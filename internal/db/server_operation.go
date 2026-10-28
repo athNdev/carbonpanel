@@ -23,6 +23,10 @@ const (
 // ServerOperationRetention is how long a finished lifecycle journal row is kept.
 const ServerOperationRetention = 30 * 24 * time.Hour
 
+// ErrActiveOperation is returned when a server already has an operation row
+// that still owns its lock. Callers must not mutate that world.
+var ErrActiveOperation = errors.New("server already has an active operation")
+
 // ServerOperation retains uncertain external effects across controller restarts.
 // ActiveServer is released only by an explicit successful finalization or recovery.
 type ServerOperation struct {
@@ -68,7 +72,13 @@ func (s *Store) BeginServerOperation(ctx context.Context, serverID, nodeID, cont
 			return lookupErr
 		}
 		op = ServerOperation{ID: uuid.NewString(), ServerID: serverID, NodeID: nodeID, ContainerID: containerID, EndpointGeneration: binding.generation, DaemonID: binding.daemonID, RequestKey: key, Kind: kind, PayloadHash: digest, Phase: ServerOperationPrepared, ActiveServer: &serverID}
-		return tx.Create(&op).Error
+		if err := tx.Create(&op).Error; err != nil {
+			if strings.Contains(err.Error(), "active_server") {
+				return ErrActiveOperation
+			}
+			return err
+		}
+		return nil
 	})
 	return &op, reused, err
 }

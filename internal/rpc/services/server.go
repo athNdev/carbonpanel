@@ -1878,98 +1878,109 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record deletion disposition: %w", err))
 	}
 
-	// A restart can observe that the world disposition was already recorded and
-	// only the panel row remains. Do not delete the world again.
-	if disposition.Phase != storage.DispositionDataSettled {
-		var dockerCli *docker.Client
-		if server.ContainerID != "" && !detach {
-			dockerCli, err = s.getDockerClientStrict(server.NodeID)
-			if err != nil {
-				return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("docker node %q unavailable during deletion: %w", server.NodeID, err))
-			}
-		}
+	peerIP := req.Peer().Addr
 
-		// Stop and remove module containers before deleting the server. A module
-		// cleanup or lookup failure must keep the parent row so the remaining
-		// resources stay addressable and deletion can be retried. Detach leaves
-		// those containers running with the server container.
-		if s.moduleManager != nil && !detach {
-			modules, err := s.store.ListServerModules(ctx, server.ID)
-			if err != nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to list server modules before deletion: %w", err))
-			}
-			for _, mod := range modules {
-				if err := s.moduleManager.DeleteModule(ctx, mod.ID); err != nil {
-					s.log.Error("Failed to delete module %s: %v", mod.ID, err)
-					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete module %s: %w", mod.ID, err))
+	// One journal row covers every destructive step of a delete: modules, the
+	// container, the proxy route, the world, and the panel row. An active
+	// backup, restore, or migration lock refuses the delete before any of those
+	// are touched. A server whose container is already gone still takes the
+	// lock, so its world cannot be removed while another job owns it.
+	if err := s.runJournaledMutation(ctx, server, "delete", requestID, func() error {
+		// A restart can observe that the world disposition was already recorded
+		// and only the panel row remains. Do not delete the world again.
+		if disposition.Phase != storage.DispositionDataSettled {
+			var dockerCli *docker.Client
+			if server.ContainerID != "" && !detach {
+				var cliErr error
+				dockerCli, cliErr = s.getDockerClientStrict(server.NodeID)
+				if cliErr != nil {
+					return connect.NewError(connect.CodeUnavailable, fmt.Errorf("docker node %q unavailable during deletion: %w", server.NodeID, cliErr))
 				}
 			}
-		}
 
-		// Stop and remove the server container before deleting its database row or
-		// data directory. A failed removal must not orphan a live container.
-		if server.ContainerID != "" && !detach {
-			if err := s.runJournaledMutation(ctx, server, "delete", requestID, func() error {
+			// Stop and remove module containers before deleting the server. A module
+			// cleanup or lookup failure must keep the parent row so the remaining
+			// resources stay addressable and deletion can be retried. Detach leaves
+			// those containers running with the server container.
+			if s.moduleManager != nil && !detach {
+				modules, listErr := s.store.ListServerModules(ctx, server.ID)
+				if listErr != nil {
+					return fmt.Errorf("failed to list server modules before deletion: %w", listErr)
+				}
+				for _, mod := range modules {
+					if delErr := s.moduleManager.DeleteModule(ctx, mod.ID); delErr != nil {
+						s.log.Error("Failed to delete module %s: %v", mod.ID, delErr)
+						return fmt.Errorf("failed to delete module %s: %w", mod.ID, delErr)
+					}
+				}
+			}
+
+			// Stop and remove the server container before deleting its database row
+			// or data directory. A failed removal must not orphan a live container.
+			if server.ContainerID != "" && !detach {
 				if _, stopErr := dockerCli.StopContainer(ctx, server.ContainerID); stopErr != nil {
 					s.log.Warn("Failed to stop container %s during deletion; removal will still be attempted: %v", server.ContainerID, stopErr)
 				}
 				if rmErr := dockerCli.RemoveContainer(ctx, server.ContainerID); rmErr != nil && !errdefs.IsNotFound(rmErr) {
-					return rmErr
+					return fmt.Errorf("failed to remove server container %s: %w", server.ContainerID, rmErr)
 				}
-				return nil
-			}); err != nil {
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to remove server container %s: %w", server.ContainerID, err))
+			}
+
+			// Remove proxy route or direct knock listener only after Docker resources
+			// are gone. If earlier cleanup failed, the live server remains reachable
+			// while the caller retries. Detach keeps the published port and does not
+			// tear down the route in this call. A later panel start rebuilds routes
+			// from remaining rows, so the proxy name is not kept after a restart.
+			if s.proxy != nil && !detach {
+				if server.ProxyHostname != "" {
+					if routeErr := s.proxy.RemoveServerRoute(server.ID); routeErr != nil {
+						return fmt.Errorf("failed to remove server proxy route: %w", routeErr)
+					}
+				} else {
+					s.proxy.StopDirectKnock(server.ID)
+				}
+			}
+
+			// Remove the data directory before the row. A failure leaves the server
+			// addressable so the same delete can be retried. keep_data and detach
+			// leave the world directory in place and still remove the panel record.
+			if !keepData {
+				if rmErr := s.removeServerData(ctx, server); rmErr != nil {
+					s.log.Error("Failed to delete server data: %v", rmErr)
+					code := connect.CodeInternal
+					if nodestorage.IsUnavailable(rmErr) {
+						code = connect.CodeUnavailable
+					}
+					return connect.NewError(code, fmt.Errorf("failed to delete server data: %w", rmErr))
+				}
+			}
+			if phaseErr := s.store.SetServerDispositionPhase(ctx, disposition.ID, storage.DispositionDataSettled); phaseErr != nil {
+				return fmt.Errorf("failed to record data disposition: %w", phaseErr)
 			}
 		}
 
-		// Remove proxy route or direct knock listener only after Docker resources are gone.
-		// If earlier cleanup failed, the live server remains reachable while the caller retries.
-		// Detach keeps the published port and does not tear down the route in this
-		// call. A later panel start rebuilds routes from remaining rows, so the
-		// proxy name is not kept after a restart.
-		if s.proxy != nil && !detach {
-			if server.ProxyHostname != "" {
-				if err := s.proxy.RemoveServerRoute(server.ID); err != nil {
-					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to remove server proxy route: %w", err))
-				}
-			} else {
-				s.proxy.StopDirectKnock(server.ID)
-			}
+		// Delete from database. Detach keeps the port lease so a new server cannot
+		// publish the port the left-behind container still binds.
+		deleteRecord := s.store.DeleteServer
+		if detach {
+			deleteRecord = s.store.DeleteServerKeepPorts
 		}
-
-		// Remove the data directory before the row. A failure leaves the server
-		// addressable so the same delete can be retried. keep_data and detach
-		// leave the world directory in place and still remove the panel record.
-		if !keepData {
-			if err := s.removeServerData(ctx, server); err != nil {
-				s.log.Error("Failed to delete server data: %v", err)
-				code := connect.CodeInternal
-				if nodestorage.IsUnavailable(err) {
-					code = connect.CodeUnavailable
-				}
-				return nil, connect.NewError(code, fmt.Errorf("failed to delete server data: %w", err))
-			}
+		if delErr := deleteRecord(ctx, req.Msg.Id); delErr != nil {
+			s.log.Error("Failed to delete server: %v", delErr)
+			return fmt.Errorf("failed to delete server")
 		}
-		if err := s.store.SetServerDispositionPhase(ctx, disposition.ID, storage.DispositionDataSettled); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to record data disposition: %w", err))
+		return s.store.SetServerDispositionPhase(ctx, disposition.ID, storage.DispositionSettled)
+	}); err != nil {
+		if errors.Is(err, storage.ErrActiveOperation) || errors.Is(err, operation.ErrInProgress) {
+			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("delete refused while another operation owns the server: %w", err))
 		}
+		var connErr *connect.Error
+		if errors.As(err, &connErr) {
+			return nil, connErr
+		}
+		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// Delete from database. Detach keeps the port lease so a new server cannot
-	// publish the port the left-behind container still binds.
-	deleteRecord := s.store.DeleteServer
-	if detach {
-		deleteRecord = s.store.DeleteServerKeepPorts
-	}
-	if err := deleteRecord(ctx, req.Msg.Id); err != nil {
-		s.log.Error("Failed to delete server: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to delete server"))
-	}
-	if err := s.store.SetServerDispositionPhase(ctx, disposition.ID, storage.DispositionSettled); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to settle deletion disposition: %w", err))
-	}
-
-	peerIP := req.Peer().Addr
 	s.auditServerDelete(ctx, peerIP, server, keepData, detach)
 
 	return connect.NewResponse(&v1.DeleteServerResponse{}), nil
