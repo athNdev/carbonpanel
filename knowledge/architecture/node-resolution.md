@@ -65,6 +65,10 @@ wrong host. That is a data-safety bug, not a degraded mode.
 - Deleting a server removes the world on the node's mapped storage root
   before the panel row. A remote node with no reachable storage is refused,
   and a controller-local directory of the same name is left in place.
+- A host-port check asks the selected daemon which protocol is published. A
+  UDP publish does not occupy the same number on TCP, and a TCP publish does
+  not occupy it on UDP. The controller socket table is consulted only for the
+  local node, and only for the protocol being reserved.
 
 # How to check
 
