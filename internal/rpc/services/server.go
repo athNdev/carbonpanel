@@ -2096,6 +2096,9 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
+	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
+	}
 
 	dockerCli, err := s.getDockerClientStrict(server.NodeID)
 	if err != nil {
@@ -2400,6 +2403,9 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
+	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
+	}
 
 	if server.ContainerID == "" {
 		// If there's no container, server is already stopped
@@ -2514,6 +2520,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	server, err := s.store.GetServer(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
 	}
 
 	dockerCli, err := s.getDockerClientStrict(server.NodeID)
@@ -2800,6 +2809,9 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 	server, err := s.store.GetServer(ctx, req.Msg.Id)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
+	}
+	if err := s.refuseActiveOperation(ctx, server.ID); err != nil {
+		return nil, err
 	}
 
 	// Get server config for container creation

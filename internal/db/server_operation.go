@@ -107,6 +107,21 @@ func daemonIdentityConflicts(recorded, current string) bool {
 	return recorded != "" && current != "" && recorded != current
 }
 
+// NoteActiveServerOperation records the next action on a lock that must stay
+// held. It does not change the phase or release ActiveServer.
+func (s *Store) NoteActiveServerOperation(ctx context.Context, id, detail string) error {
+	r := s.db.WithContext(ctx).Model(&ServerOperation{}).
+		Where("id = ? AND active_server IS NOT NULL", id).
+		Updates(map[string]any{"last_error": detail, "updated_at": time.Now().UTC()})
+	if r.Error != nil {
+		return r.Error
+	}
+	if r.RowsAffected != 1 {
+		return fmt.Errorf("operation %s is no longer active", id)
+	}
+	return nil
+}
+
 func (s *Store) AdvanceServerOperation(ctx context.Context, id, from, to, detail string) error {
 	updates := map[string]any{"phase": to, "last_error": detail, "updated_at": time.Now().UTC()}
 	if to == ServerOperationComplete || to == ServerOperationRecovered || to == ServerOperationFailed {
