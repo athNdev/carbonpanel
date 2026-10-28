@@ -1192,6 +1192,11 @@ func (s *Scheduler) executeStopTask(ctx context.Context, server *storage.Server,
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server has no container")
 	}
+	transition, err := docker.TryBeginServerTransition(server.ID)
+	if err != nil {
+		return "", fmt.Errorf("stop refused while another lifecycle operation owns the server: %w", err)
+	}
+	defer transition.Release()
 
 	dockerCli, err := s.dockerForNode(server.NodeID)
 	if err != nil {
@@ -1539,28 +1544,14 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			return updateSummary, err
 		}
 
-		// Sync files into the mapped world (excluding internal directories)
-		s.log.Info("ModpackTask %s: Syncing updated modpack files from %s to %s", task.Name, srcDir, worldRoot)
-		cmdRsync := exec.CommandContext(ctx, "rsync", "-avc",
-			"--exclude=.git",
-			"--exclude=.carbon-panel_modpack_git",
-			"--exclude=.carbon-panel_modpack_staged",
-			"--exclude=.carbon-panel_snapshots",
-			srcDir+"/", worldRoot+"/")
-		if out, err := cmdRsync.CombinedOutput(); err != nil {
-			// Fallback to cp -rf if rsync is not installed
-			cmdCp := exec.CommandContext(ctx, "cp", "-rf", srcDir+"/.", worldRoot+"/")
-			if cpOut, cpErr := cmdCp.CombinedOutput(); cpErr != nil {
-				// Pure Go fallback if neither rsync nor cp are available (e.g. on Windows)
-				excludes := []string{".git", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots"}
-				if goErr := copyDirExcluding(srcDir, worldRoot, excludes); goErr != nil {
-					// If copying failed and we took a snapshot, rollback if enabled
-					if cfg.AutoRollbackOnFailure && createdSnapshot != nil && s.snapshotEngine != nil {
-						_ = s.snapshotEngine.Rollback(ctx, server, createdSnapshot.ID)
-					}
-					return string(out) + "\n" + string(cpOut), fmt.Errorf("failed to copy modpack files: %w", goErr)
-				}
+		// Sync files into the world on the node's storage (excluding internal
+		// directories). The copy holds the lifecycle transition and releases it
+		// before a restart, which claims that transition itself.
+		if out, syncErr := s.syncModpackFiles(ctx, server, srcDir, worldRoot); syncErr != nil {
+			if cfg.AutoRollbackOnFailure && createdSnapshot != nil && s.snapshotEngine != nil {
+				_ = s.snapshotEngine.Rollback(ctx, server, createdSnapshot.ID)
 			}
+			return out, syncErr
 		}
 
 		// Check if maintenance window or immediate restart is triggered
@@ -1637,6 +1628,37 @@ func (s *Scheduler) serverWorldRoot(ctx context.Context, server *storage.Server)
 		return "", fmt.Errorf("resolve storage node %q: %w", server.NodeID, err)
 	}
 	return nodestorage.EnsureDataRoot(node.StorageInfo(), server.DataPath)
+}
+
+// syncModpackFiles copies a modpack tree into the world root on the node's
+// storage. It holds the lifecycle transition for the copy and releases it
+// before returning, so a following restart can claim that transition itself.
+func (s *Scheduler) syncModpackFiles(ctx context.Context, server *storage.Server, srcDir, destRoot string) (string, error) {
+	transition, err := docker.TryBeginServerTransition(server.ID)
+	if err != nil {
+		return "", fmt.Errorf("modpack sync refused while another lifecycle operation owns the server: %w", err)
+	}
+	defer transition.Release()
+
+	if s.log != nil {
+		s.log.Info("Syncing updated modpack files from %s to %s", srcDir, destRoot)
+	}
+	cmdRsync := exec.CommandContext(ctx, "rsync", "-avc",
+		"--exclude=.git",
+		"--exclude=.carbon-panel_modpack_git",
+		"--exclude=.carbon-panel_modpack_staged",
+		"--exclude=.carbon-panel_snapshots",
+		srcDir+"/", destRoot+"/")
+	if out, err := cmdRsync.CombinedOutput(); err != nil {
+		cmdCp := exec.CommandContext(ctx, "cp", "-rf", srcDir+"/.", destRoot+"/")
+		if cpOut, cpErr := cmdCp.CombinedOutput(); cpErr != nil {
+			excludes := []string{".git", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots"}
+			if goErr := copyDirExcluding(srcDir, destRoot, excludes); goErr != nil {
+				return string(out) + "\n" + string(cpOut), fmt.Errorf("failed to copy modpack files: %w", goErr)
+			}
+		}
+	}
+	return "", nil
 }
 
 // isWithinMaintenanceWindow checks if the given time falls within a 30-minute window of the cron schedule
