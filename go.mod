@@ -6,11 +6,11 @@ require (
 	connectrpc.com/connect v1.21.1
 	connectrpc.com/grpcreflect v1.3.0
 	github.com/arkady-emelyanov/go-shellparse v1.0.3
-	github.com/aws/aws-sdk-go-v2 v1.47.4
+	github.com/aws/aws-sdk-go-v2 v1.47.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.10
 	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.4.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5
-	github.com/aws/smithy-go v1.28.6
+	github.com/aws/smithy-go v1.28.7
 	github.com/casbin/casbin/v3 v3.11.0
 	github.com/casbin/gorm-adapter/v3 v3.41.0
 	github.com/coreos/go-oidc/v3 v3.21.0
