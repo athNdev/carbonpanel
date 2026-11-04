@@ -37,13 +37,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}: Props = $props();
 
 	const baseClasses =
-		'inline-flex items-center justify-between font-sans text-sm font-normal tracking-[0.16px] transition-[color,background-color,border-color,transform] motion-press focus-ring cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 select-none';
+		'inline-flex items-center justify-center whitespace-nowrap font-sans text-sm font-normal tracking-[0.16px] transition-[color,background-color,border-color,transform] motion-press focus-ring cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 select-none [&_svg]:shrink-0';
 
 	const sizeClasses = {
 		sm: 'h-[var(--carbon-control-sm)] px-3 text-xs',
 		md: 'h-[var(--carbon-control-md)] px-4 text-sm',
 		lg: 'h-[var(--carbon-control-lg)] px-4 text-sm',
 		xl: 'h-[var(--carbon-control-xl)] px-4 text-base'
+	};
+
+	const iconSizeClasses = {
+		sm: '!h-[var(--carbon-control-sm)] !w-[var(--carbon-control-sm)]',
+		md: '!h-[var(--carbon-control-md)] !w-[var(--carbon-control-md)]',
+		lg: '!h-[var(--carbon-control-lg)] !w-[var(--carbon-control-lg)]',
+		xl: '!h-[var(--carbon-control-xl)] !w-[var(--carbon-control-xl)]'
 	};
 
 	const kindClasses = {
@@ -70,7 +77,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		tabindex={disabled || loading ? -1 : undefined}
 		aria-busy={loading ? 'true' : undefined}
 		class="{baseClasses} {sizeClasses[size]} {kindClasses[kind]} {iconOnly
-			? '!h-[var(--carbon-control-md)] !w-[var(--carbon-control-md)] !justify-center !p-2'
+			? `!justify-center !p-0 ${iconSizeClasses[size]}`
 			: ''} {disabled || loading
 			? 'pointer-events-none cursor-not-allowed opacity-50'
 			: ''} {className}"
@@ -97,7 +104,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		disabled={disabled || loading}
 		aria-busy={loading ? 'true' : undefined}
 		class="{baseClasses} {sizeClasses[size]} {kindClasses[kind]} {iconOnly
-			? '!h-[var(--carbon-control-md)] !w-[var(--carbon-control-md)] !justify-center !p-2'
+			? `!justify-center !p-0 ${iconSizeClasses[size]}`
 			: ''} {className}"
 		{...restProps as HTMLButtonAttributes}
 		onclick={onclick as HTMLButtonAttributes['onclick']}

@@ -10,20 +10,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { apiFetch } from '$lib/api/fetch';
 	import { NodeStatus, type Node } from '$lib/proto/carbonpanel/v1/node_pb';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
-	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
-	import { CarbonConfirm } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonConfirm,
+		CarbonInlineLoading,
+		CarbonTag,
+		CarbonTile
+	} from '$lib/components/carbon';
 	import {
 		Server,
 		Plus,
@@ -31,12 +29,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		Loader2,
 		Activity,
 		CheckCircle2,
-		XCircle,
-		AlertCircle,
-		Cpu,
 		RefreshCw,
 		Layers,
-		ShieldCheck,
 		Edit,
 		Radio
 	} from '@lucide/svelte';
@@ -408,32 +402,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function getNodeStatusBadge(status: NodeStatus) {
+	type NodeStatusTag = { label: string; type: 'green' | 'red' | 'gray' };
+
+	function getNodeStatusTag(status: NodeStatus): NodeStatusTag {
 		switch (status) {
 			case NodeStatus.ONLINE:
-				return {
-					label: 'Online',
-					class: 'bg-green-500/10 text-green-500 border-green-500/20',
-					icon: CheckCircle2
-				};
-			case NodeStatus.OFFLINE:
-				return {
-					label: 'Offline',
-					class: 'bg-muted text-muted-foreground border-border',
-					icon: XCircle
-				};
+				return { label: 'Online', type: 'green' };
 			case NodeStatus.ERROR:
-				return {
-					label: 'Error',
-					class: 'bg-destructive/10 text-destructive border-destructive/20',
-					icon: AlertCircle
-				};
+				return { label: 'Error', type: 'red' };
+			case NodeStatus.OFFLINE:
+				return { label: 'Offline', type: 'gray' };
 			default:
-				return {
-					label: 'Unknown',
-					class: 'bg-muted text-muted-foreground border-border',
-					icon: AlertCircle
-				};
+				return { label: 'Unknown', type: 'gray' };
 		}
 	}
 
@@ -445,254 +425,395 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 		return `${val} MB`;
 	}
+
+	// Effective memory ceiling for a node: an explicit max wins, otherwise the
+	// daemon-reported host total is the best available bound.
+	function memoryCap(node: Node): number {
+		const max = Number(node.maxMemoryMb);
+		return max > 0 ? max : Number(node.totalMemoryMb);
+	}
+
+	function memoryPercent(node: Node): number {
+		const cap = memoryCap(node);
+		if (cap <= 0) return 0;
+		return Math.min(100, Math.round((Number(node.allocatedMemoryMb) / cap) * 100));
+	}
+
+	function getAvailableMemory(node: Node): { text: string; state: 'ok' | 'full' | 'unknown' } {
+		const available = Number(node.availableMemoryMb);
+		const max = Number(node.maxMemoryMb);
+		const total = Number(node.totalMemoryMb);
+		const allocated = Number(node.allocatedMemoryMb);
+
+		if (available > 0) return { text: formatMemory(available), state: 'ok' };
+		if (max > 0 && max <= allocated) return { text: '0 MB', state: 'full' };
+		if (total > 0 && total <= allocated) return { text: '0 MB', state: 'full' };
+		if (max > 0) return { text: formatMemory(max - allocated), state: 'ok' };
+		return { text: 'Dynamic', state: 'unknown' };
+	}
+
+	const nodeSummary = $derived.by(() => {
+		let online = 0;
+		let runningServers = 0;
+		let totalServers = 0;
+		let allocatedMemoryMb = 0;
+
+		for (const node of nodes) {
+			if (node.status === NodeStatus.ONLINE) online += 1;
+			runningServers += node.runningCount;
+			totalServers += node.serverCount;
+			allocatedMemoryMb += Number(node.allocatedMemoryMb);
+		}
+
+		return { total: nodes.length, online, runningServers, totalServers, allocatedMemoryMb };
+	});
 </script>
 
-<div class="space-y-6">
-	<!-- Header Card -->
-	<Card>
-		<CardHeader>
-			<div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<div class="flex items-center gap-2">
-						<Layers class="h-5 w-5 text-primary" />
-						<CardTitle>Docker Daemons & Nodes</CardTitle>
-					</div>
-					<CardDescription class="mt-1">
-						Configure multiple remote Docker daemons for distributed container execution and load
-						balancing.
-					</CardDescription>
-				</div>
+<div class="space-y-4">
+	<!-- Header panel: section title, node actions, and cluster summary -->
+	<CarbonTile class="overflow-hidden rounded-none !border-[#393939] !bg-[#262626] !p-0">
+		<div class="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
+			<div class="min-w-0">
 				<div class="flex items-center gap-2">
-					<Button
-						variant="outline"
-						size="sm"
-						onclick={handleAutoDetect}
-						disabled={loading || scanning}
-						title="Scan local network interfaces for active Docker daemons"
-					>
-						<Radio class="mr-2 h-4 w-4 {scanning ? 'animate-pulse' : ''}" />
-						{scanning ? 'Scanning...' : 'Auto-detect'}
-					</Button>
-					<Button variant="outline" size="sm" onclick={loadNodes} disabled={loading}>
-						<RefreshCw class="mr-2 h-4 w-4 {loading ? 'animate-spin' : ''}" />
-						Refresh
-					</Button>
-					<Button size="sm" onclick={() => (showAddDialog = true)}>
-						<Plus class="mr-2 h-4 w-4" />
-						Add Docker Node
-					</Button>
+					<Layers class="h-4 w-4 shrink-0 text-[#78a9ff]" />
+					<h2 class="truncate font-sans text-base font-semibold text-[#f4f4f4]">
+						Docker Daemons & Nodes
+					</h2>
+				</div>
+				<p class="mt-1 max-w-2xl font-sans text-xs text-[#8d8d8d]">
+					Configure multiple remote Docker daemons for distributed container execution and load
+					balancing.
+				</p>
+			</div>
+			<div class="flex flex-wrap items-center gap-2">
+				<CarbonButton
+					kind="secondary"
+					size="md"
+					class="justify-center gap-2"
+					onclick={handleAutoDetect}
+					disabled={loading || scanning}
+					title="Scan local network interfaces for active Docker daemons"
+				>
+					<Radio class="h-4 w-4 {scanning ? 'animate-pulse' : ''}" />
+					<span>{scanning ? 'Scanning...' : 'Auto-detect'}</span>
+				</CarbonButton>
+				<CarbonButton
+					kind="secondary"
+					size="md"
+					class="justify-center gap-2"
+					onclick={loadNodes}
+					disabled={loading}
+				>
+					<RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
+					<span>Refresh</span>
+				</CarbonButton>
+				<CarbonButton
+					kind="primary"
+					size="md"
+					class="justify-center gap-2"
+					onclick={() => (showAddDialog = true)}
+				>
+					<Plus class="h-4 w-4" />
+					<span>Add Docker Node</span>
+				</CarbonButton>
+			</div>
+		</div>
+
+		{#if !loading}
+			<!-- One-line cluster summary; 1px gaps paint the dividers -->
+			<div class="grid grid-cols-2 gap-px border-t border-[#393939] bg-[#393939] sm:grid-cols-4">
+				<div class="bg-[#262626] px-5 py-3">
+					<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+						Nodes
+					</p>
+					<p class="mt-0.5 font-mono text-base font-semibold text-[#f4f4f4]">
+						{nodeSummary.total}
+					</p>
+				</div>
+				<div class="bg-[#262626] px-5 py-3">
+					<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+						Online
+					</p>
+					<p class="mt-0.5 font-mono text-base font-semibold text-[#24a148]">
+						{nodeSummary.online}
+						<span class="text-sm text-[#8d8d8d]">/ {nodeSummary.total}</span>
+					</p>
+				</div>
+				<div class="bg-[#262626] px-5 py-3">
+					<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+						Running Servers
+					</p>
+					<p class="mt-0.5 font-mono text-base font-semibold text-[#f4f4f4]">
+						{nodeSummary.runningServers}
+						<span class="text-sm text-[#8d8d8d]">/ {nodeSummary.totalServers}</span>
+					</p>
+				</div>
+				<div class="bg-[#262626] px-5 py-3">
+					<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+						Allocated RAM
+					</p>
+					<p class="mt-0.5 font-mono text-base font-semibold text-[#f4f4f4]">
+						{formatMemory(nodeSummary.allocatedMemoryMb)}
+					</p>
 				</div>
 			</div>
-		</CardHeader>
-	</Card>
+		{/if}
+	</CarbonTile>
 
 	<!-- Nodes List -->
 	{#if loading}
-		<Card>
-			<CardContent class="py-16">
-				<div class="flex items-center justify-center">
-					<div class="space-y-3 text-center">
-						<Loader2 class="mx-auto h-8 w-8 animate-spin text-primary" />
-						<div class="font-medium text-muted-foreground">Loading Docker nodes...</div>
-					</div>
-				</div>
-			</CardContent>
-		</Card>
+		<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+			<div class="flex items-center justify-center px-5 py-16">
+				<CarbonInlineLoading description="Loading Docker nodes..." />
+			</div>
+		</CarbonTile>
 	{:else if nodes.length === 0}
-		<Card>
-			<CardContent class="py-16 text-center">
-				<div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-					<Server class="h-6 w-6 text-muted-foreground" />
-				</div>
-				<h3 class="text-lg font-semibold">No Docker nodes found</h3>
-				<p class="mt-1 text-sm text-muted-foreground">
-					Add a remote Docker host to scale server instances across multiple physical machines, or
-					auto-detect daemons listening on your local network.
-				</p>
-				<div class="mt-4 flex items-center justify-center gap-2">
-					<Button onclick={handleAutoDetect} variant="outline" disabled={scanning}>
-						<Radio class="mr-2 h-4 w-4 {scanning ? 'animate-pulse' : ''}" />
-						{scanning ? 'Scanning...' : 'Auto-detect Daemons'}
-					</Button>
-					<Button onclick={() => (showAddDialog = true)}>
-						<Plus class="mr-2 h-4 w-4" />
-						Add Docker Node
-					</Button>
-				</div>
-			</CardContent>
-		</Card>
-	{:else}
-		<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-			{#each nodes as node (node.id)}
-				{@const statusInfo = getNodeStatusBadge(node.status)}
-				{@const StatusIcon = statusInfo.icon}
-				{@const pingInfo = pingLatencies[node.id]}
-
-				<Card
-					class="relative flex flex-col justify-between overflow-hidden border-border/80 transition-all duration-200 hover:shadow-md"
+		<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+			<div class="flex flex-col items-center justify-center gap-4 px-5 py-16 text-center">
+				<div
+					class="flex h-12 w-12 items-center justify-center border border-[#393939] bg-[#161616]"
 				>
-					<div>
-						<!-- Card Top -->
-						<CardHeader class="pb-3">
-							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0 flex-1 space-y-1">
-									<div class="flex items-center gap-2">
-										<h4 class="truncate font-semibold text-foreground">{node.name}</h4>
-										{#if node.isLocal}
-											<Badge variant="secondary" class="text-xs">Local</Badge>
-										{/if}
-										{#if !node.enabled}
-											<Badge variant="outline" class="text-xs text-muted-foreground">Disabled</Badge
-											>
-										{/if}
-									</div>
-									<p class="truncate font-mono text-xs text-muted-foreground" title={node.host}>
-										{node.host}
+					<Server class="h-6 w-6 text-[#8d8d8d]" />
+				</div>
+				<div class="space-y-1">
+					<p class="font-mono text-[11px] tracking-wider text-[#8d8d8d] uppercase">
+						No nodes registered
+					</p>
+					<h3 class="font-sans text-base font-semibold text-[#f4f4f4]">No Docker nodes found</h3>
+					<p class="mx-auto max-w-md font-sans text-xs text-[#a8a8a8]">
+						Add a remote Docker host to scale server instances across multiple physical machines, or
+						auto-detect daemons listening on your local network.
+					</p>
+				</div>
+				<div class="flex flex-wrap items-center justify-center gap-2">
+					<CarbonButton
+						kind="tertiary"
+						size="md"
+						class="justify-center gap-2"
+						onclick={handleAutoDetect}
+						disabled={scanning}
+					>
+						<Radio class="h-4 w-4 {scanning ? 'animate-pulse' : ''}" />
+						<span>{scanning ? 'Scanning...' : 'Auto-detect Daemons'}</span>
+					</CarbonButton>
+					<CarbonButton
+						kind="primary"
+						size="md"
+						class="justify-center gap-2"
+						onclick={() => (showAddDialog = true)}
+					>
+						<Plus class="h-4 w-4" />
+						<span>Add Docker Node</span>
+					</CarbonButton>
+				</div>
+			</div>
+		</CarbonTile>
+	{:else}
+		<div class="motion-stagger grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+			{#each nodes as node (node.id)}
+				{@const statusTag = getNodeStatusTag(node.status)}
+				{@const pingInfo = pingLatencies[node.id]}
+				{@const available = getAvailableMemory(node)}
+				{@const capMb = memoryCap(node)}
+				{@const usedPercent = memoryPercent(node)}
+				{@const pingFailed =
+					pingInfo?.status === NodeStatus.ERROR || pingInfo?.status === NodeStatus.OFFLINE}
+
+				<CarbonTile
+					class="flex h-full flex-col rounded-none !border-[#393939] !bg-[#262626] !p-0 transition-colors hover:!border-[#525252]"
+				>
+					<!-- Identity -->
+					<div class="px-5 pt-4">
+						<div class="flex items-start justify-between gap-3">
+							<h3
+								class="min-w-0 flex-1 truncate font-sans text-sm font-semibold text-[#f4f4f4]"
+								title={node.name}
+							>
+								{node.name}
+							</h3>
+							<CarbonTag type={statusTag.type} size="sm">{statusTag.label}</CarbonTag>
+						</div>
+						<div class="mt-1 flex items-center justify-between gap-2">
+							<p
+								class="min-w-0 flex-1 truncate font-mono text-[11px] text-[#8d8d8d]"
+								title={node.host}
+							>
+								{node.host}
+							</p>
+							<div class="flex shrink-0 items-center gap-1">
+								{#if node.isLocal}
+									<CarbonTag type="gray" size="sm">Local</CarbonTag>
+								{/if}
+								{#if !node.enabled}
+									<CarbonTag type="warm-gray" size="sm">Disabled</CarbonTag>
+								{/if}
+							</div>
+						</div>
+					</div>
+
+					<!-- Metrics -->
+					<div class="flex flex-1 flex-col px-5 pt-4">
+						<div class="grid grid-cols-1 gap-x-4 gap-y-3 min-[380px]:grid-cols-2">
+							<div class="min-w-0">
+								<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+									Servers
+								</p>
+								<p
+									class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm text-[#f4f4f4]"
+								>
+									<span class="whitespace-nowrap">{node.runningCount} / {node.serverCount}</span>
+									{#if node.maxServers > 0}
+										<span class="text-[11px] whitespace-nowrap text-[#8d8d8d]">
+											MAX {node.maxServers}
+										</span>
+									{/if}
+								</p>
+							</div>
+
+							<div class="min-w-0">
+								<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+									Allocated RAM
+								</p>
+								<p
+									class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm text-[#f4f4f4]"
+								>
+									<span class="whitespace-nowrap">{formatMemory(node.allocatedMemoryMb)}</span>
+									{#if capMb > 0}
+										<span class="text-[11px] whitespace-nowrap text-[#8d8d8d]">
+											/ {formatMemory(capMb)}
+										</span>
+									{/if}
+								</p>
+							</div>
+
+							<div class="min-w-0">
+								<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+									Available RAM
+								</p>
+								<p
+									class="mt-0.5 font-mono text-sm whitespace-nowrap {available.state === 'full'
+										? 'text-[#da1e28]'
+										: available.state === 'ok'
+											? 'text-[#24a148]'
+											: 'text-[#8d8d8d]'}"
+								>
+									{available.text}{available.state === 'full' ? ' (full)' : ''}
+								</p>
+							</div>
+
+							<div class="min-w-0">
+								<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+									TLS
+								</p>
+								<p class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm">
+									<span
+										class="whitespace-nowrap {node.tlsEnabled
+											? 'text-[#24a148]'
+											: 'text-[#8d8d8d]'}"
+									>
+										{node.tlsEnabled ? 'Enabled' : 'Off'}
+									</span>
+									{#if node.tlsEnabled && node.tlsSkipVerify}
+										<span class="text-[11px] whitespace-nowrap text-[#f1c21b]">SKIP VERIFY</span>
+									{/if}
+								</p>
+							</div>
+
+							<div class="min-w-0 min-[380px]:col-span-2">
+								<div class="flex items-baseline justify-between gap-3">
+									<p
+										class="shrink-0 font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase"
+									>
+										Advertised IP
+									</p>
+									<p
+										class="min-w-0 truncate font-mono text-[13px] {node.advertisedIp
+											? 'text-[#f4f4f4]'
+											: 'text-[#8d8d8d]'}"
+										title={node.advertisedIp || 'Not set'}
+									>
+										{node.advertisedIp || 'Not set'}
 									</p>
 								</div>
-								<Badge
-									variant="outline"
-									class="flex shrink-0 items-center gap-1.5 {statusInfo.class}"
-								>
-									<StatusIcon class="h-3 w-3" />
-									{statusInfo.label}
-								</Badge>
 							</div>
-						</CardHeader>
+						</div>
 
-						<CardContent class="space-y-4 pb-4">
-							<!-- Metrics Grid -->
-							<div class="grid grid-cols-1 gap-2 rounded-lg bg-muted/40 p-3 text-xs md:grid-cols-2">
-								<div class="space-y-0.5">
-									<div class="flex items-center gap-1 text-muted-foreground">
-										<Server class="h-3.5 w-3.5" />
-										<span>Servers</span>
-									</div>
-									<div class="font-medium text-foreground">
-										{node.runningCount} / {node.serverCount} active
-										{#if node.maxServers > 0}
-											<span class="text-muted-foreground">({node.maxServers} max)</span>
-										{/if}
-									</div>
-								</div>
-
-								<div class="space-y-0.5">
-									<div class="flex items-center gap-1 text-muted-foreground">
-										<Cpu class="h-3.5 w-3.5" />
-										<span>Allocated RAM</span>
-									</div>
-									<div class="font-medium text-foreground">
-										{formatMemory(node.allocatedMemoryMb)}
-										{#if Number(node.maxMemoryMb) > 0}
-											<span class="text-muted-foreground">/ {formatMemory(node.maxMemoryMb)}</span>
-										{:else if Number(node.totalMemoryMb) > 0}
-											<span class="text-muted-foreground">/ {formatMemory(node.totalMemoryMb)}</span
-											>
-										{/if}
-									</div>
-								</div>
-
-								<div class="space-y-0.5">
-									<div class="flex items-center gap-1 text-muted-foreground">
-										<Activity class="h-3.5 w-3.5" />
-										<span>Available RAM</span>
-									</div>
-									<div class="font-medium text-foreground">
-										{#if Number(node.availableMemoryMb) > 0}
-											<span class="font-semibold text-emerald-500"
-												>{formatMemory(node.availableMemoryMb)}</span
-											>
-										{:else if Number(node.maxMemoryMb) > 0 && Number(node.maxMemoryMb) <= Number(node.allocatedMemoryMb)}
-											<span class="font-semibold text-rose-500">0 MB (Full)</span>
-										{:else if Number(node.totalMemoryMb) > 0 && Number(node.totalMemoryMb) <= Number(node.allocatedMemoryMb)}
-											<span class="font-semibold text-rose-500">0 MB (Full)</span>
-										{:else if Number(node.maxMemoryMb) > 0}
-											<span class="font-semibold text-emerald-500"
-												>{formatMemory(
-													Number(node.maxMemoryMb) - Number(node.allocatedMemoryMb)
-												)}</span
-											>
-										{:else}
-											<span class="text-muted-foreground">Dynamic</span>
-										{/if}
-									</div>
-								</div>
-
-								{#if node.advertisedIp}
-									<div class="col-span-2 space-y-0.5 border-t border-border/50 pt-1">
-										<div class="flex items-center gap-1 text-muted-foreground">
-											<Radio class="h-3.5 w-3.5" />
-											<span>Advertised IP</span>
-										</div>
-										<div class="font-mono font-medium text-foreground">
-											{node.advertisedIp}
-										</div>
-									</div>
-								{/if}
-
-								{#if node.tlsEnabled}
-									<div
-										class="col-span-2 flex items-center gap-1 pt-1 text-emerald-600 dark:text-emerald-400"
-									>
-										<ShieldCheck class="h-3.5 w-3.5" />
-										<span>TLS Secured {node.tlsSkipVerify ? '(Insecure Skip Verify)' : ''}</span>
-									</div>
-								{/if}
-
-								{#if pingInfo}
-									<div class="col-span-2 flex items-center gap-1.5 pt-1 text-xs text-primary">
-										<Activity class="h-3.5 w-3.5" />
-										<span>Last Ping: {pingInfo.latency}ms</span>
-									</div>
-								{/if}
+						<!-- Sharp capacity bar for the memory ceiling -->
+						{#if capMb > 0}
+							<div
+								class="mt-3 h-1 w-full overflow-hidden bg-[#393939]"
+								role="progressbar"
+								aria-label="{node.name} allocated memory"
+								aria-valuemin="0"
+								aria-valuemax="100"
+								aria-valuenow={usedPercent}
+							>
+								<div
+									class="h-full {usedPercent >= 100
+										? 'bg-[#da1e28]'
+										: 'bg-[#0f62fe]'} transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
+									style="width: {usedPercent}%"
+								></div>
 							</div>
-						</CardContent>
+						{/if}
+
+						{#if pingInfo}
+							<p
+								class="mt-2.5 font-mono text-[11px] tracking-wider uppercase {pingFailed
+									? 'text-[#da1e28]'
+									: 'text-[#78a9ff]'}"
+							>
+								Last ping {pingInfo.latency} ms
+							</p>
+						{/if}
 					</div>
 
-					<!-- Card Footer Actions -->
+					<!-- Footer actions, pinned to the bottom of the tile -->
 					<div
-						class="flex items-center justify-between border-t border-border/60 bg-muted/20 px-4 py-2.5"
+						class="mt-auto flex items-center justify-between gap-2 border-t border-[#393939] px-4 py-1.5"
 					>
-						<Button
-							variant="ghost"
-							size="sm"
-							class="h-8 px-2 text-xs"
+						<CarbonButton
+							kind="ghost"
+							size="md"
+							class="justify-center gap-2"
 							onclick={() => handlePingNode(node.id)}
 							disabled={pingingNodeId === node.id}
+							title="Ping {node.name}"
 						>
 							{#if pingingNodeId === node.id}
-								<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-								Pinging...
+								<Loader2 class="h-4 w-4 animate-spin" />
+								<span>Pinging...</span>
 							{:else}
-								<Activity class="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
-								Ping
+								<Activity class="h-4 w-4" />
+								<span>Ping</span>
 							{/if}
-						</Button>
+						</CarbonButton>
 
 						<div class="flex items-center gap-1">
-							<Button
-								variant="ghost"
-								size="icon"
-								class="h-8 w-8 text-muted-foreground hover:text-foreground"
+							<CarbonButton
+								kind="ghost"
+								iconOnly
 								onclick={() => openEditNode(node)}
-								title="Edit Node"
+								title="Edit node"
+								aria-label="Edit {node.name}"
 							>
-								<Edit class="h-3.5 w-3.5" />
-							</Button>
+								<Edit class="h-4 w-4" />
+							</CarbonButton>
 							{#if !node.isLocal}
-								<Button
-									variant="ghost"
-									size="icon"
-									class="h-8 w-8 text-destructive/70 hover:bg-destructive/10 hover:text-destructive"
+								<CarbonButton
+									kind="ghost"
+									iconOnly
+									class="hover:text-[#da1e28]"
 									onclick={() => handleDeleteNode(node)}
-									title="Delete Node"
+									title="Delete node"
+									aria-label="Delete {node.name}"
 								>
-									<Trash2 class="h-3.5 w-3.5" />
-								</Button>
+									<Trash2 class="h-4 w-4" />
+								</CarbonButton>
 							{/if}
 						</div>
 					</div>
-				</Card>
+				</CarbonTile>
 			{/each}
 		</div>
 	{/if}

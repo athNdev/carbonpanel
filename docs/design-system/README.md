@@ -127,7 +127,8 @@ decorative animation before proceeding.
 
 | Need | Panel implementation | Cloud implementation | Contract |
 | --- | --- | --- | --- |
-| Action | CarbonButton | Button | One primary action per task; distinguish secondary and destructive actions. A disabled/loading control must not execute. |
+| Action | CarbonButton | Button | One primary action per task; distinguish secondary and destructive actions. A disabled/loading control must not execute. Labels stay on one line; icon and label are centred with a fixed gap. |
+| Page header | CarbonPageHeader | PageHeader | One title, optional tag, short description and right-aligned actions. The page shell owns the outer gutter; routes do not add their own page padding. |
 | Surface | CarbonTile | Tile | Group related content; a whole tile is interactive only when its destination is clear and keyboard-operable. |
 | Status | CarbonTag | Tag | Include a readable state label; color is supplemental. |
 | Text input | CarbonTextInput / CarbonSelect | Field plus native control | Label, hint, invalid state and error association; retain entered data on recoverable errors. |

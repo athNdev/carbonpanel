@@ -19,7 +19,6 @@ one at https://mozilla.org/MPL/2.0/.
 	import DatapackSearch from '$lib/components/datapack-search.svelte';
 	import {
 		ArrowLeft,
-		Loader2,
 		Package,
 		Settings,
 		Server as ServerIcon,
@@ -38,7 +37,13 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { IndexedModpack, Version } from '$lib/proto/carbonpanel/v1/modpack_pb';
 	import type { Node } from '$lib/proto/carbonpanel/v1/node_pb';
 	import { NodeStatus } from '$lib/proto/carbonpanel/v1/node_pb';
-	import { CarbonTag, CarbonInlineLoading } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonInlineLoading,
+		CarbonPageHeader,
+		CarbonTag,
+		CarbonTextInput
+	} from '$lib/components/carbon';
 	import {
 		Dialog,
 		DialogContent,
@@ -431,31 +436,33 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="h-full overflow-y-auto bg-[#161616] font-sans text-[#f4f4f4]">
-	<div class="space-y-6 p-6">
+<div class="bg-[#161616] font-sans text-[#f4f4f4]">
+	<div class="space-y-6">
 		<!-- Carbon Page Header -->
-		<div class="flex items-center gap-4 border-b border-[#393939] pb-5">
-			<a
-				href={resolve('/servers')}
-				class="flex h-10 w-10 shrink-0 items-center justify-center rounded-none border border-[#393939] bg-[#262626] text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
-				title="Back to Servers"
-			>
-				<ArrowLeft class="h-4 w-4" />
-			</a>
-			<div>
-				<div class="flex items-center gap-2.5">
-					<h1 class="text-2xl font-light tracking-tight text-[#f4f4f4]">Create New Server</h1>
-					<span
-						class="border border-[#0f62fe]/40 bg-[#0f62fe]/20 px-2 py-0.5 font-mono text-xs text-[#78a9ff]"
-					>
-						WIZARD
-					</span>
-				</div>
-				<p class="mt-1 font-sans text-xs text-[#a8a8a8]">
-					Configure instance runtime, container engine, resource quotas, and network proxy
-				</p>
-			</div>
-		</div>
+		<CarbonPageHeader
+			title="Create New Server"
+			description="Configure instance runtime, container engine, resource quotas, and network proxy"
+		>
+			{#snippet tag()}
+				<span
+					class="border border-[#0f62fe]/40 bg-[#0f62fe]/20 px-2 py-0.5 font-mono text-xs text-[#78a9ff]"
+				>
+					WIZARD
+				</span>
+			{/snippet}
+			{#snippet actions()}
+				<CarbonButton
+					href={resolve('/servers')}
+					kind="tertiary"
+					size="md"
+					iconOnly
+					aria-label="Back to Servers"
+					title="Back to Servers"
+				>
+					<ArrowLeft class="h-4 w-4" aria-hidden="true" />
+				</CarbonButton>
+			{/snippet}
+		</CarbonPageHeader>
 
 		<!-- Carbon Progress Indicator / Steps (Requirement 3) -->
 		<div class="w-full rounded-none border border-[#393939] bg-[#262626] p-4">
@@ -465,12 +472,12 @@ one at https://mozilla.org/MPL/2.0/.
 						type="button"
 						aria-current={currentStep === step.id ? 'step' : undefined}
 						onclick={() => goToStep(step.id)}
-						class="relative flex cursor-pointer items-center gap-3 rounded-none border p-3 text-left transition-colors select-none {currentStep ===
+						class="focus-ring relative flex cursor-pointer items-center gap-3 rounded-none border p-3 text-left transition-colors select-none {currentStep ===
 						step.id
 							? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
 							: currentStep > step.id
-								? 'border-[#393939] bg-[#161616] hover:bg-[#2e2e2e]'
-								: 'border-[#2e2e2e] bg-[#161616] opacity-70 hover:opacity-100'}"
+								? 'border-[#393939] bg-[#161616] hover:bg-[#262626]'
+								: 'border-[#393939] bg-[#161616] opacity-70 hover:opacity-100'}"
 					>
 						<!-- Indicator Badge -->
 						<div
@@ -523,20 +530,27 @@ one at https://mozilla.org/MPL/2.0/.
 
 					<!-- Preset Selection (Carbon Tiles) -->
 					<div class="space-y-2">
-						<label
+						<span
+							id="config-method-label"
 							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
 						>
 							Configuration Method
-						</label>
-						<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+						</span>
+						<div
+							role="radiogroup"
+							aria-labelledby="config-method-label"
+							class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+						>
 							<!-- Manual Tile -->
 							<button
 								type="button"
+								role="radio"
+								aria-checked={selectedModpack === null}
 								onclick={() => (selectedModpack = null)}
-								class="relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack ===
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack ===
 								null
 									? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-									: 'border-[#393939] bg-[#161616] hover:bg-[#2a2a2a]'}"
+									: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
 							>
 								<div class="flex items-center gap-2">
 									<Settings class="h-4 w-4 text-accent-text" />
@@ -550,11 +564,13 @@ one at https://mozilla.org/MPL/2.0/.
 							<!-- Modpack Tile -->
 							<button
 								type="button"
+								role="radio"
+								aria-checked={selectedModpack !== null}
 								onclick={() => (showModpackDialog = true)}
-								class="relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack !==
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack !==
 								null
 									? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-									: 'border-[#393939] bg-[#161616] hover:bg-[#2a2a2a]'}"
+									: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
 							>
 								<div class="flex items-center gap-2">
 									<Package class="h-4 w-4 text-[#78a9ff]" />
@@ -626,22 +642,13 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					<!-- Server Name (Carbon TextInput) -->
-					<div class="space-y-1.5">
-						<label
-							for="name"
-							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
-						>
-							Server Name <span class="text-[#ff8389]">*</span>
-						</label>
-						<input
-							id="name"
-							type="text"
-							placeholder="survival-smp-01"
-							bind:value={formData.name}
-							required
-							class="h-10 w-full rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 text-sm text-[#f4f4f4] placeholder-[#6f6f6f] transition-all focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none"
-						/>
-					</div>
+					<CarbonTextInput
+						id="name"
+						label="Server Name *"
+						placeholder="survival-smp-01"
+						bind:value={formData.name}
+						required
+					/>
 
 					<!-- Server Description -->
 					<div class="space-y-1.5">
@@ -658,7 +665,7 @@ one at https://mozilla.org/MPL/2.0/.
 							placeholder="Primary survival server instance for cluster..."
 							bind:value={formData.description}
 							rows={3}
-							class="w-full resize-none rounded-none border-b border-[#8d8d8d] bg-[#161616] p-3 text-sm text-[#f4f4f4] placeholder-[#6f6f6f] transition-all focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none"
+							class="focus-ring w-full resize-none rounded-none border border-[#393939] bg-[#161616] p-3 text-sm text-[#f4f4f4] transition-colors placeholder:text-[#8d8d8d] focus:bg-[#353535]"
 						></textarea>
 					</div>
 				</div>
@@ -691,7 +698,7 @@ one at https://mozilla.org/MPL/2.0/.
 									id="mcVersion"
 									bind:value={formData.mcVersion}
 									disabled={loading}
-									class="h-10 w-full cursor-pointer appearance-none rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none"
+									class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-[#393939] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
 								>
 									{#each minecraftVersions as version (version)}
 										<option value={version}>
@@ -732,7 +739,7 @@ one at https://mozilla.org/MPL/2.0/.
 									formData.modLoader = val as ModLoader;
 								}}
 								disabled={loading || !!selectedModpack}
-								class="h-10 w-full cursor-pointer appearance-none rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none disabled:opacity-50"
+								class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-[#393939] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535] disabled:opacity-50"
 							>
 								{#each modLoaders as loader (loader.name)}
 									{@const enumVal =
@@ -784,22 +791,29 @@ one at https://mozilla.org/MPL/2.0/.
 					<!-- Connection Method (Carbon Tiles) -->
 					{#if proxyEnabled}
 						<div class="space-y-2">
-							<label
+							<span
+								id="ingress-method-label"
 								class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
 							>
 								Connection Ingress Method
-							</label>
-							<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+							</span>
+							<div
+								role="radiogroup"
+								aria-labelledby="ingress-method-label"
+								class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+							>
 								<button
 									type="button"
+									role="radio"
+									aria-checked={!useProxyMode}
 									onclick={() => {
 										useProxyMode = false;
 										formData.proxyHostname = '';
 										portError = '';
 									}}
-									class="relative cursor-pointer rounded-none border p-4 text-left transition-colors {!useProxyMode
+									class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {!useProxyMode
 										? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-										: 'border-[#393939] bg-[#161616] hover:bg-[#2a2a2a]'}"
+										: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
 								>
 									<h4 class="text-sm font-semibold text-[#f4f4f4]">Direct Port</h4>
 									<p class="mt-1 text-xs text-[#a8a8a8]">
@@ -808,6 +822,8 @@ one at https://mozilla.org/MPL/2.0/.
 								</button>
 								<button
 									type="button"
+									role="radio"
+									aria-checked={useProxyMode}
 									onclick={() => {
 										useProxyMode = true;
 										if (!formData.proxyHostname) {
@@ -822,9 +838,9 @@ one at https://mozilla.org/MPL/2.0/.
 										}
 										portError = '';
 									}}
-									class="relative cursor-pointer rounded-none border p-4 text-left transition-colors {useProxyMode
+									class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {useProxyMode
 										? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-										: 'border-[#393939] bg-[#161616] hover:bg-[#2a2a2a]'}"
+										: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
 								>
 									<h4 class="text-sm font-semibold text-[#f4f4f4]">SNI / Custom Hostname</h4>
 									<p class="mt-1 text-xs text-[#a8a8a8]">
@@ -850,7 +866,7 @@ one at https://mozilla.org/MPL/2.0/.
 										<select
 											id="proxy_listener"
 											bind:value={formData.proxyListenerId}
-											class="h-10 w-full cursor-pointer appearance-none rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none"
+											class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-[#393939] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
 										>
 											{#each proxyListeners as listener (listener.id)}
 												<option value={listener.id}>
@@ -875,21 +891,12 @@ one at https://mozilla.org/MPL/2.0/.
 								</div>
 							{/if}
 
-							<div class="space-y-1.5">
-								<label
-									for="proxy_hostname"
-									class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
-								>
-									Server Hostname
-								</label>
-								<input
-									id="proxy_hostname"
-									type="text"
-									placeholder={proxyBaseURL ? 'survival' : 'survival.example.com'}
-									bind:value={formData.proxyHostname}
-									class="h-10 w-full rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] placeholder-[#6f6f6f] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none"
-								/>
-							</div>
+							<CarbonTextInput
+								id="proxy_hostname"
+								label="Server Hostname"
+								placeholder={proxyBaseURL ? 'survival' : 'survival.example.com'}
+								bind:value={formData.proxyHostname}
+							/>
 						</div>
 					{:else}
 						<div class="space-y-1.5">
@@ -903,7 +910,7 @@ one at https://mozilla.org/MPL/2.0/.
 								<button
 									type="button"
 									onclick={refreshAvailablePort}
-									class="cursor-pointer font-mono text-xs text-[#78a9ff] hover:underline"
+									class="focus-ring cursor-pointer font-mono text-xs text-[#78a9ff] hover:underline"
 								>
 									Auto-Assign Next Port
 								</button>
@@ -915,12 +922,14 @@ one at https://mozilla.org/MPL/2.0/.
 								max="65535"
 								bind:value={formData.port}
 								oninput={(e) => validatePort(Number(e.currentTarget.value))}
-								class="h-10 w-full rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none {portError
-									? '!border-b-2 !border-[#da1e28]'
+								aria-invalid={portError ? 'true' : undefined}
+								aria-describedby={portError ? 'port-error' : undefined}
+								class="focus-ring h-10 w-full rounded-none border border-[#393939] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535] {portError
+									? '!border-[#da1e28]'
 									: ''}"
 							/>
 							{#if portError}
-								<p class="mt-1 font-mono text-xs text-[#ff8389]">{portError}</p>
+								<p id="port-error" class="mt-1 font-mono text-xs text-[#ff8389]">{portError}</p>
 							{/if}
 						</div>
 					{/if}
@@ -940,7 +949,7 @@ one at https://mozilla.org/MPL/2.0/.
 								min="512"
 								step="256"
 								bind:value={formData.memory}
-								class="h-10 w-full rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none"
+								class="focus-ring h-10 w-full rounded-none border border-[#393939] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
 							/>
 							<p class="font-mono text-xs text-[#8d8d8d]">
 								Equals {(formData.memory / 1024).toFixed(1)} GB
@@ -960,7 +969,7 @@ one at https://mozilla.org/MPL/2.0/.
 								min="1"
 								max="1000"
 								bind:value={formData.maxPlayers}
-								class="h-10 w-full rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none"
+								class="focus-ring h-10 w-full rounded-none border border-[#393939] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
 							/>
 						</div>
 					</div>
@@ -988,19 +997,26 @@ one at https://mozilla.org/MPL/2.0/.
 
 					<!-- Cluster Placement Mode (Carbon Tiles) -->
 					<div class="space-y-3">
-						<label
+						<span
+							id="node-placement-label"
 							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
 						>
 							Node Placement Mode
-						</label>
-						<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+						</span>
+						<div
+							role="radiogroup"
+							aria-labelledby="node-placement-label"
+							class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+						>
 							<button
 								type="button"
+								role="radio"
+								aria-checked={nodePlacementMode === 'auto'}
 								onclick={() => (nodePlacementMode = 'auto')}
-								class="relative cursor-pointer rounded-none border p-4 text-left transition-colors {nodePlacementMode ===
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {nodePlacementMode ===
 								'auto'
 									? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-									: 'border-[#393939] bg-[#161616] hover:bg-[#2a2a2a]'}"
+									: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
 							>
 								<div class="flex items-center gap-2">
 									<Activity class="h-4 w-4 text-accent-text" />
@@ -1016,11 +1032,13 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<button
 								type="button"
+								role="radio"
+								aria-checked={nodePlacementMode === 'manual'}
 								onclick={() => (nodePlacementMode = 'manual')}
-								class="relative cursor-pointer rounded-none border p-4 text-left transition-colors {nodePlacementMode ===
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {nodePlacementMode ===
 								'manual'
 									? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-									: 'border-[#393939] bg-[#161616] hover:bg-[#2a2a2a]'}"
+									: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
 							>
 								<div class="flex items-center gap-2">
 									<ServerIcon class="h-4 w-4 text-[#78a9ff]" />
@@ -1043,7 +1061,7 @@ one at https://mozilla.org/MPL/2.0/.
 								<select
 									id="placement_strategy"
 									bind:value={placementStrategy}
-									class="h-10 w-full rounded-none border border-[#525252] bg-[#262626] px-3 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+									class="focus-ring h-10 w-full rounded-none border border-[#525252] bg-[#262626] px-3 font-mono text-xs text-[#f4f4f4] transition-colors focus:bg-[#353535]"
 								>
 									<option value="least_memory">Least Memory Allocated (Recommended)</option>
 									<option value="least_servers">Least Active Server Count</option>
@@ -1064,17 +1082,24 @@ one at https://mozilla.org/MPL/2.0/.
 										Nodes before creating servers.
 									</div>
 								{:else}
-									<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+									<div
+										role="radiogroup"
+										aria-label="Target Docker node"
+										class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+									>
 										{#each nodes as node (node.id)}
 											<button
 												type="button"
+												role="radio"
+												aria-checked={selectedNodeId === node.id}
+												aria-disabled={!node.enabled}
 												onclick={() => {
 													if (node.enabled) selectedNodeId = node.id;
 												}}
-												class="relative cursor-pointer rounded-none border p-3.5 text-left transition-colors {selectedNodeId ===
+												class="focus-ring relative cursor-pointer rounded-none border p-3.5 text-left transition-colors {selectedNodeId ===
 												node.id
 													? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-													: 'border-[#393939] bg-[#161616] hover:bg-[#2a2a2a]'} {!node.enabled
+													: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'} {!node.enabled
 													? 'cursor-not-allowed opacity-40'
 													: ''}"
 											>
@@ -1146,7 +1171,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<select
 								id="docker_image"
 								bind:value={formData.dockerImage}
-								class="h-10 w-full cursor-pointer appearance-none rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 pr-10 font-mono text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none"
+								class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-[#393939] bg-[#161616] px-4 pr-10 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
 							>
 								<option value="">Auto-select base image (Recommended)</option>
 								{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
@@ -1177,7 +1202,7 @@ one at https://mozilla.org/MPL/2.0/.
 						<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
 							<!-- Start Immediately -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#202020]"
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626]"
 							>
 								<input
 									type="checkbox"
@@ -1194,7 +1219,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Detached Mode -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#202020] {useProxyMode
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626] {useProxyMode
 									? 'cursor-not-allowed opacity-50'
 									: ''}"
 							>
@@ -1214,7 +1239,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Auto Start -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#202020] {formData.detached
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626] {formData.detached
 									? 'cursor-not-allowed opacity-50'
 									: ''}"
 							>
@@ -1234,7 +1259,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Freeze on Idle -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#202020]"
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626]"
 							>
 								<input
 									type="checkbox"
@@ -1251,7 +1276,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Deep Sleep on Idle -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#202020]"
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626]"
 							>
 								<input
 									type="checkbox"
@@ -1324,9 +1349,10 @@ one at https://mozilla.org/MPL/2.0/.
 							{@const added = selectedDatapacks.some((p) => p.id === d.id)}
 							<button
 								type="button"
+								aria-pressed={added}
 								onclick={() => toggleDatapack(d.id, d.name, d.indexer)}
-								class="flex h-9 cursor-pointer items-center gap-1.5 rounded-none px-3 font-sans text-xs font-medium transition-colors {added
-									? 'bg-[#393939] text-[#c6c6c6] hover:bg-[#4c4c4c]'
+								class="focus-ring flex h-9 cursor-pointer items-center gap-1.5 rounded-none px-3 font-sans text-xs font-medium transition-colors {added
+									? 'bg-[#393939] text-[#c6c6c6] hover:bg-[#525252]'
 									: 'bg-[#0f62fe] text-white hover:bg-[#0353e9]'}"
 							>
 								{#if added}<Check class="h-3.5 w-3.5" /> Added{:else}<Plus class="h-3.5 w-3.5" /> Add{/if}
@@ -1337,49 +1363,53 @@ one at https://mozilla.org/MPL/2.0/.
 			{/if}
 
 			<!-- Carbon Wizard Navigation Bar -->
-			<div class="flex items-center justify-between border-t border-[#393939] pt-4">
-				<a
+			<div class="flex items-center justify-between gap-3 border-t border-[#393939] pt-4">
+				<CarbonButton
 					href={resolve('/servers')}
-					class="flex h-10 items-center gap-2 rounded-none border border-[#393939] bg-[#262626] px-4 font-sans text-sm text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+					kind="tertiary"
+					size="md"
+					class="whitespace-nowrap"
 				>
 					Cancel
-				</a>
+				</CarbonButton>
 
 				<div class="flex items-center gap-2">
 					{#if currentStep > 0}
-						<button
-							type="button"
+						<CarbonButton
+							kind="secondary"
+							size="md"
+							class="gap-2 whitespace-nowrap"
 							onclick={prevStep}
-							class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#393939] px-4 font-sans text-sm text-white transition-colors hover:bg-[#4c4c4c]"
 						>
-							<ChevronLeft class="h-4 w-4" />
+							<ChevronLeft class="h-4 w-4" aria-hidden="true" />
 							<span>Previous</span>
-						</button>
+						</CarbonButton>
 					{/if}
 
 					{#if currentStep < steps.length - 1}
-						<button
-							type="button"
+						<CarbonButton
+							kind="primary"
+							size="md"
+							class="gap-2 whitespace-nowrap"
 							onclick={nextStep}
-							class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#0f62fe] px-5 font-sans text-sm font-medium text-white transition-colors hover:bg-[#0353e9] active:bg-[#002d9c]"
 						>
 							<span>Next Step</span>
-							<ChevronRight class="h-4 w-4" />
-						</button>
+							<ChevronRight class="h-4 w-4" aria-hidden="true" />
+						</CarbonButton>
 					{:else}
-						<button
+						<CarbonButton
 							type="submit"
+							kind="primary"
+							size="md"
+							class="gap-2 whitespace-nowrap"
 							disabled={loading || loadingVersions}
-							class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#0f62fe] px-6 font-sans text-sm font-medium text-white transition-colors hover:bg-[#0353e9] active:bg-[#002d9c] disabled:opacity-50"
+							{loading}
 						>
-							{#if loading}
-								<Loader2 class="h-4 w-4 animate-spin" />
-								<span>Creating Server...</span>
-							{:else}
-								<Check class="h-4 w-4" />
-								<span>Create Server</span>
+							{#if !loading}
+								<Check class="h-4 w-4" aria-hidden="true" />
 							{/if}
-						</button>
+							<span>{loading ? 'Creating Server...' : 'Create Server'}</span>
+						</CarbonButton>
 					{/if}
 				</div>
 			</div>

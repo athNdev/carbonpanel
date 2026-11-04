@@ -13,7 +13,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	import { asset } from '$app/paths';
 	import type { Asset } from '$app/types';
-	import { CarbonBreadcrumbs, CarbonTag } from '$lib/components/carbon';
+	import { CarbonBreadcrumbs, CarbonTag, CarbonPageHeader } from '$lib/components/carbon';
 
 	let isLoading = $state(true);
 	let loadingProgress = $state(10);
@@ -205,37 +205,25 @@ one at https://mozilla.org/MPL/2.0/.
 	<CarbonBreadcrumbs items={[{ label: 'Docs' }, { label: 'API Reference' }]} />
 
 	<!-- Carbon Page Header -->
-	<div
-		class="flex flex-col gap-4 border-b border-[#393939] pb-4 sm:flex-row sm:items-center sm:justify-between"
+	<CarbonPageHeader
+		title="API Reference"
+		description="Live ConnectRPC + OpenAPI reference. Spec served from /api/v1/openapi.yaml (regenerated via make gen)"
 	>
-		<div>
-			<div class="flex items-center gap-2">
-				<h1 class="font-sans text-2xl font-light tracking-tight text-[#f4f4f4]">API Reference</h1>
-				<CarbonTag type="blue" size="sm">ConnectRPC</CarbonTag>
-				<CarbonTag type="gray" size="sm">15 services · 155 methods</CarbonTag>
-			</div>
-			<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
-				Live ConnectRPC + OpenAPI reference. Spec served from
-				<!-- eslint-disable svelte/no-navigation-without-resolve -- backend API endpoint, not a SvelteKit route; resolve() is inapplicable -->
-				<a href="/api/v1/openapi.yaml" class="font-mono text-[#78a9ff] hover:text-white"
-					>/api/v1/openapi.yaml</a
-				>
-				<!-- eslint-enable svelte/no-navigation-without-resolve -->
-				(regenerated via <span class="font-mono">make gen</span>)
-			</p>
-		</div>
-		<div class="flex items-center gap-2">
+		{#snippet tag()}
+			<CarbonTag type="blue" size="sm">ConnectRPC</CarbonTag>
+			<CarbonTag type="gray" size="sm">15 services · 155 methods</CarbonTag>
+		{/snippet}
+		{#snippet actions()}
 			<!-- eslint-disable svelte/no-navigation-without-resolve -- backend API endpoint, not a SvelteKit route; resolve() is inapplicable -->
 			<a
 				href="/api/v1/openapi.yaml"
 				class="inline-flex h-8 items-center px-3 font-mono text-xs tracking-wider text-[#78a9ff] uppercase hover:bg-[#353535] hover:text-white"
 			>
-				<!-- eslint-enable svelte/no-navigation-without-resolve -->
 				Open raw spec
 			</a>
 			<!-- eslint-enable svelte/no-navigation-without-resolve -->
-		</div>
-	</div>
+		{/snippet}
+	</CarbonPageHeader>
 
 	<!-- Carbon DataTable shell: interactive Scalar viewer -->
 	<div class="flex flex-col border border-[#393939] bg-[#262626]">

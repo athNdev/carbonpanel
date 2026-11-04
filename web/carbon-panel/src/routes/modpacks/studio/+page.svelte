@@ -18,12 +18,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		CarbonModal,
 		CarbonTextInput,
 		CarbonInlineLoading,
-		CarbonConfirm
+		CarbonConfirm,
+		CarbonPageHeader
 	} from '$lib/components/carbon';
 	import {
 		Package,
 		Plus,
-		ArrowLeft,
 		Boxes,
 		Trash2,
 		Copy,
@@ -318,46 +318,40 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <div class="h-full flex-1 space-y-6 rounded-none font-sans text-[#f4f4f4]">
 	<!-- Top Bar -->
-	<div
-		class="flex flex-col justify-between gap-4 rounded-none border-b border-[#393939] pb-6 sm:flex-row sm:items-center"
+	<CarbonPageHeader
+		title="Modpack Studio"
+		description="Visual workspace for custom modpacks: create, import (.mrpack, CurseForge, Packwiz), edit overrides, and deploy."
 	>
-		<div class="flex items-center gap-4">
-			<CarbonButton
-				kind="ghost"
-				size="md"
-				iconOnly
-				onclick={() => goto(resolve('/modpacks'))}
-				class="rounded-none text-[#c6c6c6] hover:text-white"
-				title="Back to Modpacks"
-				aria-label="Back to Modpacks"
-			>
-				<ArrowLeft class="h-5 w-5" />
+		{#snippet tag()}
+			<CarbonTag type="cyan" size="sm">PACKWIZ ENGINE</CarbonTag>
+		{/snippet}
+		{#snippet actions()}
+			<CarbonButton kind="ghost" size="md" class="whitespace-nowrap" href={resolve('/modpacks')}>
+				<Boxes class="mr-2 h-4 w-4" />
+				Browse Modpacks
 			</CarbonButton>
 
-			<div class="space-y-0.5">
-				<div class="flex items-center gap-3">
-					<h1 class="text-3xl font-semibold tracking-tight text-white">Modpack Studio</h1>
-					<CarbonTag type="cyan" size="sm">PACKWIZ ENGINE</CarbonTag>
-				</div>
-				<p class="text-xs text-[#a8a8a8]">
-					Visual workspace for custom modpacks: create, import (.mrpack, CurseForge, Packwiz), edit
-					overrides, and deploy.
-				</p>
-			</div>
-		</div>
-
-		<div class="flex items-center gap-3">
-			<CarbonButton kind="secondary" class="rounded-none" onclick={() => (importDialogOpen = true)}>
-				<UploadCloud class="mr-2 h-4 w-4 text-accent-text" />
+			<CarbonButton
+				kind="secondary"
+				size="md"
+				class="whitespace-nowrap"
+				onclick={() => (importDialogOpen = true)}
+			>
+				<UploadCloud class="mr-2 h-4 w-4" />
 				Import Modpack
 			</CarbonButton>
 
-			<CarbonButton kind="primary" class="rounded-none" onclick={() => (createDialogOpen = true)}>
+			<CarbonButton
+				kind="primary"
+				size="md"
+				class="whitespace-nowrap"
+				onclick={() => (createDialogOpen = true)}
+			>
 				<Plus class="mr-2 h-4 w-4" />
 				Create Modpack
 			</CarbonButton>
-		</div>
-	</div>
+		{/snippet}
+	</CarbonPageHeader>
 
 	<!-- Search & Summary Bar -->
 	<div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
@@ -398,8 +392,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<div class="flex items-center justify-center gap-3 pt-2">
 				<CarbonButton
 					kind="secondary"
-					size="sm"
-					class="rounded-none"
+					size="md"
+					class="whitespace-nowrap"
 					onclick={() => (importDialogOpen = true)}
 				>
 					<UploadCloud class="mr-2 h-4 w-4" />
@@ -407,12 +401,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</CarbonButton>
 				<CarbonButton
 					kind="primary"
-					size="sm"
-					class="rounded-none"
+					size="md"
+					class="whitespace-nowrap"
 					onclick={() => (createDialogOpen = true)}
 				>
 					<Plus class="mr-2 h-4 w-4" />
-					Create Project
+					Create Modpack
 				</CarbonButton>
 			</div>
 		</div>
@@ -474,7 +468,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								kind="ghost"
 								size="sm"
 								iconOnly
-								class="rounded-none text-[#a8a8a8] hover:text-white"
+								class="text-[#a8a8a8] hover:text-white"
 								onclick={() => clonePack(pack)}
 								title="Duplicate / Clone modpack"
 								aria-label="Duplicate modpack"
@@ -485,7 +479,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								kind="ghost"
 								size="sm"
 								iconOnly
-								class="rounded-none text-[#da1e28] hover:bg-[#da1e28]/20"
+								class="text-[#da1e28] hover:bg-[#da1e28]/20"
 								onclick={() => deletePack(pack)}
 								title="Delete modpack"
 								aria-label="Delete modpack"
@@ -498,7 +492,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<CarbonButton
 								kind="tertiary"
 								size="sm"
-								class="h-8 rounded-none px-2 text-xs"
+								class="h-8 px-2 text-xs"
 								onclick={() => exportPack(pack.id, 'packwiz', pack.name)}
 								disabled={exportingPack === `${pack.id}-packwiz`}
 								title="Export Native Packwiz .zip"
@@ -508,7 +502,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<CarbonButton
 								kind="tertiary"
 								size="sm"
-								class="h-8 rounded-none px-2 text-xs"
+								class="h-8 px-2 text-xs"
 								onclick={() => exportPack(pack.id, 'mrpack', pack.name)}
 								disabled={exportingPack === `${pack.id}-mrpack`}
 								title="Export Modrinth .mrpack"
@@ -519,7 +513,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<CarbonButton
 								kind="primary"
 								size="sm"
-								class="h-8 rounded-none text-xs"
+								class="h-8 text-xs"
 								onclick={() => goto(resolve(`/modpacks/studio/${pack.id}`))}
 							>
 								Open Studio
@@ -535,7 +529,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <!-- Create Dialog with Carbon Design System Fidelity -->
 <CarbonModal
 	bind:open={createDialogOpen}
-	title="Create New Modpack Project"
+	title="Create Modpack"
 	description="Initialize a new visual Packwiz workspace"
 	hasFooter={false}
 	size="lg"
@@ -590,25 +584,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</CarbonSelect>
 
 		<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
-			<CarbonButton
-				kind="secondary"
-				onclick={() => (createDialogOpen = false)}
-				disabled={creating}
-				class="rounded-none"
-			>
+			<CarbonButton kind="secondary" onclick={() => (createDialogOpen = false)} disabled={creating}>
 				Cancel
 			</CarbonButton>
 			<CarbonButton
 				kind="primary"
 				onclick={handleCreatePack}
 				disabled={creating || !newName.trim()}
-				class="rounded-none"
 			>
 				{#if creating}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 					Creating...
 				{:else}
-					Create Project
+					Create Modpack
 				{/if}
 			</CarbonButton>
 		</div>
@@ -618,7 +606,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <!-- Import Dialog with Carbon Design System Fidelity -->
 <CarbonModal
 	bind:open={importDialogOpen}
-	title="Import Existing Modpack"
+	title="Import Modpack"
 	description="Import a Modrinth (.mrpack), CurseForge (.zip), or Packwiz archive"
 	hasFooter={false}
 	size="lg"
@@ -663,16 +651,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				kind="secondary"
 				onclick={() => (importDialogOpen = false)}
 				disabled={importing}
-				class="rounded-none"
 			>
 				Cancel
 			</CarbonButton>
-			<CarbonButton
-				kind="primary"
-				onclick={handleImportPack}
-				disabled={importing || !importFile}
-				class="rounded-none"
-			>
+			<CarbonButton kind="primary" onclick={handleImportPack} disabled={importing || !importFile}>
 				{#if importing}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 					Importing...

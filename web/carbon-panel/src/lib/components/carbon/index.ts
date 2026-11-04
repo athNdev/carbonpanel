@@ -4,6 +4,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 export { default as CarbonButton } from './CarbonButton.svelte';
+export { default as CarbonPageHeader } from './CarbonPageHeader.svelte';
 export { default as CarbonTile } from './CarbonTile.svelte';
 export { default as CarbonTag } from './CarbonTag.svelte';
 export { default as CarbonDataTable } from './CarbonDataTable.svelte';

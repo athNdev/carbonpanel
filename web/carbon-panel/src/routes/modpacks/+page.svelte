@@ -20,7 +20,9 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonSelect,
 		CarbonModal,
 		CarbonTextInput,
-		CarbonConfirm
+		CarbonConfirm,
+		CarbonTabs,
+		CarbonPageHeader
 	} from '$lib/components/carbon';
 	import { toast } from 'svelte-sonner';
 	import {
@@ -31,7 +33,6 @@ one at https://mozilla.org/MPL/2.0/.
 		Settings,
 		Upload,
 		Package,
-		ArrowLeft,
 		Trash2,
 		X,
 		Globe,
@@ -74,8 +75,11 @@ one at https://mozilla.org/MPL/2.0/.
 	let uploadedPacks = $state<IndexedModpack[]>([]);
 	let loading = $state(false);
 	let syncing = $state(false);
-	let showFavorites = $state(false);
-	let showUploaded = $state(false);
+	// The library has one view control (Browse / Imported / Favorites); the two
+	// booleans below are read-only projections of the selected tab.
+	let activeView = $state('browse');
+	let showFavorites = $derived(activeView === 'favorites');
+	let showUploaded = $derived(activeView === 'imported');
 	let showManifestInspector = $state(false);
 	// Indexer health drives the "indexers offline" banner and the per-indexer
 	// counts below; loaders populate the filter dropdown.
@@ -87,8 +91,20 @@ one at https://mozilla.org/MPL/2.0/.
 	let selectedIndexer = $state('modrinth'); // Default Modrinth
 	let indexerName = $derived(selectedIndexer === 'fuego' ? 'CurseForge' : 'Modrinth');
 
-	// Remote modpack import state
-	let showRemoteModal = $state(false);
+	let libraryTabs = $derived([
+		{ id: 'browse', label: 'Browse' },
+		{ id: 'imported', label: 'Imported', badge: uploadedPacks.length },
+		{ id: 'favorites', label: 'Favorites', badge: favorites.length }
+	]);
+
+	const importTabs = [
+		{ id: 'zip', label: 'Upload ZIP' },
+		{ id: 'url', label: 'From URL' }
+	];
+
+	// Import modpack modal state
+	let showImportModal = $state(false);
+	let importMethod = $state('zip');
 	let importingRemote = $state(false);
 	let remoteUrl = $state('');
 	let remoteName = $state('');
@@ -282,6 +298,7 @@ one at https://mozilla.org/MPL/2.0/.
 		uploading = true;
 		uploadAbortController = new AbortController();
 		uploadProgress = null;
+		showImportModal = false;
 
 		try {
 			const uploadResult = await uploadFile(file, {
@@ -300,11 +317,11 @@ one at https://mozilla.org/MPL/2.0/.
 				description: ''
 			});
 
-			toast.success(`Modpack "${result.modpack?.name}" uploaded successfully`);
+			toast.success(`Modpack "${result.modpack?.name}" imported successfully`);
 			await Promise.all([searchModpacks(), loadUploadedPacks()]);
 		} catch (error: unknown) {
 			if (error instanceof Error && error.message === 'Upload cancelled') {
-				toast.info('Upload cancelled');
+				toast.info('Import cancelled');
 			}
 		} finally {
 			uploading = false;
@@ -321,6 +338,10 @@ one at https://mozilla.org/MPL/2.0/.
 		if (uploadProgress?.sessionId) {
 			cancelUpload(uploadProgress.sessionId).catch(() => {});
 		}
+	}
+
+	function chooseZipFile() {
+		fileInput?.click();
 	}
 
 	async function handleRemoteImport() {
@@ -342,7 +363,7 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 
 			toast.success(res.message || 'Modpack imported successfully');
-			showRemoteModal = false;
+			showImportModal = false;
 			remoteUrl = '';
 			remoteName = '';
 			remoteDescription = '';
@@ -439,82 +460,37 @@ one at https://mozilla.org/MPL/2.0/.
 		/>
 	{/if}
 	<!-- Top Bar -->
-	<div
-		class="flex flex-col justify-between gap-4 rounded-none border-b border-[#393939] pb-6 lg:flex-row lg:items-center"
-	>
-		<div class="flex items-center gap-4">
-			<div
-				class="flex h-12 w-12 items-center justify-center rounded-none border border-[#393939] bg-[#262626] text-accent-text"
-			>
-				<Package class="h-6 w-6" />
-			</div>
-			<div class="space-y-0.5">
-				<h1 class="text-3xl font-semibold tracking-tight text-white">Modpacks</h1>
-				<p class="text-xs text-[#a8a8a8]">
-					Browse, upload, and deploy modpacks to Minecraft servers
-				</p>
-			</div>
-		</div>
-
-		<!-- Top Action Buttons -->
-		<div class="flex flex-wrap items-center gap-2">
-			<CarbonButton
-				kind={showUploaded ? 'primary' : 'secondary'}
-				size="sm"
-				class="rounded-none"
-				onclick={() => {
-					showUploaded = !showUploaded;
-					if (showUploaded) showFavorites = false;
-				}}
-			>
-				{#if showUploaded}
-					<ArrowLeft class="mr-1.5 h-4 w-4" />
-					All Packs
-				{:else}
-					<Upload class="mr-1.5 h-4 w-4" />
-					Uploaded ({uploadedPacks.length})
-				{/if}
+	<CarbonPageHeader title="Modpacks" description="Browse, import and manage modpack packages">
+		{#snippet actions()}
+			<CarbonButton kind="primary" size="md" onclick={() => (showImportModal = true)}>
+				<Upload class="mr-1.5 h-4 w-4" />
+				Import Modpack
 			</CarbonButton>
 
 			<CarbonButton
-				kind={showFavorites ? 'primary' : 'secondary'}
-				size="sm"
-				class="rounded-none"
-				onclick={() => {
-					showFavorites = !showFavorites;
-					if (showFavorites) showUploaded = false;
-				}}
-			>
-				{#if showFavorites}
-					<ArrowLeft class="mr-1.5 h-4 w-4" />
-					All Packs
-				{:else}
-					<Heart class="mr-1.5 h-4 w-4" />
-					Favorites ({favorites.length})
-				{/if}
-			</CarbonButton>
-
-			<CarbonButton
-				kind="tertiary"
-				size="sm"
-				class="rounded-none"
+				kind="secondary"
+				size="md"
+				class="whitespace-nowrap"
 				onclick={() => goto(resolve('/modpacks/studio'))}
 			>
-				<Boxes class="mr-1.5 h-4 w-4 text-accent-text" />
+				<Boxes class="mr-1.5 h-4 w-4" />
 				Modpack Studio
 			</CarbonButton>
 
 			<CarbonButton
 				kind="tertiary"
-				size="sm"
-				class="rounded-none"
+				size="md"
+				class="whitespace-nowrap"
 				onclick={() => (showManifestInspector = true)}
 			>
 				<FileSearch class="mr-1.5 h-4 w-4" />
 				Inspect Manifest
 			</CarbonButton>
-		</div>
-	</div>
+		{/snippet}
+	</CarbonPageHeader>
+
+	<!-- Library view control: Browse / Imported / Favorites -->
+	<CarbonTabs tabs={libraryTabs} bind:selectedTab={activeView} />
 
 	{#if selectedIndexer === 'fuego'}
 		<div
@@ -530,7 +506,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="ghost"
 				size="sm"
-				class="h-7 rounded-none text-xs"
+				class="h-7 text-xs"
 				href={resolve('/settings?tab=api-keys')}
 			>
 				<Settings class="mr-1 h-3.5 w-3.5" />
@@ -589,7 +565,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<div class="flex items-center gap-1 md:col-span-2">
 					<CarbonButton
 						kind="primary"
-						class="w-full justify-center rounded-none"
+						class="w-full justify-center"
 						onclick={() => searchModpacks(true)}
 						disabled={loading}
 					>
@@ -601,46 +577,10 @@ one at https://mozilla.org/MPL/2.0/.
 			<!-- Secondary Action Row -->
 			<div class="flex flex-wrap items-center justify-between gap-2 pt-1">
 				<div class="flex items-center gap-2">
-					<CarbonButton
-						kind="tertiary"
-						size="sm"
-						class="rounded-none"
-						onclick={syncModpacks}
-						disabled={syncing}
-					>
+					<CarbonButton kind="tertiary" size="sm" onclick={syncModpacks} disabled={syncing}>
 						<RefreshCw class={`mr-1.5 h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
 						Sync {indexerName}
 					</CarbonButton>
-
-					<CarbonButton
-						kind="tertiary"
-						size="sm"
-						class="rounded-none"
-						onclick={() => fileInput?.click()}
-						disabled={uploading}
-					>
-						<Upload class="mr-1.5 h-3.5 w-3.5" />
-						Upload ZIP
-					</CarbonButton>
-
-					<CarbonButton
-						kind="tertiary"
-						size="sm"
-						class="rounded-none"
-						onclick={() => (showRemoteModal = true)}
-						disabled={importingRemote}
-					>
-						<Globe class="mr-1.5 h-3.5 w-3.5" />
-						Add from URL
-					</CarbonButton>
-
-					<input
-						bind:this={fileInput}
-						type="file"
-						accept=".zip"
-						onchange={handleModpackUpload}
-						class="hidden"
-					/>
 				</div>
 
 				<div class="flex items-center gap-3 font-mono text-xs text-[#8d8d8d]">
@@ -654,37 +594,37 @@ one at https://mozilla.org/MPL/2.0/.
 					{/if}
 				</div>
 			</div>
+		</div>
+	{/if}
 
-			{#if uploading && uploadProgress}
-				<div class="space-y-2 rounded-none border border-[#393939] bg-[#262626] p-4">
-					<div class="flex items-center justify-between text-xs">
-						<span class="font-medium text-white">Uploading modpack archive...</span>
-						<div class="flex items-center gap-3 font-mono text-[#a8a8a8]">
-							<span>{uploadProgress.percentComplete.toFixed(0)}%</span>
-							<span
-								>{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(
-									uploadProgress.totalBytes
-								)}</span
-							>
-							<button
-								type="button"
-								onclick={cancelCurrentUpload}
-								class="cursor-pointer text-[#da1e28] hover:text-white"
-								title="Cancel upload"
-								aria-label="Cancel upload"
-							>
-								<X class="h-4 w-4" />
-							</button>
-						</div>
-					</div>
-					<div class="h-2 w-full overflow-hidden rounded-none bg-[#161616]">
-						<div
-							class="h-full bg-[#0f62fe] transition-all"
-							style="width: {uploadProgress.percentComplete}%"
-						></div>
-					</div>
+	{#if uploading && uploadProgress}
+		<div class="space-y-2 border border-[#393939] bg-[#262626] p-4">
+			<div class="flex items-center justify-between text-xs">
+				<span class="font-medium text-white">Importing modpack archive...</span>
+				<div class="flex items-center gap-3 font-mono text-[#a8a8a8]">
+					<span>{uploadProgress.percentComplete.toFixed(0)}%</span>
+					<span
+						>{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(
+							uploadProgress.totalBytes
+						)}</span
+					>
+					<button
+						type="button"
+						onclick={cancelCurrentUpload}
+						class="cursor-pointer text-[#da1e28] hover:text-white"
+						title="Cancel import"
+						aria-label="Cancel import"
+					>
+						<X class="h-4 w-4" />
+					</button>
 				</div>
-			{/if}
+			</div>
+			<div class="h-2 w-full overflow-hidden bg-[#161616]">
+				<div
+					class="h-full bg-[#0f62fe] transition-all"
+					style="width: {uploadProgress.percentComplete}%"
+				></div>
+			</div>
 		</div>
 	{/if}
 
@@ -717,7 +657,7 @@ one at https://mozilla.org/MPL/2.0/.
 							</h3>
 							<div class="mt-1 flex flex-wrap items-center gap-2">
 								<CarbonTag type={modpack.indexer === 'manual' ? 'purple' : 'blue'} size="sm">
-									{modpack.indexer === 'manual' ? 'Manual Upload' : modpack.indexer}
+									{modpack.indexer === 'manual' ? 'Imported' : modpack.indexer}
 								</CarbonTag>
 								<span class="flex items-center gap-1 font-mono text-xs text-[#8d8d8d]">
 									<Download class="inline h-3 w-3" />
@@ -774,31 +714,21 @@ one at https://mozilla.org/MPL/2.0/.
 							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- external modpack homepage URL used directly; resolve() throws on non-absolute pathnames -->
 							<a href={modpack.websiteUrl} target="_blank" rel="noopener noreferrer">
 								<!-- eslint-enable svelte/no-navigation-without-resolve -->
-								<CarbonButton kind="ghost" size="sm" class="rounded-none">
+								<CarbonButton kind="ghost" size="sm">
 									<ExternalLink class="mr-1 h-3 w-3" />
 									View
 								</CarbonButton>
 							</a>
 						{/if}
 						{#if modpack.indexer === 'manual'}
-							<CarbonButton
-								kind="danger"
-								size="sm"
-								class="rounded-none"
-								onclick={() => deleteModpack(modpack)}
-							>
+							<CarbonButton kind="danger" size="sm" onclick={() => deleteModpack(modpack)}>
 								<Trash2 class="mr-1 h-3 w-3" />
 								Delete
 							</CarbonButton>
 						{/if}
 					</div>
 
-					<CarbonButton
-						kind="primary"
-						size="sm"
-						class="rounded-none"
-						onclick={() => handleUseInServer(modpack)}
-					>
+					<CarbonButton kind="primary" size="sm" onclick={() => handleUseInServer(modpack)}>
 						Use in Server
 					</CarbonButton>
 				</div>
@@ -827,14 +757,15 @@ one at https://mozilla.org/MPL/2.0/.
 				{#if showFavorites}
 					Click the heart icon on any package to add it to your pinned favorites.
 				{:else if !loading && !syncing}
-					Click "Sync" to index popular modpacks or import a custom modpack from URL or ZIP.
+					Click "Sync" to index popular modpacks, or use "Import Modpack" to add a ZIP archive or a
+					direct URL.
 				{/if}
 			</p>
 			{#if !showFavorites && !loading && !syncing && (searchParams.query || searchParams.gameVersion || searchParams.modLoader)}
 				<CarbonButton
 					kind="secondary"
 					size="sm"
-					class="mt-4 justify-center rounded-none"
+					class="mt-4 justify-center"
 					onclick={() => {
 						searchParams.query = '';
 						searchParams.gameVersion = '';
@@ -854,7 +785,6 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="tertiary"
 				size="sm"
-				class="rounded-none"
 				disabled={(searchParams.page || 1) === 1}
 				onclick={() => {
 					searchParams.page = Math.max(1, (searchParams.page || 1) - 1);
@@ -869,7 +799,6 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton
 				kind="tertiary"
 				size="sm"
-				class="rounded-none"
 				disabled={(searchParams.page || 1) >=
 					Math.ceil(searchResults.total / searchResults.pageSize)}
 				onclick={() => {
@@ -882,90 +811,146 @@ one at https://mozilla.org/MPL/2.0/.
 		</div>
 	{/if}
 
-	<!-- Remote Import Modal with Carbon Design System Fidelity -->
+	<!-- Import Modpack: one entry point, two methods -->
 	<CarbonModal
-		bind:open={showRemoteModal}
-		title="Add Modpack from URL / GitHub"
-		description="Import archive directly from GitHub Releases, Cloudflare R2, or static CDN"
+		bind:open={showImportModal}
+		title="Import Modpack"
+		description="Add a modpack package to your library from a ZIP archive or a direct URL"
 		hasFooter={false}
 		size="3xl"
 	>
-		<div class="space-y-4">
-			<CarbonTextInput
-				label="Modpack Archive URL *"
-				placeholder="https://github.com/owner/repo/releases/download/v1.0/modpack.zip"
-				bind:value={remoteUrl}
-				disabled={importingRemote}
-				helperText="Direct link to .zip or .mrpack archive file"
-			/>
+		<div class="space-y-5">
+			<CarbonTabs tabs={importTabs} bind:selectedTab={importMethod} idPrefix="import-method" />
 
-			<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-				<CarbonTextInput
-					label="Pack Name (Optional)"
-					placeholder="Auto-detected if blank"
-					bind:value={remoteName}
-					disabled={importingRemote}
-				/>
-				<CarbonTextInput
-					label="Minecraft Version"
-					placeholder="e.g. 1.20.1 (or auto-detect)"
-					bind:value={remoteMcVersion}
-					disabled={importingRemote}
-				/>
-			</div>
-
-			<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-				<CarbonSelect label="Mod Loader" bind:value={remoteModLoader} disabled={importingRemote}>
-					<option value="">Auto-detect from manifest</option>
-					<option value="fabric">Fabric</option>
-					<option value="forge">Forge</option>
-					<option value="neoforge">NeoForge</option>
-					<option value="quilt">Quilt</option>
-					<option value="custom">Custom</option>
-				</CarbonSelect>
-
-				<CarbonTextInput
-					type="password"
-					label="Auth Token (Optional)"
-					placeholder="Bearer token or GitHub PAT"
-					bind:value={remoteAuthToken}
-					disabled={importingRemote}
-				/>
-			</div>
-
-			<CarbonTextInput
-				label="Description (Optional)"
-				placeholder="Brief description or release summary"
-				bind:value={remoteDescription}
-				disabled={importingRemote}
-			/>
-
-			<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
-				<CarbonButton
-					kind="secondary"
-					onclick={() => (showRemoteModal = false)}
-					disabled={importingRemote}
-					class="rounded-none"
+			{#if importMethod === 'zip'}
+				<section
+					id="import-method-panel-zip"
+					role="tabpanel"
+					aria-labelledby="import-method-tab-zip"
+					class="space-y-3"
 				>
-					Cancel
-				</CarbonButton>
-				<CarbonButton
-					kind="primary"
-					onclick={handleRemoteImport}
-					disabled={importingRemote || !remoteUrl.trim()}
-					class="rounded-none"
+					<div>
+						<h4 class="font-mono text-xs font-semibold tracking-[0.32px] text-[#c6c6c6] uppercase">
+							Upload ZIP
+						</h4>
+						<p class="mt-1 text-xs text-[#a8a8a8]">
+							Import a modpack archive (.zip) from this computer. The pack becomes an Imported entry
+							in your library and can be deployed to a server.
+						</p>
+					</div>
+					<CarbonButton kind="primary" size="md" onclick={chooseZipFile} disabled={uploading}>
+						<Upload class="mr-2 h-4 w-4" />
+						{uploading ? 'Importing...' : 'Choose ZIP File'}
+					</CarbonButton>
+				</section>
+			{:else}
+				<section
+					id="import-method-panel-url"
+					role="tabpanel"
+					aria-labelledby="import-method-tab-url"
+					class="space-y-4"
 				>
-					{#if importingRemote}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						Downloading & Importing...
-					{:else}
-						<Download class="mr-2 h-4 w-4" />
-						Import Modpack
-					{/if}
-				</CarbonButton>
-			</div>
+					<div>
+						<h4
+							class="flex items-center gap-1.5 font-mono text-xs font-semibold tracking-[0.32px] text-[#c6c6c6] uppercase"
+						>
+							<Globe class="h-3.5 w-3.5 text-accent-text" />
+							From URL
+						</h4>
+						<p class="mt-1 text-xs text-[#a8a8a8]">
+							Import an archive hosted on GitHub Releases, Cloudflare R2 or a static CDN.
+						</p>
+					</div>
+
+					<CarbonTextInput
+						label="Modpack Archive URL *"
+						placeholder="https://github.com/owner/repo/releases/download/v1.0/modpack.zip"
+						bind:value={remoteUrl}
+						disabled={importingRemote}
+						helperText="Direct link to .zip or .mrpack archive file"
+					/>
+
+					<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<CarbonTextInput
+							label="Pack Name (Optional)"
+							placeholder="Auto-detected if blank"
+							bind:value={remoteName}
+							disabled={importingRemote}
+						/>
+						<CarbonTextInput
+							label="Minecraft Version"
+							placeholder="e.g. 1.20.1 (or auto-detect)"
+							bind:value={remoteMcVersion}
+							disabled={importingRemote}
+						/>
+					</div>
+
+					<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<CarbonSelect
+							label="Mod Loader"
+							bind:value={remoteModLoader}
+							disabled={importingRemote}
+						>
+							<option value="">Auto-detect from manifest</option>
+							<option value="fabric">Fabric</option>
+							<option value="forge">Forge</option>
+							<option value="neoforge">NeoForge</option>
+							<option value="quilt">Quilt</option>
+							<option value="custom">Custom</option>
+						</CarbonSelect>
+
+						<CarbonTextInput
+							type="password"
+							label="Auth Token (Optional)"
+							placeholder="Bearer token or GitHub PAT"
+							bind:value={remoteAuthToken}
+							disabled={importingRemote}
+						/>
+					</div>
+
+					<CarbonTextInput
+						label="Description (Optional)"
+						placeholder="Brief description or release summary"
+						bind:value={remoteDescription}
+						disabled={importingRemote}
+					/>
+
+					<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
+						<CarbonButton
+							kind="secondary"
+							size="md"
+							onclick={() => (showImportModal = false)}
+							disabled={importingRemote}
+						>
+							Cancel
+						</CarbonButton>
+						<CarbonButton
+							kind="primary"
+							size="md"
+							onclick={handleRemoteImport}
+							disabled={importingRemote || !remoteUrl.trim()}
+						>
+							{#if importingRemote}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								Downloading & Importing...
+							{:else}
+								<Download class="mr-2 h-4 w-4" />
+								Import Modpack
+							{/if}
+						</CarbonButton>
+					</div>
+				</section>
+			{/if}
 		</div>
 	</CarbonModal>
+
+	<input
+		bind:this={fileInput}
+		type="file"
+		accept=".zip"
+		onchange={handleModpackUpload}
+		class="hidden"
+	/>
 
 	<ManifestInspectorDialog
 		bind:open={showManifestInspector}

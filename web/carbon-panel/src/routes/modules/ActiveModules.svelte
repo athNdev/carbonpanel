@@ -259,7 +259,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<tr>
 				<td colspan="7" class="py-16 text-center text-[#8d8d8d]">
 					<Package class="mx-auto mb-3 h-10 w-10 text-[#525252]" />
-					<p class="text-sm font-semibold text-white">No active module instances</p>
+					<p class="text-sm font-semibold text-[#f4f4f4]">No active module instances</p>
 					<p class="mt-1 text-xs text-[#8d8d8d]">
 						Attach modules to a Minecraft server to provision sidecar containers.
 					</p>
@@ -271,7 +271,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<tr class="transition-colors hover:bg-[#353535]">
 					<td class="px-4 py-3">
 						<div class="space-y-0.5">
-							<div class="flex items-center gap-2 text-sm font-semibold text-white">
+							<div class="flex items-center gap-2 text-sm font-semibold text-[#f4f4f4]">
 								<span>{module.name}</span>
 							</div>
 							<div class="flex items-center gap-1.5 font-mono text-xs text-[#a8a8a8]">
@@ -323,7 +323,7 @@ one at https://mozilla.org/MPL/2.0/.
 									kind="ghost"
 									size="sm"
 									iconOnly
-									class="rounded-none text-emerald-500 hover:bg-emerald-500/20"
+									class="rounded-none text-success hover:bg-success/20"
 									onclick={() => handleStartModule(module)}
 									disabled={isLoading}
 									title="Start module"
@@ -340,7 +340,7 @@ one at https://mozilla.org/MPL/2.0/.
 									kind="ghost"
 									size="sm"
 									iconOnly
-									class="rounded-none text-red-500 hover:bg-red-500/20"
+									class="rounded-none text-destructive hover:bg-destructive/20"
 									onclick={() => handleStopModule(module)}
 									disabled={isLoading}
 									title="Stop module"
@@ -380,7 +380,7 @@ one at https://mozilla.org/MPL/2.0/.
 									kind="ghost"
 									size="sm"
 									iconOnly
-									class="rounded-none text-emerald-500 hover:bg-emerald-500/20"
+									class="rounded-none text-success hover:bg-success/20"
 									onclick={() => handleStartModule(module)}
 									disabled={isLoading}
 									title="Retry start"
@@ -425,7 +425,7 @@ one at https://mozilla.org/MPL/2.0/.
 								kind="ghost"
 								size="sm"
 								iconOnly
-								class="rounded-none text-[#da1e28] hover:bg-[#da1e28]/20"
+								class="rounded-none text-destructive hover:bg-destructive/20"
 								onclick={() => handleDeleteModule(module)}
 								disabled={isLoading}
 								title="Delete module"

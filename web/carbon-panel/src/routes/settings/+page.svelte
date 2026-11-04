@@ -14,9 +14,13 @@ one at https://mozilla.org/MPL/2.0/.
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import UserSettings from '$lib/components/user-settings.svelte';
 	import RoleSettings from '$lib/components/role-settings.svelte';
-	import { CarbonTabs, CarbonInlineLoading, CarbonErrorState } from '$lib/components/carbon';
+	import {
+		CarbonTabs,
+		CarbonInlineLoading,
+		CarbonErrorState,
+		CarbonPageHeader
+	} from '$lib/components/carbon';
 	import { toast } from 'svelte-sonner';
-	import { Settings } from '@lucide/svelte';
 	import type { ConfigCategory } from '$lib/proto/carbonpanel/v1/config_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import RoutingSettings from '$lib/components/routing-settings.svelte';
@@ -113,20 +117,11 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="min-h-full flex-1 space-y-6 bg-[#161616] p-6 text-[#f4f4f4] lg:p-8">
-	<div class="flex items-center justify-between border-b border-[#393939] pb-6">
-		<div class="flex items-center gap-4">
-			<div
-				class="flex h-14 w-14 shrink-0 items-center justify-center rounded-none border border-[#393939] bg-[#262626] text-accent-text"
-			>
-				<Settings class="h-7 w-7 text-accent-text" />
-			</div>
-			<div class="space-y-1">
-				<h1 class="font-sans text-2xl font-light tracking-tight text-[#f4f4f4]">Settings</h1>
-				<p class="text-xs text-[#a8a8a8]">Configure Carbon Panel and default server settings</p>
-			</div>
-		</div>
-	</div>
+<div class="min-h-full flex-1 space-y-6 bg-[#161616] text-[#f4f4f4]">
+	<CarbonPageHeader
+		title="Settings"
+		description="Configure Carbon Panel and default server settings"
+	/>
 
 	<div class="space-y-6">
 		<CarbonTabs
