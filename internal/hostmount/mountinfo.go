@@ -13,10 +13,10 @@ import (
 	"strings"
 )
 
-// mountEntry is one line of /proc/self/mountinfo that can hold persistent data.
+// mountEntry is a persistent mount point from /proc/self/mountinfo. The
+// filesystem type is used only to drop virtual mounts, so it is not kept.
 type mountEntry struct {
 	point string
-	fs    string
 }
 
 // virtualFilesystems never hold server data: a mount of one of these must not
@@ -68,7 +68,7 @@ func parseMountinfo(r io.Reader) []mountEntry {
 		if virtualFilesystems[fs] || point == "/" {
 			continue
 		}
-		entries = append(entries, mountEntry{point: point, fs: fs})
+		entries = append(entries, mountEntry{point: point})
 	}
 	return entries
 }
