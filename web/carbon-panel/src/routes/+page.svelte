@@ -22,8 +22,6 @@ one at https://mozilla.org/MPL/2.0/.
 		Users,
 		Zap,
 		ChevronRight,
-		Package,
-		Globe,
 		Gauge,
 		AlertTriangle,
 		RefreshCw,
@@ -116,6 +114,14 @@ one at https://mozilla.org/MPL/2.0/.
 		avgCpu: dashboardServers
 			.filter((s) => s.cpuPercent && s.cpuPercent > 0)
 			.reduce((acc, s, _, arr) => acc + (s.cpuPercent || 0) / arr.length, 0),
+		activeRatio:
+			dashboardServers.length > 0
+				? Math.round(
+						(dashboardServers.filter((s) => s.status === ServerStatus.RUNNING).length /
+							dashboardServers.length) *
+							100
+					)
+				: 0,
 		memUsagePercent:
 			dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0) > 0
 				? Math.min(
@@ -367,20 +373,23 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div
-					class="mt-4 flex items-center justify-between border-t border-[#393939] pt-3 font-mono text-xs"
+					class="mt-4 flex items-center justify-between gap-2 border-t border-[#393939] pt-3 font-mono text-xs"
 				>
-					<div class="flex items-center gap-1.5 text-[#24a148]">
-						<span class="h-1.5 w-1.5 bg-[#24a148]"></span>
-						<span>{stats.running} ACTIVE</span>
-					</div>
-					{#if stats.error > 0}
-						<div class="flex items-center gap-1.5 text-[#da1e28]">
-							<span class="h-1.5 w-1.5 bg-[#da1e28]"></span>
-							<span>{stats.error} ISSUES</span>
+					<div class="flex items-center gap-3">
+						<div class="flex items-center gap-1.5 text-[#24a148]">
+							<span class="h-1.5 w-1.5 bg-[#24a148]"></span>
+							<span>{stats.running} ACTIVE</span>
 						</div>
-					{:else}
-						<span class="text-[#8d8d8d]">{stats.stopped} STOPPED</span>
-					{/if}
+						{#if stats.error > 0}
+							<div class="flex items-center gap-1.5 text-[#da1e28]">
+								<span class="h-1.5 w-1.5 bg-[#da1e28]"></span>
+								<span>{stats.error} ISSUES</span>
+							</div>
+						{:else}
+							<span class="text-[#8d8d8d]">{stats.stopped} STOPPED</span>
+						{/if}
+					</div>
+					<span class="text-[#8d8d8d]">RATIO {stats.activeRatio}%</span>
 				</div>
 			</div>
 
@@ -484,34 +493,45 @@ one at https://mozilla.org/MPL/2.0/.
 						<Gauge class="h-4 w-4 text-[#8d8d8d]" />
 					</div>
 					<div class="mt-2 flex items-baseline gap-2">
-						<span
-							class="text-3xl font-bold tracking-tight {stats.avgTps >= 18
-								? 'text-[#24a148]'
-								: stats.avgTps > 0
-									? 'text-[#da1e28]'
-									: 'text-[#f4f4f4]'} font-mono"
-							use:countUp={{ value: stats.avgTps > 0 ? stats.avgTps : 20, decimals: 1 }}
-						></span>
+						{#if stats.avgTps > 0}
+							<span
+								class="font-mono text-3xl font-bold tracking-tight {stats.avgTps >= 18
+									? 'text-[#24a148]'
+									: 'text-[#da1e28]'}"
+								use:countUp={{ value: stats.avgTps, decimals: 1 }}
+							></span>
+						{:else}
+							<span class="font-mono text-3xl font-bold tracking-tight text-[#8d8d8d]">—</span>
+						{/if}
 						<span class="font-mono text-sm text-[#8d8d8d]">AVG TPS</span>
 					</div>
 				</div>
 				<div
 					class="mt-4 flex items-center justify-between border-t border-[#393939] pt-3 font-mono text-xs"
 				>
-					<div
-						class="flex items-center gap-1.5 {stats.avgTps >= 18 || stats.avgTps === 0
-							? 'text-[#24a148]'
-							: 'text-[#da1e28]'}"
-					>
-						<span
-							class="h-1.5 w-1.5 {stats.avgTps >= 18 || stats.avgTps === 0
-								? 'bg-[#24a148]'
-								: 'bg-[#da1e28]'}"
-						></span>
-						<span>{stats.avgTps >= 18 || stats.avgTps === 0 ? 'HEALTHY' : 'DEGRADED'}</span>
-					</div>
+					{#if stats.running === 0}
+						<div class="flex items-center gap-1.5 text-[#8d8d8d]">
+							<span class="h-1.5 w-1.5 bg-[#8d8d8d]"></span>
+							<span>IDLE</span>
+						</div>
+					{:else if stats.avgTps <= 0}
+						<div class="flex items-center gap-1.5 text-[#8d8d8d]">
+							<span class="h-1.5 w-1.5 bg-[#8d8d8d]"></span>
+							<span>AWAITING SAMPLE</span>
+						</div>
+					{:else}
+						<div
+							class="flex items-center gap-1.5 {stats.avgTps >= 18
+								? 'text-[#24a148]'
+								: 'text-[#da1e28]'}"
+						>
+							<span class="h-1.5 w-1.5 {stats.avgTps >= 18 ? 'bg-[#24a148]' : 'bg-[#da1e28]'}"
+							></span>
+							<span>{stats.avgTps >= 18 ? 'HEALTHY' : 'DEGRADED'}</span>
+						</div>
+					{/if}
 					<span class="text-[#8d8d8d]">
-						{stats.avgCpu > 0 ? `${stats.avgCpu.toFixed(0)}% CPU` : 'LOAD NORMAL'}
+						AVG CPU {stats.avgCpu > 0 ? `${stats.avgCpu.toFixed(0)}%` : '—'}
 					</span>
 				</div>
 			</div>
@@ -812,150 +832,58 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 
-		<!-- Carbon Information Grid (3 columns) -->
-		<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-			<!-- Cluster Operations & Shortcuts -->
+		<!-- Carbon System Health Strip -->
+		<div class="rounded-none border border-[#393939] bg-[#262626]">
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-5"
+				class="flex flex-col justify-between gap-3 border-b border-[#393939] p-4 sm:flex-row sm:items-center"
 			>
 				<div>
-					<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-						<div>
-							<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
-								Cluster Operations
-							</h2>
-							<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">Management shortcuts & ingress</p>
-						</div>
-					</div>
-					<div class="mt-4 space-y-2">
-						<a
-							href={resolve('/servers/new')}
-							class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3 font-mono text-xs text-[#f4f4f4] transition-colors hover:bg-[#353535]"
-						>
-							<div class="flex items-center gap-2.5">
-								<Plus class="h-4 w-4 text-accent-text" />
-								<span>Deploy Game Server</span>
-							</div>
-							<ChevronRight class="h-4 w-4 text-[#8d8d8d]" />
-						</a>
-						<a
-							href={resolve('/modpacks/studio')}
-							class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3 font-mono text-xs text-[#f4f4f4] transition-colors hover:bg-[#353535]"
-						>
-							<div class="flex items-center gap-2.5">
-								<Package class="h-4 w-4 text-[#be95ff]" />
-								<span>Modpack Studio & TOML</span>
-							</div>
-							<ChevronRight class="h-4 w-4 text-[#8d8d8d]" />
-						</a>
-						<a
-							href={resolve('/settings?tab=routing')}
-							class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3 font-mono text-xs text-[#f4f4f4] transition-colors hover:bg-[#353535]"
-						>
-							<div class="flex items-center gap-2.5">
-								<Globe class="h-4 w-4 text-[#42be65]" />
-								<span>Virtual Host Routing (:25565)</span>
-							</div>
-							<ChevronRight class="h-4 w-4 text-[#8d8d8d]" />
-						</a>
-					</div>
+					<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
+						System Health
+					</h2>
+					<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">Underlying daemon and network state</p>
 				</div>
+				<CarbonTag
+					type={serversByStatus.critical.length > 0
+						? 'red'
+						: serversByStatus.warning.length > 0
+							? 'yellow'
+							: 'green'}
+					size="sm"
+				>
+					{serversByStatus.critical.length > 0
+						? 'ATTENTION REQUIRED'
+						: serversByStatus.warning.length > 0
+							? 'DEGRADED'
+							: 'OPERATIONAL'}
+				</CarbonTag>
 			</div>
-
-			<!-- System Infrastructure Health -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-5"
+				class="grid grid-cols-1 divide-y divide-[#393939] sm:grid-cols-3 sm:divide-x sm:divide-y-0"
 			>
-				<div>
-					<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-						<div>
-							<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
-								System Health
-							</h2>
-							<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">
-								Underlying daemon and network state
-							</p>
-						</div>
-					</div>
-					<div class="mt-4 divide-y divide-[#393939]">
-						<div class="flex items-center justify-between py-2.5">
-							<span class="font-mono text-xs text-[#c6c6c6]">RPC TELEMETRY</span>
-							<CarbonTag type="green" size="sm">OPERATIONAL</CarbonTag>
-						</div>
-						<div class="flex items-center justify-between py-2.5">
-							<span class="font-mono text-xs text-[#c6c6c6]">NETWORK PROXY</span>
-							<CarbonTag
-								type={dashboardServers.some((s) => s.status === ServerStatus.RUNNING)
-									? 'green'
-									: 'gray'}
-								size="sm"
-							>
-								{dashboardServers.some((s) => s.status === ServerStatus.RUNNING)
-									? 'CONNECTED'
-									: 'IDLE'}
-							</CarbonTag>
-						</div>
-						<div class="flex items-center justify-between py-2.5">
-							<span class="font-mono text-xs text-[#c6c6c6]">STORAGE ALLOCATION</span>
-							<span class="font-mono text-xs text-[#f4f4f4]">
-								{stats.totalDiskUsage > 0
-									? `${formatBytes(stats.totalDiskUsage)}${stats.totalDiskSize}`
-									: 'LOCAL VOLUMES'}
-							</span>
-						</div>
-					</div>
+				<div class="flex items-center justify-between gap-3 px-4 py-3">
+					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">
+						RPC Telemetry
+					</span>
+					<CarbonTag type="green" size="sm">OPERATIONAL</CarbonTag>
 				</div>
-			</div>
-
-			<!-- Quick Cluster Stats -->
-			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-5"
-			>
-				<div>
-					<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-						<div>
-							<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
-								Quick Metrics
-							</h2>
-							<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">High-level cluster telemetry</p>
-						</div>
-					</div>
-					<div class="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
-						<div class="rounded-none border border-[#393939] bg-[#161616] p-3">
-							<p class="font-mono text-xs text-[#8d8d8d] uppercase">ACTIVE RATIO</p>
-							<p class="mt-1 font-mono text-xl font-bold text-[#24a148]">
-								{stats.running > 0
-									? `${((stats.running / Math.max(stats.total, 1)) * 100).toFixed(0)}%`
-									: '0%'}
-							</p>
-						</div>
-						<div class="rounded-none border border-[#393939] bg-[#161616] p-3">
-							<p class="font-mono text-xs text-[#8d8d8d] uppercase">AVG CPU</p>
-							<p
-								class="font-mono text-xl font-bold {stats.avgCpu > 80
-									? 'text-[#da1e28]'
-									: 'text-[#f4f4f4]'} mt-1"
-							>
-								{stats.avgCpu > 0 ? `${stats.avgCpu.toFixed(0)}%` : 'NORMAL'}
-							</p>
-						</div>
-						<div class="rounded-none border border-[#393939] bg-[#161616] p-3">
-							<p class="font-mono text-xs text-[#8d8d8d] uppercase">TICK RATE</p>
-							<p
-								class="font-mono text-xl font-bold {stats.avgTps >= 18 || stats.avgTps === 0
-									? 'text-[#24a148]'
-									: 'text-[#da1e28]'} mt-1"
-							>
-								{stats.avgTps > 0 ? stats.avgTps.toFixed(1) : '20.0'}
-							</p>
-						</div>
-						<div class="rounded-none border border-[#393939] bg-[#161616] p-3">
-							<p class="font-mono text-xs text-[#8d8d8d] uppercase">PLAYERS</p>
-							<p class="mt-1 font-mono text-xl font-bold text-[#24a148]">
-								{stats.totalPlayers}
-							</p>
-						</div>
-					</div>
+				<div class="flex items-center justify-between gap-3 px-4 py-3">
+					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">
+						Network Proxy
+					</span>
+					<CarbonTag type={stats.running > 0 ? 'green' : 'gray'} size="sm">
+						{stats.running > 0 ? 'CONNECTED' : 'IDLE'}
+					</CarbonTag>
+				</div>
+				<div class="flex items-center justify-between gap-3 px-4 py-3">
+					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">
+						Storage Allocation
+					</span>
+					<span class="font-mono text-xs text-[#f4f4f4]">
+						{stats.totalDiskUsage > 0
+							? `${formatBytes(stats.totalDiskUsage)}${stats.totalDiskSize}`
+							: 'LOCAL VOLUMES'}
+					</span>
 				</div>
 			</div>
 		</div>

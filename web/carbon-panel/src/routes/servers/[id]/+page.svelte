@@ -66,7 +66,13 @@ one at https://mozilla.org/MPL/2.0/.
 	} from '$lib/proto/carbonpanel/v1/server_pb';
 	import { enumToString } from '$lib/utils';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
-	import { CarbonTag, CarbonTabs, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
+	import {
+		CarbonTag,
+		CarbonTabs,
+		CarbonConfirm,
+		CarbonErrorState,
+		CarbonPageHeader
+	} from '$lib/components/carbon';
 	import { memoryUsagePercent } from '$lib/utils/safe-percent';
 	import ServerConsole from '$lib/components/server-console.svelte';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
@@ -375,12 +381,26 @@ one at https://mozilla.org/MPL/2.0/.
 		</div>
 	</div>
 {:else if server}
-	<div class="flex h-full flex-col space-y-6 bg-[#161616] p-6 font-sans text-[#f4f4f4]">
+	<div class="flex h-full flex-col space-y-6 bg-[#161616] font-sans text-[#f4f4f4]">
 		<!-- Carbon Header & Server Management Actions -->
-		<div
-			class="flex flex-col justify-between gap-4 border-b border-[#393939] pb-4 sm:flex-row sm:items-center"
+		<CarbonPageHeader
+			title={server.name}
+			description={`${server.description || 'Minecraft Server Instance'} • Created ${timestampToDate(
+				server.createdAt
+			).toLocaleDateString()}`}
 		>
-			<div class="flex items-center gap-4">
+			{#snippet tag()}
+				{#if server}
+					<!-- Status Badge (Carbon Tag Requirement) -->
+					<CarbonTag type={getStatusTagType(server.status)} size="md">
+						{getStatusDisplayName(server.status)}
+					</CarbonTag>
+					{#if server.nodeId}
+						<CarbonTag type="blue" size="sm">NODE: {server.nodeId}</CarbonTag>
+					{/if}
+				{/if}
+			{/snippet}
+			{#snippet actions()}
 				<a
 					href={resolve('/servers')}
 					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-none border border-[#393939] bg-[#262626] text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
@@ -389,188 +409,162 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					<ArrowLeft class="h-4 w-4" />
 				</a>
-				<div
-					class="flex h-12 w-12 shrink-0 items-center justify-center rounded-none border border-[#393939] bg-[#262626] text-[#78a9ff]"
-				>
-					<Package class="h-6 w-6" />
-				</div>
-				<div class="min-w-0">
-					<div class="flex flex-wrap items-center gap-2.5">
-						<h1 class="truncate text-2xl font-light tracking-tight text-[#f4f4f4]">
-							{server.name}
-						</h1>
-						<!-- Status Badge (Carbon Tag Requirement) -->
-						<CarbonTag type={getStatusTagType(server.status)} size="md">
-							{getStatusDisplayName(server.status)}
-						</CarbonTag>
-						{#if server.nodeId}
-							<span
-								class="rounded-none border border-[#0f62fe]/40 bg-[#0f62fe]/20 px-2 py-0.5 font-mono text-xs text-[#78a9ff]"
+
+				<!-- Sharp Action Buttons -->
+				{#if server}
+					<div class="flex flex-wrap items-center gap-2">
+						{#if server.status === ServerStatus.CREATING}
+							<div
+								class="flex h-10 items-center gap-2 rounded-none border border-[#393939] bg-[#262626] px-4 font-sans text-sm text-[#f4f4f4] select-none"
 							>
-								NODE: {server.nodeId}
-							</span>
-						{/if}
-					</div>
-					<p class="mt-1 font-sans text-xs text-[#a8a8a8]">
-						{server.description || 'Minecraft Server Instance'} • Created {timestampToDate(
-							server.createdAt
-						).toLocaleDateString()}
-					</p>
-				</div>
-			</div>
-
-			<!-- Sharp Action Buttons -->
-			<div class="flex flex-wrap items-center gap-2">
-				{#if server.status === ServerStatus.CREATING}
-					<div
-						class="flex h-10 items-center gap-2 rounded-none border border-[#393939] bg-[#262626] px-4 font-sans text-sm text-[#f4f4f4] select-none"
-					>
-						<Loader2 class="h-4 w-4 animate-spin text-accent-text" />
-						<span>Creating Server...</span>
-					</div>
-				{:else if server.status === ServerStatus.DEEPSLEEP}
-					<button
-						type="button"
-						onclick={() => handleServerAction('start')}
-						disabled={actionLoading}
-						class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#8a3ffc] px-4 font-sans text-sm text-white transition-colors hover:bg-[#a56eff] disabled:opacity-50"
-					>
-						{#if actionLoading}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Play class="h-4 w-4 fill-current" />
-						{/if}
-						<span>Wake Server</span>
-					</button>
-				{:else if server.status === ServerStatus.PAUSED}
-					<button
-						type="button"
-						onclick={() => handleServerAction('start')}
-						disabled={actionLoading}
-						class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#0f62fe] px-4 font-sans text-sm text-white transition-colors hover:bg-[#4589ff] disabled:opacity-50"
-					>
-						{#if actionLoading}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Play class="h-4 w-4 fill-current" />
-						{/if}
-						<span>Resume Server</span>
-					</button>
-					<button
-						type="button"
-						onclick={() => handleServerAction('stop')}
-						disabled={actionLoading}
-						class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
-					>
-						<Square class="h-4 w-4 fill-current" />
-						<span>Stop</span>
-					</button>
-				{:else if server.status === ServerStatus.STOPPED || !server.containerId}
-					<button
-						type="button"
-						onclick={() => handleServerAction('start')}
-						disabled={actionLoading}
-						class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#198038] px-4 font-sans text-sm text-white transition-colors hover:bg-[#24a148] disabled:opacity-50"
-					>
-						{#if actionLoading}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Play class="h-4 w-4 fill-current" />
-						{/if}
-						<span>Start Server</span>
-					</button>
-				{:else if server.status === ServerStatus.ERROR}
-					<button
-						type="button"
-						onclick={() => handleServerAction('restart')}
-						disabled={actionLoading}
-						class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#f1c21b] px-4 font-sans text-sm font-medium text-black transition-colors hover:bg-[#d2a106] disabled:opacity-50"
-					>
-						{#if actionLoading}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<RotateCw class="h-4 w-4" />
-						{/if}
-						<span>Restart</span>
-					</button>
-					<button
-						type="button"
-						onclick={() => handleServerAction('stop')}
-						disabled={actionLoading}
-						class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
-					>
-						<Square class="h-4 w-4 fill-current" />
-						<span>Stop</span>
-					</button>
-				{:else if server.status === ServerStatus.RUNNING || server.status === ServerStatus.STARTING || server.status === ServerStatus.UNHEALTHY}
-					<button
-						type="button"
-						onclick={() => handleServerAction('stop')}
-						disabled={actionLoading}
-						class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
-					>
-						{#if actionLoading}
-							<Loader2 class="h-4 w-4 animate-spin" />
-						{:else}
-							<Square class="h-4 w-4 fill-current" />
-						{/if}
-						<span>Stop</span>
-					</button>
-					<button
-						type="button"
-						onclick={() => handleServerAction('restart')}
-						disabled={actionLoading}
-						class="flex h-10 cursor-pointer items-center gap-2 rounded-none border border-[#525252] bg-[#393939] px-4 font-sans text-sm text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
-					>
-						<RotateCw class="h-4 w-4" />
-						<span>Restart</span>
-					</button>
-				{:else if server.status === ServerStatus.STOPPING}
-					<div
-						class="flex h-10 items-center gap-2 rounded-none border border-[#525252] bg-[#393939] px-4 font-sans text-sm text-[#c6c6c6]"
-					>
-						<Loader2 class="h-4 w-4 animate-spin" />
-						<span>Stopping...</span>
-					</div>
-				{/if}
-
-				<!-- Dropdown for recreate and delete -->
-				<DropdownMenu>
-					<DropdownMenuTrigger>
-						{#snippet child({ props })}
+								<Loader2 class="h-4 w-4 animate-spin text-accent-text" />
+								<span>Creating Server...</span>
+							</div>
+						{:else if server.status === ServerStatus.DEEPSLEEP}
 							<button
 								type="button"
-								{...props}
+								onclick={() => handleServerAction('start')}
 								disabled={actionLoading}
-								aria-label="More server actions"
-								class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-none border border-[#393939] bg-[#262626] text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#8a3ffc] px-4 font-sans text-sm text-white transition-colors hover:bg-[#a56eff] disabled:opacity-50"
 							>
-								<MoreVertical class="h-4 w-4" />
+								{#if actionLoading}
+									<Loader2 class="h-4 w-4 animate-spin" />
+								{:else}
+									<Play class="h-4 w-4 fill-current" />
+								{/if}
+								<span>Wake Server</span>
 							</button>
-						{/snippet}
-					</DropdownMenuTrigger>
-					<DropdownMenuContent
-						align="end"
-						class="rounded-none border border-[#393939] bg-[#161616] p-1 text-[#f4f4f4]"
-					>
-						<DropdownMenuItem
-							class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-[#f4f4f4] hover:bg-[#353535]"
-							onclick={() => handleServerAction('recreate')}
-						>
-							<RefreshCcw class="h-3.5 w-3.5" />
-							<span>Force Recreate</span>
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-[#ff8389] hover:bg-[#da1e28]/20"
-							onclick={() => handleDeleteServer()}
-						>
-							<Trash2 class="h-3.5 w-3.5" />
-							<span>Delete Server</span>
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
-			</div>
-		</div>
+						{:else if server.status === ServerStatus.PAUSED}
+							<button
+								type="button"
+								onclick={() => handleServerAction('start')}
+								disabled={actionLoading}
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#0f62fe] px-4 font-sans text-sm text-white transition-colors hover:bg-[#4589ff] disabled:opacity-50"
+							>
+								{#if actionLoading}
+									<Loader2 class="h-4 w-4 animate-spin" />
+								{:else}
+									<Play class="h-4 w-4 fill-current" />
+								{/if}
+								<span>Resume Server</span>
+							</button>
+							<button
+								type="button"
+								onclick={() => handleServerAction('stop')}
+								disabled={actionLoading}
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
+							>
+								<Square class="h-4 w-4 fill-current" />
+								<span>Stop</span>
+							</button>
+						{:else if server.status === ServerStatus.STOPPED || !server.containerId}
+							<button
+								type="button"
+								onclick={() => handleServerAction('start')}
+								disabled={actionLoading}
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#198038] px-4 font-sans text-sm text-white transition-colors hover:bg-[#24a148] disabled:opacity-50"
+							>
+								{#if actionLoading}
+									<Loader2 class="h-4 w-4 animate-spin" />
+								{:else}
+									<Play class="h-4 w-4 fill-current" />
+								{/if}
+								<span>Start Server</span>
+							</button>
+						{:else if server.status === ServerStatus.ERROR}
+							<button
+								type="button"
+								onclick={() => handleServerAction('restart')}
+								disabled={actionLoading}
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#f1c21b] px-4 font-sans text-sm font-medium text-black transition-colors hover:bg-[#d2a106] disabled:opacity-50"
+							>
+								{#if actionLoading}
+									<Loader2 class="h-4 w-4 animate-spin" />
+								{:else}
+									<RotateCw class="h-4 w-4" />
+								{/if}
+								<span>Restart</span>
+							</button>
+							<button
+								type="button"
+								onclick={() => handleServerAction('stop')}
+								disabled={actionLoading}
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
+							>
+								<Square class="h-4 w-4 fill-current" />
+								<span>Stop</span>
+							</button>
+						{:else if server.status === ServerStatus.RUNNING || server.status === ServerStatus.STARTING || server.status === ServerStatus.UNHEALTHY}
+							<button
+								type="button"
+								onclick={() => handleServerAction('stop')}
+								disabled={actionLoading}
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
+							>
+								{#if actionLoading}
+									<Loader2 class="h-4 w-4 animate-spin" />
+								{:else}
+									<Square class="h-4 w-4 fill-current" />
+								{/if}
+								<span>Stop</span>
+							</button>
+							<button
+								type="button"
+								onclick={() => handleServerAction('restart')}
+								disabled={actionLoading}
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none border border-[#525252] bg-[#393939] px-4 font-sans text-sm text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
+							>
+								<RotateCw class="h-4 w-4" />
+								<span>Restart</span>
+							</button>
+						{:else if server.status === ServerStatus.STOPPING}
+							<div
+								class="flex h-10 items-center gap-2 rounded-none border border-[#525252] bg-[#393939] px-4 font-sans text-sm text-[#c6c6c6]"
+							>
+								<Loader2 class="h-4 w-4 animate-spin" />
+								<span>Stopping...</span>
+							</div>
+						{/if}
+
+						<!-- Dropdown for recreate and delete -->
+						<DropdownMenu>
+							<DropdownMenuTrigger>
+								{#snippet child({ props })}
+									<button
+										type="button"
+										{...props}
+										disabled={actionLoading}
+										aria-label="More server actions"
+										class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-none border border-[#393939] bg-[#262626] text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+									>
+										<MoreVertical class="h-4 w-4" />
+									</button>
+								{/snippet}
+							</DropdownMenuTrigger>
+							<DropdownMenuContent
+								align="end"
+								class="rounded-none border border-[#393939] bg-[#161616] p-1 text-[#f4f4f4]"
+							>
+								<DropdownMenuItem
+									class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-[#f4f4f4] hover:bg-[#353535]"
+									onclick={() => handleServerAction('recreate')}
+								>
+									<RefreshCcw class="h-3.5 w-3.5" />
+									<span>Force Recreate</span>
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									class="flex cursor-pointer items-center gap-2 rounded-none px-3 py-2 text-xs text-[#ff8389] hover:bg-[#da1e28]/20"
+									onclick={() => handleDeleteServer()}
+								>
+									<Trash2 class="h-3.5 w-3.5" />
+									<span>Delete Server</span>
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</div>
+				{/if}
+			{/snippet}
+		</CarbonPageHeader>
 
 		<!-- Carbon Metric Tiles (ZERO rounded corners) -->
 		<div class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

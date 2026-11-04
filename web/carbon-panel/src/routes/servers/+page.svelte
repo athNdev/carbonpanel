@@ -34,7 +34,7 @@ one at https://mozilla.org/MPL/2.0/.
 		ArrowRight
 	} from '@lucide/svelte';
 	import { type Server, ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
-	import { CarbonTag, CarbonButton, CarbonConfirm } from '$lib/components/carbon';
+	import { CarbonTag, CarbonButton, CarbonConfirm, CarbonPageHeader } from '$lib/components/carbon';
 	import { onMount } from 'svelte';
 
 	let servers = $derived($serversStore);
@@ -251,32 +251,15 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="h-full flex-1 space-y-6 bg-[#161616] p-6 font-sans text-[#f4f4f4]">
-	<!-- Carbon Page Header -->
-	<div
-		class="flex flex-col justify-between gap-4 border-b border-[#393939] pb-4 sm:flex-row sm:items-center"
+<div class="h-full flex-1 space-y-6 bg-[#161616] font-sans text-[#f4f4f4]">
+	<CarbonPageHeader
+		title="Servers"
+		description="Manage, inspect, and deploy your Minecraft server instances"
 	>
-		<div class="flex items-center gap-4">
-			<div
-				class="flex h-12 w-12 shrink-0 items-center justify-center border border-[#393939] bg-[#262626] text-accent-text"
-			>
-				<ServerIcon class="h-6 w-6" />
-			</div>
-			<div>
-				<div class="flex items-center gap-2.5">
-					<h1 class="text-2xl font-light tracking-tight text-[#f4f4f4]">Servers</h1>
-					<span
-						class="border border-[#0f62fe]/40 bg-[#0f62fe]/20 px-2 py-0.5 font-mono text-xs text-[#78a9ff]"
-					>
-						MANAGEMENT
-					</span>
-				</div>
-				<p class="mt-1 font-sans text-xs text-[#a8a8a8]">
-					Manage, inspect, and deploy your Minecraft server instances
-				</p>
-			</div>
-		</div>
-		<div class="flex items-center gap-2">
+		{#snippet tag()}
+			<CarbonTag type="blue" size="sm">MANAGEMENT</CarbonTag>
+		{/snippet}
+		{#snippet actions()}
 			<CarbonButton
 				kind="primary"
 				size="md"
@@ -286,8 +269,8 @@ one at https://mozilla.org/MPL/2.0/.
 				<Plus class="h-4 w-4" />
 				<span>Create Server</span>
 			</CarbonButton>
-		</div>
-	</div>
+		{/snippet}
+	</CarbonPageHeader>
 
 	<!-- Carbon Action Bar: Search, Filters, View Toggles -->
 	<div

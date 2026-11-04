@@ -33,6 +33,13 @@ bun run test
 
 - Keep the Carbon geometry, typography and token usage consistent with the
   existing shell.
+- Start every primary route with `CarbonPageHeader`; do not hand-roll a title,
+  description and action row. `CarbonShell` owns the page gutter, so route roots
+  must not add another `p-6`/`p-8`.
+- Use `CarbonButton` for actions. Labels stay on one line and icon-only buttons
+  inherit the requested size.
+- A missing metric is unavailable, not zero. Render `—`, `IDLE` or `AWAITING
+  SAMPLE`; never substitute a plausible-looking number.
 - Use the approved artwork in [brand assets](../../assets/branding/README.md)
   for product-owned marks; preserve third-party and server-provided icons.
 - Run `python scripts/check_brand_assets.py` from the repository root to check

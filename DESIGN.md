@@ -137,6 +137,13 @@ To avoid CSS specificity regressions, all styling is strictly compiled inside Ta
 4. **`CarbonTag.svelte`**: High-contrast, sharp status indicators (Green for Running, Gray for Stopped, Blue for Starting, Red for Error).
 5. **`CarbonDataTable.svelte`**: Structured data table with `#393939` headers, `#353535` row hover states, and integrated action toolbars.
 6. **`CarbonTabs.svelte`**: Flat horizontal navigation with 2px `#0f62fe` active underline indicators.
+7. **`CarbonPageHeader.svelte`**: Canonical page header: 2xl light title, optional status tag, small `#8d8d8d` description, right-aligned action row, 1px bottom rule, and a responsive single-column fallback below `sm`.
+
+#### D. Page composition rules
+- Every primary route starts with one `CarbonPageHeader`; routes must not hand-roll title/description/action rows. This keeps title scale, header rule and action placement identical across the app.
+- `CarbonShell` owns the page gutter (`p-4 md:p-6`). Route roots must not add another `p-6`/`p-8`; sections own their internal padding only.
+- `CarbonButton` centres its icon and label with a fixed gap and never wraps the label. Icon-only buttons inherit the requested size rather than forcing a 40px square.
+- A missing metric is rendered as unavailable (`—`/`IDLE`/`AWAITING SAMPLE`), never fabricated. This is a product rule as well as a visual one.
 
 ---
 

@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <script lang="ts">
 	import changelog from '$lib/changelog.md?raw';
+	import { CarbonPageHeader } from '$lib/components/carbon';
 	import { marked } from 'marked';
 
 	// Drop the markdown's leading H1 so it does not duplicate the page title.
@@ -10,8 +11,8 @@
 	const rendered = marked.parse(body, { async: false }) as string;
 </script>
 
-<div class="p-6">
-	<h1 class="mb-4 text-2xl font-semibold">Changelog</h1>
+<div class="space-y-4">
+	<CarbonPageHeader title="Changelog" />
 	<!-- eslint-disable-next-line svelte/no-at-html-tags -- changelog.md is trusted repository content, not user input -->
 	<div class="changelog-md">{@html rendered}</div>
 </div>

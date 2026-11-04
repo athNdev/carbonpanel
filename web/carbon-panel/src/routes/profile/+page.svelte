@@ -20,7 +20,8 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonSelect,
 		CarbonInlineLoading,
 		CarbonConfirm,
-		CarbonErrorState
+		CarbonErrorState,
+		CarbonPageHeader
 	} from '$lib/components/carbon';
 	import { toast } from 'svelte-sonner';
 	import {
@@ -61,16 +62,6 @@ one at https://mozilla.org/MPL/2.0/.
 	let createdToken = $state<string | null>(null);
 	let copied = $state(false);
 	let deletingTokenId = $state<string | null>(null);
-
-	let initials = $derived(
-		user?.username
-			? user.username
-					.split(/[\s_-]+/)
-					.slice(0, 2)
-					.map((w) => w[0]?.toUpperCase() ?? '')
-					.join('')
-			: '?'
-	);
 
 	let primaryRole = $derived(user?.roles?.[0] ?? 'user');
 
@@ -251,23 +242,15 @@ one at https://mozilla.org/MPL/2.0/.
 			onretry={() => window.location.reload()}
 		/>
 	{:else}
-		<!-- Header with Sharp Avatar -->
-		<div class="flex items-center gap-6 rounded-none border-b border-[#393939] pb-6">
-			<div
-				class="flex h-16 w-16 items-center justify-center rounded-none bg-[#0f62fe] font-mono text-2xl font-bold text-white shadow-lg"
-			>
-				{initials}
-			</div>
-			<div class="min-w-0 space-y-1">
-				<div class="flex items-center gap-3">
-					<h1 class="truncate text-3xl font-semibold tracking-tight text-white">{user.username}</h1>
-					<CarbonTag type={getRoleTagType(primaryRole)} size="md">{primaryRole}</CarbonTag>
-				</div>
-				<p class="text-sm text-[#a8a8a8]">
-					Manage your user account credentials, security, and API tokens
-				</p>
-			</div>
-		</div>
+		<!-- Header -->
+		<CarbonPageHeader
+			title={user.username}
+			description="Manage your user account credentials, security, and API tokens"
+		>
+			{#snippet tag()}
+				<CarbonTag type={getRoleTagType(primaryRole)} size="md">{primaryRole}</CarbonTag>
+			{/snippet}
+		</CarbonPageHeader>
 
 		<div class="grid gap-6 md:grid-cols-2">
 			<!-- Account Information Tile -->

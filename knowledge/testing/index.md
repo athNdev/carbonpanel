@@ -4,5 +4,6 @@
 
 ## Concepts
 
+- [Modpack compatibility sweep](modpack-sweep.md) — How to qualify pre-existing modpacks sequentially on the newest supported Minecraft version.
 - [Testing seams](harness.md) — How failure and recovery behavior is tested without a live Minecraft server or a reachable Docker daemon.
 - [Verification](verification.md) — The commands that define a verified change in this repository.

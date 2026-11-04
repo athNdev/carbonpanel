@@ -32,10 +32,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="flex items-center justify-between border-b border-[#393939] bg-[#262626] p-4">
 			<div>
 				{#if title}
-					<h3 class="font-sans text-base font-semibold text-[#f4f4f4]">{title}</h3>
+					<h3 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
+						{title}
+					</h3>
 				{/if}
 				{#if description}
-					<p class="mt-0.5 font-sans text-xs text-[#a8a8a8]">{description}</p>
+					<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">{description}</p>
 				{/if}
 			</div>
 			{#if toolbar}
