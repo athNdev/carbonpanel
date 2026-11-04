@@ -132,7 +132,6 @@ one at https://mozilla.org/MPL/2.0/.
 		<CarbonTabs
 			tabs={settingsTabs}
 			bind:selectedTab={activeTab}
-			class="overflow-x-auto overflow-y-hidden"
 		/>
 
 		{#if activeTab === 'server-config' && showSettings}

@@ -37,6 +37,13 @@ bun run test
   for product-owned marks; preserve third-party and server-provided icons.
 - Run `python scripts/check_brand_assets.py` from the repository root to check
   deployable logo copies and raster dimensions after a brand update.
+- A surface that is not meant to scroll must not show a scrollbar, and a
+  vertical scroller must reserve its gutter. A scrollbar that appears and
+  disappears changes the content box, which can reflow the content and pull it
+  back out: the rapid flicker this rule exists to stop. Tab strips use
+  `scroll-strip`; vertical scrollers get `scrollbar-gutter: stable` from the
+  `overflow-y-*` rule in `app.css`. `scrollbar-policy.test.ts` and
+  `CarbonTabs.test.ts` fail if the policy is removed.
 - Loading, empty and error states are part of the change, not follow-up work.
 - A frontend-only fix must not bypass an authorization check in the backend.
 
