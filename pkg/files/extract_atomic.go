@@ -30,6 +30,12 @@ func ExtractArchiveAtomic(ctx context.Context, archivePath, targetRoot string) (
 		return 0, err
 	}
 
+	// Remember who owned the tree being replaced. The replacement was
+	// extracted by this process, which is usually root while the game runs as
+	// an unprivileged user; without this, a restore leaves a data directory the
+	// game cannot write and the server will not start.
+	previousOwner, hadPreviousOwner := ownerOf(targetRoot)
+
 	hadPrevious := false
 	if _, err := os.Stat(targetRoot); err == nil {
 		if err := os.Rename(targetRoot, previous); err != nil {
@@ -46,6 +52,11 @@ func ExtractArchiveAtomic(ctx context.Context, archivePath, targetRoot string) (
 			}
 		}
 		return 0, fmt.Errorf("activate restored tree: %w", err)
+	}
+	if hadPreviousOwner {
+		// Best-effort: a restore that already produced the right bytes must not
+		// be reported as failed because of an ownership detail.
+		_ = applyOwnership(previousOwner, targetRoot, true)
 	}
 	if hadPrevious {
 		_ = os.RemoveAll(previous)
