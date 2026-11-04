@@ -40,6 +40,7 @@ var AuthenticatedOnlyProcedures = map[string]bool{
 	"/carbonpanel.v1.MinecraftService/GetMinecraftVersions": true,
 	"/carbonpanel.v1.MinecraftService/GetModLoaders":        true,
 	"/carbonpanel.v1.MinecraftService/GetDockerImages":      true,
+	"/carbonpanel.v1.MinecraftService/GetLoaderVersions":    true,
 }
 
 // ProcedurePermissions maps each RPC procedure path to the resource and action

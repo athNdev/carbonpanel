@@ -692,9 +692,14 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 					<div class="flex items-center justify-between">
 						<span class="text-[#8d8d8d]">Loader:</span>
-						<CarbonTag type="teal" size="sm">
-							{enumToString(ModLoader, server.modLoader) || 'vanilla'}
-						</CarbonTag>
+						<span class="flex items-center gap-1.5">
+							{#if server.loaderVersion}
+								<span class="font-mono text-xs text-[#c6c6c6]">{server.loaderVersion}</span>
+							{/if}
+							<CarbonTag type="teal" size="sm">
+								{enumToString(ModLoader, server.modLoader) || 'vanilla'}
+							</CarbonTag>
+						</span>
 					</div>
 					{#if server.javaVersion}
 						<div class="flex items-center justify-between">

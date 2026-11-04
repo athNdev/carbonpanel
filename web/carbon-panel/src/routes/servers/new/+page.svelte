@@ -112,6 +112,7 @@ one at https://mozilla.org/MPL/2.0/.
 			description: '',
 			modLoader: ModLoader.VANILLA,
 			mcVersion: '',
+			loaderVersion: '',
 			port: 25565,
 			maxPlayers: 20,
 			memory: 2048,
@@ -130,6 +131,49 @@ one at https://mozilla.org/MPL/2.0/.
 			modpackVersionId: ''
 		})
 	);
+
+	// Exact loader builds for the current loader + Minecraft version. Empty
+	// when the selected loader does not take a version at all.
+	let loaderVersions = $state<string[]>([]);
+	let loadingLoaderVersions = $state(false);
+
+	const loaderTakesVersion = $derived(
+		[ModLoader.NEOFORGE, ModLoader.FORGE, ModLoader.FABRIC, ModLoader.QUILT].includes(
+			formData.modLoader
+		)
+	);
+
+	$effect(() => {
+		const loader = formData.modLoader;
+		const mcVersion = formData.mcVersion;
+		if (!loaderTakesVersion || !mcVersion) {
+			loaderVersions = [];
+			formData.loaderVersion = '';
+			return;
+		}
+		let cancelled = false;
+		loadingLoaderVersions = true;
+		rpcClient.minecraft
+			.getLoaderVersions({ loader: loader.toString(), mcVersion })
+			.then((response) => {
+				if (cancelled) return;
+				loaderVersions = response.versions;
+				// Keep a pin that still exists; otherwise fall back to latest rather
+				// than silently sending a build this Minecraft version has no image for.
+				if (formData.loaderVersion && !response.versions.includes(formData.loaderVersion)) {
+					formData.loaderVersion = '';
+				}
+			})
+			.catch(() => {
+				if (!cancelled) loaderVersions = [];
+			})
+			.finally(() => {
+				if (!cancelled) loadingLoaderVersions = false;
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
 
 	onMount(async () => {
 		try {
@@ -769,6 +813,50 @@ one at https://mozilla.org/MPL/2.0/.
 							</p>
 						{/if}
 					</div>
+
+					{#if loaderTakesVersion && !selectedModpack}
+						<!-- Loader Version (Carbon Select) -->
+						<div class="space-y-1.5">
+							<label
+								for="loaderVersion"
+								class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+							>
+								{formData.modLoader === ModLoader.NEOFORGE ? 'NeoForge' : 'Loader'} Version
+							</label>
+							<div class="relative">
+								<select
+									id="loaderVersion"
+									value={formData.loaderVersion}
+									onchange={(e) => (formData.loaderVersion = e.currentTarget.value)}
+									disabled={loading || loadingLoaderVersions || !formData.mcVersion}
+									class="h-10 w-full cursor-pointer appearance-none rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none disabled:opacity-50"
+								>
+									<option value="">Latest (recommended)</option>
+									{#each loaderVersions as version (version)}
+										{#if version !== 'latest'}
+											<option value={version}>{version}</option>
+										{/if}
+									{/each}
+								</select>
+								<div
+									class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#c6c6c6]"
+								>
+									<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+										<path
+											fill-rule="evenodd"
+											d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</div>
+							</div>
+							<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
+								{loadingLoaderVersions
+									? 'Looking up published builds…'
+									: 'Pin an exact build, or leave it on Latest to follow the loader.'}
+							</p>
+						</div>
+					{/if}
 				</div>
 
 				<!-- Step 2: Resources & Network -->

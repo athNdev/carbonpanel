@@ -79,6 +79,7 @@ one at https://mozilla.org/MPL/2.0/.
 			memory: server.memory,
 			modLoader: enumToString(ModLoader, server.modLoader),
 			mcVersion: server.mcVersion,
+			loaderVersion: server.loaderVersion,
 			dockerImage: server.dockerImage,
 			detached: server.detached,
 			autoStart: server.autoStart,
@@ -118,6 +119,40 @@ one at https://mozilla.org/MPL/2.0/.
 	// Available options
 	let minecraftVersions = $state<GetMinecraftVersionsResponse | null>(null);
 	let modLoaders = $state<GetModLoadersResponse | null>(null);
+
+	// Exact loader builds for the selected loader + Minecraft version, so an
+	// operator can pin or move a server to a specific loader release.
+	let loaderVersions = $state<string[]>([]);
+	let loadingLoaderVersions = $state(false);
+
+	const loaderTakesVersion = $derived(
+		['neoforge', 'forge', 'fabric', 'quilt'].includes(formData.modLoader)
+	);
+
+	$effect(() => {
+		const loader = formData.modLoader;
+		const mcVersion = formData.mcVersion;
+		if (!loaderTakesVersion || !mcVersion) {
+			loaderVersions = [];
+			return;
+		}
+		let cancelled = false;
+		loadingLoaderVersions = true;
+		rpcClient.minecraft
+			.getLoaderVersions({ loader, mcVersion })
+			.then((response) => {
+				if (!cancelled) loaderVersions = response.versions;
+			})
+			.catch(() => {
+				if (!cancelled) loaderVersions = [];
+			})
+			.finally(() => {
+				if (!cancelled) loadingLoaderVersions = false;
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
 	let dockerImages = $state<GetDockerImagesResponse | null>(null);
 	let loadingOptions = $state(true);
 
@@ -137,6 +172,7 @@ one at https://mozilla.org/MPL/2.0/.
 				memory: server.memory,
 				modLoader: enumToString(ModLoader, server.modLoader),
 				mcVersion: server.mcVersion,
+				loaderVersion: server.loaderVersion,
 				dockerImage: server.dockerImage,
 				detached: server.detached,
 				autoStart: server.autoStart,
@@ -449,6 +485,36 @@ one at https://mozilla.org/MPL/2.0/.
 				</SelectContent>
 			</Select>
 		</div>
+
+		{#if loaderTakesVersion}
+			<div class="space-y-2">
+				<Label for="loader_version" class="text-sm font-medium">Loader Version</Label>
+				<Select
+					type="single"
+					disabled={loadingOptions ||
+						loadingLoaderVersions ||
+						server.status !== ServerStatus.STOPPED}
+					value={formData.loaderVersion || '__latest__'}
+					onValueChange={(value: string | undefined) =>
+						(formData.loaderVersion = value === '__latest__' ? '' : value || '')}
+				>
+					<SelectTrigger id="loader_version" class="h-10">
+						<span>{formData.loaderVersion || 'Latest (recommended)'}</span>
+					</SelectTrigger>
+					<SelectContent>
+						<SelectItem value="__latest__">Latest (recommended)</SelectItem>
+						{#each loaderVersions as version (version)}
+							{#if version !== 'latest'}
+								<SelectItem value={version}>{version}</SelectItem>
+							{/if}
+						{/each}
+					</SelectContent>
+				</Select>
+				<p class="text-xs text-muted-foreground">
+					Saved changes recreate the container. Worlds and mods are kept.
+				</p>
+			</div>
+		{/if}
 
 		<div class="space-y-2">
 			<Label for="docker_image" class="text-sm font-medium"

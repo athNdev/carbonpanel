@@ -143,6 +143,8 @@ message CreateServerRequest {
   bool auto_deep_sleep = 22;
   // Idempotency key for this create. Repeating it returns the original server.
   string request_id = 23;
+  // Exact mod loader version. Empty means the loader's latest.
+  string loader_version = 24;
 }
 
 // Created server instance
@@ -172,6 +174,8 @@ message UpdateServerRequest {
   optional int32 idle_timeout_minutes = 18;
   optional bool auto_deep_sleep = 19;
   optional int32 deep_sleep_timeout_minutes = 20;
+  // Change the pinned mod loader version. Ignored when empty.
+  optional string loader_version = 21;
 }
 
 // Updated server instance

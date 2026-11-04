@@ -1,0 +1,39 @@
+{
+  "name": "loader-version-settings",
+  "title": "Loader Version picker on an existing server",
+  "viewport": { "width": 1440, "height": 950 },
+  "login": {
+    "path": "/login",
+    "usernameSelector": "input[placeholder=\"Enter your username\"]",
+    "passwordSelector": "input[placeholder=\"Enter your password\"]",
+    "submitSelector": "button[type=\"submit\"]",
+    "successSelector": "a[href^=\"/servers/\"]"
+  },
+  "steps": [
+    {
+      "goto": "/servers",
+      "waitFor": "a[href^=\"/servers/\"]",
+      "name": "server list loads"
+    },
+    {
+      "click": "tr:has-text(\"neo-pinned\") a[href^=\"/servers/\"]",
+      "name": "open the pinned NeoForge server"
+    },
+    { "waitFor": "[role=\"tab\"]", "name": "detail tabs render" },
+    {
+      "assertText": "main",
+      "contains": "21.1.84",
+      "name": "engine card shows the pinned build"
+    },
+    {
+      "waitFor": "#loader_version",
+      "name": "Loader Version picker is present"
+    },
+    {
+      "assertText": "main",
+      "contains": "Loader Version",
+      "name": "picker is labelled"
+    },
+    { "screenshot": "30-settings-loader-version" }
+  ]
+}
