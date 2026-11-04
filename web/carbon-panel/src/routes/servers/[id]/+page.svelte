@@ -826,7 +826,7 @@ one at https://mozilla.org/MPL/2.0/.
 				tabs={subViewTabs}
 				bind:selectedTab={activeTab}
 				idPrefix="server-detail-tabs"
-				class="sticky top-0 z-20 overflow-x-auto bg-[#161616]"
+				class="sticky top-0 z-20 bg-[#161616]"
 			/>
 
 			<!-- Tab Content Areas -->

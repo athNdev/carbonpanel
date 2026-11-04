@@ -55,9 +55,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
-		const onResize = () => measure();
-		window.addEventListener('resize', onResize);
-		return () => window.removeEventListener('resize', onResize);
+		// The strip's width changes for reasons a window resize never reports:
+		// the sidebar collapsing, a panel opening, a scrollbar appearing in an
+		// ancestor. Measuring only on window resize left the indicator parked
+		// under the previously selected tab after any of those. The observer
+		// coalesces to one measurement per frame so the animation stays smooth.
+		if (!container) return;
+		let frame = 0;
+		const schedule = () => {
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(measure);
+		};
+		const observer = new ResizeObserver(schedule);
+		observer.observe(container);
+		return () => {
+			cancelAnimationFrame(frame);
+			observer.disconnect();
+		};
 	});
 
 	function handleTabClick(id: string) {
@@ -86,7 +100,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	role="tablist"
 	aria-label="Sections"
 	onkeydown={handleTablistKeydown}
-	class="relative flex items-center border-b border-[#393939] bg-[#161616] font-sans {className}"
+	data-carbon-tabs
+	class="scroll-strip relative flex items-center border-b border-[#393939] bg-[#161616] font-sans {className}"
 >
 	{#each tabs as tab (tab.id)}
 		<button
@@ -99,7 +114,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			data-tab
 			data-testid="tab-{tab.id}"
 			onclick={() => handleTabClick(tab.id)}
-			class="relative z-10 flex h-10 cursor-pointer items-center gap-2 border-b-2 border-transparent px-3 text-sm font-normal transition-colors select-none {selectedTab ===
+			class="relative z-10 flex h-10 shrink-0 cursor-pointer items-center gap-2 border-b-2 border-transparent px-3 text-sm font-normal whitespace-nowrap transition-colors select-none {selectedTab ===
 			tab.id
 				? 'bg-[#262626] font-semibold text-[#f4f4f4]'
 				: 'text-[#a8a8a8] hover:bg-[#262626] hover:text-[#f4f4f4]'}"
@@ -116,7 +131,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- GPU-only motion: translateX + scaleX on a 1px base avoids transitioning
 		     the layout `width` property, which is what made tab switches janky. -->
 		<div
-			class="pointer-events-none absolute bottom-[-1px] left-0 h-0.5 w-px origin-left bg-[#0f62fe] transition-transform duration-[var(--motion-fast)] ease-[var(--ease-in-out-standard)]"
+			class="pointer-events-none absolute bottom-0 left-0 h-0.5 w-px origin-left bg-[#0f62fe] transition-transform duration-[var(--motion-fast)] ease-[var(--ease-in-out-standard)]"
 			style="transform: translateX({indicatorLeft}px) scaleX({indicatorWidth})"
 		></div>
 	{/if}

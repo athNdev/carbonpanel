@@ -94,10 +94,47 @@ one at https://mozilla.org/MPL/2.0/.
 		@apply border-border outline-ring/50;
 		border-radius: 0px !important;
 	}
+	/*
+		Fallback for browsers without scrollbar-width/scrollbar-color (Safari
+		before 18.2). Browsers that support the standard properties ignore these.
+	*/
+	::-webkit-scrollbar {
+		width: 10px;
+		height: 10px;
+	}
+	::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	::-webkit-scrollbar-thumb {
+		background-color: #525252;
+		border: 3px solid transparent;
+		background-clip: content-box;
+	}
+	::-webkit-scrollbar-thumb:hover {
+		background-color: #6f6f6f;
+		background-clip: content-box;
+	}
+	::-webkit-scrollbar-corner {
+		background: transparent;
+	}
 	html {
 		/* Reserve classic scrollbar space so page-level overflow changes cannot
 		   shift the app horizontally when loading, dialogs, or routes change. */
 		scrollbar-gutter: stable;
+	}
+	/*
+		One scrollbar look everywhere, and a thin one.
+
+		A classic 17px scrollbar is what makes an overflow change reflow the page:
+		it appears, the content box narrows, text rewraps taller, which can push
+		the neighbouring axis over its threshold and pull the scrollbar back out.
+		A thin, transparent-tracked scrollbar keeps that shift small enough that it
+		cannot feed back on itself, and it matches the Carbon palette instead of
+		the platform default.
+	*/
+	* {
+		scrollbar-width: thin;
+		scrollbar-color: #525252 transparent;
 	}
 	html,
 	body {
@@ -286,6 +323,46 @@ one at https://mozilla.org/MPL/2.0/.
 
 	.scrollbar-stable {
 		scrollbar-gutter: stable;
+	}
+
+	/*
+		Every vertical scroll container reserves its gutter. When content grows
+		just past the viewport (a spinner replaced by a row, a one-line diff, a
+		chart resizing), a classic scrollbar would otherwise appear, narrow the
+		box, rewrap the content and disappear again — the rapid flicker this is
+		here to stop.
+	*/
+	:where(.overflow-y-auto, .overflow-y-scroll, .overflow-auto) {
+		scrollbar-gutter: stable;
+	}
+
+	/*
+		A surface that must never show a scrollbar but may still be scrolled:
+		wheel, trackpad, touch and keyboard keep working; only the bar is gone.
+		Used for horizontal strips such as tab bars, where a bar appearing would
+		change the strip's height.
+	*/
+	.scrollbar-none {
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+	}
+	.scrollbar-none::-webkit-scrollbar {
+		display: none;
+		width: 0;
+		height: 0;
+	}
+
+	/* Horizontal strip: scrolls sideways, never grows a bar. */
+	.scroll-strip {
+		overflow-x: auto;
+		overflow-y: hidden;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+	}
+	.scroll-strip::-webkit-scrollbar {
+		display: none;
+		width: 0;
+		height: 0;
 	}
 
 	.motion-skeleton {
