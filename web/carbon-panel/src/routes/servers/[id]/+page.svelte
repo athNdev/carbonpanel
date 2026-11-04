@@ -423,9 +423,9 @@ one at https://mozilla.org/MPL/2.0/.
 			<div class="flex flex-wrap items-center gap-2">
 				{#if server.status === ServerStatus.CREATING}
 					<div
-						class="flex h-10 select-none items-center gap-2 rounded-none border border-[#393939] bg-[#262626] px-4 font-sans text-sm text-[#f4f4f4]"
+						class="flex h-10 items-center gap-2 rounded-none border border-[#393939] bg-[#262626] px-4 font-sans text-sm text-[#f4f4f4] select-none"
 					>
-						<Loader2 class="text-accent-text h-4 w-4 animate-spin" />
+						<Loader2 class="h-4 w-4 animate-spin text-accent-text" />
 						<span>Creating Server...</span>
 					</div>
 				{:else if server.status === ServerStatus.DEEPSLEEP}
@@ -579,7 +579,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
 			>
 				<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-					<span class="font-mono text-xs uppercase tracking-wider text-[#8d8d8d]"
+					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
 						>Runtime Status</span
 					>
 					<CarbonTag type={getStatusTagType(server.status)} size="sm">
@@ -638,7 +638,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
 			>
 				<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-					<span class="font-mono text-xs uppercase tracking-wider text-[#8d8d8d]"
+					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
 						>Network Ingress</span
 					>
 					<div class="flex items-center gap-2">
@@ -657,7 +657,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div class="py-3">
-					<p class="font-mono text-xs uppercase text-[#8d8d8d]">Connect String</p>
+					<p class="font-mono text-xs text-[#8d8d8d] uppercase">Connect String</p>
 					<p class="mt-0.5 truncate font-mono text-base font-semibold text-[#f4f4f4]">
 						{connectAddress}
 					</p>
@@ -681,7 +681,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
 			>
 				<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-					<span class="font-mono text-xs uppercase tracking-wider text-[#8d8d8d]">Engine Specs</span
+					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">Engine Specs</span
 					>
 					<Info class="h-4 w-4 text-[#d4bbff]" />
 				</div>
@@ -716,7 +716,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
 			>
 				<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-					<span class="font-mono text-xs uppercase tracking-wider text-[#8d8d8d]"
+					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
 						>Resource Telemetry</span
 					>
 					<Cpu class="h-4 w-4 text-[#ff8389]" />
@@ -788,7 +788,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="flex flex-col items-start justify-between gap-3 border border-l-4 border-[#393939] border-l-[#0f62fe] bg-[#161616] p-4 sm:flex-row sm:items-center"
 			>
 				<div class="flex items-center gap-3">
-					<Loader2 class="text-accent-text h-5 w-5 shrink-0 animate-spin" />
+					<Loader2 class="h-5 w-5 shrink-0 animate-spin text-accent-text" />
 					<div>
 						<p class="text-sm font-semibold text-[#f4f4f4]">Server is starting up</p>
 						<p class="mt-0.5 text-xs text-[#a8a8a8]">
@@ -810,7 +810,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<div
 				class="flex items-center gap-3 border border-l-4 border-[#393939] border-l-[#0f62fe] bg-[#161616] p-4"
 			>
-				<Loader2 class="text-accent-text h-5 w-5 shrink-0 animate-spin" />
+				<Loader2 class="h-5 w-5 shrink-0 animate-spin text-accent-text" />
 				<div>
 					<p class="text-sm font-semibold text-[#f4f4f4]">Creating server environment</p>
 					<p class="mt-0.5 text-xs text-[#a8a8a8]">
@@ -897,7 +897,7 @@ one at https://mozilla.org/MPL/2.0/.
 							role="alert"
 						>
 							<p class="font-mono text-sm text-[#ff8389]">This tab failed to render</p>
-							<p class="max-w-lg break-words text-xs text-[#a8a8a8]">
+							<p class="max-w-lg text-xs break-words text-[#a8a8a8]">
 								{error instanceof Error && error.message ? error.message : String(error)}
 							</p>
 							<div class="mt-1 flex items-center gap-2">

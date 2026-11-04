@@ -17,6 +17,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		type BackupRecord
 	} from '$lib/proto/carbonpanel/v1/backup_pb';
 	import { toast } from 'svelte-sonner';
+	import { formatTimestamp } from '$lib/utils/format-time';
 	import { CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
@@ -133,15 +134,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		return `${v.toFixed(1)} ${units[u]}`;
 	}
 
-	function formatTime(ts: unknown): string {
-		try {
-			const d = (ts as { toDate?: () => Date })?.toDate?.() ?? new Date(ts as string);
-			return d.toLocaleString();
-		} catch {
-			return '';
-		}
-	}
-
 	$effect(() => {
 		if (active) {
 			loadBackups();
@@ -193,7 +185,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									>
 								{/if}</td
 							>
-							<td class="py-2 pr-4 whitespace-nowrap">{formatTime(backup.createdAt)}</td>
+							<td class="py-2 pr-4 whitespace-nowrap">{formatTimestamp(backup.createdAt)}</td>
 							<td class="py-2 pr-4">{formatBytes(backup.sizeBytes)}</td>
 							<td class="py-2 pr-4">{backup.status}</td>
 							<td class="flex flex-wrap gap-2 py-2">

@@ -22,6 +22,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	} from './server-operations';
 	import { CarbonConfirm, CarbonTag } from '$lib/components/carbon';
 	import { toast } from 'svelte-sonner';
+	import { formatTimestamp } from '$lib/utils/format-time';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
@@ -67,16 +68,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const timer = setInterval(() => void load(), 5000);
 		return () => clearInterval(timer);
 	});
-
-	function formatTime(ts: unknown): string {
-		if (!ts) return '—';
-		try {
-			const d = (ts as { toDate?: () => Date })?.toDate?.() ?? new Date(ts as string);
-			return d.toLocaleString();
-		} catch {
-			return '—';
-		}
-	}
 
 	const counts = $derived(countOperationsByOutcome(operations));
 
@@ -177,17 +168,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<tbody>
 					{#each operations as op (op.id)}
 						<tr class="border-b border-[#262626] align-top text-[#f4f4f4]">
-							<td class="whitespace-nowrap py-2 pr-4 font-mono text-[#c6c6c6]"
-								>{formatTime(op.startedAt)}</td
+							<td class="py-2 pr-4 font-mono whitespace-nowrap text-[#c6c6c6]"
+								>{formatTimestamp(op.startedAt)}</td
 							>
-							<td class="whitespace-nowrap py-2 pr-4 font-mono">{op.kind}</td>
+							<td class="py-2 pr-4 font-mono whitespace-nowrap">{op.kind}</td>
 							<td class="py-2 pr-4">
 								<CarbonTag type={outcomeTagType(op.outcome)} size="sm">{op.outcome}</CarbonTag>
 							</td>
 							<td class="max-w-[380px] py-2 pr-4">
 								<p class="text-[#c6c6c6]">{op.reason}</p>
 								{#if op.lastError}
-									<p class="mt-1 break-words font-mono text-[11px] text-[#a8a8a8]">
+									<p class="mt-1 font-mono text-[11px] break-words text-[#a8a8a8]">
 										{op.lastError}
 									</p>
 								{/if}
@@ -195,7 +186,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<td class="py-2">
 								<div class="flex flex-col items-start gap-1">
 									<span class="text-[#c6c6c6]">{operationActionLabel(op.nextAction)}</span>
-	{#if canReleaseLock(op)}
+									{#if canReleaseLock(op)}
 										<button
 											type="button"
 											class="inline-flex h-7 items-center rounded-none border border-[#393939] px-3 text-xs text-white transition-colors hover:bg-[#393939]"

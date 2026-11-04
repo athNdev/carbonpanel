@@ -14,6 +14,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		type ActivityLogEntry
 	} from '$lib/proto/carbonpanel/v1/activity_pb';
 	import { toast } from 'svelte-sonner';
+	import { formatTimestamp } from '$lib/utils/format-time';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
@@ -43,15 +44,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			loadActivity();
 		}
 	});
-
-	function formatTime(ts: unknown): string {
-		try {
-			const d = (ts as { toDate?: () => Date })?.toDate?.() ?? new Date(ts as string);
-			return d.toLocaleString();
-		} catch {
-			return '';
-		}
-	}
 </script>
 
 <div class="h-full overflow-y-auto">
@@ -89,7 +81,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<tbody>
 						{#each entries as entry (entry.id)}
 							<tr class="border-b border-[#262626] font-mono text-[#f4f4f4]">
-								<td class="py-2 pr-4 whitespace-nowrap">{formatTime(entry.createdAt)}</td>
+								<td class="py-2 pr-4 whitespace-nowrap">{formatTimestamp(entry.createdAt)}</td>
 								<td
 									class="max-w-[160px] truncate py-2 pr-4"
 									title={entry.actorName || entry.actorId || ''}
