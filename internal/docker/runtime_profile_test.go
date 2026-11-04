@@ -324,8 +324,8 @@ func TestDescribeRuntimeReportsTheAppliedLimits(t *testing.T) {
 
 func TestPreflightWarnsWhenTheMemoryLimitIsMissing(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
-	spec.HostConfig.Resources.Memory = 0
-	spec.HostConfig.Resources.MemorySwap = 0
+	spec.HostConfig.Memory = 0
+	spec.HostConfig.MemorySwap = 0
 
 	profile := DescribeRuntime(spec)
 	if !hasIssue(profile, RuntimeIssueMemoryLimitUnset) {
@@ -338,7 +338,7 @@ func TestPreflightWarnsWhenTheMemoryLimitIsMissing(t *testing.T) {
 
 func TestPreflightWarnsWhenSwapIsReEnabled(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
-	spec.HostConfig.Resources.MemorySwap = 4096 << 20
+	spec.HostConfig.MemorySwap = 4096 << 20
 
 	profile := DescribeRuntime(spec)
 	if !hasIssue(profile, RuntimeIssueSwapEnabled) {
