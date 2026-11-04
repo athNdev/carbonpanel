@@ -7,6 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { loaderDisplayName, loaderSearchName } from '$lib/utils/mod-loader';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import {
 		DialogContent,
@@ -101,35 +102,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	let filterByVersion = $state(true);
 
-	function getLoaderString(val: number | string): string {
-		if (typeof val === 'number') {
-			switch (val) {
-				case 1:
-					return 'forge';
-				case 2:
-					return 'fabric';
-				case 3:
-					return 'quilt';
-				case 4:
-					return 'neoforge';
-				default:
-					return 'fabric';
-			}
-		}
-		const s = String(val || '')
-			.toLowerCase()
-			.replace('mod_loader_', '');
-		if (s.includes('neoforge')) return 'neoforge';
-		if (s.includes('forge') || s.includes('curseforge')) return 'forge';
-		if (s.includes('quilt')) return 'quilt';
-		if (s.includes('fabric')) return 'fabric';
-		return s || 'fabric';
-	}
-
 	// Filter Bar State
 	let activeFilters = $state<ActiveFilter[]>([
 		{ key: 'side', value: 'server', removable: true },
-		{ key: 'loader', value: getLoaderString(server.modLoader), removable: false },
+		{ key: 'loader', value: loaderSearchName(server.modLoader), removable: false },
 		...(server.mcVersion ? [{ key: 'version', value: server.mcVersion, removable: true }] : [])
 	]);
 
@@ -212,7 +188,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		mods = [];
 		try {
 			const loaderVal =
-				activeFilters.find((f) => f.key === 'loader')?.value || getLoaderString(server.modLoader);
+				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(server.modLoader);
 			const versionVal =
 				activeFilters.find((f) => f.key === 'version')?.value ||
 				(filterByVersion ? server.mcVersion || '' : '');
@@ -258,7 +234,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		try {
 			const loaderVal =
-				activeFilters.find((f) => f.key === 'loader')?.value || getLoaderString(server.modLoader);
+				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(server.modLoader);
 			const versionVal =
 				activeFilters.find((f) => f.key === 'version')?.value ||
 				(filterByVersion ? server.mcVersion || '' : '');
@@ -382,21 +358,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</DialogTitle>
 						<DialogDescription>
 							Loader: <span class="font-semibold text-foreground"
-								>{getLoaderString(server.modLoader).toUpperCase()}</span
+								>{loaderDisplayName(server.modLoader)}</span
 							>
 							{#if filterByVersion && server.mcVersion}
-								Â· Filtering for MC <span class="font-semibold text-foreground"
+								· Filtering for MC <span class="font-semibold text-foreground"
 									>{server.mcVersion}</span
 								>
 							{:else}
-								Â· <span class="text-muted-foreground">All MC versions</span>
+								· <span class="text-muted-foreground">All MC versions</span>
 							{/if}
 						</DialogDescription>
 					</div>
 				</div>
 				<div class="flex items-center gap-2">
 					<Badge variant="outline" class="font-mono text-xs uppercase">
-						{getLoaderString(server.modLoader)}
+						{loaderSearchName(server.modLoader)}
 					</Badge>
 					{#if server.mcVersion}
 						<button
@@ -663,7 +639,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<AlertTriangle class="h-4 w-4" />
 						<AlertTitle>No Compatible Versions</AlertTitle>
 						<AlertDescription>
-							No versions were found matching Minecraft {server.mcVersion} and {getLoaderString(
+							No versions were found matching Minecraft {server.mcVersion} and {loaderSearchName(
 								server.modLoader
 							)}.
 						</AlertDescription>
