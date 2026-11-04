@@ -1,0 +1,37 @@
+{
+	"name": "mod-browser-loader",
+	"title": "Mod browser resolves the server's real loader",
+	"viewport": { "width": 1440, "height": 950 },
+	"login": {
+		"path": "/login",
+		"usernameSelector": "input[placeholder=\"Enter your username\"]",
+		"passwordSelector": "input[placeholder=\"Enter your password\"]",
+		"submitSelector": "button[type=\"submit\"]",
+		"successSelector": "a[href^=\"/servers/\"]"
+	},
+	"steps": [
+		{ "goto": "/servers", "waitFor": "a[href^=\"/servers/\"]", "name": "server list loads" },
+		{
+			"click": "tr:has-text(\"create\") a[href^=\"/servers/\"]",
+			"name": "open the NeoForge server"
+		},
+		{ "waitFor": "[role=\"tab\"]", "name": "detail tabs render" },
+		{ "assertText": "main", "contains": "NEOFORGE", "name": "engine card says NeoForge" },
+		{ "click": "[role=\"tab\"]:has-text(\"Mods\")", "name": "open Mods" },
+		{ "click": "button:has-text(\"Browse Mods\")", "name": "open the mod browser" },
+		{ "waitFor": "text=Browse & Install Online Mods", "name": "browser dialog opens" },
+		{
+			"assertText": "[role=\"dialog\"]",
+			"contains": "NEOFORGE",
+			"name": "badge shows NEOFORGE"
+		},
+		{
+			"assertText": "[role=\"dialog\"]",
+			"contains": "neoforge",
+			"name": "filter chip names neoforge"
+		},
+		{ "wait": 6000 },
+		{ "assertHidden": "text=Searching compatible mods", "name": "search settles" },
+		{ "screenshot": "20-mod-browser-neoforge" }
+	]
+}
