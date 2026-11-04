@@ -72,6 +72,10 @@ type Server struct {
 	// startedAt is the server construction time, surfaced by /healthz and
 	// /readyz as an uptime.
 	startedAt time.Time
+
+	// lastObservation reports when the reconciler last finished a full sweep.
+	// It is set after the reconciler starts, so it may be nil.
+	lastObservation func() time.Time
 }
 
 // Creates new Connect RPC server
@@ -657,6 +661,14 @@ func (s *Server) dbReady() error {
 	return sqlDB.PingContext(ctx)
 }
 
+// SetLastObservation supplies the time of the last completed observation
+// sweep. It is installed after the reconciler starts, so a server construction
+// that happens first still works: the health snapshot simply falls back to each
+// row's own update time.
+func (s *Server) SetLastObservation(fn func() time.Time) {
+	s.lastObservation = fn
+}
+
 // healthSnapshot observes each layer with a bounded deadline. A layer that
 // cannot be observed is reported as unknown, never as healthy: a green answer
 // must mean evidence, not a missing check.
@@ -694,6 +706,10 @@ func (s *Server) healthSnapshot(ctx context.Context) health.Snapshot {
 		in.Routes = health.Observation{State: health.StateOK, Detail: "the proxy is disabled"}
 	} else {
 		in.Routes = health.Observation{State: health.StateOK}
+	}
+
+	if s.lastObservation != nil {
+		in.ObservedAt = s.lastObservation()
 	}
 
 	if s.store != nil {

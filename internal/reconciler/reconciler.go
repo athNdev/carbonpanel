@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/containerd/errdefs"
@@ -184,6 +185,11 @@ type Reconciler struct {
 	stop     chan struct{}
 	stopOnce sync.Once
 	started  bool
+
+	// lastSweep is the Unix-nano time the last full sweep finished observing
+	// every server. It is the only honest answer to "how old are the stored
+	// statuses?", because a row is not rewritten when its status is unchanged.
+	lastSweep atomic.Int64
 }
 
 // New constructs a Reconciler. It does not start any goroutines until Start is
@@ -273,6 +279,16 @@ func (r *Reconciler) Stop() {
 // Wait blocks until every reconciler goroutine has exited.
 func (r *Reconciler) Wait() {
 	r.wg.Wait()
+}
+
+// LastSweepAt reports when the last full sweep queued every server for an
+// observation. A zero value means no sweep has completed since start.
+func (r *Reconciler) LastSweepAt() time.Time {
+	nanos := r.lastSweep.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
 }
 
 // request schedules a convergence pass for serverID once the debounce window's
@@ -443,6 +459,9 @@ func (r *Reconciler) enqueueAll(ctx context.Context) {
 		}
 		return
 	}
+	// Every server in this list is now queued for an observation, so the
+	// stored statuses are about to be as fresh as this moment.
+	r.lastSweep.Store(time.Now().UnixNano())
 	for _, s := range servers {
 		if s == nil {
 			continue

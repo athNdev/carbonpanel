@@ -125,6 +125,74 @@ func TestEveryStaleStatusLeavesTheGameLayerUnknown(t *testing.T) {
 	}
 }
 
+func TestAFreshObservationSweepKeepsUnchangedRowsFresh(t *testing.T) {
+	// A server whose status has not changed is never rewritten, so its own
+	// update time is old. The sweep is the observation, and it is recent.
+	in := baseInput()
+	in.Servers = []ServerObservation{
+		{ID: "a", Status: "running", UpdatedAt: in.CheckedAt.Add(-6 * time.Hour)},
+	}
+	in.ObservedAt = in.CheckedAt.Add(-10 * time.Second)
+
+	snap := Compute(in)
+	if snap.Servers.Stale != 0 {
+		t.Fatalf("stale = %d, want 0 while the sweep is fresh", snap.Servers.Stale)
+	}
+	if snap.Servers.Playable != 1 {
+		t.Fatalf("playable = %d, want 1", snap.Servers.Playable)
+	}
+	if c, _ := snap.Component(LayerGame); c.State != StateOK {
+		t.Errorf("game state = %s, want ok", c.State)
+	}
+}
+
+func TestAnOldSweepStillTrustsARecentlyWrittenRow(t *testing.T) {
+	// A write is evidence too: something observed this server ten seconds ago,
+	// even though the sweep loop has not run since. Only a row that is old by
+	// every measure is stale.
+	in := baseInput()
+	in.Servers = []ServerObservation{
+		{ID: "a", Status: "running", UpdatedAt: in.CheckedAt.Add(-10 * time.Second)},
+	}
+	in.ObservedAt = in.CheckedAt.Add(-10 * time.Minute)
+
+	snap := Compute(in)
+	if snap.Servers.Stale != 0 {
+		t.Fatalf("stale = %d, want 0 for a freshly written row", snap.Servers.Stale)
+	}
+	if snap.Servers.Playable != 1 {
+		t.Fatalf("playable = %d, want 1", snap.Servers.Playable)
+	}
+}
+
+func TestAnOldSweepAndOldRowsLeaveTheGameLayerUnknown(t *testing.T) {
+	in := baseInput()
+	in.Servers = []ServerObservation{
+		{ID: "a", Status: "running", UpdatedAt: in.CheckedAt.Add(-10 * time.Minute)},
+	}
+	in.ObservedAt = in.CheckedAt.Add(-10 * time.Minute)
+
+	snap := Compute(in)
+	if snap.Servers.Stale != 1 {
+		t.Fatalf("stale = %d, want the row stale when nothing observed it", snap.Servers.Stale)
+	}
+	if c, _ := snap.Component(LayerGame); c.State != StateUnknown {
+		t.Errorf("game state = %s, want unknown", c.State)
+	}
+}
+
+func TestWithoutASweepTheRowUpdateTimeDecides(t *testing.T) {
+	in := baseInput()
+	in.Servers = []ServerObservation{
+		{ID: "a", Status: "running", UpdatedAt: in.CheckedAt.Add(-10 * time.Second)},
+	}
+	// ObservedAt unset: the fallback has to keep working.
+
+	if snap := Compute(in); snap.Servers.Stale != 0 || snap.Servers.Playable != 1 {
+		t.Fatalf("servers = %+v, want one playable and none stale", snap.Servers)
+	}
+}
+
 func TestAStartingServerIsStartingNotRunning(t *testing.T) {
 	in := baseInput()
 	in.Servers = []ServerObservation{
