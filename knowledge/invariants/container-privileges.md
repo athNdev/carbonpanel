@@ -59,5 +59,8 @@ Re-verified `2026-11-04` by `agent:zed`:
 - The preflight also names a read-only /data mount, a missing /data mount,
   host networking, a host device mapping, bootstrap capabilities removed by
   `CapDrop ALL`, and a runtime uid that cannot own the world directory.
+- It reports the applied memory, swap, pids and writable-layer limits, and
+  warns when a requested limit is absent. A writable-layer cap is applied only
+  on a writable root, because a read-only root cannot grow.
 - Broadening confinement (privileged, `CapAdd`, a writable rootfs) is still
   permission-gated rather than refused, and is reported as a warning.

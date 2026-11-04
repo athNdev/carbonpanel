@@ -82,6 +82,22 @@ const (
 	// RuntimeIssueDataOwnerMismatch is raised when the container runs as a
 	// numeric user that cannot own the world directory the panel created.
 	RuntimeIssueDataOwnerMismatch RuntimeIssueCode = "data_owner_mismatch"
+	// RuntimeIssueMemoryLimitUnset is raised when the container has no memory
+	// limit, so one server can consume the node.
+	RuntimeIssueMemoryLimitUnset RuntimeIssueCode = "memory_limit_unset"
+	// RuntimeIssueSwapEnabled is raised when the 0-swap policy was overridden.
+	RuntimeIssueSwapEnabled RuntimeIssueCode = "swap_enabled"
+	// RuntimeIssuePidsLimitUnset is raised when the fork-bomb guard is absent.
+	RuntimeIssuePidsLimitUnset RuntimeIssueCode = "pids_limit_unset"
+	// RuntimeIssueWritableLayerUnbounded is raised for a writable root with no
+	// writable-layer cap.
+	RuntimeIssueWritableLayerUnbounded RuntimeIssueCode = "writable_layer_unbounded"
+	// RuntimeIssueStorageQuotaIsNotAWorldQuota is raised when a storage-opt
+	// size is presented as if it bounded the world.
+	RuntimeIssueStorageQuotaIsNotAWorldQuota RuntimeIssueCode = "storage_quota_is_not_a_world_quota"
+	// RuntimeIssueWritableLayerCapIgnored is raised when a writable-layer cap
+	// is configured but the root is read-only, so nothing is capped.
+	RuntimeIssueWritableLayerCapIgnored RuntimeIssueCode = "writable_layer_cap_ignored"
 )
 
 // RuntimeIssue is one compatibility finding with an actionable remedy.
@@ -113,6 +129,12 @@ type RuntimeSpec struct {
 	// contract: start as root, prepare /data, rewrite /etc/nsswitch.conf, then
 	// drop to the unprivileged game user through gosu.
 	MinecraftImage bool
+	// RequestedMemoryMB is the memory the server record asked for, which the
+	// effective container limit is derived from.
+	RequestedMemoryMB int64
+	// WritableLayerMB is the operator's writable-layer cap. It is applied only
+	// when the root filesystem is writable.
+	WritableLayerMB int64
 	// DataOwnerUID is the owner of DataPath when the platform can report it.
 	// It lets the profile tell a supported non-root path (the directory was
 	// prepared for that uid) from one that would fail at boot.
@@ -124,8 +146,32 @@ type RuntimeSpec struct {
 	HostConfig *container.HostConfig
 }
 
+// ContainerLimits is the enforcement that is actually requested from the
+// daemon, next to the limit the caller asked for. A zero effective value means
+// no limit: it is never reported as if the requested limit applied.
+type ContainerLimits struct {
+	// RequestedMemoryMB is the server's configured memory.
+	RequestedMemoryMB int64
+	// MemoryBytes and MemorySwapBytes are what the container request carries.
+	MemoryBytes     int64
+	MemorySwapBytes int64
+	// SwapDisabled is true when MemorySwap equals Memory or both are unset.
+	SwapDisabled bool
+	// PidsLimit is the process cap, or 0 when the daemon default applies.
+	PidsLimit int64
+	// CPULimit is the configured CPU cap, or 0 for unlimited.
+	CPULimit float64
+	// WritableLayerMB is the storage-opt size applied to the container layer,
+	// or 0 when the layer is unbounded or the root is read-only.
+	WritableLayerMB int64
+	// WorldDiskEnforced is always false today: the world is a bind mount, so
+	// the daemon cannot quota it.
+	WorldDiskEnforced bool
+}
+
 // RuntimeProfile is the effective, inspectable runtime description of one
-// container: what it runs as, what it can write, and how confined it is.
+// container: what it runs as, what it can write, how confined it is, and which
+// limits are actually enforced.
 type RuntimeProfile struct {
 	Image             string
 	MinecraftImage    bool
@@ -142,6 +188,7 @@ type RuntimeProfile struct {
 	NetworkMode       string
 	Devices           []string
 	Entrypoint        []string
+	Limits            ContainerLimits
 	Issues            []RuntimeIssue
 }
 
@@ -175,8 +222,9 @@ func (p RuntimeProfile) Description() string {
 			data += " (ro)"
 		}
 	}
-	return fmt.Sprintf("image=%s user=%s rootfs=%s data=%s nnp=%t privileged=%t net=%s",
-		p.Image, user, rootfs, data, p.NoNewPrivileges, p.Privileged, p.NetworkMode)
+	return fmt.Sprintf("image=%s user=%s rootfs=%s data=%s nnp=%t privileged=%t net=%s memory=%dB pids=%d layer=%dMB",
+		p.Image, user, rootfs, data, p.NoNewPrivileges, p.Privileged, p.NetworkMode,
+		p.Limits.MemoryBytes, p.Limits.PidsLimit, p.Limits.WritableLayerMB)
 }
 
 // DescribeRuntime returns the effective profile of a resolved runtime spec
@@ -207,6 +255,10 @@ func DescribeRuntime(spec RuntimeSpec) RuntimeProfile {
 		for _, d := range spec.HostConfig.Devices {
 			profile.Devices = append(profile.Devices, d.PathOnHost+":"+d.PathInContainer)
 		}
+		profile.Limits = describeLimits(spec)
+	}
+	if spec.HostConfig == nil {
+		profile.Limits = describeLimits(spec)
 	}
 	if spec.Config != nil {
 		profile.User = strings.TrimSpace(spec.Config.User)
@@ -250,6 +302,32 @@ func PreflightProfile(profile RuntimeProfile) error {
 		parts = append(parts, issue.Error())
 	}
 	return fmt.Errorf("%w: %s (%s)", ErrRuntimeIncompatible, strings.Join(parts, "; "), profile.Description())
+}
+
+// describeLimits reports what the request actually enforces rather than what
+// was asked for. A limit that the daemon will not apply is reported as zero.
+func describeLimits(spec RuntimeSpec) ContainerLimits {
+	limits := ContainerLimits{RequestedMemoryMB: spec.RequestedMemoryMB}
+	if spec.HostConfig == nil {
+		return limits
+	}
+	res := spec.HostConfig.Resources
+	limits.MemoryBytes = res.Memory
+	limits.MemorySwapBytes = res.MemorySwap
+	limits.SwapDisabled = res.Memory == 0 || res.MemorySwap == res.Memory
+	if res.PidsLimit != nil {
+		limits.PidsLimit = *res.PidsLimit
+	}
+	limits.CPULimit = float64(res.NanoCPUs) / 1e9
+	if size, ok := spec.HostConfig.StorageOpt["size"]; ok {
+		if bytes, parsed := parseDockerSize(size); parsed {
+			limits.WritableLayerMB = bytes >> 20
+			// storage-opt sizes the container writable layer only. A bind mount
+			// such as /data is outside it and keeps growing with the world.
+			limits.WorldDiskEnforced = false
+		}
+	}
+	return limits
 }
 
 // runtimeIssues applies the compatibility rules to a resolved profile.
@@ -391,6 +469,71 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 			Severity: RuntimeFatal,
 			Detail:   fmt.Sprintf("host devices are mapped into the container: %s", strings.Join(profile.Devices, ", ")),
 			Remedy:   "remove the device mapping; no Minecraft server needs host device access",
+		})
+	}
+
+	issues = append(issues, limitIssues(profile)...)
+
+	if spec.WritableLayerMB > 0 && profile.ReadOnlyRootfs {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueWritableLayerCapIgnored,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("storage.container_writable_mb is %d MB but the root filesystem is read-only", spec.WritableLayerMB),
+			Remedy:   "leave the cap at 0 for a read-only root, or set it only for an image that writes outside /data",
+		})
+	}
+
+	return issues
+}
+
+// limitIssues reports a limit that is advertised but not applied. These are
+// warnings: an unlimited container still boots, but one server can then starve
+// the node, and an operator must be told the number they set is not in effect.
+func limitIssues(profile RuntimeProfile) []RuntimeIssue {
+	var issues []RuntimeIssue
+
+	if profile.Limits.MemoryBytes == 0 {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueMemoryLimitUnset,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("no container memory limit is set (requested %d MB)", profile.Limits.RequestedMemoryMB),
+			Remedy:   "set a server memory value; without a limit one server can exhaust the node",
+		})
+	}
+
+	if !profile.Limits.SwapDisabled {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueSwapEnabled,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("swap is enabled (memory %d bytes, memory+swap %d bytes)", profile.Limits.MemoryBytes, profile.Limits.MemorySwapBytes),
+			Remedy:   "set the swap limit equal to the memory limit; swapping game-server heap causes tick stalls",
+		})
+	}
+
+	if profile.Limits.PidsLimit == 0 {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssuePidsLimitUnset,
+			Severity: RuntimeWarning,
+			Detail:   "no process limit is set",
+			Remedy:   "set a pids limit so a fork bomb in one container cannot exhaust the node",
+		})
+	}
+
+	if !profile.ReadOnlyRootfs && profile.Limits.WritableLayerMB == 0 {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueWritableLayerUnbounded,
+			Severity: RuntimeWarning,
+			Detail:   "the root filesystem is writable and the writable layer has no size cap",
+			Remedy:   "set storage.container_writable_mb, or return the image to a read-only root",
+		})
+	}
+
+	if profile.Limits.WritableLayerMB > 0 && profile.DataMount != "" {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueStorageQuotaIsNotAWorldQuota,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("the %d MB writable-layer cap does not bound the world at %s", profile.Limits.WritableLayerMB, profile.DataMount),
+			Remedy:   "size the world with the node filesystem or a volume quota; a bind-mounted world is measured, not capped, by the daemon",
 		})
 	}
 

@@ -317,6 +317,10 @@ type ClientConfig struct {
 	// every managed container so reconciliation and name-conflict handling can
 	// distinguish this panel from another installation sharing a daemon.
 	InstallationID string
+	// ContainerWritableMB caps the container writable layer on a writable
+	// root. It never bounds a bind-mounted world and is ignored when the root
+	// is read-only.
+	ContainerWritableMB int64
 }
 
 type ContainerLogStreamer interface {
@@ -1025,11 +1029,24 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	ApplyOverrides(server.DockerOverrides, config, hostConfig)
 	applyServerRootfs(hostConfig, config, server.DockerOverrides)
 
+	// A writable-layer cap only applies to a writable root. A read-only root
+	// cannot grow, and the world is a bind mount either way, so setting
+	// storage-opt on a read-only container would advertise a limit that can
+	// never take effect.
+	if !hostConfig.ReadonlyRootfs {
+		ApplyDiskQuota(hostConfig, c.config.ContainerWritableMB)
+	}
+
 	// Qualify the fully-resolved configuration before the daemon is asked to
 	// create anything. An unsupported image/runtime combination must fail here
 	// with a specific reason instead of boot-looping in the container or
 	// replacing a container that was working.
-	profile := DescribeRuntime(runtimeSpecFor(imageName, dataPath, server, config, hostConfig))
+	spec := runtimeSpecFor(imageName, dataPath, server, config, hostConfig)
+	if server != nil {
+		spec.RequestedMemoryMB = int64(server.Memory)
+	}
+	spec.WritableLayerMB = c.config.ContainerWritableMB
+	profile := DescribeRuntime(spec)
 	for _, issue := range profile.Issues {
 		if issue.Severity == RuntimeWarning {
 			c.log.Warn("Runtime compatibility for server %s: %v", server.ID, issue)

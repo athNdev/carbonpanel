@@ -181,6 +181,9 @@ func main() {
 		RateLimitBurst:  cfg.Docker.RateLimitBurst,
 		ProxyEnabled:    cfg.Proxy.Enabled,
 		InstallationID:  installationID,
+		// A writable-layer cap only helps a writable root; the container
+		// constructor decides whether it applies.
+		ContainerWritableMB: cfg.Storage.ContainerWritableMB,
 	})
 	if err != nil {
 		log.Fatal("Failed to initialize Docker client: %v", err)

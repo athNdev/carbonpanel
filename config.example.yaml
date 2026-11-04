@@ -72,6 +72,11 @@ storage:
   backup_dir: "./backups"
   temp_dir: "./tmp"
   max_upload_size: 524288000  # 500MB in bytes
+  # Caps the container writable layer with the daemon storage-opt size option.
+  # It applies only when a container root filesystem is writable (an image that
+  # writes outside /data). It never bounds the world: /data is a bind mount and
+  # is measured, not quota-limited. Leave 0 for no cap.
+  container_writable_mb: 0
   # S3-compatible offsite backup upload (MINE-138). Credentials can also come
   # from env: CARBONPANEL_STORAGE_S3_ACCESS_KEY / CARBONPANEL_STORAGE_S3_SECRET_KEY.
   s3:
