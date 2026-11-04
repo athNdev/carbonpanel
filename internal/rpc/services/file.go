@@ -366,6 +366,8 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 		os.Remove(tempPath)
 	}
 
+	s.adoptServerOwnership(root, destFilePath, false)
+
 	// Cleanup the upload session
 	s.uploadManager.CleanupSession(msg.UploadSessionId)
 
@@ -419,6 +421,9 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 		s.log.Error("Failed to write file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update file"))
 	}
+	// A brand-new file would otherwise land root-owned and be unwritable by
+	// the game; an overwritten one keeps its owner, so this is a no-op there.
+	s.adoptServerOwnership(root, fullPath, false)
 
 	return connect.NewResponse(&v1.UpdateFileResponse{
 		Message: "File updated successfully",
@@ -566,6 +571,17 @@ func (s *FileService) RenameFile(ctx context.Context, req *connect.Request[v1.Re
 	}), nil
 }
 
+// adoptServerOwnership hands the given paths to the same owner as the server's
+// data root, so a file the panel wrote as root stays writable by the game
+// container. The panel and the game share the bind mount but not the uid, and a
+// root-owned server.properties makes the game fail to start. Best-effort:
+// ownership is a portability detail, never a reason to fail a successful write.
+func (s *FileService) adoptServerOwnership(root, target string, recursive bool) {
+	if err := files.AdoptOwnership(root, target, recursive); err != nil {
+		s.log.Warn("Could not give %s to the data directory owner: %v", target, err)
+	}
+}
+
 // ExtractArchive extracts an archive
 func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v1.ExtractArchiveRequest]) (*connect.Response[v1.ExtractArchiveResponse], error) {
 	msg := req.Msg
@@ -633,10 +649,13 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		if err != nil {
 			op.fail(err.Error())
 			s.log.Error("Extraction %s failed: %v", opID, err)
-		} else {
-			op.complete()
-			s.log.Info("Extraction %s completed: %d files", opID, op.FilesExtracted.Load())
+			return
 		}
+		// The extracted tree must belong to whoever runs the game, otherwise
+		// the container cannot rewrite server.properties or save worlds.
+		s.adoptServerOwnership(root, destPath, true)
+		op.complete()
+		s.log.Info("Extraction %s completed: %d files", opID, op.FilesExtracted.Load())
 	}()
 
 	return connect.NewResponse(&v1.ExtractArchiveResponse{
