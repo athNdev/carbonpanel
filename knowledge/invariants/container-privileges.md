@@ -10,7 +10,7 @@ code_refs:
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
-verified: { by: human:athNdev, at: 2026-10-24 }
+verified: { by: agent:zed, at: 2026-11-04 }
 review_after: 2027-01-23
 ---
 
@@ -29,6 +29,9 @@ host or the Docker socket can escape that boundary.
 # How to check
 
 - Inspect the effective config after overrides, not only the defaults.
+  `docker.PreflightRuntime` runs on the resolved request in
+  `Client.CreateContainer` and refuses a container that cannot boot before the
+  daemon is asked to create anything.
 - A new mount needs a path and a reason; a new capability needs a named
   requirement.
 - Do not copy a hardening exemption from one image to another.
@@ -46,3 +49,15 @@ Reviewed `2026-10-24` by `agent:mimo-v2.6-pro` against the code and attested by
 
 A validation bound on operator overrides is a known gap and would strengthen
 this invariant; it is recorded as accepted risk rather than a merge blocker.
+
+Re-verified `2026-11-04` by `agent:zed`:
+
+- `docker.PreflightRuntime` inspects the resolved `container.Config` and
+  `container.HostConfig` after `ApplyOverrides` and `applyServerRootfs`, so a
+  stored row from an older panel or another writer is checked too. Fatal
+  findings stop creation; warnings are logged with a named code and remedy.
+- The preflight also names a read-only /data mount, a missing /data mount,
+  host networking, a host device mapping, bootstrap capabilities removed by
+  `CapDrop ALL`, and a runtime uid that cannot own the world directory.
+- Broadening confinement (privileged, `CapAdd`, a writable rootfs) is still
+  permission-gated rather than refused, and is reported as a warning.

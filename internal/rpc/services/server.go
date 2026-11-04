@@ -2071,6 +2071,16 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 	return connect.NewResponse(&v1.DeleteServerResponse{}), nil
 }
 
+// createContainerError maps a refused runtime profile to a precondition the
+// caller can act on. Every other create failure keeps the generic message so
+// daemon internals are not returned to the user.
+func createContainerError(err error) *connect.Error {
+	if errors.Is(err, docker.ErrRuntimeIncompatible) {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("this server cannot start with the requested image and runtime settings: %w", err))
+	}
+	return connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server container"))
+}
+
 // ResumeUnsettledDispositions finishes deletions that were recorded and then
 // interrupted. A pending row continues the original delete, keep_data, or
 // detach choice. A row that already recorded the world disposition only
@@ -2337,7 +2347,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		containerID, err := dockerCli.CreateContainer(ctx, server, serverConfig)
 		if err != nil {
 			s.log.Error("Failed to create container: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server container"))
+			return nil, createContainerError(err)
 		}
 
 		server.ContainerID = containerID
@@ -2747,7 +2757,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			return createErr
 		}); err != nil {
 			s.log.Error("Failed to create container: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server container"))
+			return nil, createContainerError(err)
 		}
 
 		server.ContainerID = containerID
