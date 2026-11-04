@@ -88,6 +88,10 @@ type Server struct {
 	Description     string       `json:"description"`
 	ModLoader       ModLoader    `json:"mod_loader" gorm:"not null"`
 	MCVersion       string       `json:"mc_version" gorm:"not null;column:mc_version"`
+	// LoaderVersion pins the exact mod loader build (e.g. "21.1.84" for
+	// NeoForge). Empty means "latest for this Minecraft version", which is
+	// what a server created before this field existed keeps getting.
+	LoaderVersion   string       `json:"loader_version" gorm:"column:loader_version"`
 	NodeID          string       `json:"node_id" gorm:"column:node_id;default:'default'"`
 	ContainerID     string       `json:"container_id" gorm:"column:container_id"`
 	Status          ServerStatus `json:"status" gorm:"not null"`

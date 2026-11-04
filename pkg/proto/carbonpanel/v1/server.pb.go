@@ -652,7 +652,9 @@ type CreateServerRequest struct {
 	AutoHibernate     bool                   `protobuf:"varint,21,opt,name=auto_hibernate,json=autoHibernate,proto3" json:"auto_hibernate,omitempty"`
 	AutoDeepSleep     bool                   `protobuf:"varint,22,opt,name=auto_deep_sleep,json=autoDeepSleep,proto3" json:"auto_deep_sleep,omitempty"`
 	// Idempotency key for this create. Repeating it returns the original server.
-	RequestId     string `protobuf:"bytes,23,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RequestId string `protobuf:"bytes,23,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Exact mod loader version. Empty means the loader's latest.
+	LoaderVersion string `protobuf:"bytes,24,opt,name=loader_version,json=loaderVersion,proto3" json:"loader_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -848,6 +850,13 @@ func (x *CreateServerRequest) GetRequestId() string {
 	return ""
 }
 
+func (x *CreateServerRequest) GetLoaderVersion() string {
+	if x != nil {
+		return x.LoaderVersion
+	}
+	return ""
+}
+
 // Created server instance
 type CreateServerResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -916,8 +925,10 @@ type UpdateServerRequest struct {
 	IdleTimeoutMinutes      *int32                 `protobuf:"varint,18,opt,name=idle_timeout_minutes,json=idleTimeoutMinutes,proto3,oneof" json:"idle_timeout_minutes,omitempty"`
 	AutoDeepSleep           *bool                  `protobuf:"varint,19,opt,name=auto_deep_sleep,json=autoDeepSleep,proto3,oneof" json:"auto_deep_sleep,omitempty"`
 	DeepSleepTimeoutMinutes *int32                 `protobuf:"varint,20,opt,name=deep_sleep_timeout_minutes,json=deepSleepTimeoutMinutes,proto3,oneof" json:"deep_sleep_timeout_minutes,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// Change the pinned mod loader version. Ignored when empty.
+	LoaderVersion *string `protobuf:"bytes,21,opt,name=loader_version,json=loaderVersion,proto3,oneof" json:"loader_version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateServerRequest) Reset() {
@@ -1088,6 +1099,13 @@ func (x *UpdateServerRequest) GetDeepSleepTimeoutMinutes() int32 {
 		return *x.DeepSleepTimeoutMinutes
 	}
 	return 0
+}
+
+func (x *UpdateServerRequest) GetLoaderVersion() string {
+	if x != nil && x.LoaderVersion != nil {
+		return *x.LoaderVersion
+	}
+	return ""
 }
 
 // Updated server instance
@@ -2134,7 +2152,7 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\x1cGetNextAvailablePortResponse\x12\x12\n" +
 	"\x04port\x18\x01 \x01(\x05R\x04port\x127\n" +
 	"\n" +
-	"used_ports\x18\x02 \x03(\v2\x18.carbonpanel.v1.UsedPortR\tusedPorts\"\x8b\a\n" +
+	"used_ports\x18\x02 \x03(\v2\x18.carbonpanel.v1.UsedPortR\tusedPorts\"\xb2\a\n" +
 	"\x13CreateServerRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x128\n" +
@@ -2166,9 +2184,10 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\x0eauto_hibernate\x18\x15 \x01(\bR\rautoHibernate\x12&\n" +
 	"\x0fauto_deep_sleep\x18\x16 \x01(\bR\rautoDeepSleep\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x17 \x01(\tR\trequestId\"F\n" +
+	"request_id\x18\x17 \x01(\tR\trequestId\x12%\n" +
+	"\x0eloader_version\x18\x18 \x01(\tR\rloaderVersion\"F\n" +
 	"\x14CreateServerResponse\x12.\n" +
-	"\x06server\x18\x01 \x01(\v2\x16.carbonpanel.v1.ServerR\x06server\"\xc3\a\n" +
+	"\x06server\x18\x01 \x01(\v2\x16.carbonpanel.v1.ServerR\x06server\"\x82\b\n" +
 	"\x13UpdateServerRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -2196,7 +2215,8 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\x0eauto_hibernate\x18\x11 \x01(\bH\x04R\rautoHibernate\x88\x01\x01\x125\n" +
 	"\x14idle_timeout_minutes\x18\x12 \x01(\x05H\x05R\x12idleTimeoutMinutes\x88\x01\x01\x12+\n" +
 	"\x0fauto_deep_sleep\x18\x13 \x01(\bH\x06R\rautoDeepSleep\x88\x01\x01\x12@\n" +
-	"\x1adeep_sleep_timeout_minutes\x18\x14 \x01(\x05H\aR\x17deepSleepTimeoutMinutes\x88\x01\x01B\a\n" +
+	"\x1adeep_sleep_timeout_minutes\x18\x14 \x01(\x05H\aR\x17deepSleepTimeoutMinutes\x88\x01\x01\x12*\n" +
+	"\x0eloader_version\x18\x15 \x01(\tH\bR\rloaderVersion\x88\x01\x01B\a\n" +
 	"\x05_portB\r\n" +
 	"\v_auto_startB\v\n" +
 	"\t_detachedB\x0e\n" +
@@ -2204,7 +2224,8 @@ const file_carbonpanel_v1_server_proto_rawDesc = "" +
 	"\x0f_auto_hibernateB\x17\n" +
 	"\x15_idle_timeout_minutesB\x12\n" +
 	"\x10_auto_deep_sleepB\x1d\n" +
-	"\x1b_deep_sleep_timeout_minutes\"F\n" +
+	"\x1b_deep_sleep_timeout_minutesB\x11\n" +
+	"\x0f_loader_version\"F\n" +
 	"\x14UpdateServerResponse\x12.\n" +
 	"\x06server\x18\x01 \x01(\v2\x16.carbonpanel.v1.ServerR\x06server\"y\n" +
 	"\x13DeleteServerRequest\x12\x0e\n" +

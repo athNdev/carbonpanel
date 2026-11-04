@@ -11,15 +11,21 @@ package services
 
 import (
 	"context"
+	"errors"
+	"strings"
 
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 )
+
+// errLoaderRequired rejects a version lookup that names no loader.
+var errLoaderRequired = errors.New("loader is required")
 
 // Compile-time check that MinecraftService implements the interface
 var _ carbonpanelv1connect.MinecraftServiceHandler = (*MinecraftService)(nil)
@@ -147,4 +153,25 @@ func (s *MinecraftService) GetDockerImages(ctx context.Context, req *connect.Req
 	return connect.NewResponse(&v1.GetDockerImagesResponse{
 		Images: protoImages,
 	}), nil
+}
+
+// GetLoaderVersions lists the exact builds of a loader that exist for a
+// Minecraft version, newest first with "latest" always available.
+//
+// The list comes from the loader's own metadata service, so a version the
+// panel offers is a version the loader publishes. A lookup failure degrades to
+// the curated fallback list rather than failing the call: the create form must
+// still work on a panel without outbound access.
+func (s *MinecraftService) GetLoaderVersions(ctx context.Context, req *connect.Request[v1.GetLoaderVersionsRequest]) (*connect.Response[v1.GetLoaderVersionsResponse], error) {
+	loader := strings.ToLower(strings.TrimSpace(req.Msg.GetLoader()))
+	version := strings.TrimSpace(req.Msg.GetMcVersion())
+	if loader == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errLoaderRequired)
+	}
+
+	versions := handlers.GetLoaderVersions(ctx, loader, version)
+	if len(versions) == 0 {
+		versions = []string{"latest"}
+	}
+	return connect.NewResponse(&v1.GetLoaderVersionsResponse{Versions: versions}), nil
 }

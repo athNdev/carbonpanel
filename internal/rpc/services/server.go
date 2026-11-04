@@ -601,6 +601,7 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		Name:                    server.Name,
 		Description:             server.Description,
 		McVersion:               server.MCVersion,
+		LoaderVersion:           server.LoaderVersion,
 		Port:                    int32(server.Port),
 		ProxyHostname:           server.ProxyHostname,
 		ProxyListenerId:         server.ProxyListenerID,
@@ -1171,6 +1172,11 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	}
 
 	// Create server object
+	loaderVersion, err := validateLoaderVersion(modLoader, msg.LoaderVersion)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	serverUUID := uuid.New().String()
 	serverDataDir := fmt.Sprintf("%s_%s", files.SanitizePathName(msg.Name), serverUUID)
 	serverDataPath := filepath.Join(s.config.Storage.DataDir, "servers", serverDataDir)
@@ -1181,6 +1187,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		Description:     msg.Description,
 		ModLoader:       modLoader,
 		MCVersion:       msg.McVersion,
+		LoaderVersion:   loaderVersion,
 		Status:          storage.StatusCreating,
 		Port:            port,
 		ProxyHostname:   proxyHostname,
@@ -1674,6 +1681,18 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 	if msg.McVersion != "" && msg.McVersion != originalMCVersion {
 		server.MCVersion = msg.McVersion
 		needsRecreation = true
+	}
+	if msg.LoaderVersion != nil {
+		loaderVersion, err := validateLoaderVersion(server.ModLoader, *msg.LoaderVersion)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		if loaderVersion != server.LoaderVersion {
+			server.LoaderVersion = loaderVersion
+			// The loader build is baked into the container at creation, so a
+			// change only takes effect on the next recreate.
+			needsRecreation = true
+		}
 	}
 	if msg.DockerImage != "" && msg.DockerImage != originalDockerImage {
 		server.DockerImage = msg.DockerImage

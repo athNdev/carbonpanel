@@ -21,6 +21,8 @@ service MinecraftService {
   rpc GetModLoaders(GetModLoadersRequest) returns (GetModLoadersResponse);
   // List available Docker images
   rpc GetDockerImages(GetDockerImagesRequest) returns (GetDockerImagesResponse);
+  // List exact mod loader versions valid for a loader and Minecraft version.
+  rpc GetLoaderVersions(GetLoaderVersionsRequest) returns (GetLoaderVersionsResponse);
 }
 
 // Minecraft version metadata
@@ -128,4 +130,16 @@ message SLPPlayers {
 message SLPPlayerSample {
   string name = 1;
   string id = 2; // UUID
+}
+
+// Loader version lookup
+message GetLoaderVersionsRequest {
+  // Resolved on the client so the request names the loader it wants.
+  string loader = 1;
+  string mc_version = 2;
+}
+
+// Newest first, with "latest" always available.
+message GetLoaderVersionsResponse {
+  repeated string versions = 1;
 }

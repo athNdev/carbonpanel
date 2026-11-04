@@ -864,6 +864,10 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 
 	// Build environment variables
 	env := buildEnvFromConfig(serverConfig)
+	// A pinned loader build lives on the server row, not in the config blob,
+	// because it describes the container's identity the way the Minecraft
+	// version does.
+	env = append(env, loaderVersionEnv(server)...)
 
 	// Determine container port - proxy servers always use default port internally
 	useProxy := c.isProxyServer(server)
@@ -1351,7 +1355,16 @@ func (c *Client) ResolveContainer(ctx context.Context, serverID string) (*contai
 		return nil, fmt.Errorf("resolve container: label lookup failed: %w", err)
 	}
 	if len(listResult.Items) > 0 {
-		return &listResult.Items[0], nil
+		// A container the panel has replaced but not yet removed keeps this
+		// server's labels. It is a rollback artifact, not the server's current
+		// container: returning it lets a recreation adopt the container it was
+		// meant to replace, so the change that triggered the recreation (a new
+		// loader version, image or resource limit) is silently reverted.
+		for i := range listResult.Items {
+			if !isRetainedContainerName(listResult.Items[i].Names) {
+				return &listResult.Items[i], nil
+			}
+		}
 	}
 
 	// Strategy 2: deterministic name fallback
@@ -1610,11 +1623,27 @@ type RecreateContainerResult struct {
 	RepoDigest string
 }
 
+// retainedContainerNamePrefix marks a container the panel has replaced and
+// not yet removed.
+const retainedContainerNamePrefix = "carbon-panel-replaced-"
+
 // retainedContainerName is the side identity a replaced container keeps
 // until the replacement is verified (OSS-230). It is unique per attempt and
 // visible in the daemon so recovery can find the retained artifact.
 func retainedContainerName(serverID string) string {
 	return fmt.Sprintf("carbon-panel-replaced-%s-%d", serverID, time.Now().Unix())
+}
+
+// isRetainedContainerName reports whether any of a container's names is a
+// retained (replaced-but-not-removed) identity. Adoption must never treat one
+// as the server's container.
+func isRetainedContainerName(names []string) bool {
+	for _, name := range names {
+		if strings.HasPrefix(strings.TrimPrefix(name, "/"), retainedContainerNamePrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // RecreateContainer replaces a server's container reversibly (OSS-230). The
@@ -2117,6 +2146,37 @@ func extractCurseForgeFileID(raw string) string {
 }
 
 // Builds Docker environment variables from ServerConfig struct
+// loaderVersionEnv pins the mod loader to an exact build.
+//
+// Each image reads a different variable, so only the loader actually in use
+// gets one: FORGE_VERSION on a Fabric server is ignored by the image and only
+// adds noise to a support bundle. "latest" is dropped rather than passed
+// through, so a server that never pinned follows the loader's current build
+// instead of freezing at whatever "latest" meant when the row was written.
+func loaderVersionEnv(server *models.Server) []string {
+	if server == nil {
+		return nil
+	}
+	version := strings.TrimSpace(server.LoaderVersion)
+	if version == "" || strings.EqualFold(version, "latest") {
+		return nil
+	}
+	var key string
+	switch server.ModLoader {
+	case models.ModLoaderNeoForge:
+		key = "NEOFORGE_VERSION"
+	case models.ModLoaderForge:
+		key = "FORGE_VERSION"
+	case models.ModLoaderFabric:
+		key = "FABRIC_LOADER_VERSION"
+	case models.ModLoaderQuilt:
+		key = "QUILT_LOADER_VERSION"
+	default:
+		return nil
+	}
+	return []string{fmt.Sprintf("%s=%s", key, version)}
+}
+
 func buildEnvFromConfig(config *models.ServerConfig) []string {
 	// Auto-assume CurseForge slug and file ID if CFPageURL is present
 	if config.CFPageURL != nil && *config.CFPageURL != "" {
