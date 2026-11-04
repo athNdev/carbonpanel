@@ -15,6 +15,11 @@ This matrix follows source from customer UI through RPC/HTTP handlers to runtime
 - **Unqualified:** code exists, but the inspected source does not establish the required runtime/data/portability behavior.
 - **Helper/catalog only:** a utility or catalog record exists without a complete observed consumer path; do not count it as a delivered user feature.
 
+This document is checked by `internal/docscheck`: every path a row cites must
+exist, feature IDs must be unique, and each row must carry one of the status
+words above. A renamed package therefore fails `go test ./...` instead of
+leaving a row that still reads as evidence.
+
 Paths below are relative to the OSS repository. UI aliases reduce repetition: **Server page** = `web/carbon-panel/src/routes/servers/[id]/+page.svelte`; **Components** = `web/carbon-panel/src/lib/components/`; **Services** = `internal/rpc/services/`; `routes/` and `lib/` paths are under `web/carbon-panel/src/`. Every future acceptance scenario must include actual source version, selected node identity, initial data, actor permissions, action, result and recovery evidence.
 
 ## Thirty-two feature families
@@ -74,3 +79,26 @@ J07: Upgrade/rollback/reinstall with persistent DB/worlds/backups and an intenti
 
 Source findings here require reproduction at the real caller seam before bug severity or remediation completeness is asserted. The [Docker research](../research/docker-failure-semantics-and-recovery.md) supplies current primary-source behavior and fault-injection proposals.
 
+## Refresh log
+
+### 2026-11-04
+
+Source refreshed to `d30337d9` (plus the merged PRs listed below). No Docker
+daemon, game connection or browser walkthrough was run for this refresh: the
+entries below record what the cited source now does, not a live qualification.
+
+| PR | What changed | Rows whose claim is affected |
+| --- | --- | --- |
+| #308 | A cached Docker client is dropped when a node endpoint generation changes; operations record the endpoint generation and accepted daemon id they observed. | O01, O05 |
+| #297 | A delete records a durable disposition, so a failed data removal stays retryable and a resumed delete does not remove the world twice. | O04, O20 |
+| #300 | Start, stop, restart, recreate, delete, backup, restore and migration share one durable per-server lock; an interrupted attempt stays locked until the daemon is observed. | O04, O05, O17, O18, O20 |
+| #302 | File, log, mod, snapshot and modpack I/O resolve the owning node's mapped storage root; a remote node without reachable storage is refused instead of touching a controller copy. | O08, O10, O11, O13, O14, O15, O18, O20 |
+| #310 | A port lease records protocol and bind address, so TCP and UDP of one number are separate binds and a network mode that does not publish the lease is refused. | O24 |
+| #329 | A resolved container is qualified before the daemon is asked to create it: an unbootable image/runtime combination is refused with a named reason, and weaker-than-default settings are logged. | O02, O06 |
+| #333 | The applied memory, swap, pids and writable-layer limits are reported next to the request; a writable-layer cap is applied only on a writable root and is explicitly not a world quota. | O06 |
+| #334 | `/health/detail` separates process, database, runtime, game and route health; an unobserved or stale layer is never reported as healthy. | O04, O05 |
+| #335 | Module containers are reconciled: a drifted id or status is adopted, a vanished container is recorded as stopped, and a sidecar is only recreated under a running parent. | O26 |
+| #336 | The operation journal is projected to success/failed/unknown with a stable next action and redacted errors, and ships in the support bundle. | O04, O05, O18, O20 |
+
+A row whose claim is affected is not automatically closed. Each still needs the
+listed user-path acceptance evidence, in the deployment profile it names.

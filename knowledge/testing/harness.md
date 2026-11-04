@@ -24,6 +24,11 @@ temporary test store rather than the controller's database file.
 CI runs the suite, the race detector, and a Windows compile pass that builds
 every package without executing the Windows binaries.
 
+`internal/docscheck` is part of the suite. It resolves every code path cited by
+`docs/plans/oss-feature-completeness-matrix.md` and fails when a cited path no
+longer exists, when a feature id repeats, or when a row's status is not one the
+legend defines. A planning claim therefore cannot outlive the code it names.
+
 # Use it when
 
 - A change touches recovery, retries, timeouts or partial failures.
