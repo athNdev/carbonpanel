@@ -30,6 +30,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -787,6 +788,53 @@ func (s *SupportService) addSystemInfoToBundle(ctx context.Context, tarWriter *t
 		return fmt.Errorf("failed to write system info content: %w", err)
 	}
 
+	return nil
+}
+
+// operationBundle is the operations.json payload: the projected journal with
+// the outcome of every recorded mutation and the safe next step.
+type operationBundle struct {
+	Timestamp  string           `json:"timestamp"`
+	Summary    map[string]int   `json:"summary"`
+	Operations []operation.View `json:"operations"`
+}
+
+// addOperationsToBundle records the durable operation journal in the bundle.
+// An uncertain outcome is written as "unknown" rather than folded into success
+// or failure, because that distinction is the point of the journal.
+func (s *SupportService) addOperationsToBundle(ctx context.Context, tarWriter *tar.Writer) error {
+	ops, err := s.store.ListServerOperations(ctx)
+	if err != nil {
+		return fmt.Errorf("list server operations: %w", err)
+	}
+	views := operation.DescribeAll(ops)
+	counts := operation.CountByOutcome(views)
+	summary := make(map[string]int, len(counts))
+	for outcome, n := range counts {
+		summary[string(outcome)] = n
+	}
+	payload := operationBundle{
+		Timestamp:  time.Now().Format(time.RFC3339),
+		Summary:    summary,
+		Operations: views,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal operations: %w", err)
+	}
+
+	header := &tar.Header{
+		Name:    "operations.json",
+		Size:    int64(len(data)),
+		Mode:    0644,
+		ModTime: time.Now(),
+	}
+	if err := tarWriter.WriteHeader(header); err != nil {
+		return fmt.Errorf("write operations header: %w", err)
+	}
+	if _, err := tarWriter.Write(data); err != nil {
+		return fmt.Errorf("write operations content: %w", err)
+	}
 	return nil
 }
 
