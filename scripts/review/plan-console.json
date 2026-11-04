@@ -1,0 +1,96 @@
+{
+	"name": "console-smoke",
+	"title": "Console smoke: login, server detail, lifecycle journal",
+	"viewport": {
+		"width": 1440,
+		"height": 900
+	},
+	"bootstrap": {
+		"path": "/login",
+		"detectSelector": "input[placeholder=\"Enter your username\"]",
+		"usernameSelector": "input[placeholder=\"Choose admin username\"]",
+		"passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
+		"confirmSelector": "input[placeholder=\"Confirm your password\"]",
+		"submitSelector": "button[type=\"submit\"]",
+		"successSelector": "a[href^=\"/servers/\"]"
+	},
+	"login": {
+		"path": "/login",
+		"usernameSelector": "input[placeholder=\"Enter your username\"]",
+		"passwordSelector": "input[placeholder=\"Enter your password\"]",
+		"submitSelector": "button[type=\"submit\"]",
+		"successSelector": "a[href^=\"/servers/\"]"
+	},
+	"steps": [
+		{
+			"goto": "/servers",
+			"waitFor": "a[href^=\"/servers/\"]",
+			"name": "server list loads"
+		},
+		{
+			"screenshot": "01-server-list"
+		},
+		{
+			"click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
+			"name": "open first server"
+		},
+		{
+			"waitFor": "[role=\"tab\"]",
+			"name": "server detail tabs render"
+		},
+		{
+			"assertNoScrollbar": ".scroll-strip",
+			"name": "tab strip has no scrollbar"
+		},
+		{
+			"screenshot": "02-server-overview"
+		},
+		{
+			"click": "[role=\"tab\"]:has-text(\"Activity\")",
+			"name": "open Activity tab"
+		},
+		{
+			"waitFor": "text=Lifecycle operations",
+			"name": "lifecycle journal panel present"
+		},
+		{
+			"assertVisible": "table[aria-label=\"Lifecycle operation journal\"]",
+			"name": "journal table renders"
+		},
+		{
+			"screenshot": "03-activity-journal"
+		},
+		{
+			"click": "[role=\"tab\"]:has-text(\"Console\")",
+			"name": "open Console tab"
+		},
+		{
+			"waitFor": "text=Console",
+			"name": "console tab renders"
+		},
+		{
+			"screenshot": "04-console"
+		},
+		{
+			"click": "[role=\"tab\"]:has-text(\"Datapacks\")",
+			"name": "open Datapacks tab"
+		},
+		{
+			"screenshot": "05-datapacks"
+		},
+		{
+			"click": "[role=\"tab\"]:has-text(\"Mods\")",
+			"name": "open Mods tab"
+		},
+		{
+			"screenshot": "06-mods"
+		},
+		{
+			"click": "[role=\"tab\"]:has-text(\"Backups\")",
+			"name": "open Backups tab"
+		},
+		{
+			"screenshot": "07-backups"
+		}
+	]
+}

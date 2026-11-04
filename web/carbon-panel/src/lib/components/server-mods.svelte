@@ -97,6 +97,14 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	async function loadMods() {
+		// A vanilla server has no mods directory, and asking for one returns an
+		// error the RPC interceptor turns into a toast - on a tab that already
+		// explains the server cannot take mods. Do not make the call.
+		if (!canHaveMods()) {
+			mods = [];
+			loading = false;
+			return;
+		}
 		try {
 			loading = true;
 			const response = await rpcClient.mod.listMods({ serverId: server.id });
