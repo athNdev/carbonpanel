@@ -16,6 +16,6 @@ func hostMounts() ([]mountEntry, bool) {
 	if err != nil {
 		return nil, false
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	return parseMountinfo(file), true
 }
