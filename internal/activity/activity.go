@@ -25,6 +25,7 @@ const (
 	EventServerUpdate              = "server.update"
 	EventServerImage               = "server.image"
 	EventServerDelete              = "server.delete"
+	EventServerExport              = "server.export"
 	EventServerPrivilegedOverrides = "server.privileged_overrides"
 )
 
