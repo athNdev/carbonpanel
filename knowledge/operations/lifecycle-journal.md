@@ -53,6 +53,17 @@ behind an operation lock.
   gone. It must refuse a server that still exists, and it must not stop a
   container or delete world files.
 - Finished journal rows may be deleted after 30 days. An active lock may not.
+- Diagnostics project the journal, never the raw row. `operation.Describe` maps
+  the durable phase to three outcomes — success, failed, or unknown — and to a
+  stable next action: `retry_with_new_request_id` after a failure (the same key
+  is refused), `resolve_operation` for an attempt that started but never
+  finished, `wait` while it is still expected to finish. An unknown outcome is
+  never reported as success or failure; the external effect may or may not have
+  happened.
+- Credentials in recorded error text are redacted before it reaches a
+  diagnostic. Hosts, paths and daemon messages stay: they are the evidence.
+- The support bundle carries `operations.json` with that projection, so a
+  bundle can explain a stuck server without the Docker socket.
 
 # Read next
 
