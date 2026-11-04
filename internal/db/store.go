@@ -1629,6 +1629,13 @@ func (s *Store) UpdateModule(ctx context.Context, module *Module) error {
 
 // UpdateModuleContainerID updates only the container_id column for a module,
 // avoiding the full-row clobber that UpdateModule's Save performs.
+// UpdateModuleStatus is a targeted column update. Reconciliation must never
+// write a whole module row: another subsystem may be writing ContainerID at
+// the same time.
+func (s *Store) UpdateModuleStatus(ctx context.Context, id string, status ModuleStatus) error {
+	return s.db.WithContext(ctx).Model(&Module{}).Where("id = ?", id).Update("status", status).Error
+}
+
 func (s *Store) UpdateModuleContainerID(ctx context.Context, id string, containerID string) error {
 	return s.db.WithContext(ctx).Model(&Module{}).Where("id = ?", id).Update("container_id", containerID).Error
 }

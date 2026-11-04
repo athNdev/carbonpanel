@@ -91,6 +91,19 @@ type ClientResolver interface {
 	GetClientStrict(nodeID string) (Client, error)
 }
 
+// ModuleReconciler converges one module container with its record. The module
+// manager implements it; the reconciler only schedules the pass, so a module
+// keeps its own templates, hooks and dependency rules.
+type ModuleReconciler interface {
+	ReconcileModule(ctx context.Context, moduleID string) (string, error)
+}
+
+// ModuleStore is the module listing the sweep needs. It is optional: a store
+// that does not implement it simply skips the module sweep.
+type ModuleStore interface {
+	ListModules(ctx context.Context) ([]*db.Module, error)
+}
+
 // ProxyRouter re-points a server's proxy route at its current backend.
 type ProxyRouter interface {
 	UpdateServerRoute(server *db.Server) error
@@ -152,8 +165,14 @@ type Reconciler struct {
 	cfg Config
 	deb *debouncer
 
-	work   chan string
-	queued map[string]bool
+	// modules converges module containers. It is nil when the panel runs
+	// without the module system, which disables the module pass entirely.
+	modules ModuleReconciler
+
+	work        chan string
+	queued      map[string]bool
+	moduleWork  chan string
+	moduleQueue map[string]bool
 	// backends remembers the last container ID + IP pushed to the proxy per
 	// server, so route updates are driven by real backend moves rather than
 	// being issued on every pass.
@@ -191,9 +210,20 @@ func New(store Store, clients ClientResolver, proxy ProxyRouter, bus EventEmitte
 		deb:         newDebouncer(cfg.DebounceWindow),
 		work:        make(chan string, workQueueDepth),
 		queued:      make(map[string]bool),
+		moduleWork:  make(chan string, workQueueDepth),
+		moduleQueue: make(map[string]bool),
 		backends:    make(map[string]backendRef),
 		stop:        make(chan struct{}),
 	}
+}
+
+// SetModuleReconciler enables convergence of module containers. It must be
+// called before Start.
+func (r *Reconciler) SetModuleReconciler(modules ModuleReconciler) {
+	if r == nil {
+		return
+	}
+	r.modules = modules
 }
 
 // Start launches the worker pool, consumes the supervisor's merged event stream
@@ -217,6 +247,11 @@ func (r *Reconciler) Start(ctx context.Context, eventStream <-chan ContainerEven
 	if eventStream != nil {
 		r.wg.Add(1)
 		go r.consume(eventStream)
+	}
+
+	if r.modules != nil {
+		r.wg.Add(1)
+		go r.moduleWorker()
 	}
 
 	r.wg.Add(1)
@@ -274,6 +309,76 @@ func (r *Reconciler) push(serverID string) {
 	}
 }
 
+// requestModule schedules a convergence pass for one module.
+func (r *Reconciler) requestModule(moduleID string) {
+	if moduleID == "" || r.modules == nil {
+		return
+	}
+	r.deb.enqueue("module:"+moduleID, func() { r.pushModule(moduleID) })
+}
+
+// pushModule hands a module ID to the module worker, dropping duplicates that
+// are already queued.
+func (r *Reconciler) pushModule(moduleID string) {
+	r.mu.Lock()
+	ctx := r.ctx
+	if r.moduleQueue[moduleID] {
+		r.mu.Unlock()
+		return
+	}
+	r.moduleQueue[moduleID] = true
+	r.mu.Unlock()
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	select {
+	case r.moduleWork <- moduleID:
+	case <-ctx.Done():
+	case <-r.stop:
+	}
+}
+
+// moduleWorker converges queued modules one at a time. Module passes are cheap
+// relative to server passes and serialising them keeps a burst of sidecar
+// events from racing the same parent's hooks.
+func (r *Reconciler) moduleWorker() {
+	defer r.wg.Done()
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case <-r.stop:
+			return
+		case moduleID := <-r.moduleWork:
+			r.mu.Lock()
+			delete(r.moduleQueue, moduleID)
+			r.mu.Unlock()
+			r.safeReconcileModule(moduleID)
+		}
+	}
+}
+
+// safeReconcileModule isolates a module pass so a panic cannot take down the
+// worker.
+func (r *Reconciler) safeReconcileModule(moduleID string) {
+	defer func() {
+		if rec := recover(); rec != nil && r.log != nil {
+			r.log.Error("reconciler: panic while reconciling module %s: %v", moduleID, rec)
+		}
+	}()
+
+	outcome, err := r.modules.ReconcileModule(r.ctx, moduleID)
+	if err != nil && r.log != nil {
+		r.log.Error("reconciler: module %s convergence failed: %v", moduleID, err)
+		return
+	}
+	if outcome != "" && outcome != "in_sync" && r.log != nil {
+		r.log.Info("reconciler: module %s converged: %s", moduleID, outcome)
+	}
+}
+
 func (r *Reconciler) clearQueued(serverID string) {
 	r.mu.Lock()
 	delete(r.queued, serverID)
@@ -294,8 +399,12 @@ func (r *Reconciler) consume(eventStream <-chan ContainerEvent) {
 			if !ok {
 				return
 			}
-			// Module containers are not yet reconciled by this engine; only
-			// server lifecycle events schedule a pass.
+			// A module container has its own record and its own pass; a server
+			// event never schedules a module pass and vice versa.
+			if ev.ModuleID != "" {
+				r.requestModule(ev.ModuleID)
+				continue
+			}
 			if ev.ServerID != "" {
 				r.request(ev.ServerID)
 			}
@@ -339,6 +448,30 @@ func (r *Reconciler) enqueueAll(ctx context.Context) {
 			continue
 		}
 		r.request(s.ID)
+	}
+
+	// The same sweep covers module containers. A module without a recorded
+	// container has nothing to converge, and a module system that is disabled
+	// leaves r.modules nil, which requestModule ignores.
+	if r.modules == nil {
+		return
+	}
+	moduleStore, ok := r.store.(ModuleStore)
+	if !ok {
+		return
+	}
+	modules, err := moduleStore.ListModules(ctx)
+	if err != nil {
+		if r.log != nil {
+			r.log.Error("reconciler: failed to list modules for sweep: %v", err)
+		}
+		return
+	}
+	for _, m := range modules {
+		if m == nil || m.ContainerID == "" {
+			continue
+		}
+		r.requestModule(m.ID)
 	}
 }
 
