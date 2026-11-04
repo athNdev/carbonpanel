@@ -65,6 +65,17 @@ container moved to the new image. A cached image whose OS or CPU
 architecture differs from the daemon is pulled once; if it still does
 not match, creation stops before a container is made from it.
 
+# Runtime profile
+
+Before the daemon is asked to create a container, `docker.PreflightRuntime`
+describes the request that was actually resolved: the user the container runs
+as, whether the root is read-only, the writable paths, the capability set, the
+tmpfs mounts and the network mode. A fatal finding refuses the create with
+`ErrRuntimeIncompatible` and a named reason, so an unsupported image, mount or
+override fails before it replaces a working container. A warning is logged and
+does not block. The rules and their remedies live in
+`internal/docker/runtime_profile.go`.
+
 # How to check
 
 ```sh

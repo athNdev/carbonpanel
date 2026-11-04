@@ -1010,6 +1010,20 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	ApplyOverrides(server.DockerOverrides, config, hostConfig)
 	applyServerRootfs(hostConfig, config, server.DockerOverrides)
 
+	// Qualify the fully-resolved configuration before the daemon is asked to
+	// create anything. An unsupported image/runtime combination must fail here
+	// with a specific reason instead of boot-looping in the container or
+	// replacing a container that was working.
+	profile := DescribeRuntime(runtimeSpecFor(imageName, dataPath, server, config, hostConfig))
+	for _, issue := range profile.Issues {
+		if issue.Severity == RuntimeWarning {
+			c.log.Warn("Runtime compatibility for server %s: %v", server.ID, issue)
+		}
+	}
+	if err := PreflightProfile(profile); err != nil {
+		return "", err
+	}
+
 	// Network configuration
 	networkConfig := &network.NetworkingConfig{}
 	if c.config.NetworkName != "" && hostConfig.NetworkMode == "" {
