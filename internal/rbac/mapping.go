@@ -201,6 +201,15 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// ── ActivityService ─────────────────────────────────────────────
 	"/carbonpanel.v1.ActivityService/ListActivityLogs": {Resource: ResourceActivity, Action: ActionRead, ObjectIDField: "server_id"},
 
+	// ── OperationService (OSS-245) ──────────────────────────────────
+	// Every call is scoped to a server, so a scoped grant can read one
+	// server's journal without gaining access to the whole panel. An empty
+	// server_id becomes "*" in the interceptor, which only an unscoped grant
+	// matches - listing every server's operations stays an admin action.
+	"/carbonpanel.v1.OperationService/ListOperations":   {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.OperationService/GetOperation":     {Resource: ResourceServers, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.OperationService/ResolveOperation": {Resource: ResourceServers, Action: ActionUpdate, ObjectIDField: "server_id"},
+
 	// ── SubuserService ──────────────────────────────────────────────
 	"/carbonpanel.v1.SubuserService/ListSubusers":  {Resource: ResourceSubusers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.SubuserService/SetSubuser":    {Resource: ResourceSubusers, Action: ActionCreate, ObjectIDField: "server_id"},

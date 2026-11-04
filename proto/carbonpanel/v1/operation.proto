@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+
+syntax = "proto3";
+
+package carbonpanel.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
+
+// Lifecycle operation journal (OSS-245).
+//
+// Every Docker mutation that changes a server's lifecycle is journalled before
+// it is attempted, so an interrupted request leaves evidence instead of a
+// server that is silently half-changed. A row that started but never finished
+// is an *unknown* outcome - never a success and never a failure - and each row
+// carries the safe next action an operator or the UI can offer.
+service OperationService {
+  // List lifecycle operations for one server, newest first.
+  // An empty server_id lists every server and requires an unscoped grant.
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
+  // Get one lifecycle operation. The server_id must own the operation; a
+  // mismatch is refused rather than ignored.
+  rpc GetOperation(GetOperationRequest) returns (GetOperationResponse);
+  // Release a lifecycle lock without touching containers, files or worlds.
+  rpc ResolveOperation(ResolveOperationRequest) returns (ResolveOperationResponse);
+}
+
+// One journalled lifecycle operation, already projected and redacted.
+message LifecycleOperation {
+  string id = 1;
+  string server_id = 2;
+  // The mutation that was attempted, e.g. "start", "stop", "delete", "migrate".
+  string kind = 3;
+  // The recorded durable phase: prepared, executing, complete, failed, recovered.
+  string phase = 4;
+  // success, failed, running or unknown. An uncertain effect is "unknown".
+  string outcome = 5;
+  // none, wait, resolve_operation, retry_with_new_request_id, contact_operator.
+  string next_action = 6;
+  // Human-readable explanation of the outcome, safe to display verbatim.
+  string reason = 7;
+  // Whether this operation still holds the server's lifecycle lock.
+  bool holds_lock = 8;
+  // Whether a container id was recorded, i.e. the mutation reached Docker.
+  bool has_container = 9;
+  // The node endpoint generation the mutation was issued against, so a
+  // reconnect can be told apart from a slow mutation.
+  int64 endpoint_generation = 10;
+  // Recorded error text with credentials removed. Hosts, paths and daemon
+  // messages are kept: they are the evidence.
+  string last_error = 11;
+  google.protobuf.Timestamp started_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+// List query. All filters are optional.
+message ListOperationsRequest {
+  // Server to scope to. Empty: every server (requires an unscoped grant).
+  string server_id = 1;
+  // Restrict to one outcome: success, failed, running or unknown.
+  string outcome = 2;
+  // Maximum rows, newest first. 0 uses the server default.
+  int32 limit = 3;
+}
+
+// Rows newest first, with counts so a caller can summarise without a second call.
+message ListOperationsResponse {
+  repeated LifecycleOperation operations = 1;
+  // Counts by outcome over the rows that were returned, so the UI can show
+  // "3 need attention" without a second call.
+  map<string, int32> counts_by_outcome = 2;
+}
+
+// Identify one operation by its server and id.
+message GetOperationRequest {
+  string server_id = 1;
+  string operation_id = 2;
+}
+
+// The requested operation.
+message GetOperationResponse {
+  LifecycleOperation operation = 1;
+}
+
+// Release a lifecycle lock. Records the operator note on the row.
+message ResolveOperationRequest {
+  string server_id = 1;
+  string operation_id = 2;
+  // Operator note recorded on the row. Defaults to a fixed sentence.
+  string note = 3;
+}
+
+// The operation after the lock was released.
+message ResolveOperationResponse {
+  LifecycleOperation operation = 1;
+}

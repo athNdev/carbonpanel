@@ -23,7 +23,8 @@ const (
 	OutcomeSuccess Outcome = "success"
 	// OutcomeFailed means the mutation returned an error and was recorded.
 	OutcomeFailed Outcome = "failed"
-	// OutcomeRunning means the mutation is still being attempted.
+	// OutcomeRunning means the mutation is still being attempted. It is the
+	// only outcome that may still turn into a success or a failure on its own.
 	OutcomeRunning Outcome = "running"
 	// OutcomeUnknown means the intent was recorded but no completion or
 	// failure was. The external effect may or may not have happened.
@@ -38,7 +39,7 @@ type NextAction string
 const (
 	// ActionNone means nothing is required.
 	ActionNone NextAction = "none"
-	// ActionWait means the operation is still running; wait for it to finish.
+	// ActionWait means the operation is still in flight; wait for it.
 	ActionWait NextAction = "wait"
 	// ActionResolve means the process that owned the operation is gone. Startup
 	// recovery observes the container before releasing the lock; an operator can
@@ -51,9 +52,25 @@ const (
 	ActionContactOperator NextAction = "contact_operator"
 )
 
+// ExecutionStaleAfter is how long an executing operation may stay unchanged
+// before it stops being "in flight" and becomes an unknown outcome. A mutation
+// that has not recorded a completion by then may still be running, but the
+// panel can no longer tell, and an operator needs the escape hatch.
+const ExecutionStaleAfter = 2 * time.Minute
+
+// ValidOutcome reports whether name is one this package produces. It exists so
+// an RPC filter cannot silently match nothing because of a typo.
+func ValidOutcome(name string) bool {
+	switch Outcome(name) {
+	case OutcomeSuccess, OutcomeFailed, OutcomeRunning, OutcomeUnknown:
+		return true
+	}
+	return false
+}
+
 // View is the safe, redacted projection of one journal row. It carries what an
-// operator needs to tell the three outcomes apart and to pick a next step; it
-// never carries credentials or a Docker host.
+// operator needs to tell the outcomes apart and to pick a next step; it never
+// carries credentials or a Docker host.
 type View struct {
 	ID                 string     `json:"id"`
 	ServerID           string     `json:"serverId"`
@@ -64,17 +81,26 @@ type View struct {
 	Reason             string     `json:"reason"`
 	EndpointGeneration int64      `json:"endpointGeneration"`
 	HasContainer       bool       `json:"hasContainer"`
+	HoldsLock          bool       `json:"holdsLock"`
 	LastError          string     `json:"lastError,omitempty"`
 	StartedAt          time.Time  `json:"startedAt"`
 	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
-// Describe projects a journal row for diagnostics.
+// Describe projects a journal row for diagnostics, judged against the wall
+// clock. Prefer DescribeAt where the caller already has a time.
 func Describe(op *db.ServerOperation) View {
+	return DescribeAt(op, time.Now())
+}
+
+// DescribeAt projects a journal row as it should be read at now. Whether an
+// operation is still in flight depends on when it was last advanced, so the
+// clock is a parameter instead of a hidden dependency.
+func DescribeAt(op *db.ServerOperation, now time.Time) View {
 	if op == nil {
 		return View{}
 	}
-	outcome, action, reason := classify(op)
+	outcome, action, reason := classify(op, now)
 	return View{
 		ID:                 op.ID,
 		ServerID:           op.ServerID,
@@ -85,6 +111,7 @@ func Describe(op *db.ServerOperation) View {
 		Reason:             reason,
 		EndpointGeneration: op.EndpointGeneration,
 		HasContainer:       op.ContainerID != "",
+		HoldsLock:          op.ActiveServer != nil,
 		LastError:          RedactError(op.LastError),
 		StartedAt:          op.CreatedAt,
 		UpdatedAt:          op.UpdatedAt,
@@ -93,27 +120,52 @@ func Describe(op *db.ServerOperation) View {
 
 // DescribeAll projects every row, preserving order.
 func DescribeAll(ops []db.ServerOperation) []View {
+	return DescribeAllAt(ops, time.Now())
+}
+
+// DescribeAllAt projects every row at one instant, so a list never shows two
+// rows judged by clocks that disagree.
+func DescribeAllAt(ops []db.ServerOperation, now time.Time) []View {
 	views := make([]View, 0, len(ops))
 	for i := range ops {
-		views = append(views, Describe(&ops[i]))
+		views = append(views, DescribeAt(&ops[i], now))
 	}
 	return views
 }
 
 // classify maps the durable phase to an outcome and the action that follows.
-func classify(op *db.ServerOperation) (Outcome, NextAction, string) {
+func classify(op *db.ServerOperation, now time.Time) (Outcome, NextAction, string) {
 	switch op.Phase {
 	case db.ServerOperationComplete:
 		return OutcomeSuccess, ActionNone, "the operation completed and was recorded"
 	case db.ServerOperationFailed:
 		return OutcomeFailed, ActionRetryNewRequestID, "the attempt failed; the same request id is refused, so retry with a new one"
+	case db.ServerOperationRecovered:
+		return OutcomeUnknown, ActionNone, "the lifecycle lock was released without confirming the result; the container was observed at startup or an operator resolved it"
 	case db.ServerOperationPrepared:
 		return OutcomeUnknown, ActionWait, "the intent was recorded but the attempt had not started; the effect did not happen yet"
 	case db.ServerOperationExecuting:
+		if inFlight(op.UpdatedAt, now) {
+			return OutcomeRunning, ActionWait, "the mutation is still being attempted; wait for it to finish"
+		}
 		return OutcomeUnknown, ActionResolve, "the attempt started but no completion was recorded; the external effect is unknown until it is observed"
 	default:
 		return OutcomeUnknown, ActionContactOperator, "the recorded phase is not one this panel recognises"
 	}
+}
+
+// inFlight reports whether a row advanced at updatedAt could still be owned by
+// a live process. A timestamp in the future counts as live: it means the clock
+// moved, not that the operation is abandoned.
+func inFlight(updatedAt, now time.Time) bool {
+	if updatedAt.IsZero() {
+		return false
+	}
+	age := now.Sub(updatedAt)
+	if age < 0 {
+		return true
+	}
+	return age <= ExecutionStaleAfter
 }
 
 // credentialURL matches a scheme://user:password@host prefix, which is the only

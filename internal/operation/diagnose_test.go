@@ -24,7 +24,11 @@ func op(phase string) *db.ServerOperation {
 	}
 }
 
-func TestDescribeSeparatesTheThreeOutcomes(t *testing.T) {
+// atRow is the instant just after the fixture row was last advanced, so the
+// table below exercises the "still in flight" branch deliberately.
+var atRow = time.Date(2026, 11, 4, 10, 1, 30, 0, time.UTC)
+
+func TestDescribeSeparatesTheOutcomes(t *testing.T) {
 	cases := []struct {
 		phase  string
 		state  Outcome
@@ -32,13 +36,14 @@ func TestDescribeSeparatesTheThreeOutcomes(t *testing.T) {
 	}{
 		{db.ServerOperationComplete, OutcomeSuccess, ActionNone},
 		{db.ServerOperationFailed, OutcomeFailed, ActionRetryNewRequestID},
-		{db.ServerOperationExecuting, OutcomeUnknown, ActionResolve},
+		{db.ServerOperationRecovered, OutcomeUnknown, ActionNone},
+		{db.ServerOperationExecuting, OutcomeRunning, ActionWait},
 		{db.ServerOperationPrepared, OutcomeUnknown, ActionWait},
 		{"something-new", OutcomeUnknown, ActionContactOperator},
 	}
 	for _, tc := range cases {
 		t.Run(tc.phase, func(t *testing.T) {
-			view := Describe(op(tc.phase))
+			view := DescribeAt(op(tc.phase), atRow)
 			if view.Outcome != tc.state {
 				t.Errorf("outcome = %s, want %s", view.Outcome, tc.state)
 			}
@@ -52,11 +57,64 @@ func TestDescribeSeparatesTheThreeOutcomes(t *testing.T) {
 	}
 }
 
+func TestAStaleExecutingOperationBecomesUnknownWithAnEscapeHatch(t *testing.T) {
+	o := op(db.ServerOperationExecuting)
+	view := DescribeAt(o, o.UpdatedAt.Add(ExecutionStaleAfter+time.Second))
+
+	if view.Outcome != OutcomeUnknown {
+		t.Fatalf("outcome = %s, want unknown once the attempt stops reporting", view.Outcome)
+	}
+	if view.NextAction != ActionResolve {
+		t.Fatalf("next action = %s, want resolve_operation", view.NextAction)
+	}
+	if view.HoldsLock != (o.ActiveServer != nil) {
+		t.Errorf("holds lock = %v, want %v", view.HoldsLock, o.ActiveServer != nil)
+	}
+}
+
+func TestAnExecutingOperationInsideTheWindowIsRunning(t *testing.T) {
+	o := op(db.ServerOperationExecuting)
+	view := DescribeAt(o, o.UpdatedAt.Add(ExecutionStaleAfter))
+
+	if view.Outcome != OutcomeRunning {
+		t.Fatalf("outcome = %s, want running at the edge of the window", view.Outcome)
+	}
+	if view.NextAction != ActionWait {
+		t.Fatalf("next action = %s, want wait", view.NextAction)
+	}
+}
+
+func TestAFutureTimestampIsNotMistakenForAnAbandonedOperation(t *testing.T) {
+	// A clock that jumped backwards must not turn a live mutation into an
+	// orphaned one: acting on "resolve" while the panel is mid-call is the
+	// dangerous direction.
+	o := op(db.ServerOperationExecuting)
+	view := DescribeAt(o, o.UpdatedAt.Add(-time.Hour))
+
+	if view.Outcome != OutcomeRunning {
+		t.Fatalf("outcome = %s, want running for a row stamped in the future", view.Outcome)
+	}
+}
+
+func TestARecoveredRowIsSettledNotUnrecognised(t *testing.T) {
+	view := DescribeAt(op(db.ServerOperationRecovered), atRow)
+	if view.NextAction != ActionNone {
+		t.Fatalf("next action = %s, want none: a released lock needs no action", view.NextAction)
+	}
+	if strings.Contains(view.Reason, "not one this panel recognises") {
+		t.Fatalf("recovered reported as an unknown phase: %s", view.Reason)
+	}
+}
+
 func TestAnUncertainOutcomeIsNotReportedAsFailureOrSuccess(t *testing.T) {
-	for _, phase := range []string{db.ServerOperationPrepared, db.ServerOperationExecuting} {
-		view := Describe(op(phase))
+	for _, phase := range []string{
+		db.ServerOperationPrepared,
+		db.ServerOperationExecuting,
+		db.ServerOperationRecovered,
+	} {
+		view := DescribeAt(op(phase), atRow)
 		if view.Outcome == OutcomeSuccess || view.Outcome == OutcomeFailed {
-			t.Fatalf("phase %s reported as %s, want unknown", phase, view.Outcome)
+			t.Fatalf("phase %s reported as %s, want unknown or running", phase, view.Outcome)
 		}
 	}
 }
@@ -66,7 +124,7 @@ func TestDescribeCarriesTheEvidenceAnOperatorNeeds(t *testing.T) {
 	o.EndpointGeneration = 7
 	o.ContainerID = "container-1"
 	o.LastError = "daemon did not answer"
-	view := Describe(o)
+	view := DescribeAt(o, atRow)
 
 	if view.ID != "op-1" || view.ServerID != "srv-1" || view.Kind != "backup" {
 		t.Errorf("identity lost: %+v", view)
@@ -76,6 +134,9 @@ func TestDescribeCarriesTheEvidenceAnOperatorNeeds(t *testing.T) {
 	}
 	if !view.HasContainer {
 		t.Error("HasContainer = false, want true")
+	}
+	if view.HoldsLock {
+		t.Error("HoldsLock = true, want false for a row without an active lock")
 	}
 	if view.StartedAt.IsZero() || view.UpdatedAt.IsZero() {
 		t.Error("timestamps lost")
@@ -116,17 +177,30 @@ func TestDescribeAllAndCountByOutcome(t *testing.T) {
 		*op(db.ServerOperationExecuting),
 		*op(db.ServerOperationExecuting),
 	}
-	views := DescribeAll(ops)
+	views := DescribeAllAt(ops, atRow)
 
 	if len(views) != 4 {
 		t.Fatalf("views = %d, want 4", len(views))
 	}
 	counts := CountByOutcome(views)
-	if counts[OutcomeSuccess] != 1 || counts[OutcomeFailed] != 1 || counts[OutcomeUnknown] != 2 {
-		t.Fatalf("counts = %+v, want 1 success, 1 failed, 2 unknown", counts)
+	if counts[OutcomeSuccess] != 1 || counts[OutcomeFailed] != 1 || counts[OutcomeRunning] != 2 {
+		t.Fatalf("counts = %+v, want 1 success, 1 failed, 2 running", counts)
 	}
-	if got := len(FilterOutcome(views, OutcomeUnknown)); got != 2 {
-		t.Errorf("unknown views = %d, want 2", got)
+	if got := len(FilterOutcome(views, OutcomeRunning)); got != 2 {
+		t.Errorf("running views = %d, want 2", got)
+	}
+}
+
+func TestValidOutcomeRejectsAnUnknownFilter(t *testing.T) {
+	for _, ok := range []string{"", "success", "failed", "running", "unknown"} {
+		if !ValidOutcome(ok) && ok != "" {
+			t.Errorf("ValidOutcome(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"done", "SUCCESS", "pending"} {
+		if ValidOutcome(bad) {
+			t.Errorf("ValidOutcome(%q) = true, want false", bad)
+		}
 	}
 }
 

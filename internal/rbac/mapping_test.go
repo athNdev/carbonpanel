@@ -35,6 +35,12 @@ var procedureServiceNames = []string{
 	carbonpanelv1connect.TaskServiceName,
 	carbonpanelv1connect.UploadServiceName,
 	carbonpanelv1connect.UserServiceName,
+	carbonpanelv1connect.ActivityServiceName,
+	carbonpanelv1connect.BackupServiceName,
+	carbonpanelv1connect.BlueprintServiceName,
+	carbonpanelv1connect.DatapackServiceName,
+	carbonpanelv1connect.OperationServiceName,
+	carbonpanelv1connect.SubuserServiceName,
 }
 
 // TestEveryProcedureAppearsInExactlyOneMap is the CI gate that keeps the

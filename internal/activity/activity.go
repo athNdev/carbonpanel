@@ -27,6 +27,7 @@ const (
 	EventServerDelete              = "server.delete"
 	EventServerExport              = "server.export"
 	EventServerPrivilegedOverrides = "server.privileged_overrides"
+	EventServerOperationResolve    = "server.operation.resolve"
 )
 
 // Entry is a single audit record.
