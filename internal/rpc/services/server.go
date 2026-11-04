@@ -1291,9 +1291,15 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		return nil, err
 	}
 
-	// Create data directory
-	if err := os.MkdirAll(server.DataPath, 0755); err != nil {
+	// Create the world on the node's storage. A remote node with no reachable
+	// mount is refused before a controller-local directory can be mistaken for
+	// the world the remote daemon will use.
+	worldRoot, err := dataRootFor(ctx, s.store, server, true)
+	if err != nil {
 		s.capacityMu.Unlock()
+		if nodestorage.IsUnavailable(err) {
+			return nil, connect.NewError(connect.CodeUnavailable, err)
+		}
 		s.log.Error("Failed to create data directory: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server directory"))
 	}
@@ -1339,7 +1345,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			modpackFile, err := s.store.GetIndexedModpackFiles(ctx, msg.ModpackId)
 			if err == nil && len(modpackFile) > 0 {
 				sourcePath := modpackFile[0].DownloadURL
-				destPath := filepath.Join(server.DataPath, "modpack.zip")
+				destPath := filepath.Join(worldRoot, "modpack.zip")
 
 				// Copy the modpack file safely
 				copyErr := func() error {
@@ -2938,6 +2944,17 @@ func (s *ServerService) ListServerPlayers(ctx context.Context, req *connect.Requ
 	}), nil
 }
 
+// serverLatestLog reads logs/latest.log from the owning node's mapped root.
+// A remote node without reachable storage is refused, so a controller-local
+// copy is not uploaded in its place.
+func serverLatestLog(ctx context.Context, store *storage.Store, server *storage.Server) ([]byte, error) {
+	root, err := dataRootFor(ctx, store, server, false)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Join(root, "logs", "latest.log"))
+}
+
 // Reads the server's latest.log and uploads it to mclo.gs
 func (s *ServerService) UploadToMCLogs(ctx context.Context, req *connect.Request[v1.UploadToMCLogsRequest]) (*connect.Response[v1.UploadToMCLogsResponse], error) {
 	server, err := s.store.GetServer(ctx, req.Msg.Id)
@@ -2945,11 +2962,16 @@ func (s *ServerService) UploadToMCLogs(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
-	logPath := filepath.Join(server.DataPath, "logs", "latest.log")
-	content, err := os.ReadFile(logPath)
+	content, err := serverLatestLog(ctx, s.store, server)
+	if nodestorage.IsUnavailable(err) {
+		return nil, connect.NewError(connect.CodeUnavailable, err)
+	}
 	if err != nil {
 		s.log.Error("Failed to read server log file: %v", err)
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("log file not found"))
+		if os.IsNotExist(err) {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("log file not found"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read server log"))
 	}
 
 	if len(content) == 0 {
