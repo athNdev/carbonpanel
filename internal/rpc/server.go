@@ -26,6 +26,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/events"
+	"github.com/athNdev/carbon-panel/internal/health"
 	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/packwiz"
@@ -236,6 +237,7 @@ func (s *Server) setupHandler() {
 	// catch-all, which otherwise answers 200 HTML for any unknown path).
 	mux.HandleFunc("/healthz", handlers.NewHealthHandler(s.startedAt, nil))
 	mux.HandleFunc("/readyz", handlers.NewHealthHandler(s.startedAt, s.dbReady))
+	mux.HandleFunc("/health/detail", handlers.NewLayeredHealthHandler(s.healthSnapshot))
 
 	// Register OIDC HTTP handlers
 	if s.oidcHandler != nil && s.oidcHandler.IsEnabled() {
@@ -653,6 +655,68 @@ func (s *Server) dbReady() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	return sqlDB.PingContext(ctx)
+}
+
+// healthSnapshot observes each layer with a bounded deadline. A layer that
+// cannot be observed is reported as unknown, never as healthy: a green answer
+// must mean evidence, not a missing check.
+func (s *Server) healthSnapshot(ctx context.Context) health.Snapshot {
+	in := health.Input{
+		StartedAt:      s.startedAt,
+		CheckedAt:      time.Now(),
+		StaleAfter:     2 * time.Minute,
+		RunningStatus:  string(storage.StatusRunning),
+		StartingStatus: string(storage.StatusCreating),
+	}
+
+	if err := s.dbReady(); err != nil {
+		in.Database = health.Observation{State: health.StateUnavailable, Detail: err.Error()}
+	} else {
+		in.Database = health.Observation{State: health.StateOK}
+	}
+
+	if s.docker == nil {
+		in.Runtime = health.Observation{State: health.StateUnknown, Detail: "no Docker client is configured"}
+	} else {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		_, err := s.docker.Ping(pingCtx)
+		cancel()
+		if err != nil {
+			in.Runtime = health.Observation{State: health.StateUnavailable, Detail: "the Docker daemon did not answer within 2s: " + err.Error()}
+		} else {
+			in.Runtime = health.Observation{State: health.StateOK}
+		}
+	}
+
+	if s.config != nil && s.config.Proxy.Enabled && s.proxyManager == nil {
+		in.Routes = health.Observation{State: health.StateUnavailable, Detail: "the proxy is enabled but its manager is not running"}
+	} else if s.config != nil && !s.config.Proxy.Enabled {
+		in.Routes = health.Observation{State: health.StateOK, Detail: "the proxy is disabled"}
+	} else {
+		in.Routes = health.Observation{State: health.StateOK}
+	}
+
+	if s.store != nil {
+		servers, err := s.store.ListServers(ctx)
+		if err != nil {
+			// The database layer already reports the failure; do not invent a
+			// game state from a query that did not answer.
+			in.Servers = nil
+			if in.Database.State == health.StateOK {
+				in.Database = health.Observation{State: health.StateDegraded, Detail: "server records could not be listed: " + err.Error()}
+			}
+		} else {
+			for _, server := range servers {
+				in.Servers = append(in.Servers, health.ServerObservation{
+					ID:        server.ID,
+					Status:    string(server.Status),
+					UpdatedAt: server.UpdatedAt,
+				})
+			}
+		}
+	}
+
+	return health.Compute(in)
 }
 
 // Starts log streaming for a container
