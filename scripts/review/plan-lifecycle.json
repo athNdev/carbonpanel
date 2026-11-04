@@ -1,0 +1,98 @@
+{
+	"name": "server-lifecycle",
+	"title": "Live lifecycle: start a real server, watch the journal, stop it",
+	"viewport": {
+		"width": 1440,
+		"height": 900
+	},
+	"bootstrap": {
+		"path": "/login",
+		"detectSelector": "input[placeholder=\"Enter your username\"]",
+		"usernameSelector": "input[placeholder=\"Choose admin username\"]",
+		"passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
+		"confirmSelector": "input[placeholder=\"Confirm your password\"]",
+		"submitSelector": "button[type=\"submit\"]",
+		"successSelector": "a[href^=\"/servers/\"]"
+	},
+	"login": {
+		"path": "/login",
+		"usernameSelector": "input[placeholder=\"Enter your username\"]",
+		"passwordSelector": "input[placeholder=\"Enter your password\"]",
+		"submitSelector": "button[type=\"submit\"]",
+		"successSelector": "a[href^=\"/servers/\"]"
+	},
+	"steps": [
+		{
+			"goto": "/servers",
+			"waitFor": "a[href^=\"/servers/\"]",
+			"name": "server list loads"
+		},
+		{
+			"click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
+			"name": "open first server"
+		},
+		{
+			"waitFor": "text=Container offline",
+			"name": "server is stopped to begin with"
+		},
+		{
+			"click": "button:has-text(\"Start Server\")",
+			"name": "press Start Server"
+		},
+		{
+			"waitFor": "text=Starting server",
+			"timeout": 30000,
+			"name": "status moves to starting"
+		},
+		{
+			"waitFor": "text=Server healthy and processing ticks",
+			"timeout": 300000,
+			"name": "server reaches a healthy running state"
+		},
+		{
+			"screenshot": "10-running"
+		},
+		{
+			"click": "[role=\"tab\"]:has-text(\"Activity\")",
+			"name": "open Activity"
+		},
+		{
+			"waitFor": "table[aria-label=\"Lifecycle operation journal\"]",
+			"name": "journal table present"
+		},
+		{
+			"assertText": "table[aria-label=\"Lifecycle operation journal\"]",
+			"contains": "start",
+			"name": "journal recorded the start"
+		},
+		{
+			"screenshot": "11-journal-after-start"
+		},
+		{
+			"click": "[role=\"tab\"]:has-text(\"Console\")",
+			"name": "open Console"
+		},
+		{
+			"waitFor": "text=Console",
+			"name": "console renders"
+		},
+		{
+			"wait": 2500
+		},
+		{
+			"screenshot": "12-console-live"
+		},
+		{
+			"click": "button:has-text(\"Stop\")",
+			"name": "press Stop"
+		},
+		{
+			"waitFor": "text=Container offline",
+			"timeout": 180000,
+			"name": "server stops cleanly"
+		},
+		{
+			"screenshot": "13-stopped"
+		}
+	]
+}
