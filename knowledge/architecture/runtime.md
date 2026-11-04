@@ -83,8 +83,12 @@ Startup refuses the mapping rather than degrading:
   `no write permission on the mount dir`;
 - a tmpfs data directory, which is discarded with the container.
 
-Detection is best-effort so a restricted Docker socket proxy does not stop the
-panel booting. When the mount table cannot be read, the deprecated
+Detection prefers the daemon's view of the panel's own container. A
+host-networked container has no container to inspect — its hostname is the
+machine name — so the panel also reads the kernel mount table, where the source
+path of a bind mount is recorded. That path is the host directory. Detection is
+best-effort so a restricted Docker socket proxy does not stop the panel
+booting. When the mount table cannot be read, the deprecated
 `CARBONPANEL_HOST_DATA_PATH` is used if set, and otherwise paths are used
 as-is. `CARBONPANEL_DATA_DIR` is not configuration: `storage.data_dir` is the
 source of truth.

@@ -182,32 +182,50 @@ func Resolve(ctx context.Context, insp Inspector, dirs Dirs) (Mapping, error) {
 	}
 
 	mounts, err := insp.SelfMounts(ctx)
-	if err != nil {
-		// The daemon could not tell us about our own container. Fall back to
-		// the override rather than refusing to boot: a socket proxy may not
-		// allow container reads and the panel still works.
-		if override, ok := envOverride(); ok {
-			return mappingFromOverride(dataDir, override)
+
+	// The daemon's view is authoritative when it has one.
+	daemonSawOtherMounts := false
+	if err == nil && len(mounts) > 0 {
+		if mount, ok := coveringMount(mounts, dataDir); ok {
+			return mappingFromMount(dataDir, mount)
 		}
-		identity.Origin = "mount table unavailable: " + err.Error()
-		return identity, nil
-	}
-	if len(mounts) == 0 {
-		// Not a container, or the daemon does not know this process.
-		if override, ok := envOverride(); ok {
-			return mappingFromOverride(dataDir, override)
-		}
-		return identity, nil
+		// Our container exists and has mounts, but none of them holds the data
+		// directory. That is definitive on its own.
+		daemonSawOtherMounts = true
 	}
 
-	mount, ok := coveringMount(mounts, dataDir)
-	if !ok {
-		if override, ok := envOverride(); ok {
-			return mappingFromOverride(dataDir, override)
-		}
+	// No usable daemon answer. A host-networked container has no container to
+	// inspect (its hostname is the machine name), and a socket proxy may forbid
+	// container reads. The kernel still records the source path of the bind
+	// mount, so read it there before falling back.
+	if hostDir, ok := persistentHostPath(dirs); ok {
+		return Mapping{
+			ContainerDir: dataDir,
+			HostDir:      hostDir,
+			Translated:   path.Clean(dataDir) != path.Clean(hostDir),
+			Origin:       "container mount table",
+		}, nil
+	}
+
+	if override, ok := envOverride(); ok {
+		return mappingFromOverride(dataDir, override)
+	}
+
+	// The mount table is readable and the data directory is not on it: refuse,
+	// rather than let a world be written into the container layer.
+	if covered, known := containerMountCoverage(dataDir); daemonSawOtherMounts || (known && !covered) {
 		return Mapping{}, &NotMountedError{Dir: dataDir, Setting: "storage.data_dir"}
 	}
 
+	if err != nil {
+		identity.Origin = "mount table unavailable: " + err.Error()
+	}
+	return identity, nil
+}
+
+// mappingFromMount turns one daemon-reported mount into a mapping, refusing a
+// mount that cannot hold a world.
+func mappingFromMount(dataDir string, mount Mount) (Mapping, error) {
 	if !mount.RW {
 		return Mapping{}, fmt.Errorf(
 			"the volume mounted at %s is read-only: the panel cannot create a world there (no write permission on the mount dir)", dataDir)
@@ -216,7 +234,6 @@ func Resolve(ctx context.Context, insp Inspector, dirs Dirs) (Mapping, error) {
 		return Mapping{}, fmt.Errorf(
 			"the data directory %s is a tmpfs mount, which is discarded with the container; mount a host directory instead", dataDir)
 	}
-
 	if strings.TrimSpace(mount.Source) == "" {
 		return Mapping{}, fmt.Errorf("the mount at %s has no host source (mount path should be absolute)", dataDir)
 	}
