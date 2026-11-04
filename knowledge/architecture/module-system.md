@@ -32,6 +32,21 @@ describe a server's desired configuration.
 - Verify checksums before declaring a modpack delivered.
 - A hook failure must be attributable to the module and the server.
 
+# Convergence
+
+Module containers are reconciled by the same level-triggered engine as server
+containers. A module event schedules a module pass, and the periodic sweep also
+covers every module that has a container. The pass adopts a container id or
+status the daemon disagrees with, records a container that disappeared as
+stopped, and recreates a missing container only when both the module and its
+parent server are meant to be running. A sidecar is never resurrected under a
+stopped server, and an unreachable node leaves the record untouched because a
+daemon that did not answer is not evidence the container is gone.
+
+The decision itself is a pure function in `internal/module/reconcile.go`; the
+reconciler only schedules it, so templates, hooks and dependency ordering stay
+with the module manager.
+
 # Known gap
 
 `internal/module/hooks.go:execInModule` still uses the manager's client

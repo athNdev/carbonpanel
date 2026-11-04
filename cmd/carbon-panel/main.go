@@ -555,6 +555,10 @@ func main() {
 		log,
 		reconciler.Config{},
 	)
+	// Module containers get the same level-triggered convergence as server
+	// containers: an externally removed or recreated sidecar is adopted or
+	// recorded as stopped instead of drifting away from its row.
+	reconcilerEngine.SetModuleReconciler(moduleReconcilerAdapter{manager: moduleManager})
 	reconcilerEngine.Start(reconcileCtx, reconcileEvents)
 	defer func() {
 		stopReconciler()
@@ -629,4 +633,15 @@ func main() {
 	}
 
 	log.Info("Server stopped\n")
+}
+
+// moduleReconcilerAdapter keeps the reconciler free of the module package: the
+// engine schedules a module pass and the manager decides what it means.
+type moduleReconcilerAdapter struct {
+	manager *module.Manager
+}
+
+func (a moduleReconcilerAdapter) ReconcileModule(ctx context.Context, moduleID string) (string, error) {
+	outcome, err := a.manager.ReconcileModule(ctx, moduleID)
+	return string(outcome), err
 }
