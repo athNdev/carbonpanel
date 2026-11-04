@@ -44,8 +44,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/carbon-panel:/app/data
     environment:
-      - CARBONPANEL_DATA_DIR=/app/data
-      - CARBONPANEL_HOST_DATA_PATH=/tmp/carbon-panel
       - TZ=UTC
 
       #  ------------------------------------ AUTH CONFIG STARTS HERE FOR CARBON PANEL + GOOGLE ------------------------------------

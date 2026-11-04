@@ -19,8 +19,6 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
-	pathpkg "path"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -29,6 +27,7 @@ import (
 	"time"
 
 	models "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/hostmount"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -180,27 +179,16 @@ type dockerImagesCache struct {
 
 var dockerCache = &dockerImagesCache{}
 
-// Converts a container-internal path to a host path.
-// When CARBONPANEL_HOST_DATA_PATH is not set (running on host), it returns the path unchanged.
+// TranslateToHostPath converts a path this process sees into the path the
+// Docker daemon understands.
+//
+// The mapping is resolved once at startup from the panel's own container mounts
+// (see internal/hostmount), so no environment variable has to restate the
+// volume mapping. A process that has not resolved one keeps the historical
+// environment fallback; when nothing is configured the path is returned
+// unchanged, which is correct for a panel running directly on the host.
 func TranslateToHostPath(containerPath string) string {
-	hostDataPath := os.Getenv("CARBONPANEL_HOST_DATA_PATH")
-	if hostDataPath == "" {
-		return containerPath
-	}
-	containerDataDir := os.Getenv("CARBONPANEL_DATA_DIR")
-	if containerDataDir == "" {
-		containerDataDir = "/app/data"
-	}
-	containerDataDir = filepath.ToSlash(containerDataDir)
-	dockerContainerPath := filepath.ToSlash(containerPath)
-	containerDataDir = pathpkg.Clean(containerDataDir)
-	dockerContainerPath = pathpkg.Clean(dockerContainerPath)
-	if dockerContainerPath != containerDataDir && !strings.HasPrefix(dockerContainerPath, strings.TrimSuffix(containerDataDir, "/")+"/") {
-		// Path is not under the container data dir, return as-is
-		return containerPath
-	}
-	relPath := strings.TrimPrefix(strings.TrimPrefix(dockerContainerPath, containerDataDir), "/")
-	return filepath.Join(hostDataPath, filepath.FromSlash(relPath))
+	return hostmount.Translate(containerPath)
 }
 
 // bindSource translates a bind source for the daemon this client talks to.
@@ -478,7 +466,60 @@ func (c *Client) Close() error {
 	return c.docker.Close()
 }
 
-// Get the docker client instance from the client object
+// SelfMounts reports the mounts of the container this process is running in,
+// so startup can work out where the daemon sees the data directory without an
+// operator-maintained environment variable.
+//
+// A nil slice with a nil error means this process is not a container the daemon
+// knows about, which is the normal case for a panel running on the host.
+func (c *Client) SelfMounts(ctx context.Context) ([]hostmount.Mount, error) {
+	if c == nil || c.docker == nil {
+		return nil, nil
+	}
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		return nil, nil
+	}
+
+	ctx, cancel := boundedCall(ctx)
+	defer cancel()
+
+	inspectResult, err := c.docker.ContainerInspect(ctx, hostname, client.ContainerInspectOptions{})
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			// Not running in a container the daemon manages.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("inspect this container to read its mounts: %w", err)
+	}
+
+	mounts := make([]hostmount.Mount, 0, len(inspectResult.Container.Mounts))
+	for _, m := range inspectResult.Container.Mounts {
+		mounts = append(mounts, hostmount.Mount{
+			Kind:        mountKind(m.Type),
+			Source:      m.Source,
+			Destination: m.Destination,
+			RW:          m.RW,
+		})
+	}
+	return mounts, nil
+}
+
+// mountKind maps the daemon's mount type onto the hostmount vocabulary.
+func mountKind(t mount.Type) hostmount.Kind {
+	switch t {
+	case mount.TypeBind:
+		return hostmount.KindBind
+	case mount.TypeVolume:
+		return hostmount.KindVolume
+	case mount.TypeTmpfs:
+		return hostmount.KindTmpfs
+	default:
+		return hostmount.Kind(string(t))
+	}
+}
+
+// GetDockerClient returns the underlying Docker client
 func (c *Client) GetDockerClient() *client.Client {
 	return c.docker
 }

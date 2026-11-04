@@ -75,7 +75,7 @@ make dev
 All config options can also be set via environment variables with the `CARBONPANEL_` prefix. For example, `server.port` becomes `CARBONPANEL_SERVER_PORT`. Environment variables take precedence over the config file.
 
 :::tip[Host path mapping]
-When running the binary directly on a host (not in a Docker container), do **not** set `CARBONPANEL_DATA_DIR` or `CARBONPANEL_HOST_DATA_PATH` — those are only for container path translation.
+When running the binary directly on a host (not in a Docker container), no path translation is needed: the Docker daemon sees the same filesystem the panel does, and the directories are used as-is. `CARBONPANEL_DATA_DIR` and `CARBONPANEL_HOST_DATA_PATH` are legacy overrides and are not required.
 
 To change where Carbon Panel stores its database and server data, set `CARBONPANEL_STORAGE_DATA_DIR` or configure it in your config file:
 

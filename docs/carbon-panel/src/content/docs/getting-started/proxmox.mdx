@@ -39,7 +39,7 @@ The interactive wizard lets you adjust the default container resources. Set thes
 
 ## Paths
 
-Since Carbon Panel runs directly on the host here (not inside a Docker container), file paths are straightforward — `CARBONPANEL_DATA_DIR` and `CARBONPANEL_HOST_DATA_PATH` should be the same value. The default `./data` relative to `/opt/carbon-panel` works out of the box.
+Since Carbon Panel runs directly on the host here (not inside a Docker container), file paths are straightforward: the panel and the Docker daemon see the same filesystem, so no translation or extra variable is involved. The default `./data` relative to `/opt/carbon-panel` works out of the box.
 
 Once complete, Carbon Panel is accessible at **http://\<container-ip\>:8080**.
 

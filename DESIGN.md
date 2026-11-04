@@ -264,7 +264,7 @@ proto/carbonpanel/v1/
 
 ## 6. Data Storage & Schema Design
 
-Persistence is handled by **SQLite** located at `data/carbon-panel.db` (or custom configured path via `CARBONPANEL_DATA_DIR`).
+Persistence is handled by **SQLite** located at `data/carbon-panel.db` (or a custom path via `storage.data_dir` / `CARBONPANEL_STORAGE_DATA_DIR`).
 
 ```mermaid
 erDiagram
