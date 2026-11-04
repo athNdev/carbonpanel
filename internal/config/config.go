@@ -107,6 +107,12 @@ type StorageConfig struct {
 	BackupDir             string                 `mapstructure:"backup_dir" json:"backup_dir"`
 	TempDir               string                 `mapstructure:"temp_dir" json:"temp_dir"`
 	MaxUploadSize         int64                  `mapstructure:"max_upload_size" json:"max_upload_size"`
+	// ContainerWritableMB caps the container writable layer with the daemon
+	// storage-opt size option. It applies only when the container root
+	// filesystem is writable, because a read-only root cannot grow. It never
+	// bounds the world, which is a bind mount: bind-mounted data is outside the
+	// writable layer and is measured, not quota-limited, by the panel.
+	ContainerWritableMB int64 `mapstructure:"container_writable_mb" json:"container_writable_mb"`
 	MaxSnapshots          int                    `mapstructure:"max_snapshots" json:"max_snapshots"`
 	SnapshotRetentionDays int                    `mapstructure:"snapshot_retention_days" json:"snapshot_retention_days"`
 	BackupEncryption      BackupEncryptionConfig `mapstructure:"backup_encryption" json:"backup_encryption"`

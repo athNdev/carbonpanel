@@ -16,6 +16,11 @@ sources:
 
 # Current gaps
 
+- A bind-mounted world is not quota-limited. `storage.container_writable_mb`
+  caps only the container writable layer, and it applies only when the root is
+  writable. World growth is measured and alerted, not capped: a node filesystem
+  or volume quota is the only hard bound available today.
+
 - `internal/module/hooks.go:execInModule` runs hook commands through the
   manager's own Docker client (`m.docker.Exec`), so a module hook does not
   follow the node its server runs on.

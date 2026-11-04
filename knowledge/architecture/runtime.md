@@ -76,6 +76,16 @@ override fails before it replaces a working container. A warning is logged and
 does not block. The rules and their remedies live in
 `internal/docker/runtime_profile.go`.
 
+The profile also reports the limits that are actually applied, not the ones
+that were requested: memory and memory+swap, the process limit, the CPU cap,
+and the writable-layer cap. A limit the daemon will not apply is reported as
+zero, and a request that cannot take effect is a named warning. The world is a
+bind mount, so it is never quota-limited by the daemon: `storage-opt size`
+sizes only the container writable layer, is applied only when the root is
+writable, and is reported as `storage_quota_is_not_a_world_quota` whenever it
+is set. World growth is measured by the metrics collector against the node
+filesystem instead.
+
 # How to check
 
 ```sh

@@ -22,6 +22,8 @@ import (
 func resolvedMinecraftContainer(overrides *v1.DockerOverrides, dataReadOnly bool) RuntimeSpec {
 	image := "itzg/minecraft-server:java21"
 	config := &container.Config{Image: image}
+	pids := int64(512)
+	memory := int64(2048 << 20)
 	hostConfig := &container.HostConfig{
 		Mounts: []mount.Mount{{
 			Type:     mount.TypeBind,
@@ -29,8 +31,11 @@ func resolvedMinecraftContainer(overrides *v1.DockerOverrides, dataReadOnly bool
 			Target:   "/data",
 			ReadOnly: dataReadOnly,
 		}},
+		// The limits CreateContainer derives from the server record.
+		Resources: container.Resources{Memory: memory, MemorySwap: memory},
 	}
 	applyContainerHardening(hostConfig)
+	hostConfig.PidsLimit = &pids
 	ApplyOverrides(overrides, config, hostConfig)
 	applyServerRootfs(hostConfig, config, overrides)
 	return RuntimeSpec{
@@ -289,5 +294,102 @@ func TestIsMinecraftImage(t *testing.T) {
 		if got := IsMinecraftImage(image); got != want {
 			t.Errorf("IsMinecraftImage(%q) = %t, want %t", image, got, want)
 		}
+	}
+}
+
+func TestDescribeRuntimeReportsTheAppliedLimits(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.RequestedMemoryMB = 2048
+	profile := DescribeRuntime(spec)
+
+	if profile.Limits.MemoryBytes != 2048<<20 {
+		t.Errorf("MemoryBytes = %d, want 2048 MB", profile.Limits.MemoryBytes)
+	}
+	if !profile.Limits.SwapDisabled {
+		t.Error("SwapDisabled = false, want the 0-swap policy")
+	}
+	if profile.Limits.PidsLimit != 512 {
+		t.Errorf("PidsLimit = %d, want 512", profile.Limits.PidsLimit)
+	}
+	if profile.Limits.WritableLayerMB != 0 {
+		t.Errorf("WritableLayerMB = %d, want 0 on a read-only root", profile.Limits.WritableLayerMB)
+	}
+	if profile.Limits.WorldDiskEnforced {
+		t.Error("WorldDiskEnforced = true, want false: a bind-mounted world is never quota-limited by the daemon")
+	}
+	if hasIssue(profile, RuntimeIssueMemoryLimitUnset) || hasIssue(profile, RuntimeIssuePidsLimitUnset) {
+		t.Errorf("issues = %v, want the applied limits to be recognised", issueCodes(profile))
+	}
+}
+
+func TestPreflightWarnsWhenTheMemoryLimitIsMissing(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.HostConfig.Resources.Memory = 0
+	spec.HostConfig.Resources.MemorySwap = 0
+
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueMemoryLimitUnset) {
+		t.Fatalf("issues = %v, want memory_limit_unset", issueCodes(profile))
+	}
+	if profile.Fatal() {
+		t.Fatalf("an unlimited container stopped creation: %v", issueCodes(profile))
+	}
+}
+
+func TestPreflightWarnsWhenSwapIsReEnabled(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.HostConfig.Resources.MemorySwap = 4096 << 20
+
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueSwapEnabled) {
+		t.Fatalf("issues = %v, want swap_enabled", issueCodes(profile))
+	}
+	if profile.Fatal() {
+		t.Fatalf("an overridden swap policy stopped creation: %v", issueCodes(profile))
+	}
+}
+
+func TestPreflightWarnsWhenThePidsLimitIsMissing(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.HostConfig.PidsLimit = nil
+
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssuePidsLimitUnset) {
+		t.Fatalf("issues = %v, want pids_limit_unset", issueCodes(profile))
+	}
+}
+
+func TestPreflightSaysAWritableLayerCapDoesNotBoundTheWorld(t *testing.T) {
+	spec := resolvedMinecraftContainer(&v1.DockerOverrides{
+		Environment: map[string]string{writableRootfsEnv: "1"},
+	}, false)
+	ApplyDiskQuota(spec.HostConfig, 1024)
+	spec.WritableLayerMB = 1024
+
+	profile := DescribeRuntime(spec)
+	if profile.Limits.WritableLayerMB != 1024 {
+		t.Fatalf("WritableLayerMB = %d, want 1024", profile.Limits.WritableLayerMB)
+	}
+	if !hasIssue(profile, RuntimeIssueStorageQuotaIsNotAWorldQuota) {
+		t.Fatalf("issues = %v, want storage_quota_is_not_a_world_quota", issueCodes(profile))
+	}
+	if hasIssue(profile, RuntimeIssueWritableLayerUnbounded) {
+		t.Fatalf("issues = %v, want the cap to be recognised for the writable layer", issueCodes(profile))
+	}
+	if profile.Limits.WorldDiskEnforced {
+		t.Error("WorldDiskEnforced = true, want false")
+	}
+}
+
+func TestPreflightWarnsThatAWritableLayerCapIsIgnoredOnAReadOnlyRoot(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.WritableLayerMB = 1024
+
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueWritableLayerCapIgnored) {
+		t.Fatalf("issues = %v, want writable_layer_cap_ignored", issueCodes(profile))
+	}
+	if profile.Limits.WritableLayerMB != 0 {
+		t.Errorf("WritableLayerMB = %d, want 0 when the root is read-only", profile.Limits.WritableLayerMB)
 	}
 }
