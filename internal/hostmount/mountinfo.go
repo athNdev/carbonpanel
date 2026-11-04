@@ -13,10 +13,14 @@ import (
 	"strings"
 )
 
-// mountEntry is a persistent mount point from /proc/self/mountinfo. The
-// filesystem type is used only to drop virtual mounts, so it is not kept.
+// mountEntry is a persistent mount from /proc/self/mountinfo.
+//
+// Root is the source path inside the mounted filesystem. For the bind mounts
+// the panel receives that is the host directory, which makes it a usable
+// fallback when the daemon cannot describe our own container.
 type mountEntry struct {
 	point string
+	root  string
 }
 
 // virtualFilesystems never hold server data: a mount of one of these must not
@@ -59,6 +63,7 @@ func parseMountinfo(r io.Reader) []mountEntry {
 		if len(fields) < 5 {
 			continue
 		}
+		root := unescapeMountPath(fields[3])
 		point := unescapeMountPath(fields[4])
 		after := strings.Fields(line[sep+3:])
 		if len(after) == 0 {
@@ -68,7 +73,7 @@ func parseMountinfo(r io.Reader) []mountEntry {
 		if virtualFilesystems[fs] || point == "/" {
 			continue
 		}
-		entries = append(entries, mountEntry{point: point})
+		entries = append(entries, mountEntry{point: point, root: root})
 	}
 	return entries
 }
@@ -176,6 +181,54 @@ func containerMounts() ([]mountEntry, bool) {
 		return nil, false
 	}
 	return readMountTable()
+}
+
+// persistentHostPath returns the host directory behind dir as the kernel
+// reports it.
+//
+// This is the fallback for a panel whose daemon cannot describe its own
+// container: a host-networked container is not addressable by hostname, and a
+// socket proxy may forbid container reads. The kernel records the source path
+// of a bind mount in the root field, so no daemon call is needed.
+func persistentHostPath(dirs Dirs) (string, bool) {
+	entries, ok := containerMounts()
+	if !ok {
+		return "", false
+	}
+	cleaned := path.Clean(strings.TrimSpace(dirs.DataDir))
+	var best mountEntry
+	found := false
+	for _, entry := range entries {
+		point := path.Clean(entry.point)
+		if cleaned != point && !strings.HasPrefix(cleaned, strings.TrimSuffix(point, "/")+"/") {
+			continue
+		}
+		if !found || len(point) > len(path.Clean(best.point)) {
+			best = entry
+			found = true
+		}
+	}
+	if !found {
+		return "", false
+	}
+	root := path.Clean(strings.TrimSpace(best.root))
+	// "/" means the mount shares the filesystem root, which tells us nothing
+	// about where the directory lives on the host.
+	if root == "" || root == "." || root == "/" {
+		return "", false
+	}
+	return root, true
+}
+
+// containerMountCoverage reports whether the kernel's mount table covers dir,
+// and whether that table was readable at all. known=false means "could not
+// tell", which must never be treated as "not mounted".
+func containerMountCoverage(dir string) (covered, known bool) {
+	entries, ok := containerMounts()
+	if !ok || len(entries) == 0 {
+		return false, false
+	}
+	return coveredByMount(entries, dir), true
 }
 
 // coveredByMount reports whether a persistent mount covers dir.
