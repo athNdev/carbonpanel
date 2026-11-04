@@ -129,10 +129,7 @@ one at https://mozilla.org/MPL/2.0/.
 	</div>
 
 	<div class="space-y-6">
-		<CarbonTabs
-			tabs={settingsTabs}
-			bind:selectedTab={activeTab}
-		/>
+		<CarbonTabs tabs={settingsTabs} bind:selectedTab={activeTab} />
 
 		{#if activeTab === 'server-config' && showSettings}
 			<div class="motion-fade-in space-y-4">

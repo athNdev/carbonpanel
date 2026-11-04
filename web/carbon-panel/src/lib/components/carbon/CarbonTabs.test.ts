@@ -24,7 +24,9 @@ function classListOf(html: string, tag: string): string[][] {
 
 test('the tab strip never grows a scrollbar', () => {
 	const html = render(Tabs, { props: { tabs, selectedTab: 'tab-0' } }).body;
-	const strip = classListOf(html, 'div').find((classes: string[]) => classes.includes('scroll-strip'));
+	const strip = classListOf(html, 'div').find((classes: string[]) =>
+		classes.includes('scroll-strip')
+	);
 
 	assert.ok(strip, 'The tab list must use the scroll-strip utility');
 	// scroll-strip is the single place that defines how a strip scrolls, so the
