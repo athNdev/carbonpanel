@@ -135,8 +135,7 @@ EOF
     printf '      - %s/a/backups:/app/backups\n' "$base"
     printf '      - %s/a/tmp:/app/tmp\n' "$base"
     printf '    environment:\n'
-    printf '      CARBONPANEL_DATA_DIR: /app/data\n'
-    printf '      CARBONPANEL_HOST_DATA_PATH: %s/a/data\n' "$base"
+
     printf '      TZ: UTC\n'
     printf '    extra_hosts:\n      - "host.docker.internal:host-gateway"\n'
     health
@@ -153,8 +152,7 @@ EOF
       printf '      - %s/b/backups:/app/backups\n' "$base"
       printf '      - %s/b/tmp:/app/tmp\n' "$base"
       printf '    environment:\n'
-      printf '      CARBONPANEL_DATA_DIR: /app/data\n'
-      printf '      CARBONPANEL_HOST_DATA_PATH: %s/b/data\n' "$base"
+
       printf '      TZ: UTC\n'
       printf '    extra_hosts:\n      - "host.docker.internal:host-gateway"\n'
       health

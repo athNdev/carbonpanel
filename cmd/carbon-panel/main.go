@@ -25,6 +25,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/events"
+	"github.com/athNdev/carbon-panel/internal/hostmount"
 	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/operation"
@@ -137,6 +138,50 @@ func main() {
 		}
 	}
 
+	// A directory that cannot be written is a volume mapping problem, and it
+	// must be reported as one before the database or a world is created in the
+	// wrong place. This is the compose-time check: an absolute mount path that
+	// the container user cannot write is refused here rather than failing later
+	// inside a Docker operation.
+	if err := hostmount.ValidateDirs(hostmount.Dirs{
+		DataDir:   cfg.Storage.DataDir,
+		BackupDir: cfg.Storage.BackupDir,
+		TempDir:   cfg.Storage.TempDir,
+	}); err != nil {
+		log.Fatal("Storage directory check failed: %v", err)
+	}
+
+	// Before the database is created, refuse a directory that is not on a
+	// persistent mount. This runs from the container's own mount table, so a
+	// compose file with a missing volume fails here instead of writing worlds
+	// into a layer that is discarded with the container. The daemon-backed
+	// check below covers the case this cannot see.
+	if err := hostmount.CheckMounted(hostmount.Dirs{
+		DataDir:   cfg.Storage.DataDir,
+		BackupDir: cfg.Storage.BackupDir,
+		TempDir:   cfg.Storage.TempDir,
+	}); err != nil {
+		log.Fatal("Volume mapping check failed: %v", err)
+	}
+
+	// Backups and scratch space are allowed to live outside a volume (an
+	// S3-only deployment keeps a local scratch directory), but the operator
+	// should know when their contents will not survive a recreate.
+	for _, warning := range hostmount.UnmountedWarnings(hostmount.Dirs{
+		DataDir:   cfg.Storage.DataDir,
+		BackupDir: cfg.Storage.BackupDir,
+		TempDir:   cfg.Storage.TempDir,
+	}) {
+		log.Warn("%s is not on a volume mount, so its contents are lost when this container is recreated", warning)
+	}
+
+	// A deprecated override still has to be a real path. Checked here, before
+	// the database exists, so a typo is reported as a mapping error rather than
+	// surfacing later as a missing mount.
+	if err := hostmount.CheckOverride(); err != nil {
+		log.Fatal("Volume mapping check failed: %v", err)
+	}
+
 	// Initialize storage w/ migrations and seeding
 	store, err := storage.NewSQLiteStore(cfg)
 	if err != nil {
@@ -189,6 +234,30 @@ func main() {
 		log.Fatal("Failed to initialize Docker client: %v", err)
 	}
 	defer dockerClient.Close()
+
+	// Work out where the daemon sees this process's data directory. When the
+	// panel runs in a container the answer comes from its own mount table, so
+	// no environment variable has to restate the volume mapping. A data
+	// directory that is not mounted is refused: worlds written there would be
+	// discarded with the container.
+	mapping, err := hostmount.Resolve(ctx, dockerClient, hostmount.Dirs{
+		DataDir:   cfg.Storage.DataDir,
+		BackupDir: cfg.Storage.BackupDir,
+		TempDir:   cfg.Storage.TempDir,
+	})
+	if err != nil {
+		log.Fatal("Volume mapping check failed: %v", err)
+	}
+	hostmount.Configure(mapping)
+	if mapping.Translated {
+		log.Info("Server data directory %s maps to %s on the Docker host (%s)", mapping.ContainerDir, mapping.HostDir, mapping.Origin)
+	} else {
+		log.Info("Server data directory %s is used as-is by the Docker host (%s)", mapping.ContainerDir, mapping.Origin)
+	}
+	if mapping.Mismatch {
+		log.Warn("CARBONPANEL_HOST_DATA_PATH=%s disagrees with the volume the daemon reports (%s); the mount is used and the variable can be removed",
+			mapping.OverrideDir, mapping.HostDir)
+	}
 
 	// Resolve operations interrupted by a crash or restart before reconciliation:
 	// each one is observed against the daemon so an unknown Docker outcome is never

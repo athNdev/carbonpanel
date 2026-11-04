@@ -106,8 +106,13 @@ docker build -f docker/Dockerfile.carbon-panel -t carbon-panel:latest .
 ### 2. Choose your persistent storage paths
 
 Review [docker-compose.yml](docker-compose.yml) before starting. Set the host
-paths for data and backups to locations you want to keep. The
-`CARBONPANEL_HOST_DATA_PATH` value must match the host side of the data volume.
+paths for data and backups to locations you want to keep.
+
+There is no environment variable to keep in sync with those paths: the panel
+reads the volume mapping from its own container at startup. If the data
+directory is not mounted, is read-only, or the container user cannot write to
+it, startup stops with a message naming the directory instead of writing worlds
+into a layer that is discarded with the container.
 
 The included Compose file uses host networking. Review the networking notes in
 that file if your deployment needs bridge networking instead.

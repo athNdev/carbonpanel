@@ -36,11 +36,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
   
       # IMPORTANT: This is where your server(s) data will be stored on the host.
-      # You can set this to any path you'd like, but the path must exist AND you must use the same
-      # absolute paths below for the below env vars (in the environment section at the bottom). Example:
-      # CARBONPANEL_DATA_DIR=/app/data
-      # CARBONPANEL_HOST_DATA_PATH=/opt/carbon-panel/data
-      # (See environment)
+      # Set the left-hand side to any absolute path you want to keep. The panel
+      # reads this mapping from its own container, so there is no matching
+      # environment variable to keep in sync. Startup refuses to run if the data
+      # directory is not mounted or not writable, instead of writing worlds into
+      # the container's own filesystem.
       - /opt/carbon-panel/data:/app/data
       - /opt/carbon-panel/backups:/app/backups
       - /tmp/carbon-panel:/app/tmp
@@ -48,10 +48,6 @@ services:
       # Configuration file, uncomment if you are using a config file (optional, see config.example.yaml for all available options).
       #- ./config.yaml:/app/config.yaml:ro
     environment:
-      - CARBONPANEL_DATA_DIR=/app/data
-
-      # IMPORTANT: THIS MUST BE SET TO THE SAME PATH AS THE SERVER DATA PATH IN "volumes" above
-      - CARBONPANEL_HOST_DATA_PATH=/opt/carbon-panel/data
       - TZ=UTC
 
       # ── Authentication ──────────────────────────

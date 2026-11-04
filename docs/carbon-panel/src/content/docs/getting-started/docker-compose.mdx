@@ -36,14 +36,26 @@ docker compose up -d
 
 ## Volume paths
 
-Carbon Panel creates Docker bind mounts for each managed Minecraft server. When Carbon Panel runs inside a container, it needs to know both the container-internal path and the corresponding host path to set up those mounts correctly.
+Carbon Panel creates a Docker bind mount for each managed Minecraft server, and the Docker daemon interprets those paths on the host, not inside the panel's container.
 
-| Variable | Purpose | Example |
-|---|---|---|
-| `CARBONPANEL_HOST_DATA_PATH` | The host path that `CARBONPANEL_DATA_DIR` is mounted from | `/opt/carbon-panel/data` |
-| `CARBONPANEL_DATA_DIR` | Where Carbon Panel reads/writes data inside the container — you can usually leave this as the default | `/app/data` |
+There is nothing to configure for this. At startup the panel reads the mount table of its own container and works out the host path behind `/app/data`. Your compose file is the only place that mapping exists:
 
-These **must** correspond to the same volume entry. If your compose file maps `/srv/minecraft/data:/app/data`, then set `CARBONPANEL_HOST_DATA_PATH=/srv/minecraft/data`.
+```yaml
+volumes:
+  - /srv/minecraft/data:/app/data
+```
+
+With that entry, a server directory the panel sees at `/app/data/servers/x` is requested from the daemon as `/srv/minecraft/data/servers/x`.
+
+Startup validates the mapping before anything writes to it. It stops with a message naming the directory when:
+
+- no volume is mounted at the data directory (worlds would land in the container's own filesystem and disappear on recreate),
+- the volume is mounted read-only,
+- the data directory is a `tmpfs`,
+- the container user cannot write to it (`no write permission on the mount dir`),
+- a `CARBONPANEL_HOST_DATA_PATH` override is set to a relative path (`mount path should be absolute`).
+
+`CARBONPANEL_HOST_DATA_PATH` and `CARBONPANEL_DATA_DIR` are no longer needed. Both are still read for backwards compatibility when the panel cannot read its own mount table (for example behind a Docker socket proxy that forbids container reads), and setting `CARBONPANEL_HOST_DATA_PATH` is reported in the log as deprecated.
 
 :::caution[SELinux]
 On Fedora, RHEL, CentOS, etc., append `:z` to volume mounts:

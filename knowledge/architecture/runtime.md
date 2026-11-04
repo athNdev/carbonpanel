@@ -65,6 +65,30 @@ container moved to the new image. A cached image whose OS or CPU
 architecture differs from the daemon is pulled once; if it still does
 not match, creation stops before a container is made from it.
 
+# Mount boundary
+
+The daemon interprets a bind source on the host, not inside the panel's
+container. When the panel runs in a container, `internal/hostmount` reads the
+mount table of its own container at startup and derives the host path behind
+`storage.data_dir`; `docker.TranslateToHostPath` then maps every data path
+onto it. No environment variable restates the mapping, because a duplicate that
+can disagree with the compose file is a data-safety bug. A relative host source
+is refused (`mount path should be absolute`).
+
+Startup refuses the mapping rather than degrading:
+
+- no volume covering the data directory (`ErrNotMounted`) — worlds would be
+  written into the container layer and lost on recreate;
+- a read-only mount or a directory the process cannot write (probe file) —
+  `no write permission on the mount dir`;
+- a tmpfs data directory, which is discarded with the container.
+
+Detection is best-effort so a restricted Docker socket proxy does not stop the
+panel booting. When the mount table cannot be read, the deprecated
+`CARBONPANEL_HOST_DATA_PATH` is used if set, and otherwise paths are used
+as-is. `CARBONPANEL_DATA_DIR` is not configuration: `storage.data_dir` is the
+source of truth.
+
 # Runtime profile
 
 Before the daemon is asked to create a container, `docker.PreflightRuntime`

@@ -6,10 +6,10 @@
 package docker
 
 import (
-	"path/filepath"
 	"testing"
 
 	models "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/hostmount"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/moby/moby/api/types/container"
 )
@@ -35,19 +35,30 @@ func TestParseDNSAddrs(t *testing.T) {
 }
 
 func TestTranslateToHostPath(t *testing.T) {
-	t.Setenv("CARBONPANEL_HOST_DATA_PATH", "")
-	if got := TranslateToHostPath("/data/world"); got != "/data/world" {
-		t.Errorf("no env = %q", got)
-	}
+	t.Cleanup(func() { hostmount.Configure(hostmount.Mapping{}) })
 
-	t.Setenv("CARBONPANEL_HOST_DATA_PATH", "/host/data")
-	t.Setenv("CARBONPANEL_DATA_DIR", "/app/data")
-	if got, want := TranslateToHostPath("/app/data/world"), filepath.Join("/host/data", "world"); got != want {
+	// A mapping resolved at startup is the path the daemon understands.
+	hostmount.Configure(hostmount.Mapping{ContainerDir: "/app/data", HostDir: "/host/data", Translated: true})
+	if got, want := TranslateToHostPath("/app/data/world"), "/host/data/world"; got != want {
 		t.Errorf("translated = %q, want %q", got, want)
 	}
 	// Outside the container data dir: returned as-is.
 	if got := TranslateToHostPath("/etc/passwd"); got != "/etc/passwd" {
 		t.Errorf("outside = %q", got)
+	}
+
+	// A process that has not resolved a mapping keeps the legacy env fallback.
+	hostmount.Configure(hostmount.Mapping{})
+	t.Setenv("CARBONPANEL_HOST_DATA_PATH", "/host/data")
+	t.Setenv("CARBONPANEL_DATA_DIR", "/app/data")
+	if got, want := TranslateToHostPath("/app/data/world"), "/host/data/world"; got != want {
+		t.Errorf("legacy env translated = %q, want %q", got, want)
+	}
+
+	// With nothing configured the path is unchanged, which is correct on a host.
+	t.Setenv("CARBONPANEL_HOST_DATA_PATH", "")
+	if got := TranslateToHostPath("/data/world"); got != "/data/world" {
+		t.Errorf("no mapping = %q", got)
 	}
 }
 
