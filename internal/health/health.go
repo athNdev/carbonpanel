@@ -77,6 +77,11 @@ type Input struct {
 	// StartingStatus is the stored status used while the panel is preparing or
 	// booting a server.
 	StartingStatus string
+	// ObservedAt is when the last full observation sweep completed. When it is
+	// recent, every stored status was re-read at that moment, so a row that has
+	// not been rewritten is still fresh. Without it a status can only be judged
+	// by its own update time, which never moves while the status is unchanged.
+	ObservedAt time.Time
 }
 
 // GameSummary is the aggregate of the server records.
@@ -164,8 +169,9 @@ func summariseServers(in Input) (Component, GameSummary) {
 		checkedAt = time.Now()
 	}
 
+	sweepIsFresh := !in.ObservedAt.IsZero() && checkedAt.Sub(in.ObservedAt) <= staleAfter
 	for _, s := range in.Servers {
-		if !s.UpdatedAt.IsZero() && checkedAt.Sub(s.UpdatedAt) > staleAfter {
+		if !sweepIsFresh && !s.UpdatedAt.IsZero() && checkedAt.Sub(s.UpdatedAt) > staleAfter {
 			summary.Stale++
 			continue
 		}

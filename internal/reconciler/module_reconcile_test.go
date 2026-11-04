@@ -171,3 +171,23 @@ func TestAModuleFailureIsLoggedAndDoesNotStopTheWorker(t *testing.T) {
 		t.Fatalf("calls = %v, want the worker to keep processing after an error", got)
 	}
 }
+
+func TestLastSweepAtAdvancesWithASweep(t *testing.T) {
+	r := New(&fakeStore{}, &fakeResolver{}, nil, nil, nil, logger.New(), Config{
+		DebounceWindow: 10 * time.Millisecond,
+	})
+	if got := r.LastSweepAt(); !got.IsZero() {
+		t.Fatalf("LastSweepAt before any sweep = %v, want the zero time", got)
+	}
+
+	before := time.Now()
+	r.enqueueAll(context.Background())
+	after := r.LastSweepAt()
+
+	if after.IsZero() {
+		t.Fatal("LastSweepAt is zero after a sweep")
+	}
+	if after.Before(before.Add(-time.Second)) || after.After(time.Now().Add(time.Second)) {
+		t.Fatalf("LastSweepAt = %v, want a time around now", after)
+	}
+}

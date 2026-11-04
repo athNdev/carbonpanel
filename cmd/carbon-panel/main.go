@@ -628,6 +628,10 @@ func main() {
 	// containers: an externally removed or recreated sidecar is adopted or
 	// recorded as stopped instead of drifting away from its row.
 	reconcilerEngine.SetModuleReconciler(moduleReconcilerAdapter{manager: moduleManager})
+	// The health endpoint asks the reconciler how old the stored statuses are:
+	// a row is not rewritten when its status is unchanged, so its own update
+	// time alone would make a healthy server look stale.
+	rpcServer.SetLastObservation(reconcilerEngine.LastSweepAt)
 	reconcilerEngine.Start(reconcileCtx, reconcileEvents)
 	defer func() {
 		stopReconciler()
