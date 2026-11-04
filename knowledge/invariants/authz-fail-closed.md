@@ -11,7 +11,7 @@ code_refs:
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
-verified: { by: human:athNdev, at: 2026-10-24 }
+verified: { by: agent:zed, at: 2026-11-04 }
 review_after: 2027-01-23
 ---
 

@@ -76,6 +76,10 @@ type Server struct {
 	// lastObservation reports when the reconciler last finished a full sweep.
 	// It is set after the reconciler starts, so it may be nil.
 	lastObservation func() time.Time
+
+	// operationService backs SetReconcilerNudge. It is created in
+	// registerServices, so it may be nil on a server that never registered.
+	operationService *services.OperationService
 }
 
 // Creates new Connect RPC server
@@ -313,6 +317,8 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	activityService := services.NewActivityService(s.store, s.log)
+	operationService := services.NewOperationService(s.store, s.log)
+	s.operationService = operationService
 	subuserService := services.NewSubuserService(s.store, s.log)
 	blueprintService := services.NewBlueprintService(s.store, s.log)
 	backupService := services.NewBackupService(s.store, s.docker, s.clientPool, s.config.Storage.S3, s.log)
@@ -372,6 +378,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	activityPath, activityHandler := carbonpanelv1connect.NewActivityServiceHandler(activityService, opts...)
 	mux.Handle(activityPath, activityHandler)
+
+	operationPath, operationHandler := carbonpanelv1connect.NewOperationServiceHandler(operationService, opts...)
+	mux.Handle(operationPath, operationHandler)
 
 	subuserPath, subuserHandler := carbonpanelv1connect.NewSubuserServiceHandler(subuserService, opts...)
 	mux.Handle(subuserPath, subuserHandler)
@@ -667,6 +676,15 @@ func (s *Server) dbReady() error {
 // row's own update time.
 func (s *Server) SetLastObservation(fn func() time.Time) {
 	s.lastObservation = fn
+}
+
+// SetReconcilerNudge supplies the hook that converges a server immediately
+// after an operator releases a lifecycle lock, instead of leaving the server
+// blocked until the next safety-net sweep.
+func (s *Server) SetReconcilerNudge(fn func(serverID string)) {
+	if s.operationService != nil {
+		s.operationService.SetReconcilerNudge(fn)
+	}
 }
 
 // healthSnapshot observes each layer with a bounded deadline. A layer that

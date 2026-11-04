@@ -178,6 +178,24 @@ func (s *Store) ListServerOperations(ctx context.Context) ([]ServerOperation, er
 	return ops, err
 }
 
+// ListRecentServerOperations returns the journal newest first, optionally
+// restricted to one server. An empty serverID lists every server and a limit of
+// zero returns the whole (retention-bounded) table. Diagnostics always want the
+// newest rows first, which is the opposite of the recovery path's oldest-first
+// scan, so the two listings stay separate.
+func (s *Store) ListRecentServerOperations(ctx context.Context, serverID string, limit int) ([]ServerOperation, error) {
+	q := s.db.WithContext(ctx).Order("created_at desc")
+	if serverID != "" {
+		q = q.Where("server_id = ?", serverID)
+	}
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var ops []ServerOperation
+	err := q.Find(&ops).Error
+	return ops, err
+}
+
 // ResolveServerOperation releases an active lifecycle lock without touching Docker.
 // An already-released operation is left unchanged.
 func (s *Store) ResolveServerOperation(ctx context.Context, id, note string) error {

@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
@@ -44,7 +45,14 @@ func TestAddOperationsToBundleRecordsAnUncertainOutcome(t *testing.T) {
 		t.Fatalf("AdvanceServerOperation: %v", err)
 	}
 	_ = log
-	// Leave the row executing: this is the "the effect may have happened" case.
+	// Leave the row executing and stale: this is the "the effect may have
+	// happened, and nothing is going to advance it" case. A row advanced a
+	// moment ago is still in flight and reports "running" instead.
+	if err := svc.store.DB().Model(&storage.ServerOperation{}).
+		Where("id = ?", op.ID).
+		Update("updated_at", time.Now().Add(-time.Hour).UTC()).Error; err != nil {
+		t.Fatalf("backdate operation: %v", err)
+	}
 
 	var buf strings.Builder
 	bw := newStringTarWriter(&buf)

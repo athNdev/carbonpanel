@@ -291,6 +291,18 @@ func (r *Reconciler) LastSweepAt() time.Time {
 	return time.Unix(0, nanos)
 }
 
+// Nudge schedules a convergence pass for one server, as if its container had
+// emitted an event. An operator action that changes a server's recorded state
+// without touching Docker - releasing a stale lifecycle lock, for instance -
+// uses this so the server converges immediately instead of waiting for the
+// safety-net sweep.
+func (r *Reconciler) Nudge(serverID string) {
+	if serverID == "" {
+		return
+	}
+	r.request(serverID)
+}
+
 // request schedules a convergence pass for serverID once the debounce window's
 // quiet period elapses. Repeated calls within the window collapse into one.
 func (r *Reconciler) request(serverID string) {

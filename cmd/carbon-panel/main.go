@@ -632,6 +632,9 @@ func main() {
 	// a row is not rewritten when its status is unchanged, so its own update
 	// time alone would make a healthy server look stale.
 	rpcServer.SetLastObservation(reconcilerEngine.LastSweepAt)
+	// Releasing a stale lifecycle lock does not touch Docker, so nothing emits
+	// an event for it; nudge the reconciler so the server recovers at once.
+	rpcServer.SetReconcilerNudge(reconcilerEngine.Nudge)
 	reconcilerEngine.Start(reconcileCtx, reconcileEvents)
 	defer func() {
 		stopReconciler()

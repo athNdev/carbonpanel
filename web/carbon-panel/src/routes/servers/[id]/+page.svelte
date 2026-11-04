@@ -78,6 +78,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import ServerTasks from '$lib/components/server-tasks.svelte';
 	import ServerBackups from '$lib/components/server-backups.svelte';
 	import ServerActivity from '$lib/components/server-activity.svelte';
+	import ServerOperations from '$lib/components/server-operations.svelte';
 	import ServerPlayers from '$lib/components/server-players.svelte';
 	import ServerModules from '$lib/components/server/ServerModules.svelte';
 
@@ -880,7 +881,10 @@ one at https://mozilla.org/MPL/2.0/.
 					{:else if activeTab === 'players'}
 						<ServerPlayers {server} active={activeTab === 'players'} />
 					{:else if activeTab === 'activity'}
-						<ServerActivity {server} active={activeTab === 'activity'} />
+						<div class="h-full space-y-4 overflow-y-auto">
+							<ServerOperations {server} active={activeTab === 'activity'} />
+							<ServerActivity {server} active={activeTab === 'activity'} />
+						</div>
 					{:else if activeTab === 'routing'}
 						<div class="h-full overflow-y-auto">
 							<ServerRouting {server} bind:router={routingInfo} active={activeTab === 'routing'} />
