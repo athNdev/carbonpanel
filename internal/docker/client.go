@@ -718,10 +718,12 @@ func ApplyOverrides(overrides *v1.DockerOverrides, config *container.Config, hos
 }
 
 // applyServerRootfs is the Minecraft container filesystem default.
-// The root is read-only and /tmp is a noexec tmpfs. The /data bind stays
-// writable, which is where the itzg image and the world live. Images that
-// must write outside /data (unpacking into /opt or /usr, for example) set
-// CARBON_WRITABLE_ROOTFS=1. That key is an elevated Docker override.
+// The root is read-only and /tmp is a 64 MiB noexec tmpfs. Modpack
+// downloads, extracts, and native-library work go to /data/.tmp on the
+// world bind, which is the disk with room and is not mounted noexec.
+// Images that must write outside /data (unpacking into /opt or /usr, for
+// example) set CARBON_WRITABLE_ROOTFS=1. That key is an elevated Docker
+// override.
 func applyServerRootfs(hostConfig *container.HostConfig, config *container.Config, overrides *v1.DockerOverrides) {
 	if hostConfig.Tmpfs == nil {
 		hostConfig.Tmpfs = map[string]string{}
@@ -740,6 +742,7 @@ func applyServerRootfs(hostConfig *container.HostConfig, config *container.Confi
 		}
 	}
 	config.Env = append(filteredEnv, skipNsswitchConfEnv+"=TRUE")
+	applyServerWorkTemp(config, hostConfig)
 	for i := range hostConfig.Mounts {
 		if hostConfig.Mounts[i].Target == "/data" {
 			hostConfig.Mounts[i].ReadOnly = false
@@ -982,9 +985,16 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	// A remote daemon owns the bind source path. Creating it in the panel
 	// process would only create an unrelated local directory with the same
 	// name; CreateMountpoint asks Docker to create it on the target node.
+	// Work temp is a subdirectory of this bind. A local panel creates it
+	// with the sticky mode the game user can write. A remote daemon creates
+	// the same directory from the container mount, on the node that holds
+	// the world.
 	if !c.IsRemote() {
 		if err := os.MkdirAll(dataPath, 0755); err != nil {
 			return "", fmt.Errorf("failed to create server data directory: %w", err)
+		}
+		if err := ensureServerWorkTemp(dataPath); err != nil {
+			return "", fmt.Errorf("failed to create server work temp directory: %w", err)
 		}
 	}
 
