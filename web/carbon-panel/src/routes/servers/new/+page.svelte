@@ -40,17 +40,11 @@ one at https://mozilla.org/MPL/2.0/.
 	import {
 		CarbonButton,
 		CarbonInlineLoading,
+		CarbonModal,
 		CarbonPageHeader,
 		CarbonTag,
 		CarbonTextInput
 	} from '$lib/components/carbon';
-	import {
-		Dialog,
-		DialogContent,
-		DialogDescription,
-		DialogHeader,
-		DialogTitle
-	} from '$lib/components/ui/dialog';
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
@@ -1506,60 +1500,55 @@ one at https://mozilla.org/MPL/2.0/.
 </div>
 
 <!-- Modpack Selection Modal (Sharp Carbon Modal) -->
-<Dialog bind:open={showModpackDialog}>
-	<DialogContent
-		class="max-w-2xl rounded-none border border-[#393939] bg-[#161616] p-6 text-[#f4f4f4]"
-	>
-		<DialogHeader class="border-b border-[#393939] pb-3">
-			<DialogTitle class="text-lg font-light text-[#f4f4f4]">Select Favorite Modpack</DialogTitle>
-			<DialogDescription class="text-xs text-[#a8a8a8]">
-				Choose a pre-configured modpack from your saved favorites list.
-			</DialogDescription>
-		</DialogHeader>
-
-		<div class="max-h-[60vh] space-y-3 overflow-y-auto py-4">
-			{#if favoriteModpacks.length === 0}
-				<div class="rounded-none border border-[#393939] bg-[#262626] p-8 text-center">
-					<Package class="mx-auto mb-2 h-8 w-8 text-[#8d8d8d]" />
-					<p class="text-sm font-semibold text-[#f4f4f4]">No favorite modpacks yet</p>
-					<p class="mt-1 text-xs text-[#a8a8a8]">
-						Visit the Modpacks directory to search and favorite packs to use as presets.
-					</p>
-				</div>
-			{:else}
-				{#each favoriteModpacks as modpack (modpack.id)}
-					<button
-						type="button"
-						onclick={() => selectModpack(modpack)}
-						class="flex w-full cursor-pointer items-start gap-3 rounded-none border border-[#393939] bg-[#262626] p-3.5 text-left transition-colors hover:bg-[#353535]"
-					>
-						{#if modpack.logoUrl}
-							<img
-								src={modpack.logoUrl}
-								alt={modpack.name}
-								class="h-12 w-12 shrink-0 rounded-none border border-[#393939] object-cover"
-							/>
-						{/if}
-						<div class="min-w-0 flex-1">
-							<div class="flex items-center gap-2">
-								<h4 class="text-sm font-semibold text-[#f4f4f4]">{modpack.name}</h4>
-								<CarbonTag type="blue" size="sm">{modpack.indexer}</CarbonTag>
-							</div>
-							<p class="mt-1 line-clamp-2 text-xs text-[#a8a8a8]">
-								{modpack.summary}
-							</p>
-							<div class="mt-2 flex items-center gap-2 font-mono text-xs text-[#78a9ff]">
-								{#if parseJsonArray(modpack.gameVersions).length > 0}
-									<span>MC {parseJsonArray(modpack.gameVersions)[0]}</span>
-								{/if}
-								{#if parseJsonArray(modpack.modLoaders).length > 0}
-									<span>• {parseJsonArray(modpack.modLoaders)[0]}</span>
-								{/if}
-							</div>
+<CarbonModal
+	bind:open={showModpackDialog}
+	title="Select Favorite Modpack"
+	description="Choose a pre-configured modpack from your saved favorites list."
+	size="2xl"
+	hasFooter={false}
+>
+	<div class="max-h-[60vh] space-y-3 overflow-y-auto">
+		{#if favoriteModpacks.length === 0}
+			<div class="rounded-none border border-[#393939] bg-[#262626] p-8 text-center">
+				<Package class="mx-auto mb-2 h-8 w-8 text-[#8d8d8d]" />
+				<p class="text-sm font-semibold text-[#f4f4f4]">No favorite modpacks yet</p>
+				<p class="mt-1 text-xs text-[#a8a8a8]">
+					Visit the Modpacks directory to search and favorite packs to use as presets.
+				</p>
+			</div>
+		{:else}
+			{#each favoriteModpacks as modpack (modpack.id)}
+				<button
+					type="button"
+					onclick={() => selectModpack(modpack)}
+					class="flex w-full cursor-pointer items-start gap-3 rounded-none border border-[#393939] bg-[#262626] p-3.5 text-left transition-colors hover:bg-[#353535]"
+				>
+					{#if modpack.logoUrl}
+						<img
+							src={modpack.logoUrl}
+							alt={modpack.name}
+							class="h-12 w-12 shrink-0 rounded-none border border-[#393939] object-cover"
+						/>
+					{/if}
+					<div class="min-w-0 flex-1">
+						<div class="flex items-center gap-2">
+							<h4 class="text-sm font-semibold text-[#f4f4f4]">{modpack.name}</h4>
+							<CarbonTag type="blue" size="sm">{modpack.indexer}</CarbonTag>
 						</div>
-					</button>
-				{/each}
-			{/if}
-		</div>
-	</DialogContent>
-</Dialog>
+						<p class="mt-1 line-clamp-2 text-xs text-[#a8a8a8]">
+							{modpack.summary}
+						</p>
+						<div class="mt-2 flex items-center gap-2 font-mono text-xs text-[#78a9ff]">
+							{#if parseJsonArray(modpack.gameVersions).length > 0}
+								<span>MC {parseJsonArray(modpack.gameVersions)[0]}</span>
+							{/if}
+							{#if parseJsonArray(modpack.modLoaders).length > 0}
+								<span>• {parseJsonArray(modpack.modLoaders)[0]}</span>
+							{/if}
+						</div>
+					</div>
+				</button>
+			{/each}
+		{/if}
+	</div>
+</CarbonModal>

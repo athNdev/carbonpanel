@@ -13,11 +13,12 @@ one at https://mozilla.org/MPL/2.0/.
 	import { rpcClient } from '$lib/api/rpc-client';
 	import type { ProxyListener } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { ProxyListenerWithCount, ProxyRoute } from '$lib/proto/carbonpanel/v1/proxy_pb';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import { Alert, AlertDescription } from '$lib/components/ui/alert';
-	import { CarbonInlineLoading, CarbonConfirm } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonInlineLoading,
+		CarbonConfirm,
+		CarbonTextInput
+	} from '$lib/components/carbon';
 	import { toast } from 'svelte-sonner';
 	import {
 		Save,
@@ -39,15 +40,25 @@ one at https://mozilla.org/MPL/2.0/.
 	let saving = $state(false);
 	let proxyEnabled = $state(false);
 	let baseURL = $state('');
+	const baseDomainHelp =
+		'Optional base domain that will be appended to server hostnames (e.g., "survival" becomes "survival.minecraft.example.com")';
 	let listenersWithCount = $state<ProxyListenerWithCount[]>([]);
 	let editingListener = $state<ProxyListener | null>(null);
-	let newListener = $state<Partial<ProxyListener>>({
+	let newListener = $state<{
+		port: number | undefined;
+		name: string;
+		description: string;
+		enabled: boolean;
+		isDefault: boolean;
+	}>({
 		port: 25565,
 		name: '',
 		description: '',
 		enabled: true,
 		isDefault: false
 	});
+	// Kept as text so the port field is not rewritten while the operator is typing.
+	let newListenerPort = $state('25565');
 	let portError = $state('');
 	let activeRoutes = $state<ProxyRoute[]>([]);
 
@@ -86,6 +97,7 @@ one at https://mozilla.org/MPL/2.0/.
 					nextPort++;
 				}
 				newListener.port = nextPort;
+				newListenerPort = String(nextPort);
 			}
 		} catch (_e) {
 			toast.error('Failed to load proxy listeners');
@@ -167,6 +179,7 @@ one at https://mozilla.org/MPL/2.0/.
 				enabled: true,
 				isDefault: false
 			};
+			newListenerPort = '25565';
 
 			await loadListeners();
 		} catch (error: unknown) {
@@ -276,35 +289,34 @@ one at https://mozilla.org/MPL/2.0/.
 					<p class="text-xs text-[#a8a8a8]">Global proxy settings and base domain configuration</p>
 				</div>
 			</div>
-			<Switch
+			<input
+				id="proxy-enabled"
+				type="checkbox"
+				class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
 				checked={proxyEnabled}
-				onCheckedChange={(checked) => (proxyEnabled = checked)}
+				onchange={(e) => (proxyEnabled = e.currentTarget.checked)}
 				disabled={loading || saving}
+				aria-label="Enable proxy system"
 			/>
 		</div>
 		<div class="space-y-4">
-			<div class="space-y-2">
-				<Label for="base-url" class="text-xs text-[#c6c6c6]">Base Domain</Label>
-				<Input
-					id="base-url"
-					type="text"
-					bind:value={baseURL}
-					placeholder="minecraft.example.com"
-					disabled={saving || !proxyEnabled}
-					class="h-10 rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4] placeholder:text-[#6f6f6f]"
-				/>
-				<p class="text-xs text-[#8d8d8d]">
-					Optional base domain that will be appended to server hostnames (e.g., "survival" becomes
-					"survival.minecraft.example.com")
-				</p>
-			</div>
+			<CarbonTextInput
+				id="base-url"
+				label="Base Domain"
+				bind:value={baseURL}
+				placeholder="minecraft.example.com"
+				disabled={saving || !proxyEnabled}
+				helperText={baseDomainHelp}
+				class="[&_input]:bg-[#161616]"
+			/>
 
 			<div class="flex justify-end">
-				<button
-					type="button"
+				<CarbonButton
+					kind="primary"
+					size="md"
+					class="gap-2 px-6"
 					onclick={saveProxyConfig}
 					disabled={saving}
-					class="inline-flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#0f62fe] px-6 font-sans text-sm font-medium text-white transition-colors hover:bg-[#0353e9] disabled:cursor-not-allowed disabled:opacity-40"
 				>
 					{#if saving}
 						<Loader2 class="h-4 w-4 animate-spin" />
@@ -313,7 +325,7 @@ one at https://mozilla.org/MPL/2.0/.
 						<Save class="h-4 w-4" />
 						<span>Save Configuration</span>
 					{/if}
-				</button>
+				</CarbonButton>
 			</div>
 		</div>
 	</div>
@@ -325,13 +337,16 @@ one at https://mozilla.org/MPL/2.0/.
 			<CarbonInlineLoading description="Loading proxy configuration..." />
 		</div>
 	{:else if !proxyEnabled}
-		<Alert class="rounded-none border border-[#393939] bg-[#262626] text-[#c6c6c6]">
-			<Info class="h-4 w-4 text-[#78a9ff]" />
-			<AlertDescription class="text-xs text-[#a8a8a8]">
+		<div
+			role="status"
+			class="flex gap-3 rounded-none border border-[#393939] bg-[#262626] p-4 text-[#c6c6c6]"
+		>
+			<Info class="mt-0.5 h-4 w-4 shrink-0 text-[#78a9ff]" />
+			<p class="text-xs text-[#a8a8a8]">
 				Enable the proxy system to allow servers to use custom hostnames instead of direct port
 				connections.
-			</AlertDescription>
-		</Alert>
+			</p>
+		</div>
 	{:else}
 		<!-- Proxy Listeners -->
 		<div class="space-y-4 rounded-none border border-[#393939] bg-[#262626] p-5 shadow-none">
@@ -362,68 +377,70 @@ one at https://mozilla.org/MPL/2.0/.
 										<!-- Edit Mode -->
 										<div class="space-y-3">
 											<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-												<div class="space-y-2">
-													<Label class="text-xs text-[#c6c6c6]">Name</Label>
-													<Input
-														bind:value={editingListener.name}
-														placeholder="Listener name"
-														class="rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4]"
-													/>
-												</div>
-												<div class="space-y-2">
-													<Label class="text-xs text-[#c6c6c6]">Port</Label>
-													<Input
-														type="number"
-														value={listener.port}
-														disabled
-														class="rounded-none border border-[#393939] bg-[#161616] text-[#8d8d8d]"
-													/>
-												</div>
-											</div>
-											<div class="space-y-2">
-												<Label class="text-xs text-[#c6c6c6]">Description</Label>
-												<Input
-													bind:value={editingListener.description}
-													placeholder="Optional description"
-													class="rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4]"
+												<CarbonTextInput
+													label="Name"
+													bind:value={editingListener.name}
+													placeholder="Listener name"
+													class="[&_input]:bg-[#161616]"
+												/>
+												<CarbonTextInput
+													label="Port"
+													type="number"
+													value={String(listener.port)}
+													disabled
+													class="[&_input]:bg-[#161616] [&_input]:text-[#8d8d8d]"
 												/>
 											</div>
+											<CarbonTextInput
+												label="Description"
+												bind:value={editingListener.description}
+												placeholder="Optional description"
+												class="[&_input]:bg-[#161616]"
+											/>
 											<div class="flex items-center justify-between pt-2">
 												<div class="flex items-center gap-4">
-													<div class="flex items-center gap-2">
-														<Switch
+													<label class="flex cursor-pointer items-center gap-2">
+														<input
+															type="checkbox"
+															class="focus-ring h-4 w-4 cursor-pointer accent-[#0f62fe]"
 															checked={editingListener?.enabled ?? false}
-															onCheckedChange={(checked) => {
-																if (editingListener) editingListener.enabled = checked;
+															onchange={(e) => {
+																if (editingListener)
+																	editingListener.enabled = e.currentTarget.checked;
 															}}
 														/>
-														<Label class="text-xs text-[#c6c6c6]">Enabled</Label>
-													</div>
-													<div class="flex items-center gap-2">
-														<Switch
+														<span class="text-xs text-[#c6c6c6]">Enabled</span>
+													</label>
+													<label class="flex cursor-pointer items-center gap-2">
+														<input
+															type="checkbox"
+															class="focus-ring h-4 w-4 cursor-pointer accent-[#0f62fe]"
 															checked={editingListener?.isDefault ?? false}
-															onCheckedChange={(checked) => {
-																if (editingListener) editingListener.isDefault = checked;
+															onchange={(e) => {
+																if (editingListener)
+																	editingListener.isDefault = e.currentTarget.checked;
 															}}
 														/>
-														<Label class="text-xs text-[#c6c6c6]">Default</Label>
-													</div>
+														<span class="text-xs text-[#c6c6c6]">Default</span>
+													</label>
 												</div>
 												<div class="flex gap-2">
-													<button
-														type="button"
-														class="inline-flex h-8 cursor-pointer items-center rounded-none border border-[#393939] bg-[#353535] px-3 text-xs text-[#f4f4f4] hover:bg-[#393939]"
+													<CarbonButton
+														kind="secondary"
+														size="sm"
 														onclick={() => (editingListener = null)}
 													>
 														Cancel
-													</button>
-													<button
-														type="button"
-														class="inline-flex h-8 cursor-pointer items-center rounded-none bg-[#0f62fe] px-4 text-xs font-medium text-white hover:bg-[#0353e9]"
-														onclick={() => updateListener(editingListener!)}
+													</CarbonButton>
+													<CarbonButton
+														kind="primary"
+														size="sm"
+														onclick={() => {
+															if (editingListener) updateListener(editingListener);
+														}}
 													>
 														Save
-													</button>
+													</CarbonButton>
 												</div>
 											</div>
 										</div>
@@ -475,6 +492,7 @@ one at https://mozilla.org/MPL/2.0/.
 														class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-[#8d8d8d] transition-colors hover:bg-[#353535] hover:text-[#f4f4f4]"
 														onclick={() => setDefaultListener(listener)}
 														title="Set as default"
+														aria-label="Set as default"
 													>
 														<Star class="h-4 w-4" />
 													</button>
@@ -483,6 +501,7 @@ one at https://mozilla.org/MPL/2.0/.
 													type="button"
 													class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-[#8d8d8d] transition-colors hover:bg-[#353535] hover:text-[#f4f4f4]"
 													onclick={() => (editingListener = { ...listener })}
+													aria-label="Edit listener"
 												>
 													<Edit class="h-4 w-4" />
 												</button>
@@ -491,6 +510,7 @@ one at https://mozilla.org/MPL/2.0/.
 														type="button"
 														class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-[#8d8d8d] transition-colors hover:bg-[#da1e28]/20 hover:text-[#ff8389]"
 														onclick={() => deleteListener(lwc)}
+														aria-label="Delete listener"
 													>
 														<Trash2 class="h-4 w-4" />
 													</button>
@@ -509,65 +529,72 @@ one at https://mozilla.org/MPL/2.0/.
 					<h4 class="mb-3 text-sm font-normal text-[#f4f4f4]">Add New Listener</h4>
 					<div class="space-y-3">
 						<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-							<div class="space-y-2">
-								<Label class="text-xs text-[#c6c6c6]">Name</Label>
-								<Input
-									bind:value={newListener.name}
-									placeholder="e.g., Secondary, Development"
-									class="rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4]"
-								/>
-							</div>
-							<div class="space-y-2">
-								<Label class="text-xs text-[#c6c6c6]">Port</Label>
-								<Input
-									type="number"
-									bind:value={newListener.port}
-									oninput={(e) => validatePort(Number(e.currentTarget.value))}
-									class="rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4] {portError
-										? 'border-[#da1e28]'
-										: ''}"
-								/>
-								{#if portError}
-									<p class="text-xs text-[#ff8389]">{portError}</p>
-								{/if}
-							</div>
-						</div>
-						<div class="space-y-2">
-							<Label class="text-xs text-[#c6c6c6]">Description (Optional)</Label>
-							<Input
-								bind:value={newListener.description}
-								placeholder="Optional description for this listener"
-								class="rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4]"
+							<CarbonTextInput
+								label="Name"
+								bind:value={newListener.name}
+								placeholder="e.g., Secondary, Development"
+								class="[&_input]:bg-[#161616]"
+							/>
+							<CarbonTextInput
+								label="Port"
+								type="number"
+								min={1}
+								max={65535}
+								bind:value={newListenerPort}
+								oninput={(event) => {
+									const raw = event.currentTarget.value.trim();
+									if (raw === '' || !/^\d+$/.test(raw)) {
+										newListener.port = undefined;
+										portError = 'Port must be between 1 and 65535';
+										return;
+									}
+									const port = Number(raw);
+									newListener.port = port;
+									validatePort(port);
+								}}
+								error={portError}
+								class="[&_input]:bg-[#161616]"
 							/>
 						</div>
+						<CarbonTextInput
+							label="Description (Optional)"
+							bind:value={newListener.description}
+							placeholder="Optional description for this listener"
+							class="[&_input]:bg-[#161616]"
+						/>
 						<div class="flex items-center justify-between pt-2">
 							<div class="flex items-center gap-4">
-								<div class="flex items-center gap-2">
-									<Switch
+								<label class="flex cursor-pointer items-center gap-2">
+									<input
+										type="checkbox"
+										class="focus-ring h-4 w-4 cursor-pointer accent-[#0f62fe]"
 										checked={newListener.enabled}
-										onCheckedChange={(checked) => (newListener.enabled = checked)}
+										onchange={(e) => (newListener.enabled = e.currentTarget.checked)}
 									/>
-									<Label class="text-xs text-[#c6c6c6]">Enabled</Label>
-								</div>
+									<span class="text-xs text-[#c6c6c6]">Enabled</span>
+								</label>
 								{#if listenersWithCount.length === 0}
-									<div class="flex items-center gap-2">
-										<Switch
+									<label class="flex cursor-pointer items-center gap-2">
+										<input
+											type="checkbox"
+											class="focus-ring h-4 w-4 cursor-pointer accent-[#0f62fe]"
 											checked={newListener.isDefault}
-											onCheckedChange={(checked) => (newListener.isDefault = checked)}
+											onchange={(e) => (newListener.isDefault = e.currentTarget.checked)}
 										/>
-										<Label class="text-xs text-[#c6c6c6]">Set as Default</Label>
-									</div>
+										<span class="text-xs text-[#c6c6c6]">Set as Default</span>
+									</label>
 								{/if}
 							</div>
-							<button
-								type="button"
+							<CarbonButton
+								kind="primary"
+								size="md"
+								class="gap-2"
 								onclick={createListener}
 								disabled={!newListener.name || !!portError}
-								class="inline-flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#0f62fe] px-4 font-sans text-xs font-medium text-white transition-colors hover:bg-[#0353e9] disabled:cursor-not-allowed disabled:opacity-40"
 							>
 								<Plus class="h-4 w-4" />
 								<span>Add Listener</span>
-							</button>
+							</CarbonButton>
 						</div>
 					</div>
 				</div>
