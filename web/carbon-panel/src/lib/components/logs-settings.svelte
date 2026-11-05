@@ -10,19 +10,11 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
-	import { ScrollText, RefreshCw, Download, Loader2, AlertCircle, ArrowDown } from '@lucide/svelte';
+	import { ScrollText, RefreshCw, Download, ArrowDown } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { formatFileSize, parseFileSize } from '$lib/utils/format-file-size';
+	import { CarbonButton, CarbonInlineLoading, CarbonTag, CarbonTile } from '$lib/components/carbon';
 
 	let loading = $state(true);
 	let refreshing = $state(false);
@@ -101,99 +93,91 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<Card
-	class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
->
-	<div
-		class="pointer-events-none absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
-	></div>
-	<CardHeader class="relative pb-4">
-		<div class="flex items-center justify-between">
-			<div>
-				<CardTitle class="text-2xl font-semibold">Application Logs</CardTitle>
-				<CardDescription class="mt-2 text-base">
+<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+	<div class="border-b border-[#393939] px-5 py-4">
+		<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+			<div class="min-w-0">
+				<h2 class="font-sans text-base font-semibold text-[#f4f4f4]">Application Logs</h2>
+				<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
 					View real-time Carbon Panel application logs for debugging and monitoring.
-				</CardDescription>
+				</p>
 			</div>
-			<div class="flex items-center gap-2">
-				{#if filename}
-					<Badge variant="outline" class="text-xs">
-						{filename}
-					</Badge>
-					<Badge variant="secondary" class="text-xs">
-						{formatFileSize(fileSize)}
-					</Badge>
-				{/if}
-			</div>
+			{#if filename}
+				<div class="flex flex-wrap items-center gap-2">
+					<CarbonTag type="gray" size="sm">{filename}</CarbonTag>
+					<CarbonTag type="cool-gray" size="sm">{formatFileSize(fileSize)}</CarbonTag>
+				</div>
+			{/if}
 		</div>
-	</CardHeader>
-	<CardContent class="space-y-4">
-		<!-- Controls -->
-		<div class="flex items-center justify-between gap-4">
-			<div class="flex items-center gap-2">
-				<Button onclick={() => loadLogs(true)} disabled={refreshing} variant="outline" size="sm">
-					{#if refreshing}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-					{:else}
-						<RefreshCw class="mr-2 h-4 w-4" />
-					{/if}
+	</div>
+
+	<div class="space-y-4 p-5">
+		<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+			<div class="flex flex-wrap items-center gap-2">
+				<CarbonButton
+					kind="secondary"
+					size="sm"
+					class="gap-2"
+					onclick={() => loadLogs(true)}
+					disabled={refreshing}
+				>
+					<RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" />
 					Refresh
-				</Button>
-				<Button onclick={downloadLogs} disabled={!logs} variant="outline" size="sm">
-					<Download class="mr-2 h-4 w-4" />
+				</CarbonButton>
+				<CarbonButton
+					kind="secondary"
+					size="sm"
+					class="gap-2"
+					onclick={downloadLogs}
+					disabled={!logs}
+				>
+					<Download class="h-4 w-4" />
 					Download
-				</Button>
-				<Button onclick={scrollToBottom} variant="outline" size="sm">
-					<ArrowDown class="mr-2 h-4 w-4" />
+				</CarbonButton>
+				<CarbonButton kind="secondary" size="sm" class="gap-2" onclick={scrollToBottom}>
+					<ArrowDown class="h-4 w-4" />
 					Scroll to Bottom
-				</Button>
+				</CarbonButton>
 			</div>
-			<div class="flex items-center gap-2">
-				<label class="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-					<input type="checkbox" bind:checked={autoScroll} class="rounded border-border" />
-					Auto-scroll
-				</label>
-			</div>
+			<label class="flex cursor-pointer items-center gap-2 font-sans text-sm text-[#a8a8a8]">
+				<input
+					id="logs-auto-scroll"
+					type="checkbox"
+					bind:checked={autoScroll}
+					class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+				/>
+				Auto-scroll
+			</label>
 		</div>
 
-		<!-- Log Display -->
-		<div class="relative overflow-hidden rounded-lg border border-border bg-black/90">
+		<div class="overflow-hidden rounded-none border border-[#393939] bg-[#161616]">
 			{#if loading}
 				<div class="flex h-96 items-center justify-center">
-					<div class="space-y-3 text-center">
-						<Loader2 class="mx-auto h-8 w-8 animate-spin text-primary" />
-						<div class="text-sm text-muted-foreground">Loading logs...</div>
-					</div>
+					<CarbonInlineLoading description="Loading logs..." />
 				</div>
 			{:else if !logs}
-				<div class="flex h-96 items-center justify-center">
-					<div class="space-y-3 text-center">
-						<AlertCircle class="mx-auto h-8 w-8 text-muted-foreground" />
-						<div class="text-sm text-muted-foreground">No logs available</div>
-						<p class="text-xs text-muted-foreground">
-							File logging may not be enabled in your configuration.
-						</p>
-					</div>
+				<div class="flex h-96 flex-col items-center justify-center gap-2 text-center">
+					<p class="font-sans text-sm text-[#c6c6c6]">No logs available</p>
+					<p class="max-w-sm font-sans text-xs text-[#8d8d8d]">
+						File logging may not be enabled in your configuration.
+					</p>
 				</div>
 			{:else}
 				<pre
 					bind:this={logContainer}
-					class="h-96 overflow-auto p-4 font-mono text-xs break-all whitespace-pre-wrap text-green-400">{logs}</pre>
+					class="h-96 overflow-auto p-4 font-mono text-xs break-all whitespace-pre-wrap text-[#42be65]">{logs}</pre>
 			{/if}
 		</div>
 
-		<!-- Info Notice -->
-		<div class="rounded-lg border border-border/50 bg-muted/30 p-4">
-			<div class="flex gap-3">
-				<ScrollText class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-				<div class="space-y-1 text-sm text-muted-foreground">
-					<p class="font-medium">Log Information</p>
-					<p class="text-xs leading-relaxed">
-						Showing the last 500 lines of application logs. Logs auto-refresh every 5 seconds. For
-						complete logs, use the Support tab to generate a support bundle or click Download.
-					</p>
-				</div>
+		<div class="flex gap-3 rounded-none border border-[#393939] bg-[#1e1e1e] p-4">
+			<ScrollText class="mt-0.5 h-4 w-4 shrink-0 text-[#78a9ff]" />
+			<div class="space-y-1 font-sans text-xs text-[#a8a8a8]">
+				<p class="font-medium text-[#c6c6c6]">Log Information</p>
+				<p class="leading-relaxed">
+					Showing the last 500 lines of application logs. Logs auto-refresh every 5 seconds. For
+					complete logs, use the Support tab to generate a support bundle or click Download.
+				</p>
 			</div>
 		</div>
-	</CardContent>
-</Card>
+	</div>
+</CarbonTile>

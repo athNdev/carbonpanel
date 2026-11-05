@@ -7,10 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
-	import { CarbonButton } from '$lib/components/carbon';
+	import { CarbonButton, CarbonTextInput } from '$lib/components/carbon';
 	import { toast } from 'svelte-sonner';
 	import {
 		Key,
@@ -19,8 +16,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		AlertCircle,
 		ExternalLink,
 		Loader2,
-		Eye,
-		EyeOff,
 		ShieldCheck,
 		Save
 	} from '@lucide/svelte';
@@ -30,9 +25,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let cfApiKey = $state('');
 	let modrinthToken = $state('');
 	let modrinthUserAgent = $state('');
-
-	let showCfKey = $state(false);
-	let showModrinthToken = $state(false);
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -202,62 +194,56 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</ol>
 			</div>
 
-			<div class="space-y-2">
-				<Label for="cf-api-key" class="text-xs text-[#c6c6c6]">API Key</Label>
-				<div class="flex gap-2">
-					<div class="relative flex-1">
-						<Input
-							id="cf-api-key"
-							type={showCfKey ? 'text' : 'password'}
-							placeholder="$2a$10$..."
-							bind:value={cfApiKey}
-							class="h-10 rounded-none border border-[#525252] bg-[#161616] pr-10 font-mono text-sm text-[#f4f4f4] placeholder:text-[#6f6f6f]"
-						/>
-						<button
-							type="button"
-							onclick={() => (showCfKey = !showCfKey)}
-							class="absolute top-1/2 right-3 -translate-y-1/2 cursor-pointer rounded-none text-[#8d8d8d] hover:text-[#f4f4f4]"
-						>
-							{#if showCfKey}
-								<EyeOff class="h-4 w-4" />
-							{:else}
-								<Eye class="h-4 w-4" />
-							{/if}
-						</button>
-					</div>
-					<button
-						type="button"
-						onclick={testCurseForge}
-						disabled={testingCf || !cfApiKey.trim()}
-						class="inline-flex h-10 cursor-pointer items-center gap-2 rounded-none border border-[#0f62fe] px-4 font-sans text-xs font-medium text-[#78a9ff] transition-colors hover:bg-[#0f62fe] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-					>
-						{#if testingCf}
-							<Loader2 class="h-3.5 w-3.5 animate-spin" />
-							<span>Testing...</span>
-						{:else}
-							<ShieldCheck class="h-3.5 w-3.5" />
-							<span>Test Connection</span>
-						{/if}
-					</button>
-				</div>
+			<div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+				<CarbonTextInput
+					id="cf-api-key"
+					label="API Key"
+					type="password"
+					revealable
+					placeholder="$2a$10$..."
+					bind:value={cfApiKey}
+					class="min-w-0 flex-1 font-mono [&_input]:bg-[#161616]"
+				/>
+				<CarbonButton
+					kind="tertiary"
+					size="md"
+					class="shrink-0 gap-2"
+					onclick={testCurseForge}
+					disabled={testingCf || !cfApiKey.trim()}
+				>
+					{#if testingCf}
+						<Loader2 class="h-4 w-4 animate-spin" />
+						<span>Testing...</span>
+					{:else}
+						<ShieldCheck class="h-4 w-4" />
+						<span>Test Connection</span>
+					{/if}
+				</CarbonButton>
 			</div>
 
 			{#if cfTestResult}
 				{#if cfTestResult.valid}
-					<Alert class="rounded-none border border-[#24a148]/40 bg-[#24a148]/10 text-[#42be65]">
-						<CheckCircle2 class="h-4 w-4 text-[#42be65]" />
-						<AlertTitle class="text-xs font-medium">Connection Valid</AlertTitle>
-						<AlertDescription class="text-xs">{cfTestResult.message}</AlertDescription>
-					</Alert>
-				{:else}
-					<Alert
-						variant="destructive"
-						class="rounded-none border border-[#da1e28]/40 bg-[#da1e28]/10 text-[#ff8389]"
+					<div
+						role="status"
+						class="flex gap-3 rounded-none border border-[#24a148]/40 bg-[#24a148]/10 p-3 text-[#42be65]"
 					>
-						<XCircle class="h-4 w-4 text-[#da1e28]" />
-						<AlertTitle class="text-xs font-medium">Validation Failed</AlertTitle>
-						<AlertDescription class="text-xs">{cfTestResult.message}</AlertDescription>
-					</Alert>
+						<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-[#42be65]" />
+						<div class="space-y-0.5">
+							<p class="text-xs font-medium">Connection Valid</p>
+							<p class="text-xs">{cfTestResult.message}</p>
+						</div>
+					</div>
+				{:else}
+					<div
+						role="alert"
+						class="flex gap-3 rounded-none border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-[#ff8389]"
+					>
+						<XCircle class="mt-0.5 h-4 w-4 shrink-0 text-[#da1e28]" />
+						<div class="space-y-0.5">
+							<p class="text-xs font-medium">Validation Failed</p>
+							<p class="text-xs">{cfTestResult.message}</p>
+						</div>
+					</div>
 				{/if}
 			{/if}
 		</div>
@@ -313,80 +299,66 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</p>
 			</div>
 
-			<div class="space-y-2">
-				<Label for="modrinth-token" class="text-xs text-[#c6c6c6]"
-					>Personal Access Token (PAT)</Label
-				>
-				<div class="relative">
-					<Input
-						id="modrinth-token"
-						type={showModrinthToken ? 'text' : 'password'}
-						placeholder="mrp_..."
-						bind:value={modrinthToken}
-						class="h-10 rounded-none border border-[#525252] bg-[#161616] pr-10 font-mono text-sm text-[#f4f4f4] placeholder:text-[#6f6f6f]"
-					/>
-					<button
-						type="button"
-						onclick={() => (showModrinthToken = !showModrinthToken)}
-						class="absolute top-1/2 right-3 -translate-y-1/2 cursor-pointer rounded-none text-[#8d8d8d] hover:text-[#f4f4f4]"
-					>
-						{#if showModrinthToken}
-							<EyeOff class="h-4 w-4" />
-						{:else}
-							<Eye class="h-4 w-4" />
-						{/if}
-					</button>
-				</div>
-			</div>
+			<CarbonTextInput
+				id="modrinth-token"
+				label="Personal Access Token (PAT)"
+				type="password"
+				revealable
+				placeholder="mrp_..."
+				bind:value={modrinthToken}
+				class="font-mono [&_input]:bg-[#161616]"
+			/>
 
-			<div class="space-y-2">
-				<Label for="modrinth-ua" class="text-xs text-[#c6c6c6]">User-Agent Header</Label>
-				<Input
-					id="modrinth-ua"
-					type="text"
-					placeholder="CarbonPanel/1.0 (contact@example.com)"
-					bind:value={modrinthUserAgent}
-					class="h-10 rounded-none border border-[#525252] bg-[#161616] font-mono text-sm text-[#f4f4f4] placeholder:text-[#6f6f6f]"
-				/>
-				<p class="text-xs text-[#8d8d8d]">
-					Modrinth API policy encourages client identification including application name and
-					contact info.
-				</p>
-			</div>
+			<CarbonTextInput
+				id="modrinth-ua"
+				label="User-Agent Header"
+				placeholder="CarbonPanel/1.0 (contact@example.com)"
+				bind:value={modrinthUserAgent}
+				helperText="Modrinth API policy encourages client identification including application name and contact info."
+				class="font-mono [&_input]:bg-[#161616]"
+			/>
 
 			<div class="pt-2">
-				<button
-					type="button"
+				<CarbonButton
+					kind="tertiary"
+					size="md"
+					class="gap-2"
 					onclick={testModrinth}
 					disabled={testingModrinth}
-					class="inline-flex h-10 cursor-pointer items-center gap-2 rounded-none border border-[#0f62fe] px-4 font-sans text-xs font-medium text-[#78a9ff] transition-colors hover:bg-[#0f62fe] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
 				>
 					{#if testingModrinth}
-						<Loader2 class="h-3.5 w-3.5 animate-spin" />
+						<Loader2 class="h-4 w-4 animate-spin" />
 						<span>Testing...</span>
 					{:else}
-						<ShieldCheck class="h-3.5 w-3.5" />
+						<ShieldCheck class="h-4 w-4" />
 						<span>Test Connection</span>
 					{/if}
-				</button>
+				</CarbonButton>
 			</div>
 
 			{#if modrinthTestResult}
 				{#if modrinthTestResult.valid}
-					<Alert class="rounded-none border border-[#24a148]/40 bg-[#24a148]/10 text-[#42be65]">
-						<CheckCircle2 class="h-4 w-4 text-[#42be65]" />
-						<AlertTitle class="text-xs font-medium">Connection Valid</AlertTitle>
-						<AlertDescription class="text-xs">{modrinthTestResult.message}</AlertDescription>
-					</Alert>
-				{:else}
-					<Alert
-						variant="destructive"
-						class="rounded-none border border-[#da1e28]/40 bg-[#da1e28]/10 text-[#ff8389]"
+					<div
+						role="status"
+						class="flex gap-3 rounded-none border border-[#24a148]/40 bg-[#24a148]/10 p-3 text-[#42be65]"
 					>
-						<XCircle class="h-4 w-4 text-[#da1e28]" />
-						<AlertTitle class="text-xs font-medium">Validation Failed</AlertTitle>
-						<AlertDescription class="text-xs">{modrinthTestResult.message}</AlertDescription>
-					</Alert>
+						<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-[#42be65]" />
+						<div class="space-y-0.5">
+							<p class="text-xs font-medium">Connection Valid</p>
+							<p class="text-xs">{modrinthTestResult.message}</p>
+						</div>
+					</div>
+				{:else}
+					<div
+						role="alert"
+						class="flex gap-3 rounded-none border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-[#ff8389]"
+					>
+						<XCircle class="mt-0.5 h-4 w-4 shrink-0 text-[#da1e28]" />
+						<div class="space-y-0.5">
+							<p class="text-xs font-medium">Validation Failed</p>
+							<p class="text-xs">{modrinthTestResult.message}</p>
+						</div>
+					</div>
 				{/if}
 			{/if}
 		</div>

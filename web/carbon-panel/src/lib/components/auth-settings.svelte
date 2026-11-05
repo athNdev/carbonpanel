@@ -11,41 +11,21 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { create } from '@bufbuild/protobuf';
-	import {
-		Card,
-		CardContent,
-		CardDescription,
-		CardHeader,
-		CardTitle
-	} from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Button } from '$lib/components/ui/button';
-	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
-	import { Switch } from '$lib/components/ui/switch';
-	import {
-		Accordion,
-		AccordionContent,
-		AccordionItem,
-		AccordionTrigger
-	} from '$lib/components/ui/accordion';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { canUpdateSettings } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import { UpdateAuthSettingsRequestSchema } from '$lib/proto/carbonpanel/v1/auth_pb';
 	import type { GetAuthConfigResponse } from '$lib/proto/carbonpanel/v1/auth_pb';
+	import { Shield, Loader2, Check, X, Save, KeyRound, Globe } from '@lucide/svelte';
 	import {
-		Shield,
-		Loader2,
-		Check,
-		X,
-		Save,
-		KeyRound,
-		Globe,
-		FileCode,
-		Container,
-		Terminal
-	} from '@lucide/svelte';
+		CarbonAccordion,
+		CarbonAccordionItem,
+		CarbonButton,
+		CarbonInlineLoading,
+		CarbonTag,
+		CarbonTextInput,
+		CarbonTile
+	} from '$lib/components/carbon';
 
 	let loading = $state(true);
 	let saving = $state(false);
@@ -55,17 +35,57 @@ one at https://mozilla.org/MPL/2.0/.
 	let localAuthEnabled = $state(true);
 	let allowRegistration = $state(false);
 	let anonymousAccess = $state(false);
-	let sessionTimeoutHours = $state(24);
+	// Text, not a controlled number: "1." must stay on screen long enough to become "1.5".
+	let sessionTimeoutText = $state('24');
+
+	let configYamlOpen = $state(false);
+	let dockerComposeOpen = $state(false);
+	let envVarsOpen = $state(false);
+
+	$effect(() => {
+		if (configYamlOpen) {
+			dockerComposeOpen = false;
+			envVarsOpen = false;
+		}
+	});
+	$effect(() => {
+		if (dockerComposeOpen) {
+			configYamlOpen = false;
+			envVarsOpen = false;
+		}
+	});
+	$effect(() => {
+		if (envVarsOpen) {
+			configYamlOpen = false;
+			dockerComposeOpen = false;
+		}
+	});
 
 	let canEdit = $derived($canUpdateSettings);
+
+	let parsedSessionHours = $derived.by(() => {
+		const text = sessionTimeoutText.trim();
+		if (text === '') return null;
+		const hours = Number(text);
+		return Number.isFinite(hours) ? hours : null;
+	});
+	let sessionTimeoutError = $derived(
+		parsedSessionHours === null ? 'Enter the timeout in hours' : ''
+	);
 
 	let hasChanges = $derived(
 		config != null &&
 			(localAuthEnabled !== config.localAuthEnabled ||
 				allowRegistration !== config.allowRegistration ||
 				anonymousAccess !== config.anonymousAccess ||
-				Math.round(sessionTimeoutHours * 3600) !== config.sessionTimeout)
+				(parsedSessionHours !== null &&
+					Math.round(parsedSessionHours * 3600) !== config.sessionTimeout))
 	);
+
+	function setSessionTimeoutFromSeconds(seconds: number) {
+		const hours = Math.round((seconds / 3600) * 100) / 100;
+		sessionTimeoutText = String(hours);
+	}
 
 	async function loadConfig() {
 		loading = true;
@@ -75,7 +95,7 @@ one at https://mozilla.org/MPL/2.0/.
 			localAuthEnabled = response.localAuthEnabled;
 			allowRegistration = response.allowRegistration;
 			anonymousAccess = response.anonymousAccess;
-			sessionTimeoutHours = Math.round((response.sessionTimeout / 3600) * 100) / 100;
+			setSessionTimeoutFromSeconds(response.sessionTimeout);
 		} catch (error) {
 			console.error('Failed to load auth config:', error);
 		} finally {
@@ -85,6 +105,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 	async function saveSettings() {
 		if (!config) return;
+		if (parsedSessionHours === null) {
+			toast.error('Enter the timeout in hours');
+			return;
+		}
 		saving = true;
 		try {
 			const req = create(UpdateAuthSettingsRequestSchema, {});
@@ -98,7 +122,7 @@ one at https://mozilla.org/MPL/2.0/.
 			if (anonymousAccess !== config.anonymousAccess) {
 				req.anonymousAccess = anonymousAccess;
 			}
-			const newTimeout = Math.round(sessionTimeoutHours * 3600);
+			const newTimeout = Math.round(parsedSessionHours * 3600);
 			if (newTimeout !== config.sessionTimeout) {
 				req.sessionTimeout = newTimeout;
 			}
@@ -109,7 +133,7 @@ one at https://mozilla.org/MPL/2.0/.
 				localAuthEnabled = response.config.localAuthEnabled;
 				allowRegistration = response.config.allowRegistration;
 				anonymousAccess = response.config.anonymousAccess;
-				sessionTimeoutHours = Math.round((response.config.sessionTimeout / 3600) * 100) / 100;
+				setSessionTimeoutFromSeconds(response.config.sessionTimeout);
 			}
 			toast.success('Authentication settings updated');
 		} catch (error: unknown) {
@@ -126,246 +150,260 @@ one at https://mozilla.org/MPL/2.0/.
 
 {#if loading}
 	<div class="flex items-center justify-center py-16">
-		<Loader2 class="h-8 w-8 animate-spin text-primary" />
+		<CarbonInlineLoading description="Loading authentication settings..." />
 	</div>
 {:else if config}
 	<div class="grid gap-6 lg:grid-cols-2">
-		<!-- Card 1: Authentication Settings -->
-		<Card
-			class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
-		>
-			<div
-				class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
-			></div>
-			<CardHeader class="relative pb-4">
+		<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+			<div class="border-b border-[#393939] px-5 py-4">
 				<div class="flex items-center gap-3">
 					<div
-						class="flex h-12 w-12 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/10"
+						class="flex h-10 w-10 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
 					>
-						<Shield class="h-6 w-6 text-primary" />
+						<Shield class="h-5 w-5 text-[#78a9ff]" />
 					</div>
 					<div>
-						<CardTitle class="text-2xl font-semibold">Authentication Settings</CardTitle>
-						<CardDescription class="mt-1 text-base">
+						<h2 class="font-sans text-base font-semibold text-[#f4f4f4]">
+							Authentication Settings
+						</h2>
+						<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">
 							Manage login methods and access controls
-						</CardDescription>
+						</p>
 					</div>
 				</div>
-			</CardHeader>
-			<CardContent class="relative space-y-5">
-				<!-- Local Authentication -->
-				<div class="flex items-center justify-between rounded-lg border bg-card p-3">
-					<div class="space-y-0.5">
-						<Label class="text-sm font-medium">Local Authentication</Label>
-						<p class="text-xs text-muted-foreground">Username and password login</p>
+			</div>
+
+			<div class="space-y-4 p-5">
+				<div
+					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3"
+				>
+					<div class="space-y-0.5 pr-4">
+						<p class="font-sans text-sm text-[#f4f4f4]">Local Authentication</p>
+						<p class="text-xs text-[#8d8d8d]">Username and password login</p>
 					</div>
 					{#if canEdit}
-						<Switch
+						<input
+							id="local-auth-enabled"
+							type="checkbox"
+							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
 							checked={localAuthEnabled}
-							onCheckedChange={(v) => {
-								localAuthEnabled = v;
-								if (!v) allowRegistration = false;
+							onchange={(e) => {
+								localAuthEnabled = e.currentTarget.checked;
+								if (!localAuthEnabled) allowRegistration = false;
 							}}
 							disabled={saving}
+							aria-label="Local authentication"
 						/>
+					{:else if localAuthEnabled}
+						<CarbonTag type="green" size="sm">
+							<Check class="mr-1 h-3 w-3" /> Enabled
+						</CarbonTag>
 					{:else}
-						<Badge variant={localAuthEnabled ? 'default' : 'outline'}>
-							{#if localAuthEnabled}
-								<Check class="mr-1 h-3 w-3" /> Enabled
-							{:else}
-								<X class="mr-1 h-3 w-3" /> Disabled
-							{/if}
-						</Badge>
+						<CarbonTag type="gray" size="sm">
+							<X class="mr-1 h-3 w-3" /> Disabled
+						</CarbonTag>
 					{/if}
 				</div>
 
-				<!-- User Registration -->
 				<div
-					class="flex items-center justify-between rounded-lg border bg-card p-3 {!localAuthEnabled
+					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3 {!localAuthEnabled
 						? 'opacity-50'
 						: ''}"
 				>
-					<div class="space-y-0.5">
-						<Label class="text-sm font-medium">User Registration</Label>
-						<p class="text-xs text-muted-foreground">Allow new users to self-register</p>
+					<div class="space-y-0.5 pr-4">
+						<p class="font-sans text-sm text-[#f4f4f4]">User Registration</p>
+						<p class="text-xs text-[#8d8d8d]">Allow new users to self-register</p>
 					</div>
 					{#if canEdit}
-						<Switch
+						<input
+							id="allow-registration"
+							type="checkbox"
+							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
 							checked={allowRegistration}
-							onCheckedChange={(v) => {
-								allowRegistration = v;
-							}}
+							onchange={(e) => (allowRegistration = e.currentTarget.checked)}
 							disabled={saving || !localAuthEnabled}
+							aria-label="User registration"
 						/>
+					{:else if allowRegistration}
+						<CarbonTag type="green" size="sm">
+							<Check class="mr-1 h-3 w-3" /> Allowed
+						</CarbonTag>
 					{:else}
-						<Badge variant={allowRegistration ? 'default' : 'outline'}>
-							{#if allowRegistration}
-								<Check class="mr-1 h-3 w-3" /> Allowed
-							{:else}
-								<X class="mr-1 h-3 w-3" /> Disabled
-							{/if}
-						</Badge>
+						<CarbonTag type="gray" size="sm">
+							<X class="mr-1 h-3 w-3" /> Disabled
+						</CarbonTag>
 					{/if}
 				</div>
 
-				<!-- Anonymous Access -->
-				<div class="flex items-center justify-between rounded-lg border bg-card p-3">
-					<div class="space-y-0.5">
-						<Label class="text-sm font-medium">Anonymous Access</Label>
-						<p class="text-xs text-muted-foreground">Limited unauthenticated browsing</p>
+				<div
+					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3"
+				>
+					<div class="space-y-0.5 pr-4">
+						<p class="font-sans text-sm text-[#f4f4f4]">Anonymous Access</p>
+						<p class="text-xs text-[#8d8d8d]">Limited unauthenticated browsing</p>
 					</div>
 					{#if canEdit}
-						<Switch
+						<input
+							id="anonymous-access"
+							type="checkbox"
+							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
 							checked={anonymousAccess}
-							onCheckedChange={(v) => {
-								anonymousAccess = v;
-							}}
+							onchange={(e) => (anonymousAccess = e.currentTarget.checked)}
 							disabled={saving}
+							aria-label="Anonymous access"
 						/>
+					{:else if anonymousAccess}
+						<CarbonTag type="green" size="sm">
+							<Check class="mr-1 h-3 w-3" /> Enabled
+						</CarbonTag>
 					{:else}
-						<Badge variant={anonymousAccess ? 'default' : 'outline'}>
-							{#if anonymousAccess}
-								<Check class="mr-1 h-3 w-3" /> Enabled
-							{:else}
-								<X class="mr-1 h-3 w-3" /> Disabled
-							{/if}
-						</Badge>
+						<CarbonTag type="gray" size="sm">
+							<X class="mr-1 h-3 w-3" /> Disabled
+						</CarbonTag>
 					{/if}
 				</div>
 
-				<!-- Session Timeout -->
-				<div class="flex items-center justify-between rounded-lg border bg-card p-3">
+				<div
+					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3"
+				>
 					<div class="space-y-0.5">
-						<Label class="text-sm font-medium">Session Timeout</Label>
-						<p class="text-xs text-muted-foreground">How long sessions remain valid</p>
+						<label for="session-timeout-hours" class="font-sans text-sm text-[#f4f4f4]"
+							>Session Timeout</label
+						>
+						<p class="text-xs text-[#8d8d8d]">How long sessions remain valid</p>
 					</div>
 					{#if canEdit}
 						<div class="flex items-center gap-2">
-							<Input
+							<CarbonTextInput
+								id="session-timeout-hours"
 								type="number"
-								min="0.084"
-								step="0.5"
-								class="h-8 w-20 text-sm"
-								bind:value={sessionTimeoutHours}
+								min={0.084}
+								step={0.5}
+								class="[&_input]:h-8 [&_input]:w-24 [&_input]:bg-[#161616]"
+								bind:value={sessionTimeoutText}
+								error={sessionTimeoutError}
 								disabled={saving}
 							/>
-							<span class="text-sm text-muted-foreground">hours</span>
+							<span class="text-sm text-[#8d8d8d]">hours</span>
 						</div>
 					{:else}
-						<Badge variant="outline">{sessionTimeoutHours}h</Badge>
+						<CarbonTag type="gray" size="sm">{sessionTimeoutText}h</CarbonTag>
 					{/if}
 				</div>
 
 				{#if canEdit}
-					<Button onclick={saveSettings} disabled={saving || !hasChanges} class="w-full">
+					<CarbonButton
+						kind="primary"
+						size="md"
+						class="w-full justify-center gap-2"
+						onclick={saveSettings}
+						disabled={saving || !hasChanges || sessionTimeoutError !== ''}
+					>
 						{#if saving}
-							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							<Loader2 class="h-4 w-4 animate-spin" />
 							Saving...
 						{:else}
-							<Save class="mr-2 h-4 w-4" />
+							<Save class="h-4 w-4" />
 							Save Changes
 						{/if}
-					</Button>
+					</CarbonButton>
 				{/if}
-			</CardContent>
-		</Card>
+			</div>
+		</CarbonTile>
 
-		<!-- Card 2: OIDC / Single Sign-On -->
-		<Card
-			class="relative overflow-hidden border-2 bg-linear-to-br from-card to-card/80 transition-all duration-300 hover:border-primary/50 hover:shadow-2xl"
-		>
-			<div
-				class="absolute inset-0 bg-linear-to-br from-primary/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 hover:opacity-100"
-			></div>
-			<CardHeader class="relative pb-4">
-				<div class="flex items-center gap-3">
+		<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+			<div class="border-b border-[#393939] px-5 py-4">
+				<div class="flex flex-wrap items-start gap-3">
 					<div
-						class="flex h-12 w-12 items-center justify-center rounded-lg bg-linear-to-br from-primary/20 to-primary/10"
+						class="flex h-10 w-10 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
 					>
-						<KeyRound class="h-6 w-6 text-primary" />
+						<KeyRound class="h-5 w-5 text-[#78a9ff]" />
 					</div>
-					<div class="flex items-center gap-3">
-						<div>
-							<CardTitle class="text-2xl font-semibold">OIDC / Single Sign-On</CardTitle>
-							<CardDescription class="mt-1 text-base">
-								External identity provider integration
-							</CardDescription>
+					<div class="min-w-0 flex-1">
+						<div class="flex flex-wrap items-center gap-2">
+							<h2 class="font-sans text-base font-semibold text-[#f4f4f4]">
+								OIDC / Single Sign-On
+							</h2>
+							{#if config.oidcEnabled}
+								<CarbonTag type="green" size="sm">
+									<Check class="mr-1 h-3 w-3" /> Connected
+								</CarbonTag>
+							{/if}
 						</div>
-						{#if config.oidcEnabled}
-							<Badge variant="default" class="ml-2">
-								<Check class="mr-1 h-3 w-3" /> Connected
-							</Badge>
-						{/if}
+						<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">
+							External identity provider integration
+						</p>
 					</div>
 				</div>
-			</CardHeader>
-			<CardContent class="relative space-y-4">
+			</div>
+
+			<div class="space-y-4 p-5">
 				{#if config.oidcEnabled}
-					<!-- OIDC Info Grid -->
 					<div class="grid gap-3">
 						{#if config.oidcIssuerUri}
-							<div class="rounded-lg border bg-card p-3">
-								<Label class="text-xs text-muted-foreground">Issuer URI</Label>
-								<p class="mt-0.5 font-mono text-sm break-all">{config.oidcIssuerUri}</p>
+							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
+								<p class="text-xs text-[#8d8d8d]">Issuer URI</p>
+								<p class="mt-0.5 font-mono text-sm break-all text-[#f4f4f4]">
+									{config.oidcIssuerUri}
+								</p>
 							</div>
 						{/if}
 
 						{#if config.oidcClientId}
-							<div class="rounded-lg border bg-card p-3">
-								<Label class="text-xs text-muted-foreground">Client ID</Label>
-								<p class="mt-0.5 font-mono text-sm break-all">{config.oidcClientId}</p>
+							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
+								<p class="text-xs text-[#8d8d8d]">Client ID</p>
+								<p class="mt-0.5 font-mono text-sm break-all text-[#f4f4f4]">
+									{config.oidcClientId}
+								</p>
 							</div>
 						{/if}
 
 						{#if config.oidcRedirectUrl}
-							<div class="rounded-lg border bg-card p-3">
-								<Label class="text-xs text-muted-foreground">Redirect URL</Label>
-								<p class="mt-0.5 font-mono text-sm break-all">{config.oidcRedirectUrl}</p>
+							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
+								<p class="text-xs text-[#8d8d8d]">Redirect URL</p>
+								<p class="mt-0.5 font-mono text-sm break-all text-[#f4f4f4]">
+									{config.oidcRedirectUrl}
+								</p>
 							</div>
 						{/if}
 
 						{#if config.oidcScopes && config.oidcScopes.length > 0}
-							<div class="rounded-lg border bg-card p-3">
-								<Label class="text-xs text-muted-foreground">Scopes</Label>
+							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
+								<p class="text-xs text-[#8d8d8d]">Scopes</p>
 								<div class="mt-1 flex flex-wrap gap-1.5">
 									{#each config.oidcScopes as scope (scope)}
-										<Badge variant="secondary" class="text-xs">{scope}</Badge>
+										<CarbonTag type="gray" size="sm">{scope}</CarbonTag>
 									{/each}
 								</div>
 							</div>
 						{/if}
 
 						{#if config.oidcRoleClaim}
-							<div class="rounded-lg border bg-card p-3">
-								<Label class="text-xs text-muted-foreground">Role Claim</Label>
-								<p class="mt-0.5 font-mono text-sm">{config.oidcRoleClaim}</p>
+							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
+								<p class="text-xs text-[#8d8d8d]">Role Claim</p>
+								<p class="mt-0.5 font-mono text-sm text-[#f4f4f4]">{config.oidcRoleClaim}</p>
 							</div>
 						{/if}
 					</div>
 				{:else}
-					<!-- OIDC Not Configured -->
-					<div class="rounded-lg border border-dashed p-4 text-center">
-						<Globe class="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
-						<p class="mb-1 text-sm text-muted-foreground">
+					<div
+						class="rounded-none border border-dashed border-[#525252] bg-[#1e1e1e] p-4 text-center"
+					>
+						<Globe class="mx-auto mb-2 h-8 w-8 text-[#8d8d8d]" />
+						<p class="text-sm text-[#a8a8a8]">
 							OIDC allows users to sign in with external identity providers like Keycloak, Authelia,
 							Google, or any OpenID Connect compatible service.
 						</p>
-						<p class="text-xs text-muted-foreground">
+						<p class="mt-2 text-xs text-[#8d8d8d]">
 							OIDC must be configured outside the UI using one of the methods below.
 						</p>
 					</div>
 
-					<Accordion type="single" class="w-full">
-						<AccordionItem value="config-yaml">
-							<AccordionTrigger class="text-sm">
-								<span class="flex items-center gap-2">
-									<FileCode class="h-4 w-4" />
-									config.yaml
-								</span>
-							</AccordionTrigger>
-							<AccordionContent>
-								<pre class="overflow-x-auto rounded-md bg-muted p-3 text-xs"><code
-										>auth:
+					<CarbonAccordion>
+						<CarbonAccordionItem title="config.yaml" bind:open={configYamlOpen}>
+							<pre
+								class="overflow-x-auto rounded-none bg-[#161616] p-3 font-mono text-xs text-[#c6c6c6]"><code
+									>auth:
   oidc:
     enabled: true
     issuer_uri: "https://your-provider/.well-known/openid-configuration"
@@ -374,20 +412,13 @@ one at https://mozilla.org/MPL/2.0/.
     redirect_url: "https://your-domain/api/v1/auth/oidc/callback"
     scopes: ["openid", "profile", "email", "groups"]
     role_claim: "groups"</code
-									></pre>
-							</AccordionContent>
-						</AccordionItem>
+								></pre>
+						</CarbonAccordionItem>
 
-						<AccordionItem value="docker-compose">
-							<AccordionTrigger class="text-sm">
-								<span class="flex items-center gap-2">
-									<Container class="h-4 w-4" />
-									Docker Compose
-								</span>
-							</AccordionTrigger>
-							<AccordionContent>
-								<pre class="overflow-x-auto rounded-md bg-muted p-3 text-xs"><code
-										>services:
+						<CarbonAccordionItem title="Docker Compose" bind:open={dockerComposeOpen}>
+							<pre
+								class="overflow-x-auto rounded-none bg-[#161616] p-3 font-mono text-xs text-[#c6c6c6]"><code
+									>services:
   carbon-panel:
     environment:
       CARBONPANEL_AUTH_OIDC_ENABLED: "true"
@@ -397,66 +428,43 @@ one at https://mozilla.org/MPL/2.0/.
       CARBONPANEL_AUTH_OIDC_REDIRECT_URL: "https://..."
       CARBONPANEL_AUTH_OIDC_SCOPES: "openid,profile,email,groups"
       CARBONPANEL_AUTH_OIDC_ROLE_CLAIM: "groups"</code
-									></pre>
-							</AccordionContent>
-						</AccordionItem>
+								></pre>
+						</CarbonAccordionItem>
 
-						<AccordionItem value="env-vars">
-							<AccordionTrigger class="text-sm">
-								<span class="flex items-center gap-2">
-									<Terminal class="h-4 w-4" />
-									Environment Variables
-								</span>
-							</AccordionTrigger>
-							<AccordionContent>
-								<div class="space-y-1.5 font-mono text-xs">
-									<p>
-										<code class="rounded bg-muted px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ENABLED</code
-										>
-									</p>
-									<p>
-										<code class="rounded bg-muted px-1.5 py-0.5"
-											>CARBONPANEL_AUTH_OIDC_ISSUER_URI</code
-										>
-									</p>
-									<p>
-										<code class="rounded bg-muted px-1.5 py-0.5"
-											>CARBONPANEL_AUTH_OIDC_CLIENT_ID</code
-										>
-									</p>
-									<p>
-										<code class="rounded bg-muted px-1.5 py-0.5"
-											>CARBONPANEL_AUTH_OIDC_CLIENT_SECRET</code
-										>
-									</p>
-									<p>
-										<code class="rounded bg-muted px-1.5 py-0.5"
-											>CARBONPANEL_AUTH_OIDC_REDIRECT_URL</code
-										>
-									</p>
-									<p>
-										<code class="rounded bg-muted px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_SCOPES</code>
-									</p>
-									<p>
-										<code class="rounded bg-muted px-1.5 py-0.5"
-											>CARBONPANEL_AUTH_OIDC_ROLE_CLAIM</code
-										>
-									</p>
-								</div>
-							</AccordionContent>
-						</AccordionItem>
-					</Accordion>
+						<CarbonAccordionItem title="Environment Variables" bind:open={envVarsOpen}>
+							<div class="space-y-1.5 font-mono text-xs text-[#c6c6c6]">
+								<p><code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ENABLED</code></p>
+								<p>
+									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ISSUER_URI</code>
+								</p>
+								<p>
+									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_CLIENT_ID</code>
+								</p>
+								<p>
+									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_CLIENT_SECRET</code
+									>
+								</p>
+								<p>
+									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_REDIRECT_URL</code>
+								</p>
+								<p><code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_SCOPES</code></p>
+								<p>
+									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ROLE_CLAIM</code>
+								</p>
+							</div>
+						</CarbonAccordionItem>
+					</CarbonAccordion>
 
-					<p class="text-xs text-muted-foreground">
+					<p class="text-xs text-[#8d8d8d]">
 						Provider examples are available in the <a
 							href="https://docs.carbon-panel.app/introduction/"
 							target="_blank"
 							rel="noopener noreferrer"
-							class="underline hover:text-foreground">carbon-panel docs</a
+							class="text-[#78a9ff] underline hover:text-[#a6c8ff]">carbon-panel docs</a
 						>.
 					</p>
 				{/if}
-			</CardContent>
-		</Card>
+			</div>
+		</CarbonTile>
 	</div>
 {/if}
