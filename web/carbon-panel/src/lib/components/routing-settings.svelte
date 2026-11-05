@@ -40,6 +40,8 @@ one at https://mozilla.org/MPL/2.0/.
 	let saving = $state(false);
 	let proxyEnabled = $state(false);
 	let baseURL = $state('');
+	const baseDomainHelp =
+		'Optional base domain that will be appended to server hostnames (e.g., "survival" becomes "survival.minecraft.example.com")';
 	let listenersWithCount = $state<ProxyListenerWithCount[]>([]);
 	let editingListener = $state<ProxyListener | null>(null);
 	let newListener = $state<{
@@ -304,7 +306,7 @@ one at https://mozilla.org/MPL/2.0/.
 				bind:value={baseURL}
 				placeholder="minecraft.example.com"
 				disabled={saving || !proxyEnabled}
-				helperText={'Optional base domain that will be appended to server hostnames (e.g., "survival" becomes "survival.minecraft.example.com")'}
+				helperText={baseDomainHelp}
 				class="[&_input]:bg-[#161616]"
 			/>
 
