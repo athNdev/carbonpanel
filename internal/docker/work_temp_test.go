@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 )
 
 func TestApplyServerWorkTempUsesDataVolumeNotTmpfs(t *testing.T) {
@@ -48,6 +49,37 @@ func TestApplyServerWorkTempUsesDataVolumeNotTmpfs(t *testing.T) {
 	}
 }
 
+func TestWorkTempMountFollowsTheDataBind(t *testing.T) {
+	host := &container.HostConfig{Mounts: []mount.Mount{{
+		Type:   mount.TypeBind,
+		Source: "/srv/worlds/one",
+		Target: "/data",
+	}}}
+	config := &container.Config{}
+	applyServerRootfs(host, config, nil)
+	applyServerRootfs(host, config, nil)
+
+	var found int
+	for _, m := range host.Mounts {
+		if m.Target != serverWorkTempContainerPath {
+			continue
+		}
+		found++
+		if m.Source != "/srv/worlds/one/.tmp" && m.Source != serverWorkTempHostPath("/srv/worlds/one") {
+			t.Fatalf("work temp source = %q", m.Source)
+		}
+		if m.BindOptions == nil || !m.BindOptions.CreateMountpoint {
+			t.Fatal("work temp mount must be created on the daemon that owns the world")
+		}
+		if m.ReadOnly {
+			t.Fatal("work temp mount is read-only")
+		}
+	}
+	if found != 1 {
+		t.Fatalf("work temp mounts = %d, want 1", found)
+	}
+}
+
 func TestEnsureServerWorkTempIsStickyAndWritable(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(serverWorkTempHostPath(root), 0o755); err != nil {
@@ -70,20 +102,6 @@ func TestEnsureServerWorkTempIsStickyAndWritable(t *testing.T) {
 	}
 	if err := ensureServerWorkTemp(root); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestWorkTempSetupNameIsADockerName(t *testing.T) {
-	got := workTempSetupName("srv/with spaces")
-	if got != "carbon-panel-worktemp-srv-with-spaces" {
-		t.Fatalf("name = %q", got)
-	}
-	if workTempSetupName("") != "carbon-panel-worktemp-server" {
-		t.Fatalf("empty id name = %q", workTempSetupName(""))
-	}
-	cmd := serverWorkTempSetupCommand()
-	if !strings.Contains(cmd, serverWorkTempContainerPath) || strings.Contains(cmd, "/tmp") {
-		t.Fatalf("setup command = %q", cmd)
 	}
 }
 

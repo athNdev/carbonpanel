@@ -742,7 +742,7 @@ func applyServerRootfs(hostConfig *container.HostConfig, config *container.Confi
 		}
 	}
 	config.Env = append(filteredEnv, skipNsswitchConfEnv+"=TRUE")
-	applyServerWorkTemp(config)
+	applyServerWorkTemp(config, hostConfig)
 	for i := range hostConfig.Mounts {
 		if hostConfig.Mounts[i].Target == "/data" {
 			hostConfig.Mounts[i].ReadOnly = false
@@ -985,9 +985,10 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	// A remote daemon owns the bind source path. Creating it in the panel
 	// process would only create an unrelated local directory with the same
 	// name; CreateMountpoint asks Docker to create it on the target node.
-	// Work temp lives on that same disk: the local panel creates the
-	// directory itself, and a remote daemon creates it in a short-lived
-	// container so the files land on the node that holds the world.
+	// Work temp is a subdirectory of this bind. A local panel creates it
+	// with the sticky mode the game user can write. A remote daemon creates
+	// the same directory from the container mount, on the node that holds
+	// the world.
 	if !c.IsRemote() {
 		if err := os.MkdirAll(dataPath, 0755); err != nil {
 			return "", fmt.Errorf("failed to create server data directory: %w", err)
@@ -995,8 +996,6 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		if err := ensureServerWorkTemp(dataPath); err != nil {
 			return "", fmt.Errorf("failed to create server work temp directory: %w", err)
 		}
-	} else if err := c.ensureRemoteWorkTemp(ctx, imageName, dataPath, server.ID); err != nil {
-		return "", err
 	}
 
 	config := &container.Config{

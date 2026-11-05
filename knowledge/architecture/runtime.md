@@ -98,9 +98,10 @@ source of truth.
 `/tmp` stays a 64 MiB noexec tmpfs. Modpack downloads, archive extracts, and
 native libraries such as Netty and c2me use `/data/.tmp` on the server data
 bind. That directory is on the same disk as the world, it is executable, and
-it is created mode 01777 by the panel when the data path is local or by a
-short-lived container on the daemon when the node is remote. `TMPDIR` and
-`-Djava.io.tmpdir` both point there. Scheduled world backups skip `.tmp`.
+the panel creates it mode 01777 when it can see the data path. A remote
+daemon creates the same directory from the container bind, on the node that
+holds the world. `TMPDIR` and `-Djava.io.tmpdir` both point there. Scheduled
+world backups skip `.tmp`.
 
 # Runtime profile
 

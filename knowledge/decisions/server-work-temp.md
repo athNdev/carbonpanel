@@ -30,6 +30,7 @@ a 64 MiB noexec tmpfs.
 # Consequence
 
 `TMPDIR` and `-Djava.io.tmpdir` point at `/data/.tmp`. Do not send modpack
-downloads, extracts, or native-library work back to `/tmp`. The directory is
-mode 01777 so the game user can write it without a hard-coded uid. World
-backups omit `.tmp`.
+downloads, extracts, or native-library work back to `/tmp`. When the panel
+can see the data path, the directory is mode 01777 so the game user can
+write it without a hard-coded uid. On a remote daemon the directory is a
+bind mount created with the container. World backups omit `.tmp`.
