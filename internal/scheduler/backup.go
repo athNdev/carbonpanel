@@ -52,13 +52,16 @@ func secureBackupArtifact(path string) error {
 	return os.Chmod(path, 0600)
 }
 
-// defaultBackupExcludes drops lock files, rotated logs, map tiles, and
-// profiler temp files from every scheduled archive.
+// defaultBackupExcludes drops lock files, rotated logs, map tiles,
+// profiler temp files, and the server work-temp directory from every
+// scheduled archive. .tmp holds modpack downloads and extracted native
+// libraries, not world data.
 var defaultBackupExcludes = []string{
 	"session.lock",
 	"logs/*.gz",
 	"dynmap/web/tiles",
 	"spark/tmp",
+	".tmp",
 }
 
 // beforeBackupArchive, when set, runs after the backup journal row is

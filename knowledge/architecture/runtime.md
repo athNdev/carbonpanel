@@ -93,6 +93,15 @@ booting. When the mount table cannot be read, the deprecated
 as-is. `CARBONPANEL_DATA_DIR` is not configuration: `storage.data_dir` is the
 source of truth.
 
+# Work temp
+
+`/tmp` stays a 64 MiB noexec tmpfs. Modpack downloads, archive extracts, and
+native libraries such as Netty and c2me use `/data/.tmp` on the server data
+bind. That directory is on the same disk as the world, it is executable, and
+it is created mode 01777 by the panel when the data path is local or by a
+short-lived container on the daemon when the node is remote. `TMPDIR` and
+`-Djava.io.tmpdir` both point there. Scheduled world backups skip `.tmp`.
+
 # Runtime profile
 
 Before the daemon is asked to create a container, `docker.PreflightRuntime`
