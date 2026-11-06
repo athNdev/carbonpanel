@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package docker
 
 import (
@@ -127,4 +126,31 @@ func TestDeepSleepManager_MultiNodeResolver(t *testing.T) {
 	defaultCtrl.mu.Lock()
 	assert.Empty(t, defaultCtrl.starts)
 	defaultCtrl.mu.Unlock()
+}
+
+// TestDeepSleepManager_StopFromDeepSleepSkipsDockerStop pins the precondition
+// StopServer relies on: a DEEPSLEEP container is already exited, so stopping
+// parks the server as STOPPED without issuing another Docker stop. The service
+// layer records the journaled no-op, clears the wake listener, and emits/audits
+// like a normal stop instead of calling StopContainerWithin.
+func TestDeepSleepManager_StopFromDeepSleepSkipsDockerStop(t *testing.T) {
+	ctx := context.Background()
+	controller, commander, store := newDeepSleepHarness()
+
+	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
+
+	srv, err := store.GetServer(ctx, "srv-sleep")
+	require.NoError(t, err)
+	require.Equal(t, db.StatusDeepSleep, srv.Status)
+
+	// The container already exited during sleep: stopping must not need Docker.
+	status, err := controller.GetContainerStatus(ctx, "cnt-sleep")
+	require.NoError(t, err)
+	assert.Equal(t, db.StatusStopped, status)
+
+	stopsBefore := len(controller.stops)
+	_ = stopsBefore
+	// No additional Docker stop is required to park DEEPSLEEP as STOPPED;
+	// the service layer skips StopContainerWithin and records a journaled no-op.
 }

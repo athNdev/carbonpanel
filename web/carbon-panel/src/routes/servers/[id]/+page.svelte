@@ -436,6 +436,15 @@ one at https://mozilla.org/MPL/2.0/.
 								{/if}
 								<span>Wake Server</span>
 							</button>
+							<button
+								type="button"
+								onclick={() => handleServerAction('stop')}
+								disabled={actionLoading}
+								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
+							>
+								<Square class="h-4 w-4 fill-current" />
+								<span>Stop</span>
+							</button>
 						{:else if server.status === ServerStatus.PAUSED}
 							<button
 								type="button"

@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package rbac
 
 import "testing"
@@ -106,5 +105,21 @@ func TestRecordIDProceduresCannotUseServerIDField(t *testing.T) {
 		if perm.ObjectIDField != "" {
 			t.Errorf("%s ObjectIDField = %q; expected empty (service-layer enforcement)", proc, perm.ObjectIDField)
 		}
+	}
+}
+
+func TestStopServerRemainsObjectScoped(t *testing.T) {
+	// Stop-from-deepsleep adds no new RPC: StopServer keeps its fail-closed
+	// servers/stop mapping scoped to the server id, so a scoped role can stop
+	// its own deepsleep server without gaining cross-server stop.
+	perm, ok := ProcedurePermissions["/carbonpanel.v1.ServerService/StopServer"]
+	if !ok {
+		t.Fatal("StopServer has no permission mapping")
+	}
+	if perm.Resource != ResourceServers || perm.Action != ActionStop {
+		t.Fatalf("StopServer mapping = %s/%s, want servers/stop", perm.Resource, perm.Action)
+	}
+	if perm.ObjectIDField != "id" {
+		t.Fatalf("StopServer ObjectIDField = %q, want %q", perm.ObjectIDField, "id")
 	}
 }

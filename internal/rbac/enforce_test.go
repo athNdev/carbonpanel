@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package rbac
 
 import (
@@ -116,4 +115,12 @@ func TestSeedIdempotent(t *testing.T) {
 	if n2 := len(e.GetPermissionsForRole("user")); n2 != n1 {
 		t.Fatalf("reseed duplicated policies: %d -> %d", n1, n2)
 	}
+}
+
+func TestEnforceStopFromDeepSleepUsesStopPermission(t *testing.T) {
+	// Stopping a DEEPSLEEP server is still servers/stop on that server id.
+	// No new action is introduced, so existing grants apply and anonymous stays denied.
+	e := newTestEnforcer(t, false)
+	mustEnforce(t, e, []string{"user"}, ResourceServers, ActionStop, "srv-sleep", true)
+	mustEnforce(t, e, []string{"anonymous"}, ResourceServers, ActionStop, "srv-sleep", false)
 }
