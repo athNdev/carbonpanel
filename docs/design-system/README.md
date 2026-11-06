@@ -169,6 +169,12 @@ complete propagation or theme/accessibility conformance.
 - **Tables and lists:** separate initial loading, no results, a truly empty
   collection, partial results and a failed request. Explain truncation,
   pagination and stale data. Keep per-row actions labelled.
+- **Selection and context menus:** reserve the accent-border space so selecting
+  a row never shifts the layout. Selection survives hover with a distinct shade,
+  right-clicking a row selects it before the menu opens, and menu actions apply
+  to the visible selection. A row click moves keyboard focus to the list so
+  arrow keys work immediately; keep the focused row in view and let Escape
+  dismiss the menu.
 - **Search and filtering:** label the field, describe active filters and allow
   each filter to be removed. Distinguish no matches from a failed request and
   avoid changing focus unexpectedly as results update.
