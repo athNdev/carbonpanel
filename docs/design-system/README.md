@@ -57,7 +57,7 @@ actual adjacent surfaces, including hover, selection and focus states.
 
 ### Type, spacing and geometry
 
-IBM Plex Sans is the interface face and IBM Plex Mono is for code, addresses,
+Inter is the interface face and JetBrains Mono is for code, addresses,
 logs and stable-width technical values. Keep prose in sans and use tabular
 figures for changing metrics. Use normal case for labels; do not put long
 descriptions in all caps. Provide sensible system fallbacks.
