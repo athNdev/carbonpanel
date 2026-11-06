@@ -8,7 +8,8 @@ import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 <p class="docs-lead">Your worlds. Your infrastructure.<br />A guide to getting it running.</p>
 
-Install the panel on infrastructure you manage, configure it for your setup, and find the reference you need along the way.
+Install the panel on infrastructure you manage, build and deploy modpacks,
+configure your setup, and find the reference you need along the way.
 
 ## Start here
 
@@ -16,7 +17,16 @@ Install the panel on infrastructure you manage, configure it for your setup, and
   <LinkCard title="Understand Carbon Panel" description="What the panel does and how it fits your Minecraft setup." href="/introduction/" />
   <LinkCard title="Install with Docker Compose" description="Requirements, the Compose file, data paths, and first startup." href="/getting-started/docker-compose/" />
   <LinkCard title="Configure your installation" description="Configuration files, environment variables, and available settings." href="/configuration/" />
-  <LinkCard title="Find an answer" description="Common questions and the first checks to make when something goes wrong." href="/troubleshooting/" />
+  <LinkCard title="Build a modpack" description="Create, import and edit a pack, then export or deploy it." href="/guides/modpack-studio/" />
+</CardGrid>
+
+## Run and change your servers
+
+<CardGrid>
+  <LinkCard title="Install datapacks on a server" description="Browse Modrinth, upload an archive, and manage the world's datapacks folder." href="/guides/server-datapacks/" />
+  <LinkCard title="Stage updates" description="Prepare config, mod, datapack and module changes and apply them in one window." href="/guides/staged-updates/" />
+  <LinkCard title="Sleep and wake" description="Freeze or stop idle servers and wake them when a player joins." href="/guides/sleep-and-wake/" />
+  <LinkCard title="Route players by hostname" description="Give every server its own hostname on one port with the built-in proxy." href="/guides/proxy-routing/" />
 </CardGrid>
 
 ## Keep it running

@@ -1,0 +1,204 @@
+---
+title: Modpack Studio
+description: Create a modpack, add mods and content, export it for launchers, and deploy it to a server.
+---
+{/* SPDX-License-Identifier: MPL-2.0 */}
+import { Aside } from '@astrojs/starlight/components';
+
+Modpack Studio is a packwiz project editor. A project records its Minecraft
+version, mod loader and content, and can either be exported in a launcher format
+or deployed straight to a Carbon Panel server.
+
+Open **Modpack Studio** in the sidebar. Nothing in this guide needs a running
+server until you reach [Deploy](#deploy-to-a-server).
+
+## Create, import or clone
+
+- **Create** starts an empty project with the name, author, version, Minecraft
+  version and loader you choose.
+- **Import** reads an existing Modrinth `.mrpack`, CurseForge `.zip` or packwiz
+  `.zip` and turns it into an editable project.
+- **Clone** duplicates a project, including its content, so you can branch a
+  pack without touching the original.
+
+A project is plain packwiz data on the panel: `pack.toml`, one folder per
+content kind, and an overrides tree.
+
+## Pack settings
+
+The header exposes the project's identity and runtime target:
+
+| Setting | Why it matters |
+| --- | --- |
+| Pack name | Shown in the Studio and in exports. |
+| Author | Recorded in `pack.toml`. |
+| Pack version | Free-form version for your own release process. |
+| Minecraft version | Filters every search and every update check. |
+| Mod loader and loader version | Filters mod searches and is written to the exported launcher files. |
+
+Changing the Minecraft version marks installed mods stale. The **Migration** tab
+simulates the change against the new version and lists which mods still have a
+compatible release and which are missing one, so you can resolve them before
+deploying.
+
+## Mods
+
+The **Mods** tab is the main working surface:
+
+- **Add from Modrinth or CurseForge.** Search opens in a drawer. The panel
+  selects the newest build that matches the pack's Minecraft version and loader
+  and installs required dependencies automatically, recursively and
+  best-effort. A dependency that cannot be resolved is reported and skipped
+  rather than blocking the install.
+- **Add from a URL.** Direct files are recorded with their hash and are not
+  update-tracked.
+- **Work on many mods at once.** Select rows for batch actions (set side,
+  pin, unpin, remove), or filter the table by side, pinned state or available
+  updates.
+- **Adjust a mod in place.** Click its side tag to cycle Both, Server and
+  Client, and use the pin control to stop it from being updated.
+- **Check Updates** queries Modrinth for compatible newer builds. Pinned mods
+  and non-Modrinth entries are skipped.
+
+<Aside type="note">
+Bake mode never writes client-only mods into a server. Keep client mods on
+`client` so they are delivered to players through packwiz sync or an export.
+</Aside>
+
+## Datapacks, resource packs and shaders
+
+Each kind has its own tab, and all three share the same editor and the same
+options.
+
+### Adding content
+
+| Source | What happens |
+| --- | --- |
+| **Modrinth** | Search is filtered by the pack's Minecraft version. Shader packs can be filtered by the Iris or OptiFine loader. Pick a version, then install it. |
+| **Direct URL** | The panel downloads the file, validates it, computes its SHA-512, and records a metafile. |
+| **Upload archive** | The archive is validated, stored with the pack, and served by the panel. |
+
+Archives are checked before a metafile is created, so a broken upload never
+becomes a pack entry:
+
+| Kind | The archive must contain |
+| --- | --- |
+| Datapack | `pack.mcmeta` at the archive root |
+| Resource pack | `pack.mcmeta` at the root and an `assets/` directory |
+| Shader pack | A `shaders/` directory |
+
+A zip wrapped in a single top-level folder is rejected. Re-pack the archive so
+the required entries are at the root. Uploads are capped at 512 MiB.
+
+### Every configurable option
+
+| Option | packwiz field | Effect |
+| --- | --- | --- |
+| **Side** | `side` | `both` (default), `client` or `server`. A server bake skips `client`. |
+| **Pin version** | `pin` | Excludes the entry from update checks. |
+| **Optional** | `[option] optional` | Launchers let the player choose whether to install it. |
+| **Enabled by default** | `[option] default` | The initial state when the entry is optional. Only shown when Optional is on. |
+| **Option description** | `[option] description` | Text the launcher shows for the choice. Only shown when Optional is on. |
+| **File name** | metafile `filename` | The name the file is installed as. |
+| **Hash and hash format** | `hash` / `hash-format` | Integrity check recorded for the download. |
+
+Optional entries are installer metadata. A server bake has no installer UI, so
+it installs the server-side entries as configured; use sync mode or an export
+when players should choose.
+
+### Datapack install folder
+
+Datapacks carry a pack-wide folder, written to `pack.toml` as
+`[options] datapack-folder` (default `datapacks`). Change it when your pack is
+meant for a loader that reads datapacks elsewhere, for example OpenLoader at
+`config/openloader/data`.
+
+The **Install folder** control on the Datapacks tab moves the existing datapack
+metadata and any panel-hosted archives to the new folder and rewrites their
+download URLs. The folder applies to packwiz clients. A server bake always
+writes datapacks into the world's `datapacks/` folder, which is where vanilla
+and most servers load them from.
+
+### Checking for updates
+
+**Check Updates** on a content tab checks every entry of that kind. Only
+Modrinth-tracked, unpinned entries are queried. Direct URLs and uploads are not
+update-tracked. Apply one update or all of them from the dialog.
+
+## Overrides
+
+**Overrides** bundles files that are not content: server configuration, scripts,
+and anything else that should ship with the pack. Overrides are included in
+exports and are applied by packwiz in sync mode.
+
+## Export
+
+The **Export** tab produces a launcher-ready archive:
+
+| Format | Use it with |
+| --- | --- |
+| Modrinth `.mrpack` | Prism, ATLauncher, MultiMC, Modrinth App |
+| CurseForge `.zip` | Prism, ATLauncher, MultiMC through a manifest |
+| Prism/MultiMC `instance.zip` | A ready instance with `mmc-pack.json` and `instance.cfg` |
+| Packwiz `.zip` | Native `pack.toml` and `index.toml` archive |
+
+Export options include client mods, how optional entries are treated, override
+inclusion, and a summary. The tab also shows the raw `pack.toml` and a manifest
+inspector.
+
+<Aside type="caution">
+CurseForge export refuses to produce a partial pack. When an entry has no
+numeric CurseForge project and file ID, the export stops and lists every item
+it cannot carry. Remove those entries, or export as `.mrpack`, packwiz or an
+instance archive instead.
+</Aside>
+
+## Deploy to a server
+
+**Deploy to Server** targets an existing Carbon Panel server in one of two
+modes.
+
+### Mode A: live sync
+
+The panel sets the server's `PACKWIZ_URL` to the pack's `pack.toml` endpoint.
+The itzg server image syncs the pack on every start, so restarts pick up pack
+changes and players receive the same content. The server container must be able
+to reach the panel URL; the panel writes the URL from the host you used to open
+it.
+
+Sync delivers mods, datapacks, resource packs, shaders and overrides, and honors
+the `side` field.
+
+### Mode B: bake
+
+The panel downloads the pack into the server's data directory. There is no
+packwiz step at container startup.
+
+| Content | Sync | Bake |
+| --- | --- | --- |
+| Mods (`both`, `server`) | Yes | `mods/` |
+| Mods (`client`) | To clients | No |
+| Datapacks | Yes | `<world>/datapacks/` |
+| Resource packs | To clients | No |
+| Shader packs | To clients | No |
+| Overrides | Yes | No |
+
+Bake resolves the world folder from `level-name` in `server.properties`
+(`world` when unset). Resource packs and shader packs are client-side content,
+so bake reports them as client-only instead of writing them to the server; use
+sync mode or an export to deliver them.
+
+## Maintenance
+
+**Maintenance** rebuilds packwiz indices and shows the live bootstrap URLs for
+the pack, including the `pack.toml` endpoint used by sync mode. Rebuild the
+indices after editing pack files outside the Studio or restoring a pack from a
+backup.
+
+## Related pages
+
+- [Server datapacks](/guides/server-datapacks/): install datapacks directly into
+  a server world without a pack.
+- [Staged updates](/guides/staged-updates/): stage pack and content changes and
+  apply them in one window.
+- [Server backups](/guides/backups/): back up the world that datapacks live in.

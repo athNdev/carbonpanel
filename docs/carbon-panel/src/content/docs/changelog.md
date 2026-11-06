@@ -9,9 +9,11 @@ See the project [CHANGELOG.md](https://github.com/athNdev/carbon-panel/blob/main
 
 ## Unreleased
 
+- Modpack Studio tabs for datapacks, resource packs and shader packs: Modrinth search, direct URLs, validated uploads, and every packwiz metafile option.
+- Server bakes install datapacks into the world and report client-only content instead of dropping it.
+- CurseForge export refuses a partial pack and lists every entry it cannot carry.
+- Fullscreen server console fills the viewport and keeps its toolbar and command bar.
 - Global error boundary with retry/home affordances.
-- Server list error state with retry.
-- ConnectRPC `buf breaking` CI check.
 - Accessibility and robustness improvements.
 
 ## 3.0.0-beta.3
