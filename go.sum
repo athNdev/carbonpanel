@@ -53,6 +53,8 @@ github.com/STARRY-S/zip v0.2.3 h1:luE4dMvRPDOWQdeDdUxUoZkzUIpTccdKdhHHsQJ1fm4=
 github.com/STARRY-S/zip v0.2.3/go.mod h1:lqJ9JdeRipyOQJrYSOtpNAiaesFO6zVDsE8GIGFaoSk=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
+github.com/andybalholm/brotli v1.2.7 h1:UgafRPGMam5ySHfRkhthMqOFA6IFoeF3D7mWIDLjG5A=
+github.com/andybalholm/brotli v1.2.7/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/arkady-emelyanov/go-shellparse v1.0.3 h1:UrfVk/sGFefGG/1m4gHR46L9ZGNaTGTWQjO7g2iHhQ8=
 github.com/arkady-emelyanov/go-shellparse v1.0.3/go.mod h1:s00S9U8dfIEt/+dY39VsVNzggIeNZ193md1+vjF/Jeg=
 github.com/aws/aws-sdk-go-v2 v1.47.5 h1:5yA+A+BiXbDq1ZLbYwPViwhEGDMdR0MEhL8Jh2LnLS4=
@@ -249,6 +251,8 @@ github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+o
 github.com/klauspost/compress v1.4.1/go.mod h1:RyIbtBH6LamlWaDj8nUwkbUhJ87Yi3uG0guNDohfE1A=
 github.com/klauspost/compress v1.18.7 h1:aUyZsS4kH3QTKurYhAOwAHxllVPnOthb3vPfnF1Ehjw=
 github.com/klauspost/compress v1.18.7/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
+github.com/klauspost/compress v1.20.2 h1:v5tiZvm1KGLyg5d5oXdXe3lsSPrbEUiKoXGia//I7Qo=
+github.com/klauspost/compress v1.20.2/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
 github.com/klauspost/cpuid v1.2.0/go.mod h1:Pj4uuM528wm8OyEC2QMXAi2YiTZ96dNQPGgoMS4s3ek=
 github.com/klauspost/pgzip v1.2.6 h1:8RXeL5crjEUFnR2/Sn6GJNWtSQ3Dk8pq4CL3jvdDyjU=
 github.com/klauspost/pgzip v1.2.6/go.mod h1:Ch1tH69qFZu15pkjo5kYi6mth2Zzwzt50oCQKQE9RUs=
@@ -402,6 +406,8 @@ golang.org/x/crypto v0.23.0/go.mod h1:CKFgDieR+mRhux2Lsu27y0fO304Db0wZe70UKqHu0v
 golang.org/x/crypto v0.24.0/go.mod h1:Z1PMYSOR5nyMcyAVAIQSKCDwalqy85Aqn1x3Ws4L5DM=
 golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
 golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
+golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2 h1:zGDaB+/Mus2mScKvZ23k+W9NAUbP56sNM9SptgvWI5A=
+golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
 golang.org/x/exp v0.0.0-20190121172915-509febef88a4/go.mod h1:CJ0aWSM057203Lf6IL+f9T1iT9GByDxfZKAQTCR3kQA=
 golang.org/x/exp v0.0.0-20190306152737-a1d7652674e8/go.mod h1:CJ0aWSM057203Lf6IL+f9T1iT9GByDxfZKAQTCR3kQA=
 golang.org/x/exp v0.0.0-20190510132918-efd6b22b2522/go.mod h1:ZjyILWgesfNpC6sMxTJOJm9Kp84zZh5NQWvqDGG3Qr8=
