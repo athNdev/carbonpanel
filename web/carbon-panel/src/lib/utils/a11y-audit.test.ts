@@ -64,6 +64,22 @@ test('CarbonModal enforces dialog semantics, keyboard trap, and ARIA attributes'
 	);
 });
 
+test('CarbonModal portals its overlay above app chrome', () => {
+	const modalPath = path.resolve(import.meta.dirname, '../components/carbon/CarbonModal.svelte');
+	const content = fs.readFileSync(modalPath, 'utf-8');
+
+	// A fixed overlay rendered inside <main> is trapped by the page stacking
+	// context: the fixed header/sidebar paint over it and the scroll container
+	// clips it. Portaling to <body> is the same strategy bits-ui dialogs use.
+	assert.ok(content.includes('use:portal'), 'Modal overlay must be portaled');
+	assert.ok(
+		content.includes('document.body.appendChild(node)'),
+		'Portal must mount the overlay on document.body'
+	);
+	assert.ok(content.includes('fullscreen'), 'Modal must support an edge-to-edge fullscreen mode');
+	assert.ok(content.includes('bare'), 'Modal must support hosting its own chrome');
+});
+
 test('ServerBackups guards restore and delete with CarbonConfirm modals', () => {
 	const backupsPath = path.resolve(import.meta.dirname, '../components/server-backups.svelte');
 	const content = fs.readFileSync(backupsPath, 'utf-8');

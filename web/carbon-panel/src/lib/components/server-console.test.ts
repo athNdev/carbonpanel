@@ -121,3 +121,34 @@ test('ServerConsole filters client-side and expands fullscreen via CarbonModal',
 	);
 	assert.ok(content.includes('logList'), 'Console must extract the log list for reuse');
 });
+
+test('Fullscreen console reuses the complete console pane', () => {
+	const consolePath = path.resolve(import.meta.dirname, 'server-console.svelte');
+	const content = fs.readFileSync(consolePath, 'utf-8');
+
+	const start = content.indexOf('{#snippet consolePane(expanded: boolean)}');
+	const end = content.indexOf('{/snippet}', start);
+	assert.ok(start !== -1 && end > start, 'Console must share one pane snippet');
+	const pane = content.slice(start, end);
+
+	assert.ok(pane.includes('data-testid="console-send"'), 'Fullscreen must keep the command input');
+	assert.ok(pane.includes('aria-label="Refresh logs"'), 'Fullscreen must keep the toolbar');
+	assert.ok(
+		pane.includes("aria-label={expanded ? 'Exit fullscreen console' : 'Expand console'}"),
+		'The pane must expose the fullscreen toggle in both modes'
+	);
+	assert.ok(
+		pane.includes('aria-label="Close fullscreen console"'),
+		'Fullscreen needs an explicit close affordance'
+	);
+	assert.ok(
+		content.includes('{@render consolePane(false)}') &&
+			content.includes('{@render consolePane(true)}'),
+		'One pane snippet must serve the inline and fullscreen states'
+	);
+	assert.ok(
+		content.includes('fullscreen'),
+		'Fullscreen modal must opt into the edge-to-edge layout'
+	);
+	assert.ok(content.includes('bare'), 'Fullscreen modal must hide default modal chrome');
+});

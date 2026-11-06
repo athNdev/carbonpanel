@@ -72,6 +72,29 @@
 			"screenshot": "04-console"
 		},
 		{
+			"click": "[aria-label=\"Expand console\"]",
+			"name": "expand console fullscreen"
+		},
+		{
+			"waitFor": "[role=\"dialog\"] [data-testid=\"console-send\"]",
+			"name": "fullscreen keeps the command bar"
+		},
+		{
+			"assertVisible": "[role=\"dialog\"] [aria-label=\"Close fullscreen console\"]",
+			"name": "fullscreen has a close control"
+		},
+		{
+			"screenshot": "05-console-fullscreen"
+		},
+		{
+			"press": "Escape",
+			"name": "close fullscreen console"
+		},
+		{
+			"waitFor": "[aria-label=\"Expand console\"]",
+			"name": "inline console restored"
+		},
+		{
 			"click": "[role=\"tab\"]:has-text(\"Datapacks\")",
 			"name": "open Datapacks tab"
 		},

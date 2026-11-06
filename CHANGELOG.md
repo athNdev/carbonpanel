@@ -31,6 +31,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Fullscreen server console fills the viewport, keeps the toolbar and command bar, and no longer clips under the app header/sidebar. CarbonModal now portals dialogs to `<body>` so fixed overlays paint above the shell.
 - Surface unchecked packwiz import/export and proxy route-refresh write errors.
 - Make upload tests OS-independent (Windows temp-file locks, huge allocations).
 - Accessibility gaps (aria-invalid/describedby, modal focus trap, table scope, reduced motion, toast aria-live).
