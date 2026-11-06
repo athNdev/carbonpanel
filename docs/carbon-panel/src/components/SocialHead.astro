@@ -1,0 +1,53 @@
+---
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// Reuse Starlight's head (title, canonical, og:title/url/description, twitter
+// card) and add the shared social image. Prominent pages get a dedicated card;
+// every other page keeps the Carbon Panel card so a share never renders bare.
+import Default from '@astrojs/starlight/components/Head.astro';
+
+const ORIGIN = 'https://athn.dev';
+const SITE_BASE = '/carbonpanel/';
+const DEFAULT_CARD = 'assets/og.png?v=20261029i';
+const DEFAULT_ALT =
+	'Carbon Panel. Create and share modpacks, search and add datapacks, stage updates, and wake on join.';
+
+const PAGE_CARDS: Record<string, { file: string; alt: string }> = {
+	docs: {
+		file: 'assets/og-docs.png?v=1',
+		alt: 'Carbon Panel documentation. Install, configure, and run the panel.'
+	},
+	introduction: {
+		file: 'assets/og-introduction.png?v=1',
+		alt: 'Introduction to Carbon Panel.'
+	},
+	'getting-started/docker-compose': {
+		file: 'assets/og-docker-compose.png?v=1',
+		alt: 'Getting started with Docker Compose for Carbon Panel.'
+	},
+	api: {
+		file: 'assets/og-api.png?v=1',
+		alt: 'Carbon Panel API reference generated from the protobuf definitions.'
+	}
+};
+
+const route = Astro.locals.starlightRoute;
+const key = route.id === 'index' || route.id === '' ? 'docs' : route.id.replace(/\/index$/, '');
+const card = PAGE_CARDS[key] ?? { file: DEFAULT_CARD, alt: DEFAULT_ALT };
+const image = new URL(SITE_BASE + card.file, ORIGIN).href;
+const description = route.entry.data.description;
+---
+
+<Default />
+<meta property="og:image" content={image} />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content={card.alt} />
+<meta name="twitter:title" content={route.entry.data.title} />
+{description && <meta name="twitter:description" content={description} />}
+<meta name="twitter:image" content={image} />
+<meta name="twitter:image:alt" content={card.alt} />

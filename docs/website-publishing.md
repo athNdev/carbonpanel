@@ -31,7 +31,7 @@ npm and Buf 1.50.0. Network access is needed for locked npm packages and the
 versioned Buf generator. No application, Docker daemon or database is required.
 
 ```sh
-python3 -m unittest scripts.test_website scripts.test_landing_page
+python3 -m unittest scripts.test_website scripts.test_landing_page scripts.test_design_system_page
 python3 scripts/check_brand_assets.py
 python3 scripts/build_website.py
 python3 scripts/check_website.py
@@ -58,6 +58,22 @@ preview; Starlight's production search index is generated at build time.
 The docs project's normal development server previews working-tree content and
 labels its banner accordingly. Use the combined build to verify the publication
 pin and generated API schema.
+
+## Social previews
+
+Every published page declares the full Open Graph and Twitter set: type, site
+name, title, description, URL, a versioned absolute 1200 by 630 PNG and its alt
+text. The homepage, the documentation home and any page without a dedicated
+card share `landing/assets/og.png`.
+
+The documentation home, introduction, Docker Compose, API reference and the
+design system have dedicated cards in `landing/assets/og-*.png`. Regenerate
+them with `python3 scripts/generate_social_cards.py`; the script renders the
+shared layout with the vendored Inter and JetBrains Mono faces and needs a
+Chromium-family browser. Advance a card's `?v=` query when its artwork changes.
+`scripts/check_website.py` fails when a page is missing metadata, points at a
+relative or missing image, or lets a prominent route fall back to the shared
+card. Keep preview titles, descriptions and alt text free of em dashes.
 
 ## Advance the pin
 
