@@ -248,7 +248,7 @@ jobs:
 
       - name: Check landing page and brand assets
         run: |
-          python3 -m unittest scripts.test_landing_page
+          python3 -m unittest scripts.test_landing_page scripts.test_design_system_page
           python3 scripts/check_brand_assets.py
 
   knowledge:

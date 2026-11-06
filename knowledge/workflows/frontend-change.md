@@ -74,7 +74,8 @@ change alone does not establish application-wide propagation.
 - Dark is the default theme: `:root` carries the dark palette and light applies
 only under `[data-carbon-theme='light']`. Controls that render white on a
 fresh profile mean a token regressed to the light default; see
-`tokens.test.ts`.
+`tokens.test.ts`. The default selector is `:where(:root)` so it never
+outranks an explicit theme; do not 'simplify' it back to `:root`.
 - Tertiary buttons are Carbon-quiet (accent text, transparent border, hover
   layer); the heavy foreground border is gone. Mono eyebrow labels use the
   `.mono-label` utilities in `app.css`, not scattered tracking utilities.
