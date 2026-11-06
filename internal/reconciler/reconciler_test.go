@@ -214,6 +214,8 @@ func TestDecide(t *testing.T) {
 		errStatus = db.StatusError
 		paused    = db.StatusPaused
 		deepsleep = db.StatusDeepSleep
+		creating  = db.StatusCreating
+		unhealthy = db.StatusUnhealthy
 	)
 
 	existsRunning := observedState{Exists: true, ContainerID: "c1", Status: running}
@@ -223,6 +225,7 @@ func TestDecide(t *testing.T) {
 	existsSigterm := observedState{Exists: true, ContainerID: "c1", Status: stopped, ExitCode: 143}
 	existsDeleted := observedState{Exists: false}
 	existsRestarting := observedState{Exists: true, ContainerID: "c1", Status: starting}
+	existsUnhealthy := observedState{Exists: true, ContainerID: "c1", Status: unhealthy}
 	existsPaused := observedState{Exists: true, ContainerID: "c1", Status: paused}
 
 	tests := []struct {
@@ -245,6 +248,10 @@ func TestDecide(t *testing.T) {
 		{"missing + desired creating without self-heal waits", db.StatusCreating, existsDeleted, false, false, "", actNone, ""},
 		{"running + desired running is a no-op", running, existsRunning, false, true, "", actNone, ""},
 		{"running + desired starting converges up", starting, existsRunning, false, true, running, actNone, ""},
+		{"unhealthy while starting stays starting", starting, existsUnhealthy, false, true, "", actNone, ""},
+		{"unhealthy while creating stays creating", creating, existsUnhealthy, false, true, "", actNone, ""},
+		{"unhealthy while stopping resumes the stop", stopping, existsUnhealthy, false, true, "", actStop, ""},
+		{"unhealthy while running is adopted", running, existsUnhealthy, false, true, unhealthy, actNone, ""},
 		{"running + desired stopped syncs to reality", stopped, existsRunning, false, true, running, actNone, ""},
 		{"running + desired stopping resumes the stop", stopping, existsRunning, false, true, "", actStop, ""},
 		{"SIGKILL without OOMKilled is not an OOM", running, observedState{Exists: true, ContainerID: "c1", Status: stopped, ExitCode: 137}, false, true, errStatus, actNone, "exited with code 137"},

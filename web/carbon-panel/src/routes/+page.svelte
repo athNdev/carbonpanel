@@ -92,9 +92,8 @@ one at https://mozilla.org/MPL/2.0/.
 		total: dashboardServers.length,
 		running: dashboardServers.filter((s) => s.status === ServerStatus.RUNNING).length,
 		stopped: dashboardServers.filter((s) => s.status === ServerStatus.STOPPED).length,
-		error: dashboardServers.filter(
-			(s) => s.status === ServerStatus.ERROR || s.status === ServerStatus.UNHEALTHY
-		).length,
+		error: dashboardServers.filter((s) => s.status === ServerStatus.ERROR).length,
+		warning: dashboardServers.filter((s) => s.status === ServerStatus.UNHEALTHY).length,
 		totalMemory: dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0),
 		usedMemory: dashboardServers
 			.filter((s) => s.status === ServerStatus.RUNNING)
@@ -159,12 +158,13 @@ one at https://mozilla.org/MPL/2.0/.
 			(s) => s.status === ServerStatus.RUNNING && (!s.tps || s.tps >= 18)
 		),
 		warning: dashboardServers.filter(
-			(s) => s.status === ServerStatus.RUNNING && s.tps && s.tps < 18 && s.tps >= 15
+			(s) =>
+				s.status === ServerStatus.UNHEALTHY ||
+				(s.status === ServerStatus.RUNNING && s.tps && s.tps < 18 && s.tps >= 15)
 		),
 		critical: dashboardServers.filter(
 			(s) =>
 				s.status === ServerStatus.ERROR ||
-				s.status === ServerStatus.UNHEALTHY ||
 				(s.status === ServerStatus.RUNNING && s.tps && s.tps < 15)
 		)
 	});
@@ -180,7 +180,9 @@ one at https://mozilla.org/MPL/2.0/.
 		return () => clearInterval(interval);
 	});
 
-	function getStatusTagType(status: ServerStatus): 'green' | 'red' | 'purple' | 'blue' | 'gray' {
+	function getStatusTagType(
+		status: ServerStatus
+	): 'green' | 'red' | 'yellow' | 'purple' | 'blue' | 'gray' {
 		switch (status) {
 			case ServerStatus.RUNNING:
 				return 'green';
@@ -193,8 +195,9 @@ one at https://mozilla.org/MPL/2.0/.
 			case ServerStatus.PAUSED:
 				return 'blue';
 			case ServerStatus.ERROR:
-			case ServerStatus.UNHEALTHY:
 				return 'red';
+			case ServerStatus.UNHEALTHY:
+				return 'yellow';
 			case ServerStatus.STOPPED:
 			default:
 				return 'gray';
@@ -203,10 +206,12 @@ one at https://mozilla.org/MPL/2.0/.
 
 	// Status pip colours derive from getStatusTagType so a transient state
 	// (starting, sleeping, paused) is never shown as an error red. Only
-	// ERROR/UNHEALTHY are red; deep sleep and other transients are purple.
+	// ERROR is red; UNHEALTHY is a yellow degraded state, and deep sleep and
+	// other transients are purple.
 	const statusPipColor: Record<string, string> = {
 		green: 'bg-[#24a148]',
 		red: 'bg-[#da1e28]',
+		yellow: 'bg-[#f1c21b]',
 		purple: 'bg-[#a56eff]',
 		blue: 'bg-[#0f62fe]',
 		gray: 'bg-[#8d8d8d]'
@@ -384,6 +389,11 @@ one at https://mozilla.org/MPL/2.0/.
 							<div class="flex items-center gap-1.5 text-[#da1e28]">
 								<span class="h-1.5 w-1.5 bg-[#da1e28]"></span>
 								<span>{stats.error} ISSUES</span>
+							</div>
+						{:else if stats.warning > 0}
+							<div class="flex items-center gap-1.5 text-[#f1c21b]">
+								<span class="h-1.5 w-1.5 bg-[#f1c21b]"></span>
+								<span>{stats.warning} DEGRADED</span>
 							</div>
 						{:else}
 							<span class="text-[#8d8d8d]">{stats.stopped} STOPPED</span>

@@ -301,7 +301,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	function getStatusTagType(
 		status: ServerStatus
-	): 'green' | 'gray' | 'blue' | 'red' | 'warm-gray' | 'purple' {
+	): 'green' | 'gray' | 'blue' | 'red' | 'yellow' | 'warm-gray' | 'purple' {
 		switch (status) {
 			case ServerStatus.RUNNING:
 				return 'green';
@@ -318,8 +318,9 @@ one at https://mozilla.org/MPL/2.0/.
 			case ServerStatus.STOPPING:
 				return 'warm-gray';
 			case ServerStatus.ERROR:
-			case ServerStatus.UNHEALTHY:
 				return 'red';
+			case ServerStatus.UNHEALTHY:
+				return 'yellow';
 			default:
 				return 'gray';
 		}
@@ -586,12 +587,16 @@ one at https://mozilla.org/MPL/2.0/.
 							{#each Array(5) as _, i (i)}
 								<div class="heartbeat-bar bg-[#24a148]" style="animation-delay: {i * 0.15}s"></div>
 							{/each}
-						{:else if server.status === ServerStatus.ERROR || server.status === ServerStatus.UNHEALTHY}
+						{:else if server.status === ServerStatus.ERROR}
 							{#each Array(5) as _, i (i)}
 								<div
 									class="heartbeat-bar heartbeat-erratic bg-[#da1e28]"
 									style="animation-delay: {i * 0.1}s"
 								></div>
+							{/each}
+						{:else if server.status === ServerStatus.UNHEALTHY}
+							{#each Array(5) as _, i (i)}
+								<div class="heartbeat-bar bg-[#f1c21b]" style="animation-delay: {i * 0.15}s"></div>
 							{/each}
 						{:else}
 							{#each Array(5) as _, i (i)}
@@ -618,6 +623,8 @@ one at https://mozilla.org/MPL/2.0/.
 								: 'Deep sleeping (container stopped, direct port listening for login wake)'}
 						{:else if server.status === ServerStatus.PAUSED}
 							Paused via cgroup freezer (instant resume available)
+						{:else if server.status === ServerStatus.UNHEALTHY}
+							Server running but failing health checks
 						{:else if server.status === ServerStatus.STOPPING}
 							Gracefully shutting down
 						{:else}

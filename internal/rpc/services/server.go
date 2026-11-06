@@ -806,6 +806,14 @@ func preserveStoredStatus(stored, live storage.ServerStatus) bool {
 	if stored == storage.StatusPaused && live == storage.StatusStopped {
 		return true
 	}
+	if live == storage.StatusUnhealthy &&
+		(stored == storage.StatusStarting || stored == storage.StatusCreating) {
+		// Healthchecks fail during normal boot (image pulls and modpack
+		// downloads take minutes). A starting server that fails probes is
+		// still starting; let the reconciler own the transition instead of
+		// flapping the UI on every list refresh.
+		return true
+	}
 	return false
 }
 

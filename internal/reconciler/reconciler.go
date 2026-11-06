@@ -946,6 +946,14 @@ func decide(desired db.ServerStatus, obs observedState, detached, selfHeal bool)
 		if obs.Status == desired {
 			return decision{}
 		}
+		if obs.Status == db.StatusUnhealthy && isBootStatus(desired) {
+			// Health checks fail during normal boot: image pulls and modpack
+			// downloads take minutes, and the Docker healthcheck does not
+			// know that. Stay in the boot state instead of painting a
+			// starting server unhealthy for failing probes it was never
+			// expected to pass yet.
+			return decision{reconcileRoute: true}
+		}
 		return decision{status: obs.Status, reconcileRoute: true}
 
 	case db.StatusPaused:
@@ -968,6 +976,13 @@ func decide(desired db.ServerStatus, obs observedState, detached, selfHeal bool)
 	}
 
 	return decision{}
+}
+
+// isBootStatus reports whether the stored status means the server is still
+// coming up. Observations from a boot window (notably failing healthchecks)
+// are normal boot noise, not evidence about the running server.
+func isBootStatus(s db.ServerStatus) bool {
+	return s == db.StatusStarting || s == db.StatusCreating
 }
 
 // classifyExit maps a non-running container's exit information onto a panel
