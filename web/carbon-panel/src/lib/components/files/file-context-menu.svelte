@@ -98,9 +98,9 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	const itemClass =
-		'flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs cursor-pointer rounded-sm mx-0.5 hover:bg-accent hover:text-accent-foreground transition-colors';
+		'flex items-center gap-2 w-full px-3 py-1.5 text-left font-sans text-xs text-[#f4f4f4] cursor-pointer rounded-none hover:bg-[#353535] hover:text-white transition-colors';
 	const dangerClass =
-		'flex items-center gap-2 w-full px-3 py-1.5 text-left text-xs cursor-pointer rounded-sm mx-0.5 text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors';
+		'flex items-center gap-2 w-full px-3 py-1.5 text-left font-sans text-xs text-[#ff8389] cursor-pointer rounded-none hover:bg-[#da1e28]/20 transition-colors';
 </script>
 
 {#if visible}
@@ -115,116 +115,72 @@ one at https://mozilla.org/MPL/2.0/.
 	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed z-50 min-w-[180px] rounded-md border bg-popover py-1 text-popover-foreground shadow-lg"
+			class="fixed z-50 min-w-[180px] rounded-none border border-[#393939] bg-[#161616] py-1 text-[#f4f4f4] shadow-lg"
 			style={menuStyle}
 			onclick={(e) => e.stopPropagation()}
 		>
 			{#if file?.isEditable}
-				<button
-					class={itemClass}
-					style="width: calc(100% - 4px)"
-					onclick={() => handleAction(onEdit)}
-				>
+				<button class={itemClass} onclick={() => handleAction(onEdit)}>
 					<FileEdit class="h-3.5 w-3.5" />
 					Edit
 				</button>
 			{/if}
 
 			{#if file}
-				<button
-					class={itemClass}
-					style="width: calc(100% - 4px)"
-					onclick={() => handleAction(onRename)}
-				>
+				<button class={itemClass} onclick={() => handleAction(onRename)}>
 					<Pencil class="h-3.5 w-3.5" />
 					Rename
 				</button>
 			{/if}
 
-			<button
-				class={itemClass}
-				style="width: calc(100% - 4px)"
-				onclick={() => handleAction(onCopy)}
-			>
+			<button class={itemClass} onclick={() => handleAction(onCopy)}>
 				<Copy class="h-3.5 w-3.5" />
 				Copy{hasSelection && selectedCount > 1 ? ` (${selectedCount})` : ''}
 			</button>
 
-			<button
-				class={itemClass}
-				style="width: calc(100% - 4px)"
-				onclick={() => handleAction(onMove)}
-			>
+			<button class={itemClass} onclick={() => handleAction(onMove)}>
 				<FolderInput class="h-3.5 w-3.5" />
 				Move to...{hasSelection && selectedCount > 1 ? ` (${selectedCount})` : ''}
 			</button>
 
-			<button
-				class={itemClass}
-				style="width: calc(100% - 4px)"
-				onclick={() => handleAction(onDownload)}
-			>
+			<button class={itemClass} onclick={() => handleAction(onDownload)}>
 				<Download class="h-3.5 w-3.5" />
 				Download{hasSelection && selectedCount > 1 ? ` (${selectedCount})` : ''}
 			</button>
 
-			<div class="mx-2 my-1 border-t"></div>
+			<div class="mx-2 my-1 border-t border-[#393939]"></div>
 
 			{#if file?.isDir}
-				<button
-					class={itemClass}
-					style="width: calc(100% - 4px)"
-					onclick={() => handleAction(onNewFile)}
-				>
+				<button class={itemClass} onclick={() => handleAction(onNewFile)}>
 					<FilePlus class="h-3.5 w-3.5" />
 					New File
 				</button>
-				<button
-					class={itemClass}
-					style="width: calc(100% - 4px)"
-					onclick={() => handleAction(onNewFolder)}
-				>
+				<button class={itemClass} onclick={() => handleAction(onNewFolder)}>
 					<FolderPlus class="h-3.5 w-3.5" />
 					New Folder
 				</button>
-				<button
-					class={itemClass}
-					style="width: calc(100% - 4px)"
-					onclick={() => handleAction(onUpload)}
-				>
+				<button class={itemClass} onclick={() => handleAction(onUpload)}>
 					<Upload class="h-3.5 w-3.5" />
 					Upload Here
 				</button>
-				<div class="mx-2 my-1 border-t"></div>
+				<div class="mx-2 my-1 border-t border-[#393939]"></div>
 			{/if}
 
-			<button
-				class={itemClass}
-				style="width: calc(100% - 4px)"
-				onclick={() => handleAction(onCompress)}
-			>
+			<button class={itemClass} onclick={() => handleAction(onCompress)}>
 				<Archive class="h-3.5 w-3.5" />
 				Compress{hasSelection && selectedCount > 1 ? ` (${selectedCount})` : ''}
 			</button>
 
 			{#if isArchive(file)}
-				<button
-					class={itemClass}
-					style="width: calc(100% - 4px)"
-					onclick={() => handleAction(onExtract)}
-				>
+				<button class={itemClass} onclick={() => handleAction(onExtract)}>
 					<Package class="h-3.5 w-3.5" />
 					Extract
 				</button>
 			{/if}
 
-			<div class="mx-2 my-1 border-t"></div>
+			<div class="mx-2 my-1 border-t border-[#393939]"></div>
 
-			<button
-				class={dangerClass}
-				style="width: calc(100% - 4px)"
-				onclick={() => handleAction(onDelete)}
-			>
+			<button class={dangerClass} onclick={() => handleAction(onDelete)}>
 				<Trash2 class="h-3.5 w-3.5" />
 				Delete{hasSelection && selectedCount > 1 ? ` (${selectedCount})` : ''}
 			</button>

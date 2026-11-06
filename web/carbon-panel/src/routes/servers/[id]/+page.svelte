@@ -587,17 +587,17 @@ one at https://mozilla.org/MPL/2.0/.
 			<!-- Tile 1: Status & Heartbeat -->
 			<div
 				data-testid="showcase-runtime-tile"
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
+				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors hover:border-[#525252]"
 			>
-				<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
+				<div class="flex items-center justify-between">
+					<span class="font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
 						>Runtime Status</span
 					>
 					<CarbonTag type={getStatusTagType(server.status)} size="sm">
 						{getStatusDisplayName(server.status)}
 					</CarbonTag>
 				</div>
-				<div class="flex items-center justify-center gap-2 py-4">
+				<div class="mt-3 flex items-center justify-center gap-2 py-4">
 					<div class="heartbeat-container">
 						{#if server.status === ServerStatus.RUNNING}
 							{#each Array(5) as _, i (i)}
@@ -621,8 +621,8 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</div>
 				</div>
-				<div class="border-t border-[#393939] pt-2 text-center">
-					<p class="font-sans text-xs text-[#a8a8a8]">
+				<div class="mt-3 border-t border-[#393939] pt-3 text-center">
+					<p class="font-sans text-[11px] text-[#8d8d8d]">
 						{#if server.status === ServerStatus.RUNNING}
 							Server healthy and processing ticks
 						{:else if server.status === ServerStatus.STOPPED}
@@ -656,10 +656,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tile 2: Connection Address -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
+				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors hover:border-[#525252]"
 			>
-				<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
+				<div class="flex items-center justify-between">
+					<span class="font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
 						>Network Ingress</span
 					>
 					<div class="flex items-center gap-2">
@@ -677,13 +677,13 @@ one at https://mozilla.org/MPL/2.0/.
 						<ExternalLink class="h-4 w-4 text-[#78a9ff]" />
 					</div>
 				</div>
-				<div class="py-3">
+				<div class="mt-3 py-1">
 					<p class="font-mono text-xs text-[#8d8d8d] uppercase">Connect String</p>
 					<p class="mt-0.5 truncate font-mono text-base font-semibold text-[#f4f4f4]">
 						{connectAddress}
 					</p>
 				</div>
-				<div class="border-t border-[#393939] pt-2">
+				<div class="mt-3 border-t border-[#393939] pt-3">
 					<button
 						type="button"
 						onclick={() => {
@@ -699,14 +699,15 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tile 3: Engine Details -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
+				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors hover:border-[#525252]"
 			>
-				<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">Engine Specs</span
+				<div class="flex items-center justify-between">
+					<span class="font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
+						>Engine Specs</span
 					>
 					<Info class="h-4 w-4 text-[#d4bbff]" />
 				</div>
-				<div class="space-y-2 py-2 font-mono text-xs">
+				<div class="mt-3 space-y-2 font-mono text-xs">
 					<div class="flex items-center justify-between">
 						<span class="text-[#8d8d8d]">Minecraft:</span>
 						<span class="font-semibold text-[#f4f4f4]">{server.mcVersion || 'Latest'}</span>
@@ -731,7 +732,7 @@ one at https://mozilla.org/MPL/2.0/.
 					{/if}
 				</div>
 				<div
-					class="flex items-center justify-between border-t border-[#393939] pt-2 font-mono text-xs text-[#8d8d8d]"
+					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
 				>
 					<span>Port: {server.port}</span>
 					<span>Max Players: {server.maxPlayers}</span>
@@ -740,15 +741,15 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tile 4: Hardware Quotas -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
+				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors hover:border-[#525252]"
 			>
-				<div class="flex items-center justify-between border-b border-[#393939] pb-3">
-					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
+				<div class="flex items-center justify-between">
+					<span class="font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
 						>Resource Telemetry</span
 					>
 					<Cpu class="h-4 w-4 text-[#ff8389]" />
 				</div>
-				<div class="space-y-2.5 py-1">
+				<div class="mt-3 space-y-2.5">
 					<!-- Memory Bar -->
 					<div>
 						<div class="flex items-center justify-between font-mono text-xs">
@@ -791,7 +792,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div
-					class="flex items-center justify-between border-t border-[#393939] pt-2 font-mono text-xs"
+					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px]"
 				>
 					<span class="text-[#8d8d8d]">TPS:</span>
 					<span

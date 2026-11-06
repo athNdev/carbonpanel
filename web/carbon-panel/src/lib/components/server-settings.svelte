@@ -729,6 +729,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<DockerOverridesEditor
 				bind:overrides={formData.dockerOverrides}
 				disabled={saving}
+				collapsible={false}
 				onchange={(overrides) => (formData.dockerOverrides = overrides)}
 			/>
 		</CarbonAccordionItem>

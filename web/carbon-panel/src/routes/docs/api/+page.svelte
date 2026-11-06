@@ -217,7 +217,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<!-- eslint-disable svelte/no-navigation-without-resolve -- backend API endpoint, not a SvelteKit route; resolve() is inapplicable -->
 			<a
 				href="/api/v1/openapi.yaml"
-				class="inline-flex h-8 items-center px-3 font-mono text-xs tracking-wider text-[#78a9ff] uppercase hover:bg-[#353535] hover:text-white"
+				class="mono-label-accent inline-flex h-8 items-center px-3 hover:bg-[#353535] hover:text-white"
 			>
 				Open raw spec
 			</a>
@@ -253,9 +253,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<div class="absolute inset-0 z-10 flex items-center justify-center bg-[#161616]">
 					<div class="w-full max-w-md px-8">
 						<div class="mb-4 text-center">
-							<p class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">
-								Loading API Documentation...
-							</p>
+							<p class="mono-label">Loading API Documentation...</p>
 						</div>
 						<div class="h-1.5 w-full overflow-hidden bg-[#393939]">
 							<div

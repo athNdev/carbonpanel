@@ -971,6 +971,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<!-- File tree -->
 		<FileTree
 			{flatFiles}
+			emptyLabel={filterText ? 'No files match the current filter' : 'This folder is empty'}
 			{expandedDirs}
 			{selectedPaths}
 			{focusedPath}

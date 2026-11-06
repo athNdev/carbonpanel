@@ -209,13 +209,52 @@ one at https://mozilla.org/MPL/2.0/.
 		border-bottom-color: #0f62fe;
 		background-color: #262626;
 	}
+	.mono-label {
+		font-family: var(--carbon-font-mono);
+		font-size: 12px;
+		line-height: 1.6;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: #a8a8a8;
+	}
+	.mono-label-strong {
+		font-family: var(--carbon-font-mono);
+		font-size: 12px;
+		line-height: 1.6;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: #e0e0e0;
+	}
+	.mono-label-accent {
+		font-family: var(--carbon-font-mono);
+		font-size: 12px;
+		line-height: 1.6;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: var(--accent-text);
+	}
 	.focus-ring:focus-visible {
 		outline: 2px solid var(--ring);
 		outline-offset: 2px;
 	}
 }
 
-/* ------------------------------------------------------------------ *
+[data-carbon-motion='reduced'] *,
+[data-carbon-motion='reduced'] *::before,
+[data-carbon-motion='reduced'] *::after {
+	animation-duration: 0.01ms !important;
+	animation-iteration-count: 1 !important;
+	transition-duration: 0.01ms !important;
+	scroll-behavior: auto !important;
+}
+[data-carbon-density='compact'] {
+	--carbon-control-sm: 1.75rem;
+	--carbon-control-md: 2rem;
+	--carbon-control-lg: 2.5rem;
+	--carbon-space-4: 0.75rem;
+	--carbon-space-5: 1rem;
+} /* ------------------------------------------------------------------ *
  * Carbon motion system
  * Consumed by the Carbon primitives and view surfaces. Kept intentionally
  * mechanical and fast to match Carbon's utilitarian character: no bounce,

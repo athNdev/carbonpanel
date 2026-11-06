@@ -15,6 +15,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	interface Props {
 		flatFiles: FileInfo[];
+		emptyLabel?: string;
 		expandedDirs: Set<string>;
 		selectedPaths: Set<string>;
 		focusedPath: string;
@@ -34,6 +35,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let {
 		flatFiles,
+		emptyLabel = 'This folder is empty',
 		expandedDirs,
 		selectedPaths,
 		focusedPath,
@@ -76,10 +78,10 @@ one at https://mozilla.org/MPL/2.0/.
 		<!-- Name -->
 		<div class="flex-1 pl-1 font-medium tracking-wider uppercase">Name</div>
 		<!-- Size -->
-		<span class="w-16 shrink-0 text-right font-medium tracking-wider uppercase">Size</span>
+		<span class="w-20 shrink-0 text-right font-medium tracking-wider uppercase">Size</span>
 		<!-- Modified -->
 		<span
-			class="hidden w-20 shrink-0 text-right font-medium tracking-wider uppercase sm:inline-block"
+			class="hidden w-24 shrink-0 text-right font-medium tracking-wider uppercase sm:inline-block"
 			>Modified</span
 		>
 	</div>
@@ -107,7 +109,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	{#if flatFiles.length === 0}
 		<div class="flex flex-col items-center justify-center py-12 text-sm text-muted-foreground">
-			<p>This folder is empty</p>
+			<p>{emptyLabel}</p>
 		</div>
 	{/if}
 </div>

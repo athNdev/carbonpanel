@@ -647,7 +647,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<a
 					href={resolve('/servers')}
-					class="flex shrink-0 items-center gap-1 font-mono text-xs tracking-wider text-[#78a9ff] uppercase hover:text-white"
+					class="mono-label-accent flex shrink-0 items-center gap-1 hover:text-white"
 				>
 					<span>Inspect Servers</span>
 					<ChevronRight class="h-3.5 w-3.5" />
@@ -674,7 +674,7 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 						<a
 							href={resolve('/servers')}
-							class="inline-flex h-8 items-center gap-1 px-3 font-mono text-xs tracking-wider text-[#78a9ff] uppercase transition-colors hover:bg-[#353535] hover:text-white"
+							class="mono-label-accent inline-flex h-8 items-center gap-1 px-3 transition-colors hover:bg-[#353535] hover:text-white"
 						>
 							<span>View All ({dashboardServers.length})</span>
 							<ChevronRight class="h-3.5 w-3.5" />
@@ -847,7 +847,7 @@ one at https://mozilla.org/MPL/2.0/.
 													{/if}
 													<a
 														href={resolve(`/servers/${server.id}`)}
-														class="inline-flex h-7 items-center px-2.5 font-mono text-xs tracking-wider text-[#78a9ff] uppercase transition-colors hover:bg-[#393939] hover:text-white"
+														class="mono-label-accent inline-flex h-7 items-center px-2.5 transition-colors hover:bg-[#393939] hover:text-white"
 													>
 														Manage
 													</a>
@@ -883,7 +883,7 @@ one at https://mozilla.org/MPL/2.0/.
 						class="flex flex-1 flex-col items-center justify-center p-8 text-center text-[#8d8d8d]"
 					>
 						<Clock class="mb-2 h-8 w-8 text-[#525252]" />
-						<p class="font-mono text-xs tracking-wider uppercase">No recent events recorded</p>
+						<p class="mono-label">No recent events recorded</p>
 					</div>
 				{:else}
 					<!-- Structured List Header -->
@@ -999,23 +999,17 @@ one at https://mozilla.org/MPL/2.0/.
 				class="grid grid-cols-1 divide-y divide-[#393939] sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4"
 			>
 				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">
-						RPC Telemetry
-					</span>
+					<span class="mono-label"> RPC Telemetry </span>
 					<CarbonTag type="green" size="sm">OPERATIONAL</CarbonTag>
 				</div>
 				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">
-						Network Proxy
-					</span>
+					<span class="mono-label"> Network Proxy </span>
 					<CarbonTag type={stats.running > 0 ? 'green' : 'gray'} size="sm">
 						{stats.running > 0 ? 'CONNECTED' : 'IDLE'}
 					</CarbonTag>
 				</div>
 				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">
-						Storage Allocation
-					</span>
+					<span class="mono-label"> Storage Allocation </span>
 					<span class="font-mono text-xs text-[#f4f4f4]">
 						{stats.totalDiskUsage > 0
 							? `${formatBytes(stats.totalDiskUsage)}${stats.totalDiskSize}`
@@ -1023,7 +1017,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</span>
 				</div>
 				<div class="flex items-center justify-between gap-3 px-4 py-3" data-testid="health-nodes">
-					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">Nodes</span>
+					<span class="mono-label">Nodes</span>
 					{#if nodeStats.total > 0}
 						<CarbonTag type={nodeStats.offline > 0 ? 'yellow' : 'green'} size="sm">
 							{nodeStats.online}/{nodeStats.total} ONLINE

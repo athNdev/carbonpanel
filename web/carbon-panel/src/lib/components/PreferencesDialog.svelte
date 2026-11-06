@@ -73,6 +73,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	function handleClose() {
 		applyPrefs();
+		open = false;
 		onclose?.();
 	}
 

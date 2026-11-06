@@ -71,9 +71,16 @@ tokens for new UI. Cloud carries a content-pinned snapshot; changes need review
 and verification in both products. The standalone design-system homepage lives
 in docs/design-system and is not a Panel application route. Literal colors in older views remain migration debt, so a token
 change alone does not establish application-wide propagation.
-Dark is the default theme: `:root` carries the dark palette and light applies
+- Dark is the default theme: `:root` carries the dark palette and light applies
 only under `[data-carbon-theme='light']`. Controls that render white on a
 fresh profile mean a token regressed to the light default; see
 `tokens.test.ts`.
+- Tertiary buttons are Carbon-quiet (accent text, transparent border, hover
+  layer); the heavy foreground border is gone. Mono eyebrow labels use the
+  `.mono-label` utilities in `app.css`, not scattered tracking utilities.
+- Metric tiles share one hierarchy: `p-6`, sans semibold uppercase label,
+  dividers only above footers, hover border. Stored display preferences
+  (theme/motion/density) apply in `CarbonShell` on boot; see
+  `display-preferences.test.ts`.
 
 See [ADR 0009](../../docs/adr/0009-shared-design-system.md).
