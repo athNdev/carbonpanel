@@ -493,29 +493,53 @@
     <section class="showcase section" id="showcase" aria-labelledby="showcase-title">
       <div class="container">
         <div class="section-head reveal">
-          <p class="eyebrow">Interface preview</p>
+          <p class="eyebrow">Product tour</p>
           <h2 id="showcase-title">The panel, up close.</h2>
           <p>
-            Static captures from a disposable seeded stack. They regenerate
-            with the showcase journey whenever the console changes.
+            Real captures from a disposable demo stack, regenerated
+            automatically whenever the console changes.
           </p>
         </div>
         <div class="showcase-grid">
           <figure class="showcase-card reveal">
-            <img src="./assets/showcase/showcase-dashboard.png" alt="Cluster overview dashboard with server tiles, node inventory, and system health" loading="lazy" />
-            <figcaption><strong>Dashboard</strong><span>Cluster overview, nodes, and health</span></figcaption>
+            <div class="browser">
+              <div class="browser-bar" aria-hidden="true">
+                <span class="browser-dots"><i></i><i></i><i></i></span>
+                <span class="browser-url">panel/overview</span>
+              </div>
+              <img src="./assets/showcase/showcase-dashboard.png" alt="Cluster overview with KPI tiles, server list, and system health" loading="lazy" />
+            </div>
+            <figcaption><strong>Know your cluster at a glance</strong><span>Servers, players, memory, and TPS in one strip</span></figcaption>
           </figure>
           <figure class="showcase-card reveal">
-            <img src="./assets/showcase/showcase-server-detail.png" alt="Server detail view with tabs for overview, activity, and console" loading="lazy" />
-            <figcaption><strong>Server detail</strong><span>Telemetry, tabs, and lifecycle journal</span></figcaption>
+            <div class="browser">
+              <div class="browser-bar" aria-hidden="true">
+                <span class="browser-dots"><i></i><i></i><i></i></span>
+                <span class="browser-url">panel/servers/review-vanilla</span>
+              </div>
+              <img src="./assets/showcase/showcase-server-detail.png" alt="Server detail with live status heartbeat, network ingress, telemetry, and tabs" loading="lazy" />
+            </div>
+            <figcaption><strong>Catch problems before players do</strong><span>Live heartbeat, ingress, and health per server</span></figcaption>
           </figure>
           <figure class="showcase-card reveal">
-            <img src="./assets/showcase/showcase-studio.png" alt="Modpack Studio workspace for building and editing modpacks" loading="lazy" />
-            <figcaption><strong>Modpack Studio</strong><span>Visual workspace for custom packs</span></figcaption>
+            <div class="browser">
+              <div class="browser-bar" aria-hidden="true">
+                <span class="browser-dots"><i></i><i></i><i></i></span>
+                <span class="browser-url">panel/studio/showcase-pack</span>
+              </div>
+              <img src="./assets/showcase/showcase-studio.png" alt="Modpack Studio workspace with mod list, versions, and update status" loading="lazy" />
+            </div>
+            <figcaption><strong>Ship a pack without touching a manifest</strong><span>Mods, versions, and sides in one workspace</span></figcaption>
           </figure>
           <figure class="showcase-card reveal">
-            <img src="./assets/showcase/showcase-modpacks.png" alt="Modpacks library for browsing, importing, and managing packs" loading="lazy" />
-            <figcaption><strong>Modpacks</strong><span>Browse, import, and manage</span></figcaption>
+            <div class="browser">
+              <div class="browser-bar" aria-hidden="true">
+                <span class="browser-dots"><i></i><i></i><i></i></span>
+                <span class="browser-url">panel/modpacks</span>
+              </div>
+              <img src="./assets/showcase/showcase-modpacks.png" alt="Modpacks library with search filters, loader tags, and one-click server install" loading="lazy" />
+            </div>
+            <figcaption><strong>From discovery to running server in minutes</strong><span>Browse Modrinth and install straight into a server</span></figcaption>
           </figure>
         </div>
         <p class="showcase-note">Screenshots missing? Regenerate: boot <code>scripts/review/devstack.sh up</code>, run the showcase plan with <code>scripts/review/journey.mjs</code>, then copy <code>showcase-*.png</code> into <code>landing/assets/showcase/</code>.</p>

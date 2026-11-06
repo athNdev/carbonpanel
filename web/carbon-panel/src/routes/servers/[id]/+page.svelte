@@ -578,9 +578,13 @@ one at https://mozilla.org/MPL/2.0/.
 		</CarbonPageHeader>
 
 		<!-- Carbon Metric Tiles (ZERO rounded corners) -->
-		<div class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+		<div
+			class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+			data-testid="showcase-runtime-tiles"
+		>
 			<!-- Tile 1: Status & Heartbeat -->
 			<div
+				data-testid="showcase-runtime-tile"
 				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4"
 			>
 				<div class="flex items-center justify-between border-b border-[#393939] pb-3">

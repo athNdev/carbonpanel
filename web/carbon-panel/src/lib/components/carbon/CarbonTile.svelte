@@ -14,6 +14,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		class?: string;
 		onclick?: () => void;
 		children?: Snippet;
+		[key: string]: unknown;
 	}
 
 	let {
@@ -21,7 +22,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		href = undefined,
 		class: className = '',
 		onclick,
-		children
+		children,
+		...restProps
 	}: Props = $props();
 
 	const baseClasses =
@@ -34,7 +36,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 {#if href}
 	<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- href is caller-provided; callers pass resolve()d paths -->
-	<a {href} class="{baseClasses} {hoverClasses} block {className}">
+	<a {href} {...restProps} class="{baseClasses} {hoverClasses} block {className}">
 		{@render children?.()}
 	</a>
 	<!-- eslint-enable svelte/no-navigation-without-resolve -->
@@ -44,12 +46,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		tabindex="0"
 		{onclick}
 		onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && onclick?.()}
+		{...restProps}
 		class="{baseClasses} {hoverClasses} {className}"
 	>
 		{@render children?.()}
 	</div>
 {:else}
-	<div class="{baseClasses} {className}">
+	<div {...restProps} class="{baseClasses} {className}">
 		{@render children?.()}
 	</div>
 {/if}

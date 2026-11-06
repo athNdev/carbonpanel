@@ -19,12 +19,14 @@ one at https://mozilla.org/MPL/2.0/.
 		<link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/g1_22.svg" />
 		<link rel="apple-touch-icon" href="%sveltekit.assets%/g1_256x256.png" />
 		<!--
-			IBM Plex is self-hosted via @fontsource (see the imports at the top of
-			app.css). It used to be pulled from the Google Fonts CDN here, but the
-			server sets `style-src 'self' 'unsafe-inline'`, so that request was
-			blocked by CSP and the declared UI font silently never loaded — every
-			screen rendered in the fallback face. Self-hosting also removes an
-			external runtime dependency for an offline-capable, self-hosted panel.
+			Inter and JetBrains Mono are self-hosted as variable woff2 under
+			static/fonts (see the @font-face block at the top of app.css and
+			OFL-ATTRIBUTION.txt). Fonts used to be pulled from the Google Fonts
+			CDN here, but the server sets `style-src 'self' 'unsafe-inline'`, so
+			that request was blocked by CSP and the declared UI font silently
+			never loaded — every screen rendered in the fallback face.
+			Self-hosting also removes an external runtime dependency for an
+			offline-capable, self-hosted panel.
 		-->
 		%sveltekit.head%
 	</head>
