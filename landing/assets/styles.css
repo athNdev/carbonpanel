@@ -714,13 +714,13 @@ body > footer {
    ============================================================ */
 .showcase { overflow: hidden; }
 .tour {
-  max-width: 1120px;
+  max-width: 1280px;
   margin: 8px auto 0;
 }
 .tour-row {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-  gap: 56px;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+  gap: 48px;
   align-items: center;
   padding: 44px 0;
 }
