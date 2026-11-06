@@ -1,0 +1,68 @@
+{
+	"name": "showcase",
+	"title": "Showcase: dashboard, server detail, studio, modpacks",
+	"viewport": { "width": 1440, "height": 900 },
+	"docs": "Showcase screenshot plan. Regen: boot a disposable seeded stack with scripts/review/devstack.sh up, then run node scripts/review/journey.mjs --plan scripts/review/plan-showcase.json --base http://127.0.0.1:<port> --out /tmp/showcase, then copy the showcase-*.png files to landing/assets/showcase/ and assets/showcase/. Re-run on UI changes to dashboard, server detail, studio, or modpacks. Credentials from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD only; never commit PNGs you did not generate from a live stack.",
+	"bootstrap": {
+		"path": "/login",
+		"detectSelector": "input[placeholder=\"Enter your username\"]",
+		"usernameSelector": "input[placeholder=\"Choose admin username\"]",
+		"passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
+		"confirmSelector": "input[placeholder=\"Confirm your password\"]",
+		"submitSelector": "button[type=\"submit\"]",
+		"successSelector": "a[href^=\"/servers/\"]"
+	},
+	"login": {
+		"path": "/login",
+		"usernameSelector": "input[placeholder=\"Enter your username\"]",
+		"passwordSelector": "input[placeholder=\"Enter your password\"]",
+		"submitSelector": "button[type=\"submit\"]",
+		"successSelector": "a[href^=\"/servers/\"]"
+	},
+	"steps": [
+		{
+			"goto": "/",
+			"waitFor": "text=Cluster Overview",
+			"name": "dashboard loads"
+		},
+		{
+			"assertVisible": "text=System Health",
+			"name": "system health strip renders"
+		},
+		{
+			"screenshot": "showcase-dashboard"
+		},
+		{
+			"goto": "/servers",
+			"waitFor": "a[href^=\"/servers/\"]",
+			"name": "server list loads"
+		},
+		{
+			"click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
+			"name": "open first server"
+		},
+		{
+			"waitFor": "[role=\"tab\"]",
+			"name": "server detail tabs render"
+		},
+		{
+			"screenshot": "showcase-server-detail"
+		},
+		{
+			"goto": "/modpacks/studio",
+			"waitFor": "text=Modpack Studio",
+			"name": "studio loads"
+		},
+		{
+			"screenshot": "showcase-studio"
+		},
+		{
+			"goto": "/modpacks",
+			"waitFor": "text=Browse, import and manage modpack packages",
+			"name": "modpacks loads"
+		},
+		{
+			"screenshot": "showcase-modpacks"
+		}
+	]
+}

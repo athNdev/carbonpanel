@@ -710,6 +710,63 @@ body > footer {
 }
 
 /* ============================================================
+   SHOWCASE: real console screenshots (static PNGs only)
+   ============================================================ */
+.showcase { overflow: hidden; }
+.showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+.showcase-card {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--layer-01);
+  box-shadow: 0 20px 36px -28px rgba(0, 0, 0, 0.8);
+}
+.showcase-card img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: var(--term-bg);
+  border-bottom: 1px solid var(--border);
+}
+.showcase-card figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 20px 18px;
+}
+.showcase-card figcaption strong {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+}
+.showcase-card figcaption span {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+.showcase-note {
+  max-width: 1120px;
+  margin: 20px auto 0;
+  color: var(--text-tertiary);
+  font: 12px/1.6 var(--mono);
+  text-align: center;
+}
+.showcase-note code {
+  color: var(--text-secondary);
+}
+@media (max-width: 760px) {
+  .showcase-grid { grid-template-columns: 1fr; gap: 16px; }
+  .showcase-card { max-width: 540px; width: 100%; margin: 0 auto; }
+}
+
+/* ============================================================
    PROBLEM FRAMING
    ============================================================ */
 .problem-grid {

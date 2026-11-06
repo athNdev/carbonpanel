@@ -485,6 +485,44 @@
     </section>
 
     <!-- ============================================================
+         SHOWCASE: real console screenshots (static PNGs only)
+         CSP frame-ancestors is 'self', so no live iframe embeds.
+         PNGs regenerate from scripts/review/plan-showcase.json; see
+         .github/workflows/showcase.yml for the exact command.
+         ============================================================ -->
+    <section class="showcase section" id="showcase" aria-labelledby="showcase-title">
+      <div class="container">
+        <div class="section-head reveal">
+          <p class="eyebrow">Interface preview</p>
+          <h2 id="showcase-title">The panel, up close.</h2>
+          <p>
+            Static captures from a disposable seeded stack. They regenerate
+            with the showcase journey whenever the console changes.
+          </p>
+        </div>
+        <div class="showcase-grid">
+          <figure class="showcase-card reveal">
+            <img src="./assets/showcase/showcase-dashboard.png" alt="Cluster overview dashboard with server tiles, node inventory, and system health" loading="lazy" />
+            <figcaption><strong>Dashboard</strong><span>Cluster overview, nodes, and health</span></figcaption>
+          </figure>
+          <figure class="showcase-card reveal">
+            <img src="./assets/showcase/showcase-server-detail.png" alt="Server detail view with tabs for overview, activity, and console" loading="lazy" />
+            <figcaption><strong>Server detail</strong><span>Telemetry, tabs, and lifecycle journal</span></figcaption>
+          </figure>
+          <figure class="showcase-card reveal">
+            <img src="./assets/showcase/showcase-studio.png" alt="Modpack Studio workspace for building and editing modpacks" loading="lazy" />
+            <figcaption><strong>Modpack Studio</strong><span>Visual workspace for custom packs</span></figcaption>
+          </figure>
+          <figure class="showcase-card reveal">
+            <img src="./assets/showcase/showcase-modpacks.png" alt="Modpacks library for browsing, importing, and managing packs" loading="lazy" />
+            <figcaption><strong>Modpacks</strong><span>Browse, import, and manage</span></figcaption>
+          </figure>
+        </div>
+        <p class="showcase-note">Screenshots missing? Regenerate: boot <code>scripts/review/devstack.sh up</code>, run the showcase plan with <code>scripts/review/journey.mjs</code>, then copy <code>showcase-*.png</code> into <code>landing/assets/showcase/</code>.</p>
+      </div>
+    </section>
+
+    <!-- ============================================================
          PROBLEM FRAMING
          ============================================================ -->
     <section class="section">

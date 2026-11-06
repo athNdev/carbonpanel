@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: MPL-2.0
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Showcase screenshots: regenerate the static console PNGs used by the
+# marketing site and README. CSP frame-ancestors is 'self', so the site uses
+# static PNGs only (no live iframe embeds).
+#
+# AGENT INSTRUCTIONS:
+# - PNGs are GENERATED artifacts, never hand-drawn. Do not commit binaries you
+#   did not produce from a live stack. If the harness cannot run in your
+#   environment, leave landing/assets/showcase/*.png and assets/showcase/*.png
+#   as a documented TODO and report the exact regen command.
+# - Re-run this workflow (or the local command below) on UI changes to the
+#   dashboard, server detail, modpack studio, or modpacks pages.
+# - Local regen (exact command):
+#     scripts/review/devstack.sh up
+#     node scripts/review/journey.mjs \
+#       --plan scripts/review/plan-showcase.json \
+#       --base http://127.0.0.1:<port-from-devstack> \
+#       --out /tmp/showcase
+#     cp /tmp/showcase/showcase-*.png landing/assets/showcase/
+#     cp /tmp/showcase/showcase-*.png assets/showcase/
+# - The devstack port is printed by `devstack.sh up` and written to
+#   ~/.cache/carbon-panel-review.port. Credentials come from
+#   PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD only and are never committed.
+# - After copying PNGs, run `python3 scripts/build_website.py` and
+#   `python3 scripts/check_website.py` to verify the landing <img> grid.
+
+name: Showcase Screenshots
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/carbon-panel/src/routes/+page.svelte'
+      - 'web/carbon-panel/src/routes/changelog/**'
+      - 'web/carbon-panel/src/routes/servers/**'
+      - 'web/carbon-panel/src/routes/modpacks/**'
+      - 'landing/index.html'
+      - 'landing/assets/styles.css'
+      - 'scripts/review/plan-showcase.json'
+      - 'scripts/review/journey.mjs'
+      - 'scripts/review/devstack.sh'
+      - '.github/workflows/showcase.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: showcase-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
+
+      - name: Set up Buf
+        uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99
+        with:
+          version: '1.50.0'
+
+      - name: Install review driver
+        run: |
+          npm install --no-audit --no-fund playwright-core
+          npx --yes playwright@latest install chromium
+
+      - name: Boot disposable seeded stack
+        run: bash scripts/review/devstack.sh up
+        env:
+          PANEL_REVIEW_USER: reviewer
+          PANEL_REVIEW_PASSWORD: Review-Panel-2026
+
+      - name: Run showcase journey
+        run: |
+          PORT="$(cat "${HOME}/.cache/carbon-panel-review.port")"
+          REVIEW_MODULES="${GITHUB_WORKSPACE}/node_modules" \
+          PANEL_REVIEW_USER=reviewer \
+          PANEL_REVIEW_PASSWORD=Review-Panel-2026 \
+          node scripts/review/journey.mjs \
+            --plan scripts/review/plan-showcase.json \
+            --base "http://127.0.0.1:${PORT}" \
+            --out /tmp/showcase
+          ls -la /tmp/showcase
+
+      - name: Copy PNGs into the site and README trees
+        run: |
+          mkdir -p landing/assets/showcase assets/showcase
+          cp /tmp/showcase/showcase-*.png landing/assets/showcase/
+          cp /tmp/showcase/showcase-*.png assets/showcase/
+          ls -la landing/assets/showcase assets/showcase
+
+      - name: Build and validate the combined website
+        run: |
+          python3 scripts/build_website.py
+          python3 scripts/check_website.py
+
+      - name: Upload showcase artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: showcase
+          path: |
+            /tmp/showcase/showcase-*.png
+            /tmp/showcase/report.md
+
+      - name: Stop disposable stack
+        if: always()
+        run: bash scripts/review/devstack.sh down
