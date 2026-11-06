@@ -1784,6 +1784,27 @@ type ContainerState struct {
 	HasExited bool
 	// OOMKilled reports whether Docker recorded the last exit as an OOM kill.
 	OOMKilled bool
+	// StartedAt is when the container process last (re)started, zero when
+	// Docker did not report one. Failure detection scopes log evidence to
+	// lines at or after it so a previous boot's crash cannot paint a fresh
+	// boot red.
+	StartedAt time.Time
+}
+
+// parseDockerTime parses a daemon timestamp (RFC3339Nano, UTC). Unparseable
+// input yields the zero time; callers treat zero as "no bound available" and
+// skip time-scoped work rather than guessing.
+func parseDockerTime(raw string) time.Time {
+	if raw == "" {
+		return time.Time{}
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return parsed
+	}
+	return time.Time{}
 }
 
 // mapContainerState translates a Docker container.State into the panel's
@@ -1859,6 +1880,7 @@ func (c *Client) ObserveContainer(ctx context.Context, containerID string) (*Con
 		st.ContainerID = containerID
 	}
 	if inspect.State != nil {
+		st.StartedAt = parseDockerTime(inspect.State.StartedAt)
 		st.Running = inspect.State.Running
 		st.HasExited = !inspect.State.Running
 		st.ExitCode = inspect.State.ExitCode

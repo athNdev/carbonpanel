@@ -72,6 +72,7 @@ type Store interface {
 	ListServers(ctx context.Context) ([]*db.Server, error)
 	GetServerConfig(ctx context.Context, serverID string) (*db.ServerConfig, error)
 	UpdateServerStatus(ctx context.Context, id string, status db.ServerStatus) error
+	UpdateServerStatusReason(ctx context.Context, id string, reason string) error
 	UpdateServerContainerID(ctx context.Context, id string, containerID string) error
 }
 
@@ -79,6 +80,7 @@ type Store interface {
 type Client interface {
 	ResolveContainer(ctx context.Context, serverID string) (*container.Summary, error)
 	ObserveContainer(ctx context.Context, containerID string) (*docker.ContainerState, error)
+	TailContainerLogs(ctx context.Context, containerID string, tailLines int) ([]string, error)
 	StartContainer(ctx context.Context, containerID string) error
 	RecreateContainer(ctx context.Context, oldContainerID string, server *db.Server, serverConfig *db.ServerConfig) (*docker.RecreateContainerResult, error)
 	StopContainerWithin(ctx context.Context, containerID string, window time.Duration) (bool, error)
@@ -548,6 +550,9 @@ type observedState struct {
 	// ExitCode and OOMKilled describe how a stopped container's process ended.
 	ExitCode  int
 	OOMKilled bool
+	// StartedAt is when the container process last (re)started. Log evidence
+	// older than it belongs to a previous boot, not this one.
+	StartedAt time.Time
 }
 
 // observe resolves the server's container and inspects its runtime state. A
@@ -580,6 +585,7 @@ func (r *Reconciler) observe(ctx context.Context, cli Client, serverID string) (
 		Status:      st.Status,
 		ExitCode:    st.ExitCode,
 		OOMKilled:   st.OOMKilled,
+		StartedAt:   st.StartedAt,
 	}, nil
 }
 
@@ -642,6 +648,18 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 	}
 
 	dec := decide(server.Status, obs, server.Detached, !r.cfg.DisableSelfHeal)
+
+	// Game-process failure detection. The container can outlive a crashed JVM
+	// (the image retries inside a live entrypoint), so Docker-level status
+	// alone never turns red for a hard boot failure like a missing hard
+	// dependency. When the game is not verifiably healthy, consult the
+	// current boot's log tail for machine-precise fatal markers.
+	if dec.action != actStop && dec.action != actRecreate && shouldScanBootFailure(server.Status, obs) {
+		if reason, ok := r.detectBootFailure(ctx, cli, obs); ok {
+			dec.status = db.StatusError
+			dec.reason = reason
+		}
+	}
 
 	oldContainerID := server.ContainerID
 	oldBackend := r.backendFor(server.ID)
@@ -710,6 +728,29 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 		}
 		server.Status = dec.status
 		r.emitTransition(ctx, server, prev, dec.status, dec.reason)
+	}
+
+	// The failure reason is display metadata, not convergence state: record it
+	// when an error is adopted or backfilled onto a sticky error, and clear
+	// it as soon as any other status is adopted so a recovered server never
+	// shows a stale crash.
+	wantReason := server.StatusReason
+	if statusChanged {
+		wantReason = ""
+		if dec.status == db.StatusError {
+			wantReason = dec.reason
+		}
+	} else if dec.status == db.StatusError && dec.reason != "" && wantReason == "" {
+		wantReason = dec.reason
+	}
+	if wantReason != server.StatusReason {
+		if err := r.store.UpdateServerStatusReason(ctx, server.ID, wantReason); err != nil {
+			if r.log != nil {
+				r.log.Warn("reconciler: failed to record status reason for server %s: %v", server.Name, err)
+			}
+		} else {
+			server.StatusReason = wantReason
+		}
 	}
 
 	// Detect backend drift independently of status: a container can be

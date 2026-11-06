@@ -628,6 +628,10 @@ one at https://mozilla.org/MPL/2.0/.
 							Server running but failing health checks
 						{:else if server.status === ServerStatus.STOPPING}
 							Gracefully shutting down
+						{:else if server.status === ServerStatus.ERROR}
+							{server.statusReason
+								? `Server failed: ${server.statusReason}`
+								: 'Daemon status: ERROR'}
 						{:else}
 							Daemon status: {getStatusDisplayName(server.status)}
 						{/if}

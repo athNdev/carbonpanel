@@ -658,6 +658,7 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 
 	// Map status
 	protoServer.Status = dbStatusToProto(server.Status)
+	protoServer.StatusReason = server.StatusReason
 
 	// Map optional last started
 	if server.LastStarted != nil {
@@ -822,6 +823,13 @@ func preserveStoredStatus(stored, live storage.ServerStatus) bool {
 		// flapping the UI on every list refresh.
 		return true
 	}
+	if stored == storage.StatusError &&
+		(live == storage.StatusStarting || live == storage.StatusUnhealthy) {
+		// A recorded game failure owns the display until the server actually
+		// recovers (running) or stops. Boot and health readings from a
+		// crash-retry loop must not wash the error out on every refresh.
+		return true
+	}
 	return false
 }
 
@@ -891,6 +899,12 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 				status, err := dockerCli.GetContainerStatus(statusCtx, server.ContainerID)
 				if err == nil && !preserveStoredStatus(server.Status, status) {
 					server.Status = status
+					// Display-only: a live non-error reading retires any
+					// recorded crash reason. The row itself converges on the
+					// next reconciler sweep.
+					if server.Status != storage.StatusError {
+						server.StatusReason = ""
+					}
 				}
 			}
 
@@ -959,6 +973,9 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 			cancelStatus()
 			if err == nil && !preserveStoredStatus(server.Status, status) {
 				server.Status = status
+				if server.Status != storage.StatusError {
+					server.StatusReason = ""
+				}
 			}
 		}
 	}

@@ -34,6 +34,10 @@ the container again, so a dropped or reordered event does not leave status,
 the proxy route, or log subscriptions stuck. Failing healthchecks while a
 server is still starting keep the boot status; only a running server adopts
 unhealthy, which the console renders as degraded yellow rather than error red.
+A game process that dies inside a live container is detected from the current
+boot's log tail (hard-dependency failures, the image runner's exit report)
+and recorded as error with a human-readable reason, which the console shows
+on the status tile.
 
 # Listeners
 

@@ -176,6 +176,13 @@ func (s *Store) UpdateServerStatus(ctx context.Context, id string, status Server
 	return s.db.WithContext(ctx).Model(&Server{}).Where("id = ?", id).Update("status", status).Error
 }
 
+// UpdateServerStatusReason records or clears the display reason for an error
+// status. It is a targeted column update like UpdateServerStatus: the
+// reconciler never rewrites the whole row.
+func (s *Store) UpdateServerStatusReason(ctx context.Context, id string, reason string) error {
+	return s.db.WithContext(ctx).Model(&Server{}).Where("id = ?", id).Update("status_reason", reason).Error
+}
+
 // UpdateServerFields performs a targeted multi-column update for a server,
 // updating only the columns present in fields. This avoids the full-row
 // clobber that UpdateServer's Save performs, which is important when the

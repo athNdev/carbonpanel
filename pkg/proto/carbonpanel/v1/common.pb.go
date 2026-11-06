@@ -368,6 +368,10 @@ type Server struct {
 	// boots from the platform, but displays use this loader. UNSPECIFIED when
 	// the server did not come from a modpack or the loader is unknown.
 	ModpackLoader ModLoader `protobuf:"varint,46,opt,name=modpack_loader,json=modpackLoader,proto3,enum=carbonpanel.v1.ModLoader" json:"modpack_loader,omitempty"`
+	// Human-readable cause of an error status, e.g. a crashed game process
+	// detected in the boot log. Display metadata only; empty unless status is
+	// error, and cleared as soon as any other status is adopted.
+	StatusReason  string `protobuf:"bytes,47,opt,name=status_reason,json=statusReason,proto3" json:"status_reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -722,6 +726,13 @@ func (x *Server) GetModpackLoader() ModLoader {
 		return x.ModpackLoader
 	}
 	return ModLoader_MOD_LOADER_UNSPECIFIED
+}
+
+func (x *Server) GetStatusReason() string {
+	if x != nil {
+		return x.StatusReason
+	}
+	return ""
 }
 
 // Extra port mapping for container
@@ -1461,7 +1472,7 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"last_login\x18\t \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tlastLogin\x88\x01\x01B\b\n" +
 	"\x06_emailB\r\n" +
-	"\v_last_login\"\x92\x0e\n" +
+	"\v_last_login\"\xb7\x0e\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -1521,7 +1532,8 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\afavicon\x18& \x01(\tR\afavicon\x12\x17\n" +
 	"\anode_id\x18( \x01(\tR\x06nodeId\x12%\n" +
 	"\x0eloader_version\x18- \x01(\tR\rloaderVersion\x12@\n" +
-	"\x0emodpack_loader\x18. \x01(\x0e2\x19.carbonpanel.v1.ModLoaderR\rmodpackLoaderB\x0f\n" +
+	"\x0emodpack_loader\x18. \x01(\x0e2\x19.carbonpanel.v1.ModLoaderR\rmodpackLoader\x12#\n" +
+	"\rstatus_reason\x18/ \x01(\tR\fstatusReasonB\x0f\n" +
 	"\r_last_started\"\xa9\x01\n" +
 	"\x0eAdditionalPort\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +

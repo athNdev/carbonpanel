@@ -98,21 +98,25 @@ type Server struct {
 	// platform so the image fetches the pack, but every display surface
 	// should name the game loader players actually run. Empty means the
 	// server was not created from a modpack or the loader is unknown.
-	ModpackLoader   ModLoader    `json:"modpack_loader" gorm:"column:modpack_loader"`
-	NodeID          string       `json:"node_id" gorm:"column:node_id;default:'default'"`
-	ContainerID     string       `json:"container_id" gorm:"column:container_id"`
-	Status          ServerStatus `json:"status" gorm:"not null"`
-	Port            int          `json:"port"`
-	ProxyPort       int          `json:"proxy_port" gorm:"column:proxy_port"`
-	ProxyHostname   string       `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
-	ProxyListenerID string       `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
-	MaxPlayers      int          `json:"max_players" gorm:"default:20;column:max_players"`
-	Memory          int          `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
-	CreatedAt       time.Time    `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       time.Time    `json:"updated_at" gorm:"autoUpdateTime"`
-	LastStarted     *time.Time   `json:"last_started" gorm:"column:last_started"`
-	JavaVersion     string       `json:"java_version" gorm:"column:java_version"`
-	DockerImage     string       `json:"docker_image" gorm:"column:docker_image"`
+	ModpackLoader ModLoader    `json:"modpack_loader" gorm:"column:modpack_loader"`
+	NodeID        string       `json:"node_id" gorm:"column:node_id;default:'default'"`
+	ContainerID   string       `json:"container_id" gorm:"column:container_id"`
+	Status        ServerStatus `json:"status" gorm:"not null"`
+	// StatusReason is the human-readable cause of the current error status
+	// (e.g. a crashed game process detected in the boot log). Display
+	// metadata only: empty unless Status is error.
+	StatusReason    string     `json:"status_reason" gorm:"column:status_reason"`
+	Port            int        `json:"port"`
+	ProxyPort       int        `json:"proxy_port" gorm:"column:proxy_port"`
+	ProxyHostname   string     `json:"proxy_hostname" gorm:"column:proxy_hostname;uniqueIndex:idx_proxy_hostname_listener,where:proxy_hostname != ''"`
+	ProxyListenerID string     `json:"proxy_listener_id" gorm:"column:proxy_listener_id;uniqueIndex:idx_proxy_hostname_listener,where:proxy_listener_id != ''"` // Which listener this server uses
+	MaxPlayers      int        `json:"max_players" gorm:"default:20;column:max_players"`
+	Memory          int        `json:"memory" gorm:"default:4096"` // in MB (allocated) - IMPORTANT: This applies to the container's memory allocation first, then used to calc the JVM min/max for mc server proc inside w/ overhead
+	CreatedAt       time.Time  `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt       time.Time  `json:"updated_at" gorm:"autoUpdateTime"`
+	LastStarted     *time.Time `json:"last_started" gorm:"column:last_started"`
+	JavaVersion     string     `json:"java_version" gorm:"column:java_version"`
+	DockerImage     string     `json:"docker_image" gorm:"column:docker_image"`
 	// AppliedImageID is the daemon image ID of the container that last came
 	// up. A failed pull or recreate leaves the previous value in place.
 	AppliedImageID string `json:"applied_image_id" gorm:"column:applied_image_id"`

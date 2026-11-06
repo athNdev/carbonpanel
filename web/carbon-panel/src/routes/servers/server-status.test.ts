@@ -60,3 +60,12 @@ test('list issues pill goes amber when nothing actually errored', () => {
 	assert.ok(list.includes('hasErrorIssue'), 'pill must distinguish error from degraded');
 	assert.ok(list.includes('border-[#f1c21b]'), 'degraded-only pill must use amber styling');
 });
+
+test('error tile names the recorded failure cause', () => {
+	const detail = fs.readFileSync(path.resolve(import.meta.dirname, './[id]/+page.svelte'), 'utf-8');
+	assert.ok(detail.includes('server.statusReason'), 'error tile must read the recorded reason');
+	assert.ok(
+		detail.includes('Server failed:'),
+		'error tile must name the failure instead of only a daemon code'
+	);
+});
