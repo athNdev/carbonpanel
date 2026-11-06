@@ -513,6 +513,128 @@ func (x *SetBackupLockedResponse) GetBackup() *BackupRecord {
 	return nil
 }
 
+// Create request
+type CreateBackupRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	BackupName    string                 `protobuf:"bytes,2,opt,name=backup_name,json=backupName,proto3" json:"backup_name,omitempty"`
+	StopForBackup bool                   `protobuf:"varint,3,opt,name=stop_for_backup,json=stopForBackup,proto3" json:"stop_for_backup,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateBackupRequest) Reset() {
+	*x = CreateBackupRequest{}
+	mi := &file_carbonpanel_v1_backup_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateBackupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateBackupRequest) ProtoMessage() {}
+
+func (x *CreateBackupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_backup_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateBackupRequest.ProtoReflect.Descriptor instead.
+func (*CreateBackupRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_backup_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CreateBackupRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
+	}
+	return ""
+}
+
+func (x *CreateBackupRequest) GetBackupName() string {
+	if x != nil {
+		return x.BackupName
+	}
+	return ""
+}
+
+func (x *CreateBackupRequest) GetStopForBackup() bool {
+	if x != nil {
+		return x.StopForBackup
+	}
+	return false
+}
+
+// Create response
+type CreateBackupResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Backup        *BackupRecord          `protobuf:"bytes,3,opt,name=backup,proto3" json:"backup,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateBackupResponse) Reset() {
+	*x = CreateBackupResponse{}
+	mi := &file_carbonpanel_v1_backup_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateBackupResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateBackupResponse) ProtoMessage() {}
+
+func (x *CreateBackupResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_backup_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateBackupResponse.ProtoReflect.Descriptor instead.
+func (*CreateBackupResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_backup_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CreateBackupResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *CreateBackupResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *CreateBackupResponse) GetBackup() *BackupRecord {
+	if x != nil {
+		return x.Backup
+	}
+	return nil
+}
+
 var File_carbonpanel_v1_backup_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_backup_proto_rawDesc = "" +
@@ -547,12 +669,22 @@ const file_carbonpanel_v1_backup_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06locked\x18\x02 \x01(\bR\x06locked\"O\n" +
 	"\x17SetBackupLockedResponse\x124\n" +
-	"\x06backup\x18\x01 \x01(\v2\x1c.carbonpanel.v1.BackupRecordR\x06backup2\x84\x03\n" +
+	"\x06backup\x18\x01 \x01(\v2\x1c.carbonpanel.v1.BackupRecordR\x06backup\"{\n" +
+	"\x13CreateBackupRequest\x12\x1b\n" +
+	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x1f\n" +
+	"\vbackup_name\x18\x02 \x01(\tR\n" +
+	"backupName\x12&\n" +
+	"\x0fstop_for_backup\x18\x03 \x01(\bR\rstopForBackup\"\x80\x01\n" +
+	"\x14CreateBackupResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x124\n" +
+	"\x06backup\x18\x03 \x01(\v2\x1c.carbonpanel.v1.BackupRecordR\x06backup2\xdf\x03\n" +
 	"\rBackupService\x12V\n" +
 	"\vListBackups\x12\".carbonpanel.v1.ListBackupsRequest\x1a#.carbonpanel.v1.ListBackupsResponse\x12Y\n" +
 	"\fDeleteBackup\x12#.carbonpanel.v1.DeleteBackupRequest\x1a$.carbonpanel.v1.DeleteBackupResponse\x12\\\n" +
 	"\rRestoreBackup\x12$.carbonpanel.v1.RestoreBackupRequest\x1a%.carbonpanel.v1.RestoreBackupResponse\x12b\n" +
-	"\x0fSetBackupLocked\x12&.carbonpanel.v1.SetBackupLockedRequest\x1a'.carbonpanel.v1.SetBackupLockedResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
+	"\x0fSetBackupLocked\x12&.carbonpanel.v1.SetBackupLockedRequest\x1a'.carbonpanel.v1.SetBackupLockedResponse\x12Y\n" +
+	"\fCreateBackup\x12#.carbonpanel.v1.CreateBackupRequest\x1a$.carbonpanel.v1.CreateBackupResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
 
 var (
 	file_carbonpanel_v1_backup_proto_rawDescOnce sync.Once
@@ -566,7 +698,7 @@ func file_carbonpanel_v1_backup_proto_rawDescGZIP() []byte {
 	return file_carbonpanel_v1_backup_proto_rawDescData
 }
 
-var file_carbonpanel_v1_backup_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_carbonpanel_v1_backup_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_carbonpanel_v1_backup_proto_goTypes = []any{
 	(*BackupRecord)(nil),            // 0: carbonpanel.v1.BackupRecord
 	(*ListBackupsRequest)(nil),      // 1: carbonpanel.v1.ListBackupsRequest
@@ -577,25 +709,30 @@ var file_carbonpanel_v1_backup_proto_goTypes = []any{
 	(*RestoreBackupResponse)(nil),   // 6: carbonpanel.v1.RestoreBackupResponse
 	(*SetBackupLockedRequest)(nil),  // 7: carbonpanel.v1.SetBackupLockedRequest
 	(*SetBackupLockedResponse)(nil), // 8: carbonpanel.v1.SetBackupLockedResponse
-	(*timestamppb.Timestamp)(nil),   // 9: google.protobuf.Timestamp
+	(*CreateBackupRequest)(nil),     // 9: carbonpanel.v1.CreateBackupRequest
+	(*CreateBackupResponse)(nil),    // 10: carbonpanel.v1.CreateBackupResponse
+	(*timestamppb.Timestamp)(nil),   // 11: google.protobuf.Timestamp
 }
 var file_carbonpanel_v1_backup_proto_depIdxs = []int32{
-	9, // 0: carbonpanel.v1.BackupRecord.created_at:type_name -> google.protobuf.Timestamp
-	0, // 1: carbonpanel.v1.ListBackupsResponse.backups:type_name -> carbonpanel.v1.BackupRecord
-	0, // 2: carbonpanel.v1.SetBackupLockedResponse.backup:type_name -> carbonpanel.v1.BackupRecord
-	1, // 3: carbonpanel.v1.BackupService.ListBackups:input_type -> carbonpanel.v1.ListBackupsRequest
-	3, // 4: carbonpanel.v1.BackupService.DeleteBackup:input_type -> carbonpanel.v1.DeleteBackupRequest
-	5, // 5: carbonpanel.v1.BackupService.RestoreBackup:input_type -> carbonpanel.v1.RestoreBackupRequest
-	7, // 6: carbonpanel.v1.BackupService.SetBackupLocked:input_type -> carbonpanel.v1.SetBackupLockedRequest
-	2, // 7: carbonpanel.v1.BackupService.ListBackups:output_type -> carbonpanel.v1.ListBackupsResponse
-	4, // 8: carbonpanel.v1.BackupService.DeleteBackup:output_type -> carbonpanel.v1.DeleteBackupResponse
-	6, // 9: carbonpanel.v1.BackupService.RestoreBackup:output_type -> carbonpanel.v1.RestoreBackupResponse
-	8, // 10: carbonpanel.v1.BackupService.SetBackupLocked:output_type -> carbonpanel.v1.SetBackupLockedResponse
-	7, // [7:11] is the sub-list for method output_type
-	3, // [3:7] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	11, // 0: carbonpanel.v1.BackupRecord.created_at:type_name -> google.protobuf.Timestamp
+	0,  // 1: carbonpanel.v1.ListBackupsResponse.backups:type_name -> carbonpanel.v1.BackupRecord
+	0,  // 2: carbonpanel.v1.SetBackupLockedResponse.backup:type_name -> carbonpanel.v1.BackupRecord
+	0,  // 3: carbonpanel.v1.CreateBackupResponse.backup:type_name -> carbonpanel.v1.BackupRecord
+	1,  // 4: carbonpanel.v1.BackupService.ListBackups:input_type -> carbonpanel.v1.ListBackupsRequest
+	3,  // 5: carbonpanel.v1.BackupService.DeleteBackup:input_type -> carbonpanel.v1.DeleteBackupRequest
+	5,  // 6: carbonpanel.v1.BackupService.RestoreBackup:input_type -> carbonpanel.v1.RestoreBackupRequest
+	7,  // 7: carbonpanel.v1.BackupService.SetBackupLocked:input_type -> carbonpanel.v1.SetBackupLockedRequest
+	9,  // 8: carbonpanel.v1.BackupService.CreateBackup:input_type -> carbonpanel.v1.CreateBackupRequest
+	2,  // 9: carbonpanel.v1.BackupService.ListBackups:output_type -> carbonpanel.v1.ListBackupsResponse
+	4,  // 10: carbonpanel.v1.BackupService.DeleteBackup:output_type -> carbonpanel.v1.DeleteBackupResponse
+	6,  // 11: carbonpanel.v1.BackupService.RestoreBackup:output_type -> carbonpanel.v1.RestoreBackupResponse
+	8,  // 12: carbonpanel.v1.BackupService.SetBackupLocked:output_type -> carbonpanel.v1.SetBackupLockedResponse
+	10, // 13: carbonpanel.v1.BackupService.CreateBackup:output_type -> carbonpanel.v1.CreateBackupResponse
+	9,  // [9:14] is the sub-list for method output_type
+	4,  // [4:9] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_backup_proto_init() }
@@ -609,7 +746,7 @@ func file_carbonpanel_v1_backup_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_backup_proto_rawDesc), len(file_carbonpanel_v1_backup_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

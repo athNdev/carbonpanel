@@ -334,6 +334,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	// service can resolve the owning server and enforce against it; without
 	// this the handlers would fail closed for every caller.
 	backupService.SetEnforcer(s.enforcer)
+	backupService.SetScheduler(s.scheduler)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)

@@ -51,6 +51,9 @@ const (
 	// BackupServiceSetBackupLockedProcedure is the fully-qualified name of the BackupService's
 	// SetBackupLocked RPC.
 	BackupServiceSetBackupLockedProcedure = "/carbonpanel.v1.BackupService/SetBackupLocked"
+	// BackupServiceCreateBackupProcedure is the fully-qualified name of the BackupService's
+	// CreateBackup RPC.
+	BackupServiceCreateBackupProcedure = "/carbonpanel.v1.BackupService/CreateBackup"
 )
 
 // BackupServiceClient is a client for the carbonpanel.v1.BackupService service.
@@ -63,6 +66,8 @@ type BackupServiceClient interface {
 	RestoreBackup(context.Context, *connect.Request[v1.RestoreBackupRequest]) (*connect.Response[v1.RestoreBackupResponse], error)
 	// Toggle the sticky lock flag
 	SetBackupLocked(context.Context, *connect.Request[v1.SetBackupLockedRequest]) (*connect.Response[v1.SetBackupLockedResponse], error)
+	// Run a backup now with default retention (no schedule needed)
+	CreateBackup(context.Context, *connect.Request[v1.CreateBackupRequest]) (*connect.Response[v1.CreateBackupResponse], error)
 }
 
 // NewBackupServiceClient constructs a client for the carbonpanel.v1.BackupService service. By
@@ -100,6 +105,12 @@ func NewBackupServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(backupServiceMethods.ByName("SetBackupLocked")),
 			connect.WithClientOptions(opts...),
 		),
+		createBackup: connect.NewClient[v1.CreateBackupRequest, v1.CreateBackupResponse](
+			httpClient,
+			baseURL+BackupServiceCreateBackupProcedure,
+			connect.WithSchema(backupServiceMethods.ByName("CreateBackup")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -109,6 +120,7 @@ type backupServiceClient struct {
 	deleteBackup    *connect.Client[v1.DeleteBackupRequest, v1.DeleteBackupResponse]
 	restoreBackup   *connect.Client[v1.RestoreBackupRequest, v1.RestoreBackupResponse]
 	setBackupLocked *connect.Client[v1.SetBackupLockedRequest, v1.SetBackupLockedResponse]
+	createBackup    *connect.Client[v1.CreateBackupRequest, v1.CreateBackupResponse]
 }
 
 // ListBackups calls carbonpanel.v1.BackupService.ListBackups.
@@ -131,6 +143,11 @@ func (c *backupServiceClient) SetBackupLocked(ctx context.Context, req *connect.
 	return c.setBackupLocked.CallUnary(ctx, req)
 }
 
+// CreateBackup calls carbonpanel.v1.BackupService.CreateBackup.
+func (c *backupServiceClient) CreateBackup(ctx context.Context, req *connect.Request[v1.CreateBackupRequest]) (*connect.Response[v1.CreateBackupResponse], error) {
+	return c.createBackup.CallUnary(ctx, req)
+}
+
 // BackupServiceHandler is an implementation of the carbonpanel.v1.BackupService service.
 type BackupServiceHandler interface {
 	// List backup records for a server
@@ -141,6 +158,8 @@ type BackupServiceHandler interface {
 	RestoreBackup(context.Context, *connect.Request[v1.RestoreBackupRequest]) (*connect.Response[v1.RestoreBackupResponse], error)
 	// Toggle the sticky lock flag
 	SetBackupLocked(context.Context, *connect.Request[v1.SetBackupLockedRequest]) (*connect.Response[v1.SetBackupLockedResponse], error)
+	// Run a backup now with default retention (no schedule needed)
+	CreateBackup(context.Context, *connect.Request[v1.CreateBackupRequest]) (*connect.Response[v1.CreateBackupResponse], error)
 }
 
 // NewBackupServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -174,6 +193,12 @@ func NewBackupServiceHandler(svc BackupServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(backupServiceMethods.ByName("SetBackupLocked")),
 		connect.WithHandlerOptions(opts...),
 	)
+	backupServiceCreateBackupHandler := connect.NewUnaryHandler(
+		BackupServiceCreateBackupProcedure,
+		svc.CreateBackup,
+		connect.WithSchema(backupServiceMethods.ByName("CreateBackup")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/carbonpanel.v1.BackupService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case BackupServiceListBackupsProcedure:
@@ -184,6 +209,8 @@ func NewBackupServiceHandler(svc BackupServiceHandler, opts ...connect.HandlerOp
 			backupServiceRestoreBackupHandler.ServeHTTP(w, r)
 		case BackupServiceSetBackupLockedProcedure:
 			backupServiceSetBackupLockedHandler.ServeHTTP(w, r)
+		case BackupServiceCreateBackupProcedure:
+			backupServiceCreateBackupHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -207,4 +234,8 @@ func (UnimplementedBackupServiceHandler) RestoreBackup(context.Context, *connect
 
 func (UnimplementedBackupServiceHandler) SetBackupLocked(context.Context, *connect.Request[v1.SetBackupLockedRequest]) (*connect.Response[v1.SetBackupLockedResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.BackupService.SetBackupLocked is not implemented"))
+}
+
+func (UnimplementedBackupServiceHandler) CreateBackup(context.Context, *connect.Request[v1.CreateBackupRequest]) (*connect.Response[v1.CreateBackupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.BackupService.CreateBackup is not implemented"))
 }

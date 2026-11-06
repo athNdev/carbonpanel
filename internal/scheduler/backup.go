@@ -79,12 +79,35 @@ func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Serve
 			return "", fmt.Errorf("invalid backup config: %w", err)
 		}
 	}
+	displayName := config.BackupName
+	if displayName == "" {
+		displayName = task.Name
+	}
+	output, _, err = s.runBackupArchive(ctx, server, displayName, config)
+	return output, err
+}
+
+// RunManualBackup runs an on-demand backup without a schedule, through the
+// same journaled pipeline as scheduled tasks. It returns the scheduler output
+// and the stored backup record.
+func (s *Scheduler) RunManualBackup(ctx context.Context, server *storage.Server, config BackupTaskConfig) (string, *storage.BackupRecord, error) {
+	displayName := config.BackupName
+	if displayName == "" {
+		displayName = "Manual backup"
+	}
+	return s.runBackupArchive(ctx, server, displayName, config)
+}
+
+// runBackupArchive executes the journaled backup pipeline shared by scheduled
+// tasks and on-demand backups: node-aware paths, save quiescing, manifest
+// archive, verification, encryption, offsite upload and retention.
+func (s *Scheduler) runBackupArchive(ctx context.Context, server *storage.Server, displayName string, config BackupTaskConfig) (output string, created *storage.BackupRecord, err error) {
 
 	if s.appConfig == nil || s.appConfig.Storage.BackupDir == "" {
-		return "", fmt.Errorf("backup directory is not configured")
+		return "", nil, fmt.Errorf("backup directory is not configured")
 	}
 	if server.DataPath == "" {
-		return "", fmt.Errorf("server has no data directory")
+		return "", nil, fmt.Errorf("server has no data directory")
 	}
 
 	// Server data lives on the owning node; resolve the controller-side root
@@ -95,11 +118,11 @@ func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Serve
 	if !nodestorage.IsLegacyLocalNodeID(server.NodeID) {
 		node, nerr := s.store.GetNode(ctx, server.NodeID)
 		if nerr != nil {
-			return "", fmt.Errorf("resolve storage node %q: %w", server.NodeID, nerr)
+			return "", nil, fmt.Errorf("resolve storage node %q: %w", server.NodeID, nerr)
 		}
 		mapped, merr := nodestorage.MapDataPath(node.StorageInfo(), server.DataPath)
 		if merr != nil {
-			return "", merr
+			return "", nil, merr
 		}
 		worldDataPath = mapped
 	}
@@ -111,29 +134,25 @@ func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Serve
 		var pathErr error
 		paths, missing, pathErr = resolveBackupPaths(worldDataPath, config.Paths)
 		if pathErr != nil {
-			return "", pathErr
+			return "", nil, pathErr
 		}
 	}
 
 	// Backups are grouped per server using the unique server data directory name
 	destDir := filepath.Join(s.appConfig.Storage.BackupDir, filepath.Base(server.DataPath))
 	if err := os.MkdirAll(destDir, 0700); err != nil {
-		return "", fmt.Errorf("failed to create backup directory: %w", err)
+		return "", nil, fmt.Errorf("failed to create backup directory: %w", err)
 	}
 	if err := os.Chmod(destDir, 0700); err != nil {
-		return "", fmt.Errorf("failed to secure backup directory: %w", err)
+		return "", nil, fmt.Errorf("failed to secure backup directory: %w", err)
 	}
 
-	backupName := config.BackupName
-	if backupName == "" {
-		backupName = task.Name
-	}
-	prefix := files.SanitizePathName(backupName)
+	prefix := files.SanitizePathName(displayName)
 	destPath := filepath.Join(destDir, fmt.Sprintf("%s_%s.zip", prefix, time.Now().UTC().Format("20060102-150405")))
 
 	transition, terr := docker.TryBeginServerTransition(server.ID)
 	if terr != nil {
-		return "", fmt.Errorf("backup refused while another lifecycle operation owns the server: %w", terr)
+		return "", nil, fmt.Errorf("backup refused while another lifecycle operation owns the server: %w", terr)
 	}
 	defer transition.Release()
 
@@ -286,6 +305,7 @@ func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Serve
 			SizeBytes: size, SHA256: sum, Status: "complete",
 			Encrypted: encrypted, EncryptionKeyID: keyID,
 		}
+		created = rec
 		if recErr := s.store.CreateBackupRecord(ctx, rec); recErr != nil {
 			s.log.Error("Backup: failed to record backup %s: %v", destPath, recErr)
 		}
@@ -322,7 +342,7 @@ func (s *Scheduler) executeBackupTask(ctx context.Context, server *storage.Serve
 		}
 		return nil
 	})
-	return output, err
+	return output, created, err
 }
 
 // Validates the requested paths against the server data

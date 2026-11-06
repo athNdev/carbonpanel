@@ -57,40 +57,6 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultMemory:   1024,
 		},
 		{
-			ID:             "builtin-mc-backup",
-			Name:           "MC Backup",
-			Description:    "Automated backup solution for Minecraft server worlds with RCON-coordinated saves and configurable retention policies",
-			Type:           storage.ModuleTemplateTypeBuiltin,
-			DockerImage:    "itzg/mc-backup:latest",
-			Category:       "utilities",
-			SupportsProxy:  false,
-			RequiresServer: true,
-			Icon:           "archive",
-			Ports:          []*v1.ModulePort{},
-			DefaultEnv: `{
-				"RCON_HOST": "carbon-panel-server-{{server.id}}",
-				"RCON_PORT": "{{server.config.rconPort}}",
-				"RCON_PASSWORD": "{{server.config.rconPassword}}",
-				"SRC_DIR": "/data",
-				"DEST_DIR": "/backups",
-				"BACKUP_NAME": "world",
-				"BACKUP_METHOD": "tar",
-				"BACKUP_INTERVAL": "24h",
-				"INITIAL_DELAY": "2m",
-				"BACKUP_ON_STARTUP": "true",
-				"PRUNE_BACKUPS_DAYS": "7",
-				"PAUSE_IF_NO_PLAYERS": "false",
-				"EXCLUDES": "*.jar,cache,logs,*.tmp",
-				"TZ": "{{server.config.tz}}"
-			}`,
-			DefaultVolumes: `[
-				{"source": "{{server.data_path}}", "target": "/data", "read_only": true},
-				{"source": "{{config.storage.backup_dir}}", "target": "/backups", "read_only": false}
-				]`,
-			Documentation: "Coordinates backups with the Minecraft server via RCON. Automatically flushes data, pauses writes, and resumes after backup. RCON settings are pulled from server config. Backups stored in global backup directory.",
-			DefaultMemory: 256,
-		},
-		{
 			ID:             "builtin-rcon-web",
 			Name:           "RCON Web Admin",
 			Description:    "Web-based RCON client for remote server management with command history and multi-server support",
@@ -206,6 +172,19 @@ func InitBuiltinTemplates(store *storage.Store) error {
 	// Upsert each template
 	for _, template := range templates {
 		if err := store.UpsertModuleTemplate(ctx, &template); err != nil {
+			return err
+		}
+	}
+
+	// Retire builtin-mc-backup: backups are a native feature (Backups tab,
+	// scheduled tasks and the CreateBackup RPC run the same journaled
+	// pipeline), not a sidecar. Existing installs keep working until their
+	// owners remove them, so the template row is deleted only when nothing
+	// references it; DeleteModuleTemplate refuses otherwise.
+	if mods, err := store.ListModulesByTemplate(ctx, "builtin-mc-backup"); err != nil {
+		return err
+	} else if len(mods) == 0 {
+		if err := store.DeleteModuleTemplate(ctx, "builtin-mc-backup"); err != nil {
 			return err
 		}
 	}

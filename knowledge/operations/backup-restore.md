@@ -7,6 +7,7 @@ owners: [oss-runtime]
 code_refs:
   - internal/s3
   - internal/snapshot
+  - internal/scheduler
 sources:
   - title: Backup confirmation issue
     resource: ../../docs/issues/013-UI-5-backup-confirmation-dialogs.md
@@ -20,6 +21,12 @@ A backup, snapshot, restore or retention change is being made.
 
 # Rules
 
+- Backups are native: the Backups tab, scheduled tasks and the CreateBackup
+  RPC all run the same journaled pipeline (quiesce, manifest archive,
+  verify, encrypt, upload, retain). The retired builtin-mc-backup sidecar is
+  no longer seeded; its template row is removed only while no module
+  references it, so existing installs keep working until their owners
+  remove them.
 - A backup is not complete until it can be restored. Test the restore path.
 - S3 credentials and any backup keys come from configuration, never from
   tracked source.

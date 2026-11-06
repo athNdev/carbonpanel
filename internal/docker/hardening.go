@@ -169,9 +169,10 @@ func ServerOverrideSafeRoots(serverDataPath string) []string {
 
 // ModuleSafeRoots returns the safe roots for module volume mounts: the
 // owning server's data path (builtin templates mount
-// {{server.data_path}}/...) and the global backup directory (the mc-backup
-// template mounts {{config.storage.backup_dir}}). Empty roots are dropped;
-// with no safe roots every absolute bind source is rejected (fail closed).
+// {{server.data_path}}/...) and the global backup directory (native backups
+// and restores stage archives under {{config.storage.backup_dir}}). Empty
+// roots are dropped; with no safe roots every absolute bind source is
+// rejected (fail closed).
 func ModuleSafeRoots(serverDataPath, backupDir string) []string {
 	return expandWithHostTranslation([]string{serverDataPath, backupDir})
 }
