@@ -103,6 +103,12 @@ one at https://mozilla.org/MPL/2.0/.
 		'flex items-center gap-2 w-full px-3 py-1.5 text-left font-sans text-xs text-[#ff8389] cursor-pointer rounded-none hover:bg-[#da1e28]/20 transition-colors';
 </script>
 
+<svelte:window
+	onkeydown={(event) => {
+		if (visible && event.key === 'Escape') onClose();
+	}}
+/>
+
 {#if visible}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div

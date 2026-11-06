@@ -234,7 +234,14 @@ async function main() {
           // renders through the same path as a full page (locator-level
           // element shots have rendered CSS-var-themed content wrong).
           const target = page.locator(spec.element).first();
-          await target.scrollIntoViewIfNeeded({ timeout: 15000 });
+          // Full-height page crops start at the top of the scroll container and
+          // must not be scrolled: scrollIntoViewIfNeeded aligns a too-tall
+          // element under the fixed 48px app header, so the capture shows a
+          // strip of chrome and a half-hidden page header. Plans set
+          // scroll:false for those and capture from the current (top) scroll.
+          if (spec.scroll !== false) {
+            await target.scrollIntoViewIfNeeded({ timeout: 15000 });
+          }
           const box = await target.boundingBox({ timeout: 15000 });
           if (!box) throw new Error(`no bounding box for ${spec.element}`);
           const vp = page.viewportSize() ?? { width: 1440, height: 900 };

@@ -55,10 +55,21 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let hasSelection = $derived(selectedPaths.size > 0);
 	let allSelected = $derived(flatFiles.length > 0 && selectedPaths.size === flatFiles.length);
+
+	let container: HTMLDivElement | undefined = $state();
+
+	// Arrow-key navigation moves focus through the flat list; keep the focused
+	// row visible when the list scrolls past the viewport.
+	$effect(() => {
+		if (!focusedPath || !container) return;
+		const row = container.querySelector(`[data-path="${CSS.escape(focusedPath)}"]`);
+		row?.scrollIntoView({ block: 'nearest' });
+	});
 </script>
 
 <div
-	class="min-h-0 flex-1 overflow-auto focus:outline-none"
+	bind:this={container}
+	class="min-h-0 flex-1 overflow-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-[#0f62fe] focus-visible:ring-inset"
 	tabindex="0"
 	role="tree"
 	onkeydown={onKeydown}

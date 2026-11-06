@@ -383,7 +383,10 @@ one at https://mozilla.org/MPL/2.0/.
 		</div>
 	</div>
 {:else if server}
-	<div class="flex h-full flex-col space-y-6 bg-[#161616] font-sans text-[#f4f4f4]">
+	<div
+		class="flex h-full flex-col space-y-6 bg-[#161616] font-sans text-[#f4f4f4]"
+		data-testid="showcase-server-detail"
+	>
 		<!-- Carbon Header & Server Management Actions -->
 		<CarbonPageHeader
 			title={server.name}

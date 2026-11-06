@@ -135,11 +135,19 @@ one at https://mozilla.org/MPL/2.0/.
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="file-row group flex h-[30px] cursor-pointer items-center rounded-none border-b border-l-2 border-[#222222] border-l-transparent pr-3 text-xs transition-colors select-none
-		{isSelected ? 'border-l-[#0f62fe] bg-[#262626]' : isFocused ? 'bg-[#2a2a2a]' : 'bg-[#161616]'}
-		{isDragOver && file.isDir ? 'bg-[#0f62fe]/20 ring-1 ring-[#0f62fe]' : ''}
-		hover:bg-[#353535]"
+		{isSelected
+		? 'border-l-[#0f62fe] bg-[#262626] hover:bg-[#303030]'
+		: isFocused
+			? 'bg-[#2a2a2a]'
+			: 'bg-[#161616] hover:bg-[#353535]'}
+		{isDragOver && file.isDir ? 'bg-[#0f62fe]/20 ring-1 ring-[#0f62fe]' : ''}"
 	draggable="true"
-	onclick={(e) => onSelect(file, e)}
+	data-path={file.path}
+	onclick={(e) => {
+		// Move real focus to the tree so arrow keys work right after a click.
+		(e.currentTarget as HTMLElement | null)?.closest<HTMLElement>('[role="tree"]')?.focus();
+		onSelect(file, e);
+	}}
 	oncontextmenu={(e) => {
 		e.preventDefault();
 		onContextMenu(file, e);

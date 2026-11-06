@@ -349,6 +349,14 @@ one at https://mozilla.org/MPL/2.0/.
 
 	// --- Context menu ---
 	function handleContextMenu(file: FileInfo, event: MouseEvent) {
+		// Native file managers select the row you right-clicked. Without this,
+		// the menu acts on a different (still selected) file, which makes
+		// Delete/Copy look like they target the wrong row.
+		if (!selectedPaths.has(file.path)) {
+			selectedPaths = new SvelteSet([file.path]);
+			lastClickedPath = file.path;
+		}
+		focusedPath = file.path;
 		contextMenuFile = file;
 		contextMenuX = event.clientX;
 		contextMenuY = event.clientY;

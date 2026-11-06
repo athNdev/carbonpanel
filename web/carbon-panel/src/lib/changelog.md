@@ -26,6 +26,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Tab indicator paints above active-tab backgrounds; tertiary buttons follow the Carbon spec (accent text, borderless); mono eyebrow labels share one tracking/color contract.
 - Preferences Done closes the dialog; reduced-motion and compact-density choices take effect and apply on boot.
 - Files tab: aligned columns, shift-free selection, Carbon-square context menu, filter-aware empty text; Docker Overrides single disclosure; server tiles match dashboard tile hierarchy.
+- Showcase screenshots capture each page's full content column, keeping the homepage product tour large and uniform (4:3-16:10) instead of thin strips.
 
 ### Fixed
 
@@ -44,6 +45,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Trimmed the Docker auto-detect dialog copy.
 - Light theme selection works again: the dark default no longer outranks an explicit light theme.
 - Design-system homepage refresh: current Inter/JetBrains Mono type, tertiary/ghost/tab/tile demos, documented kind, label, tile and preference contracts, with regression tests.
+- Files tab interactions: right-click selects the row under the cursor, selected rows keep a distinct hover state, clicking a row focuses the tree so arrow keys work immediately (with scroll-into-view), and Escape closes the context menu.
 
 ## [3.0.0-beta.3] - 2026-10-21
 

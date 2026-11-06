@@ -3,7 +3,7 @@
 	"title": "Showcase: dashboard, server detail, studio, modpacks",
 	"viewport": { "width": 1440, "height": 900 },
 	"deviceScaleFactor": 2,
-	"docs": "Showcase screenshot plan. Captures are tight CROPS of the feature in question (no sidebar/header chrome) on a seeded stack with a RUNNING server and a populated modpack (see devstack.sh seed + seed_showcase_pack). Crops render at 2x for crisp marketing use. Element shots clip a viewport screenshot to the measured box (locator-level element shots have rendered CSS-var-themed content wrong). Regen: boot a disposable seeded stack with scripts/review/devstack.sh up, then run node scripts/review/journey.mjs --plan scripts/review/plan-showcase.json --base http://127.0.0.1:<port> --out /tmp/showcase, then copy the showcase-*.png files to landing/assets/showcase/ and assets/showcase/. Re-run on UI changes to dashboard, server detail, studio, or modpacks. Credentials from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD only; never commit PNGs you did not generate from a live stack.",
+	"docs": "Showcase screenshot plan. Captures are CROPS of each page's content column (no sidebar or topbar chrome) on a seeded stack with a RUNNING server and a populated modpack library (see devstack.sh seed + seed_showcase_pack). Capturing the whole content column keeps every PNG at a comparable 4:3-16:10 ratio instead of thin strips, so the landing tour can show them large. Crops render at 2x for crisp marketing use. Element shots clip a viewport screenshot to the measured box (locator-level element shots have rendered CSS-var-themed content wrong). Regen: boot a disposable seeded stack with scripts/review/devstack.sh up, then run node scripts/review/journey.mjs --plan scripts/review/plan-showcase.json --base http://127.0.0.1:<port> --out /tmp/showcase, then copy the showcase-*.png files to landing/assets/showcase/ and assets/showcase/. Re-run on UI changes to dashboard, server detail, studio, or modpacks. Credentials from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD only; never commit PNGs you did not generate from a live stack.",
 	"bootstrap": {
 		"path": "/login",
 		"detectSelector": "input[placeholder=\"Enter your username\"]",
@@ -25,14 +25,14 @@
 		{ "waitFor": "text=RUNNING", "timeout": 300000, "name": "seeded server reaches running" },
 		{ "wait": 60000, "name": "let metrics collector tick into the tiles" },
 		{ "assertVisible": "text=System Health", "name": "system health strip renders" },
-		{ "screenshot": "showcase-dashboard", "element": "[data-testid=\"showcase-kpi-tiles\"]", "name": "dashboard tiles crop" },
+		{ "screenshot": "showcase-dashboard", "element": "[data-testid=\"showcase-dashboard-content\"]", "scroll": false, "name": "dashboard content crop" },
 		{ "goto": "/servers", "waitFor": "a[href^=\"/servers/\"]", "name": "server list loads" },
 		{ "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])", "name": "open first server" },
 		{ "waitFor": "[role=\"tab\"]", "name": "server detail tabs render" },
 		{ "wait": 2000, "name": "let detail settle" },
-		{ "screenshot": "showcase-server-detail", "element": "[data-testid=\"showcase-runtime-tiles\"]", "name": "runtime tiles crop" },
+		{ "screenshot": "showcase-server-detail", "element": "[data-testid=\"showcase-server-detail\"]", "scroll": false, "name": "server detail crop" },
 		{ "goto": "/modpacks/studio", "waitFor": "text=Modpack Studio", "name": "studio loads" },
-		{ "click": "a[href^=\"/modpacks/studio/\"]", "name": "open first pack" },
+		{ "click": "a[href^=\"/modpacks/studio/\"]:has-text(\"Showcase Pack\")", "name": "open the pack with mods" },
 		{ "waitFor": "text=Mods in Modpack", "name": "studio mods render" },
 		{ "wait": 2000, "name": "let studio settle" },
 		{ "screenshot": "showcase-studio", "element": "[data-testid=\"showcase-studio-workspace\"]", "name": "studio workspace crop" },
@@ -40,6 +40,6 @@
 		{ "wait": 10000, "name": "let sync toast dismiss" },
 		{ "assertVisible": "[data-testid=\"showcase-modpack-card\"]", "name": "first modpack card renders" },
 		{ "wait": 2000, "name": "let route styles settle" },
-		{ "screenshot": "showcase-modpacks", "element": "[data-testid=\"showcase-modpack-card\"]", "name": "modpack card crop" }
+		{ "screenshot": "showcase-modpacks", "element": "[data-testid=\"showcase-modpacks-content\"]", "scroll": false, "name": "modpacks library crop" }
 	]
 }
