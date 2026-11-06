@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
-# UI preview screenshots (TODO)
+# UI preview screenshots
 
-No PNGs are committed yet: this environment cannot reach a live panel instance.
+Seeded-stack captures, regenerated 2026-11-06 from the dashboard branch via devstack + journey (see commands below). Re-run on UI changes to dashboard, server detail, studio, or modpacks.
 
 Regenerate from a disposable seeded stack:
 
