@@ -727,6 +727,9 @@ body > footer {
 .tour-row + .tour-row {
   border-top: 1px solid var(--border);
 }
+.tour-row:nth-child(even) {
+  grid-template-columns: minmax(0, 8fr) minmax(0, 4fr);
+}
 .tour-row:nth-child(even) .tour-copy {
   order: 2;
 }
@@ -756,7 +759,8 @@ body > footer {
   display: block;
 }
 @media (max-width: 900px) {
-  .tour-row { grid-template-columns: 1fr; gap: 24px; padding: 32px 0; }
+  .tour-row,
+  .tour-row:nth-child(even) { grid-template-columns: 1fr; gap: 24px; padding: 32px 0; }
   .tour-row:nth-child(even) .tour-copy { order: 0; }
 }
 
