@@ -26,11 +26,18 @@ one at https://mozilla.org/MPL/2.0/.
 		overrides?: DockerOverrides;
 		disabled?: boolean;
 		onchange?: (overrides: DockerOverrides | undefined) => void;
+		/**
+		 * When false the editor renders open under its own heading instead of
+		 * behind a second disclosure toggle. Use it wherever the caller
+		 * already gates visibility (e.g. inside an accordion item).
+		 */
+		collapsible?: boolean;
 	}
 
-	let { overrides = $bindable(), disabled = false, onchange }: Props = $props();
+	let { overrides = $bindable(), disabled = false, onchange, collapsible = true }: Props = $props();
 
 	let showAdvanced = $state(false);
+	let expanded = $derived(!collapsible || showAdvanced);
 	let jsonMode = $state(false);
 	let jsonText = $state('');
 	let jsonError = $state('');
@@ -289,25 +296,35 @@ one at https://mozilla.org/MPL/2.0/.
 
 <div class="space-y-4">
 	<div class="flex items-center justify-between">
-		<button
-			type="button"
-			onclick={() => (showAdvanced = !showAdvanced)}
-			{disabled}
-			class="flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary"
-		>
-			{#if showAdvanced}
-				<ChevronDown class="h-4 w-4" />
-			{:else}
-				<ChevronRight class="h-4 w-4" />
-			{/if}
-			<span>Docker Container Overrides</span>
-			{#if activeCount() > 0}
-				<Badge variant="secondary" class="ml-1">{activeCount()}</Badge>
-			{/if}
-			<span class="ml-1 text-xs text-muted-foreground">(Advanced)</span>
-		</button>
+		{#if collapsible}
+			<button
+				type="button"
+				onclick={() => (showAdvanced = !showAdvanced)}
+				{disabled}
+				class="flex items-center gap-2 text-sm font-medium transition-colors hover:text-primary"
+			>
+				{#if expanded}
+					<ChevronDown class="h-4 w-4" />
+				{:else}
+					<ChevronRight class="h-4 w-4" />
+				{/if}
+				<span>Docker Container Overrides</span>
+				{#if activeCount() > 0}
+					<Badge variant="secondary" class="ml-1">{activeCount()}</Badge>
+				{/if}
+				<span class="ml-1 text-xs text-muted-foreground">(Advanced)</span>
+			</button>
+		{:else}
+			<div class="flex items-center gap-2 text-sm font-medium">
+				<span>Docker Container Overrides</span>
+				{#if activeCount() > 0}
+					<Badge variant="secondary" class="ml-1">{activeCount()}</Badge>
+				{/if}
+				<span class="ml-1 text-xs text-muted-foreground">(Advanced)</span>
+			</div>
+		{/if}
 
-		{#if showAdvanced}
+		{#if expanded}
 			<CarbonButton
 				type="button"
 				kind="ghost"
@@ -322,7 +339,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 	</div>
 
-	{#if showAdvanced}
+	{#if expanded}
 		<Card class="overflow-hidden">
 			{#if jsonMode}
 				<CardContent class="pt-6">

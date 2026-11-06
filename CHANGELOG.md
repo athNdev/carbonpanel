@@ -23,6 +23,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Showcase screenshot flow (devstack + journey plan + CD workflow).
 - Landing product tour: borderless 2x feature crops with side copy (journey clips viewport shots to testid anchors).
 - Studio list Export dropdown covering every launcher format; Stop buttons for deep-sleep/frozen servers on dashboard and server list.
+- Tab indicator paints above active-tab backgrounds; tertiary buttons follow the Carbon spec (accent text, borderless); mono eyebrow labels share one tracking/color contract.
+- Preferences Done closes the dialog; reduced-motion and compact-density choices take effect and apply on boot.
+- Files tab: aligned columns, shift-free selection, Carbon-square context menu, filter-aware empty text; Docker Overrides single disclosure; server tiles match dashboard tile hierarchy.
 
 ### Fixed
 

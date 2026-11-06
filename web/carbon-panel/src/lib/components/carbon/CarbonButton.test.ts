@@ -35,6 +35,17 @@ for (const state of ['disabled', 'loading'] as const) {
 	});
 }
 
+test('tertiary follows the Carbon spec: accent text, no border', () => {
+	// Tertiary is the quiet action next to a primary button (Deploy/Export
+	// beside Save). A full foreground border competes with the primary, so
+	// per Carbon it renders accent text on transparent with a hover layer.
+	const html = render(Button, { props: { kind: 'tertiary' } }).body;
+	const button = html.match(/<button\b[^>]*>/)?.[0] ?? '';
+	assert.ok(button.includes('text-accent-text'), 'tertiary text must be the accent');
+	assert.ok(button.includes('border-transparent'), 'tertiary must not draw a border');
+	assert.ok(!button.includes('border-foreground'), 'tertiary must not use a foreground border');
+});
+
 test('an enabled link button retains its destination', () => {
 	const html = render(Button, { props: { href: '/destination' } }).body;
 	assert.match(html, /\shref="\/destination"/);

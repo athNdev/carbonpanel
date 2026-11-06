@@ -134,12 +134,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="file-row group flex h-[30px] cursor-pointer items-center rounded-none border-b border-[#222222] pr-3 text-xs transition-colors select-none
-		{isSelected
-		? 'border-l-2 border-l-[#0f62fe] bg-[#262626]'
-		: isFocused
-			? 'bg-[#2a2a2a]'
-			: 'bg-[#161616]'}
+	class="file-row group flex h-[30px] cursor-pointer items-center rounded-none border-b border-l-2 border-[#222222] border-l-transparent pr-3 text-xs transition-colors select-none
+		{isSelected ? 'border-l-[#0f62fe] bg-[#262626]' : isFocused ? 'bg-[#2a2a2a]' : 'bg-[#161616]'}
 		{isDragOver && file.isDir ? 'bg-[#0f62fe]/20 ring-1 ring-[#0f62fe]' : ''}
 		hover:bg-[#353535]"
 	draggable="true"

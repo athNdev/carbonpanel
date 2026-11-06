@@ -61,6 +61,25 @@ test('preferences dialog offers light/dark without a backend', () => {
 	assert.doesNotMatch(prefs, /fetch\(|rpcClient/, 'preferences must not call any backend');
 });
 
+test('Done applies the choices and closes the dialog', () => {
+	assert.match(
+		prefs,
+		/function handleClose\(\) \{[^}]*open = false/s,
+		'Done must close the dialog, not just persist'
+	);
+});
+
+test('shell applies stored preferences on boot', () => {
+	assert.ok(
+		shell.includes('applyStoredPreferences'),
+		'shell must apply stored preferences on mount'
+	);
+	assert.ok(
+		shell.includes("localStorage.getItem('carbon-motion')"),
+		'stored motion must apply without opening the dialog'
+	);
+});
+
 test('shell hosts both popups', () => {
 	assert.ok(shell.includes('PreferencesDialog'), 'shell must render the PreferencesDialog popup');
 	assert.ok(shell.includes('bind:open={prefsOpen}'), 'preferences open state must be bound');

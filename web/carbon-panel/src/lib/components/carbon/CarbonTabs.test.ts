@@ -45,6 +45,18 @@ test('tabs do not shrink or wrap, so the bar height cannot change', () => {
 	}
 });
 
+test('the selection indicator paints above the active tab background', () => {
+	// The active tab carries an opaque background over the full strip height,
+	// including the 2px zone where the indicator lives (backgrounds paint
+	// under transparent borders). Without its own stacking level the accent
+	// bar disappears under the active tab.
+	assert.match(
+		source,
+		/pointer-events-none absolute bottom-0 left-0 z-20/,
+		'indicator must stack above the z-10 tab buttons'
+	);
+});
+
 test('the selection indicator stays inside the strip', () => {
 	// The indicator only exists after layout, so it is asserted on the component
 	// source. A negative offset would be clipped by the strip's hidden vertical

@@ -114,7 +114,27 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let primaryNode = $derived(pickPrimaryNode(nodes));
 	let primaryNodeStatus = $derived(describeNodeStatus(primaryNode?.status));
 
+	function applyStoredPreferences() {
+		// Preferences apply on boot, not only when the dialog opens: a stored
+		// reduced-motion or compact-density choice must hold on first paint.
+		// Unknown values fall through to the defaults.
+		try {
+			const theme = localStorage.getItem('carbon-theme');
+			const motion = localStorage.getItem('carbon-motion');
+			const density = localStorage.getItem('carbon-density');
+			if (theme === 'light' || theme === 'dark')
+				document.documentElement.setAttribute('data-carbon-theme', theme);
+			if (motion === 'full' || motion === 'reduced')
+				document.documentElement.setAttribute('data-carbon-motion', motion);
+			if (density === 'comfortable' || density === 'compact')
+				document.documentElement.setAttribute('data-carbon-density', density);
+		} catch {
+			// Private mode: defaults stand.
+		}
+	}
+
 	onMount(() => {
+		applyStoredPreferences();
 		const media = window.matchMedia(MOBILE_QUERY);
 		const applyBreakpoint = () => {
 			isMobile = media.matches;

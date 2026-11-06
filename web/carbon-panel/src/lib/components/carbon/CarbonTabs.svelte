@@ -131,7 +131,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- GPU-only motion: translateX + scaleX on a 1px base avoids transitioning
 		     the layout `width` property, which is what made tab switches janky. -->
 		<div
-			class="pointer-events-none absolute bottom-0 left-0 h-0.5 w-px origin-left bg-[#0f62fe] transition-transform duration-[var(--motion-fast)] ease-[var(--ease-in-out-standard)]"
+			class="pointer-events-none absolute bottom-0 left-0 z-20 h-0.5 w-px origin-left bg-[#0f62fe] transition-transform duration-[var(--motion-fast)] ease-[var(--ease-in-out-standard)]"
 			style="transform: translateX({indicatorLeft}px) scaleX({indicatorWidth})"
 		></div>
 	{/if}

@@ -59,7 +59,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		secondary:
 			'bg-secondary text-secondary-foreground hover:bg-[var(--button-secondary-hover)] active:bg-[var(--button-secondary-active)] border border-transparent',
 		tertiary:
-			'bg-transparent text-foreground hover:bg-accent active:bg-[var(--button-secondary-active)] border border-foreground',
+			'bg-transparent text-accent-text hover:bg-accent active:bg-[var(--button-secondary-active)] border border-transparent',
 		ghost:
 			'bg-transparent text-accent-text hover:bg-accent hover:text-foreground active:bg-[var(--button-secondary-active)] active:text-foreground border border-transparent disabled:hover:bg-transparent',
 		danger:

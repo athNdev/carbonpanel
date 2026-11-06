@@ -420,7 +420,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<h3 class="truncate text-lg font-semibold">
 									<a
 										href={resolve(`/modpacks/studio/${pack.id}`)}
-										class="text-white transition-colors hover:text-[#0f62fe]"
+										class="text-white transition-colors hover:text-accent-text"
 									>
 										{pack.name}
 									</a>
