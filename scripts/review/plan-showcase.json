@@ -35,7 +35,7 @@
 		{ "click": "a[href^=\"/modpacks/studio/\"]", "name": "open first pack" },
 		{ "waitFor": "text=Mods in Modpack", "name": "studio mods render" },
 		{ "wait": 2000, "name": "let studio settle" },
-		{ "screenshot": "showcase-studio", "element": "[data-testid=\"showcase-mods-table\"]", "name": "studio mods crop" },
+		{ "screenshot": "showcase-studio", "element": "[data-testid=\"showcase-studio-workspace\"]", "name": "studio workspace crop" },
 		{ "goto": "/modpacks", "waitFor": "text=Browse, import and manage modpack packages", "name": "modpacks loads" },
 		{ "wait": 10000, "name": "let sync toast dismiss" },
 		{ "assertVisible": "[data-testid=\"showcase-modpack-card\"]", "name": "first modpack card renders" },
