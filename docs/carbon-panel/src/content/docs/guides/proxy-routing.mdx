@@ -1,0 +1,95 @@
+---
+title: Proxy routing
+description: Give every server its own hostname on one port with the built-in Minecraft proxy.
+---
+{/* SPDX-License-Identifier: MPL-2.0 */}
+import { Aside } from '@astrojs/starlight/components';
+
+Carbon Panel can route players by hostname. Instead of publishing a port per
+server, players connect to `<server>.<your-domain>:<port>` and the panel sends
+them to the right container.
+
+## Enable the proxy
+
+Set the proxy block in `config.yaml` (or the matching `CARBONPANEL_PROXY_*`
+environment variables):
+
+```yaml
+proxy:
+  enabled: true
+  base_url: "mc.example.com"   # the domain players connect to
+  listen_port: 25565
+  listen_ports: [25565]
+  port_range_min: 25565
+  port_range_max: 25665
+```
+
+Restart the panel after changing proxy settings. The **Routing** settings page
+shows the listeners and their state.
+
+## DNS
+
+Add a wildcard record for the base domain:
+
+```text
+*.mc.example.com.  A  203.0.113.10
+```
+
+Individual records per server work too. Without the wildcard, only the
+hostnames you create explicitly resolve.
+
+## Per-server hostname
+
+Each server has a hostname on its **Routing** tab. The panel derives it from the
+server name, and you can change it:
+
+```text
+survival.mc.example.com:25565
+```
+
+Hostnames must be unique across servers. The tab rejects duplicates and invalid
+names before saving, and shows whether a route is active. Changing a hostname
+takes effect immediately for new connections.
+
+<Aside type="note">
+A deep-sleeping or frozen server still has a route. The proxy wakes it on a
+player login (never on a server-list ping) and holds the connection while it
+starts. See [Sleep and wake](/guides/sleep-and-wake/).
+</Aside>
+
+## Transfers and rate limiting
+
+- **Transfers**: a handshake with NextState 3 (Transfer) is treated as a login,
+  so a player moved to this host by another Velocity-compatible proxy still
+  reaches the hostname route. Set `accepts_transfers: false` to disconnect
+  transferred players instead.
+- **Login rate limit**: `login_ratelimit_ms` is the minimum gap between
+  handshakes from one IP on the listener. Status pings and logins share the
+  budget; established play sessions are not throttled. `0` disables it.
+
+## Real player IPs
+
+Players behind another load balancer lose their address unless it forwards the
+PROXY protocol. Enable PROXY protocol v2 on the listener that receives the
+balancer's traffic; the panel then preserves the real player IP and forwards it
+to the server.
+
+## UDP and extra ports
+
+Hostname routing is for Minecraft's TCP protocol. Other services keep their own
+port:
+
+- Voice chat, map viewers and similar TCP/UDP services use the server's
+  **Additional Ports** section.
+- UDP services such as Geyser are forwarded by the module's UDP proxy rather
+  than by hostname routing.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Connection refused on the hostname | The proxy is enabled, the listener is running, and the DNS record resolves to the panel host. |
+| Connected to the wrong server | Hostnames are unique; the requested hostname matches the server's Routing tab. |
+| Works locally, not remotely | The base domain and wildcard record resolve publicly, and the listen port is allowed through the firewall. |
+| Real player IPs are the proxy IP | PROXY protocol is not enabled on the listener behind the load balancer. |
+| Players time out while a server boots | Deep sleep or freeze is waking the server. Retry once it is ready; see [Sleep and wake](/guides/sleep-and-wake/). |

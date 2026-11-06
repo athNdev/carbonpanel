@@ -1,0 +1,89 @@
+---
+title: Sleep and wake
+description: Let idle servers rest, and wake them automatically when a player joins.
+---
+{/* SPDX-License-Identifier: MPL-2.0 */}
+import { Aside } from '@astrojs/starlight/components';
+
+An empty server does not have to hold CPU and memory. Carbon Panel can pause a
+server in place or stop it entirely, then bring it back when a player joins.
+
+## The three layers
+
+| Layer | What happens | Memory | CPU | Wake |
+| --- | --- | --- | --- | --- |
+| Native pause | Minecraft stops ticking while empty, but the container keeps running. | Unchanged | Near zero | Instant |
+| Freeze | The container process is suspended with the cgroup freezer. | Unchanged | Near zero | Instant |
+| Deep sleep | The container is stopped. | Released | Zero | After a container start |
+
+Each layer is independent. They compose: a server can use native pause on its
+own, or combine it with freeze or deep sleep.
+
+## Native pause
+
+Minecraft 1.21.2 and later pause ticking when no players are online. The
+relevant setting is `pause-when-empty-seconds` in `server.properties`, which
+defaults to 60 seconds. Because the server keeps running and keeps answering
+server-list pings, this needs no panel configuration and no proxy.
+
+## Freeze on idle
+
+In the server's **Settings → Sleep & Deep Sleep**, enable **Freeze on Idle** and
+set **Idle minutes before freeze**.
+
+The panel suspends the container after that many idle minutes. The process stays
+in memory, so the first join resumes in milliseconds. The default timeout is 10
+minutes; a value of `0` uses the default.
+
+Freeze needs a daemon and host that allow the freezer. When the panel cannot
+freeze a container it reports the failure and leaves the server running.
+
+## Deep sleep on idle
+
+Enable **Deep Sleep on Idle** and set **Idle minutes before deep sleep**.
+
+The panel stops the container after that many idle minutes. The JVM exits, so
+the memory is returned to the host. On a join, the panel starts the container
+and holds the connection while the server boots (up to about 25 seconds). The
+default timeout is 30 minutes; a value of `0` uses the default.
+
+<Aside type="note">
+Wake-on-join needs the [proxy](/guides/proxy-routing/) to be listening: a direct
+connection to a stopped container has nothing to accept it. Without the proxy,
+start a deep-sleeping server from the panel or the dashboard first.
+</Aside>
+
+## What counts as idle
+
+The panel samples the player count. A server becomes a sleep candidate only
+when its player count has been zero for the whole timeout. A join resets the
+idle clock.
+
+Server-list pings do not count as joins and never wake a server. Status queries
+and the panel's own monitoring do not reset the idle clock either.
+
+## Waking
+
+- A player login through the proxy wakes a frozen or deep-sleeping server.
+- Starting the server from the panel or dashboard also wakes it.
+- A scheduled task that starts the server wakes it.
+- Applying a staged update handles the state deliberately: a deep-sleeping
+  server receives the batch without booting, a running server restarts once,
+  and a frozen server is stopped, started, and left running. See
+  [Staged updates](/guides/staged-updates/).
+
+## Choosing a mode
+
+| If you want to... | Use |
+| --- | --- |
+| Save CPU with zero visible downtime | Native pause, optionally freeze. |
+| Return memory to the host on a quiet server | Deep sleep. |
+| Keep a server ready for instant joins | Native pause, or freeze at most. |
+| Run many small servers on limited RAM | Deep sleep. |
+| Keep a server reachable from voice chat or map mods | Do not deep sleep it; those ports are published directly and cannot wake it. |
+
+<Aside type="caution">
+Deep sleep adds a cold start to the first join after idling. Players see a
+connection hold while the server boots, and a client may need to retry. Say so
+in your server's MOTD or community rules if players are not used to it.
+</Aside>

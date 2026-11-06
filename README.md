@@ -175,7 +175,7 @@ addresses and world data out of public reports.
 ## Development
 
 The backend is Go; the console is SvelteKit with Bun. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for contribution and verification guidance.
+[the contributing guide](https://athn.dev/carbonpanel/docs/contributing/) for contribution and verification guidance.
 Current CI uses Go 1.26 and Bun 1.4.2.
 
 Build the frontend before compiling a binary that embeds it:

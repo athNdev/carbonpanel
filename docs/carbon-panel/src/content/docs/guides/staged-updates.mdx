@@ -1,0 +1,90 @@
+---
+title: Staged updates
+description: Prepare configuration, mod, datapack and module changes and apply them in one window.
+---
+{/* SPDX-License-Identifier: MPL-2.0 */}
+import { Aside } from '@astrojs/starlight/components';
+
+A staged update is a change you prepare now and apply later. Staging leaves the
+running server untouched: no restart, no container call, and no write to the
+live configuration, mods, datapacks or world.
+
+Use it when a change should land together with others, or when you do not want
+to interrupt players right away.
+
+## What can be staged
+
+- Server configuration fields.
+- Mod installs, replacements and deletes.
+- Datapack installs, replacements and deletes.
+- File changes.
+- A modpack switch.
+- Module configuration and container-spec changes.
+
+Staged file bytes are kept on the server's node under
+`.carbon-panel/staged/<id>/` inside the data root. A staged delete records the
+path and removes nothing until it is applied. Discard deletes the staged bytes.
+
+<Aside type="caution">
+A server on a remote node with unreachable storage refuses to stage instead of
+keeping a controller-local copy. Fix the node storage first, then stage again.
+</Aside>
+
+## One batch per server
+
+Each server has one open update batch. Staging another change adds it to that
+batch. The server configuration screen reads the open batch so you can review
+everything that will change.
+
+Discard a single item or the whole batch. Discarding does not touch the live
+server.
+
+## Choosing when it applies
+
+Publishing a batch is journaled. Pick one of:
+
+| Window | Behaviour |
+| --- | --- |
+| **Next restart** | Applies with the server's next restart. |
+| **UTC timestamp** | Applies when the clock reaches the time you set. |
+| **Idle minutes** | Applies after the server has been idle for that long. A player join clears the idle stretch. |
+| **Apply now** | Applies immediately; a running server restarts. |
+
+A future timestamp, or an idle stretch that has not finished, stays staged if
+the panel restarts in between. The batch is not lost.
+
+<Aside type="note">
+The idle window uses the same player-count source as [freeze and deep
+sleep](/guides/sleep-and-wake/). It does not fire on server-list pings.
+</Aside>
+
+## How the batch is applied
+
+The panel handles the server's current state deliberately:
+
+| Server state | What happens |
+| --- | --- |
+| Running | The world is saved, then the server restarts once. |
+| Frozen | A real stop and start; the server is left running. |
+| Deep sleep | The batch is committed onto the stopped server. The JVM is not started. |
+| Stopped | The files and configuration are updated without starting the server. |
+
+If applying fails, the previous files and configuration are restored and the
+batch stays open.
+
+## Conflicts
+
+A live configuration field that changed after it was staged stops the publish
+before anything is written. Re-stage that field against the current value, then
+apply again.
+
+## Modpacks and modules
+
+A modpack task can join the same batch. Its fetched tree is copied into the
+staging directory and the live pack stays as it is until the window. The same
+window commits the pack together with any staged configuration, mods and
+datapacks.
+
+A module configuration or container-spec change can join the batch too. The
+live module stays as it is until the window, which recreates the module
+container when its spec changed. A deep-sleeping server is still not started.

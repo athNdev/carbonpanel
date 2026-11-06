@@ -21,11 +21,13 @@ Answers to the questions that get asked over and over.
   <details>
     <summary>Docker Compose</summary>
 
-In the folder where your `compose.yml` file is, run:
+In the folder where your `compose.yml` file is:
 
-1. `docker compose down`
-2. `docker pull nickheyer/carbon-panel`
+1. `git pull`
+2. `docker build -f docker/Dockerfile.carbon-panel -t carbon-panel:latest .`
 3. `docker compose up -d`
+
+Your data and backups stay on the host paths named in the compose file; recreating the container does not delete them.
 
   </details>
 
@@ -37,11 +39,9 @@ Open the console for the container and enter `update`.
   </details>
 
   <details>
-    <summary>Source</summary>
+    <summary>Source or prebuilt binary</summary>
 
-Download the new binary and run it.
-
-*Needs more specific documentation.*
+Stop the panel, replace the binary, and start it again. See [Building from source](/getting-started/build-from-source/) or [Prebuilt binaries](/getting-started/prebuilt-binaries/) for the full layout.
 
   </details>
 </details>
@@ -63,7 +63,49 @@ Or set the `CARBONPANEL_SERVER_PORT` environment variable to whatever port you w
 <details>
   <summary>How do I set up the proxy for my servers?</summary>
 
-*TODO*
+Enable the proxy block in `config.yaml`, point `base_url` at your domain, and add a wildcard DNS record for it. Each server then gets `<server-name>.<base_url>` on the proxy port, which you can change on its **Routing** tab.
+
+```yaml
+proxy:
+  enabled: true
+  base_url: "mc.example.com"
+  listen_port: 25565
+```
+
+See [Proxy routing](/guides/proxy-routing/) for DNS, transfers, rate limiting and troubleshooting.
+
+</details>
+
+<details>
+  <summary>How do I add datapacks, resource packs or shaders to a modpack?</summary>
+
+Open the pack in [Modpack Studio](/guides/modpack-studio/) and use the **Datapacks**, **Resource Packs** or **Shaders** tab. Each tab can search Modrinth, take a direct URL, or accept an uploaded archive. Installed entries expose the full packwiz option set: side, pin, optional, default and description.
+
+To install a datapack into one server without a pack, use the server's **Datapacks** tab instead. See [Server datapacks](/guides/server-datapacks/).
+
+</details>
+
+<details>
+  <summary>What is the difference between sync and bake when deploying a pack?</summary>
+
+- **Sync** sets `PACKWIZ_URL` on the server; the server image fetches the pack on every start. Mods, datapacks, resource packs, shaders and overrides all arrive, and `side` is honored.
+- **Bake** downloads the pack into the server's data directory. Mods go to `mods/` and datapacks to `<world>/datapacks/`. Client-side content is not written to the server.
+
+See [Deploy to a server](/guides/modpack-studio/#deploy-to-a-server).
+
+</details>
+
+<details>
+  <summary>Why did CurseForge export refuse to build?</summary>
+
+CurseForge manifests need numeric project and file IDs. If any mod or content entry has no CurseForge ID, Carbon Panel refuses instead of shipping a partial pack and lists every item it cannot carry. Remove those entries or export as `.mrpack`, packwiz or an instance archive, which do not need CurseForge IDs.
+
+</details>
+
+<details>
+  <summary>Why does my empty server freeze or stop?</summary>
+
+That is the sleep configuration on the server's **Settings** page. **Freeze on Idle** suspends the container in memory; **Deep Sleep on Idle** stops it and releases the memory. Both wake on a player join through the proxy. Disable the option or raise the timeout if you want the server to stay up. See [Sleep and wake](/guides/sleep-and-wake/).
 
 </details>
 
@@ -188,5 +230,3 @@ Yep! We have a Glance widget. It's in the community repo but not yet merged at t
 See the community widget link above for its current appearance and setup instructions.
 
 </details>
-
-*This section is a work in progress.*

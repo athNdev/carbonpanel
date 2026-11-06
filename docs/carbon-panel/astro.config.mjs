@@ -53,7 +53,22 @@ export default defineConfig({
 				{
 					label: 'Guides',
 					items: [
-						{ label: 'Server Backups', slug: 'guides/backups' },
+						{
+							label: 'Modpacks and content',
+							items: [
+								{ label: 'Modpack Studio', slug: 'guides/modpack-studio' },
+								{ label: 'Server datapacks', slug: 'guides/server-datapacks' },
+							],
+						},
+						{
+							label: 'Server operations',
+							items: [
+								{ label: 'Staged updates', slug: 'guides/staged-updates' },
+								{ label: 'Sleep and wake', slug: 'guides/sleep-and-wake' },
+								{ label: 'Proxy routing', slug: 'guides/proxy-routing' },
+								{ label: 'Server Backups', slug: 'guides/backups' },
+							],
+						},
 						{
 							label: 'OIDC',
 							items: [

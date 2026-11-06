@@ -31,6 +31,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Modpack Studio tabs for datapacks, resource packs and shader packs: Modrinth search, direct URL, archive upload, every packwiz metafile option (side, pin, optional/default/description), update checks, and a configurable datapack folder.
 - Baking a pack now installs datapacks into the world datapacks folder (honouring `level-name`) and reports client-only content instead of dropping it silently.
 - Open Graph and Twitter previews on every website page, with dedicated 1200x630 cards for the documentation home, introduction, Docker Compose, API reference and design system.
+- Documentation: guides for Modpack Studio, server datapacks, staged updates, sleep and wake, and proxy routing; refreshed introduction, FAQ, troubleshooting and contributing pages.
 
 ### Fixed
 
