@@ -1062,9 +1062,13 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			}
 		}
 
-		// Set minimum memory for modpacks
-		if msg.Memory < 4096 {
-			msg.Memory = 4096
+		// A caller's memory choice is authoritative. Only fill an omitted
+		// value, preferring the pack's recommendation.
+		if msg.Memory <= 0 {
+			msg.Memory = int32(modpack.RecommendedRAM)
+			if msg.Memory <= 0 {
+				msg.Memory = 4096
+			}
 		}
 	}
 

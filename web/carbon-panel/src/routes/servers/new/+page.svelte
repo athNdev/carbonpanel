@@ -1035,6 +1035,9 @@ one at https://mozilla.org/MPL/2.0/.
 							/>
 							<p class="font-mono text-xs text-[#8d8d8d]">
 								Equals {(formData.memory / 1024).toFixed(1)} GB
+								{#if selectedModpack && selectedModpack.recommendedRam > 0}
+									· Recommended for this pack: {selectedModpack.recommendedRam} MB
+								{/if}
 							</p>
 						</div>
 
