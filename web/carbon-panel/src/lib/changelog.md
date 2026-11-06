@@ -27,6 +27,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Preferences Done closes the dialog; reduced-motion and compact-density choices take effect and apply on boot.
 - Files tab: aligned columns, shift-free selection, Carbon-square context menu, filter-aware empty text; Docker Overrides single disclosure; server tiles match dashboard tile hierarchy.
 - Showcase screenshots capture each page's full content column, keeping the homepage product tour large and uniform (4:3-16:10) instead of thin strips.
+- Design-system guide: selection and context-menu state contract (hover, right-click, focus, Escape).
 
 ### Fixed
 
