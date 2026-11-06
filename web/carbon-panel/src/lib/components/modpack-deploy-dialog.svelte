@@ -212,12 +212,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<HardDrive class="mt-0.5 h-5 w-5 flex-shrink-0 text-primary" />
 						<div class="space-y-1 text-left">
 							<div class="flex items-center gap-2">
-								<span class="text-sm font-semibold">Mode B: Bake to Server Data (/data/mods)</span>
+								<span class="text-sm font-semibold">Mode B: Bake to Server Data</span>
 								<Badge variant="outline" class="px-1 py-0 text-xs">Standalone</Badge>
 							</div>
 							<p class="text-xs text-muted-foreground">
-								Downloads and installs all server-side mod JARs directly into the server's mods
-								directory. No external network calls needed during container startup.
+								Downloads server-side mod JARs into the server's mods directory and datapacks into
+								its world. Resource packs and shaders are client-side, so players get them through
+								Mode A or a pack export.
 							</p>
 						</div>
 					</div>

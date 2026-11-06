@@ -31,15 +31,15 @@ test('detail header collapses exports into a single Export entry', () => {
 	assert.doesNotMatch(detail, /exportPack\('curseforge'\)/);
 });
 
-test('detail has a sticky Export and Manifest tab', () => {
-	assert.match(detail, /id: 'export', label: 'Export & Manifest'/);
+test('detail has a sticky Export tab', () => {
+	assert.match(detail, /id: 'export', label: 'Export'/);
 	assert.match(detail, /sticky top-0/);
 	assert.match(detail, /Raw pack\.toml Preview/);
 	assert.match(detail, /inspectorOpen = true/);
 });
 
 test('export dialog warns about CurseForge data loss', () => {
-	assert.match(exportDialog, /CurseForge can drop mods/);
+	assert.match(exportDialog, /CurseForge can drop items/);
 	assert.match(exportDialog, /radiogroup/);
 	assert.match(exportDialog, /includeClient/);
 	assert.match(exportDialog, /optionalMode/);

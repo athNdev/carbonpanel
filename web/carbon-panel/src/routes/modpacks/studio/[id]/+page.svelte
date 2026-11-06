@@ -50,6 +50,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import ModpackDeployDialog from '$lib/components/modpack-deploy-dialog.svelte';
 	import ManifestInspectorDialog from '$lib/components/manifest-inspector-dialog.svelte';
 	import DatapackBrowserDialog from '$lib/components/datapack-browser-dialog.svelte';
+	import PackContentPanel from '$lib/components/pack-content-panel.svelte';
 	import ExportDialog from '../export-dialog.svelte';
 	import { formatBytes } from '$lib/utils';
 
@@ -64,6 +65,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		download_url: string;
 		file_size?: number;
 		pinned?: boolean;
+		kind?: string;
+		optional?: boolean;
+		default?: boolean;
+		option_description?: string;
+		hash?: string;
+		hash_format?: string;
+		sha512?: string;
 	}
 
 	interface Pack {
@@ -76,6 +84,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		loader_version: string;
 		updated_at: string;
 		mods: ModItem[];
+		datapacks?: ModItem[];
+		resourcepacks?: ModItem[];
+		shaderpacks?: ModItem[];
+		datapack_folder?: string;
 	}
 
 	interface SearchModResult {
@@ -142,17 +154,30 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let exportDialogOpen = $state(false);
 	let inspectorOpen = $state(false);
 
-	// Primary View Tab: "mods", "overrides", "migrate", "export", "maintenance"
-	let activeTab = $state<'mods' | 'overrides' | 'migrate' | 'export' | 'maintenance'>('mods');
+	// Primary View Tab: "mods", "datapacks", "resourcepacks", "shaderpacks",
+	// "overrides", "migrate", "export", "maintenance"
+	let activeTab = $state<
+		| 'mods'
+		| 'datapacks'
+		| 'resourcepacks'
+		| 'shaderpacks'
+		| 'overrides'
+		| 'migrate'
+		| 'export'
+		| 'maintenance'
+	>('mods');
 
 	// Overrides / Files State (declared before studioTabs which references packFiles)
 	let packFiles = $state<PackFileInfo[]>([]);
 
 	const studioTabs = $derived([
 		{ id: 'mods', label: 'Mods', badge: pack?.mods?.length ?? 0 },
-		{ id: 'overrides', label: 'Overrides & Configs', badge: packFiles.length },
-		{ id: 'migrate', label: 'Version Migration' },
-		{ id: 'export', label: 'Export & Manifest' },
+		{ id: 'datapacks', label: 'Datapacks', badge: pack?.datapacks?.length ?? 0 },
+		{ id: 'resourcepacks', label: 'Resource Packs', badge: pack?.resourcepacks?.length ?? 0 },
+		{ id: 'shaderpacks', label: 'Shaders', badge: pack?.shaderpacks?.length ?? 0 },
+		{ id: 'overrides', label: 'Overrides', badge: packFiles.length },
+		{ id: 'migrate', label: 'Migration' },
+		{ id: 'export', label: 'Export' },
 		{ id: 'maintenance', label: 'Maintenance' }
 	]);
 
@@ -1003,6 +1028,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						onselect={(id) => {
 							if (
 								id === 'mods' ||
+								id === 'datapacks' ||
+								id === 'resourcepacks' ||
+								id === 'shaderpacks' ||
 								id === 'overrides' ||
 								id === 'migrate' ||
 								id === 'export' ||
@@ -1330,6 +1358,43 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 						{/if}
 					</CarbonTile>
+				{/if}
+
+				<!-- TAB: DATAPACKS -->
+				{#if activeTab === 'datapacks'}
+					<PackContentPanel
+						packId={packId ?? ''}
+						kind="datapack"
+						items={pack.datapacks ?? []}
+						mcVersion={pack.mc_version}
+						loader={pack.mod_loader}
+						datapackFolder={pack.datapack_folder ?? 'datapacks'}
+						onchanged={loadPack}
+					/>
+				{/if}
+
+				<!-- TAB: RESOURCE PACKS -->
+				{#if activeTab === 'resourcepacks'}
+					<PackContentPanel
+						packId={packId ?? ''}
+						kind="resourcepack"
+						items={pack.resourcepacks ?? []}
+						mcVersion={pack.mc_version}
+						loader={pack.mod_loader}
+						onchanged={loadPack}
+					/>
+				{/if}
+
+				<!-- TAB: SHADER PACKS -->
+				{#if activeTab === 'shaderpacks'}
+					<PackContentPanel
+						packId={packId ?? ''}
+						kind="shaderpack"
+						items={pack.shaderpacks ?? []}
+						mcVersion={pack.mc_version}
+						loader={pack.mod_loader}
+						onchanged={loadPack}
+					/>
 				{/if}
 
 				<!-- TAB 2: OVERRIDES & CONFIGS -->
@@ -2009,7 +2074,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		bind:open={exportDialogOpen}
 		packId={pack.id}
 		packName={pack.name}
-		mods={pack.mods}
+		mods={[
+			...(pack.mods ?? []),
+			...(pack.datapacks ?? []),
+			...(pack.resourcepacks ?? []),
+			...(pack.shaderpacks ?? [])
+		]}
 	/>
 {/if}
 <ManifestInspectorDialog bind:open={inspectorOpen} onOpenChange={(v) => (inspectorOpen = v)} />
