@@ -41,8 +41,11 @@ behind an operation lock.
   delete and leaves the world in place.
 - A start, stop, restart, recreate, boot auto-start, scheduled start, stop,
   or restart, and a deep-sleep or freeze wake all refuse while one of those
-  locks is held. A frozen server with no active lock still auto-starts. A
-  deeply asleep server still stays asleep across a panel restart.
+  locks is held. A deeply-asleep server stops without waking: its container
+  is already exited, so the journaled stop skips Docker, clears the proxy
+  knock, and converges the row to stopped.
+- A frozen server with no active lock still auto-starts. A deeply asleep
+  server still stays asleep across a panel restart.
 - A client `request_id` plus the action kind is idempotent for one server.
   Completing a key does not run the mutation again. A failure needs a new key.
 - Do not release a lock when the container state cannot be read. Retry the

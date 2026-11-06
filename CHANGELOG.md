@@ -14,6 +14,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Reusable `CarbonErrorState` and `CarbonEmptyState` components exported from `carbon/index.ts`.
 - Retryable error states for dashboard, ActiveModules, profile (API tokens), and settings (global settings).
 - Docker daemon reachability/config integration tests behind the `integration` build tag (`internal/docker/integration_test.go`).
+- Modpack export options (include-client/optional/overrides/summary), Prism/MultiMC instance export, and single Export dialog with data-loss preview.
+- Dashboard node inventory cards and tile typography pass.
+- Console fullscreen viewer, log search, and delete confirmation.
+- Back up now: one-click native backups from the Backups tab (new CreateBackup RPC).
+- Profile and Preferences popups; stop from deep sleep.
+- Inter + JetBrains Mono webfonts (vendored, OFL).
+- Showcase screenshot flow (devstack + journey plan + CD workflow).
 
 ### Fixed
 
@@ -21,6 +28,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Make upload tests OS-independent (Windows temp-file locks, huge allocations).
 - Accessibility gaps (aria-invalid/describedby, modal focus trap, table scope, reduced motion, toast aria-live).
 - RBAC no longer denies every RPC for Clerk sessions whose org is not yet linked: falls back to the bootstrap default organization and auto-provisions membership.
+- UNHEALTHY renders degraded yellow; boot healthcheck noise no longer flips starting servers.
+- Game-process crashes detected from boot log and recorded as error with reason.
+- Mod operations (install/upload/toggle/delete/stack) logged in Activity tab.
+- Modpack servers name the real game loader instead of the platform.
+- Tab indicator/confirm dialogs layering (indicator above active tab; modals teleport to body).
+- Module table overflows; CarbonButton mapping sweep.
+- Dependency vuln bumps (brotli, compress, x/crypto).
 
 ## [3.0.0-beta.3] - 2026-10-21
 
