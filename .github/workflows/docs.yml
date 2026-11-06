@@ -29,7 +29,7 @@ jobs:
         with:
           version: '1.50.0'
       - name: Test snapshot isolation and URL handling
-        run: python3 -m unittest scripts.test_website scripts.test_landing_page
+        run: python3 -m unittest scripts.test_website scripts.test_landing_page scripts.test_design_system_page
       - name: Build the homepage and pinned docs
         run: python3 scripts/build_website.py
       - name: Check every local route and asset

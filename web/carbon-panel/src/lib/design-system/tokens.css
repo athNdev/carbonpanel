@@ -77,7 +77,11 @@
 	--tag-cool-gray-text: #334155;
 }
 
-:root,
+/* Dark is the default: `:where(:root)` carries zero specificity, so the
+ * explicit light theme (and any container preview) always overrides it.
+ * A plain `:root` here would tie with the light rule and win on source
+ * order, making light unreachable. */
+:where(:root),
 .dark,
 [data-carbon-theme='dark'] {
 	color-scheme: dark;

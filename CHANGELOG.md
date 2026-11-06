@@ -42,6 +42,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Dependency vuln bumps (brotli, compress, x/crypto).
 - Responsive overflow pass: wrapping page headers, grid track minimums, shortened node tags, breaking config values; modpack grids go single-column below lg.
 - Trimmed the Docker auto-detect dialog copy.
+- Light theme selection works again: the dark default no longer outranks an explicit light theme.
+- Design-system homepage refresh: current Inter/JetBrains Mono type, tertiary/ghost/tab/tile demos, documented kind, label, tile and preference contracts, with regression tests.
 
 ## [3.0.0-beta.3] - 2026-10-21
 

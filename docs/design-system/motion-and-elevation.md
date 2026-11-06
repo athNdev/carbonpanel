@@ -53,7 +53,8 @@ action to play an effect.
 
 ## Reduced motion
 
-Honor `prefers-reduced-motion: reduce` in every consuming surface. Replace
+Honor `prefers-reduced-motion: reduce` in every consuming surface, and the
+stored `data-carbon-motion` preference where the product keeps one. Replace
 transform, looping pulse, shimmer and route animation with a stable result;
 retain labels and non-motion state cues. The standalone homepage and both
 applications have reduced-motion rules, but individual legacy components still

@@ -55,8 +55,9 @@ preference renders dark controls. Light applies only under
 does not expose a theme picker; its light palette is a foundation for future
 work, not a claim that Cloud's pages have been qualified in light mode.
 A preview may use data-carbon-theme on a container; application themes use the
-root dark class. Test contrast in the actual adjacent surfaces, including
-hover, selection and focus states.
+root dark class. The default is written as `:where(:root)` so it carries no
+specificity and can never outrank an explicit theme. Test contrast in the
+actual adjacent surfaces, including hover, selection and focus states.
 
 ### Type, spacing and geometry
 
@@ -65,10 +66,17 @@ logs and stable-width technical values. Keep prose in sans and use tabular
 figures for changing metrics. Use normal case for labels; do not put long
 descriptions in all caps. Provide sensible system fallbacks.
 
+Eyebrow kickers are the one place all-caps is correct: 12 px JetBrains Mono,
+uppercase, 0.04em tracking (the `.mono-label` utilities, with `-strong` and
+`-accent` variants). Use them to name sections, tiles and table groups, never
+for sentences.
+
 The shared spacing steps are 4, 8, 12, 16, 24, 32 and 48 CSS pixels
 (expressed as rem). Group related items more tightly than unrelated sections.
 Control heights are 32, 40, 48 and 64 pixels. Prefer the 40-pixel default; a
 compact control must still satisfy the target-size and spacing rules. The
+stored compact-density preference tightens the control-height and spacing
+tokens (`data-carbon-density`); layouts must survive both densities. The
 current system uses square corners, thin structural borders and restrained
 elevation. Match nested spacing and avoid decoration that competes with status
 or actions. These are current defaults and may be revised centrally.
@@ -102,7 +110,8 @@ Shared duration and easing tokens define the existing fast, restrained motion
 language. Animate only properties that change; feedback should remain clear
 without animation. Respect prefers-reduced-motion, including route transitions,
 spinners and loading skeletons. A user should never have to wait for a
-decorative animation before proceeding.
+decorative animation before proceeding. The stored reduced-motion preference
+(`data-carbon-motion`) mirrors the media-query kill-switch; test both paths.
 
 ## Accessibility contract
 
@@ -130,14 +139,14 @@ decorative animation before proceeding.
 
 | Need | Panel implementation | Cloud implementation | Contract |
 | --- | --- | --- | --- |
-| Action | CarbonButton | Button | One primary action per task; distinguish secondary and destructive actions. A disabled/loading control must not execute. Labels stay on one line; icon and label are centred with a fixed gap. |
+| Action | CarbonButton | Button | One primary action per task; distinguish secondary and destructive actions. Kinds are primary, secondary, tertiary, ghost and danger. Tertiary and ghost stay quiet: accent text, transparent border, hover layer. A disabled/loading control must not execute. Labels stay on one line; icon and label are centred with a fixed gap. |
 | Page header | CarbonPageHeader | PageHeader | One title, optional tag, short description and right-aligned actions. The page shell owns the outer gutter; routes do not add their own page padding. |
-| Surface | CarbonTile | Tile | Group related content; a whole tile is interactive only when its destination is clear and keyboard-operable. |
+| Surface | CarbonTile | Tile | Group related content; a whole tile is interactive only when its destination is clear and keyboard-operable. Metric tiles share one hierarchy: sans semibold uppercase label, one large value, footer strip above a divider. Dividers sit above footers, never under headers. |
 | Status | CarbonTag | Tag | Include a readable state label; color is supplemental. |
 | Text input | CarbonTextInput / CarbonSelect | Field plus native control | Label, hint, invalid state and error association; retain entered data on recoverable errors. |
 | Table | CarbonDataTable | DataTable | Semantic headers, responsive overflow, honest loading/empty/error states, raw-value sorting. |
 | Dialog | CarbonModal / CarbonConfirm | Modal | Name, focus lifecycle, keyboard support and an explicit cancellation path. Confirm irreversible actions. |
-| Navigation | CarbonShell / CarbonTabs / CarbonBreadcrumbs | AppShell / Tabs | Identify current location and keep navigation predictable; do not expose inaccessible actions as usable. |
+| Navigation | CarbonShell / CarbonTabs / CarbonBreadcrumbs | AppShell / Tabs | Identify current location and keep navigation predictable; do not expose inaccessible actions as usable. Tab selection uses an accent bar that paints above the active tab background; tabs support arrow-key travel. |
 | Feedback | CarbonInlineLoading / CarbonErrorState / CarbonEmptyState | LoadError / EmptyState / Toast | Explain what happened, whether data may be stale, and the next available step. |
 
 These are separate Svelte implementations, not a shared component package.

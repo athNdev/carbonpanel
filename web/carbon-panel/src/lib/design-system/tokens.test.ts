@@ -81,6 +81,20 @@ for (const selector of ["[data-carbon-theme='light']", "[data-carbon-theme='dark
 	});
 }
 
+test('the dark default yields to the explicit light theme', () => {
+	// The default must not outrank [data-carbon-theme='light']: equal
+	// specificity would let source order decide, and the dark block comes
+	// last, which once made light unreachable. `:where(:root)` carries zero
+	// specificity so any explicit theme wins.
+	assert.ok(
+		css.includes(':where(:root)'),
+		'dark default must use :where(:root) so light overrides it'
+	);
+	const light = theme("[data-carbon-theme='light']");
+	const root = theme(':root');
+	assert.notEqual(light['--card'], root['--card'], 'light and dark palettes must actually differ');
+});
+
 test(':root defaults to the dark palette so fresh browsers render dark controls', () => {
 	const root = theme(':root');
 	const dark = theme("[data-carbon-theme='dark']");
