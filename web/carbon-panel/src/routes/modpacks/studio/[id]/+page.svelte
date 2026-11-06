@@ -1367,7 +1367,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						kind="datapack"
 						items={pack.datapacks ?? []}
 						mcVersion={pack.mc_version}
-						loader={pack.mod_loader}
 						datapackFolder={pack.datapack_folder ?? 'datapacks'}
 						onchanged={loadPack}
 					/>
@@ -1380,7 +1379,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						kind="resourcepack"
 						items={pack.resourcepacks ?? []}
 						mcVersion={pack.mc_version}
-						loader={pack.mod_loader}
 						onchanged={loadPack}
 					/>
 				{/if}
@@ -1392,7 +1390,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						kind="shaderpack"
 						items={pack.shaderpacks ?? []}
 						mcVersion={pack.mc_version}
-						loader={pack.mod_loader}
 						onchanged={loadPack}
 					/>
 				{/if}

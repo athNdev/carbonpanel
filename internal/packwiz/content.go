@@ -327,9 +327,7 @@ func (m *Manager) SetDatapackFolder(packID, folder string) error {
 	oldURL := fmt.Sprintf("/api/v1/packwiz/%s/%s/", packID, oldFolder)
 	newURL := fmt.Sprintf("/api/v1/packwiz/%s/%s/", packID, newFolder)
 	for i := range pack.Datapacks {
-		if strings.Contains(pack.Datapacks[i].DownloadURL, oldURL) {
-			pack.Datapacks[i].DownloadURL = strings.Replace(pack.Datapacks[i].DownloadURL, oldURL, newURL, 1)
-		}
+		pack.Datapacks[i].DownloadURL = strings.Replace(pack.Datapacks[i].DownloadURL, oldURL, newURL, 1)
 	}
 
 	if err := moveDirContents(oldDir, newDir); err != nil {

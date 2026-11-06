@@ -24,6 +24,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		X
 	} from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import {
 		CarbonButton,
 		CarbonConfirm,
@@ -104,20 +105,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		kind: Kind;
 		items: ContentItem[];
 		mcVersion: string;
-		loader: string;
 		datapackFolder?: string;
 		onchanged: () => Promise<void> | void;
 	}
 
-	let {
-		packId,
-		kind,
-		items,
-		mcVersion,
-		loader,
-		datapackFolder = 'datapacks',
-		onchanged
-	}: Props = $props();
+	let { packId, kind, items, mcVersion, datapackFolder = 'datapacks', onchanged }: Props = $props();
 
 	const meta = $derived.by(() => {
 		switch (kind) {
@@ -186,7 +178,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let loadingVersions = $state(false);
 	let selectedVersionId = $state('');
 	let installing = $state(false);
-	let installSide = $state<Side>(meta.defaultSide);
+	let installSide = $derived(meta.defaultSide);
 	let installPinned = $state(false);
 	let installOptional = $state(false);
 
@@ -194,7 +186,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let uploadTarget = $state<File | null>(null);
 	let uploading = $state(false);
 
-	let folderDraft = $state(datapackFolder);
+	let folderDraft = $derived(datapackFolder);
 	let savingFolder = $state(false);
 
 	let editTarget = $state<ContentItem | null>(null);
@@ -205,14 +197,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let deleteTarget = $state<ContentItem | null>(null);
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
-
-	$effect(() => {
-		folderDraft = datapackFolder;
-	});
-
-	$effect(() => {
-		installSide = meta.defaultSide;
-	});
 
 	const filtered = $derived.by(() => {
 		const query = filter.trim().toLowerCase();
@@ -260,6 +244,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		uploadTarget = null;
 		installPinned = false;
 		installOptional = false;
+		installSide = meta.defaultSide;
 		addOpen = true;
 		if (tab === 'modrinth') void runSearch();
 	}
@@ -271,7 +256,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		selectedProject = null;
 		versions = [];
 		try {
-			const params = new URLSearchParams({
+			const params = new SvelteURLSearchParams({
 				kind,
 				game_version: searchVersion || mcVersion,
 				limit: '24'
@@ -295,7 +280,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		versions = [];
 		loadingVersions = true;
 		try {
-			const params = new URLSearchParams({
+			const params = new SvelteURLSearchParams({
 				project_id: project.id,
 				kind,
 				game_version: searchVersion || mcVersion

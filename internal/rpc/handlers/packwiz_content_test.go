@@ -21,7 +21,7 @@ import (
 func TestPackwizHandler_ContentRoutes(t *testing.T) {
 	dir, err := os.MkdirTemp("", "packwiz_content_handler_*")
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	log := logger.New()
 	mgr := packwiz.NewManager(dir, log)
