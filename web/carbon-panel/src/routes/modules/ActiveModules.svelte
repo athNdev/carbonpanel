@@ -269,29 +269,34 @@ one at https://mozilla.org/MPL/2.0/.
 			{#each modules as module (module.id)}
 				{@const isLoading = actionLoading === module.id}
 				<tr class="transition-colors hover:bg-[#353535]">
-					<td class="px-4 py-3">
+					<td class="max-w-[240px] px-4 py-3">
 						<div class="space-y-0.5">
 							<div class="flex items-center gap-2 text-sm font-semibold text-[#f4f4f4]">
-								<span>{module.name}</span>
+								<span class="min-w-0 flex-1 truncate" title={module.name}>{module.name}</span>
 							</div>
 							<div class="flex items-center gap-1.5 font-mono text-xs text-[#a8a8a8]">
-								<Server class="h-3 w-3 text-accent-text" />
-								<span>{module.serverName || module.serverId}</span>
+								<Server class="h-3 w-3 shrink-0 text-accent-text" />
+								<span class="min-w-0 flex-1 truncate" title={module.serverName || module.serverId}
+									>{module.serverName || module.serverId}</span
+								>
 							</div>
 						</div>
 					</td>
 
-					<td class="px-4 py-3 font-mono text-xs text-[#c6c6c6]">
+					<td
+						class="max-w-[180px] truncate px-4 py-3 font-mono text-xs whitespace-nowrap text-[#c6c6c6]"
+						title={module.templateName}
+					>
 						{module.templateName}
 					</td>
 
-					<td class="px-4 py-3">
+					<td class="px-4 py-3 whitespace-nowrap">
 						<CarbonTag type={getStatusTagType(module.status)} size="sm">
 							{getStatusLabel(module.status)}
 						</CarbonTag>
 					</td>
 
-					<td class="px-4 py-3 font-mono text-xs text-[#a8a8a8]">
+					<td class="px-4 py-3 font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
 						{#if module.status === ModuleStatus.RUNNING && module.memoryUsage > 0}
 							{module.memoryUsage.toFixed(0)} MB
 						{:else}
@@ -299,7 +304,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</td>
 
-					<td class="px-4 py-3 font-mono text-xs text-[#a8a8a8]">
+					<td class="px-4 py-3 font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
 						{#if module.status === ModuleStatus.RUNNING}
 							{module.cpuPercent.toFixed(1)}%
 						{:else}
@@ -307,7 +312,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</td>
 
-					<td class="px-4 py-3">
+					<td class="px-4 py-3 whitespace-nowrap">
 						{#if module.autoStart}
 							<CarbonTag type="blue" size="sm">Enabled</CarbonTag>
 						{:else}
@@ -315,8 +320,8 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</td>
 
-					<td class="px-4 py-3 text-right">
-						<div class="flex items-center justify-end gap-1">
+					<td class="px-4 py-3 text-right whitespace-nowrap">
+						<div class="flex items-center justify-end gap-1 whitespace-nowrap">
 							<!-- Start / Stop / Restart Control -->
 							{#if module.status === ModuleStatus.STOPPED}
 								<CarbonButton

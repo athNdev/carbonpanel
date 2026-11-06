@@ -12,7 +12,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { page } from '$app/state';
 	import { base, resolve } from '$app/paths';
 	import { runningServers, activitySortedServers } from '$lib/stores/servers';
-	import { currentUser, canAccessSettings } from '$lib/stores/auth';
+	import { authStore, currentUser, canAccessSettings } from '$lib/stores/auth';
+	import CarbonModal from './CarbonModal.svelte';
+	import CarbonButton from './CarbonButton.svelte';
+	import CarbonTextInput from './CarbonTextInput.svelte';
+	import PreferencesDialog from '../PreferencesDialog.svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { type Node } from '$lib/proto/carbonpanel/v1/node_pb';
 	import { describeNodeStatus, pickPrimaryNode } from '$lib/utils/node-status';
@@ -26,6 +30,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	let sideNavExpanded = $state(true);
 	let profileOpen = $state(false);
+	let profileDialogOpen = $state(false);
+	let prefsOpen = $state(false);
+	let passwordOld = $state('');
+	let passwordNew = $state('');
+	let passwordConfirm = $state('');
+	let passwordError: string | null = $state(null);
+	let passwordSaving = $state(false);
+	let passwordDone = $state(false);
 
 	function toggleProfile() {
 		profileOpen = !profileOpen;
@@ -33,6 +45,52 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	function closeProfile() {
 		profileOpen = false;
+	}
+
+	function openProfileDialog() {
+		profileOpen = false;
+		passwordError = null;
+		passwordDone = false;
+		profileDialogOpen = true;
+	}
+
+	function openPreferencesDialog() {
+		profileOpen = false;
+		prefsOpen = true;
+	}
+
+	async function handleSignOut() {
+		profileOpen = false;
+		await authStore.logout();
+	}
+
+	async function handleDialogPasswordChange() {
+		passwordError = null;
+		passwordDone = false;
+		if (!passwordOld || !passwordNew) {
+			passwordError = 'Enter the current and a new password.';
+			return;
+		}
+		if (passwordNew !== passwordConfirm) {
+			passwordError = 'New passwords do not match.';
+			return;
+		}
+		if (passwordNew.length < 12) {
+			passwordError = 'New password must be at least 12 characters.';
+			return;
+		}
+		passwordSaving = true;
+		try {
+			await authStore.changePassword(passwordOld, passwordNew);
+			passwordDone = true;
+			passwordOld = '';
+			passwordNew = '';
+			passwordConfirm = '';
+		} catch (err) {
+			passwordError = err instanceof Error ? err.message : 'Failed to change password';
+		} finally {
+			passwordSaving = false;
+		}
 	}
 
 	function handleProfileKeydown(event: KeyboardEvent) {
@@ -265,16 +323,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<button
 								type="button"
 								role="menuitem"
-								class="block w-full px-3 py-2 text-left font-sans text-sm text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
-								onclick={closeProfile}
+								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+								onclick={openProfileDialog}
 							>
 								Profile
 							</button>
 							<button
 								type="button"
 								role="menuitem"
-								class="block w-full px-3 py-2 text-left font-sans text-sm text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
-								onclick={closeProfile}
+								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+								onclick={openPreferencesDialog}
 							>
 								Preferences
 							</button>
@@ -282,8 +340,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<button
 								type="button"
 								role="menuitem"
-								class="block w-full px-3 py-2 text-left font-sans text-sm text-[#ff8389] transition-colors hover:bg-[#353535]"
-								onclick={closeProfile}
+								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-[#ff8389] transition-colors hover:bg-[#353535]"
+								onclick={handleSignOut}
 							>
 								Sign out
 							</button>
@@ -381,4 +439,108 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</main>
 	</div>
+
+	<CarbonModal
+		bind:open={profileDialogOpen}
+		title="Profile"
+		description="Signed-in account summary"
+		size="md"
+		hasFooter={false}
+		onclose={() => (profileDialogOpen = false)}
+	>
+		{#if user}
+			<div class="space-y-3">
+				<div
+					class="flex items-center justify-between gap-3 rounded-none border border-[#393939] bg-[#161616] p-3"
+				>
+					<span class="text-xs text-[#c6c6c6]">Username</span>
+					<span class="truncate font-mono text-sm font-medium text-white" title={user.username}
+						>{user.username}</span
+					>
+				</div>
+				{#if user.email}
+					<div
+						class="flex items-center justify-between gap-3 rounded-none border border-[#393939] bg-[#161616] p-3"
+					>
+						<span class="shrink-0 text-xs text-[#c6c6c6]">Email</span>
+						<span class="truncate font-mono text-sm text-white" title={user.email ?? ''}
+							>{user.email}</span
+						>
+					</div>
+				{/if}
+				<div
+					class="flex items-center justify-between gap-3 rounded-none border border-[#393939] bg-[#161616] p-3"
+				>
+					<span class="shrink-0 text-xs text-[#c6c6c6]">Roles</span>
+					<span
+						class="truncate font-mono text-xs text-[#c6c6c6]"
+						title={(user.roles ?? []).join(', ')}
+						>{(user.roles ?? []).join(', ') || 'No roles'}</span
+					>
+				</div>
+				<a
+					href={resolve('/profile')}
+					onclick={() => (profileDialogOpen = false)}
+					class="block truncate text-sm text-accent-text hover:underline"
+				>
+					Manage profile, password and API tokens
+				</a>
+				<div class="space-y-3 border-t border-[#393939] pt-4">
+					<h3 class="text-sm font-semibold text-white">Change password</h3>
+					<CarbonTextInput
+						revealable
+						type="password"
+						label="Current password"
+						autocomplete="current-password"
+						bind:value={passwordOld}
+						disabled={passwordSaving}
+					/>
+					<CarbonTextInput
+						revealable
+						type="password"
+						label="New password"
+						autocomplete="new-password"
+						placeholder="Minimum 12 characters"
+						bind:value={passwordNew}
+						disabled={passwordSaving}
+					/>
+					<CarbonTextInput
+						revealable
+						type="password"
+						label="Confirm new password"
+						autocomplete="new-password"
+						bind:value={passwordConfirm}
+						disabled={passwordSaving}
+					/>
+					{#if passwordError}
+						<p class="text-xs text-[#ff8389]">{passwordError}</p>
+					{/if}
+					{#if passwordDone}
+						<p class="text-xs text-[#6fdc8c]">Password changed successfully.</p>
+					{/if}
+					<div class="flex items-center justify-end gap-3">
+						<CarbonButton
+							kind="secondary"
+							onclick={() => (profileDialogOpen = false)}
+							class="rounded-none"
+						>
+							Close
+						</CarbonButton>
+						<CarbonButton
+							kind="primary"
+							onclick={handleDialogPasswordChange}
+							disabled={passwordSaving}
+							class="rounded-none"
+						>
+							{#if passwordSaving}Updating...{:else}Update password{/if}
+						</CarbonButton>
+					</div>
+				</div>
+			</div>
+		{:else}
+			<p class="text-sm text-[#a8a8a8]">No signed-in user.</p>
+		{/if}
+	</CarbonModal>
+
+	<PreferencesDialog bind:open={prefsOpen} />
 </div>

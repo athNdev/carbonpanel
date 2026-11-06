@@ -18,7 +18,7 @@ one at https://mozilla.org/MPL/2.0/.
 		DialogTitle
 	} from '$lib/components/ui/dialog';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { CarbonConfirm } from '$lib/components/carbon';
@@ -366,14 +366,14 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<div class="flex items-center gap-2">
 					<span class="text-xs text-muted-foreground"> Ctrl+S to save </span>
-					<Button variant="outline" onclick={handleClose}>
+					<CarbonButton kind="tertiary" onclick={handleClose}>
 						<X class="mr-2 h-4 w-4" />
 						Close
-					</Button>
-					<Button
+					</CarbonButton>
+					<CarbonButton
 						onclick={handleSave}
 						disabled={!isDirty || saving || loading}
-						variant={isDirty ? 'default' : 'secondary'}
+						kind={isDirty ? 'primary' : 'secondary'}
 					>
 						{#if saving}
 							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
@@ -381,7 +381,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<Save class="mr-2 h-4 w-4" />
 						{/if}
 						Save
-					</Button>
+					</CarbonButton>
 				</div>
 			</div>
 		</DialogFooter>

@@ -9,7 +9,7 @@ one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Textarea } from '$lib/components/ui/textarea';
@@ -308,9 +308,9 @@ one at https://mozilla.org/MPL/2.0/.
 		</button>
 
 		{#if showAdvanced}
-			<Button
+			<CarbonButton
 				type="button"
-				variant="ghost"
+				kind="ghost"
 				size="sm"
 				onclick={toggleJsonMode}
 				{disabled}
@@ -318,7 +318,7 @@ one at https://mozilla.org/MPL/2.0/.
 			>
 				<Code class="h-3 w-3" />
 				{jsonMode ? 'Visual Editor' : 'JSON Editor'}
-			</Button>
+			</CarbonButton>
 		{/if}
 	</div>
 
@@ -341,15 +341,15 @@ one at https://mozilla.org/MPL/2.0/.
 							</div>
 						{/if}
 						<div class="flex justify-end">
-							<Button
+							<CarbonButton
 								type="button"
-								variant="default"
+								kind="primary"
 								size="sm"
 								onclick={toggleJsonMode}
 								disabled={disabled || !!jsonError}
 							>
 								Apply JSON
-							</Button>
+							</CarbonButton>
 						</div>
 					</div>
 				</CardContent>
@@ -359,9 +359,9 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
 							<Label class="text-sm font-medium">Environment Variables</Label>
-							<Button
+							<CarbonButton
 								type="button"
-								variant="ghost"
+								kind="ghost"
 								size="sm"
 								onclick={addEnvVar}
 								{disabled}
@@ -369,7 +369,7 @@ one at https://mozilla.org/MPL/2.0/.
 							>
 								<Plus class="h-3 w-3" />
 								Add Variable
-							</Button>
+							</CarbonButton>
 						</div>
 						{#if overrides?.environment && Object.keys(overrides.environment).length > 0}
 							<div class="rounded-lg border bg-muted/20 p-3">
@@ -391,16 +391,17 @@ one at https://mozilla.org/MPL/2.0/.
 												{disabled}
 												class="h-8 flex-1 font-mono text-xs"
 											/>
-											<Button
+											<CarbonButton
 												type="button"
-												variant="ghost"
-												size="icon"
+												kind="ghost"
+												size="sm"
+												iconOnly
 												onclick={() => removeEnvVar(key)}
 												{disabled}
 												class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
 											>
 												<X class="h-3 w-3" />
-											</Button>
+											</CarbonButton>
 										</div>
 									{/each}
 								</div>
@@ -416,9 +417,9 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
 							<Label class="text-sm font-medium">Volume Mounts</Label>
-							<Button
+							<CarbonButton
 								type="button"
-								variant="ghost"
+								kind="ghost"
 								size="sm"
 								onclick={addVolume}
 								{disabled}
@@ -426,7 +427,7 @@ one at https://mozilla.org/MPL/2.0/.
 							>
 								<Plus class="h-3 w-3" />
 								Add Volume
-							</Button>
+							</CarbonButton>
 						</div>
 						{#if overrides?.volumes && overrides.volumes.length > 0}
 							<div class="rounded-lg border bg-muted/20 p-3">
@@ -450,16 +451,17 @@ one at https://mozilla.org/MPL/2.0/.
 														class="h-8 font-mono text-xs"
 													/>
 												</div>
-												<Button
+												<CarbonButton
 													type="button"
-													variant="ghost"
-													size="icon"
+													kind="ghost"
+													size="sm"
+													iconOnly
 													onclick={() => updateVolume(i, null)}
 													{disabled}
 													class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
 												>
 													<X class="h-3 w-3" />
-												</Button>
+												</CarbonButton>
 											</div>
 											<div class="flex items-center gap-4 pl-1">
 												<label class="flex items-center gap-2">
@@ -680,9 +682,9 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
 							<Label class="text-sm font-medium">Labels</Label>
-							<Button
+							<CarbonButton
 								type="button"
-								variant="ghost"
+								kind="ghost"
 								size="sm"
 								onclick={addLabel}
 								{disabled}
@@ -690,7 +692,7 @@ one at https://mozilla.org/MPL/2.0/.
 							>
 								<Plus class="h-3 w-3" />
 								Add Label
-							</Button>
+							</CarbonButton>
 						</div>
 						{#if overrides?.labels && Object.keys(overrides.labels).length > 0}
 							<div class="rounded-lg border bg-muted/20 p-3">
@@ -712,16 +714,17 @@ one at https://mozilla.org/MPL/2.0/.
 												{disabled}
 												class="h-8 flex-1 font-mono text-xs"
 											/>
-											<Button
+											<CarbonButton
 												type="button"
-												variant="ghost"
-												size="icon"
+												kind="ghost"
+												size="sm"
+												iconOnly
 												onclick={() => removeLabel(key)}
 												{disabled}
 												class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
 											>
 												<X class="h-3 w-3" />
-											</Button>
+											</CarbonButton>
 										</div>
 									{/each}
 								</div>

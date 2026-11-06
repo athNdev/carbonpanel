@@ -18,7 +18,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CardHeader,
 		CardTitle
 	} from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
@@ -346,8 +346,8 @@ one at https://mozilla.org/MPL/2.0/.
 		</p>
 		<div class="flex items-center gap-2">
 			{#if canCreate}
-				<Button
-					variant="outline"
+				<CarbonButton
+					kind="tertiary"
 					onclick={() => {
 						fetchRoles();
 						showCreateInviteDialog = true;
@@ -355,8 +355,8 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					<TicketPlus class="mr-2 h-4 w-4" />
 					Create Invite
-				</Button>
-				<Button
+				</CarbonButton>
+				<CarbonButton
 					onclick={() => {
 						fetchRoles();
 						showCreateDialog = true;
@@ -364,7 +364,7 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					<UserPlus class="mr-2 h-4 w-4" />
 					Add User
-				</Button>
+				</CarbonButton>
 			{/if}
 		</div>
 	</div>
@@ -405,17 +405,23 @@ one at https://mozilla.org/MPL/2.0/.
 						<TableBody>
 							{#each users as user (user.id)}
 								<TableRow>
-									<TableCell class="font-medium">{user.username}</TableCell>
-									<TableCell>{user.email || '-'}</TableCell>
+									<TableCell class="max-w-[160px] font-medium whitespace-nowrap"
+										><span class="block truncate" title={user.username}>{user.username}</span
+										></TableCell
+									>
+									<TableCell class="max-w-[200px] whitespace-nowrap"
+										><span class="block truncate" title={user.email || ''}>{user.email || '-'}</span
+										></TableCell
+									>
 									<TableCell>
-										<Badge variant="outline" class="capitalize"
+										<Badge variant="outline" class="whitespace-nowrap capitalize"
 											>{user.authProvider || 'local'}</Badge
 										>
 									</TableCell>
 									<TableCell>
 										<div class="flex flex-wrap gap-1">
 											{#each user.roles || [] as role (role)}
-												<Badge variant={getRoleBadgeVariant(role)}>
+												<Badge variant={getRoleBadgeVariant(role)} class="whitespace-nowrap">
 													{role}
 												</Badge>
 											{/each}
@@ -426,33 +432,41 @@ one at https://mozilla.org/MPL/2.0/.
 									</TableCell>
 									<TableCell>
 										{#if user.isActive}
-											<Badge variant="outline" class="text-green-600">Active</Badge>
+											<Badge variant="outline" class="whitespace-nowrap text-green-600"
+												>Active</Badge
+											>
 										{:else}
-											<Badge variant="outline" class="text-red-600">Inactive</Badge>
+											<Badge variant="outline" class="whitespace-nowrap text-red-600"
+												>Inactive</Badge
+											>
 										{/if}
 									</TableCell>
-									<TableCell class="text-sm text-muted-foreground">
+									<TableCell class="text-sm whitespace-nowrap text-muted-foreground">
 										{user.createdAt
 											? formatDate(new Date(Number(user.createdAt.seconds) * 1000).toISOString())
 											: 'Unknown'}
 									</TableCell>
 									{#if canUpdate || canDelete}
-										<TableCell class="text-right">
-											<div class="flex justify-end gap-2">
+										<TableCell class="text-right whitespace-nowrap">
+											<div class="flex justify-end gap-2 whitespace-nowrap">
 												{#if canUpdate}
-													<Button size="sm" variant="outline" onclick={() => openEditDialog(user)}>
+													<CarbonButton
+														size="sm"
+														kind="tertiary"
+														onclick={() => openEditDialog(user)}
+													>
 														<Edit class="h-4 w-4" />
-													</Button>
+													</CarbonButton>
 												{/if}
 												{#if canDelete}
-													<Button
+													<CarbonButton
 														size="sm"
-														variant="outline"
+														kind="tertiary"
 														onclick={() => deleteUser(user)}
 														disabled={user.id === $authStore.user?.id}
 													>
 														<Trash2 class="h-4 w-4" />
-													</Button>
+													</CarbonButton>
 												{/if}
 											</div>
 										</TableCell>
@@ -498,33 +512,39 @@ one at https://mozilla.org/MPL/2.0/.
 										<span class="truncate text-sm font-medium"
 											>{invite.description || 'Untitled'}</span
 										>
-										<Badge variant={getStatusVariant(status)} class="shrink-0 text-xs">
+										<Badge
+											variant={getStatusVariant(status)}
+											class="shrink-0 text-xs whitespace-nowrap"
+										>
 											{status}
 										</Badge>
 										{#if invite.hasPin}
-											<Badge variant="outline" class="shrink-0 text-xs">PIN</Badge>
+											<Badge variant="outline" class="shrink-0 text-xs whitespace-nowrap">PIN</Badge
+											>
 										{/if}
 									</div>
 									<div class="flex shrink-0 items-center gap-0.5">
-										<Button
-											variant="ghost"
-											size="icon"
+										<CarbonButton
+											kind="ghost"
+											size="sm"
+											iconOnly
 											class="h-7 w-7"
 											onclick={() => copyInviteUrl(invite.code)}
 											title="Copy invite URL"
 										>
 											<Copy class="h-3.5 w-3.5" />
-										</Button>
+										</CarbonButton>
 										{#if canDelete}
-											<Button
-												variant="ghost"
-												size="icon"
+											<CarbonButton
+												kind="ghost"
+												size="sm"
+												iconOnly
 												class="h-7 w-7 text-destructive hover:text-destructive"
 												onclick={() => deleteInvite(invite.id)}
 												title="Revoke invite"
 											>
 												<Trash2 class="h-3.5 w-3.5" />
-											</Button>
+											</CarbonButton>
 										{/if}
 									</div>
 								</div>
@@ -613,14 +633,15 @@ one at https://mozilla.org/MPL/2.0/.
 						<h2 class="text-2xl font-semibold tracking-tight">Create User</h2>
 						<p class="mt-1 text-muted-foreground">Add a new user to the system</p>
 					</div>
-					<Button
-						variant="ghost"
-						size="icon"
+					<CarbonButton
+						kind="ghost"
+						size="sm"
+						iconOnly
 						onclick={() => (showCreateDialog = false)}
 						class="h-10 w-10"
 					>
 						<X class="h-5 w-5" />
-					</Button>
+					</CarbonButton>
 				</div>
 
 				<div class="flex-1 overflow-y-auto p-8">
@@ -670,16 +691,16 @@ one at https://mozilla.org/MPL/2.0/.
 							</div>
 							<div class="flex flex-wrap gap-2">
 								{#each availableRoles as role (role.id)}
-									<Button
+									<CarbonButton
 										size="sm"
-										variant={newUserForm.roles.includes(role.name) ? 'default' : 'outline'}
+										kind={newUserForm.roles.includes(role.name) ? 'primary' : 'tertiary'}
 										onclick={() => toggleRole(newUserForm, role.name)}
 									>
 										{#if newUserForm.roles.includes(role.name)}
 											<Check class="mr-1 h-3 w-3" />
 										{/if}
 										{role.name}
-									</Button>
+									</CarbonButton>
 								{/each}
 							</div>
 						</div>
@@ -687,13 +708,17 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
-					<Button variant="outline" onclick={() => (showCreateDialog = false)} class="h-11 px-6">
+					<CarbonButton
+						kind="tertiary"
+						onclick={() => (showCreateDialog = false)}
+						class="h-11 px-6"
+					>
 						Cancel
-					</Button>
-					<Button onclick={createUser} class="h-11 gap-2 px-8">
+					</CarbonButton>
+					<CarbonButton onclick={createUser} class="h-11 gap-2 px-8">
 						<UserPlus class="h-4 w-4" />
 						Create User
-					</Button>
+					</CarbonButton>
 				</div>
 			</div>
 		</div>
@@ -732,7 +757,9 @@ one at https://mozilla.org/MPL/2.0/.
 									<p class="text-muted-foreground">Current roles</p>
 									<div class="mt-1 flex flex-wrap gap-1">
 										{#each editingUser.roles || [] as role (role)}
-											<Badge variant={getRoleBadgeVariant(role)} class="text-xs">{role}</Badge>
+											<Badge variant={getRoleBadgeVariant(role)} class="text-xs whitespace-nowrap"
+												>{role}</Badge
+											>
 										{/each}
 										{#if !editingUser.roles?.length}
 											<span class="text-xs text-muted-foreground">None</span>
@@ -774,14 +801,15 @@ one at https://mozilla.org/MPL/2.0/.
 						<h2 class="text-2xl font-semibold tracking-tight">Edit User</h2>
 						<p class="mt-1 text-muted-foreground">Update account details and permissions</p>
 					</div>
-					<Button
-						variant="ghost"
-						size="icon"
+					<CarbonButton
+						kind="ghost"
+						size="sm"
+						iconOnly
 						onclick={() => (showEditDialog = false)}
 						class="h-10 w-10"
 					>
 						<X class="h-5 w-5" />
-					</Button>
+					</CarbonButton>
 				</div>
 
 				<div class="flex-1 overflow-y-auto p-8">
@@ -810,16 +838,16 @@ one at https://mozilla.org/MPL/2.0/.
 								</div>
 								<div class="flex flex-wrap gap-2">
 									{#each availableRoles as role (role.id)}
-										<Button
+										<CarbonButton
 											size="sm"
-											variant={editUserForm.roles.includes(role.name) ? 'default' : 'outline'}
+											kind={editUserForm.roles.includes(role.name) ? 'primary' : 'tertiary'}
 											onclick={() => toggleRole(editUserForm, role.name)}
 										>
 											{#if editUserForm.roles.includes(role.name)}
 												<Check class="mr-1 h-3 w-3" />
 											{/if}
 											{role.name}
-										</Button>
+										</CarbonButton>
 									{/each}
 								</div>
 							</div>
@@ -839,13 +867,13 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
-					<Button variant="outline" onclick={() => (showEditDialog = false)} class="h-11 px-6">
+					<CarbonButton kind="tertiary" onclick={() => (showEditDialog = false)} class="h-11 px-6">
 						Cancel
-					</Button>
-					<Button onclick={updateUser} class="h-11 gap-2 px-8">
+					</CarbonButton>
+					<CarbonButton onclick={updateUser} class="h-11 gap-2 px-8">
 						<Save class="h-4 w-4" />
 						Save Changes
-					</Button>
+					</CarbonButton>
 				</div>
 			</div>
 		</div>
@@ -916,14 +944,15 @@ one at https://mozilla.org/MPL/2.0/.
 						<h2 class="text-2xl font-semibold tracking-tight">Create Invite</h2>
 						<p class="mt-1 text-muted-foreground">Configure invite settings and restrictions</p>
 					</div>
-					<Button
-						variant="ghost"
-						size="icon"
+					<CarbonButton
+						kind="ghost"
+						size="sm"
+						iconOnly
 						onclick={() => (showCreateInviteDialog = false)}
 						class="h-10 w-10"
 					>
 						<X class="h-5 w-5" />
-					</Button>
+					</CarbonButton>
 				</div>
 
 				<!-- Scrollable Content Area -->
@@ -946,9 +975,9 @@ one at https://mozilla.org/MPL/2.0/.
 							</p>
 							<div class="mt-1 flex flex-wrap gap-2">
 								{#each inviteRoleNames as role (role)}
-									<Button
+									<CarbonButton
 										size="sm"
-										variant={newInviteForm.roles.includes(role) ? 'default' : 'outline'}
+										kind={newInviteForm.roles.includes(role) ? 'primary' : 'tertiary'}
 										onclick={() => toggleInviteRole(role)}
 										disabled={creatingInvite}
 									>
@@ -956,7 +985,7 @@ one at https://mozilla.org/MPL/2.0/.
 											<Check class="mr-1 h-3 w-3" />
 										{/if}
 										{role}
-									</Button>
+									</CarbonButton>
 								{/each}
 							</div>
 						</div>
@@ -1032,15 +1061,15 @@ one at https://mozilla.org/MPL/2.0/.
 
 				<!-- Footer -->
 				<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
-					<Button
-						variant="outline"
+					<CarbonButton
+						kind="tertiary"
 						onclick={() => (showCreateInviteDialog = false)}
 						disabled={creatingInvite}
 						class="h-11 px-6"
 					>
 						Cancel
-					</Button>
-					<Button onclick={createInvite} disabled={creatingInvite} class="h-11 gap-2 px-8">
+					</CarbonButton>
+					<CarbonButton onclick={createInvite} disabled={creatingInvite} class="h-11 gap-2 px-8">
 						{#if creatingInvite}
 							<Loader2 class="h-4 w-4 animate-spin" />
 							Creating...
@@ -1048,7 +1077,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<TicketPlus class="h-4 w-4" />
 							Create & Copy URL
 						{/if}
-					</Button>
+					</CarbonButton>
 				</div>
 			</div>
 		</div>

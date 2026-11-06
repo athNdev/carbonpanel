@@ -7,7 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { Input } from '$lib/components/ui/input';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Card, CardContent } from '$lib/components/ui/card';
@@ -90,9 +90,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				class="border-[#393939] bg-[#262626] pl-8 text-[#f4f4f4]"
 			/>
 		</div>
-		<Button onclick={search} disabled={searching} class="rounded-none bg-[#0f62fe] text-white">
+		<CarbonButton
+			onclick={search}
+			disabled={searching}
+			class="rounded-none bg-[#0f62fe] text-white"
+		>
 			{#if searching}<Loader2 class="h-4 w-4 animate-spin" />{:else}Search{/if}
-		</Button>
+		</CarbonButton>
 	</div>
 
 	{#if error}
@@ -118,9 +122,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<div class="min-w-0 flex-1">
 						<div class="flex items-center gap-2">
 							<span class="truncate font-medium text-white">{d.name}</span>
-							<Badge class="border-[#393939] bg-[#393939] text-[#c6c6c6]">datapack</Badge>
+							<Badge class="border-[#393939] bg-[#393939] whitespace-nowrap text-[#c6c6c6]"
+								>datapack</Badge
+							>
 							{#if d.indexer}
-								<Badge class="border-[#393939] bg-[#262626] text-[#8d8d8d]">{d.indexer}</Badge>
+								<Badge class="border-[#393939] bg-[#262626] whitespace-nowrap text-[#8d8d8d]"
+									>{d.indexer}</Badge
+								>
 							{/if}
 						</div>
 						<p class="line-clamp-2 text-xs text-[#a8a8a8]">{d.summary}</p>

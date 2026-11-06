@@ -185,7 +185,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{:else}
 			{#each filteredTemplates as template (template.name)}
 				<tr class="transition-colors hover:bg-[#353535]">
-					<td class="px-4 py-3 font-medium text-white">
+					<td class="max-w-[240px] px-4 py-3 font-medium whitespace-nowrap text-white">
 						<div class="flex items-center gap-2.5">
 							<div
 								class="flex h-7 w-7 shrink-0 items-center justify-center rounded-none border border-[#393939] bg-[#161616] text-accent-text"
@@ -196,11 +196,13 @@ one at https://mozilla.org/MPL/2.0/.
 									fallback="Package"
 								/>
 							</div>
-							<span class="text-sm font-semibold">{template.name}</span>
+							<span class="min-w-0 flex-1 truncate text-sm font-semibold" title={template.name}
+								>{template.name}</span
+							>
 						</div>
 					</td>
 
-					<td class="px-4 py-3">
+					<td class="px-4 py-3 whitespace-nowrap">
 						{#if template.type === ModuleTemplateType.BUILTIN}
 							<CarbonTag type="blue" size="sm">Built-in</CarbonTag>
 						{:else}
@@ -208,7 +210,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</td>
 
-					<td class="px-4 py-3">
+					<td class="max-w-[160px] truncate px-4 py-3 whitespace-nowrap">
 						{#if template.category}
 							<CarbonTag type="gray" size="sm">{template.category}</CarbonTag>
 						{:else}
@@ -230,8 +232,8 @@ one at https://mozilla.org/MPL/2.0/.
 						{template.description || 'No description provided'}
 					</td>
 
-					<td class="px-4 py-3 text-right">
-						<div class="flex items-center justify-end gap-1">
+					<td class="px-4 py-3 text-right whitespace-nowrap">
+						<div class="flex items-center justify-end gap-1 whitespace-nowrap">
 							{#if template.type === ModuleTemplateType.CUSTOM}
 								<CarbonButton
 									kind="ghost"

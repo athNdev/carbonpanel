@@ -9,7 +9,7 @@ one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
@@ -137,9 +137,9 @@ one at https://mozilla.org/MPL/2.0/.
 				clients must reach it directly, such as Bedrock UDP.
 			</p>
 		</div>
-		<Button
+		<CarbonButton
 			type="button"
-			variant="outline"
+			kind="tertiary"
 			size="sm"
 			onclick={addPort}
 			{disabled}
@@ -147,7 +147,7 @@ one at https://mozilla.org/MPL/2.0/.
 		>
 			<Plus class="h-3 w-3" />
 			Add Port
-		</Button>
+		</CarbonButton>
 	</div>
 
 	{#if ports.length > 0}
@@ -226,17 +226,18 @@ one at https://mozilla.org/MPL/2.0/.
 								</Select>
 							</div>
 							<div class="col-span-1 flex justify-end sm:col-span-2">
-								<Button
+								<CarbonButton
 									type="button"
-									variant="ghost"
-									size="icon"
+									kind="ghost"
+									size="sm"
+									iconOnly
 									aria-label={`Remove additional port ${index + 1}`}
 									onclick={() => removePort(index)}
 									{disabled}
 									class="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
 								>
 									<X class="h-3 w-3" />
-								</Button>
+								</CarbonButton>
 							</div>
 						</div>
 
