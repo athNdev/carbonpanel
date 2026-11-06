@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from scripts.build_website import export_snapshot, publish_design_system, scoped_links
-from scripts.check_website import Links
+from scripts.check_website import Links, check
 
 
 class DesignPageParser(HTMLParser):
@@ -102,6 +102,8 @@ class WebsiteTests(unittest.TestCase):
             self.assertIn('href="./tokens.css"', page)
             self.assertIn("github.com/athNdev/carbonpanel/blob/main/docs/design-system/README.md", page)
             self.assertNotIn("../../web/carbon-panel/", page)
+            self.assertIn('property="og:image"', page)
+            self.assertIn('content="https://athn.dev/carbonpanel/assets/og-design-system.png?v=1"', page)
             self.assertEqual(
                 (design / "tokens.css").read_bytes(),
                 (root / "web/carbon-panel/src/lib/design-system/tokens.css").read_bytes())
@@ -115,6 +117,16 @@ class WebsiteTests(unittest.TestCase):
         parser = Links(not_found=True)
         parser.feed('<link rel="canonical" href="/404/"><a href="/docs/">Docs</a>')
         self.assertEqual(parser.urls, ["/docs/"])
+
+    def test_a_page_without_social_metadata_fails_the_website_check(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "index.html").write_text(
+                "<!doctype html><html lang=\"en\"><head><title>Bare</title></head>"
+                "<body></body></html>", encoding="utf-8")
+            with self.assertRaises(ValueError) as raised:
+                check(root)
+            self.assertIn("og:title", str(raised.exception))
 
 
 if __name__ == "__main__":

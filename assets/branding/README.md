@@ -53,14 +53,31 @@ copies of the approved artwork; update those copies when the master changes.
 ## Repository and social previews
 
 `assets/banner.svg` is the root README banner. `landing/assets/og.svg` and
-`landing/assets/og.png` are the social-card exports. Open
-`social-preview.vectorcraft` in VectorCraft to edit the card; export its first
-artboard as SVG with text outlined and PNG at 1x (1200 by 630). The editable card
-uses Inter for its feature captions; the exported SVG contains paths and needs
-no installed fonts.
+`landing/assets/og.png` are the shared social-card exports. Open `social-preview.vectorcraft` in VectorCraft to edit the card;
+export its first artboard as SVG with text outlined and PNG at 1x (1200 by 630).
+The editable card uses Inter for its feature captions; the exported SVG contains
+paths and needs no installed fonts.
 
-The homepage and documentation share the versioned PNG URL in their Open Graph
-and Twitter metadata. Advance its query version when replacing the artwork.
-Keep preview titles, descriptions and alt text free of em dashes. A repository
-social preview is a separate GitHub setting: upload the same PNG there after
-reviewing the export.
+`landing/assets/og.png` is the shared card: the homepage, the documentation home
+when no dedicated card exists, and every docs page without its own card use its
+versioned URL in their Open Graph and Twitter metadata. Advance the query
+version when replacing the artwork.
+
+Prominent pages carry dedicated cards drawn from the same layout and the
+vendored Inter and JetBrains Mono faces. Regenerate them with
+`python3 scripts/generate_social_cards.py` (requires a Chromium-family browser):
+
+| Card | Page |
+| --- | --- |
+| `og-docs.png` | Documentation home |
+| `og-introduction.png` | Introduction |
+| `og-docker-compose.png` | Docker Compose getting started |
+| `og-api.png` | API reference and its generated reference page |
+| `og-design-system.png` | Design system |
+
+Keep preview titles, descriptions and alt text free of em dashes.
+`scripts/check_website.py` fails the build if any published page is missing the
+full Open Graph and Twitter set, if its image is not an absolute 1200 by 630
+PNG under the website base, or if a prominent route falls back to the shared
+card. A repository social preview is a separate GitHub setting: upload the same
+PNG there after reviewing the export.

@@ -36,6 +36,11 @@ def main():
 
     for relative, dimensions in (
         ("landing/assets/og.png", (1200, 630)),
+        ("landing/assets/og-docs.png", (1200, 630)),
+        ("landing/assets/og-introduction.png", (1200, 630)),
+        ("landing/assets/og-docker-compose.png", (1200, 630)),
+        ("landing/assets/og-api.png", (1200, 630)),
+        ("landing/assets/og-design-system.png", (1200, 630)),
         ("landing/assets/favicon.png", (32, 32)),
         ("web/carbon-panel/static/g1_16x16.png", (16, 16)),
         ("web/carbon-panel/static/g1_32x32.png", (32, 32)),

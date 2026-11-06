@@ -6,12 +6,32 @@
 
 """Regression checks for the standalone design-system homepage."""
 
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlsplit
 import unittest
 
 
 PAGE = Path(__file__).resolve().parent.parent / "docs" / "design-system" / "index.html"
 CSS = Path(__file__).resolve().parent.parent / "docs" / "design-system" / "site.css"
+
+
+class PreviewParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.metadata = {}
+        self.canonical = None
+        self.html_lang = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "html":
+            self.html_lang = attrs.get("lang")
+        if tag == "meta":
+            key = attrs.get("property", attrs.get("name", ""))
+            self.metadata[key] = attrs.get("content", "")
+        if tag == "link" and attrs.get("rel") == "canonical":
+            self.canonical = attrs.get("href")
 
 
 class DesignSystemPageTests(unittest.TestCase):
@@ -57,6 +77,37 @@ class DesignSystemPageTests(unittest.TestCase):
     def test_theme_preview_toggle_is_present(self):
         page = PAGE.read_text(encoding="utf-8")
         self.assertIn("data-theme-toggle", page)
+
+    def test_page_declares_a_well_formed_html_element(self):
+        page = PAGE.read_text(encoding="utf-8")
+        parser = PreviewParser()
+        parser.feed(page)
+        self.assertEqual(parser.html_lang, "en")
+        self.assertNotIn('<html lang="en"></html>', page)
+
+    def test_social_preview_metadata_is_complete(self):
+        parser = PreviewParser()
+        parser.feed(PAGE.read_text(encoding="utf-8"))
+        metadata = parser.metadata
+        for key in ("og:type", "og:site_name", "og:title", "og:description",
+                    "og:url", "og:image", "og:image:type", "og:image:width",
+                    "og:image:height", "og:image:alt", "twitter:card",
+                    "twitter:title", "twitter:description", "twitter:image",
+                    "twitter:image:alt"):
+            self.assertTrue(metadata.get(key), key)
+            self.assertNotIn(chr(0x2014), metadata[key], key)
+        self.assertEqual(metadata["og:url"],
+                         "https://athn.dev/carbonpanel/design-system/")
+        self.assertEqual(parser.canonical, metadata["og:url"])
+        self.assertEqual(metadata["og:image"], metadata["twitter:image"])
+        self.assertEqual(metadata["twitter:card"], "summary_large_image")
+        self.assertEqual((metadata["og:image:width"], metadata["og:image:height"]),
+                         ("1200", "630"))
+        image = urlsplit(metadata["og:image"])
+        self.assertEqual(image.netloc, "athn.dev")
+        self.assertTrue(image.query, "A replaced preview needs a cache version")
+        target = PAGE.parent / ".." / ".." / "landing" / image.path.removeprefix("/carbonpanel/")
+        self.assertTrue(target.resolve().is_file(), f"missing card: {target}")
 
 
 if __name__ == "__main__":
