@@ -52,6 +52,13 @@ bun run test
   `overflow-y-*` rule in `app.css`. `scrollbar-policy.test.ts` and
   `CarbonTabs.test.ts` fail if the policy is removed.
 - Loading, empty and error states are part of the change, not follow-up work.
+- Overlays that must sit above the app chrome portal to `<body>`. A fixed
+  overlay rendered inside `<main>` is trapped by the page stacking context: the
+  fixed header and sidebar paint over it and the scroll container clips it.
+  `CarbonModal` portals every dialog for this reason; its `fullscreen` and
+  `bare` modes let a surface own the whole viewport. The server console's
+  fullscreen mode renders the same pane as the inline console, so the toolbar,
+  command bar and tail controls never drop out.
 - A frontend-only fix must not bypass an authorization check in the backend.
 - No page may scroll horizontally at 360/768/1440 widths. Wide tables and tab
   strips scroll inside their own `overflow-x-auto`/`scroll-strip` container;
