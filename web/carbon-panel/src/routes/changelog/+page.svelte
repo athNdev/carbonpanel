@@ -23,7 +23,7 @@
 	function slugifyVersion(title: string): string {
 		return title
 			.toLowerCase()
-			.replace(/[\[\]]/g, '')
+			.replace(/\[|\]/g, '')
 			.replace(/[^a-z0-9]+/g, '-')
 			.replace(/^-+|-+$/g, '')
 			.slice(0, 64);
@@ -98,8 +98,8 @@
 
 <div class="space-y-4">
 	<CarbonPageHeader title="Changelog" />
-	<!-- eslint-disable-next-line svelte/no-at-html-tags -- changelog.md is trusted repository content, not user input -->
 	{#if introHtml.trim()}
+		<!-- eslint-disable-next-line svelte/no-at-html-tags -- changelog.md is trusted repository content, not user input -->
 		<div class="changelog-md changelog-intro">{@html introHtml}</div>
 	{/if}
 	<div class="grid gap-6 lg:grid-cols-[220px_1fr]">
