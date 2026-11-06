@@ -34,6 +34,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { CarbonErrorState } from '$lib/components/carbon';
 	import { apiFetch } from '$lib/api/fetch';
+	import {
+		DEFAULT_EXPORT_OPTIONS,
+		downloadPackExport,
+		formatExportLabel,
+		type PackExportFormat
+	} from './pack-export';
 
 	interface PackSummary {
 		id: string;
@@ -115,33 +121,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	});
 
-	async function exportPack(
-		packId: string,
-		format: 'mrpack' | 'curseforge' | 'packwiz',
-		packName: string
-	) {
+	async function exportPack(packId: string, format: PackExportFormat, packName: string) {
 		exportingPack = `${packId}-${format}`;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/export/${format}`);
-			if (!res.ok) {
-				const txt = await res.text();
-				throw new Error(txt || `HTTP ${res.status}`);
+			const result = await downloadPackExport(packId, packName, format, DEFAULT_EXPORT_OPTIONS);
+			if (result.ok) {
+				toast.success(`Exported ${formatExportLabel(format)}`);
+			} else {
+				throw new Error(result.message);
 			}
-			const blob = await res.blob();
-			const url = window.URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			let ext = '.zip';
-			if (format === 'mrpack') ext = '.mrpack';
-			else if (format === 'packwiz') ext = '.packwiz.zip';
-			a.download = `${packName}${ext}`;
-			document.body.appendChild(a);
-			a.click();
-			window.URL.revokeObjectURL(url);
-			document.body.removeChild(a);
-			toast.success(
-				`Exported ${format === 'mrpack' ? '.mrpack' : format === 'packwiz' ? 'Packwiz .zip' : 'CurseForge .zip'}`
-			);
 		} catch (err) {
 			console.error('Failed to export modpack:', err);
 			toast.error(
@@ -508,6 +496,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								title="Export Modrinth .mrpack"
 							>
 								.mrpack
+							</CarbonButton>
+							<CarbonButton
+								kind="tertiary"
+								size="sm"
+								class="h-8 px-2 text-xs"
+								onclick={() => exportPack(pack.id, 'curseforge', pack.name)}
+								disabled={exportingPack === `${pack.id}-curseforge`}
+								title="Export CurseForge .zip (blocked when mods lack CurseForge IDs)"
+							>
+								CurseForge
+							</CarbonButton>
+							<CarbonButton
+								kind="tertiary"
+								size="sm"
+								class="h-8 px-2 text-xs"
+								onclick={() => exportPack(pack.id, 'mmc', pack.name)}
+								disabled={exportingPack === `${pack.id}-mmc`}
+								title="Export Prism/MultiMC instance.zip"
+							>
+								MMC
 							</CarbonButton>
 
 							<CarbonButton

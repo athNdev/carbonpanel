@@ -20,10 +20,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		CarbonSelect,
 		CarbonSearch,
 		CarbonStructuredList,
-		CarbonAccordion,
-		CarbonAccordionItem,
 		CarbonInlineLoading,
-		CarbonConfirm
+		CarbonConfirm,
+		CarbonEmptyState
 	} from '$lib/components/carbon';
 	import {
 		ArrowLeft,
@@ -39,7 +38,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		CheckCircle2,
 		AlertTriangle,
 		RefreshCw,
-		FolderGit2,
 		ArrowRightLeft,
 		Copy,
 		Sparkles,
@@ -50,7 +48,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { apiFetch } from '$lib/api/fetch';
 	import { uploadFile } from '$lib/utils/chunked-upload';
 	import ModpackDeployDialog from '$lib/components/modpack-deploy-dialog.svelte';
+	import ManifestInspectorDialog from '$lib/components/manifest-inspector-dialog.svelte';
 	import DatapackBrowserDialog from '$lib/components/datapack-browser-dialog.svelte';
+	import ExportDialog from '../export-dialog.svelte';
 	import { formatBytes } from '$lib/utils';
 
 	interface ModItem {
@@ -137,12 +137,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	// MC version the pack had when last loaded/saved — used to detect an MC
 	// version change that marks installed mods stale (ticket: stale + resolve).
 	let loadedMCVersion = $state('');
-	let exportingPack = $state<'mrpack' | 'curseforge' | 'packwiz' | null>(null);
 	let availableLoaderVersions = $state<string[]>(['latest']);
 	let loadingLoaderVersions = $state(false);
+	let exportDialogOpen = $state(false);
+	let inspectorOpen = $state(false);
 
-	// Primary View Tab: "mods", "overrides", "migrate", "maintenance"
-	let activeTab = $state<'mods' | 'overrides' | 'migrate' | 'maintenance'>('mods');
+	// Primary View Tab: "mods", "overrides", "migrate", "export", "maintenance"
+	let activeTab = $state<'mods' | 'overrides' | 'migrate' | 'export' | 'maintenance'>('mods');
 
 	// Overrides / Files State (declared before studioTabs which references packFiles)
 	let packFiles = $state<PackFileInfo[]>([]);
@@ -151,7 +152,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{ id: 'mods', label: 'Mods', badge: pack?.mods?.length ?? 0 },
 		{ id: 'overrides', label: 'Overrides & Configs', badge: packFiles.length },
 		{ id: 'migrate', label: 'Version Migration' },
-		{ id: 'maintenance', label: 'Maintenance & TOML' }
+		{ id: 'export', label: 'Export & Manifest' },
+		{ id: 'maintenance', label: 'Maintenance' }
 	]);
 
 	// Mod Filter & Selection
@@ -294,40 +296,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			fetchLoaderVersions(pack.mod_loader, pack.mc_version);
 		}
 	});
-
-	async function exportPack(format: 'mrpack' | 'curseforge' | 'packwiz') {
-		if (!pack) return;
-		exportingPack = format;
-		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/export/${format}`);
-			if (!res.ok) {
-				const txt = await res.text();
-				throw new Error(txt || `HTTP ${res.status}`);
-			}
-			const blob = await res.blob();
-			const url = window.URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			let ext = '.zip';
-			if (format === 'mrpack') ext = '.mrpack';
-			else if (format === 'packwiz') ext = '.packwiz.zip';
-			a.download = `${pack.name}${ext}`;
-			document.body.appendChild(a);
-			a.click();
-			window.URL.revokeObjectURL(url);
-			document.body.removeChild(a);
-			toast.success(
-				`Exported ${format === 'mrpack' ? '.mrpack' : format === 'packwiz' ? 'Packwiz .zip' : 'CurseForge .zip'}`
-			);
-		} catch (err) {
-			console.error('Failed to export modpack:', err);
-			toast.error(
-				`Export failed: ${(err instanceof Error ? err.message : undefined) || 'Unauthorized or server error'}`
-			);
-		} finally {
-			exportingPack = null;
-		}
-	}
 
 	let loadError = $state('');
 
@@ -934,48 +902,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					kind="tertiary"
 					size="sm"
 					class="h-8 rounded-none text-xs"
-					onclick={() => exportPack('packwiz')}
-					disabled={exportingPack === 'packwiz'}
-					title="Export native Packwiz .zip archive"
+					onclick={() => (exportDialogOpen = true)}
+					title="Export .mrpack, CurseForge, instance.zip or Packwiz archive"
 				>
-					{#if exportingPack === 'packwiz'}
-						<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-					{:else}
-						<Download class="mr-1.5 h-3.5 w-3.5 text-accent-text" />
-					{/if}
-					Packwiz .zip
-				</CarbonButton>
-
-				<CarbonButton
-					kind="tertiary"
-					size="sm"
-					class="h-8 rounded-none text-xs"
-					onclick={() => exportPack('mrpack')}
-					disabled={exportingPack === 'mrpack'}
-					title="Export Modrinth .mrpack"
-				>
-					{#if exportingPack === 'mrpack'}
-						<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-					{:else}
-						<Download class="mr-1.5 h-3.5 w-3.5" />
-					{/if}
-					.mrpack
-				</CarbonButton>
-
-				<CarbonButton
-					kind="tertiary"
-					size="sm"
-					class="h-8 rounded-none text-xs"
-					onclick={() => exportPack('curseforge')}
-					disabled={exportingPack === 'curseforge'}
-					title="Export CurseForge .zip"
-				>
-					{#if exportingPack === 'curseforge'}
-						<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-					{:else}
-						<Download class="mr-1.5 h-3.5 w-3.5" />
-					{/if}
-					CurseForge .zip
+					<Download class="mr-1.5 h-3.5 w-3.5" />
+					Export
 				</CarbonButton>
 
 				<CarbonButton
@@ -1057,50 +988,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</CarbonButton>
 				</div>
-
-				<!-- Carbon Accordion for Pack Manifest Quick Insights -->
-				<div class="border-t border-[#393939] pt-4">
-					<CarbonAccordion>
-						<CarbonAccordionItem title="Manifest Breakdown">
-							<div class="space-y-2 font-mono text-xs">
-								<div class="flex justify-between text-[#c6c6c6]">
-									<span>Total Mods:</span>
-									<span class="font-bold text-white">{pack.mods.length}</span>
-								</div>
-								<div class="flex justify-between text-[#c6c6c6]">
-									<span>Client Only:</span>
-									<span>{pack.mods.filter((m) => m.side === 'client').length}</span>
-								</div>
-								<div class="flex justify-between text-[#c6c6c6]">
-									<span>Server Only:</span>
-									<span>{pack.mods.filter((m) => m.side === 'server').length}</span>
-								</div>
-								<div class="flex justify-between text-[#c6c6c6]">
-									<span>Both Sides:</span>
-									<span>{pack.mods.filter((m) => m.side === 'both').length}</span>
-								</div>
-								<div class="flex justify-between text-[#c6c6c6]">
-									<span>Pinned Versions:</span>
-									<span>{pack.mods.filter((m) => m.pinned).length}</span>
-								</div>
-							</div>
-						</CarbonAccordionItem>
-					</CarbonAccordion>
-				</div>
 			</CarbonTile>
 
 			<!-- Studio Main Workspace Area -->
 			<div class="space-y-4 lg:col-span-3">
-				<!-- Workspace CarbonTabs -->
-				<CarbonTabs
-					tabs={studioTabs}
-					selectedTab={activeTab}
-					onselect={(id) => {
-						if (id === 'mods' || id === 'overrides' || id === 'migrate' || id === 'maintenance') {
-							activeTab = id;
-						}
-					}}
-				/>
+				<!-- Workspace CarbonTabs (sticky) -->
+				<div class="sticky top-0 z-10 bg-background/95 backdrop-blur">
+					<CarbonTabs
+						tabs={studioTabs}
+						selectedTab={activeTab}
+						onselect={(id) => {
+							if (
+								id === 'mods' ||
+								id === 'overrides' ||
+								id === 'migrate' ||
+								id === 'export' ||
+								id === 'maintenance'
+							) {
+								activeTab = id;
+							}
+						}}
+					/>
+				</div>
 
 				<!-- TAB 1: MODS MANAGEMENT -->
 				{#if activeTab === 'mods'}
@@ -1151,60 +1060,58 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 						</div>
 
-						<!-- Filter pills bar (0px border radius) -->
+						<!-- Filter bar: Carbon buttons replace the raw filter pills -->
 						<div
 							class="flex flex-wrap items-center gap-1.5 border-b border-[#393939] bg-[#161616] p-3 text-xs"
 						>
-							<button
-								type="button"
+							<CarbonButton
+								size="sm"
+								kind={sideFilter === 'all' ? 'primary' : 'secondary'}
+								class="rounded-none"
 								onclick={() => (sideFilter = 'all')}
-								class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs transition-colors {sideFilter ===
-								'all'
-									? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-									: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
 							>
 								All ({pack.mods.length})
-							</button>
-							<button
-								type="button"
+							</CarbonButton>
+							<CarbonButton
+								size="sm"
+								kind={sideFilter === 'both' ? 'primary' : 'secondary'}
+								class="rounded-none"
 								onclick={() => (sideFilter = 'both')}
-								class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs transition-colors {sideFilter ===
-								'both'
-									? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-									: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
 							>
 								Both ({pack.mods.filter((m) => m.side === 'both').length})
-							</button>
-							<button
-								type="button"
+							</CarbonButton>
+							<CarbonButton
+								size="sm"
+								kind={sideFilter === 'client' ? 'primary' : 'secondary'}
+								class="rounded-none"
 								onclick={() => (sideFilter = 'client')}
-								class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs transition-colors {sideFilter ===
-								'client'
-									? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-									: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
 							>
 								Client Only ({pack.mods.filter((m) => m.side === 'client').length})
-							</button>
-							<button
-								type="button"
+							</CarbonButton>
+							<CarbonButton
+								size="sm"
+								kind={sideFilter === 'server' ? 'primary' : 'secondary'}
+								class="rounded-none"
 								onclick={() => (sideFilter = 'server')}
-								class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs transition-colors {sideFilter ===
-								'server'
-									? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-									: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
 							>
 								Server Only ({pack.mods.filter((m) => m.side === 'server').length})
-							</button>
-							<button
-								type="button"
+							</CarbonButton>
+							<CarbonButton
+								size="sm"
+								kind={sideFilter === 'pinned' ? 'primary' : 'secondary'}
+								class="rounded-none"
 								onclick={() => (sideFilter = 'pinned')}
-								class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs transition-colors {sideFilter ===
-								'pinned'
-									? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-									: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
 							>
 								Pinned ({pack.mods.filter((m) => m.pinned).length})
-							</button>
+							</CarbonButton>
+							<CarbonButton
+								size="sm"
+								kind={sideFilter === 'updates' ? 'primary' : 'secondary'}
+								class="rounded-none"
+								onclick={() => (sideFilter = 'updates')}
+							>
+								Updates ({Object.values(updatesMap).filter((u) => u.update_available).length})
+							</CarbonButton>
 						</div>
 
 						<!-- Batch Action Bar -->
@@ -1277,17 +1184,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						{/if}
 
 						{#if filteredMods.length === 0}
-							<div class="space-y-3 py-20 text-center text-[#8d8d8d]">
-								<Package class="mx-auto h-10 w-10 text-[#525252]" />
-								<p class="text-sm font-semibold text-white">No mods match current filter</p>
-								<CarbonButton
-									size="sm"
-									class="rounded-none"
-									onclick={() => (searchDrawerOpen = true)}
-								>
-									<Plus class="mr-1.5 h-4 w-4" />
-									Browse & Add Mods
-								</CarbonButton>
+							<div class="p-4">
+								<CarbonEmptyState
+									title="No mods match current filter"
+									description="Adjust the side filter or search, or browse the catalog to add mods."
+									actionLabel="Browse & Add Mods"
+									onaction={() => (searchDrawerOpen = true)}
+								/>
 							</div>
 						{:else}
 							<div class="overflow-x-auto">
@@ -1360,17 +1263,25 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 													</CarbonTag>
 												</td>
 												<td class="px-3 py-3">
-													<button
-														type="button"
+													<CarbonButton
+														size="sm"
+														kind="ghost"
+														class="rounded-none"
 														onclick={() => toggleSide(mod)}
-														class="inline-flex cursor-pointer items-center rounded-none border px-2 py-0.5 font-mono text-xs font-semibold
-															{mod.side === 'both' ? 'border-[#0f62fe] bg-[#0f62fe]/20 text-[#78a9ff]' : ''}
-															{mod.side === 'server' ? 'border-[#198038] bg-[#198038]/20 text-[#6fdc8c]' : ''}
-															{mod.side === 'client' ? 'border-[#8a3ffc] bg-[#8a3ffc]/20 text-[#d4bbff]' : ''}"
 														title="Click to toggle side (Both -> Server -> Client)"
+														aria-label={`Toggle side for ${mod.name} (currently ${mod.side})`}
 													>
-														{mod.side.toUpperCase()}
-													</button>
+														<CarbonTag
+															type={mod.side === 'both'
+																? 'blue'
+																: mod.side === 'server'
+																	? 'green'
+																	: 'purple'}
+															size="sm"
+														>
+															{mod.side.toUpperCase()}
+														</CarbonTag>
+													</CarbonButton>
 												</td>
 												<td class="px-3 py-3">
 													<button
@@ -1474,31 +1385,24 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<CarbonInlineLoading description="Scanning override files..." />
 							</div>
 						{:else if packFiles.length === 0}
-							<div class="space-y-3 py-16 text-center text-[#8d8d8d]">
-								<FolderGit2 class="mx-auto h-10 w-10 text-[#525252]" />
-								<p class="text-sm font-semibold text-white">No override files found</p>
-								<p class="mx-auto max-w-sm text-xs text-[#a8a8a8]">
-									Add custom server configs, datapacks, or options to bundle them directly into the
-									modpack.
-								</p>
-								<CarbonButton
-									size="sm"
-									kind="secondary"
-									class="rounded-none"
-									onclick={() => (datapackBrowseOpen = true)}
-								>
-									<Package class="mr-1.5 h-4 w-4" />
-									Browse Datapacks
-								</CarbonButton>
-								<CarbonButton
-									size="sm"
-									kind="secondary"
-									class="rounded-none"
-									onclick={() => (uploadFileDialogOpen = true)}
-								>
-									<Plus class="mr-1.5 h-4 w-4" />
-									Add Config File
-								</CarbonButton>
+							<div class="space-y-3 p-4">
+								<CarbonEmptyState
+									title="No override files found"
+									description="Add custom server configs, datapacks, or options to bundle them directly into the modpack."
+									actionLabel="Add Config File"
+									onaction={() => (uploadFileDialogOpen = true)}
+								/>
+								<div class="flex justify-center">
+									<CarbonButton
+										size="sm"
+										kind="secondary"
+										class="rounded-none"
+										onclick={() => (datapackBrowseOpen = true)}
+									>
+										<Package class="mr-1.5 h-4 w-4" />
+										Browse Datapacks
+									</CarbonButton>
+								</div>
 							</div>
 						{:else}
 							<div class="overflow-x-auto">
@@ -1652,14 +1556,121 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</CarbonTile>
 				{/if}
 
-				<!-- TAB 4: MAINTENANCE & RAW TOML -->
+				<!-- TAB 4: EXPORT & MANIFEST -->
+				{#if activeTab === 'export'}
+					<CarbonTile class="space-y-6 rounded-none border-[#393939]">
+						<div class="border-b border-border pb-3">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<div>
+									<h2 class="text-base font-semibold">Export & Manifest</h2>
+									<p class="text-xs text-muted-foreground">
+										Launcher exports, manifest breakdown, raw TOML, and manifest inspection.
+									</p>
+								</div>
+								<div class="flex flex-wrap items-center gap-2">
+									<CarbonButton
+										size="sm"
+										kind="secondary"
+										class="rounded-none"
+										onclick={() => (inspectorOpen = true)}
+									>
+										Inspect Manifest
+									</CarbonButton>
+									<CarbonButton
+										size="sm"
+										class="rounded-none"
+										onclick={() => (exportDialogOpen = true)}
+									>
+										<Download class="mr-1.5 h-3.5 w-3.5" />
+										Export Pack
+									</CarbonButton>
+								</div>
+							</div>
+						</div>
+
+						<!-- Manifest breakdown -->
+						<div class="space-y-2">
+							<div class="flex flex-wrap items-center gap-2">
+								<CarbonTag type="cyan" size="sm">Total {pack.mods.length}</CarbonTag>
+								<CarbonTag type="blue" size="sm">
+									Both {pack.mods.filter((m) => m.side === 'both').length}
+								</CarbonTag>
+								<CarbonTag type="purple" size="sm">
+									Client {pack.mods.filter((m) => m.side === 'client').length}
+								</CarbonTag>
+								<CarbonTag type="green" size="sm">
+									Server {pack.mods.filter((m) => m.side === 'server').length}
+								</CarbonTag>
+								<CarbonTag type="gray" size="sm">
+									Pinned {pack.mods.filter((m) => m.pinned).length}
+								</CarbonTag>
+							</div>
+							<CarbonStructuredList>
+								{#snippet header()}
+									<div class="flex w-full justify-between">
+										<span>Side</span>
+										<span>Count</span>
+									</div>
+								{/snippet}
+								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
+									<span class="text-white">Client-only (excluded with server export)</span>
+									<span>{pack.mods.filter((m) => m.side === 'client').length}</span>
+								</div>
+								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
+									<span class="text-white">CurseForge-ready (numeric IDs)</span>
+									<span
+										>{pack.mods.filter(
+											(m) => m.platform === 'curseforge' && /^\d+$/.test(m.project_id || '')
+										).length} of {pack.mods.length}</span
+									>
+								</div>
+								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
+									<span class="text-white">Override files bundled</span>
+									<span>{packFiles.length}</span>
+								</div>
+							</CarbonStructuredList>
+						</div>
+
+						<!-- Raw TOML Inspector -->
+						<div class="space-y-2">
+							<div class="flex items-center justify-between">
+								<span class="text-xs font-semibold text-white">Raw pack.toml Preview</span>
+								<CarbonButton
+									kind="ghost"
+									size="sm"
+									class="rounded-none text-xs"
+									onclick={loadRawTomls}
+									disabled={loadingRaw}
+								>
+									Reload TOML
+								</CarbonButton>
+							</div>
+							{#if loadingRaw}
+								<div class="flex items-center justify-center py-8">
+									<CarbonInlineLoading description="Loading pack.toml..." />
+								</div>
+							{:else if rawPackToml}
+								<pre
+									class="max-h-48 overflow-y-auto rounded-none border border-border bg-muted p-3 font-mono text-xs">{rawPackToml}</pre>
+							{:else}
+								<CarbonEmptyState
+									title="No TOML preview"
+									description="Reload to fetch the generated pack.toml for this project."
+									actionLabel="Reload TOML"
+									onaction={loadRawTomls}
+								/>
+							{/if}
+						</div>
+					</CarbonTile>
+				{/if}
+
+				<!-- TAB 5: MAINTENANCE -->
 				{#if activeTab === 'maintenance'}
 					<CarbonTile class="space-y-6 rounded-none border-[#393939]">
 						<div class="border-b border-[#393939] pb-3">
 							<h2 class="text-base font-semibold text-white">Packwiz Maintenance & Live Serving</h2>
 							<p class="text-xs text-[#a8a8a8]">
-								Inspect raw generated TOML files, rebuild indices, and view live container bootstrap
-								URLs.
+								Rebuild indices and view live container bootstrap URLs.
 							</p>
 						</div>
 
@@ -1721,25 +1732,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								{/if}
 								Run Refresh
 							</CarbonButton>
-						</div>
-
-						<!-- Raw TOML Inspector -->
-						<div class="space-y-2">
-							<div class="flex items-center justify-between">
-								<span class="text-xs font-semibold text-white">Raw pack.toml Preview</span>
-								<CarbonButton
-									kind="ghost"
-									size="sm"
-									class="rounded-none text-xs"
-									onclick={loadRawTomls}
-									disabled={loadingRaw}
-								>
-									Reload TOML
-								</CarbonButton>
-							</div>
-							<pre
-								class="max-h-48 overflow-y-auto rounded-none border border-[#393939] bg-[#161616] p-3 font-mono text-xs text-[#c6c6c6]">{rawPackToml ||
-									'Loading pack.toml...'}</pre>
 						</div>
 					</CarbonTile>
 				{/if}
@@ -1803,10 +1795,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<CarbonInlineLoading description="Searching mods..." />
 					</div>
 				{:else if searchResults.length === 0}
-					<div class="space-y-2 py-16 text-center text-[#8d8d8d]">
-						<Package class="mx-auto h-10 w-10 text-[#525252]" />
-						<p class="text-sm font-semibold text-white">Enter a search query</p>
-					</div>
+					<CarbonEmptyState
+						title="Enter a search query"
+						description="Search the online catalog to add mods to this pack."
+					/>
 				{:else}
 					{#each searchResults as item (item.id)}
 						<CarbonTile
@@ -2010,7 +2002,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		mcVersion={pack.mc_version}
 		modLoader={pack.mod_loader}
 	/>
+	<ExportDialog
+		bind:open={exportDialogOpen}
+		packId={pack.id}
+		packName={pack.name}
+		mods={pack.mods}
+	/>
 {/if}
+<ManifestInspectorDialog bind:open={inspectorOpen} onOpenChange={(v) => (inspectorOpen = v)} />
 <CarbonConfirm
 	bind:open={confirmDeleteOpen}
 	title="Delete override file?"

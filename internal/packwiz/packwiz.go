@@ -8,7 +8,6 @@ package packwiz
 import (
 	"archive/zip"
 	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -51,6 +50,74 @@ type ModItem struct {
 	DownloadURL string `json:"download_url"`
 	FileSize    int64  `json:"file_size"`
 	Pinned      bool   `json:"pinned"`
+	// Hash/HashFormat persist the mod file checksum (sha256/sha512/sha1)
+	// captured at import or AddModFromURL time. Exporters reuse these
+	// instead of emitting placeholder hashes.
+	Hash       string `json:"hash,omitempty"`
+	HashFormat string `json:"hash_format,omitempty"`
+}
+
+// ExportOptions controls per-launcher export behaviour. All fields are
+// optional; DefaultExportOptions fills the launcher-safe defaults.
+type ExportOptions struct {
+	// IncludeClient excludes client-only mods when false (server pack).
+	IncludeClient bool `json:"include_client"`
+	// OptionalMode is "keep" (default), "required" (force required) or
+	// "optional" (mark files optional). It drives mrpack env flags and
+	// CurseForge required booleans.
+	OptionalMode string `json:"optional_mode"`
+	// Overrides is "all" (default), "none" or "configs-only"
+	// (only config/ paths are bundled).
+	Overrides string `json:"overrides"`
+	// Summary overrides the generated mrpack summary / instance notes.
+	Summary string `json:"summary"`
+}
+
+// DefaultExportOptions returns launcher-safe export defaults.
+func DefaultExportOptions() ExportOptions {
+	return ExportOptions{IncludeClient: true, OptionalMode: "keep", Overrides: "all"}
+}
+
+func (o ExportOptions) normalized() ExportOptions {
+	out := o
+	if out.OptionalMode == "" {
+		out.OptionalMode = "keep"
+	} else {
+		out.OptionalMode = strings.ToLower(strings.TrimSpace(out.OptionalMode))
+		if out.OptionalMode != "keep" && out.OptionalMode != "required" && out.OptionalMode != "optional" {
+			out.OptionalMode = "keep"
+		}
+	}
+	if out.Overrides == "" {
+		out.Overrides = "all"
+	} else {
+		out.Overrides = strings.ToLower(strings.TrimSpace(out.Overrides))
+		if out.Overrides != "all" && out.Overrides != "none" && out.Overrides != "configs-only" {
+			out.Overrides = "all"
+		}
+	}
+	return out
+}
+
+func resolveExportOptions(opts []ExportOptions) ExportOptions {
+	if len(opts) == 0 {
+		return DefaultExportOptions()
+	}
+	return opts[0].normalized()
+}
+
+// DroppedModsError is returned by CurseForge export when non-CurseForge
+// mods would be silently dropped. Callers must surface Dropped to the user
+// instead of shipping a partial pack.
+type DroppedModsError struct {
+	Dropped []string
+}
+
+func (e *DroppedModsError) Error() string {
+	if e == nil || len(e.Dropped) == 0 {
+		return "curseforge export would drop mods"
+	}
+	return fmt.Sprintf("curseforge export would drop %d non-CurseForge mod(s): %s", len(e.Dropped), strings.Join(e.Dropped, ", "))
 }
 
 type Pack struct {
@@ -447,6 +514,8 @@ func (m *Manager) readPack(id string) (*Pack, error) {
 					VersionID:   verID,
 					DownloadURL: tm.Download.URL,
 					Pinned:      pinned,
+					Hash:        tm.Download.Hash,
+					HashFormat:  tm.Download.HashFormat,
 				})
 			}
 		}
@@ -480,13 +549,20 @@ func (m *Manager) writePackFiles(p *Pack) error {
 			slug = sanitizeSlug(mod.Name)
 		}
 
+		hashFormat := mod.HashFormat
+		if hashFormat == "" {
+			// Preserve the historical packwiz default so download-only
+			// entries without a known checksum still carry a hash-format.
+			hashFormat = "sha256"
+		}
 		tm := tomlMod{
 			Name:     mod.Name,
 			FileName: mod.FileName,
 			Side:     mod.Side,
 			Download: tomlModDownload{
 				URL:        mod.DownloadURL,
-				HashFormat: "sha256",
+				HashFormat: hashFormat,
+				Hash:       mod.Hash,
 			},
 			Option: &struct {
 				Pinned bool `toml:"pinned,omitempty"`
@@ -611,8 +687,107 @@ func (m *Manager) ServePackFile(packID, relativePath string) ([]byte, string, er
 	return data, contentType, nil
 }
 
-// ExportMrpack generates a Modrinth .mrpack archive
-func (m *Manager) ExportMrpack(packID string, w io.Writer) error {
+// shouldBundleOverride reports whether a pack-relative override path is
+// included under the given Overrides policy.
+func shouldBundleOverride(rel, policy string) bool {
+	switch policy {
+	case "none":
+		return false
+	case "configs-only":
+		// Bundle server/client configuration surface only; datapacks,
+		// scripts and resource packs stay behind.
+		lower := strings.ToLower(rel)
+		return strings.HasPrefix(lower, "config/") ||
+			lower == "options.txt" ||
+			lower == "servers.dat" ||
+			strings.HasPrefix(lower, "config/")
+	default: // "all"
+		return true
+	}
+}
+
+func mrpackHashes(mod ModItem) map[string]string {
+	out := map[string]string{}
+	if mod.Hash == "" {
+		return out
+	}
+	format := strings.ToLower(strings.TrimSpace(mod.HashFormat))
+	if format == "" {
+		format = "sha256"
+	}
+	switch format {
+	case "sha512":
+		out["sha512"] = mod.Hash
+	case "sha1":
+		out["sha1"] = mod.Hash
+	default:
+		out["sha256"] = mod.Hash
+	}
+	return out
+}
+
+func mrpackEnv(side, optionalMode string) (client, server string) {
+	client, server = "required", "required"
+	switch side {
+	case "client":
+		server = "unsupported"
+	case "server":
+		client = "unsupported"
+	}
+	if optionalMode == "optional" {
+		if client == "required" {
+			client = "optional"
+		}
+		if server == "required" {
+			server = "optional"
+		}
+	}
+	return client, server
+}
+
+// bundleOverrides copies pack override files into zw under prefix,
+// honouring the Overrides policy. pack.toml, index.toml and mods/ are
+// never treated as overrides.
+func (m *Manager) bundleOverrides(zw *zip.Writer, packID, prefix, policy string) error {
+	if policy == "none" {
+		return nil
+	}
+	pDir := filepath.Clean(m.packDir(packID))
+	return filepath.Walk(pDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(pDir, path)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "pack.toml" || rel == "index.toml" || strings.HasPrefix(rel, "mods/") {
+			return nil
+		}
+		if !shouldBundleOverride(rel, policy) {
+			return nil
+		}
+		src, openErr := os.Open(path)
+		if openErr != nil {
+			return nil
+		}
+		dst, createErr := zw.Create(prefix + rel)
+		if createErr != nil {
+			_ = src.Close()
+			return createErr
+		}
+		_, copyErr := io.Copy(dst, io.LimitReader(src, 500*1024*1024))
+		_ = src.Close()
+		return copyErr
+	})
+}
+
+// ExportMrpack generates a Modrinth .mrpack archive. Stored per-mod
+// checksums are reused; mods without a known hash ship with an empty
+// hashes map instead of a placeholder.
+func (m *Manager) ExportMrpack(packID string, w io.Writer, opts ...ExportOptions) error {
+	o := resolveExportOptions(opts)
 	pack, err := m.GetPack(packID)
 	if err != nil {
 		return err
@@ -629,26 +804,16 @@ func (m *Manager) ExportMrpack(packID string, w io.Writer) error {
 		FileSize  int64             `json:"fileSize,omitempty"`
 	}
 
-	var files []mrpackFile
+	files := []mrpackFile{}
 	for _, mod := range pack.Mods {
-		clientEnv := "required"
-		serverEnv := "required"
-		switch mod.Side {
-		case "client":
-			serverEnv = "unsupported"
-		case "server":
-			clientEnv = "unsupported"
+		if !o.IncludeClient && mod.Side == "client" {
+			continue
 		}
-
+		clientEnv, serverEnv := mrpackEnv(mod.Side, o.OptionalMode)
 		files = append(files, mrpackFile{
-			Path: "mods/" + mod.FileName,
-			Hashes: map[string]string{
-				"sha512": hex.EncodeToString(sha512.New().Sum(nil)),
-			},
-			Env: map[string]string{
-				"client": clientEnv,
-				"server": serverEnv,
-			},
+			Path:      "mods/" + mod.FileName,
+			Hashes:    mrpackHashes(mod),
+			Env:       map[string]string{"client": clientEnv, "server": serverEnv},
 			Downloads: []string{mod.DownloadURL},
 			FileSize:  mod.FileSize,
 		})
@@ -669,12 +834,16 @@ func (m *Manager) ExportMrpack(packID string, w io.Writer) error {
 		deps["quilt-loader"] = pack.LoaderVersion
 	}
 
+	summary := o.Summary
+	if summary == "" {
+		summary = fmt.Sprintf("%s modpack created in Carbon Panel Studio", pack.Name)
+	}
 	mrIndex := map[string]any{
 		"formatVersion": 1,
 		"game":          "minecraft",
 		"versionId":     pack.Version,
 		"name":          pack.Name,
-		"summary":       fmt.Sprintf("%s modpack created in Carbon Panel Studio", pack.Name),
+		"summary":       summary,
 		"files":         files,
 		"dependencies":  deps,
 	}
@@ -694,45 +863,21 @@ func (m *Manager) ExportMrpack(packID string, w io.Writer) error {
 
 	// Bundle override files (configs, datapacks, options, ...) under overrides/,
 	// mirroring the packwiz layout Modrinth-compatible installers extract.
-	pDir := filepath.Clean(m.packDir(packID))
-	err = filepath.Walk(pDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		rel, relErr := filepath.Rel(pDir, path)
-		if relErr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if rel == "pack.toml" || rel == "index.toml" || strings.HasPrefix(rel, "mods/") {
-			return nil
-		}
-		src, openErr := os.Open(path)
-		if openErr != nil {
-			return nil
-		}
-		dst, createErr := zw.Create("overrides/" + rel)
-		if createErr != nil {
-			_ = src.Close()
-			return createErr
-		}
-		_, copyErr := io.Copy(dst, io.LimitReader(src, 500*1024*1024))
-		_ = src.Close()
-		return copyErr
-	})
-	if err != nil {
+	if _, err := zw.Create("overrides/"); err != nil {
 		return err
 	}
-
-	// Create overrides dir
-	if _, err := zw.Create("overrides/"); err != nil {
+	if err := m.bundleOverrides(zw, packID, "overrides/", o.Overrides); err != nil {
 		return err
 	}
 	return zw.Close()
 }
 
-// ExportCurseForge generates a CurseForge .zip modpack
-func (m *Manager) ExportCurseForge(packID string, w io.Writer) error {
+// ExportCurseForge generates a CurseForge .zip modpack. Unlike the legacy
+// behaviour it never silently drops mods: any non-CurseForge entry (Modrinth,
+// direct URL, or missing numeric IDs) aborts the export with a
+// *DroppedModsError listing every dropped mod so the UI can warn/block.
+func (m *Manager) ExportCurseForge(packID string, w io.Writer, opts ...ExportOptions) error {
+	o := resolveExportOptions(opts)
 	pack, err := m.GetPack(packID)
 	if err != nil {
 		return err
@@ -747,20 +892,33 @@ func (m *Manager) ExportCurseForge(packID string, w io.Writer) error {
 		Required  bool `json:"required"`
 	}
 
-	var cfFiles []cfFile
+	cfFiles := []cfFile{}
 	var modlistItems []string
+	var dropped []string
 
 	for _, mod := range pack.Mods {
+		if !o.IncludeClient && mod.Side == "client" {
+			continue
+		}
 		pID, _ := strconv.Atoi(mod.ProjectID)
 		fID, _ := strconv.Atoi(mod.VersionID)
-		if pID > 0 && fID > 0 {
-			cfFiles = append(cfFiles, cfFile{
-				ProjectID: pID,
-				FileID:    fID,
-				Required:  mod.Side != "client",
-			})
+		if mod.Platform != "curseforge" || pID <= 0 || fID <= 0 {
+			dropped = append(dropped, fmt.Sprintf("%s (%s)", mod.Name, mod.Slug))
+			continue
 		}
+		required := mod.Side != "client"
+		switch o.OptionalMode {
+		case "required":
+			required = true
+		case "optional":
+			required = false
+		}
+		cfFiles = append(cfFiles, cfFile{ProjectID: pID, FileID: fID, Required: required})
 		modlistItems = append(modlistItems, fmt.Sprintf("<li><a href=\"%s\">%s</a> (%s)</li>", mod.DownloadURL, mod.Name, mod.Side))
+	}
+	if len(dropped) > 0 {
+		_ = zw.Close()
+		return &DroppedModsError{Dropped: dropped}
 	}
 
 	loaderID := fmt.Sprintf("%s-%s", strings.ToLower(pack.ModLoader), pack.LoaderVersion)
@@ -802,6 +960,94 @@ func (m *Manager) ExportCurseForge(packID string, w io.Writer) error {
 	}
 
 	if _, err := zw.Create("overrides/"); err != nil {
+		return err
+	}
+	if err := m.bundleOverrides(zw, packID, "overrides/", o.Overrides); err != nil {
+		return err
+	}
+	return zw.Close()
+}
+
+// mmcLoaderUID maps a packwiz loader name to the MultiMC/Prism component UID.
+func mmcLoaderUID(loader string) string {
+	switch strings.ToLower(loader) {
+	case "fabric":
+		return "net.fabricmc.fabric-loader"
+	case "forge":
+		return "net.minecraftforge"
+	case "neoforge":
+		return "net.neoforged"
+	case "quilt":
+		return "org.quiltmc.quilt-loader"
+	default:
+		return ""
+	}
+}
+
+// ExportMMC generates a Prism/MultiMC instance.zip (mmc-pack.json +
+// instance.cfg) reusing the resolved packwiz mod list. Mod jars themselves
+// are not bundled (Studio stores URLs, not binaries); a modlist.txt with
+// download URLs plus the .minecraft/ overrides ship instead so launchers
+// import a ready-to-complete instance.
+func (m *Manager) ExportMMC(packID string, w io.Writer, opts ...ExportOptions) error {
+	o := resolveExportOptions(opts)
+	pack, err := m.GetPack(packID)
+	if err != nil {
+		return err
+	}
+
+	zw := zip.NewWriter(w)
+	defer func() { _ = zw.Close() }()
+
+	components := []map[string]string{
+		{"uid": "net.minecraft", "version": pack.MCVersion},
+	}
+	if uid := mmcLoaderUID(pack.ModLoader); uid != "" {
+		ver := pack.LoaderVersion
+		if ver == "" || ver == "latest" {
+			ver = "latest"
+		}
+		components = append(components, map[string]string{"uid": uid, "version": ver})
+	}
+	mmcPack := map[string]any{"components": components, "formatVersion": 1}
+	mmcBytes, err := json.MarshalIndent(mmcPack, "", "  ")
+	if err != nil {
+		return err
+	}
+	if f, err := zw.Create("mmc-pack.json"); err != nil {
+		return err
+	} else if _, err := f.Write(mmcBytes); err != nil {
+		return err
+	}
+
+	notes := o.Summary
+	if notes == "" {
+		notes = fmt.Sprintf("%s modpack exported from Carbon Panel Studio", pack.Name)
+	}
+	instanceCfg := fmt.Sprintf("InstanceType=OneSix\niconKey=default\nname=%s\nnotes=%s\n", pack.Name, notes)
+	if f, err := zw.Create("instance.cfg"); err != nil {
+		return err
+	} else if _, err := f.Write([]byte(instanceCfg)); err != nil {
+		return err
+	}
+
+	var modLines []string
+	for _, mod := range pack.Mods {
+		if !o.IncludeClient && mod.Side == "client" {
+			continue
+		}
+		modLines = append(modLines, fmt.Sprintf("%s | %s | %s | %s", mod.Name, mod.FileName, mod.Side, mod.DownloadURL))
+	}
+	if f, err := zw.Create("modlist.txt"); err != nil {
+		return err
+	} else if _, err := f.Write([]byte(strings.Join(modLines, "\n"))); err != nil {
+		return err
+	}
+
+	if _, err := zw.Create(".minecraft/"); err != nil {
+		return err
+	}
+	if err := m.bundleOverrides(zw, packID, ".minecraft/", o.Overrides); err != nil {
 		return err
 	}
 	return zw.Close()
@@ -940,8 +1186,12 @@ type MigrationReport struct {
 	Mods              []MigrationModItem `json:"mods"`
 }
 
-// ExportPackwizZip exports the full native Packwiz archive (.zip with pack.toml, index.toml, mods/, and overrides)
-func (m *Manager) ExportPackwizZip(packID string, w io.Writer) error {
+// ExportPackwizZip exports the full native Packwiz archive (.zip with pack.toml, index.toml, mods/, and overrides).
+// The native format always preserves side metadata, so IncludeClient /
+// OptionalMode / Summary are ignored; only the Overrides policy filters
+// which non-mod files are bundled.
+func (m *Manager) ExportPackwizZip(packID string, w io.Writer, opts ...ExportOptions) error {
+	o := resolveExportOptions(opts)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -953,7 +1203,7 @@ func (m *Manager) ExportPackwizZip(packID string, w io.Writer) error {
 	zw := zip.NewWriter(w)
 	defer func() { _ = zw.Close() }()
 
-	return filepath.Walk(pDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(pDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -966,6 +1216,12 @@ func (m *Manager) ExportPackwizZip(packID string, w io.Writer) error {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+
+		// Core packwiz files and mods/ always ship; only overrides are filtered.
+		isCore := rel == "pack.toml" || rel == "index.toml" || strings.HasPrefix(rel, "mods/")
+		if !isCore && !shouldBundleOverride(rel, o.Overrides) {
+			return nil
+		}
 
 		zf, err := zw.Create(rel)
 		if err != nil {
@@ -981,6 +1237,10 @@ func (m *Manager) ExportPackwizZip(packID string, w io.Writer) error {
 		_, err = io.Copy(zf, f)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	return zw.Close()
 }
 
 // RefreshPack re-indexes all mod and override files, recomputing hashes according to packwiz refresh
@@ -1132,6 +1392,8 @@ func (m *Manager) AddModFromURL(packID string, req DirectURLModRequest) (*ModIte
 		DownloadURL: req.DownloadURL,
 		FileSize:    written,
 		Pinned:      req.Pinned,
+		Hash:        hashStr,
+		HashFormat:  "sha256",
 	}
 
 	if err := m.AddMod(packID, modItem); err != nil {

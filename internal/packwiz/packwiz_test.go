@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package packwiz
 
 import (
@@ -96,7 +95,31 @@ func TestPackwizManager_CreateUpdateExport(t *testing.T) {
 	}
 	assert.True(t, foundIndex)
 
-	// Export CurseForge .zip
+	// CurseForge export must block on non-CurseForge mods instead of
+	// silently dropping them (test-pack holds a Modrinth Sodium).
+	var cfBlocked bytes.Buffer
+	err = mgr.ExportCurseForge("test-pack", &cfBlocked)
+	require.Error(t, err)
+	var dropped *DroppedModsError
+	require.ErrorAs(t, err, &dropped)
+	require.Len(t, dropped.Dropped, 1)
+	assert.Contains(t, dropped.Dropped[0], "Sodium")
+
+	// Add a CurseForge mod and verify a CF-only pack exports cleanly.
+	err = mgr.AddMod("test-pack", ModItem{
+		Slug:        "jei",
+		Name:        "Just Enough Items",
+		FileName:    "jei-1.20.1.jar",
+		Side:        "both",
+		Platform:    "curseforge",
+		ProjectID:   "238222",
+		VersionID:   "4635832",
+		DownloadURL: "https://edge.forgecdn.net/files/4635/832/jei-1.20.1.jar",
+	})
+	require.NoError(t, err)
+	err = mgr.DeleteMod("test-pack", "sodium")
+	require.NoError(t, err)
+
 	var cfBuf bytes.Buffer
 	err = mgr.ExportCurseForge("test-pack", &cfBuf)
 	assert.NoError(t, err)
