@@ -95,6 +95,15 @@ func (f *fakeStore) UpdateServerStatus(_ context.Context, id string, status db.S
 	return nil
 }
 
+func (f *fakeStore) UpdateServerStatusReason(_ context.Context, id string, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.servers[id]; ok {
+		s.StatusReason = reason
+	}
+	return nil
+}
+
 func (f *fakeStore) UpdateServerContainerID(_ context.Context, id string, containerID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -110,6 +119,8 @@ type fakeClient struct {
 	summary        *container.Summary
 	state          *docker.ContainerState
 	observeErr     error
+	logLines       []string
+	logErr         error
 	started        []string
 	recreations    int
 	recreateErr    error
@@ -129,6 +140,13 @@ func (c *fakeClient) ObserveContainer(_ context.Context, _ string) (*docker.Cont
 		return nil, c.observeErr
 	}
 	return c.state, nil
+}
+
+func (c *fakeClient) TailContainerLogs(_ context.Context, _ string, _ int) ([]string, error) {
+	if c.logErr != nil {
+		return nil, c.logErr
+	}
+	return c.logLines, nil
 }
 
 func (c *fakeClient) StartContainer(_ context.Context, containerID string) error {
@@ -577,6 +595,10 @@ func (c *sequencedClient) ObserveContainer(context.Context, string) (*docker.Con
 
 func (c *sequencedClient) StartContainer(context.Context, string) error { return nil }
 
+func (c *sequencedClient) TailContainerLogs(context.Context, string, int) ([]string, error) {
+	return nil, nil
+}
+
 func (c *sequencedClient) StopContainerWithin(context.Context, string, time.Duration) (bool, error) {
 	return true, nil
 }
@@ -914,5 +936,105 @@ func TestReconcileDirectPortServer_CallsUpdateRouteOnStatusChange(t *testing.T) 
 
 	if proxy.count() == 0 {
 		t.Fatalf("expected proxy.UpdateServerRoute to be called for direct-port server on status change")
+	}
+}
+
+func TestReconcileBootCrashBecomesErrorWithReason(t *testing.T) {
+	// Homestead shape: the JVM exits 1 on a missing hard dependency while the
+	// entrypoint keeps the container alive. Docker health never goes healthy,
+	// so without log evidence the panel would sit on STARTING forever.
+	boot := time.Date(2026, 11, 6, 5, 2, 49, 0, time.UTC)
+	line := func(min, sec int, msg string) string {
+		return time.Date(2026, 11, 6, 5, min, sec, 0, time.UTC).Format(time.RFC3339Nano) + " " + msg
+	}
+	server := &db.Server{ID: "s1", Name: "Homestead", NodeID: "default", ContainerID: "c1", Status: db.StatusStarting}
+	store := newFakeStore(server)
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusUnhealthy, StartedAt: boot},
+		logLines: []string{
+			line(2, 51, "[init] Starting the Minecraft server..."),
+			line(2, 56, "[main/INFO]: Loading Minecraft 1.20.1 with Fabric Loader 0.19.5"),
+			line(3, 10, "[main/INFO]:  - Mod 'Chipped' (chipped) 3.0.7 requires version 3.1.1 or later of athena, which is missing!"),
+		},
+	}
+	bus := &fakeBus{}
+
+	r := newTestReconciler(t, store, cli, &fakeProxy{}, bus)
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("ReconcileServer: %v", err)
+	}
+
+	got, err := store.GetServer(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != db.StatusError {
+		t.Fatalf("status = %q, want error", got.Status)
+	}
+	if !contains(got.StatusReason, "athena") {
+		t.Fatalf("reason = %q, want the missing dependency named", got.StatusReason)
+	}
+}
+
+func TestReconcileBootWithoutCrashEvidenceStaysStarting(t *testing.T) {
+	boot := time.Date(2026, 11, 6, 5, 2, 49, 0, time.UTC)
+	line := func(min, sec int, msg string) string {
+		return time.Date(2026, 11, 6, 5, min, sec, 0, time.UTC).Format(time.RFC3339Nano) + " " + msg
+	}
+	server := &db.Server{ID: "s1", Name: "Homestead", NodeID: "default", ContainerID: "c1", Status: db.StatusStarting}
+	store := newFakeStore(server)
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusUnhealthy, StartedAt: boot},
+		logLines: []string{
+			line(2, 51, "[init] Starting the Minecraft server..."),
+			line(2, 56, "[main/INFO]: Loading Minecraft 1.20.1 with Fabric Loader 0.19.5"),
+			line(2, 58, "[main/INFO]: Preparing spawn area: 10%"),
+		},
+	}
+
+	r := newTestReconciler(t, store, cli, &fakeProxy{}, &fakeBus{})
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("ReconcileServer: %v", err)
+	}
+
+	got, err := store.GetServer(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != db.StatusStarting {
+		t.Fatalf("status = %q, want starting: a slow boot without crash evidence is not an error", got.Status)
+	}
+	if got.StatusReason != "" {
+		t.Fatalf("reason = %q, want empty", got.StatusReason)
+	}
+}
+
+func TestReconcileRecoveryClearsStatusReason(t *testing.T) {
+	server := &db.Server{
+		ID: "s1", Name: "Homestead", NodeID: "default", ContainerID: "c1",
+		Status: db.StatusError, StatusReason: "Minecraft server process failed (exit code 1)",
+	}
+	store := newFakeStore(server)
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "c1"},
+		state:   &docker.ContainerState{ContainerID: "c1", Status: db.StatusRunning},
+	}
+
+	r := newTestReconciler(t, store, cli, &fakeProxy{}, &fakeBus{})
+	if err := r.ReconcileServer(context.Background(), "s1"); err != nil {
+		t.Fatalf("ReconcileServer: %v", err)
+	}
+
+	got, err := store.GetServer(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != db.StatusRunning {
+		t.Fatalf("status = %q, want running", got.Status)
+	}
+	if got.StatusReason != "" {
+		t.Fatalf("reason = %q, a recovered server must not show a stale crash", got.StatusReason)
 	}
 }

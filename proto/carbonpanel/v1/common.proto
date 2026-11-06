@@ -130,6 +130,11 @@ message Server {
   // boots from the platform, but displays use this loader. UNSPECIFIED when
   // the server did not come from a modpack or the loader is unknown.
   ModLoader modpack_loader = 46;
+
+  // Human-readable cause of an error status, e.g. a crashed game process
+  // detected in the boot log. Display metadata only; empty unless status is
+  // error, and cleared as soon as any other status is adopted.
+  string status_reason = 47;
 }
 
 // Extra port mapping for container

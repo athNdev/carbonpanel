@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
@@ -98,4 +97,22 @@ func TestPreserveStoredStatus_BootGraceSurvivesUnhealthyProbes(t *testing.T) {
 		"a running server that fails health probes is genuinely unhealthy")
 	assert.False(t, preserveStoredStatus(storage.StatusStarting, storage.StatusRunning),
 		"a boot that finished must converge to running")
+}
+
+// TestPreserveStoredStatus_ErrorSurvivesRetryLoop keeps a recorded game crash
+// visible: while the entrypoint retries inside a live container, Docker
+// reports starting/unhealthy and those readings must not wash the error out
+// on every list refresh. A real recovery (running) or stop still wins.
+func TestPreserveStoredStatus_ErrorSurvivesRetryLoop(t *testing.T) {
+	for _, live := range []storage.ServerStatus{
+		storage.StatusStarting,
+		storage.StatusUnhealthy,
+	} {
+		assert.True(t, preserveStoredStatus(storage.StatusError, live),
+			"a recorded crash must survive live status %q", live)
+	}
+	assert.False(t, preserveStoredStatus(storage.StatusError, storage.StatusRunning),
+		"a recovered server must converge to running")
+	assert.False(t, preserveStoredStatus(storage.StatusError, storage.StatusStopped),
+		"a stopped server must converge to stopped")
 }
