@@ -759,7 +759,7 @@ one at https://mozilla.org/MPL/2.0/.
 										{/if}
 									</div>
 									{#if prop.envVar}
-										<code class="font-mono text-xs text-[#8d8d8d]">{prop.envVar}</code>
+										<code class="font-mono text-xs break-all text-[#8d8d8d]">{prop.envVar}</code>
 									{/if}
 									{#if prop.description}
 										<p class="mt-1 text-xs text-[#a8a8a8]">{prop.description}</p>
@@ -921,7 +921,7 @@ one at https://mozilla.org/MPL/2.0/.
 							</div>
 						{/if}
 
-						<div class="grid gap-4 lg:grid-cols-2">
+						<div class="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
 							{#each primaryCategoryProps as prop (prop.key)}
 								{@render fieldCard(prop)}
 							{/each}
@@ -947,7 +947,7 @@ one at https://mozilla.org/MPL/2.0/.
 									</span>
 								</button>
 								{#if showAdvancedCurseForge}
-									<div class="mt-4 grid gap-4 lg:grid-cols-2">
+									<div class="mt-4 grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
 										{#each advancedCategoryProps as prop (prop.key)}
 											{@render fieldCard(prop)}
 										{/each}

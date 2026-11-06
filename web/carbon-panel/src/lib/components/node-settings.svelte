@@ -861,7 +861,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <CarbonModal
 	bind:open={showDetectedDialog}
 	title="Docker daemons detected"
-	description="Auto-detect found reachable Docker daemons on this host's network. Register the ones you want the placement engine to use — you can adjust names, IPs, and limits later."
+	description="Register the detected daemons you want to use. Names, IPs, and limits can change later."
 	size="xl"
 	hasFooter={false}
 >

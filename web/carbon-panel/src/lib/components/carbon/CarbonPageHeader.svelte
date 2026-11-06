@@ -24,7 +24,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <div
-	class="flex flex-col justify-between gap-4 border-b border-[#393939] pb-4 sm:flex-row sm:items-center {className}"
+	class="flex flex-col justify-between gap-4 border-b border-[#393939] pb-4 sm:flex-row sm:flex-wrap sm:items-center {className}"
 >
 	<div class="min-w-0">
 		<div class="flex min-w-0 flex-wrap items-center gap-2">

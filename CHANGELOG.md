@@ -21,6 +21,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Profile and Preferences popups; stop from deep sleep.
 - Inter + JetBrains Mono webfonts (vendored, OFL).
 - Showcase screenshot flow (devstack + journey plan + CD workflow).
+- Landing product tour: borderless 2x feature crops with side copy (journey clips viewport shots to testid anchors).
+- Studio list Export dropdown covering every launcher format; Stop buttons for deep-sleep/frozen servers on dashboard and server list.
 
 ### Fixed
 
@@ -35,6 +37,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Tab indicator/confirm dialogs layering (indicator above active tab; modals teleport to body).
 - Module table overflows; CarbonButton mapping sweep.
 - Dependency vuln bumps (brotli, compress, x/crypto).
+- Responsive overflow pass: wrapping page headers, grid track minimums, shortened node tags, breaking config values; modpack grids go single-column below lg.
+- Trimmed the Docker auto-detect dialog copy.
 
 ## [3.0.0-beta.3] - 2026-10-21
 

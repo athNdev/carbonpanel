@@ -36,7 +36,12 @@ one at https://mozilla.org/MPL/2.0/.
 	} from '$lib/proto/carbonpanel/v1/node_pb';
 	import { formatRpcError } from '$lib/api/rpc-error';
 	import { serversStore, sortServersByActivity } from '$lib/stores/servers';
-	import { CarbonButton, CarbonTag, CarbonErrorState } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonTag,
+		CarbonErrorState,
+		CarbonPageHeader
+	} from '$lib/components/carbon';
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 
 	// Dashboard data
@@ -379,22 +384,14 @@ one at https://mozilla.org/MPL/2.0/.
 	</div>
 {:else}
 	<div class="space-y-6 bg-[#161616] text-[#f4f4f4]">
-		<!-- Carbon Page Header -->
-		<div
-			class="flex flex-col justify-between gap-4 border-b border-[#393939] pb-4 sm:flex-row sm:items-center"
+		<CarbonPageHeader
+			title="Cluster Overview"
+			description="Hardware utilization, game servers status, and network routing topology"
 		>
-			<div>
-				<div class="flex items-center gap-2">
-					<h1 class="font-sans text-2xl font-light tracking-tight text-[#f4f4f4]">
-						Cluster Overview
-					</h1>
-					<CarbonTag type="blue" size="sm">Carbon Panel</CarbonTag>
-				</div>
-				<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
-					Hardware utilization, game servers status, and network routing topology
-				</p>
-			</div>
-			<div class="flex items-center gap-2">
+			{#snippet tag()}
+				<CarbonTag type="blue" size="sm">Carbon Panel</CarbonTag>
+			{/snippet}
+			{#snippet actions()}
 				<CarbonButton
 					kind="secondary"
 					size="md"
@@ -414,12 +411,12 @@ one at https://mozilla.org/MPL/2.0/.
 					<Plus class="h-4 w-4" />
 					<span>Create Server</span>
 				</CarbonButton>
-			</div>
-		</div>
+			{/snippet}
+		</CarbonPageHeader>
 
 		<!-- Carbon KPI Tiles -->
 		<div
-			class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+			class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0"
 			data-testid="showcase-kpi-tiles"
 		>
 			<!-- Tile 1: Total Servers -->
@@ -659,7 +656,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		<!-- Server list & Recent activity Grid -->
-		<div class="grid gap-6 lg:grid-cols-7">
+		<div class="grid gap-6 lg:grid-cols-7 [&>*]:min-w-0">
 			<!-- Carbon DataTable: Server Overview (4 cols on lg) -->
 			<div
 				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] lg:col-span-4"
@@ -807,6 +804,17 @@ one at https://mozilla.org/MPL/2.0/.
 														>
 															<PlayCircle class="h-4 w-4" />
 														</button>
+														{#if server.status === ServerStatus.DEEPSLEEP}
+															<button
+																type="button"
+																onclick={() => handleServerAction('stop', server)}
+																class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#da1e28] transition-colors hover:bg-[#393939] hover:text-[#ff8389]"
+																title="Stop Server"
+																aria-label="Stop Server"
+															>
+																<StopCircle class="h-4 w-4" />
+															</button>
+														{/if}
 													{:else if server.status === ServerStatus.PAUSED}
 														<button
 															type="button"
@@ -816,6 +824,15 @@ one at https://mozilla.org/MPL/2.0/.
 															aria-label="Resume Server"
 														>
 															<PlayCircle class="h-4 w-4" />
+														</button>
+														<button
+															type="button"
+															onclick={() => handleServerAction('stop', server)}
+															class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#da1e28] transition-colors hover:bg-[#393939] hover:text-[#ff8389]"
+															title="Stop Server"
+															aria-label="Stop Server"
+														>
+															<StopCircle class="h-4 w-4" />
 														</button>
 													{:else if server.status === ServerStatus.RUNNING}
 														<button

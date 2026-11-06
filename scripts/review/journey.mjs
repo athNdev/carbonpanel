@@ -88,6 +88,7 @@ async function main() {
   const context = await browser.newContext({
     viewport: plan.viewport ?? { width: 1440, height: 900 },
     ignoreHTTPSErrors: true,
+    deviceScaleFactor: plan.deviceScaleFactor ?? 1,
   });
   const page = await context.newPage();
 
@@ -228,12 +229,23 @@ async function main() {
         await page.waitForTimeout(120);
         const file = join(out, `${spec.screenshot}.png`);
         if (spec.element) {
-          // Cropped capture: scroll the element into view, then shoot only
-          // it. Showcase images stay focused on the feature in question
-          // instead of a full page of chrome.
+          // Cropped capture: scroll the element into view, measure its box,
+          // then clip a viewport screenshot to it. A viewport-clipped shot
+          // renders through the same path as a full page (locator-level
+          // element shots have rendered CSS-var-themed content wrong).
           const target = page.locator(spec.element).first();
           await target.scrollIntoViewIfNeeded({ timeout: 15000 });
-          await target.screenshot({ path: file });
+          const box = await target.boundingBox({ timeout: 15000 });
+          if (!box) throw new Error(`no bounding box for ${spec.element}`);
+          const vp = page.viewportSize() ?? { width: 1440, height: 900 };
+          const clip = {
+            x: Math.max(0, Math.round(box.x)),
+            y: Math.max(0, Math.round(box.y)),
+            width: Math.min(Math.round(box.width), vp.width - Math.max(0, Math.round(box.x))),
+            height: Math.min(Math.round(box.height), vp.height - Math.max(0, Math.round(box.y))),
+          };
+          if (clip.width < 2 || clip.height < 2) throw new Error(`empty clip for ${spec.element}`);
+          await page.screenshot({ path: file, clip });
         } else {
           await page.screenshot({ path: file, fullPage: spec.fullPage ?? false });
         }
