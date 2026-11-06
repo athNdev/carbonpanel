@@ -71,7 +71,7 @@ func TestPackwizHandler_ExportMrpackWithOptions(t *testing.T) {
 			rc, err := f.Open()
 			require.NoError(t, err)
 			indexRaw, err = io.ReadAll(rc)
-			rc.Close()
+			_ = rc.Close()
 			require.NoError(t, err)
 		}
 	}

@@ -91,11 +91,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		toast.success(`Downloaded ${filename}`);
 	}
 
-	function close() {
-		open = false;
-		onOpenChange?.(false);
-	}
-
 	let filteredMods = $derived.by(() => {
 		if (!inspection) return [];
 		return inspection.mods.filter((m) => {

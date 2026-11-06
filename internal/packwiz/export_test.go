@@ -61,7 +61,7 @@ func readZipFile(t *testing.T, zr *zip.Reader, name string) []byte {
 		if f.Name == name {
 			rc, err := f.Open()
 			require.NoError(t, err)
-			defer rc.Close()
+			defer func() { _ = rc.Close() }()
 			var buf bytes.Buffer
 			_, err = buf.ReadFrom(rc)
 			require.NoError(t, err)
