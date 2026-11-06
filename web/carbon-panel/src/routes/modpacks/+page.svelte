@@ -630,7 +630,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Modpack Packages Grid with CarbonTiles -->
 	<div
-		class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+		class="motion-stagger grid gap-4 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0"
 		data-testid="showcase-modpack-grid"
 	>
 		{#each displayModpacks as modpack, i (modpack.id)}

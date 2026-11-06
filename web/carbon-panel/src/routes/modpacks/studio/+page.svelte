@@ -29,13 +29,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		Copy,
 		UploadCloud,
 		Loader2,
-		Calendar
+		Calendar,
+		Download,
+		ChevronDown
 	} from '@lucide/svelte';
+	import {
+		DropdownMenu,
+		DropdownMenuContent,
+		DropdownMenuItem,
+		DropdownMenuTrigger
+	} from '$lib/components/ui/dropdown-menu';
 	import { toast } from 'svelte-sonner';
 	import { CarbonErrorState } from '$lib/components/carbon';
 	import { apiFetch } from '$lib/api/fetch';
 	import {
 		DEFAULT_EXPORT_OPTIONS,
+		EXPORT_FORMATS,
 		downloadPackExport,
 		formatExportLabel,
 		type PackExportFormat
@@ -399,14 +408,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 	{:else}
-		<div class="motion-stagger grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+		<div class="motion-stagger grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
 			{#each filteredPacks as pack (pack.id)}
 				<CarbonTile
 					class="group flex flex-col justify-between rounded-none border-[#393939] p-5 transition-colors hover:border-[#525252]"
 				>
 					<div class="space-y-3">
 						<!-- Tile Header -->
-						<div class="flex items-start justify-between gap-3">
+						<div class="flex flex-wrap items-start justify-between gap-3">
 							<div class="min-w-0 flex-1 space-y-1">
 								<h3 class="truncate text-lg font-semibold">
 									<a
@@ -477,46 +486,38 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</div>
 
 						<div class="flex flex-wrap items-center justify-end gap-1.5">
-							<CarbonButton
-								kind="tertiary"
-								size="sm"
-								class="h-8 px-2 text-xs"
-								onclick={() => exportPack(pack.id, 'packwiz', pack.name)}
-								disabled={exportingPack === `${pack.id}-packwiz`}
-								title="Export Native Packwiz .zip"
-							>
-								Packwiz
-							</CarbonButton>
-							<CarbonButton
-								kind="tertiary"
-								size="sm"
-								class="h-8 px-2 text-xs"
-								onclick={() => exportPack(pack.id, 'mrpack', pack.name)}
-								disabled={exportingPack === `${pack.id}-mrpack`}
-								title="Export Modrinth .mrpack"
-							>
-								.mrpack
-							</CarbonButton>
-							<CarbonButton
-								kind="tertiary"
-								size="sm"
-								class="h-8 px-2 text-xs"
-								onclick={() => exportPack(pack.id, 'curseforge', pack.name)}
-								disabled={exportingPack === `${pack.id}-curseforge`}
-								title="Export CurseForge .zip (blocked when mods lack CurseForge IDs)"
-							>
-								CurseForge
-							</CarbonButton>
-							<CarbonButton
-								kind="tertiary"
-								size="sm"
-								class="h-8 px-2 text-xs"
-								onclick={() => exportPack(pack.id, 'mmc', pack.name)}
-								disabled={exportingPack === `${pack.id}-mmc`}
-								title="Export Prism/MultiMC instance.zip"
-							>
-								MMC
-							</CarbonButton>
+							<DropdownMenu>
+								<DropdownMenuTrigger>
+									{#snippet child({ props })}
+										<button
+											type="button"
+											{...props}
+											disabled={exportingPack !== null}
+											aria-label={`Export ${pack.name}`}
+											class="flex h-8 cursor-pointer items-center gap-1.5 rounded-none border border-[#393939] bg-transparent px-2 font-sans text-xs text-[#c6c6c6] transition-colors hover:border-[#6f6f6f] hover:text-white disabled:opacity-50"
+										>
+											<Download class="h-3.5 w-3.5" />
+											Export
+											<ChevronDown class="h-3 w-3" />
+										</button>
+									{/snippet}
+								</DropdownMenuTrigger>
+								<DropdownMenuContent
+									align="end"
+									class="rounded-none border border-[#393939] bg-[#161616] p-1 text-[#f4f4f4]"
+								>
+									{#each EXPORT_FORMATS as f (f.id)}
+										<DropdownMenuItem
+											class="flex cursor-pointer flex-col items-start gap-0.5 rounded-none px-3 py-2 text-xs text-[#f4f4f4] hover:bg-[#353535]"
+											onclick={() => exportPack(pack.id, f.id, pack.name)}
+											title={f.hint}
+										>
+											<span class="font-semibold">{f.label}</span>
+											<span class="text-[#8d8d8d]">{f.hint}</span>
+										</DropdownMenuItem>
+									{/each}
+								</DropdownMenuContent>
+							</DropdownMenu>
 
 							<CarbonButton
 								kind="primary"

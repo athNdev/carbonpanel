@@ -27,6 +27,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		onclose?: () => void;
 		class?: string;
 		children?: Snippet;
+		[key: string]: unknown;
 	}
 
 	let {
@@ -36,7 +37,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		pulse = false,
 		onclose,
 		class: className = '',
-		children
+		children,
+		...restProps
 	}: Props = $props();
 
 	const typeClasses = {
@@ -62,6 +64,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <span
+	{...restProps}
 	class="inline-flex shrink-0 items-center gap-1 rounded-none font-mono font-semibold tracking-wider whitespace-nowrap uppercase transition-[color,background-color,border-color] duration-[var(--motion-fast)] ease-[var(--ease-out-quart)] select-none {pulse
 		? 'motion-pulse'
 		: ''} {sizeClasses[size]} {typeClasses[type]} {className}"

@@ -53,6 +53,11 @@ bun run test
   `CarbonTabs.test.ts` fail if the policy is removed.
 - Loading, empty and error states are part of the change, not follow-up work.
 - A frontend-only fix must not bypass an authorization check in the backend.
+- No page may scroll horizontally at 360/768/1440 widths. Wide tables and tab
+  strips scroll inside their own `overflow-x-auto`/`scroll-strip` container;
+  grid children get `min-w-0` (or `[&>*]:min-w-0` on the grid) so tracks cannot
+  blow out; UUIDs and other unbreakable strings are shortened or `break-all`.
+  Verify with the overflow audit pattern before calling a surface responsive.
 
 # Read next
 

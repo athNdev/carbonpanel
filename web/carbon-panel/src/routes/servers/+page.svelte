@@ -593,7 +593,7 @@ one at https://mozilla.org/MPL/2.0/.
 										</button>
 									{/if}
 
-									{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.STARTING}
+									{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.STARTING || server.status === ServerStatus.DEEPSLEEP || server.status === ServerStatus.PAUSED}
 										<button
 											title="Stop"
 											aria-label={`Stop server ${server.name}`}
@@ -655,7 +655,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon Tile / Grid Layout -->
 	{:else}
-		<div class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+		<div class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">
 			{#each filteredServers as server (server.id)}
 				<div
 					class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4 transition-colors hover:border-[#525252]"
@@ -699,7 +699,7 @@ one at https://mozilla.org/MPL/2.0/.
 										<Play class="h-3 w-3 fill-current" />
 									</button>
 								{/if}
-								{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.STARTING}
+								{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.STARTING || server.status === ServerStatus.DEEPSLEEP || server.status === ServerStatus.PAUSED}
 									<button
 										title="Stop"
 										aria-label={`Stop server ${server.name}`}

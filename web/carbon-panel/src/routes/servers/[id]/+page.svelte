@@ -398,7 +398,9 @@ one at https://mozilla.org/MPL/2.0/.
 						{getStatusDisplayName(server.status)}
 					</CarbonTag>
 					{#if server.nodeId}
-						<CarbonTag type="blue" size="sm">NODE: {server.nodeId}</CarbonTag>
+						<CarbonTag type="blue" size="sm" title={server.nodeId}>
+							NODE: {server.nodeId.split('-')[0]}
+						</CarbonTag>
 					{/if}
 				{/if}
 			{/snippet}
@@ -579,7 +581,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon Metric Tiles (ZERO rounded corners) -->
 		<div
-			class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+			class="motion-stagger grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
 			data-testid="showcase-runtime-tiles"
 		>
 			<!-- Tile 1: Status & Heartbeat -->

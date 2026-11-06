@@ -17,9 +17,11 @@ test('both studio pages share one export helper', () => {
 	assert.match(detail, /from '..\/export-dialog.svelte'/);
 });
 
-test('studio list exposes the missing CurseForge and MMC exports', () => {
-	assert.match(studioList, /exportPack\(pack\.id, 'curseforge'/);
-	assert.match(studioList, /exportPack\(pack\.id, 'mmc'/);
+test('studio list collapses every export format into one Export dropdown', () => {
+	assert.match(studioList, /EXPORT_FORMATS/);
+	assert.match(studioList, /DropdownMenu/);
+	assert.match(studioList, /exportPack\(pack\.id, f\.id, pack\.name\)/);
+	assert.doesNotMatch(studioList, /exportPack\(pack\.id, 'curseforge', pack\.name\)/);
 });
 
 test('detail header collapses exports into a single Export entry', () => {
