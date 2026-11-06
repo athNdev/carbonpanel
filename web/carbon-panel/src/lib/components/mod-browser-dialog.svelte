@@ -100,6 +100,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let selectedDependencies = $state<Record<string, boolean>>({});
 	let installing = $state(false);
 
+	let selectedDepIds = $derived(
+		Object.keys(selectedDependencies).filter((k) => selectedDependencies[k])
+	);
+	let installLabel = $derived(
+		selectedDepIds.length > 0 ? 'Install with all dependencies' : 'Install'
+	);
+
 	let filterByVersion = $state(true);
 
 	// Filter Bar State
@@ -256,13 +263,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (!versionsSequence.isCurrent(seq)) return;
 			versions = data.versions || [];
 			if (versions.length > 0) {
-				selectedVersion = versions[0];
-				// Pre-select required dependencies
-				for (const dep of selectedVersion.dependencies || []) {
-					if (dep.dependency_type === 'required') {
-						selectedDependencies[dep.project_id] = true;
-					}
-				}
+				selectVersion(versions[0]);
 			}
 		} catch (err) {
 			if (!versionsSequence.isCurrent(seq)) return;
@@ -273,18 +274,122 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	function selectVersion(ver: ModVersion) {
+		selectedVersion = ver;
+		selectedDependencies = {};
+		for (const dep of ver.dependencies || []) {
+			if (!dep.project_id) continue;
+			if ((dep.dependency_type || '').toLowerCase() === 'required') {
+				selectedDependencies[dep.project_id] = true;
+			}
+		}
+	}
+
+	interface InstallItem {
+		name: string;
+		file_name: string;
+		download_url: string;
+	}
+
+	async function resolveDependencyInstallItems(
+		deps: ModDependency[],
+		platform: string,
+		loaderVal: string,
+		versionVal: string,
+		depth: number,
+		visited: Set<string>
+	): Promise<InstallItem[]> {
+		if (depth > 3) return [];
+		const collected: InstallItem[] = [];
+		const wanted = (deps || []).filter((d) => d.project_id && selectedDependencies[d.project_id]);
+		for (const dep of wanted) {
+			const depId = dep.project_id as string;
+			const key = `${platform.toLowerCase()}:${depId.toLowerCase()}`;
+			if (visited.has(key)) continue;
+			visited.add(key);
+			try {
+				const vParams = new URLSearchParams({
+					platform,
+					loader: loaderVal,
+					mc_version: versionVal
+				});
+				const vRes = await apiFetch(
+					`/api/v1/servers/${server.id}/mods/${depId}/versions?${vParams.toString()}`
+				);
+				if (!vRes.ok) continue;
+				const vData = await vRes.json();
+				const depVersions = vData.versions || [];
+				if (depVersions.length === 0) continue;
+				const ver = depVersions[0];
+				if (!ver.file_name || !ver.download_url) continue;
+				// Fill in a human-readable name when the versions response
+				// only carried the raw project ID.
+				if (!dep.title) dep.title = ver.name || ver.version_number || depId;
+				// Pre-select this dependency's own required deps so transitive
+				// requirements are included in the same install.
+				for (const trans of ver.dependencies || []) {
+					if (!trans.project_id) continue;
+					if ((trans.dependency_type || '').toLowerCase() === 'required') {
+						const tKey = `${platform.toLowerCase()}:${trans.project_id.toLowerCase()}`;
+						if (!visited.has(tKey) && selectedDependencies[trans.project_id] === undefined) {
+							selectedDependencies[trans.project_id] = true;
+						}
+					}
+				}
+				collected.push({
+					name: dep.title || ver.name || ver.version_number || depId,
+					file_name: ver.file_name,
+					download_url: ver.download_url
+				});
+				const transitive = await resolveDependencyInstallItems(
+					ver.dependencies || [],
+					platform,
+					loaderVal,
+					versionVal,
+					depth + 1,
+					visited
+				);
+				collected.push(...transitive);
+			} catch (err) {
+				console.warn(`Skipping unresolvable dependency ${depId}:`, err);
+			}
+		}
+		return collected;
+	}
+
 	async function installMod() {
 		if (!selectedVersion || !selectedMod) return;
 
 		installing = true;
 		try {
-			const items = [
+			const loaderVal =
+				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(server.modLoader);
+			const versionVal =
+				activeFilters.find((f) => f.key === 'version')?.value ||
+				(filterByVersion ? server.mcVersion || '' : '');
+			const platform = selectedMod.platform;
+
+			const items: InstallItem[] = [
 				{
 					name: selectedMod.title,
-					filename: selectedVersion.file_name,
+					file_name: selectedVersion.file_name,
 					download_url: selectedVersion.download_url
 				}
 			];
+
+			const visited = new Set<string>([
+				`${platform.toLowerCase()}:${selectedMod.id.toLowerCase()}`,
+				`slug:${(selectedMod.slug || '').toLowerCase()}`
+			]);
+			const depItems = await resolveDependencyInstallItems(
+				selectedVersion.dependencies || [],
+				platform,
+				loaderVal,
+				versionVal,
+				0,
+				visited
+			);
+			items.push(...depItems);
 
 			const res = await apiFetch(`/api/v1/servers/${server.id}/mods/install`, {
 				method: 'POST',
@@ -292,7 +397,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				body: JSON.stringify({ items })
 			});
 
-			const data = await res.json();
+			const text = await res.text();
+			let data: { success?: boolean; message?: string; errors?: string[] } | null = null;
+			try {
+				data = JSON.parse(text);
+			} catch {
+				data = null;
+			}
+			if (!res.ok || !data) {
+				throw new Error(text || `HTTP ${res.status}`);
+			}
 			if (data.success) {
 				toast.success(data.message || `Installed ${selectedMod.title}`);
 				selectedMod.installed = true;
@@ -301,11 +415,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				}
 				selectedMod = null;
 			} else {
-				toast.error(data.message || 'Failed to install mod');
+				const detail = (data.errors || []).join('; ');
+				toast.error(detail ? `${data.message} ${detail}` : data.message || 'Failed to install mod');
 			}
 		} catch (err) {
 			console.error('Failed to install mod:', err);
-			toast.error('Installation request failed');
+			toast.error(
+				(err instanceof Error ? err.message : undefined) || 'Installation request failed'
+			);
 		} finally {
 			installing = false;
 		}
@@ -617,7 +734,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/if}
 			</div>
 		{:else}
-			<!-- Mod Versions & 1-Click Install View -->
+			<!-- Mod Versions & Install View -->
 			<div
 				class="mt-4 max-h-[500px] min-h-[280px] flex-1 space-y-4 overflow-y-auto pr-1 sm:min-h-[360px]"
 			>
@@ -654,8 +771,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<div
 									role="button"
 									tabindex="0"
-									onclick={() => (selectedVersion = ver)}
-									onkeydown={(e) => e.key === 'Enter' && (selectedVersion = ver)}
+									onclick={() => selectVersion(ver)}
+									onkeydown={(e) => e.key === 'Enter' && selectVersion(ver)}
 									class="flex cursor-pointer items-center justify-between rounded-md p-2 text-sm transition-colors
 										{selectedVersion?.id === ver.id
 										? 'border border-primary/40 bg-primary/15 font-medium'
@@ -684,19 +801,39 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<div class="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-4">
 							<div class="flex items-center gap-2 text-sm font-semibold text-foreground">
 								<Layers class="h-4 w-4 text-primary" />
-								Required Dependencies Detected
+								Dependencies
 							</div>
 							<p class="text-xs text-muted-foreground">
-								This mod specifies {selectedVersion.dependencies.length} upstream dependency/dependencies:
+								Select dependencies to install together with this mod. Required dependencies are
+								pre-selected.
 							</p>
 							<div class="space-y-1.5 pt-1">
 								{#each selectedVersion.dependencies as dep (dep.project_id ?? dep.title)}
-									<div class="flex items-center gap-2 text-xs">
-										<Badge variant="outline" class="font-mono text-xs">
-											{dep.dependency_type}
-										</Badge>
-										<span class="font-medium text-foreground">{dep.title || dep.project_id}</span>
-									</div>
+									{#if dep.project_id}
+										<label class="flex cursor-pointer items-center gap-2 text-xs">
+											<input
+												type="checkbox"
+												checked={!!selectedDependencies[dep.project_id]}
+												onchange={(e) => {
+													selectedDependencies[dep.project_id] = (
+														e.target as HTMLInputElement
+													).checked;
+												}}
+												class="h-3.5 w-3.5 accent-primary"
+											/>
+											<Badge variant="outline" class="font-mono text-xs">
+												{dep.dependency_type}
+											</Badge>
+											<span class="font-medium text-foreground">{dep.title || dep.project_id}</span>
+										</label>
+									{:else}
+										<div class="flex items-center gap-2 text-xs text-muted-foreground">
+											<Badge variant="outline" class="font-mono text-xs">
+												{dep.dependency_type}
+											</Badge>
+											<span>{dep.title || 'Unresolvable dependency (no project id)'}</span>
+										</div>
+									{/if}
 								{/each}
 							</div>
 						</div>
@@ -710,7 +847,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								Installing to /mods...
 							{:else}
 								<Download class="mr-2 h-4 w-4" />
-								1-Click Install to Server
+								{installLabel}
 							{/if}
 						</Button>
 					</div>

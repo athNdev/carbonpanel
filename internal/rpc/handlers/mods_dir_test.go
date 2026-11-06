@@ -110,6 +110,75 @@ func TestInstallModWritesTheMappedRoot(t *testing.T) {
 	}
 }
 
+func TestInstallModLegacyFilenameKeyRoundTrip(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+	mount := filepath.Join(dir, "mount")
+	if err := os.MkdirAll(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := seedRemoteModServer(t, store, "srv-legacy-key2", filepath.Join(dir, "controller", "srv-data"), mount)
+
+	download := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("jar-bytes"))
+	}))
+	t.Cleanup(download.Close)
+
+	payload := `{"items":[{"name":"Example","filename":"legacy.jar","download_url":"` + download.URL + `"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/install", bytes.NewReader([]byte(payload)))
+	rec := httptest.NewRecorder()
+	NewModOnlineManager(store, logger.New(), nil, nil).handleInstall(rec, req, server)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install status = %d body %s", rec.Code, rec.Body.String())
+	}
+	var resp InstallModsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body %s", err, rec.Body.String())
+	}
+	if !resp.Success || len(resp.Installed) != 1 {
+		t.Fatalf("resp = %+v", resp)
+	}
+	got, err := os.ReadFile(filepath.Join(mount, "srv-data", "mods", "legacy.jar"))
+	if err != nil || string(got) != "jar-bytes" {
+		t.Fatalf("mapped jar = %q, %v", got, err)
+	}
+}
+
+func TestInstallModConfinesTraversalFilenames(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+	mount := filepath.Join(dir, "mount")
+	if err := os.MkdirAll(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := seedRemoteModServer(t, store, "srv-traversal", filepath.Join(dir, "controller", "srv-data"), mount)
+
+	download := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("jar-bytes"))
+	}))
+	t.Cleanup(download.Close)
+
+	body, err := json.Marshal(InstallModsRequest{Items: []InstallModItem{{
+		Name: "Evil", FileName: "../evil.jar", DownloadURL: download.URL,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/install", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	NewModOnlineManager(store, logger.New(), nil, nil).handleInstall(rec, req, server)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install status = %d body %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "evil.jar")); !os.IsNotExist(err) {
+		t.Fatalf("traversal escaped mods dir")
+	}
+	got, err := os.ReadFile(filepath.Join(mount, "srv-data", "mods", "evil.jar"))
+	if err != nil || string(got) != "jar-bytes" {
+		t.Fatalf("mapped jar = %q, %v", got, err)
+	}
+}
+
 func TestInstallModRefusesAnUnreachableRemoteNode(t *testing.T) {
 	store := setupTestStore(t)
 	controller := filepath.Join(t.TempDir(), "controller", "srv-data")

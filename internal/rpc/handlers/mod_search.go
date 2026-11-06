@@ -64,6 +64,42 @@ type InstallModItem struct {
 	DownloadURL string `json:"download_url"`
 }
 
+// UnmarshalJSON accepts the canonical snake_case keys as well as the
+// camelCase / no-underscore aliases older console builds sent. The console
+// once posted `filename` instead of `file_name`, which decoded to an empty
+// FileName and made every install fail with "missing url or filename".
+func (i *InstallModItem) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var s string
+	if v, ok := raw["name"]; ok {
+		if err := json.Unmarshal(v, &s); err == nil {
+			i.Name = s
+		}
+	}
+	for _, k := range []string{"file_name", "filename", "fileName"} {
+		if v, ok := raw[k]; ok {
+			var f string
+			if err := json.Unmarshal(v, &f); err == nil && strings.TrimSpace(f) != "" {
+				i.FileName = strings.TrimSpace(f)
+				break
+			}
+		}
+	}
+	for _, k := range []string{"download_url", "downloadUrl", "url"} {
+		if v, ok := raw[k]; ok {
+			var u string
+			if err := json.Unmarshal(v, &u); err == nil && strings.TrimSpace(u) != "" {
+				i.DownloadURL = strings.TrimSpace(u)
+				break
+			}
+		}
+	}
+	return nil
+}
+
 type InstallModsRequest struct {
 	Items []InstallModItem `json:"items"`
 }
@@ -613,6 +649,8 @@ func (m *ModOnlineManager) handleModrinthVersions(w http.ResponseWriter, r *http
 		})
 	}
 
+	m.enrichModrinthDependencyTitles(r.Context(), token, ua, versions)
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"versions": versions,
 		"count":    len(versions),
@@ -849,6 +887,8 @@ func (m *ModOnlineManager) handleCurseForgeVersions(w http.ResponseWriter, r *ht
 		})
 	}
 
+	m.enrichCurseForgeDependencyTitles(r.Context(), apiKey, versions)
+
 	// If strict gameVersion filtering was too restrictive, fallback to returning all files
 	if len(versions) == 0 && len(cfFiles.Data) > 0 {
 		for _, f := range cfFiles.Data {
@@ -886,6 +926,8 @@ func (m *ModOnlineManager) handleCurseForgeVersions(w http.ResponseWriter, r *ht
 			})
 		}
 	}
+
+	m.enrichCurseForgeDependencyTitles(r.Context(), apiKey, versions)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"versions": versions,
@@ -933,12 +975,20 @@ func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request,
 	}
 
 	for _, item := range req.Items {
-		if item.DownloadURL == "" || item.FileName == "" {
+		if item.DownloadURL == "" || strings.TrimSpace(item.FileName) == "" {
 			resp.Errors = append(resp.Errors, fmt.Sprintf("skipped %s: missing url or filename", item.Name))
 			continue
 		}
 
-		targetPath := filepath.Join(modsDir, item.FileName)
+		// Confine the write to the mods directory even if a caller sends a
+		// path with separators or traversal segments.
+		fileName := filepath.Base(strings.TrimSpace(item.FileName))
+		if fileName == "" || fileName == "." || fileName == string(filepath.Separator) {
+			resp.Errors = append(resp.Errors, fmt.Sprintf("skipped %s: invalid filename", item.Name))
+			continue
+		}
+
+		targetPath := filepath.Join(modsDir, fileName)
 
 		// Download directly to target file
 		res, err := m.httpClient.Get(item.DownloadURL)
@@ -970,12 +1020,14 @@ func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request,
 			continue
 		}
 
-		resp.Installed = append(resp.Installed, item.FileName)
+		resp.Installed = append(resp.Installed, fileName)
 	}
 
 	if len(resp.Installed) == 0 && len(resp.Errors) > 0 {
 		resp.Success = false
-		resp.Message = "Failed to install selected mods."
+		resp.Message = "Failed to install selected mods: " + strings.Join(resp.Errors, "; ")
+	} else if len(resp.Errors) > 0 {
+		resp.Message = fmt.Sprintf("Successfully installed %d mod(s) with %d error(s): %s.", len(resp.Installed), len(resp.Errors), strings.Join(resp.Errors, "; "))
 	} else {
 		resp.Message = fmt.Sprintf("Successfully installed %d mod(s).", len(resp.Installed))
 	}
