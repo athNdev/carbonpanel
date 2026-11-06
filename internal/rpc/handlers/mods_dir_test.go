@@ -13,8 +13,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/athNdev/carbon-panel/internal/activity"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/packwiz"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -247,5 +250,77 @@ func TestPackwizBakeWritesTheMappedRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "controller", "srv-data", "mods", "example.jar")); !os.IsNotExist(err) {
 		t.Fatalf("controller jar exists: %v", err)
+	}
+}
+
+func TestInstallModWritesActivityLog(t *testing.T) {
+	store := setupTestStore(t)
+	dir := t.TempDir()
+	mount := filepath.Join(dir, "mount")
+	if err := os.MkdirAll(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := seedRemoteModServer(t, store, "srv-activity", filepath.Join(dir, "controller", "srv-data"), mount)
+
+	download := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("jar-bytes"))
+	}))
+	t.Cleanup(download.Close)
+
+	// Success installs one mod.
+	body, err := json.Marshal(InstallModsRequest{Items: []InstallModItem{{
+		Name: "Example", FileName: "example.jar", DownloadURL: download.URL,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/install", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	NewModOnlineManager(store, logger.New(), nil, nil).handleInstall(rec, req, server)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install status = %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// Failure (missing filename) still audits.
+	bad, err := json.Marshal(InstallModsRequest{Items: []InstallModItem{{
+		Name: "Broken", DownloadURL: download.URL,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	badReq := httptest.NewRequest(http.MethodPost, "/install", bytes.NewReader(bad))
+	badRec := httptest.NewRecorder()
+	NewModOnlineManager(store, logger.New(), nil, nil).handleInstall(badRec, badReq, server)
+	if badRec.Code != http.StatusOK {
+		t.Fatalf("failed install status = %d body %s", badRec.Code, badRec.Body.String())
+	}
+
+	rows, err := activity.List(store.DB(), server.ID, "", time.Time{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("activity rows = %d, want 2", len(rows))
+	}
+	for _, row := range rows {
+		if row.Event != activity.EventModInstall {
+			t.Fatalf("event = %q, want %q", row.Event, activity.EventModInstall)
+		}
+	}
+	// Same-second timestamps can tie, so match rows by content, not order.
+	var sawFailure, sawSuccess bool
+	for _, row := range rows {
+		if strings.Contains(row.Properties, "missing url or filename") {
+			sawFailure = true
+		}
+		if strings.Contains(row.Properties, "example.jar") {
+			sawSuccess = true
+		}
+	}
+	if !sawFailure {
+		t.Fatalf("no failure row; rows = %+v", rows)
+	}
+	if !sawSuccess {
+		t.Fatalf("no success row; rows = %+v", rows)
 	}
 }

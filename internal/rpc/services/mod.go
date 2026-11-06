@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/athNdev/carbon-panel/internal/activity"
+	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
@@ -61,6 +63,28 @@ func NewModService(store *storage.Store, docker *docker.Client, uploadManager *u
 		docker:        docker,
 		log:           log,
 		uploadManager: uploadManager,
+	}
+}
+
+// auditMod records a mod operation in the Activity tab, failures included.
+// Mod failures used to surface only as toasts, leaving no trace of what was
+// tried. Audit failures are logged, never returned.
+func (s *ModService) auditMod(ctx context.Context, ip, event, serverID string, props map[string]any) {
+	actorID, actorName := "", ""
+	if u := auth.GetUserFromContext(ctx); u != nil {
+		actorID, actorName = u.ID, u.Username
+	}
+	propsJSON, _ := json.Marshal(props)
+	if err := activity.Log(s.store.DB(), activity.Entry{
+		ActorID:    actorID,
+		ActorName:  actorName,
+		IP:         ip,
+		Event:      event,
+		SubjectTyp: "server",
+		SubjectID:  serverID,
+		Properties: string(propsJSON),
+	}); err != nil {
+		s.log.Error("Audit log failed for %s: %v", event, err)
 	}
 }
 
@@ -255,6 +279,7 @@ func (s *ModService) GetMod(ctx context.Context, req *connect.Request[v1.GetModR
 // ImportUploadedMod imports a mod
 func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request[v1.ImportUploadedModRequest]) (*connect.Response[v1.ImportUploadedModResponse], error) {
 	msg := req.Msg
+	peerIP := req.Peer().Addr
 
 	// Validate upload session
 	if msg.UploadSessionId == "" {
@@ -271,11 +296,13 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
 	if err != nil {
 		s.log.Error("Failed to get upload session: %v", err)
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "error": "upload session not found or not completed"})
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found or not completed"))
 	}
 
 	// Validate file is appropriate for this mod loader
 	if !minecraft.IsValidModFile(originalFilename, server.ModLoader) {
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "invalid file type for this mod loader"})
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid file type for this mod loader"))
 	}
 
@@ -285,6 +312,7 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	if side, sideErr := minecraft.InspectModSide(tempPath); sideErr == nil && side == minecraft.SideClient {
 		_ = os.Remove(tempPath)
 		_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "client-only mod rejected"})
 		return nil, connect.NewError(
 			connect.CodeInvalidArgument,
 			errors.New("this mod is client-only and cannot run on a dedicated server"),
@@ -292,7 +320,13 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	}
 
 	if msg.GetStage() {
-		return s.stageUploadedMod(ctx, msg, server, tempPath, originalFilename)
+		stageResp, stageErr := s.stageUploadedMod(ctx, msg, server, tempPath, originalFilename)
+		if stageErr != nil {
+			s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "staged": true, "file": originalFilename, "error": stageErr.Error()})
+			return nil, stageErr
+		}
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "staged": true, "file": originalFilename})
+		return stageResp, nil
 	}
 
 	root, err := dataRootFor(ctx, s.store, server, true)
@@ -303,12 +337,14 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	// Get the correct mods directory based on mod loader
 	modsDir := minecraft.GetModsPath(root, server.ModLoader)
 	if modsDir == "" {
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "server type does not support mods"})
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("this server type does not support mods"))
 	}
 
 	// Create mods directory if needed
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
 		s.log.Error("Failed to create mods directory: %v", err)
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "failed to create mods directory"})
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create mods directory"))
 	}
 
@@ -317,6 +353,7 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	if err := os.Rename(tempPath, modPath); err != nil {
 		if err := files.CopyFile(tempPath, modPath); err != nil {
 			s.log.Error("Failed to move mod file: %v", err)
+			s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "failed to save mod"})
 			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save mod"))
 		}
 		os.Remove(tempPath)
@@ -353,6 +390,7 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 		UploadedAt:  timestamppb.New(info.ModTime()),
 	}
 
+	s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "display_name": displayName})
 	return connect.NewResponse(&v1.ImportUploadedModResponse{
 		Mod:     mod,
 		Message: "Mod uploaded successfully",
@@ -409,6 +447,7 @@ func (s *ModService) stageUploadedMod(ctx context.Context, msg *v1.ImportUploade
 // UpdateMod updates a mod
 func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.UpdateModRequest]) (*connect.Response[v1.UpdateModResponse], error) {
 	msg := req.Msg
+	peerIP := req.Peer().Addr
 
 	// Get server to find mod path
 	server, err := s.store.GetServer(ctx, msg.ServerId)
@@ -467,6 +506,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 	}
 
 	if modFileName == "" {
+		s.auditMod(ctx, peerIP, activity.EventModUpdate, msg.ServerId, map[string]any{"mod_id": msg.ModId, "error": "mod not found"})
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("mod not found"))
 	}
 
@@ -479,6 +519,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 			newPath := filepath.Join(modsDir, modFileName)
 			if err := os.Rename(oldPath, newPath); err != nil {
 				s.log.Error("Failed to enable mod: %v", err)
+				s.auditMod(ctx, peerIP, activity.EventModUpdate, msg.ServerId, map[string]any{"file": modFileName, "error": "failed to enable mod"})
 				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to enable mod"))
 			}
 			finalEnabled = true
@@ -489,6 +530,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 			newPath := filepath.Join(disabledDir, modFileName)
 			if err := os.Rename(oldPath, newPath); err != nil {
 				s.log.Error("Failed to disable mod: %v", err)
+				s.auditMod(ctx, peerIP, activity.EventModUpdate, msg.ServerId, map[string]any{"file": modFileName, "error": "failed to disable mod"})
 				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to disable mod"))
 			}
 			finalEnabled = false
@@ -511,6 +553,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 		description = *msg.Description
 	}
 
+	s.auditMod(ctx, peerIP, activity.EventModUpdate, msg.ServerId, map[string]any{"file": modFileName, "enabled": finalEnabled})
 	return connect.NewResponse(&v1.UpdateModResponse{
 		Mod: &v1.Mod{
 			Id:          msg.ModId,
@@ -529,6 +572,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 // DeleteMod deletes a mod
 func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.DeleteModRequest]) (*connect.Response[v1.DeleteModResponse], error) {
 	msg := req.Msg
+	peerIP := req.Peer().Addr
 
 	// Get server to find file path
 	server, err := s.store.GetServer(ctx, msg.ServerId)
@@ -558,6 +602,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 					modPath := filepath.Join(modsDir, file.Name())
 					if err := os.Remove(modPath); err != nil {
 						s.log.Error("Failed to delete mod file: %v", err)
+						s.auditMod(ctx, peerIP, activity.EventModRemove, msg.ServerId, map[string]any{"file": file.Name(), "error": "failed to delete mod file"})
 						return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete mod file"))
 					}
 					deleted = true
@@ -578,6 +623,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 						modPath := filepath.Join(disabledDir, file.Name())
 						if err := os.Remove(modPath); err != nil {
 							s.log.Error("Failed to delete mod file: %v", err)
+							s.auditMod(ctx, peerIP, activity.EventModRemove, msg.ServerId, map[string]any{"file": file.Name(), "error": "failed to delete mod file"})
 							return nil, connect.NewError(connect.CodeInternal, errors.New("failed to delete mod file"))
 						}
 						deleted = true
@@ -589,9 +635,11 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 	}
 
 	if !deleted {
+		s.auditMod(ctx, peerIP, activity.EventModRemove, msg.ServerId, map[string]any{"mod_id": msg.ModId, "error": "mod not found"})
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("mod not found"))
 	}
 
+	s.auditMod(ctx, peerIP, activity.EventModRemove, msg.ServerId, map[string]any{"mod_id": msg.ModId})
 	return connect.NewResponse(&v1.DeleteModResponse{
 		Message: "Mod deleted successfully",
 	}), nil
@@ -726,12 +774,14 @@ func (s *ModService) GetFabricOptimizationStack(ctx context.Context, req *connec
 // InstallFabricOptimizationStack installs or updates Lithium, FerriteCore, ModernFix, and/or C2ME
 func (s *ModService) InstallFabricOptimizationStack(ctx context.Context, req *connect.Request[v1.InstallFabricOptimizationStackRequest]) (*connect.Response[v1.InstallFabricOptimizationStackResponse], error) {
 	msg := req.Msg
+	peerIP := req.Peer().Addr
 	server, err := s.store.GetServer(ctx, msg.ServerId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
 	if server.ModLoader != storage.ModLoaderFabric && server.ModLoader != storage.ModLoaderQuilt {
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"stack": "fabric-optimization", "error": "server mod loader is not Fabric or Quilt"})
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("server mod loader is not Fabric or Quilt"))
 	}
 
@@ -742,6 +792,7 @@ func (s *ModService) InstallFabricOptimizationStack(ctx context.Context, req *co
 
 	modsDir := minecraft.GetModsPath(root, server.ModLoader)
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"stack": "fabric-optimization", "error": "failed to create mods directory"})
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create mods directory: %w", err))
 	}
 
@@ -816,6 +867,11 @@ func (s *ModService) InstallFabricOptimizationStack(ctx context.Context, req *co
 		})
 	}
 
+	installedFiles := make([]string, 0, len(installedMods))
+	for _, m := range installedMods {
+		installedFiles = append(installedFiles, m.FileName)
+	}
+	s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"stack": "fabric-optimization", "installed": installedFiles, "warnings": warnings})
 	return connect.NewResponse(&v1.InstallFabricOptimizationStackResponse{
 		InstalledMods: installedMods,
 		Warnings:      warnings,
