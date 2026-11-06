@@ -69,6 +69,12 @@ Steps run in order. Each step names exactly one action; `name` labels it in the
 report and `screenshot` captures the page after it succeeds. Screenshots settle
 CSS animations first, so a report never argues about a state nobody can see.
 
+A `screenshot` step may add `"element": "<selector>"` to crop to that box (the
+shot is a viewport clip, so the themed page renders exactly as a person sees
+it). Crops scroll the element into view first; set `"scroll": false` for a
+full-height page column so it is captured from the top instead of being
+aligned under the fixed app header.
+
 | Action | Meaning |
 | --- | --- |
 | `goto` | navigate to a path under the base URL |

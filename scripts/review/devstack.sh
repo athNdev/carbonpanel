@@ -110,9 +110,10 @@ seed() {
 }
 
 # seed_showcase_pack creates a small fabric pack with real mods so studio and
-# library captures show populated state. Runs only on a fresh pack; reruns
-# resolve the existing pack and skip mod seeding (no duplicates). Best-effort:
-# any failure only warns, never fails the boot.
+# library captures show populated state, then adds a few empty packs so the
+# library grid reads as a real row of cards rather than one lone pack. Runs
+# only on a fresh pack; reruns resolve the existing pack and skip seeding (no
+# duplicates). Best-effort: any failure only warns, never fails the boot.
 seed_showcase_pack() {
 	local token="$1" base="http://127.0.0.1:${PORT}" pack_id mod ver
 	pack_id=$(curl -fsS --max-time 20 -X POST "${base}/api/v1/packwiz/packs" \
@@ -134,6 +135,18 @@ seed_showcase_pack() {
 				echo "could not add mod ${mod} to showcase pack" >&2
 		fi
 	done
+
+	create_extra_pack() {
+		curl -fsS --max-time 20 -X POST "${base}/api/v1/packwiz/packs" \
+			-H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
+			-d "{\"name\":\"$1\",\"author\":\"Carbon Review\",\"version\":\"$2\",\"mc_version\":\"$3\",\"mod_loader\":\"$4\",\"loader_version\":\"latest\"}" \
+			>/dev/null 2>&1 || echo "could not add showcase pack $1" >&2
+	}
+	create_extra_pack 'Performance Plus' '2.3.1' '1.20.1' 'fabric'
+	create_extra_pack 'Create: Workshop' '1.4.0' '1.20.1' 'forge'
+	create_extra_pack 'Vanilla Tweaks' '3.0.2' '1.21.1' 'fabric'
+	create_extra_pack 'NeoForge Basics' '1.1.0' '1.21.1' 'neoforge'
+	create_extra_pack 'Adventure Kit' '1.2.4' '1.20.1' 'quilt'
 }
 
 down() {

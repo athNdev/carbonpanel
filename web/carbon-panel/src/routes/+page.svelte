@@ -383,7 +383,7 @@ one at https://mozilla.org/MPL/2.0/.
 		/>
 	</div>
 {:else}
-	<div class="space-y-6 bg-[#161616] text-[#f4f4f4]">
+	<div class="space-y-6 bg-[#161616] text-[#f4f4f4]" data-testid="showcase-dashboard-content">
 		<CarbonPageHeader
 			title="Cluster Overview"
 			description="Hardware utilization, game servers status, and network routing topology"

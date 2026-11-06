@@ -445,7 +445,10 @@ one at https://mozilla.org/MPL/2.0/.
 	<title>Modpacks - Carbon Panel</title>
 </svelte:head>
 
-<div class="h-full flex-1 space-y-6 rounded-none font-sans text-[#f4f4f4]">
+<div
+	class="h-full flex-1 space-y-6 rounded-none font-sans text-[#f4f4f4]"
+	data-testid="showcase-modpacks-content"
+>
 	{#if searchError && !showFavorites && !showUploaded}
 		<CarbonErrorState
 			title="Failed to search modpacks"
