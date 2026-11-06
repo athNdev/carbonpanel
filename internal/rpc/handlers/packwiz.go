@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -657,6 +658,31 @@ func (h *PackwizHandler) handleImportPack(w http.ResponseWriter, r *http.Request
 	http.Error(w, "multipart/form-data required for import", http.StatusBadRequest)
 }
 
+func errorAsDropped(err error, target **packwiz.DroppedModsError) bool {
+	return errors.As(err, target)
+}
+
+// parseExportOptions reads per-launcher export options from the query string:
+// ?include_client=false&optional_mode=optional&overrides=configs-only&summary=...
+func parseExportOptions(r *http.Request) packwiz.ExportOptions {
+	opts := packwiz.DefaultExportOptions()
+	q := r.URL.Query()
+	if _, ok := q["include_client"]; ok {
+		v := strings.ToLower(strings.TrimSpace(q.Get("include_client")))
+		opts.IncludeClient = v != "false" && v != "0" && v != "no" && v != "off"
+	}
+	if v := strings.TrimSpace(q.Get("optional_mode")); v != "" {
+		opts.OptionalMode = v
+	}
+	if v := strings.TrimSpace(q.Get("overrides")); v != "" {
+		opts.Overrides = v
+	}
+	if v := q.Get("summary"); v != "" {
+		opts.Summary = v
+	}
+	return opts
+}
+
 func (h *PackwizHandler) handleExport(w http.ResponseWriter, r *http.Request, packID, format string) {
 	pack, err := h.manager.GetPack(packID)
 	if err != nil {
@@ -664,6 +690,7 @@ func (h *PackwizHandler) handleExport(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
+	opts := parseExportOptions(r)
 	var buf bytes.Buffer
 	var filename, contentType string
 
@@ -671,7 +698,7 @@ func (h *PackwizHandler) handleExport(w http.ResponseWriter, r *http.Request, pa
 	case "packwiz":
 		filename = fmt.Sprintf("%s-%s.packwiz.zip", pack.Name, pack.Version)
 		contentType = "application/zip"
-		if err := h.manager.ExportPackwizZip(packID, &buf); err != nil {
+		if err := h.manager.ExportPackwizZip(packID, &buf, opts); err != nil {
 			h.log.Error("Failed to export packwiz zip: %v", err)
 			http.Error(w, "failed to export packwiz zip", http.StatusInternalServerError)
 			return
@@ -679,7 +706,7 @@ func (h *PackwizHandler) handleExport(w http.ResponseWriter, r *http.Request, pa
 	case "mrpack":
 		filename = fmt.Sprintf("%s-%s.mrpack", pack.Name, pack.Version)
 		contentType = "application/x-modrinth-modpack+zip"
-		if err := h.manager.ExportMrpack(packID, &buf); err != nil {
+		if err := h.manager.ExportMrpack(packID, &buf, opts); err != nil {
 			h.log.Error("Failed to export mrpack: %v", err)
 			http.Error(w, "failed to export mrpack", http.StatusInternalServerError)
 			return
@@ -687,9 +714,28 @@ func (h *PackwizHandler) handleExport(w http.ResponseWriter, r *http.Request, pa
 	case "curseforge", "zip":
 		filename = fmt.Sprintf("%s-%s.zip", pack.Name, pack.Version)
 		contentType = "application/zip"
-		if err := h.manager.ExportCurseForge(packID, &buf); err != nil {
+		if err := h.manager.ExportCurseForge(packID, &buf, opts); err != nil {
+			var dropped *packwiz.DroppedModsError
+			if ok := errorAsDropped(err, &dropped); ok {
+				h.log.Error("CurseForge export blocked (data loss): %v", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"error":   err.Error(),
+					"dropped": dropped.Dropped,
+				})
+				return
+			}
 			h.log.Error("Failed to export curseforge pack: %v", err)
 			http.Error(w, "failed to export curseforge pack", http.StatusInternalServerError)
+			return
+		}
+	case "mmc", "prism", "multimc", "instance":
+		filename = fmt.Sprintf("%s-%s-mmc.zip", pack.Name, pack.Version)
+		contentType = "application/zip"
+		if err := h.manager.ExportMMC(packID, &buf, opts); err != nil {
+			h.log.Error("Failed to export MMC instance: %v", err)
+			http.Error(w, "failed to export instance zip", http.StatusInternalServerError)
 			return
 		}
 	default:

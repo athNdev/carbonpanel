@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package packwiz
 
 import (
@@ -158,9 +157,22 @@ func TestPackwizE2E_ModDependenciesIngestion(t *testing.T) {
 	assert.FileExists(t, filepath.Join(tempDir, "dependency-pack", "mods", "jei.pw.toml"))
 	assert.FileExists(t, filepath.Join(tempDir, "dependency-pack", "mods", "spark.pw.toml"))
 
-	// Verify CurseForge export captures CurseForge dependencies
+	// Verify CurseForge export blocks instead of silently dropping the two
+	// Modrinth mods (Sodium, spark) in this mixed-platform pack.
+	var cfBlocked bytes.Buffer
+	err = mgr.ExportCurseForge("dependency-pack", &cfBlocked)
+	require.Error(t, err)
+	var cfDropped *DroppedModsError
+	require.ErrorAs(t, err, &cfDropped)
+	require.Len(t, cfDropped.Dropped, 2)
+
+	// A CurseForge-only pack exports cleanly with overrides bundled.
+	cfOnly := &Pack{ID: "cf-only-pack", Name: "CF Only", MCVersion: "1.20.1", ModLoader: "fabric", LoaderVersion: "0.15.11"}
+	_, err = mgr.CreatePack(cfOnly)
+	require.NoError(t, err)
+	require.NoError(t, mgr.AddMod("cf-only-pack", curseforgeMod))
 	var cfBuf bytes.Buffer
-	err = mgr.ExportCurseForge("dependency-pack", &cfBuf)
+	err = mgr.ExportCurseForge("cf-only-pack", &cfBuf)
 	require.NoError(t, err)
 	cfZip, err := zip.NewReader(bytes.NewReader(cfBuf.Bytes()), int64(cfBuf.Len()))
 	require.NoError(t, err)

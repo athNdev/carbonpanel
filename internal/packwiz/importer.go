@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package packwiz
 
 import (
@@ -234,6 +233,8 @@ func (m *Manager) ImportMrpack(r io.ReaderAt, size int64, opts ImportOptions) (*
 			DownloadURL: dlURL,
 			FileSize:    file.FileSize,
 			Pinned:      false,
+			Hash:        hash,
+			HashFormat:  hashFormat,
 		}
 		mods = append(mods, modItem)
 
