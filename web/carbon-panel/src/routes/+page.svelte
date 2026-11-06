@@ -29,7 +29,11 @@ one at https://mozilla.org/MPL/2.0/.
 		StopCircle
 	} from '@lucide/svelte';
 	import { ServerStatus, type Server as ServerType } from '$lib/proto/carbonpanel/v1/common_pb';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
+	import {
+		NodeStatus as NodeStatusEnum,
+		type Node as NodeType
+	} from '$lib/proto/carbonpanel/v1/node_pb';
 	import { formatRpcError } from '$lib/api/rpc-error';
 	import { serversStore, sortServersByActivity } from '$lib/stores/servers';
 	import { CarbonButton, CarbonTag, CarbonErrorState } from '$lib/components/carbon';
@@ -37,18 +41,31 @@ one at https://mozilla.org/MPL/2.0/.
 
 	// Dashboard data
 	let dashboardServers: ServerType[] = $state([]);
+	let dashboardNodes: NodeType[] = $state([]);
 	let isLoading = $state(true);
 	let loadError = $state<string | null>(null);
 	let isRefreshing = $state(false);
 	let currentTime = $state(new Date());
 
-	// Load dashboard data with full stats
+	// Load dashboard data with full stats, plus node inventory fail-open.
+	// NodeService.listNodes runs in parallel with listServers so a node
+	// failure never blocks the server tiles; nodes stay empty on error.
 	async function loadDashboardData() {
 		loadError = null;
 		try {
-			const response = await rpcClient.server.listServers({ fullStats: true });
-			dashboardServers = response.servers;
-			serversStore.set(response.servers);
+			const [serversResponse] = await Promise.all([
+				rpcClient.server.listServers({ fullStats: true }),
+				rpcClient.node
+					.listNodes({}, silentCallOptions)
+					.then((res) => {
+						dashboardNodes = res.nodes ?? [];
+					})
+					.catch((nodeError) => {
+						console.error('Failed to load node inventory (fail-open):', nodeError);
+					})
+			]);
+			dashboardServers = serversResponse.servers;
+			serversStore.set(serversResponse.servers);
 		} catch (error) {
 			loadError = formatRpcError(error, 'Could not load dashboard data. Try again.');
 			console.error('Failed to load dashboard data:', error);
@@ -168,6 +185,46 @@ one at https://mozilla.org/MPL/2.0/.
 				(s.status === ServerStatus.RUNNING && s.tps && s.tps < 15)
 		)
 	});
+
+	let nodeStats = $derived({
+		total: dashboardNodes.length,
+		online: dashboardNodes.filter((n) => n.status === NodeStatusEnum.ONLINE).length,
+		offline: dashboardNodes.filter((n) => n.status !== NodeStatusEnum.ONLINE).length,
+		totalServers: dashboardNodes.reduce((acc, n) => acc + (n.serverCount || 0), 0),
+		totalAllocatedMb: dashboardNodes.reduce((acc, n) => acc + Number(n.allocatedMemoryMb || 0n), 0)
+	});
+
+	function getNodeTagType(status: NodeStatusEnum): 'green' | 'red' | 'gray' {
+		switch (status) {
+			case NodeStatusEnum.ONLINE:
+				return 'green';
+			case NodeStatusEnum.ERROR:
+				return 'red';
+			case NodeStatusEnum.OFFLINE:
+			default:
+				return 'gray';
+		}
+	}
+
+	function describeNodeStatusLabel(status: NodeStatusEnum): string {
+		switch (status) {
+			case NodeStatusEnum.ONLINE:
+				return 'ONLINE';
+			case NodeStatusEnum.OFFLINE:
+				return 'OFFLINE';
+			case NodeStatusEnum.ERROR:
+				return 'ERROR';
+			default:
+				return 'UNKNOWN';
+		}
+	}
+
+	function formatNodeMemory(node: NodeType): string {
+		const allocatedGb = Number(node.allocatedMemoryMb || 0n) / 1024;
+		const totalMb = Number(node.totalMemoryMb || node.maxMemoryMb || 0n);
+		if (totalMb <= 0) return `${allocatedGb.toFixed(1)} GB allocated`;
+		return `${allocatedGb.toFixed(1)} / ${(totalMb / 1024).toFixed(1)} GB`;
+	}
 
 	onMount(() => {
 		loadDashboardData().then(() => {
@@ -295,7 +352,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 			{#each [0, 1, 2, 3] as _ (_)}
 				<div
-					class="flex h-[140px] flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-5 select-none"
+					class="flex h-[140px] flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 select-none"
 				>
 					<div>
 						<div class="flex items-center justify-between">
@@ -304,7 +361,7 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 						<div class="motion-skeleton mt-3 h-8 w-20 bg-[#393939]"></div>
 					</div>
-					<div class="mt-4 flex items-center justify-between border-t border-[#393939] pt-3">
+					<div class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3">
 						<div class="motion-skeleton h-3 w-20 bg-[#393939]"></div>
 						<div class="motion-skeleton h-3 w-12 bg-[#393939]"></div>
 					</div>
@@ -364,21 +421,23 @@ one at https://mozilla.org/MPL/2.0/.
 		<div class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 			<!-- Tile 1: Total Servers -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-5 transition-colors select-none hover:border-[#525252]"
+				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"
 			>
 				<div>
 					<div
-						class="flex items-center justify-between font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
+						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
 					>
 						<span>Total Servers</span>
 						<Server class="h-4 w-4 text-[#8d8d8d]" />
 					</div>
-					<div class="mt-2 font-mono text-3xl font-bold tracking-tight text-[#f4f4f4]">
+					<div
+						class="mt-3 font-sans text-[32px] leading-none font-semibold tracking-tight text-[#f4f4f4] tabular-nums"
+					>
 						<span use:countUp={{ value: stats.total, decimals: 0 }}></span>
 					</div>
 				</div>
 				<div
-					class="mt-4 flex items-center justify-between gap-2 border-t border-[#393939] pt-3 font-mono text-xs"
+					class="mt-3 flex items-center justify-between gap-2 border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
 				>
 					<div class="flex items-center gap-3">
 						<div class="flex items-center gap-1.5 text-[#24a148]">
@@ -405,21 +464,23 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tile 2: Active Players -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-5 transition-colors select-none hover:border-[#525252]"
+				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"
 			>
 				<div>
 					<div
-						class="flex items-center justify-between font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
+						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
 					>
 						<span>Active Players</span>
 						<Users class="h-4 w-4 text-[#8d8d8d]" />
 					</div>
-					<div class="mt-2 font-mono text-3xl font-bold tracking-tight text-[#f4f4f4]">
+					<div
+						class="mt-3 font-sans text-[32px] leading-none font-semibold tracking-tight text-[#f4f4f4] tabular-nums"
+					>
 						<span use:countUp={{ value: stats.totalPlayers, decimals: 0 }}></span>
 					</div>
 				</div>
 				<div
-					class="mt-4 flex items-center justify-between border-t border-[#393939] pt-3 font-mono text-xs"
+					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
 				>
 					{#if stats.totalPlayers > 0}
 						<div class="flex items-center gap-1.5 text-[#24a148]">
@@ -439,24 +500,24 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tile 3: Memory Usage -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-5 transition-colors select-none hover:border-[#525252]"
+				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"
 			>
 				<div>
 					<div
-						class="flex items-center justify-between font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
+						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
 					>
 						<span>Memory Allocation</span>
 						<MemoryStick class="h-4 w-4 text-[#8d8d8d]" />
 					</div>
-					<div class="mt-2 flex items-baseline gap-1.5">
+					<div class="mt-3 flex items-baseline gap-1.5">
 						<span
-							class="font-mono text-3xl font-bold tracking-tight text-[#f4f4f4]"
+							class="font-sans text-[32px] leading-none font-semibold tracking-tight text-[#f4f4f4] tabular-nums"
 							use:countUp={{
 								value: stats.totalMemory > 0 ? stats.usedMemory / 1024 : 0,
 								decimals: 1
 							}}
 						></span>
-						<span class="font-mono text-sm text-[#8d8d8d]">
+						<span class="font-sans text-sm text-[#8d8d8d]">
 							/ {stats.totalMemory > 0 ? (stats.totalMemory / 1024).toFixed(1) : '0.0'} GB
 						</span>
 					</div>
@@ -469,7 +530,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div
-					class="mt-4 flex items-center justify-between border-t border-[#393939] pt-3 font-mono text-xs"
+					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
 				>
 					<div
 						class="flex items-center gap-1.5 {stats.memUsagePercent > 85
@@ -493,31 +554,35 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Tile 4: Cluster Performance -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-5 transition-colors select-none hover:border-[#525252]"
+				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"
 			>
 				<div>
 					<div
-						class="flex items-center justify-between font-mono text-xs tracking-wider text-[#8d8d8d] uppercase"
+						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
 					>
 						<span>Cluster Performance</span>
 						<Gauge class="h-4 w-4 text-[#8d8d8d]" />
 					</div>
-					<div class="mt-2 flex items-baseline gap-2">
+					<div class="mt-3 flex items-baseline gap-2">
 						{#if stats.avgTps > 0}
 							<span
-								class="font-mono text-3xl font-bold tracking-tight {stats.avgTps >= 18
+								class="font-sans text-[32px] leading-none font-semibold tracking-tight tabular-nums {stats.avgTps >=
+								18
 									? 'text-[#24a148]'
 									: 'text-[#da1e28]'}"
 								use:countUp={{ value: stats.avgTps, decimals: 1 }}
 							></span>
 						{:else}
-							<span class="font-mono text-3xl font-bold tracking-tight text-[#8d8d8d]">—</span>
+							<span
+								class="font-sans text-[32px] leading-none font-semibold tracking-tight text-[#8d8d8d] tabular-nums"
+								>—</span
+							>
 						{/if}
-						<span class="font-mono text-sm text-[#8d8d8d]">AVG TPS</span>
+						<span class="font-sans text-sm text-[#8d8d8d]">AVG TPS</span>
 					</div>
 				</div>
 				<div
-					class="mt-4 flex items-center justify-between border-t border-[#393939] pt-3 font-mono text-xs"
+					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
 				>
 					{#if stats.running === 0}
 						<div class="flex items-center gap-1.5 text-[#8d8d8d]">
@@ -842,6 +907,48 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 
+		{#if dashboardNodes.length > 0}
+			<div class="rounded-none border border-[#393939] bg-[#262626]" data-testid="node-section">
+				<div
+					class="flex flex-col justify-between gap-3 border-b border-[#393939] p-4 sm:flex-row sm:items-center"
+				>
+					<div>
+						<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
+							Nodes
+						</h2>
+						<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">Docker hosts backing this cluster</p>
+					</div>
+					<CarbonTag type={nodeStats.offline > 0 ? 'yellow' : 'green'} size="sm">
+						{nodeStats.online}/{nodeStats.total} ONLINE
+					</CarbonTag>
+				</div>
+				<div class="divide-y divide-[#393939]">
+					{#each dashboardNodes as node (node.id)}
+						<div
+							class="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+							data-testid="node-row"
+						>
+							<div class="flex min-w-0 items-center gap-2">
+								<span class="truncate text-sm font-medium text-[#f4f4f4]">{node.name}</span>
+								{#if node.isLocal}
+									<CarbonTag type="blue" size="sm">LOCAL</CarbonTag>
+								{/if}
+								<CarbonTag type={getNodeTagType(node.status)} size="sm">
+									{describeNodeStatusLabel(node.status)}
+								</CarbonTag>
+							</div>
+							<div class="flex items-center gap-4 font-sans text-[11px] text-[#8d8d8d]">
+								<span class="tabular-nums">
+									{node.runningCount ?? 0}/{node.serverCount ?? 0} SERVERS
+								</span>
+								<span class="tabular-nums">{formatNodeMemory(node)}</span>
+							</div>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
 		<!-- Carbon System Health Strip -->
 		<div class="rounded-none border border-[#393939] bg-[#262626]">
 			<div
@@ -869,7 +976,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</CarbonTag>
 			</div>
 			<div
-				class="grid grid-cols-1 divide-y divide-[#393939] sm:grid-cols-3 sm:divide-x sm:divide-y-0"
+				class="grid grid-cols-1 divide-y divide-[#393939] sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4"
 			>
 				<div class="flex items-center justify-between gap-3 px-4 py-3">
 					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">
@@ -894,6 +1001,16 @@ one at https://mozilla.org/MPL/2.0/.
 							? `${formatBytes(stats.totalDiskUsage)}${stats.totalDiskSize}`
 							: 'LOCAL VOLUMES'}
 					</span>
+				</div>
+				<div class="flex items-center justify-between gap-3 px-4 py-3" data-testid="health-nodes">
+					<span class="font-mono text-xs tracking-wider text-[#8d8d8d] uppercase">Nodes</span>
+					{#if nodeStats.total > 0}
+						<CarbonTag type={nodeStats.offline > 0 ? 'yellow' : 'green'} size="sm">
+							{nodeStats.online}/{nodeStats.total} ONLINE
+						</CarbonTag>
+					{:else}
+						<CarbonTag type="gray" size="sm">NO DATA</CarbonTag>
+					{/if}
 				</div>
 			</div>
 		</div>

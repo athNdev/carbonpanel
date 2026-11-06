@@ -32,6 +32,27 @@ one at https://mozilla.org/MPL/2.0/.
   </p>
 </div>
 
+## UI preview
+
+Static captures from a disposable seeded stack (no live embeds: CSP `frame-ancestors 'self'`).
+
+| Dashboard | Server detail |
+| --- | --- |
+| ![Cluster overview dashboard](assets/showcase/showcase-dashboard.png) | ![Server detail](assets/showcase/showcase-server-detail.png) |
+| Modpack Studio | Modpacks |
+| ![Modpack Studio](assets/showcase/showcase-studio.png) | ![Modpacks library](assets/showcase/showcase-modpacks.png) |
+
+PNGs regenerate on UI changes via the showcase journey:
+
+```sh
+scripts/review/devstack.sh up
+node scripts/review/journey.mjs --plan scripts/review/plan-showcase.json --base http://127.0.0.1:<port-from-devstack> --out /tmp/showcase
+cp /tmp/showcase/showcase-*.png assets/showcase/
+cp /tmp/showcase/showcase-*.png landing/assets/showcase/
+```
+
+See `scripts/review/plan-showcase.json` and `.github/workflows/showcase.yml`.
+
 ## Make the world yours
 
 ### Modpack Studio: create, export and share
