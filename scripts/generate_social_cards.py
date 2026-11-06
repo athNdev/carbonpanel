@@ -80,12 +80,12 @@ def page_style():
 
 def card_html(card):
     lines = len(card["title"])
-    title_top = 380 if lines == 1 else 366
+    title_top = 374 if lines == 1 else 356
     svg_title = "".join(
         f'<tspan x="96" y="{title_top + index * 82}">{line}</tspan>'
         for index, line in enumerate(card["title"])
     )
-    subtitle_top = 474 if lines == 1 else 528
+    subtitle_top = 468 if lines == 1 else 512
     svg_subtitle = "".join(
         f'<tspan x="96" y="{subtitle_top + index * 38}">{line}</tspan>'
         for index, line in enumerate(card["subtitle"])
@@ -99,13 +99,14 @@ def card_html(card):
   <path d="{MARK}" fill="#f4f4f4"/>
   <text x="232" y="145" fill="#f4f4f4" font-family="Inter" font-weight="700"
         font-size="40" letter-spacing="1.5">CARBON PANEL</text>
-  <text x="96" y="300" fill="#8d8d8d" font-family="'JetBrains Mono'" font-weight="400"
+  <text x="96" y="294" fill="#8d8d8d" font-family="'JetBrains Mono'" font-weight="400"
         font-size="18" letter-spacing="4">{card["eyebrow"]}</text>
   <text fill="#f4f4f4" font-family="Inter" font-weight="600" font-size="72"
         letter-spacing="-1">{svg_title}</text>
   <text fill="#c6c6c6" font-family="Inter" font-weight="400" font-size="27">{svg_subtitle}</text>
-  <text x="96" y="602" fill="#6f6f6f" font-family="'JetBrains Mono'" font-weight="400"
-        font-size="16" letter-spacing="0.5">{card["url"]}</text>
+  <line x1="96" y1="584" x2="1104" y2="584" stroke="#2f2f2f" stroke-width="1"/>
+  <text x="96" y="608" fill="#8d8d8d" font-family="'JetBrains Mono'" font-weight="400"
+        font-size="17" letter-spacing="0.5">{card["url"]}</text>
 </svg>
 </body></html>"""
 

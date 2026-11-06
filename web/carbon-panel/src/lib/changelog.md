@@ -35,6 +35,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Social preview cards: balanced vertical spacing with a footer rule and a clearer URL line.
+
 - Creating a server from a modpack keeps the RAM value you enter; the pack recommendation is shown as a hint instead of silently replacing it.
 
 - Landing product tour: even rows now give the screenshot the wide column, so all four captures render at the same readable size.
