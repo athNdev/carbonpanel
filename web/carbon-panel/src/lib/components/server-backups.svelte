@@ -11,6 +11,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
 		ListBackupsRequestSchema,
+		CreateBackupRequestSchema,
 		DeleteBackupRequestSchema,
 		RestoreBackupRequestSchema,
 		SetBackupLockedRequestSchema,
@@ -106,6 +107,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	async function createBackupNow() {
+		acting = 'create';
+		try {
+			const response = await rpcClient.backup.createBackup(
+				create(CreateBackupRequestSchema, { serverId: server.id })
+			);
+			toast.success(response.message || 'Backup created');
+			await loadBackups();
+		} catch (error) {
+			toast.error(
+				'Failed to create backup: ' + (error instanceof Error ? error.message : 'Unknown error')
+			);
+		} finally {
+			acting = null;
+		}
+	}
+
 	async function toggleLock(id: string, locked: boolean) {
 		acting = `lock:${id}`;
 		try {
@@ -145,14 +163,24 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
 		<div class="mb-1 flex items-center justify-between">
 			<h3 class="text-base font-semibold text-[#f4f4f4]">Backups</h3>
-			<button
-				type="button"
-				class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
-				onclick={loadBackups}
-				disabled={loading}
-			>
-				{loading ? 'Loading…' : 'Refresh'}
-			</button>
+			<div class="flex items-center gap-2">
+				<button
+					type="button"
+					class="inline-flex h-8 cursor-pointer items-center rounded-none bg-[#0f62fe] px-4 text-xs text-white transition-colors hover:bg-[#0353e9] disabled:opacity-50"
+					onclick={createBackupNow}
+					disabled={acting !== null || loading}
+				>
+					{acting === 'create' ? 'Backing up…' : 'Back up now'}
+				</button>
+				<button
+					type="button"
+					class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
+					onclick={loadBackups}
+					disabled={loading}
+				>
+					{loading ? 'Loading…' : 'Refresh'}
+				</button>
+			</div>
 		</div>
 		<p class="mb-6 text-xs text-[#a8a8a8]">
 			Scheduled and on-demand archives with restore and sticky locks
@@ -162,7 +190,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<CarbonErrorState title="Failed to load backups" message={loadError} onretry={loadBackups} />
 		{:else if backups.length === 0}
 			<p class="py-8 text-center font-mono text-xs text-[#a8a8a8]">
-				{loading ? 'Loading backups…' : 'No backups yet. Create one from a scheduled backup task.'}
+				{loading
+					? 'Loading backups…'
+					: 'No backups yet. Back up now or create a scheduled backup task.'}
 			</p>
 		{:else}
 			<table class="w-full text-xs" aria-label="Server backups">

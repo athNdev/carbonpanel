@@ -19,7 +19,7 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_backup: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChtjYXJib25wYW5lbC92MS9iYWNrdXAucHJvdG8SDmNhcmJvbnBhbmVsLnYxIq8BCgxCYWNrdXBSZWNvcmQSCgoCaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSEgoKc2l6ZV9ieXRlcxgEIAEoAxIOCgZzaGEyNTYYBSABKAkSDgoGbG9ja2VkGAYgASgIEg4KBnN0YXR1cxgHIAEoCRIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI2ChJMaXN0QmFja3Vwc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg0KBWxpbWl0GAIgASgFIkQKE0xpc3RCYWNrdXBzUmVzcG9uc2USLQoHYmFja3VwcxgBIAMoCzIcLmNhcmJvbnBhbmVsLnYxLkJhY2t1cFJlY29yZCIhChNEZWxldGVCYWNrdXBSZXF1ZXN0EgoKAmlkGAEgASgJIicKFERlbGV0ZUJhY2t1cFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgiIgoUUmVzdG9yZUJhY2t1cFJlcXVlc3QSCgoCaWQYASABKAkiOQoVUmVzdG9yZUJhY2t1cFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSI0ChZTZXRCYWNrdXBMb2NrZWRSZXF1ZXN0EgoKAmlkGAEgASgJEg4KBmxvY2tlZBgCIAEoCCJHChdTZXRCYWNrdXBMb2NrZWRSZXNwb25zZRIsCgZiYWNrdXAYASABKAsyHC5jYXJib25wYW5lbC52MS5CYWNrdXBSZWNvcmQyhAMKDUJhY2t1cFNlcnZpY2USVgoLTGlzdEJhY2t1cHMSIi5jYXJib25wYW5lbC52MS5MaXN0QmFja3Vwc1JlcXVlc3QaIy5jYXJib25wYW5lbC52MS5MaXN0QmFja3Vwc1Jlc3BvbnNlElkKDERlbGV0ZUJhY2t1cBIjLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZUJhY2t1cFJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5EZWxldGVCYWNrdXBSZXNwb25zZRJcCg1SZXN0b3JlQmFja3VwEiQuY2FyYm9ucGFuZWwudjEuUmVzdG9yZUJhY2t1cFJlcXVlc3QaJS5jYXJib25wYW5lbC52MS5SZXN0b3JlQmFja3VwUmVzcG9uc2USYgoPU2V0QmFja3VwTG9ja2VkEiYuY2FyYm9ucGFuZWwudjEuU2V0QmFja3VwTG9ja2VkUmVxdWVzdBonLmNhcmJvbnBhbmVsLnYxLlNldEJhY2t1cExvY2tlZFJlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw',
+		'ChtjYXJib25wYW5lbC92MS9iYWNrdXAucHJvdG8SDmNhcmJvbnBhbmVsLnYxIq8BCgxCYWNrdXBSZWNvcmQSCgoCaWQYASABKAkSEQoJc2VydmVyX2lkGAIgASgJEgwKBG5hbWUYAyABKAkSEgoKc2l6ZV9ieXRlcxgEIAEoAxIOCgZzaGEyNTYYBSABKAkSDgoGbG9ja2VkGAYgASgIEg4KBnN0YXR1cxgHIAEoCRIuCgpjcmVhdGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI2ChJMaXN0QmFja3Vwc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg0KBWxpbWl0GAIgASgFIkQKE0xpc3RCYWNrdXBzUmVzcG9uc2USLQoHYmFja3VwcxgBIAMoCzIcLmNhcmJvbnBhbmVsLnYxLkJhY2t1cFJlY29yZCIhChNEZWxldGVCYWNrdXBSZXF1ZXN0EgoKAmlkGAEgASgJIicKFERlbGV0ZUJhY2t1cFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgiIgoUUmVzdG9yZUJhY2t1cFJlcXVlc3QSCgoCaWQYASABKAkiOQoVUmVzdG9yZUJhY2t1cFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCSI0ChZTZXRCYWNrdXBMb2NrZWRSZXF1ZXN0EgoKAmlkGAEgASgJEg4KBmxvY2tlZBgCIAEoCCJHChdTZXRCYWNrdXBMb2NrZWRSZXNwb25zZRIsCgZiYWNrdXAYASABKAsyHC5jYXJib25wYW5lbC52MS5CYWNrdXBSZWNvcmQiVgoTQ3JlYXRlQmFja3VwUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLYmFja3VwX25hbWUYAiABKAkSFwoPc3RvcF9mb3JfYmFja3VwGAMgASgIImYKFENyZWF0ZUJhY2t1cFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIsCgZiYWNrdXAYAyABKAsyHC5jYXJib25wYW5lbC52MS5CYWNrdXBSZWNvcmQy3wMKDUJhY2t1cFNlcnZpY2USVgoLTGlzdEJhY2t1cHMSIi5jYXJib25wYW5lbC52MS5MaXN0QmFja3Vwc1JlcXVlc3QaIy5jYXJib25wYW5lbC52MS5MaXN0QmFja3Vwc1Jlc3BvbnNlElkKDERlbGV0ZUJhY2t1cBIjLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZUJhY2t1cFJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5EZWxldGVCYWNrdXBSZXNwb25zZRJcCg1SZXN0b3JlQmFja3VwEiQuY2FyYm9ucGFuZWwudjEuUmVzdG9yZUJhY2t1cFJlcXVlc3QaJS5jYXJib25wYW5lbC52MS5SZXN0b3JlQmFja3VwUmVzcG9uc2USYgoPU2V0QmFja3VwTG9ja2VkEiYuY2FyYm9ucGFuZWwudjEuU2V0QmFja3VwTG9ja2VkUmVxdWVzdBonLmNhcmJvbnBhbmVsLnYxLlNldEJhY2t1cExvY2tlZFJlc3BvbnNlElkKDENyZWF0ZUJhY2t1cBIjLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZUJhY2t1cFJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5DcmVhdGVCYWNrdXBSZXNwb25zZUJIWkZnaXRodWIuY29tL2F0aE5kZXYvY2FyYm9uLXBhbmVsL3BrZy9wcm90by9jYXJib25wYW5lbC92MTtjYXJib25wYW5lbHYxYgZwcm90bzM',
 		[file_google_protobuf_timestamp]
 	);
 
@@ -254,6 +254,66 @@ export const SetBackupLockedResponseSchema: GenMessage<SetBackupLockedResponse> 
 	messageDesc(file_carbonpanel_v1_backup, 8);
 
 /**
+ * Create request
+ *
+ * @generated from message carbonpanel.v1.CreateBackupRequest
+ */
+export type CreateBackupRequest = Message<'carbonpanel.v1.CreateBackupRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
+
+	/**
+	 * @generated from field: string backup_name = 2;
+	 */
+	backupName: string;
+
+	/**
+	 * @generated from field: bool stop_for_backup = 3;
+	 */
+	stopForBackup: boolean;
+};
+
+/**
+ * Describes the message carbonpanel.v1.CreateBackupRequest.
+ * Use `create(CreateBackupRequestSchema)` to create a new message.
+ */
+export const CreateBackupRequestSchema: GenMessage<CreateBackupRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_backup, 9);
+
+/**
+ * Create response
+ *
+ * @generated from message carbonpanel.v1.CreateBackupResponse
+ */
+export type CreateBackupResponse = Message<'carbonpanel.v1.CreateBackupResponse'> & {
+	/**
+	 * @generated from field: bool success = 1;
+	 */
+	success: boolean;
+
+	/**
+	 * @generated from field: string message = 2;
+	 */
+	message: string;
+
+	/**
+	 * @generated from field: carbonpanel.v1.BackupRecord backup = 3;
+	 */
+	backup?: BackupRecord | undefined;
+};
+
+/**
+ * Describes the message carbonpanel.v1.CreateBackupResponse.
+ * Use `create(CreateBackupResponseSchema)` to create a new message.
+ */
+export const CreateBackupResponseSchema: GenMessage<CreateBackupResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_backup, 10);
+
+/**
  * On-demand backup management (MINE-138)
  *
  * @generated from service carbonpanel.v1.BackupService
@@ -298,5 +358,15 @@ export const BackupService: GenService<{
 		methodKind: 'unary';
 		input: typeof SetBackupLockedRequestSchema;
 		output: typeof SetBackupLockedResponseSchema;
+	};
+	/**
+	 * Run a backup now with default retention (no schedule needed)
+	 *
+	 * @generated from rpc carbonpanel.v1.BackupService.CreateBackup
+	 */
+	createBackup: {
+		methodKind: 'unary';
+		input: typeof CreateBackupRequestSchema;
+		output: typeof CreateBackupResponseSchema;
 	};
 }> = /*@__PURE__*/ serviceDesc(file_carbonpanel_v1_backup, 0);

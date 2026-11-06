@@ -28,6 +28,9 @@ const (
 	EventServerExport              = "server.export"
 	EventServerPrivilegedOverrides = "server.privileged_overrides"
 	EventServerOperationResolve    = "server.operation.resolve"
+	EventModInstall                = "mod.install"
+	EventModUpdate                 = "mod.update"
+	EventModRemove                 = "mod.remove"
 )
 
 // Entry is a single audit record.

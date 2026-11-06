@@ -124,6 +124,12 @@ message Server {
   // loader's latest for this Minecraft version. Pinned so a rebuild does not
   // silently move a server to a different loader build.
   string loader_version = 45;
+
+  // Real game loader underneath a modpack platform. When mod_loader is a
+  // provisioning platform (modrinth, auto_curseforge) the container still
+  // boots from the platform, but displays use this loader. UNSPECIFIED when
+  // the server did not come from a modpack or the loader is unknown.
+  ModLoader modpack_loader = 46;
 }
 
 // Extra port mapping for container

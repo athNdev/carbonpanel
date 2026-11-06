@@ -181,3 +181,21 @@ func TestBackupTaskRemoteSharedStorageMapsControllerPath(t *testing.T) {
 	require.FileExists(t, filepath.Join(mount, "srv-data", "world", "level.dat"))
 	require.FileExists(t, filepath.Join(mount, "srv-data", "server.properties"))
 }
+
+func TestRunManualBackupUsesSamePipeline(t *testing.T) {
+	s, server := backupTaskFixture(t)
+
+	out, rec, err := s.RunManualBackup(context.Background(), server, BackupTaskConfig{
+		Compress: true, RetentionDays: 7, MinBackups: 1,
+	})
+	require.NoError(t, err)
+	require.Contains(t, out, "backup created")
+	require.NotNil(t, rec)
+	require.NotEmpty(t, rec.SHA256)
+
+	destDir := filepath.Join(s.appConfig.Storage.BackupDir, filepath.Base(server.DataPath))
+	matches, err := filepath.Glob(filepath.Join(destDir, "*.zip"))
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.True(t, worldstore.HasWorldstoreManifest(matches[0]), "manual backup must be a worldstore manifest archive")
+}

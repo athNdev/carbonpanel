@@ -62,3 +62,28 @@ export function loaderDisplayName(loader: ModLoader): string {
 	const name = loaderSearchName(loader);
 	return name === '' ? 'ANY' : name.toUpperCase();
 }
+
+/**
+ * Whether the loader is a modpack provisioning platform rather than a game
+ * loader. The container must keep booting from the platform; displays must
+ * not present it as the mod loader.
+ */
+export function isModpackPlatform(loader: ModLoader): boolean {
+	return loader === ModLoader.AUTO_CURSEFORGE || loader === ModLoader.MODRINTH;
+}
+
+/**
+ * The loader to show and to filter mod indexes by. Modpack servers carry the
+ * platform in modLoader and the real game loader in modpackLoader; every
+ * other server shows modLoader unchanged.
+ */
+export function effectiveLoader(modLoader: ModLoader, modpackLoader?: ModLoader): ModLoader {
+	if (
+		modpackLoader !== undefined &&
+		modpackLoader !== ModLoader.UNSPECIFIED &&
+		isModpackPlatform(modLoader)
+	) {
+		return modpackLoader;
+	}
+	return modLoader;
+}

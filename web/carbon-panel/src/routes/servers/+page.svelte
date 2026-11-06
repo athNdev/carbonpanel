@@ -34,6 +34,7 @@ one at https://mozilla.org/MPL/2.0/.
 		ArrowRight
 	} from '@lucide/svelte';
 	import { type Server, ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
+	import { effectiveLoader } from '$lib/utils/mod-loader';
 	import { CarbonTag, CarbonButton, CarbonConfirm, CarbonPageHeader } from '$lib/components/carbon';
 	import { onMount } from 'svelte';
 
@@ -41,6 +42,7 @@ one at https://mozilla.org/MPL/2.0/.
 	let filteredServers = $state<Server[]>([]);
 	let searchQuery = $state('');
 	let statusFilter = $state<'all' | 'running' | 'stopped' | 'issues'>('all');
+	let hasErrorIssue = $derived(servers.some((s) => s.status === ServerStatus.ERROR));
 	let viewMode = $state<'table' | 'tiles'>('table');
 	let loading = $state(false);
 	let loadError = $state<string | null>(null);
@@ -195,7 +197,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	function getStatusTagType(
 		status: ServerStatus
-	): 'green' | 'gray' | 'blue' | 'red' | 'warm-gray' | 'purple' {
+	): 'green' | 'gray' | 'blue' | 'red' | 'yellow' | 'warm-gray' | 'purple' {
 		switch (status) {
 			case ServerStatus.RUNNING:
 				return 'green';
@@ -212,8 +214,9 @@ one at https://mozilla.org/MPL/2.0/.
 			case ServerStatus.STOPPING:
 				return 'warm-gray';
 			case ServerStatus.ERROR:
-			case ServerStatus.UNHEALTHY:
 				return 'red';
+			case ServerStatus.UNHEALTHY:
+				return 'yellow';
 			default:
 				return 'gray';
 		}
@@ -246,8 +249,9 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function getModLoaderDisplay(modLoader: ModLoader): string {
-		return ModLoader[modLoader].replace('_', ' ').toLowerCase();
+	function getModLoaderDisplay(server: Server): string {
+		const loader = effectiveLoader(server.modLoader, server.modpackLoader);
+		return ModLoader[loader].replace('_', ' ').toLowerCase();
 	}
 </script>
 
@@ -335,8 +339,12 @@ one at https://mozilla.org/MPL/2.0/.
 						aria-pressed={statusFilter === 'issues'}
 						class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {statusFilter ===
 						'issues'
-							? 'border-[#da1e28] bg-[#da1e28] text-white'
-							: 'border-[#da1e28]/50 bg-[#161616] text-[#ff8389] hover:bg-[#353535]'}"
+							? hasErrorIssue
+								? 'border-[#da1e28] bg-[#da1e28] text-white'
+								: 'border-[#f1c21b] bg-[#f1c21b] text-black'
+							: hasErrorIssue
+								? 'border-[#da1e28]/50 bg-[#161616] text-[#ff8389] hover:bg-[#353535]'
+								: 'border-[#f1c21b]/50 bg-[#161616] text-[#f1c21b] hover:bg-[#353535]'}"
 					>
 						Issues ({servers.filter(
 							(s) => s.status === ServerStatus.ERROR || s.status === ServerStatus.UNHEALTHY
@@ -513,7 +521,7 @@ one at https://mozilla.org/MPL/2.0/.
 									<span class="text-[#f4f4f4]">{server.mcVersion || 'Latest'}</span>
 									{#if server.modLoader !== ModLoader.VANILLA && server.modLoader !== ModLoader.UNSPECIFIED}
 										<CarbonTag type="teal" size="sm">
-											{getModLoaderDisplay(server.modLoader)}
+											{getModLoaderDisplay(server)}
 										</CarbonTag>
 									{:else}
 										<span class="text-xs text-[#8d8d8d]">Vanilla</span>
@@ -742,7 +750,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<span class="font-mono text-xs text-[#a8a8a8]">{server.mcVersion}</span>
 							{#if server.modLoader !== ModLoader.VANILLA && server.modLoader !== ModLoader.UNSPECIFIED}
 								<CarbonTag type="teal" size="sm">
-									{getModLoaderDisplay(server.modLoader)}
+									{getModLoaderDisplay(server)}
 								</CarbonTag>
 							{/if}
 						</div>

@@ -363,6 +363,11 @@ type Server struct {
 	// loader's latest for this Minecraft version. Pinned so a rebuild does not
 	// silently move a server to a different loader build.
 	LoaderVersion string `protobuf:"bytes,45,opt,name=loader_version,json=loaderVersion,proto3" json:"loader_version,omitempty"`
+	// Real game loader underneath a modpack platform. When mod_loader is a
+	// provisioning platform (modrinth, auto_curseforge) the container still
+	// boots from the platform, but displays use this loader. UNSPECIFIED when
+	// the server did not come from a modpack or the loader is unknown.
+	ModpackLoader ModLoader `protobuf:"varint,46,opt,name=modpack_loader,json=modpackLoader,proto3,enum=carbonpanel.v1.ModLoader" json:"modpack_loader,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -710,6 +715,13 @@ func (x *Server) GetLoaderVersion() string {
 		return x.LoaderVersion
 	}
 	return ""
+}
+
+func (x *Server) GetModpackLoader() ModLoader {
+	if x != nil {
+		return x.ModpackLoader
+	}
+	return ModLoader_MOD_LOADER_UNSPECIFIED
 }
 
 // Extra port mapping for container
@@ -1449,7 +1461,7 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"last_login\x18\t \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tlastLogin\x88\x01\x01B\b\n" +
 	"\x06_emailB\r\n" +
-	"\v_last_login\"\xd0\r\n" +
+	"\v_last_login\"\x92\x0e\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -1508,7 +1520,8 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\x0fmax_players_slp\x18% \x01(\x05R\rmaxPlayersSlp\x12\x18\n" +
 	"\afavicon\x18& \x01(\tR\afavicon\x12\x17\n" +
 	"\anode_id\x18( \x01(\tR\x06nodeId\x12%\n" +
-	"\x0eloader_version\x18- \x01(\tR\rloaderVersionB\x0f\n" +
+	"\x0eloader_version\x18- \x01(\tR\rloaderVersion\x12@\n" +
+	"\x0emodpack_loader\x18. \x01(\x0e2\x19.carbonpanel.v1.ModLoaderR\rmodpackLoaderB\x0f\n" +
 	"\r_last_started\"\xa9\x01\n" +
 	"\x0eAdditionalPort\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
@@ -1674,21 +1687,22 @@ var file_carbonpanel_v1_common_proto_depIdxs = []int32{
 	6,  // 7: carbonpanel.v1.Server.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
 	13, // 8: carbonpanel.v1.Server.created_at:type_name -> google.protobuf.Timestamp
 	13, // 9: carbonpanel.v1.Server.updated_at:type_name -> google.protobuf.Timestamp
-	11, // 10: carbonpanel.v1.DockerOverrides.environment:type_name -> carbonpanel.v1.DockerOverrides.EnvironmentEntry
-	5,  // 11: carbonpanel.v1.DockerOverrides.volumes:type_name -> carbonpanel.v1.VolumeMount
-	12, // 12: carbonpanel.v1.DockerOverrides.labels:type_name -> carbonpanel.v1.DockerOverrides.LabelsEntry
-	13, // 13: carbonpanel.v1.ProxyListener.created_at:type_name -> google.protobuf.Timestamp
-	13, // 14: carbonpanel.v1.ProxyListener.updated_at:type_name -> google.protobuf.Timestamp
-	13, // 15: carbonpanel.v1.ProxyConfig.created_at:type_name -> google.protobuf.Timestamp
-	13, // 16: carbonpanel.v1.ProxyConfig.updated_at:type_name -> google.protobuf.Timestamp
-	9,  // 17: carbonpanel.v1.Role.permissions:type_name -> carbonpanel.v1.Permission
-	13, // 18: carbonpanel.v1.Role.created_at:type_name -> google.protobuf.Timestamp
-	13, // 19: carbonpanel.v1.Role.updated_at:type_name -> google.protobuf.Timestamp
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	1,  // 10: carbonpanel.v1.Server.modpack_loader:type_name -> carbonpanel.v1.ModLoader
+	11, // 11: carbonpanel.v1.DockerOverrides.environment:type_name -> carbonpanel.v1.DockerOverrides.EnvironmentEntry
+	5,  // 12: carbonpanel.v1.DockerOverrides.volumes:type_name -> carbonpanel.v1.VolumeMount
+	12, // 13: carbonpanel.v1.DockerOverrides.labels:type_name -> carbonpanel.v1.DockerOverrides.LabelsEntry
+	13, // 14: carbonpanel.v1.ProxyListener.created_at:type_name -> google.protobuf.Timestamp
+	13, // 15: carbonpanel.v1.ProxyListener.updated_at:type_name -> google.protobuf.Timestamp
+	13, // 16: carbonpanel.v1.ProxyConfig.created_at:type_name -> google.protobuf.Timestamp
+	13, // 17: carbonpanel.v1.ProxyConfig.updated_at:type_name -> google.protobuf.Timestamp
+	9,  // 18: carbonpanel.v1.Role.permissions:type_name -> carbonpanel.v1.Permission
+	13, // 19: carbonpanel.v1.Role.created_at:type_name -> google.protobuf.Timestamp
+	13, // 20: carbonpanel.v1.Role.updated_at:type_name -> google.protobuf.Timestamp
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_common_proto_init() }

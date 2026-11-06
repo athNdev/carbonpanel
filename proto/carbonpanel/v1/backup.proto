@@ -22,6 +22,8 @@ service BackupService {
   rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse);
   // Toggle the sticky lock flag
   rpc SetBackupLocked(SetBackupLockedRequest) returns (SetBackupLockedResponse);
+  // Run a backup now with default retention (no schedule needed)
+  rpc CreateBackup(CreateBackupRequest) returns (CreateBackupResponse);
 }
 
 // One backup record
@@ -77,4 +79,18 @@ message SetBackupLockedRequest {
 // Lock response
 message SetBackupLockedResponse {
   BackupRecord backup = 1;
+}
+
+// Create request
+message CreateBackupRequest {
+  string server_id = 1;
+  string backup_name = 2;
+  bool stop_for_backup = 3;
+}
+
+// Create response
+message CreateBackupResponse {
+  bool success = 1;
+  string message = 2;
+  BackupRecord backup = 3;
 }

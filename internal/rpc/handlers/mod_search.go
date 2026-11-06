@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
@@ -935,6 +936,37 @@ func (m *ModOnlineManager) handleCurseForgeVersions(w http.ResponseWriter, r *ht
 	})
 }
 
+// auditModInstall records an online mod install in the Activity tab, failures
+// included. A failed install used to surface only as a toast, leaving no
+// trace of what was tried and why it failed.
+func (m *ModOnlineManager) auditModInstall(r *http.Request, server *storage.Server, success bool, installed, errs []string) {
+	if m.store == nil || server == nil {
+		return
+	}
+	actorID, actorName := "", ""
+	if m.authManager != nil {
+		if user, err := m.authManager.AuthenticateFromHeader(r.Context(), r.Header.Get("Authorization")); err == nil && user != nil {
+			actorID, actorName = user.ID, user.Username
+		}
+	}
+	props, _ := json.Marshal(map[string]any{
+		"success":   success,
+		"installed": installed,
+		"errors":    errs,
+	})
+	if err := activity.Log(m.store.DB(), activity.Entry{
+		ActorID:    actorID,
+		ActorName:  actorName,
+		IP:         r.RemoteAddr,
+		Event:      activity.EventModInstall,
+		SubjectTyp: "server",
+		SubjectID:  server.ID,
+		Properties: string(props),
+	}); err != nil {
+		m.log.Error("Audit log failed for %s: %v", activity.EventModInstall, err)
+	}
+}
+
 func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request, server *storage.Server) {
 	modsDir, err := modsDirectory(r.Context(), m.store, server, true)
 	if err != nil {
@@ -1022,6 +1054,8 @@ func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request,
 
 		resp.Installed = append(resp.Installed, fileName)
 	}
+
+	m.auditModInstall(r, server, resp.Success, resp.Installed, resp.Errors)
 
 	if len(resp.Installed) == 0 && len(resp.Errors) > 0 {
 		resp.Success = false

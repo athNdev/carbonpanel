@@ -25,6 +25,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	s3uploader "github.com/athNdev/carbon-panel/internal/s3"
+	"github.com/athNdev/carbon-panel/internal/scheduler"
 	"github.com/athNdev/carbon-panel/internal/worldstore"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -45,7 +46,10 @@ type BackupService struct {
 	enforcer         *rbac.Enforcer
 	restoringMu      sync.Mutex
 	restoringServers map[string]bool
-	worldDataDir     string
+	// scheduler runs on-demand backups through the same journaled pipeline
+	// as scheduled tasks. Injected by setter to keep the constructor stable.
+	scheduler    *scheduler.Scheduler
+	worldDataDir string
 	// backupKey is the authenticated-encryption key for backup artifacts
 	// (OSS-236). Nil is the explicit disabled-encryption state.
 	backupKey *backupcrypt.Key
@@ -105,6 +109,12 @@ func (s *BackupService) SetBackupEncryption(keyID, key string) error {
 // worldstore-format archives are refused rather than silently degraded.
 func (s *BackupService) SetWorldDataDir(dataDir string) {
 	s.worldDataDir = dataDir
+}
+
+// SetScheduler injects the task scheduler used for on-demand backups.
+// Without it CreateBackup fails closed instead of running degraded.
+func (s *BackupService) SetScheduler(sched *scheduler.Scheduler) {
+	s.scheduler = sched
 }
 
 func (s *BackupService) SetEnforcer(e *rbac.Enforcer) {
@@ -246,6 +256,42 @@ func (s *BackupService) SetBackupLocked(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read backup"))
 	}
 	return connect.NewResponse(&v1.SetBackupLockedResponse{Backup: dbBackupToProto(rec)}), nil
+}
+
+// CreateBackup runs an on-demand backup without a schedule, through the same
+// journaled pipeline as scheduled backup tasks (hot by default; set
+// stop_for_backup for a stopped, strongest-consistency archive).
+func (s *BackupService) CreateBackup(ctx context.Context, req *connect.Request[v1.CreateBackupRequest]) (*connect.Response[v1.CreateBackupResponse], error) {
+	msg := req.Msg
+	server, err := s.store.GetServer(ctx, msg.ServerId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
+	}
+	if err := s.authorizeServerBackup(ctx, server.ID, rbac.ActionCreate); err != nil {
+		return nil, err
+	}
+	if s.scheduler == nil {
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("backup runner is not configured"))
+	}
+	name := msg.BackupName
+	if name == "" {
+		name = "Manual backup"
+	}
+	output, rec, err := s.scheduler.RunManualBackup(ctx, server, scheduler.BackupTaskConfig{
+		BackupName:    name,
+		Compress:      true,
+		RetentionDays: 7,
+		MinBackups:    1,
+		StopForBackup: msg.StopForBackup,
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("backup failed: %w", err))
+	}
+	resp := &v1.CreateBackupResponse{Success: true, Message: output}
+	if rec != nil {
+		resp.Backup = dbBackupToProto(rec)
+	}
+	return connect.NewResponse(resp), nil
 }
 
 func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[v1.RestoreBackupRequest]) (*connect.Response[v1.RestoreBackupResponse], error) {

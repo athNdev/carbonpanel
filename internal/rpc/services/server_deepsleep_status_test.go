@@ -81,3 +81,21 @@ func TestDBStatusToProto_DoesNotCollapseOrdinaryStatuses(t *testing.T) {
 	assert.Equal(t, v1.ServerStatus_SERVER_STATUS_ERROR, dbStatusToProto(storage.StatusError))
 	assert.Equal(t, v1.ServerStatus_SERVER_STATUS_UNHEALTHY, dbStatusToProto(storage.StatusUnhealthy))
 }
+
+// TestPreserveStoredStatus_BootGraceSurvivesUnhealthyProbes covers the normal
+// boot window: image pulls and modpack downloads take minutes, and the Docker
+// healthcheck fails probes the whole time. A starting server must keep
+// showing as starting on list refreshes instead of flapping yellow/red.
+func TestPreserveStoredStatus_BootGraceSurvivesUnhealthyProbes(t *testing.T) {
+	for _, stored := range []storage.ServerStatus{
+		storage.StatusStarting,
+		storage.StatusCreating,
+	} {
+		assert.True(t, preserveStoredStatus(stored, storage.StatusUnhealthy),
+			"a booting server that fails health probes is still %q", stored)
+	}
+	assert.False(t, preserveStoredStatus(storage.StatusRunning, storage.StatusUnhealthy),
+		"a running server that fails health probes is genuinely unhealthy")
+	assert.False(t, preserveStoredStatus(storage.StatusStarting, storage.StatusRunning),
+		"a boot that finished must converge to running")
+}

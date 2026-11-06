@@ -104,6 +104,9 @@ func TestInitBuiltinTemplates_SeedsAndIdempotent(t *testing.T) {
 	if !byID["builtin-geyser"] {
 		t.Error("builtin-geyser template missing")
 	}
+	if byID["builtin-mc-backup"] {
+		t.Error("builtin-mc-backup must not be seeded: backups are native (Backups tab, tasks, CreateBackup)")
+	}
 	for _, tpl := range templates {
 		if tpl.ID != "builtin-geyser" {
 			continue
@@ -542,4 +545,33 @@ func TestExecuteHookBranches(t *testing.T) {
 	m.executeHook(ctx, mod, &v1.ModuleEventHook{
 		Event: v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_START,
 	}, "s1")
+}
+
+func TestInitBuiltinTemplates_RetiresMcBackupWhenUnreferenced(t *testing.T) {
+	_, store := newLogicTestManager(t, nil)
+	ctx := context.Background()
+
+	if err := InitBuiltinTemplates(store); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+	if _, err := store.GetModuleTemplate(ctx, "builtin-mc-backup"); err == nil {
+		t.Fatal("retired template row must be gone when no module references it")
+	}
+
+	// An existing install pins the row: seeding must keep it working.
+	legacy := &storage.ModuleTemplate{ID: "builtin-mc-backup", Name: "MC Backup", Type: storage.ModuleTemplateTypeBuiltin}
+	if err := store.CreateModuleTemplate(ctx, legacy); err != nil {
+		t.Fatalf("recreate legacy template: %v", err)
+	}
+	if err := store.CreateModule(ctx, &storage.Module{
+		ID: "mod-1", Name: "mod-1", TemplateID: "builtin-mc-backup", ServerID: "srv-1",
+	}); err != nil {
+		t.Fatalf("create legacy module: %v", err)
+	}
+	if err := InitBuiltinTemplates(store); err != nil {
+		t.Fatalf("reseed with legacy install failed: %v", err)
+	}
+	if _, err := store.GetModuleTemplate(ctx, "builtin-mc-backup"); err != nil {
+		t.Fatalf("referenced template row must be kept: %v", err)
+	}
 }
