@@ -17,7 +17,7 @@ one at https://mozilla.org/MPL/2.0/.
 		DialogHeader,
 		DialogTitle
 	} from '$lib/components/ui/dialog';
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { Folder, FolderOpen, ChevronRight, ChevronDown } from '@lucide/svelte';
 	import type { FileInfo } from '$lib/proto/carbonpanel/v1/file_pb';
@@ -123,10 +123,10 @@ one at https://mozilla.org/MPL/2.0/.
 			{@render dirTree(files, 1)}
 		</div>
 		<DialogFooter>
-			<Button variant="outline" onclick={onClose}>Cancel</Button>
-			<Button onclick={() => onConfirm(selectedPath)}>
+			<CarbonButton kind="tertiary" onclick={onClose}>Cancel</CarbonButton>
+			<CarbonButton onclick={() => onConfirm(selectedPath)}>
 				{title.startsWith('Move') ? 'Move Here' : 'Copy Here'}
-			</Button>
+			</CarbonButton>
 		</DialogFooter>
 	</DialogContent>
 </DialogPrimitive.Root>

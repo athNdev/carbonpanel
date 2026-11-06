@@ -13,7 +13,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		DialogHeader,
 		DialogTitle
 	} from '$lib/components/ui/dialog';
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { Download, Loader2, Package } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import DatapackSearch from '$lib/components/datapack-search.svelte';
@@ -63,7 +63,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		<DatapackSearch {gameVersion} emptyHint="Search for datapacks to install into this world.">
 			{#snippet actions(d)}
-				<Button
+				<CarbonButton
 					onclick={() => installDatapack(d.id, d.name, d.indexer)}
 					disabled={installing[d.id]}
 					class="rounded-none bg-[#0f62fe] text-white"
@@ -72,7 +72,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							class="h-4 w-4"
 						/>{/if}
 					Install
-				</Button>
+				</CarbonButton>
 			{/snippet}
 		</DatapackSearch>
 	</DialogContent>

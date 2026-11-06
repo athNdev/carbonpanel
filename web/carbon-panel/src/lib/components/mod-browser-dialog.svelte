@@ -15,7 +15,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		DialogHeader,
 		DialogTitle
 	} from '$lib/components/ui/dialog';
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { Input } from '$lib/components/ui/input';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Tabs, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
@@ -462,14 +462,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-3">
 					{#if selectedMod}
-						<Button
-							variant="ghost"
+						<CarbonButton
+							kind="ghost"
 							size="sm"
 							onclick={() => (selectedMod = null)}
 							class="h-8 w-8 p-0"
 						>
 							<ArrowLeft class="h-4 w-4" />
-						</Button>
+						</CarbonButton>
 					{/if}
 					<div>
 						<DialogTitle class="flex items-center gap-2 text-xl font-bold">
@@ -555,13 +555,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						/>
 					</div>
 
-					<Button onclick={searchMods} disabled={searching}>
+					<CarbonButton onclick={searchMods} disabled={searching}>
 						{#if searching}
 							<Loader2 class="h-4 w-4 animate-spin" />
 						{:else}
 							Search
 						{/if}
-					</Button>
+					</CarbonButton>
 				</div>
 
 				<!-- Interactive Filter Bar -->
@@ -728,7 +728,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									</div>
 
 									<div class="flex flex-shrink-0 flex-col items-end gap-2">
-										<Button size="sm" onclick={() => viewModVersions(mod)}>Select Version</Button>
+										<CarbonButton size="sm" onclick={() => viewModVersions(mod)}
+											>Select Version</CarbonButton
+										>
 									</div>
 								</CardContent>
 							</Card>
@@ -843,8 +845,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					{/if}
 
 					<div class="flex justify-end gap-3 pt-3">
-						<Button variant="outline" onclick={() => (selectedMod = null)}>Cancel</Button>
-						<Button onclick={installMod} disabled={installing || !selectedVersion}>
+						<CarbonButton kind="tertiary" onclick={() => (selectedMod = null)}>Cancel</CarbonButton>
+						<CarbonButton onclick={installMod} disabled={installing || !selectedVersion}>
 							{#if installing}
 								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
 								Installing to /mods...
@@ -852,7 +854,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<Download class="mr-2 h-4 w-4" />
 								{installLabel}
 							{/if}
-						</Button>
+						</CarbonButton>
 					</div>
 				{/if}
 			</div>

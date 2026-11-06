@@ -10,7 +10,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { Progress } from '$lib/components/ui/progress';
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import {
@@ -906,16 +906,17 @@ one at https://mozilla.org/MPL/2.0/.
 					<span class="text-xs text-muted-foreground">
 						{uploadProgress.percentComplete.toFixed(0)}%
 					</span>
-					<Button
-						size="icon"
-						variant="ghost"
+					<CarbonButton
+						size="sm"
+						iconOnly
+						kind="ghost"
 						class="h-5 w-5"
 						onclick={cancelCurrentUpload}
 						title="Cancel"
 						aria-label="Cancel upload"
 					>
 						<X class="h-3 w-3" />
-					</Button>
+					</CarbonButton>
 				</div>
 			</div>
 			<Progress value={uploadProgress.percentComplete} class="h-1.5" />
@@ -962,13 +963,9 @@ one at https://mozilla.org/MPL/2.0/.
 			<Folder class="mb-4 h-12 w-12" />
 			<p>This folder is empty</p>
 			<p class="mt-2 text-sm">Upload files or create a new file to get started</p>
-			<button
-				type="button"
-				onclick={() => triggerUpload('')}
-				class="mt-4 inline-flex h-8 cursor-pointer items-center rounded-none bg-[#0f62fe] px-4 font-sans text-xs text-white transition-colors hover:bg-[#0353e9]"
-			>
+			<CarbonButton kind="primary" size="sm" onclick={() => triggerUpload('')} class="mt-4">
 				Upload files
-			</button>
+			</CarbonButton>
 		</div>
 	{:else}
 		<!-- File tree -->
@@ -1062,8 +1059,9 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 		<DialogFooter>
-			<Button variant="outline" onclick={() => (showNewFileDialog = false)}>Cancel</Button>
-			<Button onclick={createNewFile}>Create</Button>
+			<CarbonButton kind="tertiary" onclick={() => (showNewFileDialog = false)}>Cancel</CarbonButton
+			>
+			<CarbonButton onclick={createNewFile}>Create</CarbonButton>
 		</DialogFooter>
 	</DialogContent>
 </DialogPrimitive.Root>
@@ -1091,8 +1089,10 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 		<DialogFooter>
-			<Button variant="outline" onclick={() => (showNewFolderDialog = false)}>Cancel</Button>
-			<Button onclick={createNewFolder}>Create</Button>
+			<CarbonButton kind="tertiary" onclick={() => (showNewFolderDialog = false)}
+				>Cancel</CarbonButton
+			>
+			<CarbonButton onclick={createNewFolder}>Create</CarbonButton>
 		</DialogFooter>
 	</DialogContent>
 </DialogPrimitive.Root>
@@ -1120,8 +1120,8 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 		<DialogFooter>
-			<Button variant="outline" onclick={() => (showRenameDialog = false)}>Cancel</Button>
-			<Button onclick={confirmRename}>Rename</Button>
+			<CarbonButton kind="tertiary" onclick={() => (showRenameDialog = false)}>Cancel</CarbonButton>
+			<CarbonButton onclick={confirmRename}>Rename</CarbonButton>
 		</DialogFooter>
 	</DialogContent>
 </DialogPrimitive.Root>

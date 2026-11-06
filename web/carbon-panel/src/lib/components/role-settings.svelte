@@ -13,7 +13,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { CarbonConfirm } from '$lib/components/carbon';
 	import { canCreateRoles, canUpdateRoles, canDeleteRoles } from '$lib/stores/auth';
 	import { Card, CardContent } from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
+	import { CarbonButton } from '$lib/components/carbon';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
@@ -350,10 +350,10 @@ one at https://mozilla.org/MPL/2.0/.
 	<div class="flex items-center justify-between">
 		<p class="text-sm text-muted-foreground">Manage roles and their permissions</p>
 		{#if canCreate}
-			<Button onclick={() => (showCreateDialog = true)}>
+			<CarbonButton onclick={() => (showCreateDialog = true)}>
 				<Plus class="mr-2 h-4 w-4" />
 				Create Role
-			</Button>
+			</CarbonButton>
 		{/if}
 	</div>
 
@@ -383,13 +383,19 @@ one at https://mozilla.org/MPL/2.0/.
 					<TableBody>
 						{#each roles as role (role.id)}
 							<TableRow>
-								<TableCell class="font-medium">{role.name}</TableCell>
-								<TableCell class="text-muted-foreground">{role.description || '-'}</TableCell>
+								<TableCell class="max-w-[160px] font-medium whitespace-nowrap"
+									><span class="block truncate" title={role.name}>{role.name}</span></TableCell
+								>
+								<TableCell class="max-w-[240px] whitespace-nowrap text-muted-foreground"
+									><span class="block truncate" title={role.description || ''}
+										>{role.description || '-'}</span
+									></TableCell
+								>
 								<TableCell>
 									{#if role.isSystem}
-										<Badge variant="secondary">System</Badge>
+										<Badge variant="secondary" class="whitespace-nowrap">System</Badge>
 									{:else}
-										<Badge variant="outline">Custom</Badge>
+										<Badge variant="outline" class="whitespace-nowrap">Custom</Badge>
 									{/if}
 								</TableCell>
 								<TableCell>
@@ -399,14 +405,18 @@ one at https://mozilla.org/MPL/2.0/.
 										<X class="h-4 w-4 text-muted-foreground" />
 									{/if}
 								</TableCell>
-								<TableCell>
+								<TableCell class="whitespace-nowrap">
 									{#if hasFullAccess(role.name)}
-										<Badge variant="destructive">Full Access</Badge>
+										<Badge variant="destructive" class="whitespace-nowrap">Full Access</Badge>
 									{:else if canUpdate}
-										<Button size="sm" variant="outline" onclick={() => openPermissionsDialog(role)}>
+										<CarbonButton
+											size="sm"
+											kind="tertiary"
+											onclick={() => openPermissionsDialog(role)}
+										>
 											<Edit class="mr-1 h-3 w-3" />
 											Edit ({role.permissions?.length || 0})
-										</Button>
+										</CarbonButton>
 									{:else}
 										<span class="text-sm text-muted-foreground"
 											>{role.permissions?.length || 0} permissions</span
@@ -414,11 +424,11 @@ one at https://mozilla.org/MPL/2.0/.
 									{/if}
 								</TableCell>
 								{#if canDelete}
-									<TableCell class="text-right">
+									<TableCell class="text-right whitespace-nowrap">
 										{#if !role.isSystem}
-											<Button size="sm" variant="outline" onclick={() => deleteRole(role)}>
+											<CarbonButton size="sm" kind="tertiary" onclick={() => deleteRole(role)}>
 												<Trash2 class="h-4 w-4" />
-											</Button>
+											</CarbonButton>
 										{/if}
 									</TableCell>
 								{/if}
@@ -470,8 +480,8 @@ one at https://mozilla.org/MPL/2.0/.
 		</div>
 
 		<DialogFooter>
-			<Button variant="outline" onclick={() => (showCreateDialog = false)}>Cancel</Button>
-			<Button onclick={createRole}>Create Role</Button>
+			<CarbonButton kind="tertiary" onclick={() => (showCreateDialog = false)}>Cancel</CarbonButton>
+			<CarbonButton onclick={createRole}>Create Role</CarbonButton>
 		</DialogFooter>
 	</DialogContent>
 </Dialog>
@@ -550,14 +560,15 @@ one at https://mozilla.org/MPL/2.0/.
 							{/if}
 						</p>
 					</div>
-					<Button
-						variant="ghost"
-						size="icon"
+					<CarbonButton
+						kind="ghost"
+						size="sm"
+						iconOnly
 						onclick={() => (showPermissionsDialog = false)}
 						class="h-10 w-10"
 					>
 						<X class="h-5 w-5" />
-					</Button>
+					</CarbonButton>
 				</div>
 
 				<!-- Scrollable Content Area -->
@@ -766,14 +777,18 @@ one at https://mozilla.org/MPL/2.0/.
 
 				<!-- Footer -->
 				<div class="flex items-center justify-end gap-3 border-t bg-muted/30 px-8 py-5">
-					<Button
-						variant="outline"
+					<CarbonButton
+						kind="tertiary"
 						onclick={() => (showPermissionsDialog = false)}
 						class="h-11 px-6"
 					>
 						Cancel
-					</Button>
-					<Button onclick={savePermissions} disabled={savingPermissions} class="h-11 gap-2 px-8">
+					</CarbonButton>
+					<CarbonButton
+						onclick={savePermissions}
+						disabled={savingPermissions}
+						class="h-11 gap-2 px-8"
+					>
 						{#if savingPermissions}
 							<Loader2 class="h-4 w-4 animate-spin" />
 							Saving...
@@ -781,7 +796,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<Save class="h-4 w-4" />
 							Save Permissions
 						{/if}
-					</Button>
+					</CarbonButton>
 				</div>
 			</div>
 		</div>
