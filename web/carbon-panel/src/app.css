@@ -13,22 +13,28 @@ one at https://mozilla.org/MPL/2.0/.
 @import 'tw-animate-css';
 
 /*
-	Self-hosted IBM Plex.
+	Self-hosted Inter (UI) + JetBrains Mono (code).
 
-	These were previously requested from the Google Fonts CDN via a <link> in
-	app.html, which the server's `style-src 'self' 'unsafe-inline'` CSP blocked.
-	The block was silent: the declared UI font never loaded and every screen
-	rendered in the fallback face.
-
-	- Plex Sans ships a variable font with a weight axis, so one file covers
-	  100-700 and no faux-bold synthesis is needed.
-	- Plex Mono has no variable release, so 400/500/600 are loaded statically.
-	- Latin subset only, to keep the payload proportionate for a panel UI.
+	Variable woff2 files vendored under static/fonts (see OFL-ATTRIBUTION.txt),
+	so the panel needs no font CDN or npm font package at runtime and works
+	offline/air-gapped. Served from the app's own origin, which the server's
+	`font-src 'self'` CSP allows. Latin subset only, to keep the payload
+	proportionate for a panel UI.
 */
-@import '@fontsource-variable/ibm-plex-sans/wght.css';
-@import '@fontsource/ibm-plex-mono/latin-400.css';
-@import '@fontsource/ibm-plex-mono/latin-500.css';
-@import '@fontsource/ibm-plex-mono/latin-600.css';
+@font-face {
+	font-family: 'Inter Variable';
+	font-style: normal;
+	font-display: swap;
+	font-weight: 100 900;
+	src: url('/fonts/inter-latin-wght-normal.woff2') format('woff2');
+}
+@font-face {
+	font-family: 'JetBrains Mono Variable';
+	font-style: normal;
+	font-display: swap;
+	font-weight: 100 900;
+	src: url('/fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2');
+}
 
 @custom-variant dark (&:is(.dark *));
 
