@@ -253,11 +253,6 @@ func (m *Manager) ImportMrpack(r io.ReaderAt, size int64, opts ImportOptions) (*
 					Version: hash,
 				},
 			},
-			Option: &struct {
-				Pinned bool `toml:"pinned,omitempty"`
-			}{
-				Pinned: false,
-			},
 		}
 
 		modBytes, err := toml.Marshal(tm)
@@ -479,11 +474,6 @@ func (m *Manager) ImportCurseForge(r io.ReaderAt, size int64, opts ImportOptions
 					ProjectID: file.ProjectID,
 					FileID:    file.FileID,
 				},
-			},
-			Option: &struct {
-				Pinned bool `toml:"pinned,omitempty"`
-			}{
-				Pinned: false,
 			},
 		}
 

@@ -21,6 +21,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/packwiz"
 	"github.com/athNdev/carbon-panel/internal/rbac"
@@ -167,6 +168,22 @@ func (h *PackwizHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleSaveFile(w, r, packID)
 		case subRoute == "files" && r.Method == http.MethodDelete:
 			h.handleDeleteFile(w, r, packID)
+		case subRoute == "datapack-folder" && r.Method == http.MethodPut:
+			h.handleSetDatapackFolder(w, r, packID)
+		case subRoute == "content" && len(parts) >= 4 && parts[3] == "search" && r.Method == http.MethodGet:
+			h.handleSearchContent(w, r, packID)
+		case subRoute == "content" && len(parts) >= 4 && parts[3] == "versions" && r.Method == http.MethodGet:
+			h.handleListContentVersions(w, r, packID)
+		case subRoute == "content" && len(parts) >= 4 && parts[3] == "url" && r.Method == http.MethodPost:
+			h.handleAddContentURL(w, r, packID)
+		case subRoute == "content" && len(parts) >= 4 && parts[3] == "upload" && r.Method == http.MethodPost:
+			h.handleUploadContent(w, r, packID)
+		case subRoute == "content" && len(parts) == 3 && r.Method == http.MethodPost:
+			h.handleAddContent(w, r, packID)
+		case subRoute == "content" && len(parts) >= 5 && r.Method == http.MethodPatch:
+			h.handleUpdateContent(w, r, packID, parts[3], parts[4])
+		case subRoute == "content" && len(parts) >= 5 && r.Method == http.MethodDelete:
+			h.handleDeleteContent(w, r, packID, parts[3], parts[4])
 		case subRoute == "datapacks" && len(parts) >= 4 && parts[3] == "upload" && r.Method == http.MethodPost:
 			h.handleUploadDatapack(w, r, packID)
 		case subRoute == "datapacks" && r.Method == http.MethodPost:
@@ -276,10 +293,19 @@ func (h *PackwizHandler) handleRefreshPack(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *PackwizHandler) handleCheckUpdates(w http.ResponseWriter, r *http.Request, packID string) {
-	updates, err := h.manager.CheckModUpdates(packID)
+	updates, err := h.manager.CheckContentUpdates(packID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to check updates: %v", err), http.StatusInternalServerError)
 		return
+	}
+	if kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind != "" {
+		filtered := updates[:0]
+		for _, update := range updates {
+			if update.Kind == kind {
+				filtered = append(filtered, update)
+			}
+		}
+		updates = filtered
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"updates": updates})
 }
@@ -287,28 +313,36 @@ func (h *PackwizHandler) handleCheckUpdates(w http.ResponseWriter, r *http.Reque
 func (h *PackwizHandler) handleApplyUpdates(w http.ResponseWriter, r *http.Request, packID string) {
 	var req struct {
 		Slug            string `json:"slug"`
+		Kind            string `json:"kind"`
 		TargetVersionID string `json:"target_version_id"`
 		TargetFileName  string `json:"target_file_name"`
 		TargetURL       string `json:"target_url"`
+		HashFormat      string `json:"hash_format"`
+		Hash            string `json:"hash"`
+		SHA512          string `json:"sha512"`
 		ApplyAll        bool   `json:"apply_all"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
+	if req.Kind == "" {
+		req.Kind = packwiz.ContentKindMod
+	}
 
 	if req.ApplyAll {
-		updates, err := h.manager.CheckModUpdates(packID)
+		updates, err := h.manager.CheckContentUpdates(packID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("failed to check updates: %v", err), http.StatusInternalServerError)
 			return
 		}
 		updatedCount := 0
 		for _, u := range updates {
-			if u.UpdateAvailable && u.LatestVersionID != "" {
-				if err := h.manager.ApplyModUpdate(packID, u.Slug, u.LatestVersionID, u.LatestFileName, u.LatestDownloadURL); err == nil {
-					updatedCount++
-				}
+			if u.Kind != req.Kind || !u.UpdateAvailable || u.LatestVersionID == "" {
+				continue
+			}
+			if err := h.manager.ApplyContentUpdate(packID, u.Kind, u.Slug, u.LatestVersionID, u.LatestFileName, u.LatestDownloadURL, u.LatestHashFormat, u.LatestHash, u.LatestSHA512); err == nil {
+				updatedCount++
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"success": true, "updated_count": updatedCount})
@@ -320,7 +354,7 @@ func (h *PackwizHandler) handleApplyUpdates(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.manager.ApplyModUpdate(packID, req.Slug, req.TargetVersionID, req.TargetFileName, req.TargetURL); err != nil {
+	if err := h.manager.ApplyContentUpdate(packID, req.Kind, req.Slug, req.TargetVersionID, req.TargetFileName, req.TargetURL, req.HashFormat, req.Hash, req.SHA512); err != nil {
 		http.Error(w, fmt.Sprintf("failed to apply update: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -813,8 +847,8 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
-	// Mode B: bake into the mods folder on the node's mapped storage.
-	modsDir, err := modsDirectory(r.Context(), h.store, server, true)
+	// Mode B: bake into the server's data directory on the node's mapped storage.
+	dataRoot, err := serverDataDirectory(r.Context(), h.store, server, true)
 	if err != nil {
 		if nodestorage.IsUnavailable(err) {
 			h.log.Error("packwiz bake refused: %v", err)
@@ -822,23 +856,41 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 			return
 		}
 		h.log.Error("packwiz bake storage: %v", err)
-		http.Error(w, "failed to resolve mods directory", http.StatusInternalServerError)
+		http.Error(w, "failed to resolve server storage", http.StatusInternalServerError)
 		return
 	}
+	modsDir := minecraft.GetModsPath(dataRoot, server.ModLoader)
 	if modsDir == "" {
 		http.Error(w, "server does not support mods", http.StatusBadRequest)
 		return
 	}
-	installedCount, err := h.manager.BakeToServer(packID, modsDir)
+
+	levelName := ""
+	if props, propErr := minecraft.LoadServerProperties(dataRoot); propErr == nil {
+		levelName = props.GetString("level-name", "")
+	}
+
+	result, err := h.manager.BakeToServerContent(packID, modsDir, minecraft.GetDatapacksPath(dataRoot, levelName))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to bake to server: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	installed := []string{fmt.Sprintf("%d mod(s)", result.Mods)}
+	if result.Datapacks > 0 {
+		installed = append(installed, fmt.Sprintf("%d datapack(s)", result.Datapacks))
+	}
+	message := fmt.Sprintf("Baked %s into %s", strings.Join(installed, " and "), dataRoot)
+	if result.ClientOnly > 0 {
+		message += fmt.Sprintf("; %d client-side item(s) ship through packwiz sync or an export", result.ClientOnly)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"success":   true,
-		"mode":      "bake",
-		"installed": installedCount,
-		"message":   fmt.Sprintf("Baked %d server-side mod(s) directly into %s", installedCount, modsDir),
+		"success":     true,
+		"mode":        "bake",
+		"installed":   result.Mods,
+		"datapacks":   result.Datapacks,
+		"client_only": result.ClientOnly,
+		"message":     message,
 	})
 }

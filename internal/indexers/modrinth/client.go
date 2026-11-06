@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package modrinth
 
 import (
@@ -159,6 +158,39 @@ type Dependency struct {
 	ProjectID      *string `json:"project_id"`
 	FileName       *string `json:"file_name"`
 	DependencyType string  `json:"dependency_type"`
+}
+
+// SearchProjects searches Modrinth for one project type. Datapacks, resource
+// packs and shader packs are loader-agnostic; pass loader only when the caller
+// wants to narrow projects that advertise it (for example iris for shaders).
+func (c *Client) SearchProjects(ctx context.Context, projectType, query, gameVersion, loader string, offset, limit int) (*SearchResponse, error) {
+	facets := [][]string{{fmt.Sprintf("project_type:%s", projectType)}}
+	if gameVersion != "" {
+		facets = append(facets, []string{fmt.Sprintf("versions:%s", gameVersion)})
+	}
+	if loader != "" {
+		facets = append(facets, []string{fmt.Sprintf("categories:%s", strings.ToLower(loader))})
+	}
+
+	facetsJSON, err := json.Marshal(facets)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal facets: %w", err)
+	}
+
+	params := url.Values{}
+	if query != "" {
+		params.Set("query", query)
+	}
+	params.Set("facets", string(facetsJSON))
+	params.Set("index", "downloads")
+	params.Set("offset", strconv.Itoa(offset))
+	params.Set("limit", strconv.Itoa(limit))
+
+	var resp SearchResponse
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/search?%s", BaseURL, params.Encode()), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // SearchModpacks searches for modpacks on Modrinth

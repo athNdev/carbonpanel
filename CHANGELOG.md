@@ -28,8 +28,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Files tab: aligned columns, shift-free selection, Carbon-square context menu, filter-aware empty text; Docker Overrides single disclosure; server tiles match dashboard tile hierarchy.
 - Showcase screenshots capture each page's full content column, keeping the homepage product tour large and uniform (4:3-16:10) instead of thin strips.
 - Design-system guide: selection and context-menu state contract (hover, right-click, focus, Escape).
+- Modpack Studio tabs for datapacks, resource packs and shader packs: Modrinth search, direct URL, archive upload, every packwiz metafile option (side, pin, optional/default/description), update checks, and a configurable datapack folder.
+- Baking a pack now installs datapacks into the world datapacks folder (honouring `level-name`) and reports client-only content instead of dropping it silently.
 
 ### Fixed
+
+- CurseForge export blocks with the full item list instead of silently dropping datapacks, resource packs, shader packs or mods it cannot carry.
 
 - Fullscreen server console fills the viewport, keeps the toolbar and command bar, and no longer clips under the app header/sidebar. CarbonModal now portals dialogs to `<body>` so fixed overlays paint above the shell.
 - Surface unchecked packwiz import/export and proxy route-refresh write errors.

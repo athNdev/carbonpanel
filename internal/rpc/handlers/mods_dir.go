@@ -16,10 +16,9 @@ import (
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 )
 
-// modsDirectory is the mods folder on the node's mapped storage. A remote
-// node with no reachable storage returns ErrUnavailable. An empty string
-// means this loader has no mods directory.
-func modsDirectory(ctx context.Context, store *storage.Store, server *storage.Server, write bool) (string, error) {
+// serverDataDirectory is the server's data root on the node's mapped storage.
+// A remote node with no reachable storage returns ErrUnavailable.
+func serverDataDirectory(ctx context.Context, store *storage.Store, server *storage.Server, write bool) (string, error) {
 	if server == nil {
 		return "", fmt.Errorf("server is required")
 	}
@@ -40,6 +39,16 @@ func modsDirectory(ctx context.Context, store *storage.Store, server *storage.Se
 		if err != nil {
 			return "", err
 		}
+	}
+	return root, nil
+}
+
+// modsDirectory is the mods folder on the node's mapped storage. An empty
+// string means this loader has no mods directory.
+func modsDirectory(ctx context.Context, store *storage.Store, server *storage.Server, write bool) (string, error) {
+	root, err := serverDataDirectory(ctx, store, server, write)
+	if err != nil {
+		return "", err
 	}
 	return minecraft.GetModsPath(root, server.ModLoader), nil
 }

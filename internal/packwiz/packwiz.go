@@ -50,11 +50,40 @@ type ModItem struct {
 	DownloadURL string `json:"download_url"`
 	FileSize    int64  `json:"file_size"`
 	Pinned      bool   `json:"pinned"`
+	// Kind is one of mod, datapack, resourcepack or shaderpack. Older clients
+	// can ignore it; GetPack always sets it so the Studio can render one list.
+	Kind string `json:"kind,omitempty"`
+	// Optional files are installed only when the user selects them. Default
+	// controls whether an optional file starts enabled. OptionDescription is
+	// shown next to that choice.
+	Optional          bool   `json:"optional"`
+	Default           bool   `json:"default"`
+	OptionDescription string `json:"option_description,omitempty"`
 	// Hash/HashFormat persist the mod file checksum (sha256/sha512/sha1)
 	// captured at import or AddModFromURL time. Exporters reuse these
 	// instead of emitting placeholder hashes.
 	Hash       string `json:"hash,omitempty"`
 	HashFormat string `json:"hash_format,omitempty"`
+	// SHA512 is kept separately because Modrinth supplies it and mrpack
+	// exports require it.
+	SHA512 string `json:"sha512,omitempty"`
+}
+
+// Content kinds match both the packwiz category folders and the Modrinth
+// project types. The Studio exposes one manager per kind.
+const (
+	ContentKindMod          = "mod"
+	ContentKindDatapack     = "datapack"
+	ContentKindResourcePack = "resourcepack"
+	ContentKindShaderPack   = "shaderpack"
+)
+
+func ValidContentKind(kind string) bool {
+	switch kind {
+	case ContentKindMod, ContentKindDatapack, ContentKindResourcePack, ContentKindShaderPack:
+		return true
+	}
+	return false
 }
 
 // ExportOptions controls per-launcher export behaviour. All fields are
@@ -115,21 +144,28 @@ type DroppedModsError struct {
 
 func (e *DroppedModsError) Error() string {
 	if e == nil || len(e.Dropped) == 0 {
-		return "curseforge export would drop mods"
+		return "curseforge export would drop items"
 	}
-	return fmt.Sprintf("curseforge export would drop %d non-CurseForge mod(s): %s", len(e.Dropped), strings.Join(e.Dropped, ", "))
+	return fmt.Sprintf("curseforge export would drop %d item(s) with no CurseForge project/file ID: %s", len(e.Dropped), strings.Join(e.Dropped, ", "))
 }
 
 type Pack struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	Author        string    `json:"author"`
-	Version       string    `json:"version"`
-	MCVersion     string    `json:"mc_version"`
-	ModLoader     string    `json:"mod_loader"`
-	LoaderVersion string    `json:"loader_version"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	Mods          []ModItem `json:"mods"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Author         string    `json:"author"`
+	Version        string    `json:"version"`
+	MCVersion      string    `json:"mc_version"`
+	ModLoader      string    `json:"mod_loader"`
+	LoaderVersion  string    `json:"loader_version"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	Mods           []ModItem `json:"mods"`
+	Datapacks      []ModItem `json:"datapacks"`
+	ResourcePacks  []ModItem `json:"resourcepacks"`
+	ShaderPacks    []ModItem `json:"shaderpacks"`
+	DatapackFolder string    `json:"datapack_folder,omitempty"`
+	// Options preserves the pack.toml [options] table (acceptable versions,
+	// meta-folder, datapack-folder, ...) so editing a pack never drops it.
+	Options map[string]any `json:"options,omitempty"`
 }
 
 // PackTOML format
@@ -140,6 +176,7 @@ type tomlPack struct {
 	PackFormat string            `toml:"pack-format"`
 	Index      tomlPackIndex     `toml:"index"`
 	Versions   map[string]string `toml:"versions"`
+	Options    map[string]any    `toml:"options,omitempty"`
 }
 
 type tomlPackIndex struct {
@@ -163,6 +200,8 @@ type tomlModDownload struct {
 	URL        string `toml:"url"`
 	HashFormat string `toml:"hash-format"`
 	Hash       string `toml:"hash"`
+	// Mode is "url" (default) or "metadata:curseforge" for CurseForge files.
+	Mode string `toml:"mode,omitempty"`
 }
 
 type tomlModUpdateModrinth struct {
@@ -180,15 +219,23 @@ type tomlModUpdate struct {
 	Curseforge *tomlModUpdateCurseforge `toml:"curseforge,omitempty"`
 }
 
+type tomlModOption struct {
+	Optional    bool   `toml:"optional"`
+	Default     bool   `toml:"default,omitempty"`
+	Description string `toml:"description,omitempty"`
+	// Pinned is the legacy Carbon field. packwiz stores pinning at the top
+	// level, so it is only read for backwards compatibility and never written.
+	Pinned bool `toml:"pinned,omitempty"`
+}
+
 type tomlMod struct {
 	Name     string          `toml:"name"`
 	FileName string          `toml:"filename"`
-	Side     string          `toml:"side"`
+	Side     string          `toml:"side,omitempty"`
+	Pin      bool            `toml:"pin,omitempty"`
 	Download tomlModDownload `toml:"download"`
 	Update   tomlModUpdate   `toml:"update"`
-	Option   *struct {
-		Pinned bool `toml:"pinned,omitempty"`
-	} `toml:"option,omitempty"`
+	Option   *tomlModOption  `toml:"option,omitempty"`
 }
 
 type Manager struct {
@@ -471,141 +518,334 @@ func (m *Manager) readPack(id string) (*Pack, error) {
 		}
 	}
 
-	// Read mods from mods/
-	modsDir := filepath.Join(pDir, "mods")
-	mods := []ModItem{}
-	if files, err := os.ReadDir(modsDir); err == nil {
-		for _, f := range files {
-			if !f.IsDir() && strings.HasSuffix(f.Name(), ".pw.toml") {
-				mBytes, err := os.ReadFile(filepath.Join(modsDir, f.Name()))
-				if err != nil {
-					continue
-				}
-				var tm tomlMod
-				if err := toml.Unmarshal(mBytes, &tm); err != nil {
-					continue
-				}
+	// Read content from the packwiz category folders. A metadata file can live
+	// in any folder, but these are the canonical locations the Studio manages.
+	datapackFolder := "datapacks"
+	if raw, ok := tp.Options["datapack-folder"].(string); ok && strings.TrimSpace(raw) != "" {
+		datapackFolder = strings.TrimSpace(raw)
+	}
+	options := tp.Options
+	if options == nil {
+		options = map[string]any{}
+	}
 
-				slug := strings.TrimSuffix(f.Name(), ".pw.toml")
-				platform := "modrinth"
-				projID := ""
-				verID := ""
-				if tm.Update.Curseforge != nil && tm.Update.Curseforge.ProjectID > 0 {
-					platform = "curseforge"
-					projID = strconv.Itoa(tm.Update.Curseforge.ProjectID)
-					verID = strconv.Itoa(tm.Update.Curseforge.FileID)
-				} else if tm.Update.Modrinth != nil {
-					projID = tm.Update.Modrinth.ModID
-					verID = tm.Update.Modrinth.Version
-				}
+	mods := readContentDir(pDir, "mods", ContentKindMod)
+	datapacks := readContentDir(pDir, datapackFolder, ContentKindDatapack)
+	resourcePacks := readContentDir(pDir, "resourcepacks", ContentKindResourcePack)
+	shaderPacks := readContentDir(pDir, "shaderpacks", ContentKindShaderPack)
 
-				pinned := false
-				if tm.Option != nil {
-					pinned = tm.Option.Pinned
-				}
+	return &Pack{
+		ID:             id,
+		Name:           tp.Name,
+		Author:         tp.Author,
+		Version:        tp.Version,
+		MCVersion:      mcVer,
+		ModLoader:      loader,
+		LoaderVersion:  loaderVer,
+		UpdatedAt:      updatedAt,
+		Mods:           mods,
+		Datapacks:      datapacks,
+		ResourcePacks:  resourcePacks,
+		ShaderPacks:    shaderPacks,
+		DatapackFolder: datapackFolder,
+		Options:        options,
+	}, nil
+}
 
-				mods = append(mods, ModItem{
-					Slug:        slug,
-					Name:        tm.Name,
-					FileName:    tm.FileName,
-					Side:        tm.Side,
-					Platform:    platform,
-					ProjectID:   projID,
-					VersionID:   verID,
-					DownloadURL: tm.Download.URL,
-					Pinned:      pinned,
-					Hash:        tm.Download.Hash,
-					HashFormat:  tm.Download.HashFormat,
-				})
+// readContentDir reads every packwiz metafile in one category folder.
+func readContentDir(pDir, folder, kind string) []ModItem {
+	items := []ModItem{}
+	safeFolder, err := cleanContentFolder(folder)
+	if err != nil {
+		return items
+	}
+	files, err := os.ReadDir(filepath.Join(pDir, filepath.FromSlash(safeFolder)))
+	if err != nil {
+		return items
+	}
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".pw.toml") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(pDir, filepath.FromSlash(safeFolder), f.Name()))
+		if err != nil {
+			continue
+		}
+		var tm tomlMod
+		if err := toml.Unmarshal(raw, &tm); err != nil {
+			continue
+		}
+
+		slug := strings.TrimSuffix(f.Name(), ".pw.toml")
+		platform := "modrinth"
+		projID := ""
+		verID := ""
+		if tm.Update.Curseforge != nil && tm.Update.Curseforge.ProjectID > 0 {
+			platform = "curseforge"
+			projID = strconv.Itoa(tm.Update.Curseforge.ProjectID)
+			verID = strconv.Itoa(tm.Update.Curseforge.FileID)
+		} else if tm.Update.Modrinth != nil {
+			projID = tm.Update.Modrinth.ModID
+			verID = tm.Update.Modrinth.Version
+		} else {
+			platform = "url"
+			projID = tm.Download.URL
+		}
+
+		pinned := tm.Pin
+		optional := false
+		optionDefault := false
+		optionDescription := ""
+		if tm.Option != nil {
+			// Older Carbon builds wrote pinning under [option]; accept it on
+			// read so existing packs keep their pinned state.
+			pinned = pinned || tm.Option.Pinned
+			optional = tm.Option.Optional
+			optionDefault = tm.Option.Default
+			optionDescription = tm.Option.Description
+		}
+
+		side := tm.Side
+		if side == "" {
+			side = "both"
+		}
+		items = append(items, ModItem{
+			Slug:              slug,
+			Name:              tm.Name,
+			FileName:          tm.FileName,
+			Side:              side,
+			Platform:          platform,
+			ProjectID:         projID,
+			VersionID:         verID,
+			DownloadURL:       tm.Download.URL,
+			Pinned:            pinned,
+			Kind:              kind,
+			Optional:          optional,
+			Default:           optionDefault,
+			OptionDescription: optionDescription,
+			HashFormat:        tm.Download.HashFormat,
+			Hash:              tm.Download.Hash,
+		})
+	}
+	return items
+}
+
+// cleanContentFolder validates a pack-relative category folder. Packwiz stores
+// folders with forward slashes; reject absolute paths, traversal and the pack's
+// own metadata files.
+func cleanContentFolder(folder string) (string, error) {
+	folder = strings.TrimSpace(filepath.ToSlash(folder))
+	folder = strings.Trim(folder, "/")
+	if folder == "" {
+		return "", fmt.Errorf("content folder is required")
+	}
+	if folder == "." || folder == ".." || strings.Contains(folder, "..") {
+		return "", fmt.Errorf("invalid content folder %q", folder)
+	}
+	for _, part := range strings.Split(folder, "/") {
+		if part == "" || part == "." || part == ".." {
+			return "", fmt.Errorf("invalid content folder %q", folder)
+		}
+	}
+	if folder == "pack.toml" || folder == "index.toml" {
+		return "", fmt.Errorf("invalid content folder %q", folder)
+	}
+	return folder, nil
+}
+
+func cleanContentFileName(name string) (string, error) {
+	name = strings.TrimSpace(filepath.ToSlash(name))
+	if name == "" {
+		return "", fmt.Errorf("file name is required")
+	}
+	if strings.Contains(name, "/") || name == "." || name == ".." || strings.Contains(name, "..") {
+		return "", fmt.Errorf("file name must not contain a path")
+	}
+	return name, nil
+}
+
+func contentFolderFor(p *Pack, kind string) string {
+	switch kind {
+	case ContentKindDatapack:
+		if folder, err := cleanContentFolder(p.DatapackFolder); err == nil {
+			return folder
+		}
+		return "datapacks"
+	case ContentKindResourcePack:
+		return "resourcepacks"
+	case ContentKindShaderPack:
+		return "shaderpacks"
+	default:
+		return "mods"
+	}
+}
+
+func contentList(p *Pack, kind string) []ModItem {
+	switch kind {
+	case ContentKindDatapack:
+		return p.Datapacks
+	case ContentKindResourcePack:
+		return p.ResourcePacks
+	case ContentKindShaderPack:
+		return p.ShaderPacks
+	default:
+		return p.Mods
+	}
+}
+
+func setContentList(p *Pack, kind string, items []ModItem) {
+	switch kind {
+	case ContentKindDatapack:
+		p.Datapacks = items
+	case ContentKindResourcePack:
+		p.ResourcePacks = items
+	case ContentKindShaderPack:
+		p.ShaderPacks = items
+	default:
+		p.Mods = items
+	}
+}
+
+// ContentFolder returns the pack-relative folder a kind installs into.
+func (m *Manager) ContentFolder(packID, kind string) (string, error) {
+	if !ValidContentKind(kind) {
+		return "", fmt.Errorf("invalid content kind %q", kind)
+	}
+	pack, err := m.GetPack(packID)
+	if err != nil {
+		return "", err
+	}
+	return contentFolderFor(pack, kind), nil
+}
+
+// managedContentTargets returns the install paths represented by metafiles so
+// override bundlers never include the same file twice.
+func managedContentTargets(pack *Pack) map[string]bool {
+	targets := map[string]bool{}
+	groups := []struct {
+		kind  string
+		items []ModItem
+	}{
+		{ContentKindMod, pack.Mods},
+		{ContentKindDatapack, pack.Datapacks},
+		{ContentKindResourcePack, pack.ResourcePacks},
+		{ContentKindShaderPack, pack.ShaderPacks},
+	}
+	for _, group := range groups {
+		folder := contentFolderFor(pack, group.kind)
+		for _, item := range group.items {
+			if fileName, err := cleanContentFileName(item.FileName); err == nil {
+				targets[folder+"/"+fileName] = true
 			}
 		}
 	}
-
-	return &Pack{
-		ID:            id,
-		Name:          tp.Name,
-		Author:        tp.Author,
-		Version:       tp.Version,
-		MCVersion:     mcVer,
-		ModLoader:     loader,
-		LoaderVersion: loaderVer,
-		UpdatedAt:     updatedAt,
-		Mods:          mods,
-	}, nil
+	return targets
 }
 
 func (m *Manager) writePackFiles(p *Pack) error {
 	pDir := m.packDir(p.ID)
-	modsDir := filepath.Join(pDir, "mods")
-	if err := os.MkdirAll(modsDir, 0755); err != nil {
-		return err
+	if strings.TrimSpace(p.DatapackFolder) == "" {
+		p.DatapackFolder = "datapacks"
 	}
 
-	// 1. Write individual mod tomls and collect for index
+	groups := []struct {
+		kind  string
+		items []ModItem
+	}{
+		{ContentKindMod, p.Mods},
+		{ContentKindDatapack, p.Datapacks},
+		{ContentKindResourcePack, p.ResourcePacks},
+		{ContentKindShaderPack, p.ShaderPacks},
+	}
+
+	// 1. Write individual metafiles and collect for index
 	var indexFiles []tomlIndexFile
-	for _, mod := range p.Mods {
-		slug := mod.Slug
-		if slug == "" {
-			slug = sanitizeSlug(mod.Name)
+	for _, group := range groups {
+		folder := contentFolderFor(p, group.kind)
+		if _, err := cleanContentFolder(folder); err != nil {
+			return err
 		}
-
-		hashFormat := mod.HashFormat
-		if hashFormat == "" {
-			// Preserve the historical packwiz default so download-only
-			// entries without a known checksum still carry a hash-format.
-			hashFormat = "sha256"
-		}
-		tm := tomlMod{
-			Name:     mod.Name,
-			FileName: mod.FileName,
-			Side:     mod.Side,
-			Download: tomlModDownload{
-				URL:        mod.DownloadURL,
-				HashFormat: hashFormat,
-				Hash:       mod.Hash,
-			},
-			Option: &struct {
-				Pinned bool `toml:"pinned,omitempty"`
-			}{
-				Pinned: mod.Pinned,
-			},
-		}
-
-		switch mod.Platform {
-		case "curseforge":
-			pID, _ := strconv.Atoi(mod.ProjectID)
-			fID, _ := strconv.Atoi(mod.VersionID)
-			tm.Update.Curseforge = &tomlModUpdateCurseforge{
-				ProjectID: pID,
-				FileID:    fID,
-			}
-		case "modrinth":
-			// Only true Modrinth mods carry update metadata. Direct-URL
-			// ("url") mods are download-only entries: emitting a fabricated
-			// modrinth block would make them round-trip as tracked mods.
-			tm.Update.Modrinth = &tomlModUpdateModrinth{
-				ModID:   mod.ProjectID,
-				Version: mod.VersionID,
-			}
-		}
-
-		modBytes, err := toml.Marshal(tm)
-		if err != nil {
+		dir := filepath.Join(pDir, filepath.FromSlash(folder))
+		if err := os.MkdirAll(dir, 0755); err != nil {
 			return err
 		}
 
-		modFilePath := filepath.Join(modsDir, slug+".pw.toml")
-		if err := os.WriteFile(modFilePath, modBytes, 0644); err != nil {
-			return err
-		}
+		for _, item := range group.items {
+			slug := item.Slug
+			if slug == "" {
+				slug = sanitizeSlug(item.Name)
+			}
+			fileName, err := cleanContentFileName(item.FileName)
+			if err != nil {
+				// Legacy rows without a filename remain writable: derive one from
+				// the slug so the pack stays valid instead of failing to save.
+				fileName = slug + contentExtension(group.kind)
+			}
+			side := item.Side
+			if side == "" {
+				side = "both"
+			}
 
-		// Calculate hash for index
-		h := sha256.Sum256(modBytes)
-		indexFiles = append(indexFiles, tomlIndexFile{
-			File:     "mods/" + slug + ".pw.toml",
-			Hash:     hex.EncodeToString(h[:]),
-			Metafile: true,
-		})
+			hashFormat := item.HashFormat
+			if hashFormat == "" {
+				// Preserve the historical packwiz default so download-only
+				// entries without a known checksum still carry a hash-format.
+				hashFormat = "sha256"
+			}
+			tm := tomlMod{
+				Name:     item.Name,
+				FileName: fileName,
+				Side:     side,
+				Pin:      item.Pinned,
+				Download: tomlModDownload{
+					URL:        item.DownloadURL,
+					HashFormat: hashFormat,
+					Hash:       item.Hash,
+				},
+			}
+
+			switch item.Platform {
+			case "curseforge":
+				pID, _ := strconv.Atoi(item.ProjectID)
+				fID, _ := strconv.Atoi(item.VersionID)
+				tm.Download.Mode = "metadata:curseforge"
+				tm.Update.Curseforge = &tomlModUpdateCurseforge{
+					ProjectID: pID,
+					FileID:    fID,
+				}
+			case "modrinth":
+				// Only true Modrinth items carry update metadata. Direct-URL
+				// ("url") entries are download-only: emitting a fabricated
+				// modrinth block would make them round-trip as tracked items.
+				tm.Update.Modrinth = &tomlModUpdateModrinth{
+					ModID:   item.ProjectID,
+					Version: item.VersionID,
+				}
+			}
+
+			if item.Optional || item.Default || item.OptionDescription != "" {
+				tm.Option = &tomlModOption{
+					Optional:    item.Optional,
+					Default:     item.Default,
+					Description: item.OptionDescription,
+				}
+			}
+
+			metaBytes, err := toml.Marshal(tm)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(dir, slug+".pw.toml"), metaBytes, 0644); err != nil {
+				return err
+			}
+
+			h := sha256.Sum256(metaBytes)
+			indexFiles = append(indexFiles, tomlIndexFile{
+				File:     folder + "/" + slug + ".pw.toml",
+				Hash:     hex.EncodeToString(h[:]),
+				Metafile: true,
+			})
+		}
 	}
 
 	// 2. Write index.toml
@@ -635,6 +875,17 @@ func (m *Manager) writePackFiles(p *Pack) error {
 		versions[strings.ToLower(p.ModLoader)] = loaderVer
 	}
 
+	options := p.Options
+	if options == nil {
+		options = map[string]any{}
+	}
+	// packwiz only treats a folder as the datapack destination when this
+	// option is present. Write it whenever the pack owns datapacks so a
+	// generated pack works with the real packwiz installer.
+	if len(p.Datapacks) > 0 {
+		options["datapack-folder"] = p.DatapackFolder
+	}
+
 	tp := tomlPack{
 		Name:       p.Name,
 		Author:     p.Author,
@@ -646,6 +897,7 @@ func (m *Manager) writePackFiles(p *Pack) error {
 			Hash:       hex.EncodeToString(idxHash[:]),
 		},
 		Versions: versions,
+		Options:  options,
 	}
 
 	packBytes, err := toml.Marshal(tp)
@@ -706,22 +958,28 @@ func shouldBundleOverride(rel, policy string) bool {
 	}
 }
 
-func mrpackHashes(mod ModItem) map[string]string {
+func mrpackHashes(item ModItem) map[string]string {
 	out := map[string]string{}
-	if mod.Hash == "" {
+	if item.SHA512 != "" {
+		out["sha512"] = item.SHA512
 		return out
 	}
-	format := strings.ToLower(strings.TrimSpace(mod.HashFormat))
+	if item.Hash == "" {
+		return out
+	}
+	format := strings.ToLower(strings.TrimSpace(item.HashFormat))
 	if format == "" {
 		format = "sha256"
 	}
 	switch format {
 	case "sha512":
-		out["sha512"] = mod.Hash
+		out["sha512"] = item.Hash
 	case "sha1":
-		out["sha1"] = mod.Hash
+		out["sha1"] = item.Hash
 	default:
-		out["sha256"] = mod.Hash
+		// Preserve the existing export contract for stores that only kept a
+		// SHA-256 checksum. Modrinth installers use sha512 when present.
+		out["sha256"] = item.Hash
 	}
 	return out
 }
@@ -752,6 +1010,11 @@ func (m *Manager) bundleOverrides(zw *zip.Writer, packID, prefix, policy string)
 	if policy == "none" {
 		return nil
 	}
+	pack, _ := m.GetPack(packID)
+	managed := map[string]bool{}
+	if pack != nil {
+		managed = managedContentTargets(pack)
+	}
 	pDir := filepath.Clean(m.packDir(packID))
 	return filepath.Walk(pDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -763,6 +1026,12 @@ func (m *Manager) bundleOverrides(zw *zip.Writer, packID, prefix, policy string)
 		}
 		rel = filepath.ToSlash(rel)
 		if rel == "pack.toml" || rel == "index.toml" || strings.HasPrefix(rel, "mods/") {
+			return nil
+		}
+		// Metafiles are represented as download entries; their referenced
+		// archives are represented there too, so bundling either as an
+		// override would install the same file twice.
+		if strings.HasSuffix(rel, ".pw.toml") || managed[rel] {
 			return nil
 		}
 		if !shouldBundleOverride(rel, policy) {
@@ -805,18 +1074,37 @@ func (m *Manager) ExportMrpack(packID string, w io.Writer, opts ...ExportOptions
 	}
 
 	files := []mrpackFile{}
-	for _, mod := range pack.Mods {
-		if !o.IncludeClient && mod.Side == "client" {
-			continue
+	groups := []struct {
+		kind  string
+		items []ModItem
+	}{
+		{ContentKindMod, pack.Mods},
+		{ContentKindDatapack, pack.Datapacks},
+		{ContentKindResourcePack, pack.ResourcePacks},
+		{ContentKindShaderPack, pack.ShaderPacks},
+	}
+	for _, group := range groups {
+		folder := contentFolderFor(pack, group.kind)
+		for _, item := range group.items {
+			if !o.IncludeClient && item.Side == "client" {
+				continue
+			}
+			if strings.TrimSpace(item.DownloadURL) == "" {
+				continue
+			}
+			fileName, err := cleanContentFileName(item.FileName)
+			if err != nil {
+				continue
+			}
+			clientEnv, serverEnv := mrpackEnv(item.Side, o.OptionalMode)
+			files = append(files, mrpackFile{
+				Path:      folder + "/" + fileName,
+				Hashes:    mrpackHashes(item),
+				Env:       map[string]string{"client": clientEnv, "server": serverEnv},
+				Downloads: []string{item.DownloadURL},
+				FileSize:  item.FileSize,
+			})
 		}
-		clientEnv, serverEnv := mrpackEnv(mod.Side, o.OptionalMode)
-		files = append(files, mrpackFile{
-			Path:      "mods/" + mod.FileName,
-			Hashes:    mrpackHashes(mod),
-			Env:       map[string]string{"client": clientEnv, "server": serverEnv},
-			Downloads: []string{mod.DownloadURL},
-			FileSize:  mod.FileSize,
-		})
 	}
 
 	deps := map[string]string{
@@ -915,6 +1203,25 @@ func (m *Manager) ExportCurseForge(packID string, w io.Writer, opts ...ExportOpt
 		}
 		cfFiles = append(cfFiles, cfFile{ProjectID: pID, FileID: fID, Required: required})
 		modlistItems = append(modlistItems, fmt.Sprintf("<li><a href=\"%s\">%s</a> (%s)</li>", mod.DownloadURL, mod.Name, mod.Side))
+	}
+
+	// A CurseForge manifest can only install CurseForge project files. Refuse
+	// to silently omit datapacks, resource packs or shader packs added from
+	// other sources; the caller shows the list and offers another format.
+	for _, group := range []struct {
+		kind  string
+		items []ModItem
+	}{
+		{ContentKindDatapack, pack.Datapacks},
+		{ContentKindResourcePack, pack.ResourcePacks},
+		{ContentKindShaderPack, pack.ShaderPacks},
+	} {
+		for _, item := range group.items {
+			if !o.IncludeClient && item.Side == "client" {
+				continue
+			}
+			dropped = append(dropped, fmt.Sprintf("%s (%s)", item.Name, item.Slug))
+		}
 	}
 	if len(dropped) > 0 {
 		_ = zw.Close()
@@ -1053,39 +1360,90 @@ func (m *Manager) ExportMMC(packID string, w io.Writer, opts ...ExportOptions) e
 	return zw.Close()
 }
 
-// BakeToServer extracts server-side mods directly into /data/mods
+// BakeResult summarises what a bake wrote into a server's data directory.
+// ClientOnly counts entries that a dedicated server cannot consume: client-side
+// mods, plus every resource and shader pack. Those reach players through
+// packwiz sync or a pack export rather than the server.
+type BakeResult struct {
+	Mods       int `json:"mods"`
+	Datapacks  int `json:"datapacks"`
+	ClientOnly int `json:"client_only"`
+}
+
+// BakeToServer extracts server-side mods directly into /data/mods.
 func (m *Manager) BakeToServer(packID, modsDir string) (int, error) {
+	res, err := m.BakeToServerContent(packID, modsDir, "")
+	return res.Mods, err
+}
+
+// BakeToServerContent installs the server-side parts of a pack: mods into
+// modsDir and datapacks into datapacksDir (usually world/datapacks). An empty
+// datapacksDir skips datapacks. Resource packs and shader packs are client-only
+// content and are never written to a server.
+func (m *Manager) BakeToServerContent(packID, modsDir, datapacksDir string) (BakeResult, error) {
+	var res BakeResult
 	pack, err := m.GetPack(packID)
 	if err != nil {
-		return 0, err
+		return res, err
 	}
 
-	cleanModsDir := filepath.Clean(modsDir)
-	if err := os.MkdirAll(cleanModsDir, 0755); err != nil {
-		return 0, fmt.Errorf("failed to create mods directory: %w", err)
+	mods, clientMods, err := m.installArchives(pack.Mods, modsDir)
+	if err != nil {
+		return res, err
+	}
+	res.Mods = mods
+	res.ClientOnly = clientMods
+
+	datapacks, clientDatapacks, err := m.installArchives(pack.Datapacks, datapacksDir)
+	if err != nil {
+		return res, err
+	}
+	res.Datapacks = datapacks
+	res.ClientOnly += clientDatapacks
+
+	// A dedicated server never loads resource or shader packs.
+	res.ClientOnly += len(pack.ResourcePacks) + len(pack.ShaderPacks)
+	return res, nil
+}
+
+// installArchives downloads each item into dir, skipping client-side entries,
+// and reports how many archives were written and how many were skipped as
+// client-only. An empty dir installs nothing.
+func (m *Manager) installArchives(items []ModItem, dir string) (installed, clientOnly int, err error) {
+	if dir == "" {
+		for _, item := range items {
+			if item.Side == "client" {
+				clientOnly++
+			}
+		}
+		return 0, clientOnly, nil
 	}
 
-	installed := 0
-	for _, mod := range pack.Mods {
-		// Server side only or both
-		if mod.Side == "client" {
+	cleanDir := filepath.Clean(dir)
+	if err := os.MkdirAll(cleanDir, 0755); err != nil {
+		return 0, 0, fmt.Errorf("failed to create content directory: %w", err)
+	}
+
+	for _, item := range items {
+		if item.Side == "client" {
+			clientOnly++
 			continue
 		}
-		if mod.DownloadURL == "" || mod.FileName == "" {
+		if item.DownloadURL == "" || item.FileName == "" {
 			continue
 		}
 
-		cleanFileName := filepath.Base(filepath.Clean(mod.FileName))
+		cleanFileName := filepath.Base(filepath.Clean(item.FileName))
 		if cleanFileName == "." || cleanFileName == "/" || strings.Contains(cleanFileName, "..") {
 			continue
 		}
-		targetFile := filepath.Join(cleanModsDir, cleanFileName)
-		if !strings.HasPrefix(filepath.Clean(targetFile), cleanModsDir+string(filepath.Separator)) {
+		targetFile := filepath.Join(cleanDir, cleanFileName)
+		if !strings.HasPrefix(filepath.Clean(targetFile), cleanDir+string(filepath.Separator)) {
 			continue
 		}
 
 		// Download directly
-		resp, err := m.httpClient.Get(mod.DownloadURL)
+		resp, err := m.httpClient.Get(item.DownloadURL)
 		if err != nil || resp.StatusCode != http.StatusOK {
 			if resp != nil {
 				_ = resp.Body.Close()
@@ -1110,7 +1468,7 @@ func (m *Manager) BakeToServer(packID, modsDir string) (int, error) {
 		}
 	}
 
-	return installed, nil
+	return installed, clientOnly, nil
 }
 
 func sanitizeSlug(name string) string {
@@ -1143,11 +1501,15 @@ type DirectURLModRequest struct {
 type ModUpdateInfo struct {
 	Slug              string `json:"slug"`
 	Name              string `json:"name"`
+	Kind              string `json:"kind,omitempty"`
 	Platform          string `json:"platform"`
 	CurrentVersionID  string `json:"current_version_id"`
 	LatestVersionID   string `json:"latest_version_id"`
 	LatestFileName    string `json:"latest_file_name"`
 	LatestDownloadURL string `json:"latest_download_url"`
+	LatestHashFormat  string `json:"latest_hash_format,omitempty"`
+	LatestHash        string `json:"latest_hash,omitempty"`
+	LatestSHA512      string `json:"latest_sha512,omitempty"`
 	Changelog         string `json:"changelog,omitempty"`
 	UpdateAvailable   bool   `json:"update_available"`
 	Pinned            bool   `json:"pinned"`

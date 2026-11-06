@@ -153,12 +153,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<div class="space-y-2 rounded-none border border-border bg-muted p-3" role="alert">
 				<div class="flex items-center gap-2 text-sm font-semibold">
 					<TriangleAlert class="h-4 w-4" />
-					CurseForge can drop mods
+					CurseForge can drop items
 					<CarbonTag type="yellow" size="sm">Data-loss warning</CarbonTag>
 				</div>
 				{#if cfPreview.length > 0}
 					<p class="text-xs text-muted-foreground">
-						{cfPreview.length} mod(s) in this pack have no CurseForge project/file ID and will block
+						{cfPreview.length} item(s) in this pack have no CurseForge project/file ID and will block
 						the export:
 					</p>
 					<ul class="max-h-24 list-disc overflow-y-auto pl-5 font-mono text-xs">

@@ -96,7 +96,7 @@ export async function downloadPackExport(
 					dropped,
 					message:
 						data.error ||
-						`CurseForge export blocked: ${dropped.length} mod(s) have no CurseForge project/file ID.`
+						`CurseForge export blocked: ${dropped.length} item(s) have no CurseForge project/file ID.`
 				};
 			} catch {
 				return { ok: false, message: `Export failed: HTTP ${res.status}` };
