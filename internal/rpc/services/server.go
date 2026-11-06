@@ -648,6 +648,14 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 	// Map mod loader
 	protoServer.ModLoader = dbModLoaderToProto(server.ModLoader)
 
+	// Display loader underneath a modpack platform. Empty is UNSPECIFIED, not
+	// vanilla: an unresolved platform must keep showing the platform.
+	if server.ModpackLoader == "" {
+		protoServer.ModpackLoader = v1.ModLoader_MOD_LOADER_UNSPECIFIED
+	} else {
+		protoServer.ModpackLoader = dbModLoaderToProto(server.ModpackLoader)
+	}
+
 	// Map status
 	protoServer.Status = dbStatusToProto(server.Status)
 
@@ -886,6 +894,11 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 				}
 			}
 
+			// Converge the display loader for modpack servers created before
+			// it existed. Best-effort and self-terminating: resolved rows
+			// skip the lookup on later reads.
+			s.backfillModpackLoader(ctx, server)
+
 			// Apply cached metrics from the background collector
 			if s.metricsCollector != nil {
 				if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
@@ -950,6 +963,9 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 		}
 	}
 
+	// See ListServers: converge the display loader for older modpack servers.
+	s.backfillModpackLoader(ctx, server)
+
 	// Apply cached metrics from the background collector
 	if s.metricsCollector != nil {
 		if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
@@ -989,6 +1005,10 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Convert mod loader from proto
 	modLoader := protoModLoaderToDB(msg.ModLoader)
 
+	// Display loader underneath a modpack platform; empty unless a modpack
+	// resolved a real game loader below.
+	var modpackLoader storage.ModLoader
+
 	// If modpack is selected, load it and derive settings
 	var modpackURL string
 	if msg.ModpackId != "" {
@@ -1006,6 +1026,15 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			modLoader = storage.ModLoaderAutoCurseForge
 		case "modrinth":
 			modLoader = storage.ModLoaderModrinth
+		}
+
+		// Record the real game loader for display. The container TYPE must
+		// stay the platform so the image fetches the pack; the console names
+		// the loader players actually run.
+		if files, ferr := s.store.GetIndexedModpackFiles(ctx, msg.ModpackId); ferr == nil {
+			modpackLoader = resolveModpackGameLoader(modpack, files, msg.ModpackVersionId)
+		} else {
+			modpackLoader = resolveModpackGameLoader(modpack, nil, msg.ModpackVersionId)
 		}
 
 		// Get MC version from modpack if not explicitly set
@@ -1194,6 +1223,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		Name:            msg.Name,
 		Description:     msg.Description,
 		ModLoader:       modLoader,
+		ModpackLoader:   modpackLoader,
 		MCVersion:       msg.McVersion,
 		LoaderVersion:   loaderVersion,
 		Status:          storage.StatusCreating,
@@ -1851,6 +1881,17 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 				needsRecreation = true
 
 				configureModrinthModpack(serverConfig, modpack.IndexerID, msg.ModpackVersionId)
+			}
+
+			// A re-attached pack replaces the previous display loader; an
+			// unresolvable pack falls back to showing the platform.
+			server.ModpackLoader = ""
+			if files, ferr := s.store.GetIndexedModpackFiles(ctx, msg.ModpackId); ferr == nil {
+				if loader := resolveModpackGameLoader(modpack, files, msg.ModpackVersionId); loader != "" {
+					server.ModpackLoader = loader
+				}
+			} else if loader := resolveModpackGameLoader(modpack, nil, msg.ModpackVersionId); loader != "" {
+				server.ModpackLoader = loader
 			}
 
 			if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {

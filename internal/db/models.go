@@ -83,15 +83,22 @@ const (
 )
 
 type Server struct {
-	ID              string       `json:"id" gorm:"primaryKey"`
-	Name            string       `json:"name" gorm:"not null"`
-	Description     string       `json:"description"`
-	ModLoader       ModLoader    `json:"mod_loader" gorm:"not null"`
-	MCVersion       string       `json:"mc_version" gorm:"not null;column:mc_version"`
+	ID          string    `json:"id" gorm:"primaryKey"`
+	Name        string    `json:"name" gorm:"not null"`
+	Description string    `json:"description"`
+	ModLoader   ModLoader `json:"mod_loader" gorm:"not null"`
+	MCVersion   string    `json:"mc_version" gorm:"not null;column:mc_version"`
 	// LoaderVersion pins the exact mod loader build (e.g. "21.1.84" for
 	// NeoForge). Empty means "latest for this Minecraft version", which is
 	// what a server created before this field existed keeps getting.
-	LoaderVersion   string       `json:"loader_version" gorm:"column:loader_version"`
+	LoaderVersion string `json:"loader_version" gorm:"column:loader_version"`
+	// ModpackLoader is the real game loader (fabric, forge, neoforge, ...)
+	// underneath a modpack platform. When ModLoader is a provisioning
+	// platform (modrinth, auto_curseforge), the container TYPE must stay the
+	// platform so the image fetches the pack, but every display surface
+	// should name the game loader players actually run. Empty means the
+	// server was not created from a modpack or the loader is unknown.
+	ModpackLoader   ModLoader    `json:"modpack_loader" gorm:"column:modpack_loader"`
 	NodeID          string       `json:"node_id" gorm:"column:node_id;default:'default'"`
 	ContainerID     string       `json:"container_id" gorm:"column:container_id"`
 	Status          ServerStatus `json:"status" gorm:"not null"`

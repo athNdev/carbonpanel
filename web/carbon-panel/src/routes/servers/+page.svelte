@@ -34,6 +34,7 @@ one at https://mozilla.org/MPL/2.0/.
 		ArrowRight
 	} from '@lucide/svelte';
 	import { type Server, ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
+	import { effectiveLoader } from '$lib/utils/mod-loader';
 	import { CarbonTag, CarbonButton, CarbonConfirm, CarbonPageHeader } from '$lib/components/carbon';
 	import { onMount } from 'svelte';
 
@@ -248,8 +249,9 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function getModLoaderDisplay(modLoader: ModLoader): string {
-		return ModLoader[modLoader].replace('_', ' ').toLowerCase();
+	function getModLoaderDisplay(server: Server): string {
+		const loader = effectiveLoader(server.modLoader, server.modpackLoader);
+		return ModLoader[loader].replace('_', ' ').toLowerCase();
 	}
 </script>
 
@@ -519,7 +521,7 @@ one at https://mozilla.org/MPL/2.0/.
 									<span class="text-[#f4f4f4]">{server.mcVersion || 'Latest'}</span>
 									{#if server.modLoader !== ModLoader.VANILLA && server.modLoader !== ModLoader.UNSPECIFIED}
 										<CarbonTag type="teal" size="sm">
-											{getModLoaderDisplay(server.modLoader)}
+											{getModLoaderDisplay(server)}
 										</CarbonTag>
 									{:else}
 										<span class="text-xs text-[#8d8d8d]">Vanilla</span>
@@ -748,7 +750,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<span class="font-mono text-xs text-[#a8a8a8]">{server.mcVersion}</span>
 							{#if server.modLoader !== ModLoader.VANILLA && server.modLoader !== ModLoader.UNSPECIFIED}
 								<CarbonTag type="teal" size="sm">
-									{getModLoaderDisplay(server.modLoader)}
+									{getModLoaderDisplay(server)}
 								</CarbonTag>
 							{/if}
 						</div>

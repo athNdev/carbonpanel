@@ -7,7 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { loaderDisplayName, loaderSearchName } from '$lib/utils/mod-loader';
+	import { effectiveLoader, loaderDisplayName, loaderSearchName } from '$lib/utils/mod-loader';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
 	import {
 		DialogContent,
@@ -103,6 +103,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let selectedDepIds = $derived(
 		Object.keys(selectedDependencies).filter((k) => selectedDependencies[k])
 	);
+	// Real game loader underneath a modpack platform; plain modLoader otherwise.
+	let gameLoader = $derived(effectiveLoader(server.modLoader, server.modpackLoader));
+
 	let installLabel = $derived(
 		selectedDepIds.length > 0 ? 'Install with all dependencies' : 'Install'
 	);
@@ -112,7 +115,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	// Filter Bar State
 	let activeFilters = $state<ActiveFilter[]>([
 		{ key: 'side', value: 'server', removable: true },
-		{ key: 'loader', value: loaderSearchName(server.modLoader), removable: false },
+		{ key: 'loader', value: loaderSearchName(gameLoader), removable: false },
 		...(server.mcVersion ? [{ key: 'version', value: server.mcVersion, removable: true }] : [])
 	]);
 
@@ -195,7 +198,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		mods = [];
 		try {
 			const loaderVal =
-				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(server.modLoader);
+				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(gameLoader);
 			const versionVal =
 				activeFilters.find((f) => f.key === 'version')?.value ||
 				(filterByVersion ? server.mcVersion || '' : '');
@@ -241,7 +244,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		try {
 			const loaderVal =
-				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(server.modLoader);
+				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(gameLoader);
 			const versionVal =
 				activeFilters.find((f) => f.key === 'version')?.value ||
 				(filterByVersion ? server.mcVersion || '' : '');
@@ -363,7 +366,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		installing = true;
 		try {
 			const loaderVal =
-				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(server.modLoader);
+				activeFilters.find((f) => f.key === 'loader')?.value || loaderSearchName(gameLoader);
 			const versionVal =
 				activeFilters.find((f) => f.key === 'version')?.value ||
 				(filterByVersion ? server.mcVersion || '' : '');
@@ -475,7 +478,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</DialogTitle>
 						<DialogDescription>
 							Loader: <span class="font-semibold text-foreground"
-								>{loaderDisplayName(server.modLoader)}</span
+								>{loaderDisplayName(gameLoader)}</span
 							>
 							{#if filterByVersion && server.mcVersion}
 								· Filtering for MC <span class="font-semibold text-foreground"
@@ -489,7 +492,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<div class="flex items-center gap-2">
 					<Badge variant="outline" class="font-mono text-xs uppercase">
-						{loaderSearchName(server.modLoader)}
+						{loaderSearchName(gameLoader)}
 					</Badge>
 					{#if server.mcVersion}
 						<button
@@ -757,7 +760,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<AlertTitle>No Compatible Versions</AlertTitle>
 						<AlertDescription>
 							No versions were found matching Minecraft {server.mcVersion} and {loaderSearchName(
-								server.modLoader
+								gameLoader
 							)}.
 						</AlertDescription>
 					</Alert>

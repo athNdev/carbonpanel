@@ -65,6 +65,7 @@ one at https://mozilla.org/MPL/2.0/.
 		RecreateServerRequestSchema
 	} from '$lib/proto/carbonpanel/v1/server_pb';
 	import { enumToString } from '$lib/utils';
+	import { effectiveLoader } from '$lib/utils/mod-loader';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
 	import {
 		CarbonTag,
@@ -698,7 +699,8 @@ one at https://mozilla.org/MPL/2.0/.
 								<span class="font-mono text-xs text-[#c6c6c6]">{server.loaderVersion}</span>
 							{/if}
 							<CarbonTag type="teal" size="sm">
-								{enumToString(ModLoader, server.modLoader) || 'vanilla'}
+								{enumToString(ModLoader, effectiveLoader(server.modLoader, server.modpackLoader)) ||
+									'vanilla'}
 							</CarbonTag>
 						</span>
 					</div>

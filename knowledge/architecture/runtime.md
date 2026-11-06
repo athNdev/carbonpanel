@@ -31,7 +31,9 @@ watcher. A node whose client cannot
 be resolved is stale and does not stop the others. A full event buffer drops
 the event instead of stalling that node's stream. The periodic sweep reads
 the container again, so a dropped or reordered event does not leave status,
-the proxy route, or log subscriptions stuck.
+the proxy route, or log subscriptions stuck. Failing healthchecks while a
+server is still starting keep the boot status; only a running server adopts
+unhealthy, which the console renders as degraded yellow rather than error red.
 
 # Listeners
 
@@ -101,8 +103,10 @@ as, whether the root is read-only, the writable paths, the capability set, the
 tmpfs mounts and the network mode. A fatal finding refuses the create with
 `ErrRuntimeIncompatible` and a named reason, so an unsupported image, mount or
 override fails before it replaces a working container. A warning is logged and
-does not block. The rules and their remedies live in
-`internal/docker/runtime_profile.go`.
+does not block. A Minecraft image referenced by tag rather than
+`name@sha256:<digest>` warns `image_unpinned` and still boots; the profile
+records `ImageDigest` only when the reference is pinned. The rules and their
+remedies live in `internal/docker/runtime_profile.go`.
 
 The profile also reports the limits that are actually applied, not the ones
 that were requested: memory and memory+swap, the process limit, the CPU cap,
@@ -112,7 +116,13 @@ bind mount, so it is never quota-limited by the daemon: `storage-opt size`
 sizes only the container writable layer, is applied only when the root is
 writable, and is reported as `storage_quota_is_not_a_world_quota` whenever it
 is set. World growth is measured by the metrics collector against the node
-filesystem instead.
+filesystem instead. Free inodes on that filesystem and backup staging under
+`storage.temp_dir` are separate budgets: each is measured when possible or
+reported as explicitly unknown, and neither is added to world bytes. The
+collector measures the node's Docker image store (deduplicated TotalSize)
+when a client or pool is configured. A missing client stays explicitly
+unknown. A daemon or lookup failure stays explicitly unknown. Image-cache
+bytes are not a world quota and are not added to world bytes.
 
 # How to check
 

@@ -7,7 +7,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
-import { loaderDisplayName, loaderSearchName } from './mod-loader';
+import {
+	effectiveLoader,
+	isModpackPlatform,
+	loaderDisplayName,
+	loaderSearchName
+} from './mod-loader';
 
 test('every loader maps to a name the mod indexes understand', () => {
 	// A wrong loader does not fail loudly: it silently installs mods the server
@@ -50,4 +55,19 @@ test('a pack-driven or vanilla server shows ANY rather than a wrong loader', () 
 	assert.equal(loaderDisplayName(ModLoader.UNSPECIFIED), 'ANY');
 	assert.equal(loaderDisplayName(ModLoader.AUTO_CURSEFORGE), 'ANY');
 	assert.equal(loaderDisplayName(ModLoader.MODRINTH), 'ANY');
+});
+
+test('platform loaders are recognised as provisioning, not game loaders', () => {
+	assert.equal(isModpackPlatform(ModLoader.MODRINTH), true);
+	assert.equal(isModpackPlatform(ModLoader.AUTO_CURSEFORGE), true);
+	assert.equal(isModpackPlatform(ModLoader.NEOFORGE), false);
+	assert.equal(isModpackPlatform(ModLoader.FABRIC), false);
+});
+
+test('modpack servers display the game loader, plain servers are unchanged', () => {
+	assert.equal(effectiveLoader(ModLoader.MODRINTH, ModLoader.NEOFORGE), ModLoader.NEOFORGE);
+	assert.equal(effectiveLoader(ModLoader.AUTO_CURSEFORGE, ModLoader.FABRIC), ModLoader.FABRIC);
+	assert.equal(effectiveLoader(ModLoader.MODRINTH, ModLoader.UNSPECIFIED), ModLoader.MODRINTH);
+	assert.equal(effectiveLoader(ModLoader.MODRINTH), ModLoader.MODRINTH);
+	assert.equal(effectiveLoader(ModLoader.NEOFORGE, ModLoader.FABRIC), ModLoader.NEOFORGE);
 });
