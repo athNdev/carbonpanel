@@ -29,6 +29,9 @@ describe a server's desired configuration.
   server. Do not use the manager's client directly.
 - Surface indexer and delivery failures; do not turn a partial download into a
   successful install.
+- Exports honor options (client inclusion, optional handling, overrides); a
+  CurseForge export with non-CF mods is refused with the drop list rather
+  than silently shipping without them.
 - Verify checksums before declaring a modpack delivered.
 - A hook failure must be attributable to the module and the server.
 
