@@ -99,6 +99,41 @@ seed() {
 			"${token}" >/dev/null 2>&1 ||
 			echo "could not create the starter server; create one in the UI" >&2
 	fi
+	# Boot the starter so captures show running telemetry. Idempotent:
+	# starting a running server is refused and ignored.
+	server_id=$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const l=JSON.parse(s);const arr=l.servers||[];console.log(((Array.isArray(arr)?arr:[])[0]||{}).id||"")}catch(e){}})')
+	if [ -n "${server_id}" ]; then
+		rpc /carbonpanel.v1.ServerService/StartServer '{"id":"'${server_id}'","requestId":"review-bootstrap-start"}' "${token}" >/dev/null 2>&1 || true
+	fi
+
+	seed_showcase_pack "${token}"
+}
+
+# seed_showcase_pack creates a small fabric pack with real mods so studio and
+# library captures show populated state. Runs only on a fresh pack; reruns
+# resolve the existing pack and skip mod seeding (no duplicates). Best-effort:
+# any failure only warns, never fails the boot.
+seed_showcase_pack() {
+	local token="$1" base="http://127.0.0.1:${PORT}" pack_id mod ver
+	pack_id=$(curl -fsS --max-time 20 -X POST "${base}/api/v1/packwiz/packs" \
+		-H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
+		-d '{"name":"Showcase Pack","author":"Carbon Review","version":"1.0.0","mc_version":"1.21.1","mod_loader":"fabric","loader_version":"latest"}' 2>/dev/null |
+		node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).id||"")}catch(e){}})') || true
+	if [ -z "${pack_id}" ]; then
+		echo "showcase pack already seeded or unavailable; skipping mod seeding" >&2
+		return 0
+	fi
+	for mod in 9s6osm5g mOgUt4GM P7dR8mSH; do
+		ver=$(curl -fsS --max-time 30 "${base}/api/v1/servers/none/mods/${mod}/versions?platform=modrinth&loader=fabric&mc_version=1.21.1" \
+			-H "Authorization: Bearer ${token}" 2>/dev/null |
+			MOD="${mod}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=(JSON.parse(s).versions||[])[0];if(!v||!v.file_name||!v.download_url)return;console.log(JSON.stringify({slug:String(v.name||process.env.MOD).toLowerCase().replace(/[^a-z0-9]+/g,"-"),name:v.name||v.version_number,file_name:v.file_name,side:"both",platform:"modrinth",project_id:process.env.MOD,version_id:v.id,download_url:v.download_url,file_size:v.file_size||0,pinned:false}))}catch(e){}})') || true
+		if [ -n "${ver}" ]; then
+			curl -fsS --max-time 30 -X POST "${base}/api/v1/packwiz/packs/${pack_id}/mods" \
+				-H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
+				-d "${ver}" >/dev/null 2>&1 ||
+				echo "could not add mod ${mod} to showcase pack" >&2
+		fi
+	done
 }
 
 down() {
@@ -140,3 +175,4 @@ clean)
 	exit 2
 	;;
 esac
+

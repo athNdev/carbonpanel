@@ -727,6 +727,46 @@ body > footer {
   border-radius: var(--radius-lg);
   background: var(--layer-01);
   box-shadow: 0 20px 36px -28px rgba(0, 0, 0, 0.8);
+  transition: transform var(--dur-med) var(--ease), border-color var(--dur) var(--ease), box-shadow var(--dur-med) var(--ease);
+}
+.showcase-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--border-strong);
+  box-shadow: 0 28px 48px -24px rgba(0, 0, 0, 0.85), 0 -24px 48px -32px rgba(226, 226, 224, 0.16);
+}
+.browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--layer-02);
+  border-bottom: 1px solid var(--border);
+}
+.browser-dots {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+.browser-dots i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--layer-03);
+  border: 1px solid var(--border-strong);
+}
+.browser-url {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font: 12px/1.4 var(--mono);
+  color: var(--text-tertiary);
+  background: var(--term-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 5px 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .showcase-card img {
   width: 100%;

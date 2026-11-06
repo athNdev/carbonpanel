@@ -629,10 +629,14 @@ one at https://mozilla.org/MPL/2.0/.
 	{/if}
 
 	<!-- Modpack Packages Grid with CarbonTiles -->
-	<div class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-		{#each displayModpacks as modpack (modpack.id)}
+	<div
+		class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+		data-testid="showcase-modpack-grid"
+	>
+		{#each displayModpacks as modpack, i (modpack.id)}
 			<CarbonTile
 				class="group flex flex-col justify-between rounded-none border-[#393939] p-5 transition-colors hover:border-[#525252]"
+				data-testid={i === 0 ? 'showcase-modpack-card' : undefined}
 			>
 				<div class="space-y-3">
 					<!-- Tile Header -->

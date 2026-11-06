@@ -418,7 +418,10 @@ one at https://mozilla.org/MPL/2.0/.
 		</div>
 
 		<!-- Carbon KPI Tiles -->
-		<div class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+		<div
+			class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+			data-testid="showcase-kpi-tiles"
+		>
 			<!-- Tile 1: Total Servers -->
 			<div
 				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"

@@ -227,7 +227,16 @@ async function main() {
           .catch(() => {});
         await page.waitForTimeout(120);
         const file = join(out, `${spec.screenshot}.png`);
-        await page.screenshot({ path: file, fullPage: spec.fullPage ?? false });
+        if (spec.element) {
+          // Cropped capture: scroll the element into view, then shoot only
+          // it. Showcase images stay focused on the feature in question
+          // instead of a full page of chrome.
+          const target = page.locator(spec.element).first();
+          await target.scrollIntoViewIfNeeded({ timeout: 15000 });
+          await target.screenshot({ path: file });
+        } else {
+          await page.screenshot({ path: file, fullPage: spec.fullPage ?? false });
+        }
         record(label, true, `screenshot ${file}`);
       } else {
         record(label, true, "");

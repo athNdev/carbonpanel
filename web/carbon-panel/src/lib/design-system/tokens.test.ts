@@ -80,3 +80,15 @@ for (const selector of ["[data-carbon-theme='light']", "[data-carbon-theme='dark
 		assert.ok(contrast('#ffffff', values['--destructive']) >= 4.5);
 	});
 }
+
+test(':root defaults to the dark palette so fresh browsers render dark controls', () => {
+	const root = theme(':root');
+	const dark = theme("[data-carbon-theme='dark']");
+	for (const token of ['--background', '--card', '--foreground', '--input', '--border']) {
+		assert.equal(
+			root[token],
+			dark[token],
+			`:root ${token} must match the dark theme (unstyled selects/cards flash white otherwise)`
+		);
+	}
+});

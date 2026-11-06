@@ -1193,7 +1193,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								/>
 							</div>
 						{:else}
-							<div class="overflow-x-auto">
+							<div class="overflow-x-auto" data-testid="showcase-mods-table">
 								<table class="w-full border-collapse text-left text-xs">
 									<thead
 										class="border-b border-[#525252] bg-[#393939] font-semibold tracking-wider text-[#f4f4f4] uppercase"
