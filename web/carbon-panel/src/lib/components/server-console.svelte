@@ -32,12 +32,13 @@ one at https://mozilla.org/MPL/2.0/.
 		Trash2,
 		RefreshCw,
 		Wifi,
-		WifiOff
+		WifiOff,
+		Maximize2
 	} from '@lucide/svelte';
 	import AnsiToHtml from 'ansi-to-html';
 	import { getStringForEnum } from '$lib/utils';
 	import { wsClient } from '$lib/stores/websocket.svelte';
-	import { CarbonTag } from '$lib/components/carbon';
+	import { CarbonConfirm, CarbonModal, CarbonSearch, CarbonTag } from '$lib/components/carbon';
 
 	const ansiConverter = new AnsiToHtml({
 		fg: '#f4f4f4',
@@ -88,6 +89,17 @@ one at https://mozilla.org/MPL/2.0/.
 	let scrollAreaRef = $state<HTMLDivElement | null>(null);
 	let tailLines = $state(500);
 	const MAX_LOG_ENTRIES = 5000;
+	let searchQuery = $state('');
+	let clearConfirmOpen = $state(false);
+	let clearing = $state(false);
+	let fullscreenOpen = $state(false);
+	let filteredLogs = $derived(
+		searchQuery.trim() === ''
+			? logEntries
+			: logEntries.filter((entry) =>
+					entry.message.toLowerCase().includes(searchQuery.trim().toLowerCase())
+				)
+	);
 
 	let wsConnectionState = $derived(wsClient.state.connectionState);
 	let everConnected = $state(false);
@@ -274,15 +286,19 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function clearLogs() {
+		clearing = true;
 		try {
 			const request = create(ClearServerLogsRequestSchema, { id: server.id });
 			await rpcClient.server.clearServerLogs(request);
 			logEntries = [];
-			toast.success('Logs cleared');
+			searchQuery = '';
+			toast.success('Viewed buffer cleared');
 		} catch (error) {
 			reportError(
 				'Failed to clear logs: ' + (error instanceof Error ? error.message : 'Unknown error')
 			);
+		} finally {
+			clearing = false;
 		}
 	}
 
@@ -391,6 +407,31 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <!-- Carbon Code/Terminal Container (Requirement 5) -->
+{#snippet logList(entries: LogEntry[])}
+	<div class="font-mono text-xs leading-relaxed text-[#f4f4f4]">
+		{#if entries.length === 0}
+			<div class="py-12 text-center font-mono text-xs text-[#a8a8a8]">
+				{#if searchQuery.trim() !== '' && logEntries.length > 0}
+					No lines match this filter.
+				{:else if server.status === ServerStatus.CREATING}
+					Server container is being initialized and configured...
+				{:else if [ServerStatus.RUNNING, ServerStatus.STARTING, ServerStatus.UNHEALTHY].includes(server.status)}
+					No logs available. Try refreshing or waiting for container output.
+				{:else}
+					No logs available. Start server to view live container telemetry.
+				{/if}
+			</div>
+		{:else}
+			{#each entries as entry, i (i)}
+				<div class="log-line break-all whitespace-pre-wrap" data-type={entry.level}>
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+					{@html ansiConverter.toHtml(entry.message)}
+				</div>
+			{/each}
+		{/if}
+	</div>
+{/snippet}
+
 <ResizablePaneGroup
 	direction="vertical"
 	class="h-full max-h-[800px] min-h-[320px] w-full overflow-hidden rounded-none border border-[#393939] bg-[#161616] font-mono text-[#f4f4f4] md:min-h-[450px]"
@@ -478,15 +519,37 @@ one at https://mozilla.org/MPL/2.0/.
 
 					<button
 						type="button"
-						onclick={clearLogs}
+						onclick={() => (clearConfirmOpen = true)}
 						disabled={logEntries.length === 0}
 						aria-label="Clear log buffer"
-						title="Clear log buffer"
+						title="Clear viewed buffer (daemon logs are kept)"
 						class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-[#ff8389] focus-visible:outline-2 focus-visible:outline-[#0f62fe] disabled:opacity-40"
 					>
 						<Trash2 class="h-3.5 w-3.5" />
 					</button>
+
+					<button
+						type="button"
+						onclick={() => (fullscreenOpen = true)}
+						aria-label="Expand console"
+						title="Expand console"
+						class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white focus-visible:outline-2 focus-visible:outline-[#0f62fe] disabled:opacity-40"
+					>
+						<Maximize2 class="h-3.5 w-3.5" />
+					</button>
 				</div>
+			</div>
+
+			<!-- Log filter -->
+			<div class="flex items-center gap-2 border-b border-[#393939] bg-[#1e1e1e] px-4 py-2">
+				<div class="flex-1">
+					<CarbonSearch bind:value={searchQuery} placeholder="Filter logs..." size="sm" />
+				</div>
+				{#if searchQuery.trim() !== ''}
+					<span class="font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
+						{filteredLogs.length} of {logEntries.length}
+					</span>
+				{/if}
 			</div>
 
 			<!-- Assertive error announcements (MINE-135); visually hidden -->
@@ -501,26 +564,7 @@ one at https://mozilla.org/MPL/2.0/.
 				bind:this={scrollAreaRef}
 				onscroll={handleScroll}
 			>
-				<div class="font-mono text-xs leading-relaxed text-[#f4f4f4]">
-					{#if logEntries.length === 0}
-						<div class="py-12 text-center font-mono text-xs text-[#a8a8a8]">
-							{#if server.status === ServerStatus.CREATING}
-								Server container is being initialized and configured...
-							{:else if [ServerStatus.RUNNING, ServerStatus.STARTING, ServerStatus.UNHEALTHY].includes(server.status)}
-								No logs available. Try refreshing or waiting for container output.
-							{:else}
-								No logs available. Start server to view live container telemetry.
-							{/if}
-						</div>
-					{:else}
-						{#each logEntries as entry, i (i)}
-							<div class="log-line break-all whitespace-pre-wrap" data-type={entry.level}>
-								<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-								{@html ansiConverter.toHtml(entry.message)}
-							</div>
-						{/each}
-					{/if}
-				</div>
+				{@render logList(filteredLogs)}
 			</div>
 		</div>
 	</ResizablePane>
@@ -589,11 +633,45 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 			<div class="font-mono text-xs text-[#8d8d8d]">
-				{logEntries.length} lines in buffer
+				{logEntries.length} lines in viewed buffer
 			</div>
 		</div>
 	</div>
 </ResizablePaneGroup>
+
+<CarbonConfirm
+	bind:open={clearConfirmOpen}
+	title="Clear viewed log buffer?"
+	message="Clears the viewed buffer only. Daemon logs are kept. This cannot be undone."
+	confirmLabel="Clear viewed buffer"
+	danger={true}
+	confirming={clearing}
+	onconfirm={clearLogs}
+	onclose={() => {}}
+/>
+
+<CarbonModal
+	bind:open={fullscreenOpen}
+	title="Server Console"
+	description="{logEntries.length} lines in viewed buffer. Clearing removes the viewed buffer only; daemon logs are kept."
+	size="full"
+	hasFooter={false}
+>
+	<div class="flex flex-col gap-3">
+		<CarbonSearch bind:value={searchQuery} placeholder="Filter logs..." size="sm" />
+		<div
+			role="log"
+			aria-live="polite"
+			aria-label="Server console output fullscreen"
+			class="custom-scrollbar max-h-[60vh] min-h-[40vh] overflow-auto bg-[#161616] p-4"
+		>
+			{@render logList(filteredLogs)}
+		</div>
+		<p class="font-mono text-xs text-[#a8a8a8]">
+			{filteredLogs.length} of {logEntries.length} lines shown. Clearing removes the viewed buffer only.
+		</p>
+	</div>
+</CarbonModal>
 
 <style>
 	.custom-scrollbar {

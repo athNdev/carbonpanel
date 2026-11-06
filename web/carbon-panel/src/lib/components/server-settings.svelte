@@ -19,9 +19,9 @@ one at https://mozilla.org/MPL/2.0/.
 	import { beginLifecycleRequest } from '$lib/lifecycle-request';
 	import { create } from '@bufbuild/protobuf';
 	import { toast } from 'svelte-sonner';
-	import { Loader2, Save, AlertCircle, Network, ArrowRightLeft } from '@lucide/svelte';
+	import { Loader2, Save, AlertCircle, ArrowRightLeft } from '@lucide/svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
-	import { CarbonConfirm } from '$lib/components/carbon';
+	import { CarbonAccordion, CarbonAccordionItem, CarbonConfirm } from '$lib/components/carbon';
 	import * as _ from 'lodash-es';
 	import { ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { UpdateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
@@ -231,6 +231,30 @@ one at https://mozilla.org/MPL/2.0/.
 	let confirmTitle = $state('');
 	let confirmMessage = $state('');
 	let pendingMigrate = $state<{ targetNodeId: string; isLive: boolean } | null>(null);
+
+	let portsCount = $derived(formData.additionalPorts?.length ?? 0);
+	let overridesCount = $derived.by(() => {
+		const o = formData.dockerOverrides;
+		if (!o) return 0;
+		let count = 0;
+		if (o.environment && Object.keys(o.environment).length > 0) count++;
+		if (o.volumes && o.volumes.length > 0) count++;
+		if (o.cpuLimit) count++;
+		if (o.cpusetCpus) count++;
+		if (o.memoryLimit) count++;
+		if (o.networkMode) count++;
+		if (o.privileged) count++;
+		if (o.user) count++;
+		if (o.capAdd && o.capAdd.length > 0) count++;
+		if (o.capDrop && o.capDrop.length > 0) count++;
+		if (o.devices && o.devices.length > 0) count++;
+		if (o.dns && o.dns.length > 0) count++;
+		if (o.labels && Object.keys(o.labels).length > 0) count++;
+		return count;
+	});
+	let currentNodeName = $derived(
+		nodes.find((n) => n.id === server.nodeId)?.name ?? server.nodeId ?? 'unassigned'
+	);
 
 	async function handleMigrate() {
 		if (!targetNodeId || targetNodeId === server.nodeId) {
@@ -685,147 +709,132 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<Separator class="my-4" />
 
-	<div class="space-y-4">
-		<AdditionalPortsEditor
-			bind:ports={formData.additionalPorts}
-			disabled={saving}
-			onchange={(ports) => (formData.additionalPorts = ports)}
-		/>
-
-		<DockerOverridesEditor
-			bind:overrides={formData.dockerOverrides}
-			disabled={saving}
-			onchange={(overrides) => (formData.dockerOverrides = overrides)}
-		/>
-	</div>
-
-	<Separator class="my-6" />
-
-	<!-- Cluster Node Placement & Live Migration Card -->
-	<div
-		class="space-y-5 rounded-xl border border-border/80 bg-linear-to-br from-card to-card/90 p-5 shadow-sm"
-	>
-		<div class="flex items-start justify-between gap-4">
-			<div class="flex items-center gap-3">
-				<div
-					class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary"
-				>
-					<Network class="h-5 w-5" />
+	<CarbonAccordion>
+		<CarbonAccordionItem
+			title="Additional Ports"
+			subtitle={portsCount === 0 ? 'none' : portsCount + ' configured'}
+			open={false}
+		>
+			<AdditionalPortsEditor
+				bind:ports={formData.additionalPorts}
+				disabled={saving}
+				onchange={(ports) => (formData.additionalPorts = ports)}
+			/>
+		</CarbonAccordionItem>
+		<CarbonAccordionItem
+			title="Docker Overrides"
+			subtitle={overridesCount === 0 ? 'none' : overridesCount + ' active'}
+			open={false}
+		>
+			<DockerOverridesEditor
+				bind:overrides={formData.dockerOverrides}
+				disabled={saving}
+				onchange={(overrides) => (formData.dockerOverrides = overrides)}
+			/>
+		</CarbonAccordionItem>
+		<CarbonAccordionItem title="Cluster Migration" subtitle={currentNodeName} open={true}>
+			<!-- Current Placement Info -->
+			<div
+				class="grid grid-cols-1 gap-3 rounded-lg border border-border/50 bg-muted/40 p-3.5 text-xs sm:grid-cols-2"
+			>
+				<div>
+					<span class="text-muted-foreground">Current Node:</span>
+					<div class="mt-1 flex items-center gap-2">
+						<span class="text-sm font-semibold text-foreground"
+							>{server.nodeId || 'unassigned'}</span
+						>
+						{#if nodes.find((n) => n.id === server.nodeId)?.isLocal}
+							<Badge variant="secondary" class="h-4 px-1.5 py-0 text-xs">Local</Badge>
+						{/if}
+					</div>
 				</div>
 				<div>
-					<h4 class="text-base font-semibold text-foreground">
-						Cluster Node Placement & Live Migration
-					</h4>
-					<p class="text-xs text-muted-foreground">
-						Seamlessly migrate this instance across Docker hosts without player disconnection
-					</p>
+					<span class="text-muted-foreground">Container Endpoint:</span>
+					<div class="mt-1 truncate font-mono text-foreground">
+						{nodes.find((n) => n.id === server.nodeId)?.host || 'local daemon'}
+					</div>
 				</div>
 			</div>
-			<Badge
-				variant="outline"
-				class="border-primary/30 bg-primary/5 font-mono text-xs text-primary"
-			>
-				Live Engine
-			</Badge>
-		</div>
 
-		<!-- Current Placement Info -->
-		<div
-			class="grid grid-cols-1 gap-3 rounded-lg border border-border/50 bg-muted/40 p-3.5 text-xs sm:grid-cols-2"
-		>
-			<div>
-				<span class="text-muted-foreground">Current Node:</span>
-				<div class="mt-1 flex items-center gap-2">
-					<span class="text-sm font-semibold text-foreground">{server.nodeId || 'unassigned'}</span>
-					{#if nodes.find((n) => n.id === server.nodeId)?.isLocal}
-						<Badge variant="secondary" class="h-4 px-1.5 py-0 text-xs">Local</Badge>
-					{/if}
-				</div>
-			</div>
-			<div>
-				<span class="text-muted-foreground">Container Endpoint:</span>
-				<div class="mt-1 truncate font-mono text-foreground">
-					{nodes.find((n) => n.id === server.nodeId)?.host || 'local daemon'}
-				</div>
-			</div>
-		</div>
-
-		<!-- Target Node Migration Form -->
-		<div class="space-y-3">
-			<Label for="target_node" class="text-sm font-medium">Migrate to Target Node</Label>
-			<div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-				<div class="flex-1">
-					<Select type="single" bind:value={targetNodeId} disabled={migrating || loadingNodes}>
-						<SelectTrigger id="target_node" class="h-10 w-full">
-							<span>
-								{nodes.find((n) => n.id === targetNodeId)?.name || 'Select destination node...'}
-							</span>
-						</SelectTrigger>
-						<SelectContent>
-							{#each nodes as node (node.id)}
-								<SelectItem value={node.id} disabled={node.id === server.nodeId || !node.enabled}>
-									<div class="flex w-full items-center justify-between gap-3">
-										<span>{node.name} {node.id === server.nodeId ? '(Current)' : ''}</span>
-										<div class="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-											{#if node.status === NodeStatus.ONLINE}
-												<span class="text-emerald-400">Online</span>
-											{:else}
-												<span class="text-rose-400">Offline</span>
-											{/if}
-											• {Number(node.availableMemoryMb) > 0
-												? `${(Number(node.availableMemoryMb) / 1024).toFixed(1)} GB free`
-												: Number(node.maxMemoryMb) > 0
-													? `${(Math.max(0, Number(node.maxMemoryMb) - Number(node.allocatedMemoryMb)) / 1024).toFixed(1)} GB free`
-													: `${(Number(node.allocatedMemoryMb) / 1024).toFixed(1)} GB allocated`}
+			<!-- Target Node Migration Form -->
+			<div class="space-y-3">
+				<Label for="target_node" class="text-sm font-medium">Migrate to Target Node</Label>
+				<div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+					<div class="flex-1">
+						<Select type="single" bind:value={targetNodeId} disabled={migrating || loadingNodes}>
+							<SelectTrigger id="target_node" class="h-10 w-full">
+								<span>
+									{nodes.find((n) => n.id === targetNodeId)?.name || 'Select destination node...'}
+								</span>
+							</SelectTrigger>
+							<SelectContent>
+								{#each nodes as node (node.id)}
+									<SelectItem value={node.id} disabled={node.id === server.nodeId || !node.enabled}>
+										<div class="flex w-full items-center justify-between gap-3">
+											<span>{node.name} {node.id === server.nodeId ? '(Current)' : ''}</span>
+											<div
+												class="flex items-center gap-1.5 font-mono text-xs text-muted-foreground"
+											>
+												{#if node.status === NodeStatus.ONLINE}
+													<span class="text-emerald-400">Online</span>
+												{:else}
+													<span class="text-rose-400">Offline</span>
+												{/if}
+												• {Number(node.availableMemoryMb) > 0
+													? `${(Number(node.availableMemoryMb) / 1024).toFixed(1)} GB free`
+													: Number(node.maxMemoryMb) > 0
+														? `${(Math.max(0, Number(node.maxMemoryMb) - Number(node.allocatedMemoryMb)) / 1024).toFixed(1)} GB free`
+														: `${(Number(node.allocatedMemoryMb) / 1024).toFixed(1)} GB allocated`}
+											</div>
 										</div>
-									</div>
-								</SelectItem>
-							{/each}
-						</SelectContent>
-					</Select>
+									</SelectItem>
+								{/each}
+							</SelectContent>
+						</Select>
+					</div>
+
+					<Button
+						onclick={handleMigrate}
+						disabled={migrating || !targetNodeId || targetNodeId === server.nodeId}
+						class="h-10 min-w-36 gap-2"
+					>
+						{#if migrating}
+							<Loader2 class="h-4 w-4 animate-spin" />
+							Migrating...
+						{:else}
+							<ArrowRightLeft class="h-4 w-4" />
+							Migrate Node
+						{/if}
+					</Button>
 				</div>
 
-				<Button
-					onclick={handleMigrate}
-					disabled={migrating || !targetNodeId || targetNodeId === server.nodeId}
-					class="h-10 min-w-36 gap-2"
-				>
-					{#if migrating}
-						<Loader2 class="h-4 w-4 animate-spin" />
-						Migrating...
-					{:else}
-						<ArrowRightLeft class="h-4 w-4" />
-						Migrate Node
-					{/if}
-				</Button>
+				<!-- Migration Helper & Force Bypass -->
+				<div class="flex flex-col justify-between gap-2 pt-1 sm:flex-row sm:items-center">
+					<p class="text-xs text-muted-foreground">
+						{#if server.status === ServerStatus.RUNNING}
+							<b>Live zero-downtime migration</b>: Memory & world state are synced before proxy
+							rerouting.
+						{:else}
+							<b>Offline migration</b>: Container will be initialized on the selected node.
+						{/if}
+					</p>
+					<div class="flex items-center gap-2 text-xs text-muted-foreground">
+						<Switch id="force_migrate" bind:checked={forceMigrate} disabled={migrating} />
+						<Label for="force_migrate" class="cursor-pointer text-xs">Bypass capacity checks</Label>
+					</div>
+				</div>
+
+				{#if migrating && migrationStep}
+					<div
+						class="flex animate-pulse items-center gap-2 rounded-md border border-primary/20 bg-primary/10 p-3 text-xs text-primary"
+					>
+						<Loader2 class="h-3.5 w-3.5 animate-spin" />
+						<span>{migrationStep}</span>
+					</div>
+				{/if}
 			</div>
-
-			<!-- Migration Helper & Force Bypass -->
-			<div class="flex flex-col justify-between gap-2 pt-1 sm:flex-row sm:items-center">
-				<p class="text-xs text-muted-foreground">
-					{#if server.status === ServerStatus.RUNNING}
-						⚡ <b>Live zero-downtime migration</b>: Memory & world state are synced before proxy
-						rerouting.
-					{:else}
-						ðŸ’¤ <b>Offline migration</b>: Container will be initialized on the selected node.
-					{/if}
-				</p>
-				<div class="flex items-center gap-2 text-xs text-muted-foreground">
-					<Switch id="force_migrate" bind:checked={forceMigrate} disabled={migrating} />
-					<Label for="force_migrate" class="cursor-pointer text-xs">Bypass capacity checks</Label>
-				</div>
-			</div>
-
-			{#if migrating && migrationStep}
-				<div
-					class="flex animate-pulse items-center gap-2 rounded-md border border-primary/20 bg-primary/10 p-3 text-xs text-primary"
-				>
-					<Loader2 class="h-3.5 w-3.5 animate-spin" />
-					<span>{migrationStep}</span>
-				</div>
-			{/if}
-		</div>
-	</div>
+		</CarbonAccordionItem>
+	</CarbonAccordion>
 
 	<Separator class="my-4" />
 

@@ -120,9 +120,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</button>
 	</div>
 	<p class="mb-4 text-xs text-[#a8a8a8]">
-		Every start, stop, restart, delete and migrate is written down before it is attempted. An
-		interrupted request shows as <span class="text-[#f1c21b]">unknown</span> — never as a success or
-		a failure — with the safe next step beside it.
+		Starts, stops, restarts, deletes and migrations are journaled first. Interrupted requests show
+		as unknown with the next step.
 	</p>
 
 	{#if operations.length > 0}
@@ -151,7 +150,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<p class="py-6 text-center font-mono text-xs text-[#a8a8a8]">
 			{loading
 				? 'Loading operations…'
-				: 'No lifecycle operations recorded. Start, stop or restart the server to populate this journal.'}
+				: 'No operations yet. Start, stop or restart to populate this journal.'}
 		</p>
 	{:else}
 		<div class="overflow-x-auto">
@@ -208,7 +207,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <CarbonConfirm
 	bind:open={confirmOpen}
 	title="Release the lifecycle lock?"
-	message="This releases the lock on the server so it can be operated on again. It does not stop, start, remove or prune any container, and it does not touch world files. Only do this once you know what the interrupted operation actually did."
+	message="Releases the lock only. Does not touch containers or world files. Release only after checking what the interrupted run did."
 	confirmLabel="Release lock"
 	confirming={resolving}
 	danger={true}

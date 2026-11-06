@@ -1025,18 +1025,9 @@ one at https://mozilla.org/MPL/2.0/.
 						</button>
 					{/if}
 					<p class="font-mono text-xs text-[#c6c6c6]">
-						Stage keeps the server as it is, including while it is frozen or in deep sleep.
-						{#if applyWindow === 'time'}
-							The batch applies at the chosen time, even if that time passed while the panel was
-							down.
-						{:else if applyWindow === 'idle'}
-							The batch applies after the server has had nobody online for the chosen minutes. A
-							player joining starts that wait over. Deep sleep stays stopped. A frozen server
-							restarts once.
-						{:else}
-							The batch applies on the next restart.
-						{/if}
-						Apply now restarts the container.
+						Staging preserves current state, including frozen/deep-sleep. time: applies at chosen
+						time. idle: applies after N empty minutes (join resets; deep-sleep stays stopped, frozen
+						restarts once). restart: next restart. Apply now restarts.
 					</p>
 				</div>
 			{/if}

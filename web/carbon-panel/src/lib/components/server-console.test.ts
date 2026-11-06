@@ -42,9 +42,12 @@ test('ServerConsole does not depend on Tooltip context and has accessible toolti
 		'Download logs button must declare aria-label and title'
 	);
 	assert.ok(
-		content.includes('aria-label="Clear log buffer"') &&
-			content.includes('title="Clear log buffer"'),
-		'Clear logs button must declare aria-label and title'
+		content.includes('aria-label="Clear log buffer"'),
+		'Clear logs button must declare aria-label'
+	);
+	assert.ok(
+		content.includes('viewed buffer'),
+		'Clear affordance must state it clears the viewed buffer'
 	);
 });
 
@@ -82,4 +85,39 @@ test('Server detail page wraps tab panels with svelte:boundary to prevent tab we
 		content.includes("<ServerConsole {server} active={activeTab === 'console'} />"),
 		'Server detail page must render ServerConsole'
 	);
+});
+
+test('ServerConsole gates clear behind a danger confirm and states viewed-buffer semantics', () => {
+	const consolePath = path.resolve(import.meta.dirname, 'server-console.svelte');
+	const content = fs.readFileSync(consolePath, 'utf-8');
+	assert.ok(content.includes('CarbonConfirm'), 'Console must use CarbonConfirm for clear');
+	assert.ok(content.includes('clearConfirmOpen'), 'Clear must open a confirm dialog');
+	assert.ok(content.includes('danger={true}'), 'Clear confirm must use the danger pattern');
+	assert.ok(
+		content.includes('viewed buffer only') || content.includes('viewed buffer'),
+		'Clear confirm must state only the viewed buffer is cleared'
+	);
+	assert.ok(
+		content.includes('Daemon logs are kept') || content.includes('daemon logs are kept'),
+		'Clear confirm must state daemon logs are kept'
+	);
+	assert.ok(
+		!content.includes('onclick={clearLogs}'),
+		'Clear button must not call clearLogs directly; it must open the confirm first'
+	);
+});
+
+test('ServerConsole filters client-side and expands fullscreen via CarbonModal', () => {
+	const consolePath = path.resolve(import.meta.dirname, 'server-console.svelte');
+	const content = fs.readFileSync(consolePath, 'utf-8');
+	assert.ok(content.includes('CarbonSearch'), 'Console must reuse CarbonSearch for filtering');
+	assert.ok(content.includes('searchQuery'), 'Console must keep client-side filter state');
+	assert.ok(content.includes('filteredLogs'), 'Console must derive filtered logs');
+	assert.ok(content.includes('CarbonModal'), 'Console must host fullscreen in CarbonModal');
+	assert.ok(content.includes('fullscreenOpen'), 'Console must gate fullscreen behind state');
+	assert.ok(
+		content.includes('aria-label="Expand console"'),
+		'Fullscreen button must declare aria-label'
+	);
+	assert.ok(content.includes('logList'), 'Console must extract the log list for reuse');
 });

@@ -2599,6 +2599,39 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 		}), nil
 	}
 
+	if server.Status == storage.StatusDeepSleep {
+		// DEEPSLEEP containers are already exited: skip DockerStop, record the
+		// journaled no-op, clear the wake listener, and park as STOPPED.
+		if s.proxy != nil {
+			if server.ProxyHostname != "" {
+				if err := s.proxy.RemoveServerRoute(server.ID); err != nil {
+					s.log.Error("Failed to remove proxy route: %v", err)
+				}
+			} else {
+				s.proxy.StopDirectKnock(server.ID)
+			}
+		}
+		if stopErr := s.runJournaledMutation(ctx, server, "stop", requestID, func() error { return nil }); stopErr != nil {
+			s.log.Error("Failed to stop container: %v", stopErr)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to stop server"))
+		}
+		server.Status = storage.StatusStopped
+		if err := s.store.UpdateServer(ctx, server); err != nil {
+			s.log.Error("Failed to update server status: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server stopped but status could not be saved: %w", err))
+		}
+		if s.bus != nil {
+			s.bus.Emit(ctx, events.Event{
+				Type:     v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP,
+				ServerID: server.ID,
+			})
+		}
+		s.auditPower(ctx, req.Peer().Addr, activity.EventServerStop, server.ID)
+		return connect.NewResponse(&v1.StopServerResponse{
+			Status: "stopped",
+		}), nil
+	}
+
 	// Stop container
 	dockerCli, err := s.getDockerClientStrict(server.NodeID)
 	if err != nil {

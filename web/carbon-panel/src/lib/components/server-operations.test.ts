@@ -58,3 +58,27 @@ test('counts add up to the number of rows', () => {
 	assert.deepEqual(counts, { success: 2, unknown: 1 });
 	assert.deepEqual(countOperationsByOutcome([]), {});
 });
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+test('journal copy is trimmed to the approved sentences', () => {
+	const opsPath = path.resolve(import.meta.dirname, 'server-operations.svelte');
+	const content = fs.readFileSync(opsPath, 'utf-8').replace(/\s+/g, ' ');
+	assert.ok(
+		content.includes(
+			'Starts, stops, restarts, deletes and migrations are journaled first. Interrupted requests show as unknown with the next step.'
+		),
+		'operations intro must use the trimmed copy'
+	);
+	assert.ok(
+		content.includes(
+			'Releases the lock only. Does not touch containers or world files. Release only after checking what the interrupted run did.'
+		),
+		'resolve action must use the trimmed copy'
+	);
+	assert.ok(
+		content.includes('No operations yet. Start, stop or restart to populate this journal.'),
+		'empty state must use the trimmed copy'
+	);
+});
