@@ -365,8 +365,8 @@
 								<span class="spec-label">STATES</span>
 								<div class="sample-row"><button class="button primary" type="button" disabled>Disabled</button><button class="button primary" type="button"><span class="spinner" aria-hidden="true"></span>Loading</button><button class="button secondary icon-only" type="button" aria-label="Refresh"><span aria-hidden="true">↻</span></button><button class="button tertiary" type="button" disabled>Disabled tertiary</button></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>kind</code></td><td><code>'primary' | 'secondary' | 'tertiary' | 'ghost' | 'danger'</code></td><td><code>'primary'</code></td></tr>
@@ -379,7 +379,7 @@
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 										<tr><td><code>...restProps</code></td><td>button or anchor attributes</td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -396,13 +396,13 @@
 						<p class="component-intro">The single <code>h1</code> for a route, with an optional status snippet, a short description and right-aligned actions. It does not own page padding; the shell provides the gutter.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="ph-demo">
+								<span class="spec-label">Example</span><div class="ph-demo">
 									<div class="ph-main"><div class="ph-title-row"><h4>survival-01</h4><span class="tag good">Running</span></div><p>Java 21 · Paper 1.21.4 · eu-west</p></div>
 									<div class="ph-actions"><span class="button secondary size-sm">Console</span><span class="button primary size-sm">Start</span></div>
 								</div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>title</code> <em>required</em></td><td><code>string</code></td><td>—</td></tr>
@@ -411,7 +411,7 @@
 										<tr><td><code>actions</code></td><td><code>Snippet</code></td><td>—</td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -426,10 +426,10 @@
 						<p class="component-intro">A bordered content surface. The same component is a static panel, a clickable card or a link, decided by <code>href</code> and <code>clickable</code>.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="tile-demo"><div class="tile-head"><span>Active players</span><span class="tile-dot" aria-hidden="true"></span></div><div class="tile-value">12</div><div class="tile-foot"><span class="tile-live"><i aria-hidden="true"></i>8 online</span><span>Max 20</span></div></div>
+								<span class="spec-label">Metric tile</span><div class="tile-demo"><div class="tile-head"><span>Active players</span><span class="tile-dot" aria-hidden="true"></span></div><div class="tile-value">12</div><div class="tile-foot"><span class="tile-live"><i aria-hidden="true"></i>8 online</span><span>Max 20</span></div></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>clickable</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
@@ -439,7 +439,7 @@
 										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
 										<tr><td><code>...restProps</code></td><td><code>unknown</code></td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -460,8 +460,8 @@
 								<span class="spec-label">SIZES AND STATES</span>
 								<div class="sample-row"><span class="tag neutral tag-sm">sm 20</span><span class="tag neutral">md 24</span><span class="tag good pulse">pulse</span><span class="tag blue filter">filter <button type="button" aria-label="Remove filter">×</button></span></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>type</code></td><td><code>'blue' | 'green' | 'red' | 'purple' | 'cyan' | 'teal' | 'magenta' | 'yellow' | 'gray' | 'warm-gray' | 'cool-gray'</code></td><td><code>'gray'</code></td></tr>
@@ -472,7 +472,7 @@
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 										<tr><td><code>...restProps</code></td><td><code>unknown</code></td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -488,7 +488,7 @@
 						<p class="component-intro">A framed table with an optional header bar and toolbar. It supplies the chrome and the horizontal overflow container; the caller supplies <code>thead</code> cells and <code>tbody</code> rows.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="table-demo">
+								<span class="spec-label">Example</span><div class="table-demo">
 									<div class="table-head"><div><strong>SERVERS</strong><span>3 in eu-west</span></div><span class="table-tool">Filter</span></div>
 									<table>
 										<thead><tr><th scope="col">Name</th><th scope="col">State</th><th scope="col">Players</th></tr></thead>
@@ -496,8 +496,8 @@
 									</table>
 								</div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>title</code></td><td><code>string</code></td><td><code>''</code></td></tr>
@@ -507,7 +507,7 @@
 										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -523,14 +523,14 @@
 						<p class="component-intro">A modal dialog portalled to <code>&lt;body&gt;</code>. Owns backdrop, scroll lock, focus placement, focus containment, Escape handling and focus restoration.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="modal-demo">
+								<span class="spec-label">Example</span><div class="modal-demo">
 									<div class="modal-demo-head"><div><span class="modal-demo-eyebrow">DELETE SERVER</span><strong>Delete survival-01?</strong></div><span class="modal-demo-close" aria-hidden="true">×</span></div>
 									<div class="modal-demo-body">This removes the container and its volume. The world is deleted and cannot be recovered.</div>
 									<div class="modal-demo-foot"><span class="modal-btn">Cancel</span><span class="modal-btn fill-danger">Delete</span></div>
 								</div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>open</code></td><td><code>boolean</code> (bindable)</td><td><code>false</code></td></tr>
@@ -548,7 +548,7 @@
 										<tr><td><code>onclose</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
 										<tr><td><code>footer</code></td><td><code>Snippet</code></td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -566,13 +566,13 @@
 						<p class="component-intro">A small confirmation dialog built on <code>CarbonModal</code>. Awaiting <code>onconfirm</code> before closing makes it safe for slow destructive requests.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="confirm-demo">
+								<span class="spec-label">Example</span><div class="confirm-demo">
 									<div class="confirm-row"><span class="confirm-icon" aria-hidden="true">▲</span><div><strong>Delete backup?</strong><p>backup-2026-11-02 · 4.2 GiB</p></div></div>
 									<div class="confirm-actions"><span class="button secondary size-sm">Cancel</span><span class="button danger size-sm">Delete</span></div>
 								</div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>open</code></td><td><code>boolean</code> (bindable)</td><td><code>false</code></td></tr>
@@ -586,7 +586,7 @@
 										<tr><td><code>onconfirm</code></td><td><code>() =&gt; void | Promise&lt;void&gt;</code></td><td>—</td></tr>
 										<tr><td><code>onclose</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -603,11 +603,11 @@
 						<p class="component-intro">A labelled text field with hint, error and optional password reveal. Extends <code>HTMLInputAttributes</code>, so every native attribute is accepted.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="field-demo"><label for="demo-text-input">Server name</label><input id="demo-text-input" type="text" value="survival" aria-describedby="demo-text-hint" /><small id="demo-text-hint">Lowercase letters, digits and hyphens.</small></div>
+								<span class="spec-label">Valid and invalid</span><div class="field-demo"><label for="demo-text-input">Server name</label><input id="demo-text-input" type="text" value="survival" aria-describedby="demo-text-hint" /><small id="demo-text-hint">Lowercase letters, digits and hyphens.</small></div>
 								<div class="field-demo"><label for="demo-text-error">Memory limit</label><input id="demo-text-error" type="text" value="0" aria-invalid="true" aria-describedby="demo-text-error-msg" /><small id="demo-text-error-msg" class="error">Must be at least 1 GiB.</small></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>label</code></td><td><code>string</code></td><td><code>''</code></td></tr>
@@ -620,7 +620,7 @@
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 										<tr><td><code>...restProps</code></td><td>input attributes</td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -637,10 +637,10 @@
 						<p class="component-intro">A labelled native <code>&lt;select&gt;</code> with an overlaid chevron and the same label, hint and error association as <code>CarbonTextInput</code>.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="field-demo"><label for="demo-select">Software</label><select id="demo-select" aria-describedby="demo-select-hint"><option>Paper 1.21.4</option><option>Fabric 1.21.4</option><option>Forge 1.21.4</option></select><small id="demo-select-hint">The image is pinned to this version.</small></div>
+								<span class="spec-label">Example</span><div class="field-demo"><label for="demo-select">Software</label><select id="demo-select" aria-describedby="demo-select-hint"><option>Paper 1.21.4</option><option>Fabric 1.21.4</option><option>Forge 1.21.4</option></select><small id="demo-select-hint">The image is pinned to this version.</small></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>label</code></td><td><code>string</code></td><td><code>''</code></td></tr>
@@ -651,7 +651,7 @@
 										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
 										<tr><td><code>...restProps</code></td><td>select attributes</td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -666,11 +666,11 @@
 						<p class="component-intro">A horizontal tab strip with a measured selection indicator and APG keyboard behaviour.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="tabs-demo"><span class="tab-demo">Overview</span><span class="tab-demo active">Console</span><span class="tab-demo">Files</span><span class="tab-demo">Backups</span></div>
+								<span class="spec-label">Strip</span><div class="tabs-demo"><span class="tab-demo">Overview</span><span class="tab-demo active">Console</span><span class="tab-demo">Files</span><span class="tab-demo">Backups</span></div>
 								<p class="annotation">The 2 px indicator is a 1 px element scaled with <code>scaleX</code> and moved with <code>translateX</code>; it paints above the active tab background, never under it.</p>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>tabs</code> <em>required</em></td><td><code>{ id: string; label: string; badge?: string | number }[]</code></td><td><code>[]</code></td></tr>
@@ -679,7 +679,7 @@
 										<tr><td><code>onselect</code></td><td><code>(id: string) =&gt; void</code></td><td>—</td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -696,17 +696,17 @@
 						<p class="component-intro">A single-line progress indicator with three outcomes: active, finished and error.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="loading-demo"><span class="inline-loading"><span class="spinner" aria-hidden="true"></span>Loading server list</span><span class="inline-loading"><span class="check" aria-hidden="true">✓</span>Backup complete</span><span class="inline-loading"><span class="cross" aria-hidden="true">×</span>Backup failed</span></div>
+								<span class="spec-label">States</span><div class="loading-demo"><span class="inline-loading"><span class="spinner" aria-hidden="true"></span>Loading server list</span><span class="inline-loading"><span class="check" aria-hidden="true">✓</span>Backup complete</span><span class="inline-loading"><span class="cross" aria-hidden="true">×</span>Backup failed</span></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>description</code></td><td><code>string</code></td><td><code>'Loading...'</code></td></tr>
 										<tr><td><code>status</code></td><td><code>'active' | 'finished' | 'error'</code></td><td><code>'active'</code></td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -721,16 +721,16 @@
 						<p class="component-intro">Ancestor navigation for a nested route. Renders a <code>nav</code> labelled "Breadcrumbs" with slash separators.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<nav class="crumbs-demo" aria-label="Breadcrumbs example"><a href="#c-breadcrumbs">Servers</a><span>/</span><a href="#c-breadcrumbs">survival-01</a><span>/</span><span class="current">Backups</span></nav>
+								<span class="spec-label">Trail</span><nav class="crumbs-demo" aria-label="Breadcrumbs example"><a href="#c-breadcrumbs">Servers</a><span>/</span><a href="#c-breadcrumbs">survival-01</a><span>/</span><span class="current">Backups</span></nav>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>items</code> <em>required</em></td><td><code>{ href?: string; label: string }[]</code></td><td><code>[]</code></td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -744,19 +744,19 @@
 						<p class="component-intro">The application frame: top bar, collapsible side navigation, profile menu, preferences dialog and the scrolling main region. It is the only component here that depends on the SvelteKit runtime.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="shell-demo" aria-hidden="true">
+								<span class="spec-label">Frame</span><div class="shell-demo" aria-hidden="true">
 									<div class="shell-top"></div>
 									<div class="shell-body"><div class="shell-side"></div><div class="shell-main"><div class="shell-block short"></div><div class="shell-block"></div><div class="shell-block"></div></div></div>
 								</div>
 								<p class="annotation">Header 64 px; side nav 256 px expanded, 48 px collapsed, 0 below <code>md</code>; main gutter 16 px, 24 px at <code>md</code>.</p>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -772,12 +772,12 @@
 						<p class="component-intro">A search input with a leading magnifier and a clear control that appears only when the field has a value.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="search-demo"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Search servers" aria-label="Search servers" /><span class="search-clear" aria-hidden="true">×</span></div>
-								<div class="search-demo sm"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Small 32" aria-label="Small search example" readonly /><span class="search-clear" aria-hidden="true">×</span></div>
-								<div class="search-demo lg"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Large 48" aria-label="Large search example" readonly /><span class="search-clear" aria-hidden="true">×</span></div>
+								<div class="demo-group"><span class="spec-label">Default / 40 px</span><div class="search-demo"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Search servers" aria-label="Search servers" /><span class="search-clear" aria-hidden="true">×</span></div></div>
+								<div class="demo-group"><span class="spec-label">Small / 32 px</span><div class="search-demo sm"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Small 32" aria-label="Small search example" readonly /><span class="search-clear" aria-hidden="true">×</span></div></div>
+								<div class="demo-group"><span class="spec-label">Large / 48 px</span><div class="search-demo lg"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Large 48" aria-label="Large search example" readonly /><span class="search-clear" aria-hidden="true">×</span></div></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>value</code></td><td><code>string</code> (bindable)</td><td><code>''</code></td></tr>
@@ -788,7 +788,7 @@
 										<tr><td><code>onkeydown</code></td><td><code>(e: KeyboardEvent) =&gt; void</code></td><td>—</td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -804,20 +804,20 @@
 						<p class="component-intro">The list wrapper for disclosure items. Renders a <code>ul</code> with a top rule; it holds no state and imposes no exclusivity.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="accordion-demo">
+								<span class="spec-label">Example</span><div class="accordion-demo">
 									<div class="accordion-item"><span>Network</span><span class="chev open" aria-hidden="true">›</span></div>
 									<div class="accordion-panel">Host <code>0.0.0.0</code>, port <code>25565</code>. The port is allocated at creation and cannot be changed while the server exists.</div>
 									<div class="accordion-item"><span>Resources</span><span class="chev" aria-hidden="true">›</span></div>
 								</div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -831,14 +831,14 @@
 						<p class="component-intro">A 48 px header row and a height-animated panel. Closed content is inert, so it cannot be focused or read by tab order.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="accordion-demo">
+								<span class="spec-label">Example</span><div class="accordion-demo">
 									<div class="accordion-item"><span>Network</span><span class="chev open" aria-hidden="true">›</span></div>
 									<div class="accordion-panel">Host <code>0.0.0.0</code>, port <code>25565</code>.</div>
 									<div class="accordion-item"><span>Resources</span><span class="chev" aria-hidden="true">›</span></div>
 								</div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>title</code> <em>required</em></td><td><code>string</code></td><td>—</td></tr>
@@ -848,7 +848,7 @@
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -864,17 +864,17 @@
 						<p class="component-intro">A labelled list of rows with a coloured header strip and 1 px dividers. Lighter than <code>CarbonDataTable</code>, but not a table.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="structured-demo"><div class="structured-head"><span>Property</span><span>Value</span></div><div class="structured-row"><span>Image</span><span>paper:1.21.4</span></div><div class="structured-row"><span>Memory</span><span>2.4 GiB</span></div><div class="structured-row"><span>Created</span><span>2026-11-02</span></div></div>
+								<span class="spec-label">Example</span><div class="structured-demo"><div class="structured-head"><span>Property</span><span>Value</span></div><div class="structured-row"><span>Image</span><span>paper:1.21.4</span></div><div class="structured-row"><span>Memory</span><span>2.4 GiB</span></div><div class="structured-row"><span>Created</span><span>2026-11-02</span></div></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>header</code></td><td><code>Snippet</code></td><td>—</td></tr>
 										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -889,10 +889,10 @@
 						<p class="component-intro">A full-panel failure state with a retry action. Announces itself with <code>role="alert"</code>.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="state-demo error"><span class="state-icon" aria-hidden="true">▲</span><strong>Could not load servers</strong><p>The node did not respond. Check the connection and try again.</p><span class="button secondary size-sm">Retry</span></div>
+								<span class="spec-label">Error</span><div class="state-demo error"><span class="state-icon" aria-hidden="true">▲</span><strong>Could not load servers</strong><p>The node did not respond. Check the connection and try again.</p><span class="button secondary size-sm">Retry</span></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>title</code></td><td><code>string</code></td><td><code>'Something went wrong'</code></td></tr>
@@ -901,7 +901,7 @@
 										<tr><td><code>onretry</code></td><td><code>() =&gt; void | Promise&lt;void&gt;</code></td><td>—</td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
@@ -916,10 +916,10 @@
 						<p class="component-intro">The zero-results and never-created state, with an optional icon snippet and one primary action.</p>
 						<div class="component-grid">
 							<div class="demo-surface">
-								<div class="state-demo"><span class="state-icon" aria-hidden="true">▤</span><strong>No backups yet</strong><p>Backups run nightly at 03:00 UTC. You can also start one now.</p><span class="button primary size-sm">Create backup</span></div>
+								<span class="spec-label">Empty</span><div class="state-demo"><span class="state-icon" aria-hidden="true">▤</span><strong>No backups yet</strong><p>Backups run nightly at 03:00 UTC. You can also start one now.</p><span class="button primary size-sm">Create backup</span></div>
 							</div>
-							<div class="props">
-								<table class="doc-table props-table">
+							<div class="props"><div class="props-scroll">
+<table class="doc-table props-table">
 									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
 									<tbody>
 										<tr><td><code>title</code></td><td><code>string</code></td><td><code>'Nothing here yet'</code></td></tr>
@@ -929,7 +929,7 @@
 										<tr><td><code>onaction</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
 										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
 									</tbody>
-								</table>
+								</table></div>
 							</div>
 						</div>
 						<ul class="notes">
