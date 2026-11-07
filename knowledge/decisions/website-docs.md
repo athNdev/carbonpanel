@@ -32,8 +32,10 @@ sources:
   current branch, including its canonical tokens. It is not application content.
 - The website theme and docs navigation can evolve independently of the source
   pin. Display the pin on every documentation page.
-- A development commit must be labelled as a development snapshot. Do not infer
-  a stable release from a package version or an inherited tag.
+- A published release pin uses the release tag as its label. Any other commit is
+  labelled a development snapshot. Do not infer a release from a package version
+  or an inherited tag; the label names an explicit tag or the maintainer's
+  snapshot choice.
 - Every published page declares the full Open Graph and Twitter set: type,
   site name, title, description, URL, a versioned absolute 1200 by 630 image
   and its alt text. The homepage, documentation home and any page without a

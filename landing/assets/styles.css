@@ -2016,6 +2016,11 @@ table.compare .icon { width: 16px; height: 16px; flex: none; }
   border-radius: var(--radius-pill);
   color: var(--text-secondary);
 }
+.footer-bottom .release-tag {
+  color: var(--text-secondary);
+  transition: color var(--dur) var(--ease);
+}
+.footer-bottom .release-tag:hover { color: var(--text-primary); }
 
 /* ============================================================
    Scroll-reveal (enter animations, staggered)

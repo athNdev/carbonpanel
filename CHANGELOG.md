@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.0.0-beta.4] - 2026-11-07
+
 ### Added
 
 - Global `+error.svelte` boundary with retry/home affordances.
@@ -36,13 +38,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - Social preview cards: balanced vertical spacing with a footer rule and a clearer URL line.
-
 - Creating a server from a modpack keeps the RAM value you enter; the pack recommendation is shown as a hint instead of silently replacing it.
-
 - Landing product tour: even rows now give the screenshot the wide column, so all four captures render at the same readable size.
-
 - CurseForge export blocks with the full item list instead of silently dropping datapacks, resource packs, shader packs or mods it cannot carry.
-
 - Fullscreen server console fills the viewport, keeps the toolbar and command bar, and no longer clips under the app header/sidebar. CarbonModal now portals dialogs to `<body>` so fixed overlays paint above the shell.
 - Surface unchecked packwiz import/export and proxy route-refresh write errors.
 - Make upload tests OS-independent (Windows temp-file locks, huge allocations).
@@ -89,7 +87,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI with Carbon Design System.
 - Docker-based server isolation.
 
-[Unreleased]: https://github.com/athNdev/carbon-panel/compare/v3.0.0-beta.3...HEAD
+[Unreleased]: https://github.com/athNdev/carbon-panel/compare/v3.0.0-beta.4...HEAD
+[3.0.0-beta.4]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.4
 [3.0.0-beta.3]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.3
 [2.0.15]: https://github.com/athNdev/carbon-panel/releases/tag/v2.0.15
 [1.0.38]: https://github.com/athNdev/carbon-panel/releases/tag/v1.0.38

@@ -17,6 +17,7 @@ one at https://mozilla.org/MPL/2.0/.
 
   <p>
     <a href="https://github.com/athNdev/carbonpanel/actions/workflows/ci.yml"><img src="https://github.com/athNdev/carbonpanel/actions/workflows/ci.yml/badge.svg" alt="Continuous Integration" /></a>
+    <a href="https://github.com/athNdev/carbonpanel/releases"><img src="https://img.shields.io/github/v/release/athNdev/carbonpanel?include_prereleases&label=release" alt="Latest release" /></a>
     <a href="LICENSE.MPL-2.0"><img src="https://img.shields.io/badge/license-MPL--2.0-555555" alt="License: MPL-2.0" /></a>
     <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.26-555555" alt="Go 1.26" /></a>
     <a href="https://www.docker.com/"><img src="https://img.shields.io/badge/runtime-Docker-555555" alt="Docker" /></a>
@@ -25,6 +26,7 @@ one at https://mozilla.org/MPL/2.0/.
   <p>
     <a href="https://athn.dev/carbonpanel/">Website</a> &bull;
     <a href="https://athn.dev/carbonpanel/docs/">Documentation</a> &bull;
+    <a href="https://github.com/athNdev/carbonpanel/releases">Releases</a> &bull;
     <a href="docs/design-system/index.html">Design system</a> &bull;
     <a href="#quick-start">Quick start</a> &bull;
     <a href="#features">Features</a> &bull;
