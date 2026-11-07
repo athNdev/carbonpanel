@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Design-system page documents all nineteen exported Carbon components with prop tables and behaviour notes, full light and dark token tables, and composition rules. A regression test now asserts every `carbon/index.ts` export has a documented section.
+
 ## [3.0.0-beta.4] - 2026-11-07
 
 ### Added

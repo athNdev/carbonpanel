@@ -52,82 +52,952 @@
 			<button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to light preview">Light preview <span aria-hidden="true">◐</span></button>
 		</header>
 		<details class="mobile-nav">
-			<summary>Explore the system</summary>
-			<nav aria-label="Design system sections"><a href="#overview">Overview</a><a href="#color">Color</a><a href="#type">Typography</a><a href="#space">Layout &amp; spacing</a><a href="#elevation">Elevation</a><a href="#motion">Motion</a><a href="#components">Components</a><a href="#patterns">Patterns &amp; content</a><a href="#accessibility">Accessibility</a><a href="#workflow">Using the system</a></nav>
+			<summary>Contents</summary>
+			<nav aria-label="Design system sections"><a href="#overview">Overview</a><a href="#color">Color</a><a href="#type">Typography</a><a href="#space">Space and geometry</a><a href="#elevation">Elevation</a><a href="#motion">Motion</a><a href="#components">Components</a><a href="#composition">Composition</a><a href="#patterns">Patterns</a><a href="#accessibility">Accessibility</a><a href="#workflow">Workflow</a></nav>
 		</details>
 		<div class="layout" id="top">
 			<aside class="sidebar" aria-label="Page sections">
-				<p class="side-label">THE SYSTEM</p>
+				<p class="side-label">CONTENTS</p>
 				<nav aria-label="Design system sections">
-					<a href="#overview">Overview</a><a href="#color">Color</a><a href="#type">Typography</a><a href="#space">Layout &amp; spacing</a><a href="#elevation">Elevation</a><a href="#motion">Motion</a><a href="#components">Components</a><a href="#patterns">Patterns &amp; content</a><a href="#accessibility">Accessibility</a><a href="#workflow">Using the system</a>
+					<a href="#overview">Overview</a><a href="#color">Color</a><a href="#type">Typography</a><a href="#space">Space and geometry</a><a href="#elevation">Elevation</a><a href="#motion">Motion</a><a href="#components">Components</a><a href="#composition">Composition</a><a href="#patterns">Patterns</a><a href="#accessibility">Accessibility</a><a href="#workflow">Workflow</a>
 				</nav>
-				<p class="side-note">Shared by Carbon Panel<br />and Carbon Cloud</p>
+				<p class="side-note">Source of record<br /><code>tokens.css</code><br /><code>components/carbon</code></p>
 			</aside>
 			<main id="main">
 				<section class="hero" id="overview" aria-labelledby="hero-title">
-					<p class="eyebrow"><span class="eyebrow-dot"></span> FOUNDATION / 01 <span class="draft">WORKING SYSTEM</span></p>
-					<h1 id="hero-title">A clearer way<br /><span>to build Carbon.</span></h1>
-					<p class="hero-copy">One shared language for the tools people use to run their Minecraft servers. Practical foundations, accessible interactions, and room to evolve.</p>
-					<div class="hero-actions"><a class="button primary" href="#color">Explore the foundations <span aria-hidden="true">↗</span></a><a class="button secondary" href="./README.md">Read the guide <span aria-hidden="true">→</span></a></div>
-					<div class="hero-meta"><span>01 / FOUNDATIONS</span><span>02 / COMPONENTS</span><span>03 / EXPERIENCE</span></div>
+					<p class="eyebrow"><span class="eyebrow-dot"></span> REFERENCE / FOUNDATIONS <span class="draft">WORKING SYSTEM</span></p>
+					<h1 id="hero-title">Tokens and components<br /><span>for Carbon Panel and Carbon Cloud.</span></h1>
+					<p class="hero-copy">A single reference for the shared visual layer: CSS custom properties, control geometry, motion contracts, and the nineteen Svelte components exported from <code>$lib/components/carbon</code>. The examples on this page are static HTML reproductions; the Svelte files remain the implementation.</p>
+					<div class="hero-actions"><a class="button primary" href="#components">Component inventory <span aria-hidden="true">↗</span></a><a class="button secondary" href="./README.md">Design contract <span aria-hidden="true">→</span></a></div>
+					<dl class="source-list">
+						<div><dt>tokens.css</dt><dd><code>web/carbon-panel/src/lib/design-system/tokens.css</code><span>Canonical colour, spacing, control, motion and shadow values for both themes.</span></dd></div>
+						<div><dt>index.ts</dt><dd><code>web/carbon-panel/src/lib/components/carbon/index.ts</code><span>Public export surface. Nineteen components, no shared package boundary.</span></dd></div>
+						<div><dt>app.css</dt><dd><code>web/carbon-panel/src/app.css</code><span>Tailwind theme mapping, utility contracts (<code>focus-ring</code>, <code>motion-press</code>, <code>scroll-strip</code>) and reduced-motion handling.</span></dd></div>
+					</dl>
+					<div class="callout">
+						<p class="spec-label">THEME RESOLUTION</p>
+						<p>Dark is the default. The dark block is written as <code>:where(:root), .dark, [data-carbon-theme='dark']</code>; <code>:where()</code> contributes zero specificity, so an explicit <code>[data-carbon-theme='light']</code> container always wins regardless of source order. A plain <code>:root</code> selector would tie with the light rule and win by order, which is why it is not used.</p>
+					</div>
+					<div class="hero-meta"><span>01 / FOUNDATIONS</span><span>02 / COMPONENTS</span><span>03 / COMPOSITION</span><span>04 / WORKFLOW</span></div>
 				</section>
 
 				<section class="section" id="color" aria-labelledby="color-title">
-					<div class="section-heading"><div><p class="eyebrow">01 / FOUNDATIONS</p><h2 id="color-title">Color with purpose.</h2></div><p>Semantic roles keep interfaces consistent as themes and product needs change.</p></div>
-					<div class="swatches">
-						<div class="swatch"><span class="color" style="background:var(--background)"></span><strong>Background</strong><code>--background</code></div>
-						<div class="swatch"><span class="color" style="background:var(--card)"></span><strong>Surface</strong><code>--card</code></div>
-						<div class="swatch"><span class="color" style="background:var(--popover)"></span><strong>Raised</strong><code>--popover</code></div>
-						<div class="swatch"><span class="color" style="background:var(--primary)"></span><strong>Primary</strong><code>--primary</code></div>
-						<div class="swatch"><span class="color" style="background:var(--destructive)"></span><strong>Danger</strong><code>--destructive</code></div>
-						<div class="swatch"><span class="color" style="background:var(--success)"></span><strong>Success</strong><code>--success</code></div>
-						<div class="swatch"><span class="color" style="background:var(--warning)"></span><strong>Warning</strong><code>--warning</code></div>
-						<div class="swatch"><span class="color" style="background:var(--ring)"></span><strong>Focus</strong><code>--ring</code></div>
+					<div class="section-heading"><div><p class="eyebrow">01 / FOUNDATIONS</p><h2 id="color-title">Colour tokens</h2></div><p>Semantic roles, not literal values. Every row lists both themes; consumers reference the token name, never the hex.</p></div>
+
+					<h3 class="table-title">Surfaces and text</h3>
+					<div class="table-wrap">
+						<table class="doc-table">
+							<thead><tr><th scope="col">Role</th><th scope="col">Token</th><th scope="col">Light</th><th scope="col">Dark</th><th scope="col">Usage</th></tr></thead>
+							<tbody>
+								<tr><td>Page background</td><td><code>--background</code></td><td><span class="chip" style="background:#ffffff"></span><code>#ffffff</code></td><td><span class="chip" style="background:#161616"></span><code>#161616</code></td><td>Root page plane and inset wells.</td></tr>
+								<tr><td>Body text</td><td><code>--foreground</code></td><td><span class="chip" style="background:#161616"></span><code>#161616</code></td><td><span class="chip" style="background:#f4f4f4"></span><code>#f4f4f4</code></td><td>Primary reading colour on <code>--background</code>.</td></tr>
+								<tr><td>Card surface</td><td><code>--card</code></td><td><span class="chip" style="background:#f4f4f4"></span><code>#f4f4f4</code></td><td><span class="chip" style="background:#262626"></span><code>#262626</code></td><td>First raised plane: tiles, tables, panels.</td></tr>
+								<tr><td>Card text</td><td><code>--card-foreground</code></td><td><span class="chip" style="background:#161616"></span><code>#161616</code></td><td><span class="chip" style="background:#f4f4f4"></span><code>#f4f4f4</code></td><td>Text on <code>--card</code>.</td></tr>
+								<tr><td>Popover surface</td><td><code>--popover</code></td><td><span class="chip" style="background:#ffffff"></span><code>#ffffff</code></td><td><span class="chip" style="background:#393939"></span><code>#393939</code></td><td>Menus, popovers, floating layers.</td></tr>
+								<tr><td>Popover text</td><td><code>--popover-foreground</code></td><td><span class="chip" style="background:#161616"></span><code>#161616</code></td><td><span class="chip" style="background:#f4f4f4"></span><code>#f4f4f4</code></td><td>Text on <code>--popover</code>.</td></tr>
+								<tr><td>Muted surface</td><td><code>--muted</code></td><td><span class="chip" style="background:#f4f4f4"></span><code>#f4f4f4</code></td><td><span class="chip" style="background:#262626"></span><code>#262626</code></td><td>Subtle fills that recede behind content.</td></tr>
+								<tr><td>Secondary text</td><td><code>--muted-foreground</code></td><td><span class="chip" style="background:#525252"></span><code>#525252</code></td><td><span class="chip" style="background:#a8a8a8"></span><code>#a8a8a8</code></td><td>Hints, descriptions, metadata.</td></tr>
+								<tr><td>Accent surface</td><td><code>--accent</code></td><td><span class="chip" style="background:#e8e8e8"></span><code>#e8e8e8</code></td><td><span class="chip" style="background:#353535"></span><code>#353535</code></td><td>Hover layer for tertiary and ghost actions.</td></tr>
+								<tr><td>Accent text</td><td><code>--accent-foreground</code></td><td><span class="chip" style="background:#161616"></span><code>#161616</code></td><td><span class="chip" style="background:#ffffff"></span><code>#ffffff</code></td><td>Text on <code>--accent</code>.</td></tr>
+								<tr><td>Secondary surface</td><td><code>--secondary</code></td><td><span class="chip" style="background:#e0e0e0"></span><code>#e0e0e0</code></td><td><span class="chip" style="background:#393939"></span><code>#393939</code></td><td>Secondary button fill.</td></tr>
+								<tr><td>Secondary text</td><td><code>--secondary-foreground</code></td><td><span class="chip" style="background:#161616"></span><code>#161616</code></td><td><span class="chip" style="background:#f4f4f4"></span><code>#f4f4f4</code></td><td>Text on <code>--secondary</code>.</td></tr>
+								<tr><td>Structural border</td><td><code>--border</code></td><td><span class="chip" style="background:#e0e0e0"></span><code>#e0e0e0</code></td><td><span class="chip" style="background:#393939"></span><code>#393939</code></td><td>1 px dividers and container edges.</td></tr>
+								<tr><td>Control boundary</td><td><code>--input</code></td><td><span class="chip" style="background:#737373"></span><code>#737373</code></td><td><span class="chip" style="background:#7d7d7d"></span><code>#7d7d7d</code></td><td>Visible field boundary; stronger than <code>--border</code>.</td></tr>
+								<tr><td>Focus ring</td><td><code>--ring</code></td><td><span class="chip" style="background:#0f62fe"></span><code>#0f62fe</code></td><td><span class="chip" style="background:#ffffff"></span><code>#ffffff</code></td><td>2 px outline, 2 px offset in product (3 px on this page).</td></tr>
+								<tr><td>Skeleton start</td><td><code>--skeleton-from</code></td><td><span class="chip" style="background:#e0e0e0"></span><code>#e0e0e0</code></td><td><span class="chip" style="background:#262626"></span><code>#262626</code></td><td>Leading stop of the shimmer gradient.</td></tr>
+								<tr><td>Skeleton end</td><td><code>--skeleton-to</code></td><td><span class="chip" style="background:#f4f4f4"></span><code>#f4f4f4</code></td><td><span class="chip" style="background:#353535"></span><code>#353535</code></td><td>Midpoint stop of the shimmer gradient.</td></tr>
+							</tbody>
+						</table>
 					</div>
-					<p class="annotation">Fills and text use separate roles. Status always has a text label; color is a supporting cue.</p>
+
+					<h3 class="table-title">Action and status</h3>
+					<div class="table-wrap">
+						<table class="doc-table">
+							<thead><tr><th scope="col">Role</th><th scope="col">Token</th><th scope="col">Light</th><th scope="col">Dark</th><th scope="col">Usage</th></tr></thead>
+							<tbody>
+								<tr><td>Primary fill</td><td><code>--primary</code></td><td><span class="chip" style="background:#0f62fe"></span><code>#0f62fe</code></td><td><span class="chip" style="background:#0f62fe"></span><code>#0f62fe</code></td><td>Primary action and selection indicator. Pairs with white text in both themes.</td></tr>
+								<tr><td>Primary text</td><td><code>--primary-foreground</code></td><td><span class="chip" style="background:#ffffff"></span><code>#ffffff</code></td><td><span class="chip" style="background:#ffffff"></span><code>#ffffff</code></td><td>Text and icons on <code>--primary</code>.</td></tr>
+								<tr><td>Primary as text</td><td><code>--primary-text</code></td><td><span class="chip" style="background:#0f62fe"></span><code>#0f62fe</code></td><td><span class="chip" style="background:#78a9ff"></span><code>#78a9ff</code></td><td>Accent-coloured labels that must meet text contrast.</td></tr>
+								<tr><td>Accent text</td><td><code>--accent-text</code></td><td><span class="chip" style="background:#0f62fe"></span><code>#0f62fe</code></td><td><span class="chip" style="background:#78a9ff"></span><code>#78a9ff</code></td><td>Tertiary and ghost button labels, inline links.</td></tr>
+								<tr><td>Destructive fill</td><td><code>--destructive</code></td><td><span class="chip" style="background:#da1e28"></span><code>#da1e28</code></td><td><span class="chip" style="background:#da1e28"></span><code>#da1e28</code></td><td>Danger button and invalid field boundary.</td></tr>
+								<tr><td>Destructive text</td><td><code>--destructive-text</code></td><td><span class="chip" style="background:#a2191f"></span><code>#a2191f</code></td><td><span class="chip" style="background:#ff8389"></span><code>#ff8389</code></td><td>Error copy, never the fill.</td></tr>
+								<tr><td>Success fill</td><td><code>--success</code></td><td><span class="chip" style="background:#198038"></span><code>#198038</code></td><td><span class="chip" style="background:#24a148"></span><code>#24a148</code></td><td>Status dots, progress completion.</td></tr>
+								<tr><td>Success text</td><td><code>--success-text</code></td><td><span class="chip" style="background:#0e6027"></span><code>#0e6027</code></td><td><span class="chip" style="background:#6fdc8c"></span><code>#6fdc8c</code></td><td>Running and healthy labels.</td></tr>
+								<tr><td>Warning fill</td><td><code>--warning</code></td><td><span class="chip" style="background:#b28600"></span><code>#b28600</code></td><td><span class="chip" style="background:#f1c21b"></span><code>#f1c21b</code></td><td>Caution marks and attention dots.</td></tr>
+								<tr><td>Warning text</td><td><code>--warning-text</code></td><td><span class="chip" style="background:#6f5200"></span><code>#6f5200</code></td><td><span class="chip" style="background:#f1c21b"></span><code>#f1c21b</code></td><td>Caution copy and Caps Lock notice.</td></tr>
+							</tbody>
+						</table>
+					</div>
+
+					<h3 class="table-title">Button state overrides</h3>
+					<div class="table-wrap">
+						<table class="doc-table">
+							<thead><tr><th scope="col">Token</th><th scope="col">Light</th><th scope="col">Dark</th><th scope="col">Applied by</th></tr></thead>
+							<tbody>
+								<tr><td><code>--button-primary-hover</code></td><td><code>#0353e9</code></td><td><code>#0353e9</code></td><td><code>CarbonButton kind="primary"</code> <code>:hover</code></td></tr>
+								<tr><td><code>--button-primary-active</code></td><td><code>#002d9c</code></td><td><code>#002d9c</code></td><td><code>CarbonButton kind="primary"</code> <code>:active</code></td></tr>
+								<tr><td><code>--button-secondary-hover</code></td><td><code>#c6c6c6</code></td><td><code>#4c4c4c</code></td><td>Secondary and tertiary active states</td></tr>
+								<tr><td><code>--button-secondary-active</code></td><td><code>#a8a8a8</code></td><td><code>#6f6f6f</code></td><td>Secondary, tertiary and ghost <code>:active</code></td></tr>
+								<tr><td><code>--button-danger-hover</code></td><td><code>#ba1b23</code></td><td><code>#ba1b23</code></td><td><code>CarbonButton kind="danger"</code> <code>:hover</code></td></tr>
+								<tr><td><code>--button-danger-active</code></td><td><code>#750e13</code></td><td><code>#750e13</code></td><td><code>CarbonButton kind="danger"</code> <code>:active</code></td></tr>
+							</tbody>
+						</table>
+					</div>
+
+					<h3 class="table-title">Tag pairs</h3>
+					<div class="table-wrap">
+						<table class="doc-table">
+							<thead><tr><th scope="col">Type</th><th scope="col">Background token</th><th scope="col">Light / dark</th><th scope="col">Text token</th><th scope="col">Light / dark</th></tr></thead>
+							<tbody>
+								<tr><td><span class="tag good">green</span></td><td><code>--tag-green-bg</code></td><td><code>#defbe6</code> / <code>#163b22</code></td><td><code>--tag-green-text</code></td><td><code>#0e6027</code> / <code>#6fdc8c</code></td></tr>
+								<tr><td><span class="tag neutral">gray</span></td><td><code>--tag-gray-bg</code></td><td><code>#e0e0e0</code> / <code>#383838</code></td><td><code>--tag-gray-text</code></td><td><code>#393939</code> / <code>#c6c6c6</code></td></tr>
+								<tr><td><span class="tag bad">red</span></td><td><code>--tag-red-bg</code></td><td><code>#fff1f1</code> / <code>#4d2326</code></td><td><code>--tag-red-text</code></td><td><code>#a2191f</code> / <code>#ff8389</code></td></tr>
+								<tr><td><span class="tag warning">yellow</span></td><td><code>--tag-yellow-bg</code></td><td><code>#fcf4d6</code> / <code>#423a1b</code></td><td><code>--tag-yellow-text</code></td><td><code>#6f5200</code> / <code>#f1c21b</code></td></tr>
+								<tr><td><span class="tag blue">blue</span></td><td><code>--tag-blue-bg</code></td><td><code>#d0e2ff</code> / <code>#102a56</code></td><td><code>--tag-blue-text</code></td><td><code>#0043ce</code> / <code>#a6c8ff</code></td></tr>
+								<tr><td><span class="tag purple">purple</span></td><td><code>--tag-purple-bg</code></td><td><code>#e8daff</code> / <code>#382952</code></td><td><code>--tag-purple-text</code></td><td><code>#491d8b</code> / <code>#d4bbff</code></td></tr>
+								<tr><td><span class="tag cyan">cyan</span></td><td><code>--tag-cyan-bg</code></td><td><code>#bae6ff</code> / <code>#18374e</code></td><td><code>--tag-cyan-text</code></td><td><code>#004a7e</code> / <code>#78c8ff</code></td></tr>
+								<tr><td><span class="tag teal">teal</span></td><td><code>--tag-teal-bg</code></td><td><code>#9ef0f0</code> / <code>#173c3c</code></td><td><code>--tag-teal-text</code></td><td><code>#005d5d</code> / <code>#3ddbd9</code></td></tr>
+								<tr><td><span class="tag magenta">magenta</span></td><td><code>--tag-magenta-bg</code></td><td><code>#ffd6e8</code> / <code>#4a2636</code></td><td><code>--tag-magenta-text</code></td><td><code>#9f1853</code> / <code>#ff7eb6</code></td></tr>
+								<tr><td><span class="tag warm">warm-gray</span></td><td><code>--tag-warm-gray-bg</code></td><td><code>#e7e5e4</code> / <code>#3d3935</code></td><td><code>--tag-warm-gray-text</code></td><td><code>#44403c</code> / <code>#d6d3d1</code></td></tr>
+								<tr><td><span class="tag cool">cool-gray</span></td><td><code>--tag-cool-gray-bg</code></td><td><code>#e2e8f0</code> / <code>#303a48</code></td><td><code>--tag-cool-gray-text</code></td><td><code>#334155</code> / <code>#cbd5e1</code></td></tr>
+							</tbody>
+						</table>
+					</div>
+
+					<h3 class="table-title">Chart ramp</h3>
+					<p class="annotation">Charts must also carry labels, values or patterns. The ramp is categorical, not ordinal; <code>--chart-1</code> is not "series one" in every chart.</p>
+					<div class="chart-ramp">
+						<div><span class="chip" style="background:#0f62fe"></span><code>--chart-1</code><span>light #0f62fe / dark #4589ff</span></div>
+						<div><span class="chip" style="background:#198038"></span><code>--chart-2</code><span>light #198038 / dark #42be65</span></div>
+						<div><span class="chip" style="background:#b28600"></span><code>--chart-3</code><span>light #b28600 / dark #f1c21b</span></div>
+						<div><span class="chip" style="background:#8a3ffc"></span><code>--chart-4</code><span>light #8a3ffc / dark #be95ff</span></div>
+						<div><span class="chip" style="background:#ff832b"></span><code>--chart-5</code><span>light #ff832b / dark #ff832b</span></div>
+					</div>
+
+					<h3 class="table-title">Sidebar roles</h3>
+					<div class="table-wrap">
+						<table class="doc-table">
+							<thead><tr><th scope="col">Token</th><th scope="col">Light</th><th scope="col">Dark</th></tr></thead>
+							<tbody>
+								<tr><td><code>--sidebar</code></td><td><code>#f4f4f4</code></td><td><code>#161616</code></td></tr>
+								<tr><td><code>--sidebar-foreground</code></td><td><code>#161616</code></td><td><code>#f4f4f4</code></td></tr>
+								<tr><td><code>--sidebar-primary</code></td><td><code>#0f62fe</code></td><td><code>#0f62fe</code></td></tr>
+								<tr><td><code>--sidebar-primary-foreground</code></td><td><code>#ffffff</code></td><td><code>#ffffff</code></td></tr>
+								<tr><td><code>--sidebar-accent</code></td><td><code>#e8e8e8</code></td><td><code>#262626</code></td></tr>
+								<tr><td><code>--sidebar-accent-foreground</code></td><td><code>#161616</code></td><td><code>#f4f4f4</code></td></tr>
+								<tr><td><code>--sidebar-border</code></td><td><code>#e0e0e0</code></td><td><code>#393939</code></td></tr>
+								<tr><td><code>--sidebar-ring</code></td><td><code>#0f62fe</code></td><td><code>#ffffff</code></td></tr>
+							</tbody>
+						</table>
+					</div>
+					<p class="annotation">Contrast is a property of the adjacent pair, not of a colour in isolation. Hover, selection and focus states must be checked on the surface they actually render over. Status colour never carries meaning alone.</p>
 				</section>
 
 				<section class="section" id="type" aria-labelledby="type-title">
-					<div class="section-heading"><div><p class="eyebrow">02 / FOUNDATIONS</p><h2 id="type-title">Type that works.</h2></div><p>Inter for product interfaces and JetBrains Mono for technical text, with dependable system fallbacks.</p></div>
-					<div class="type-grid"><div class="type-specimen"><span class="spec-label">INTERFACE / INTER</span><p class="type-display">Manage with<br />confidence.</p><p>Clear labels and plain language make complex operations feel understandable.</p></div><div class="type-specimen mono-specimen"><span class="spec-label">TECHNICAL / JETBRAINS MONO</span><p>play.example.net:25565<br />12 / 20 players<br />2.4 GiB memory</p><p>Use monospace for code, addresses and logs.</p></div><div class="type-specimen"><span class="spec-label">LABELS / EYEBROW KICKERS</span><p class="eyebrow-demo">Dashboard</p><p>12 px uppercase monospace kickers name sections and tiles. Sentence case stays in prose.</p></div></div>
+					<div class="section-heading"><div><p class="eyebrow">02 / FOUNDATIONS</p><h2 id="type-title">Typography</h2></div><p>Two self-hosted variable faces, a five-step product scale, and one uppercase monospace label contract.</p></div>
+					<div class="type-grid">
+						<div class="type-specimen">
+							<span class="spec-label">INTERFACE / INTER VARIABLE</span>
+							<p class="type-display">survival-01</p>
+							<dl class="spec-list">
+								<div><dt>stack</dt><dd><code>'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif</code></dd></div>
+								<div><dt>weights</dt><dd>100–900 variable</dd></div>
+								<div><dt>source</dt><dd><code>/fonts/inter-latin-wght-normal.woff2</code>, latin subset, <code>font-display: swap</code></dd></div>
+								<div><dt>utility</dt><dd><code>font-sans</code></dd></div>
+							</dl>
+						</div>
+						<div class="type-specimen mono-specimen">
+							<span class="spec-label">TECHNICAL / JETBRAINS MONO VARIABLE</span>
+							<p>play.example.net:25565<br />12 / 20 players<br />2.4 GiB memory</p>
+							<dl class="spec-list">
+								<div><dt>stack</dt><dd><code>'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace</code></dd></div>
+								<div><dt>weights</dt><dd>100–900 variable</dd></div>
+								<div><dt>source</dt><dd><code>/fonts/jetbrains-mono-latin-wght-normal.woff2</code>, latin subset, <code>font-display: swap</code></dd></div>
+								<div><dt>utility</dt><dd><code>font-mono</code></dd></div>
+							</dl>
+						</div>
+						<div class="type-specimen">
+							<span class="spec-label">LABELS / MONO EYEBROW</span>
+							<p class="eyebrow-demo">Active players</p>
+							<dl class="spec-list">
+								<div><dt>size</dt><dd>12 px / 1.6 line-height</dd></div>
+								<div><dt>tracking</dt><dd>0.04em</dd></div>
+								<div><dt>transform</dt><dd><code>uppercase</code></dd></div>
+								<div><dt>weight</dt><dd>400 (<code>.mono-label</code>), 600 (<code>.mono-label-strong</code>)</dd></div>
+								<div><dt>colour</dt><dd><code>#a8a8a8</code>, or <code>var(--accent-text)</code> for <code>.mono-label-accent</code></dd></div>
+							</dl>
+							<p class="annotation">The only sanctioned use of all caps. Section labels, tile labels, table group labels. Never sentences.</p>
+						</div>
+					</div>
+
+					<h3 class="table-title">Product scale</h3>
+					<div class="table-wrap">
+						<table class="doc-table">
+							<thead><tr><th scope="col">Utility</th><th scope="col">Size</th><th scope="col">Line height</th><th scope="col">Applied in</th></tr></thead>
+							<tbody>
+								<tr><td><code>text-xs</code></td><td>0.75 rem / 12 px</td><td>1 rem / 16 px</td><td>Field labels, hints, errors, breadcrumbs, table body, tags</td></tr>
+								<tr><td><code>text-sm</code></td><td>0.875 rem / 14 px</td><td>1.25 rem / 20 px</td><td>Buttons, tabs, tables, modal body, inputs</td></tr>
+								<tr><td><code>text-base</code></td><td>1 rem / 16 px</td><td>1.5 rem / 24 px</td><td><code>CarbonButton size="xl"</code>, <code>CarbonSearch size="lg"</code></td></tr>
+								<tr><td><code>text-xl</code></td><td>1.25 rem / 20 px</td><td>1.75 rem / 28 px</td><td>Modal title</td></tr>
+								<tr><td><code>text-2xl</code></td><td>1.5 rem / 24 px</td><td>2 rem / 32 px</td><td><code>CarbonPageHeader</code> title</td></tr>
+							</tbody>
+						</table>
+					</div>
+					<div class="spec-grid">
+						<div><span class="spec-label">TRACKING</span><code>tracking-[0.16px]</code><p>Button labels. <code>tracking-[0.32px]</code> is used on field labels; <code>tracking-tight</code> on the page title; <code>tracking-wider</code> (0.05em) on tags and table titles.</p></div>
+						<div><span class="spec-label">NUMERALS</span><code>font-variant-numeric: tabular-nums</code><p>Required for metrics that change in place so digits do not reflow. Metric tiles, player counts, memory values.</p></div>
+						<div><span class="spec-label">WEIGHTS</span><code>font-light 300</code><p>Page title only. Body and controls use 400; emphasis uses 500 or 600. Values in tables stay 400.</p></div>
+					</div>
+					<p class="annotation">Display type on this page uses <code>clamp()</code> for documentation chrome. It is not imported by either product and must not be copied into an application surface.</p>
 				</section>
 
 				<section class="section" id="space" aria-labelledby="space-title">
-					<div class="section-heading"><div><p class="eyebrow">03 / FOUNDATIONS</p><h2 id="space-title">A steady rhythm.</h2></div><p>Spacing and control sizes create a predictable, readable interface.</p></div>
-					<div class="space-grid"><div><span class="spec-label">SPACING / PX</span><div class="space-steps"><span style="--step:4px">4</span><span style="--step:8px">8</span><span style="--step:12px">12</span><span style="--step:16px">16</span><span style="--step:24px">24</span><span style="--step:32px">32</span><span style="--step:48px">48</span></div></div><div><span class="spec-label">CONTROLS / PX</span><p class="large-number">32 <span>/</span> 40 <span>/</span> 48 <span>/</span> 64</p><p class="muted">40 px is the default. The current geometry is square and grid-aligned.</p></div></div>
+					<div class="section-heading"><div><p class="eyebrow">03 / FOUNDATIONS</p><h2 id="space-title">Space and geometry</h2></div><p>A four-pixel base, four control heights, one radius value and a documented focus outline.</p></div>
+					<div class="space-grid">
+						<div>
+							<span class="spec-label">SPACING TOKENS</span>
+							<div class="space-steps"><span style="--step:4px">4</span><span style="--step:8px">8</span><span style="--step:12px">12</span><span style="--step:16px">16</span><span style="--step:24px">24</span><span style="--step:32px">32</span><span style="--step:48px">48</span></div>
+							<div class="table-wrap compact">
+								<table class="doc-table">
+									<thead><tr><th scope="col">Token</th><th scope="col">rem</th><th scope="col">px</th></tr></thead>
+									<tbody>
+										<tr><td><code>--carbon-space-1</code></td><td>0.25</td><td>4</td></tr>
+										<tr><td><code>--carbon-space-2</code></td><td>0.5</td><td>8</td></tr>
+										<tr><td><code>--carbon-space-3</code></td><td>0.75</td><td>12</td></tr>
+										<tr><td><code>--carbon-space-4</code></td><td>1</td><td>16</td></tr>
+										<tr><td><code>--carbon-space-5</code></td><td>1.5</td><td>24</td></tr>
+										<tr><td><code>--carbon-space-6</code></td><td>2</td><td>32</td></tr>
+										<tr><td><code>--carbon-space-7</code></td><td>3</td><td>48</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<div>
+							<span class="spec-label">CONTROL HEIGHTS</span>
+							<div class="control-scale">
+								<div><span class="control-box" style="height:32px"></span><code>--carbon-control-sm</code><span>2 rem / 32 px</span></div>
+								<div><span class="control-box" style="height:40px"></span><code>--carbon-control-md</code><span>2.5 rem / 40 px — default</span></div>
+								<div><span class="control-box" style="height:48px"></span><code>--carbon-control-lg</code><span>3 rem / 48 px</span></div>
+								<div><span class="control-box" style="height:64px"></span><code>--carbon-control-xl</code><span>4 rem / 64 px</span></div>
+							</div>
+						</div>
+					</div>
+					<div class="spec-grid">
+						<div><span class="spec-label">RADIUS</span><code>--radius: 0px</code><p>All corners are square. <code>app.css</code> also forces <code>border-radius: 0 !important</code> on every element, so a rounded utility cannot leak in.</p></div>
+						<div><span class="spec-label">FOCUS</span><code>outline: 2px solid var(--ring)</code><p><code>.focus-ring</code> applies <code>outline-offset: 2px</code> on <code>:focus-visible</code> only. This page uses a 3 px offset for legibility against documentation borders.</p></div>
+						<div><span class="spec-label">BORDERS</span><code>1px solid var(--border)</code><p>Structural by default. Fields gain a 2 px bottom border on focus or error; the selected tab indicator is a 2 px bar.</p></div>
+						<div><span class="spec-label">DENSITY</span><code>data-carbon-density</code><p>The stored compact-density preference rewrites these tokens. Layouts must remain usable in both densities; do not hard-code 40 px.</p></div>
+						<div><span class="spec-label">TARGET SIZE</span><code>24 × 24 CSS px</code><p>Minimum pointer target, subject to the WCAG spacing exceptions. Aim for 44 × 44 on touch-heavy actions; a 32 px control must still meet the minimum.</p></div>
+						<div><span class="spec-label">ICON SIZE</span><code>16 / 20 / 24 px</code><p>Inline icons are 16 px and inherit the text colour; standalone icons are 24 px. An icon-only control supplies an accessible name, and no icon carries state alone.</p></div>
+					</div>
+					<p class="annotation">A 32 px control still needs a 24 × 24 CSS px target and adequate spacing. Prefer the 40 px default; reach for <code>sm</code> only in dense, pointer-driven surfaces such as table toolbars.</p>
 				</section>
 
 				<section class="section" id="elevation" aria-labelledby="elevation-title">
-					<div class="section-heading"><div><p class="eyebrow">04 / FOUNDATIONS</p><h2 id="elevation-title">Depth, kept quiet.</h2></div><p>Borders describe structure. Shadows distinguish floating layers when needed.</p></div>
-					<div class="elevation-grid"><div class="elevation-card flat"><span class="spec-label">LEVEL 00</span><strong>Flat</strong><code>--carbon-shadow-none</code><p>Default surfaces and dense layouts.</p></div><div class="elevation-card raised"><span class="spec-label">LEVEL 01</span><strong>Raised</strong><code>--carbon-shadow-raised</code><p>Transient menus and floating content.</p></div><div class="elevation-card overlay"><span class="spec-label">LEVEL 02</span><strong>Overlay</strong><code>--carbon-shadow-overlay</code><p>Dialogs and other modal layers.</p></div></div>
+					<div class="section-heading"><div><p class="eyebrow">04 / FOUNDATIONS</p><h2 id="elevation-title">Elevation</h2></div><p>Three levels. Borders describe structure; shadows separate a floating layer from the page.</p></div>
+					<div class="elevation-grid">
+						<div class="elevation-card flat"><span class="spec-label">LEVEL 00</span><strong>Flat</strong><code>--carbon-shadow-none</code><p>Default surfaces, tables, tiles and dense layouts. Separation comes from a 1 px border and a surface change.</p></div>
+						<div class="elevation-card raised"><span class="spec-label">LEVEL 01</span><strong>Raised</strong><code>--carbon-shadow-raised</code><p>Transient menus, popovers, floating panels and the motion demo object.</p></div>
+						<div class="elevation-card overlay"><span class="spec-label">LEVEL 02</span><strong>Overlay</strong><code>--carbon-shadow-overlay</code><p>Modal dialogs. Always combined with a backdrop and a focus trap, never with a static inline panel.</p></div>
+					</div>
+					<div class="table-wrap compact">
+						<table class="doc-table">
+							<thead><tr><th scope="col">Token</th><th scope="col">Light</th><th scope="col">Dark</th></tr></thead>
+							<tbody>
+								<tr><td><code>--carbon-shadow-raised</code></td><td><code>0 1px 2px rgb(0 0 0 / 0.12), 0 4px 12px rgb(0 0 0 / 0.08)</code></td><td><code>0 1px 2px rgb(0 0 0 / 0.32), 0 4px 12px rgb(0 0 0 / 0.24)</code></td></tr>
+								<tr><td><code>--carbon-shadow-overlay</code></td><td><code>0 12px 32px rgb(0 0 0 / 0.2), 0 2px 8px rgb(0 0 0 / 0.12)</code></td><td><code>0 12px 32px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.3)</code></td></tr>
+							</tbody>
+						</table>
+					</div>
+					<p class="annotation">Do not stack shadows to fake a higher level, and do not add a shadow to a bordered surface that stays in flow. A layer that clips its parent is a stacking-context defect, not an elevation problem: <code>CarbonModal</code> portals to <code>document.body</code> for this reason.</p>
 				</section>
 
 				<section class="section" id="motion" aria-labelledby="motion-title">
-					<div class="section-heading"><div><p class="eyebrow">05 / FOUNDATIONS</p><h2 id="motion-title">Motion with intent.</h2></div><p>Fast feedback, restrained entrances, and a static alternative for reduced motion.</p></div>
-					<div class="motion-grid"><div class="motion-demo"><span class="spec-label">LIVE EXAMPLE / RISE IN</span><div class="motion-stage"><div class="motion-object" data-motion-object><span class="status-dot"></span> Server ready</div></div><button class="button secondary" type="button" data-replay>Replay animation <span aria-hidden="true">↻</span></button><p class="muted" data-motion-status aria-live="polite">200 ms · 6 px · ease out</p></div><div class="motion-specs"><div><span>Instant / controls</span><code>100 ms</code></div><div><span>Route change</span><code>140 ms</code></div><div><span>Fast / state</span><code>150 ms</code></div><div><span>Base / entrance</span><code>200 ms</code></div><div><span>Slow / deliberate</span><code>300 ms</code></div><div><span>Surface / infrequent</span><code>500 ms</code></div></div></div>
-					<p class="annotation">Transitions are interruptible. Animate color, opacity and transform deliberately; motion never carries the only state cue. Respect reduced-motion preferences, including the stored data-carbon-motion attribute.</p>
+					<div class="section-heading"><div><p class="eyebrow">05 / FOUNDATIONS</p><h2 id="motion-title">Motion</h2></div><p>Six durations, five easings and two independent reduced-motion paths.</p></div>
+					<div class="motion-grid">
+						<div class="motion-demo"><span class="spec-label">LIVE EXAMPLE / RISE IN</span><div class="motion-stage"><div class="motion-object" data-motion-object><span class="status-dot"></span> Server ready</div></div><button class="button secondary" type="button" data-replay>Replay animation <span aria-hidden="true">↻</span></button><p class="muted" data-motion-status aria-live="polite">200 ms · 6 px · ease out</p></div>
+						<div class="motion-specs">
+							<div><span>Instant / controls</span><code>--motion-instant 100 ms</code></div>
+							<div><span>Route change</span><code>--motion-page 140 ms</code></div>
+							<div><span>Fast / state</span><code>--motion-fast 150 ms</code></div>
+							<div><span>Base / entrance</span><code>--motion-base 200 ms</code></div>
+							<div><span>Slow / deliberate</span><code>--motion-slow 300 ms</code></div>
+							<div><span>Surface / infrequent</span><code>--motion-surface 500 ms</code></div>
+							<div><span>Stagger step</span><code>--motion-stagger-step 40 ms</code></div>
+						</div>
+					</div>
+					<div class="table-wrap compact">
+						<table class="doc-table">
+							<thead><tr><th scope="col">Token</th><th scope="col">Value</th><th scope="col">Used for</th></tr></thead>
+							<tbody>
+								<tr><td><code>--ease-out-quart</code></td><td><code>cubic-bezier(0.25, 1, 0.5, 1)</code></td><td>Default exit/entrance easing, colour transitions</td></tr>
+								<tr><td><code>--ease-out-quint</code></td><td><code>cubic-bezier(0.22, 1, 0.36, 1)</code></td><td>Larger travel where quart feels abrupt</td></tr>
+								<tr><td><code>--ease-out-expo</code></td><td><code>cubic-bezier(0.16, 1, 0.3, 1)</code></td><td>Sheets and long-distance entrances</td></tr>
+								<tr><td><code>--ease-in-out-standard</code></td><td><code>cubic-bezier(0.65, 0, 0.35, 1)</code></td><td>Looping indicators, tab indicator, accordion height</td></tr>
+								<tr><td><code>--ease-sheet</code></td><td><code>cubic-bezier(0.32, 0.72, 0, 1)</code></td><td>Bottom and side sheets</td></tr>
+							</tbody>
+						</table>
+					</div>
+					<div class="spec-grid">
+						<div><span class="spec-label">TRANSITIONS</span><code>--carbon-transition-color</code><p>Colour, background and border at <code>--motion-instant</code>. <code>--carbon-transition-press</code> scales transform to <code>--carbon-motion-press-scale</code> (0.96).</p></div>
+						<div><span class="spec-label">ANIMATIONS</span><code>--carbon-animation-rise-in</code><p><code>fade-in</code>, <code>rise-in</code> (6 px via <code>--carbon-motion-distance</code>), <code>pulse</code> (1600 ms) and <code>shimmer</code> (1400 ms).</p></div>
+						<div><span class="spec-label">REDUCED MOTION</span><code>prefers-reduced-motion</code><p>A media query collapses animation and transition durations to 0.01 ms and disables smooth scrolling. The stored preference is mirrored by <code>[data-carbon-motion='reduced']</code> with the same declarations, for users whose OS setting is unavailable to the application.</p></div>
+					</div>
+					<p class="annotation">Motion never carries the only state cue. Animate opacity and transform; avoid transitioning layout properties. An entrance must be interruptible and must never delay an action. Spinners and skeletons stop under reduced motion.</p>
 				</section>
 
 				<section class="section" id="components" aria-labelledby="components-title">
-					<div class="section-heading"><div><p class="eyebrow">06 / COMPONENTS</p><h2 id="components-title">A common vocabulary.</h2></div><p>Examples show shared roles. Product components remain separately implemented.</p></div>
-					<div class="component-board"><div><span class="spec-label">ACTIONS</span><div class="sample-row"><button class="button primary" type="button">Primary action</button><button class="button secondary" type="button">Secondary</button><button class="button tertiary" type="button">Tertiary</button><button class="button ghost" type="button">Ghost</button><button class="button danger" type="button">Destructive</button><button class="button secondary" type="button" disabled>Disabled</button></div><p class="annotation">Tertiary and ghost stay quiet: accent text, transparent border, hover layer.</p></div><div><span class="spec-label">STATUS</span><div class="sample-row"><span class="tag good">Running</span><span class="tag neutral">Stopped</span><span class="tag warning">Warning</span><span class="tag bad">Error</span></div></div><div><span class="spec-label">FORM FIELD</span><label for="sample-name">Server name</label><input id="sample-name" value="Survival" aria-describedby="sample-hint" /><small id="sample-hint">Choose a name people can recognize.</small></div><div><span class="spec-label">TABS</span><div class="tabs-demo"><span class="tab-demo">Overview</span><span class="tab-demo active">Console</span><span class="tab-demo">Files</span></div><p class="annotation">The selection bar paints above the active tab background, never under it.</p></div><div><span class="spec-label">METRIC TILE</span><div class="tile-demo"><div class="tile-head"><span>Active players</span><span class="tile-dot" aria-hidden="true"></span></div><div class="tile-value">12</div><div class="tile-foot"><span class="tile-live"><i aria-hidden="true"></i>8 online</span><span>Max 20</span></div></div></div></div>
+					<div class="section-heading"><div><p class="eyebrow">06 / COMPONENTS</p><h2 id="components-title">Component inventory</h2></div><p>All nineteen exports from <code>components/carbon/index.ts</code>. Props are quoted from the component source; defaults are the destructured values.</p></div>
+					<nav class="component-index" aria-label="Component index">
+						<a href="#c-button">CarbonButton</a><a href="#c-page-header">CarbonPageHeader</a><a href="#c-tile">CarbonTile</a><a href="#c-tag">CarbonTag</a><a href="#c-data-table">CarbonDataTable</a><a href="#c-modal">CarbonModal</a><a href="#c-confirm">CarbonConfirm</a><a href="#c-text-input">CarbonTextInput</a><a href="#c-select">CarbonSelect</a><a href="#c-tabs">CarbonTabs</a><a href="#c-inline-loading">CarbonInlineLoading</a><a href="#c-breadcrumbs">CarbonBreadcrumbs</a><a href="#c-shell">CarbonShell</a><a href="#c-search">CarbonSearch</a><a href="#c-accordion">CarbonAccordion</a><a href="#c-accordion-item">CarbonAccordionItem</a><a href="#c-structured-list">CarbonStructuredList</a><a href="#c-error-state">CarbonErrorState</a><a href="#c-empty-state">CarbonEmptyState</a>
+					</nav>
+					<p class="annotation">These are independent Svelte components, not a shared package with a compatibility guarantee. Cloud imports a pinned token snapshot and carries its own component implementations; a prop name on this page is authoritative for Panel only. "Tokenised" means the component reads <code>var(--…)</code> roles; "literal" means it still contains hard-coded dark-palette hex values and will not follow a theme change.</p>
+
+					<article class="component" id="c-button">
+						<header class="component-head"><div><span class="spec-label">01 / ACTION</span><h3>CarbonButton</h3></div><span class="coverage tokens">tokenised</span></header>
+						<p class="component-intro">The shared action control. Renders a native <code>&lt;button type="button"&gt;</code> or, when <code>href</code> is present, an <code>&lt;a&gt;</code>. One primary action per view; <code>danger</code> is reserved for irreversible operations.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<span class="spec-label">KINDS</span>
+								<div class="sample-row"><button class="button primary" type="button">Primary action</button><button class="button secondary" type="button">Secondary</button><button class="button tertiary" type="button">Tertiary</button><button class="button ghost" type="button">Ghost</button><button class="button danger" type="button">Destructive</button></div>
+								<span class="spec-label">SIZES</span>
+								<div class="sample-row"><button class="button secondary size-sm" type="button">Small 32</button><button class="button secondary" type="button">Medium 40</button><button class="button secondary size-lg" type="button">Large 48</button><button class="button secondary size-xl" type="button">Extra large 64</button></div>
+								<span class="spec-label">STATES</span>
+								<div class="sample-row"><button class="button primary" type="button" disabled>Disabled</button><button class="button primary" type="button"><span class="spinner" aria-hidden="true"></span>Loading</button><button class="button secondary icon-only" type="button" aria-label="Refresh"><span aria-hidden="true">↻</span></button><button class="button tertiary" type="button" disabled>Disabled tertiary</button></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>kind</code></td><td><code>'primary' | 'secondary' | 'tertiary' | 'ghost' | 'danger'</code></td><td><code>'primary'</code></td></tr>
+										<tr><td><code>size</code></td><td><code>'sm' | 'md' | 'lg' | 'xl'</code></td><td><code>'md'</code></td></tr>
+										<tr><td><code>iconOnly</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>disabled</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>loading</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>href</code></td><td><code>string</code></td><td>—</td></tr>
+										<tr><td><code>onclick</code></td><td><code>(event) =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>...restProps</code></td><td>button or anchor attributes</td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li><code>size</code> maps to <code>--carbon-control-sm|md|lg|xl</code>. <code>sm</code> also drops the label to <code>text-xs</code>; <code>xl</code> raises it to <code>text-base</code>.</li>
+							<li><code>iconOnly</code> forces a square: equal width and height at the chosen control size, zero padding. The caller must supply an accessible name (<code>aria-label</code>).</li>
+							<li><code>loading</code> renders a 16 px spinner and sets <code>aria-busy="true"</code>. It also disables the control, so a duplicate submit is impossible while the promise is pending.</li>
+							<li>With <code>href</code>, a disabled or loading button keeps the anchor element but withholds <code>href</code>, adds <code>role="link"</code>, <code>aria-disabled="true"</code> and <code>tabindex="-1"</code>, and calls <code>preventDefault()</code>.</li>
+							<li>The root sets <code>motion-press</code> (active scale 0.96) and <code>focus-ring</code>. Icons are marked <code>shrink-0</code>; labels stay on one line (<code>whitespace-nowrap</code>).</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-page-header">
+						<header class="component-head"><div><span class="spec-label">02 / STRUCTURE</span><h3>CarbonPageHeader</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">The single <code>h1</code> for a route, with an optional status snippet, a short description and right-aligned actions. It does not own page padding; the shell provides the gutter.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="ph-demo">
+									<div class="ph-main"><div class="ph-title-row"><h4>survival-01</h4><span class="tag good">Running</span></div><p>Java 21 · Paper 1.21.4 · eu-west</p></div>
+									<div class="ph-actions"><span class="button secondary size-sm">Console</span><span class="button primary size-sm">Start</span></div>
+								</div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>title</code> <em>required</em></td><td><code>string</code></td><td>—</td></tr>
+										<tr><td><code>description</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>tag</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>actions</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Title: <code>text-2xl font-light tracking-tight</code>. Description: <code>text-xs</code> in the literal <code>#8d8d8d</code> secondary tone.</li>
+							<li>The <code>tag</code> snippet sits inline with the title and wraps with it; <code>actions</code> move to their own row below 640 px.</li>
+							<li>The root is a flex row with <code>border-b</code> and <code>pb-4</code>. It is not sticky and does not scroll independently.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-tile">
+						<header class="component-head"><div><span class="spec-label">03 / SURFACE</span><h3>CarbonTile</h3></div><span class="coverage tokens">tokenised</span></header>
+						<p class="component-intro">A bordered content surface. The same component is a static panel, a clickable card or a link, decided by <code>href</code> and <code>clickable</code>.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="tile-demo"><div class="tile-head"><span>Active players</span><span class="tile-dot" aria-hidden="true"></span></div><div class="tile-value">12</div><div class="tile-foot"><span class="tile-live"><i aria-hidden="true"></i>8 online</span><span>Max 20</span></div></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>clickable</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>href</code></td><td><code>string</code></td><td>—</td></tr>
+										<tr><td><code>onclick</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>...restProps</code></td><td><code>unknown</code></td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Root selection is <code>href</code> first, then <code>clickable</code>, then a static <code>div</code>. In the link branch <code>onclick</code> is not forwarded; use the anchor's own navigation.</li>
+							<li><code>clickable</code> renders <code>&lt;div role="button" tabindex="0"&gt;</code> and activates on Enter or Space. Prefer <code>href</code> when a real destination exists.</li>
+							<li>Interactive tiles gain a 1 px lift on hover (<code>translateY(-1px)</code>), <code>hover:bg-accent</code> and <code>focus-ring</code>. Static tiles gain none of these.</li>
+							<li>Padding is <code>--carbon-space-4</code> (16 px). Metric tiles keep the shared hierarchy: uppercase label, one large tabular value, footer strip above a divider.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-tag">
+						<header class="component-head"><div><span class="spec-label">04 / STATUS</span><h3>CarbonTag</h3></div><span class="coverage tokens">tokenised</span></header>
+						<p class="component-intro">A compact status or filter label. Eleven colour pairs, two heights, an optional remove control and an optional pulse.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<span class="spec-label">TYPES</span>
+								<div class="sample-row wrap"><span class="tag good">green</span><span class="tag neutral">gray</span><span class="tag bad">red</span><span class="tag warning">yellow</span><span class="tag blue">blue</span><span class="tag purple">purple</span><span class="tag cyan">cyan</span><span class="tag teal">teal</span><span class="tag magenta">magenta</span><span class="tag warm">warm-gray</span><span class="tag cool">cool-gray</span></div>
+								<span class="spec-label">SIZES AND STATES</span>
+								<div class="sample-row"><span class="tag neutral tag-sm">sm 20</span><span class="tag neutral">md 24</span><span class="tag good pulse">pulse</span><span class="tag blue filter">filter <button type="button" aria-label="Remove filter">×</button></span></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>type</code></td><td><code>'blue' | 'green' | 'red' | 'purple' | 'cyan' | 'teal' | 'magenta' | 'yellow' | 'gray' | 'warm-gray' | 'cool-gray'</code></td><td><code>'gray'</code></td></tr>
+										<tr><td><code>size</code></td><td><code>'sm' | 'md'</code></td><td><code>'md'</code></td></tr>
+										<tr><td><code>filter</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>pulse</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>onclose</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>...restProps</code></td><td><code>unknown</code></td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Heights are 20 px (<code>sm</code>) and 24 px (<code>md</code>). Label: uppercase monospace, semibold, <code>tracking-wider</code>.</li>
+							<li><code>filter</code> renders a remove button with <code>aria-label="Remove filter"</code>. It calls <code>onclose</code>, which must be provided or the button does nothing.</li>
+							<li><code>pulse</code> applies <code>motion-pulse</code> (1600 ms, opacity 1 → 0.35 → 1). Use it for live state, not decoration.</li>
+							<li>Colour is supplemental. Every tag must contain a readable label; the eleven types are not a severity scale.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-data-table">
+						<header class="component-head"><div><span class="spec-label">05 / DATA</span><h3>CarbonDataTable</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A framed table with an optional header bar and toolbar. It supplies the chrome and the horizontal overflow container; the caller supplies <code>thead</code> cells and <code>tbody</code> rows.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="table-demo">
+									<div class="table-head"><div><strong>SERVERS</strong><span>3 in eu-west</span></div><span class="table-tool">Filter</span></div>
+									<table>
+										<thead><tr><th scope="col">Name</th><th scope="col">State</th><th scope="col">Players</th></tr></thead>
+										<tbody><tr><td>survival-01</td><td><span class="tag good">Running</span></td><td>12 / 20</td></tr><tr><td>creative-02</td><td><span class="tag neutral">Stopped</span></td><td>—</td></tr><tr><td>modded-03</td><td><span class="tag warning">Starting</span></td><td>0 / 10</td></tr></tbody>
+									</table>
+								</div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>title</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>description</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>toolbar</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>header</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>The header bar renders only when <code>title</code> or <code>toolbar</code> is present. <code>header</code> is the <code>thead</code> content; <code>children</code> renders inside <code>tbody</code>.</li>
+							<li>The table is wrapped in <code>overflow-x-auto</code>, so narrow viewports scroll the table rather than the page.</li>
+							<li>Documented gap: this component still uses literal <code>#161616</code>, <code>#262626</code>, <code>#393939</code> and <code>#f4f4f4</code>. It will not follow the light theme until those are replaced with token roles.</li>
+							<li>Empty, loading and error states are not built in. Compose <code>CarbonEmptyState</code>, <code>CarbonInlineLoading</code> or <code>CarbonErrorState</code> around it rather than rendering a table with no rows.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-modal">
+						<header class="component-head"><div><span class="spec-label">06 / OVERLAY</span><h3>CarbonModal</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A modal dialog portalled to <code>&lt;body&gt;</code>. Owns backdrop, scroll lock, focus placement, focus containment, Escape handling and focus restoration.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="modal-demo">
+									<div class="modal-demo-head"><div><span class="modal-demo-eyebrow">DELETE SERVER</span><strong>Delete survival-01?</strong></div><span class="modal-demo-close" aria-hidden="true">×</span></div>
+									<div class="modal-demo-body">This removes the container and its volume. The world is deleted and cannot be recovered.</div>
+									<div class="modal-demo-foot"><span class="modal-btn">Cancel</span><span class="modal-btn fill-danger">Delete</span></div>
+								</div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>open</code></td><td><code>boolean</code> (bindable)</td><td><code>false</code></td></tr>
+										<tr><td><code>title</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>description</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>primaryButtonText</code></td><td><code>string</code></td><td><code>'Confirm'</code></td></tr>
+										<tr><td><code>secondaryButtonText</code></td><td><code>string</code></td><td><code>'Cancel'</code></td></tr>
+										<tr><td><code>danger</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>size</code></td><td><code>'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | 'full'</code></td><td><code>'2xl'</code></td></tr>
+										<tr><td><code>hasFooter</code></td><td><code>boolean</code></td><td><code>true</code></td></tr>
+										<tr><td><code>bare</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>fullscreen</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>onprimary</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>onsecondary</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>onclose</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>footer</code></td><td><code>Snippet</code></td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li><code>use:portal</code> appends the overlay to <code>document.body</code>. Rendering it inside <code>&lt;main&gt;</code> left it in the page stacking context, where the fixed header and sidebar painted over it and the scroll container clipped it.</li>
+							<li>Open locks <code>document.body.style.overflow</code>; close restores the previous value. Backdrop clicks close; wheel events on the backdrop are prevented.</li>
+							<li>Focus moves to the first focusable descendant after 50 ms, otherwise to the dialog. Tab and Shift+Tab wrap inside the dialog. Escape closes with <code>preventDefault()</code> and <code>stopPropagation()</code>. The previously focused element regains focus on close.</li>
+							<li><code>size="full"</code> is 95 vw × 90 vh. <code>fullscreen</code> removes the padding, uses <code>h-screen</code> and no maximum width.</li>
+							<li><code>bare</code> suppresses header and footer chrome but keeps the title and description as <code>sr-only</code> elements so <code>aria-labelledby</code> and <code>aria-describedby</code> still resolve.</li>
+							<li><code>onprimary</code> does not close the dialog; the caller decides. <code>onsecondary</code> falls back to closing when omitted. Bind <code>open</code> to a boolean value, not to an expression such as <code>{value !== null}</code>.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-confirm">
+						<header class="component-head"><div><span class="spec-label">07 / OVERLAY</span><h3>CarbonConfirm</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A small confirmation dialog built on <code>CarbonModal</code>. Awaiting <code>onconfirm</code> before closing makes it safe for slow destructive requests.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="confirm-demo">
+									<div class="confirm-row"><span class="confirm-icon" aria-hidden="true">▲</span><div><strong>Delete backup?</strong><p>backup-2026-11-02 · 4.2 GiB</p></div></div>
+									<div class="confirm-actions"><span class="button secondary size-sm">Cancel</span><span class="button danger size-sm">Delete</span></div>
+								</div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>open</code></td><td><code>boolean</code> (bindable)</td><td><code>false</code></td></tr>
+										<tr><td><code>title</code></td><td><code>string</code></td><td><code>'Are you sure?'</code></td></tr>
+										<tr><td><code>message</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>details</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>confirmLabel</code></td><td><code>string</code></td><td><code>'Confirm'</code></td></tr>
+										<tr><td><code>cancelLabel</code></td><td><code>string</code></td><td><code>'Cancel'</code></td></tr>
+										<tr><td><code>danger</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>confirming</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>onconfirm</code></td><td><code>() =&gt; void | Promise&lt;void&gt;</code></td><td>—</td></tr>
+										<tr><td><code>onclose</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Renders <code>CarbonModal</code> at <code>size="sm"</code> with <code>hasFooter={false}</code>; the action row lives in the body.</li>
+							<li><code>details</code> renders inside a bordered monospace block. Use it for the exact resource name, size or count affected.</li>
+							<li><code>handleConfirm</code> awaits <code>onconfirm</code>, then sets <code>open = false</code>. If the request throws, the dialog stays open and the error belongs in the caller's UI.</li>
+							<li><code>confirming</code> disables both buttons and replaces the confirm label with "Working…". It does not stop Escape or backdrop dismissal; disable those in the caller when cancellation is unsafe.</li>
+							<li><code>danger</code> adds the alert triangle and switches the confirm button to <code>kind="danger"</code>.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-text-input">
+						<header class="component-head"><div><span class="spec-label">08 / FORM</span><h3>CarbonTextInput</h3></div><span class="coverage tokens">tokenised</span></header>
+						<p class="component-intro">A labelled text field with hint, error and optional password reveal. Extends <code>HTMLInputAttributes</code>, so every native attribute is accepted.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="field-demo"><label for="demo-text-input">Server name</label><input id="demo-text-input" type="text" value="survival" aria-describedby="demo-text-hint" /><small id="demo-text-hint">Lowercase letters, digits and hyphens.</small></div>
+								<div class="field-demo"><label for="demo-text-error">Memory limit</label><input id="demo-text-error" type="text" value="0" aria-invalid="true" aria-describedby="demo-text-error-msg" /><small id="demo-text-error-msg" class="error">Must be at least 1 GiB.</small></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>label</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>helperText</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>error</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>value</code></td><td><code>string</code> (bindable)</td><td><code>''</code></td></tr>
+										<tr><td><code>id</code></td><td><code>string</code></td><td><code>$props.id()</code></td></tr>
+										<tr><td><code>type</code></td><td><code>string</code></td><td><code>'text'</code></td></tr>
+										<tr><td><code>revealable</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>...restProps</code></td><td>input attributes</td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li><code>id</code> falls back to the Svelte-generated <code>$props.id()</code>, so a label and field still connect without a caller-supplied id.</li>
+							<li><code>aria-describedby</code> points at <code>{id}-desc</code> only when an error or hint exists. <code>error</code> also sets <code>aria-invalid="true"</code>.</li>
+							<li>Message precedence is error, then the Caps Lock notice, then the hint. The Caps Lock check runs only for <code>type="password"</code> and reads <code>getModifierState('CapsLock')</code> on key down and key up.</li>
+							<li><code>revealable</code> only applies to <code>type="password"</code>. The toggle is a 24 px button with <code>aria-pressed</code> and a Show/Hide password label.</li>
+							<li>Field geometry: 40 px height, 1 px bottom border, 2 px border on focus or error, <code>--carbon-control-md</code>, 16 px horizontal padding.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-select">
+						<header class="component-head"><div><span class="spec-label">09 / FORM</span><h3>CarbonSelect</h3></div><span class="coverage tokens">tokenised</span></header>
+						<p class="component-intro">A labelled native <code>&lt;select&gt;</code> with an overlaid chevron and the same label, hint and error association as <code>CarbonTextInput</code>.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="field-demo"><label for="demo-select">Software</label><select id="demo-select" aria-describedby="demo-select-hint"><option>Paper 1.21.4</option><option>Fabric 1.21.4</option><option>Forge 1.21.4</option></select><small id="demo-select-hint">The image is pinned to this version.</small></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>label</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>helperText</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>error</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>value</code></td><td><code>string | number</code> (bindable)</td><td><code>''</code></td></tr>
+										<tr><td><code>id</code></td><td><code>string</code></td><td><code>$props.id()</code></td></tr>
+										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>...restProps</code></td><td>select attributes</td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Uses <code>appearance-none</code> plus a pointer-events-none chevron in the same box; the native menu, keyboard behaviour and mobile picker are preserved.</li>
+							<li><code>value</code> is bound, not an <code>onchange</code> callback. Read it from the bound variable rather than reaching for the event.</li>
+							<li>Same <code>{id}-desc</code> association and <code>aria-invalid</code> behaviour as the text input.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-tabs">
+						<header class="component-head"><div><span class="spec-label">10 / NAVIGATION</span><h3>CarbonTabs</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A horizontal tab strip with a measured selection indicator and APG keyboard behaviour.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="tabs-demo"><span class="tab-demo">Overview</span><span class="tab-demo active">Console</span><span class="tab-demo">Files</span><span class="tab-demo">Backups</span></div>
+								<p class="annotation">The 2 px indicator is a 1 px element scaled with <code>scaleX</code> and moved with <code>translateX</code>; it paints above the active tab background, never under it.</p>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>tabs</code> <em>required</em></td><td><code>{ id: string; label: string; badge?: string | number }[]</code></td><td><code>[]</code></td></tr>
+										<tr><td><code>selectedTab</code></td><td><code>string</code> (bindable)</td><td>first tab id</td></tr>
+										<tr><td><code>idPrefix</code></td><td><code>string</code></td><td>—</td></tr>
+										<tr><td><code>onselect</code></td><td><code>(id: string) =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>The indicator is re-measured on selection, on tab-list changes and through a <code>ResizeObserver</code> on the strip. The observer exists because a sidebar collapse or a scrollbar appearing changes the width without a window resize, which previously left the indicator under the wrong tab.</li>
+							<li>Keyboard: ArrowLeft and ArrowRight wrap, Home and End jump, and selection follows focus. Roving <code>tabindex</code> keeps one stop in the tab order.</li>
+							<li><code>idPrefix</code> emits <code>{prefix}-tab-{id}</code> and <code>aria-controls="{prefix}-panel-{id}"</code>. Provide the matching panels yourself.</li>
+							<li>Gotcha: <code>onselect</code> is an allowlist of ids in most call sites. Adding a tab without extending that handler produces a tab that selects but never loads its panel.</li>
+							<li>The strip uses <code>scroll-strip</code>: horizontal overflow scrolls, but no scrollbar is painted, so the strip height cannot jump.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-inline-loading">
+						<header class="component-head"><div><span class="spec-label">11 / FEEDBACK</span><h3>CarbonInlineLoading</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A single-line progress indicator with three outcomes: active, finished and error.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="loading-demo"><span class="inline-loading"><span class="spinner" aria-hidden="true"></span>Loading server list</span><span class="inline-loading"><span class="check" aria-hidden="true">✓</span>Backup complete</span><span class="inline-loading"><span class="cross" aria-hidden="true">×</span>Backup failed</span></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>description</code></td><td><code>string</code></td><td><code>'Loading...'</code></td></tr>
+										<tr><td><code>status</code></td><td><code>'active' | 'finished' | 'error'</code></td><td><code>'active'</code></td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Active renders a 16 px spinning square; finished draws a check with a 300 ms dash animation; error fades in a cross.</li>
+							<li>The component has no live region of its own. When the description changes in place, wrap it in an <code>aria-live="polite"</code> status region or use a status role.</li>
+							<li>Do not use it as a substitute for a skeleton when the final layout is already known.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-breadcrumbs">
+						<header class="component-head"><div><span class="spec-label">12 / NAVIGATION</span><h3>CarbonBreadcrumbs</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">Ancestor navigation for a nested route. Renders a <code>nav</code> labelled "Breadcrumbs" with slash separators.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<nav class="crumbs-demo" aria-label="Breadcrumbs example"><a href="#c-breadcrumbs">Servers</a><span>/</span><a href="#c-breadcrumbs">survival-01</a><span>/</span><span class="current">Backups</span></nav>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>items</code> <em>required</em></td><td><code>{ href?: string; label: string }[]</code></td><td><code>[]</code></td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>The final item is always rendered as a non-interactive <code>span</code>, even if it carries an <code>href</code>. That is the current location, not a destination.</li>
+							<li>Items are keyed by index, so reordering the trail reuses DOM nodes. Include the whole path in the label when that matters.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-shell">
+						<header class="component-head"><div><span class="spec-label">13 / STRUCTURE</span><h3>CarbonShell</h3></div><span class="coverage mixed">mixed</span></header>
+						<p class="component-intro">The application frame: top bar, collapsible side navigation, profile menu, preferences dialog and the scrolling main region. It is the only component here that depends on the SvelteKit runtime.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="shell-demo" aria-hidden="true">
+									<div class="shell-top"></div>
+									<div class="shell-body"><div class="shell-side"></div><div class="shell-main"><div class="shell-block short"></div><div class="shell-block"></div><div class="shell-block"></div></div></div>
+								</div>
+								<p class="annotation">Header 64 px; side nav 256 px expanded, 48 px collapsed, 0 below <code>md</code>; main gutter 16 px, 24 px at <code>md</code>.</p>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li><code>&lt;main&gt;</code> owns <code>p-4</code> / <code>md:p-6</code>, <code>scrollbar-stable</code>, <code>md:ml-64</code> or <code>md:ml-12</code>, and an inner <code>mx-auto max-w-7xl space-y-6</code>. Routes must not add another page-level padding — nesting <code>p-6</code> doubles the gutter.</li>
+							<li>Imports <code>$app/state</code>, <code>$app/paths</code>, the auth and server stores, and the RPC client. It is product infrastructure, not a portable layout primitive; Cloud has its own <code>AppShell</code>.</li>
+							<li>Sidebar expansion persists in component state only. The profile menu, password dialog and preferences dialog are mounted here, so routes do not each re-implement them.</li>
+							<li>The header is fixed and paints above page content; the sidebar is offset by 64 px. A fixed overlay rendered inside <code>main</code> would sit below both — hence the modal portal.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-search">
+						<header class="component-head"><div><span class="spec-label">14 / FORM</span><h3>CarbonSearch</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A search input with a leading magnifier and a clear control that appears only when the field has a value.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="search-demo"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Search servers" aria-label="Search servers" /><span class="search-clear" aria-hidden="true">×</span></div>
+								<div class="search-demo sm"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Small 32" aria-label="Small search example" readonly /><span class="search-clear" aria-hidden="true">×</span></div>
+								<div class="search-demo lg"><span class="search-icon" aria-hidden="true">⌕</span><input type="text" placeholder="Large 48" aria-label="Large search example" readonly /><span class="search-clear" aria-hidden="true">×</span></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>value</code></td><td><code>string</code> (bindable)</td><td><code>''</code></td></tr>
+										<tr><td><code>placeholder</code></td><td><code>string</code></td><td><code>'Search...'</code></td></tr>
+										<tr><td><code>size</code></td><td><code>'sm' | 'md' | 'lg'</code></td><td><code>'md'</code></td></tr>
+										<tr><td><code>disabled</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>onclear</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>onkeydown</code></td><td><code>(e: KeyboardEvent) =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Heights are 32, 40 and 48 px; the leading icon and horizontal padding scale with the size.</li>
+							<li>The accessible name falls back to <code>aria-label</code> from the rest props, then the placeholder, then "Search". A visible label is still preferred in forms.</li>
+							<li>The input is always <code>type="text"</code>. <code>size</code> is removed from the forwarded attributes so it cannot collide with the native input size.</li>
+							<li>Clearing sets the bound value to <code>''</code> and calls <code>onclear</code>; the button fades in over 100 ms.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-accordion">
+						<header class="component-head"><div><span class="spec-label">15 / DISCLOSURE</span><h3>CarbonAccordion</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">The list wrapper for disclosure items. Renders a <code>ul</code> with a top rule; it holds no state and imposes no exclusivity.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="accordion-demo">
+									<div class="accordion-item"><span>Network</span><span class="chev open" aria-hidden="true">›</span></div>
+									<div class="accordion-panel">Host <code>0.0.0.0</code>, port <code>25565</code>. The port is allocated at creation and cannot be changed while the server exists.</div>
+									<div class="accordion-item"><span>Resources</span><span class="chev" aria-hidden="true">›</span></div>
+								</div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Styling only: <code>m-0 w-full list-none border-t p-0</code>. Put <code>CarbonAccordionItem</code> children inside.</li>
+							<li>Opening one item does not close another. If the surface needs an exclusive group, own the open index in the parent.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-accordion-item">
+						<header class="component-head"><div><span class="spec-label">16 / DISCLOSURE</span><h3>CarbonAccordionItem</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A 48 px header row and a height-animated panel. Closed content is inert, so it cannot be focused or read by tab order.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="accordion-demo">
+									<div class="accordion-item"><span>Network</span><span class="chev open" aria-hidden="true">›</span></div>
+									<div class="accordion-panel">Host <code>0.0.0.0</code>, port <code>25565</code>.</div>
+									<div class="accordion-item"><span>Resources</span><span class="chev" aria-hidden="true">›</span></div>
+								</div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>title</code> <em>required</em></td><td><code>string</code></td><td>—</td></tr>
+										<tr><td><code>subtitle</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>open</code></td><td><code>boolean</code> (bindable)</td><td><code>false</code></td></tr>
+										<tr><td><code>disabled</code></td><td><code>boolean</code></td><td><code>false</code></td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>The panel animates <code>grid-template-rows</code> from <code>0fr</code> to <code>1fr</code> over <code>--motion-slow</code> with an in-out easing; the chevron rotates 90° over <code>--motion-base</code>.</li>
+							<li><code>inert</code> is applied whenever the item is closed, which removes its subtree from focus and accessibility APIs without unmounting it.</li>
+							<li>Documented gap: the trigger does not set <code>aria-expanded</code> or <code>aria-controls</code>. Add both before relying on this component where disclosure semantics are audited.</li>
+							<li>Title and subtitle both truncate. Long values lose text rather than wrapping; keep them short or put the full value in the panel.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-structured-list">
+						<header class="component-head"><div><span class="spec-label">17 / DATA</span><h3>CarbonStructuredList</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A labelled list of rows with a coloured header strip and 1 px dividers. Lighter than <code>CarbonDataTable</code>, but not a table.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="structured-demo"><div class="structured-head"><span>Property</span><span>Value</span></div><div class="structured-row"><span>Image</span><span>paper:1.21.4</span></div><div class="structured-row"><span>Memory</span><span>2.4 GiB</span></div><div class="structured-row"><span>Created</span><span>2026-11-02</span></div></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>header</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>children</code></td><td><code>Snippet</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>Built from <code>div</code> elements, so a header cell is not associated with a row value. Use <code>CarbonDataTable</code> when a screen reader must associate columns with cells.</li>
+							<li>The header snippet renders inside a single grid row; the caller supplies the same column template on the header and the rows.</li>
+							<li>Rows are divided by <code>divide-y</code> on the row container. The outer element has a top border only.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-error-state">
+						<header class="component-head"><div><span class="spec-label">18 / FEEDBACK</span><h3>CarbonErrorState</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">A full-panel failure state with a retry action. Announces itself with <code>role="alert"</code>.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="state-demo error"><span class="state-icon" aria-hidden="true">▲</span><strong>Could not load servers</strong><p>The node did not respond. Check the connection and try again.</p><span class="button secondary size-sm">Retry</span></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>title</code></td><td><code>string</code></td><td><code>'Something went wrong'</code></td></tr>
+										<tr><td><code>message</code></td><td><code>string</code></td><td><code>'An unexpected error occurred. Please try again.'</code></td></tr>
+										<tr><td><code>retryLabel</code></td><td><code>string</code></td><td><code>'Retry'</code></td></tr>
+										<tr><td><code>onretry</code></td><td><code>() =&gt; void | Promise&lt;void&gt;</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>The retry button renders only when <code>onretry</code> exists. While the returned promise is pending the button is in <code>loading</code> state and cannot be pressed again.</li>
+							<li><code>role="alert"</code> makes the whole panel an assertive live region. Mounting it on every failed poll will announce repeatedly; keep it for terminal failures.</li>
+							<li>Say what failed and what the user can do. Do not render an error state for a request that is still in flight.</li>
+						</ul>
+					</article>
+
+					<article class="component" id="c-empty-state">
+						<header class="component-head"><div><span class="spec-label">19 / FEEDBACK</span><h3>CarbonEmptyState</h3></div><span class="coverage literal">literal palette</span></header>
+						<p class="component-intro">The zero-results and never-created state, with an optional icon snippet and one primary action.</p>
+						<div class="component-grid">
+							<div class="demo-surface">
+								<div class="state-demo"><span class="state-icon" aria-hidden="true">▤</span><strong>No backups yet</strong><p>Backups run nightly at 03:00 UTC. You can also start one now.</p><span class="button primary size-sm">Create backup</span></div>
+							</div>
+							<div class="props">
+								<table class="doc-table props-table">
+									<thead><tr><th scope="col">Prop</th><th scope="col">Type</th><th scope="col">Default</th></tr></thead>
+									<tbody>
+										<tr><td><code>title</code></td><td><code>string</code></td><td><code>'Nothing here yet'</code></td></tr>
+										<tr><td><code>description</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+										<tr><td><code>icon</code></td><td><code>Snippet</code></td><td><code>Inbox</code></td></tr>
+										<tr><td><code>actionLabel</code></td><td><code>string</code></td><td>—</td></tr>
+										<tr><td><code>onaction</code></td><td><code>() =&gt; void</code></td><td>—</td></tr>
+										<tr><td><code>class</code></td><td><code>string</code></td><td><code>''</code></td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+						<ul class="notes">
+							<li>The action renders only when both <code>actionLabel</code> and <code>onaction</code> are supplied. One action; the component has no secondary slot.</li>
+							<li>There is no <code>role</code> and no live region. Announce a change to an empty collection in the surrounding region, not by remounting this panel.</li>
+							<li>Distinguish a truly empty collection from no search matches and from a failed request. The copy and the available action differ in each case.</li>
+						</ul>
+					</article>
+				</section>
+
+				<section class="section" id="composition" aria-labelledby="composition-title">
+					<div class="section-heading"><div><p class="eyebrow">07 / COMPOSITION</p><h2 id="composition-title">Composition rules</h2></div><p>How the pieces are assembled. These are the rules that cause the most repeated defects when a route bypasses them.</p></div>
+					<div class="rule-grid">
+						<article><span>01</span><h3>One gutter</h3><p><code>CarbonShell</code> owns the main padding, maximum width and vertical rhythm. A route starts with <code>CarbonPageHeader</code>; it does not add <code>p-6</code>, <code>max-w-*</code> or another scroll container.</p></article>
+						<article><span>02</span><h3>Scroll containers</h3><p>Every vertical scroll container reserves its gutter (<code>scrollbar-gutter: stable</code>), applied globally to <code>overflow-y-auto</code>, <code>overflow-y-scroll</code> and <code>overflow-auto</code>. This prevents the reflow flicker when content grows past the viewport.</p></article>
+						<article><span>03</span><h3>Horizontal strips</h3><p>Tabs and other horizontal strips use <code>scroll-strip</code>: they scroll sideways and paint no bar, so the strip height cannot change. Never add a wrapper with <code>overflow-x-auto</code> that also grows a bar.</p></article>
+						<article><span>04</span><h3>Nested surfaces</h3><p>A tile inside a card is a bordered plane, not a shadow. <code>space-y-6</code> separates page sections; <code>space-y-2</code> or <code>space-y-4</code> separates fields and rows. Do not mix a page gutter with a card padding of the same intent.</p></article>
+						<article><span>05</span><h3>Overlays</h3><p>Anything fixed goes through a portal to <code>document.body</code>. Rendering inside <code>main</code> places the layer below the fixed header and inside the scroll clip. Dialogs also lock body scroll and restore focus.</p></article>
+						<article><span>06</span><h3>Widths</h3><p>Content is capped at <code>max-w-7xl</code> (80 rem). Tables scroll inside their own region. There must be no page-level horizontal overflow at 360, 768 or 1440 px.</p></article>
+					</div>
+					<div class="spec-grid">
+						<div><span class="spec-label">DENSITY</span><code>data-carbon-density</code><p>Compact mode rewrites control and spacing tokens. A layout that hard-codes heights will break. Test both densities and both themes.</p></div>
+						<div><span class="spec-label">RESPONSIVE BREAKPOINTS</span><code>sm 640 · md 768 · lg 1024 · xl 1280</code><p>Tailwind defaults. The shell's side navigation collapses at <code>md</code>; page headers stack below <code>sm</code>.</p></div>
+						<div><span class="spec-label">TAB ORDER</span><code>DOM order</code><p>No positive <code>tabindex</code>. Roving tabindex is limited to composite widgets such as the tab strip.</p></div>
+					</div>
 				</section>
 
 				<section class="section" id="patterns" aria-labelledby="patterns-title">
-					<div class="section-heading"><div><p class="eyebrow">07 / EXPERIENCE</p><h2 id="patterns-title">Design for the whole task.</h2></div><p>Every screen must explain the current state and make the next step clear.</p></div>
-					<div class="principle-grid"><article><span>01</span><h3>Show the real state</h3><p>Separate empty, loading, stale and failed data. Unknown is not zero.</p></article><article><span>02</span><h3>Make consequences clear</h3><p>Name the resource and outcome before destructive or billable actions.</p></article><article><span>03</span><h3>Help people recover</h3><p>Preserve input and offer a useful next step when something fails.</p></article><article><span>04</span><h3>Make state predictable</h3><p>Hover, selection, focus and menus never move the layout or act on a different row than the one under the pointer.</p></article></div>
+					<div class="section-heading"><div><p class="eyebrow">08 / EXPERIENCE</p><h2 id="patterns-title">Interaction patterns</h2></div><p>State handling that is not expressible as a component prop.</p></div>
+					<div class="principle-grid">
+						<article><span>01</span><h3>Represent real state</h3><p>Separate initial loading, empty, filtered-empty, stale, partial and failed. A missing metric is unavailable, not zero. Never render a placeholder value that could be mistaken for data.</p></article>
+						<article><span>02</span><h3>Name the consequence</h3><p>Destructive, long-running, billable and permission-sensitive actions state the resource and the outcome before the request. The confirm label repeats the verb, not "OK".</p></article>
+						<article><span>03</span><h3>Preserve the work</h3><p>Keep entered values on a recoverable error. Move focus to an error summary for long forms. A failed request must not clear a table or a draft.</p></article>
+						<article><span>04</span><h3>Keep geometry stable</h3><p>Reserve the accent-border space, the scrollbar gutter and the loading slot. Hover, selection, focus and menus must not move the layout or target a different row than the one under the pointer.</p></article>
+						<article><span>05</span><h3>Report honestly</h3><p>Distinguish submitted, pending, running, complete, failed and unknown. Show progress only when it is measured. Do not imply completion before the backend confirms it.</p></article>
+						<article><span>06</span><h3>Keep console output intact</h3><p>Monospace for logs, meaningful line breaks preserved, connection and reconnect state visible. Polling updates must not move the scroll position of someone reading older output.</p></article>
+					</div>
 				</section>
 
 				<section class="section" id="accessibility" aria-labelledby="accessibility-title">
-					<div class="section-heading"><div><p class="eyebrow">08 / EXPERIENCE</p><h2 id="accessibility-title">Access is a foundation.</h2></div><p>Build and test for keyboard, assistive technology, zoom and different preferences.</p></div>
-					<div class="access-grid"><p><strong>4.5:1</strong><span>normal text contrast target</span></p><p><strong>3:1</strong><span>essential non-text contrast target</span></p><p><strong>24 × 24</strong><span>minimum target size in CSS pixels, subject to WCAG exceptions</span></p></div>
-					<p class="annotation">These are design targets, not a certification of either application. Test real components and states in context.</p>
+					<div class="section-heading"><div><p class="eyebrow">09 / EXPERIENCE</p><h2 id="accessibility-title">Accessibility contract</h2></div><p>Review dimensions for every component and route. These are targets, not a certification of either application.</p></div>
+					<div class="access-grid"><p><strong>4.5:1</strong><span>normal text contrast target</span></p><p><strong>3:1</strong><span>large text and essential non-text boundary target</span></p><p><strong>24 × 24</strong><span>minimum target size in CSS pixels, subject to WCAG exceptions</span></p></div>
+					<div class="access-list">
+						<div><span class="spec-label">KEYBOARD</span><p>Every action is reachable and operable without a pointer. Composite widgets implement their APG pattern: tabs move selection with arrows, Home and End; dialogs trap and restore focus; disclosure content is removed from tab order when closed.</p></div>
+						<div><span class="spec-label">NAMES AND LABELS</span><p>Every control has an accessible name, including icon-only buttons. Visible labels are associated with their field. Hints and errors are referenced with <code>aria-describedby</code>, and invalid state is exposed with <code>aria-invalid</code>.</p></div>
+						<div><span class="spec-label">FOCUS</span><p>A 2 px <code>--ring</code> outline at 2 px offset on <code>:focus-visible</code>. Focus styling is never removed without an equivalent. Focus is never moved by polling or by a background refresh.</p></div>
+						<div><span class="spec-label">LIVE REGIONS</span><p>Async state changes that the user did not initiate are announced once through a status or alert region. Repeated polling results are not announced. <code>CarbonInlineLoading</code> needs a caller-provided region; <code>CarbonErrorState</code> is already <code>role="alert"</code>.</p></div>
+						<div><span class="spec-label">MOTION AND ZOOM</span><p>Both reduced-motion paths are supported: the media query and the stored <code>data-carbon-motion</code> attribute. Layouts survive 200% browser zoom and text enlargement, and no content or action is lost at 320 px.</p></div>
+						<div><span class="spec-label">COLOUR AND MEDIA</span><p>Meaning is never carried by colour alone. Charts include labels or patterns and a text alternative. Forced-colours mode, translation, RTL and long labels are review dimensions, not assumed to work.</p></div>
+					</div>
+					<p class="annotation">Automated checks catch a minority of these. Test real components in context with a keyboard and a screen reader, including error, loading and reduced-motion states.</p>
 				</section>
 
 				<section class="section closing" id="workflow" aria-labelledby="workflow-title">
-					<p class="eyebrow">09 / WORKFLOW</p><h2 id="workflow-title">Built to evolve together.</h2><p>Start with the shared guide and semantic tokens, review both products, then propagate a verified snapshot to Cloud. Existing literal styles remain migration work.</p><div class="hero-actions"><a class="button primary" href="./README.md">Open the guide <span aria-hidden="true">→</span></a><a class="button secondary" href="../../web/carbon-panel/src/lib/design-system/tokens.css">View the tokens <span aria-hidden="true">↗</span></a></div>
+					<div class="section-heading"><div><p class="eyebrow">10 / WORKFLOW</p><h2 id="workflow-title">Change and propagation</h2></div><p>The token file is a shared contract. A change is not finished when Panel renders correctly.</p></div>
+					<ol class="steps">
+						<li><div><strong>Propose the change against the contract.</strong><p>Update <code>tokens.css</code> or the component source, and describe the intended effect on both themes, every state, responsive behaviour and compatibility. Do not silently change the meaning of an existing token.</p></div></li>
+						<li><div><strong>Update Panel, this page and the regression checks.</strong><p>The static examples here mirror the Svelte props; a new component or prop must appear on this page in the same change. Run the frontend checks and the design-system tests.</p></div></li>
+						<li><div><strong>Propagate the snapshot to Cloud.</strong><p>Cloud consumes a content-pinned copy with a recorded digest. Its lock records the digest, so ordinary builds need no Panel checkout or network access; a local digest check detects edits to the snapshot. A newer upstream version is only visible through an explicit comparison.</p></div></li>
+						<li><div><strong>Verify the affected surfaces in both products.</strong><p>Keyboard, error, loading, reduced-motion, light and dark themes, both densities, and narrow widths. Tokens do not propagate through hard-coded colours and do not prove behavioural equivalence.</p></div></li>
+					</ol>
+					<div class="callout">
+						<p class="spec-label">SOURCE OF RECORD</p>
+						<p>The contract and the propagation procedure are documented in the design-system README. The token values on this page are copied from the canonical stylesheet at build time, not maintained by hand. Where this page and the component source disagree, the source file wins; open a change against this page.</p>
+					</div>
+					<div class="hero-actions"><a class="button primary" href="./README.md">Read the contract <span aria-hidden="true">→</span></a><a class="button secondary" href="../../web/carbon-panel/src/lib/design-system/tokens.css">Open tokens.css <span aria-hidden="true">↗</span></a></div>
 				</section>
-				<footer><span>CARBON / DESIGN SYSTEM</span><span>Panel + Cloud · Shared foundations</span></footer>
+				<footer><span>CARBON / DESIGN SYSTEM</span><span>Panel + Cloud · 19 components · 2 themes</span></footer>
 			</main>
 		</div>
 	</body>

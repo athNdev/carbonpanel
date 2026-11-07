@@ -9,11 +9,19 @@
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
+import re
 import unittest
 
 
-PAGE = Path(__file__).resolve().parent.parent / "docs" / "design-system" / "index.html"
-CSS = Path(__file__).resolve().parent.parent / "docs" / "design-system" / "site.css"
+ROOT = Path(__file__).resolve().parent.parent
+PAGE = ROOT / "docs" / "design-system" / "index.html"
+CSS = ROOT / "docs" / "design-system" / "site.css"
+EXPORTS = ROOT / "web" / "carbon-panel" / "src" / "lib" / "components" / "carbon" / "index.ts"
+
+
+def component_anchor(name):
+    kebab = re.sub(r"(?<!^)(?=[A-Z])", "-", name.removeprefix("Carbon")).lower()
+    return f"c-{kebab}"
 
 
 class PreviewParser(HTMLParser):
@@ -73,6 +81,19 @@ class DesignSystemPageTests(unittest.TestCase):
             / "../../web/carbon-panel/src/lib/design-system/tokens.css"
         ).resolve()
         self.assertTrue(target.is_file(), f"missing tokens source: {target}")
+
+    def test_every_exported_component_has_a_documented_section(self):
+        exports = re.findall(
+            r"export \{ default as (\w+) \} from", EXPORTS.read_text(encoding="utf-8")
+        )
+        self.assertGreaterEqual(len(exports), 19, "component export list changed unexpectedly")
+        page = PAGE.read_text(encoding="utf-8")
+        for name in exports:
+            anchor = component_anchor(name)
+            self.assertIn(f'id="{anchor}"', page, f"missing section for {name}")
+            section = page.split(f'id="{anchor}"', 1)[1].split("</article>", 1)[0]
+            self.assertIn(name, section, f"{name} is not named in its section")
+            self.assertIn("props-table", section, f"{name} has no prop table")
 
     def test_theme_preview_toggle_is_present(self):
         page = PAGE.read_text(encoding="utf-8")
