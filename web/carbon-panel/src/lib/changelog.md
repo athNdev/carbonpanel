@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Design-system page documents all nineteen exported Carbon components with prop tables and behaviour notes, full light and dark token tables, and composition rules. A regression test now asserts every `carbon/index.ts` export has a documented section.
 - Design-system page layout redo: every component pairs a captioned demo pane with a scrollable prop table, badges are fixed pills, and demo groups follow one spacing rhythm at 360, 768 and 1440 px.
+- Server detail Console and Mods panes fill the available vertical space via a shared `tab-fill` utility instead of stopping at a fixed 800 px cap.
 
 ## [3.0.0-beta.4] - 2026-11-07
 

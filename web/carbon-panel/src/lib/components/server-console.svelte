@@ -439,7 +439,7 @@ one at https://mozilla.org/MPL/2.0/.
 		direction="vertical"
 		class="w-full overflow-hidden rounded-none bg-[#161616] font-mono text-[#f4f4f4] {expanded
 			? 'h-full min-h-0 border-0'
-			: 'max-h-[800px] min-h-[320px] border border-[#393939] md:min-h-[450px]'}"
+			: 'tab-fill min-h-[320px] border border-[#393939] md:min-h-[450px]'}"
 	>
 		<ResizablePane defaultSize={78} minSize={30}>
 			<div class="flex h-full flex-col">

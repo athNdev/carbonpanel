@@ -371,6 +371,24 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	/*
+		Fill the available vertical space. Tab panes with their own scroll
+		regions (the console log stream, the mods list) use this instead of
+		a fixed pixel cap so they grow with the viewport instead of leaving a
+		dead void below them on tall screens. 30rem covers the shell header,
+		page header, metric tiles, tab strip and gutters above the panel;
+		the per-pane min-height floors keep small viewports usable. dvh tracks
+		the visual viewport on mobile browsers, with vh as the fallback.
+	*/
+	.tab-fill {
+		height: calc(100vh - 30rem);
+	}
+	@supports (height: 100dvh) {
+		.tab-fill {
+			height: calc(100dvh - 30rem);
+		}
+	}
+
+	/*
 		Every vertical scroll container reserves its gutter. When content grows
 		just past the viewport (a spinner replaced by a row, a one-line diff, a
 		chart resizing), a classic scrollbar would otherwise appear, narrow the
