@@ -7,14 +7,15 @@ description: Release history for Carbon Panel.
 
 See the project [CHANGELOG.md](https://github.com/athNdev/carbon-panel/blob/main/CHANGELOG.md) for the full release history.
 
-## Unreleased
+## 3.0.0-beta.4 - 2026-11-07
 
-- Modpack Studio tabs for datapacks, resource packs and shader packs: Modrinth search, direct URLs, validated uploads, and every packwiz metafile option.
-- Server bakes install datapacks into the world and report client-only content instead of dropping it.
-- CurseForge export refuses a partial pack and lists every entry it cannot carry.
+- Modpack Studio tabs for datapacks, resource packs and shader packs, with Modrinth search, direct URLs, validated uploads, and every packwiz metafile option.
+- Server bakes install datapacks into the world and report client-only content; CurseForge export refuses a partial pack instead of dropping entries.
 - Fullscreen server console fills the viewport and keeps its toolbar and command bar.
-- Global error boundary with retry/home affordances.
-- Accessibility and robustness improvements.
+- Creating a server from a modpack keeps the RAM value you enter; the pack recommendation is a hint.
+- Open Graph and Twitter previews on every website page, with dedicated cards for the main entry points.
+- New guides for Modpack Studio, server datapacks, staged updates, sleep and wake, and proxy routing.
+- Global error boundary with retry and home affordances, plus accessibility and robustness fixes.
 
 ## 3.0.0-beta.3
 

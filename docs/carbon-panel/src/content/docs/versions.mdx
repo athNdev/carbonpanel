@@ -9,10 +9,15 @@ import version from '../../../../website-source.json';
 
 <p><strong>{version.label}</strong></p>
 <p>Application commit: <a href={version.repository + '/tree/' + version.revision}><code>{version.revision}</code></a></p>
+{version.label.startsWith('v') && (
+  <p>Release: <a href={version.repository + '/releases/tag/' + version.label}>{version.label}</a></p>
+)}
 
 The guides, configuration examples, Compose files, identity-provider examples, and generated API schema are taken from this exact commit. The website's navigation and visual theme can be updated independently.
 
-This is a development snapshot. Carbon Panel had no published GitHub releases when this pin was selected. Older tags, including prerelease tags, are not presented as a release of this snapshot.
+{version.label.startsWith('v')
+  ? `${version.label} is a prerelease. It is a published GitHub release, but not a stable release.`
+  : 'This is a development snapshot, not a published release.'}
 
 ## Match your installation
 
@@ -22,6 +27,6 @@ The API reference describes the pinned schema. Your running panel remains the au
 
 ## Updating the pin
 
-Maintainers update `docs/website-source.json` deliberately, review the guides and examples against that commit, and rebuild the complete website. The site build checks links and generates its API reference from the same source.
+Maintainers update `docs/website-source.json` deliberately, review the guides and examples against that release, and rebuild the complete website. Prefer a published release tag and use the tag as the label; label any other commit as a development snapshot. The site build checks links and generates its API reference from the same source.
 
 Repository pages linked from these docs use the pinned commit where an exact file version is needed.

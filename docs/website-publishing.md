@@ -10,8 +10,8 @@ combined site on pull requests; it cannot replace the homepage.
 ## Source contract
 
 `docs/website-source.json` records a full application commit SHA, its public
-repository URL and a human-readable label. The initial pin is a development
-snapshot selected by the maintainer, not a stable release.
+repository URL and a human-readable label. The label is the release tag when the
+pin is a published release; any other commit is labelled a development snapshot.
 
 The builder exports the authored guides and all imported Compose, configuration,
 OIDC and protobuf sources from that commit into a temporary directory. It
@@ -78,13 +78,13 @@ card. Keep preview titles, descriptions and alt text free of em dashes.
 ## Advance the pin
 
 1. Select and verify the intended full application commit. Prefer a published
-   stable release once the project has one; explicitly label development snapshots.
-2. Update the manifest revision and label. Keep the referenced commit reachable.
-3. Review authored docs, imported examples and API changes against that commit.
+   release tag and use the tag as the label; label any other commit as a
+   development snapshot. Keep the referenced commit reachable.
+2. Review authored docs, imported examples and API changes against that commit.
    Update the source docs first, commit them, then pin to the resulting commit.
-4. Build and check the site. Verify the version banner and source link, install
+3. Build and check the site. Verify the version banner and source link, install
    guide, search, API reference, mobile navigation, and a link back to the homepage.
-5. Merge the reviewed change. The one combined Pages artifact deploys automatically.
+4. Merge the reviewed change. The one combined Pages artifact deploys automatically.
 
 Neither publishing a docs pin nor publishing the website creates an application
 release. Pinned documentation must not claim live runtime acceptance that has
