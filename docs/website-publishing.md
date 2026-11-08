@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 # Website and pinned documentation
 
-The Pages deployment contains the marketing homepage at `/carbonpanel/` and
-Starlight documentation at `/carbonpanel/docs/`, and the standalone shared
-design system at `/carbonpanel/design-system/`. Only
+The Pages deployment contains the marketing homepage at `/` and
+Starlight documentation at `/docs/`, and the standalone shared
+design system at `/design-system/`. Only
 `.github/workflows/landing.yml` publishes Pages. The docs workflow validates the
 combined site on pull requests; it cannot replace the homepage.
 

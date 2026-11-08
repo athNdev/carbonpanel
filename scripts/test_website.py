@@ -66,9 +66,9 @@ class WebsiteTests(unittest.TestCase):
         source = '[Config](/configuration/) <iframe src="/api-reference.html"></iframe> ' + \
                  '[External](https://example.com/) git clone https://example.com/repo ' + \
                  'https://github.com/athNdev/carbonpanel/blob/main/README.md'
-        result = scoped_links(source, "/carbonpanel/docs/", "a" * 40)
-        self.assertIn("](/carbonpanel/docs/configuration/)", result)
-        self.assertIn('src="/carbonpanel/docs/api-reference.html"', result)
+        result = scoped_links(source, "/docs/", "a" * 40)
+        self.assertIn("](/docs/configuration/)", result)
+        self.assertIn('src="/docs/api-reference.html"', result)
         self.assertIn("[External](https://example.com/)", result)
         self.assertIn("git clone https://example.com/repo", result)
         self.assertIn("/blob/" + "a" * 40 + "/README.md", result)
@@ -103,7 +103,7 @@ class WebsiteTests(unittest.TestCase):
             self.assertIn("github.com/athNdev/carbonpanel/blob/main/docs/design-system/README.md", page)
             self.assertNotIn("../../web/carbon-panel/", page)
             self.assertIn('property="og:image"', page)
-            self.assertIn('content="https://athn.dev/carbonpanel/assets/og-design-system.png?v=2"', page)
+            self.assertIn('content="https://carbonpanel.dev/assets/og-design-system.png?v=2"', page)
             self.assertEqual(
                 (design / "tokens.css").read_bytes(),
                 (root / "web/carbon-panel/src/lib/design-system/tokens.css").read_bytes())

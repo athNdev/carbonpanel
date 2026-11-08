@@ -10,7 +10,7 @@ Help a new self-hosting user understand Carbon Panel, install it, bring friends
 into a first world, and use the features that distinguish it: Modpack Studio,
 datapacks, staged updates, native pause, freeze, deep sleep and wake-on-join.
 
-The website now publishes the existing repository docs under `/carbonpanel/docs/`.
+The website now publishes the existing repository docs under `/docs/`.
 The source manifest pins application content and examples to
 `d37e61a26147c76a2e5cf6b2b81a067ec3c16c90`, labelled Development snapshot.
 This is an initial publication, not acceptance of every existing guide.

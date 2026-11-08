@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://athn.dev/carbonpanel/sitemap.xml
+Sitemap: https://carbonpanel.dev/sitemap.xml

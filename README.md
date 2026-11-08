@@ -24,8 +24,8 @@ one at https://mozilla.org/MPL/2.0/.
   </p>
 
   <p>
-    <a href="https://athn.dev/carbonpanel/">Website</a> &bull;
-    <a href="https://athn.dev/carbonpanel/docs/">Documentation</a> &bull;
+    <a href="https://carbonpanel.dev/">Website</a> &bull;
+    <a href="https://carbonpanel.dev/docs/">Documentation</a> &bull;
     <a href="https://github.com/athNdev/carbonpanel/releases">Releases</a> &bull;
     <a href="docs/design-system/index.html">Design system</a> &bull;
     <a href="#quick-start">Quick start</a> &bull;
@@ -108,13 +108,13 @@ depend on the server version, host and idle-mode configuration.
 
 Carbon Panel is under active development. The website documentation displays its
 exact application commit, labelled as a development snapshot. Check
-[the documentation version](https://athn.dev/carbonpanel/docs/versions/) against
+[the documentation version](https://carbonpanel.dev/docs/versions/) against
 your installation when following a guide.
 
 ## Quick start
 
 For the full walkthrough, see
-[Docker Compose setup](https://athn.dev/carbonpanel/docs/getting-started/docker-compose/).
+[Docker Compose setup](https://carbonpanel.dev/docs/getting-started/docker-compose/).
 
 ### 1. Download the repository and build the image
 
@@ -155,14 +155,14 @@ recreating containers.
 
 | You want to... | Start here |
 | --- | --- |
-| Understand the panel | [Introduction](https://athn.dev/carbonpanel/docs/introduction/) |
-| Install it | [Docker Compose](https://athn.dev/carbonpanel/docs/getting-started/docker-compose/) |
-| Configure it | [Configuration](https://athn.dev/carbonpanel/docs/configuration/) and [config.example.yaml](config.example.yaml) |
-| Back up a server | [Server backups](https://athn.dev/carbonpanel/docs/guides/backups/) |
-| Configure sign-in | [OIDC guides](https://athn.dev/carbonpanel/docs/guides/oidc/keycloak/) |
-| Use the API | [API reference](https://athn.dev/carbonpanel/docs/api/); authenticated requests are required for protected operations |
-| Resolve a problem | [Troubleshooting](https://athn.dev/carbonpanel/docs/troubleshooting/) and [FAQ](https://athn.dev/carbonpanel/docs/faq/) |
-| Check what the docs describe | [Documentation version](https://athn.dev/carbonpanel/docs/versions/) |
+| Understand the panel | [Introduction](https://carbonpanel.dev/docs/introduction/) |
+| Install it | [Docker Compose](https://carbonpanel.dev/docs/getting-started/docker-compose/) |
+| Configure it | [Configuration](https://carbonpanel.dev/docs/configuration/) and [config.example.yaml](config.example.yaml) |
+| Back up a server | [Server backups](https://carbonpanel.dev/docs/guides/backups/) |
+| Configure sign-in | [OIDC guides](https://carbonpanel.dev/docs/guides/oidc/keycloak/) |
+| Use the API | [API reference](https://carbonpanel.dev/docs/api/); authenticated requests are required for protected operations |
+| Resolve a problem | [Troubleshooting](https://carbonpanel.dev/docs/troubleshooting/) and [FAQ](https://carbonpanel.dev/docs/faq/) |
+| Check what the docs describe | [Documentation version](https://carbonpanel.dev/docs/versions/) |
 
 Operator references in this repository include
 [server operations](docs/runbook-server-operations.md),
@@ -177,7 +177,7 @@ addresses and world data out of public reports.
 ## Development
 
 The backend is Go; the console is SvelteKit with Bun. See
-[the contributing guide](https://athn.dev/carbonpanel/docs/contributing/) for contribution and verification guidance.
+[the contributing guide](https://carbonpanel.dev/docs/contributing/) for contribution and verification guidance.
 Current CI uses Go 1.26 and Bun 1.4.2.
 
 Build the frontend before compiling a binary that embeds it:
