@@ -11,12 +11,12 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-const websiteOrigin = process.env.WEBSITE_ORIGIN || 'https://athn.dev';
+const websiteOrigin = process.env.WEBSITE_ORIGIN || 'https://carbonpanel.dev';
 
 // https://astro.build/config
 export default defineConfig({
 	site: websiteOrigin,
-	base: process.env.DOCS_BASE_PATH || '/carbonpanel/docs/',
+	base: process.env.DOCS_BASE_PATH || '/docs/',
 	trailingSlash: 'always',
 	integrations: [
 		starlight({

@@ -35,31 +35,31 @@ CARDS = {
         "eyebrow": "DOCUMENTATION",
         "title": ["Carbon Panel", "Documentation"],
         "subtitle": ["Install, configure, and run the panel on", "infrastructure you manage."],
-        "url": "athn.dev/carbonpanel/docs/",
+        "url": "carbonpanel.dev/docs/",
     },
     "og-introduction": {
         "eyebrow": "INTRODUCTION",
         "title": ["Understand", "Carbon Panel"],
         "subtitle": ["What the panel does and how it fits", "your Minecraft setup."],
-        "url": "athn.dev/carbonpanel/docs/introduction/",
+        "url": "carbonpanel.dev/docs/introduction/",
     },
     "og-docker-compose": {
         "eyebrow": "GETTING STARTED",
         "title": ["Docker Compose"],
         "subtitle": ["Requirements, the Compose file, data paths,", "and first startup."],
-        "url": "athn.dev/carbonpanel/docs/getting-started/docker-compose/",
+        "url": "carbonpanel.dev/docs/getting-started/docker-compose/",
     },
     "og-api": {
         "eyebrow": "REFERENCE",
         "title": ["API Reference"],
         "subtitle": ["Every Connect RPC, generated from the", "protobuf definitions."],
-        "url": "athn.dev/carbonpanel/docs/api/",
+        "url": "carbonpanel.dev/docs/api/",
     },
     "og-design-system": {
         "eyebrow": "DESIGN SYSTEM",
         "title": ["Carbon", "Design System"],
         "subtitle": ["Foundations, components and patterns shared", "by Carbon Panel and Carbon Cloud."],
-        "url": "athn.dev/carbonpanel/design-system/",
+        "url": "carbonpanel.dev/design-system/",
     },
 }
 

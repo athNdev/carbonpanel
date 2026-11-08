@@ -124,7 +124,7 @@ def build(root, base, site):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", default="/carbonpanel/")
-    parser.add_argument("--site", default="https://athn.dev")
+    parser.add_argument("--base", default="/")
+    parser.add_argument("--site", default="https://carbonpanel.dev")
     args = parser.parse_args()
     build(ROOT, args.base, args.site)

@@ -9,8 +9,8 @@
 // every other page keeps the Carbon Panel card so a share never renders bare.
 import Default from '@astrojs/starlight/components/Head.astro';
 
-const ORIGIN = 'https://athn.dev';
-const SITE_BASE = '/carbonpanel/';
+const ORIGIN = process.env.WEBSITE_ORIGIN || 'https://carbonpanel.dev';
+const SITE_BASE = process.env.WEBSITE_BASE_PATH || '/';
 const DEFAULT_CARD = 'assets/og.png?v=20261029i';
 const DEFAULT_ALT =
 	'Carbon Panel. Create and share modpacks, search and add datapacks, stage updates, and wake on join.';

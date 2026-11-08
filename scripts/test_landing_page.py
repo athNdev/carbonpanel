@@ -70,13 +70,13 @@ class LandingPageTests(unittest.TestCase):
             self.assertTrue(metadata[key], key)
             self.assertNotIn(chr(0x2014), metadata[key], key)
         self.assertEqual(metadata["og:image"], metadata["twitter:image"])
-        self.assertEqual(metadata["og:url"], "https://athn.dev/carbonpanel/")
+        self.assertEqual(metadata["og:url"], "https://carbonpanel.dev/")
         self.assertEqual(metadata["og:type"], "website")
         self.assertEqual(metadata["og:site_name"], "Carbon Panel")
         self.assertEqual(metadata["twitter:card"], "summary_large_image")
         image = urlsplit(metadata["og:image"])
         self.assertTrue(image.query, "A replaced preview needs a cache version")
-        self.assertTrue((root / "landing" / image.path.removeprefix("/carbonpanel/")).is_file())
+        self.assertTrue((root / "landing" / image.path.removeprefix("/")).is_file())
 
     def test_tour_screenshots_keep_the_wide_track_on_both_sides(self):
         root = Path(__file__).resolve().parent.parent

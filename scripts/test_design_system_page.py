@@ -118,16 +118,16 @@ class DesignSystemPageTests(unittest.TestCase):
             self.assertTrue(metadata.get(key), key)
             self.assertNotIn(chr(0x2014), metadata[key], key)
         self.assertEqual(metadata["og:url"],
-                         "https://athn.dev/carbonpanel/design-system/")
+                         "https://carbonpanel.dev/design-system/")
         self.assertEqual(parser.canonical, metadata["og:url"])
         self.assertEqual(metadata["og:image"], metadata["twitter:image"])
         self.assertEqual(metadata["twitter:card"], "summary_large_image")
         self.assertEqual((metadata["og:image:width"], metadata["og:image:height"]),
                          ("1200", "630"))
         image = urlsplit(metadata["og:image"])
-        self.assertEqual(image.netloc, "athn.dev")
+        self.assertEqual(image.netloc, "carbonpanel.dev")
         self.assertTrue(image.query, "A replaced preview needs a cache version")
-        target = PAGE.parent / ".." / ".." / "landing" / image.path.removeprefix("/carbonpanel/")
+        target = PAGE.parent / ".." / ".." / "landing" / image.path.removeprefix("/")
         self.assertTrue(target.resolve().is_file(), f"missing card: {target}")
 
 

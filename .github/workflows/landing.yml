@@ -4,7 +4,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 
-# One Pages artifact: homepage at /carbonpanel/, pinned docs at /carbonpanel/docs/.
+# One Pages artifact: homepage at the custom domain root, pinned docs at /docs/.
 
 name: Deploy Website to GitHub Pages
 

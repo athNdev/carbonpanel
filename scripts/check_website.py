@@ -118,7 +118,7 @@ def check_social(parser, page, root, base, site, errors):
         errors.append(f"{relative}: expected the dedicated card {card}")
 
 
-def check(root, base="/carbonpanel/", site="https://athn.dev"):
+def check(root, base="/", site="https://carbonpanel.dev"):
     errors = []
     pages = list(root.rglob("*.html"))
     for page in pages:
@@ -151,7 +151,7 @@ def check(root, base="/carbonpanel/", site="https://athn.dev"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path, nargs="?", default=Path(".website-build/site"))
-    parser.add_argument("--base", default="/carbonpanel/")
-    parser.add_argument("--site", default="https://athn.dev")
+    parser.add_argument("--base", default="/")
+    parser.add_argument("--site", default="https://carbonpanel.dev")
     args = parser.parse_args()
     check(args.root, args.base, args.site)
