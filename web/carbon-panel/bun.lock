@@ -29,7 +29,7 @@
         "ansi-to-html": "^0.7.2",
         "bits-ui": "^2.14.4",
         "carbon-components-svelte": "^0.112.0",
-        "carbon-icons-svelte": "^13.15.0",
+        "carbon-icons-svelte": "^13.18.0",
         "clsx": "^2.1.1",
         "embla-carousel-svelte": "^8.6.0",
         "eslint": "^10.14.0",
@@ -395,7 +395,7 @@
 
     "carbon-components-svelte": ["carbon-components-svelte@0.112.0", "", { "dependencies": { "@ibm/telemetry-js": "^1.5.0", "flatpickr": "4.6.9" } }, "sha512-7h+8EiCOFiaE4ydsLUyeAEn4R4p/XDAPYGORvTkLML0A6Vl49bW5JjrMukMHl+bnF8CIPA7nU3ZqqZYTUbCoPg=="],
 
-    "carbon-icons-svelte": ["carbon-icons-svelte@13.15.0", "", {}, "sha512-NzTWP1X+Qdkx4/ri6BOOSitZ2uGw0M6dMSiQAO8mgU+FTybB5z34v1qk7CRuamm6FKe+TiqRpu67IwlUm6ibdg=="],
+    "carbon-icons-svelte": ["carbon-icons-svelte@13.18.0", "", {}, "sha512-9Ga25DuZkqWuxdofqHwE5mjGiS0uM22bfdSNz6NVEGCpl//kDpUrAE9rDiZE4IbhHZoWl3rBx9GX6f7wDL9kmA=="],
 
     "chokidar": ["chokidar@4.0.3", "", { "dependencies": { "readdirp": "^4.0.1" } }, "sha512-Qgzu8kfBvo+cA4962jnP1KkS6Dop5NS6g7R5LFYJr4b8Ub94PPQXUksCw9PvXoeXPRRddRNC5C1JQUR2SMGtnA=="],
 
