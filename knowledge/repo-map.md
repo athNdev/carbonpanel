@@ -16,7 +16,7 @@ sources:
 | --- | --- |
 | `cmd/carbon-panel` | Daemon entrypoint, lifecycle, embedded frontend |
 | `cmd/carbon-fault-harness` | Fault-injection harness for tests |
-| `cmd/carbon-storage` | Storage utility; not yet wired into production |
+| `cmd/carbon-storage` | Worldstore JSON worker and nodestorage accessor mode for remote transport |
 | `cmd/geyser`, `cmd/status` | Auxiliary binaries |
 | `internal` | Controllers and subsystems (see the architecture concepts) |
 | `pkg` | Public shared packages (`mcstatus`, `routing`) also used by Cloud |

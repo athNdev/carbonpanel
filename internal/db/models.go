@@ -1010,6 +1010,7 @@ func (n *Node) SameEndpoint(other *Node) bool {
 // access and world-data paths (ADR 0005).
 func (n *Node) StorageInfo() nodestorage.NodeInfo {
 	return nodestorage.NodeInfo{
+		ID:                    n.ID,
 		Name:                  n.Name,
 		IsLocal:               n.IsLocal,
 		StorageRoot:           n.StorageRoot,

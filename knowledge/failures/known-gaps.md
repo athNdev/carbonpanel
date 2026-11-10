@@ -8,6 +8,7 @@ code_refs:
   - internal/module/hooks.go
   - internal/docker/freezer.go
   - cmd/carbon-panel
+  - internal/nodestorage
   - internal/s3
 sources:
   - title: Reliability plan
@@ -41,9 +42,11 @@ sources:
   follow the node its server runs on.
 - `internal/docker/freezer.go` takes a `ContainerFreezer` seam, but
   `cmd/carbon-panel` wires it to the local client unconditionally.
-- A remote node that does not share a filesystem mount has no transport
-  adapter. Those operations are refused instead of using the controller's
-  copy of the path.
+- Remote nodes without a controller-side storage mount can use the
+  `carbon-storage` JSON accessor worker when `storage.worker_image` is set
+  (Docker one-shot attach). Content RPCs that open `nodestorage.ForNode` use
+  it; direct-path listing, uploads, archives, backup/worldstore and metrics
+  still require shared storage or further migration onto the transport.
 
 # How to use this
 

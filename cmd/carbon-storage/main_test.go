@@ -35,7 +35,7 @@ func TestJSONLWorkerBindsIdentityAndHandlesUploadRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := serve(strings.NewReader(input.String()), &output, s); err != nil {
+	if err := serveWorldstore(strings.NewReader(input.String()), &output, s); err != nil {
 		t.Fatal(err)
 	}
 	dec := json.NewDecoder(&output)
