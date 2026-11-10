@@ -81,6 +81,19 @@ Source findings here require reproduction at the real caller seam before bug sev
 
 ## Refresh log
 
+### 2026-11-10
+
+No Docker daemon, game connection or browser walkthrough was run for this
+refresh. The entry below records an in-repo caller-seam regression, not a live
+J01–J07 qualification.
+
+| PR | What changed | Rows whose claim is affected |
+| --- | --- | --- |
+| (this PR) | CreateServer writes a manual server pack through `nodestorage.ForNode` and refuses a missing remote adapter instead of `os.Create` on a mapped path (no controller-local fallback). | O15 |
+
+A row whose claim is affected is not automatically closed. Each still needs the
+listed user-path acceptance evidence, in the deployment profile it names.
+
 ### 2026-11-04
 
 Source refreshed to `d30337d9` (plus the merged PRs listed below). No Docker

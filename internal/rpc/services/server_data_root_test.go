@@ -14,6 +14,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
@@ -177,6 +178,96 @@ func TestCreateServerRefusesARemoteNodeWithNoStorage(t *testing.T) {
 	if len(servers) != 0 {
 		t.Fatalf("created %d servers after a storage refusal", len(servers))
 	}
+	controllerServers := filepath.Join(svc.config.Storage.DataDir, "servers")
+	if _, statErr := os.Stat(controllerServers); !os.IsNotExist(statErr) {
+		t.Fatalf("controller servers directory %s: %v", controllerServers, statErr)
+	}
+}
+
+func seedManualModpack(t *testing.T, store *db.Store, id, zipBytes string) string {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), "pack.zip")
+	if err := os.WriteFile(src, []byte(zipBytes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB().Create(&db.IndexedModpack{
+		ID: id, Indexer: "manual", Name: "Manual", GameVersions: "[]",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB().Create(&db.IndexedModpackFile{
+		ID: id + "-file", ModpackID: id, DownloadURL: src,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	return src
+}
+
+func TestCreateServerPlacesManualModpackThroughRemoteTransport(t *testing.T) {
+	svc, _ := newDockerPrivilegeTestService(t)
+	workerRoot := filepath.Join(t.TempDir(), "worker-data")
+	if err := os.MkdirAll(workerRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rt := &recordingTransport{workerRoot: workerRoot}
+	nodestorage.SetTransport(rt)
+	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+
+	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
+	registerRemoteCreateNode(t, svc, "transport-create", phantomRoot)
+	seedManualModpack(t, svc.store, "manual-transport", "server-pack-bytes")
+
+	resp, err := svc.CreateServer(ctxWithRole("operator"), connect.NewRequest(&v1.CreateServerRequest{
+		Name: "generated-pack", McVersion: "1.20.1", DockerImage: "java21",
+		NodeId: "transport-create", Port: 25591, Memory: 2048, ModpackId: "manual-transport",
+	}))
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	if rt.opened == 0 {
+		t.Fatal("expected CreateServer to write the extracted server pack through nodestorage.ForNode")
+	}
+	got, readErr := os.ReadFile(filepath.Join(workerRoot, "modpack.zip"))
+	if readErr != nil || string(got) != "server-pack-bytes" {
+		t.Fatalf("transport zip = %q, %v", got, readErr)
+	}
+	assertNoControllerLocalTree(t, phantomRoot, resp.Msg.Server.DataPath)
+	if _, err := os.Stat(resp.Msg.Server.DataPath); !os.IsNotExist(err) {
+		t.Fatalf("controller data path %s exists: %v", resp.Msg.Server.DataPath, err)
+	}
+	cfg, err := svc.store.GetServerConfig(context.Background(), resp.Msg.Server.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CFModpackZip == nil || *cfg.CFModpackZip != "/data/modpack.zip" {
+		t.Fatalf("CF_MODPACK_ZIP = %v", cfg.CFModpackZip)
+	}
+}
+
+func TestCreateServerRefusesManualModpackWithoutRemoteAdapter(t *testing.T) {
+	svc, _ := newDockerPrivilegeTestService(t)
+	nodestorage.SetTransport(nil)
+	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+
+	phantomRoot := filepath.Join(t.TempDir(), "only-on-node")
+	registerRemoteCreateNode(t, svc, "transport-bare", phantomRoot)
+	seedManualModpack(t, svc.store, "manual-bare", "must-not-land")
+
+	_, err := svc.CreateServer(ctxWithRole("operator"), connect.NewRequest(&v1.CreateServerRequest{
+		Name: "bare-pack", McVersion: "1.20.1", DockerImage: "java21",
+		NodeId: "transport-bare", Port: 25592, Memory: 2048, ModpackId: "manual-bare",
+	}))
+	if connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("CreateServer error = %v, want unavailable", err)
+	}
+	servers, listErr := svc.store.ListServers(context.Background())
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(servers) != 0 {
+		t.Fatalf("created %d servers after a missing-adapter refusal", len(servers))
+	}
+	assertNoControllerLocalTree(t, phantomRoot, filepath.Join(svc.config.Storage.DataDir, "servers", "bare-pack"))
 	controllerServers := filepath.Join(svc.config.Storage.DataDir, "servers")
 	if _, statErr := os.Stat(controllerServers); !os.IsNotExist(statErr) {
 		t.Fatalf("controller servers directory %s: %v", controllerServers, statErr)
