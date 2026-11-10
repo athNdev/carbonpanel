@@ -586,6 +586,14 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
+	if err != nil {
+		return nil, storageError(err)
+	}
+	if nodestorage.RequiresRemoteTransport(info) {
+		return s.extractArchiveViaAccessor(ctx, server, msg)
+	}
+
 	if err := refuseLocalPathPipeline(ctx, s.store, server); err != nil {
 		return nil, storageError(err)
 	}
@@ -602,7 +610,7 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 	}
 
 	// Check if archive exists
-	info, err := os.Stat(fullArchivePath)
+	archiveInfo, err := os.Stat(fullArchivePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("archive not found"))
@@ -611,7 +619,7 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 	}
 
 	// Ensure it's not a directory
-	if info.IsDir() {
+	if archiveInfo.IsDir() {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path is a directory, not an archive"))
 	}
 
@@ -651,6 +659,61 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		// The extracted tree must belong to whoever runs the game, otherwise
 		// the container cannot rewrite server.properties or save worlds.
 		s.adoptServerOwnership(root, destPath, true)
+		op.complete()
+		s.log.Info("Extraction %s completed: %d files", opID, op.FilesExtracted.Load())
+	}()
+
+	return connect.NewResponse(&v1.ExtractArchiveResponse{
+		OperationId: opID,
+	}), nil
+}
+
+// extractArchiveViaAccessor streams a zip through nodestorage.ForNode. It
+// never calls dataRootFor or os.MkdirAll, so a transport-only node cannot
+// grow a controller-local tree (ADR 0005).
+func (s *FileService) extractArchiveViaAccessor(ctx context.Context, server *storage.Server, msg *v1.ExtractArchiveRequest) (*connect.Response[v1.ExtractArchiveResponse], error) {
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
+	if err != nil {
+		return nil, storageError(err)
+	}
+	acc, err := nodestorage.ForNode(info, server.DataPath)
+	if err != nil {
+		return nil, storageError(err)
+	}
+
+	st, err := acc.Stat(msg.Path)
+	if err != nil {
+		_ = acc.Close()
+		if os.IsNotExist(err) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("archive not found"))
+		}
+		if nodestorage.IsEscape(err) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid archive path"))
+		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to access archive"))
+	}
+	if st.IsDir() {
+		_ = acc.Close()
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path is a directory, not an archive"))
+	}
+
+	destRel := nodestorage.DestRelFromArchive(msg.Path)
+	opID := uuid.New().String()
+	userID := ""
+	if user := auth.GetUserFromContext(ctx); user != nil {
+		userID = user.ID
+	}
+	op := &extractionOp{State: "extracting", ServerID: server.ID, UserID: userID}
+	s.extractions.Store(opID, op)
+
+	go func() {
+		defer func() { _ = acc.Close() }()
+		_, err := nodestorage.ExtractZip(context.Background(), acc, msg.Path, destRel, &op.FilesExtracted)
+		if err != nil {
+			op.fail(err.Error())
+			s.log.Error("Extraction %s failed: %v", opID, err)
+			return
+		}
 		op.complete()
 		s.log.Info("Extraction %s completed: %d files", opID, op.FilesExtracted.Load())
 	}()
