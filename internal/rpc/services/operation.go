@@ -161,6 +161,7 @@ func (s *OperationService) recordResolution(ctx context.Context, op *storage.Ser
 		SubjectTyp: "server",
 		SubjectID:  op.ServerID,
 		Properties: props,
+		RequestID:  operation.ClientRequestID(op),
 	}
 	if u := auth.GetUserFromContext(ctx); u != nil {
 		entry.ActorID = u.ID
@@ -195,6 +196,7 @@ func operationMessage(v operation.View) *v1.LifecycleOperation {
 		HasContainer:       v.HasContainer,
 		EndpointGeneration: v.EndpointGeneration,
 		LastError:          v.LastError,
+		RequestId:          v.RequestID,
 	}
 	if !v.StartedAt.IsZero() {
 		msg.StartedAt = timestamppb.New(v.StartedAt)

@@ -6,9 +6,12 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/operation
+  - internal/activity
   - internal/db
   - internal/rpc/services/operation.go
+  - internal/rpc/services/activity.go
   - web/carbon-panel/src/lib/components/server-operations.svelte
+  - web/carbon-panel/src/lib/components/server-activity.svelte
 sources:
   - title: Server operations runbook
     resource: ../../docs/runbook-server-operations.md
@@ -44,6 +47,11 @@ exists to prevent.
 - The journal is readable only through a server: every RPC carries a
   `server_id` that is the RBAC object id, and an empty one is not a wildcard
   grant.
+- A journaled mutation that writes an activity row stores the client
+  `request_id` on that row. `operation.Describe` exposes the same id so a
+  journal row and an activity event join. Listing activity for one server
+  never returns another server's rows or request ids. Redaction of recorded
+  error text is unchanged.
 
 # Read next
 

@@ -85,6 +85,9 @@ type View struct {
 	LastError          string     `json:"lastError,omitempty"`
 	StartedAt          time.Time  `json:"startedAt"`
 	UpdatedAt          time.Time  `json:"updatedAt"`
+	// RequestID is the client request id that keyed this row, when one was
+	// supplied. It is the join key with activity events.
+	RequestID string `json:"requestId,omitempty"`
 }
 
 // Describe projects a journal row for diagnostics, judged against the wall
@@ -115,7 +118,26 @@ func DescribeAt(op *db.ServerOperation, now time.Time) View {
 		LastError:          RedactError(op.LastError),
 		StartedAt:          op.CreatedAt,
 		UpdatedAt:          op.UpdatedAt,
+		RequestID:          ClientRequestID(op),
 	}
+}
+
+// ClientRequestID is the caller-supplied request id stored on a journal row.
+// StorageKey concatenates that id with the kind; a generated key (empty
+// request id) is returned as-is so an operator can still quote it.
+func ClientRequestID(op *db.ServerOperation) string {
+	if op == nil {
+		return ""
+	}
+	key := strings.TrimSpace(op.RequestKey)
+	if key == "" || op.Kind == "" {
+		return key
+	}
+	suffix := ":" + op.Kind
+	if strings.HasSuffix(key, suffix) {
+		return strings.TrimSuffix(key, suffix)
+	}
+	return key
 }
 
 // DescribeAll projects every row, preserving order.

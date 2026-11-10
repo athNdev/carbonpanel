@@ -32,3 +32,5 @@
   expect: architecture/runtime
 - query: Which packages own the Locator lifecycle handle idle-power PlanFor and worldstore seams?
   expect: architecture/runtime-seams
+- query: How do journal rows join activity events?
+  expect: architecture/operation-journal

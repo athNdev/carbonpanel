@@ -6,7 +6,8 @@ the mutation finishes or startup has observed the container.
 
 A repeat of the same client `request_id` for the same server and action does
 not run that mutation twice. A new attempt after a failure uses a new
-`request_id`.
+`request_id`. The same id is stored on the matching activity-feed row so the
+journal and the audit trail join.
 
 ## When a server stays locked
 
