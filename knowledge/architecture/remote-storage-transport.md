@@ -9,6 +9,9 @@ code_refs:
   - internal/storageworker
   - internal/docker/storage_transport.go
   - cmd/carbon-storage
+  - internal/rpc/services/file.go
+  - internal/rpc/services/storage_node.go
+  - internal/rpc/services/server.go
 sources:
   - title: ADR 0005 node-aware file access
     resource: ../../docs/adr/0005-node-aware-file-access.md
@@ -36,6 +39,18 @@ registers `docker.StorageTransport` on startup.
 
 With no transport configured, transport-only nodes keep `ErrUnavailable`. Remote
 accessors never fall back to controller paths.
+
+# File RPC coverage
+
+Accessor-backed file RPCs (`ListFiles`, `UpdateFile`, `DeleteFile`,
+`SaveUploadedFile`, `GetFile`, `RenameFile`, `CreateFolder`, `CopyFile`,
+`MoveFile`, `InitFileDownload`) and `serverLatestLog` open storage through
+`nodestorage.ForNode`. Zip-oriented RPCs (`CreateArchive`, `DownloadArchive`,
+`ExtractArchive`, `DownloadRemoteArchive`) and `ExportWorld` still walk or
+build archives on the controller filesystem; transport-only nodes are refused
+at those entry points until a streaming zip path exists. No worker means
+`ErrUnavailable` / Connect `CodeUnavailable` — never a controller-local
+fallback.
 
 # Read next
 

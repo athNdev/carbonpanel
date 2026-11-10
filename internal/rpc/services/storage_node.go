@@ -42,3 +42,16 @@ func dataRootFor(ctx context.Context, store *storage.Store, server *storage.Serv
 	}
 	return nodestorage.MapDataPath(info, server.DataPath)
 }
+
+// refuseLocalPathPipeline reports when a pipeline still walks the controller
+// filesystem (zip/extract) and must not run on transport-only nodes.
+func refuseLocalPathPipeline(ctx context.Context, store *storage.Store, server *storage.Server) error {
+	info, err := storageNodeInfo(ctx, store, server.NodeID)
+	if err != nil {
+		return err
+	}
+	if nodestorage.RequiresRemoteTransport(info) {
+		return fmt.Errorf("%w: operation is not available for transport-only node %q", nodestorage.ErrUnavailable, info.Name)
+	}
+	return nil
+}
