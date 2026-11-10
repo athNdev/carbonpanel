@@ -75,21 +75,36 @@ func TestComposeUpgradeKeepsBindMountedData(t *testing.T) {
 		"--apply",
 		"Leave worlds and bind mounts untouched",
 		"Helm and Terraform are not shipped",
+		"not running compose up",
+		"compose-upgrade-rollback.sh",
+		"not a prune",
 	} {
 		if !strings.Contains(script, needle) {
 			t.Errorf("compose-upgrade.sh must contain %q", needle)
 		}
 	}
 	assertNoDataDestruction(t, "scripts/compose-upgrade.sh", script)
+	snapIdx := strings.Index(script, `"${SNAPSHOT_CMD[@]}"`)
+	upIdx := strings.Index(script, `"${UP_CMD[@]}"`)
+	if snapIdx < 0 || upIdx < 0 || snapIdx > upIdx {
+		t.Fatal("compose-upgrade.sh must invoke the snapshot before compose up")
+	}
+	failBranch := script[snapIdx:upIdx]
+	if !strings.Contains(failBranch, "not running compose up") {
+		t.Fatal("compose-upgrade.sh must stop before up when the snapshot fails")
+	}
 
 	matrix := readRepoFile(t, root, "docs/deployment-modes.md")
 	for _, needle := range []string{
 		"scripts/compose-upgrade.sh",
+		"scripts/compose-upgrade-rollback.sh",
 		"Helm",
 		"Terraform",
 		"Not shipped",
 		"create → join",
 		"Rootless Docker",
+		"disk-full",
+		"copy-back",
 	} {
 		if !strings.Contains(matrix, needle) {
 			t.Errorf("docs/deployment-modes.md must name %q", needle)
@@ -214,4 +229,181 @@ func keys(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func TestComposeUpgradeRollbackIsCopyBackNotPrune(t *testing.T) {
+	root := repoRoot(t)
+	script := readRepoFile(t, root, "scripts/compose-upgrade-rollback.sh")
+	for _, needle := range []string{
+		"--snapshot",
+		"cp ",
+		"copy-back",
+		"Leave worlds and bind mounts untouched",
+		"not a prune",
+		"Dry-run only",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Errorf("compose-upgrade-rollback.sh must contain %q", needle)
+		}
+	}
+	assertNoDataDestruction(t, "scripts/compose-upgrade-rollback.sh", script)
+	if strings.Contains(script, "rm -rf") {
+		t.Fatal("rollback script must not rm -rf (worlds/backups must stay)")
+	}
+	for _, line := range strings.Split(script, "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "rm ") && (strings.Contains(trim, "world") || strings.Contains(trim, "backup")) {
+			t.Fatalf("rollback must not delete worlds or backups: %s", trim)
+		}
+	}
+
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	world := filepath.Join(dataDir, "servers", "alpha", "world", "level.dat")
+	backup := filepath.Join(dir, "backups", "world.zip")
+	if err := os.MkdirAll(filepath.Dir(world), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(backup), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(world, []byte("world-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backup, []byte("backup-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(dataDir, "carbon-panel.db")
+	if err := writeProbeDB(t, dbPath, "after-upgrade"); err != nil {
+		t.Logf("skipping live rollback script: %v", err)
+		return
+	}
+	snapshot := filepath.Join(dir, "carbon-panel-db-20261110T000000Z.sqlite")
+	if err := writeProbeDB(t, snapshot, "before-upgrade"); err != nil {
+		t.Fatal(err)
+	}
+
+	runRollback := func(apply bool) (string, error) {
+		bash, err := exec.LookPath("bash")
+		if err != nil {
+			return "", err
+		}
+		args := []string{
+			filepath.Join(root, "scripts/compose-upgrade-rollback.sh"),
+			"--data-dir", dataDir,
+			"--snapshot", snapshot,
+		}
+		if apply {
+			args = append(args, "--apply")
+		}
+		cmd := exec.Command(bash, args...)
+		out, runErr := cmd.CombinedOutput()
+		return string(out), runErr
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Log("skipping bash compose-upgrade-rollback.sh on Windows; Linux CI executes it")
+		if err := copyFile(snapshot, dbPath); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Remove(dbPath + "-wal")
+		_ = os.Remove(dbPath + "-shm")
+	} else if _, err := exec.LookPath("bash"); err != nil {
+		t.Log("bash not on PATH; proving restore-by-copy without running the operator script")
+		if err := copyFile(snapshot, dbPath); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Remove(dbPath + "-wal")
+		_ = os.Remove(dbPath + "-shm")
+	} else {
+		out, err := runRollback(false)
+		if err != nil {
+			t.Fatalf("rollback dry-run: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "Dry-run only") {
+			t.Fatalf("default rollback must be dry-run:\n%s", out)
+		}
+		got, readErr := readProbeDB(t, dbPath)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if got != "after-upgrade" {
+			t.Fatalf("dry-run must not copy the snapshot, got %q", got)
+		}
+		out, err = runRollback(true)
+		if err != nil {
+			t.Fatalf("rollback --apply: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "Leave worlds and bind mounts untouched") {
+			t.Fatalf("apply output must document world retention:\n%s", out)
+		}
+	}
+
+	got, err := readProbeDB(t, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "before-upgrade" {
+		t.Fatalf("restored database = %q, want before-upgrade", got)
+	}
+	gotWorld, err := os.ReadFile(world)
+	if err != nil || string(gotWorld) != "world-bytes" {
+		t.Fatalf("world must survive rollback: %v %q", err, gotWorld)
+	}
+	gotBackup, err := os.ReadFile(backup)
+	if err != nil || string(gotBackup) != "backup-bytes" {
+		t.Fatalf("backups dir must survive rollback: %v %q", err, gotBackup)
+	}
+}
+
+func TestComposeUpgradeStopsBeforeUpWhenSnapshotFails(t *testing.T) {
+	root := repoRoot(t)
+	if runtime.GOOS == "windows" {
+		t.Log("skipping bash snapshot-failure apply on Windows; Linux CI executes it")
+		return
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Log("bash not on PATH")
+		return
+	}
+
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	world := filepath.Join(dataDir, "servers", "alpha", "world", "level.dat")
+	if err := os.MkdirAll(filepath.Dir(world), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(world, []byte("world-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(dataDir, "carbon-panel.db")
+	if err := writeProbeDB(t, dbPath, "live"); err != nil {
+		t.Logf("skipping live snapshot-failure apply: %v", err)
+		return
+	}
+
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	cmd := exec.Command(bash, filepath.Join(root, "scripts/compose-upgrade.sh"),
+		"--compose", filepath.Join(root, "docker-compose.yml"),
+		"--data-dir", dataDir, "--apply")
+	out, runErr := cmd.CombinedOutput()
+	text := string(out)
+	if runErr == nil {
+		t.Fatalf("expected snapshot failure to stop the upgrade:\n%s", text)
+	}
+	if !strings.Contains(text, "not running compose up") {
+		t.Fatalf("failed snapshot must stop before compose up:\n%s", text)
+	}
+	if !strings.Contains(text, "compose-upgrade-rollback.sh") {
+		t.Fatalf("failed snapshot must name copy-back rollback:\n%s", text)
+	}
+	gotWorld, err := os.ReadFile(world)
+	if err != nil || string(gotWorld) != "world-bytes" {
+		t.Fatalf("failed snapshot must not touch worlds: %v %q", err, gotWorld)
+	}
 }

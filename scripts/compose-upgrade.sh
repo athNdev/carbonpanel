@@ -22,6 +22,10 @@
 # Helm and Terraform are not shipped in this repository. Do not treat this
 # script as a Kubernetes or cloud rollout.
 #
+# Interrupted upgrade / disk-full: if the snapshot fails, this script stops
+# before compose up. Worlds stay on the host. Roll back a damaged database
+# with scripts/compose-upgrade-rollback.sh (copy-back, not a prune).
+#
 # After --apply, confirm the server list and that world directories on the
 # bind mount still exist. A live create→join after upgrade still needs a
 # host with Docker and a disposable Minecraft server.
@@ -34,7 +38,7 @@ DATA_DIR="/opt/carbon-panel/data"
 APPLY=false
 
 usage() {
-	sed -n '2,28p' "$0" | sed 's/^# \?//'
+	sed -n '2,32p' "$0" | sed 's/^# \?//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -101,7 +105,11 @@ if [[ ! -d "$DATA_DIR" ]]; then
 	exit 1
 fi
 
-"${SNAPSHOT_CMD[@]}"
+if ! "${SNAPSHOT_CMD[@]}"; then
+	echo "snapshot failed (disk full, interrupted copy, or missing tools); not running compose up."
+	echo "Worlds and bind mounts are untouched. Rollback is copy-back of a prior snapshot via scripts/compose-upgrade-rollback.sh, not a prune."
+	exit 1
+fi
 "${UP_CMD[@]}"
 echo "Compose service recreated. Confirm the server list; world directories on the bind mount must still be present."
 echo "Leave worlds and bind mounts untouched."

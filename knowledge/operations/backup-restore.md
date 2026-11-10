@@ -11,6 +11,7 @@ code_refs:
   - internal/worldstore
   - scripts/snapshot-panel-db.sh
   - scripts/compose-upgrade.sh
+  - scripts/compose-upgrade-rollback.sh
   - docker-compose.yml
 sources:
   - title: Backup confirmation issue
@@ -55,7 +56,9 @@ copying that file onto `database.path` with the panel stopped; do not touch
 worlds or bind mounts. `make test`, `scripts/web-build.sh`, `make clean` and
 `docker compose up`/`down` do not take or restore that snapshot.
 `scripts/compose-upgrade.sh --apply` snapshots then recreates the panel
-container with `up -d --pull always`; host data directories stay in place.
+container with `up -d --pull always`; a failed snapshot stops before `up`.
+Host data directories stay in place. Restore with
+`scripts/compose-upgrade-rollback.sh` (copy-back, not a prune).
 
 # Read next
 

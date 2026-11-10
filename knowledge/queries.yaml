@@ -8,6 +8,8 @@
   expect: operations/backup-restore
 - query: How do I upgrade a Compose install without deleting worlds?
   expect: operations/deployment-modes
+- query: How do I roll back a Compose upgrade without deleting worlds?
+  expect: operations/deployment-modes
 - query: Does Carbon Panel ship Helm or Terraform?
   expect: operations/deployment-modes
 - query: How does the TCP proxy route a Minecraft handshake by hostname?
