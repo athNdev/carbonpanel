@@ -89,7 +89,7 @@ J01–J07 qualification.
 
 | PR | What changed | Rows whose claim is affected |
 | --- | --- | --- |
-| (this PR) | CreateServer writes a manual server pack through `nodestorage.ForNode` and refuses a missing remote adapter instead of `os.Create` on a mapped path (no controller-local fallback). | O15 |
+| #406 | CreateServer writes a manual server pack through `nodestorage.ForNode` and refuses a missing remote adapter instead of `os.Create` on a mapped path (no controller-local fallback). | O15 |
 
 A row whose claim is affected is not automatically closed. Each still needs the
 listed user-path acceptance evidence, in the deployment profile it names.
