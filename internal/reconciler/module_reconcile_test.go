@@ -8,11 +8,15 @@ package reconciler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
+
 	"github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
@@ -42,6 +46,12 @@ func (r *recordingModules) calls() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.seen...)
+}
+
+func (r *recordingModules) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = nil
 }
 
 // moduleAwareStore adds ListModules to the test store, which is how the sweep
@@ -142,6 +152,86 @@ func TestTheSweepAlsoCoversModulesWithAContainer(t *testing.T) {
 			t.Fatalf("calls = %v, want sweep to include %s", calls, id)
 		}
 	}
+}
+
+func TestAServerAdoptionSchedulesChildModules(t *testing.T) {
+	server := &db.Server{
+		ID: "srv-parent", Name: "Survival", NodeID: "default",
+		ContainerID: "old-container", Status: db.StatusRunning,
+	}
+	modules := &recordingModules{}
+	store := &moduleAwareStore{
+		Store: newFakeStore(server),
+		modules: []*db.Module{
+			{ID: "sidecar", ServerID: "srv-parent", ContainerID: "mod-c1", Status: db.ModuleStatusRunning},
+			{ID: "other-server", ServerID: "srv-other", ContainerID: "mod-c2", Status: db.ModuleStatusRunning},
+		},
+	}
+	cli := &fakeClient{
+		summary: &container.Summary{ID: "new-container"},
+		state:   &docker.ContainerState{ContainerID: "new-container", Status: db.StatusRunning},
+	}
+	r := New(store, fakeResolver{cli: cli}, nil, nil, nil, logger.New(), Config{
+		DebounceWindow: 10 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.SetModuleReconciler(modules)
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		r.Stop()
+		cancel()
+	})
+	waitFor(t, func() bool {
+		return r.LastSweepAt().After(time.Time{}) && len(modules.calls()) >= 2
+	})
+	modules.reset()
+
+	if err := r.ReconcileServer(ctx, "srv-parent"); err != nil {
+		t.Fatalf("ReconcileServer: %v", err)
+	}
+
+	waitFor(t, func() bool {
+		calls := modules.calls()
+		return len(calls) == 1 && calls[0] == "sidecar"
+	})
+}
+
+func TestAServerSelfHealRecreateSchedulesChildModules(t *testing.T) {
+	server := &db.Server{
+		ID: "srv-parent", Name: "Survival", NodeID: "default",
+		ContainerID: "gone", Status: db.StatusRunning,
+	}
+	modules := &recordingModules{}
+	store := &moduleAwareStore{
+		Store: newFakeStore(server),
+		modules: []*db.Module{
+			{ID: "sidecar", ServerID: "srv-parent", ContainerID: "", Status: db.ModuleStatusRunning},
+		},
+	}
+	cli := &fakeClient{resolveErr: fmt.Errorf("%w: srv-parent", docker.ErrContainerNotResolved)}
+	r := New(store, fakeResolver{cli: cli}, nil, nil, nil, logger.New(), Config{
+		DebounceWindow: 10 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	r.SetModuleReconciler(modules)
+	r.Start(ctx, nil)
+	t.Cleanup(func() {
+		r.Stop()
+		cancel()
+	})
+	waitFor(t, func() bool {
+		return r.LastSweepAt().After(time.Time{}) && len(modules.calls()) >= 1
+	})
+	modules.reset()
+
+	if err := r.ReconcileServer(ctx, "srv-parent"); err != nil {
+		t.Fatalf("ReconcileServer: %v", err)
+	}
+
+	waitFor(t, func() bool {
+		calls := modules.calls()
+		return len(calls) == 1 && calls[0] == "sidecar"
+	})
 }
 
 func TestAModulePassPropagatesToDependents(t *testing.T) {

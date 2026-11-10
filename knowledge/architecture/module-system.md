@@ -54,8 +54,10 @@ reconciler only schedules it, so templates, hooks and dependency ordering stay
 with the module manager. When a pass adopts, recreates, or records a stopped
 module, the reconciler also schedules any module that declared a dependency on
 it, so a waiting sidecar can converge without waiting only on the periodic
-sweep. The sweep still revisits every running module row even when its
-container id is empty.
+sweep. The same propagation runs for the parent server: when a server pass
+adopts or recreates its container, or transitions to running or stopped, every
+module on that server is scheduled. The sweep still revisits every running
+module row even when its container id is empty.
 
 # Known gap
 
