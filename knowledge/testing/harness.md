@@ -27,7 +27,10 @@ every package without executing the Windows binaries.
 `internal/docscheck` is part of the suite. It resolves every code path cited by
 `docs/plans/oss-feature-completeness-matrix.md` and fails when a cited path no
 longer exists, when a feature id repeats, or when a row's status is not one the
-legend defines. A planning claim therefore cannot outlive the code it names.
+legend defines. It also requires DESIGN.md §4.5 to cite the five architecture
+seam packages (`locator.go`, `transition.go`, `idle.go`, `plan.go`,
+`worldstore`) and fails if those paths disappear. A planning claim therefore
+cannot outlive the code it names.
 
 # Use it when
 

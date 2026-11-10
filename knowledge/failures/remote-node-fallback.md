@@ -28,7 +28,8 @@ not answer a named node with the local daemon.
 
 # Remaining exposure
 
-- `internal/docker/freezer.go` still targets the local client unconditionally.
+- Hibernation resolves through Locator via `SetFreezerResolver`; a nil freezer
+  from that callback must not be treated as the local daemon for a remote node.
 - `internal/module/hooks.go:execInModule` still uses the manager's client.
 - Creating a server, deleting it, mod installation, packwiz bake, snapshot
   create/restore, scheduled backup archives, and scheduled modpack sync use

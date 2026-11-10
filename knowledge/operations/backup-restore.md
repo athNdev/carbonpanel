@@ -8,6 +8,7 @@ code_refs:
   - internal/s3
   - internal/snapshot
   - internal/scheduler
+  - internal/worldstore
 sources:
   - title: Backup confirmation issue
     resource: ../../docs/issues/013-UI-5-backup-confirmation-dialogs.md

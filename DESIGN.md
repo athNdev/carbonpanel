@@ -239,6 +239,20 @@ Carbon Panel supports a distributed, multi-node topology. The architecture disti
 - **Write scaling ceiling**: SQLite's single-writer model caps concurrent control-plane writes (server CRUD, task scheduling, RBAC changes) as node/server count grows.
 - **Deliberate decision (open)**: if multi-controller failover is a real near-term goal, `rqlite`/`dqlite` (Raft-replicated SQLite) are the minimal-change options, with `Litestream` continuous backup to object storage as a cheaper way to bound data loss from the existing single-writer setup; a full move to PostgreSQL is the more conventional path only if genuine multi-writer horizontal write scaling is needed. This decision is intentionally left open and should be revisited before controller HA becomes a requirement.
 
+### 4.5 Runtime, lifecycle and world-data seams
+
+Five internal seams concentrate node-to-daemon resolution, lifecycle ownership, idle-power policy, proxy route planning, and world-data snapshot/restore. Call sites must use these modules rather than re-implementing the same rules. The ADRs are authoritative for rationale; this table is the package map.
+
+| Seam | Package path | Owns | ADR |
+| :--- | :--- | :--- | :--- |
+| Locator | `internal/docker/locator.go` | One node-addressed adapter from a logical node to a Docker client or command executor, with typed fail-closed errors (`ErrUnknownNode`, `ErrNoClient`). Never `(nil, nil)`. | [0004-docker-locator](docs/adr/0004-docker-locator.md) |
+| Lifecycle handle | `internal/docker/transition.go` | One `Transition` claim: `TryBeginServerTransition` returns the handle; only that handle can `Release()`, and release is idempotent. | [0005-lifecycle-transitions](docs/adr/0005-lifecycle-transitions.md) |
+| Idle-power module | `internal/docker/idle.go` | Shared idle tracker, mode data and sweep runner. Freeze and deep sleep are `idleMode` values, not a second manager copy. | [0006-idle-modes-are-data](docs/adr/0006-idle-modes-are-data.md) |
+| Route PlanFor | `internal/proxy/plan.go` | Pure `PlanFor` over already-observed server, node and listener views. The proxy manager applies plans; it does not encode route policy under the lock. | [0004-proxy-route-plans](docs/adr/0004-proxy-route-plans.md) |
+| Worldstore | `internal/worldstore` | Quiesce, manifest snapshot, backup and journaled restore of world data. Default scheduled backups and restores use this seam. | [0004-world-data-seam](docs/adr/0004-world-data-seam.md) |
+
+`internal/docscheck` fails CI when a path in this table is renamed or deleted, or when DESIGN.md drops the citation.
+
 ---
 
 ## 5. API & Protocol Contracts

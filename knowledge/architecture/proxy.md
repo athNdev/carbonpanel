@@ -6,6 +6,7 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/proxy
+  - internal/proxy/plan.go
   - pkg/routing
   - web/carbon-panel/src/lib/components/server-routing.svelte
 sources:
@@ -25,6 +26,8 @@ right container port. SRV records are handled so clients do not need a port.
   fallback server.
 - Route lookup is owned by `pkg/routing`; the proxy does not invent a second
   routing model.
+- Route mutation policy is `PlanFor` in `internal/proxy/plan.go`. The manager
+  observes state, then applies the plan. See [runtime seams](runtime-seams.md).
 - A route change must be reflected in the console and the proxy without a
   restart where the existing implementation allows it.
 

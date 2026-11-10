@@ -20,3 +20,5 @@
   expect: workflows/frontend-change
 - query: Which health endpoint fails when the database is down but not when a Docker node is down?
   expect: operations/health-checks
+- query: Which packages own the Locator lifecycle handle idle-power PlanFor and worldstore seams?
+  expect: architecture/runtime-seams

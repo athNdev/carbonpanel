@@ -50,6 +50,71 @@ func TestFeatureMatrixCitesExistingSource(t *testing.T) {
 	}
 }
 
+func TestArchitectureSeamsAreCitedAndExist(t *testing.T) {
+	root := repoRoot(t)
+	const design = "DESIGN.md"
+	if _, err := os.Stat(filepath.Join(root, design)); err != nil {
+		t.Skipf("%s is not present in this checkout: %v", design, err)
+	}
+
+	problems, err := CheckRecordedSeams(root, design)
+	if err != nil {
+		t.Fatalf("CheckRecordedSeams: %v", err)
+	}
+	for _, problem := range problems {
+		t.Errorf("%s", problem)
+	}
+}
+
+func TestCheckRecordedSeamsReportsAMissingCitation(t *testing.T) {
+	root := t.TempDir()
+	for _, seam := range RecordedSeams {
+		path := filepath.Join(root, filepath.FromSlash(seam.Path))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Ext(path) == "" {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err := os.WriteFile(path, []byte("package docker\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "DESIGN.md"), []byte("# empty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	problems, err := CheckRecordedSeams(root, "DESIGN.md")
+	if err != nil {
+		t.Fatalf("CheckRecordedSeams: %v", err)
+	}
+	if len(problems) != len(RecordedSeams) {
+		t.Fatalf("problems = %v, want one missing citation per seam", problems)
+	}
+}
+
+func TestCheckRecordedSeamsReportsAMissingPath(t *testing.T) {
+	root := t.TempDir()
+	var cites []string
+	for _, seam := range RecordedSeams {
+		cites = append(cites, "`"+seam.Path+"`")
+	}
+	if err := os.WriteFile(filepath.Join(root, "DESIGN.md"), []byte(strings.Join(cites, " ")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	problems, err := CheckRecordedSeams(root, "DESIGN.md")
+	if err != nil {
+		t.Fatalf("CheckRecordedSeams: %v", err)
+	}
+	if len(problems) != len(RecordedSeams) {
+		t.Fatalf("problems = %v, want one missing path per seam", problems)
+	}
+}
+
 func TestCheckMatrixReportsAMissingPath(t *testing.T) {
 	problems, err := CheckMatrixText(t.TempDir(), "| O01 — Example | UI | `Services/gone.go` | **Source-present.** text |")
 	if err != nil {
