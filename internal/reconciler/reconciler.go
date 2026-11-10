@@ -407,6 +407,55 @@ func (r *Reconciler) safeReconcileModule(moduleID string) {
 	if outcome != "" && outcome != "in_sync" && r.log != nil {
 		r.log.Info("reconciler: module %s converged: %s", moduleID, outcome)
 	}
+	if err == nil {
+		r.scheduleModuleDependents(moduleID, outcome)
+	}
+}
+
+// scheduleModuleDependents queues a pass for modules that declared a dependency
+// on moduleID. A dependency becoming ready or stopping is what unblocks a
+// waiting sidecar; without this, dependents relied on the periodic sweep alone.
+func (r *Reconciler) scheduleModuleDependents(moduleID, outcome string) {
+	switch outcome {
+	case "adopted", "recreated", "stopped":
+	default:
+		return
+	}
+	if moduleID == "" || r.modules == nil {
+		return
+	}
+	moduleStore, ok := r.store.(ModuleStore)
+	if !ok {
+		return
+	}
+	ctx := r.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	modules, err := moduleStore.ListModules(ctx)
+	if err != nil {
+		if r.log != nil {
+			r.log.Error("reconciler: list modules for dependent propagation: %v", err)
+		}
+		return
+	}
+	for _, m := range modules {
+		if m == nil || m.ID == moduleID {
+			continue
+		}
+		if moduleDependsOn(m, moduleID) {
+			r.requestModule(m.ID)
+		}
+	}
+}
+
+func moduleDependsOn(mod *db.Module, moduleID string) bool {
+	for _, dep := range mod.Dependencies {
+		if dep != nil && dep.ModuleId == moduleID {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Reconciler) clearQueued(serverID string) {
@@ -501,7 +550,12 @@ func (r *Reconciler) enqueueAll(ctx context.Context) {
 		return
 	}
 	for _, m := range modules {
-		if m == nil || m.ContainerID == "" {
+		if m == nil {
+			continue
+		}
+		// A running row with no container id still needs passes (for example
+		// while waiting to recreate once a dependency or host port frees up).
+		if m.ContainerID == "" && m.Status != db.ModuleStatusRunning {
 			continue
 		}
 		r.requestModule(m.ID)

@@ -339,6 +339,101 @@ func TestReconcileModuleLeavesTheRecordAloneWhenTheNodeIsUnreachable(t *testing.
 	}
 }
 
+func TestReconcileModuleWaitsWhenADependencyIsStopped(t *testing.T) {
+	manager, store := newModuleReconcileFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/containers/json") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		http.NotFound(w, r)
+	})
+	ctx := context.Background()
+	server := &storage.Server{ID: "srv-deps", Name: "srv", Status: storage.StatusRunning, NodeID: "local"}
+	if err := store.DB().Create(server).Error; err != nil {
+		t.Fatal(err)
+	}
+	dep := &storage.Module{
+		ID: "mod-dep", Name: "dependency", ServerID: server.ID, NodeID: "local",
+		Status: storage.ModuleStatusStopped,
+	}
+	child := &storage.Module{
+		ID: "mod-child", Name: "sidecar", ServerID: server.ID, NodeID: "local",
+		ContainerID: "gone", Status: storage.ModuleStatusRunning,
+		Dependencies: []*v1.ModuleDependency{{ModuleId: dep.ID}},
+	}
+	for _, row := range []*storage.Module{dep, child} {
+		if err := store.DB().Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	outcome, err := manager.ReconcileModule(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("ReconcileModule: %v", err)
+	}
+	if outcome != ReconcileWaiting {
+		t.Fatalf("outcome = %s, want waiting", outcome)
+	}
+	got, err := store.GetModule(ctx, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContainerID != "gone" || got.Status != storage.ModuleStatusRunning {
+		t.Fatalf("record changed while waiting: %+v", got)
+	}
+}
+
+func TestReconcileModuleWaitsWhenAHostPortIsTaken(t *testing.T) {
+	manager, store := newModuleReconcileFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]"))
+		case strings.Contains(r.URL.Path, "/network/ports"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("{}"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	ctx := context.Background()
+	server := &storage.Server{ID: "srv-port", Name: "srv", Status: storage.StatusRunning, NodeID: "local", Port: 25565}
+	if err := store.DB().Create(server).Error; err != nil {
+		t.Fatal(err)
+	}
+	holder := &storage.Module{
+		ID: "mod-holder", Name: "holder", ServerID: server.ID, NodeID: "local",
+		Status: storage.ModuleStatusRunning,
+		Ports:  []*v1.ModulePort{{Name: "web", HostPort: 8100, ContainerPort: 8100, Protocol: "tcp"}},
+	}
+	waiting := &storage.Module{
+		ID: "mod-wait-port", Name: "sidecar", ServerID: server.ID, NodeID: "local",
+		ContainerID: "gone", Status: storage.ModuleStatusRunning,
+		Ports:       []*v1.ModulePort{{Name: "web", HostPort: 8100, ContainerPort: 8100, Protocol: "tcp"}},
+	}
+	for _, row := range []*storage.Module{holder, waiting} {
+		if err := store.DB().Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	outcome, err := manager.ReconcileModule(ctx, waiting.ID)
+	if err != nil {
+		t.Fatalf("ReconcileModule: %v", err)
+	}
+	if outcome != ReconcileWaiting {
+		t.Fatalf("outcome = %s, want waiting", outcome)
+	}
+	got, err := store.GetModule(ctx, waiting.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContainerID != "gone" || got.Status != storage.ModuleStatusRunning {
+		t.Fatalf("record changed while waiting on port: %+v", got)
+	}
+}
+
 func TestReconcileModuleIgnoresADeletedModule(t *testing.T) {
 	manager, _ := newModuleReconcileFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)

@@ -51,7 +51,11 @@ create, and waits instead of recreating when another consumer holds the port.
 
 The decision itself is a pure function in `internal/module/reconcile.go`; the
 reconciler only schedules it, so templates, hooks and dependency ordering stay
-with the module manager.
+with the module manager. When a pass adopts, recreates, or records a stopped
+module, the reconciler also schedules any module that declared a dependency on
+it, so a waiting sidecar can converge without waiting only on the periodic
+sweep. The sweep still revisits every running module row even when its
+container id is empty.
 
 # Known gap
 

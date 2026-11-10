@@ -14,6 +14,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
 // recordingModules is a ModuleReconciler that records every pass.
@@ -115,6 +116,7 @@ func TestTheSweepAlsoCoversModulesWithAContainer(t *testing.T) {
 		modules: []*db.Module{
 			{ID: "mod-with-container", ContainerID: "abc", Status: db.ModuleStatusRunning},
 			{ID: "mod-without-container", ContainerID: "", Status: db.ModuleStatusStopped},
+			{ID: "mod-running-no-container", ContainerID: "", Status: db.ModuleStatusRunning},
 		},
 	}
 	r := New(store, &fakeResolver{}, nil, nil, nil, logger.New(), Config{
@@ -127,11 +129,50 @@ func TestTheSweepAlsoCoversModulesWithAContainer(t *testing.T) {
 	r.Start(ctx, nil)
 	defer r.Stop()
 
-	waitFor(t, func() bool { return len(modules.calls()) == 1 })
+	waitFor(t, func() bool { return len(modules.calls()) >= 2 })
 	calls := modules.calls()
-	if len(calls) != 1 || calls[0] != "mod-with-container" {
-		t.Fatalf("calls = %v, want only the module that has a container", calls)
+	want := map[string]bool{"mod-with-container": false, "mod-running-no-container": false}
+	for _, id := range calls {
+		if _, ok := want[id]; ok {
+			want[id] = true
+		}
 	}
+	for id, seen := range want {
+		if !seen {
+			t.Fatalf("calls = %v, want sweep to include %s", calls, id)
+		}
+	}
+}
+
+func TestAModulePassPropagatesToDependents(t *testing.T) {
+	modules := &recordingModules{outcome: "adopted"}
+	store := &moduleAwareStore{
+		Store: &fakeStore{},
+		modules: []*db.Module{
+			{ID: "dep-upstream", ContainerID: "abc", Status: db.ModuleStatusRunning},
+			{
+				ID: "dep-downstream", ContainerID: "def", Status: db.ModuleStatusRunning,
+				Dependencies: []*v1.ModuleDependency{{ModuleId: "dep-upstream"}},
+			},
+		},
+	}
+	r := New(store, &fakeResolver{}, nil, nil, nil, logger.New(), Config{
+		DebounceWindow: 10 * time.Millisecond,
+	})
+	r.SetModuleReconciler(modules)
+
+	events := make(chan ContainerEvent, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.Start(ctx, events)
+	defer r.Stop()
+
+	events <- ContainerEvent{ModuleID: "dep-upstream", ContainerID: "abc"}
+
+	waitFor(t, func() bool {
+		calls := modules.calls()
+		return len(calls) >= 2 && calls[len(calls)-1] == "dep-downstream"
+	})
 }
 
 func TestModulePassesAreDisabledWithoutAModuleReconciler(t *testing.T) {
