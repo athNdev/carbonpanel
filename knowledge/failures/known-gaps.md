@@ -38,9 +38,11 @@ sources:
   or volume quotas when a hard kernel world cap is required.
 
 - Daemon `/info` qualification warns when cgroup or storage-opt limits may be
-  ignored (for example rootless on cgroup v1). Live confirmation on the target
-  daemon profile remains in OSS-247; the panel does not claim enforcement
-  without capability evidence.
+  ignored (for example rootless on cgroup v1) and zeros the matching effective
+  limit fields. In-repo tests map `/info` payloads to those outcomes. Live
+  confirmation that a target rootless or Desktop daemon actually honors or
+  ignores cgroup and storage-opt flags remains OSS-247; the panel does not
+  claim kernel enforcement from `/info` flags alone.
 
 - `internal/module/hooks.go:execInModule` runs hook commands through the
   manager's own Docker client (`m.docker.Exec`), so a module hook does not

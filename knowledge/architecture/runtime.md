@@ -139,8 +139,18 @@ the in-repo matrix still runs without that daemon.
 
 The profile also reports the limits that are actually applied, not the ones
 that were requested: memory and memory+swap, the process limit, the CPU cap,
-and the writable-layer cap. A limit the daemon will not apply is reported as
-zero, and a request that cannot take effect is a named warning. The world is a
+and the writable-layer cap. `ContainerLimits` keeps the HostConfig request on
+`Requested*` fields. Effective `MemoryBytes`, `PidsLimit`, and
+`WritableLayerMB` are zero when Docker `/info` (`DaemonEnforcement`) says that
+cap is unsupported, or when a rootless daemon is not on cgroup v2. A request
+that cannot take effect is a named warning (`memory_limit_unsupported`,
+`swap_limit_unsupported`, `pids_limit_unsupported`,
+`writable_layer_cap_unsupported`, `rootless_cgroup_unqualified`) and is never
+reported as `*_unset`. The in-repo table
+`TestEffectiveLimitsMatchRequestVersusDaemonInfo` encodes those request versus
+`/info` outcomes without a live game container. Live confirmation that a given
+rootless or Desktop daemon actually honors (or ignores) those flags remains
+OSS-247. The world is a
 bind mount, so it is never quota-limited by the daemon: `storage-opt size`
 sizes only the container writable layer, is applied only when the root is
 writable, and is reported as `storage_quota_is_not_a_world_quota` whenever it
