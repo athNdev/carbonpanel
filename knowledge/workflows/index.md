@@ -6,5 +6,5 @@
 
 - [Add an RPC](add-rpc.md) — The order of changes for a new API method, from proto to permission mapping and console client.
 - [Database migration](db-migration.md) — How to change the SQLite schema without risking existing controller or user data.
-- [Frontend change](frontend-change.md) — How to change the SvelteKit console and verify it without breaking the embedded build.
+- [Frontend change](frontend-change.md) — How to change the SvelteKit console, ServerTabPanel tab-fill chrome, and verify it without breaking the embedded build.
 - [Release](release.md) — The checks and artifacts required before a tagged Carbon Panel release.

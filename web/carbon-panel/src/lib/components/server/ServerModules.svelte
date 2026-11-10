@@ -10,9 +10,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
-	import { CarbonConfirm } from '$lib/components/carbon';
+	import { CarbonButton, CarbonConfirm } from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
@@ -270,39 +271,37 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<Card class="tab-fill flex min-h-0 flex-col">
-	<CardHeader>
-		<div class="flex items-center justify-between">
-			<div>
-				<CardTitle>Server Modules</CardTitle>
-				<p class="mt-1 text-sm text-muted-foreground">Companion services attached to this server</p>
-			</div>
-			<div class="flex items-center gap-2">
-				<Button
-					variant="outline"
-					size="sm"
-					onclick={() => loadModules()}
-					disabled={loading}
-					aria-label="Refresh modules"
-				>
-					{#if loading}
-						<Loader2 class="h-4 w-4 animate-spin" />
-					{:else}
-						<RefreshCw class="h-4 w-4" />
-					{/if}
-				</Button>
-				<Button variant="outline" onclick={() => (templateCreateDialogOpen = true)}>
-					<Puzzle class="mr-2 h-4 w-4" />
-					Create Template
-				</Button>
-				<Button onclick={() => (createDialogOpen = true)} disabled={templates.length === 0}>
-					<Plus class="mr-2 h-4 w-4" />
-					Add Module
-				</Button>
-			</div>
-		</div>
-	</CardHeader>
-	<CardContent class="min-h-0 flex-1 overflow-auto">
+<ServerTabPanel title="Server Modules" description="Companion services attached to this server">
+	{#snippet actions()}
+		<CarbonButton
+			kind="ghost"
+			size="sm"
+			iconOnly
+			onclick={() => loadModules()}
+			disabled={loading}
+			aria-label="Refresh modules"
+		>
+			{#if loading}
+				<Loader2 class="h-4 w-4 animate-spin" />
+			{:else}
+				<RefreshCw class="h-4 w-4" />
+			{/if}
+		</CarbonButton>
+		<CarbonButton kind="secondary" size="sm" onclick={() => (templateCreateDialogOpen = true)}>
+			<Puzzle class="h-4 w-4" />
+			Create Template
+		</CarbonButton>
+		<CarbonButton
+			kind="primary"
+			size="sm"
+			onclick={() => (createDialogOpen = true)}
+			disabled={templates.length === 0}
+		>
+			<Plus class="h-4 w-4" />
+			Add Module
+		</CarbonButton>
+	{/snippet}
+	<div class="min-h-0 flex-1 overflow-auto p-4">
 		{#if loading}
 			<div class="flex items-center justify-center py-12">
 				<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
@@ -568,8 +567,8 @@ one at https://mozilla.org/MPL/2.0/.
 				{/each}
 			</div>
 		{/if}
-	</CardContent>
-</Card>
+	</div>
+</ServerTabPanel>
 
 <ModuleDialog
 	bind:open={createDialogOpen}

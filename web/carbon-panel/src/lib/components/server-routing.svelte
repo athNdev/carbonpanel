@@ -29,6 +29,8 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { ServerStatus } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/carbonpanel/v1/proxy_pb';
+	import { CarbonButton } from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 
 	let {
 		server,
@@ -177,178 +179,216 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-{#if loading}
-	<div class="flex items-center justify-center py-8">
-		<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
-	</div>
-{:else if !routingInfo?.proxyEnabled}
-	<Alert>
-		<AlertCircle class="h-4 w-4" />
-		<AlertDescription>
-			Proxy routing is not enabled. Enable it in your configuration file to use custom hostnames for
-			your servers.
-		</AlertDescription>
-	</Alert>
-{:else}
-	<div class="space-y-4">
-		<!-- Status Card -->
-		<Card>
-			<CardHeader>
-				<CardTitle class="flex items-center gap-2">
-					<Globe class="h-5 w-5" />
-					Current Routing Status
-				</CardTitle>
-				<CardDescription>How players can connect to your server</CardDescription>
-			</CardHeader>
-			<CardContent class="space-y-4">
-				{#if routingInfo.currentRoute || routingInfo.proxyHostname}
-					<div class="flex items-center gap-2">
-						<Badge variant="default" class="gap-1">
-							<CheckCircle2 class="h-3 w-3" />
-							Active Route
-						</Badge>
-						<span class="text-sm text-muted-foreground">
-							Players can connect using the hostname below
-						</span>
-					</div>
-				{:else if server.status === ServerStatus.RUNNING}
-					<div class="flex items-center gap-2">
-						<Badge variant="secondary" class="gap-1">
-							<AlertCircle class="h-3 w-3" />
-							No Active Route
-						</Badge>
-						<span class="text-sm text-muted-foreground">
-							Configure a hostname below to enable proxy routing
-						</span>
-					</div>
+<ServerTabPanel
+	title="Routing"
+	description="Custom hostnames for players to reach this server"
+	mode="form"
+>
+	{#snippet actions()}
+		{#if routingInfo?.proxyEnabled}
+			<CarbonButton
+				kind="secondary"
+				size="sm"
+				onclick={() => {
+					hostname = originalHostname;
+					hostnameError = '';
+				}}
+				disabled={!hasChanges || saving}
+			>
+				Cancel
+			</CarbonButton>
+			<CarbonButton
+				kind="primary"
+				size="sm"
+				onclick={saveRouting}
+				disabled={!hasChanges || saving || !!hostnameError}
+			>
+				{#if saving}
+					<Loader2 class="h-4 w-4 animate-spin" />
 				{:else}
-					<div class="flex items-center gap-2">
-						<Badge variant="outline" class="gap-1">
-							<XCircle class="h-3 w-3" />
-							Server Offline
-						</Badge>
-						<span class="text-sm text-muted-foreground">
-							Start the server to activate routing
-						</span>
-					</div>
+					<Save class="h-4 w-4" />
 				{/if}
-
-				<div class="rounded-lg bg-muted p-4">
-					<div class="flex items-center justify-between">
-						<div>
-							<p class="mb-1 text-sm font-medium">Connection Address</p>
-							<p class="font-mono text-lg">{getConnectionString()}</p>
-						</div>
-						<Button
-							variant="outline"
-							size="icon"
-							aria-label="Copy connection address to clipboard"
-							onclick={() => copyToClipboard(getConnectionString())}
-						>
-							<Copy class="h-4 w-4" />
-						</Button>
-					</div>
-				</div>
-			</CardContent>
-		</Card>
-
-		<!-- Configuration Card -->
-		<Card>
-			<CardHeader>
-				<CardTitle>Hostname Configuration</CardTitle>
-				<CardDescription>
-					Set a custom hostname for players to connect to your server
-				</CardDescription>
-			</CardHeader>
-			<CardContent class="space-y-4">
-				<div class="space-y-2">
-					<Label for="hostname">Custom Hostname</Label>
-					<Input
-						id="hostname"
-						type="text"
-						bind:value={hostname}
-						placeholder={routingInfo.suggestedHostname || 'minecraft.example.com'}
-						oninput={(e) => validateHostname(e.currentTarget.value)}
-						class={hostnameError ? 'border-destructive' : ''}
-					/>
-					{#if hostnameError}
-						<p class="text-sm text-destructive">{hostnameError}</p>
-					{:else if hostname}
-						<p class="text-sm text-muted-foreground">
-							Players will connect using: <span class="font-mono">{getConnectionString()}</span>
-						</p>
-					{:else}
-						<p class="text-sm text-muted-foreground">
-							Leave empty to use the default hostname based on your server name
-						</p>
-					{/if}
-				</div>
-
-				{#if routingInfo.baseUrl}
-					<Alert>
-						<AlertDescription>
-							<p class="mb-1 font-medium">DNS Configuration Required</p>
-							<p class="text-sm">
-								Make sure to add a DNS record pointing <code class="font-mono"
-									>{getFullHostname()}</code
-								> to your server's IP address.
-							</p>
-						</AlertDescription>
-					</Alert>
-				{/if}
-
-				<div class="flex justify-end gap-2">
-					<Button
-						variant="outline"
-						onclick={() => {
-							hostname = originalHostname;
-							hostnameError = '';
-						}}
-						disabled={!hasChanges || saving}
-					>
-						Cancel
-					</Button>
-					<Button onclick={saveRouting} disabled={!hasChanges || saving || !!hostnameError}>
-						{#if saving}
-							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						{:else}
-							<Save class="mr-2 h-4 w-4" />
-						{/if}
-						Save Changes
-					</Button>
-				</div>
-			</CardContent>
-		</Card>
-
-		<!-- Other Servers Using Proxy -->
-		{#if allRoutes.length > 0}
-			<Card>
-				<CardHeader>
-					<CardTitle>Active Routes</CardTitle>
-					<CardDescription>Other servers currently using proxy routing</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<div class="space-y-2">
-						{#each allRoutes as route (route.serverId)}
-							<div class="flex items-center justify-between gap-3 rounded-lg bg-muted/50 p-3">
-								<div class="min-w-0">
-									<p class="truncate font-mono text-sm" title={route.hostname}>{route.hostname}</p>
-									<p class="text-xs text-muted-foreground">
-										{route.serverId === server.id
-											? '(This server)'
-											: `Server: ${route.serverId.slice(0, 8)}...`}
-									</p>
-								</div>
-								{#if route.active}
-									<Badge variant="default" class="shrink-0 text-xs">Active</Badge>
-								{:else}
-									<Badge variant="outline" class="shrink-0 text-xs">Inactive</Badge>
-								{/if}
+				Save Changes
+			</CarbonButton>
+		{/if}
+	{/snippet}
+	<div class="p-4 sm:p-6">
+		{#if loading}
+			<div class="flex items-center justify-center py-8">
+				<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+			</div>
+		{:else if !routingInfo?.proxyEnabled}
+			<Alert>
+				<AlertCircle class="h-4 w-4" />
+				<AlertDescription>
+					Proxy routing is not enabled. Enable it in your configuration file to use custom hostnames
+					for your servers.
+				</AlertDescription>
+			</Alert>
+		{:else}
+			<div class="space-y-4">
+				<!-- Status Card -->
+				<Card>
+					<CardHeader>
+						<CardTitle class="flex items-center gap-2">
+							<Globe class="h-5 w-5" />
+							Current Routing Status
+						</CardTitle>
+						<CardDescription>How players can connect to your server</CardDescription>
+					</CardHeader>
+					<CardContent class="space-y-4">
+						{#if routingInfo.currentRoute || routingInfo.proxyHostname}
+							<div class="flex items-center gap-2">
+								<Badge variant="default" class="gap-1">
+									<CheckCircle2 class="h-3 w-3" />
+									Active Route
+								</Badge>
+								<span class="text-sm text-muted-foreground">
+									Players can connect using the hostname below
+								</span>
 							</div>
-						{/each}
-					</div>
-				</CardContent>
-			</Card>
+						{:else if server.status === ServerStatus.RUNNING}
+							<div class="flex items-center gap-2">
+								<Badge variant="secondary" class="gap-1">
+									<AlertCircle class="h-3 w-3" />
+									No Active Route
+								</Badge>
+								<span class="text-sm text-muted-foreground">
+									Configure a hostname below to enable proxy routing
+								</span>
+							</div>
+						{:else}
+							<div class="flex items-center gap-2">
+								<Badge variant="outline" class="gap-1">
+									<XCircle class="h-3 w-3" />
+									Server Offline
+								</Badge>
+								<span class="text-sm text-muted-foreground">
+									Start the server to activate routing
+								</span>
+							</div>
+						{/if}
+
+						<div class="rounded-lg bg-muted p-4">
+							<div class="flex items-center justify-between">
+								<div>
+									<p class="mb-1 text-sm font-medium">Connection Address</p>
+									<p class="font-mono text-lg">{getConnectionString()}</p>
+								</div>
+								<Button
+									variant="outline"
+									size="icon"
+									aria-label="Copy connection address to clipboard"
+									onclick={() => copyToClipboard(getConnectionString())}
+								>
+									<Copy class="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
+					</CardContent>
+				</Card>
+
+				<!-- Configuration Card -->
+				<Card>
+					<CardHeader>
+						<CardTitle>Hostname Configuration</CardTitle>
+						<CardDescription>
+							Set a custom hostname for players to connect to your server
+						</CardDescription>
+					</CardHeader>
+					<CardContent class="space-y-4">
+						<div class="space-y-2">
+							<Label for="hostname">Custom Hostname</Label>
+							<Input
+								id="hostname"
+								type="text"
+								bind:value={hostname}
+								placeholder={routingInfo.suggestedHostname || 'minecraft.example.com'}
+								oninput={(e) => validateHostname(e.currentTarget.value)}
+								class={hostnameError ? 'border-destructive' : ''}
+							/>
+							{#if hostnameError}
+								<p class="text-sm text-destructive">{hostnameError}</p>
+							{:else if hostname}
+								<p class="text-sm text-muted-foreground">
+									Players will connect using: <span class="font-mono">{getConnectionString()}</span>
+								</p>
+							{:else}
+								<p class="text-sm text-muted-foreground">
+									Leave empty to use the default hostname based on your server name
+								</p>
+							{/if}
+						</div>
+
+						{#if routingInfo.baseUrl}
+							<Alert>
+								<AlertDescription>
+									<p class="mb-1 font-medium">DNS Configuration Required</p>
+									<p class="text-sm">
+										Make sure to add a DNS record pointing <code class="font-mono"
+											>{getFullHostname()}</code
+										> to your server's IP address.
+									</p>
+								</AlertDescription>
+							</Alert>
+						{/if}
+
+						<div class="flex justify-end gap-2">
+							<Button
+								variant="outline"
+								onclick={() => {
+									hostname = originalHostname;
+									hostnameError = '';
+								}}
+								disabled={!hasChanges || saving}
+							>
+								Cancel
+							</Button>
+							<Button onclick={saveRouting} disabled={!hasChanges || saving || !!hostnameError}>
+								{#if saving}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								{:else}
+									<Save class="mr-2 h-4 w-4" />
+								{/if}
+								Save Changes
+							</Button>
+						</div>
+					</CardContent>
+				</Card>
+
+				<!-- Other Servers Using Proxy -->
+				{#if allRoutes.length > 0}
+					<Card>
+						<CardHeader>
+							<CardTitle>Active Routes</CardTitle>
+							<CardDescription>Other servers currently using proxy routing</CardDescription>
+						</CardHeader>
+						<CardContent>
+							<div class="space-y-2">
+								{#each allRoutes as route (route.serverId)}
+									<div class="flex items-center justify-between gap-3 rounded-lg bg-muted/50 p-3">
+										<div class="min-w-0">
+											<p class="truncate font-mono text-sm" title={route.hostname}>
+												{route.hostname}
+											</p>
+											<p class="text-xs text-muted-foreground">
+												{route.serverId === server.id
+													? '(This server)'
+													: `Server: ${route.serverId.slice(0, 8)}...`}
+											</p>
+										</div>
+										{#if route.active}
+											<Badge variant="default" class="shrink-0 text-xs">Active</Badge>
+										{:else}
+											<Badge variant="outline" class="shrink-0 text-xs">Inactive</Badge>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						</CardContent>
+					</Card>
+				{/if}
+			</div>
 		{/if}
 	</div>
-{/if}
+</ServerTabPanel>

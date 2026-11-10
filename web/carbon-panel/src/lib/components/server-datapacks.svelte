@@ -7,9 +7,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { CarbonButton } from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Database, Download, Trash2, Loader2, Package, RefreshCw, Upload } from '@lucide/svelte';
+	import { Download, Trash2, Loader2, Package, RefreshCw, Upload } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { rpcClient } from '$lib/api/rpc-client';
@@ -109,48 +110,36 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="tab-fill flex min-h-0 flex-col overflow-hidden">
-	<div class="flex shrink-0 items-center justify-between gap-4 pb-4">
-		<div>
-			<h3 class="flex items-center gap-2 text-lg font-semibold text-white">
-				<Database class="h-5 w-5" /> Datapacks
-			</h3>
-			<p class="text-sm text-[#a8a8a8]">
-				World data packs in <code class="font-mono">datapacks/</code>. They run on Vanilla servers
-				with no mod loader.
-			</p>
-		</div>
-		<div class="flex items-center gap-2">
-			<input
-				bind:this={fileInput}
-				type="file"
-				accept=".zip,application/zip"
-				class="hidden"
-				onchange={handleUpload}
-			/>
-			<CarbonButton kind="ghost" onclick={load} class="rounded-none text-[#a8a8a8]">
-				<RefreshCw class="h-4 w-4" />
-			</CarbonButton>
-			<CarbonButton
-				kind="ghost"
-				disabled={uploading}
-				onclick={() => fileInput?.click()}
-				class="rounded-none text-[#c6c6c6]"
-			>
-				{#if uploading}<Loader2 class="h-4 w-4 animate-spin" /> Uploading… {uploadPercent}%{:else}<Upload
-						class="h-4 w-4"
-					/> Upload Datapack{/if}
-			</CarbonButton>
-			<CarbonButton
-				onclick={() => (browseOpen = true)}
-				class="rounded-none bg-[#0f62fe] text-white"
-			>
-				<Download class="h-4 w-4" /> Browse Datapacks
-			</CarbonButton>
-		</div>
-	</div>
-
-	<div class="min-h-0 flex-1 overflow-auto">
+<ServerTabPanel
+	title="Datapacks"
+	description="World data packs in datapacks/. They run on Vanilla servers with no mod loader."
+>
+	{#snippet actions()}
+		<input
+			bind:this={fileInput}
+			type="file"
+			accept=".zip,application/zip"
+			class="hidden"
+			onchange={handleUpload}
+		/>
+		<CarbonButton kind="ghost" size="sm" iconOnly onclick={load} aria-label="Refresh datapacks">
+			<RefreshCw class="h-4 w-4" />
+		</CarbonButton>
+		<CarbonButton
+			kind="secondary"
+			size="sm"
+			disabled={uploading}
+			onclick={() => fileInput?.click()}
+		>
+			{#if uploading}<Loader2 class="h-4 w-4 animate-spin" /> Uploading… {uploadPercent}%{:else}<Upload
+					class="h-4 w-4"
+				/> Upload Datapack{/if}
+		</CarbonButton>
+		<CarbonButton kind="primary" size="sm" onclick={() => (browseOpen = true)}>
+			<Download class="h-4 w-4" /> Browse Datapacks
+		</CarbonButton>
+	{/snippet}
+	<div class="min-h-0 flex-1 overflow-auto p-4">
 		{#if error}
 			<p class="border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-sm text-[#ff8389]">{error}</p>
 		{/if}
@@ -212,7 +201,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 		{/if}
 	</div>
-</div>
+</ServerTabPanel>
 
 <DatapackBrowserDialog
 	bind:open={browseOpen}

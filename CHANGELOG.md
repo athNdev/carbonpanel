@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Design-system page documents all nineteen exported Carbon components with prop tables and behaviour notes, full light and dark token tables, and composition rules. A regression test now asserts every `carbon/index.ts` export has a documented section.
 - Design-system page layout redo: every component pairs a captioned demo pane with a scrollable prop table, badges are fixed pills, and demo groups follow one spacing rhythm at 360, 768 and 1440 px.
 - Server detail working panes (console, mods, datapacks, modules, files, tasks, backups, players, activity) fill the remaining column through a `min-h-0` / `flex-1` chain instead of a viewport-minus-chrome height, so the log, list, or tree scrolls inside the pane.
+- Every server-detail tab shares one `ServerTabPanel` header (title, optional description and chip, right-aligned actions) and one filling container. Lists and logs scroll inside; forms keep their natural height.
 
 ## [3.0.0-beta.4] - 2026-11-07
 

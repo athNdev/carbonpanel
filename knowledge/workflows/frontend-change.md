@@ -1,7 +1,7 @@
 ---
 type: Workflow
 title: Frontend change
-description: How to change the SvelteKit console and verify it without breaking the embedded build.
+description: How to change the SvelteKit console, ServerTabPanel tab-fill chrome, and verify it without breaking the embedded build.
 status: stable
 owners: [oss-runtime]
 code_refs:
@@ -48,8 +48,12 @@ bun run test
   remaining height of `CarbonShell`'s main column through a `min-h-0` /
   `flex-1` chain and `.tab-fill`. Do not size them with `100vh` minus a chrome
   constant: that leftover is a dead region whenever the chrome is shorter than
-  the constant. Forms on Overview, Configuration, and Routing keep their
-  natural height and scroll inside the tab panel when they overflow.
+  the constant. Every server-detail tab uses `ServerTabPanel`: one header
+  (title, optional one-line description, optional chip, right-aligned
+  `CarbonButton` size `sm` actions, shared min-height/padding/divider) and one
+  bordered surface. Lists, logs and tables scroll inside the body (`mode=fill`);
+  forms on Overview, Configuration, and Routing keep their natural height
+  (`mode=form`) and scroll inside the same surface when they overflow.
   `tab-fill.test.ts` holds the contract.
 - A surface that is not meant to scroll must not show a scrollbar, and a
   vertical scroller must reserve its gutter. A scrollbar that appears and

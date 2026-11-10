@@ -384,6 +384,94 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	/*
+		One header and one surface for every server-detail tab. The header
+		keeps a fixed min-height, type scale, padding and divider; the body
+		fills the remaining column. Lists and logs scroll inside; forms
+		keep their natural height (mode=form) so they are not stretched.
+	*/
+	.server-tab-panel {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		border: 1px solid #393939;
+		background: #262626;
+	}
+
+	.server-tab-header {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		column-gap: 1rem;
+		row-gap: 0.75rem;
+		min-height: 4.5rem;
+		padding: 0.75rem 1.25rem;
+		border-bottom: 1px solid #393939;
+		background: #262626;
+		flex-shrink: 0;
+	}
+
+	.server-tab-header-copy {
+		min-width: 0;
+		flex: 1 1 12rem;
+	}
+
+	.server-tab-title-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.server-tab-title {
+		margin: 0;
+		font-size: 1.125rem;
+		font-weight: 300;
+		letter-spacing: -0.025em;
+		line-height: 1.25;
+		color: #f4f4f4;
+	}
+
+	.server-tab-description {
+		margin: 0.25rem 0 0;
+		font-size: 0.75rem;
+		line-height: 1rem;
+		color: #a8a8a8;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.server-tab-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+		flex-shrink: 0;
+	}
+
+	.server-tab-toolbar {
+		flex-shrink: 0;
+		border-bottom: 1px solid #393939;
+		background: #161616;
+	}
+
+	.server-tab-body {
+		flex: 1 1 0%;
+		min-height: 0;
+	}
+
+	.server-tab-body--fill {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.server-tab-body--form {
+		overflow-y: auto;
+	}
+
+	/*
 		Every vertical scroll container reserves its gutter. When content grows
 		just past the viewport (a spinner replaced by a row, a one-line diff, a
 		chart resizing), a classic scrollbar would otherwise appear, narrow the

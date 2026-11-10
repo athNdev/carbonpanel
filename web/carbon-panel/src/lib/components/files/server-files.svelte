@@ -11,6 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { Progress } from '$lib/components/ui/progress';
 	import { CarbonButton } from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import {
@@ -21,7 +22,16 @@ one at https://mozilla.org/MPL/2.0/.
 		DialogTitle
 	} from '$lib/components/ui/dialog';
 	import { Dialog as DialogPrimitive } from 'bits-ui';
-	import { Loader2, Folder, X } from '@lucide/svelte';
+	import {
+		Loader2,
+		Folder,
+		X,
+		FilePlus,
+		FolderPlus,
+		Upload,
+		RefreshCw,
+		Search
+	} from '@lucide/svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
@@ -31,7 +41,6 @@ one at https://mozilla.org/MPL/2.0/.
 	import { formatBytes } from '$lib/utils';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import FileEditorDialog from './file-editor-dialog.svelte';
-	import FileToolbar from './file-toolbar.svelte';
 	import FileBreadcrumb from './file-breadcrumb.svelte';
 	import FileBulkActions from './file-bulk-actions.svelte';
 	import FileTree from './file-tree.svelte';
@@ -853,28 +862,59 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="tab-fill flex min-h-0 flex-col overflow-hidden rounded-none border bg-background">
-	<!-- Toolbar -->
-	<FileToolbar
-		{filterText}
-		onRefresh={loadFiles}
-		onNewFile={() => {
-			dialogTargetPath = '';
-			newItemName = '';
-			showNewFileDialog = true;
-		}}
-		onNewFolder={() => {
-			dialogTargetPath = '';
-			newItemName = '';
-			showNewFolderDialog = true;
-		}}
-		onUpload={() => triggerUpload('')}
-		onFilterChange={(v) => (filterText = v)}
-	/>
-
-	<!-- Breadcrumb -->
-	<FileBreadcrumb {currentPath} onNavigate={handleBreadcrumbNavigate} />
-
+<ServerTabPanel title="Files" description="Browse and edit files in the server container">
+	{#snippet actions()}
+		<CarbonButton
+			kind="secondary"
+			size="sm"
+			onclick={() => {
+				dialogTargetPath = '';
+				newItemName = '';
+				showNewFileDialog = true;
+			}}
+		>
+			<FilePlus class="h-3.5 w-3.5" />
+			<span class="hidden sm:inline">New File</span>
+		</CarbonButton>
+		<CarbonButton
+			kind="secondary"
+			size="sm"
+			onclick={() => {
+				dialogTargetPath = '';
+				newItemName = '';
+				showNewFolderDialog = true;
+			}}
+		>
+			<FolderPlus class="h-3.5 w-3.5" />
+			<span class="hidden sm:inline">New Folder</span>
+		</CarbonButton>
+		<CarbonButton kind="secondary" size="sm" onclick={() => triggerUpload('')}>
+			<Upload class="h-3.5 w-3.5" />
+			<span class="hidden sm:inline">Upload</span>
+		</CarbonButton>
+		<CarbonButton
+			kind="ghost"
+			size="sm"
+			iconOnly
+			onclick={loadFiles}
+			aria-label="Refresh tree"
+			title="Refresh tree"
+		>
+			<RefreshCw class="h-3.5 w-3.5" />
+		</CarbonButton>
+	{/snippet}
+	{#snippet toolbar()}
+		<div class="flex items-center gap-2 px-3 py-2">
+			<Search class="h-3.5 w-3.5 shrink-0 text-[#8d8d8d]" />
+			<input
+				class="h-8 min-w-0 flex-1 rounded-none border border-[#525252] bg-[#161616] px-2 font-sans text-xs text-[#f4f4f4] placeholder-[#6f6f6f] focus:border-[#0f62fe] focus:outline-none"
+				placeholder="Search files..."
+				value={filterText}
+				oninput={(e) => (filterText = (e.target as HTMLInputElement).value)}
+			/>
+		</div>
+		<FileBreadcrumb {currentPath} onNavigate={handleBreadcrumbNavigate} />
+	{/snippet}
 	<!-- Upload progress -->
 	{#if uploading && uploadProgress}
 		<div class="border-b px-3 py-2">
@@ -979,7 +1019,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<span>{selectedPaths.size} selected</span>
 		{/if}
 	</div>
-</div>
+</ServerTabPanel>
 
 <!-- Context menu -->
 <FileContextMenu

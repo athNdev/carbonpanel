@@ -90,6 +90,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import ServerOperations from '$lib/components/server-operations.svelte';
 	import ServerPlayers from '$lib/components/server-players.svelte';
 	import ServerModules from '$lib/components/server/ServerModules.svelte';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
@@ -895,15 +896,15 @@ one at https://mozilla.org/MPL/2.0/.
 				<div class="flex h-full min-h-0 flex-1 flex-col">
 					<svelte:boundary>
 						{#if activeTab === 'overview'}
-							<div class="min-h-0 flex-1 overflow-y-auto">
-								<div class="rounded-none border border-[#393939] bg-[#262626] p-4 sm:p-6">
-									<h3 class="mb-1 text-base font-semibold text-[#f4f4f4]">Server Settings</h3>
-									<p class="mb-6 text-xs text-[#a8a8a8]">
-										Modify runtime container settings and server parameters
-									</p>
+							<ServerTabPanel
+								title="Server Settings"
+								description="Modify runtime container settings and server parameters"
+								mode="form"
+							>
+								<div class="p-4 sm:p-6">
 									<ServerSettings {server} onUpdate={loadServer} />
 								</div>
-							</div>
+							</ServerTabPanel>
 						{:else if activeTab === 'console'}
 							<ServerConsole {server} active={activeTab === 'console'} />
 						{:else if activeTab === 'configuration'}
@@ -923,20 +924,18 @@ one at https://mozilla.org/MPL/2.0/.
 						{:else if activeTab === 'players'}
 							<ServerPlayers {server} active={activeTab === 'players'} />
 						{:else if activeTab === 'activity'}
-							<div class="tab-fill min-h-0 overflow-y-auto">
-								<div class="flex flex-col gap-4">
+							<ServerTabPanel
+								title="Activity"
+								description="Lifecycle journal and who did what on this server, newest first"
+								mode="form"
+							>
+								<div class="flex flex-col gap-6 p-4 sm:p-6">
 									<ServerOperations {server} active={activeTab === 'activity'} />
 									<ServerActivity {server} active={activeTab === 'activity'} />
 								</div>
-							</div>
+							</ServerTabPanel>
 						{:else if activeTab === 'routing'}
-							<div class="min-h-0 flex-1 overflow-y-auto">
-								<ServerRouting
-									{server}
-									bind:router={routingInfo}
-									active={activeTab === 'routing'}
-								/>
-							</div>
+							<ServerRouting {server} bind:router={routingInfo} active={activeTab === 'routing'} />
 						{/if}
 
 						{#snippet failed(error, reset)}

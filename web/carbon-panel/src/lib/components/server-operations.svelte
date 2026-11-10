@@ -109,7 +109,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <div class="rounded-none border border-[#393939] bg-[#262626] p-6">
 	<div class="mb-1 flex flex-wrap items-center justify-between gap-2">
-		<h3 class="text-base font-semibold text-[#f4f4f4]">Lifecycle operations</h3>
+		<h3 class="text-sm font-medium text-[#f4f4f4]">Lifecycle operations</h3>
 		<button
 			type="button"
 			class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"

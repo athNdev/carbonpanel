@@ -31,7 +31,8 @@ one at https://mozilla.org/MPL/2.0/.
 		Wand2
 	} from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
-	import { CarbonInlineLoading } from '$lib/components/carbon';
+	import { CarbonButton, CarbonInlineLoading } from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
 		ConfigApplyWindow,
@@ -575,80 +576,70 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div
-	class="tab-fill flex min-h-0 flex-col gap-0 rounded-none border border-[#393939] bg-[#262626] shadow-none"
+<ServerTabPanel
+	title={!server ? 'Default Server Configuration' : 'Server Configuration'}
+	description={!server
+		? 'Configure default values for new servers'
+		: 'Configure Minecraft server environment variables'}
 >
-	<div class="shrink-0 border-b border-[#393939] bg-[#262626] p-4 sm:p-5">
-		<div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-			<div>
-				<h2 class="font-sans text-lg font-light tracking-tight text-[#f4f4f4]">
-					{!server ? 'Default Server Configuration' : 'Server Configuration'}
-				</h2>
-				<p class="mt-1 text-xs text-[#a8a8a8]">
-					{!server
-						? 'Configure default values for new servers'
-						: 'Configure Minecraft server environment variables'}
-				</p>
-			</div>
-			<div class="flex items-center gap-3">
-				{#if hasChanges}
-					<span class="font-mono text-xs whitespace-nowrap text-[#ff832b]">
-						{modifiedFields.size} unsaved {modifiedFields.size === 1 ? 'change' : 'changes'}
-					</span>
+	{#snippet chip()}
+		{#if hasChanges}
+			<span class="font-mono text-xs whitespace-nowrap text-[#ff832b]">
+				{modifiedFields.size} unsaved {modifiedFields.size === 1 ? 'change' : 'changes'}
+			</span>
+		{/if}
+	{/snippet}
+	{#snippet actions()}
+		{#if !server}
+			<CarbonButton
+				kind="secondary"
+				size="sm"
+				onclick={() => handleSyncToAllServers(true)}
+				disabled={loading || syncing || hasChanges}
+				title="Propagate configured default Ops and Whitelist to all existing servers"
+			>
+				{#if syncing}
+					<Loader2 class="h-3.5 w-3.5 animate-spin" />
+				{:else}
+					<Send class="h-3.5 w-3.5" />
 				{/if}
-				{#if !server}
-					<button
-						type="button"
-						onclick={() => handleSyncToAllServers(true)}
-						disabled={loading || syncing || hasChanges}
-						title="Propagate configured default Ops and Whitelist to all existing servers"
-						class="inline-flex h-8 cursor-pointer items-center gap-2 rounded-none border border-[#393939] bg-[#353535] px-3 font-sans text-xs text-[#f4f4f4] transition-colors hover:bg-[#393939] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-					>
-						{#if syncing}
-							<Loader2 class="mr-2 h-3.5 w-3.5 animate-spin" />
-						{:else}
-							<Send class="mr-2 h-3.5 w-3.5" />
-						{/if}
-						<span>Sync Ops & Whitelist</span>
-					</button>
-				{/if}
-				<button
-					type="button"
-					onclick={handleReset}
-					disabled={loading || !hasChanges}
-					class="inline-flex h-8 cursor-pointer items-center gap-2 rounded-none border border-[#393939] bg-[#353535] px-3 font-sans text-xs text-[#f4f4f4] transition-colors hover:bg-[#393939] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-				>
-					<RefreshCw class="mr-2 h-3.5 w-3.5" />
-					<span>Reset</span>
-				</button>
-				{#if server}
-					<button
-						type="button"
-						onclick={() => handleSave(false)}
-						disabled={loading || isSaving || !hasChanges}
-						title="Save these values and restart the container"
-						class="inline-flex h-8 cursor-pointer items-center gap-2 rounded-none border border-[#393939] bg-[#353535] px-3 font-sans text-xs text-[#f4f4f4] transition-colors hover:bg-[#393939] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
-					>
-						<span>Apply now</span>
-					</button>
-				{/if}
-				<button
-					type="button"
-					onclick={() => handleSave(true)}
-					disabled={loading || isSaving || !hasChanges}
-					class="inline-flex h-8 cursor-pointer items-center gap-2 rounded-none bg-[#0f62fe] px-4 font-sans text-xs font-medium text-white transition-colors hover:bg-[#0353e9] disabled:cursor-not-allowed disabled:opacity-40"
-				>
-					{#if isSaving}
-						<Loader2 class="mr-2 h-3.5 w-3.5 animate-spin" />
-					{:else}
-						<Save class="mr-2 h-3.5 w-3.5" />
-					{/if}
-					<span>{server ? 'Stage' : 'Save'}</span>
-				</button>
-			</div>
-		</div>
-	</div>
-
+				<span>Sync Ops & Whitelist</span>
+			</CarbonButton>
+		{/if}
+		<CarbonButton
+			kind="secondary"
+			size="sm"
+			onclick={handleReset}
+			disabled={loading || !hasChanges}
+		>
+			<RefreshCw class="h-3.5 w-3.5" />
+			<span>Reset</span>
+		</CarbonButton>
+		{#if server}
+			<CarbonButton
+				kind="secondary"
+				size="sm"
+				onclick={() => handleSave(false)}
+				disabled={loading || isSaving || !hasChanges}
+				title="Save these values and restart the container"
+			>
+				<span>Apply now</span>
+			</CarbonButton>
+		{/if}
+		<CarbonButton
+			kind="primary"
+			size="sm"
+			onclick={() => handleSave(true)}
+			disabled={loading || isSaving || !hasChanges}
+		>
+			{#if isSaving}
+				<Loader2 class="h-3.5 w-3.5 animate-spin" />
+			{:else}
+				<Save class="h-3.5 w-3.5" />
+			{/if}
+			<span>{server ? 'Stage' : 'Save'}</span>
+		</CarbonButton>
+	{/snippet}
 	<div class="my-0 flex-1 overflow-hidden p-0">
 		{#if loading}
 			<div class="flex items-center justify-center py-16">
@@ -1033,6 +1024,6 @@ one at https://mozilla.org/MPL/2.0/.
 			{/if}
 		{/if}
 	</div>
-</div>
+</ServerTabPanel>
 
 <ScrollToTop />
