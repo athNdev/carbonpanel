@@ -66,6 +66,32 @@ func TestExtractZipWritesOnlyThroughAccessor(t *testing.T) {
 	}
 }
 
+func TestReplaceTreeFromZipSwapsThroughAccessor(t *testing.T) {
+	acc, root := testAccessor(t)
+	if err := acc.WriteFile("stale.txt", []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	n, err := ReplaceTreeFromZip(context.Background(), acc, zipBytes(t, map[string]string{
+		"server.properties": "fresh",
+	}))
+	if err != nil {
+		t.Fatalf("ReplaceTreeFromZip: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("extracted %d, want 1", n)
+	}
+	got, err := acc.ReadFile("server.properties")
+	if err != nil || string(got) != "fresh" {
+		t.Fatalf("restored = %q, %v", got, err)
+	}
+	if _, err := acc.Stat("stale.txt"); !os.IsNotExist(err) {
+		t.Fatalf("stale file survived replace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "server.properties")); !os.IsNotExist(err) {
+		t.Fatalf("replace must not write beside the accessor root: %v", err)
+	}
+}
+
 func TestExtractZipRejectsTraversal(t *testing.T) {
 	acc, root := testAccessor(t)
 	var buf bytes.Buffer
