@@ -40,8 +40,11 @@ covers every module that has a container. The pass adopts a container id or
 status the daemon disagrees with, records a container that disappeared as
 stopped, and recreates a missing container only when both the module and its
 parent server are meant to be running. A sidecar is never resurrected under a
-stopped server, and an unreachable node leaves the record untouched because a
-daemon that did not answer is not evidence the container is gone.
+stopped server. While the parent is still coming up (for example after a
+self-heal recreate that records `starting`), a running module with no
+container waits and keeps its row; marking it gone would prevent recreate
+once the parent is running. An unreachable node leaves the record untouched
+because a daemon that did not answer is not evidence the container is gone.
 
 While a declared dependency is not running, the pass neither reports the module
 in sync nor recreates it; it returns a waiting outcome and leaves the row

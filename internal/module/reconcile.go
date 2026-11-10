@@ -37,7 +37,8 @@ const (
 	// its node cannot be reached, or its parent is not running.
 	ReconcileSkipped ReconcileOutcome = "skipped"
 	// ReconcileWaiting means convergence is blocked on a declared dependency,
-	// a host port reservation, or another precondition that may clear later.
+	// a host port reservation, a parent server that is not yet running, or
+	// another precondition that may clear later.
 	ReconcileWaiting ReconcileOutcome = "waiting"
 )
 
@@ -51,6 +52,7 @@ const (
 	actionMarkGone          moduleAction = "mark_gone"
 	actionWaitForDependency moduleAction = "wait_for_dependency"
 	actionWaitForPorts      moduleAction = "wait_for_ports"
+	actionWaitForParent     moduleAction = "wait_for_parent"
 )
 
 // reconcileGates carries preconditions that only the module manager enforces at
@@ -95,9 +97,14 @@ func decideModuleObservation(mod *storage.Module, parent *storage.Server, obs Mo
 		}
 		// A sidecar is never resurrected on its own: the parent server must be
 		// up, otherwise the module would start against a world nobody is
-		// serving.
-		if parent == nil || parent.Status != storage.StatusRunning {
+		// serving. A parent that is still coming up (self-heal recreate
+		// persists starting) must leave the child waiting, not mark it gone,
+		// or the later running pass will not recreate it.
+		if parent == nil || parent.Status == storage.StatusStopped || parent.Status == storage.StatusDeepSleep {
 			return actionMarkGone
+		}
+		if parent.Status != storage.StatusRunning {
+			return actionWaitForParent
 		}
 		return actionRecreate
 	}
@@ -229,6 +236,10 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 
 	case actionWaitForPorts:
 		m.logger.Info("Module %s is waiting for host port reservations before recreate", mod.Name)
+		return ReconcileWaiting, nil
+
+	case actionWaitForParent:
+		m.logger.Info("Module %s is waiting for its parent server before it can converge", mod.Name)
 		return ReconcileWaiting, nil
 
 	default:

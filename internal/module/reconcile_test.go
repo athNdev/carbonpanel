@@ -61,6 +61,20 @@ func TestDecideModule(t *testing.T) {
 			want:   actionMarkGone,
 		},
 		{
+			name:   "running module whose container vanished under a starting parent waits",
+			mod:    &storage.Module{Status: storage.ModuleStatusRunning, ContainerID: "old"},
+			parent: &storage.Server{ID: "srv", Status: storage.StatusStarting},
+			obs:    ModuleObservation{Exists: false},
+			want:   actionWaitForParent,
+		},
+		{
+			name:   "running module whose container vanished under a creating parent waits",
+			mod:    &storage.Module{Status: storage.ModuleStatusRunning, ContainerID: "old"},
+			parent: &storage.Server{ID: "srv", Status: storage.StatusCreating},
+			obs:    ModuleObservation{Exists: false},
+			want:   actionWaitForParent,
+		},
+		{
 			name: "stopped module whose container vanished is recorded as gone",
 			mod:  &storage.Module{Status: storage.ModuleStatusStopped, ContainerID: "old"},
 			obs:  ModuleObservation{Exists: false},
@@ -410,7 +424,7 @@ func TestReconcileModuleWaitsWhenAHostPortIsTaken(t *testing.T) {
 	waiting := &storage.Module{
 		ID: "mod-wait-port", Name: "sidecar", ServerID: server.ID, NodeID: "local",
 		ContainerID: "gone", Status: storage.ModuleStatusRunning,
-		Ports:       []*v1.ModulePort{{Name: "web", HostPort: 8100, ContainerPort: 8100, Protocol: "tcp"}},
+		Ports: []*v1.ModulePort{{Name: "web", HostPort: 8100, ContainerPort: 8100, Protocol: "tcp"}},
 	}
 	for _, row := range []*storage.Module{holder, waiting} {
 		if err := store.DB().Create(row).Error; err != nil {
@@ -431,6 +445,44 @@ func TestReconcileModuleWaitsWhenAHostPortIsTaken(t *testing.T) {
 	}
 	if got.ContainerID != "gone" || got.Status != storage.ModuleStatusRunning {
 		t.Fatalf("record changed while waiting on port: %+v", got)
+	}
+}
+
+func TestReconcileModuleWaitsWhenTheParentIsStarting(t *testing.T) {
+	manager, store := newModuleReconcileFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/containers/json") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		http.NotFound(w, r)
+	})
+	ctx := context.Background()
+	server := &storage.Server{ID: "srv-starting", Name: "srv", Status: storage.StatusStarting, NodeID: "local"}
+	if err := store.DB().Create(server).Error; err != nil {
+		t.Fatal(err)
+	}
+	mod := &storage.Module{
+		ID: "mod-wait-parent", Name: "sidecar", ServerID: server.ID, NodeID: "local",
+		ContainerID: "gone", Status: storage.ModuleStatusRunning,
+	}
+	if err := store.DB().Create(mod).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	outcome, err := manager.ReconcileModule(ctx, mod.ID)
+	if err != nil {
+		t.Fatalf("ReconcileModule: %v", err)
+	}
+	if outcome != ReconcileWaiting {
+		t.Fatalf("outcome = %s, want waiting", outcome)
+	}
+	got, err := store.GetModule(ctx, mod.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContainerID != "gone" || got.Status != storage.ModuleStatusRunning {
+		t.Fatalf("child was marked gone while the parent is starting: %+v", got)
 	}
 }
 

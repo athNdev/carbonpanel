@@ -258,6 +258,63 @@ func TestAServerSelfHealRecreateSchedulesChildModules(t *testing.T) {
 	})
 }
 
+func TestAServerStatusTransitionSchedulesChildModules(t *testing.T) {
+	cases := []struct {
+		name     string
+		initial  db.ServerStatus
+		observed db.ServerStatus
+	}{
+		{name: "running", initial: db.StatusStarting, observed: db.StatusRunning},
+		{name: "stopped", initial: db.StatusRunning, observed: db.StatusStopped},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &db.Server{
+				ID: "srv-parent", Name: "Survival", NodeID: "default",
+				ContainerID: "same-container", Status: tc.initial,
+			}
+			modules := &recordingModules{}
+			store := &moduleAwareStore{
+				Store: newFakeStore(server),
+				modules: []*db.Module{
+					{ID: "sidecar", ServerID: "srv-parent", ContainerID: "mod-c1", Status: db.ModuleStatusRunning},
+					{ID: "other-server", ServerID: "srv-other", ContainerID: "mod-c2", Status: db.ModuleStatusRunning},
+				},
+				omitServersFromList: true,
+			}
+			cli := &fakeClient{
+				summary: &container.Summary{ID: "same-container"},
+				state:   &docker.ContainerState{ContainerID: "same-container", Status: tc.observed},
+			}
+			r := New(store, fakeResolver{cli: cli}, nil, nil, nil, logger.New(), Config{
+				DebounceWindow: 10 * time.Millisecond,
+				SweepInterval:  time.Hour,
+			})
+			ctx, cancel := context.WithCancel(context.Background())
+			r.SetModuleReconciler(modules)
+			r.Start(ctx, nil)
+			t.Cleanup(func() {
+				r.Stop()
+				cancel()
+			})
+			waitFor(t, func() bool {
+				calls := modules.calls()
+				return callsInclude(calls, "sidecar") && callsInclude(calls, "other-server")
+			})
+			modules.reset()
+
+			if err := r.ReconcileServer(ctx, "srv-parent"); err != nil {
+				t.Fatalf("ReconcileServer: %v", err)
+			}
+
+			waitFor(t, func() bool {
+				calls := modules.calls()
+				return callsInclude(calls, "sidecar") && !callsInclude(calls, "other-server")
+			})
+		})
+	}
+}
+
 func TestAModulePassPropagatesToDependents(t *testing.T) {
 	modules := &recordingModules{outcome: "adopted"}
 	store := &moduleAwareStore{
