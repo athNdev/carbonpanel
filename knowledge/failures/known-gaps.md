@@ -19,7 +19,15 @@ sources:
 - A bind-mounted world is not quota-limited. `storage.container_writable_mb`
   caps only the container writable layer, and it applies only when the root is
   writable. World growth is measured and alerted, not capped: a node filesystem
-  or volume quota is the only hard bound available today.
+  or volume quota is the only hard bound available today. The metrics collector
+  reports separate budgets beside world bytes: free inodes on the world
+  filesystem (or explicitly unknown, for example on Windows), and backup
+  staging bytes under `storage.temp_dir` when configured (unknown when unset).
+  The collector measures the node's Docker image store (deduplicated
+  TotalSize) when a client or pool is configured. A missing client stays
+  explicitly unknown. A daemon or lookup failure stays explicitly unknown.
+  Image-cache bytes are not a world quota and are not added to world bytes.
+  None of these is a hard world quota.
 
 - `internal/module/hooks.go:execInModule` runs hook commands through the
   manager's own Docker client (`m.docker.Exec`), so a module hook does not

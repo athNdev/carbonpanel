@@ -31,15 +31,21 @@ import (
 )
 
 type ServerMetrics struct {
-	ServerID      string
-	CPUPercent    float64
-	MemoryUsage   float64 // MB
-	DiskUsage     int64   // bytes (total server data)
-	DiskTotal     int64   // bytes
-	WorldSize     int64   // bytes (world directory only)
-	PlayersOnline int
-	TPS           float64
-	LastUpdated   time.Time
+	ServerID    string
+	CPUPercent  float64
+	MemoryUsage float64 // MB
+	DiskUsage   int64   // bytes (total server data)
+	DiskTotal   int64   // bytes
+	WorldSize   int64   // bytes (world directory only)
+	// Separate resource budgets (OSS-239). These are measured or explicitly
+	// unknown; they are not a hard world quota and must not be inferred from
+	// DiskUsage or WorldSize.
+	WorldFreeInodes    Budget
+	BackupStagingBytes Budget
+	ImageCacheBytes    Budget
+	PlayersOnline      int
+	TPS                float64
+	LastUpdated        time.Time
 
 	// SLP fields
 	SLPAvailable    bool
@@ -107,6 +113,17 @@ type Collector struct {
 	wg       sync.WaitGroup
 
 	collectorConfig CollectorConfig
+
+	imageDiskUsage ImageDiskUsageReader
+}
+
+// SetImageDiskUsageReader wires Docker image-store measurement for a node.
+// When unset, image cache is reported as unknown with a stable reason.
+func (c *Collector) SetImageDiskUsageReader(r ImageDiskUsageReader) {
+	if c == nil {
+		return
+	}
+	c.imageDiskUsage = r
 }
 
 // Creates a new metrics collector
@@ -122,11 +139,12 @@ func NewCollectorWithPool(store *storage.Store, dockerCli *docker.Client, pool *
 		cc = collectorCfg[0]
 	}
 
+	measureImageCache := dockerCli != nil || pool != nil
 	if pool == nil && dockerCli != nil {
 		pool = docker.NewClientPool(store, dockerCli, log)
 	}
 
-	return &Collector{
+	c := &Collector{
 		store:           store,
 		docker:          dockerCli,
 		pool:            pool,
@@ -140,6 +158,10 @@ func NewCollectorWithPool(store *storage.Store, dockerCli *docker.Client, pool *
 		tpsFailedAt:     make(map[string]time.Time),
 		collectorConfig: cc,
 	}
+	if measureImageCache {
+		c.imageDiskUsage = newDockerImageDiskReader(c)
+	}
+	return c
 }
 
 // resolveDocker returns the Docker client for the given nodeID, preferring a
@@ -454,6 +476,11 @@ func (c *Collector) collectDiskUsage() {
 		diskTotal = 0
 	}
 
+	stagingBudget := backupStagingBudget(c.config)
+	// One image-store query per node per pass. The result stays on
+	// ImageCacheBytes and is never added to DiskUsage or WorldSize.
+	imageBudgets := make(map[string]Budget)
+
 	for _, server := range servers {
 		if server.DataPath == "" {
 			continue
@@ -488,10 +515,20 @@ func (c *Collector) collectDiskUsage() {
 		if space, serr := files.GetDiskSpace(root); serr == nil {
 			serverDiskTotal = space
 		}
+		inodeBudget := worldInodeBudget(root)
+		imageBudget, seen := imageBudgets[server.NodeID]
+		if !seen {
+			imageBudget = c.imageCacheBudget(ctx, server.NodeID)
+			imageBudgets[server.NodeID] = imageBudget
+		}
+
 		c.updateMetrics(server.ID, func(m *ServerMetrics) {
 			m.DiskUsage = totalSize
 			m.DiskTotal = serverDiskTotal
 			m.WorldSize = totalWorldSize
+			m.WorldFreeInodes = inodeBudget
+			m.BackupStagingBytes = stagingBudget
+			m.ImageCacheBytes = imageBudget
 			m.LastUpdated = time.Now()
 		})
 	}
