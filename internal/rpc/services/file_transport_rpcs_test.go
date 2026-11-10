@@ -6,6 +6,7 @@
 package services
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"os"
@@ -18,8 +19,8 @@ import (
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/download"
 	"github.com/athNdev/carbon-panel/pkg/logger"
-	"github.com/athNdev/carbon-panel/pkg/upload"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/upload"
 )
 
 type recordingTransport struct {
@@ -329,12 +330,6 @@ func TestZipPipelinesRefuseTransportOnlyEvenWithProvider(t *testing.T) {
 			}))
 			return err
 		}},
-		{"ExtractArchive", func() error {
-			_, err := svc.ExtractArchive(ctx, connect.NewRequest(&v1.ExtractArchiveRequest{
-				ServerId: server.ID, Path: "a.zip",
-			}))
-			return err
-		}},
 		{"DownloadRemoteArchive", func() error {
 			// Transport makes dataRootFor succeed with nodeDataRoot on the
 			// controller. Refuse must run before os.MkdirAll or this dest
@@ -396,6 +391,61 @@ func TestSaveUploadedFileUsesTransport(t *testing.T) {
 		t.Fatalf("uploaded file = %q, %v", got, err)
 	}
 	assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
+}
+
+func TestExtractArchiveUsesTransportNotControllerLocalPath(t *testing.T) {
+	_, server, svc, rt, workerRoot, phantomRoot, cleanup := transportOnlyFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("mods/demo.jar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("mod-bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workerRoot, "pack.zip"), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	openedBefore := rt.opened
+	resp, err := svc.ExtractArchive(ctx, connect.NewRequest(&v1.ExtractArchiveRequest{
+		ServerId: server.ID, Path: "pack.zip",
+	}))
+	if err != nil {
+		t.Fatalf("ExtractArchive: %v", err)
+	}
+	if resp.Msg.GetOperationId() == "" {
+		t.Fatal("expected extraction operation id")
+	}
+	if rt.opened <= openedBefore {
+		t.Fatal("expected ExtractArchive to open remote transport")
+	}
+
+	want := filepath.Join(workerRoot, "pack", "mods", "demo.jar")
+	deadline := time.Now().Add(5 * time.Second)
+	var got []byte
+	for time.Now().Before(deadline) {
+		got, err = os.ReadFile(want)
+		if err == nil && string(got) == "mod-bytes" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if string(got) != "mod-bytes" {
+		t.Fatalf("worker extract = %q, %v (controller zip fallback?)", got, err)
+	}
+	assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
+	mapped := filepath.Join(phantomRoot, filepath.Base(server.DataPath), "pack")
+	if _, err := os.Stat(mapped); !os.IsNotExist(err) {
+		t.Fatalf("controller-local extract tree %s exists: %v", mapped, err)
+	}
 }
 
 func TestInitFileDownloadUsesTransport(t *testing.T) {
