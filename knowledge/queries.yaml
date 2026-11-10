@@ -6,6 +6,10 @@
   expect: invariants/data-safety
 - query: How do I snapshot the panel database before an upgrade?
   expect: operations/backup-restore
+- query: How do I upgrade a Compose install without deleting worlds?
+  expect: operations/deployment-modes
+- query: Does Carbon Panel ship Helm or Terraform?
+  expect: operations/deployment-modes
 - query: How does the TCP proxy route a Minecraft handshake by hostname?
   expect: architecture/proxy
 - query: How durable are SQLite migrations?
@@ -30,6 +34,8 @@
   expect: architecture/remote-storage-transport
 - query: How does the panel qualify Minecraft container runtime profiles after operator overrides?
   expect: architecture/runtime
+- query: When does a Minecraft container skip recursive chown of /data?
+  expect: architecture/server-data-ownership
 - query: Does storage-opt size bound a bind-mounted world?
   expect: architecture/runtime
 - query: What happens when storage.world_quota_mb is set and world bytes meet it?
