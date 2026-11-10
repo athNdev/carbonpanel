@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"sync"
 
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
@@ -116,7 +115,7 @@ func (c *Client) startStorageWorker(ctx context.Context, image, hostDataRoot str
 	closeF := func() error {
 		closeOnce.Do(func() {
 			if attach.Conn != nil {
-				_ = attach.Conn.(net.Conn).Close()
+				_ = attach.Conn.Close()
 			}
 			attach.Close()
 			_ = stdoutR.Close()

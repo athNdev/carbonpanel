@@ -256,18 +256,15 @@ func TestEnsureDataRootRequiresExistingMount(t *testing.T) {
 	}
 }
 
-func TestEnsureDataRootTransportDoesNotCreateControllerCopy(t *testing.T) {
+func TestEnsureDataRootTransportRefusedWithoutProvider(t *testing.T) {
 	base := t.TempDir()
 	nodeRoot := filepath.Join(base, "only-on-node")
 	node := NodeInfo{Name: "r-transport", StorageRoot: nodeRoot}
-	got, err := EnsureDataRoot(node, filepath.Join("var", "data", "servers", "mc"))
-	if err != nil {
-		t.Fatalf("EnsureDataRoot transport mapping: %v", err)
+	SetTransport(nil)
+	if _, err := EnsureDataRoot(node, filepath.Join("var", "data", "servers", "mc")); err == nil || !IsUnavailable(err) {
+		t.Fatalf("transport-only node without provider must be refused, got %v", err)
 	}
 	want := filepath.Join(nodeRoot, "mc")
-	if got != want {
-		t.Fatalf("EnsureDataRoot = %q, want %q", got, want)
-	}
 	if _, err := os.Stat(want); !os.IsNotExist(err) {
 		t.Fatalf("transport must not create controller-local server dir, stat err=%v", err)
 	}

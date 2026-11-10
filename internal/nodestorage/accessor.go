@@ -228,6 +228,9 @@ func MapDataPath(node NodeInfo, dataRoot string) (string, error) {
 		return dataRoot, nil
 	}
 	if RequiresRemoteTransport(node) {
+		if getTransport() == nil {
+			return "", fmt.Errorf("%w: remote transport is not configured for node %q", ErrUnavailable, node.Name)
+		}
 		return nodeDataRoot(node, dataRoot), nil
 	}
 	root := sharedStorageRoot(node)
