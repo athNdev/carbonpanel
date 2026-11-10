@@ -3188,11 +3188,16 @@ func (s *ServerService) ListServerPlayers(ctx context.Context, req *connect.Requ
 // A remote node without reachable storage is refused, so a controller-local
 // copy is not uploaded in its place.
 func serverLatestLog(ctx context.Context, store *storage.Store, server *storage.Server) ([]byte, error) {
-	root, err := dataRootFor(ctx, store, server, false)
+	info, err := storageNodeInfo(ctx, store, server.NodeID)
 	if err != nil {
 		return nil, err
 	}
-	return os.ReadFile(filepath.Join(root, "logs", "latest.log"))
+	acc, err := nodestorage.ForNode(info, server.DataPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = acc.Close() }()
+	return acc.ReadFile(filepath.Join("logs", "latest.log"))
 }
 
 // Reads the server's latest.log and uploads it to mclo.gs

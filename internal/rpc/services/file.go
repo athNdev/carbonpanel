@@ -186,24 +186,22 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 		path = "."
 	}
 
-	// Server data lives on the owning node; list through the mapped root.
-	root, err := dataRootFor(ctx, s.store, server, false)
+	root, acc, err := s.openMappedStorage(ctx, server, false)
 	if err != nil {
 		return nil, storageError(err)
 	}
+	defer func() { _ = acc.Close() }()
 
-	// Clean and validate path
 	fullPath := filepath.Join(root, path)
 	if !files.WithinReal(root, fullPath) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
 
-	// List directory
 	var files []*v1.FileInfo
 	if msg.Tree {
-		files, err = s.listDirectoryTree(fullPath, root, 0, 10) // max depth 10
+		files, err = s.listDirectoryTreeAcc(acc, path, 0, 10)
 	} else {
-		files, err = s.listDirectory(fullPath, root)
+		files, err = s.listDirectoryAcc(acc, path)
 	}
 
 	if err != nil {
@@ -218,10 +216,14 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 
 // openMappedStorage resolves the owning node's data root and opens an accessor
 // there. The controller copy of server.DataPath is not consulted. A remote
-// node without reachable storage is refused before any path check.
+// node without reachable storage is refused before any path check. Write
+// pipelines may create the server directory on shared or local storage; they
+// never mkdir a transport-only node onto the controller.
 func (s *FileService) openMappedStorage(ctx context.Context, server *storage.Server, write bool) (string, nodestorage.Accessor, error) {
-	if _, err := dataRootFor(ctx, s.store, server, write); err != nil {
-		return "", nil, err
+	if write {
+		if _, err := dataRootFor(ctx, s.store, server, true); err != nil {
+			return "", nil, err
+		}
 	}
 	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
 	if err != nil {
@@ -336,39 +338,39 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 		targetPath = "."
 	}
 
-	// Server data lives on the owning node; write through the mapped root.
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, acc, err := s.openMappedStorage(ctx, server, true)
 	if err != nil {
 		return nil, storageError(err)
 	}
+	defer func() { _ = acc.Close() }()
 
-	// Clean and validate path
 	fullPath := filepath.Join(root, targetPath)
 	if !files.WithinReal(root, fullPath) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
 
-	// Refuse writing directly through a symlink
-	if fi, err := os.Lstat(fullPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot write through symbolic link"))
-	}
-
-	// Create directories if needed
-	if err := os.MkdirAll(fullPath, 0755); err != nil {
+	if err := acc.MkdirAll(targetPath); err != nil {
 		s.log.Error("Failed to create directory: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create directory"))
+		return nil, storageError(err)
 	}
 
-	// Move file from temp location to destination
-	destFilePath := filepath.Join(fullPath, targetFilename)
-	if err := os.Rename(tempPath, destFilePath); err != nil {
-		if err := files.CopyFile(tempPath, destFilePath); err != nil {
-			s.log.Error("Failed to move file: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to save file"))
+	data, err := os.ReadFile(tempPath)
+	if err != nil {
+		s.log.Error("Failed to read upload temp file: %v", err)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to read uploaded file"))
+	}
+
+	destRel := filepath.Join(targetPath, targetFilename)
+	if err := acc.WriteFile(destRel, data); err != nil {
+		if nodestorage.IsSymlink(err) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
-		os.Remove(tempPath)
+		s.log.Error("Failed to save file: %v", err)
+		return nil, storageError(err)
 	}
+	_ = os.Remove(tempPath)
 
+	destFilePath := filepath.Join(root, destRel)
 	s.adoptServerOwnership(root, destFilePath, false)
 
 	// Cleanup the upload session
@@ -390,10 +392,13 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, !msg.GetStage())
+	write := !msg.GetStage()
+	root, acc, err := s.openMappedStorage(ctx, server, write)
 	if err != nil {
 		return nil, storageError(err)
 	}
+	defer func() { _ = acc.Close() }()
+
 	fullPath := filepath.Join(root, msg.Path)
 	if !files.WithinReal(root, fullPath) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
@@ -410,13 +415,6 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 		}), nil
 	}
 
-	// Write through the node-aware accessor: confined to the mapped root and
-	// refusing symlink writes.
-	acc, err := nodestorage.NewLocal(root)
-	if err != nil {
-		return nil, storageError(err)
-	}
-	defer func() { _ = acc.Close() }()
 	if err := acc.WriteFile(msg.Path, msg.Content); err != nil {
 		if nodestorage.IsSymlink(err) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
@@ -453,12 +451,11 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
 	}
 
-	// Validate every path against the owning node's root. A missing adapter
-	// refuses before a controller-local directory is inspected.
-	root, err := dataRootFor(ctx, s.store, server, false)
+	root, acc, err := s.openMappedStorage(ctx, server, false)
 	if err != nil {
 		return nil, storageError(err)
 	}
+	defer func() { _ = acc.Close() }()
 	for _, p := range paths {
 		fullPath := filepath.Join(root, p)
 		if !files.WithinReal(root, fullPath) {
@@ -477,12 +474,6 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 		}
 		return connect.NewResponse(&v1.DeleteFileResponse{}), nil
 	}
-
-	acc, err := nodestorage.NewLocal(root)
-	if err != nil {
-		return nil, storageError(err)
-	}
-	defer func() { _ = acc.Close() }()
 
 	for _, p := range paths {
 		info, err := acc.Stat(p)
@@ -595,7 +586,10 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	// Server data lives on the owning node; extract through the mapped root.
+	if err := refuseLocalPathPipeline(ctx, s.store, server); err != nil {
+		return nil, storageError(err)
+	}
+
 	root, err := dataRootFor(ctx, s.store, server, true)
 	if err != nil {
 		return nil, storageError(err)
@@ -730,7 +724,10 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("SSRF guard blocked URL: %w", err))
 	}
 
-	// Server data lives on the owning node; download into the mapped root.
+	if err := refuseLocalPathPipeline(ctx, s.store, server); err != nil {
+		return nil, storageError(err)
+	}
+
 	root, err := dataRootFor(ctx, s.store, server, true)
 	if err != nil {
 		return nil, storageError(err)
@@ -945,19 +942,20 @@ func (s *FileService) CreateFolder(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, acc, err := s.openMappedStorage(ctx, server, true)
 	if err != nil {
 		return nil, storageError(err)
 	}
+	defer func() { _ = acc.Close() }()
 
 	fullPath := filepath.Join(root, msg.Path)
 	if !files.WithinReal(root, fullPath) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
 
-	if err := os.MkdirAll(fullPath, 0755); err != nil {
+	if err := acc.MkdirAll(msg.Path); err != nil {
 		s.log.Error("Failed to create folder: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create folder"))
+		return nil, storageError(err)
 	}
 
 	return connect.NewResponse(&v1.CreateFolderResponse{
@@ -974,10 +972,11 @@ func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.Move
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, acc, err := s.openMappedStorage(ctx, server, true)
 	if err != nil {
 		return nil, storageError(err)
 	}
+	defer func() { _ = acc.Close() }()
 
 	srcFull := filepath.Join(root, msg.SourcePath)
 	dstFull := filepath.Join(root, msg.DestinationPath)
@@ -986,36 +985,33 @@ func (s *FileService) MoveFile(ctx context.Context, req *connect.Request[v1.Move
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
 
-	if _, err := os.Stat(srcFull); err != nil {
+	srcInfo, err := acc.Stat(msg.SourcePath)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("source not found"))
 		}
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to access source"))
 	}
 
-	// Ensure destination parent exists
-	if err := os.MkdirAll(filepath.Dir(dstFull), 0755); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create destination directory"))
+	if parent := filepath.Dir(msg.DestinationPath); parent != "" && parent != "." {
+		if err := acc.MkdirAll(parent); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create destination directory"))
+		}
 	}
 
-	// Try rename first, fall back to copy+delete for cross-device moves
-	if err := os.Rename(srcFull, dstFull); err != nil {
-		srcInfo, statErr := os.Stat(srcFull)
-		if statErr != nil {
+	if err := acc.Rename(msg.SourcePath, msg.DestinationPath); err != nil {
+		if copyErr := copyViaAccessor(acc, msg.SourcePath, msg.DestinationPath, srcInfo.IsDir()); copyErr != nil {
+			s.log.Error("Failed to copy for move: %v", copyErr)
+			if srcInfo.IsDir() {
+				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to move directory"))
+			}
 			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to move file"))
 		}
 		if srcInfo.IsDir() {
-			if copyErr := files.CopyDir(srcFull, dstFull); copyErr != nil {
-				s.log.Error("Failed to copy dir for move: %v", copyErr)
-				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to move directory"))
-			}
+			_ = acc.RemoveAll(msg.SourcePath)
 		} else {
-			if copyErr := files.CopyFile(srcFull, dstFull); copyErr != nil {
-				s.log.Error("Failed to copy file for move: %v", copyErr)
-				return nil, connect.NewError(connect.CodeInternal, errors.New("failed to move file"))
-			}
+			_ = acc.Remove(msg.SourcePath)
 		}
-		os.RemoveAll(srcFull)
 	}
 
 	return connect.NewResponse(&v1.MoveFileResponse{
@@ -1032,19 +1028,22 @@ func (s *FileService) CopyFile(ctx context.Context, req *connect.Request[v1.Copy
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, acc, err := s.openMappedStorage(ctx, server, true)
 	if err != nil {
 		return nil, storageError(err)
 	}
+	defer func() { _ = acc.Close() }()
 
-	srcFull := filepath.Join(root, msg.SourcePath)
-	dstFull := filepath.Join(root, msg.DestinationPath)
+	srcRel := msg.SourcePath
+	dstRel := msg.DestinationPath
+	srcFull := filepath.Join(root, srcRel)
+	dstFull := filepath.Join(root, dstRel)
 
 	if !files.WithinReal(root, srcFull) || !files.WithinReal(root, dstFull) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
 
-	srcInfo, err := os.Stat(srcFull)
+	srcInfo, err := acc.Stat(srcRel)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("source not found"))
@@ -1052,25 +1051,26 @@ func (s *FileService) CopyFile(ctx context.Context, req *connect.Request[v1.Copy
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to access source"))
 	}
 
-	// If src and dst are the same, generate a "copy" name to avoid truncation
-	if srcFull == dstFull {
-		dstFull = uniqueCopyPath(dstFull, srcInfo.IsDir())
+	if srcRel == dstRel {
+		dstRel = uniqueCopyRel(acc, dstRel, srcInfo.IsDir())
+		dstFull = filepath.Join(root, dstRel)
+		if !files.WithinReal(root, dstFull) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
+		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dstFull), 0755); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create destination directory"))
+	if parent := filepath.Dir(dstRel); parent != "" && parent != "." {
+		if err := acc.MkdirAll(parent); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create destination directory"))
+		}
 	}
 
-	if srcInfo.IsDir() {
-		if err := files.CopyDir(srcFull, dstFull); err != nil {
-			s.log.Error("Failed to copy directory: %v", err)
+	if err := copyViaAccessor(acc, srcRel, dstRel, srcInfo.IsDir()); err != nil {
+		s.log.Error("Failed to copy: %v", err)
+		if srcInfo.IsDir() {
 			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to copy directory"))
 		}
-	} else {
-		if err := files.CopyFile(srcFull, dstFull); err != nil {
-			s.log.Error("Failed to copy file: %v", err)
-			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to copy file"))
-		}
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to copy file"))
 	}
 
 	return connect.NewResponse(&v1.CopyFileResponse{
@@ -1091,7 +1091,10 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
 	}
 
-	// Server data lives on the owning node; archive through the mapped root.
+	if err := refuseLocalPathPipeline(ctx, s.store, server); err != nil {
+		return nil, storageError(err)
+	}
+
 	root, err := dataRootFor(ctx, s.store, server, true)
 	if err != nil {
 		return nil, storageError(err)
@@ -1151,7 +1154,10 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
 	}
 
-	// Server data lives on the owning node; read through the mapped root.
+	if err := refuseLocalPathPipeline(ctx, s.store, server); err != nil {
+		return nil, storageError(err)
+	}
+
 	root, err := dataRootFor(ctx, s.store, server, false)
 	if err != nil {
 		return nil, storageError(err)
@@ -1164,7 +1170,6 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 		}
 	}
 
-	// Determine download filename
 	filename := "download.zip"
 	if len(msg.Paths) == 1 {
 		base := filepath.Base(msg.Paths[0])
@@ -1219,6 +1224,9 @@ func (s *FileService) ExportWorld(ctx context.Context, req *connect.Request[v1.E
 	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
 	if err != nil {
 		return nil, storageError(err)
+	}
+	if nodestorage.RequiresRemoteTransport(info) {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("%w: world export is not available for transport-only node %q", nodestorage.ErrUnavailable, info.Name))
 	}
 	root, err := nodestorage.MapDataPath(info, server.DataPath)
 	if err != nil {
@@ -1339,17 +1347,22 @@ func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, false)
+	if s.downloadManager == nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("download manager is not configured"))
+	}
+
+	root, acc, err := s.openMappedStorage(ctx, server, false)
 	if err != nil {
 		return nil, storageError(err)
 	}
+	defer func() { _ = acc.Close() }()
 
 	fullPath := filepath.Join(root, msg.Path)
 	if !files.WithinReal(root, fullPath) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid path"))
 	}
 
-	info, err := os.Stat(fullPath)
+	info, err := acc.Stat(msg.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("file not found"))
@@ -1361,14 +1374,24 @@ func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path is a directory, use DownloadArchive instead"))
 	}
 
-	// Point session at file, bound to the owning server and creating user.
+	content, err := acc.ReadFile(msg.Path)
+	if err != nil {
+		s.log.Error("Failed to read file for download: %v", err)
+		return nil, storageError(err)
+	}
+
 	filename := filepath.Base(msg.Path)
+	tempPath := filepath.Join(s.downloadManager.TempDir(), fmt.Sprintf("file-%s-%s", time.Now().Format("20060102-150405.000"), filename))
+	if err := os.WriteFile(tempPath, content, 0o644); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stage download"))
+	}
+
 	user := auth.GetUserFromContext(ctx)
 	creatorID := ""
 	if user != nil {
 		creatorID = user.ID
 	}
-	session := s.downloadManager.InitSessionFor(fullPath, filename, info.Size(), false, msg.ServerId, creatorID)
+	session := s.downloadManager.InitSessionFor(tempPath, filename, info.Size(), true, msg.ServerId, creatorID)
 
 	return connect.NewResponse(&v1.InitFileDownloadResponse{
 		SessionId: session.ID,
@@ -1377,10 +1400,11 @@ func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request
 	}), nil
 }
 
-// uniqueCopyPath generates a non-colliding "name (copy).ext" path.
-func uniqueCopyPath(fullPath string, isDir bool) string {
-	dir := filepath.Dir(fullPath)
-	base := filepath.Base(fullPath)
+// uniqueCopyRel generates a non-colliding "name (copy).ext" path relative to
+// the accessor root.
+func uniqueCopyRel(acc nodestorage.Accessor, rel string, isDir bool) string {
+	dir := filepath.Dir(rel)
+	base := filepath.Base(rel)
 
 	var stem, ext string
 	if isDir {
@@ -1390,99 +1414,142 @@ func uniqueCopyPath(fullPath string, isDir bool) string {
 		stem = strings.TrimSuffix(base, ext)
 	}
 
-	candidate := filepath.Join(dir, stem+" (copy)"+ext)
+	candidate := joinRelDir(dir, stem+" (copy)"+ext)
 	for i := 2; ; i++ {
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		if _, err := acc.Stat(candidate); err != nil {
 			return candidate
 		}
-		candidate = filepath.Join(dir, fmt.Sprintf("%s (copy %d)%s", stem, i, ext))
+		candidate = joinRelDir(dir, fmt.Sprintf("%s (copy %d)%s", stem, i, ext))
 	}
 }
 
-// Helper functions
-func (s *FileService) listDirectory(path, basePath string) ([]*v1.FileInfo, error) {
-	entries, err := os.ReadDir(path)
+func copyViaAccessor(acc nodestorage.Accessor, src, dst string, isDir bool) error {
+	if isDir {
+		if err := acc.MkdirAll(dst); err != nil {
+			return err
+		}
+		entries, err := acc.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			childSrc := joinRelDir(src, entry.Name())
+			childDst := joinRelDir(dst, entry.Name())
+			info, err := acc.Stat(childSrc)
+			if err != nil {
+				return err
+			}
+			if err := copyViaAccessor(acc, childSrc, childDst, info.IsDir()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	data, err := acc.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return acc.WriteFile(dst, data)
+}
+
+func joinRelDir(rel, name string) string {
+	if rel == "" || rel == "." {
+		return name
+	}
+	return filepath.Join(rel, name)
+}
+
+func (s *FileService) fileInfoFromAccessor(acc nodestorage.Accessor, rel string, info os.FileInfo) *v1.FileInfo {
+	root := acc.Root()
+	fullPath := filepath.Join(root, rel)
+	if !files.WithinReal(root, fullPath) {
+		return nil
+	}
+	isSymlink := info.Mode()&os.ModeSymlink != 0
+	isDir := info.IsDir() && !isSymlink
+	return &v1.FileInfo{
+		Name:       info.Name(),
+		Path:       filepath.ToSlash(rel),
+		IsDir:      isDir,
+		Size:       info.Size(),
+		Modified:   info.ModTime().Unix(),
+		IsEditable: !isDir && !isSymlink && isTextFromAccessor(acc, rel),
+	}
+}
+
+func isTextFromAccessor(acc nodestorage.Accessor, rel string) bool {
+	data, err := acc.ReadFile(rel)
+	if err != nil {
+		return false
+	}
+	if len(data) == 0 {
+		return true
+	}
+	if len(data) > 512 {
+		data = data[:512]
+	}
+	for _, b := range data {
+		if b == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *FileService) listDirectoryAcc(acc nodestorage.Accessor, rel string) ([]*v1.FileInfo, error) {
+	if rel == "" {
+		rel = "."
+	}
+	entries, err := acc.ReadDir(rel)
 	if err != nil {
 		return nil, err
 	}
 
 	lsFiles := make([]*v1.FileInfo, 0, len(entries))
 	for _, entry := range entries {
-		info, err := entry.Info()
+		childRel := joinRelDir(rel, entry.Name())
+		info, err := acc.Stat(childRel)
 		if err != nil {
 			continue
 		}
-
-		fullPath := filepath.Join(path, entry.Name())
-		if !files.WithinReal(basePath, fullPath) {
-			continue
+		if fi := s.fileInfoFromAccessor(acc, childRel, info); fi != nil {
+			lsFiles = append(lsFiles, fi)
 		}
-
-		relPath, _ := filepath.Rel(basePath, fullPath)
-		isSymlink := entry.Type()&os.ModeSymlink != 0
-		isDir := entry.IsDir() && !isSymlink
-
-		fileInfo := &v1.FileInfo{
-			Name:       entry.Name(),
-			Path:       relPath,
-			IsDir:      isDir,
-			Size:       info.Size(),
-			Modified:   info.ModTime().Unix(),
-			IsEditable: !isDir && !isSymlink && files.IsTextFile(fullPath),
-		}
-
-		lsFiles = append(lsFiles, fileInfo)
 	}
-
 	return lsFiles, nil
 }
 
-func (s *FileService) listDirectoryTree(path, basePath string, depth, maxDepth int) ([]*v1.FileInfo, error) {
+func (s *FileService) listDirectoryTreeAcc(acc nodestorage.Accessor, rel string, depth, maxDepth int) ([]*v1.FileInfo, error) {
 	if depth > maxDepth {
 		return nil, nil
 	}
-
-	entries, err := os.ReadDir(path)
+	if rel == "" {
+		rel = "."
+	}
+	entries, err := acc.ReadDir(rel)
 	if err != nil {
 		return nil, err
 	}
 
 	lsFiles := make([]*v1.FileInfo, 0, len(entries))
 	for _, entry := range entries {
-		info, err := entry.Info()
+		childRel := joinRelDir(rel, entry.Name())
+		info, err := acc.Stat(childRel)
 		if err != nil {
 			continue
 		}
-
-		fullPath := filepath.Join(path, entry.Name())
-		if !files.WithinReal(basePath, fullPath) {
+		fi := s.fileInfoFromAccessor(acc, childRel, info)
+		if fi == nil {
 			continue
 		}
-
-		relPath, _ := filepath.Rel(basePath, fullPath)
-		isSymlink := entry.Type()&os.ModeSymlink != 0
-		isDir := entry.IsDir() && !isSymlink
-
-		fileInfo := &v1.FileInfo{
-			Name:       entry.Name(),
-			Path:       relPath,
-			IsDir:      isDir,
-			Size:       info.Size(),
-			Modified:   info.ModTime().Unix(),
-			IsEditable: !isDir && !isSymlink && files.IsTextFile(fullPath),
-		}
-
-		// If it's a directory and we haven't reached max depth, get children
+		isDir := fi.IsDir
 		if isDir && depth < maxDepth {
-			childPath := filepath.Join(path, entry.Name())
-			children, err := s.listDirectoryTree(childPath, basePath, depth+1, maxDepth)
+			children, err := s.listDirectoryTreeAcc(acc, childRel, depth+1, maxDepth)
 			if err == nil {
-				fileInfo.Children = children
+				fi.Children = children
 			}
 		}
-
-		lsFiles = append(lsFiles, fileInfo)
+		lsFiles = append(lsFiles, fi)
 	}
-
 	return lsFiles, nil
 }
