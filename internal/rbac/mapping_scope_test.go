@@ -50,6 +50,7 @@ func TestObjectScopedProceduresUseServerID(t *testing.T) {
 		"/carbonpanel.v1.SubuserService/ListSubusers",
 		"/carbonpanel.v1.SubuserService/SetSubuser",
 		"/carbonpanel.v1.SubuserService/RemoveSubuser",
+		"/carbonpanel.v1.ActivityService/ListActivityLogs",
 	}
 	for _, proc := range want {
 		perm, ok := ProcedurePermissions[proc]

@@ -29,6 +29,9 @@ message ActivityLogEntry {
   string subject_id = 7;
   string properties = 8;
   google.protobuf.Timestamp created_at = 9;
+  // Client request id of the journaled lifecycle operation this event
+  // records, when one was supplied. Empty for non-journaled events.
+  string request_id = 10;
 }
 
 // List request with optional filters

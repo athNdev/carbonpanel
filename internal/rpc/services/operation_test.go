@@ -78,6 +78,9 @@ func TestListOperationsIsScopedToOneServer(t *testing.T) {
 	if got := res.Msg.Operations[0].ServerId; got != "srv-1" {
 		t.Fatalf("server id = %q, want srv-1", got)
 	}
+	if got := res.Msg.Operations[0].RequestId; got == "" {
+		t.Fatal("journal row is missing request_id; activity cannot join it")
+	}
 }
 
 func TestListOperationsSeparatesInFlightFromUnknown(t *testing.T) {

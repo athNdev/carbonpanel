@@ -159,6 +159,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<tr class="border-b border-[#393939] text-left text-[#a8a8a8]">
 						<th scope="col" class="py-2 pr-4 font-medium">Started</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Operation</th>
+						<th scope="col" class="py-2 pr-4 font-medium">Request ID</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Outcome</th>
 						<th scope="col" class="py-2 pr-4 font-medium">What happened</th>
 						<th scope="col" class="py-2 font-medium">Next step</th>
@@ -171,6 +172,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								>{formatTimestamp(op.startedAt)}</td
 							>
 							<td class="py-2 pr-4 font-mono whitespace-nowrap">{op.kind}</td>
+							<td class="max-w-[180px] truncate py-2 pr-4 font-mono" title={op.requestId || ''}
+								>{op.requestId || '—'}</td
+							>
 							<td class="py-2 pr-4">
 								<CarbonTag type={outcomeTagType(op.outcome)} size="sm">{op.outcome}</CarbonTag>
 							</td>

@@ -28,3 +28,5 @@
   expect: architecture/runtime
 - query: What happens when storage.world_quota_mb is set and world bytes meet it?
   expect: architecture/runtime
+- query: How do journal rows join activity events?
+  expect: architecture/operation-journal

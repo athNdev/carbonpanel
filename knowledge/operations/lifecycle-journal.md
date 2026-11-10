@@ -6,6 +6,7 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/operation
+  - internal/activity
   - internal/db/server_operation.go
   - cmd/carbon-panel/operations.go
   - internal/db/portlease.go
@@ -65,6 +66,9 @@ behind an operation lock.
   happened.
 - Credentials in recorded error text are redacted before it reaches a
   diagnostic. Hosts, paths and daemon messages stay: they are the evidence.
+- The activity feed stores the same client `request_id` as the journal row it
+  records, so operators can join the two without guessing. An empty client
+  id stays empty on activity; it is not invented after the fact.
 - The support bundle carries `operations.json` with that projection, so a
   bundle can explain a stuck server without the Docker socket.
 
