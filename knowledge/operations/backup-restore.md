@@ -9,6 +9,8 @@ code_refs:
   - internal/snapshot
   - internal/scheduler
   - internal/worldstore
+  - scripts/snapshot-panel-db.sh
+  - docker-compose.yml
 sources:
   - title: Backup confirmation issue
     resource: ../../docs/issues/013-UI-5-backup-confirmation-dialogs.md
@@ -44,6 +46,13 @@ data path.
 Panel database snapshots and the offline restore command are specified in
 [ADR 0007](../../docs/adr/0007-panel-sqlite-snapshots.md) and
 `docs/runbook-panel-db-restore.md`.
+
+Before a controller upgrade, run the named operator script
+`scripts/snapshot-panel-db.sh` (or `make snapshot-panel-db`). It writes
+`carbon-panel-db-<timestamp>.sqlite` beside the data directory. Restore by
+copying that file onto `database.path` with the panel stopped; do not touch
+worlds or bind mounts. `make test`, `scripts/web-build.sh`, `make clean` and
+`docker compose up`/`down` do not take or restore that snapshot.
 
 # Read next
 
