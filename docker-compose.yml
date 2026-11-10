@@ -51,6 +51,8 @@ services:
       # copying that file back onto carbon-panel.db with the panel stopped.
       # Recreate onto a newer image with scripts/compose-upgrade.sh (dry-run
       # by default; --apply snapshots then `docker compose up -d --pull always`).
+      # A failed snapshot stops before compose up. Copy-back rollback is
+      # scripts/compose-upgrade-rollback.sh (not a volume prune).
       # Helm and Terraform are not shipped in this repository.
       - /opt/carbon-panel/data:/app/data
       - /opt/carbon-panel/backups:/app/backups

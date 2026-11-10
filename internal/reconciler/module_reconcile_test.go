@@ -541,6 +541,96 @@ func TestAModuleFailureIsLoggedAndDoesNotStopTheWorker(t *testing.T) {
 	}
 }
 
+func TestReconnectEventAdoptsReplacedModuleIdentity(t *testing.T) {
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{
+			Path:           ":memory:",
+			AutoMigrate:    true,
+			MaxConnections: 1,
+		},
+	}
+	store, err := db.NewSQLiteStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := store.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	ctx := context.Background()
+	server := &db.Server{
+		ID: "srv-reconnect", Name: "Survival", NodeID: "local",
+		ContainerID: "game", Status: db.StatusRunning,
+		ModLoader: db.ModLoaderVanilla, MCVersion: "1.21", DataPath: t.TempDir(),
+	}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	mod := &db.Module{
+		ID: "sidecar-reconnect", Name: "sidecar", ServerID: server.ID, NodeID: "local",
+		ContainerID: "stale-before-restart", Status: db.ModuleStatusRunning,
+		Ports: []*v1.ModulePort{{Name: "Bedrock", HostPort: 19132, ContainerPort: 19132, Protocol: "udp"}},
+	}
+	if err := store.DB().Create(mod).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"Id":"after-reconnect","Names":["/carbon-panel-module-sidecar-reconnect"],"State":"running","Ports":[{"PublicPort":19132,"PrivatePort":19132,"Type":"udp"}]}]`))
+		case strings.Contains(r.URL.Path, "/containers/after-reconnect/json"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"after-reconnect","Name":"/carbon-panel-module-sidecar-reconnect","State":{"Status":"running","Running":true,"ExitCode":0},"Config":{"Labels":{}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(api.Close)
+	cli, err := docker.NewClient(strings.Replace(api.URL, "http://", "tcp://", 1), logger.New())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = cli.Close() })
+
+	manager := module.NewManager(store, cli, nil, nil, nil, logger.New())
+	pass := &recordingManagerPass{manager: manager}
+	gated := &hideServersFromSweep{Store: store}
+	r := New(gated, &fakeResolver{}, nil, nil, nil, logger.New(), Config{
+		DebounceWindow: 10 * time.Millisecond,
+		SweepInterval:  time.Hour,
+	})
+	events := make(chan ContainerEvent, 1)
+	runCtx, cancel := context.WithCancel(context.Background())
+	r.SetModuleReconciler(pass)
+	r.Start(runCtx, events)
+	t.Cleanup(func() {
+		r.Stop()
+		cancel()
+	})
+
+	events <- ContainerEvent{ModuleID: "sidecar-reconnect", ContainerID: "after-reconnect"}
+	waitFor(t, func() bool { return callsInclude(pass.calls(), "sidecar-reconnect") })
+	if got := pass.lastOutcome(); got != string(module.ReconcileAdopted) {
+		t.Fatalf("outcome = %s, want adopted after reconnect", got)
+	}
+	got, err := store.GetModule(ctx, "sidecar-reconnect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContainerID != "after-reconnect" {
+		t.Fatalf("container id = %q, want the identity observed after reconnect", got.ContainerID)
+	}
+	if got.Status != db.ModuleStatusRunning {
+		t.Fatalf("status = %s, want running", got.Status)
+	}
+	if len(got.Ports) != 1 || got.Ports[0].HostPort != 19132 {
+		t.Fatalf("ports = %+v, want the recorded 19132", got.Ports)
+	}
+}
+
 func TestLastSweepAtAdvancesWithASweep(t *testing.T) {
 	r := New(&fakeStore{}, &fakeResolver{}, nil, nil, nil, logger.New(), Config{
 		DebounceWindow: 10 * time.Millisecond,

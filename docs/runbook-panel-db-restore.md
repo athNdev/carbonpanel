@@ -47,10 +47,20 @@ mounts are not read or written.
 
 ## Restoring an upgrade snapshot
 
-1. **Stop the panel** (`docker compose down` without `--volumes`, or stop the
-   process). Bind mounts and world directories stay on the host.
+1. **Stop the panel** (`docker compose stop`, or `docker compose down` without
+   a volumes-delete flag). Bind mounts and world directories stay on the host.
 
-2. **Copy the snapshot over the live database file only:**
+2. **Copy the snapshot over the live database file only** with the named
+   rollback script (preferred) or by hand:
+
+   ```sh
+   scripts/compose-upgrade-rollback.sh \
+     --data-dir /opt/carbon-panel/data \
+     --snapshot /opt/carbon-panel/carbon-panel-db-YYYYMMDDTHHMMSSZ.sqlite \
+     --apply
+   ```
+
+   Equivalent copy-back:
 
    ```sh
    cp /opt/carbon-panel/carbon-panel-db-YYYYMMDDTHHMMSSZ.sqlite \
@@ -60,8 +70,15 @@ mounts are not read or written.
    ```
 
    Do not copy the snapshot onto worlds, `servers/`, or the backups mount.
+   Do not `docker volume prune`. Rollback is this copy-back, not a destructive
+   compose down.
 
 3. **Start the panel** and confirm the server list matches the snapshot.
+
+Interrupted upgrade / disk-full: `scripts/compose-upgrade.sh --apply` does not
+run `compose up` if the snapshot failed. The previous panel image is still the
+one that is running (or last running). Use copy-back only if the live SQLite
+file is damaged; worlds stay on the bind mount either way.
 
 You can also feed the same file to `carbon-panel -restore-panel-backup` if the
 binary is available; that path keeps the previous database at

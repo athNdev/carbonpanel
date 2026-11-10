@@ -9,6 +9,7 @@ code_refs:
   - internal/snapshot
   - internal/s3
   - scripts/snapshot-panel-db.sh
+  - scripts/compose-upgrade-rollback.sh
 sources:
   - title: Panel SQLite snapshots
     resource: ../../docs/adr/0007-panel-sqlite-snapshots.md
@@ -24,8 +25,8 @@ Migrations are embedded and run at startup. The shipped durability mode is a
 daily `VACUUM INTO` snapshot with an integrity check and an explicit offline
 restore (ADR 0007). It is not continuous replication. An extra on-demand
 operator snapshot (`scripts/snapshot-panel-db.sh`) writes a timestamped file
-beside the data directory and is restored by copying it back; worlds stay on
-their bind mounts.
+beside the data directory and is restored by `scripts/compose-upgrade-rollback.sh`
+(copy-back, not a prune); worlds stay on their bind mounts.
 
 Worlds, snapshots and remote archives are handled by `internal/snapshot` and
 `internal/s3`. The database holds metadata about them, never the world data
