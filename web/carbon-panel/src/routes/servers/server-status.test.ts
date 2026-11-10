@@ -63,9 +63,9 @@ test('list issues pill goes amber when nothing actually errored', () => {
 
 test('error tile names the recorded failure cause', () => {
 	const detail = fs.readFileSync(path.resolve(import.meta.dirname, './[id]/+page.svelte'), 'utf-8');
-	assert.ok(detail.includes('server.statusReason'), 'error tile must read the recorded reason');
+	assert.ok(detail.includes('exitFailureCopy'), 'error tile must read the recorded reason');
 	assert.ok(
-		detail.includes('Server failed:'),
+		detail.includes('exitFailureCopy(server.statusReason)'),
 		'error tile must name the failure instead of only a daemon code'
 	);
 });

@@ -528,7 +528,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<!-- Carbon Page Header -->
 		<CarbonPageHeader
 			title="Create New Server"
-			description="Configure instance runtime, container engine, resource quotas, and network proxy"
+			description="Configure instance runtime, container engine, resource requests, and network proxy"
 		>
 			{#snippet tag()}
 				<span
@@ -967,7 +967,8 @@ one at https://mozilla.org/MPL/2.0/.
 					<div>
 						<h2 class="text-lg font-light text-[#f4f4f4]">Step 3: Resources & Network</h2>
 						<p class="mt-1 font-sans text-xs text-[#a8a8a8]">
-							Configure port routing, reverse proxy domain, and system memory limits.
+							Configure port routing, reverse proxy domain, and a memory request (not a hard cap
+							until the engine reports it as enforced).
 						</p>
 					</div>
 
@@ -1117,14 +1118,14 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 					{/if}
 
-					<!-- Quotas: Memory & Max Players -->
+					<!-- Memory request and max players -->
 					<div class="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
 						<div class="space-y-1.5">
 							<label
 								for="memory"
 								class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
 							>
-								Memory Allocation (MB)
+								Memory request (MB)
 							</label>
 							<input
 								id="memory"
@@ -1135,7 +1136,8 @@ one at https://mozilla.org/MPL/2.0/.
 								class="focus-ring h-10 w-full rounded-none border border-[#393939] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
 							/>
 							<p class="font-mono text-xs text-[#8d8d8d]">
-								Equals {(formData.memory / 1024).toFixed(1)} GB
+								Equals {(formData.memory / 1024).toFixed(1)} GB · not a hard cap if the engine reports
+								memory_limit_unsupported
 								{#if selectedModpack && selectedModpack.recommendedRam > 0}
 									· Recommended for this pack: {selectedModpack.recommendedRam} MB
 								{/if}

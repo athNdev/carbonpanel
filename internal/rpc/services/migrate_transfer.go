@@ -195,7 +195,7 @@ func (s *ServerService) migrateServerNow(ctx context.Context, server *storage.Se
 		SourceNodeId: sourceNodeID,
 		TargetNodeId: targetNode.ID,
 		DurationMs:   durationMs,
-		Server:       dbServerToProto(server),
+		Server:       s.toProtoServer(ctx, server),
 	}, nil
 }
 

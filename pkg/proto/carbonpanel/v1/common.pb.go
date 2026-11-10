@@ -378,6 +378,10 @@ type Server struct {
 	JoinObservationKind string                 `protobuf:"bytes,48,opt,name=join_observation_kind,json=joinObservationKind,proto3" json:"join_observation_kind,omitempty"`
 	JoinObservedAt      *timestamppb.Timestamp `protobuf:"bytes,49,opt,name=join_observed_at,json=joinObservedAt,proto3,oneof" json:"join_observed_at,omitempty"`
 	LastGoodJoinAt      *timestamppb.Timestamp `protobuf:"bytes,50,opt,name=last_good_join_at,json=lastGoodJoinAt,proto3,oneof" json:"last_good_join_at,omitempty"`
+	// Requested versus effective Docker resource limits for this server.
+	// memory_enforced is false until /info qualification says the cap applies;
+	// world_disk_enforced is never set from storage-opt.
+	ResourceEnforcement *ResourceEnforcement `protobuf:"bytes,51,opt,name=resource_enforcement,json=resourceEnforcement,proto3" json:"resource_enforcement,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -762,6 +766,122 @@ func (x *Server) GetLastGoodJoinAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *Server) GetResourceEnforcement() *ResourceEnforcement {
+	if x != nil {
+		return x.ResourceEnforcement
+	}
+	return nil
+}
+
+// Requested versus effective container resource limits.
+type ResourceEnforcement struct {
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	RequestedMemoryBytes     int64                  `protobuf:"varint,1,opt,name=requested_memory_bytes,json=requestedMemoryBytes,proto3" json:"requested_memory_bytes,omitempty"`
+	EffectiveMemoryBytes     int64                  `protobuf:"varint,2,opt,name=effective_memory_bytes,json=effectiveMemoryBytes,proto3" json:"effective_memory_bytes,omitempty"`
+	RequestedWritableLayerMb int64                  `protobuf:"varint,3,opt,name=requested_writable_layer_mb,json=requestedWritableLayerMb,proto3" json:"requested_writable_layer_mb,omitempty"`
+	EffectiveWritableLayerMb int64                  `protobuf:"varint,4,opt,name=effective_writable_layer_mb,json=effectiveWritableLayerMb,proto3" json:"effective_writable_layer_mb,omitempty"`
+	// True only when the daemon quotas the world bind. storage-opt size never
+	// sets this, including overlay2+xfs.
+	WorldDiskEnforced bool `protobuf:"varint,5,opt,name=world_disk_enforced,json=worldDiskEnforced,proto3" json:"world_disk_enforced,omitempty"`
+	// True when storage.world_quota_mb is set. That is panel admission, not a
+	// kernel or volume quota.
+	WorldQuotaAdmission bool `protobuf:"varint,6,opt,name=world_quota_admission,json=worldQuotaAdmission,proto3" json:"world_quota_admission,omitempty"`
+	// True only when Docker /info was qualified and effective memory is non-zero
+	// without memory_limit_unsupported / rootless_cgroup_unqualified.
+	MemoryEnforced bool `protobuf:"varint,7,opt,name=memory_enforced,json=memoryEnforced,proto3" json:"memory_enforced,omitempty"`
+	// RuntimeProfile warning codes (memory_limit_unsupported,
+	// writable_layer_cap_unsupported, storage_quota_is_not_a_world_quota, …).
+	Warnings      []string `protobuf:"bytes,8,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResourceEnforcement) Reset() {
+	*x = ResourceEnforcement{}
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResourceEnforcement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResourceEnforcement) ProtoMessage() {}
+
+func (x *ResourceEnforcement) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResourceEnforcement.ProtoReflect.Descriptor instead.
+func (*ResourceEnforcement) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ResourceEnforcement) GetRequestedMemoryBytes() int64 {
+	if x != nil {
+		return x.RequestedMemoryBytes
+	}
+	return 0
+}
+
+func (x *ResourceEnforcement) GetEffectiveMemoryBytes() int64 {
+	if x != nil {
+		return x.EffectiveMemoryBytes
+	}
+	return 0
+}
+
+func (x *ResourceEnforcement) GetRequestedWritableLayerMb() int64 {
+	if x != nil {
+		return x.RequestedWritableLayerMb
+	}
+	return 0
+}
+
+func (x *ResourceEnforcement) GetEffectiveWritableLayerMb() int64 {
+	if x != nil {
+		return x.EffectiveWritableLayerMb
+	}
+	return 0
+}
+
+func (x *ResourceEnforcement) GetWorldDiskEnforced() bool {
+	if x != nil {
+		return x.WorldDiskEnforced
+	}
+	return false
+}
+
+func (x *ResourceEnforcement) GetWorldQuotaAdmission() bool {
+	if x != nil {
+		return x.WorldQuotaAdmission
+	}
+	return false
+}
+
+func (x *ResourceEnforcement) GetMemoryEnforced() bool {
+	if x != nil {
+		return x.MemoryEnforced
+	}
+	return false
+}
+
+func (x *ResourceEnforcement) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
+	}
+	return nil
+}
+
 // Extra port mapping for container
 type AdditionalPort struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -779,7 +899,7 @@ type AdditionalPort struct {
 
 func (x *AdditionalPort) Reset() {
 	*x = AdditionalPort{}
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -791,7 +911,7 @@ func (x *AdditionalPort) String() string {
 func (*AdditionalPort) ProtoMessage() {}
 
 func (x *AdditionalPort) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -804,7 +924,7 @@ func (x *AdditionalPort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdditionalPort.ProtoReflect.Descriptor instead.
 func (*AdditionalPort) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{2}
+	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AdditionalPort) GetName() string {
@@ -856,7 +976,7 @@ type VolumeMount struct {
 
 func (x *VolumeMount) Reset() {
 	*x = VolumeMount{}
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -868,7 +988,7 @@ func (x *VolumeMount) String() string {
 func (*VolumeMount) ProtoMessage() {}
 
 func (x *VolumeMount) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -881,7 +1001,7 @@ func (x *VolumeMount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VolumeMount.ProtoReflect.Descriptor instead.
 func (*VolumeMount) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{3}
+	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *VolumeMount) GetSource() string {
@@ -950,7 +1070,7 @@ type DockerOverrides struct {
 
 func (x *DockerOverrides) Reset() {
 	*x = DockerOverrides{}
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -962,7 +1082,7 @@ func (x *DockerOverrides) String() string {
 func (*DockerOverrides) ProtoMessage() {}
 
 func (x *DockerOverrides) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -975,7 +1095,7 @@ func (x *DockerOverrides) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerOverrides.ProtoReflect.Descriptor instead.
 func (*DockerOverrides) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{4}
+	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DockerOverrides) GetEnvironment() map[string]string {
@@ -1150,7 +1270,7 @@ type ProxyListener struct {
 
 func (x *ProxyListener) Reset() {
 	*x = ProxyListener{}
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1162,7 +1282,7 @@ func (x *ProxyListener) String() string {
 func (*ProxyListener) ProtoMessage() {}
 
 func (x *ProxyListener) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1175,7 +1295,7 @@ func (x *ProxyListener) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxyListener.ProtoReflect.Descriptor instead.
 func (*ProxyListener) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{5}
+	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ProxyListener) GetId() string {
@@ -1255,7 +1375,7 @@ type ProxyConfig struct {
 
 func (x *ProxyConfig) Reset() {
 	*x = ProxyConfig{}
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1267,7 +1387,7 @@ func (x *ProxyConfig) String() string {
 func (*ProxyConfig) ProtoMessage() {}
 
 func (x *ProxyConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1280,7 +1400,7 @@ func (x *ProxyConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxyConfig.ProtoReflect.Descriptor instead.
 func (*ProxyConfig) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{6}
+	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ProxyConfig) GetId() string {
@@ -1330,7 +1450,7 @@ type Permission struct {
 
 func (x *Permission) Reset() {
 	*x = Permission{}
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1342,7 +1462,7 @@ func (x *Permission) String() string {
 func (*Permission) ProtoMessage() {}
 
 func (x *Permission) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1355,7 +1475,7 @@ func (x *Permission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Permission.ProtoReflect.Descriptor instead.
 func (*Permission) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{7}
+	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Permission) GetResource() string {
@@ -1396,7 +1516,7 @@ type Role struct {
 
 func (x *Role) Reset() {
 	*x = Role{}
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1408,7 +1528,7 @@ func (x *Role) String() string {
 func (*Role) ProtoMessage() {}
 
 func (x *Role) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_common_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_common_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1421,7 +1541,7 @@ func (x *Role) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Role.ProtoReflect.Descriptor instead.
 func (*Role) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{8}
+	return file_carbonpanel_v1_common_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Role) GetId() string {
@@ -1499,7 +1619,7 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"last_login\x18\t \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tlastLogin\x88\x01\x01B\b\n" +
 	"\x06_emailB\r\n" +
-	"\v_last_login\"\xad\x10\n" +
+	"\v_last_login\"\x85\x11\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -1563,10 +1683,20 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\rstatus_reason\x18/ \x01(\tR\fstatusReason\x122\n" +
 	"\x15join_observation_kind\x180 \x01(\tR\x13joinObservationKind\x12I\n" +
 	"\x10join_observed_at\x181 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\x0ejoinObservedAt\x88\x01\x01\x12J\n" +
-	"\x11last_good_join_at\x182 \x01(\v2\x1a.google.protobuf.TimestampH\x02R\x0elastGoodJoinAt\x88\x01\x01B\x0f\n" +
+	"\x11last_good_join_at\x182 \x01(\v2\x1a.google.protobuf.TimestampH\x02R\x0elastGoodJoinAt\x88\x01\x01\x12V\n" +
+	"\x14resource_enforcement\x183 \x01(\v2#.carbonpanel.v1.ResourceEnforcementR\x13resourceEnforcementB\x0f\n" +
 	"\r_last_startedB\x13\n" +
 	"\x11_join_observed_atB\x14\n" +
-	"\x12_last_good_join_at\"\xa9\x01\n" +
+	"\x12_last_good_join_at\"\xa8\x03\n" +
+	"\x13ResourceEnforcement\x124\n" +
+	"\x16requested_memory_bytes\x18\x01 \x01(\x03R\x14requestedMemoryBytes\x124\n" +
+	"\x16effective_memory_bytes\x18\x02 \x01(\x03R\x14effectiveMemoryBytes\x12=\n" +
+	"\x1brequested_writable_layer_mb\x18\x03 \x01(\x03R\x18requestedWritableLayerMb\x12=\n" +
+	"\x1beffective_writable_layer_mb\x18\x04 \x01(\x03R\x18effectiveWritableLayerMb\x12.\n" +
+	"\x13world_disk_enforced\x18\x05 \x01(\bR\x11worldDiskEnforced\x122\n" +
+	"\x15world_quota_admission\x18\x06 \x01(\bR\x13worldQuotaAdmission\x12'\n" +
+	"\x0fmemory_enforced\x18\a \x01(\bR\x0ememoryEnforced\x12\x1a\n" +
+	"\bwarnings\x18\b \x03(\tR\bwarnings\"\xa9\x01\n" +
 	"\x0eAdditionalPort\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x0econtainer_port\x18\x02 \x01(\x05R\rcontainerPort\x12\x1b\n" +
@@ -1703,52 +1833,54 @@ func file_carbonpanel_v1_common_proto_rawDescGZIP() []byte {
 }
 
 var file_carbonpanel_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_carbonpanel_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_carbonpanel_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_carbonpanel_v1_common_proto_goTypes = []any{
 	(ServerStatus)(0),             // 0: carbonpanel.v1.ServerStatus
 	(ModLoader)(0),                // 1: carbonpanel.v1.ModLoader
 	(*User)(nil),                  // 2: carbonpanel.v1.User
 	(*Server)(nil),                // 3: carbonpanel.v1.Server
-	(*AdditionalPort)(nil),        // 4: carbonpanel.v1.AdditionalPort
-	(*VolumeMount)(nil),           // 5: carbonpanel.v1.VolumeMount
-	(*DockerOverrides)(nil),       // 6: carbonpanel.v1.DockerOverrides
-	(*ProxyListener)(nil),         // 7: carbonpanel.v1.ProxyListener
-	(*ProxyConfig)(nil),           // 8: carbonpanel.v1.ProxyConfig
-	(*Permission)(nil),            // 9: carbonpanel.v1.Permission
-	(*Role)(nil),                  // 10: carbonpanel.v1.Role
-	nil,                           // 11: carbonpanel.v1.DockerOverrides.EnvironmentEntry
-	nil,                           // 12: carbonpanel.v1.DockerOverrides.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*ResourceEnforcement)(nil),   // 4: carbonpanel.v1.ResourceEnforcement
+	(*AdditionalPort)(nil),        // 5: carbonpanel.v1.AdditionalPort
+	(*VolumeMount)(nil),           // 6: carbonpanel.v1.VolumeMount
+	(*DockerOverrides)(nil),       // 7: carbonpanel.v1.DockerOverrides
+	(*ProxyListener)(nil),         // 8: carbonpanel.v1.ProxyListener
+	(*ProxyConfig)(nil),           // 9: carbonpanel.v1.ProxyConfig
+	(*Permission)(nil),            // 10: carbonpanel.v1.Permission
+	(*Role)(nil),                  // 11: carbonpanel.v1.Role
+	nil,                           // 12: carbonpanel.v1.DockerOverrides.EnvironmentEntry
+	nil,                           // 13: carbonpanel.v1.DockerOverrides.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
 }
 var file_carbonpanel_v1_common_proto_depIdxs = []int32{
-	13, // 0: carbonpanel.v1.User.created_at:type_name -> google.protobuf.Timestamp
-	13, // 1: carbonpanel.v1.User.updated_at:type_name -> google.protobuf.Timestamp
-	13, // 2: carbonpanel.v1.User.last_login:type_name -> google.protobuf.Timestamp
+	14, // 0: carbonpanel.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	14, // 1: carbonpanel.v1.User.updated_at:type_name -> google.protobuf.Timestamp
+	14, // 2: carbonpanel.v1.User.last_login:type_name -> google.protobuf.Timestamp
 	1,  // 3: carbonpanel.v1.Server.mod_loader:type_name -> carbonpanel.v1.ModLoader
 	0,  // 4: carbonpanel.v1.Server.status:type_name -> carbonpanel.v1.ServerStatus
-	13, // 5: carbonpanel.v1.Server.last_started:type_name -> google.protobuf.Timestamp
-	4,  // 6: carbonpanel.v1.Server.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
-	6,  // 7: carbonpanel.v1.Server.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
-	13, // 8: carbonpanel.v1.Server.created_at:type_name -> google.protobuf.Timestamp
-	13, // 9: carbonpanel.v1.Server.updated_at:type_name -> google.protobuf.Timestamp
+	14, // 5: carbonpanel.v1.Server.last_started:type_name -> google.protobuf.Timestamp
+	5,  // 6: carbonpanel.v1.Server.additional_ports:type_name -> carbonpanel.v1.AdditionalPort
+	7,  // 7: carbonpanel.v1.Server.docker_overrides:type_name -> carbonpanel.v1.DockerOverrides
+	14, // 8: carbonpanel.v1.Server.created_at:type_name -> google.protobuf.Timestamp
+	14, // 9: carbonpanel.v1.Server.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 10: carbonpanel.v1.Server.modpack_loader:type_name -> carbonpanel.v1.ModLoader
-	13, // 11: carbonpanel.v1.Server.join_observed_at:type_name -> google.protobuf.Timestamp
-	13, // 12: carbonpanel.v1.Server.last_good_join_at:type_name -> google.protobuf.Timestamp
-	11, // 13: carbonpanel.v1.DockerOverrides.environment:type_name -> carbonpanel.v1.DockerOverrides.EnvironmentEntry
-	5,  // 14: carbonpanel.v1.DockerOverrides.volumes:type_name -> carbonpanel.v1.VolumeMount
-	12, // 15: carbonpanel.v1.DockerOverrides.labels:type_name -> carbonpanel.v1.DockerOverrides.LabelsEntry
-	13, // 16: carbonpanel.v1.ProxyListener.created_at:type_name -> google.protobuf.Timestamp
-	13, // 17: carbonpanel.v1.ProxyListener.updated_at:type_name -> google.protobuf.Timestamp
-	13, // 18: carbonpanel.v1.ProxyConfig.created_at:type_name -> google.protobuf.Timestamp
-	13, // 19: carbonpanel.v1.ProxyConfig.updated_at:type_name -> google.protobuf.Timestamp
-	9,  // 20: carbonpanel.v1.Role.permissions:type_name -> carbonpanel.v1.Permission
-	13, // 21: carbonpanel.v1.Role.created_at:type_name -> google.protobuf.Timestamp
-	13, // 22: carbonpanel.v1.Role.updated_at:type_name -> google.protobuf.Timestamp
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	14, // 11: carbonpanel.v1.Server.join_observed_at:type_name -> google.protobuf.Timestamp
+	14, // 12: carbonpanel.v1.Server.last_good_join_at:type_name -> google.protobuf.Timestamp
+	4,  // 13: carbonpanel.v1.Server.resource_enforcement:type_name -> carbonpanel.v1.ResourceEnforcement
+	12, // 14: carbonpanel.v1.DockerOverrides.environment:type_name -> carbonpanel.v1.DockerOverrides.EnvironmentEntry
+	6,  // 15: carbonpanel.v1.DockerOverrides.volumes:type_name -> carbonpanel.v1.VolumeMount
+	13, // 16: carbonpanel.v1.DockerOverrides.labels:type_name -> carbonpanel.v1.DockerOverrides.LabelsEntry
+	14, // 17: carbonpanel.v1.ProxyListener.created_at:type_name -> google.protobuf.Timestamp
+	14, // 18: carbonpanel.v1.ProxyListener.updated_at:type_name -> google.protobuf.Timestamp
+	14, // 19: carbonpanel.v1.ProxyConfig.created_at:type_name -> google.protobuf.Timestamp
+	14, // 20: carbonpanel.v1.ProxyConfig.updated_at:type_name -> google.protobuf.Timestamp
+	10, // 21: carbonpanel.v1.Role.permissions:type_name -> carbonpanel.v1.Permission
+	14, // 22: carbonpanel.v1.Role.created_at:type_name -> google.protobuf.Timestamp
+	14, // 23: carbonpanel.v1.Role.updated_at:type_name -> google.protobuf.Timestamp
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_common_proto_init() }
@@ -1764,7 +1896,7 @@ func file_carbonpanel_v1_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_common_proto_rawDesc), len(file_carbonpanel_v1_common_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
