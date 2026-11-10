@@ -50,7 +50,7 @@ test('a strip can scroll without ever showing a scrollbar', () => {
 test('nested horizontal panes hide the bar so sidebar collapse cannot change their height', () => {
 	assert.match(
 		css,
-		/:where\(\.overflow-x-auto,\s*\.overflow-x-scroll\):not\(\.overflow-y-auto\):not\(\.overflow-y-scroll\):not\(\.overflow-auto\)\s*\{[^}]*scrollbar-width: none/
+		/:where\(\.overflow-x-auto,\s*\.overflow-x-scroll\):not\(\.overflow-y-auto\):not\(\.overflow-y-scroll\):not\(\s*\.overflow-auto\s*\)\s*\{[^}]*scrollbar-width: none/
 	);
 	assert.doesNotMatch(
 		css,

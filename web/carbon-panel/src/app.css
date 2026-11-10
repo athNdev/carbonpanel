@@ -435,11 +435,15 @@ one at https://mozilla.org/MPL/2.0/.
 		Dual-axis panes (console, logs) keep a visible bar and already reserve
 		the vertical gutter.
 	*/
-	:where(.overflow-x-auto, .overflow-x-scroll):not(.overflow-y-auto):not(.overflow-y-scroll):not(.overflow-auto) {
+	:where(.overflow-x-auto, .overflow-x-scroll):not(.overflow-y-auto):not(.overflow-y-scroll):not(
+			.overflow-auto
+		) {
 		scrollbar-width: none;
 		-ms-overflow-style: none;
 	}
-	:where(.overflow-x-auto, .overflow-x-scroll):not(.overflow-y-auto):not(.overflow-y-scroll):not(.overflow-auto)::-webkit-scrollbar {
+	:where(.overflow-x-auto, .overflow-x-scroll):not(.overflow-y-auto):not(.overflow-y-scroll):not(
+			.overflow-auto
+		)::-webkit-scrollbar {
 		display: none;
 		height: 0;
 	}
