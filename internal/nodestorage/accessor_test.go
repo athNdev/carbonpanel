@@ -99,6 +99,59 @@ func TestForNodeRefusesRemoteWithoutAdapter(t *testing.T) {
 	}
 }
 
+func TestForNodeMissingAdapterCreatesNothing(t *testing.T) {
+	parent := t.TempDir()
+	dataRoot := filepath.Join(parent, "srv-data")
+
+	before, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeNames := entryNames(before)
+
+	acc, err := ForNode(NodeInfo{
+		Name:                  "remote-1",
+		IsLocal:               false,
+		StorageRoot:           "",
+		ControllerStorageRoot: "",
+	}, dataRoot)
+	if acc != nil {
+		t.Cleanup(func() { _ = acc.Close() })
+	}
+	if err == nil || !IsUnavailable(err) || acc != nil {
+		t.Fatalf("missing remote adapter must return ErrUnavailable and a nil accessor, got %v, %v", acc, err)
+	}
+
+	after, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterNames := entryNames(after)
+	if len(beforeNames) != len(afterNames) {
+		t.Fatalf("parent listing changed: before %v, after %v", beforeNames, afterNames)
+	}
+	for i := range beforeNames {
+		if beforeNames[i] != afterNames[i] {
+			t.Fatalf("parent listing changed: before %v, after %v", beforeNames, afterNames)
+		}
+	}
+	if _, err := os.Stat(dataRoot); !os.IsNotExist(err) {
+		t.Fatalf("data root must not be created, stat err = %v", err)
+	}
+	sibling := filepath.Join(parent, "remote-1")
+	if _, err := os.Stat(sibling); !os.IsNotExist(err) {
+		t.Fatalf("sibling %q must not be created, stat err = %v", sibling, err)
+	}
+}
+
+func entryNames(entries []os.DirEntry) []string {
+	names := make([]string, len(entries))
+	for i, entry := range entries {
+		names[i] = entry.Name()
+	}
+	return names
+}
+
 func TestMapDataPath(t *testing.T) {
 	tests := []struct {
 		name string
