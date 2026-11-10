@@ -1101,6 +1101,9 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		spec.RequestedMemoryMB = int64(server.Memory)
 	}
 	spec.WritableLayerMB = c.config.ContainerWritableMB
+	if spec.MinecraftImage {
+		spec.DaemonRootless = c.queryDaemonRootless(ctx)
+	}
 	profile := DescribeRuntime(spec)
 	for _, issue := range profile.Issues {
 		if issue.Severity == RuntimeWarning {

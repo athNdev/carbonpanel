@@ -102,6 +102,10 @@ const (
 	// tag. It is a warning: the container can still boot, but a rebuilt tag
 	// can change what the next recreate runs.
 	RuntimeIssueImageUnpinned RuntimeIssueCode = "image_unpinned"
+	// RuntimeIssueRootlessHostRootData is raised when a rootless daemon must run
+	// the root-then-drop bootstrap but the world directory is still owned by
+	// host uid 0. The entrypoint cannot chown it into the user namespace.
+	RuntimeIssueRootlessHostRootData RuntimeIssueCode = "rootless_host_root_data"
 )
 
 // RuntimeIssue is one compatibility finding with an actionable remedy.
@@ -143,6 +147,8 @@ type RuntimeSpec struct {
 	// It lets the profile tell a supported non-root path (the directory was
 	// prepared for that uid) from one that would fail at boot.
 	DataOwnerUID *int
+	// DaemonRootless is true when the target Docker daemon runs rootless.
+	DaemonRootless bool
 	// Overrides are the operator overrides that produced this configuration.
 	Overrides *v1.DockerOverrides
 	// Config and HostConfig are the resolved daemon request.
@@ -368,6 +374,16 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 			Severity: RuntimeFatal,
 			Detail:   fmt.Sprintf("the container runs as uid %d but the world directory is owned by uid %d", uid, *spec.DataOwnerUID),
 			Remedy:   "chown the data directory to the runtime uid:gid, or run the image as root and let its bootstrap drop privileges",
+		})
+	}
+
+	if spec.DaemonRootless && profile.MinecraftImage && profile.RootStartDropUser &&
+		spec.DataOwnerUID != nil && *spec.DataOwnerUID == 0 {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueRootlessHostRootData,
+			Severity: RuntimeFatal,
+			Detail:   "the data directory is owned by host uid 0 but the daemon runs rootless",
+			Remedy:   "chown the data directory to the game uid (for example 1000) or the subuid your rootless daemon maps, then recreate; do not enable privileged mode or a writable root to compensate",
 		})
 	}
 
