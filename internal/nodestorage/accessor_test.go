@@ -153,6 +153,15 @@ func entryNames(entries []os.DirEntry) []string {
 }
 
 func TestMapDataPath(t *testing.T) {
+	base := t.TempDir()
+	shared := filepath.Join(base, "shared")
+	ctrl := filepath.Join(base, "nfs")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(ctrl, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name string
 		node NodeInfo
@@ -161,23 +170,23 @@ func TestMapDataPath(t *testing.T) {
 	}{
 		{
 			name: "local keeps the data root",
-			node: NodeInfo{Name: "local", IsLocal: true, StorageRoot: "/mnt/shared"},
+			node: NodeInfo{Name: "local", IsLocal: true, StorageRoot: shared},
 			want: filepath.Join("var", "data", "servers", "mc"),
 		},
 		{
 			name: "remote shared storage defaults to the node-side root",
-			node: NodeInfo{Name: "r1", StorageRoot: filepath.Join("mnt", "shared")},
-			want: filepath.Join("mnt", "shared", "mc"),
+			node: NodeInfo{Name: "r1", StorageRoot: shared},
+			want: filepath.Join(shared, "mc"),
 		},
 		{
 			name: "controller mount wins when set",
-			node: NodeInfo{Name: "r2", StorageRoot: "/srv/nfs", ControllerStorageRoot: filepath.Join("mnt", "nfs")},
-			want: filepath.Join("mnt", "nfs", "mc"),
+			node: NodeInfo{Name: "r2", StorageRoot: "/srv/nfs", ControllerStorageRoot: ctrl},
+			want: filepath.Join(ctrl, "mc"),
 		},
 		{
 			name: "controller mount alone is enough to serve files",
-			node: NodeInfo{Name: "r3", ControllerStorageRoot: filepath.Join("mnt", "nfs")},
-			want: filepath.Join("mnt", "nfs", "mc"),
+			node: NodeInfo{Name: "r3", ControllerStorageRoot: ctrl},
+			want: filepath.Join(ctrl, "mc"),
 		},
 		{
 			name: "remote without roots is refused",
