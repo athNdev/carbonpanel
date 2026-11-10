@@ -30,6 +30,8 @@ import (
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/health"
+	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -44,10 +46,11 @@ var _ carbonpanelv1connect.SupportServiceHandler = (*SupportService)(nil)
 
 // SupportService implements the Support service
 type SupportService struct {
-	store  *storage.Store
-	docker *docker.Client
-	config *config.Config
-	log    *logger.Logger
+	store   *storage.Store
+	docker  *docker.Client
+	config  *config.Config
+	log     *logger.Logger
+	metrics *metrics.Collector
 	// Store generated bundles temporarily. Guarded by bundlesMu: take the
 	// write lock for mutations, the read lock for lookups. Never hold the
 	// mutex across I/O — snapshot what is needed under the lock, then do
@@ -90,6 +93,12 @@ func NewSupportService(store *storage.Store, docker *docker.Client, config *conf
 		log:     log,
 		bundles: make(map[string]*BundleInfo),
 	}
+}
+
+// SetMetricsCollector supplies already-collected SLP/RCON timestamps so a
+// bundle can mark stale observations without probing the game itself.
+func (s *SupportService) SetMetricsCollector(c *metrics.Collector) {
+	s.metrics = c
 }
 
 // GenerateSupportBundle generates a support bundle
@@ -163,6 +172,10 @@ func (s *SupportService) GenerateSupportBundle(ctx context.Context, req *connect
 			s.log.Warn("Continuing without system info")
 		}
 	}
+
+	// Journal projection and last-good observations are always attached: they
+	// are the evidence ordinary operators can collect without a Docker socket.
+	s.addDiagnosticEvidence(ctx, tarWriter)
 
 	// Close writers to flush all data
 	tarWriter.Close()
@@ -301,6 +314,8 @@ func (s *SupportService) UploadSupportBundle(ctx context.Context, req *connect.R
 			s.log.Warn("Continuing without system info")
 		}
 	}
+
+	s.addDiagnosticEvidence(ctx, tarWriter)
 
 	// Close writers to flush all data
 	tarWriter.Close()
@@ -799,6 +814,38 @@ type operationBundle struct {
 	Operations []operation.View `json:"operations"`
 }
 
+type observationBundle struct {
+	Timestamp  string           `json:"timestamp"`
+	StaleAfter string           `json:"staleAfter"`
+	Summary    map[string]int   `json:"summary"`
+	Servers    []health.Reading `json:"servers"`
+	Nodes      []nodeReading    `json:"nodes,omitempty"`
+}
+
+type nodeReading struct {
+	ID                 string     `json:"id"`
+	Kind               string     `json:"kind"`
+	LastHeartbeat      *time.Time `json:"lastHeartbeat,omitempty"`
+	EndpointGeneration int64      `json:"endpointGeneration,omitempty"`
+}
+
+// addDiagnosticEvidence attaches the journal projection and last-good
+// observations. Failures are logged and skipped so a missing store does not
+// void the rest of the archive.
+func (s *SupportService) addDiagnosticEvidence(ctx context.Context, tarWriter *tar.Writer) {
+	if s.store == nil {
+		return
+	}
+	if err := s.addOperationsToBundle(ctx, tarWriter); err != nil {
+		s.log.Error("Failed to add operations to bundle: %v", err)
+		s.log.Warn("Continuing without operations.json")
+	}
+	if err := s.addObservationsToBundle(ctx, tarWriter); err != nil {
+		s.log.Error("Failed to add observations to bundle: %v", err)
+		s.log.Warn("Continuing without observations.json")
+	}
+}
+
 // addOperationsToBundle records the durable operation journal in the bundle.
 // An uncertain outcome is written as "unknown" rather than folded into success
 // or failure, because that distinction is the point of the journal.
@@ -813,27 +860,117 @@ func (s *SupportService) addOperationsToBundle(ctx context.Context, tarWriter *t
 	for outcome, n := range counts {
 		summary[string(outcome)] = n
 	}
-	payload := operationBundle{
+	return writeJSONTar(tarWriter, "operations.json", operationBundle{
 		Timestamp:  time.Now().Format(time.RFC3339),
 		Summary:    summary,
 		Operations: views,
+	})
+}
+
+// addObservationsToBundle records per-server freshness: last-good join times
+// and whether the stored status is still evidence. Stale is never rewritten
+// as playable, stopped or failed. Player samples and hostnames are omitted.
+func (s *SupportService) addObservationsToBundle(ctx context.Context, tarWriter *tar.Writer) error {
+	now := time.Now().UTC()
+	in := health.Input{
+		CheckedAt:      now,
+		StaleAfter:     health.DefaultStaleAfter,
+		RunningStatus:  string(storage.StatusRunning),
+		StartingStatus: string(storage.StatusCreating),
 	}
+	servers, err := s.store.ListServers(ctx)
+	if err != nil {
+		return fmt.Errorf("list servers: %w", err)
+	}
+	for _, server := range servers {
+		obs := health.ServerObservation{
+			ID:        server.ID,
+			Status:    string(server.Status),
+			UpdatedAt: server.UpdatedAt,
+			Game:      supportJoinProbe(s.metrics, server.ID),
+		}
+		if server.LastStarted != nil {
+			obs.StartedAt = *server.LastStarted
+		}
+		in.Servers = append(in.Servers, obs)
+	}
+	readings := health.ClassifyServers(in)
+	counts := health.CountByKind(readings)
+	summary := make(map[string]int, len(counts))
+	for kind, n := range counts {
+		summary[string(kind)] = n
+	}
+	payload := observationBundle{
+		Timestamp:  now.Format(time.RFC3339),
+		StaleAfter: health.DefaultStaleAfter.String(),
+		Summary:    summary,
+		Servers:    readings,
+		Nodes:      s.nodeReadings(ctx, now),
+	}
+	return writeJSONTar(tarWriter, "observations.json", payload)
+}
+
+func (s *SupportService) nodeReadings(ctx context.Context, now time.Time) []nodeReading {
+	nodes, err := s.store.ListNodes(ctx)
+	if err != nil {
+		return nil
+	}
+	out := make([]nodeReading, 0, len(nodes))
+	for _, node := range nodes {
+		reading := nodeReading{
+			ID:                 node.ID,
+			Kind:               "never",
+			EndpointGeneration: node.EndpointGeneration,
+		}
+		if node.LastHeartbeat != nil {
+			hb := node.LastHeartbeat.UTC()
+			reading.LastHeartbeat = &hb
+			if now.Sub(hb) <= health.DefaultStaleAfter {
+				reading.Kind = "fresh"
+			} else {
+				reading.Kind = "stale"
+			}
+		}
+		out = append(out, reading)
+	}
+	return out
+}
+
+// supportJoinProbe copies already-collected SLP or RCON freshness. It never
+// pings the game: a missing metric stays unobserved.
+func supportJoinProbe(collector *metrics.Collector, serverID string) health.Probe {
+	if collector == nil {
+		return health.Probe{}
+	}
+	m := collector.GetMetrics(serverID)
+	if m == nil {
+		return health.Probe{}
+	}
+	if !m.SLPLastUpdated.IsZero() {
+		return health.Probe{Source: health.SourceSLP, ObservedAt: m.SLPLastUpdated, OK: m.SLPAvailable}
+	}
+	if !m.RCONLastUpdated.IsZero() {
+		return health.Probe{Source: health.SourceRCON, ObservedAt: m.RCONLastUpdated, OK: true}
+	}
+	return health.Probe{}
+}
+
+func writeJSONTar(tw *tar.Writer, name string, payload any) error {
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal operations: %w", err)
+		return fmt.Errorf("marshal %s: %w", name, err)
 	}
-
 	header := &tar.Header{
-		Name:    "operations.json",
+		Name:    name,
 		Size:    int64(len(data)),
 		Mode:    0644,
 		ModTime: time.Now(),
 	}
-	if err := tarWriter.WriteHeader(header); err != nil {
-		return fmt.Errorf("write operations header: %w", err)
+	if err := tw.WriteHeader(header); err != nil {
+		return fmt.Errorf("write %s header: %w", name, err)
 	}
-	if _, err := tarWriter.Write(data); err != nil {
-		return fmt.Errorf("write operations content: %w", err)
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("write %s content: %w", name, err)
 	}
 	return nil
 }

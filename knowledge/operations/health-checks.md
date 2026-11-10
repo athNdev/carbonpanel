@@ -10,6 +10,7 @@ code_refs:
   - internal/rpc/handlers/health.go
   - internal/docker/pool.go
   - internal/metrics/collector.go
+  - internal/rpc/services/support.go
 sources:
   - title: Container privileges invariant
     resource: ../invariants/container-privileges.md
@@ -56,7 +57,12 @@ was never collected. A running server with no join probe is `unobserved`
 creating past the three-minute startup deadline is `timedOut`
 (`degraded`/`unavailable` with a reason), never silently playable or stopped.
 An unobserved layer is `unknown` as well: a missing check is never reported as
-healthy.
+healthy. `health.ClassifyServer` is the per-row form of that game layer: a
+stale status, a missing join probe and a failed join stay distinct, and a
+last-good join timestamp is kept when the current reading is stale. The
+support bundle carries `observations.json` with that projection so an operator
+can collect last-good evidence without a Docker socket. Player samples, MOTD
+and hostnames are omitted.
 
 # Why a runtime outage is not a `503`
 

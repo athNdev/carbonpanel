@@ -10,6 +10,7 @@ code_refs:
   - internal/db/server_operation.go
   - cmd/carbon-panel/operations.go
   - internal/db/portlease.go
+  - internal/rpc/services/support.go
 sources:
   - title: Server operation runbook
     resource: ../../docs/runbook-server-operations.md
@@ -69,8 +70,9 @@ behind an operation lock.
 - The activity feed stores the same client `request_id` as the journal row it
   records, so operators can join the two without guessing. An empty client
   id stays empty on activity; it is not invented after the fact.
-- The support bundle carries `operations.json` with that projection, so a
-  bundle can explain a stuck server without the Docker socket.
+- The support bundle always carries `operations.json` with that projection and
+  `observations.json` with per-server last-good timestamps, so a bundle can
+  explain a stuck or stale server without the Docker socket.
 
 # Read next
 
