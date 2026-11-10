@@ -74,11 +74,74 @@ func getFreePort(t *testing.T) int {
 	return port
 }
 
+func newTestDirectKnockManager(wakeHandler WakeHandler, log *logger.Logger) *DirectKnockManager {
+	mgr := NewDirectKnockManager(wakeHandler, log)
+	mgr.SetKnockBindHost("127.0.0.1")
+	return mgr
+}
+
+func loopbackOnlyDirectKnockListener(network, address string) (net.Listener, error) {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return nil, fmt.Errorf("test direct knock listener refuses non-loopback address %q", host)
+	}
+	return net.Listen(network, address)
+}
+
+func TestKnockListenAddr_DefaultAllInterfaces(t *testing.T) {
+	if got := knockListenAddr("", 25565); got != ":25565" {
+		t.Fatalf("got %q want :25565", got)
+	}
+	if got := knockListenAddr("127.0.0.1", 25565); got != "127.0.0.1:25565" {
+		t.Fatalf("got %q want 127.0.0.1:25565", got)
+	}
+}
+
+func TestLoopbackOnlyDirectKnockListenerRejectsWildcard(t *testing.T) {
+	for _, address := range []string{"0.0.0.0:25565", "[::]:25565", "192.0.2.10:25565"} {
+		t.Run(address, func(t *testing.T) {
+			ln, err := loopbackOnlyDirectKnockListener("tcp", address)
+			if err == nil {
+				_ = ln.Close()
+				t.Fatalf("listener accepted non-loopback address %q", address)
+			}
+		})
+	}
+}
+
+func TestDirectKnock_StartKnockUsesLoopbackBindAndInjectedListen(t *testing.T) {
+	orig := directKnockListen
+	t.Cleanup(func() { directKnockListen = orig })
+
+	var seenAddr string
+	directKnockListen = func(network, address string) (net.Listener, error) {
+		seenAddr = address
+		return loopbackOnlyDirectKnockListener(network, address)
+	}
+
+	port := getFreePort(t)
+	mgr := newTestDirectKnockManager(nil, logger.New())
+	srv := &db.Server{ID: "bind-host", Name: "bind", Port: port, Status: db.StatusDeepSleep}
+	if err := mgr.StartKnock(srv); err != nil {
+		t.Fatalf("StartKnock: %v", err)
+	}
+	defer mgr.StopKnock(srv.ID)
+
+	want := fmt.Sprintf("127.0.0.1:%d", port)
+	if seenAddr != want {
+		t.Fatalf("directKnockListen address = %q, want %q", seenAddr, want)
+	}
+}
+
 // Test 1: Direct knock listener starts and stops, binding the port
 func TestDirectKnock_StartStop(t *testing.T) {
 	port := getFreePort(t)
 	log := logger.New()
-	mgr := NewDirectKnockManager(nil, log)
+	mgr := newTestDirectKnockManager(nil, log)
 
 	srv := &db.Server{
 		ID:     "srv-start-stop",
@@ -124,7 +187,7 @@ func TestDirectKnock_StartStop(t *testing.T) {
 func TestDirectKnock_SLPPing(t *testing.T) {
 	port := getFreePort(t)
 	log := logger.New()
-	mgr := NewDirectKnockManager(nil, log)
+	mgr := newTestDirectKnockManager(nil, log)
 
 	srv := &db.Server{
 		ID:     "srv-slp-ping",
@@ -203,7 +266,7 @@ func TestDirectKnock_SLPPing(t *testing.T) {
 func TestDirectKnock_LoginIntent_ReleasesPortAndDisconnects(t *testing.T) {
 	port := getFreePort(t)
 	log := logger.New()
-	mgr := NewDirectKnockManager(nil, log)
+	mgr := newTestDirectKnockManager(nil, log)
 
 	srv := &db.Server{
 		ID:     "srv-login-intent",
@@ -289,7 +352,7 @@ func TestDirectKnock_LoginIntent_TriggersWakeHandler(t *testing.T) {
 		return nil
 	}
 
-	mgr := NewDirectKnockManager(wakeHandler, log)
+	mgr := newTestDirectKnockManager(wakeHandler, log)
 
 	srv := &db.Server{
 		ID:     "srv-wake-handler-test",
@@ -336,7 +399,7 @@ func TestDirectKnock_StopAll(t *testing.T) {
 	port1 := getFreePort(t)
 	port2 := getFreePort(t)
 	log := logger.New()
-	mgr := NewDirectKnockManager(nil, log)
+	mgr := newTestDirectKnockManager(nil, log)
 
 	_ = mgr.StartKnock(&db.Server{ID: "srv-1", Port: port1, Status: db.StatusDeepSleep})
 	_ = mgr.StartKnock(&db.Server{ID: "srv-2", Port: port2, Status: db.StatusDeepSleep})
@@ -356,7 +419,7 @@ func TestDirectKnock_StopAll(t *testing.T) {
 func TestDirectKnock_SLPPingAndPongRoundTrip(t *testing.T) {
 	port := getFreePort(t)
 	log := logger.New()
-	mgr := NewDirectKnockManager(nil, log)
+	mgr := newTestDirectKnockManager(nil, log)
 
 	srv := &db.Server{
 		ID:     "srv-slp-pingpong",
@@ -432,7 +495,7 @@ func TestDirectKnock_SLPPingAndPongRoundTrip(t *testing.T) {
 func TestDirectKnock_LoginIntentWithLoginStartPacket(t *testing.T) {
 	port := getFreePort(t)
 	log := logger.New()
-	mgr := NewDirectKnockManager(nil, log)
+	mgr := newTestDirectKnockManager(nil, log)
 
 	srv := &db.Server{
 		ID:     "srv-login-start-test",
@@ -505,7 +568,7 @@ func TestDirectKnock_LoginIntentWithLoginStartPacket(t *testing.T) {
 func TestDirectKnock_TransferIntent_Wakes(t *testing.T) {
 	port := getFreePort(t)
 	var woke atomic.Bool
-	mgr := NewDirectKnockManager(func(ctx context.Context, serverID string) error {
+	mgr := newTestDirectKnockManager(func(ctx context.Context, serverID string) error {
 		if serverID == "srv-transfer" {
 			woke.Store(true)
 		}
@@ -537,7 +600,7 @@ func TestDirectKnock_TransferIntent_Wakes(t *testing.T) {
 func TestDirectKnock_TransferRejectedWhenDisabled(t *testing.T) {
 	port := getFreePort(t)
 	var woke atomic.Bool
-	mgr := NewDirectKnockManager(func(ctx context.Context, serverID string) error {
+	mgr := newTestDirectKnockManager(func(ctx context.Context, serverID string) error {
 		woke.Store(true)
 		return nil
 	}, logger.New())
