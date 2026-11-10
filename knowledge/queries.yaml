@@ -4,6 +4,8 @@
   expect: failures/remote-node-fallback
 - query: Do cleanup commands delete worlds or backups?
   expect: invariants/data-safety
+- query: How do I snapshot the panel database before an upgrade?
+  expect: operations/backup-restore
 - query: How does the TCP proxy route a Minecraft handshake by hostname?
   expect: architecture/proxy
 - query: How durable are SQLite migrations?

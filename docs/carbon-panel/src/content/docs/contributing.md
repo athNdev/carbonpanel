@@ -70,7 +70,11 @@ make knowledge-lint
 `make dev` (or `bun run dev`, `scripts/dev.sh`, `scripts/dev.ps1`) starts the
 backend and the console together. The frontend runs at
 <http://localhost:5174> and proxies API and RPC requests to the backend at
-<http://localhost:8080>.
+<http://localhost:8080>. `make clean`, the production web build, and Compose
+up/down keep `./data` (worlds and the controller database). Resetting a
+disposable review stack is the separately named
+`scripts/review/devstack.sh clean`. Snapshot the controller database before an
+upgrade with `make snapshot-panel-db`.
 
 ## What a change needs
 

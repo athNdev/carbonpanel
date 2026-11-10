@@ -22,7 +22,51 @@ There is **no automatic restore**. Snapshots are not shipped off the host by
 this mechanism (this is not Litestream); use the encrypted offsite backup
 system for worlds, and ship panel snapshots with your own tooling if needed.
 
-## Restoring
+## Upgrade snapshot (named operator script)
+
+Daily `VACUUM INTO` snapshots are the in-process durability mode (ADR 0007).
+Before a controller image or schema upgrade, take an extra on-demand copy with
+the named operator script. Ordinary `make test`, `scripts/web-build.sh`,
+`make clean`, `docker compose up` and `docker compose down` never invoke it.
+
+```sh
+scripts/snapshot-panel-db.sh --data-dir /opt/carbon-panel/data
+```
+
+From a repo checkout with the default `./data` directory:
+
+```sh
+make snapshot-panel-db
+```
+
+The script writes `carbon-panel-db-<UTC timestamp>.sqlite` **beside** the data
+directory (sibling of `data/`, not inside it). Worlds, backups and other bind
+mounts are not read or written.
+
+## Restoring an upgrade snapshot
+
+1. **Stop the panel** (`docker compose down` without `--volumes`, or stop the
+   process). Bind mounts and world directories stay on the host.
+
+2. **Copy the snapshot over the live database file only:**
+
+   ```sh
+   cp /opt/carbon-panel/carbon-panel-db-YYYYMMDDTHHMMSSZ.sqlite \
+      /opt/carbon-panel/data/carbon-panel.db
+   rm -f /opt/carbon-panel/data/carbon-panel.db-wal \
+         /opt/carbon-panel/data/carbon-panel.db-shm
+   ```
+
+   Do not copy the snapshot onto worlds, `servers/`, or the backups mount.
+
+3. **Start the panel** and confirm the server list matches the snapshot.
+
+You can also feed the same file to `carbon-panel -restore-panel-backup` if the
+binary is available; that path keeps the previous database at
+`<database.path>.pre-restore`. Copy-back is the documented rollback when you
+only have the snapshot file.
+
+## Restoring a daily snapshot
 
 1. **Stop the panel.** The restore swaps database files and must not race a
    running process.
