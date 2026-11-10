@@ -75,5 +75,9 @@ Re-verified `2026-11-04` by `agent:zed`:
   the host source sits under the server data directory. A bind that replaces
   `/tmp` is reported (`tmpfs_replaced`) and does not recover by widening the
   tmpfs.
+- Module sidecars use the same rule: `applyModuleConfinement` never leaves
+  `Privileged` true, and `ValidateModuleVolumeMounts` refuses `/var/run/docker.sock`.
+  A host-extension template that needs those is an operator feature, not a
+  builtin default.
 
 Re-verified `2026-11-10` by `agent:zed` against the expanded runtime matrix.

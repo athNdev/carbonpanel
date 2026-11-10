@@ -238,6 +238,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		},
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
+	applyModuleConfinement(hostConfig)
 
 	// Apply CPU limit if specified
 	if module.CPULimit > 0 {
@@ -406,6 +407,17 @@ func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount, serverDataPa
 	}
 
 	return mounts
+}
+
+// applyModuleConfinement keeps sidecar HostConfig from being auto-broadened.
+// Privileged host-extension templates are operator features: they must not
+// turn Privileged on as a side effect of create, and bind sources stay
+// confined by ValidateModuleVolumeMounts (docker.sock is outside safe roots).
+func applyModuleConfinement(hc *container.HostConfig) {
+	if hc == nil {
+		return
+	}
+	hc.Privileged = false
 }
 
 // GetModuleContainerIP gets the IP address of a module container on the Carbon Panel network
