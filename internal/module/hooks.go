@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package module
 
 import (
@@ -182,6 +181,23 @@ func (m *Manager) executeHook(ctx context.Context, module *storage.Module, hook 
 
 // Starts a module, creating its container if needed
 func (m *Manager) ensureModuleStarted(ctx context.Context, module *storage.Module) error {
+	cli, err := m.resolveDocker(module.NodeID)
+	if err != nil {
+		return err
+	}
+	obs, err := observeModule(ctx, cli, module.ID, module.ContainerID)
+	if err != nil {
+		return err
+	}
+	if obs.Exists {
+		if obs.ContainerID != "" && obs.ContainerID != module.ContainerID {
+			if err := m.store.UpdateModuleContainerID(ctx, module.ID, obs.ContainerID); err != nil {
+				return err
+			}
+			module.ContainerID = obs.ContainerID
+		}
+		return m.StartModule(ctx, module.ID)
+	}
 	if module.ContainerID == "" {
 		return m.CreateAndStartModule(ctx, module.ID, true)
 	}
