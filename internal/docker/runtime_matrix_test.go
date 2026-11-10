@@ -101,7 +101,9 @@ func TestRuntimeQualificationMatrix(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := resolvedMinecraftContainer(tc.overrides, tc.dataRO)
 			spec.DataOwnerUID = tc.ownerUID
-			spec.DaemonRootless = tc.rootless
+			if tc.rootless {
+				spec.Daemon = &DaemonEnforcement{Rootless: true, CgroupVersion: "2"}
+			}
 			if tc.mutate != nil {
 				tc.mutate(&spec)
 			}

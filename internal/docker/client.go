@@ -571,6 +571,20 @@ func (c *Client) HostMemoryMB(ctx context.Context) (int64, error) {
 	return result.Info.MemTotal / (1024 * 1024), nil
 }
 
+// DaemonEnforcement reads /info and reports which limits the daemon can apply.
+func (c *Client) DaemonEnforcement(ctx context.Context) (DaemonEnforcement, error) {
+	if c == nil || c.docker == nil {
+		return DaemonEnforcement{}, fmt.Errorf("docker client is nil")
+	}
+	ctx, cancel := boundedCall(ctx)
+	defer cancel()
+	result, err := c.docker.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return DaemonEnforcement{}, fmt.Errorf("failed to inspect Docker daemon: %w", err)
+	}
+	return DescribeDaemonEnforcement(result.Info), nil
+}
+
 // ApplyDiskQuota sets a container storage size limit when the storage driver
 // supports it (overlay2 size opt). diskMB <= 0 disables the limit.
 func ApplyDiskQuota(hostConfig *container.HostConfig, diskMB int64) {
@@ -1101,8 +1115,10 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		spec.RequestedMemoryMB = int64(server.Memory)
 	}
 	spec.WritableLayerMB = c.config.ContainerWritableMB
-	if spec.MinecraftImage {
-		spec.DaemonRootless = c.queryDaemonRootless(ctx)
+	if enforcement, enfErr := c.DaemonEnforcement(ctx); enfErr != nil {
+		c.log.Warn("Runtime qualification could not read Docker daemon capabilities: %v", enfErr)
+	} else {
+		spec.Daemon = &enforcement
 	}
 	profile := DescribeRuntime(spec)
 	for _, issue := range profile.Issues {

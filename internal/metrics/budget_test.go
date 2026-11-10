@@ -35,6 +35,13 @@ func TestBackupStagingBudgetMeasured(t *testing.T) {
 	}
 }
 
+func TestWorldFilesystemFreeBudget(t *testing.T) {
+	got := worldFilesystemFreeBudget(t.TempDir())
+	if !got.Known || got.Value < 0 {
+		t.Fatalf("free bytes = %+v, want measured non-negative", got)
+	}
+}
+
 func TestWorldInodeBudget(t *testing.T) {
 	got := worldInodeBudget(t.TempDir())
 	if got.Known && got.Value < 0 {

@@ -207,7 +207,7 @@ func TestPreflightRejectsDataOwnerMismatch(t *testing.T) {
 
 func TestPreflightRejectsRootlessBootstrapOnHostRootData(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
-	spec.DaemonRootless = true
+	spec.Daemon = &DaemonEnforcement{Rootless: true}
 	owner := 0
 	spec.DataOwnerUID = &owner
 
@@ -222,7 +222,7 @@ func TestPreflightRejectsRootlessBootstrapOnHostRootData(t *testing.T) {
 
 func TestPreflightAcceptsRootlessWhenDataOwnedByGameUser(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
-	spec.DaemonRootless = true
+	spec.Daemon = &DaemonEnforcement{Rootless: true}
 	owner := 1000
 	spec.DataOwnerUID = &owner
 
@@ -456,5 +456,29 @@ func TestPreflightWarnsThatAWritableLayerCapIsIgnoredOnAReadOnlyRoot(t *testing.
 	}
 	if profile.Limits.WritableLayerMB != 0 {
 		t.Errorf("WritableLayerMB = %d, want 0 when the root is read-only", profile.Limits.WritableLayerMB)
+	}
+}
+
+func TestDescribeRuntimeWarnsWhenRootlessDaemonUsesCgroupV1(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.Daemon = &DaemonEnforcement{
+		Rootless:             true,
+		CgroupVersion:        "1",
+		MemoryLimitSupported: true,
+		SwapLimitSupported:   true,
+		PidsLimitSupported:   true,
+	}
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueRootlessCgroupUnqualified) {
+		t.Fatalf("issues = %v, want rootless_cgroup_unqualified", issueCodes(profile))
+	}
+}
+
+func TestDescribeRuntimeWarnsWhenDaemonCannotEnforceMemory(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.Daemon = &DaemonEnforcement{MemoryLimitSupported: false}
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueMemoryLimitUnsupported) {
+		t.Fatalf("issues = %v, want memory_limit_unsupported", issueCodes(profile))
 	}
 }

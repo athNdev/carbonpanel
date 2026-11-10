@@ -141,6 +141,15 @@ collector measures the node's Docker image store (deduplicated TotalSize)
 when a client or pool is configured. A missing client stays explicitly
 unknown. A daemon or lookup failure stays explicitly unknown. Image-cache
 bytes are not a world quota and are not added to world bytes.
+Free bytes on the world filesystem are a separate budget beside total capacity
+(`DiskTotal`); they are measured when possible or reported as explicitly
+unknown, and are not a hard world quota.
+
+Before container create, `DaemonEnforcement` reads Docker `/info` and the
+runtime profile compares the resolved request to those capabilities. Rootless
+daemons on cgroup v1, memory/swap/pids flags the daemon marks unsupported, and
+writable-layer caps on storage stacks without overlay2+xfs+pquota each produce
+named warnings so an ignored limit is not mistaken for enforcement.
 
 # How to check
 

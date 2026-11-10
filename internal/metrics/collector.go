@@ -40,9 +40,10 @@ type ServerMetrics struct {
 	// Separate resource budgets (OSS-239). These are measured or explicitly
 	// unknown; they are not a hard world quota and must not be inferred from
 	// DiskUsage or WorldSize.
-	WorldFreeInodes    Budget
-	BackupStagingBytes Budget
-	ImageCacheBytes    Budget
+	WorldFreeInodes           Budget
+	WorldFilesystemFreeBytes  Budget
+	BackupStagingBytes        Budget
+	ImageCacheBytes           Budget
 	PlayersOnline      int
 	TPS                float64
 	LastUpdated        time.Time
@@ -516,6 +517,7 @@ func (c *Collector) collectDiskUsage() {
 			serverDiskTotal = space
 		}
 		inodeBudget := worldInodeBudget(root)
+		freeBytesBudget := worldFilesystemFreeBudget(root)
 		imageBudget, seen := imageBudgets[server.NodeID]
 		if !seen {
 			imageBudget = c.imageCacheBudget(ctx, server.NodeID)
@@ -527,6 +529,7 @@ func (c *Collector) collectDiskUsage() {
 			m.DiskTotal = serverDiskTotal
 			m.WorldSize = totalWorldSize
 			m.WorldFreeInodes = inodeBudget
+			m.WorldFilesystemFreeBytes = freeBytesBudget
 			m.BackupStagingBytes = stagingBudget
 			m.ImageCacheBytes = imageBudget
 			m.LastUpdated = time.Now()

@@ -92,6 +92,48 @@ func TestNewAPIClientNegotiatesVersionEagerly(t *testing.T) {
 	}
 }
 
+func TestDaemonEnforcementReadsDockerInfo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"MemoryLimit":true,
+				"SwapLimit":true,
+				"PidsLimit":true,
+				"CgroupVersion":"2",
+				"Driver":"overlay2",
+				"DriverStatus":[["Backing Filesystem","xfs"]],
+				"SecurityOptions":["name=rootless"]
+			}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	sdk, err := NewAPIClient(client.WithHost(fakeDockerHost(t, srv)))
+	if err != nil {
+		t.Fatalf("NewAPIClient: %v", err)
+	}
+	defer func() { _ = sdk.Close() }()
+
+	got, err := (&Client{docker: sdk}).DaemonEnforcement(context.Background())
+	if err != nil {
+		t.Fatalf("DaemonEnforcement: %v", err)
+	}
+	if !got.Rootless {
+		t.Fatal("Rootless = false, want true")
+	}
+	if !got.WritableLayerQuotaSupported {
+		t.Fatal("WritableLayerQuotaSupported = false, want true")
+	}
+}
+
 func TestHostMemoryMBReadsDockerInfoWithBoundedCall(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
