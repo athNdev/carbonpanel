@@ -177,7 +177,6 @@ one at https://mozilla.org/MPL/2.0/.
 				return 'gray';
 		}
 	}
-
 </script>
 
 <div class="space-y-4 rounded-none font-sans text-[#f4f4f4]">

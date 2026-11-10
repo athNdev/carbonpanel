@@ -9,11 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { ModuleStatus } from './proto/carbonpanel/v1/module_pb';
-import {
-	moduleIdentityFromRecord,
-	moduleStatusLabel,
-	shortContainerId
-} from './module-identity';
+import { moduleIdentityFromRecord, moduleStatusLabel, shortContainerId } from './module-identity';
 
 test('the Modules tab identity comes from the reconciled record, not a stale inspect helper', () => {
 	const staleInspect = {
