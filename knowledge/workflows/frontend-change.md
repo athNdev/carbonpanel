@@ -50,7 +50,11 @@ bun run test
   back out: the rapid flicker this rule exists to stop. Tab strips use
   `scroll-strip`; vertical scrollers get `scrollbar-gutter: stable` from the
   `overflow-y-*` rule in `app.css`. `scrollbar-policy.test.ts` and
-  `CarbonTabs.test.ts` fail if the policy is removed.
+  `CarbonTabs.test.ts` fail if the policy is removed. Login, signup, route-change
+  layout and sidebar collapse inherit that gutter; `layout-motion-policy.test.ts`
+  fails if those surfaces opt out. Route view-transitions use `--motion-page`
+  (140 ms) and are skipped under `prefers-reduced-motion` and
+  `[data-carbon-motion='reduced']`.
 - Loading, empty and error states are part of the change, not follow-up work.
 - Overlays that must sit above the app chrome portal to `<body>`. A fixed
   overlay rendered inside `<main>` is trapped by the page stacking context: the

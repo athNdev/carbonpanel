@@ -36,7 +36,8 @@ one at https://mozilla.org/MPL/2.0/.
 	onNavigate(() => {
 		if (
 			!document.startViewTransition ||
-			window.matchMedia('(prefers-reduced-motion: reduce)').matches
+			window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+			document.documentElement.getAttribute('data-carbon-motion') === 'reduced'
 		) {
 			return;
 		}
