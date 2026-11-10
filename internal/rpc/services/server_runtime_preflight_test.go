@@ -21,15 +21,25 @@ import (
 // failed-precondition that names the reason, and no other create failure
 // leaks daemon internals.
 func TestCreateContainerErrorReportsAnIncompatibleRuntime(t *testing.T) {
-	cause := fmt.Errorf("%w: %s [fatal]: /data is mounted read-only; make it writable",
-		docker.ErrRuntimeIncompatible, "data_mount_read_only")
-	err := createContainerError(fmt.Errorf("failed to create container: %w", cause))
-
-	if err.Code() != connect.CodeFailedPrecondition {
-		t.Fatalf("code = %v, want failed_precondition", err.Code())
+	codes := []string{
+		"data_mount_missing",
+		"data_mount_read_only",
+		"read_only_root_blocks_nsswitch",
+		"bootstrap_capabilities_missing",
+		"data_owner_mismatch",
+		"rootless_host_root_data",
 	}
-	if !strings.Contains(err.Message(), "data_mount_read_only") {
-		t.Fatalf("message = %q, want the compatibility reason", err.Message())
+	for _, code := range codes {
+		t.Run(code, func(t *testing.T) {
+			cause := fmt.Errorf("%w: %s [fatal]: incompatible", docker.ErrRuntimeIncompatible, code)
+			err := createContainerError(fmt.Errorf("failed to create container: %w", cause))
+			if err.Code() != connect.CodeFailedPrecondition {
+				t.Fatalf("code = %v, want failed_precondition", err.Code())
+			}
+			if !strings.Contains(err.Message(), code) {
+				t.Fatalf("message = %q, want %s", err.Message(), code)
+			}
+		})
 	}
 }
 

@@ -41,6 +41,9 @@ legend defines. A planning claim therefore cannot outlive the code it names.
   path.
 - Do not require a live Minecraft server for a unit-level failure test.
 - If a failure cannot be reproduced in a test, say so in the change.
+- The runtime qualification matrix in `internal/docker/runtime_matrix_test.go`
+  always inspects the resolved CreateContainer request. Skip only the
+  daemon-`/info` case when Docker is absent; game-readiness stays OSS-247.
 
 # Read next
 
