@@ -30,6 +30,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/hostmount"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/utils"
@@ -309,6 +310,9 @@ type ClientConfig struct {
 	// root. It never bounds a bind-mounted world and is ignored when the root
 	// is read-only.
 	ContainerWritableMB int64
+	// WorldQuotaMB refuses create when measured world bytes meet or exceed
+	// this many mebibytes. 0 disables. Not a daemon or xfs world quota.
+	WorldQuotaMB int64
 }
 
 type ContainerLogStreamer interface {
@@ -1115,6 +1119,16 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 		spec.RequestedMemoryMB = int64(server.Memory)
 	}
 	spec.WritableLayerMB = c.config.ContainerWritableMB
+	spec.WorldQuotaMB = c.config.WorldQuotaMB
+	if spec.WorldQuotaMB > 0 {
+		n, worldErr := files.WorldBytes(dataPath)
+		if worldErr != nil {
+			c.log.Warn("World quota measurement failed for server %s: %v", server.ID, worldErr)
+		} else {
+			spec.WorldBytes = n
+			spec.WorldBytesKnown = true
+		}
+	}
 	if enforcement, enfErr := c.DaemonEnforcement(ctx); enfErr != nil {
 		c.log.Warn("Runtime qualification could not read Docker daemon capabilities: %v", enfErr)
 	} else {
