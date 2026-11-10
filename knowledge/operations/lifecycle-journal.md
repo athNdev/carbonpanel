@@ -72,9 +72,12 @@ behind an operation lock.
   id stays empty on activity; it is not invented after the fact.
 - The support bundle always carries `operations.json` with that projection and
   `observations.json` with per-server last-good timestamps, so a bundle can
-  explain a stuck or stale server without the Docker socket.
+  explain a stuck or stale server without the Docker socket. Operator next
+  actions for permission, port, pull, stale node, partial restore/migration
+  and disk exhaustion are in [actionable recovery](actionable-recovery.md).
 
 # Read next
 
 - [Persistence](../architecture/persistence.md)
 - [Runtime model](../architecture/runtime.md)
+- [Actionable recovery](actionable-recovery.md)
