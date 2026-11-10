@@ -98,6 +98,10 @@ const (
 	// RuntimeIssueWritableLayerCapIgnored is raised when a writable-layer cap
 	// is configured but the root is read-only, so nothing is capped.
 	RuntimeIssueWritableLayerCapIgnored RuntimeIssueCode = "writable_layer_cap_ignored"
+	// RuntimeIssueImageUnpinned is raised when a Minecraft image is a moving
+	// tag. It is a warning: the container can still boot, but a rebuilt tag
+	// can change what the next recreate runs.
+	RuntimeIssueImageUnpinned RuntimeIssueCode = "image_unpinned"
 )
 
 // RuntimeIssue is one compatibility finding with an actionable remedy.
@@ -173,7 +177,11 @@ type ContainerLimits struct {
 // container: what it runs as, what it can write, how confined it is, and which
 // limits are actually enforced.
 type RuntimeProfile struct {
-	Image             string
+	Image string
+	// ImageDigest is the sha256 digest when the image reference is pinned.
+	// Empty means the reference is a tag.
+	ImageDigest       string
+	ImagePinned       bool
 	MinecraftImage    bool
 	User              string
 	RootStartDropUser bool
@@ -235,6 +243,10 @@ func DescribeRuntime(spec RuntimeSpec) RuntimeProfile {
 		MinecraftImage:    spec.MinecraftImage,
 		RootStartDropUser: spec.MinecraftImage,
 		Tmpfs:             map[string]string{},
+	}
+	if digest, pinned := imageDigest(spec.Image); pinned {
+		profile.ImageDigest = digest
+		profile.ImagePinned = true
 	}
 	if spec.HostConfig != nil {
 		profile.CapAdd = append([]string(nil), spec.HostConfig.CapAdd...)
@@ -472,6 +484,15 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 		})
 	}
 
+	if profile.MinecraftImage && !profile.ImagePinned {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueImageUnpinned,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("image %q is not pinned to a digest", profile.Image),
+			Remedy:   "record the image as name@sha256:<digest> so a rebuilt tag cannot change the server; do not broaden privileges to compensate",
+		})
+	}
+
 	issues = append(issues, limitIssues(profile)...)
 
 	if spec.WritableLayerMB > 0 && profile.ReadOnlyRootfs {
@@ -538,6 +559,21 @@ func limitIssues(profile RuntimeProfile) []RuntimeIssue {
 	}
 
 	return issues
+}
+
+// imageDigest reports the sha256 digest of a pinned reference (name@sha256:<hex>).
+// A tag, including :latest, is not pinned.
+func imageDigest(image string) (string, bool) {
+	image = strings.TrimSpace(image)
+	at := strings.LastIndex(image, "@")
+	if at < 0 || at == len(image)-1 {
+		return "", false
+	}
+	digest := image[at+1:]
+	if !strings.HasPrefix(strings.ToLower(digest), "sha256:") || len(digest) < len("sha256:")+64 {
+		return "", false
+	}
+	return digest, true
 }
 
 // IsMinecraftImage reports whether an image reference is the itzg Minecraft

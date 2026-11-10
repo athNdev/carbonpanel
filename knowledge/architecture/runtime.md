@@ -117,9 +117,10 @@ as, whether the root is read-only, the writable paths, the capability set, the
 tmpfs mounts and the network mode. A fatal finding refuses the create with
 `ErrRuntimeIncompatible` and a named reason, so an unsupported image, mount or
 override fails before it replaces a working container. A warning is logged and
-does not block. A Minecraft image referenced by tag rather than
-`name@sha256:<digest>` warns `image_unpinned` and still boots; the profile
-records `ImageDigest` only when the reference is pinned. The rules and their
+does not block. A moving Minecraft image tag is a warning (`image_unpinned`),
+not a boot refusal; pin `name@sha256:<digest>` to keep recreates stable. The
+profile records `ImageDigest` and `ImagePinned` only when the reference is
+pinned. The rules and their
 remedies live in `internal/docker/runtime_profile.go`.
 
 The profile also reports the limits that are actually applied, not the ones

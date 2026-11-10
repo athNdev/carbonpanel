@@ -96,8 +96,37 @@ func TestPreflightAcceptsTheDefaultMinecraftContainer(t *testing.T) {
 	if len(profile.CapAdd) == 0 {
 		t.Error("default container has no bootstrap capabilities")
 	}
-	if len(profile.Issues) != 0 {
-		t.Errorf("default container reported issues: %v", issueCodes(profile))
+	if profile.ImagePinned || profile.ImageDigest != "" {
+		t.Errorf("tag reference recorded as pinned: digest=%q", profile.ImageDigest)
+	}
+	if !hasIssue(profile, RuntimeIssueImageUnpinned) {
+		t.Errorf("default tag reported issues: %v, want image_unpinned", issueCodes(profile))
+	}
+	for _, issue := range profile.Issues {
+		if issue.Code != RuntimeIssueImageUnpinned {
+			t.Errorf("default container reported %s; only image_unpinned is expected", issue.Code)
+		}
+		if issue.Severity != RuntimeWarning {
+			t.Errorf("image_unpinned severity = %s, want warning", issue.Severity)
+		}
+	}
+}
+
+func TestPreflightRecordsAPinnedImageDigest(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	const digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	spec.Image = "itzg/minecraft-server:java21@" + digest
+	spec.MinecraftImage = IsMinecraftImage(spec.Image)
+
+	profile := DescribeRuntime(spec)
+	if err := PreflightProfile(profile); err != nil {
+		t.Fatalf("pinned image refused: %v", err)
+	}
+	if !profile.ImagePinned || profile.ImageDigest != digest {
+		t.Fatalf("pinned image digest = pinned:%t %q", profile.ImagePinned, profile.ImageDigest)
+	}
+	if hasIssue(profile, RuntimeIssueImageUnpinned) {
+		t.Fatalf("pinned image warned image_unpinned: %v", issueCodes(profile))
 	}
 }
 
