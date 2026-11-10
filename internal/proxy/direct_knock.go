@@ -43,7 +43,12 @@ type DirectKnockManager struct {
 	wakeHandler      WakeHandler
 	logger           *logger.Logger
 	acceptsTransfers bool
+	bindHost         string // empty = all interfaces (production wake ingress)
 }
+
+// directKnockListen is the TCP listen function used by StartKnock. Tests may
+// replace it to assert bind addresses or avoid non-loopback listeners on Windows.
+var directKnockListen = net.Listen
 
 // NewDirectKnockManager creates a new DirectKnockManager.
 func NewDirectKnockManager(wakeHandler WakeHandler, log *logger.Logger) *DirectKnockManager {
@@ -70,6 +75,22 @@ func (m *DirectKnockManager) SetWakeHandler(h WakeHandler) {
 	m.wakeHandler = h
 }
 
+// SetKnockBindHost sets the local address host for direct knock listeners.
+// Empty (the default) binds on all interfaces (":port") so Minecraft clients can
+// reach deeply-asleep direct-port servers. Tests should set "127.0.0.1".
+func (m *DirectKnockManager) SetKnockBindHost(host string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.bindHost = host
+}
+
+func knockListenAddr(bindHost string, port int) string {
+	if bindHost == "" {
+		return fmt.Sprintf(":%d", port)
+	}
+	return net.JoinHostPort(bindHost, fmt.Sprintf("%d", port))
+}
+
 // StartKnock starts a TCP listener on the server's port.
 func (m *DirectKnockManager) StartKnock(server *db.Server) error {
 	if server == nil || server.Port <= 0 {
@@ -88,8 +109,8 @@ func (m *DirectKnockManager) StartKnock(server *db.Server) error {
 		delete(m.knocks, server.ID)
 	}
 
-	addr := fmt.Sprintf(":%d", server.Port)
-	listener, err := net.Listen("tcp", addr)
+	addr := knockListenAddr(m.bindHost, server.Port)
+	listener, err := directKnockListen("tcp", addr)
 	if err != nil {
 		if m.logger != nil {
 			m.logger.Warn("Direct knock: failed to bind port %d for server %s: %v", server.Port, server.Name, err)
