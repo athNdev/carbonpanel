@@ -9,6 +9,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -309,19 +313,63 @@ func TestFileRPCsRefuseTransportOnlyWithoutProvider(t *testing.T) {
 	}
 }
 
-func TestZipPipelinesRefuseTransportOnlyEvenWithProvider(t *testing.T) {
-	_, server, svc, _, _, phantomRoot, cleanup := transportOnlyFixture(t)
+func TestDownloadRemoteArchiveUsesTransportNotControllerLocalPath(t *testing.T) {
+	t.Setenv("DISCO_ALLOW_LOOPBACK_TEST", "1")
+	_, server, svc, rt, workerRoot, phantomRoot, cleanup := transportOnlyFixture(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	// DownloadRemoteArchive still walks HTTP-to-disk on the controller.
-	// Refuse must run before os.MkdirAll or this dest directory is created
-	// and the RPC still looks "successful".
-	_, err := svc.DownloadRemoteArchive(ctx, connect.NewRequest(&v1.DownloadRemoteArchiveRequest{
-		ServerId: server.ID, Url: "http://1.1.1.1/archive.zip", DestinationPath: "mods",
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.Create("mods/demo.jar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("mod-bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	zipData := buf.Bytes()
+	sum := sha256.Sum256(zipData)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(zipData)
 	}))
-	if connect.CodeOf(err) != connect.CodeUnavailable {
-		t.Fatalf("DownloadRemoteArchive error = %v, want unavailable (no controller zip fallback)", err)
+	t.Cleanup(ts.Close)
+
+	openedBefore := rt.opened
+	resp, err := svc.DownloadRemoteArchive(ctx, connect.NewRequest(&v1.DownloadRemoteArchiveRequest{
+		ServerId: server.ID, Url: ts.URL + "/pack.zip", DestinationPath: ".",
+		Sha256Checksum: hex.EncodeToString(sum[:]), AutoExtract: true,
+	}))
+	if err != nil {
+		t.Fatalf("DownloadRemoteArchive: %v", err)
+	}
+	if rt.opened <= openedBefore {
+		t.Fatal("expected DownloadRemoteArchive to open remote transport")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		pResp, perr := svc.GetRemoteArchiveProgress(ctx, connect.NewRequest(&v1.GetRemoteArchiveProgressRequest{
+			ServerId: server.ID, TaskId: resp.Msg.GetTaskId(),
+		}))
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		if pResp.Msg.Status == "completed" {
+			break
+		}
+		if pResp.Msg.Status == "failed" {
+			t.Fatalf("download failed: %s", pResp.Msg.Error)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	got, err := os.ReadFile(filepath.Join(workerRoot, "mods", "demo.jar"))
+	if err != nil || string(got) != "mod-bytes" {
+		t.Fatalf("worker extract = %q, %v (controller zip fallback?)", got, err)
 	}
 	assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
 	mappedMods := filepath.Join(phantomRoot, filepath.Base(server.DataPath), "mods")

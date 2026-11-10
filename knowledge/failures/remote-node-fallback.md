@@ -42,9 +42,7 @@ not answer a named node with the local daemon.
   List/Update/Delete, CreateFolder, Copy/Move, uploads, InitFileDownload,
   `serverLatestLog`, staged content, zip extract, CreateArchive,
   DownloadArchive, ExportWorld, snapshot create/rollback, worldstore
-  backup/restore, and that server-pack write).
-  `DownloadRemoteArchive` still requires a controller filesystem walk and
-  is refused on transport-only nodes.
+  backup/restore, DownloadRemoteArchive, and that server-pack write).
 
 # Detection
 

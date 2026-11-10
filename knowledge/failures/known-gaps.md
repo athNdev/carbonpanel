@@ -56,7 +56,8 @@ sources:
   InitFileDownload, latest-log, zip extract, CreateArchive,
   DownloadArchive, ExportWorld, CreateServer manual pack).
   Snapshot create/rollback and worldstore backup/restore also use that
-  accessor. `DownloadRemoteArchive` and metrics still require shared
+  accessor. `DownloadRemoteArchive` downloads to a controller temp file
+  then writes or extracts through ForNode. Metrics still require shared
   storage or a further streaming worker path.
 
 # How to use this

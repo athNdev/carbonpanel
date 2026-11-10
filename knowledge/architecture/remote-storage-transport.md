@@ -59,8 +59,8 @@ download temp). Snapshot create/rollback and worldstore backup/restore
 stream through `nodestorage.ForNode` (`worldstore.BackupToAccessor` /
 `RestoreFromAccessor`, `WriteZip` / `ReplaceTreeFromZip`). Backup
 artifacts stay in the controller backup directory. `DownloadRemoteArchive`
-still walks HTTP-to-disk on the controller and is refused on
-transport-only nodes. No worker means `ErrUnavailable` / Connect
+downloads to a controller temp file then writes or extracts through the
+same accessor. No worker means `ErrUnavailable` / Connect
 `CodeUnavailable` — never a controller-local fallback.
 
 # Read next

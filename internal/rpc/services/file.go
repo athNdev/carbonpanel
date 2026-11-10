@@ -787,6 +787,14 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("SSRF guard blocked URL: %w", err))
 	}
 
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
+	if err != nil {
+		return nil, storageError(err)
+	}
+	if nodestorage.RequiresRemoteTransport(info) {
+		return s.downloadRemoteArchiveViaAccessor(ctx, server, info, msg, rawURL)
+	}
+
 	if err := refuseLocalPathPipeline(ctx, s.store, server); err != nil {
 		return nil, storageError(err)
 	}
@@ -942,6 +950,167 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 			}
 			if err := out.Close(); err != nil {
 				op.fail(fmt.Sprintf("failed to close downloaded file: %v", err))
+				return
+			}
+		}
+
+		op.complete()
+	}()
+
+	return connect.NewResponse(&v1.DownloadRemoteArchiveResponse{
+		TaskId:  taskID,
+		Message: "Remote archive download initiated",
+	}), nil
+}
+
+// downloadRemoteArchiveViaAccessor downloads to a controller temp file then
+// writes or extracts through nodestorage.ForNode. It never calls dataRootFor
+// or os.MkdirAll on the server tree (ADR 0005).
+func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.DownloadRemoteArchiveRequest, rawURL string) (*connect.Response[v1.DownloadRemoteArchiveResponse], error) {
+	acc, err := nodestorage.ForNode(info, server.DataPath)
+	if err != nil {
+		return nil, storageError(err)
+	}
+
+	destRel := strings.TrimSpace(msg.DestinationPath)
+	if destRel == "" {
+		destRel = "."
+	}
+	destRel = filepath.ToSlash(destRel)
+	if filepath.IsAbs(destRel) || strings.HasPrefix(destRel, "/") || filepath.VolumeName(filepath.FromSlash(destRel)) != "" {
+		_ = acc.Close()
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid destination path"))
+	}
+	destRel = path.Clean(destRel)
+	if destRel == ".." || strings.HasPrefix(destRel, "../") {
+		_ = acc.Close()
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("invalid destination path"))
+	}
+	if err := acc.MkdirAll(destRel); err != nil {
+		_ = acc.Close()
+		return nil, storageError(err)
+	}
+
+	taskID := uuid.New().String()
+	op := &remoteDownloadOp{
+		TaskID: taskID,
+		Status: "downloading",
+	}
+	s.remoteDownloads.Store(taskID, op)
+
+	go func() {
+		defer op.markCompletedAt()
+		defer func() { _ = acc.Close() }()
+
+		client := utils.NewSafeHTTPClient(15*time.Minute, true)
+		httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
+		if err != nil {
+			op.fail(fmt.Sprintf("failed to create HTTP request: %v", err))
+			return
+		}
+		httpReq.Header.Set("User-Agent", "CarbonPanel/2.x (Archive Downloader)")
+
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			op.fail(fmt.Sprintf("download request failed: %v", err))
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			op.fail(fmt.Sprintf("remote server returned HTTP status %d", resp.StatusCode))
+			return
+		}
+
+		totalSize := resp.ContentLength
+		if totalSize > maxRemoteDownloadBytes {
+			op.fail(fmt.Sprintf("remote archive too large: declared %d bytes exceeds limit of %d",
+				totalSize, int64(maxRemoteDownloadBytes)))
+			return
+		}
+		if totalSize > 0 {
+			op.TotalBytes.Store(totalSize)
+		}
+
+		tmpFile, err := os.CreateTemp("", "remote-archive-*.tmp")
+		if err != nil {
+			op.fail(fmt.Sprintf("failed to create temp file: %v", err))
+			return
+		}
+		tmpPath := tmpFile.Name()
+		defer func() { _ = os.Remove(tmpPath) }()
+		defer func() { _ = tmpFile.Close() }()
+
+		hasher := sha256.New()
+		writer := io.MultiWriter(tmpFile, hasher)
+
+		buf := make([]byte, 64*1024)
+		var downloaded int64
+		for {
+			n, rErr := resp.Body.Read(buf)
+			if n > 0 {
+				if downloaded+int64(n) > maxRemoteDownloadBytes {
+					op.fail(fmt.Sprintf("remote archive too large: exceeded limit of %d bytes",
+						int64(maxRemoteDownloadBytes)))
+					return
+				}
+				if _, wErr := writer.Write(buf[:n]); wErr != nil {
+					op.fail(fmt.Sprintf("failed writing download stream: %v", wErr))
+					return
+				}
+				downloaded += int64(n)
+				op.BytesDownloaded.Store(downloaded)
+				if totalSize > 0 {
+					pct := int32((float64(downloaded) / float64(totalSize)) * 100)
+					if pct > 100 {
+						pct = 100
+					}
+					op.ProgressPercent.Store(pct)
+				}
+			}
+			if rErr == io.EOF {
+				break
+			}
+			if rErr != nil {
+				op.fail(fmt.Sprintf("error during download stream: %v", rErr))
+				return
+			}
+		}
+
+		expectedSHA := strings.TrimSpace(msg.Sha256Checksum)
+		if expectedSHA != "" {
+			op.setStatus("verifying")
+			actualSHA := hex.EncodeToString(hasher.Sum(nil))
+			if !strings.EqualFold(actualSHA, expectedSHA) {
+				op.fail(fmt.Sprintf("SHA256 checksum mismatch: expected %s, got %s", expectedSHA, actualSHA))
+				return
+			}
+		}
+
+		if _, err := tmpFile.Seek(0, 0); err != nil {
+			op.fail(fmt.Sprintf("failed to rewind downloaded archive: %v", err))
+			return
+		}
+		data, err := io.ReadAll(io.LimitReader(tmpFile, maxRemoteDownloadBytes+1))
+		if err != nil {
+			op.fail(fmt.Sprintf("failed to read downloaded archive: %v", err))
+			return
+		}
+
+		if msg.AutoExtract {
+			op.setStatus("extracting")
+			if _, err := nodestorage.ExtractZipBytes(context.Background(), acc, data, destRel, nil); err != nil {
+				op.fail(fmt.Sprintf("failed to extract archive: %v", err))
+				return
+			}
+		} else {
+			fileName := remoteArchiveFilename(rawURL)
+			targetRel := fileName
+			if destRel != "." && destRel != "" {
+				targetRel = path.Join(destRel, fileName)
+			}
+			if err := acc.WriteFile(targetRel, data); err != nil {
+				op.fail(fmt.Sprintf("failed to save file to destination: %v", err))
 				return
 			}
 		}
