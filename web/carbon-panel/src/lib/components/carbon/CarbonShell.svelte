@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import type { Snippet } from 'svelte';
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import { motionDuration } from '$lib/motion';
 	import { page } from '$app/state';
 	import { base, resolve } from '$app/paths';
 	import { runningServers, activitySortedServers } from '$lib/stores/servers';
@@ -377,7 +378,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- IBM Carbon SideNav: off-canvas overlay on narrow screens, rail/panel on md+ -->
 		<aside
 			id="carbon-sidenav"
-			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 w-64 overflow-x-hidden overflow-y-auto border-r border-[#393939] bg-[#161616] transition-[width,transform] duration-[160ms] ease-[var(--ease-out-quart)] {sideNavExpanded
+			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 w-64 overflow-x-hidden overflow-y-auto border-r border-[#393939] bg-[#161616] transition-[width,transform] duration-(--motion-fast) ease-[var(--ease-out-quart)] {sideNavExpanded
 				? 'translate-x-0'
 				: '-translate-x-full'} {sideNavExpanded ? 'md:w-64' : 'md:w-12'} md:translate-x-0"
 		>
@@ -443,14 +444,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				type="button"
 				aria-label="Close navigation"
 				onclick={closeMobileNav}
-				transition:fade={{ duration: 150 }}
+				transition:fade={{ duration: motionDuration(150) }}
 				class="fixed inset-0 top-12 z-30 cursor-default bg-black/60 md:hidden"
 			></button>
 		{/if}
 
 		<!-- Carbon Main Content Area -->
 		<main
-			class="scrollbar-stable ml-0 flex-1 overflow-y-auto p-4 transition-[margin] duration-[160ms] ease-[var(--ease-out-quart)] md:p-6 {sideNavExpanded
+			class="scrollbar-stable ml-0 flex-1 overflow-y-auto p-4 transition-[margin] duration-(--motion-fast) ease-[var(--ease-out-quart)] md:p-6 {sideNavExpanded
 				? 'md:ml-64'
 				: 'md:ml-12'}"
 		>

@@ -47,6 +47,18 @@ test('a strip can scroll without ever showing a scrollbar', () => {
 	assert.match(css, /\.scroll-strip::-webkit-scrollbar\s*\{[^}]*display: none/);
 });
 
+test('nested horizontal panes hide the bar so sidebar collapse cannot change their height', () => {
+	assert.match(
+		css,
+		/:where\(\.overflow-x-auto,\s*\.overflow-x-scroll\):not\(\.overflow-y-auto\):not\(\.overflow-y-scroll\):not\(\s*\.overflow-auto\s*\)\s*\{[^}]*scrollbar-width: none/
+	);
+	assert.doesNotMatch(
+		css,
+		/:where\(\.overflow-x-auto,\s*\.overflow-x-scroll\)\s*\{[^}]*scrollbar-width: none/,
+		'Dual-axis panes must keep a visible vertical scrollbar'
+	);
+});
+
 test('an opt-out utility hides the bar but keeps the surface scrollable', () => {
 	const none = requireRule('\\.scrollbar-none');
 	assert.match(none, /scrollbar-width: none/);

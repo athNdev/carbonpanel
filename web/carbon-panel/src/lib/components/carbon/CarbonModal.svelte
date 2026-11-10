@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import type { Snippet } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
 	import { cubicOut, cubicIn } from 'svelte/easing';
+	import { motionDuration } from '$lib/motion';
 	import CarbonButton from './CarbonButton.svelte';
 
 	interface Props {
@@ -188,7 +189,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		class="fixed inset-0 z-50 flex items-center justify-center rounded-none bg-black/70 backdrop-blur-xs select-none {fullscreen
 			? 'p-0'
 			: 'p-4'}"
-		transition:fade={{ duration: 150, easing: cubicOut }}
+		transition:fade={{ duration: motionDuration(150), easing: cubicOut }}
 		onclick={handleBackdropClick}
 		onwheel={(event) => {
 			// Keep wheel input from scrolling the page behind the dialog.
@@ -205,8 +206,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			class="w-full {fullscreen
 				? 'h-screen max-h-screen max-w-none'
 				: `${sizeClasses[size]} max-h-[90vh] border border-[#393939]`} flex flex-col rounded-none bg-[#161616] shadow-[var(--carbon-shadow-overlay)] outline-none select-text focus:outline-none"
-			in:scale={{ start: 0.97, opacity: 0, duration: 200, easing: cubicOut }}
-			out:scale={{ start: 0.97, opacity: 0, duration: 150, easing: cubicIn }}
+			in:scale={{ start: 0.97, opacity: 0, duration: motionDuration(200), easing: cubicOut }}
+			out:scale={{ start: 0.97, opacity: 0, duration: motionDuration(150), easing: cubicIn }}
 		>
 			{#if bare && title}
 				<h3 id={titleId} class="sr-only">{title}</h3>

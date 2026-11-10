@@ -49,12 +49,19 @@ bun run test
   disappears changes the content box, which can reflow the content and pull it
   back out: the rapid flicker this rule exists to stop. Tab strips use
   `scroll-strip`; vertical scrollers get `scrollbar-gutter: stable` from the
-  `overflow-y-*` rule in `app.css`. `scrollbar-policy.test.ts` and
-  `CarbonTabs.test.ts` fail if the policy is removed. Login, signup, route-change
-  layout and sidebar collapse inherit that gutter; `layout-motion-policy.test.ts`
-  fails if those surfaces opt out. Route view-transitions use `--motion-page`
-  (140 ms) and are skipped under `prefers-reduced-motion` and
-  `[data-carbon-motion='reduced']`.
+  `overflow-y-*` rule in `app.css`. Nested `overflow-x-auto` panes that are not
+  also vertical scrollers hide the bar (same height contract as `scroll-strip`)
+  so a table overflowing after sidebar collapse cannot grow a horizontal bar and
+  feed an ancestor gutter. Dual-axis panes (console, logs) keep a visible bar.
+  `scrollbar-policy.test.ts` and `CarbonTabs.test.ts` fail if the policy is
+  removed. Login, signup, route-change layout and sidebar collapse inherit that
+  gutter; `layout-motion-policy.test.ts` fails if those surfaces opt out. Route
+  view-transitions use `--motion-page` (140 ms), skip an in-flight transition
+  when the next navigation starts, and are skipped under `prefersReducedMotion()`
+  (`prefers-reduced-motion` and `[data-carbon-motion='reduced']`). Svelte
+  `transition:` helpers must use `motionDuration()` so they snap under reduced
+  motion. Animate color/opacity/transform only; do not `transition: all`. Cloud
+  visual verification of the same states is out of this repository.
 - Loading, empty and error states are part of the change, not follow-up work.
 - Overlays that must sit above the app chrome portal to `<body>`. A fixed
   overlay rendered inside `<main>` is trapped by the page stacking context: the

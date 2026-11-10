@@ -23,30 +23,38 @@ one at https://mozilla.org/MPL/2.0/.
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
+	import { prefersReducedMotion } from '$lib/motion';
 
 	let { children } = $props();
 
 	let loading = $state(true);
 
 	let statusPollingInterval: ReturnType<typeof setInterval> | null = null;
+	let activeViewTransition: ViewTransition | null = null;
 
 	// Animate only client-side route changes. Resolve after SvelteKit updates the
-	// DOM so the browser captures the correct new view; avoid animation for users
-	// who request reduced motion.
+	// DOM so the browser captures the correct new view; skip and interrupt
+	// animation for users who request reduced motion or navigate again.
 	onNavigate(() => {
-		if (
-			!document.startViewTransition ||
-			window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
-			document.documentElement.getAttribute('data-carbon-motion') === 'reduced'
-		) {
+		if (!document.startViewTransition || prefersReducedMotion()) {
+			activeViewTransition?.skipTransition();
+			activeViewTransition = null;
 			return;
 		}
+
+		activeViewTransition?.skipTransition();
 
 		let finishTransition!: () => void;
 		const updated = new Promise<void>((resolve) => {
 			finishTransition = resolve;
 		});
-		document.startViewTransition(() => updated);
+		const next = document.startViewTransition(() => updated);
+		activeViewTransition = next;
+		void next.finished.finally(() => {
+			if (activeViewTransition === next) {
+				activeViewTransition = null;
+			}
+		});
 		return () => finishTransition();
 	});
 

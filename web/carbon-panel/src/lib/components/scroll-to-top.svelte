@@ -14,6 +14,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { cubicOut } from 'svelte/easing';
 	import { Button } from '$lib/components/ui/button';
 	import { ArrowUp } from '@lucide/svelte';
+	import { motionDuration, prefersReducedMotion } from '$lib/motion';
 
 	let showButton = $state(false);
 	let scrollElement = $state<Element | Window | null>(null);
@@ -71,7 +72,7 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	function scrollToTop() {
-		const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		const reduce = prefersReducedMotion();
 		if (scrollElement === window) {
 			window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
 		} else if (scrollElement) {
@@ -83,7 +84,7 @@ one at https://mozilla.org/MPL/2.0/.
 {#if showButton}
 	<div
 		class="fixed right-8 bottom-8 z-50"
-		transition:fly={{ y: 8, duration: 200, easing: cubicOut }}
+		transition:fly={{ y: 8, duration: motionDuration(200), easing: cubicOut }}
 	>
 		<Button
 			size="icon"
