@@ -18,6 +18,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { Module, ModuleTemplate } from '$lib/proto/carbonpanel/v1/module_pb';
 	import { ModuleStatus } from '$lib/proto/carbonpanel/v1/module_pb';
+	import { moduleIdentityFromRecord, moduleStatusLabel } from '$lib/module-identity';
 	import { getEventTypeLabel } from '$lib/utils/events';
 	import {
 		Loader2,
@@ -240,25 +241,6 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function getStatusLabel(status: ModuleStatus): string {
-		switch (status) {
-			case ModuleStatus.RUNNING:
-				return 'Running';
-			case ModuleStatus.STOPPED:
-				return 'Stopped';
-			case ModuleStatus.STARTING:
-				return 'Starting';
-			case ModuleStatus.STOPPING:
-				return 'Stopping';
-			case ModuleStatus.ERROR:
-				return 'Error';
-			case ModuleStatus.CREATING:
-				return 'Creating';
-			default:
-				return 'Unknown';
-		}
-	}
-
 	function getDependencyName(moduleId: string): string {
 		const dep = modules.find((m) => m.id === moduleId);
 		return dep?.name || moduleId.slice(0, 8);
@@ -343,6 +325,7 @@ one at https://mozilla.org/MPL/2.0/.
 			<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
 				{#each modules as module (module.id)}
 					{@const isLoading = actionLoading === module.id}
+					{@const identity = moduleIdentityFromRecord(module)}
 					<Card
 						class="group relative overflow-hidden border shadow-sm transition-all hover:shadow-md"
 					>
@@ -358,10 +341,19 @@ one at https://mozilla.org/MPL/2.0/.
 								<div class="min-w-0 flex-1">
 									<div class="mb-1 flex items-center gap-2">
 										<h3 class="truncate font-semibold">{module.name}</h3>
-										<Badge variant={getStatusBadgeVariant(module.status)} class="text-xs">
-											{getStatusLabel(module.status)}
+										<Badge variant={getStatusBadgeVariant(identity.status)} class="text-xs">
+											{moduleStatusLabel(identity.status)}
 										</Badge>
 									</div>
+									{#if identity.shortContainerId}
+										<p
+											class="mb-1 font-mono text-[11px] text-muted-foreground"
+											title={identity.containerId}
+											data-testid="module-container-id"
+										>
+											{identity.shortContainerId}
+										</p>
+									{/if}
 									<p class="truncate text-sm text-muted-foreground">
 										{module.templateName}{#if module.createdByUsername}
 											<span class="ml-2 text-muted-foreground/60"

@@ -14,6 +14,9 @@ code_refs:
   - internal/docker/client.go
   - internal/reconciler
   - internal/rpc/services/server.go
+  - web/carbon-panel/src/lib/module-identity.ts
+  - web/carbon-panel/src/routes/modules/ActiveModules.svelte
+  - web/carbon-panel/src/lib/components/server/ServerModules.svelte
 sources:
   - title: Module delivery checksum issue
     resource: ../../docs/issues/003-MOD-4-modpack-delivery-checksum.md
@@ -73,6 +76,9 @@ container under a running parent is restored without `RemoveContainer`,
 because that call always sets `RemoveVolumes`. A failed start hook retries
 against the observed container and does not create a second one. A parent
 row that is already gone marks the child stopped and does not resurrect it.
+The Modules tab renders container id and status from that reconciled
+`listModules` record (`moduleIdentityFromRecord`), not from a stale inspect
+helper.
 
 Parent deletion has an explicit child policy. A full delete stops and
 removes sidecar containers before the server row. `DeleteServer` with
