@@ -87,7 +87,8 @@ upgrade with `make snapshot-panel-db`.
   overrides.
 - Configuration instead of machine-specific paths or addresses.
 - Compose, Docker, Helm, Terraform and release documentation updated when their
-  behavior changes.
+  behavior changes. OSS does not currently ship Helm or Terraform; see
+  `docs/deployment-modes.md`.
 
 ## Documentation
 

@@ -28,6 +28,8 @@ Daily `VACUUM INTO` snapshots are the in-process durability mode (ADR 0007).
 Before a controller image or schema upgrade, take an extra on-demand copy with
 the named operator script. Ordinary `make test`, `scripts/web-build.sh`,
 `make clean`, `docker compose up` and `docker compose down` never invoke it.
+The named Compose image recreate is `scripts/compose-upgrade.sh` (see
+`docs/deployment-modes.md`); that script snapshots first when you pass `--apply`.
 
 ```sh
 scripts/snapshot-panel-db.sh --data-dir /opt/carbon-panel/data
