@@ -159,6 +159,10 @@ func TestCollectDiskUsage_MeasuresServerDir(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Storage.DataDir = dir
+	cfg.Storage.TempDir = filepath.Join(dir, "staging")
+	if err := os.MkdirAll(cfg.Storage.TempDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	c := NewCollectorWithPool(store, nil, nil, nil, cfg, nil, logger.New())
 	c.collectDiskUsage()
 
@@ -171,6 +175,15 @@ func TestCollectDiskUsage_MeasuresServerDir(t *testing.T) {
 	}
 	if got.DiskTotal <= 0 {
 		t.Errorf("DiskTotal = %d, want positive", got.DiskTotal)
+	}
+	if !got.BackupStagingBytes.Known {
+		t.Errorf("BackupStagingBytes = %+v, want measured", got.BackupStagingBytes)
+	}
+	if got.ImageCacheBytes.Known {
+		t.Errorf("ImageCacheBytes = %+v, want unknown without docker", got.ImageCacheBytes)
+	}
+	if !got.WorldFreeInodes.Known && got.WorldFreeInodes.Reason == "" {
+		t.Errorf("WorldFreeInodes = %+v, want known or explicit reason", got.WorldFreeInodes)
 	}
 }
 
