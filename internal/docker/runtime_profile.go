@@ -98,6 +98,21 @@ const (
 	// RuntimeIssueWritableLayerCapIgnored is raised when a writable-layer cap
 	// is configured but the root is read-only, so nothing is capped.
 	RuntimeIssueWritableLayerCapIgnored RuntimeIssueCode = "writable_layer_cap_ignored"
+	// RuntimeIssueMemoryLimitUnsupported is raised when the container requests a
+	// memory cap but the daemon reports it cannot enforce one.
+	RuntimeIssueMemoryLimitUnsupported RuntimeIssueCode = "memory_limit_unsupported"
+	// RuntimeIssueSwapLimitUnsupported is raised when swap is enabled on the
+	// request but the daemon reports swap limits are unavailable.
+	RuntimeIssueSwapLimitUnsupported RuntimeIssueCode = "swap_limit_unsupported"
+	// RuntimeIssuePidsLimitUnsupported is raised when a process cap is set but
+	// the daemon reports pids limits are unavailable.
+	RuntimeIssuePidsLimitUnsupported RuntimeIssueCode = "pids_limit_unsupported"
+	// RuntimeIssueRootlessCgroupUnqualified is raised when a rootless daemon is
+	// not on cgroup v2, so cgroup resource flags may be ignored.
+	RuntimeIssueRootlessCgroupUnqualified RuntimeIssueCode = "rootless_cgroup_unqualified"
+	// RuntimeIssueWritableLayerCapUnsupported is raised when a writable-layer
+	// cap is requested on a storage stack that does not support storage-opt size.
+	RuntimeIssueWritableLayerCapUnsupported RuntimeIssueCode = "writable_layer_cap_unsupported"
 	// RuntimeIssueImageUnpinned is raised when a Minecraft image is a moving
 	// tag. It is a warning: the container can still boot, but a rebuilt tag
 	// can change what the next recreate runs.
@@ -145,6 +160,9 @@ type RuntimeSpec struct {
 	DataOwnerUID *int
 	// Overrides are the operator overrides that produced this configuration.
 	Overrides *v1.DockerOverrides
+	// Daemon is the Docker daemon's reported limit capabilities when known.
+	// Missing means qualification was not performed; no daemon issue is raised.
+	Daemon *DaemonEnforcement
 	// Config and HostConfig are the resolved daemon request.
 	Config     *container.Config
 	HostConfig *container.HostConfig
@@ -494,6 +512,7 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 	}
 
 	issues = append(issues, limitIssues(profile)...)
+	issues = append(issues, daemonLimitIssues(spec, profile)...)
 
 	if spec.WritableLayerMB > 0 && profile.ReadOnlyRootfs {
 		issues = append(issues, RuntimeIssue{
@@ -555,6 +574,64 @@ func limitIssues(profile RuntimeProfile) []RuntimeIssue {
 			Severity: RuntimeWarning,
 			Detail:   fmt.Sprintf("the %d MB writable-layer cap does not bound the world at %s", profile.Limits.WritableLayerMB, profile.DataMount),
 			Remedy:   "size the world with the node filesystem or a volume quota; a bind-mounted world is measured, not capped, by the daemon",
+		})
+	}
+
+	return issues
+}
+
+// daemonLimitIssues compares the resolved request to daemon capabilities so an
+// ignored limit is reported explicitly. Warnings only: the container may still
+// boot, but the operator must not treat the number as enforced.
+func daemonLimitIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
+	if spec.Daemon == nil {
+		return nil
+	}
+	daemon := spec.Daemon
+	var issues []RuntimeIssue
+
+	if daemon.Rootless && daemon.CgroupVersion != "2" {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueRootlessCgroupUnqualified,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("rootless Docker is on cgroup %q, not cgroup v2", daemon.CgroupVersion),
+			Remedy:   "move the rootless daemon to cgroup v2 with delegation, or treat memory/swap/pids limits as advisory",
+		})
+	}
+
+	if profile.Limits.MemoryBytes > 0 && !daemon.MemoryLimitSupported {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueMemoryLimitUnsupported,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("the container requests %d bytes of memory but the daemon reports memory limits are unsupported", profile.Limits.MemoryBytes),
+			Remedy:   "use a daemon with cgroup support, or reduce load; the request may run without the cap",
+		})
+	}
+
+	if profile.Limits.MemoryBytes > 0 && !profile.Limits.SwapDisabled && !daemon.SwapLimitSupported {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueSwapLimitUnsupported,
+			Severity: RuntimeWarning,
+			Detail:   "swap limits are enabled on the container but the daemon reports swap limits are unsupported",
+			Remedy:   "set memory and memory+swap to the same value on a daemon with swap cgroup support",
+		})
+	}
+
+	if profile.Limits.PidsLimit > 0 && !daemon.PidsLimitSupported {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssuePidsLimitUnsupported,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("the container requests pids limit %d but the daemon reports pids limits are unsupported", profile.Limits.PidsLimit),
+			Remedy:   "use a daemon with pids cgroup support or accept the default process limit",
+		})
+	}
+
+	if spec.WritableLayerMB > 0 && !profile.ReadOnlyRootfs && !daemon.WritableLayerQuotaSupported {
+		issues = append(issues, RuntimeIssue{
+			Code:     RuntimeIssueWritableLayerCapUnsupported,
+			Severity: RuntimeWarning,
+			Detail:   fmt.Sprintf("storage.container_writable_mb is %d MB but the %s storage driver cannot enforce storage-opt size", spec.WritableLayerMB, daemon.StorageDriver),
+			Remedy:   "use overlay2 on xfs with pquota for a layer cap, or leave the writable layer unbounded and rely on node free space",
 		})
 	}
 

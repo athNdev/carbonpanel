@@ -27,7 +27,14 @@ sources:
   TotalSize) when a client or pool is configured. A missing client stays
   explicitly unknown. A daemon or lookup failure stays explicitly unknown.
   Image-cache bytes are not a world quota and are not added to world bytes.
-  None of these is a hard world quota.
+  None of these is a hard world quota. Free bytes on the world filesystem are
+  reported separately from total capacity; neither substitutes for xfs/project
+  or volume quotas when a hard world cap is required.
+
+- Daemon `/info` qualification warns when cgroup or storage-opt limits may be
+  ignored (for example rootless on cgroup v1). Live confirmation on the target
+  daemon profile remains in OSS-247; the panel does not claim enforcement
+  without capability evidence.
 
 - `internal/module/hooks.go:execInModule` runs hook commands through the
   manager's own Docker client (`m.docker.Exec`), so a module hook does not
