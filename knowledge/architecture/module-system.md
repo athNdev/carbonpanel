@@ -10,6 +10,7 @@ code_refs:
   - internal/indexers
   - internal/blueprint
   - internal/module/hooks.go
+  - internal/rpc/services/server.go
 sources:
   - title: Module delivery checksum issue
     resource: ../../docs/issues/003-MOD-4-modpack-delivery-checksum.md
@@ -61,6 +62,15 @@ sweep. The same propagation runs for the parent server: when a server pass
 adopts or recreates its container, or transitions to running or stopped, every
 module on that server is scheduled. The sweep still revisits every running
 module row even when its container id is empty.
+
+Parent deletion has an explicit child policy. A full delete stops and
+removes sidecar containers before the server row. `DeleteServer` with
+`keep_data` drops module panel records through `ForgetModule` and leaves
+the containers in place, because `RemoveContainer` always sets
+`RemoveVolumes`. Detach skips child cleanup so sidecars keep running with
+the detached server. After a parent migration, module rows follow the
+target node and clear their container ids; source sidecar containers are
+not removed.
 
 # Known gap
 

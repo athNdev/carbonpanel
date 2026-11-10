@@ -8,6 +8,8 @@ code_refs:
   - internal/snapshot
   - internal/s3
   - internal/db
+  - internal/module/manager.go
+  - internal/rpc/services/server.go
   - Makefile
   - docker-compose.yml
   - scripts/snapshot-panel-db.sh
@@ -74,7 +76,9 @@ losing a world is not recoverable by rebuilding the controller.
   the original choice. A disposition that already recorded the world outcome
   only removes the remaining panel row.
 - `DeleteServer` with `keep_data` drops the panel record and container and
-  leaves the world directory where it is. The audit row records that path.
+  leaves the world directory where it is. Sidecar module records are
+  dropped without removing their containers, so module volumes are not
+  purged. The audit row records that path.
 - `DeleteServer` with `detach` leaves the container and the world directory
   and keeps that server's host port lease. The audit row records the
   container id and the path. `-operations release-port` frees that lease

@@ -2055,19 +2055,27 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 				}
 			}
 
-			// Stop and remove module containers before deleting the server. A module
-			// cleanup or lookup failure must keep the parent row so the remaining
-			// resources stay addressable and deletion can be retried. Detach leaves
-			// those containers running with the server container.
+			// Child policy: a full delete stops and removes sidecar containers
+			// before the parent row. keep_data drops module records but leaves
+			// containers and volumes so sidecar data is not purged with
+			// RemoveVolumes. Detach leaves those containers running with the
+			// server container. A module cleanup or lookup failure must keep
+			// the parent row so remaining resources stay addressable.
 			if s.moduleManager != nil && !detach {
 				modules, listErr := s.store.ListServerModules(ctx, server.ID)
 				if listErr != nil {
 					return fmt.Errorf("failed to list server modules before deletion: %w", listErr)
 				}
 				for _, mod := range modules {
-					if delErr := s.moduleManager.DeleteModule(ctx, mod.ID); delErr != nil {
-						s.log.Error("Failed to delete module %s: %v", mod.ID, delErr)
-						return fmt.Errorf("failed to delete module %s: %w", mod.ID, delErr)
+					var childErr error
+					if keepData {
+						childErr = s.moduleManager.ForgetModule(ctx, mod.ID)
+					} else {
+						childErr = s.moduleManager.DeleteModule(ctx, mod.ID)
+					}
+					if childErr != nil {
+						s.log.Error("Failed to settle module %s during deletion: %v", mod.ID, childErr)
+						return fmt.Errorf("failed to settle module %s: %w", mod.ID, childErr)
 					}
 				}
 			}

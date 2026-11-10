@@ -18,6 +18,8 @@
   expect: architecture/scheduler
 - query: Which module hook still uses the manager's Docker client?
   expect: architecture/module-system
+- query: What happens to sidecar containers when DeleteServer keeps world data?
+  expect: invariants/data-safety
 - query: Where are backup and restore procedures described?
   expect: operations/backup-restore
 - query: Why does deep sleep still use the local Docker client?

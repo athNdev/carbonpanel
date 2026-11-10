@@ -750,19 +750,37 @@ func (m *Manager) DeleteModule(ctx context.Context, moduleID string) error {
 		}
 	}
 
-	// Clean up associated API token
+	if err := m.dropModuleRecord(ctx, module); err != nil {
+		return err
+	}
+	m.logger.Info("Deleted module: %s", module.Name)
+	return nil
+}
+
+// ForgetModule drops the panel record and API token without stopping or
+// removing the container. Parent keep_data uses this so sidecar volumes are
+// not purged by RemoveContainer (which always sets RemoveVolumes).
+func (m *Manager) ForgetModule(ctx context.Context, moduleID string) error {
+	module, err := m.store.GetModule(ctx, moduleID)
+	if err != nil {
+		return fmt.Errorf("failed to get module: %w", err)
+	}
+	if err := m.dropModuleRecord(ctx, module); err != nil {
+		return err
+	}
+	m.logger.Info("Forgot module record %s; container %s left in place", module.Name, module.ContainerID)
+	return nil
+}
+
+func (m *Manager) dropModuleRecord(ctx context.Context, module *storage.Module) error {
 	if module.TokenID != "" {
 		if err := m.store.DeleteAPITokenByID(ctx, module.TokenID); err != nil {
 			return fmt.Errorf("failed to delete module API token: %w", err)
 		}
 	}
-
-	// Delete from database
-	if err := m.store.DeleteModule(ctx, moduleID); err != nil {
+	if err := m.store.DeleteModule(ctx, module.ID); err != nil {
 		return fmt.Errorf("failed to delete module from database: %w", err)
 	}
-
-	m.logger.Info("Deleted module: %s", module.Name)
 	return nil
 }
 
