@@ -695,36 +695,26 @@ func (s *Server) healthSnapshot(ctx context.Context) health.Snapshot {
 	in := health.Input{
 		StartedAt:      s.startedAt,
 		CheckedAt:      time.Now(),
-		StaleAfter:     2 * time.Minute,
+		StaleAfter:     health.DefaultStaleAfter,
+		StartupAfter:   health.DefaultStartupAfter,
 		RunningStatus:  string(storage.StatusRunning),
 		StartingStatus: string(storage.StatusCreating),
 	}
 
 	if err := s.dbReady(); err != nil {
-		in.Database = health.Observation{State: health.StateUnavailable, Detail: err.Error()}
+		in.Database = health.Observation{State: health.StateUnavailable, Detail: err.Error(), Source: health.SourceSQLite, ObservedAt: in.CheckedAt}
 	} else {
-		in.Database = health.Observation{State: health.StateOK}
+		in.Database = health.Observation{State: health.StateOK, Source: health.SourceSQLite, ObservedAt: in.CheckedAt}
 	}
 
-	if s.docker == nil {
-		in.Runtime = health.Observation{State: health.StateUnknown, Detail: "no Docker client is configured"}
-	} else {
-		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		_, err := s.docker.Ping(pingCtx)
-		cancel()
-		if err != nil {
-			in.Runtime = health.Observation{State: health.StateUnavailable, Detail: "the Docker daemon did not answer within 2s: " + err.Error()}
-		} else {
-			in.Runtime = health.Observation{State: health.StateOK}
-		}
-	}
+	s.observeRuntime(ctx, &in)
 
 	if s.config != nil && s.config.Proxy.Enabled && s.proxyManager == nil {
-		in.Routes = health.Observation{State: health.StateUnavailable, Detail: "the proxy is enabled but its manager is not running"}
+		in.Routes = health.Observation{State: health.StateUnavailable, Detail: "the proxy is enabled but its manager is not running", Source: health.SourceProxy, ObservedAt: in.CheckedAt}
 	} else if s.config != nil && !s.config.Proxy.Enabled {
-		in.Routes = health.Observation{State: health.StateOK, Detail: "the proxy is disabled"}
+		in.Routes = health.Observation{State: health.StateOK, Detail: "the proxy is disabled", Source: health.SourceProxy, ObservedAt: in.CheckedAt}
 	} else {
-		in.Routes = health.Observation{State: health.StateOK}
+		in.Routes = health.Observation{State: health.StateOK, Source: health.SourceProxy, ObservedAt: in.CheckedAt}
 	}
 
 	if s.lastObservation != nil {
@@ -738,20 +728,87 @@ func (s *Server) healthSnapshot(ctx context.Context) health.Snapshot {
 			// game state from a query that did not answer.
 			in.Servers = nil
 			if in.Database.State == health.StateOK {
-				in.Database = health.Observation{State: health.StateDegraded, Detail: "server records could not be listed: " + err.Error()}
+				in.Database = health.Observation{State: health.StateDegraded, Detail: "server records could not be listed: " + err.Error(), Source: health.SourceSQLite, ObservedAt: in.CheckedAt}
 			}
 		} else {
 			for _, server := range servers {
-				in.Servers = append(in.Servers, health.ServerObservation{
+				obs := health.ServerObservation{
 					ID:        server.ID,
 					Status:    string(server.Status),
 					UpdatedAt: server.UpdatedAt,
-				})
+					Game:      joinProbe(s.metricsCollector, server.ID),
+				}
+				if server.LastStarted != nil {
+					obs.StartedAt = *server.LastStarted
+				}
+				in.Servers = append(in.Servers, obs)
 			}
 		}
 	}
 
 	return health.Compute(in)
+}
+
+// observeRuntime fans out Docker pings across enabled nodes. One down node is
+// a degraded/unavailable node in the aggregate; the default client is only
+// probed when there is no node inventory.
+func (s *Server) observeRuntime(ctx context.Context, in *health.Input) {
+	checkedAt := in.CheckedAt
+	if s.clientPool != nil {
+		probes, err := s.clientPool.ProbeNodes(ctx)
+		if err != nil {
+			in.Runtime = health.Observation{
+				State:      health.StateUnknown,
+				Detail:     "docker nodes could not be listed",
+				Source:     health.SourceDockerPing,
+				ObservedAt: checkedAt,
+			}
+			return
+		}
+		if len(probes) > 0 {
+			in.Runtime = health.Observation{Source: health.SourceDockerPing, ObservedAt: checkedAt}
+			for _, probe := range probes {
+				state := health.StateOK
+				if !probe.Reachable {
+					state = health.StateUnavailable
+				}
+				in.Nodes = append(in.Nodes, health.NodeObservation{State: state})
+			}
+			return
+		}
+	}
+
+	if s.docker == nil {
+		in.Runtime = health.Observation{State: health.StateUnknown, Detail: "no Docker client is configured", Source: health.SourceDockerPing, ObservedAt: checkedAt}
+		return
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	_, err := s.docker.Ping(pingCtx)
+	cancel()
+	if err != nil {
+		in.Runtime = health.Observation{State: health.StateUnavailable, Detail: "the Docker daemon did not answer within 2s", Source: health.SourceDockerPing, ObservedAt: checkedAt}
+		return
+	}
+	in.Runtime = health.Observation{State: health.StateOK, Source: health.SourceDockerPing, ObservedAt: checkedAt}
+}
+
+// joinProbe copies already-collected SLP or RCON freshness. It never pings
+// the game here: a missing metric stays unknown.
+func joinProbe(collector *metrics.Collector, serverID string) health.Probe {
+	if collector == nil {
+		return health.Probe{}
+	}
+	m := collector.GetMetrics(serverID)
+	if m == nil {
+		return health.Probe{}
+	}
+	if !m.SLPLastUpdated.IsZero() {
+		return health.Probe{Source: health.SourceSLP, ObservedAt: m.SLPLastUpdated, OK: m.SLPAvailable}
+	}
+	if !m.RCONLastUpdated.IsZero() {
+		return health.Probe{Source: health.SourceRCON, ObservedAt: m.RCONLastUpdated, OK: true}
+	}
+	return health.Probe{}
 }
 
 // Starts log streaming for a container

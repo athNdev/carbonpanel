@@ -47,18 +47,60 @@ const (
 	LayerRoute    Layer = "route"
 )
 
+const (
+	// SourceProcess is the API process itself.
+	SourceProcess = "process"
+	// SourceSQLite is a database ping.
+	SourceSQLite = "sqlite"
+	// SourceDockerPing is a Docker node probe.
+	SourceDockerPing = "docker-ping"
+	// SourceSLP is a Minecraft server-list ping.
+	SourceSLP = "slp"
+	// SourceRCON is an RCON command that already returned.
+	SourceRCON = "rcon"
+	// SourceReconciler is the reconciler's last full sweep.
+	SourceReconciler = "reconciler-sweep"
+	// SourceProxy is the TCP proxy manager.
+	SourceProxy = "proxy"
+)
+
+// DefaultStaleAfter is how long a stored status or join probe remains evidence.
+const DefaultStaleAfter = 2 * time.Minute
+
+// DefaultStartupAfter is how long a server may stay starting before the
+// game layer reports it as past the deadline. It matches the SLP boot gate.
+const DefaultStartupAfter = 3 * time.Minute
+
 // Observation is one layer's state plus why.
 type Observation struct {
-	State  State  `json:"state"`
-	Detail string `json:"detail,omitempty"`
+	State      State     `json:"state"`
+	Detail     string    `json:"detail,omitempty"`
+	Source     string    `json:"source,omitempty"`
+	ObservedAt time.Time `json:"observedAt,omitempty"`
 }
 
-// ServerObservation is one server's stored status and the age of that status.
-// Age is used to decide whether the stored value is still evidence.
+// Probe is a bounded observation of joinability. A zero ObservedAt means the
+// probe never ran: that is unknown, not a failed join.
+type Probe struct {
+	Source     string
+	ObservedAt time.Time
+	OK         bool
+}
+
+// NodeObservation is one Docker node's probe result. It carries no hostname.
+type NodeObservation struct {
+	State State
+}
+
+// ServerObservation is one server's stored status, optional join evidence, and
+// when that server began starting. Age is used to decide whether the stored
+// value is still evidence.
 type ServerObservation struct {
 	ID        string
 	Status    string
 	UpdatedAt time.Time
+	StartedAt time.Time
+	Game      Probe
 }
 
 // Input is everything a snapshot is computed from. It carries no names or
@@ -67,10 +109,17 @@ type Input struct {
 	StartedAt  time.Time
 	CheckedAt  time.Time
 	StaleAfter time.Duration
-	Database   Observation
-	Runtime    Observation
-	Routes     Observation
-	Servers    []ServerObservation
+	// StartupAfter is how long a server may remain starting. Zero uses
+	// DefaultStartupAfter.
+	StartupAfter time.Duration
+	Database     Observation
+	Runtime      Observation
+	Routes       Observation
+	// Nodes, when non-empty, is folded into the runtime layer. A missing
+	// Runtime observation is then filled from these probes so one down node
+	// degrades runtime without failing the API.
+	Nodes   []NodeObservation
+	Servers []ServerObservation
 	// RunningStatus is the stored status that means the container is up and
 	// the game loop should be running.
 	RunningStatus string
@@ -86,24 +135,33 @@ type Input struct {
 
 // GameSummary is the aggregate of the server records.
 type GameSummary struct {
-	// Playable is the number of servers whose running status is fresh.
+	// Playable is the number of running servers with a fresh successful SLP or
+	// RCON observation. Stored StatusRunning alone is not playable.
 	Playable int `json:"playable"`
-	// Starting is the number of servers in a starting state.
+	// Starting is the number of servers still within the startup deadline.
 	Starting int `json:"starting"`
 	// Stopped is the number of servers with a fresh non-running, non-starting
-	// status.
+	// status. Unobserved running servers are never counted here.
 	Stopped int `json:"stopped"`
 	// Stale is the number of servers whose stored status is too old to trust.
 	Stale int `json:"stale"`
+	// Unobserved is running servers with no fresh SLP or RCON evidence.
+	Unobserved int `json:"unobserved"`
+	// Unjoinable is running servers whose fresh join probe failed.
+	Unjoinable int `json:"unjoinable"`
+	// TimedOut is servers still marked starting after the startup deadline.
+	TimedOut int `json:"timedOut"`
 	// Total is every server the panel knows about.
 	Total int `json:"total"`
 }
 
 // Component is one line of a snapshot.
 type Component struct {
-	Layer  Layer  `json:"layer"`
-	State  State  `json:"state"`
-	Detail string `json:"detail,omitempty"`
+	Layer      Layer     `json:"layer"`
+	State      State     `json:"state"`
+	Detail     string    `json:"detail,omitempty"`
+	Source     string    `json:"source,omitempty"`
+	ObservedAt time.Time `json:"observedAt,omitempty"`
 }
 
 // Snapshot is the layered answer. Overall is the worst layer that should page
@@ -131,14 +189,15 @@ func Compute(in Input) Snapshot {
 		}
 	}
 
+	runtime := summariseRuntime(in)
 	game, servers := summariseServers(in)
 
 	components := []Component{
-		{Layer: LayerProcess, State: StateOK, Detail: "the API process is serving"},
-		{Layer: LayerDatabase, State: in.Database.State, Detail: in.Database.Detail},
-		{Layer: LayerRuntime, State: in.Runtime.State, Detail: in.Runtime.Detail},
-		{Layer: LayerGame, State: game.State, Detail: game.Detail},
-		{Layer: LayerRoute, State: in.Routes.State, Detail: in.Routes.Detail},
+		{Layer: LayerProcess, State: StateOK, Detail: "the API process is serving", Source: SourceProcess, ObservedAt: checkedAt},
+		componentFrom(LayerDatabase, in.Database),
+		componentFrom(LayerRuntime, runtime),
+		game,
+		componentFrom(LayerRoute, in.Routes),
 	}
 	for i := range components {
 		if components[i].State == "" {
@@ -157,12 +216,104 @@ func Compute(in Input) Snapshot {
 	}
 }
 
+func componentFrom(layer Layer, obs Observation) Component {
+	return Component{
+		Layer:      layer,
+		State:      obs.State,
+		Detail:     obs.Detail,
+		Source:     obs.Source,
+		ObservedAt: obs.ObservedAt,
+	}
+}
+
+// summariseRuntime folds per-node probes into one runtime observation. A
+// single down node degrades the layer; it never fails the API by itself.
+func summariseRuntime(in Input) Observation {
+	if len(in.Nodes) == 0 {
+		return in.Runtime
+	}
+
+	n := len(in.Nodes)
+	ok, unavail, unknown := 0, 0, 0
+	for _, node := range in.Nodes {
+		switch node.State {
+		case StateOK:
+			ok++
+		case StateUnavailable:
+			unavail++
+		default:
+			unknown++
+		}
+	}
+
+	src := in.Runtime.Source
+	if src == "" {
+		src = SourceDockerPing
+	}
+	at := in.Runtime.ObservedAt
+	switch {
+	case unavail == n:
+		return Observation{
+			State:      StateUnavailable,
+			Detail:     fmt.Sprintf("all %d docker nodes did not answer", n),
+			Source:     src,
+			ObservedAt: at,
+		}
+	case ok == n:
+		return Observation{
+			State:      StateOK,
+			Detail:     fmt.Sprintf("all %d docker nodes answered", n),
+			Source:     src,
+			ObservedAt: at,
+		}
+	case unavail > 0:
+		return Observation{
+			State:      StateDegraded,
+			Detail:     fmt.Sprintf("%d of %d docker nodes did not answer", unavail, n),
+			Source:     src,
+			ObservedAt: at,
+		}
+	default:
+		return Observation{
+			State:      StateUnknown,
+			Detail:     fmt.Sprintf("%d of %d docker nodes were not observed", unknown, n),
+			Source:     src,
+			ObservedAt: at,
+		}
+	}
+}
+
+func isStarting(status, startingStatus string) bool {
+	if startingStatus != "" && status == startingStatus {
+		return true
+	}
+	return status == "starting" || status == "creating"
+}
+
+func probeIsFresh(p Probe, checkedAt time.Time, staleAfter time.Duration) bool {
+	if p.ObservedAt.IsZero() {
+		return false
+	}
+	return checkedAt.Sub(p.ObservedAt) <= staleAfter
+}
+
+func startClock(s ServerObservation) time.Time {
+	if !s.StartedAt.IsZero() {
+		return s.StartedAt
+	}
+	return s.UpdatedAt
+}
+
 // summariseServers classifies the server records into the game layer.
 func summariseServers(in Input) (Component, GameSummary) {
 	summary := GameSummary{Total: len(in.Servers)}
 	staleAfter := in.StaleAfter
 	if staleAfter <= 0 {
-		staleAfter = 2 * time.Minute
+		staleAfter = DefaultStaleAfter
+	}
+	startupAfter := in.StartupAfter
+	if startupAfter <= 0 {
+		startupAfter = DefaultStartupAfter
 	}
 	checkedAt := in.CheckedAt
 	if checkedAt.IsZero() {
@@ -170,49 +321,78 @@ func summariseServers(in Input) (Component, GameSummary) {
 	}
 
 	sweepIsFresh := !in.ObservedAt.IsZero() && checkedAt.Sub(in.ObservedAt) <= staleAfter
+	source := SourceReconciler
+	var observedAt time.Time
+	if sweepIsFresh {
+		observedAt = in.ObservedAt
+	}
 	for _, s := range in.Servers {
 		if !sweepIsFresh && !s.UpdatedAt.IsZero() && checkedAt.Sub(s.UpdatedAt) > staleAfter {
 			summary.Stale++
 			continue
 		}
-		switch s.Status {
-		case in.RunningStatus:
-			summary.Playable++
-		case in.StartingStatus:
+		switch {
+		case s.Status == in.RunningStatus:
+			if !probeIsFresh(s.Game, checkedAt, staleAfter) {
+				summary.Unobserved++
+				continue
+			}
+			if s.Game.Source != "" {
+				source = s.Game.Source
+			}
+			observedAt = s.Game.ObservedAt
+			if s.Game.OK {
+				summary.Playable++
+			} else {
+				summary.Unjoinable++
+			}
+		case isStarting(s.Status, in.StartingStatus):
+			started := startClock(s)
+			if !started.IsZero() && checkedAt.Sub(started) > startupAfter {
+				summary.TimedOut++
+				continue
+			}
 			summary.Starting++
 		default:
 			summary.Stopped++
 		}
 	}
 
+	game := Component{Layer: LayerGame, Source: source, ObservedAt: observedAt}
 	switch {
 	case summary.Total == 0:
-		return Component{Layer: LayerGame, State: StateOK, Detail: "no servers are registered"}, summary
+		game.State = StateOK
+		game.Detail = "no servers are registered"
+		game.Source = SourceReconciler
 	case summary.Stale == summary.Total:
-		return Component{
-			Layer:  LayerGame,
-			State:  StateUnknown,
-			Detail: fmt.Sprintf("no server status was observed within %s", staleAfter),
-		}, summary
-	case summary.Stale > 0:
-		return Component{
-			Layer:  LayerGame,
-			State:  StateDegraded,
-			Detail: fmt.Sprintf("%d of %d server statuses are older than %s", summary.Stale, summary.Total, staleAfter),
-		}, summary
+		game.State = StateUnknown
+		game.Detail = fmt.Sprintf("no server status was observed within %s", staleAfter)
+	case summary.Playable == 0 && summary.Unobserved > 0 && summary.Unjoinable == 0 && summary.TimedOut == 0 && summary.Starting == 0 && summary.Stale == 0:
+		game.State = StateUnknown
+		game.Detail = fmt.Sprintf("%d of %d running servers have no fresh SLP or RCON observation", summary.Unobserved, summary.Total)
+	case summary.TimedOut > 0 && summary.Playable == 0 && summary.Starting == 0:
+		game.State = StateUnavailable
+		game.Detail = fmt.Sprintf("%d of %d servers exceeded the startup deadline of %s", summary.TimedOut, summary.Total, startupAfter)
+	case summary.Unjoinable > 0 || summary.TimedOut > 0 || summary.Stale > 0 || summary.Unobserved > 0:
+		game.State = StateDegraded
+		switch {
+		case summary.Unjoinable > 0:
+			game.Detail = fmt.Sprintf("%d of %d running servers did not answer SLP or RCON", summary.Unjoinable, summary.Total)
+		case summary.TimedOut > 0:
+			game.Detail = fmt.Sprintf("%d of %d servers exceeded the startup deadline of %s", summary.TimedOut, summary.Total, startupAfter)
+		case summary.Unobserved > 0:
+			game.Detail = fmt.Sprintf("%d of %d running servers have no fresh SLP or RCON observation", summary.Unobserved, summary.Total)
+		default:
+			game.Detail = fmt.Sprintf("%d of %d server statuses are older than %s", summary.Stale, summary.Total, staleAfter)
+		}
 	case summary.Starting > 0:
-		return Component{
-			Layer:  LayerGame,
-			State:  StateStarting,
-			Detail: fmt.Sprintf("%d of %d servers are starting", summary.Starting, summary.Total),
-		}, summary
+		game.State = StateStarting
+		game.Detail = fmt.Sprintf("%d of %d servers are starting", summary.Starting, summary.Total)
 	default:
-		return Component{
-			Layer:  LayerGame,
-			State:  StateOK,
-			Detail: fmt.Sprintf("%d of %d servers are running", summary.Playable, summary.Total),
-		}, summary
+		game.State = StateOK
+		game.Detail = fmt.Sprintf("%d of %d servers are playable", summary.Playable, summary.Total)
 	}
+	return game, summary
 }
 
 // overall folds the layers into the status a deployment should act on.
