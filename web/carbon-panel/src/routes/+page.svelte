@@ -35,6 +35,7 @@ one at https://mozilla.org/MPL/2.0/.
 		type Node as NodeType
 	} from '$lib/proto/carbonpanel/v1/node_pb';
 	import { formatRpcError } from '$lib/api/rpc-error';
+	import { prefersReducedMotion } from '$lib/motion';
 	import { serversStore, sortServersByActivity } from '$lib/stores/servers';
 	import {
 		CarbonButton,
@@ -303,9 +304,7 @@ one at https://mozilla.org/MPL/2.0/.
 		const decimals = params.decimals ?? 0;
 		let raf = 0;
 		let current = 0;
-		const reduce =
-			typeof window !== 'undefined' &&
-			window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		const reduce = prefersReducedMotion();
 		const render = (v: number) => {
 			node.textContent = v.toFixed(decimals);
 		};

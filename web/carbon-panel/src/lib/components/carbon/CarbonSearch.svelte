@@ -8,6 +8,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import type { HTMLInputAttributes } from 'svelte/elements';
 	import { fade } from 'svelte/transition';
+	import { motionDuration } from '$lib/motion';
 
 	interface Props extends Omit<HTMLInputAttributes, 'size'> {
 		value?: string;
@@ -76,7 +77,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			type="button"
 			onclick={handleClear}
 			aria-label="Clear search"
-			transition:fade={{ duration: 100 }}
+			transition:fade={{ duration: motionDuration(100) }}
 			class="absolute inset-y-0 right-0 flex cursor-pointer items-center rounded-none px-2.5 text-[#a8a8a8] hover:text-[#f4f4f4]"
 		>
 			<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">

@@ -11,6 +11,11 @@ const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8').replace
 const tokens = readFileSync(new URL('./design-system/tokens.css', import.meta.url), 'utf8');
 const layout = readFileSync(new URL('../routes/+layout.svelte', import.meta.url), 'utf8');
 const login = readFileSync(new URL('../routes/login/+page.svelte', import.meta.url), 'utf8');
+const motion = readFileSync(new URL('./motion.ts', import.meta.url), 'utf8');
+const modal = readFileSync(
+	new URL('./components/carbon/CarbonModal.svelte', import.meta.url),
+	'utf8'
+);
 const shell = readFileSync(
 	new URL('./components/carbon/CarbonShell.svelte', import.meta.url),
 	'utf8'
@@ -56,6 +61,9 @@ test('sidebar collapse reserves its gutter and only moves the main margin', () =
 	assert.match(shell, /overflow-y-auto p-4/);
 	assert.match(shell, /md:ml-64/);
 	assert.match(shell, /md:ml-12/);
+	assert.match(shell, /transition-\[width,transform\]/);
+	assert.match(shell, /transition-\[margin\]/);
+	assert.match(shell, /duration-\(--motion-fast\)/);
 	assert.doesNotMatch(
 		shell,
 		/<main[\s\S]*overflow-x-(auto|scroll)/,
@@ -82,9 +90,10 @@ test('prefers-reduced-motion disables view-transitions and other motion', () => 
 		css,
 		/@media \(prefers-reduced-motion: reduce\) \{[\s\S]*animation-duration: 0\.01ms !important/
 	);
+	assert.match(motion, /matchMedia\('\(prefers-reduced-motion: reduce\)'\)\.matches/);
 	assert.match(
 		layout,
-		/matchMedia\('\(prefers-reduced-motion: reduce\)'\)\.matches/,
+		/prefersReducedMotion\(\)/,
 		'Layout must skip startViewTransition when the OS asks for reduced motion'
 	);
 });
@@ -94,9 +103,32 @@ test('stored reduced motion also disables view-transitions', () => {
 		css,
 		/\[data-carbon-motion='reduced'\]::view-transition-old\(root\),\s*\[data-carbon-motion='reduced'\]::view-transition-new\(root\) \{\s*animation: none;/
 	);
+	assert.match(motion, /getAttribute\('data-carbon-motion'\) === 'reduced'/);
 	assert.match(
 		layout,
-		/getAttribute\('data-carbon-motion'\) === 'reduced'/,
+		/prefersReducedMotion\(\)/,
 		'Layout must skip startViewTransition when the stored preference is reduced'
 	);
 });
+
+test('route view-transitions are interruptible', () => {
+	assert.match(layout, /skipTransition/);
+	assert.match(layout, /activeViewTransition/);
+});
+
+test('Svelte JS transitions honor reduced motion instead of a fixed duration', () => {
+	assert.match(shell, /motionDuration\(150\)/);
+	assert.match(modal, /motionDuration\(150\)/);
+	assert.match(modal, /motionDuration\(200\)/);
+});
+
+test('tab hover motion only animates color, not layout', () => {
+	const tab = ruleBody(css, '\\.cds-tab-item');
+	assert.match(tab, /var\(--carbon-transition-color\)/);
+	assert.doesNotMatch(tab, /transition:\s*all/);
+});
+
+// Cloud visual verification of the same login, signup, route-change, and
+// sidebar interaction states lives in the Cloud console snapshot, which is
+// out of this repository. Do not treat that gap as missing OSS work.
+// test.todo('Cloud: login, signup, route change, and sidebar collapse match OSS gutters');

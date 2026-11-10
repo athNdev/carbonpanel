@@ -11,6 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { loadingStore } from '$lib/stores/loading.svelte';
 	import { fade } from 'svelte/transition';
+	import { motionDuration } from '$lib/motion';
 
 	let isLoading = $derived($loadingStore.global);
 </script>
@@ -18,7 +19,7 @@ one at https://mozilla.org/MPL/2.0/.
 {#if isLoading}
 	<div
 		class="carbon-progress-track fixed top-0 right-0 left-0 z-[60] h-0.5"
-		transition:fade={{ duration: 150 }}
+		transition:fade={{ duration: motionDuration(150) }}
 		role="status"
 		aria-label="Loading"
 	>
