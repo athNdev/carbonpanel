@@ -6,6 +6,7 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/docker
+  - internal/docker/locator.go
   - internal/module
   - internal/snapshot
   - internal/docker/freezer.go
@@ -43,7 +44,7 @@ wrong host. That is a data-safety bug, not a degraded mode.
 - `GetClient` does not serve a named node from the local daemon, including
   when the historical fallback flag is set. Local aliases still use the
   controller client.
-- `internal/docker/freezer.go` still targets the local client unconditionally.
+- Hibernation uses `SetFreezerResolver` so freeze/wake go through `internal/docker/locator.go` for the server's node. The remaining freezer exposure is a resolver that returns nil rather than a typed locator error.
 - `internal/module/hooks.go:execInModule` still uses the manager's client.
 - Disk usage measures the node's mapped world root. A remote node without
   reachable storage is left unmeasured.

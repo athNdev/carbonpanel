@@ -1,7 +1,7 @@
 ---
 type: Runbook
 title: Deep sleep and wake
-description: Where the hibernation behavior is specified and which code path still needs a node resolver.
+description: Where hibernation and deep sleep are specified, sharing one idle-power module.
 status: stable
 owners: [oss-runtime]
 code_refs:
@@ -29,9 +29,10 @@ machine from a single container inspect; read the recorded state.
 
 # Known gap
 
-`internal/docker/freezer.go` still targets the local Docker client
-unconditionally. It needs the same fail-closed resolver as the module and
-snapshot paths. See [node resolution](../architecture/node-resolution.md).
+Hibernation and deep sleep share `internal/docker/idle.go`. Each manager still
+has a node resolver callback; freeze/wake must keep using Locator rather than
+the controller socket. See [runtime seams](../architecture/runtime-seams.md)
+and [node resolution](../architecture/node-resolution.md).
 
 # Read next
 

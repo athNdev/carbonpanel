@@ -91,12 +91,7 @@ func NewEngineWithPool(store *storage.Store, dockerClient *docker.Client, pool *
 // An unresolvable remote node is an error: rollback mutates a server's data and
 // container state, so guessing the daemon is not safe.
 func (e *Engine) resolveDocker(nodeID string) (*docker.Client, error) {
-	cli, err := docker.NewLocator(e.pool, e.docker, e.store).For(context.Background(), nodeID)
-	if errors.Is(err, docker.ErrNoClient) {
-		// Preserve the caller's explicit "docker client is unavailable" path.
-		return nil, nil
-	}
-	return cli, err
+	return docker.NewLocator(e.pool, e.docker, e.store).For(context.Background(), nodeID)
 }
 
 // CreatePreUpdateSnapshot creates an atomic volume snapshot before updating modpacks or configs
@@ -273,10 +268,17 @@ func (e *Engine) Rollback(ctx context.Context, server *storage.Server, snapshotI
 
 		dockerCli, err := e.resolveDocker(server.NodeID)
 		if err != nil {
-			// Abort before stopping the container or touching files: the
-			// snapshot must not be applied while the server's node cannot be
-			// reached.
-			return fmt.Errorf("cannot safely rollback: %w", err)
+			if errors.Is(err, docker.ErrNoClient) && server.ContainerID != "" {
+				return fmt.Errorf("cannot safely rollback: container %s exists but docker client is unavailable", server.ContainerID)
+			}
+			if errors.Is(err, docker.ErrNoClient) && server.ContainerID == "" {
+				dockerCli = nil
+			} else {
+				// Abort before stopping the container or touching files: the
+				// snapshot must not be applied while the server's node cannot be
+				// reached.
+				return fmt.Errorf("cannot safely rollback: %w", err)
+			}
 		}
 
 		// Establish the live container state before any write: the database

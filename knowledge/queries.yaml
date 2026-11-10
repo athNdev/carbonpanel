@@ -28,3 +28,5 @@
   expect: architecture/runtime
 - query: What happens when storage.world_quota_mb is set and world bytes meet it?
   expect: architecture/runtime
+- query: Which packages own the Locator lifecycle handle idle-power PlanFor and worldstore seams?
+  expect: architecture/runtime-seams

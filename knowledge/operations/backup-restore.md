@@ -8,6 +8,7 @@ code_refs:
   - internal/s3
   - internal/snapshot
   - internal/scheduler
+  - internal/worldstore
   - scripts/snapshot-panel-db.sh
   - docker-compose.yml
 sources:

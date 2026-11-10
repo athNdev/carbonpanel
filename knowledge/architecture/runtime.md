@@ -54,7 +54,9 @@ placeholder when the frontend is not built. Production builds run
 # Docker boundary
 
 The controller holds a Docker client for the local socket or for a remote node.
-Never assume it is local; see [node resolution](node-resolution.md).
+Never assume it is local. Node-to-daemon resolution, lifecycle claims,
+idle-power sweeps, proxy `PlanFor` and worldstore are the five seams in
+[runtime seams](runtime-seams.md). See [node resolution](node-resolution.md).
 
 A Minecraft server image is a tag on `itzg/minecraft-server`, or a full
 reference to `itzg/minecraft-server` or `itzg/minecraft-bedrock-server`.
