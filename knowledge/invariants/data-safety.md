@@ -8,12 +8,21 @@ code_refs:
   - internal/snapshot
   - internal/s3
   - internal/db
+  - Makefile
+  - docker-compose.yml
+  - scripts/snapshot-panel-db.sh
+  - scripts/web-build.sh
+  - scripts/dev.sh
+  - scripts/review/devstack.sh
+  - internal/docscheck/upgrade_safety_test.go
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
   - title: Backup confirmation issue
     resource: ../../docs/issues/013-UI-5-backup-confirmation-dialogs.md
-verified: { by: agent:zed, at: 2026-11-04 }
+  - title: Panel database restore runbook
+    resource: ../../docs/runbook-panel-db-restore.md
+verified: { by: agent:cursor-grok, at: 2026-11-10 }
 review_after: 2027-01-23
 ---
 
@@ -32,6 +41,16 @@ losing a world is not recoverable by rebuilding the controller.
 
 - Look for `remove`, `prune`, `rm`, `clean` or volume deletion in the changed
   path. If it touches a world, backup or database path, stop.
+- `internal/docscheck/upgrade_safety_test.go` must stay green: `make clean`,
+  `make test`, `make build`, `scripts/web-build.sh`, `scripts/dev.sh` and
+  `docker compose down` (without `--volumes`) do not delete worlds or the
+  controller database. `scripts/review/devstack.sh clean` is the named
+  destructive command for the disposable review stack only.
+- Before a controller upgrade, `scripts/snapshot-panel-db.sh` (also
+  `make snapshot-panel-db`) writes a timestamped SQLite copy beside the data
+  directory. Rollback copies that file onto `carbon-panel.db` and leaves
+  worlds and bind mounts untouched. Ordinary test/build/compose paths must
+  not invoke it.
 - Backup and restore must be tested; a backup that cannot be restored is not a
   backup.
 - Remote archive paths must not silently read the controller filesystem.
@@ -64,9 +83,14 @@ Reviewed `2026-10-24` by `agent:mimo-v2.6-pro` against the code and attested by
 
 - `make clean` removes only the build binary and states that server data and
   Docker volumes are preserved; `proto-clean` removes generated proto output.
+- `make help` describes clean as preserving worlds and databases.
+- Compose bind-mounts host data; `docker compose down` without `--volumes`
+  leaves those mounts in place (`docker-compose.yml`).
 - Snapshot retention prunes only expired snapshots and protects the most recent
   copy (`internal/snapshot/integrity_retention_test.go`).
 - Restore coverage exists in `internal/snapshot`.
+- Upgrade snapshots and copy-back rollback are covered by
+  `internal/docscheck/upgrade_safety_test.go`.
 
 The remote archive path gap is tracked in
 [known gaps](../failures/known-gaps.md).

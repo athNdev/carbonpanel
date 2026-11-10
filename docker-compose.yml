@@ -41,6 +41,14 @@ services:
       # environment variable to keep in sync. Startup refuses to run if the data
       # directory is not mounted or not writable, instead of writing worlds into
       # the container's own filesystem.
+      #
+      # `docker compose down` (without --volumes) stops and removes the panel
+      # container and leaves these host bind mounts in place. Worlds and the
+      # controller SQLite file stay on the host. Recreating the container does
+      # not delete them. Do not add `down -v` to routine scripts.
+      # Before an image upgrade, snapshot the database with
+      # scripts/snapshot-panel-db.sh --data-dir <host-data-path>; restore by
+      # copying that file back onto carbon-panel.db with the panel stopped.
       - /opt/carbon-panel/data:/app/data
       - /opt/carbon-panel/backups:/app/backups
       - /tmp/carbon-panel:/app/tmp
