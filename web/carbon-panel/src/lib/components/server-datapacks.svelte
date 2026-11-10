@@ -109,8 +109,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="space-y-4">
-	<div class="flex items-center justify-between">
+<div class="tab-fill flex min-h-0 flex-col overflow-hidden">
+	<div class="flex shrink-0 items-center justify-between gap-4 pb-4">
 		<div>
 			<h3 class="flex items-center gap-2 text-lg font-semibold text-white">
 				<Database class="h-5 w-5" /> Datapacks
@@ -150,6 +150,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</div>
 	</div>
 
+	<div class="min-h-0 flex-1 overflow-auto">
 	{#if error}
 		<p class="border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-sm text-[#ff8389]">{error}</p>
 	{/if}
@@ -210,6 +211,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{/each}
 		</div>
 	{/if}
+	</div>
 </div>
 
 <DatapackBrowserDialog

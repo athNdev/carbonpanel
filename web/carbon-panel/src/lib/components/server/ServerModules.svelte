@@ -270,7 +270,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<Card class="flex h-full flex-col">
+<Card class="tab-fill flex min-h-0 flex-col">
 	<CardHeader>
 		<div class="flex items-center justify-between">
 			<div>
@@ -302,7 +302,7 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 	</CardHeader>
-	<CardContent class="flex-1 overflow-auto">
+	<CardContent class="min-h-0 flex-1 overflow-auto">
 		{#if loading}
 			<div class="flex items-center justify-center py-12">
 				<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />

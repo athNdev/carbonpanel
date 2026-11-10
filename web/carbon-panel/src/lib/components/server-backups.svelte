@@ -159,8 +159,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full overflow-y-auto">
-	<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
+<div class="tab-fill flex min-h-0 flex-col overflow-hidden rounded-none border border-[#393939] bg-[#262626]">
+	<div class="shrink-0 p-6 pb-0">
 		<div class="mb-1 flex items-center justify-between">
 			<h3 class="text-base font-semibold text-[#f4f4f4]">Backups</h3>
 			<div class="flex items-center gap-2">
@@ -182,10 +182,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</button>
 			</div>
 		</div>
-		<p class="mb-6 text-xs text-[#a8a8a8]">
+		<p class="mb-4 text-xs text-[#a8a8a8]">
 			Scheduled and on-demand archives with restore and sticky locks
 		</p>
+	</div>
 
+	<div class="min-h-0 flex-1 overflow-auto px-6 pb-6">
 		{#if loadError && backups.length === 0}
 			<CarbonErrorState title="Failed to load backups" message={loadError} onretry={loadBackups} />
 		{:else if backups.length === 0}

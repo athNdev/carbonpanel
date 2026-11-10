@@ -264,7 +264,7 @@ one at https://mozilla.org/MPL/2.0/.
 <!-- Carbon Container (Requirement 6) -->
 <ResizablePaneGroup
 	direction="vertical"
-	class="tab-fill min-h-[450px] rounded-none border border-[#393939] bg-[#161616] font-sans text-[#f4f4f4]"
+	class="tab-fill rounded-none border border-[#393939] bg-[#161616] font-sans text-[#f4f4f4]"
 >
 	<ResizablePane defaultSize={100}>
 		<div class="flex h-full flex-col bg-[#161616]">

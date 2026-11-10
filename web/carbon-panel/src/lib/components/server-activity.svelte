@@ -46,8 +46,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full overflow-y-auto">
-	<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
+<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
 		<div class="mb-1 flex items-center justify-between">
 			<h3 class="text-base font-semibold text-[#f4f4f4]">Activity</h3>
 			<button
@@ -102,5 +101,4 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</table>
 			</div>
 		{/if}
-	</div>
 </div>

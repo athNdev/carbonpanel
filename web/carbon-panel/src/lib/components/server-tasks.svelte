@@ -894,14 +894,15 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
+<div class="tab-fill flex min-h-0 flex-col overflow-hidden">
 {#if loading}
-	<div class="flex items-center justify-center py-8">
+	<div class="flex flex-1 items-center justify-center py-8">
 		<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 	</div>
 {:else}
-	<div class="space-y-4">
+	<div class="flex min-h-0 flex-1 flex-col gap-4">
 		<!-- Header -->
-		<div class="flex items-center justify-between">
+		<div class="flex shrink-0 items-center justify-between">
 			<div>
 				<h3 class="text-lg font-semibold">Tasks</h3>
 				<p class="text-sm text-muted-foreground">
@@ -921,6 +922,7 @@ one at https://mozilla.org/MPL/2.0/.
 		</div>
 
 		<!-- Tasks List -->
+		<div class="min-h-0 flex-1 overflow-auto">
 		{#if loadError && tasks.length === 0}
 			<CarbonErrorState title="Failed to load tasks" message={loadError} onretry={loadTasks} />
 		{:else if tasks.length === 0}
@@ -1064,7 +1066,9 @@ one at https://mozilla.org/MPL/2.0/.
 				{/each}
 			</div>
 		{/if}
+		</div>
 	</div>
+{/if}
 
 	<!-- Create/Edit Dialog -->
 	<Dialog.Root bind:open={showCreateDialog}>
@@ -1795,7 +1799,6 @@ one at https://mozilla.org/MPL/2.0/.
 			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>
-{/if}
 <CarbonConfirm
 	bind:open={confirmOpen}
 	title="Delete task?"
@@ -1809,3 +1812,4 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if pendingDelete}{pendingDelete.name}{/if}
 	{/snippet}
 </CarbonConfirm>
+</div>

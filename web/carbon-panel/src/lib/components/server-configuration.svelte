@@ -576,7 +576,7 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <div
-	class="flex h-full flex-col gap-0 rounded-none border border-[#393939] bg-[#262626] shadow-none"
+	class="tab-fill flex min-h-0 flex-col gap-0 rounded-none border border-[#393939] bg-[#262626] shadow-none"
 >
 	<div class="shrink-0 border-b border-[#393939] bg-[#262626] p-4 sm:p-5">
 		<div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">

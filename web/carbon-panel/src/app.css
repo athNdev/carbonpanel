@@ -371,21 +371,16 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	/*
-		Fill the available vertical space. Tab panes with their own scroll
-		regions (the console log stream, the mods list) use this instead of
-		a fixed pixel cap so they grow with the viewport instead of leaving a
-		dead void below them on tall screens. 30rem covers the shell header,
-		page header, metric tiles, tab strip and gutters above the panel;
-		the per-pane min-height floors keep small viewports usable. dvh tracks
-		the visual viewport on mobile browsers, with vh as the fallback.
+		Fill remaining space in a flex column. Server-detail working panes
+		(console log, lists, file tree, tables) grow to the bottom of the
+		shell's main column and scroll inside. Do not size these with a
+		viewport-minus-chrome calc: that leftover is a dead region whenever
+		the chrome is shorter than the constant.
 	*/
 	.tab-fill {
-		height: calc(100vh - 30rem);
-	}
-	@supports (height: 100dvh) {
-		.tab-fill {
-			height: calc(100dvh - 30rem);
-		}
+		flex: 1 1 0%;
+		min-height: 0;
+		height: 100%;
 	}
 
 	/*

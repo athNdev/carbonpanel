@@ -44,6 +44,13 @@ bun run test
   for product-owned marks; preserve third-party and server-provided icons.
 - Run `python scripts/check_brand_assets.py` from the repository root to check
   deployable logo copies and raster dimensions after a brand update.
+- Server-detail working panes (console, lists, file tree, tables) fill the
+  remaining height of `CarbonShell`'s main column through a `min-h-0` /
+  `flex-1` chain and `.tab-fill`. Do not size them with `100vh` minus a chrome
+  constant: that leftover is a dead region whenever the chrome is shorter than
+  the constant. Forms on Overview, Configuration, and Routing keep their
+  natural height and scroll inside the tab panel when they overflow.
+  `tab-fill.test.ts` holds the contract.
 - A surface that is not meant to scroll must not show a scrollbar, and a
   vertical scroller must reserve its gutter. A scrollbar that appears and
   disappears changes the content box, which can reflow the content and pull it

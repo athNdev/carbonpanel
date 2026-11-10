@@ -91,8 +91,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full overflow-y-auto">
-	<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
+<div class="tab-fill flex min-h-0 flex-col overflow-hidden rounded-none border border-[#393939] bg-[#262626]">
+	<div class="shrink-0 p-6 pb-0">
 		<div class="mb-1 flex items-center justify-between">
 			<h3 class="text-base font-semibold text-[#f4f4f4]">
 				Players{#if onlineCount > 0}
@@ -107,7 +107,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{loading ? 'Loading…' : 'Refresh'}
 			</button>
 		</div>
-		<p class="mb-6 text-xs text-[#a8a8a8]">
+		<p class="mb-4 text-xs text-[#a8a8a8]">
 			Live roster with moderation actions (console commands)
 		</p>
 
@@ -119,7 +119,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			onkeydown={(e) => e.key === 'Escape' && (search = '')}
 			class="mb-4 h-9 w-full max-w-xs rounded-none border border-[#393939] bg-[#161616] px-3 text-xs text-[#f4f4f4]"
 		/>
+	</div>
 
+	<div class="min-h-0 flex-1 overflow-auto px-6 pb-6">
 		{#if loadError && players.length === 0}
 			<CarbonErrorState title="Failed to load players" message={loadError} onretry={loadPlayers} />
 		{:else if filtered.length === 0}

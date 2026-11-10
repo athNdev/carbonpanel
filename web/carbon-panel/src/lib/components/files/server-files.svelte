@@ -852,36 +852,9 @@ one at https://mozilla.org/MPL/2.0/.
 		if (uploadProgress?.sessionId) cancelUpload(uploadProgress.sessionId).catch(() => {});
 	}
 
-	let containerEl = $state<HTMLDivElement>();
-	let heightStyle = $state('max-height: 600px');
-
-	function measure() {
-		if (!containerEl) return;
-		const rect = containerEl.getBoundingClientRect();
-		const available = window.innerHeight - rect.top - 24;
-		heightStyle = `height: ${Math.max(200, available)}px`;
-	}
-
-	$effect(() => {
-		if (containerEl && active) {
-			// Measure after layout settles
-			const frame = requestAnimationFrame(() => {
-				requestAnimationFrame(measure);
-			});
-			window.addEventListener('resize', measure);
-			return () => {
-				cancelAnimationFrame(frame);
-				window.removeEventListener('resize', measure);
-			};
-		}
-	});
 </script>
 
-<div
-	bind:this={containerEl}
-	style={heightStyle}
-	class="flex flex-col overflow-hidden rounded-lg border bg-background"
->
+<div class="tab-fill flex min-h-0 flex-col overflow-hidden rounded-none border bg-background">
 	<!-- Toolbar -->
 	<FileToolbar
 		{filterText}
