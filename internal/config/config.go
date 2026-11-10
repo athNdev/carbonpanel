@@ -117,6 +117,9 @@ type StorageConfig struct {
 	SnapshotRetentionDays int                    `mapstructure:"snapshot_retention_days" json:"snapshot_retention_days"`
 	BackupEncryption      BackupEncryptionConfig `mapstructure:"backup_encryption" json:"backup_encryption"`
 	S3                    S3Config               `mapstructure:"s3" json:"s3"`
+	// WorkerImage is the OCI image that provides /usr/local/bin/carbon-storage
+	// for remote-node accessor transport (OSS-281). Empty disables Docker transport.
+	WorkerImage string `mapstructure:"worker_image" json:"worker_image"`
 }
 
 // BackupEncryptionConfig enables authenticated encryption of backup

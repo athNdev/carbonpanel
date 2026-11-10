@@ -28,6 +28,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/hostmount"
 	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/internal/module"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/proxy"
 	"github.com/athNdev/carbon-panel/internal/reconciler"
@@ -345,6 +346,9 @@ func main() {
 	clientPool.SetProxyEnabled(cfg.Proxy.Enabled)
 	clientPool.StartHealthChecker(30 * time.Second)
 	defer clientPool.StopHealthChecker()
+	if cfg.Storage.WorkerImage != "" {
+		nodestorage.SetTransport(docker.NewStorageTransport(clientPool, log, cfg.Storage.WorkerImage))
+	}
 
 	// Initialize command sender
 	sender := command.NewSender(store, cfg, dockerClient, clientPool)

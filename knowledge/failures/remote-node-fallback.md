@@ -33,8 +33,10 @@ not answer a named node with the local daemon.
 - Creating a server, deleting it, mod installation, packwiz bake, snapshot
   create/restore, scheduled backup archives, and scheduled modpack sync use
   the node's mapped storage root. A remote node with no shared mount is
-  refused. There is no second transport for a node that does not share a
-  filesystem.
+  refused unless `storage.worker_image` is configured and the call path uses
+  `nodestorage.ForNode` (content RPCs and staged content). Listing,
+  upload/archive pipelines and worldstore backup paths are not on the
+  transport yet.
 
 # Detection
 

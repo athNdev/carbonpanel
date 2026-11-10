@@ -1,5 +1,5 @@
-// carbon-storage is a line-oriented JSON worker intended to run locally now
-// and over Docker attach/exec in a later transport adapter.
+// carbon-storage is a line-oriented JSON worker for worldstore backup I/O and
+// for nodestorage accessor mode over Docker attach/exec (OSS-281).
 package main
 
 import (
@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/internal/worldstore"
 )
 
@@ -29,37 +31,60 @@ type response struct {
 }
 
 func main() {
-	var root, journal, server, node, daemon, owner string
+	var mode, root, journal, server, node, daemon, owner string
 	var generation uint64
+	flag.StringVar(&mode, "mode", "worldstore", "worldstore or accessor")
 	flag.StringVar(&root, "root", "", "authorized server data root")
-	flag.StringVar(&journal, "journal-dir", "", "durable operation journal directory")
+	flag.StringVar(&journal, "journal-dir", "", "durable operation journal directory (worldstore mode)")
 	flag.StringVar(&server, "server", "", "bound server identity")
 	flag.StringVar(&node, "node", "", "bound node identity")
 	flag.StringVar(&daemon, "daemon", "", "bound daemon identity")
 	flag.StringVar(&owner, "owner", "", "bound owner identity")
 	flag.Uint64Var(&generation, "generation", 0, "bound nonzero assignment generation")
 	flag.Parse()
-	if root == "" || journal == "" {
-		fmt.Fprintln(os.Stderr, "--root and --journal-dir are required")
+	if root == "" {
+		fmt.Fprintln(os.Stderr, "--root is required")
 		os.Exit(2)
 	}
-	store, err := worldstore.NewLocal(worldstore.Identity{Server: server, Node: node, Daemon: daemon, Owner: owner, Generation: generation}, root, journal)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	defer func() {
-		if cerr := store.Close(); cerr != nil {
-			fmt.Fprintln(os.Stderr, cerr)
+	switch mode {
+	case "accessor":
+		acc, err := nodestorage.NewLocal(root)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
-	}()
-	if err := serve(os.Stdin, os.Stdout, store); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		defer func() { _ = acc.Close() }()
+		if err := storageworker.ServeAccessor(os.Stdin, os.Stdout, acc); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	case "worldstore":
+		if journal == "" {
+			fmt.Fprintln(os.Stderr, "--journal-dir is required in worldstore mode")
+			os.Exit(2)
+		}
+		store, err := worldstore.NewLocal(worldstore.Identity{Server: server, Node: node, Daemon: daemon, Owner: owner, Generation: generation}, root, journal)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defer func() {
+			if cerr := store.Close(); cerr != nil {
+				fmt.Fprintln(os.Stderr, cerr)
+			}
+		}()
+		if err := serveWorldstore(os.Stdin, os.Stdout, store); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "unknown --mode %q\n", mode)
+		os.Exit(2)
 	}
 }
 
-func serve(input io.Reader, output io.Writer, store *worldstore.Local) (err error) {
+func serveWorldstore(input io.Reader, output io.Writer, store *worldstore.Local) (err error) {
 	scanner := bufio.NewScanner(input)
 	// ZIP payloads are bounded at 512 MiB; JSON base64 adds roughly one third.
 	scanner.Buffer(make([]byte, 64*1024), 700<<20)
@@ -78,7 +103,7 @@ func serve(input io.Reader, output io.Writer, store *worldstore.Local) (err erro
 			}
 			continue
 		}
-		res := dispatch(store, req)
+		res := dispatchWorldstore(store, req)
 		if err := enc.Encode(res); err != nil {
 			return err
 		}
@@ -89,7 +114,7 @@ func serve(input io.Reader, output io.Writer, store *worldstore.Local) (err erro
 	return scanner.Err()
 }
 
-func dispatch(s *worldstore.Local, r request) response {
+func dispatchWorldstore(s *worldstore.Local, r request) response {
 	res := response{}
 	var err error
 	switch r.Op {

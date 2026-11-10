@@ -53,6 +53,7 @@ COPY --from=proto-builder /app/pkg/proto ./pkg/proto/
 COPY --from=frontend-builder /app/web/carbon-panel/build ./web/carbon-panel/build
 
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o carbon-panel ./cmd/carbon-panel
+RUN CGO_ENABLED=0 GOOS=linux go build -o carbon-storage ./cmd/carbon-storage
 
 FROM alpine:latest
 
@@ -64,6 +65,7 @@ RUN apk --no-cache add ca-certificates sqlite-libs
 WORKDIR /app
 
 COPY --from=backend-builder /app/carbon-panel .
+COPY --from=backend-builder /app/carbon-storage /usr/local/bin/carbon-storage
 COPY config.example.yaml ./
 
 #RUN mkdir -p data/servers backups tmp

@@ -230,29 +230,46 @@ func TestForNodeMapsRemoteSharedStorage(t *testing.T) {
 
 func TestEnsureDataRootRequiresExistingMount(t *testing.T) {
 	base := t.TempDir()
-	mount := filepath.Join(base, "not-mounted")
-	node := NodeInfo{Name: "r1", StorageRoot: mount}
+	controllerMount := filepath.Join(base, "not-mounted")
+	node := NodeInfo{Name: "r1", StorageRoot: "/srv/nfs", ControllerStorageRoot: controllerMount}
 
 	if _, err := EnsureDataRoot(node, filepath.Join("var", "data", "servers", "mc")); err == nil || !IsUnavailable(err) {
-		t.Fatalf("missing mount must be refused with ErrUnavailable, got %v", err)
+		t.Fatalf("missing controller mount must be refused with ErrUnavailable, got %v", err)
 	}
-	if _, err := os.Stat(mount); !os.IsNotExist(err) {
+	if _, err := os.Stat(controllerMount); !os.IsNotExist(err) {
 		t.Fatalf("a missing storage root must never be created (hidden mount guard), stat err = %v", err)
 	}
 
-	if err := os.MkdirAll(mount, 0o755); err != nil {
+	if err := os.MkdirAll(controllerMount, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	got, err := EnsureDataRoot(node, filepath.Join("var", "data", "servers", "mc"))
 	if err != nil {
 		t.Fatalf("EnsureDataRoot with mounted root: %v", err)
 	}
-	want := filepath.Join(mount, "mc")
+	want := filepath.Join(controllerMount, "mc")
 	if got != want {
 		t.Fatalf("EnsureDataRoot = %q, want %q", got, want)
 	}
 	if fi, err := os.Stat(want); err != nil || !fi.IsDir() {
 		t.Fatalf("server directory must be created under the mount: %v", err)
+	}
+}
+
+func TestEnsureDataRootTransportDoesNotCreateControllerCopy(t *testing.T) {
+	base := t.TempDir()
+	nodeRoot := filepath.Join(base, "only-on-node")
+	node := NodeInfo{Name: "r-transport", StorageRoot: nodeRoot}
+	got, err := EnsureDataRoot(node, filepath.Join("var", "data", "servers", "mc"))
+	if err != nil {
+		t.Fatalf("EnsureDataRoot transport mapping: %v", err)
+	}
+	want := filepath.Join(nodeRoot, "mc")
+	if got != want {
+		t.Fatalf("EnsureDataRoot = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(want); !os.IsNotExist(err) {
+		t.Fatalf("transport must not create controller-local server dir, stat err=%v", err)
 	}
 }
 

@@ -220,15 +220,18 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 // there. The controller copy of server.DataPath is not consulted. A remote
 // node without reachable storage is refused before any path check.
 func (s *FileService) openMappedStorage(ctx context.Context, server *storage.Server, write bool) (string, nodestorage.Accessor, error) {
-	root, err := dataRootFor(ctx, s.store, server, write)
+	if _, err := dataRootFor(ctx, s.store, server, write); err != nil {
+		return "", nil, err
+	}
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
 	if err != nil {
 		return "", nil, err
 	}
-	acc, err := nodestorage.NewLocal(root)
+	acc, err := nodestorage.ForNode(info, server.DataPath)
 	if err != nil {
 		return "", nil, err
 	}
-	return root, acc, nil
+	return acc.Root(), acc, nil
 }
 
 // storageError maps accessor refusals onto connect errors: a remote node

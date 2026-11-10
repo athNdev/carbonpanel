@@ -12,6 +12,7 @@
 package nodestorage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -188,6 +189,7 @@ func (l *local) Rename(oldRel, newRel string) error {
 // ControllerStorageRoot is where the controller mounts the same storage
 // (empty when the paths are identical on both sides).
 type NodeInfo struct {
+	ID                    string
 	Name                  string
 	IsLocal               bool
 	StorageRoot           string
@@ -224,6 +226,9 @@ func sharedStorageRoot(node NodeInfo) string {
 func MapDataPath(node NodeInfo, dataRoot string) (string, error) {
 	if node.IsLocal {
 		return dataRoot, nil
+	}
+	if RequiresRemoteTransport(node) {
+		return nodeDataRoot(node, dataRoot), nil
 	}
 	root := sharedStorageRoot(node)
 	if root == "" {
@@ -285,14 +290,20 @@ func EnsureDataRoot(node NodeInfo, dataRoot string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !node.IsLocal {
+	if !node.IsLocal && !RequiresRemoteTransport(node) {
 		mount := sharedStorageRoot(node)
 		if fi, serr := os.Stat(mount); serr != nil || !fi.IsDir() {
 			return "", fmt.Errorf("%w: controller storage root %q for node %q is not accessible", ErrUnavailable, mount, node.Name)
 		}
+		if err := os.MkdirAll(mapped, 0o755); err != nil {
+			return "", fmt.Errorf("create data root for node %q: %w", node.Name, err)
+		}
+		return mapped, nil
 	}
-	if err := os.MkdirAll(mapped, 0o755); err != nil {
-		return "", fmt.Errorf("create data root for node %q: %w", node.Name, err)
+	if node.IsLocal {
+		if err := os.MkdirAll(mapped, 0o755); err != nil {
+			return "", fmt.Errorf("create data root for node %q: %w", node.Name, err)
+		}
 	}
 	return mapped, nil
 }
@@ -305,6 +316,13 @@ func EnsureDataRoot(node NodeInfo, dataRoot string) (string, error) {
 func ForNode(node NodeInfo, dataRoot string) (Accessor, error) {
 	if node.IsLocal {
 		return NewLocal(dataRoot)
+	}
+	if RequiresRemoteTransport(node) {
+		t := getTransport()
+		if t == nil {
+			return nil, fmt.Errorf("%w: remote transport is not configured for node %q", ErrUnavailable, node.Name)
+		}
+		return t.Open(context.Background(), node, dataRoot)
 	}
 	mapped, err := EnsureDataRoot(node, dataRoot)
 	if err != nil {
