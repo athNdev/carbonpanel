@@ -10,6 +10,9 @@ code_refs:
   - internal/indexers
   - internal/blueprint
   - internal/module/hooks.go
+  - internal/module/reconcile.go
+  - internal/docker/client.go
+  - internal/reconciler
   - internal/rpc/services/server.go
 sources:
   - title: Module delivery checksum issue
@@ -62,6 +65,14 @@ sweep. The same propagation runs for the parent server: when a server pass
 adopts or recreates its container, or transitions to running or stopped, every
 module on that server is scheduled. The sweep still revisits every running
 module row even when its container id is empty.
+
+An external replace or reconnect is adopted from the live labeled container
+(never a retained `carbon-panel-replaced-*` name, never an exited sibling).
+Identity, status and recorded host ports stay on that one sidecar. A missing
+container under a running parent is restored without `RemoveContainer`,
+because that call always sets `RemoveVolumes`. A failed start hook retries
+against the observed container and does not create a second one. A parent
+row that is already gone marks the child stopped and does not resurrect it.
 
 Parent deletion has an explicit child policy. A full delete stops and
 removes sidecar containers before the server row. `DeleteServer` with

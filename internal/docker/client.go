@@ -1427,6 +1427,13 @@ func (c *Client) ResolveContainer(ctx context.Context, serverID string) (*contai
 // Docker container belonging to a module ID via the carbon-panel.module.id label, falling back
 // to the deterministic name "carbon-panel-module-<id>".
 func (c *Client) ResolveModuleContainer(ctx context.Context, moduleID string) (*container.Summary, error) {
+	return c.ResolveModuleContainerPreferring(ctx, moduleID, "")
+}
+
+// ResolveModuleContainerPreferring is ResolveModuleContainer with a recorded
+// container id that stays preferred while it is still alive, so ports do not
+// flip to a sibling labeled container.
+func (c *Client) ResolveModuleContainerPreferring(ctx context.Context, moduleID, recordedID string) (*container.Summary, error) {
 	if moduleID == "" {
 		return nil, fmt.Errorf("resolve module container: module id is empty")
 	}
@@ -1446,8 +1453,8 @@ func (c *Client) ResolveModuleContainer(ctx context.Context, moduleID string) (*
 	if err != nil {
 		return nil, fmt.Errorf("resolve module container: label lookup failed: %w", err)
 	}
-	if len(listResult.Items) > 0 {
-		return &listResult.Items[0], nil
+	if picked := pickModuleContainer(listResult.Items, recordedID); picked != nil {
+		return picked, nil
 	}
 
 	// Strategy 2: deterministic name fallback
@@ -1461,6 +1468,43 @@ func (c *Client) ResolveModuleContainer(ctx context.Context, moduleID string) (*
 	}
 
 	return inspectToSummary(inspectResult.Container), nil
+}
+
+// pickModuleContainer chooses the sidecar that should be adopted when more
+// than one container still carries the module label. A retained
+// replaced-but-not-removed name is never the live identity. A recorded id
+// that is still alive keeps its ports; otherwise the first live container
+// wins so an external replace is adopted instead of the exited original.
+func pickModuleContainer(items []container.Summary, recordedID string) *container.Summary {
+	var recorded, live, fallback *container.Summary
+	for i := range items {
+		if isRetainedContainerName(items[i].Names) {
+			continue
+		}
+		item := &items[i]
+		if recordedID != "" && item.ID == recordedID {
+			recorded = item
+		}
+		if isAliveContainerState(item.State) {
+			if live == nil {
+				live = item
+			}
+			continue
+		}
+		if fallback == nil {
+			fallback = item
+		}
+	}
+	if recorded != nil && isAliveContainerState(recorded.State) {
+		return recorded
+	}
+	if live != nil {
+		return live
+	}
+	if recorded != nil {
+		return recorded
+	}
+	return fallback
 }
 
 // inspectToSummary adapts a ContainerInspect result into the same container.Summary shape

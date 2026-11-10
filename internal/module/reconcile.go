@@ -149,7 +149,8 @@ func applyReconcileGates(mod *storage.Module, action moduleAction, gates reconci
 // module and its parent server are both meant to be running.
 //
 // A node that cannot be reached leaves the record untouched: an unreachable
-// daemon is not evidence that the container is gone.
+// daemon is not evidence that the container is gone. A missing container is
+// restored without RemoveVolumes so sidecar data is not purged on reconnect.
 func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (ReconcileOutcome, error) {
 	if strings.TrimSpace(moduleID) == "" {
 		return ReconcileSkipped, nil
@@ -166,7 +167,7 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 		return ReconcileSkipped, fmt.Errorf("resolve docker for module %s: %w", mod.Name, err)
 	}
 
-	obs, err := observeModule(ctx, cli, mod.ID)
+	obs, err := observeModule(ctx, cli, mod.ID, mod.ContainerID)
 	if err != nil {
 		return ReconcileSkipped, err
 	}
@@ -224,7 +225,7 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 		return ReconcileAdopted, nil
 
 	case actionRecreate:
-		if err := m.RecreateModule(ctx, mod.ID); err != nil {
+		if err := m.restoreMissingModuleContainer(ctx, mod.ID); err != nil {
 			return ReconcileSkipped, fmt.Errorf("recreate module %s: %w", mod.Name, err)
 		}
 		m.logger.Info("Recreated missing container for module %s", mod.Name)
@@ -306,11 +307,62 @@ func (m *Manager) moduleHostPortsReadyForRecreate(ctx context.Context, mod *stor
 	return true, nil
 }
 
+// restoreMissingModuleContainer brings a running module back when the daemon
+// has no container for it. It does not RemoveContainer: that call always sets
+// RemoveVolumes, and a missing (or externally replaced) sidecar must not
+// casually purge data. If a labeled container appeared between decide and
+// restore, it is adopted instead of creating a duplicate.
+func (m *Manager) restoreMissingModuleContainer(ctx context.Context, moduleID string) error {
+	mod, err := m.store.GetModule(ctx, moduleID)
+	if err != nil || mod == nil {
+		return err
+	}
+	parent, err := m.store.GetServer(ctx, mod.ServerID)
+	if err != nil || parent == nil {
+		return fmt.Errorf("parent server missing for module %s", mod.Name)
+	}
+	if parent.Status != storage.StatusRunning {
+		return fmt.Errorf("parent server for module %s is %s", mod.Name, parent.Status)
+	}
+	cli, err := m.resolveDocker(mod.NodeID)
+	if err != nil {
+		return err
+	}
+	obs, err := observeModule(ctx, cli, mod.ID, mod.ContainerID)
+	if err != nil {
+		return err
+	}
+	if obs.Exists {
+		if obs.ContainerID != "" && obs.ContainerID != mod.ContainerID {
+			if err := m.store.UpdateModuleContainerID(ctx, mod.ID, obs.ContainerID); err != nil {
+				return err
+			}
+		}
+		status := storage.ModuleStatusStopped
+		if obs.Running {
+			status = storage.ModuleStatusRunning
+		}
+		if status != mod.Status {
+			if err := m.store.UpdateModuleStatus(ctx, mod.ID, status); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if mod.ContainerID != "" {
+		mod.ContainerID = ""
+		if err := m.store.UpdateModule(ctx, mod); err != nil {
+			return fmt.Errorf("clear vanished container id: %w", err)
+		}
+	}
+	return m.CreateAndStartModule(ctx, moduleID, true)
+}
+
 // observeModule resolves and inspects a module's container. A container that
 // cannot be found yields Exists=false and no error; a daemon failure is an
 // error so the caller leaves the record alone.
-func observeModule(ctx context.Context, cli *docker.Client, moduleID string) (ModuleObservation, error) {
-	summary, err := cli.ResolveModuleContainer(ctx, moduleID)
+func observeModule(ctx context.Context, cli *docker.Client, moduleID, recordedID string) (ModuleObservation, error) {
+	summary, err := cli.ResolveModuleContainerPreferring(ctx, moduleID, recordedID)
 	if err != nil {
 		if errors.Is(err, docker.ErrContainerNotResolved) {
 			return ModuleObservation{Exists: false}, nil

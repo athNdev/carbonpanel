@@ -20,6 +20,8 @@
   expect: architecture/module-system
 - query: What happens to sidecar containers when DeleteServer keeps world data?
   expect: invariants/data-safety
+- query: How does module reconcile adopt an externally replaced sidecar without duplicating it?
+  expect: architecture/module-system
 - query: Where are backup and restore procedures described?
   expect: operations/backup-restore
 - query: Why does deep sleep still use the local Docker client?
