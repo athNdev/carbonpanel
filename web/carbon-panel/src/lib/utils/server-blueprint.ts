@@ -70,7 +70,10 @@ function parseEnv(raw: string): Record<string, string> {
 }
 
 function isBedrockImage(image: string): boolean {
-	const ref = image.trim().toLowerCase().replace(/^docker\.io\//, '');
+	const ref = image
+		.trim()
+		.toLowerCase()
+		.replace(/^docker\.io\//, '');
 	return ref.startsWith('itzg/minecraft-bedrock-server');
 }
 

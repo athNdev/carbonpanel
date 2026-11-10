@@ -8,10 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
-import {
-	nativeBedrockLimitation,
-	resolveCreateBlueprint
-} from './server-blueprint';
+import { nativeBedrockLimitation, resolveCreateBlueprint } from './server-blueprint';
 
 test('qualified Java seed resolves image, TYPE env and Java protocol', () => {
 	const spec = resolveCreateBlueprint({
@@ -49,7 +46,13 @@ test('create wizard lists catalog seeds and does not treat Bedrock as selectable
 	const pagePath = path.resolve(import.meta.dirname, '../../routes/servers/new/+page.svelte');
 	const content = fs.readFileSync(pagePath, 'utf8');
 	assert.ok(content.includes('listBlueprints'), 'create path must load the blueprint catalog');
-	assert.ok(content.includes('resolveCreateBlueprint'), 'create path must resolve image/env/protocol');
+	assert.ok(
+		content.includes('resolveCreateBlueprint'),
+		'create path must resolve image/env/protocol'
+	);
 	assert.ok(content.includes('spec.qualified'), 'unqualified seeds must not be selected');
-	assert.ok(content.includes('spec.limitation'), 'unqualified seeds must show a supported-mode limitation');
+	assert.ok(
+		content.includes('spec.limitation'),
+		'unqualified seeds must show a supported-mode limitation'
+	);
 });

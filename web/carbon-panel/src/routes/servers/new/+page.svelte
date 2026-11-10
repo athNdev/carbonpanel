@@ -759,9 +759,7 @@ one at https://mozilla.org/MPL/2.0/.
 					{#if catalogBlueprints.length > 0}
 						<div class="space-y-2">
 							<div class="flex items-center justify-between gap-2">
-								<p
-									class="font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
-								>
+								<p class="font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase">
 									Catalog seed
 								</p>
 								{#if selectedBlueprintId}
