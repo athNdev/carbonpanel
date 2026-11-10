@@ -205,6 +205,36 @@ func TestPreflightRejectsDataOwnerMismatch(t *testing.T) {
 	}
 }
 
+func TestPreflightRejectsRootlessBootstrapOnHostRootData(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.Daemon = &DaemonEnforcement{Rootless: true}
+	owner := 0
+	spec.DataOwnerUID = &owner
+
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueRootlessHostRootData) {
+		t.Fatalf("issues = %v, want rootless_host_root_data", issueCodes(profile))
+	}
+	if err := PreflightProfile(profile); !errors.Is(err, ErrRuntimeIncompatible) {
+		t.Fatalf("error = %v, want ErrRuntimeIncompatible", err)
+	}
+}
+
+func TestPreflightAcceptsRootlessWhenDataOwnedByGameUser(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.Daemon = &DaemonEnforcement{Rootless: true}
+	owner := 1000
+	spec.DataOwnerUID = &owner
+
+	profile := DescribeRuntime(spec)
+	if hasIssue(profile, RuntimeIssueRootlessHostRootData) {
+		t.Fatalf("issues = %v, want no rootless_host_root_data", issueCodes(profile))
+	}
+	if err := PreflightProfile(profile); err != nil {
+		t.Fatalf("supported rootless profile refused: %v", err)
+	}
+}
+
 func TestPreflightAcceptsASupportedNonRootUser(t *testing.T) {
 	spec := resolvedMinecraftContainer(&v1.DockerOverrides{User: "1000:1000"}, false)
 	owner := 1000

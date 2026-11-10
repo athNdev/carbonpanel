@@ -58,7 +58,9 @@ Re-verified `2026-11-04` by `agent:zed`:
   findings stop creation; warnings are logged with a named code and remedy.
 - The preflight also names a read-only /data mount, a missing /data mount,
   host networking, a host device mapping, bootstrap capabilities removed by
-  `CapDrop ALL`, and a runtime uid that cannot own the world directory.
+  `CapDrop ALL`, a runtime uid that cannot own the world directory, and a
+  rootless daemon paired with host-root-owned data during the root-then-drop
+  bootstrap (`rootless_host_root_data`).
 - It reports the applied memory, swap, pids and writable-layer limits, and
   warns when a requested limit is absent. A writable-layer cap is applied only
   on a writable root, because a read-only root cannot grow.

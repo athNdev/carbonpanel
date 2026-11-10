@@ -120,8 +120,11 @@ override fails before it replaces a working container. A warning is logged and
 does not block. A moving Minecraft image tag is a warning (`image_unpinned`),
 not a boot refusal; pin `name@sha256:<digest>` to keep recreates stable. The
 profile records `ImageDigest` and `ImagePinned` only when the reference is
-pinned. The rules and their
-remedies live in `internal/docker/runtime_profile.go`.
+pinned. On a rootless daemon, the default root-then-drop bootstrap is refused
+when the world directory is still owned by host uid 0 (`rootless_host_root_data`);
+chown the data to the game user first. Daemon rootless mode is read from Engine
+`GET /info` during create preflight. The rules and their remedies live in
+`internal/docker/runtime_profile.go`.
 
 The profile also reports the limits that are actually applied, not the ones
 that were requested: memory and memory+swap, the process limit, the CPU cap,
