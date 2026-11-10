@@ -827,7 +827,45 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 		r.updateRoute(ctx, server)
 	}
 
+	r.scheduleServerChildModules(server.ID, adopted, selfHealed, statusChanged, server.Status)
+
 	return nil
+}
+
+// scheduleServerChildModules queues a module pass for every sidecar on serverID
+// when the parent container identity or readiness changed. Without this,
+// modules waiting on a recreated or stopped parent relied on the periodic sweep.
+func (r *Reconciler) scheduleServerChildModules(serverID string, adopted, selfHealed, statusChanged bool, status db.ServerStatus) {
+	if serverID == "" || r.modules == nil {
+		return
+	}
+	propagate := adopted || selfHealed
+	if statusChanged && (status == db.StatusRunning || status == db.StatusStopped) {
+		propagate = true
+	}
+	if !propagate {
+		return
+	}
+	moduleStore, ok := r.store.(ModuleStore)
+	if !ok {
+		return
+	}
+	ctx := r.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	modules, err := moduleStore.ListModules(ctx)
+	if err != nil {
+		if r.log != nil {
+			r.log.Error("reconciler: list modules for server propagation: %v", err)
+		}
+		return
+	}
+	for _, m := range modules {
+		if m != nil && m.ServerID == serverID {
+			r.requestModule(m.ID)
+		}
+	}
 }
 
 // backendRef identifies the container a proxy route points at: the container ID
