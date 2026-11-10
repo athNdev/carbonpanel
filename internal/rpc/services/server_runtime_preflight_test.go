@@ -33,6 +33,19 @@ func TestCreateContainerErrorReportsAnIncompatibleRuntime(t *testing.T) {
 	}
 }
 
+func TestCreateContainerErrorReportsWorldQuotaExceeded(t *testing.T) {
+	cause := fmt.Errorf("%w: %s [fatal]: measured world bytes meet storage.world_quota_mb",
+		docker.ErrRuntimeIncompatible, "world_quota_exceeded")
+	err := createContainerError(fmt.Errorf("failed to create container: %w", cause))
+
+	if err.Code() != connect.CodeFailedPrecondition {
+		t.Fatalf("code = %v, want failed_precondition", err.Code())
+	}
+	if !strings.Contains(err.Message(), "world_quota_exceeded") {
+		t.Fatalf("message = %q, want world_quota_exceeded", err.Message())
+	}
+}
+
 func TestCreateContainerErrorHidesOtherCreateFailures(t *testing.T) {
 	err := createContainerError(errors.New("daemon said: /var/run/docker.sock permission denied"))
 

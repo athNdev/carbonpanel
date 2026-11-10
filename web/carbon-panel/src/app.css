@@ -471,13 +471,13 @@ one at https://mozilla.org/MPL/2.0/.
 }
 
 /* Short, low-distance route transitions. SvelteKit starts these only for
-   client-side navigation; first paint stays still. */
+   client-side navigation; first paint stays still. --motion-page is 140ms. */
 ::view-transition-old(root) {
-	animation: carbon-route-out 140ms cubic-bezier(0.2, 0, 0, 1) both;
+	animation: carbon-route-out var(--motion-page) cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 ::view-transition-new(root) {
-	animation: carbon-route-in 140ms cubic-bezier(0.2, 0, 0, 1) both;
+	animation: carbon-route-in var(--motion-page) cubic-bezier(0.2, 0, 0, 1) both;
 }
 
 @keyframes carbon-route-out {
@@ -522,6 +522,11 @@ one at https://mozilla.org/MPL/2.0/.
 	::view-transition-new(root) {
 		animation: none;
 	}
+}
+
+[data-carbon-motion='reduced']::view-transition-old(root),
+[data-carbon-motion='reduced']::view-transition-new(root) {
+	animation: none;
 }
 /* Responsive safety net */
 @media (max-width: 767px) {

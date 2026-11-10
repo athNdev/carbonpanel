@@ -4,6 +4,8 @@
   expect: failures/remote-node-fallback
 - query: Do cleanup commands delete worlds or backups?
   expect: invariants/data-safety
+- query: How do I snapshot the panel database before an upgrade?
+  expect: operations/backup-restore
 - query: How does the TCP proxy route a Minecraft handshake by hostname?
   expect: architecture/proxy
 - query: How durable are SQLite migrations?
@@ -18,7 +20,13 @@
   expect: operations/deep-sleep
 - query: Which commands verify the frontend?
   expect: workflows/frontend-change
+- query: How does the console stop scrollbar layout jump and honor reduced motion?
+  expect: workflows/frontend-change
 - query: Which health endpoint fails when the database is down but not when a Docker node is down?
   expect: operations/health-checks
 - query: How does ExtractArchive reach a node without shared storage?
   expect: architecture/remote-storage-transport
+- query: Does storage-opt size bound a bind-mounted world?
+  expect: architecture/runtime
+- query: What happens when storage.world_quota_mb is set and world bytes meet it?
+  expect: architecture/runtime

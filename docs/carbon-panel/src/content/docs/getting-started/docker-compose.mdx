@@ -66,4 +66,29 @@ On Fedora, RHEL, CentOS, etc., append `:z` to volume mounts:
 
 Once running, open **http://\<your-host\>:8080** and create your admin account.
 
+## Stopping, upgrades and rollback
+
+`docker compose down` stops and removes the panel container. It does **not**
+delete the host bind mounts (`/opt/carbon-panel/data`, `/opt/carbon-panel/backups`
+in the shipped file). Worlds and the controller SQLite database stay on the
+host. Recreating the container, `docker compose up`, `make test`,
+`scripts/web-build.sh` and `make clean` also leave that data in place.
+
+Do not pass `--volumes` / `-v` on routine shutdown. The shipped file uses bind
+mounts, so host world directories still survive `down -v`, but that flag is the
+destructive form for any named volumes you add later.
+
+Before upgrading the panel image, snapshot the controller database on the host
+(this is a named operator step, not part of compose up):
+
+```bash
+scripts/snapshot-panel-db.sh --data-dir /opt/carbon-panel/data
+```
+
+The script writes `carbon-panel-db-<UTC timestamp>.sqlite` beside the data
+directory. Restore by stopping the panel and copying that file back onto
+`carbon-panel.db`, then removing leftover `-wal` / `-shm` sidecars. Do not copy
+over worlds, backups or other bind-mounted files. See
+`docs/runbook-panel-db-restore.md`.
+
 For all available configuration options, see [Configuration](/configuration/).

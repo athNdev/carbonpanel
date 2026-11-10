@@ -44,10 +44,11 @@ accessors never fall back to controller paths.
 
 Accessor-backed file RPCs (`ListFiles`, `UpdateFile`, `DeleteFile`,
 `SaveUploadedFile`, `GetFile`, `RenameFile`, `CreateFolder`, `CopyFile`,
-`MoveFile`, `InitFileDownload`) and `serverLatestLog` open storage through
-`nodestorage.ForNode`. `ExtractArchive` streams a zip through the same
-accessor (`nodestorage.ExtractZip`) on transport-only nodes. Zip *write*
-RPCs (`CreateArchive`, `DownloadArchive`, `DownloadRemoteArchive`) and
+`MoveFile`, `InitFileDownload`), `serverLatestLog`, and CreateServer's
+manual server-pack zip open storage through `nodestorage.ForNode`.
+`ExtractArchive` streams a zip through the same accessor
+(`nodestorage.ExtractZip`) on transport-only nodes. Zip *write* RPCs
+(`CreateArchive`, `DownloadArchive`, `DownloadRemoteArchive`) and
 `ExportWorld` still walk or build archives on the controller filesystem;
 transport-only nodes are refused at those entry points until a streaming
 write path exists. No worker means `ErrUnavailable` / Connect

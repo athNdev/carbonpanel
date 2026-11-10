@@ -1426,14 +1426,29 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Create the world on the node's storage. A remote node with no reachable
 	// mount is refused before a controller-local directory can be mistaken for
 	// the world the remote daemon will use.
-	worldRoot, err := dataRootFor(ctx, s.store, server, true)
-	if err != nil {
+	if _, err := dataRootFor(ctx, s.store, server, true); err != nil {
 		s.capacityMu.Unlock()
 		if nodestorage.IsUnavailable(err) {
 			return nil, connect.NewError(connect.CodeUnavailable, err)
 		}
 		s.log.Error("Failed to create data directory: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server directory"))
+	}
+
+	// A manual server pack is written through ForNode before the row is kept,
+	// so a missing remote adapter cannot leave a controller-local zip.
+	placedManualPack := false
+	if msg.ModpackId != "" {
+		placed, err := s.writeManualServerPack(ctx, server, msg.ModpackId)
+		if err != nil {
+			s.capacityMu.Unlock()
+			if nodestorage.IsUnavailable(err) {
+				return nil, connect.NewError(connect.CodeUnavailable, err)
+			}
+			s.log.Error("Failed to place manual server pack: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to place server pack"))
+		}
+		placedManualPack = placed
 	}
 
 	// Save to database
@@ -1472,45 +1487,11 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Configure modpack if selected
 	if msg.ModpackId != "" {
 		modpack, _ := s.store.GetIndexedModpack(ctx, msg.ModpackId)
-		if modpack != nil && modpack.Indexer == "manual" {
-			// For manual modpacks, copy the zip file
-			modpackFile, err := s.store.GetIndexedModpackFiles(ctx, msg.ModpackId)
-			if err == nil && len(modpackFile) > 0 {
-				sourcePath := modpackFile[0].DownloadURL
-				destPath := filepath.Join(worldRoot, "modpack.zip")
-
-				// Copy the modpack file safely
-				copyErr := func() error {
-					sourceFile, err := os.Open(sourcePath)
-					if err != nil {
-						return err
-					}
-					defer sourceFile.Close()
-
-					destFile, err := os.Create(destPath)
-					if err != nil {
-						return err
-					}
-					defer destFile.Close()
-
-					if _, err := io.Copy(destFile, sourceFile); err != nil {
-						return err
-					}
-					return nil
-				}()
-				if copyErr == nil {
-					// Set CF_MODPACK_ZIP for manual modpack
-					cfModpackZip := "/data/modpack.zip"
-					serverConfig.CFModpackZip = &cfModpackZip
-
-					// Set a dummy slug
-					cfSlug := "manual-" + modpack.ID
-					serverConfig.CFSlug = &cfSlug
-				} else {
-					s.log.Error("Failed to copy manual modpack file %s: %v", sourcePath, copyErr)
-					_ = os.Remove(destPath)
-				}
-			}
+		if modpack != nil && modpack.Indexer == "manual" && placedManualPack {
+			cfModpackZip := "/data/modpack.zip"
+			serverConfig.CFModpackZip = &cfModpackZip
+			cfSlug := "manual-" + modpack.ID
+			serverConfig.CFSlug = &cfSlug
 		} else if modpackURL != "" && server.ModLoader == storage.ModLoaderAutoCurseForge {
 			// If version is pinned, append /files/<id>
 			if msg.ModpackVersionId != "" {
@@ -3182,6 +3163,40 @@ func (s *ServerService) ListServerPlayers(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(&v1.ListServerPlayersResponse{
 		Players: players, OnlineCount: int32(online),
 	}), nil
+}
+
+// writeManualServerPack copies a panel-extracted manual server pack onto the
+// owning node's storage through ForNode. It refuses a missing remote adapter
+// and never writes a controller-local fallback zip.
+func (s *ServerService) writeManualServerPack(ctx context.Context, server *storage.Server, modpackID string) (bool, error) {
+	modpack, err := s.store.GetIndexedModpack(ctx, modpackID)
+	if err != nil || modpack == nil || modpack.Indexer != "manual" {
+		return false, nil
+	}
+	modpackFile, err := s.store.GetIndexedModpackFiles(ctx, modpackID)
+	if err != nil {
+		return false, err
+	}
+	if len(modpackFile) == 0 {
+		return false, nil
+	}
+	data, err := os.ReadFile(modpackFile[0].DownloadURL)
+	if err != nil {
+		return false, err
+	}
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
+	if err != nil {
+		return false, err
+	}
+	acc, err := nodestorage.ForNode(info, server.DataPath)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = acc.Close() }()
+	if err := acc.WriteFile("modpack.zip", data); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // serverLatestLog reads logs/latest.log from the owning node's mapped root.
