@@ -257,7 +257,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <svelte:window onkeydown={handleWindowKeydown} />
 
 <div
-	class="flex min-h-screen flex-col bg-[#161616] font-sans text-[#f4f4f4] antialiased selection:bg-[#0f62fe] selection:text-white"
+	class="flex h-dvh min-h-0 flex-col bg-[#161616] font-sans text-[#f4f4f4] antialiased selection:bg-[#0f62fe] selection:text-white"
 >
 	<!-- IBM Carbon Global Header (48px fixed) -->
 	<header
@@ -374,7 +374,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	</header>
 
 	<!-- Layout Body (SideNav + Content) -->
-	<div class="flex flex-1 pt-12">
+	<div class="flex min-h-0 flex-1 pt-12">
 		<!-- IBM Carbon SideNav: off-canvas overlay on narrow screens, rail/panel on md+ -->
 		<aside
 			id="carbon-sidenav"
@@ -451,11 +451,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon Main Content Area -->
 		<main
-			class="scrollbar-stable ml-0 flex-1 overflow-y-auto p-4 transition-[margin] duration-(--motion-fast) ease-[var(--ease-out-quart)] md:p-6 {sideNavExpanded
+			class="scrollbar-stable ml-0 flex min-h-0 flex-1 flex-col overflow-y-auto p-4 transition-[margin] duration-(--motion-fast) ease-[var(--ease-out-quart)] md:p-6 {sideNavExpanded
 				? 'md:ml-64'
 				: 'md:ml-12'}"
 		>
-			<div class="mx-auto max-w-7xl space-y-6">
+			<div class="mx-auto flex min-h-full w-full max-w-7xl flex-1 flex-col">
 				{@render children?.()}
 			</div>
 		</main>

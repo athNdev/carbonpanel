@@ -46,61 +46,59 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full overflow-y-auto">
-	<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
-		<div class="mb-1 flex items-center justify-between">
-			<h3 class="text-base font-semibold text-[#f4f4f4]">Activity</h3>
-			<button
-				type="button"
-				class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
-				onclick={loadActivity}
-				disabled={loading}
-			>
-				{loading ? 'Loading…' : 'Refresh'}
-			</button>
-		</div>
-		<p class="mb-6 text-xs text-[#a8a8a8]">
-			Who did what on this server, newest first. Journaled actions show the request id that joins
-			them to the operations journal.
-		</p>
-
-		{#if entries.length === 0}
-			<p class="py-8 text-center font-mono text-xs text-[#a8a8a8]">
-				{loading
-					? 'Loading activity…'
-					: 'No activity recorded yet. Start or stop the server to generate entries.'}
-			</p>
-		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full min-w-[480px] text-xs" aria-label="Server activity log">
-					<thead>
-						<tr class="border-b border-[#393939] text-left text-[#a8a8a8]">
-							<th scope="col" class="py-2 pr-4 font-medium">Time</th>
-							<th scope="col" class="py-2 pr-4 font-medium">Actor</th>
-							<th scope="col" class="py-2 pr-4 font-medium">Event</th>
-							<th scope="col" class="py-2 pr-4 font-medium">Request ID</th>
-							<th scope="col" class="py-2 font-medium">IP</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each entries as entry (entry.id)}
-							<tr class="border-b border-[#262626] font-mono text-[#f4f4f4]">
-								<td class="py-2 pr-4 whitespace-nowrap">{formatTimestamp(entry.createdAt)}</td>
-								<td
-									class="max-w-[160px] truncate py-2 pr-4"
-									title={entry.actorName || entry.actorId || ''}
-									>{entry.actorName || entry.actorId || '—'}</td
-								>
-								<td class="py-2 pr-4">{entry.event}</td>
-								<td class="max-w-[180px] truncate py-2 pr-4" title={entry.requestId || ''}
-									>{entry.requestId || '—'}</td
-								>
-								<td class="py-2">{entry.ip || '—'}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{/if}
+<div>
+	<div class="mb-3 flex items-center justify-between">
+		<h3 class="text-sm font-medium text-[#f4f4f4]">Audit log</h3>
+		<button
+			type="button"
+			class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
+			onclick={loadActivity}
+			disabled={loading}
+		>
+			{loading ? 'Loading…' : 'Refresh'}
+		</button>
 	</div>
+	<p class="mb-6 text-xs text-[#a8a8a8]">
+		Who did what on this server, newest first. Journaled actions show the request id that joins them
+		to the operations journal.
+	</p>
+
+	{#if entries.length === 0}
+		<p class="py-8 text-center font-mono text-xs text-[#a8a8a8]">
+			{loading
+				? 'Loading activity…'
+				: 'No activity recorded yet. Start or stop the server to generate entries.'}
+		</p>
+	{:else}
+		<div class="overflow-x-auto">
+			<table class="w-full min-w-[480px] text-xs" aria-label="Server activity log">
+				<thead>
+					<tr class="border-b border-[#393939] text-left text-[#a8a8a8]">
+						<th scope="col" class="py-2 pr-4 font-medium">Time</th>
+						<th scope="col" class="py-2 pr-4 font-medium">Actor</th>
+						<th scope="col" class="py-2 pr-4 font-medium">Event</th>
+						<th scope="col" class="py-2 pr-4 font-medium">Request ID</th>
+						<th scope="col" class="py-2 font-medium">IP</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each entries as entry (entry.id)}
+						<tr class="border-b border-[#262626] font-mono text-[#f4f4f4]">
+							<td class="py-2 pr-4 whitespace-nowrap">{formatTimestamp(entry.createdAt)}</td>
+							<td
+								class="max-w-[160px] truncate py-2 pr-4"
+								title={entry.actorName || entry.actorId || ''}
+								>{entry.actorName || entry.actorId || '—'}</td
+							>
+							<td class="py-2 pr-4">{entry.event}</td>
+							<td class="max-w-[180px] truncate py-2 pr-4" title={entry.requestId || ''}
+								>{entry.requestId || '—'}</td
+							>
+							<td class="py-2">{entry.ip || '—'}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
+	{/if}
 </div>

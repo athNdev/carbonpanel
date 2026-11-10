@@ -12,7 +12,8 @@ one at https://mozilla.org/MPL/2.0/.
 	import { onMount } from 'svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
-	import { CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
+	import { CarbonButton, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
@@ -894,908 +895,897 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-{#if loading}
-	<div class="flex items-center justify-center py-8">
-		<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
-	</div>
-{:else}
-	<div class="space-y-4">
-		<!-- Header -->
-		<div class="flex items-center justify-between">
-			<div>
-				<h3 class="text-lg font-semibold">Tasks</h3>
-				<p class="text-sm text-muted-foreground">
-					Schedule operations or run them on server events (including webhooks).
-				</p>
-			</div>
-			<div class="flex gap-2">
-				<Button variant="outline" size="sm" onclick={loadTasks}>
-					<RefreshCw class="mr-2 h-4 w-4" />
-					Refresh
-				</Button>
-				<Button size="sm" onclick={openCreateDialog}>
-					<Plus class="mr-2 h-4 w-4" />
-					New Task
-				</Button>
-			</div>
+<ServerTabPanel
+	title="Tasks"
+	description="Schedule operations or run them on server events (including webhooks)."
+>
+	{#snippet actions()}
+		<CarbonButton kind="secondary" size="sm" onclick={loadTasks}>
+			<RefreshCw class="h-4 w-4" />
+			Refresh
+		</CarbonButton>
+		<CarbonButton kind="primary" size="sm" onclick={openCreateDialog}>
+			<Plus class="h-4 w-4" />
+			New Task
+		</CarbonButton>
+	{/snippet}
+	{#if loading}
+		<div class="flex flex-1 items-center justify-center py-8">
+			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 		</div>
-
-		<!-- Tasks List -->
-		{#if loadError && tasks.length === 0}
-			<CarbonErrorState title="Failed to load tasks" message={loadError} onretry={loadTasks} />
-		{:else if tasks.length === 0}
-			<Card>
-				<CardContent class="py-8">
-					<div class="space-y-4 text-center">
-						<Clock class="mx-auto h-12 w-12 text-muted-foreground/50" />
-						<div>
-							<p class="text-lg font-medium">No tasks yet</p>
-							<p class="text-sm text-muted-foreground">
-								Create a scheduled task or a webhook to react to server events.
-							</p>
-						</div>
-						<div class="flex justify-center gap-2">
-							<Button onclick={openCreateDialog}>
-								<Plus class="mr-2 h-4 w-4" />
-								New Task
-							</Button>
-						</div>
-					</div>
-				</CardContent>
-			</Card>
-		{:else}
-			<div class="space-y-3">
-				{#each tasks as task (task.id)}
-					{@const TaskIcon = getTaskTypeIcon(task.taskType)}
-					{@const webhookUrlDisplay = getWebhookUrlForDisplay(task)}
-					<Card class="transition-shadow hover:shadow-md">
-						<CardContent class="p-4">
-							<div class="flex items-start gap-4">
-								<div
-									class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10"
-								>
-									<TaskIcon class="h-5 w-5 text-primary" />
-								</div>
-								<div class="min-w-0 flex-1">
-									<div class="mb-1 flex items-center gap-2">
-										<h4 class="truncate font-medium">{task.name}</h4>
-										<Badge
-											variant={task.status === TaskStatus.ENABLED ? 'default' : 'secondary'}
-											class="text-xs"
-										>
-											{task.status === TaskStatus.ENABLED ? 'Enabled' : 'Disabled'}
-										</Badge>
-										<Badge variant="outline" class="text-xs">
-											{getTaskTypeLabel(task.taskType)}
-										</Badge>
-										{#if task.schedule === ScheduleType.EVENT}
-											{#each task.eventTriggers as trigger (trigger)}
-												<Badge variant="outline" class="flex items-center gap-1 text-xs">
-													<Zap class="h-3 w-3" />
-													{getEventTypeLabel(trigger)}
-												</Badge>
-											{/each}
-										{/if}
-									</div>
-									{#if task.description}
-										<p class="mb-2 truncate text-sm text-muted-foreground">{task.description}</p>
-									{/if}
-									{#if webhookUrlDisplay}
-										<div class="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-											<span class="max-w-[400px] truncate font-mono">{webhookUrlDisplay}</span>
-											<Button
-												variant="ghost"
-												size="icon"
-												class="h-5 w-5"
-												onclick={() => copyText(webhookUrlDisplay)}
-											>
-												<Copy class="h-3 w-3" />
-											</Button>
-										</div>
-									{/if}
-									<div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
-										<span class="flex items-center gap-1">
-											<Clock class="h-3 w-3" />
-											{getScheduleLabel(task)}
-										</span>
-										{#if task.nextRun && task.status === TaskStatus.ENABLED && task.schedule !== ScheduleType.EVENT}
-											<span class="flex items-center gap-1">
-												Next: {formatNextRun(task)}
-											</span>
-										{/if}
-										{#if task.lastRun}
-											<span>
-												Last: {new Date(Number(task.lastRun.seconds) * 1000).toLocaleString()}
-											</span>
-										{/if}
-									</div>
-								</div>
-								<div class="flex shrink-0 items-center gap-1">
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => viewHistory(task)}
-										title="View History"
-									>
-										<History class="h-4 w-4" />
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => triggerTask(task)}
-										title="Run Now"
-										disabled={task.status !== TaskStatus.ENABLED}
-									>
-										<Play class="h-4 w-4" />
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => toggleTask(task)}
-										title={task.status === TaskStatus.ENABLED ? 'Disable' : 'Enable'}
-									>
-										{#if task.status === TaskStatus.ENABLED}
-											<Pause class="h-4 w-4" />
-										{:else}
-											<Play class="h-4 w-4" />
-										{/if}
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => openEditDialog(task)}
-										title="Edit"
-									>
-										<Pencil class="h-4 w-4" />
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										class="text-destructive hover:text-destructive"
-										onclick={() => deleteTask(task)}
-										title="Delete"
-									>
-										<Trash2 class="h-4 w-4" />
-									</Button>
-								</div>
+	{:else}
+		<div class="min-h-0 flex-1 overflow-auto p-4">
+			{#if loadError && tasks.length === 0}
+				<CarbonErrorState title="Failed to load tasks" message={loadError} onretry={loadTasks} />
+			{:else if tasks.length === 0}
+				<Card>
+					<CardContent class="py-8">
+						<div class="space-y-4 text-center">
+							<Clock class="mx-auto h-12 w-12 text-muted-foreground/50" />
+							<div>
+								<p class="text-lg font-medium">No tasks yet</p>
+								<p class="text-sm text-muted-foreground">
+									Create a scheduled task or a webhook to react to server events.
+								</p>
 							</div>
-						</CardContent>
-					</Card>
-				{/each}
-			</div>
-		{/if}
-	</div>
-
-	<!-- Create/Edit Dialog -->
-	<Dialog.Root bind:open={showCreateDialog}>
-		<Dialog.Content
-			class="flex h-[80vh]! w-[95vw]! max-w-4xl! flex-col gap-0! overflow-hidden p-0!"
-			showCloseButton={false}
-		>
-			<div class="flex h-full">
-				<!-- Sidebar -->
-				<div class="flex w-56 shrink-0 flex-col border-r bg-muted/30">
-					<div class="border-b p-6">
-						<div class="flex items-center gap-3">
-							<div
-								class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10"
-							>
-								<DialogTaskIcon class="h-6 w-6 text-primary" />
-							</div>
-							<div class="min-w-0 flex-1">
-								<h3 class="truncate font-semibold">
-									{taskName || (selectedTask ? 'Edit Task' : 'New Task')}
-								</h3>
-								<p class="truncate text-sm text-muted-foreground">{getTaskTypeLabel(taskType)}</p>
+							<div class="flex justify-center gap-2">
+								<Button onclick={openCreateDialog}>
+									<Plus class="mr-2 h-4 w-4" />
+									New Task
+								</Button>
 							</div>
 						</div>
-					</div>
-
-					<nav class="flex-1 space-y-1 p-4">
-						{#each dialogSections as section (section.id)}
-							{@const SectionIcon = section.icon}
-							<button
-								onclick={() => (activeSection = section.id)}
-								class="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors {activeSection ===
-								section.id
-									? 'bg-primary text-primary-foreground'
-									: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
-							>
-								<SectionIcon class="h-5 w-5" />
-								<span class="font-medium">{section.label}</span>
-							</button>
-						{/each}
-					</nav>
-				</div>
-
-				<!-- Main Content -->
-				<div class="flex min-w-0 flex-1 flex-col">
-					<!-- Content Header -->
-					<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
-						<div>
-							<h2 class="text-2xl font-semibold tracking-tight">{currentSection.title}</h2>
-							<p class="mt-1 text-muted-foreground">{currentSection.description}</p>
-						</div>
-						<Button
-							variant="ghost"
-							size="icon"
-							onclick={closeDialog}
-							class="h-10 w-10"
-							aria-label="Close dialog"
-						>
-							<X class="h-5 w-5" />
-						</Button>
-					</div>
-
-					<!-- Scrollable Content -->
-					<div class="flex-1 overflow-y-auto p-8">
-						<div class="max-w-2xl space-y-6">
-							{#if activeSection === 'general'}
-								<div class="space-y-3">
-									<Label for="taskName">Task Name *</Label>
-									<Input
-										id="taskName"
-										bind:value={taskName}
-										placeholder="Daily Backup"
-										class="h-11"
-									/>
-								</div>
-
-								<div class="space-y-3">
-									<Label for="taskDescription">Description</Label>
-									<Input
-										id="taskDescription"
-										bind:value={taskDescription}
-										placeholder="Runs every day at midnight"
-										class="h-11"
-									/>
-								</div>
-
-								<div class="space-y-3">
-									<Label>Task Type</Label>
-									<Select.Root
-										type="single"
-										name="taskType"
-										value={taskType.toString()}
-										onValueChange={(v) => {
-											if (v) taskType = parseInt(v) as TaskType;
-										}}
-									>
-										<Select.Trigger class="h-11! w-full">
-											{getTaskTypeLabel(taskType)}
-										</Select.Trigger>
-										<Select.Content>
-											<Select.Item value={TaskType.COMMAND.toString()} label="Command"
-												>Command</Select.Item
-											>
-											<Select.Item value={TaskType.BACKUP.toString()} label="Backup"
-												>Backup</Select.Item
-											>
-											<Select.Item value={TaskType.RESTART.toString()} label="Restart Server"
-												>Restart Server</Select.Item
-											>
-											<Select.Item value={TaskType.START.toString()} label="Start Server"
-												>Start Server</Select.Item
-											>
-											<Select.Item value={TaskType.STOP.toString()} label="Stop Server"
-												>Stop Server</Select.Item
-											>
-											<Select.Item value={TaskType.SCRIPT.toString()} label="Script"
-												>Script</Select.Item
-											>
-											<Select.Item value={TaskType.WEBHOOK.toString()} label="Webhook"
-												>Webhook</Select.Item
-											>
-											<Select.Item
-												value={TaskType.MODPACK_UPDATE.toString()}
-												label="Modpack Auto-Update">Modpack Auto-Update</Select.Item
-											>
-										</Select.Content>
-									</Select.Root>
-								</div>
-
-								{#if taskType === TaskType.COMMAND}
-									<div class="space-y-3">
-										<Label for="command">RCON Command *</Label>
-										<Input
-											id="command"
-											bind:value={command}
-											placeholder="say Hello World!"
-											class="h-11 font-mono"
-										/>
-										<p class="text-sm text-muted-foreground">The command to execute via RCON</p>
-									</div>
-								{:else if taskType === TaskType.SCRIPT}
-									<div class="space-y-3">
-										<Label for="scriptPath">Script Path or Executable *</Label>
-										<Input
-											id="scriptPath"
-											bind:value={scriptPath}
-											placeholder="/data/scripts/cleanup.sh"
-											class="h-11 font-mono"
-										/>
-										<p class="text-sm text-muted-foreground">
-											Path to the script/executable inside the container
-										</p>
-									</div>
-									<div class="space-y-3">
-										<Label for="scriptArgs">Arguments</Label>
-										<Input
-											id="scriptArgs"
-											bind:value={scriptArgs}
-											placeholder="--verbose --level 2"
-											class="h-11 font-mono"
-										/>
-										<p class="text-sm text-muted-foreground">
-											Space-separated arguments to pass to the script/executable
-										</p>
-									</div>
-								{:else if taskType === TaskType.BACKUP}
-									<div class="space-y-3">
-										<Label for="backupName">Backup Name</Label>
-										<Input
-											id="backupName"
-											bind:value={backupName}
-											placeholder={taskName || 'Daily Backup'}
-											class="h-11"
-										/>
-										<p class="text-sm text-muted-foreground">
-											Used as the archive filename prefix. Defaults to the task name.
-										</p>
-									</div>
-									<div class="space-y-3">
-										<Label for="backupPaths">Paths to Include</Label>
-										<Input
-											id="backupPaths"
-											bind:value={backupPaths}
-											placeholder="world, world_nether, world_the_end"
-											class="h-11 font-mono"
-										/>
-										<p class="text-sm text-muted-foreground">
-											Comma-separated paths relative to the server directory. Leave empty to back up
-											the world directory.
-										</p>
-									</div>
-									<label
-										class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
-									>
-										<Switch bind:checked={backupCompress} class="mt-0.5" />
-										<div class="space-y-1">
-											<span class="font-medium">Compress Archive</span>
-											<p class="text-sm text-muted-foreground">
-												Smaller backups at the cost of more CPU while archiving
-											</p>
-										</div>
-									</label>
-									<div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
-										<div class="space-y-3">
-											<Label for="retentionDays">Retention (days)</Label>
-											<Input
-												id="retentionDays"
-												type="number"
-												bind:value={backupRetentionDays}
-												min={0}
-												class="h-11"
-											/>
-											<p class="text-sm text-muted-foreground">
-												Delete backups older than this. 0 = keep forever
-											</p>
-										</div>
-										<div class="space-y-3">
-											<Label for="minBackups">Min Backups</Label>
-											<Input
-												id="minBackups"
-												type="number"
-												bind:value={backupMinBackups}
-												min={0}
-												disabled={backupRetentionDays <= 0}
-												class="h-11"
-											/>
-											<p class="text-sm text-muted-foreground">
-												Never expire by age below this many, even past retention
-											</p>
-										</div>
-										<div class="space-y-3">
-											<Label for="maxBackups">Max Backups</Label>
-											<Input
-												id="maxBackups"
-												type="number"
-												bind:value={backupMaxBackups}
-												min={0}
-												class="h-11"
-											/>
-											<p class="text-sm text-muted-foreground">
-												Hard cap, oldest deleted first. 0 = unlimited
-											</p>
-										</div>
-									</div>
-									<p class="text-sm text-muted-foreground">
-										World saving is automatically paused and flushed while the backup runs, then
-										re-enabled.
-									</p>
-								{:else if taskType === TaskType.WEBHOOK}
-									<div class="space-y-3">
-										<Label for="url">Webhook URL *</Label>
-										<Input
-											id="url"
-											bind:value={webhookUrl}
-											placeholder={isDiscordUrl(webhookUrl)
-												? 'https://discord.com/api/webhooks/...'
-												: 'https://example.com/webhook'}
-											class="h-11 font-mono"
-										/>
-										<p class="text-sm text-muted-foreground">
-											The endpoint the request is sent to. Discord/Slack/Teams/ntfy URLs are
-											auto-detected for the default payload preset.
-										</p>
-									</div>
-								{:else if taskType === TaskType.MODPACK_UPDATE}
-									<div class="space-y-4">
-										<div class="space-y-3">
-											<Label for="gitUrl">Git Repository URL *</Label>
-											<Input
-												id="gitUrl"
-												bind:value={gitUrl}
-												placeholder="https://github.com/organization/modpack-repo.git"
-												class="h-11 font-mono"
-											/>
-											<p class="text-sm text-muted-foreground">
-												GitHub or Git repository containing modpack files, configs, or mods.
-											</p>
-										</div>
-										<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-											<div class="space-y-3">
-												<Label for="gitBranch">Branch / Tag</Label>
-												<Input
-													id="gitBranch"
-													bind:value={gitBranch}
-													placeholder="main"
-													class="h-11 font-mono"
-												/>
-												<p class="text-sm text-muted-foreground">
-													Branch to track (defaults to main).
-												</p>
-											</div>
-											<div class="space-y-3">
-												<Label for="gitTargetSubfolder">Repository Subfolder</Label>
-												<Input
-													id="gitTargetSubfolder"
-													bind:value={gitTargetSubfolder}
-													placeholder="minecraft (optional)"
-													class="h-11 font-mono"
-												/>
-												<p class="text-sm text-muted-foreground">
-													Optional folder inside the repository to sync into the server root.
-												</p>
-											</div>
-										</div>
-										<div class="space-y-3">
-											<Label for="gitAuthToken">Personal Access Token (optional)</Label>
-											<Input
-												id="gitAuthToken"
-												type="password"
-												bind:value={gitAuthToken}
-												placeholder="ghp_xxxxxxxxxxxx"
-												class="h-11 font-mono"
-											/>
-											<p class="text-sm text-muted-foreground">
-												Required only for private GitHub / GitLab repositories.
-											</p>
-										</div>
-										<label
-											class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
-										>
-											<Switch bind:checked={gitStageIntoBatch} class="mt-0.5" />
-											<div class="space-y-1">
-												<span class="font-medium">Stage into the open batch</span>
-												<p class="text-sm text-muted-foreground">
-													The fetched pack joins the server's open update batch. The live pack stays
-													as it is, and this task does not restart the server. The batch window
-													applies the pack with any other staged changes.
-												</p>
-											</div>
-										</label>
-										<label
-											class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
-										>
-											<Switch bind:checked={gitRestartImmediately} class="mt-0.5" />
-											<div class="space-y-1">
-												<span class="font-medium">Restart Immediately on Update</span>
-												<p class="text-sm text-muted-foreground">
-													If enabled, automatically restarts the Minecraft server whenever new
-													commits are pulled. If disabled, new files are synced and restart is
-													deferred to scheduled maintenance.
-												</p>
-											</div>
-										</label>
-									</div>
-								{:else}
-									<div class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-										No additional configuration required for this task type.
-									</div>
-								{/if}
-							{:else if activeSection === 'payload' && taskType === TaskType.WEBHOOK}
-								<div class="flex items-center justify-between">
-									<div>
-										<Label class="text-base">Customize Payload</Label>
-										<p class="mt-0.5 text-sm text-muted-foreground">
-											{#if customizePayload}
-												Using a custom payload template
-											{:else}
-												Using the default {presetLabels[getDefaultPresetKey(webhookUrl)] ||
-													'Generic'} preset
-											{/if}
-										</p>
-									</div>
-									<Switch
-										checked={customizePayload}
-										onCheckedChange={(checked) => {
-											customizePayload = checked;
-											if (checked && !payloadTemplate) {
-												payloadTemplate = getDefaultTemplate(webhookUrl);
-											}
-										}}
-									/>
-								</div>
-
-								<div class={!customizePayload ? 'pointer-events-none opacity-40' : ''}>
-									<p class="mb-1.5 text-sm font-medium text-muted-foreground">Presets</p>
-									<div class="flex flex-wrap gap-1">
-										{#each Object.keys(presetLabels) as key (key)}
-											{#if webhookTemplatePresets[key]}
-												<Button
-													variant="outline"
-													size="sm"
-													class="h-7 text-xs"
-													onclick={() => applyPreset(key)}
-												>
-													{presetLabels[key]}
-												</Button>
-											{/if}
-										{/each}
-									</div>
-								</div>
-
-								<div class={!customizePayload ? 'pointer-events-none opacity-50' : ''}>
-									<CodeEditor
-										value={displayValue}
-										language="json-template"
-										readOnly={!customizePayload}
-										height="340px"
-										onChange={(v) => {
-											if (customizePayload) payloadTemplate = v;
-										}}
-									/>
-								</div>
-
-								<div class={!customizePayload ? 'opacity-40' : ''}>
-									<p class="mb-1 text-sm font-medium text-muted-foreground">Available variables</p>
-									<div
-										class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded border border-border/50 bg-muted/20 p-2 font-mono text-xs text-muted-foreground"
-									>
-										{#each [['{{.event}}', 'Event name'], ['{{.timestamp}}', 'ISO 8601 timestamp'], ['{{.title}}', 'Event title'], ['{{.color}}', 'Color (int, for Discord)'], ['{{.server_id}}', 'Server ID'], ['{{.server_name}}', 'Server name'], ['{{.server_status}}', 'Server status'], ['{{.server_mc_version}}', 'MC version'], ['{{.server_mod_loader}}', 'Mod loader'], ['{{.server_players}}', 'Player count'], ['{{.server_max_players}}', 'Max players'], ['{{.server_port}}', 'Server port'], ['{{.player}}', 'Player name (player join/leave events)']] as [variable, description] (variable)}
-											<button
-												class="cursor-pointer text-left transition-colors hover:text-foreground"
-												title="Copy {variable}"
-												onclick={() => {
-													navigator.clipboard.writeText(variable);
-													toast.success(`Copied ${variable}`);
-												}}>{variable}</button
-											>
-											<span class="font-sans">{description}</span>
-										{/each}
-									</div>
-								</div>
-							{:else if activeSection === 'schedule'}
-								<div class="space-y-3">
-									<Label>Schedule Type</Label>
-									<Select.Root
-										type="single"
-										name="scheduleType"
-										value={scheduleType.toString()}
-										onValueChange={(v) => {
-											if (v) scheduleType = parseInt(v) as ScheduleType;
-										}}
-									>
-										<Select.Trigger class="h-11! w-full">
-											{getScheduleTypeLabel(scheduleType)}
-										</Select.Trigger>
-										<Select.Content>
-											<Select.Item value={ScheduleType.EVENT.toString()} label="On Event"
-												>On Event</Select.Item
-											>
-											<Select.Item value={ScheduleType.CRON.toString()} label="Cron Expression"
-												>Cron Expression</Select.Item
-											>
-											<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed Interval"
-												>Fixed Interval</Select.Item
-											>
-											<Select.Item value={ScheduleType.ONCE.toString()} label="Run Once"
-												>Run Once</Select.Item
-											>
-										</Select.Content>
-									</Select.Root>
-								</div>
-
-								{#if scheduleType === ScheduleType.CRON}
-									<div class="space-y-3">
-										<Label for="cronExpr">Cron Expression *</Label>
-										<Input
-											id="cronExpr"
-											bind:value={cronExpr}
-											placeholder="0 0 * * *"
-											class="h-11 font-mono"
-										/>
-										<p class="text-sm text-muted-foreground">
-											Format: minute hour day month weekday (e.g., "0 0 * * *" for daily at
-											midnight)
-										</p>
-									</div>
-								{:else if scheduleType === ScheduleType.INTERVAL}
-									<div class="space-y-3">
-										<Label for="intervalSecs">Interval (seconds)</Label>
-										<Input
-											id="intervalSecs"
-											type="number"
-											bind:value={intervalSecs}
-											min={60}
-											class="h-11"
-										/>
-										<p class="text-sm text-muted-foreground">
-											Minimum 60 seconds. Current: every {formatInterval(intervalSecs)}
-										</p>
-									</div>
-								{:else if scheduleType === ScheduleType.ONCE}
-									<div class="space-y-3">
-										<Label for="runAt">Run At</Label>
-										<Input id="runAt" type="datetime-local" bind:value={runAt} class="h-11" />
-										<p class="text-sm text-muted-foreground">
-											The task runs once at this time, then is disabled
-										</p>
-									</div>
-								{:else if scheduleType === ScheduleType.EVENT}
-									<div class="space-y-3">
-										<Label>Events *</Label>
-										<div
-											class="grid grid-cols-1 gap-2 rounded-lg border border-border/50 bg-muted/20 p-3"
-										>
-											{#each SERVER_EVENT_TYPES as { type, label, description } (type)}
-												<label
-													class="flex cursor-pointer items-center gap-3 rounded p-2 hover:bg-muted/40"
-												>
-													<Checkbox
-														checked={eventTriggers.includes(type)}
-														onCheckedChange={() => toggleEventTrigger(type)}
-													/>
-													<div>
-														<span class="text-sm font-medium">{label}</span>
-														<p class="text-xs text-muted-foreground">{description}</p>
-													</div>
-												</label>
-											{/each}
-										</div>
-										<p class="text-sm text-muted-foreground">
-											The task runs whenever any selected event fires.
-										</p>
-									</div>
-								{/if}
-							{:else if activeSection === 'advanced'}
-								{#if taskType === TaskType.WEBHOOK}
-									<div class="space-y-3">
-										<Label for="secret">Secret (optional)</Label>
-										<Input
-											id="secret"
-											type="password"
-											bind:value={webhookSecret}
-											placeholder={originalWebhookHasSecret ? '(unchanged)' : 'HMAC signing secret'}
-											class="h-11"
-										/>
-										<p class="text-sm text-muted-foreground">
-											Signs the payload with HMAC-SHA256 so the receiver can verify it.
-										</p>
-									</div>
-
-									<div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
-										<div class="space-y-3">
-											<Label for="maxRetries">Max Retries</Label>
-											<Input
-												id="maxRetries"
-												type="number"
-												bind:value={webhookMaxRetries}
-												min={0}
-												max={10}
-												class="h-11"
-											/>
-											<p class="text-sm text-muted-foreground">
-												Delivery attempts before giving up
-											</p>
-										</div>
-										<div class="space-y-3">
-											<Label for="retryDelayMs">Retry Delay (ms)</Label>
-											<Input
-												id="retryDelayMs"
-												type="number"
-												bind:value={webhookRetryDelayMs}
-												min={100}
-												max={60000}
-												class="h-11"
-											/>
-											<p class="text-sm text-muted-foreground">Wait between delivery attempts</p>
-										</div>
-										<div class="space-y-3">
-											<Label for="webhookTimeout">Timeout (ms)</Label>
-											<Input
-												id="webhookTimeout"
-												type="number"
-												bind:value={webhookTimeoutMs}
-												min={1000}
-												max={30000}
-												class="h-11"
-											/>
-											<p class="text-sm text-muted-foreground">Per-attempt request timeout</p>
-										</div>
-									</div>
-								{:else}
-									<div class="space-y-3">
-										<Label for="timeout">Timeout (seconds)</Label>
-										<Input
-											id="timeout"
-											type="number"
-											bind:value={timeout}
-											min={10}
-											max={3600}
-											class="h-11"
-										/>
-										<p class="text-sm text-muted-foreground">
-											Maximum execution time before the task is cancelled
-										</p>
-									</div>
-
-									<div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
-										<div class="space-y-3">
-											<Label for="retryCount">Retry Count</Label>
-											<Input
-												id="retryCount"
-												type="number"
-												bind:value={retryCount}
-												min={0}
-												max={10}
-												class="h-11"
-											/>
-											<p class="text-sm text-muted-foreground">
-												Times to retry on failure. 0 = no retries
-											</p>
-										</div>
-										<div class="space-y-3">
-											<Label for="retryDelay">Retry Delay (seconds)</Label>
-											<Input
-												id="retryDelay"
-												type="number"
-												bind:value={retryDelay}
-												min={1}
-												class="h-11"
-											/>
-											<p class="text-sm text-muted-foreground">Wait between retry attempts</p>
-										</div>
-									</div>
-
-									<label
-										class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
-									>
-										<Switch bind:checked={requireOnline} class="mt-0.5" />
-										<div class="space-y-1">
-											<span class="font-medium">Require Server Online</span>
-											<p class="text-sm text-muted-foreground">
-												Skip this task when the server is offline
-											</p>
-										</div>
-									</label>
-								{/if}
-							{/if}
-						</div>
-					</div>
-
-					<!-- Footer -->
-					<div class="flex items-center justify-between border-t bg-muted/20 p-4">
-						<Button variant="ghost" onclick={closeDialog}>Cancel</Button>
-						<Button
-							onclick={saveTask}
-							disabled={!taskName.trim() || creating}
-							class="min-w-[120px]"
-						>
-							{#if creating}
-								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-								{selectedTask ? 'Saving...' : 'Creating...'}
-							{:else}
-								{selectedTask ? 'Save Changes' : 'Create Task'}
-							{/if}
-						</Button>
-					</div>
-				</div>
-			</div>
-		</Dialog.Content>
-	</Dialog.Root>
-
-	<!-- History Dialog -->
-	<Dialog.Root bind:open={showHistoryDialog}>
-		<Dialog.Content class="max-h-[80vh] max-w-2xl overflow-y-auto">
-			<Dialog.Header>
-				<Dialog.Title>Task History: {selectedTask?.name}</Dialog.Title>
-				<Dialog.Description>Recent execution history for this task</Dialog.Description>
-			</Dialog.Header>
-
-			{#if historyLoading}
-				<div class="flex items-center justify-center py-8">
-					<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
-				</div>
-			{:else if taskHistory.length === 0}
-				<div class="py-8 text-center text-muted-foreground">
-					<History class="mx-auto mb-4 h-12 w-12 opacity-50" />
-					<p>No execution history yet</p>
-				</div>
+					</CardContent>
+				</Card>
 			{:else}
-				<div class="max-h-96 space-y-2 overflow-y-auto">
-					{#each taskHistory as execution (execution.id)}
-						{@const statusInfo = getExecutionStatusBadge(execution.status)}
-						{@const StatusIcon = statusInfo.icon}
-						<div class="rounded-lg border bg-card p-3">
-							<div class="mb-2 flex items-start justify-between">
-								<div class="flex items-center gap-2">
-									<Badge variant={statusInfo.variant} class={statusInfo.class}>
-										<StatusIcon
-											class="mr-1 h-3 w-3 {execution.status === ExecutionStatus.RUNNING
-												? 'animate-spin'
-												: ''}"
-										/>
-										{getExecutionStatusLabel(execution.status)}
-									</Badge>
-									<span class="text-xs text-muted-foreground">
-										{execution.trigger === 'manual'
-											? 'Manual'
-											: execution.trigger === 'event'
-												? 'Event'
-												: 'Scheduled'}
-									</span>
-								</div>
-								{#if execution.duration}
-									<span class="text-xs text-muted-foreground"
-										>{formatDuration(execution.duration)}</span
+				<div class="space-y-3">
+					{#each tasks as task (task.id)}
+						{@const TaskIcon = getTaskTypeIcon(task.taskType)}
+						{@const webhookUrlDisplay = getWebhookUrlForDisplay(task)}
+						<Card class="transition-shadow hover:shadow-md">
+							<CardContent class="p-4">
+								<div class="flex items-start gap-4">
+									<div
+										class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10"
 									>
-								{/if}
-							</div>
-							<div class="mb-1 text-xs text-muted-foreground">
-								{new Date(Number(execution.startedAt?.seconds || 0) * 1000).toLocaleString()}
-							</div>
-							{#if execution.output}
-								<div
-									class="mt-2 max-h-24 overflow-y-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap"
-								>
-									{execution.output}
+										<TaskIcon class="h-5 w-5 text-primary" />
+									</div>
+									<div class="min-w-0 flex-1">
+										<div class="mb-1 flex items-center gap-2">
+											<h4 class="truncate font-medium">{task.name}</h4>
+											<Badge
+												variant={task.status === TaskStatus.ENABLED ? 'default' : 'secondary'}
+												class="text-xs"
+											>
+												{task.status === TaskStatus.ENABLED ? 'Enabled' : 'Disabled'}
+											</Badge>
+											<Badge variant="outline" class="text-xs">
+												{getTaskTypeLabel(task.taskType)}
+											</Badge>
+											{#if task.schedule === ScheduleType.EVENT}
+												{#each task.eventTriggers as trigger (trigger)}
+													<Badge variant="outline" class="flex items-center gap-1 text-xs">
+														<Zap class="h-3 w-3" />
+														{getEventTypeLabel(trigger)}
+													</Badge>
+												{/each}
+											{/if}
+										</div>
+										{#if task.description}
+											<p class="mb-2 truncate text-sm text-muted-foreground">
+												{task.description}
+											</p>
+										{/if}
+										{#if webhookUrlDisplay}
+											<div class="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+												<span class="max-w-[400px] truncate font-mono">{webhookUrlDisplay}</span>
+												<Button
+													variant="ghost"
+													size="icon"
+													class="h-5 w-5"
+													onclick={() => copyText(webhookUrlDisplay)}
+												>
+													<Copy class="h-3 w-3" />
+												</Button>
+											</div>
+										{/if}
+										<div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
+											<span class="flex items-center gap-1">
+												<Clock class="h-3 w-3" />
+												{getScheduleLabel(task)}
+											</span>
+											{#if task.nextRun && task.status === TaskStatus.ENABLED && task.schedule !== ScheduleType.EVENT}
+												<span class="flex items-center gap-1">
+													Next: {formatNextRun(task)}
+												</span>
+											{/if}
+											{#if task.lastRun}
+												<span>
+													Last: {new Date(Number(task.lastRun.seconds) * 1000).toLocaleString()}
+												</span>
+											{/if}
+										</div>
+									</div>
+									<div class="flex shrink-0 items-center gap-1">
+										<Button
+											variant="ghost"
+											size="icon"
+											onclick={() => viewHistory(task)}
+											title="View History"
+										>
+											<History class="h-4 w-4" />
+										</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											onclick={() => triggerTask(task)}
+											title="Run Now"
+											disabled={task.status !== TaskStatus.ENABLED}
+										>
+											<Play class="h-4 w-4" />
+										</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											onclick={() => toggleTask(task)}
+											title={task.status === TaskStatus.ENABLED ? 'Disable' : 'Enable'}
+										>
+											{#if task.status === TaskStatus.ENABLED}
+												<Pause class="h-4 w-4" />
+											{:else}
+												<Play class="h-4 w-4" />
+											{/if}
+										</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											onclick={() => openEditDialog(task)}
+											title="Edit"
+										>
+											<Pencil class="h-4 w-4" />
+										</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											class="text-destructive hover:text-destructive"
+											onclick={() => deleteTask(task)}
+											title="Delete"
+										>
+											<Trash2 class="h-4 w-4" />
+										</Button>
+									</div>
 								</div>
-							{/if}
-							{#if execution.error}
-								<div class="mt-2 rounded bg-destructive/10 p-2 text-xs text-destructive">
-									{execution.error}
-								</div>
-							{/if}
-						</div>
+							</CardContent>
+						</Card>
 					{/each}
 				</div>
 			{/if}
+		</div>
+	{/if}
+</ServerTabPanel>
 
-			<Dialog.Footer>
-				<Button
-					variant="outline"
-					onclick={() => {
-						showHistoryDialog = false;
-						selectedTask = null;
-						taskHistory = [];
-					}}>Close</Button
-				>
-			</Dialog.Footer>
-		</Dialog.Content>
-	</Dialog.Root>
-{/if}
+<!-- Create/Edit Dialog -->
+<Dialog.Root bind:open={showCreateDialog}>
+	<Dialog.Content
+		class="flex h-[80vh]! w-[95vw]! max-w-4xl! flex-col gap-0! overflow-hidden p-0!"
+		showCloseButton={false}
+	>
+		<div class="flex h-full">
+			<!-- Sidebar -->
+			<div class="flex w-56 shrink-0 flex-col border-r bg-muted/30">
+				<div class="border-b p-6">
+					<div class="flex items-center gap-3">
+						<div
+							class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10"
+						>
+							<DialogTaskIcon class="h-6 w-6 text-primary" />
+						</div>
+						<div class="min-w-0 flex-1">
+							<h3 class="truncate font-semibold">
+								{taskName || (selectedTask ? 'Edit Task' : 'New Task')}
+							</h3>
+							<p class="truncate text-sm text-muted-foreground">{getTaskTypeLabel(taskType)}</p>
+						</div>
+					</div>
+				</div>
+
+				<nav class="flex-1 space-y-1 p-4">
+					{#each dialogSections as section (section.id)}
+						{@const SectionIcon = section.icon}
+						<button
+							onclick={() => (activeSection = section.id)}
+							class="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors {activeSection ===
+							section.id
+								? 'bg-primary text-primary-foreground'
+								: 'text-muted-foreground hover:bg-muted hover:text-foreground'}"
+						>
+							<SectionIcon class="h-5 w-5" />
+							<span class="font-medium">{section.label}</span>
+						</button>
+					{/each}
+				</nav>
+			</div>
+
+			<!-- Main Content -->
+			<div class="flex min-w-0 flex-1 flex-col">
+				<!-- Content Header -->
+				<div class="flex items-center justify-between border-b bg-muted/30 px-8 py-6">
+					<div>
+						<h2 class="text-2xl font-semibold tracking-tight">{currentSection.title}</h2>
+						<p class="mt-1 text-muted-foreground">{currentSection.description}</p>
+					</div>
+					<Button
+						variant="ghost"
+						size="icon"
+						onclick={closeDialog}
+						class="h-10 w-10"
+						aria-label="Close dialog"
+					>
+						<X class="h-5 w-5" />
+					</Button>
+				</div>
+
+				<!-- Scrollable Content -->
+				<div class="flex-1 overflow-y-auto p-8">
+					<div class="max-w-2xl space-y-6">
+						{#if activeSection === 'general'}
+							<div class="space-y-3">
+								<Label for="taskName">Task Name *</Label>
+								<Input
+									id="taskName"
+									bind:value={taskName}
+									placeholder="Daily Backup"
+									class="h-11"
+								/>
+							</div>
+
+							<div class="space-y-3">
+								<Label for="taskDescription">Description</Label>
+								<Input
+									id="taskDescription"
+									bind:value={taskDescription}
+									placeholder="Runs every day at midnight"
+									class="h-11"
+								/>
+							</div>
+
+							<div class="space-y-3">
+								<Label>Task Type</Label>
+								<Select.Root
+									type="single"
+									name="taskType"
+									value={taskType.toString()}
+									onValueChange={(v) => {
+										if (v) taskType = parseInt(v) as TaskType;
+									}}
+								>
+									<Select.Trigger class="h-11! w-full">
+										{getTaskTypeLabel(taskType)}
+									</Select.Trigger>
+									<Select.Content>
+										<Select.Item value={TaskType.COMMAND.toString()} label="Command"
+											>Command</Select.Item
+										>
+										<Select.Item value={TaskType.BACKUP.toString()} label="Backup"
+											>Backup</Select.Item
+										>
+										<Select.Item value={TaskType.RESTART.toString()} label="Restart Server"
+											>Restart Server</Select.Item
+										>
+										<Select.Item value={TaskType.START.toString()} label="Start Server"
+											>Start Server</Select.Item
+										>
+										<Select.Item value={TaskType.STOP.toString()} label="Stop Server"
+											>Stop Server</Select.Item
+										>
+										<Select.Item value={TaskType.SCRIPT.toString()} label="Script"
+											>Script</Select.Item
+										>
+										<Select.Item value={TaskType.WEBHOOK.toString()} label="Webhook"
+											>Webhook</Select.Item
+										>
+										<Select.Item
+											value={TaskType.MODPACK_UPDATE.toString()}
+											label="Modpack Auto-Update">Modpack Auto-Update</Select.Item
+										>
+									</Select.Content>
+								</Select.Root>
+							</div>
+
+							{#if taskType === TaskType.COMMAND}
+								<div class="space-y-3">
+									<Label for="command">RCON Command *</Label>
+									<Input
+										id="command"
+										bind:value={command}
+										placeholder="say Hello World!"
+										class="h-11 font-mono"
+									/>
+									<p class="text-sm text-muted-foreground">The command to execute via RCON</p>
+								</div>
+							{:else if taskType === TaskType.SCRIPT}
+								<div class="space-y-3">
+									<Label for="scriptPath">Script Path or Executable *</Label>
+									<Input
+										id="scriptPath"
+										bind:value={scriptPath}
+										placeholder="/data/scripts/cleanup.sh"
+										class="h-11 font-mono"
+									/>
+									<p class="text-sm text-muted-foreground">
+										Path to the script/executable inside the container
+									</p>
+								</div>
+								<div class="space-y-3">
+									<Label for="scriptArgs">Arguments</Label>
+									<Input
+										id="scriptArgs"
+										bind:value={scriptArgs}
+										placeholder="--verbose --level 2"
+										class="h-11 font-mono"
+									/>
+									<p class="text-sm text-muted-foreground">
+										Space-separated arguments to pass to the script/executable
+									</p>
+								</div>
+							{:else if taskType === TaskType.BACKUP}
+								<div class="space-y-3">
+									<Label for="backupName">Backup Name</Label>
+									<Input
+										id="backupName"
+										bind:value={backupName}
+										placeholder={taskName || 'Daily Backup'}
+										class="h-11"
+									/>
+									<p class="text-sm text-muted-foreground">
+										Used as the archive filename prefix. Defaults to the task name.
+									</p>
+								</div>
+								<div class="space-y-3">
+									<Label for="backupPaths">Paths to Include</Label>
+									<Input
+										id="backupPaths"
+										bind:value={backupPaths}
+										placeholder="world, world_nether, world_the_end"
+										class="h-11 font-mono"
+									/>
+									<p class="text-sm text-muted-foreground">
+										Comma-separated paths relative to the server directory. Leave empty to back up
+										the world directory.
+									</p>
+								</div>
+								<label
+									class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+								>
+									<Switch bind:checked={backupCompress} class="mt-0.5" />
+									<div class="space-y-1">
+										<span class="font-medium">Compress Archive</span>
+										<p class="text-sm text-muted-foreground">
+											Smaller backups at the cost of more CPU while archiving
+										</p>
+									</div>
+								</label>
+								<div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+									<div class="space-y-3">
+										<Label for="retentionDays">Retention (days)</Label>
+										<Input
+											id="retentionDays"
+											type="number"
+											bind:value={backupRetentionDays}
+											min={0}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Delete backups older than this. 0 = keep forever
+										</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="minBackups">Min Backups</Label>
+										<Input
+											id="minBackups"
+											type="number"
+											bind:value={backupMinBackups}
+											min={0}
+											disabled={backupRetentionDays <= 0}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Never expire by age below this many, even past retention
+										</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="maxBackups">Max Backups</Label>
+										<Input
+											id="maxBackups"
+											type="number"
+											bind:value={backupMaxBackups}
+											min={0}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Hard cap, oldest deleted first. 0 = unlimited
+										</p>
+									</div>
+								</div>
+								<p class="text-sm text-muted-foreground">
+									World saving is automatically paused and flushed while the backup runs, then
+									re-enabled.
+								</p>
+							{:else if taskType === TaskType.WEBHOOK}
+								<div class="space-y-3">
+									<Label for="url">Webhook URL *</Label>
+									<Input
+										id="url"
+										bind:value={webhookUrl}
+										placeholder={isDiscordUrl(webhookUrl)
+											? 'https://discord.com/api/webhooks/...'
+											: 'https://example.com/webhook'}
+										class="h-11 font-mono"
+									/>
+									<p class="text-sm text-muted-foreground">
+										The endpoint the request is sent to. Discord/Slack/Teams/ntfy URLs are
+										auto-detected for the default payload preset.
+									</p>
+								</div>
+							{:else if taskType === TaskType.MODPACK_UPDATE}
+								<div class="space-y-4">
+									<div class="space-y-3">
+										<Label for="gitUrl">Git Repository URL *</Label>
+										<Input
+											id="gitUrl"
+											bind:value={gitUrl}
+											placeholder="https://github.com/organization/modpack-repo.git"
+											class="h-11 font-mono"
+										/>
+										<p class="text-sm text-muted-foreground">
+											GitHub or Git repository containing modpack files, configs, or mods.
+										</p>
+									</div>
+									<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+										<div class="space-y-3">
+											<Label for="gitBranch">Branch / Tag</Label>
+											<Input
+												id="gitBranch"
+												bind:value={gitBranch}
+												placeholder="main"
+												class="h-11 font-mono"
+											/>
+											<p class="text-sm text-muted-foreground">
+												Branch to track (defaults to main).
+											</p>
+										</div>
+										<div class="space-y-3">
+											<Label for="gitTargetSubfolder">Repository Subfolder</Label>
+											<Input
+												id="gitTargetSubfolder"
+												bind:value={gitTargetSubfolder}
+												placeholder="minecraft (optional)"
+												class="h-11 font-mono"
+											/>
+											<p class="text-sm text-muted-foreground">
+												Optional folder inside the repository to sync into the server root.
+											</p>
+										</div>
+									</div>
+									<div class="space-y-3">
+										<Label for="gitAuthToken">Personal Access Token (optional)</Label>
+										<Input
+											id="gitAuthToken"
+											type="password"
+											bind:value={gitAuthToken}
+											placeholder="ghp_xxxxxxxxxxxx"
+											class="h-11 font-mono"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Required only for private GitHub / GitLab repositories.
+										</p>
+									</div>
+									<label
+										class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+									>
+										<Switch bind:checked={gitStageIntoBatch} class="mt-0.5" />
+										<div class="space-y-1">
+											<span class="font-medium">Stage into the open batch</span>
+											<p class="text-sm text-muted-foreground">
+												The fetched pack joins the server's open update batch. The live pack stays
+												as it is, and this task does not restart the server. The batch window
+												applies the pack with any other staged changes.
+											</p>
+										</div>
+									</label>
+									<label
+										class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+									>
+										<Switch bind:checked={gitRestartImmediately} class="mt-0.5" />
+										<div class="space-y-1">
+											<span class="font-medium">Restart Immediately on Update</span>
+											<p class="text-sm text-muted-foreground">
+												If enabled, automatically restarts the Minecraft server whenever new commits
+												are pulled. If disabled, new files are synced and restart is deferred to
+												scheduled maintenance.
+											</p>
+										</div>
+									</label>
+								</div>
+							{:else}
+								<div class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+									No additional configuration required for this task type.
+								</div>
+							{/if}
+						{:else if activeSection === 'payload' && taskType === TaskType.WEBHOOK}
+							<div class="flex items-center justify-between">
+								<div>
+									<Label class="text-base">Customize Payload</Label>
+									<p class="mt-0.5 text-sm text-muted-foreground">
+										{#if customizePayload}
+											Using a custom payload template
+										{:else}
+											Using the default {presetLabels[getDefaultPresetKey(webhookUrl)] || 'Generic'}
+											preset
+										{/if}
+									</p>
+								</div>
+								<Switch
+									checked={customizePayload}
+									onCheckedChange={(checked) => {
+										customizePayload = checked;
+										if (checked && !payloadTemplate) {
+											payloadTemplate = getDefaultTemplate(webhookUrl);
+										}
+									}}
+								/>
+							</div>
+
+							<div class={!customizePayload ? 'pointer-events-none opacity-40' : ''}>
+								<p class="mb-1.5 text-sm font-medium text-muted-foreground">Presets</p>
+								<div class="flex flex-wrap gap-1">
+									{#each Object.keys(presetLabels) as key (key)}
+										{#if webhookTemplatePresets[key]}
+											<Button
+												variant="outline"
+												size="sm"
+												class="h-7 text-xs"
+												onclick={() => applyPreset(key)}
+											>
+												{presetLabels[key]}
+											</Button>
+										{/if}
+									{/each}
+								</div>
+							</div>
+
+							<div class={!customizePayload ? 'pointer-events-none opacity-50' : ''}>
+								<CodeEditor
+									value={displayValue}
+									language="json-template"
+									readOnly={!customizePayload}
+									height="340px"
+									onChange={(v) => {
+										if (customizePayload) payloadTemplate = v;
+									}}
+								/>
+							</div>
+
+							<div class={!customizePayload ? 'opacity-40' : ''}>
+								<p class="mb-1 text-sm font-medium text-muted-foreground">Available variables</p>
+								<div
+									class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded border border-border/50 bg-muted/20 p-2 font-mono text-xs text-muted-foreground"
+								>
+									{#each [['{{.event}}', 'Event name'], ['{{.timestamp}}', 'ISO 8601 timestamp'], ['{{.title}}', 'Event title'], ['{{.color}}', 'Color (int, for Discord)'], ['{{.server_id}}', 'Server ID'], ['{{.server_name}}', 'Server name'], ['{{.server_status}}', 'Server status'], ['{{.server_mc_version}}', 'MC version'], ['{{.server_mod_loader}}', 'Mod loader'], ['{{.server_players}}', 'Player count'], ['{{.server_max_players}}', 'Max players'], ['{{.server_port}}', 'Server port'], ['{{.player}}', 'Player name (player join/leave events)']] as [variable, description] (variable)}
+										<button
+											class="cursor-pointer text-left transition-colors hover:text-foreground"
+											title="Copy {variable}"
+											onclick={() => {
+												navigator.clipboard.writeText(variable);
+												toast.success(`Copied ${variable}`);
+											}}>{variable}</button
+										>
+										<span class="font-sans">{description}</span>
+									{/each}
+								</div>
+							</div>
+						{:else if activeSection === 'schedule'}
+							<div class="space-y-3">
+								<Label>Schedule Type</Label>
+								<Select.Root
+									type="single"
+									name="scheduleType"
+									value={scheduleType.toString()}
+									onValueChange={(v) => {
+										if (v) scheduleType = parseInt(v) as ScheduleType;
+									}}
+								>
+									<Select.Trigger class="h-11! w-full">
+										{getScheduleTypeLabel(scheduleType)}
+									</Select.Trigger>
+									<Select.Content>
+										<Select.Item value={ScheduleType.EVENT.toString()} label="On Event"
+											>On Event</Select.Item
+										>
+										<Select.Item value={ScheduleType.CRON.toString()} label="Cron Expression"
+											>Cron Expression</Select.Item
+										>
+										<Select.Item value={ScheduleType.INTERVAL.toString()} label="Fixed Interval"
+											>Fixed Interval</Select.Item
+										>
+										<Select.Item value={ScheduleType.ONCE.toString()} label="Run Once"
+											>Run Once</Select.Item
+										>
+									</Select.Content>
+								</Select.Root>
+							</div>
+
+							{#if scheduleType === ScheduleType.CRON}
+								<div class="space-y-3">
+									<Label for="cronExpr">Cron Expression *</Label>
+									<Input
+										id="cronExpr"
+										bind:value={cronExpr}
+										placeholder="0 0 * * *"
+										class="h-11 font-mono"
+									/>
+									<p class="text-sm text-muted-foreground">
+										Format: minute hour day month weekday (e.g., "0 0 * * *" for daily at midnight)
+									</p>
+								</div>
+							{:else if scheduleType === ScheduleType.INTERVAL}
+								<div class="space-y-3">
+									<Label for="intervalSecs">Interval (seconds)</Label>
+									<Input
+										id="intervalSecs"
+										type="number"
+										bind:value={intervalSecs}
+										min={60}
+										class="h-11"
+									/>
+									<p class="text-sm text-muted-foreground">
+										Minimum 60 seconds. Current: every {formatInterval(intervalSecs)}
+									</p>
+								</div>
+							{:else if scheduleType === ScheduleType.ONCE}
+								<div class="space-y-3">
+									<Label for="runAt">Run At</Label>
+									<Input id="runAt" type="datetime-local" bind:value={runAt} class="h-11" />
+									<p class="text-sm text-muted-foreground">
+										The task runs once at this time, then is disabled
+									</p>
+								</div>
+							{:else if scheduleType === ScheduleType.EVENT}
+								<div class="space-y-3">
+									<Label>Events *</Label>
+									<div
+										class="grid grid-cols-1 gap-2 rounded-lg border border-border/50 bg-muted/20 p-3"
+									>
+										{#each SERVER_EVENT_TYPES as { type, label, description } (type)}
+											<label
+												class="flex cursor-pointer items-center gap-3 rounded p-2 hover:bg-muted/40"
+											>
+												<Checkbox
+													checked={eventTriggers.includes(type)}
+													onCheckedChange={() => toggleEventTrigger(type)}
+												/>
+												<div>
+													<span class="text-sm font-medium">{label}</span>
+													<p class="text-xs text-muted-foreground">{description}</p>
+												</div>
+											</label>
+										{/each}
+									</div>
+									<p class="text-sm text-muted-foreground">
+										The task runs whenever any selected event fires.
+									</p>
+								</div>
+							{/if}
+						{:else if activeSection === 'advanced'}
+							{#if taskType === TaskType.WEBHOOK}
+								<div class="space-y-3">
+									<Label for="secret">Secret (optional)</Label>
+									<Input
+										id="secret"
+										type="password"
+										bind:value={webhookSecret}
+										placeholder={originalWebhookHasSecret ? '(unchanged)' : 'HMAC signing secret'}
+										class="h-11"
+									/>
+									<p class="text-sm text-muted-foreground">
+										Signs the payload with HMAC-SHA256 so the receiver can verify it.
+									</p>
+								</div>
+
+								<div class="grid grid-cols-1 gap-6 sm:grid-cols-3">
+									<div class="space-y-3">
+										<Label for="maxRetries">Max Retries</Label>
+										<Input
+											id="maxRetries"
+											type="number"
+											bind:value={webhookMaxRetries}
+											min={0}
+											max={10}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">Delivery attempts before giving up</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="retryDelayMs">Retry Delay (ms)</Label>
+										<Input
+											id="retryDelayMs"
+											type="number"
+											bind:value={webhookRetryDelayMs}
+											min={100}
+											max={60000}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">Wait between delivery attempts</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="webhookTimeout">Timeout (ms)</Label>
+										<Input
+											id="webhookTimeout"
+											type="number"
+											bind:value={webhookTimeoutMs}
+											min={1000}
+											max={30000}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">Per-attempt request timeout</p>
+									</div>
+								</div>
+							{:else}
+								<div class="space-y-3">
+									<Label for="timeout">Timeout (seconds)</Label>
+									<Input
+										id="timeout"
+										type="number"
+										bind:value={timeout}
+										min={10}
+										max={3600}
+										class="h-11"
+									/>
+									<p class="text-sm text-muted-foreground">
+										Maximum execution time before the task is cancelled
+									</p>
+								</div>
+
+								<div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+									<div class="space-y-3">
+										<Label for="retryCount">Retry Count</Label>
+										<Input
+											id="retryCount"
+											type="number"
+											bind:value={retryCount}
+											min={0}
+											max={10}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">
+											Times to retry on failure. 0 = no retries
+										</p>
+									</div>
+									<div class="space-y-3">
+										<Label for="retryDelay">Retry Delay (seconds)</Label>
+										<Input
+											id="retryDelay"
+											type="number"
+											bind:value={retryDelay}
+											min={1}
+											class="h-11"
+										/>
+										<p class="text-sm text-muted-foreground">Wait between retry attempts</p>
+									</div>
+								</div>
+
+								<label
+									class="flex cursor-pointer items-start gap-4 rounded-lg border p-4 transition-colors hover:bg-muted/50"
+								>
+									<Switch bind:checked={requireOnline} class="mt-0.5" />
+									<div class="space-y-1">
+										<span class="font-medium">Require Server Online</span>
+										<p class="text-sm text-muted-foreground">
+											Skip this task when the server is offline
+										</p>
+									</div>
+								</label>
+							{/if}
+						{/if}
+					</div>
+				</div>
+
+				<!-- Footer -->
+				<div class="flex items-center justify-between border-t bg-muted/20 p-4">
+					<Button variant="ghost" onclick={closeDialog}>Cancel</Button>
+					<Button onclick={saveTask} disabled={!taskName.trim() || creating} class="min-w-[120px]">
+						{#if creating}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							{selectedTask ? 'Saving...' : 'Creating...'}
+						{:else}
+							{selectedTask ? 'Save Changes' : 'Create Task'}
+						{/if}
+					</Button>
+				</div>
+			</div>
+		</div>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- History Dialog -->
+<Dialog.Root bind:open={showHistoryDialog}>
+	<Dialog.Content class="max-h-[80vh] max-w-2xl overflow-y-auto">
+		<Dialog.Header>
+			<Dialog.Title>Task History: {selectedTask?.name}</Dialog.Title>
+			<Dialog.Description>Recent execution history for this task</Dialog.Description>
+		</Dialog.Header>
+
+		{#if historyLoading}
+			<div class="flex items-center justify-center py-8">
+				<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+			</div>
+		{:else if taskHistory.length === 0}
+			<div class="py-8 text-center text-muted-foreground">
+				<History class="mx-auto mb-4 h-12 w-12 opacity-50" />
+				<p>No execution history yet</p>
+			</div>
+		{:else}
+			<div class="max-h-96 space-y-2 overflow-y-auto">
+				{#each taskHistory as execution (execution.id)}
+					{@const statusInfo = getExecutionStatusBadge(execution.status)}
+					{@const StatusIcon = statusInfo.icon}
+					<div class="rounded-lg border bg-card p-3">
+						<div class="mb-2 flex items-start justify-between">
+							<div class="flex items-center gap-2">
+								<Badge variant={statusInfo.variant} class={statusInfo.class}>
+									<StatusIcon
+										class="mr-1 h-3 w-3 {execution.status === ExecutionStatus.RUNNING
+											? 'animate-spin'
+											: ''}"
+									/>
+									{getExecutionStatusLabel(execution.status)}
+								</Badge>
+								<span class="text-xs text-muted-foreground">
+									{execution.trigger === 'manual'
+										? 'Manual'
+										: execution.trigger === 'event'
+											? 'Event'
+											: 'Scheduled'}
+								</span>
+							</div>
+							{#if execution.duration}
+								<span class="text-xs text-muted-foreground"
+									>{formatDuration(execution.duration)}</span
+								>
+							{/if}
+						</div>
+						<div class="mb-1 text-xs text-muted-foreground">
+							{new Date(Number(execution.startedAt?.seconds || 0) * 1000).toLocaleString()}
+						</div>
+						{#if execution.output}
+							<div
+								class="mt-2 max-h-24 overflow-y-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap"
+							>
+								{execution.output}
+							</div>
+						{/if}
+						{#if execution.error}
+							<div class="mt-2 rounded bg-destructive/10 p-2 text-xs text-destructive">
+								{execution.error}
+							</div>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		<Dialog.Footer>
+			<Button
+				variant="outline"
+				onclick={() => {
+					showHistoryDialog = false;
+					selectedTask = null;
+					taskHistory = [];
+				}}>Close</Button
+			>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
 <CarbonConfirm
 	bind:open={confirmOpen}
 	title="Delete task?"

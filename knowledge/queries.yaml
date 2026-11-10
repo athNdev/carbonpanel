@@ -40,6 +40,8 @@
   expect: workflows/frontend-change
 - query: How does the console stop scrollbar layout jump and honor reduced motion?
   expect: workflows/frontend-change
+- query: Which ServerTabPanel and tab-fill contract do server-detail tabs use?
+  expect: workflows/frontend-change
 - query: Which health endpoint fails when the database is down but not when a Docker node is down?
   expect: operations/health-checks
 - query: How does ExtractArchive reach a node without shared storage?

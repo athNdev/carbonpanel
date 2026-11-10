@@ -90,6 +90,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import ServerOperations from '$lib/components/server-operations.svelte';
 	import ServerPlayers from '$lib/components/server-players.svelte';
 	import ServerModules from '$lib/components/server/ServerModules.svelte';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 
 	let server = $state<Server | null>(null);
 	let loading = $state(true);
@@ -386,7 +387,7 @@ one at https://mozilla.org/MPL/2.0/.
 	</div>
 {:else if server}
 	<div
-		class="flex h-full flex-col space-y-6 bg-[#161616] font-sans text-[#f4f4f4]"
+		class="flex min-h-0 flex-1 flex-col gap-6 bg-[#161616] font-sans text-[#f4f4f4]"
 		data-testid="showcase-server-detail"
 	>
 		<!-- Carbon Header & Server Management Actions -->
@@ -864,13 +865,13 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		<!-- Carbon Tabs for Sub-Views with bottom blue line indicator (Requirement 4) -->
-		<div class="flex min-h-0 flex-1 flex-col space-y-4">
+		<div class="flex min-h-0 flex-1 flex-col gap-4">
 			<!-- Tab Bar -->
 			<CarbonTabs
 				tabs={subViewTabs}
 				bind:selectedTab={activeTab}
 				idPrefix="server-detail-tabs"
-				class="sticky top-0 z-20 bg-[#161616]"
+				class="sticky top-0 z-20 shrink-0 bg-[#161616]"
 			/>
 
 			<!-- Tab Content Areas -->
@@ -878,7 +879,7 @@ one at https://mozilla.org/MPL/2.0/.
 				id={`server-detail-tabs-panel-${activeTab}`}
 				role="tabpanel"
 				aria-labelledby={`server-detail-tabs-tab-${activeTab}`}
-				class="motion-fade-in min-h-0 flex-1"
+				class="motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
 			>
 				<!--
 						A throw while a tab panel renders must never be able to wedge the
@@ -892,75 +893,79 @@ one at https://mozilla.org/MPL/2.0/.
 						`svelte:boundary` contains the failure to this panel, keeps the rest
 						of the page interactive, and offers a retry instead of a dead tab.
 					-->
-				<svelte:boundary>
-					{#if activeTab === 'overview'}
-						<div class="rounded-none border border-[#393939] bg-[#262626] p-4 sm:p-6">
-							<h3 class="mb-1 text-base font-semibold text-[#f4f4f4]">Server Settings</h3>
-							<p class="mb-6 text-xs text-[#a8a8a8]">
-								Modify runtime container settings and server parameters
-							</p>
-							<ServerSettings {server} onUpdate={loadServer} />
-						</div>
-					{:else if activeTab === 'console'}
-						<ServerConsole {server} active={activeTab === 'console'} />
-					{:else if activeTab === 'configuration'}
-						<div class="h-full overflow-y-auto">
+				<div class="flex h-full min-h-0 flex-1 flex-col">
+					<svelte:boundary>
+						{#if activeTab === 'overview'}
+							<ServerTabPanel
+								title="Server Settings"
+								description="Modify runtime container settings and server parameters"
+								mode="form"
+							>
+								<div class="p-4 sm:p-6">
+									<ServerSettings {server} onUpdate={loadServer} />
+								</div>
+							</ServerTabPanel>
+						{:else if activeTab === 'console'}
+							<ServerConsole {server} active={activeTab === 'console'} />
+						{:else if activeTab === 'configuration'}
 							<ServerConfiguration {server} />
-						</div>
-					{:else if activeTab === 'mods'}
-						<ServerMods {server} active={activeTab === 'mods'} />
-					{:else if activeTab === 'datapacks'}
-						<ServerDatapacks {server} />
-					{:else if activeTab === 'modules'}
-						<ServerModules {server} active={activeTab === 'modules'} />
-					{:else if activeTab === 'files'}
-						<ServerFiles {server} active={activeTab === 'files'} />
-					{:else if activeTab === 'tasks'}
-						<div class="h-full overflow-y-auto">
+						{:else if activeTab === 'mods'}
+							<ServerMods {server} active={activeTab === 'mods'} />
+						{:else if activeTab === 'datapacks'}
+							<ServerDatapacks {server} />
+						{:else if activeTab === 'modules'}
+							<ServerModules {server} active={activeTab === 'modules'} />
+						{:else if activeTab === 'files'}
+							<ServerFiles {server} active={activeTab === 'files'} />
+						{:else if activeTab === 'tasks'}
 							<ServerTasks {server} active={activeTab === 'tasks'} />
-						</div>
-					{:else if activeTab === 'backups'}
-						<ServerBackups {server} active={activeTab === 'backups'} />
-					{:else if activeTab === 'players'}
-						<ServerPlayers {server} active={activeTab === 'players'} />
-					{:else if activeTab === 'activity'}
-						<div class="h-full space-y-4 overflow-y-auto">
-							<ServerOperations {server} active={activeTab === 'activity'} />
-							<ServerActivity {server} active={activeTab === 'activity'} />
-						</div>
-					{:else if activeTab === 'routing'}
-						<div class="h-full overflow-y-auto">
+						{:else if activeTab === 'backups'}
+							<ServerBackups {server} active={activeTab === 'backups'} />
+						{:else if activeTab === 'players'}
+							<ServerPlayers {server} active={activeTab === 'players'} />
+						{:else if activeTab === 'activity'}
+							<ServerTabPanel
+								title="Activity"
+								description="Lifecycle journal and who did what on this server, newest first"
+								mode="form"
+							>
+								<div class="flex flex-col gap-6 p-4 sm:p-6">
+									<ServerOperations {server} active={activeTab === 'activity'} />
+									<ServerActivity {server} active={activeTab === 'activity'} />
+								</div>
+							</ServerTabPanel>
+						{:else if activeTab === 'routing'}
 							<ServerRouting {server} bind:router={routingInfo} active={activeTab === 'routing'} />
-						</div>
-					{/if}
+						{/if}
 
-					{#snippet failed(error, reset)}
-						<div
-							class="flex min-h-64 flex-col items-center justify-center gap-3 border border-[#393939] bg-[#262626] p-6 text-center"
-							role="alert"
-						>
-							<p class="font-mono text-sm text-[#ff8389]">This tab failed to render</p>
-							<p class="max-w-lg text-xs break-words text-[#a8a8a8]">
-								{error instanceof Error && error.message ? error.message : String(error)}
-							</p>
-							<div class="mt-1 flex items-center gap-2">
-								<button
-									type="button"
-									onclick={reset}
-									class="flex h-8 cursor-pointer items-center border border-[#0f62fe] bg-[#0f62fe] px-4 font-sans text-xs text-white transition-colors hover:bg-[#0353e9]"
-								>
-									Retry
-								</button>
-								<a
-									href={resolve('/servers')}
-									class="flex h-8 items-center border border-[#393939] bg-[#262626] px-4 font-sans text-xs text-[#f4f4f4] transition-colors hover:bg-[#353535]"
-								>
-									Back to servers
-								</a>
+						{#snippet failed(error, reset)}
+							<div
+								class="flex min-h-64 flex-col items-center justify-center gap-3 border border-[#393939] bg-[#262626] p-6 text-center"
+								role="alert"
+							>
+								<p class="font-mono text-sm text-[#ff8389]">This tab failed to render</p>
+								<p class="max-w-lg text-xs break-words text-[#a8a8a8]">
+									{error instanceof Error && error.message ? error.message : String(error)}
+								</p>
+								<div class="mt-1 flex items-center gap-2">
+									<button
+										type="button"
+										onclick={reset}
+										class="flex h-8 cursor-pointer items-center border border-[#0f62fe] bg-[#0f62fe] px-4 font-sans text-xs text-white transition-colors hover:bg-[#0353e9]"
+									>
+										Retry
+									</button>
+									<a
+										href={resolve('/servers')}
+										class="flex h-8 items-center border border-[#393939] bg-[#262626] px-4 font-sans text-xs text-[#f4f4f4] transition-colors hover:bg-[#353535]"
+									>
+										Back to servers
+									</a>
+								</div>
 							</div>
-						</div>
-					{/snippet}
-				</svelte:boundary>
+						{/snippet}
+					</svelte:boundary>
+				</div>
 			</div>
 		</div>
 	</div>

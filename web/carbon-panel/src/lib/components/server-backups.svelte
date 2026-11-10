@@ -19,7 +19,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	} from '$lib/proto/carbonpanel/v1/backup_pb';
 	import { toast } from 'svelte-sonner';
 	import { formatTimestamp } from '$lib/utils/format-time';
-	import { CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
+	import { CarbonButton, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
@@ -159,33 +160,25 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full overflow-y-auto">
-	<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
-		<div class="mb-1 flex items-center justify-between">
-			<h3 class="text-base font-semibold text-[#f4f4f4]">Backups</h3>
-			<div class="flex items-center gap-2">
-				<button
-					type="button"
-					class="inline-flex h-8 cursor-pointer items-center rounded-none bg-[#0f62fe] px-4 text-xs text-white transition-colors hover:bg-[#0353e9] disabled:opacity-50"
-					onclick={createBackupNow}
-					disabled={acting !== null || loading}
-				>
-					{acting === 'create' ? 'Backing up…' : 'Back up now'}
-				</button>
-				<button
-					type="button"
-					class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
-					onclick={loadBackups}
-					disabled={loading}
-				>
-					{loading ? 'Loading…' : 'Refresh'}
-				</button>
-			</div>
-		</div>
-		<p class="mb-6 text-xs text-[#a8a8a8]">
-			Scheduled and on-demand archives with restore and sticky locks
-		</p>
+<ServerTabPanel
+	title="Backups"
+	description="Scheduled and on-demand archives with restore and sticky locks"
+>
+	{#snippet actions()}
+		<CarbonButton
+			kind="primary"
+			size="sm"
+			onclick={createBackupNow}
+			disabled={acting !== null || loading}
+		>
+			{acting === 'create' ? 'Backing up…' : 'Back up now'}
+		</CarbonButton>
+		<CarbonButton kind="secondary" size="sm" onclick={loadBackups} disabled={loading}>
+			{loading ? 'Loading…' : 'Refresh'}
+		</CarbonButton>
+	{/snippet}
 
+	<div class="min-h-0 flex-1 overflow-auto px-6 pb-6">
 		{#if loadError && backups.length === 0}
 			<CarbonErrorState title="Failed to load backups" message={loadError} onretry={loadBackups} />
 		{:else if backups.length === 0}
@@ -250,7 +243,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</table>
 		{/if}
 	</div>
-</div>
+</ServerTabPanel>
 
 <CarbonConfirm
 	bind:open={restoreConfirmOpen}

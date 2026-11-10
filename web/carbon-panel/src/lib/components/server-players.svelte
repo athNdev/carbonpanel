@@ -13,7 +13,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { SendCommandRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 	import { GetFileRequestSchema } from '$lib/proto/carbonpanel/v1/file_pb';
 	import { toast } from 'svelte-sonner';
-	import { CarbonErrorState } from '$lib/components/carbon';
+	import { CarbonButton, CarbonErrorState } from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
@@ -91,35 +92,34 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full overflow-y-auto">
-	<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
-		<div class="mb-1 flex items-center justify-between">
-			<h3 class="text-base font-semibold text-[#f4f4f4]">
-				Players{#if onlineCount > 0}
-					({onlineCount} online){/if}
-			</h3>
-			<button
-				type="button"
-				class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
-				onclick={loadPlayers}
-				disabled={loading}
-			>
-				{loading ? 'Loading…' : 'Refresh'}
-			</button>
+<ServerTabPanel
+	title="Players"
+	description="Live roster with moderation actions (console commands)"
+>
+	{#snippet chip()}
+		{#if onlineCount > 0}
+			<span class="font-mono text-xs text-[#a8a8a8]">{onlineCount} online</span>
+		{/if}
+	{/snippet}
+	{#snippet actions()}
+		<CarbonButton kind="secondary" size="sm" onclick={loadPlayers} disabled={loading}>
+			{loading ? 'Loading…' : 'Refresh'}
+		</CarbonButton>
+	{/snippet}
+	{#snippet toolbar()}
+		<div class="px-4 py-2">
+			<input
+				type="text"
+				placeholder="Search players…"
+				aria-label="Search players"
+				bind:value={search}
+				onkeydown={(e) => e.key === 'Escape' && (search = '')}
+				class="h-8 w-full max-w-xs rounded-none border border-[#393939] bg-[#161616] px-3 text-xs text-[#f4f4f4]"
+			/>
 		</div>
-		<p class="mb-6 text-xs text-[#a8a8a8]">
-			Live roster with moderation actions (console commands)
-		</p>
+	{/snippet}
 
-		<input
-			type="text"
-			placeholder="Search players…"
-			aria-label="Search players"
-			bind:value={search}
-			onkeydown={(e) => e.key === 'Escape' && (search = '')}
-			class="mb-4 h-9 w-full max-w-xs rounded-none border border-[#393939] bg-[#161616] px-3 text-xs text-[#f4f4f4]"
-		/>
-
+	<div class="min-h-0 flex-1 overflow-auto px-6 pb-6">
 		{#if loadError && players.length === 0}
 			<CarbonErrorState title="Failed to load players" message={loadError} onretry={loadPlayers} />
 		{:else if filtered.length === 0}
@@ -161,4 +161,4 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<p class="font-mono text-xs text-[#a8a8a8]">{banned.join(', ')}</p>
 		{/if}
 	</div>
-</div>
+</ServerTabPanel>

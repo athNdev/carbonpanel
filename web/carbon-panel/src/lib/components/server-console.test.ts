@@ -127,9 +127,9 @@ test('Fullscreen console reuses the complete console pane', () => {
 	const content = fs.readFileSync(consolePath, 'utf-8');
 
 	const start = content.indexOf('{#snippet consolePane(expanded: boolean)}');
-	const end = content.indexOf('{/snippet}', start);
-	assert.ok(start !== -1 && end > start, 'Console must share one pane snippet');
-	const pane = content.slice(start, end);
+	const marker = content.search(/\{\/snippet\}\r?\n\r?\n\{#if !fullscreenOpen\}/);
+	assert.ok(start !== -1 && marker > start, 'Console must share one pane snippet');
+	const pane = content.slice(start, marker);
 
 	assert.ok(pane.includes('data-testid="console-send"'), 'Fullscreen must keep the command input');
 	assert.ok(pane.includes('aria-label="Refresh logs"'), 'Fullscreen must keep the toolbar');

@@ -24,7 +24,6 @@ one at https://mozilla.org/MPL/2.0/.
 	import { ResizablePaneGroup, ResizablePane, ResizableHandle } from '$lib/components/ui/resizable';
 	import { toast } from 'svelte-sonner';
 	import {
-		Terminal,
 		Send,
 		Loader2,
 		Download,
@@ -40,7 +39,14 @@ one at https://mozilla.org/MPL/2.0/.
 	import AnsiToHtml from 'ansi-to-html';
 	import { getStringForEnum } from '$lib/utils';
 	import { wsClient } from '$lib/stores/websocket.svelte';
-	import { CarbonConfirm, CarbonModal, CarbonSearch, CarbonTag } from '$lib/components/carbon';
+	import {
+		CarbonButton,
+		CarbonConfirm,
+		CarbonModal,
+		CarbonSearch,
+		CarbonTag
+	} from '$lib/components/carbon';
+	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 
 	const ansiConverter = new AnsiToHtml({
 		fg: '#f4f4f4',
@@ -435,235 +441,223 @@ one at https://mozilla.org/MPL/2.0/.
 {/snippet}
 
 {#snippet consolePane(expanded: boolean)}
-	<ResizablePaneGroup
-		direction="vertical"
-		class="w-full overflow-hidden rounded-none bg-[#161616] font-mono text-[#f4f4f4] {expanded
-			? 'h-full min-h-0 border-0'
-			: 'tab-fill min-h-[320px] border border-[#393939] md:min-h-[450px]'}"
+	<ServerTabPanel
+		title="Server Console"
+		description={expanded ? server.name : 'Live container logs and command input'}
+		fill={!expanded}
+		class={expanded ? 'h-full min-h-0 border-0' : ''}
 	>
-		<ResizablePane defaultSize={78} minSize={30}>
-			<div class="flex h-full flex-col">
-				<!-- Terminal Header -->
-				<div
-					class="flex flex-wrap items-center justify-between gap-y-1 border-b border-[#393939] bg-[#262626] px-4 py-2"
-				>
-					<div class="flex min-w-0 items-center gap-2.5">
-						<Terminal class="h-4 w-4 shrink-0 text-accent-text" />
-						<span
-							class="truncate font-mono text-xs font-semibold tracking-wider text-[#f4f4f4] uppercase"
-						>
-							Server Console
-						</span>
-						{#if expanded}
-							<span class="truncate font-mono text-xs text-[#8d8d8d]">{server.name}</span>
-						{/if}
-						<CarbonTag type={server.status === ServerStatus.RUNNING ? 'green' : 'gray'} size="sm">
-							{getStringForEnum(ServerStatus, server.status)?.toUpperCase()}
-						</CarbonTag>
-						{#if wsConnectionState === 'authenticated'}
-							<Wifi class="h-3.5 w-3.5 {getConnectionColor()}" />
-						{:else}
-							<WifiOff class="h-3.5 w-3.5 {getConnectionColor()}" />
-						{/if}
-						{#if everConnected && wsConnectionState !== 'authenticated'}
-							<CarbonTag type="yellow" size="sm">
-								<span class="motion-pulse">RECONNECTING</span>
-							</CarbonTag>
-						{/if}
-						{#if wsConnectionState === 'disconnected'}
-							<button
-								type="button"
-								onclick={() => wsClient.reconnect()}
-								class="cursor-pointer font-mono text-xs text-[#78a9ff] hover:text-[#a6c8ff] hover:underline"
-								aria-label="Reconnect WebSocket"
-							>
-								Reconnect
-							</button>
-						{/if}
-					</div>
-
-					<!-- Toolbar Icon Buttons -->
-					<div class="flex items-center gap-1">
-						<button
-							type="button"
-							onclick={fetchLogs}
-							disabled={loading}
-							aria-label="Refresh logs"
-							title="Refresh logs"
-							class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white focus-visible:outline-2 focus-visible:outline-[#0f62fe] disabled:cursor-not-allowed disabled:opacity-40"
-						>
-							{#if loading}
-								<Loader2 class="h-3.5 w-3.5 animate-spin" />
-							{:else}
-								<RefreshCw class="h-3.5 w-3.5" />
-							{/if}
-						</button>
-
-						<button
-							type="button"
-							onclick={uploadToMCLogs}
-							disabled={uploading}
-							aria-label="Upload logs to mclo.gs"
-							title="Upload logs to mclo.gs"
-							class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white focus-visible:outline-2 focus-visible:outline-[#0f62fe] disabled:cursor-not-allowed disabled:opacity-40"
-						>
-							{#if uploading}
-								<Loader2 class="h-3.5 w-3.5 animate-spin" />
-							{:else}
-								<Upload class="h-3.5 w-3.5" />
-							{/if}
-						</button>
-
-						<button
-							type="button"
-							onclick={downloadLogs}
-							disabled={logEntries.length === 0}
-							aria-label="Download raw log"
-							title="Download raw log"
-							class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white focus-visible:outline-2 focus-visible:outline-[#0f62fe] disabled:opacity-40"
-						>
-							<Download class="h-3.5 w-3.5" />
-						</button>
-
-						<button
-							type="button"
-							onclick={() => (clearConfirmOpen = true)}
-							disabled={logEntries.length === 0}
-							aria-label="Clear log buffer"
-							title="Clear viewed buffer (daemon logs are kept)"
-							class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-[#ff8389] focus-visible:outline-2 focus-visible:outline-[#0f62fe] disabled:opacity-40"
-						>
-							<Trash2 class="h-3.5 w-3.5" />
-						</button>
-
-						<button
-							type="button"
-							onclick={() => (fullscreenOpen = !fullscreenOpen)}
-							aria-label={expanded ? 'Exit fullscreen console' : 'Expand console'}
-							title={expanded ? 'Exit fullscreen (Esc)' : 'Expand console'}
-							class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white focus-visible:outline-2 focus-visible:outline-[#0f62fe] disabled:cursor-not-allowed disabled:opacity-40"
-						>
-							{#if expanded}
-								<Minimize2 class="h-3.5 w-3.5" />
-							{:else}
-								<Maximize2 class="h-3.5 w-3.5" />
-							{/if}
-						</button>
-						{#if expanded}
-							<button
-								type="button"
-								onclick={() => (fullscreenOpen = false)}
-								aria-label="Close fullscreen console"
-								title="Close (Esc)"
-								class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white focus-visible:outline-2 focus-visible:outline-[#0f62fe]"
-							>
-								<X class="h-4 w-4" />
-							</button>
-						{/if}
-					</div>
-				</div>
-
-				<!-- Log filter -->
-				<div class="flex items-center gap-2 border-b border-[#393939] bg-[#1e1e1e] px-4 py-2">
-					<div class="flex-1">
-						<CarbonSearch bind:value={searchQuery} placeholder="Filter logs..." size="sm" />
-					</div>
-					{#if searchQuery.trim() !== ''}
-						<span class="font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
-							{filteredLogs.length} of {logEntries.length}
-						</span>
-					{/if}
-				</div>
-
-				<!-- Assertive error announcements (MINE-135); visually hidden -->
-				<div class="sr-only" role="alert">{alertMessage}</div>
-
-				<!-- Terminal Output Stream: role=log is implicitly aria-live=polite -->
-				<div
-					role="log"
-					aria-live="polite"
-					aria-label="Server console output"
-					class="custom-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-auto bg-[#161616] p-4 selection:bg-[#0f62fe] selection:text-white"
-					bind:this={scrollAreaRef}
-					onscroll={handleScroll}
-				>
-					{@render logList(filteredLogs)}
-				</div>
-			</div>
-		</ResizablePane>
-
-		<ResizableHandle class="bg-[#393939] transition-colors hover:bg-[#525252]" />
-
-		<!-- Carbon Command Input Bar -->
-		<div class="flex flex-col bg-[#262626]">
-			<div class="flex shrink-0 items-center gap-2 p-3">
-				<span class="font-mono text-sm font-bold text-accent-text select-none">$</span>
-				<input
-					type="text"
-					placeholder={server.status === ServerStatus.CREATING
-						? 'Server is creating...'
-						: server.status === ServerStatus.STARTING
-							? 'Server is starting...'
-							: server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY
-								? 'Enter Minecraft server command (↑↓ recalls history)...'
-								: 'Server must be active to execute commands'}
-					bind:value={command}
-					disabled={server.status !== ServerStatus.RUNNING &&
-						server.status !== ServerStatus.UNHEALTHY}
-					onkeydown={handleCommandKey}
-					class="h-9 flex-1 rounded-none border border-[#525252] bg-[#161616] px-3 font-mono text-xs text-[#f4f4f4] placeholder-[#6f6f6f] transition-all focus:border-[#0f62fe] focus:outline-none disabled:opacity-40"
-				/>
+		{#snippet chip()}
+			<CarbonTag type={server.status === ServerStatus.RUNNING ? 'green' : 'gray'} size="sm">
+				{getStringForEnum(ServerStatus, server.status)?.toUpperCase()}
+			</CarbonTag>
+			{#if wsConnectionState === 'authenticated'}
+				<Wifi class="h-3.5 w-3.5 {getConnectionColor()}" />
+			{:else}
+				<WifiOff class="h-3.5 w-3.5 {getConnectionColor()}" />
+			{/if}
+			{#if everConnected && wsConnectionState !== 'authenticated'}
+				<CarbonTag type="yellow" size="sm">
+					<span class="motion-pulse">RECONNECTING</span>
+				</CarbonTag>
+			{/if}
+			{#if wsConnectionState === 'disconnected'}
 				<button
 					type="button"
-					data-testid="console-send"
-					onclick={sendCommand}
-					disabled={(server.status !== ServerStatus.RUNNING &&
-						server.status !== ServerStatus.UNHEALTHY) ||
-						!command.trim() ||
-						loading}
-					class="flex h-9 cursor-pointer items-center gap-1.5 rounded-none bg-[#0f62fe] px-4 font-mono text-xs text-white transition-colors hover:bg-[#0353e9] active:bg-[#002d9c] disabled:bg-[#393939] disabled:opacity-40"
+					onclick={() => wsClient.reconnect()}
+					class="cursor-pointer font-mono text-xs text-[#78a9ff] hover:text-[#a6c8ff] hover:underline"
+					aria-label="Reconnect WebSocket"
 				>
-					<Send class="h-3.5 w-3.5" />
-					<span>Send</span>
+					Reconnect
 				</button>
-			</div>
-
-			<!-- Status / Config Footer -->
-			<div
-				class="flex shrink-0 items-center justify-between border-t border-[#393939] bg-[#161616] px-3 py-1.5 font-mono text-xs text-[#8d8d8d]"
+			{/if}
+		{/snippet}
+		{#snippet actions()}
+			<CarbonButton
+				kind="ghost"
+				size="sm"
+				iconOnly
+				onclick={fetchLogs}
+				disabled={loading}
+				aria-label="Refresh logs"
+				title="Refresh logs"
 			>
-				<div class="flex items-center gap-4">
-					<label class="flex cursor-pointer items-center gap-2 select-none">
-						<input
-							type="checkbox"
-							bind:checked={autoScroll}
-							class="h-3.5 w-3.5 rounded-none accent-[#0f62fe]"
-						/>
-						<span>Auto-scroll</span>
-					</label>
-					<div class="flex items-center gap-1.5">
-						<span>Tail:</span>
-						<select
-							bind:value={tailLines}
-							onchange={handleTailChange}
-							class="h-6 rounded-none border border-[#393939] bg-[#262626] px-1.5 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
-						>
-							<option value={100}>100</option>
-							<option value={500}>500</option>
-							<option value={1000}>1000</option>
-							<option value={2000}>2000</option>
-						</select>
-					</div>
-					{#if expanded}
-						<span class="hidden font-mono text-xs text-[#6f6f6f] sm:inline">Esc closes</span>
-					{/if}
+				{#if loading}
+					<Loader2 class="h-3.5 w-3.5 animate-spin" />
+				{:else}
+					<RefreshCw class="h-3.5 w-3.5" />
+				{/if}
+			</CarbonButton>
+			<CarbonButton
+				kind="ghost"
+				size="sm"
+				iconOnly
+				onclick={uploadToMCLogs}
+				disabled={uploading}
+				aria-label="Upload logs to mclo.gs"
+				title="Upload logs to mclo.gs"
+			>
+				{#if uploading}
+					<Loader2 class="h-3.5 w-3.5 animate-spin" />
+				{:else}
+					<Upload class="h-3.5 w-3.5" />
+				{/if}
+			</CarbonButton>
+			<CarbonButton
+				kind="ghost"
+				size="sm"
+				iconOnly
+				onclick={downloadLogs}
+				disabled={logEntries.length === 0}
+				aria-label="Download raw log"
+				title="Download raw log"
+			>
+				<Download class="h-3.5 w-3.5" />
+			</CarbonButton>
+			<CarbonButton
+				kind="ghost"
+				size="sm"
+				iconOnly
+				onclick={() => (clearConfirmOpen = true)}
+				disabled={logEntries.length === 0}
+				aria-label="Clear log buffer"
+				title="Clear viewed buffer (daemon logs are kept)"
+			>
+				<Trash2 class="h-3.5 w-3.5" />
+			</CarbonButton>
+			<CarbonButton
+				kind="ghost"
+				size="sm"
+				iconOnly
+				onclick={() => (fullscreenOpen = !fullscreenOpen)}
+				aria-label={expanded ? 'Exit fullscreen console' : 'Expand console'}
+				title={expanded ? 'Exit fullscreen (Esc)' : 'Expand console'}
+			>
+				{#if expanded}
+					<Minimize2 class="h-3.5 w-3.5" />
+				{:else}
+					<Maximize2 class="h-3.5 w-3.5" />
+				{/if}
+			</CarbonButton>
+			{#if expanded}
+				<CarbonButton
+					kind="ghost"
+					size="sm"
+					iconOnly
+					onclick={() => (fullscreenOpen = false)}
+					aria-label="Close fullscreen console"
+					title="Close (Esc)"
+				>
+					<X class="h-4 w-4" />
+				</CarbonButton>
+			{/if}
+		{/snippet}
+		{#snippet toolbar()}
+			<div class="flex items-center gap-2 px-4 py-2">
+				<div class="flex-1">
+					<CarbonSearch bind:value={searchQuery} placeholder="Filter logs..." size="sm" />
 				</div>
-				<div class="font-mono text-xs text-[#8d8d8d]">
-					{logEntries.length} lines in viewed buffer
+				{#if searchQuery.trim() !== ''}
+					<span class="font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
+						{filteredLogs.length} of {logEntries.length}
+					</span>
+				{/if}
+			</div>
+		{/snippet}
+		<ResizablePaneGroup
+			direction="vertical"
+			class="h-full min-h-0 w-full overflow-hidden rounded-none bg-[#161616] font-mono text-[#f4f4f4]"
+		>
+			<ResizablePane defaultSize={78} minSize={30}>
+				<div class="flex h-full min-h-0 flex-col">
+					<div class="sr-only" role="alert">{alertMessage}</div>
+					<!-- Terminal Output Stream: role=log is implicitly aria-live=polite -->
+					<div
+						role="log"
+						aria-live="polite"
+						aria-label="Server console output"
+						class="custom-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-auto bg-[#161616] p-4 selection:bg-[#0f62fe] selection:text-white"
+						bind:this={scrollAreaRef}
+						onscroll={handleScroll}
+					>
+						{@render logList(filteredLogs)}
+					</div>
+				</div>
+			</ResizablePane>
+
+			<ResizableHandle class="bg-[#393939] transition-colors hover:bg-[#525252]" />
+
+			<!-- Carbon Command Input Bar -->
+			<div class="flex flex-col bg-[#262626]">
+				<div class="flex shrink-0 items-center gap-2 p-3">
+					<span class="font-mono text-sm font-bold text-accent-text select-none">$</span>
+					<input
+						type="text"
+						placeholder={server.status === ServerStatus.CREATING
+							? 'Server is creating...'
+							: server.status === ServerStatus.STARTING
+								? 'Server is starting...'
+								: server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY
+									? 'Enter Minecraft server command (↑↓ recalls history)...'
+									: 'Server must be active to execute commands'}
+						bind:value={command}
+						disabled={server.status !== ServerStatus.RUNNING &&
+							server.status !== ServerStatus.UNHEALTHY}
+						onkeydown={handleCommandKey}
+						class="h-9 flex-1 rounded-none border border-[#525252] bg-[#161616] px-3 font-mono text-xs text-[#f4f4f4] placeholder-[#6f6f6f] transition-all focus:border-[#0f62fe] focus:outline-none disabled:opacity-40"
+					/>
+					<button
+						type="button"
+						data-testid="console-send"
+						onclick={sendCommand}
+						disabled={(server.status !== ServerStatus.RUNNING &&
+							server.status !== ServerStatus.UNHEALTHY) ||
+							!command.trim() ||
+							loading}
+						class="flex h-9 cursor-pointer items-center gap-1.5 rounded-none bg-[#0f62fe] px-4 font-mono text-xs text-white transition-colors hover:bg-[#0353e9] active:bg-[#002d9c] disabled:bg-[#393939] disabled:opacity-40"
+					>
+						<Send class="h-3.5 w-3.5" />
+						<span>Send</span>
+					</button>
+				</div>
+
+				<!-- Status / Config Footer -->
+				<div
+					class="flex shrink-0 items-center justify-between border-t border-[#393939] bg-[#161616] px-3 py-1.5 font-mono text-xs text-[#8d8d8d]"
+				>
+					<div class="flex items-center gap-4">
+						<label class="flex cursor-pointer items-center gap-2 select-none">
+							<input
+								type="checkbox"
+								bind:checked={autoScroll}
+								class="h-3.5 w-3.5 rounded-none accent-[#0f62fe]"
+							/>
+							<span>Auto-scroll</span>
+						</label>
+						<div class="flex items-center gap-1.5">
+							<span>Tail:</span>
+							<select
+								bind:value={tailLines}
+								onchange={handleTailChange}
+								class="h-6 rounded-none border border-[#393939] bg-[#262626] px-1.5 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+							>
+								<option value={100}>100</option>
+								<option value={500}>500</option>
+								<option value={1000}>1000</option>
+								<option value={2000}>2000</option>
+							</select>
+						</div>
+						{#if expanded}
+							<span class="hidden font-mono text-xs text-[#6f6f6f] sm:inline">Esc closes</span>
+						{/if}
+					</div>
+					<div class="font-mono text-xs text-[#8d8d8d]">
+						{logEntries.length} lines in viewed buffer
+					</div>
 				</div>
 			</div>
-		</div>
-	</ResizablePaneGroup>
+		</ResizablePaneGroup>
+	</ServerTabPanel>
 {/snippet}
 
 {#if !fullscreenOpen}
