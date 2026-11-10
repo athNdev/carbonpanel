@@ -349,8 +349,8 @@ func TestSendCommand_NilExecutorHandledGracefully(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when executor is nil, got nil")
 	}
-	if !strings.Contains(err.Error(), "no docker executor available") {
-		t.Errorf("expected 'no docker executor available', got: %v", err)
+	if !errors.Is(err, docker.ErrNoClient) {
+		t.Errorf("expected ErrNoClient, got: %v", err)
 	}
 }
 

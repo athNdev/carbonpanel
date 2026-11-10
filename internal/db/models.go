@@ -713,6 +713,10 @@ type ActivityLog struct {
 	SubjectTyp string `json:"subject_type" gorm:"index;column:subject_type"` // e.g. "server", "user"
 	SubjectID  string `json:"subject_id" gorm:"index;column:subject_id"`
 	Properties string `json:"properties" gorm:"type:text"` // JSON details
+	// RequestID is the client request id of a journaled lifecycle operation,
+	// so an activity row can be joined to the matching journal row. Empty
+	// when the event is not tied to a journaled mutation.
+	RequestID string `json:"request_id" gorm:"index;size:128;column:request_id"`
 
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime;index"`
 }

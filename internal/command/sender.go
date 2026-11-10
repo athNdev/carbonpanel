@@ -49,10 +49,6 @@ func NewSender(store *storage.Store, cfg *config.Config, dockerExec DockerExecut
 // commands are not silently sent to the wrong (local) daemon for a remote node.
 func (s *Sender) resolveExecutor(nodeID string) (DockerExecutor, error) {
 	executor, err := docker.NewExecutorLocator(s.pool, s.docker, s.store).ExecutorFor(context.Background(), nodeID)
-	if errors.Is(err, docker.ErrNoClient) {
-		// Preserve SendCommand's explicit "no docker executor available" path.
-		return nil, nil
-	}
 	if err != nil {
 		return nil, fmt.Errorf("docker executor unavailable for node %q: %w", nodeID, err)
 	}

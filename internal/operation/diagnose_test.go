@@ -210,6 +210,21 @@ func TestDescribeHandlesAnEmptyOperation(t *testing.T) {
 	}
 }
 
+func TestDescribeExposesTheClientRequestID(t *testing.T) {
+	o := op(db.ServerOperationComplete)
+	o.RequestKey = StorageKey("client-req", o.Kind)
+	view := DescribeAt(o, atRow)
+	if view.RequestID != "client-req" {
+		t.Fatalf("request id = %q, want client-req so activity can join the journal row", view.RequestID)
+	}
+
+	generated := op(db.ServerOperationFailed)
+	generated.RequestKey = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	if got := DescribeAt(generated, atRow).RequestID; got != generated.RequestKey {
+		t.Fatalf("generated key = %q, want the stored key", got)
+	}
+}
+
 func TestTrimRequestKey(t *testing.T) {
 	if got := TrimRequestKey("short"); got != "short" {
 		t.Errorf("TrimRequestKey(short) = %q", got)

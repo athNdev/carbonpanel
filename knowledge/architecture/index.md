@@ -10,6 +10,7 @@
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.
 - [Remote storage transport](remote-storage-transport.md) — JSON accessor worker and Docker attach path for nodes without shared controller storage.
 - [RPC contract](rpc-contract.md) — Proto definitions are the single API contract for the backend, console and CLI.
+- [Runtime lifecycle and world-data seams](runtime-seams.md) — Locator, lifecycle handle, idle-power module, route PlanFor and worldstore are the five stable architecture seams.
 - [Runtime model](runtime.md) — The daemon owns the API, console, proxy, scheduler and SQLite, and starts them from cmd/carbon-panel.
 - [Scheduler](scheduler.md) — Cron and lifecycle tasks run in the controller and surface progress over the WebSocket hub.
 - [Server data ownership](server-data-ownership.md) — The panel and the game container share a bind mount but not a uid, so anything the panel writes must be handed to the game container's user.

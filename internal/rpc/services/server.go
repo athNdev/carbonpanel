@@ -368,13 +368,13 @@ func (s *ServerService) SetPlacementEngine(engine *docker.PlacementEngine) {
 
 // auditPower records a server power event in the audit trail (MINE-141).
 // Audit failures are logged, never returned.
-func (s *ServerService) auditPower(ctx context.Context, ip, event, serverID string) {
-	s.auditServerLifecycle(ctx, ip, event, serverID)
+func (s *ServerService) auditPower(ctx context.Context, ip, event, serverID, requestID string) {
+	s.auditServerLifecycle(ctx, ip, event, serverID, requestID)
 }
 
 // auditServerLifecycle records a server lifecycle event in the audit trail (MINE-141, SEC-3).
 // Audit failures are logged, never returned.
-func (s *ServerService) auditServerDelete(ctx context.Context, ip string, server *storage.Server, keepData, detach bool) {
+func (s *ServerService) auditServerDelete(ctx context.Context, ip string, server *storage.Server, keepData, detach bool, requestID string) {
 	if server == nil {
 		return
 	}
@@ -401,12 +401,13 @@ func (s *ServerService) auditServerDelete(ctx context.Context, ip string, server
 		SubjectTyp: "server",
 		SubjectID:  server.ID,
 		Properties: string(props),
+		RequestID:  strings.TrimSpace(requestID),
 	}); err != nil {
 		s.log.Error("Audit log failed for %s: %v", activity.EventServerDelete, err)
 	}
 }
 
-func (s *ServerService) auditServerLifecycle(ctx context.Context, ip, event, serverID string) {
+func (s *ServerService) auditServerLifecycle(ctx context.Context, ip, event, serverID, requestID string) {
 	actorID, actorName := "", ""
 	if u := auth.GetUserFromContext(ctx); u != nil {
 		actorID, actorName = u.ID, u.Username
@@ -418,6 +419,7 @@ func (s *ServerService) auditServerLifecycle(ctx context.Context, ip, event, ser
 		Event:      event,
 		SubjectTyp: "server",
 		SubjectID:  serverID,
+		RequestID:  strings.TrimSpace(requestID),
 	}); err != nil {
 		s.log.Error("Audit log failed for %s: %v", event, err)
 	}
@@ -1608,7 +1610,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	transitionHeld = false // ownership transferred to the asynchronous task
 
 	peerIP := req.Peer().Addr
-	s.auditServerLifecycle(ctx, peerIP, activity.EventServerCreate, server.ID)
+	s.auditServerLifecycle(ctx, peerIP, activity.EventServerCreate, server.ID, requestID)
 	if docker.IsPrivilegedDockerOverride(msg.DockerOverrides) {
 		s.auditPrivilegedOverrides(ctx, peerIP, server.ID, msg.DockerOverrides)
 	}
@@ -1921,7 +1923,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			s.auditServerImage(ctx, peerIP, server.ID, originalDockerImage, server.DockerImage, server.AppliedImageID, server.AppliedRepoDigest, imageApplied)
 		}()
 	}
-	s.auditServerLifecycle(ctx, peerIP, activity.EventServerUpdate, server.ID)
+	s.auditServerLifecycle(ctx, peerIP, activity.EventServerUpdate, server.ID, "")
 	if docker.IsPrivilegedDockerOverride(msg.DockerOverrides) {
 		s.auditPrivilegedOverrides(ctx, peerIP, server.ID, msg.DockerOverrides)
 	}
@@ -2136,7 +2138,7 @@ func (s *ServerService) DeleteServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	s.auditServerDelete(ctx, peerIP, server, keepData, detach)
+	s.auditServerDelete(ctx, peerIP, server, keepData, detach, requestID)
 
 	return connect.NewResponse(&v1.DeleteServerResponse{}), nil
 }
@@ -2516,7 +2518,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 	// so create, unpause, and this RPC share one announcement.
 
 	// Audit trail (MINE-141): never break the op on audit failure.
-	s.auditPower(ctx, req.Peer().Addr, activity.EventServerStart, server.ID)
+	s.auditPower(ctx, req.Peer().Addr, activity.EventServerStart, server.ID, requestID)
 
 	return connect.NewResponse(&v1.StartServerResponse{
 		Status: "starting",
@@ -2611,7 +2613,7 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 				ServerID: server.ID,
 			})
 		}
-		s.auditPower(ctx, req.Peer().Addr, activity.EventServerStop, server.ID)
+		s.auditPower(ctx, req.Peer().Addr, activity.EventServerStop, server.ID, requestID)
 		return connect.NewResponse(&v1.StopServerResponse{
 			Status: "stopped",
 		}), nil
@@ -2691,7 +2693,7 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 	}
 
 	// Audit trail (MINE-141): never break the op on audit failure.
-	s.auditPower(ctx, req.Peer().Addr, activity.EventServerStop, server.ID)
+	s.auditPower(ctx, req.Peer().Addr, activity.EventServerStop, server.ID, requestID)
 
 	return connect.NewResponse(&v1.StopServerResponse{
 		Status: "stopped",
@@ -2839,7 +2841,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 				ServerID: server.ID,
 			})
 		}
-		s.auditPower(ctx, req.Peer().Addr, activity.EventServerRestart, server.ID)
+		s.auditPower(ctx, req.Peer().Addr, activity.EventServerRestart, server.ID, requestID)
 		return connect.NewResponse(&v1.RestartServerResponse{Status: "starting"}), nil
 	}
 	// If container doesn't exist, create it and start it
@@ -2989,7 +2991,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		}
 	}
 
-	s.auditPower(ctx, req.Peer().Addr, activity.EventServerRestart, server.ID)
+	s.auditPower(ctx, req.Peer().Addr, activity.EventServerRestart, server.ID, requestID)
 
 	return connect.NewResponse(&v1.RestartServerResponse{
 		Status: "restarting",

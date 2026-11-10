@@ -11,6 +11,10 @@
 // evidence for a feature nobody can find. CheckMatrix resolves every reference
 // and reports the ones that no longer exist, so the matrix cannot drift away
 // from the repository without failing a test.
+//
+// CheckRecordedSeams additionally requires DESIGN.md to cite the five
+// architecture seam packages. A rename of locator, transition, idle, PlanFor
+// or worldstore fails this package's tests.
 package docscheck
 
 import (
@@ -74,6 +78,21 @@ var (
 	rowID = regexp.MustCompile(`^\|\s*(O\d{2})\s*—`)
 )
 
+// RecordedSeam is one architecture package DESIGN.md must name.
+type RecordedSeam struct {
+	Name string
+	Path string
+}
+
+// RecordedSeams are the five landed runtime, lifecycle and world-data seams.
+var RecordedSeams = []RecordedSeam{
+	{Name: "Locator", Path: "internal/docker/locator.go"},
+	{Name: "lifecycle handle", Path: "internal/docker/transition.go"},
+	{Name: "idle-power module", Path: "internal/docker/idle.go"},
+	{Name: "route PlanFor", Path: "internal/proxy/plan.go"},
+	{Name: "worldstore", Path: "internal/worldstore"},
+}
+
 // Problem is one matrix defect with the row it came from.
 type Problem struct {
 	Row    string
@@ -82,6 +101,34 @@ type Problem struct {
 
 // String renders the problem for a test failure message.
 func (p Problem) String() string { return p.Row + ": " + p.Detail }
+
+// CheckRecordedSeams verifies that DESIGN.md cites each architecture seam
+// package and that those paths still exist under root.
+func CheckRecordedSeams(root, designPath string) ([]Problem, error) {
+	body, err := os.ReadFile(filepath.Join(root, designPath))
+	if err != nil {
+		return nil, err
+	}
+	text := string(body)
+	var problems []Problem
+	for _, seam := range RecordedSeams {
+		cite := "`" + seam.Path + "`"
+		if !strings.Contains(text, cite) {
+			problems = append(problems, Problem{
+				Row:    "DESIGN.md",
+				Detail: fmt.Sprintf("missing citation for %s seam %q", seam.Name, seam.Path),
+			})
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(seam.Path))); err != nil {
+			problems = append(problems, Problem{
+				Row:    "DESIGN.md",
+				Detail: fmt.Sprintf("cited path %q for %s does not exist", seam.Path, seam.Name),
+			})
+		}
+	}
+	sort.SliceStable(problems, func(a, b int) bool { return problems[a].Detail < problems[b].Detail })
+	return problems, nil
+}
 
 // CheckMatrix reads the matrix and verifies that every path it cites exists
 // under root, that feature IDs are unique, and that every row carries a status

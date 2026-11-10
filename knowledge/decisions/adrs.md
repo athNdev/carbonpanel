@@ -18,7 +18,11 @@ sources:
 | [0001](../../docs/adr/0001-moby-sdk-migration.md) | Use the Moby SDK instead of a shelled-out Docker CLI | [Runtime](../architecture/runtime.md), [Node resolution](../architecture/node-resolution.md) |
 | [0002](../../docs/adr/0002-sveltekit-resolve-navigation.md) | Use SvelteKit resolve/navigation conventions in the console | [Frontend change](../workflows/frontend-change.md) |
 | [0003](../../docs/adr/0003-sqlite-durability.md) | Superseded. Original continuous-replication proposal | [Persistence](../architecture/persistence.md) |
-| [0006](../../docs/adr/0006-idle-modes-are-data.md) | Idle modes are data, not strategies | [Deep sleep](../operations/deep-sleep.md) |
+| [0004-docker-locator](../../docs/adr/0004-docker-locator.md) | One node-to-daemon Locator | [Runtime seams](../architecture/runtime-seams.md), [Node resolution](../architecture/node-resolution.md) |
+| [0004-proxy-route-plans](../../docs/adr/0004-proxy-route-plans.md) | Proxy route policy is a pure PlanFor | [Runtime seams](../architecture/runtime-seams.md), [TCP proxy](../architecture/proxy.md) |
+| [0004-world-data-seam](../../docs/adr/0004-world-data-seam.md) | World data flows through worldstore | [Runtime seams](../architecture/runtime-seams.md), [Backup and restore](../operations/backup-restore.md) |
+| [0005](../../docs/adr/0005-lifecycle-transitions.md) | Lifecycle transitions are owned leases | [Runtime seams](../architecture/runtime-seams.md) |
+| [0006](../../docs/adr/0006-idle-modes-are-data.md) | Idle modes are data, not strategies | [Runtime seams](../architecture/runtime-seams.md), [Deep sleep](../operations/deep-sleep.md) |
 | [0007](../../docs/adr/0007-panel-sqlite-snapshots.md) | Daily SQLite snapshots and an explicit restore | [Persistence](../architecture/persistence.md) |
 | [0008](../../docs/adr/0008-carbon-panel-brand-identity.md) | Use the approved lower-cut block and technical-capitals wordmark | [Brand assets](../../assets/branding/README.md) |
 | [0009](../../docs/adr/0009-shared-design-system.md) | Proposed shared design-system source and Cloud snapshot | [Frontend change](../workflows/frontend-change.md) |

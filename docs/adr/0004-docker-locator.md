@@ -21,8 +21,10 @@ Docker client, `ExecutorFor(nodeID)` the command executor, `IsLocal(nodeID)` the
 locality predicate. Resolution failures are typed: `ErrUnknownNode` when the store has
 no such node, `ErrNoClient` when the node exists but its daemon is unreachable.
 
-Callers keep their existing return-shaped shims where a test depends on them
-(`snapshot`, `command` translate `ErrNoClient` to "no client, no error").
+Callers must not wrap Locator in a second node-to-daemon resolver that
+returns `(nil, nil)`. Snapshot rollback may treat `ErrNoClient` as "no
+daemon" at the call site when deciding whether a container stop is required;
+that is rollback policy, not a second locator.
 
 ## Consequences
 
