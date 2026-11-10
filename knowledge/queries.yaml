@@ -20,6 +20,8 @@
   expect: operations/deep-sleep
 - query: Which commands verify the frontend?
   expect: workflows/frontend-change
+- query: How does the console stop scrollbar layout jump and honor reduced motion?
+  expect: workflows/frontend-change
 - query: Which health endpoint fails when the database is down but not when a Docker node is down?
   expect: operations/health-checks
 - query: Does storage-opt size bound a bind-mounted world?
