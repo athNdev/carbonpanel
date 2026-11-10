@@ -1647,6 +1647,17 @@ func (s *Store) UpdateModuleContainerID(ctx context.Context, id string, containe
 	return s.db.WithContext(ctx).Model(&Module{}).Where("id = ?", id).Update("container_id", containerID).Error
 }
 
+// MoveServerModulesToNode retargets every module on a server after the parent
+// migrates. Source sidecar containers are left in place; records follow the
+// parent so the reconciler can recreate on the new node without purging data.
+func (s *Store) MoveServerModulesToNode(ctx context.Context, serverID, nodeID string) error {
+	return s.db.WithContext(ctx).Model(&Module{}).Where("server_id = ?", serverID).Updates(map[string]interface{}{
+		"node_id":      nodeID,
+		"container_id": "",
+		"status":       ModuleStatusStopped,
+	}).Error
+}
+
 func (s *Store) DeleteModule(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Delete(&Module{}, "id = ?", id).Error
 }

@@ -237,6 +237,39 @@ func TestServerService_MigrateServer_OfflineMigration(t *testing.T) {
 	}
 }
 
+func TestMigrateServerMovesChildModuleRecordsWithoutPurgingThem(t *testing.T) {
+	f := newMigrationFixture(t)
+	ctx := context.Background()
+	if err := f.store.DB().Create(&db.Module{
+		ID: "mod-follow", Name: "map", ServerID: "server-1", TemplateID: "tpl",
+		NodeID: "node-1", ContainerID: "sidecar-source", Status: db.ModuleStatusRunning,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.svc.MigrateServer(ctx, connect.NewRequest(&v1.MigrateServerRequest{
+		Id:           "server-1",
+		TargetNodeId: "node-2",
+		Force:        boolPtr(true),
+	})); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	mod, err := f.store.GetModule(ctx, "mod-follow")
+	if err != nil {
+		t.Fatalf("module row missing after migrate: %v", err)
+	}
+	if mod.NodeID != "node-2" {
+		t.Errorf("module NodeID = %s, want node-2", mod.NodeID)
+	}
+	if mod.ContainerID != "" {
+		t.Errorf("module ContainerID = %s, want empty so source sidecar is not reused", mod.ContainerID)
+	}
+	if mod.Status != db.ModuleStatusStopped {
+		t.Errorf("module Status = %s, want stopped", mod.Status)
+	}
+}
+
 // TestServerService_MigrateServerRefusesUntransferableWorld is the OSS-234
 // red regression: a world that cannot be read and written through node-aware
 // storage must not be called a successful migration. The source stays fully
