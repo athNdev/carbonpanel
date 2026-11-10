@@ -38,11 +38,11 @@ not answer a named node with the local daemon.
   remote node with no shared mount is refused unless `storage.worker_image`
   is configured and the call path uses `nodestorage.ForNode` (Get/Rename/
   List/Update/Delete, CreateFolder, Copy/Move, uploads, InitFileDownload,
-  `serverLatestLog`, staged content, zip extract, and that server-pack
-  write). Creating or downloading archives and world export still require
-  controller-local filesystem walks; transport-only nodes get
-  `CodeUnavailable` on those entry points even when a worker is configured.
-  Worldstore backup paths are not on the transport yet.
+  `serverLatestLog`, staged content, zip extract, CreateArchive,
+  DownloadArchive, ExportWorld, and that server-pack write).
+  `DownloadRemoteArchive` still requires a controller filesystem walk and
+  is refused on transport-only nodes. Worldstore backup/restore paths are
+  not on the transport yet.
 
 # Detection
 

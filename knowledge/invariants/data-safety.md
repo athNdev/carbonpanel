@@ -86,7 +86,8 @@ losing a world is not recoverable by rebuilding the controller.
   delete the world.
 - `ExportWorld` zips the server directory on the owning node's storage into
   a download and leaves the container, the world, and the panel row in
-  place. A remote node without shared storage is refused.
+  place. Transport-only nodes zip through `nodestorage.ForNode`; a node
+  with no worker is refused before a controller-local tree is created.
 
 # Review
 

@@ -32,6 +32,8 @@
   expect: operations/health-checks
 - query: How does ExtractArchive reach a node without shared storage?
   expect: architecture/remote-storage-transport
+- query: How does CreateArchive reach a node without shared storage?
+  expect: architecture/remote-storage-transport
 - query: How does the panel qualify Minecraft container runtime profiles after operator overrides?
   expect: architecture/runtime
 - query: When does a Minecraft container skip recursive chown of /data?
