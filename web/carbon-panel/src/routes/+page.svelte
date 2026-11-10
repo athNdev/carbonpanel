@@ -37,6 +37,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { formatRpcError } from '$lib/api/rpc-error';
 	import { prefersReducedMotion } from '$lib/motion';
 	import { serversStore, sortServersByActivity } from '$lib/stores/servers';
+	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import {
 		CarbonButton,
 		CarbonTag,
@@ -122,7 +123,7 @@ one at https://mozilla.org/MPL/2.0/.
 			.filter((s) => s.status === ServerStatus.RUNNING)
 			.reduce((acc, s) => acc + Number(s.memoryUsage || s.memory || 0), 0),
 		totalPlayers: dashboardServers
-			.filter((s) => s.status === ServerStatus.RUNNING)
+			.filter((s) => joinIsPlayable(s))
 			.reduce((acc, s) => acc + (s.playersOnline || 0), 0),
 		totalMaxPlayers: dashboardServers.reduce((acc, s) => acc + (s.maxPlayers || 0), 0),
 		avgTps: dashboardServers
@@ -770,7 +771,11 @@ one at https://mozilla.org/MPL/2.0/.
 													<div class="flex items-center gap-3 font-mono text-xs">
 														<span class="flex items-center gap-1 text-[#c6c6c6]">
 															<Users class="h-3.5 w-3.5 text-[#8d8d8d]" />
-															{server.playersOnline || 0}/{server.maxPlayers}
+															{#if joinIsPlayable(server)}
+																{server.playersOnline || 0}/{server.maxPlayers}
+															{:else}
+																{joinKindLabel(server.joinObservationKind)}
+															{/if}
 														</span>
 														{#if server.tps}
 															<span class="flex items-center gap-1 {getTpsColor(server.tps)}">

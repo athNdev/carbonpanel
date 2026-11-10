@@ -156,6 +156,12 @@ type Server struct {
 	PlayerSample    []string `json:"player_sample" gorm:"-"`
 	MaxPlayersSLP   int      `json:"max_players_slp" gorm:"-"` // Actual from SLP (MaxPlayers field is config)
 	Favicon         string   `json:"favicon" gorm:"-"`         // Base64 PNG from SLP
+
+	// Join observation projection (not persisted). Distinguishes last-good
+	// SLP from current playable state.
+	JoinObservationKind string    `json:"join_observation_kind" gorm:"-"`
+	JoinObservedAt      time.Time `json:"join_observed_at" gorm:"-"`
+	LastGoodJoinAt      time.Time `json:"last_good_join_at" gorm:"-"`
 }
 
 type ServerConfig struct {

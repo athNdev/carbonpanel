@@ -4,6 +4,7 @@
 
 ## Concepts
 
+- [Actionable recovery paths](actionable-recovery.md) — Safe next actions for permission, port, pull, stale node, partial restore or migration, and disk exhaustion without treating unknown as failed.
 - [Backup and restore](backup-restore.md) — Where backup storage, snapshots and restore are specified.
 - [Deep sleep and wake](deep-sleep.md) — A player knock must not start an intentionally stopped server. Hibernation and deep sleep share one idle-power module.
 - [Deployment modes](deployment-modes.md) — Which install paths are shipped (Compose and native binary), which are not (Helm, Terraform), and how a Compose image upgrade keeps host data.

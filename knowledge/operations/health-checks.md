@@ -11,6 +11,7 @@ code_refs:
   - internal/docker/pool.go
   - internal/metrics/collector.go
   - internal/rpc/services/support.go
+  - internal/rpc/services/server.go
 sources:
   - title: Container privileges invariant
     resource: ../invariants/container-privileges.md
@@ -62,7 +63,13 @@ stale status, a missing join probe and a failed join stay distinct, and a
 last-good join timestamp is kept when the current reading is stale. The
 support bundle carries `observations.json` with that projection so an operator
 can collect last-good evidence without a Docker socket. Player samples, MOTD
-and hostnames are omitted.
+and hostnames are omitted. `GetServer` and `ListServers` use the same
+classification for live SLP fields: last-good join is never copied into
+`slp_available`, `players_online` or `player_sample`. The proto carries
+`join_observation_kind` so stale and unobserved stay distinct from running
+success and from a failed join. Recovery paths for permission, port, pull,
+stale node, partial restore/migration and disk exhaustion are in
+[actionable recovery](actionable-recovery.md).
 
 # Why a runtime outage is not a `503`
 
@@ -84,3 +91,4 @@ go test ./internal/health ./internal/rpc ./internal/rpc/handlers ./internal/dock
 
 - [Runtime model](../architecture/runtime.md)
 - [Lifecycle journal](lifecycle-journal.md)
+- [Actionable recovery](actionable-recovery.md)
