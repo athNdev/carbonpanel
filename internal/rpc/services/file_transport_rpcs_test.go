@@ -314,49 +314,143 @@ func TestZipPipelinesRefuseTransportOnlyEvenWithProvider(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	cases := []struct {
-		name string
-		call func() error
-	}{
-		{"CreateArchive", func() error {
-			_, err := svc.CreateArchive(ctx, connect.NewRequest(&v1.CreateArchiveRequest{
-				ServerId: server.ID, Paths: []string{"."},
-			}))
-			return err
-		}},
-		{"DownloadArchive", func() error {
-			_, err := svc.DownloadArchive(ctx, connect.NewRequest(&v1.DownloadArchiveRequest{
-				ServerId: server.ID, Paths: []string{"."},
-			}))
-			return err
-		}},
-		{"DownloadRemoteArchive", func() error {
-			// Transport makes dataRootFor succeed with nodeDataRoot on the
-			// controller. Refuse must run before os.MkdirAll or this dest
-			// directory is created and the RPC still looks "successful".
-			_, err := svc.DownloadRemoteArchive(ctx, connect.NewRequest(&v1.DownloadRemoteArchiveRequest{
-				ServerId: server.ID, Url: "http://1.1.1.1/archive.zip", DestinationPath: "mods",
-			}))
-			return err
-		}},
-		{"ExportWorld", func() error {
-			_, err := svc.ExportWorld(ctx, connect.NewRequest(&v1.ExportWorldRequest{ServerId: server.ID}))
-			return err
-		}},
+	// DownloadRemoteArchive still walks HTTP-to-disk on the controller.
+	// Refuse must run before os.MkdirAll or this dest directory is created
+	// and the RPC still looks "successful".
+	_, err := svc.DownloadRemoteArchive(ctx, connect.NewRequest(&v1.DownloadRemoteArchiveRequest{
+		ServerId: server.ID, Url: "http://1.1.1.1/archive.zip", DestinationPath: "mods",
+	}))
+	if connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("DownloadRemoteArchive error = %v, want unavailable (no controller zip fallback)", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.call()
-			if connect.CodeOf(err) != connect.CodeUnavailable {
-				t.Fatalf("%s error = %v, want unavailable (no controller zip fallback)", tc.name, err)
-			}
-			assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
-			mappedMods := filepath.Join(phantomRoot, filepath.Base(server.DataPath), "mods")
-			if _, err := os.Stat(mappedMods); !os.IsNotExist(err) {
-				t.Fatalf("controller-local dest %s exists after %s: %v", mappedMods, tc.name, err)
-			}
-		})
+	assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
+	mappedMods := filepath.Join(phantomRoot, filepath.Base(server.DataPath), "mods")
+	if _, err := os.Stat(mappedMods); !os.IsNotExist(err) {
+		t.Fatalf("controller-local dest %s exists after DownloadRemoteArchive: %v", mappedMods, err)
 	}
+}
+
+func TestCreateArchiveUsesTransportNotControllerLocalPath(t *testing.T) {
+	_, server, svc, rt, workerRoot, phantomRoot, cleanup := transportOnlyFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	openedBefore := rt.opened
+	resp, err := svc.CreateArchive(ctx, connect.NewRequest(&v1.CreateArchiveRequest{
+		ServerId: server.ID, Paths: []string{"server.properties"}, ArchiveName: "out.zip",
+	}))
+	if err != nil {
+		t.Fatalf("CreateArchive: %v", err)
+	}
+	if rt.opened <= openedBefore {
+		t.Fatal("expected CreateArchive to open remote transport")
+	}
+	if resp.Msg.GetArchivePath() != "out.zip" || resp.Msg.GetFilesArchived() != 1 {
+		t.Fatalf("create archive = %+v", resp.Msg)
+	}
+	raw, err := os.ReadFile(filepath.Join(workerRoot, "out.zip"))
+	if err != nil {
+		t.Fatalf("worker zip missing (controller-local write?): %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range zr.File {
+		if f.Name == "server.properties" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("worker zip entries = %v", zipNames(zr))
+	}
+	assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
+	mapped := filepath.Join(phantomRoot, filepath.Base(server.DataPath), "out.zip")
+	if _, err := os.Stat(mapped); !os.IsNotExist(err) {
+		t.Fatalf("controller-local archive %s exists: %v", mapped, err)
+	}
+}
+
+func TestDownloadArchiveUsesTransportNotControllerLocalPath(t *testing.T) {
+	_, server, svc, rt, _, phantomRoot, cleanup := transportOnlyFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	openedBefore := rt.opened
+	resp, err := svc.DownloadArchive(ctx, connect.NewRequest(&v1.DownloadArchiveRequest{
+		ServerId: server.ID, Paths: []string{"server.properties"},
+	}))
+	if err != nil {
+		t.Fatalf("DownloadArchive: %v", err)
+	}
+	if rt.opened <= openedBefore {
+		t.Fatal("expected DownloadArchive to open remote transport")
+	}
+	session, err := svc.downloadManager.GetSession(resp.Msg.GetSessionId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := zip.OpenReader(session.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = zr.Close() })
+	found := false
+	for _, f := range zr.File {
+		if f.Name == "server.properties" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("download zip missing server.properties")
+	}
+	assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
+}
+
+func TestExportWorldUsesTransportNotControllerLocalPath(t *testing.T) {
+	_, server, svc, rt, _, phantomRoot, cleanup := transportOnlyFixture(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	openedBefore := rt.opened
+	resp, err := svc.ExportWorld(ctx, connect.NewRequest(&v1.ExportWorldRequest{ServerId: server.ID}))
+	if err != nil {
+		t.Fatalf("ExportWorld: %v", err)
+	}
+	if rt.opened <= openedBefore {
+		t.Fatal("expected ExportWorld to open remote transport")
+	}
+	if resp.Msg.GetFilename() != "srv-transport-world.zip" {
+		t.Fatalf("filename = %q", resp.Msg.GetFilename())
+	}
+	session, err := svc.downloadManager.GetSession(resp.Msg.GetSessionId())
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, err := zip.OpenReader(session.FilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = zr.Close() })
+	found := false
+	for _, f := range zr.File {
+		if f.Name == "server.properties" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("world export zip missing server.properties")
+	}
+	assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
+}
+
+func zipNames(zr *zip.Reader) []string {
+	names := make([]string, 0, len(zr.File))
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	return names
 }
 
 func TestSaveUploadedFileUsesTransport(t *testing.T) {

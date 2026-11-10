@@ -10,6 +10,7 @@ code_refs:
   - internal/scheduler
   - internal/worldstore
   - scripts/snapshot-panel-db.sh
+  - scripts/compose-upgrade.sh
   - docker-compose.yml
 sources:
   - title: Backup confirmation issue
@@ -53,6 +54,8 @@ Before a controller upgrade, run the named operator script
 copying that file onto `database.path` with the panel stopped; do not touch
 worlds or bind mounts. `make test`, `scripts/web-build.sh`, `make clean` and
 `docker compose up`/`down` do not take or restore that snapshot.
+`scripts/compose-upgrade.sh --apply` snapshots then recreates the panel
+container with `up -d --pull always`; host data directories stay in place.
 
 # Read next
 

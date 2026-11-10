@@ -8,6 +8,7 @@ package docker
 import (
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -127,6 +128,16 @@ const (
 	// the root-then-drop bootstrap but the world directory is still owned by
 	// host uid 0. The entrypoint cannot chown it into the user namespace.
 	RuntimeIssueRootlessHostRootData RuntimeIssueCode = "rootless_host_root_data"
+	// RuntimeIssueReadOnlyRootUserMod is raised when root-then-drop would
+	// usermod/groupmod an account that is not already in the image, which
+	// needs a writable /etc.
+	RuntimeIssueReadOnlyRootUserMod RuntimeIssueCode = "read_only_root_blocks_usermod"
+	// RuntimeIssueSensitiveMount is raised when an override bind shadows a
+	// sensitive container path (for example /etc or the Docker socket).
+	RuntimeIssueSensitiveMount RuntimeIssueCode = "sensitive_mount_target"
+	// RuntimeIssueTmpfsReplaced is raised when a bind or volume covers /tmp
+	// and therefore replaces the default noexec tmpfs.
+	RuntimeIssueTmpfsReplaced RuntimeIssueCode = "tmpfs_replaced"
 )
 
 // RuntimeIssue is one compatibility finding with an actionable remedy.
@@ -243,7 +254,10 @@ type RuntimeProfile struct {
 	Devices           []string
 	Entrypoint        []string
 	Limits            ContainerLimits
-	Issues            []RuntimeIssue
+	// SkipDataChown is true when SKIP_CHOWN is set so the image will not
+	// recursively chown /data on this start.
+	SkipDataChown bool
+	Issues        []RuntimeIssue
 }
 
 // Fatal reports whether any issue blocks a boot.
@@ -284,6 +298,7 @@ func (p RuntimeProfile) Description() string {
 // DescribeRuntime returns the effective profile of a resolved runtime spec
 // together with its compatibility issues.
 func DescribeRuntime(spec RuntimeSpec) RuntimeProfile {
+	applyMinecraftOwnershipEnv(&spec)
 	profile := RuntimeProfile{
 		Image:             spec.Image,
 		MinecraftImage:    spec.MinecraftImage,
@@ -302,7 +317,8 @@ func DescribeRuntime(spec RuntimeSpec) RuntimeProfile {
 		profile.NetworkMode = string(spec.HostConfig.NetworkMode)
 		profile.ReadOnlyRootfs = spec.HostConfig.ReadonlyRootfs
 		for _, m := range spec.HostConfig.Mounts {
-			if m.Target == "/data" {
+			if containerPath(m.Target) == "/data" {
+				// Docker last-wins when two mounts share a target.
 				profile.DataMount = m.Source
 				profile.DataWritable = !m.ReadOnly
 			}
@@ -321,6 +337,7 @@ func DescribeRuntime(spec RuntimeSpec) RuntimeProfile {
 	if spec.Config != nil {
 		profile.User = strings.TrimSpace(spec.Config.User)
 		profile.Entrypoint = append([]string(nil), spec.Config.Entrypoint...)
+		profile.SkipDataChown = hasEnv(spec.Config, skipChownEnv, "TRUE")
 	}
 	if uid, ok := resolveRuntimeUser(profile.User); ok {
 		// An explicit non-root user cannot perform the root-then-drop
@@ -442,6 +459,41 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 			Detail:   fmt.Sprintf("the container runs as uid %d but the world directory is owned by uid %d", uid, *spec.DataOwnerUID),
 			Remedy:   "chown the data directory to the runtime uid:gid, or run the image as root and let its bootstrap drop privileges",
 		})
+	}
+
+	if profile.MinecraftImage && profile.RootStartDropUser && profile.ReadOnlyRootfs {
+		uid, uidOK := gameUID(spec)
+		gid, gidOK := gameGID(spec)
+		if uidOK && gidOK && (uid != itzgDefaultUID || gid != itzgDefaultGID) {
+			issues = append(issues, RuntimeIssue{
+				Code:     RuntimeIssueReadOnlyRootUserMod,
+				Severity: RuntimeFatal,
+				Detail:   fmt.Sprintf("root-then-drop would usermod uid %d gid %d on a read-only root", uid, gid),
+				Remedy:   "use the image uid:gid 1000:1000, start as that numeric user so /etc is not rewritten, or set CARBON_WRITABLE_ROOTFS=1 when the image must modify passwd (elevated Docker permission). Do not enable privileged mode to compensate",
+			})
+		}
+	}
+
+	if spec.HostConfig != nil {
+		for _, m := range spec.HostConfig.Mounts {
+			target := containerPath(m.Target)
+			if isSensitiveMountTarget(target) || isDockerSockSource(m.Source) {
+				issues = append(issues, RuntimeIssue{
+					Code:     RuntimeIssueSensitiveMount,
+					Severity: RuntimeFatal,
+					Detail:   fmt.Sprintf("override mount %s -> %s reaches a sensitive path", m.Source, m.Target),
+					Remedy:   "remove the mount; keep extra binds under the server data directory and never shadow /etc, /proc, /sys, /dev, or the Docker socket",
+				})
+			}
+			if profile.ReadOnlyRootfs && (target == "/tmp" || strings.HasPrefix(target, "/tmp/")) {
+				issues = append(issues, RuntimeIssue{
+					Code:     RuntimeIssueTmpfsReplaced,
+					Severity: RuntimeWarning,
+					Detail:   fmt.Sprintf("/tmp is a %s mount from %q instead of the default noexec tmpfs", m.Type, m.Source),
+					Remedy:   "remove the /tmp override so the 64m noexec tmpfs remains; unpack work uses /data/.tmp",
+				})
+			}
+		}
 	}
 
 	if spec.Daemon != nil && spec.Daemon.Rootless && profile.MinecraftImage && profile.RootStartDropUser &&
@@ -817,16 +869,100 @@ func hasEnv(config *container.Config, key, want string) bool {
 	if config == nil {
 		return false
 	}
-	for _, env := range config.Env {
-		k, v, ok := strings.Cut(env, "=")
-		if !ok {
-			continue
+	return strings.EqualFold(strings.TrimSpace(envValue(config.Env, key)), want)
+}
+
+func envInt(config *container.Config, key string) (int, bool) {
+	if config == nil {
+		return 0, false
+	}
+	v := strings.TrimSpace(envValue(config.Env, key))
+	if v == "" && !envHasKey(config.Env, key) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// applyMinecraftOwnershipEnv sets SKIP_CHOWN when existing /data already
+// belongs to the game uid. It never clears an operator-supplied value and
+// never broadens confinement.
+func applyMinecraftOwnershipEnv(spec *RuntimeSpec) {
+	if spec == nil || spec.Config == nil || !spec.MinecraftImage {
+		return
+	}
+	if envHasKey(spec.Config.Env, skipChownEnv) {
+		return
+	}
+	uid, ok := gameUID(*spec)
+	if !ok || uid == 0 || spec.DataOwnerUID == nil {
+		return
+	}
+	if *spec.DataOwnerUID == uid {
+		spec.Config.Env = upsertEnv(spec.Config.Env, skipChownEnv, "TRUE")
+	}
+}
+
+func gameUID(spec RuntimeSpec) (int, bool) {
+	if spec.Config != nil {
+		if uid, ok := resolveRuntimeUser(spec.Config.User); ok {
+			return uid, true
 		}
-		if strings.EqualFold(strings.TrimSpace(k), key) && strings.EqualFold(strings.TrimSpace(v), want) {
+		if uid, ok := envInt(spec.Config, "UID"); ok {
+			return uid, true
+		}
+	}
+	if spec.MinecraftImage {
+		return itzgDefaultUID, true
+	}
+	return 0, false
+}
+
+func gameGID(spec RuntimeSpec) (int, bool) {
+	if spec.Config != nil {
+		user := strings.TrimSpace(spec.Config.User)
+		if idx := strings.IndexByte(user, ':'); idx >= 0 {
+			if gid, err := strconv.Atoi(user[idx+1:]); err == nil {
+				return gid, true
+			}
+		}
+		if gid, ok := envInt(spec.Config, "GID"); ok {
+			return gid, true
+		}
+	}
+	if spec.MinecraftImage {
+		return itzgDefaultGID, true
+	}
+	return 0, false
+}
+
+func containerPath(p string) string {
+	p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+	if p == "" {
+		return p
+	}
+	return path.Clean(p)
+}
+
+func isSensitiveMountTarget(target string) bool {
+	switch target {
+	case "/", "/etc", "/proc", "/sys", "/dev", "/var/run/docker.sock", "/run/docker.sock":
+		return true
+	}
+	for _, prefix := range []string{"/etc/", "/proc/", "/sys/", "/dev/"} {
+		if strings.HasPrefix(target, prefix) {
 			return true
 		}
 	}
-	return false
+	return strings.HasSuffix(target, "/docker.sock")
+}
+
+func isDockerSockSource(src string) bool {
+	s := strings.TrimSpace(strings.ReplaceAll(src, "\\", "/"))
+	return strings.EqualFold(s, "docker.sock") || strings.HasSuffix(strings.ToLower(s), "/docker.sock")
 }
 
 // tmpfsSizeBytes parses the size= option of a tmpfs mount string.

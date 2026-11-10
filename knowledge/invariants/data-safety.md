@@ -8,9 +8,12 @@ code_refs:
   - internal/snapshot
   - internal/s3
   - internal/db
+  - internal/module/manager.go
+  - internal/rpc/services/server.go
   - Makefile
   - docker-compose.yml
   - scripts/snapshot-panel-db.sh
+  - scripts/compose-upgrade.sh
   - scripts/web-build.sh
   - scripts/dev.sh
   - scripts/review/devstack.sh
@@ -22,6 +25,8 @@ sources:
     resource: ../../docs/issues/013-UI-5-backup-confirmation-dialogs.md
   - title: Panel database restore runbook
     resource: ../../docs/runbook-panel-db-restore.md
+  - title: Deployment modes
+    resource: ../../docs/deployment-modes.md
 verified: { by: agent:cursor-grok, at: 2026-11-10 }
 review_after: 2027-01-23
 ---
@@ -51,6 +56,11 @@ losing a world is not recoverable by rebuilding the controller.
   directory. Rollback copies that file onto `carbon-panel.db` and leaves
   worlds and bind mounts untouched. Ordinary test/build/compose paths must
   not invoke it.
+- A Compose image upgrade uses `scripts/compose-upgrade.sh` (also
+  `make compose-upgrade`). It recreates the panel with
+  `docker compose up -d --pull always` and never a volumes-deleting compose
+  down. The shipped file bind-mounts data and backups, so worlds survive the
+  container recreate. Helm and Terraform are not shipped.
 - Backup and restore must be tested; a backup that cannot be restored is not a
   backup.
 - Remote archive paths must not silently read the controller filesystem.
@@ -66,7 +76,9 @@ losing a world is not recoverable by rebuilding the controller.
   the original choice. A disposition that already recorded the world outcome
   only removes the remaining panel row.
 - `DeleteServer` with `keep_data` drops the panel record and container and
-  leaves the world directory where it is. The audit row records that path.
+  leaves the world directory where it is. Sidecar module records are
+  dropped without removing their containers, so module volumes are not
+  purged. The audit row records that path.
 - `DeleteServer` with `detach` leaves the container and the world directory
   and keeps that server's host port lease. The audit row records the
   container id and the path. `-operations release-port` frees that lease
@@ -74,7 +86,8 @@ losing a world is not recoverable by rebuilding the controller.
   delete the world.
 - `ExportWorld` zips the server directory on the owning node's storage into
   a download and leaves the container, the world, and the panel row in
-  place. A remote node without shared storage is refused.
+  place. Transport-only nodes zip through `nodestorage.ForNode`; a node
+  with no worker is refused before a controller-local tree is created.
 
 # Review
 
@@ -90,7 +103,9 @@ Reviewed `2026-10-24` by `agent:mimo-v2.6-pro` against the code and attested by
   copy (`internal/snapshot/integrity_retention_test.go`).
 - Restore coverage exists in `internal/snapshot`.
 - Upgrade snapshots and copy-back rollback are covered by
-  `internal/docscheck/upgrade_safety_test.go`.
+  `internal/docscheck/upgrade_safety_test.go`. Compose bind-mount upgrades and
+  the unshipped Helm/Terraform claim are covered by
+  `internal/docscheck/compose_upgrade_test.go`.
 
 The remote archive path gap is tracked in
 [known gaps](../failures/known-gaps.md).

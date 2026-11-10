@@ -53,9 +53,10 @@ sources:
   `carbon-storage` JSON accessor worker when `storage.worker_image` is set
   (Docker one-shot attach). File RPCs that open `nodestorage.ForNode` use it
   (list/get/update/delete/rename, folder create, copy/move, uploads,
-  InitFileDownload, latest-log, zip extract, CreateServer manual pack).
-  Creating or downloading archives, world export, backup/worldstore and
-  metrics still require shared storage or a streaming write/worker path.
+  InitFileDownload, latest-log, zip extract, CreateArchive,
+  DownloadArchive, ExportWorld, CreateServer manual pack).
+  `DownloadRemoteArchive`, backup/worldstore and metrics still require
+  shared storage or a further streaming worker path.
 
 # How to use this
 

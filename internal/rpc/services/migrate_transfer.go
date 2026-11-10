@@ -166,6 +166,12 @@ func (s *ServerService) migrateServerNow(ctx context.Context, server *storage.Se
 		}
 	}
 
+	// Records follow the parent; source sidecar containers stay so their
+	// volumes are not purged. Reconcile recreates on the target node.
+	if merr := s.store.MoveServerModulesToNode(ctx, server.ID, targetNode.ID); merr != nil {
+		return nil, fmt.Errorf("parent moved but child modules could not follow: %w", merr)
+	}
+
 	// Cutover committed: the source container can go now — synchronously, so
 	// no unscoped cleanup outlives the operation. The source world DATA is
 	// preserved for recovery (world disposition is OSS-244's lane).

@@ -56,6 +56,16 @@ func envValue(env []string, key string) string {
 	return ""
 }
 
+func envHasKey(env []string, key string) bool {
+	for _, entry := range env {
+		k, _, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(k), key) {
+			return true
+		}
+	}
+	return false
+}
+
 func upsertEnv(env []string, key, value string) []string {
 	kept := make([]string, 0, len(env)+1)
 	for _, entry := range env {

@@ -85,10 +85,25 @@ Before upgrading the panel image, snapshot the controller database on the host
 scripts/snapshot-panel-db.sh --data-dir /opt/carbon-panel/data
 ```
 
-The script writes `carbon-panel-db-<UTC timestamp>.sqlite` beside the data
-directory. Restore by stopping the panel and copying that file back onto
+Then recreate the panel container onto the newer image **without** deleting
+bind mounts:
+
+```bash
+scripts/compose-upgrade.sh --data-dir /opt/carbon-panel/data
+scripts/compose-upgrade.sh --data-dir /opt/carbon-panel/data --apply
+```
+
+`--apply` runs the snapshot (if you skip the first command) and
+`docker compose up -d --pull always`. It never deletes named volumes on
+shutdown. Worlds and the controller SQLite file stay on the host bind mounts.
+
+The snapshot script writes `carbon-panel-db-<UTC timestamp>.sqlite` beside the
+data directory. Restore by stopping the panel and copying that file back onto
 `carbon-panel.db`, then removing leftover `-wal` / `-shm` sidecars. Do not copy
 over worlds, backups or other bind-mounted files. See
-`docs/runbook-panel-db-restore.md`.
+`docs/runbook-panel-db-restore.md` and `docs/deployment-modes.md`.
+
+Helm and Terraform are not shipped; this is the Compose path only. A live
+create→join after upgrade still needs a disposable host.
 
 For all available configuration options, see [Configuration](/configuration/).

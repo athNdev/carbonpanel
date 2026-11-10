@@ -6,6 +6,10 @@
   expect: invariants/data-safety
 - query: How do I snapshot the panel database before an upgrade?
   expect: operations/backup-restore
+- query: How do I upgrade a Compose install without deleting worlds?
+  expect: operations/deployment-modes
+- query: Does Carbon Panel ship Helm or Terraform?
+  expect: operations/deployment-modes
 - query: How does the TCP proxy route a Minecraft handshake by hostname?
   expect: architecture/proxy
 - query: How durable are SQLite migrations?
@@ -14,6 +18,8 @@
   expect: architecture/scheduler
 - query: Which module hook still uses the manager's Docker client?
   expect: architecture/module-system
+- query: What happens to sidecar containers when DeleteServer keeps world data?
+  expect: invariants/data-safety
 - query: Where are backup and restore procedures described?
   expect: operations/backup-restore
 - query: Why does deep sleep still use the local Docker client?
@@ -26,8 +32,12 @@
   expect: operations/health-checks
 - query: How does ExtractArchive reach a node without shared storage?
   expect: architecture/remote-storage-transport
+- query: How does CreateArchive reach a node without shared storage?
+  expect: architecture/remote-storage-transport
 - query: How does the panel qualify Minecraft container runtime profiles after operator overrides?
   expect: architecture/runtime
+- query: When does a Minecraft container skip recursive chown of /data?
+  expect: architecture/server-data-ownership
 - query: Does storage-opt size bound a bind-mounted world?
   expect: architecture/runtime
 - query: What happens when storage.world_quota_mb is set and world bytes meet it?
