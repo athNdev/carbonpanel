@@ -44,6 +44,8 @@
   expect: architecture/runtime
 - query: What happens when storage.world_quota_mb is set and world bytes meet it?
   expect: architecture/runtime
+- query: What is reported when Docker /info says a requested memory limit is unsupported?
+  expect: architecture/runtime
 - query: Which packages own the Locator lifecycle handle idle-power PlanFor and worldstore seams?
   expect: architecture/runtime-seams
 - query: How do journal rows join activity events?

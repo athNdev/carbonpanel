@@ -207,7 +207,13 @@ func TestPreflightRejectsDataOwnerMismatch(t *testing.T) {
 
 func TestPreflightRejectsRootlessBootstrapOnHostRootData(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
-	spec.Daemon = &DaemonEnforcement{Rootless: true}
+	spec.Daemon = &DaemonEnforcement{
+		Rootless:             true,
+		CgroupVersion:        "2",
+		MemoryLimitSupported: true,
+		SwapLimitSupported:   true,
+		PidsLimitSupported:   true,
+	}
 	owner := 0
 	spec.DataOwnerUID = &owner
 
@@ -222,7 +228,13 @@ func TestPreflightRejectsRootlessBootstrapOnHostRootData(t *testing.T) {
 
 func TestPreflightAcceptsRootlessWhenDataOwnedByGameUser(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
-	spec.Daemon = &DaemonEnforcement{Rootless: true}
+	spec.Daemon = &DaemonEnforcement{
+		Rootless:             true,
+		CgroupVersion:        "2",
+		MemoryLimitSupported: true,
+		SwapLimitSupported:   true,
+		PidsLimitSupported:   true,
+	}
 	owner := 1000
 	spec.DataOwnerUID = &owner
 
@@ -531,9 +543,23 @@ func TestDescribeRuntimeWarnsWhenRootlessDaemonUsesCgroupV1(t *testing.T) {
 
 func TestDescribeRuntimeWarnsWhenDaemonCannotEnforceMemory(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
-	spec.Daemon = &DaemonEnforcement{MemoryLimitSupported: false}
+	spec.Daemon = &DaemonEnforcement{
+		CgroupVersion:        "2",
+		MemoryLimitSupported: false,
+		SwapLimitSupported:   true,
+		PidsLimitSupported:   true,
+	}
 	profile := DescribeRuntime(spec)
 	if !hasIssue(profile, RuntimeIssueMemoryLimitUnsupported) {
 		t.Fatalf("issues = %v, want memory_limit_unsupported", issueCodes(profile))
+	}
+	if profile.Limits.RequestedMemoryBytes == 0 {
+		t.Fatal("RequestedMemoryBytes = 0, want the HostConfig memory the daemon was asked to apply")
+	}
+	if profile.Limits.MemoryBytes != 0 {
+		t.Errorf("MemoryBytes = %d, want 0 when /info says memory limits are unsupported", profile.Limits.MemoryBytes)
+	}
+	if hasIssue(profile, RuntimeIssueMemoryLimitUnset) {
+		t.Fatalf("issues = %v, must not treat an unsupported request as unset", issueCodes(profile))
 	}
 }

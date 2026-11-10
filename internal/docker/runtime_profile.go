@@ -202,21 +202,31 @@ type RuntimeSpec struct {
 type ContainerLimits struct {
 	// RequestedMemoryMB is the server's configured memory.
 	RequestedMemoryMB int64
-	// MemoryBytes and MemorySwapBytes are what the container request carries.
-	MemoryBytes     int64
-	MemorySwapBytes int64
-	// SwapDisabled is true when MemorySwap equals Memory or both are unset.
+	// RequestedMemoryBytes and RequestedMemorySwapBytes are HostConfig values
+	// sent to Docker. MemoryBytes and MemorySwapBytes are effective: zero when
+	// /info says the daemon cannot apply them.
+	RequestedMemoryBytes     int64
+	RequestedMemorySwapBytes int64
+	MemoryBytes              int64
+	MemorySwapBytes          int64
+	// SwapDisabled is true when the request sets MemorySwap equal to Memory or
+	// leaves both unset. It describes the request, not daemon capability.
 	SwapDisabled bool
-	// PidsLimit is the process cap, or 0 when the daemon default applies.
-	PidsLimit int64
+	// RequestedPidsLimit is the process cap on the request. PidsLimit is
+	// effective, or 0 when the daemon default applies or /info says pids
+	// limits are unsupported.
+	RequestedPidsLimit int64
+	PidsLimit          int64
 	// CPULimit is the configured CPU cap, or 0 for unlimited.
 	CPULimit float64
-	// WritableLayerMB is the storage-opt size applied to the container layer,
-	// or 0 when the layer is unbounded or the root is read-only.
-	WritableLayerMB int64
+	// RequestedWritableLayerMB is storage-opt size on the request.
+	// WritableLayerMB is effective, or 0 when the layer is unbounded, the
+	// root is read-only, or /info says storage-opt size is unsupported.
+	RequestedWritableLayerMB int64
+	WritableLayerMB          int64
 	// WorldDiskEnforced is true only when the daemon quotas the world bind.
 	// Panel admission (storage.world_quota_mb) can refuse create without
-	// setting this. storage-opt size never sets it.
+	// setting this. storage-opt size never sets it, including overlay2+xfs.
 	WorldDiskEnforced bool
 }
 
@@ -370,29 +380,56 @@ func PreflightProfile(profile RuntimeProfile) error {
 }
 
 // describeLimits reports what the request actually enforces rather than what
-// was asked for. A limit that the daemon will not apply is reported as zero.
+// was asked for. A limit that /info says the daemon will not apply is
+// reported as zero on the effective fields; the HostConfig request is kept on
+// the Requested* fields so an ignored limit is never presented as enforced.
 func describeLimits(spec RuntimeSpec) ContainerLimits {
 	limits := ContainerLimits{RequestedMemoryMB: spec.RequestedMemoryMB}
 	if spec.HostConfig == nil {
 		return limits
 	}
 	res := spec.HostConfig.Resources
+	limits.RequestedMemoryBytes = res.Memory
+	limits.RequestedMemorySwapBytes = res.MemorySwap
 	limits.MemoryBytes = res.Memory
 	limits.MemorySwapBytes = res.MemorySwap
 	limits.SwapDisabled = res.Memory == 0 || res.MemorySwap == res.Memory
 	if res.PidsLimit != nil {
+		limits.RequestedPidsLimit = *res.PidsLimit
 		limits.PidsLimit = *res.PidsLimit
 	}
 	limits.CPULimit = float64(res.NanoCPUs) / 1e9
 	if size, ok := spec.HostConfig.StorageOpt["size"]; ok {
 		if bytes, parsed := parseDockerSize(size); parsed {
+			limits.RequestedWritableLayerMB = bytes >> 20
 			limits.WritableLayerMB = bytes >> 20
 			// storage-opt sizes the container writable layer only. A bind mount
 			// such as /data is outside it and keeps growing with the world.
 			limits.WorldDiskEnforced = false
 		}
 	}
+	applyDaemonEffectiveLimits(spec.Daemon, &limits)
 	return limits
+}
+
+// applyDaemonEffectiveLimits zeros effective memory, swap, pids, and
+// writable-layer values when Docker /info says those caps cannot apply.
+// Requested* fields are left as the HostConfig the panel sent.
+func applyDaemonEffectiveLimits(daemon *DaemonEnforcement, limits *ContainerLimits) {
+	if daemon == nil {
+		return
+	}
+	cgroupIgnored := daemon.Rootless && daemon.CgroupVersion != "2"
+	if limits.MemoryBytes > 0 && (!daemon.MemoryLimitSupported || cgroupIgnored) {
+		limits.MemoryBytes = 0
+		limits.MemorySwapBytes = 0
+	}
+	if limits.PidsLimit > 0 && (!daemon.PidsLimitSupported || cgroupIgnored) {
+		limits.PidsLimit = 0
+	}
+	if limits.WritableLayerMB > 0 && !daemon.WritableLayerQuotaSupported {
+		limits.WritableLayerMB = 0
+	}
 }
 
 // runtimeIssues applies the compatibility rules to a resolved profile.
@@ -613,7 +650,7 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 func limitIssues(profile RuntimeProfile) []RuntimeIssue {
 	var issues []RuntimeIssue
 
-	if profile.Limits.MemoryBytes == 0 {
+	if profile.Limits.RequestedMemoryBytes == 0 {
 		issues = append(issues, RuntimeIssue{
 			Code:     RuntimeIssueMemoryLimitUnset,
 			Severity: RuntimeWarning,
@@ -626,12 +663,12 @@ func limitIssues(profile RuntimeProfile) []RuntimeIssue {
 		issues = append(issues, RuntimeIssue{
 			Code:     RuntimeIssueSwapEnabled,
 			Severity: RuntimeWarning,
-			Detail:   fmt.Sprintf("swap is enabled (memory %d bytes, memory+swap %d bytes)", profile.Limits.MemoryBytes, profile.Limits.MemorySwapBytes),
+			Detail:   fmt.Sprintf("swap is enabled (memory %d bytes, memory+swap %d bytes)", profile.Limits.RequestedMemoryBytes, profile.Limits.RequestedMemorySwapBytes),
 			Remedy:   "set the swap limit equal to the memory limit; swapping game-server heap causes tick stalls",
 		})
 	}
 
-	if profile.Limits.PidsLimit == 0 {
+	if profile.Limits.RequestedPidsLimit == 0 {
 		issues = append(issues, RuntimeIssue{
 			Code:     RuntimeIssuePidsLimitUnset,
 			Severity: RuntimeWarning,
@@ -640,7 +677,7 @@ func limitIssues(profile RuntimeProfile) []RuntimeIssue {
 		})
 	}
 
-	if !profile.ReadOnlyRootfs && profile.Limits.WritableLayerMB == 0 {
+	if !profile.ReadOnlyRootfs && profile.Limits.RequestedWritableLayerMB == 0 {
 		issues = append(issues, RuntimeIssue{
 			Code:     RuntimeIssueWritableLayerUnbounded,
 			Severity: RuntimeWarning,
@@ -649,11 +686,12 @@ func limitIssues(profile RuntimeProfile) []RuntimeIssue {
 		})
 	}
 
-	if profile.Limits.WritableLayerMB > 0 && profile.DataMount != "" {
+	if profile.Limits.RequestedWritableLayerMB > 0 && profile.DataMount != "" {
+		layerMB := profile.Limits.RequestedWritableLayerMB
 		issues = append(issues, RuntimeIssue{
 			Code:     RuntimeIssueStorageQuotaIsNotAWorldQuota,
 			Severity: RuntimeWarning,
-			Detail:   fmt.Sprintf("the %d MB writable-layer cap does not bound the world at %s", profile.Limits.WritableLayerMB, profile.DataMount),
+			Detail:   fmt.Sprintf("the %d MB writable-layer cap does not bound the world at %s", layerMB, profile.DataMount),
 			Remedy:   "set storage.world_quota_mb to refuse create when measured world bytes meet the cap; storage-opt size does not quota a bind-mounted world",
 		})
 	}
@@ -707,29 +745,29 @@ func daemonLimitIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue 
 		})
 	}
 
-	if profile.Limits.MemoryBytes > 0 && !daemon.MemoryLimitSupported {
+	if profile.Limits.RequestedMemoryBytes > 0 && !daemon.MemoryLimitSupported {
 		issues = append(issues, RuntimeIssue{
 			Code:     RuntimeIssueMemoryLimitUnsupported,
 			Severity: RuntimeWarning,
-			Detail:   fmt.Sprintf("the container requests %d bytes of memory but the daemon reports memory limits are unsupported", profile.Limits.MemoryBytes),
+			Detail:   fmt.Sprintf("the container requests %d bytes of memory but the daemon reports memory limits are unsupported", profile.Limits.RequestedMemoryBytes),
 			Remedy:   "use a daemon with cgroup support, or reduce load; the request may run without the cap",
 		})
 	}
 
-	if profile.Limits.MemoryBytes > 0 && !profile.Limits.SwapDisabled && !daemon.SwapLimitSupported {
+	if profile.Limits.RequestedMemoryBytes > 0 && !daemon.SwapLimitSupported {
 		issues = append(issues, RuntimeIssue{
 			Code:     RuntimeIssueSwapLimitUnsupported,
 			Severity: RuntimeWarning,
-			Detail:   "swap limits are enabled on the container but the daemon reports swap limits are unsupported",
-			Remedy:   "set memory and memory+swap to the same value on a daemon with swap cgroup support",
+			Detail:   "the container requests a swap policy but the daemon reports swap limits are unsupported",
+			Remedy:   "use a daemon with swap cgroup support; MemorySwap may be ignored, including a 0-swap request",
 		})
 	}
 
-	if profile.Limits.PidsLimit > 0 && !daemon.PidsLimitSupported {
+	if profile.Limits.RequestedPidsLimit > 0 && !daemon.PidsLimitSupported {
 		issues = append(issues, RuntimeIssue{
 			Code:     RuntimeIssuePidsLimitUnsupported,
 			Severity: RuntimeWarning,
-			Detail:   fmt.Sprintf("the container requests pids limit %d but the daemon reports pids limits are unsupported", profile.Limits.PidsLimit),
+			Detail:   fmt.Sprintf("the container requests pids limit %d but the daemon reports pids limits are unsupported", profile.Limits.RequestedPidsLimit),
 			Remedy:   "use a daemon with pids cgroup support or accept the default process limit",
 		})
 	}
