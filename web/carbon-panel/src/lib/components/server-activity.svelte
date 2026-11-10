@@ -92,10 +92,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									>{entry.actorName || entry.actorId || '—'}</td
 								>
 								<td class="py-2 pr-4">{entry.event}</td>
-								<td
-									class="max-w-[180px] truncate py-2 pr-4"
-									title={entry.requestId || ''}
-								>{entry.requestId || '—'}</td>
+								<td class="max-w-[180px] truncate py-2 pr-4" title={entry.requestId || ''}
+									>{entry.requestId || '—'}</td
+								>
 								<td class="py-2">{entry.ip || '—'}</td>
 							</tr>
 						{/each}
