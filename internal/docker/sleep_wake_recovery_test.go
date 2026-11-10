@@ -14,11 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDeepSleepManager_WakeRecoversDriftedStoppedAutoDeepSleep verifies that
-// if a server has AutoDeepSleep enabled and a knock-to-wake arrives while its
-// DB status drifted to StatusStopped (or StatusCreating), WakeServer still
-// boots the container instead of failing with a non-deepsleep error (MINE-172).
-func TestDeepSleepManager_WakeRecoversDriftedStoppedAutoDeepSleep(t *testing.T) {
+// TestDeepSleepManager_WakeRefusesStoppedAutoDeepSleep pins the O22 policy:
+// AutoDeepSleep is not a license to start an operator-stopped server. A
+// knock that still arrives after status is STOPPED must fail closed. Drift
+// from DEEPSLEEP is preserved by the reconciler, not by treating STOPPED as
+// asleep (MINE-172 / OSS-247).
+func TestDeepSleepManager_WakeRefusesStoppedAutoDeepSleep(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
 	controller.status["cnt-sleep"] = db.StatusStopped
@@ -26,11 +27,16 @@ func TestDeepSleepManager_WakeRecoversDriftedStoppedAutoDeepSleep(t *testing.T) 
 	store.servers["srv-sleep"].AutoDeepSleep = true
 
 	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
-	require.NoError(t, mgr.WakeServer(ctx, "srv-sleep"))
+	err := mgr.WakeServer(ctx, "srv-sleep")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-deepsleep status stopped")
 
-	srv, err := store.GetServer(ctx, "srv-sleep")
-	require.NoError(t, err)
-	assert.Equal(t, db.StatusRunning, srv.Status)
+	srv, getErr := store.GetServer(ctx, "srv-sleep")
+	require.NoError(t, getErr)
+	assert.Equal(t, db.StatusStopped, srv.Status)
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	assert.Empty(t, controller.starts)
 }
 
 // TestDeepSleepManager_UnknownRemoteNodeDoesNotUseDefaultController verifies

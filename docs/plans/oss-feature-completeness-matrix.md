@@ -90,6 +90,7 @@ J01–J07 qualification.
 | PR | What changed | Rows whose claim is affected |
 | --- | --- | --- |
 | #406 | CreateServer writes a manual server pack through `nodestorage.ForNode` and refuses a missing remote adapter instead of `os.Create` on a mapped path (no controller-local fallback). | O15 |
+| pending | Player wake starts only recorded deep sleep. An operator stop stays stopped even when AutoDeepSleep is still enabled; freeze wake refuses a non-paused status; the reconciler does not recreate a stopped container as a wake. | O22 |
 
 A row whose claim is affected is not automatically closed. Each still needs the
 listed user-path acceptance evidence, in the deployment profile it names.

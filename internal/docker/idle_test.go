@@ -107,6 +107,13 @@ func TestIdleSweepForgetsIneligibleServers(t *testing.T) {
 		t.Fatalf("slept = %v, want nothing for a stopped server", slept)
 	}
 
+	srv.Status = db.StatusDeepSleep
+	tracker.markIdleSince(srv.ID, time.Now().Add(-24*time.Hour))
+	tracker.sweep(context.Background(), []*db.Server{srv}, idleTestMode(&slept), nil)
+	if len(slept) != 0 {
+		t.Fatalf("slept = %v, want nothing for an already deep-sleeping server", slept)
+	}
+
 	srv.Status = db.StatusRunning
 	tracker.sweep(context.Background(), []*db.Server{srv}, idleTestMode(&slept), nil)
 	if len(slept) != 0 {

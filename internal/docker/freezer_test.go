@@ -452,3 +452,53 @@ func TestHibernationManager_WakeUnpauseAndStatusPersistenceFail_ReportsBothError
 	assert.Contains(t, err.Error(), "cgroup unfreeze device busy")
 	assert.Contains(t, err.Error(), "database transaction error", "status persistence failure must not be discarded")
 }
+
+func TestHibernationManager_PlayerWakeStatusPolicy(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      db.ServerStatus
+		autoSleep   bool
+		wantUnpause bool
+		errContains string
+	}{
+		{name: "paused wakes", status: db.StatusPaused, autoSleep: true, wantUnpause: true},
+		{name: "stopped with auto sleep stays stopped", status: db.StatusStopped, autoSleep: true, errContains: "non-paused status stopped"},
+		{name: "deep sleep is not a freeze wake", status: db.StatusDeepSleep, autoSleep: true, errContains: "non-paused status deepsleep"},
+		{name: "already running is idempotent", status: db.StatusRunning, autoSleep: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			freezer := newMockFreezer()
+			if tt.status == db.StatusPaused {
+				freezer.paused["cnt-1"] = true
+			}
+			store := newMockFreezerStore()
+			store.servers["srv-1"] = &db.Server{
+				ID:            "srv-1",
+				ContainerID:   "cnt-1",
+				Status:        tt.status,
+				AutoHibernate: tt.autoSleep,
+			}
+			mgr := NewHibernationManager(freezer, store, nil)
+			err := mgr.WakeServer(ctx, "srv-1")
+			freezer.mu.Lock()
+			unpause := append([]string(nil), freezer.unpauseCalls...)
+			freezer.mu.Unlock()
+
+			if tt.wantUnpause {
+				require.NoError(t, err)
+				assert.Contains(t, unpause, "cnt-1")
+				return
+			}
+			if tt.errContains != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.NotContains(t, unpause, "cnt-1")
+		})
+	}
+}
