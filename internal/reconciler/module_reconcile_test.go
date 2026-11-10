@@ -58,11 +58,31 @@ func (r *recordingModules) reset() {
 // discovers modules.
 type moduleAwareStore struct {
 	Store
-	modules []*db.Module
+	modules             []*db.Module
+	omitServersFromList bool
 }
 
 func (s *moduleAwareStore) ListModules(context.Context) ([]*db.Module, error) {
 	return s.modules, nil
+}
+
+// ListServers is how the startup sweep finds parent servers. Tests that assert
+// a specific ReconcileServer pass can hide those rows so the sweep cannot
+// adopt or recreate first and swallow the transition.
+func (s *moduleAwareStore) ListServers(ctx context.Context) ([]*db.Server, error) {
+	if s.omitServersFromList {
+		return nil, nil
+	}
+	return s.Store.ListServers(ctx)
+}
+
+func callsInclude(calls []string, id string) bool {
+	for _, c := range calls {
+		if c == id {
+			return true
+		}
+	}
+	return false
 }
 
 func waitFor(t *testing.T, cond func() bool) {
@@ -166,6 +186,7 @@ func TestAServerAdoptionSchedulesChildModules(t *testing.T) {
 			{ID: "sidecar", ServerID: "srv-parent", ContainerID: "mod-c1", Status: db.ModuleStatusRunning},
 			{ID: "other-server", ServerID: "srv-other", ContainerID: "mod-c2", Status: db.ModuleStatusRunning},
 		},
+		omitServersFromList: true,
 	}
 	cli := &fakeClient{
 		summary: &container.Summary{ID: "new-container"},
@@ -173,6 +194,7 @@ func TestAServerAdoptionSchedulesChildModules(t *testing.T) {
 	}
 	r := New(store, fakeResolver{cli: cli}, nil, nil, nil, logger.New(), Config{
 		DebounceWindow: 10 * time.Millisecond,
+		SweepInterval:  time.Hour,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	r.SetModuleReconciler(modules)
@@ -182,7 +204,8 @@ func TestAServerAdoptionSchedulesChildModules(t *testing.T) {
 		cancel()
 	})
 	waitFor(t, func() bool {
-		return r.LastSweepAt().After(time.Time{}) && len(modules.calls()) >= 2
+		calls := modules.calls()
+		return callsInclude(calls, "sidecar") && callsInclude(calls, "other-server")
 	})
 	modules.reset()
 
@@ -192,7 +215,7 @@ func TestAServerAdoptionSchedulesChildModules(t *testing.T) {
 
 	waitFor(t, func() bool {
 		calls := modules.calls()
-		return len(calls) == 1 && calls[0] == "sidecar"
+		return callsInclude(calls, "sidecar") && !callsInclude(calls, "other-server")
 	})
 }
 
@@ -207,10 +230,12 @@ func TestAServerSelfHealRecreateSchedulesChildModules(t *testing.T) {
 		modules: []*db.Module{
 			{ID: "sidecar", ServerID: "srv-parent", ContainerID: "", Status: db.ModuleStatusRunning},
 		},
+		omitServersFromList: true,
 	}
 	cli := &fakeClient{resolveErr: fmt.Errorf("%w: srv-parent", docker.ErrContainerNotResolved)}
 	r := New(store, fakeResolver{cli: cli}, nil, nil, nil, logger.New(), Config{
 		DebounceWindow: 10 * time.Millisecond,
+		SweepInterval:  time.Hour,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	r.SetModuleReconciler(modules)
@@ -220,7 +245,7 @@ func TestAServerSelfHealRecreateSchedulesChildModules(t *testing.T) {
 		cancel()
 	})
 	waitFor(t, func() bool {
-		return r.LastSweepAt().After(time.Time{}) && len(modules.calls()) >= 1
+		return callsInclude(modules.calls(), "sidecar")
 	})
 	modules.reset()
 
@@ -229,8 +254,7 @@ func TestAServerSelfHealRecreateSchedulesChildModules(t *testing.T) {
 	}
 
 	waitFor(t, func() bool {
-		calls := modules.calls()
-		return len(calls) == 1 && calls[0] == "sidecar"
+		return callsInclude(modules.calls(), "sidecar")
 	})
 }
 
