@@ -48,11 +48,13 @@ Accessor-backed file RPCs (`ListFiles`, `UpdateFile`, `DeleteFile`,
 manual server-pack zip open storage through `nodestorage.ForNode`.
 `ExtractArchive` streams a zip through the same accessor
 (`nodestorage.ExtractZip`) on transport-only nodes. Zip *write* RPCs
-(`CreateArchive`, `DownloadArchive`, `DownloadRemoteArchive`) and
-`ExportWorld` still walk or build archives on the controller filesystem;
-transport-only nodes are refused at those entry points until a streaming
-write path exists. No worker means `ErrUnavailable` / Connect
-`CodeUnavailable` — never a controller-local fallback.
+`CreateArchive`, `DownloadArchive`, and `ExportWorld` walk and write
+through `nodestorage.CreateZip` / `WriteZip` (accessor `WriteFile` for
+on-node archives; download/export zip bytes land only in the controller
+download temp). `DownloadRemoteArchive` still walks HTTP-to-disk on the
+controller and is refused on transport-only nodes. No worker means
+`ErrUnavailable` / Connect `CodeUnavailable` — never a controller-local
+fallback.
 
 # Read next
 

@@ -1154,6 +1154,14 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
 	}
 
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
+	if err != nil {
+		return nil, storageError(err)
+	}
+	if nodestorage.RequiresRemoteTransport(info) {
+		return s.createArchiveViaAccessor(ctx, server, info, msg)
+	}
+
 	if err := refuseLocalPathPipeline(ctx, s.store, server); err != nil {
 		return nil, storageError(err)
 	}
@@ -1203,6 +1211,43 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 	}), nil
 }
 
+// createArchiveViaAccessor writes a zip through nodestorage.ForNode. It never
+// calls dataRootFor or os.MkdirAll, so a transport-only node cannot grow a
+// controller-local tree (ADR 0005).
+func (s *FileService) createArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.CreateArchiveRequest) (*connect.Response[v1.CreateArchiveResponse], error) {
+	acc, err := nodestorage.ForNode(info, server.DataPath)
+	if err != nil {
+		return nil, storageError(err)
+	}
+	defer func() { _ = acc.Close() }()
+
+	archiveName := msg.ArchiveName
+	if archiveName == "" {
+		archiveName = fmt.Sprintf("archive_%s.zip", time.Now().Format("20060102_150405"))
+	}
+	if !strings.HasSuffix(archiveName, ".zip") {
+		archiveName += ".zip"
+	}
+	destRel := archiveName
+	if destDir := strings.TrimSpace(msg.DestinationPath); destDir != "" && destDir != "." {
+		destRel = path.Join(filepath.ToSlash(destDir), archiveName)
+	}
+
+	count, err := nodestorage.CreateZip(ctx, acc, msg.Paths, destRel, true)
+	if err != nil {
+		s.log.Error("Failed to create archive: %v", err)
+		if os.IsNotExist(err) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("path not found"))
+		}
+		return nil, storageError(err)
+	}
+	return connect.NewResponse(&v1.CreateArchiveResponse{
+		Message:       "Archive created successfully",
+		ArchivePath:   destRel,
+		FilesArchived: int32(count),
+	}), nil
+}
+
 // DownloadArchive creates a zip on disk and returns a download session.
 // The actual bytes are served via GET /api/v1/download/{session_id}.
 func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[v1.DownloadArchiveRequest]) (*connect.Response[v1.DownloadArchiveResponse], error) {
@@ -1215,6 +1260,14 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 
 	if len(msg.Paths) == 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("no paths specified"))
+	}
+
+	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
+	if err != nil {
+		return nil, storageError(err)
+	}
+	if nodestorage.RequiresRemoteTransport(info) {
+		return s.downloadArchiveViaAccessor(ctx, server, info, msg)
 	}
 
 	if err := refuseLocalPathPipeline(ctx, s.store, server); err != nil {
@@ -1248,7 +1301,7 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 	}
 
 	// Stat to get final size
-	info, err := os.Stat(tempPath)
+	zipInfo, err := os.Stat(tempPath)
 	if err != nil {
 		os.Remove(tempPath)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stat archive"))
@@ -1262,12 +1315,67 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 	if user != nil {
 		creatorID = user.ID
 	}
-	session := s.downloadManager.InitSessionFor(tempPath, filename, info.Size(), true, msg.ServerId, creatorID)
+	session := s.downloadManager.InitSessionFor(tempPath, filename, zipInfo.Size(), true, msg.ServerId, creatorID)
 
 	return connect.NewResponse(&v1.DownloadArchiveResponse{
 		SessionId: session.ID,
 		Filename:  filename,
-		TotalSize: info.Size(),
+		TotalSize: zipInfo.Size(),
+	}), nil
+}
+
+// downloadArchiveViaAccessor zips through nodestorage.ForNode into the
+// controller download temp directory. The node world is never mirrored onto
+// a controller-local data tree (ADR 0005).
+func (s *FileService) downloadArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.DownloadArchiveRequest) (*connect.Response[v1.DownloadArchiveResponse], error) {
+	if s.downloadManager == nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("download manager is not configured"))
+	}
+	acc, err := nodestorage.ForNode(info, server.DataPath)
+	if err != nil {
+		return nil, storageError(err)
+	}
+	defer func() { _ = acc.Close() }()
+
+	filename := "download.zip"
+	if len(msg.Paths) == 1 {
+		base := filepath.Base(msg.Paths[0])
+		filename = strings.TrimSuffix(base, filepath.Ext(base)) + ".zip"
+	}
+	tempPath := filepath.Join(s.downloadManager.TempDir(), fmt.Sprintf("download-%s.zip", time.Now().Format("20060102-150405.000")))
+	f, err := os.Create(tempPath)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create archive"))
+	}
+	_, err = nodestorage.WriteZip(ctx, acc, msg.Paths, f, true)
+	closeErr := f.Close()
+	if err != nil {
+		_ = os.Remove(tempPath)
+		s.log.Error("Failed to create download archive: %v", err)
+		if os.IsNotExist(err) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("path not found"))
+		}
+		return nil, storageError(err)
+	}
+	if closeErr != nil {
+		_ = os.Remove(tempPath)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to create archive"))
+	}
+	zipInfo, err := os.Stat(tempPath)
+	if err != nil {
+		_ = os.Remove(tempPath)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stat archive"))
+	}
+	user := auth.GetUserFromContext(ctx)
+	creatorID := ""
+	if user != nil {
+		creatorID = user.ID
+	}
+	session := s.downloadManager.InitSessionFor(tempPath, filename, zipInfo.Size(), true, msg.ServerId, creatorID)
+	return connect.NewResponse(&v1.DownloadArchiveResponse{
+		SessionId: session.ID,
+		Filename:  filename,
+		TotalSize: zipInfo.Size(),
 	}), nil
 }
 
@@ -1289,7 +1397,7 @@ func (s *FileService) ExportWorld(ctx context.Context, req *connect.Request[v1.E
 		return nil, storageError(err)
 	}
 	if nodestorage.RequiresRemoteTransport(info) {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("%w: world export is not available for transport-only node %q", nodestorage.ErrUnavailable, info.Name))
+		return s.exportWorldViaAccessor(ctx, req, server, info)
 	}
 	root, err := nodestorage.MapDataPath(info, server.DataPath)
 	if err != nil {
@@ -1333,6 +1441,56 @@ func (s *FileService) ExportWorld(ctx context.Context, req *connect.Request[v1.E
 	session := s.downloadManager.InitSessionFor(tempPath, filename, zipInfo.Size(), true, server.ID, creatorID)
 	s.auditWorldExport(ctx, req.Peer().Addr, server, filename)
 
+	return connect.NewResponse(&v1.ExportWorldResponse{
+		SessionId: session.ID,
+		Filename:  filename,
+		TotalSize: zipInfo.Size(),
+		DataPath:  server.DataPath,
+	}), nil
+}
+
+// exportWorldViaAccessor zips the remote server tree through ForNode into a
+// download temp file. It never Stats or MkdirAll a controller-local world
+// path for a transport-only node (ADR 0005).
+func (s *FileService) exportWorldViaAccessor(ctx context.Context, req *connect.Request[v1.ExportWorldRequest], server *storage.Server, info nodestorage.NodeInfo) (*connect.Response[v1.ExportWorldResponse], error) {
+	if unsafeWorldExport(server.DataPath) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("refusing to export unsafe server data path %q", server.DataPath))
+	}
+	acc, err := nodestorage.ForNode(info, server.DataPath)
+	if err != nil {
+		return nil, storageError(err)
+	}
+	defer func() { _ = acc.Close() }()
+
+	filename := worldExportFilename(server)
+	tempPath := filepath.Join(s.downloadManager.TempDir(), fmt.Sprintf("world-%s.zip", time.Now().Format("20060102-150405.000")))
+	f, err := os.Create(tempPath)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to export world"))
+	}
+	_, err = nodestorage.WriteZip(ctx, acc, []string{"."}, f, true)
+	closeErr := f.Close()
+	if err != nil {
+		_ = os.Remove(tempPath)
+		s.log.Error("Failed to export world: %v", err)
+		return nil, storageError(err)
+	}
+	if closeErr != nil {
+		_ = os.Remove(tempPath)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to export world"))
+	}
+	zipInfo, err := os.Stat(tempPath)
+	if err != nil {
+		_ = os.Remove(tempPath)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stat world export"))
+	}
+	user := auth.GetUserFromContext(ctx)
+	creatorID := ""
+	if user != nil {
+		creatorID = user.ID
+	}
+	session := s.downloadManager.InitSessionFor(tempPath, filename, zipInfo.Size(), true, server.ID, creatorID)
+	s.auditWorldExport(ctx, req.Peer().Addr, server, filename)
 	return connect.NewResponse(&v1.ExportWorldResponse{
 		SessionId: session.ID,
 		Filename:  filename,
