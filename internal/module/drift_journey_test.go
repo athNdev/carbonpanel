@@ -99,7 +99,7 @@ func (d *moduleDaemon) handler() http.HandlerFunc {
 			}}
 			d.inspect[id] = fmt.Sprintf(`{"Id":%q,"Name":"/carbon-panel-module-created","State":{"Status":"created","Running":false},"Config":{"Labels":{}}}`, id)
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"Id":%q}`, id)))
+			_, _ = fmt.Fprintf(w, `{"Id":%q}`, id)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/start"):
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/stop"):
@@ -141,7 +141,6 @@ func newDriftFixture(t *testing.T, daemon *moduleDaemon) (*Manager, *storage.Sto
 
 func seedRunningSidecar(t *testing.T, store *storage.Store, moduleID, containerID string) (*storage.Server, *storage.Module) {
 	t.Helper()
-	ctx := context.Background()
 	server := &storage.Server{
 		ID: "srv-drift", Name: "Survival", Status: storage.StatusRunning, NodeID: "local",
 		ModLoader: storage.ModLoaderVanilla, MCVersion: "1.21", DataPath: t.TempDir(),
@@ -163,7 +162,6 @@ func seedRunningSidecar(t *testing.T, store *storage.Store, moduleID, containerI
 	if err := store.DB().Create(mod).Error; err != nil {
 		t.Fatal(err)
 	}
-	_ = ctx
 	return server, mod
 }
 
