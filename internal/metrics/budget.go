@@ -48,6 +48,17 @@ func backupStagingBudget(cfg *config.Config) Budget {
 	return knownBudget(size)
 }
 
+func worldFilesystemFreeBudget(root string) Budget {
+	if strings.TrimSpace(root) == "" {
+		return unknownBudget("world path unset")
+	}
+	free, err := files.GetFreeDiskSpace(root)
+	if err != nil {
+		return unknownBudget("filesystem free space unavailable")
+	}
+	return knownBudget(free)
+}
+
 func worldInodeBudget(root string) Budget {
 	if strings.TrimSpace(root) == "" {
 		return unknownBudget("world path unset")

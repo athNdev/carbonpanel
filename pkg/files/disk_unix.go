@@ -20,3 +20,13 @@ func GetDiskSpace(path string) (int64, error) {
 
 	return totalSpace, nil
 }
+
+// GetFreeDiskSpace returns free bytes available to an unprivileged user on the
+// filesystem hosting path.
+func GetFreeDiskSpace(path string) (int64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, fmt.Errorf("failed to get disk stats for %s: %w", path, err)
+	}
+	return int64(stat.Bavail) * int64(stat.Bsize), nil
+}

@@ -428,3 +428,27 @@ func TestPreflightWarnsThatAWritableLayerCapIsIgnoredOnAReadOnlyRoot(t *testing.
 		t.Errorf("WritableLayerMB = %d, want 0 when the root is read-only", profile.Limits.WritableLayerMB)
 	}
 }
+
+func TestDescribeRuntimeWarnsWhenRootlessDaemonUsesCgroupV1(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.Daemon = &DaemonEnforcement{
+		Rootless:             true,
+		CgroupVersion:        "1",
+		MemoryLimitSupported: true,
+		SwapLimitSupported:   true,
+		PidsLimitSupported:   true,
+	}
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueRootlessCgroupUnqualified) {
+		t.Fatalf("issues = %v, want rootless_cgroup_unqualified", issueCodes(profile))
+	}
+}
+
+func TestDescribeRuntimeWarnsWhenDaemonCannotEnforceMemory(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.Daemon = &DaemonEnforcement{MemoryLimitSupported: false}
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueMemoryLimitUnsupported) {
+		t.Fatalf("issues = %v, want memory_limit_unsupported", issueCodes(profile))
+	}
+}
