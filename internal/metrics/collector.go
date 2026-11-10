@@ -40,13 +40,13 @@ type ServerMetrics struct {
 	// Separate resource budgets (OSS-239). These are measured or explicitly
 	// unknown; they are not a hard world quota and must not be inferred from
 	// DiskUsage or WorldSize.
-	WorldFreeInodes           Budget
-	WorldFilesystemFreeBytes  Budget
-	BackupStagingBytes        Budget
-	ImageCacheBytes           Budget
-	PlayersOnline      int
-	TPS                float64
-	LastUpdated        time.Time
+	WorldFreeInodes          Budget
+	WorldFilesystemFreeBytes Budget
+	BackupStagingBytes       Budget
+	ImageCacheBytes          Budget
+	PlayersOnline            int
+	TPS                      float64
+	LastUpdated              time.Time
 
 	// SLP fields
 	SLPAvailable    bool
@@ -58,6 +58,9 @@ type ServerMetrics struct {
 	MaxPlayers      int
 	Favicon         string // Base64 PNG (data:image/png;base64,...)
 	SLPLastUpdated  time.Time
+	// RCONLastUpdated is when a list or TPS command last succeeded. It is
+	// not set on failure, so a missing timestamp stays unknown.
+	RCONLastUpdated time.Time
 }
 
 // Configuration for metrics collector
@@ -221,6 +224,21 @@ func (c *Collector) Stop() {
 
 	c.wg.Wait()
 	c.log.Info("Metrics collector stopped")
+}
+
+// SeedMetrics installs an already-collected metrics row. Health reads SLP and
+// RCON timestamps from it and does not ping the game itself.
+func (c *Collector) SeedMetrics(m ServerMetrics) {
+	if c == nil || m.ServerID == "" {
+		return
+	}
+	cp := m
+	c.mu.Lock()
+	if c.metrics == nil {
+		c.metrics = make(map[string]*ServerMetrics)
+	}
+	c.metrics[m.ServerID] = &cp
+	c.mu.Unlock()
 }
 
 // Get metrics for a specific server
@@ -399,7 +417,9 @@ func (c *Collector) collectRCONData() {
 				c.updateMetrics(server.ID, func(m *ServerMetrics) {
 					m.PlayersOnline = count
 					m.PlayerSample = players
-					m.LastUpdated = time.Now()
+					now := time.Now()
+					m.LastUpdated = now
+					m.RCONLastUpdated = now
 				})
 			}
 		}
@@ -438,7 +458,9 @@ func (c *Collector) collectRCONData() {
 					if tps > 0 {
 						c.updateMetrics(server.ID, func(m *ServerMetrics) {
 							m.TPS = tps
-							m.LastUpdated = time.Now()
+							now := time.Now()
+							m.LastUpdated = now
+							m.RCONLastUpdated = now
 						})
 						c.tpsMu.Lock()
 						c.tpsWorkingCmd[server.ID] = cmd
@@ -648,7 +670,6 @@ func (c *Collector) collectSLPData() {
 		// Check if server is running
 		status, err := dockerCli.GetContainerStatus(ctx, server.ContainerID)
 		if err != nil || status != storage.StatusRunning {
-			// Mark SLP as unavailable for no op
 			c.updateMetrics(server.ID, func(m *ServerMetrics) {
 				m.SLPAvailable = false
 			})
@@ -714,6 +735,7 @@ func (c *Collector) collectSLPData() {
 			c.log.Debug("Metrics collector SLP: failed to ping %s (%s:%d): %v", server.ID, targetHost, targetPort, err)
 			c.updateMetrics(server.ID, func(m *ServerMetrics) {
 				m.SLPAvailable = false
+				m.SLPLastUpdated = time.Now()
 			})
 			continue
 		}

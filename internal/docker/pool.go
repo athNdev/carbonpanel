@@ -424,6 +424,51 @@ func (p *ClientPool) RemoveNode(nodeID string) error {
 	return nil
 }
 
+// NodeProbe is one enabled node's reachability. It carries no hostname or
+// secret: health aggregates these into counts.
+type NodeProbe struct {
+	Reachable bool
+}
+
+// ProbeNodes pings every enabled node in parallel. An empty result means the
+// pool has no node inventory to fan out to; callers should fall back to the
+// default client. Listing the inventory is an observation: a list error is
+// returned so health can report unknown rather than inventing an outage.
+func (p *ClientPool) ProbeNodes(ctx context.Context) ([]NodeProbe, error) {
+	if p == nil || p.store == nil {
+		return nil, nil
+	}
+	nodes, err := p.store.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var enabled []*models.Node
+	for _, node := range nodes {
+		if node != nil && node.Enabled {
+			enabled = append(enabled, node)
+		}
+	}
+	if len(enabled) == 0 {
+		return nil, nil
+	}
+
+	out := make([]NodeProbe, len(enabled))
+	var wg sync.WaitGroup
+	for i, node := range enabled {
+		wg.Add(1)
+		go func(i int, id string) {
+			defer wg.Done()
+			nodeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			ok, err := p.PingNode(nodeCtx, id)
+			out[i] = NodeProbe{Reachable: err == nil && ok}
+		}(i, node.ID)
+	}
+	wg.Wait()
+	return out, nil
+}
+
 // PingNode tests connectivity to a specific Docker node and updates its DB status.
 func (p *ClientPool) PingNode(ctx context.Context, nodeID string) (bool, error) {
 	if p.store == nil {

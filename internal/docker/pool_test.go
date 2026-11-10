@@ -21,8 +21,9 @@ import (
 
 // mockNodeStore implements NodeStore for unit tests
 type mockNodeStore struct {
-	mu    sync.Mutex
-	nodes map[string]*models.Node
+	mu      sync.Mutex
+	nodes   map[string]*models.Node
+	listErr error
 }
 
 func newMockNodeStore(nodes ...*models.Node) *mockNodeStore {
@@ -50,6 +51,9 @@ func (m *mockNodeStore) GetNode(ctx context.Context, id string) (*models.Node, e
 func (m *mockNodeStore) ListNodes(ctx context.Context) ([]*models.Node, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	var list []*models.Node
 	for _, n := range m.nodes {
 		cp := *n
@@ -228,6 +232,69 @@ func TestGetClientStrictDropsAClientWhenTheGenerationChanges(t *testing.T) {
 	}
 	if got == stale {
 		t.Fatal("generation change reused the cached client")
+	}
+}
+
+func TestProbeNodesFansOutAndKeepsOneFailureFromHidingTheRest(t *testing.T) {
+	log := logger.New()
+	local := &Client{log: log}
+	remote := &Client{log: log}
+	store := newMockNodeStore(
+		&models.Node{ID: "local", Name: "Local", Host: "unix:///var/run/docker.sock", Enabled: true, IsLocal: true},
+		&models.Node{ID: "remote-b", Name: "B", Host: "tcp://10.0.0.2:2375", Enabled: true},
+		&models.Node{ID: "off", Name: "Off", Host: "tcp://10.0.0.3:2375", Enabled: false},
+	)
+	pool := NewClientPool(store, local, log)
+	t.Cleanup(func() { _ = pool.Close() })
+	pool.RegisterClient("local", local)
+	pool.RegisterClient("remote-b", remote)
+
+	origPing := pingDocker
+	origID := readDaemonIdentity
+	t.Cleanup(func() {
+		pingDocker = origPing
+		readDaemonIdentity = origID
+	})
+	pingDocker = func(_ context.Context, cli *Client) error {
+		if cli == remote {
+			return errors.New("timeout")
+		}
+		return nil
+	}
+	readDaemonIdentity = func(context.Context, *Client) (string, error) { return "daemon-a", nil }
+
+	probes, err := pool.ProbeNodes(context.Background())
+	if err != nil {
+		t.Fatalf("ProbeNodes: %v", err)
+	}
+	if len(probes) != 2 {
+		t.Fatalf("probes = %d, want 2 enabled nodes", len(probes))
+	}
+	ok, down := 0, 0
+	for _, p := range probes {
+		if p.Reachable {
+			ok++
+		} else {
+			down++
+		}
+	}
+	if ok != 1 || down != 1 {
+		t.Fatalf("reachable=%d down=%d, want one of each", ok, down)
+	}
+}
+
+func TestProbeNodesReturnsListErrorAsUnknownNotOutage(t *testing.T) {
+	store := newMockNodeStore()
+	store.listErr = errors.New("db unavailable")
+	pool := NewClientPool(store, &Client{log: logger.New()}, logger.New())
+	t.Cleanup(func() { _ = pool.Close() })
+
+	probes, err := pool.ProbeNodes(context.Background())
+	if err == nil {
+		t.Fatal("expected list error")
+	}
+	if probes != nil {
+		t.Fatalf("probes = %v, want nil so health can report unknown", probes)
 	}
 }
 
