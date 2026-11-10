@@ -9,6 +9,8 @@ code_refs:
   - internal/docker/freezer.go
   - cmd/carbon-panel
   - internal/nodestorage
+  - internal/docker/runtime_profile.go
+  - pkg/files
   - internal/s3
 sources:
   - title: Reliability plan
@@ -17,10 +19,13 @@ sources:
 
 # Current gaps
 
-- A bind-mounted world is not quota-limited. `storage.container_writable_mb`
+- A bind-mounted world is not quota-limited by Docker. `storage.container_writable_mb`
   caps only the container writable layer, and it applies only when the root is
-  writable. World growth is measured and alerted, not capped: a node filesystem
-  or volume quota is the only hard bound available today. The metrics collector
+  writable. `storage.world_quota_mb` is portable panel admission: when set,
+  StartServer/create fails closed if measured world bytes meet or exceed it.
+  That is not an xfs/project or volume quota and must not be reported as
+  `WorldDiskEnforced`. World growth is still unbounded at the filesystem until
+  a node filesystem or volume quota is present. The metrics collector
   reports separate budgets beside world bytes: free inodes on the world
   filesystem (or explicitly unknown, for example on Windows), and backup
   staging bytes under `storage.temp_dir` when configured (unknown when unset).
@@ -30,7 +35,7 @@ sources:
   Image-cache bytes are not a world quota and are not added to world bytes.
   None of these is a hard world quota. Free bytes on the world filesystem are
   reported separately from total capacity; neither substitutes for xfs/project
-  or volume quotas when a hard world cap is required.
+  or volume quotas when a hard kernel world cap is required.
 
 - Daemon `/info` qualification warns when cgroup or storage-opt limits may be
   ignored (for example rootless on cgroup v1). Live confirmation on the target

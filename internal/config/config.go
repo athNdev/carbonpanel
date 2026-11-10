@@ -113,6 +113,11 @@ type StorageConfig struct {
 	// bounds the world, which is a bind mount: bind-mounted data is outside the
 	// writable layer and is measured, not quota-limited, by the panel.
 	ContainerWritableMB int64 `mapstructure:"container_writable_mb" json:"container_writable_mb"`
+	// WorldQuotaMB refuses container create when measured world bytes (the
+	// metrics collector's WorldSize) meet or exceed this many mebibytes.
+	// 0 disables admission. This is panel fail-closed admission, not an
+	// xfs/project or volume quota, and it is not the writable-layer cap.
+	WorldQuotaMB int64 `mapstructure:"world_quota_mb" json:"world_quota_mb"`
 	MaxSnapshots          int                    `mapstructure:"max_snapshots" json:"max_snapshots"`
 	SnapshotRetentionDays int                    `mapstructure:"snapshot_retention_days" json:"snapshot_retention_days"`
 	BackupEncryption      BackupEncryptionConfig `mapstructure:"backup_encryption" json:"backup_encryption"`
@@ -421,6 +426,9 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.Storage.SnapshotRetentionDays < 0 {
 		return fmt.Errorf("storage.snapshot_retention_days cannot be negative, got: %d", cfg.Storage.SnapshotRetentionDays)
+	}
+	if cfg.Storage.WorldQuotaMB < 0 {
+		return fmt.Errorf("storage.world_quota_mb cannot be negative, got: %d", cfg.Storage.WorldQuotaMB)
 	}
 
 	// Validate upload limits

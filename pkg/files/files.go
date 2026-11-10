@@ -63,10 +63,50 @@ func FindWorldDir(dataDir string) (string, error) {
 	}
 
 	if worldDir == "" {
-		return "", fmt.Errorf("no valid world directory found in %s", dataDir)
+		return "", fmt.Errorf("%w in %s", ErrWorldDirNotFound, dataDir)
 	}
 
 	return worldDir, nil
+}
+
+// ErrWorldDirNotFound is returned when the data directory has no Minecraft
+// world (no directory named world that contains level.dat).
+var ErrWorldDirNotFound = errors.New("no valid world directory found")
+
+// WorldBytes is the metrics collector's world-directory total: the overworld
+// plus sibling nether and end directories when they exist. A missing data
+// directory or a first-boot tree with no world is 0, not an error. Other
+// walk failures are returned so admission can fail closed.
+func WorldBytes(dataDir string) (int64, error) {
+	if strings.TrimSpace(dataDir) == "" {
+		return 0, nil
+	}
+	info, err := os.Stat(dataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if !info.IsDir() {
+		return 0, fmt.Errorf("world data path %s is not a directory", dataDir)
+	}
+	worldPaths, err := FindWorldDirs(dataDir)
+	if err != nil {
+		if errors.Is(err, ErrWorldDirNotFound) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var total int64
+	for _, worldPath := range worldPaths {
+		size, err := CalculateDirSize(worldPath)
+		if err != nil {
+			return 0, err
+		}
+		total += size
+	}
+	return total, nil
 }
 
 // Returns the server's world directory along with any sibling world dirs
