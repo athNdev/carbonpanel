@@ -46,6 +46,12 @@ parent server are meant to be running. A sidecar is never resurrected under a
 stopped server, and an unreachable node leaves the record untouched because a
 daemon that did not answer is not evidence the container is gone.
 
+While a declared dependency is not running, the pass neither reports the module
+in sync nor recreates it; it returns a waiting outcome and leaves the row
+unchanged. Before recreate it re-checks each published host port on
+Module.Ports using the same store and daemon reservation checks as module
+create, and waits instead of recreating when another consumer holds the port.
+
 The decision itself is a pure function in `internal/module/reconcile.go`; the
 reconciler only schedules it, so templates, hooks and dependency ordering stay
 with the module manager.
