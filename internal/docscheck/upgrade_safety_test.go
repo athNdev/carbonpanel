@@ -6,6 +6,7 @@
 package docscheck
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,10 +76,6 @@ func TestDefaultLifecyclePreservesWorldsAndDatabase(t *testing.T) {
 	devstack := readRepoFile(t, root, "scripts/review/devstack.sh")
 	if !destructiveNameOK.MatchString(devstack) && !strings.Contains(devstack, "devstack.sh clean") {
 		t.Fatal("review stack must keep a separately named clean that deletes only its own data")
-	}
-	if !strings.Contains(makefile, "review/devstack.sh clean") {
-		// Makefile must not wire the destructive review clean into default targets;
-		// mentioning it only in comments is fine, invoking it is not.
 	}
 	if strings.Contains(makefileRecipe(t, makefile, "clean"), "devstack.sh") {
 		t.Fatal("make clean must not call the review-stack destructive clean")
@@ -268,9 +265,7 @@ func writeProbeDB(t *testing.T, path, value string) error {
 		"import sqlite3,sys; p,v=sys.argv[1],sys.argv[2]; c=sqlite3.connect(p); c.execute('CREATE TABLE probe (v TEXT)'); c.execute('INSERT INTO probe (v) VALUES (?)', (v,)); c.commit()",
 		path, value)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return err
-	} else {
-		_ = out
+		return fmt.Errorf("%w: %s", err, out)
 	}
 	return nil
 }
@@ -284,11 +279,9 @@ func overwriteProbeDB(t *testing.T, path, value string) error {
 	cmd := exec.Command(py, "-c",
 		"import sqlite3,sys; p,v=sys.argv[1],sys.argv[2]; c=sqlite3.connect(p); c.execute('UPDATE probe SET v = ?', (v,)); c.commit()",
 		path, value)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return err
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, out)
 	}
-	_ = out
 	return nil
 }
 
@@ -303,7 +296,7 @@ func readProbeDB(t *testing.T, path string) (string, error) {
 		path)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %s", err, out)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
