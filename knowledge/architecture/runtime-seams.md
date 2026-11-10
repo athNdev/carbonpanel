@@ -38,7 +38,7 @@ package fails knowledge-lint (`code_refs`) and `internal/docscheck`.
 | Lifecycle handle | `internal/docker/transition.go` | `TryBeginServerTransition` returns a `Transition`. Only that handle can release the claim. |
 | Idle-power module | `internal/docker/idle.go` | Freeze and deep sleep share `idleTracker`, `idleMode` and `idleRunner`. |
 | Route PlanFor | `internal/proxy/plan.go` | `PlanFor` is pure. The proxy manager applies the plan. |
-| Worldstore | `internal/worldstore` | Snapshot, backup and restore of world data go through this package. |
+| Worldstore | `internal/worldstore` | Snapshot, backup and restore of world data go through this package. Transport-only nodes stream backup and restore through `nodestorage.ForNode`. |
 
 # Why
 

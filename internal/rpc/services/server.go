@@ -637,15 +637,16 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 		UpdatedAt:               timestamppb.New(server.UpdatedAt),
 
 		// SLP fields
-		SlpAvailable:    server.SLPAvailable,
-		SlpLatencyMs:    server.SLPLatencyMs,
-		Motd:            server.MOTD,
-		ServerVersion:   server.ServerVersion,
-		ProtocolVersion: int32(server.ProtocolVersion),
-		PlayerSample:    server.PlayerSample,
-		MaxPlayersSlp:   int32(server.MaxPlayersSLP),
-		Favicon:         server.Favicon,
-		NodeId:          server.NodeID,
+		SlpAvailable:        server.SLPAvailable,
+		SlpLatencyMs:        server.SLPLatencyMs,
+		Motd:                server.MOTD,
+		ServerVersion:       server.ServerVersion,
+		ProtocolVersion:     int32(server.ProtocolVersion),
+		PlayerSample:        server.PlayerSample,
+		MaxPlayersSlp:       int32(server.MaxPlayersSLP),
+		Favicon:             server.Favicon,
+		NodeId:              server.NodeID,
+		JoinObservationKind: server.JoinObservationKind,
 	}
 
 	// Apply overrides
@@ -669,6 +670,12 @@ func dbServerToProto(server *storage.Server) *v1.Server {
 	// Map optional last started
 	if server.LastStarted != nil {
 		protoServer.LastStarted = timestamppb.New(*server.LastStarted)
+	}
+	if !server.JoinObservedAt.IsZero() {
+		protoServer.JoinObservedAt = timestamppb.New(server.JoinObservedAt)
+	}
+	if !server.LastGoodJoinAt.IsZero() {
+		protoServer.LastGoodJoinAt = timestamppb.New(server.LastGoodJoinAt)
 	}
 
 	return protoServer
@@ -919,27 +926,11 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 			// skip the lookup on later reads.
 			s.backfillModpackLoader(ctx, server)
 
-			// Apply cached metrics from the background collector
+			var live *metrics.ServerMetrics
 			if s.metricsCollector != nil {
-				if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
-					server.MemoryUsage = m.MemoryUsage
-					server.CPUPercent = m.CPUPercent
-					server.DiskUsage = m.DiskUsage
-					server.DiskTotal = m.DiskTotal
-					server.WorldSize = m.WorldSize
-					server.PlayersOnline = m.PlayersOnline
-					server.TPS = m.TPS
-
-					// SLP fields
-					server.SLPAvailable = m.SLPAvailable
-					server.SLPLatencyMs = m.SLPLatencyMs
-					server.MOTD = m.MOTD
-					server.ServerVersion = m.ServerVersion
-					server.ProtocolVersion = m.ProtocolVersion
-					server.PlayerSample = m.PlayerSample
-					server.MaxPlayersSLP = m.MaxPlayers
-				}
+				live = s.metricsCollector.GetMetrics(server.ID)
 			}
+			applyCachedMetrics(server, live, time.Now())
 		}
 	}
 
@@ -989,28 +980,11 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 	// See ListServers: converge the display loader for older modpack servers.
 	s.backfillModpackLoader(ctx, server)
 
-	// Apply cached metrics from the background collector
+	var live *metrics.ServerMetrics
 	if s.metricsCollector != nil {
-		if m := s.metricsCollector.GetMetrics(server.ID); m != nil {
-			server.MemoryUsage = m.MemoryUsage
-			server.CPUPercent = m.CPUPercent
-			server.DiskUsage = m.DiskUsage
-			server.DiskTotal = m.DiskTotal
-			server.WorldSize = m.WorldSize
-			server.PlayersOnline = m.PlayersOnline
-			server.TPS = m.TPS
-
-			// SLP fields
-			server.SLPAvailable = m.SLPAvailable
-			server.SLPLatencyMs = m.SLPLatencyMs
-			server.MOTD = m.MOTD
-			server.ServerVersion = m.ServerVersion
-			server.ProtocolVersion = m.ProtocolVersion
-			server.PlayerSample = m.PlayerSample
-			server.MaxPlayersSLP = m.MaxPlayers
-			server.Favicon = m.Favicon
-		}
+		live = s.metricsCollector.GetMetrics(server.ID)
 	}
+	applyCachedMetrics(server, live, time.Now())
 
 	return connect.NewResponse(&v1.GetServerResponse{
 		Server: s.toProtoServer(ctx, server),
@@ -3163,15 +3137,15 @@ func (s *ServerService) SendCommand(ctx context.Context, req *connect.Request[v1
 // ListServerPlayers returns the live online roster from the metrics
 // collector (RCON `list` / SLP sample), empty when offline (MINE-140).
 func (s *ServerService) ListServerPlayers(ctx context.Context, req *connect.Request[v1.ListServerPlayersRequest]) (*connect.Response[v1.ListServerPlayersResponse], error) {
-	if _, err := s.store.GetServer(ctx, req.Msg.ServerId); err != nil {
+	server, err := s.store.GetServer(ctx, req.Msg.ServerId)
+	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 	players := []string{}
 	online := 0
 	if s.metricsCollector != nil {
 		if m := s.metricsCollector.GetMetrics(req.Msg.ServerId); m != nil {
-			players = append(players, m.PlayerSample...)
-			online = m.PlayersOnline
+			players, online = livePlayerRoster(server, m, time.Now())
 		}
 	}
 	return connect.NewResponse(&v1.ListServerPlayersResponse{

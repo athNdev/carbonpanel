@@ -11,6 +11,7 @@ code_refs:
   - internal/rpc/services/operation.go
   - internal/rpc/services/activity.go
   - internal/rpc/services/support.go
+  - internal/rpc/services/server.go
   - web/carbon-panel/src/lib/components/server-operations.svelte
   - web/carbon-panel/src/lib/components/server-activity.svelte
 sources:
@@ -56,9 +57,13 @@ exists to prevent.
 - Generate and Upload always attach `operations.json` (the projected journal)
   and `observations.json` (per-server stale vs last-good join evidence). Writing
   the helper is not enough; the archive path must call it.
+- `GetServer` projects that same join classification onto live fields.
+  Last-good SLP is not current playable state. See
+  [actionable recovery](../operations/actionable-recovery.md).
 
 # Read next
 
 - [Runtime model](runtime.md)
 - [Fail-closed authorization](../invariants/authz-fail-closed.md)
 - [Data safety](../invariants/data-safety.md)
+- [Actionable recovery](../operations/actionable-recovery.md)

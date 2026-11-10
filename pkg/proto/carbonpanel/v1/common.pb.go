@@ -372,10 +372,16 @@ type Server struct {
 	// detected in the boot log. Display metadata only; empty unless status is
 	// error, and cleared as soon as any other status is adopted.
 	StatusReason string `protobuf:"bytes,47,opt,name=status_reason,json=statusReason,proto3" json:"status_reason,omitempty"`
+	// Join observation freshness from ClassifyServer. Last-good SLP is never
+	// rewritten as current playable state. Values: playable, unjoinable,
+	// unobserved, stale, starting, timed_out, stopped.
+	JoinObservationKind string                 `protobuf:"bytes,48,opt,name=join_observation_kind,json=joinObservationKind,proto3" json:"join_observation_kind,omitempty"`
+	JoinObservedAt      *timestamppb.Timestamp `protobuf:"bytes,49,opt,name=join_observed_at,json=joinObservedAt,proto3,oneof" json:"join_observed_at,omitempty"`
+	LastGoodJoinAt      *timestamppb.Timestamp `protobuf:"bytes,50,opt,name=last_good_join_at,json=lastGoodJoinAt,proto3,oneof" json:"last_good_join_at,omitempty"`
 	// Requested versus effective Docker resource limits for this server.
 	// memory_enforced is false until /info qualification says the cap applies;
 	// world_disk_enforced is never set from storage-opt.
-	ResourceEnforcement *ResourceEnforcement `protobuf:"bytes,48,opt,name=resource_enforcement,json=resourceEnforcement,proto3" json:"resource_enforcement,omitempty"`
+	ResourceEnforcement *ResourceEnforcement `protobuf:"bytes,51,opt,name=resource_enforcement,json=resourceEnforcement,proto3" json:"resource_enforcement,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -737,6 +743,27 @@ func (x *Server) GetStatusReason() string {
 		return x.StatusReason
 	}
 	return ""
+}
+
+func (x *Server) GetJoinObservationKind() string {
+	if x != nil {
+		return x.JoinObservationKind
+	}
+	return ""
+}
+
+func (x *Server) GetJoinObservedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.JoinObservedAt
+	}
+	return nil
+}
+
+func (x *Server) GetLastGoodJoinAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastGoodJoinAt
+	}
+	return nil
 }
 
 func (x *Server) GetResourceEnforcement() *ResourceEnforcement {
@@ -1592,7 +1619,7 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"last_login\x18\t \x01(\v2\x1a.google.protobuf.TimestampH\x01R\tlastLogin\x88\x01\x01B\b\n" +
 	"\x06_emailB\r\n" +
-	"\v_last_login\"\x8f\x0f\n" +
+	"\v_last_login\"\x85\x11\n" +
 	"\x06Server\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
@@ -1653,9 +1680,14 @@ const file_carbonpanel_v1_common_proto_rawDesc = "" +
 	"\anode_id\x18( \x01(\tR\x06nodeId\x12%\n" +
 	"\x0eloader_version\x18- \x01(\tR\rloaderVersion\x12@\n" +
 	"\x0emodpack_loader\x18. \x01(\x0e2\x19.carbonpanel.v1.ModLoaderR\rmodpackLoader\x12#\n" +
-	"\rstatus_reason\x18/ \x01(\tR\fstatusReason\x12V\n" +
-	"\x14resource_enforcement\x180 \x01(\v2#.carbonpanel.v1.ResourceEnforcementR\x13resourceEnforcementB\x0f\n" +
-	"\r_last_started\"\xa8\x03\n" +
+	"\rstatus_reason\x18/ \x01(\tR\fstatusReason\x122\n" +
+	"\x15join_observation_kind\x180 \x01(\tR\x13joinObservationKind\x12I\n" +
+	"\x10join_observed_at\x181 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\x0ejoinObservedAt\x88\x01\x01\x12J\n" +
+	"\x11last_good_join_at\x182 \x01(\v2\x1a.google.protobuf.TimestampH\x02R\x0elastGoodJoinAt\x88\x01\x01\x12V\n" +
+	"\x14resource_enforcement\x183 \x01(\v2#.carbonpanel.v1.ResourceEnforcementR\x13resourceEnforcementB\x0f\n" +
+	"\r_last_startedB\x13\n" +
+	"\x11_join_observed_atB\x14\n" +
+	"\x12_last_good_join_at\"\xa8\x03\n" +
 	"\x13ResourceEnforcement\x124\n" +
 	"\x16requested_memory_bytes\x18\x01 \x01(\x03R\x14requestedMemoryBytes\x124\n" +
 	"\x16effective_memory_bytes\x18\x02 \x01(\x03R\x14effectiveMemoryBytes\x12=\n" +
@@ -1831,22 +1863,24 @@ var file_carbonpanel_v1_common_proto_depIdxs = []int32{
 	14, // 8: carbonpanel.v1.Server.created_at:type_name -> google.protobuf.Timestamp
 	14, // 9: carbonpanel.v1.Server.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 10: carbonpanel.v1.Server.modpack_loader:type_name -> carbonpanel.v1.ModLoader
-	4,  // 11: carbonpanel.v1.Server.resource_enforcement:type_name -> carbonpanel.v1.ResourceEnforcement
-	12, // 12: carbonpanel.v1.DockerOverrides.environment:type_name -> carbonpanel.v1.DockerOverrides.EnvironmentEntry
-	6,  // 13: carbonpanel.v1.DockerOverrides.volumes:type_name -> carbonpanel.v1.VolumeMount
-	13, // 14: carbonpanel.v1.DockerOverrides.labels:type_name -> carbonpanel.v1.DockerOverrides.LabelsEntry
-	14, // 15: carbonpanel.v1.ProxyListener.created_at:type_name -> google.protobuf.Timestamp
-	14, // 16: carbonpanel.v1.ProxyListener.updated_at:type_name -> google.protobuf.Timestamp
-	14, // 17: carbonpanel.v1.ProxyConfig.created_at:type_name -> google.protobuf.Timestamp
-	14, // 18: carbonpanel.v1.ProxyConfig.updated_at:type_name -> google.protobuf.Timestamp
-	10, // 19: carbonpanel.v1.Role.permissions:type_name -> carbonpanel.v1.Permission
-	14, // 20: carbonpanel.v1.Role.created_at:type_name -> google.protobuf.Timestamp
-	14, // 21: carbonpanel.v1.Role.updated_at:type_name -> google.protobuf.Timestamp
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	14, // 11: carbonpanel.v1.Server.join_observed_at:type_name -> google.protobuf.Timestamp
+	14, // 12: carbonpanel.v1.Server.last_good_join_at:type_name -> google.protobuf.Timestamp
+	4,  // 13: carbonpanel.v1.Server.resource_enforcement:type_name -> carbonpanel.v1.ResourceEnforcement
+	12, // 14: carbonpanel.v1.DockerOverrides.environment:type_name -> carbonpanel.v1.DockerOverrides.EnvironmentEntry
+	6,  // 15: carbonpanel.v1.DockerOverrides.volumes:type_name -> carbonpanel.v1.VolumeMount
+	13, // 16: carbonpanel.v1.DockerOverrides.labels:type_name -> carbonpanel.v1.DockerOverrides.LabelsEntry
+	14, // 17: carbonpanel.v1.ProxyListener.created_at:type_name -> google.protobuf.Timestamp
+	14, // 18: carbonpanel.v1.ProxyListener.updated_at:type_name -> google.protobuf.Timestamp
+	14, // 19: carbonpanel.v1.ProxyConfig.created_at:type_name -> google.protobuf.Timestamp
+	14, // 20: carbonpanel.v1.ProxyConfig.updated_at:type_name -> google.protobuf.Timestamp
+	10, // 21: carbonpanel.v1.Role.permissions:type_name -> carbonpanel.v1.Permission
+	14, // 22: carbonpanel.v1.Role.created_at:type_name -> google.protobuf.Timestamp
+	14, // 23: carbonpanel.v1.Role.updated_at:type_name -> google.protobuf.Timestamp
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_common_proto_init() }

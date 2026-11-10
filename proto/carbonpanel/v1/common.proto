@@ -136,10 +136,17 @@ message Server {
   // error, and cleared as soon as any other status is adopted.
   string status_reason = 47;
 
+  // Join observation freshness from ClassifyServer. Last-good SLP is never
+  // rewritten as current playable state. Values: playable, unjoinable,
+  // unobserved, stale, starting, timed_out, stopped.
+  string join_observation_kind = 48;
+  optional google.protobuf.Timestamp join_observed_at = 49;
+  optional google.protobuf.Timestamp last_good_join_at = 50;
+
   // Requested versus effective Docker resource limits for this server.
   // memory_enforced is false until /info qualification says the cap applies;
   // world_disk_enforced is never set from storage-opt.
-  ResourceEnforcement resource_enforcement = 48;
+  ResourceEnforcement resource_enforcement = 51;
 }
 
 // Requested versus effective container resource limits.

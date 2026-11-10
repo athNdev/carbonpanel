@@ -46,7 +46,21 @@ func ExtractZip(ctx context.Context, acc Accessor, archiveRel, destRel string, c
 	if err != nil {
 		return 0, err
 	}
-	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	return ExtractZipBytes(ctx, acc, raw, destRel, counter)
+}
+
+// ExtractZipBytes writes zip members through acc. data may come from a
+// controller temp file (remote download, snapshot rollback); the destination
+// is still only the accessor.
+func ExtractZipBytes(ctx context.Context, acc Accessor, data []byte, destRel string, counter *atomic.Int32) (int, error) {
+	if acc == nil {
+		return 0, fmt.Errorf("%w: accessor is required", ErrUnavailable)
+	}
+	destRel = strings.TrimSpace(destRel)
+	if destRel == "" {
+		return 0, fmt.Errorf("%w: empty archive or destination", ErrEscape)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return 0, fmt.Errorf("failed to open zip: %w", err)
 	}
@@ -84,6 +98,71 @@ func ExtractZip(ctx context.Context, acc Accessor, archiveRel, destRel string, c
 		}
 	}
 	return extracted, nil
+}
+
+const (
+	restoreStageRel = ".carbon-restore-stage"
+	restoreOldRel   = ".carbon-restore-old"
+)
+
+// ReplaceTreeFromZip extracts a controller-side zip through acc and swaps it
+// over the existing tree. Staging stays inside the accessor so a transport-only
+// node cannot grow a controller-local copy (ADR 0005).
+func ReplaceTreeFromZip(ctx context.Context, acc Accessor, data []byte) (int, error) {
+	if acc == nil {
+		return 0, fmt.Errorf("%w: accessor is required", ErrUnavailable)
+	}
+	_ = acc.RemoveAll(restoreStageRel)
+	_ = acc.RemoveAll(restoreOldRel)
+	n, err := ExtractZipBytes(ctx, acc, data, restoreStageRel, nil)
+	if err != nil {
+		_ = acc.RemoveAll(restoreStageRel)
+		return 0, err
+	}
+	if err := SwapAccessorTree(acc, restoreStageRel, restoreOldRel); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// SwapAccessorTree moves live top-level entries aside, promotes stageRel to
+// the accessor root, then drops the staging directories.
+func SwapAccessorTree(acc Accessor, stageRel, oldRel string) error {
+	if acc == nil {
+		return fmt.Errorf("%w: accessor is required", ErrUnavailable)
+	}
+	entries, err := acc.ReadDir(".")
+	if err != nil {
+		return err
+	}
+	moved := false
+	for _, e := range entries {
+		name := e.Name()
+		if name == stageRel || name == oldRel {
+			continue
+		}
+		if !moved {
+			if err := acc.MkdirAll(oldRel); err != nil {
+				return err
+			}
+			moved = true
+		}
+		if err := acc.Rename(name, path.Join(oldRel, name)); err != nil {
+			return err
+		}
+	}
+	stageEntries, err := acc.ReadDir(stageRel)
+	if err != nil {
+		return err
+	}
+	for _, e := range stageEntries {
+		if err := acc.Rename(path.Join(stageRel, e.Name()), e.Name()); err != nil {
+			return err
+		}
+	}
+	_ = acc.RemoveAll(stageRel)
+	_ = acc.RemoveAll(oldRel)
+	return nil
 }
 
 func extractZipFile(acc Accessor, f *zip.File, rel string, total *int64) error {

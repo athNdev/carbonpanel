@@ -74,6 +74,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonErrorState,
 		CarbonPageHeader
 	} from '$lib/components/carbon';
+	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import { memoryUsagePercent } from '$lib/utils/safe-percent';
 	import { exitFailureCopy, memoryLimitCopy, worldDiskCopy } from '$lib/utils/resource-enforcement';
 	import ServerConsole from '$lib/components/server-console.svelte';
@@ -813,7 +814,13 @@ one at https://mozilla.org/MPL/2.0/.
 						{server.status === ServerStatus.RUNNING && server.tps > 0 ? server.tps.toFixed(1) : '—'}
 					</span>
 					<span class="text-[#8d8d8d]">Players:</span>
-					<span class="font-semibold text-[#6fdc8c]">{server.playersOnline || 0}</span>
+					<span
+						class="font-semibold {joinIsPlayable(server) ? 'text-[#6fdc8c]' : 'text-[#8d8d8d]'}"
+					>
+						{joinIsPlayable(server)
+							? server.playersOnline || 0
+							: joinKindLabel(server.joinObservationKind)}
+					</span>
 				</div>
 			</div>
 		</div>

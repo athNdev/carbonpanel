@@ -12,6 +12,10 @@ code_refs:
   - internal/rpc/services/file.go
   - internal/rpc/services/storage_node.go
   - internal/rpc/services/server.go
+  - internal/rpc/services/backup.go
+  - internal/scheduler/backup.go
+  - internal/snapshot/snapshot.go
+  - internal/worldstore
 sources:
   - title: ADR 0005 node-aware file access
     resource: ../../docs/adr/0005-node-aware-file-access.md
@@ -51,10 +55,13 @@ manual server-pack zip open storage through `nodestorage.ForNode`.
 `CreateArchive`, `DownloadArchive`, and `ExportWorld` walk and write
 through `nodestorage.CreateZip` / `WriteZip` (accessor `WriteFile` for
 on-node archives; download/export zip bytes land only in the controller
-download temp). `DownloadRemoteArchive` still walks HTTP-to-disk on the
-controller and is refused on transport-only nodes. No worker means
-`ErrUnavailable` / Connect `CodeUnavailable` — never a controller-local
-fallback.
+download temp). Snapshot create/rollback and worldstore backup/restore
+stream through `nodestorage.ForNode` (`worldstore.BackupToAccessor` /
+`RestoreFromAccessor`, `WriteZip` / `ReplaceTreeFromZip`). Backup
+artifacts stay in the controller backup directory. `DownloadRemoteArchive`
+still walks HTTP-to-disk on the controller and is refused on
+transport-only nodes. No worker means `ErrUnavailable` / Connect
+`CodeUnavailable` — never a controller-local fallback.
 
 # Read next
 
