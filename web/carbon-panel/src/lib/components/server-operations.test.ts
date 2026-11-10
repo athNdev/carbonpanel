@@ -81,4 +81,5 @@ test('journal copy is trimmed to the approved sentences', () => {
 		content.includes('No operations yet. Start, stop or restart to populate this journal.'),
 		'empty state must use the trimmed copy'
 	);
+	assert.ok(content.includes('op.requestId'), 'journal rows must show the request id for joining');
 });

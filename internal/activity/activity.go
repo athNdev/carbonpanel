@@ -42,6 +42,7 @@ type Entry struct {
 	SubjectTyp string
 	SubjectID  string
 	Properties string
+	RequestID  string
 }
 
 // Log appends one audit record. Failures are returned; callers log and
@@ -56,6 +57,7 @@ func Log(db *gorm.DB, e Entry) error {
 		SubjectTyp: e.SubjectTyp,
 		SubjectID:  e.SubjectID,
 		Properties: e.Properties,
+		RequestID:  e.RequestID,
 	}).Error
 }
 

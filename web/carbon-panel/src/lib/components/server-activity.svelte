@@ -59,7 +59,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{loading ? 'Loading…' : 'Refresh'}
 			</button>
 		</div>
-		<p class="mb-6 text-xs text-[#a8a8a8]">Who did what on this server, newest first</p>
+		<p class="mb-6 text-xs text-[#a8a8a8]">
+			Who did what on this server, newest first. Journaled actions show the request id that joins
+			them to the operations journal.
+		</p>
 
 		{#if entries.length === 0}
 			<p class="py-8 text-center font-mono text-xs text-[#a8a8a8]">
@@ -75,6 +78,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<th scope="col" class="py-2 pr-4 font-medium">Time</th>
 							<th scope="col" class="py-2 pr-4 font-medium">Actor</th>
 							<th scope="col" class="py-2 pr-4 font-medium">Event</th>
+							<th scope="col" class="py-2 pr-4 font-medium">Request ID</th>
 							<th scope="col" class="py-2 font-medium">IP</th>
 						</tr>
 					</thead>
@@ -88,6 +92,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									>{entry.actorName || entry.actorId || '—'}</td
 								>
 								<td class="py-2 pr-4">{entry.event}</td>
+								<td
+									class="max-w-[180px] truncate py-2 pr-4"
+									title={entry.requestId || ''}
+								>{entry.requestId || '—'}</td>
 								<td class="py-2">{entry.ip || '—'}</td>
 							</tr>
 						{/each}

@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
@@ -45,6 +44,7 @@ func (s *ActivityService) ListActivityLogs(ctx context.Context, req *connect.Req
 			Id: e.ID, ActorId: e.ActorID, ActorName: e.ActorName, Ip: e.IP,
 			Event: e.Event, SubjectType: e.SubjectTyp, SubjectId: e.SubjectID,
 			Properties: e.Properties, CreatedAt: timestamppb.New(e.CreatedAt),
+			RequestId: e.RequestID,
 		}
 	}
 	return connect.NewResponse(&v1.ListActivityLogsResponse{Entries: out}), nil

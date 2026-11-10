@@ -56,6 +56,9 @@ message LifecycleOperation {
   string last_error = 11;
   google.protobuf.Timestamp started_at = 12;
   google.protobuf.Timestamp updated_at = 13;
+  // Client request id that keyed this journal row. Empty when the caller
+  // did not supply one and the journal generated an internal key.
+  string request_id = 14;
 }
 
 // List query. All filters are optional.

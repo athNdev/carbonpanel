@@ -3,10 +3,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package activity
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -18,17 +18,85 @@ import (
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open memory db: %v", err)
-	}
+	db := testDBWithoutMigrate(t)
 	if err := db.AutoMigrate(&storage.ActivityLog{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	return db
+}
+
+func testDBWithoutMigrate(t *testing.T) *gorm.DB {
+	t.Helper()
+	name := strings.ReplaceAll(t.Name(), "/", "_")
+	db, err := gorm.Open(sqlite.Open("file:"+name+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open memory db: %v", err)
+	}
 	t.Cleanup(func() {
-		db.Exec("DELETE FROM activity_logs")
+		db.Exec("DROP TABLE IF EXISTS activity_logs")
 	})
 	return db
+}
+
+func TestLogPersistsRequestIDAndDoesNotLeakAcrossServers(t *testing.T) {
+	db := testDB(t)
+	if err := Log(db, Entry{
+		ActorID: "u1", Event: EventServerStart, SubjectTyp: "server", SubjectID: "s1",
+		RequestID: "req-s1",
+	}); err != nil {
+		t.Fatalf("log s1: %v", err)
+	}
+	if err := Log(db, Entry{
+		ActorID: "u2", Event: EventServerStop, SubjectTyp: "server", SubjectID: "s2",
+		RequestID: "req-s2",
+	}); err != nil {
+		t.Fatalf("log s2: %v", err)
+	}
+
+	got, err := List(db, "s1", "", time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 || got[0].RequestID != "req-s1" {
+		t.Fatalf("expected s1's request id, got %+v", got)
+	}
+	for _, e := range got {
+		if e.SubjectID != "s1" || e.RequestID == "req-s2" {
+			t.Fatalf("cross-server activity leaked: %+v", e)
+		}
+	}
+}
+
+func TestRequestIDColumnIsAddedOnUpgrade(t *testing.T) {
+	db := testDBWithoutMigrate(t)
+	if err := db.Exec(`CREATE TABLE activity_logs (
+		id text primary key,
+		actor_id text,
+		actor_name text,
+		ip text,
+		event text not null,
+		subject_type text,
+		subject_id text,
+		properties text,
+		created_at datetime
+	)`).Error; err != nil {
+		t.Fatalf("seed previous schema: %v", err)
+	}
+	if err := db.AutoMigrate(&storage.ActivityLog{}); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if err := Log(db, Entry{
+		Event: EventServerStart, SubjectTyp: "server", SubjectID: "s1", RequestID: "req-upgrade",
+	}); err != nil {
+		t.Fatalf("log after upgrade: %v", err)
+	}
+	got, err := List(db, "s1", "", time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 || got[0].RequestID != "req-upgrade" {
+		t.Fatalf("expected request id after upgrade, got %+v", got)
+	}
 }
 
 func TestLogAndList(t *testing.T) {
