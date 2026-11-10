@@ -1510,7 +1510,8 @@ one at https://mozilla.org/MPL/2.0/.
 	size="2xl"
 	hasFooter={false}
 >
-	<div class="max-h-[60vh] space-y-3 overflow-y-auto">
+	{#snippet children()}
+		<div class="max-h-[60vh] space-y-3 overflow-y-auto">
 		{#if favoriteModpacks.length === 0}
 			<div class="rounded-none border border-[#393939] bg-[#262626] p-8 text-center">
 				<Package class="mx-auto mb-2 h-8 w-8 text-[#8d8d8d]" />
@@ -1553,5 +1554,6 @@ one at https://mozilla.org/MPL/2.0/.
 				</button>
 			{/each}
 		{/if}
-	</div>
+		</div>
+	{/snippet}
 </CarbonModal>

@@ -861,11 +861,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <CarbonModal
 	bind:open={showDetectedDialog}
 	title="Docker daemons detected"
-	description="Register the detected daemons you want to use. Names, IPs, and limits can change later."
+	description="Auto-detect found reachable Docker daemons on this host's network. Register the ones you want the placement engine to use — you can adjust names, IPs, and limits later."
 	size="xl"
 	hasFooter={false}
 >
-	<div class="max-h-[50vh] space-y-3 overflow-y-auto">
+	{#snippet children()}
+		<div class="max-h-[50vh] space-y-3 overflow-y-auto">
 		{#each detectedDaemons as d (d.host)}
 			<div class="space-y-2 rounded-none border border-[#393939] bg-[#262626] p-3">
 				<div class="flex items-center justify-between gap-2">
@@ -917,7 +918,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/if}
 			</div>
 		{/each}
-	</div>
+		</div>
+	{/snippet}
 	{#snippet footer()}
 		<div class="flex justify-end p-4">
 			<CarbonButton kind="secondary" size="md" onclick={() => (showDetectedDialog = false)}>
@@ -939,7 +941,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	size="lg"
 	hasFooter={false}
 >
-	<div class="space-y-4">
+	{#snippet children()}
+		<div class="space-y-4">
 		<CarbonTextInput
 			id="node-name"
 			label="Node Name *"
@@ -1080,7 +1083,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</div>
 			{/if}
 		</div>
-	</div>
+		</div>
+	{/snippet}
 	{#snippet footer()}
 		<div class="flex w-full items-center justify-end">
 			<CarbonButton
@@ -1118,6 +1122,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	size="lg"
 	hasFooter={false}
 >
+	{#snippet children()}
 	{#if editingNode}
 		<div class="space-y-4">
 			<CarbonTextInput
@@ -1274,6 +1279,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</div>
 	{/if}
+	{/snippet}
 	{#snippet footer()}
 		<div class="flex w-full items-center justify-end">
 			<CarbonButton
