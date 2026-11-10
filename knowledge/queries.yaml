@@ -24,6 +24,8 @@
   expect: operations/backup-restore
 - query: Why does deep sleep still use the local Docker client?
   expect: operations/deep-sleep
+- query: Does a player knock start an intentionally stopped server?
+  expect: operations/deep-sleep
 - query: Which commands verify the frontend?
   expect: workflows/frontend-change
 - query: How does the console stop scrollbar layout jump and honor reduced motion?

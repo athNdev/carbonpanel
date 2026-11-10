@@ -285,6 +285,7 @@ func TestDecide(t *testing.T) {
 		{"deepsleep + exited container is stable", deepsleep, existsExitedClean, false, true, "", actNone, ""},
 		{"deepsleep + crashed container never heals", deepsleep, existsCrash, false, true, "", actNone, ""},
 		{"deepsleep + running container is stopped, not adopted", deepsleep, existsRunning, false, true, "", actStop, ""},
+		{"stopped + exited container is stable, no start", stopped, existsExitedClean, false, true, stopped, actNone, ""},
 	}
 
 	for _, tt := range tests {

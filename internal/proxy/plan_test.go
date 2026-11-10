@@ -98,6 +98,15 @@ func TestPlanFor(t *testing.T) {
 			want: RoutePlan{Action: PlanRemove, ServerID: "srv-1", ServerName: "survival", Hostname: "survival.mc.test", ListenerPort: 25565},
 		},
 		{
+			name: "stopped with auto deep sleep still removes, never a down-route",
+			in: func() PlanInput {
+				in := base(db.StatusStopped)
+				in.Server.AutoDeepSleep = true
+				return in
+			}(),
+			want: RoutePlan{Action: PlanRemove, ServerID: "srv-1", ServerName: "survival", Hostname: "survival.mc.test", ListenerPort: 25565},
+		},
+		{
 			name: "stopping removes",
 			in:   base(db.StatusStopping),
 			want: RoutePlan{Action: PlanRemove, ServerID: "srv-1", ServerName: "survival", Hostname: "survival.mc.test", ListenerPort: 25565},

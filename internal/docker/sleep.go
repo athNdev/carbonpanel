@@ -467,16 +467,10 @@ func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) erro
 		return nil
 	}
 
-	// Allow waking a server with AutoDeepSleep enabled whose persisted status
-	// drifted to Stopped or Creating (e.g. if a down-route remained armed after
-	// a status drift or failed transition, MINE-172).
+	// Player knock may start only a recorded deep-sleep. AutoDeepSleep is the
+	// idle opt-in, not a license to start an operator stop (OSS-247 O22).
 	if srv.Status != db.StatusDeepSleep {
-		if !srv.AutoDeepSleep || (srv.Status != db.StatusStopped && srv.Status != db.StatusCreating) {
-			return fmt.Errorf("cannot wake server %s with non-deepsleep status %s", serverID, srv.Status)
-		}
-		if m.logger != nil {
-			m.logger.Warn("Deep sleep: waking server %s (%s) from drifted status %s (auto_deepsleep=true)", srv.Name, serverID, srv.Status)
-		}
+		return fmt.Errorf("cannot wake server %s with non-deepsleep status %s", serverID, srv.Status)
 	}
 
 	m.mu.Lock()
