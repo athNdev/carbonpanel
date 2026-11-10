@@ -280,6 +280,12 @@ func TestFileRPCsRefuseTransportOnlyWithoutProvider(t *testing.T) {
 			}))
 			return err
 		}},
+		{"DownloadRemoteArchive", func() error {
+			_, err := svc.DownloadRemoteArchive(ctx, connect.NewRequest(&v1.DownloadRemoteArchiveRequest{
+				ServerId: server.ID, Url: "http://1.1.1.1/archive.zip", DestinationPath: "mods",
+			}))
+			return err
+		}},
 		{"ExportWorld", func() error {
 			_, err := svc.ExportWorld(ctx, connect.NewRequest(&v1.ExportWorldRequest{ServerId: server.ID}))
 			return err
@@ -293,6 +299,10 @@ func TestFileRPCsRefuseTransportOnlyWithoutProvider(t *testing.T) {
 			}
 			if _, err := os.Stat(phantomRoot); !os.IsNotExist(err) {
 				t.Fatalf("controller created storage_root after %s: %v", tc.name, err)
+			}
+			mappedMods := filepath.Join(phantomRoot, filepath.Base(server.DataPath), "mods")
+			if _, err := os.Stat(mappedMods); !os.IsNotExist(err) {
+				t.Fatalf("controller-local dest %s exists after %s: %v", mappedMods, tc.name, err)
 			}
 		})
 	}
@@ -325,6 +335,15 @@ func TestZipPipelinesRefuseTransportOnlyEvenWithProvider(t *testing.T) {
 			}))
 			return err
 		}},
+		{"DownloadRemoteArchive", func() error {
+			// Transport makes dataRootFor succeed with nodeDataRoot on the
+			// controller. Refuse must run before os.MkdirAll or this dest
+			// directory is created and the RPC still looks "successful".
+			_, err := svc.DownloadRemoteArchive(ctx, connect.NewRequest(&v1.DownloadRemoteArchiveRequest{
+				ServerId: server.ID, Url: "http://1.1.1.1/archive.zip", DestinationPath: "mods",
+			}))
+			return err
+		}},
 		{"ExportWorld", func() error {
 			_, err := svc.ExportWorld(ctx, connect.NewRequest(&v1.ExportWorldRequest{ServerId: server.ID}))
 			return err
@@ -337,6 +356,10 @@ func TestZipPipelinesRefuseTransportOnlyEvenWithProvider(t *testing.T) {
 				t.Fatalf("%s error = %v, want unavailable (no controller zip fallback)", tc.name, err)
 			}
 			assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
+			mappedMods := filepath.Join(phantomRoot, filepath.Base(server.DataPath), "mods")
+			if _, err := os.Stat(mappedMods); !os.IsNotExist(err) {
+				t.Fatalf("controller-local dest %s exists after %s: %v", mappedMods, tc.name, err)
+			}
 		})
 	}
 }
