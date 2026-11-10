@@ -132,7 +132,16 @@ are encoded as a table against the same resolved request `CreateContainer`
 builds (`DescribeRuntime` / `PreflightRuntime`): root-then-drop versus an
 explicit non-root uid, a read-only root with and without the nsswitch skip,
 `CapDrop ALL` with bootstrap capabilities removed, a missing writable `/data`,
-rootless plus host-root-owned data, and an unpinned image warning. Preflight
+rootless plus host-root-owned data, and an unpinned image warning. Existing
+`/data` that already belongs to the game uid gets `SKIP_CHOWN=TRUE` so a
+restart does not recursively chown; a fresh root-owned directory keeps
+bootstrap chown. Root-then-drop with a uid/gid other than the image's
+1000:1000 is refused on a read-only root (`read_only_root_blocks_usermod`)
+because usermod/groupmod cannot rewrite `/etc`. Start as that numeric user
+instead, or keep 1000:1000. Extra override mounts that shadow `/etc`, `/proc`,
+`/sys`, `/dev`, or the Docker socket are fatal (`sensitive_mount_target`); a
+bind that replaces `/tmp` is a warning (`tmpfs_replaced`). The last `/data`
+mount is the effective world bind. Preflight
 must not enable privileged mode, disable no-new-privileges, or make the root
 writable to recover. Live game-readiness on an isolated daemon is OSS-247;
 the in-repo matrix still runs without that daemon.
