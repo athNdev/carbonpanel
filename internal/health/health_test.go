@@ -432,6 +432,49 @@ func TestComputeLayers(t *testing.T) {
 	}
 }
 
+func TestClassifyKeepsLastGoodOnStaleStatus(t *testing.T) {
+	in := baseInput()
+	in.ObservedAt = time.Time{}
+	lastGood := in.CheckedAt.Add(-5 * time.Hour)
+	in.Servers = []ServerObservation{
+		{
+			ID:        "old",
+			Status:    "running",
+			UpdatedAt: in.CheckedAt.Add(-6 * time.Hour),
+			Game:      Probe{Source: SourceSLP, ObservedAt: lastGood, OK: true},
+		},
+	}
+
+	got := ClassifyServers(in)
+	if len(got) != 1 {
+		t.Fatalf("readings = %d, want 1", len(got))
+	}
+	if got[0].Kind != ReadingStale {
+		t.Fatalf("kind = %s, want stale", got[0].Kind)
+	}
+	if !got[0].LastGoodAt.Equal(lastGood) {
+		t.Fatalf("lastGoodAt = %s, want %s", got[0].LastGoodAt, lastGood)
+	}
+	snap := Compute(in)
+	if snap.Servers.Stale != 1 || snap.Servers.Playable != 0 || snap.Servers.Stopped != 0 {
+		t.Fatalf("summary = %+v, want stale not playable or stopped", snap.Servers)
+	}
+}
+
+func TestClassifyDoesNotCallStaleJoinPlayable(t *testing.T) {
+	in := baseInput()
+	in.Servers = []ServerObservation{
+		{ID: "a", Status: "running", UpdatedAt: in.CheckedAt, Game: Probe{Source: SourceSLP, ObservedAt: in.CheckedAt.Add(-10 * time.Minute), OK: true}},
+	}
+	got := ClassifyServer(in.Servers[0], in)
+	if got.Kind != ReadingUnobserved {
+		t.Fatalf("kind = %s, want unobserved", got.Kind)
+	}
+	if got.LastGoodAt.IsZero() {
+		t.Fatal("last-good join time must survive an unobserved reading")
+	}
+}
+
 func TestSnapshotIsDeterministic(t *testing.T) {
 	in := baseInput()
 	in.Runtime = Observation{State: StateDegraded}

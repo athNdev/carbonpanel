@@ -50,3 +50,5 @@
   expect: architecture/runtime-seams
 - query: How do journal rows join activity events?
   expect: architecture/operation-journal
+- query: Where does a support bundle record stale last-good observations?
+  expect: operations/health-checks

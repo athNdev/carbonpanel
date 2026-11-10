@@ -315,6 +315,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 		s.log.Warn("Resumed %d unfinished deletion(s)", finished)
 	}
 	supportService := services.NewSupportService(s.store, s.docker, s.config, s.log)
+	supportService.SetMetricsCollector(s.metricsCollector)
 	taskService := services.NewTaskService(s.store, s.scheduler, s.log)
 	activityService := services.NewActivityService(s.store, s.log)
 	operationService := services.NewOperationService(s.store, s.log)

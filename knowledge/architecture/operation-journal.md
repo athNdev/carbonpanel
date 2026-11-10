@@ -10,6 +10,7 @@ code_refs:
   - internal/db
   - internal/rpc/services/operation.go
   - internal/rpc/services/activity.go
+  - internal/rpc/services/support.go
   - web/carbon-panel/src/lib/components/server-operations.svelte
   - web/carbon-panel/src/lib/components/server-activity.svelte
 sources:
@@ -52,6 +53,9 @@ exists to prevent.
   journal row and an activity event join. Listing activity for one server
   never returns another server's rows or request ids. Redaction of recorded
   error text is unchanged.
+- Generate and Upload always attach `operations.json` (the projected journal)
+  and `observations.json` (per-server stale vs last-good join evidence). Writing
+  the helper is not enough; the archive path must call it.
 
 # Read next
 

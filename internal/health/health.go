@@ -155,6 +155,129 @@ type GameSummary struct {
 	Total int `json:"total"`
 }
 
+// ReadingKind is one server's freshness classification. It is the per-row
+// form of GameSummary so diagnostics can name last-good timestamps without
+// treating a stale observation as current.
+type ReadingKind string
+
+const (
+	ReadingPlayable   ReadingKind = "playable"
+	ReadingUnjoinable ReadingKind = "unjoinable"
+	ReadingUnobserved ReadingKind = "unobserved"
+	ReadingStale      ReadingKind = "stale"
+	ReadingStarting   ReadingKind = "starting"
+	ReadingTimedOut   ReadingKind = "timed_out"
+	ReadingStopped    ReadingKind = "stopped"
+)
+
+// Reading is one server's last-good vs stale projection. It carries ids and
+// timestamps, never MOTD, player samples or hostnames.
+type Reading struct {
+	ID               string      `json:"id"`
+	Kind             ReadingKind `json:"kind"`
+	Status           string      `json:"status"`
+	StatusObservedAt time.Time   `json:"statusObservedAt,omitempty"`
+	JoinSource       string      `json:"joinSource,omitempty"`
+	JoinObservedAt   time.Time   `json:"joinObservedAt,omitempty"`
+	LastGoodAt       time.Time   `json:"lastGoodAt,omitempty"`
+	Detail           string      `json:"detail,omitempty"`
+}
+
+// ClassifyServers projects every server observation at one instant.
+func ClassifyServers(in Input) []Reading {
+	out := make([]Reading, 0, len(in.Servers))
+	for _, s := range in.Servers {
+		out = append(out, ClassifyServer(s, in))
+	}
+	return out
+}
+
+// CountByKind counts readings by kind for a bundle header.
+func CountByKind(readings []Reading) map[ReadingKind]int {
+	counts := map[ReadingKind]int{}
+	for _, r := range readings {
+		counts[r.Kind]++
+	}
+	return counts
+}
+
+// ClassifyServer projects one stored status and optional join probe. A stale
+// or missing observation is never rewritten as stopped, playable or failed.
+func ClassifyServer(s ServerObservation, in Input) Reading {
+	checkedAt, staleAfter, startupAfter, sweepIsFresh := observationWindow(in)
+	r := Reading{
+		ID:               s.ID,
+		Status:           s.Status,
+		StatusObservedAt: s.UpdatedAt,
+		JoinSource:       s.Game.Source,
+		JoinObservedAt:   s.Game.ObservedAt,
+	}
+	if s.Game.OK && !s.Game.ObservedAt.IsZero() {
+		r.LastGoodAt = s.Game.ObservedAt
+	}
+
+	if !sweepIsFresh && !s.UpdatedAt.IsZero() && checkedAt.Sub(s.UpdatedAt) > staleAfter {
+		r.Kind = ReadingStale
+		r.Detail = "stored status is older than the freshness window"
+		return r
+	}
+
+	running := in.RunningStatus
+	if running == "" {
+		running = "running"
+	}
+	switch {
+	case s.Status == running:
+		if !probeIsFresh(s.Game, checkedAt, staleAfter) {
+			r.Kind = ReadingUnobserved
+			r.Detail = "running with no fresh SLP or RCON observation"
+			return r
+		}
+		if s.Game.OK {
+			r.Kind = ReadingPlayable
+			r.Detail = "fresh successful join observation"
+			return r
+		}
+		r.Kind = ReadingUnjoinable
+		r.Detail = "fresh join probe failed"
+		return r
+	case isStarting(s.Status, in.StartingStatus):
+		started := startClock(s)
+		if !started.IsZero() && checkedAt.Sub(started) > startupAfter {
+			r.Kind = ReadingTimedOut
+			r.Detail = "startup exceeded the deadline"
+			return r
+		}
+		r.Kind = ReadingStarting
+		r.Detail = "still within the startup deadline"
+		return r
+	default:
+		r.Kind = ReadingStopped
+		if r.LastGoodAt.IsZero() && !s.UpdatedAt.IsZero() {
+			r.LastGoodAt = s.UpdatedAt
+		}
+		r.Detail = "fresh non-running status"
+		return r
+	}
+}
+
+func observationWindow(in Input) (checkedAt time.Time, staleAfter, startupAfter time.Duration, sweepIsFresh bool) {
+	checkedAt = in.CheckedAt
+	if checkedAt.IsZero() {
+		checkedAt = time.Now()
+	}
+	staleAfter = in.StaleAfter
+	if staleAfter <= 0 {
+		staleAfter = DefaultStaleAfter
+	}
+	startupAfter = in.StartupAfter
+	if startupAfter <= 0 {
+		startupAfter = DefaultStartupAfter
+	}
+	sweepIsFresh = !in.ObservedAt.IsZero() && checkedAt.Sub(in.ObservedAt) <= staleAfter
+	return checkedAt, staleAfter, startupAfter, sweepIsFresh
+}
+
 // Component is one line of a snapshot.
 type Component struct {
 	Layer      Layer     `json:"layer"`
@@ -306,53 +429,37 @@ func startClock(s ServerObservation) time.Time {
 
 // summariseServers classifies the server records into the game layer.
 func summariseServers(in Input) (Component, GameSummary) {
-	summary := GameSummary{Total: len(in.Servers)}
-	staleAfter := in.StaleAfter
-	if staleAfter <= 0 {
-		staleAfter = DefaultStaleAfter
-	}
-	startupAfter := in.StartupAfter
-	if startupAfter <= 0 {
-		startupAfter = DefaultStartupAfter
-	}
-	checkedAt := in.CheckedAt
-	if checkedAt.IsZero() {
-		checkedAt = time.Now()
-	}
+	_, staleAfter, startupAfter, sweepIsFresh := observationWindow(in)
+	readings := ClassifyServers(in)
+	summary := GameSummary{Total: len(readings)}
 
-	sweepIsFresh := !in.ObservedAt.IsZero() && checkedAt.Sub(in.ObservedAt) <= staleAfter
 	source := SourceReconciler
 	var observedAt time.Time
 	if sweepIsFresh {
 		observedAt = in.ObservedAt
 	}
-	for _, s := range in.Servers {
-		if !sweepIsFresh && !s.UpdatedAt.IsZero() && checkedAt.Sub(s.UpdatedAt) > staleAfter {
+	for _, r := range readings {
+		switch r.Kind {
+		case ReadingPlayable:
+			summary.Playable++
+			if r.JoinSource != "" {
+				source = r.JoinSource
+			}
+			observedAt = r.JoinObservedAt
+		case ReadingUnjoinable:
+			summary.Unjoinable++
+			if r.JoinSource != "" {
+				source = r.JoinSource
+			}
+			observedAt = r.JoinObservedAt
+		case ReadingUnobserved:
+			summary.Unobserved++
+		case ReadingStale:
 			summary.Stale++
-			continue
-		}
-		switch {
-		case s.Status == in.RunningStatus:
-			if !probeIsFresh(s.Game, checkedAt, staleAfter) {
-				summary.Unobserved++
-				continue
-			}
-			if s.Game.Source != "" {
-				source = s.Game.Source
-			}
-			observedAt = s.Game.ObservedAt
-			if s.Game.OK {
-				summary.Playable++
-			} else {
-				summary.Unjoinable++
-			}
-		case isStarting(s.Status, in.StartingStatus):
-			started := startClock(s)
-			if !started.IsZero() && checkedAt.Sub(started) > startupAfter {
-				summary.TimedOut++
-				continue
-			}
+		case ReadingStarting:
 			summary.Starting++
+		case ReadingTimedOut:
+			summary.TimedOut++
 		default:
 			summary.Stopped++
 		}

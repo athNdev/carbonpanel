@@ -7,6 +7,8 @@ package services
 
 import (
 	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -14,10 +16,14 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/health"
+	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
 // TestAddOperationsToBundleRecordsAnUncertainOutcome is the regression for the
@@ -198,6 +204,164 @@ func newSupportOperationsService(t *testing.T) *SupportService {
 			t.Errorf("close store: %v", err)
 		}
 	})
-	cfg := &config.Config{Storage: config.StorageConfig{DataDir: t.TempDir()}}
+	cfg := &config.Config{Storage: config.StorageConfig{DataDir: t.TempDir(), TempDir: t.TempDir()}}
 	return NewSupportService(store, nil, cfg, logger.New())
+}
+
+func TestAddObservationsToBundleMarksStaleWithoutPrivateData(t *testing.T) {
+	ctx := context.Background()
+	svc := newSupportOperationsService(t)
+
+	lastGood := time.Now().Add(-6 * time.Hour).UTC().Truncate(time.Second)
+	server := &storage.Server{
+		ID: "obs-stale-server", Name: "Secret World", NodeID: "test-node",
+		Port: 25592, Memory: 1024, Status: storage.StatusRunning,
+		DataPath: t.TempDir(), UpdatedAt: lastGood,
+	}
+	if err := svc.store.CreateServer(ctx, server); err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	if err := svc.store.DB().Model(&storage.Server{}).
+		Where("id = ?", server.ID).
+		Update("updated_at", lastGood).Error; err != nil {
+		t.Fatalf("backdate server: %v", err)
+	}
+
+	staleHB := time.Now().Add(-time.Hour).UTC()
+	if err := svc.store.CreateNode(ctx, &storage.Node{
+		ID: "obs-stale-node", Name: "secret-node-name",
+		Host: "tcp://secret.example:2376", Enabled: true,
+		LastHeartbeat: &staleHB, EndpointGeneration: 4,
+	}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	collector := metrics.NewCollectorWithPool(nil, nil, nil, nil, nil, nil, nil)
+	collector.SeedMetrics(metrics.ServerMetrics{
+		ServerID:       server.ID,
+		SLPAvailable:   true,
+		MOTD:           "private motd with player data",
+		PlayerSample:   []string{"Notch", "jeb_"},
+		SLPLastUpdated: lastGood,
+	})
+	svc.SetMetricsCollector(collector)
+
+	var buf strings.Builder
+	tw := tar.NewWriter(newStringTarWriter(&buf))
+	if err := svc.addObservationsToBundle(ctx, tw); err != nil {
+		t.Fatalf("addObservationsToBundle: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	data := readTarEntry(t, strings.NewReader(buf.String()), "observations.json")
+	body := string(data)
+	for _, leaked := range []string{"Secret World", "private motd", "Notch", "jeb_", "secret-node-name", "secret.example"} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("observations.json leaked %q:\n%s", leaked, body)
+		}
+	}
+
+	var payload struct {
+		Summary map[string]int `json:"summary"`
+		Servers []struct {
+			ID         string `json:"id"`
+			Kind       string `json:"kind"`
+			LastGoodAt string `json:"lastGoodAt"`
+		} `json:"servers"`
+		Nodes []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("observations.json is not valid JSON: %v\n%s", err, data)
+	}
+	if payload.Summary[string(health.ReadingStale)] != 1 {
+		t.Errorf("summary = %+v, want one stale server", payload.Summary)
+	}
+	if len(payload.Servers) != 1 || payload.Servers[0].ID != server.ID {
+		t.Fatalf("servers = %+v, want the stale server", payload.Servers)
+	}
+	if payload.Servers[0].Kind != string(health.ReadingStale) {
+		t.Errorf("server kind = %q, want stale", payload.Servers[0].Kind)
+	}
+	if payload.Servers[0].LastGoodAt == "" {
+		t.Error("last-good timestamp missing on a stale reading")
+	}
+	var foundNode bool
+	for _, n := range payload.Nodes {
+		if n.ID != "obs-stale-node" {
+			continue
+		}
+		foundNode = true
+		if n.Kind != "stale" {
+			t.Errorf("node kind = %q, want stale", n.Kind)
+		}
+	}
+	if !foundNode {
+		t.Fatalf("stale node missing from observations: %+v", payload.Nodes)
+	}
+}
+
+func TestGenerateSupportBundleIncludesJournalAndObservations(t *testing.T) {
+	ctx := context.Background()
+	svc := newSupportOperationsService(t)
+
+	server := &storage.Server{
+		ID: "bundle-gen-server", Name: "Bundle Gen", NodeID: "test-node",
+		Port: 25593, Memory: 1024, Status: storage.StatusStopped,
+		DataPath: t.TempDir(),
+	}
+	if err := svc.store.CreateServer(ctx, server); err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	op, _, err := svc.store.BeginServerOperation(ctx, server.ID, server.NodeID, "", "key-gen", "start", operation.Digest("start", server))
+	if err != nil {
+		t.Fatalf("BeginServerOperation: %v", err)
+	}
+	if err := svc.store.AdvanceServerOperation(ctx, op.ID, storage.ServerOperationPrepared, storage.ServerOperationExecuting, ""); err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if err := svc.store.DB().Model(&storage.ServerOperation{}).
+		Where("id = ?", op.ID).
+		Update("updated_at", time.Now().Add(-time.Hour).UTC()).Error; err != nil {
+		t.Fatalf("backdate operation: %v", err)
+	}
+
+	resp, err := svc.GenerateSupportBundle(ctx, connect.NewRequest(&v1.GenerateSupportBundleRequest{
+		IncludeLogs:       false,
+		IncludeConfigs:    false,
+		IncludeSystemInfo: true,
+	}))
+	if err != nil {
+		t.Fatalf("GenerateSupportBundle: %v", err)
+	}
+	dl, err := svc.DownloadSupportBundle(ctx, connect.NewRequest(&v1.DownloadSupportBundleRequest{
+		BundleId: resp.Msg.BundleId,
+	}))
+	if err != nil {
+		t.Fatalf("DownloadSupportBundle: %v", err)
+	}
+
+	gr, err := gzip.NewReader(bytes.NewReader(dl.Msg.Content))
+	if err != nil {
+		t.Fatalf("gzip: %v", err)
+	}
+	raw, err := io.ReadAll(gr)
+	if closeErr := gr.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatalf("read gzip: %v", err)
+	}
+	ops := readTarEntry(t, bytes.NewReader(raw), "operations.json")
+	obs := readTarEntry(t, bytes.NewReader(raw), "observations.json")
+	if !strings.Contains(string(ops), `"outcome": "unknown"`) {
+		t.Errorf("generated bundle omitted the unknown operation:\n%s", ops)
+	}
+	if !strings.Contains(string(obs), server.ID) {
+		t.Errorf("generated bundle omitted the server observation:\n%s", obs)
+	}
 }
