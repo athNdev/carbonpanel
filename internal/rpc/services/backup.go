@@ -285,6 +285,9 @@ func (s *BackupService) CreateBackup(ctx context.Context, req *connect.Request[v
 		StopForBackup: msg.StopForBackup,
 	})
 	if err != nil {
+		if nodestorage.IsUnavailable(err) {
+			return nil, connect.NewError(connect.CodeUnavailable, err)
+		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("backup failed: %w", err))
 	}
 	resp := &v1.CreateBackupResponse{Success: true, Message: output}
@@ -308,18 +311,28 @@ func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
-	if err := requireLocalRestoreStorage(ctx, s.store, server.NodeID); err != nil {
-		return nil, connect.NewError(connect.CodeUnavailable, err)
-	}
-	// Restores land in the server's data root on the owning node; map it to the
-	// controller-side path for nodes on shared storage (ADR 0005).
 	nodeInfo, err := storageNodeInfo(ctx, s.store, server.NodeID)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, err)
 	}
-	worldDataPath, err := nodestorage.EnsureDataRoot(nodeInfo, server.DataPath)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeUnavailable, err)
+	var worldDataPath string
+	var acc nodestorage.Accessor
+	if nodestorage.RequiresRemoteTransport(nodeInfo) {
+		acc, err = nodestorage.ForNode(nodeInfo, server.DataPath)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable, err)
+		}
+		defer func() { _ = acc.Close() }()
+	} else {
+		if err := requireLocalRestoreStorage(ctx, s.store, server.NodeID); err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable, err)
+		}
+		// Restores land in the server's data root on the owning node; map it to the
+		// controller-side path for nodes on shared storage (ADR 0005).
+		worldDataPath, err = nodestorage.EnsureDataRoot(nodeInfo, server.DataPath)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable, err)
+		}
 	}
 	transition, err := docker.TryBeginServerTransition(server.ID)
 	if err != nil {
@@ -439,7 +452,7 @@ func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[
 	var restoreResp *v1.RestoreBackupResponse
 	jerr := operation.RunJournaled(ctx, s.store, s.log, server, "restore", "", func() error {
 		var rerr error
-		restoreResp, rerr = s.restoreBackupNow(ctx, server, rec, archivePath, worldDataPath, done)
+		restoreResp, rerr = s.restoreBackupNow(ctx, server, rec, archivePath, worldDataPath, acc, done)
 		return rerr
 	})
 	if jerr != nil {
@@ -456,7 +469,7 @@ func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[
 // the server is stopped, restore the world through the world-data seam or a
 // clean staged swap, restart per the preserved intent, and verify players can
 // join before calling the restore successful.
-func (s *BackupService) restoreBackupNow(ctx context.Context, server *storage.Server, rec *storage.BackupRecord, archivePath, worldDataPath string, done func(string)) (*v1.RestoreBackupResponse, error) {
+func (s *BackupService) restoreBackupNow(ctx context.Context, server *storage.Server, rec *storage.BackupRecord, archivePath, worldDataPath string, acc nodestorage.Accessor, done func(string)) (*v1.RestoreBackupResponse, error) {
 	dockerCli, dockerErr := s.dockerFor(server.NodeID)
 	if server.ContainerID != "" && dockerErr != nil {
 		done("failed")
@@ -497,8 +510,30 @@ func (s *BackupService) restoreBackupNow(ctx context.Context, server *storage.Se
 	// Manifest'd archives are restored through the world-data seam
 	// (worldstore): verified contents and one journaled atomic swap shared
 	// with the CLI. Legacy zips get a clean staged swap (ADR 0004/OSS-235).
+	// Transport-only nodes stream through the accessor; the controller never
+	// extracts onto a local data tree.
 	var verifyNote string
-	if worldstore.HasWorldstoreManifest(archivePath) {
+	if acc != nil {
+		if worldstore.HasWorldstoreManifest(archivePath) {
+			if rerr := worldstore.RestoreFromAccessor(acc, archivePath); rerr != nil {
+				done("failed")
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restore backup: %w", rerr))
+			}
+			verifyNote = "world verified against the archive's per-file sha256"
+		} else {
+			raw, rerr := os.ReadFile(archivePath)
+			if rerr != nil {
+				done("failed")
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read backup: %w", rerr))
+			}
+			count, xerr := nodestorage.ReplaceTreeFromZip(ctx, acc, raw)
+			if xerr != nil {
+				done("failed")
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to extract backup: %w", xerr))
+			}
+			verifyNote = fmt.Sprintf("world verified: %d files extracted with matching CRC and swapped in cleanly", count)
+		}
+	} else if worldstore.HasWorldstoreManifest(archivePath) {
 		if s.worldDataDir == "" {
 			done("failed")
 			return nil, connect.NewError(connect.CodeInternal, errors.New("world-data seam is not configured"))

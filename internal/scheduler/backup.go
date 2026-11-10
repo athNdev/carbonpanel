@@ -116,24 +116,30 @@ func (s *Scheduler) runBackupArchive(ctx context.Context, server *storage.Server
 	// Server data lives on the owning node; resolve the controller-side root
 	// once for both the world-data seam and the legacy zip pipeline (ADR 0005).
 	// Nodes without reachable storage fail the task rather than archiving a
-	// controller-local path that is not the server's data.
+	// controller-local path that is not the server's data. Transport-only
+	// nodes stream through nodestorage.ForNode and never map a local tree.
 	worldDataPath := server.DataPath
+	var nodeInfo nodestorage.NodeInfo
 	if !nodestorage.IsLegacyLocalNodeID(server.NodeID) {
 		node, nerr := s.store.GetNode(ctx, server.NodeID)
 		if nerr != nil {
 			return "", nil, fmt.Errorf("resolve storage node %q: %w", server.NodeID, nerr)
 		}
-		mapped, merr := nodestorage.MapDataPath(node.StorageInfo(), server.DataPath)
-		if merr != nil {
-			return "", nil, merr
+		nodeInfo = node.StorageInfo()
+		if !nodestorage.RequiresRemoteTransport(nodeInfo) {
+			mapped, merr := nodestorage.MapDataPath(nodeInfo, server.DataPath)
+			if merr != nil {
+				return "", nil, merr
+			}
+			worldDataPath = mapped
 		}
-		worldDataPath = mapped
 	}
 
 	// Explicit path requests validate their configured paths up front; the
 	// default backup covers the full state tree through the world-data seam.
+	// Transport-only nodes resolve paths through the accessor after it opens.
 	var paths, missing []string
-	if len(config.Paths) > 0 {
+	if len(config.Paths) > 0 && !nodestorage.RequiresRemoteTransport(nodeInfo) {
 		var pathErr error
 		paths, missing, pathErr = resolveBackupPaths(worldDataPath, config.Paths)
 		if pathErr != nil {
@@ -209,7 +215,13 @@ func (s *Scheduler) runBackupArchive(ctx context.Context, server *storage.Server
 		start := time.Now()
 		excludes := append(append([]string{}, defaultBackupExcludes...), config.Exclude...)
 		var count int
-		if len(config.Paths) == 0 {
+		if nodestorage.RequiresRemoteTransport(nodeInfo) {
+			var cerr error
+			count, cerr = s.archiveWorldViaAccessor(ctx, server, nodeInfo, destPath, config, excludes)
+			if cerr != nil {
+				return fmt.Errorf("failed to create backup archive: %w", cerr)
+			}
+		} else if len(config.Paths) == 0 {
 			// Default backups run through the world-data seam (worldstore): a
 			// deterministic manifest archive covering the full server state tree
 			// minus excludes, streamed to disk. See ADR 0004.
@@ -346,6 +358,86 @@ func (s *Scheduler) runBackupArchive(ctx context.Context, server *storage.Server
 		return nil
 	})
 	return output, created, err
+}
+
+// archiveWorldViaAccessor writes a backup archive through nodestorage.ForNode.
+// The artifact lands in destPath on the controller; world bytes never pass
+// through a controller-local data tree (ADR 0004/0005).
+func (s *Scheduler) archiveWorldViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, destPath string, config BackupTaskConfig, excludes []string) (int, error) {
+	acc, err := nodestorage.ForNode(info, server.DataPath)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = acc.Close() }()
+
+	if len(config.Paths) == 0 {
+		if _, err := worldstore.BackupToAccessor(acc, destPath, func(rel string) bool {
+			return files.PathExcluded(rel, excludes)
+		}); err != nil {
+			return 0, err
+		}
+		count := 0
+		if zr, zerr := zip.OpenReader(destPath); zerr == nil {
+			for _, f := range zr.File {
+				if strings.TrimSuffix(f.Name, "/") != ".worldstore-manifest.json" {
+					count++
+				}
+			}
+			_ = zr.Close()
+		}
+		return count, nil
+	}
+
+	paths, _, err := resolveBackupPathsAccessor(acc, config.Paths)
+	if err != nil {
+		return 0, err
+	}
+	out, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	count, zerr := nodestorage.WriteZip(ctx, acc, paths, out, config.Compress)
+	cerr := out.Close()
+	if zerr != nil {
+		_ = os.Remove(destPath)
+		return 0, zerr
+	}
+	if cerr != nil {
+		_ = os.Remove(destPath)
+		return 0, cerr
+	}
+	return count, nil
+}
+
+func resolveBackupPathsAccessor(acc nodestorage.Accessor, requested []string) (paths []string, missing []string, err error) {
+	cleaned := make([]string, 0, len(requested))
+	for _, p := range requested {
+		rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(p)))
+		if rel == "" || rel == "." {
+			continue
+		}
+		if filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, "../") {
+			return nil, nil, fmt.Errorf("invalid backup path %q: must be relative to the server directory", p)
+		}
+		cleaned = append(cleaned, rel)
+	}
+	if len(cleaned) == 0 {
+		if _, serr := acc.Stat("world"); serr != nil {
+			return nil, nil, fmt.Errorf("no world directory found to back up (configure explicit paths for a custom layout): %w", serr)
+		}
+		return []string{"world"}, nil, nil
+	}
+	for _, rel := range cleaned {
+		if _, serr := acc.Stat(rel); serr != nil {
+			missing = append(missing, rel)
+			continue
+		}
+		paths = append(paths, rel)
+	}
+	if len(paths) == 0 {
+		return nil, nil, fmt.Errorf("none of the configured backup paths exist in the server directory")
+	}
+	return paths, missing, nil
 }
 
 // Validates the requested paths against the server data
