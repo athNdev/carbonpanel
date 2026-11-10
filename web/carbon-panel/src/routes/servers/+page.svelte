@@ -34,6 +34,7 @@ one at https://mozilla.org/MPL/2.0/.
 		ArrowRight
 	} from '@lucide/svelte';
 	import { type Server, ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
+	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import { effectiveLoader } from '$lib/utils/mod-loader';
 	import { CarbonTag, CarbonButton, CarbonConfirm, CarbonPageHeader } from '$lib/components/carbon';
 	import { onMount } from 'svelte';
@@ -551,9 +552,17 @@ one at https://mozilla.org/MPL/2.0/.
 							<td class="px-3 py-3.5 whitespace-nowrap">
 								{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY}
 									<div class="flex items-center gap-3 font-mono text-xs">
-										<span class="flex items-center gap-1 text-[#6fdc8c]">
+										<span
+											class="flex items-center gap-1 {joinIsPlayable(server)
+												? 'text-[#6fdc8c]'
+												: 'text-[#8d8d8d]'}"
+										>
 											<Users class="h-3.5 w-3.5" />
-											{server.playersOnline || 0}/{server.maxPlayers}
+											{#if joinIsPlayable(server)}
+												{server.playersOnline || 0}/{server.maxPlayers}
+											{:else}
+												{joinKindLabel(server.joinObservationKind)}
+											{/if}
 										</span>
 										<span
 											class="flex items-center gap-1 {server.tps && server.tps >= 18
@@ -786,8 +795,16 @@ one at https://mozilla.org/MPL/2.0/.
 									<Users class="h-3.5 w-3.5 shrink-0 text-[#6fdc8c]" />
 									<div class="min-w-0">
 										<p class="mono-label">Players</p>
-										<p class="font-mono text-xs font-semibold text-[#6fdc8c]">
-											{server.playersOnline || 0} / {server.maxPlayers}
+										<p
+											class="font-mono text-xs font-semibold {joinIsPlayable(server)
+												? 'text-[#6fdc8c]'
+												: 'text-[#8d8d8d]'}"
+										>
+											{#if joinIsPlayable(server)}
+												{server.playersOnline || 0} / {server.maxPlayers}
+											{:else}
+												{joinKindLabel(server.joinObservationKind)}
+											{/if}
 										</p>
 									</div>
 								</div>

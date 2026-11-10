@@ -55,8 +55,10 @@ sources:
   (list/get/update/delete/rename, folder create, copy/move, uploads,
   InitFileDownload, latest-log, zip extract, CreateArchive,
   DownloadArchive, ExportWorld, CreateServer manual pack).
-  `DownloadRemoteArchive`, backup/worldstore and metrics still require
-  shared storage or a further streaming worker path.
+  Snapshot create/rollback and worldstore backup/restore also use that
+  accessor. `DownloadRemoteArchive` downloads to a controller temp file
+  then writes or extracts through ForNode. Metrics still require shared
+  storage or a further streaming worker path.
 
 # How to use this
 

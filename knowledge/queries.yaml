@@ -1,3 +1,5 @@
+- query: Does the create path treat a Bedrock blueprint seed as a native edition?
+  expect: decisions/blueprint-create-qualification
 - query: How do I add a new RPC?
   expect: workflows/add-rpc
 - query: What happens when a remote node's Docker client cannot be resolved?
@@ -42,6 +44,10 @@
   expect: architecture/remote-storage-transport
 - query: How does CreateArchive reach a node without shared storage?
   expect: architecture/remote-storage-transport
+- query: How does worldstore backup restore a node without shared storage?
+  expect: architecture/remote-storage-transport
+- query: How does DownloadRemoteArchive reach a node without shared storage?
+  expect: architecture/remote-storage-transport
 - query: How does the panel qualify Minecraft container runtime profiles after operator overrides?
   expect: architecture/runtime
 - query: When does a Minecraft container skip recursive chown of /data?
@@ -58,3 +64,5 @@
   expect: architecture/operation-journal
 - query: Where does a support bundle record stale last-good observations?
   expect: operations/health-checks
+- query: What is the recovery path for a stale node or failed image pull?
+  expect: operations/actionable-recovery

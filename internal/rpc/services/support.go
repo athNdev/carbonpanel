@@ -942,17 +942,7 @@ func supportJoinProbe(collector *metrics.Collector, serverID string) health.Prob
 	if collector == nil {
 		return health.Probe{}
 	}
-	m := collector.GetMetrics(serverID)
-	if m == nil {
-		return health.Probe{}
-	}
-	if !m.SLPLastUpdated.IsZero() {
-		return health.Probe{Source: health.SourceSLP, ObservedAt: m.SLPLastUpdated, OK: m.SLPAvailable}
-	}
-	if !m.RCONLastUpdated.IsZero() {
-		return health.Probe{Source: health.SourceRCON, ObservedAt: m.RCONLastUpdated, OK: true}
-	}
-	return health.Probe{}
+	return joinProbeFromMetrics(collector.GetMetrics(serverID))
 }
 
 func writeJSONTar(tw *tar.Writer, name string, payload any) error {

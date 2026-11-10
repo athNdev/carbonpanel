@@ -8,6 +8,7 @@ package blueprint
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/athNdev/carbon-panel/internal/config"
@@ -88,5 +89,53 @@ func TestBuiltinBlueprintImagesStayOnAllowedRepositories(t *testing.T) {
 		if resolved != "itzg/minecraft-bedrock-server:latest" {
 			t.Fatalf("seed %s resolves to %q", seed.ID, resolved)
 		}
+	}
+}
+
+func TestResolveSelectsImageEnvAndProtocol(t *testing.T) {
+	qualified := 0
+	for _, seed := range Seed() {
+		spec, err := Resolve(seed)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", seed.ID, err)
+		}
+		if spec.Env["EULA"] != "TRUE" {
+			t.Fatalf("%s env EULA = %q", seed.ID, spec.Env["EULA"])
+		}
+		if spec.Image == "" || spec.StoredImage == "" {
+			t.Fatalf("%s did not resolve an image", seed.ID)
+		}
+		if spec.Qualified {
+			qualified++
+			if spec.Protocol != ProtocolJava {
+				t.Fatalf("%s protocol = %s, want java", seed.ID, spec.Protocol)
+			}
+			if spec.GamePort != 25565 {
+				t.Fatalf("%s game port = %d, want 25565", seed.ID, spec.GamePort)
+			}
+			wantType := storage.NormalizeModLoaderForType(seed.ModLoader)
+			if spec.Env["TYPE"] != wantType {
+				t.Fatalf("%s TYPE = %q, want %q", seed.ID, spec.Env["TYPE"], wantType)
+			}
+			if !strings.HasPrefix(spec.Image, "itzg/minecraft-server:") {
+				t.Fatalf("%s image %q is not a Java server tag", seed.ID, spec.Image)
+			}
+			if spec.Limitation != "" {
+				t.Fatalf("%s qualified seed must not carry a limitation", seed.ID)
+			}
+			continue
+		}
+		if spec.Protocol != ProtocolBedrock {
+			t.Fatalf("%s unqualified protocol = %s, want bedrock", seed.ID, spec.Protocol)
+		}
+		if spec.Limitation != NativeBedrockLimitation {
+			t.Fatalf("%s limitation = %q", seed.ID, spec.Limitation)
+		}
+		if spec.Image != "itzg/minecraft-bedrock-server:latest" {
+			t.Fatalf("%s image %q must not be advertised as a Java edition", seed.ID, spec.Image)
+		}
+	}
+	if qualified != 5 {
+		t.Fatalf("qualified Java seeds = %d, want 5", qualified)
 	}
 }

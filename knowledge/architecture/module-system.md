@@ -9,6 +9,7 @@ code_refs:
   - internal/packwiz
   - internal/indexers
   - internal/blueprint
+  - internal/blueprint/resolve.go
   - internal/module/hooks.go
   - internal/module/reconcile.go
   - internal/docker/client.go
@@ -17,6 +18,7 @@ code_refs:
   - web/carbon-panel/src/lib/module-identity.ts
   - web/carbon-panel/src/routes/modules/ActiveModules.svelte
   - web/carbon-panel/src/lib/components/server/ServerModules.svelte
+  - web/carbon-panel/src/routes/servers/new/+page.svelte
 sources:
   - title: Module delivery checksum issue
     resource: ../../docs/issues/003-MOD-4-modpack-delivery-checksum.md
@@ -38,6 +40,9 @@ describe a server's desired configuration.
   successful install.
 - Verify checksums before declaring a modpack delivered.
 - A hook failure must be attributable to the module and the server.
+- Create-path blueprints are Java/tag seeds resolved to image, env and
+  protocol. A Bedrock full-image seed is labeled unsupported and is not a
+  native edition path. See [blueprint create qualification](../decisions/blueprint-create-qualification.md).
 
 # Convergence
 

@@ -9,6 +9,8 @@ code_refs:
   - internal/module/hooks.go
   - internal/docker/freezer.go
   - internal/snapshot
+  - internal/worldstore
+  - internal/scheduler
 sources:
   - title: Fail-closed node resolution change
     resource: https://github.com/athNdev/carbon-panel/pull/225
@@ -39,10 +41,8 @@ not answer a named node with the local daemon.
   is configured and the call path uses `nodestorage.ForNode` (Get/Rename/
   List/Update/Delete, CreateFolder, Copy/Move, uploads, InitFileDownload,
   `serverLatestLog`, staged content, zip extract, CreateArchive,
-  DownloadArchive, ExportWorld, and that server-pack write).
-  `DownloadRemoteArchive` still requires a controller filesystem walk and
-  is refused on transport-only nodes. Worldstore backup/restore paths are
-  not on the transport yet.
+  DownloadArchive, ExportWorld, snapshot create/rollback, worldstore
+  backup/restore, DownloadRemoteArchive, and that server-pack write).
 
 # Detection
 
