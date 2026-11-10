@@ -446,6 +446,61 @@ func TestPreflightSaysAWritableLayerCapDoesNotBoundTheWorld(t *testing.T) {
 	}
 }
 
+func TestPreflightDoesNotRefuseWhenWorldQuotaUnset(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.WorldBytes = 8 << 30
+	spec.WorldBytesKnown = true
+
+	profile := DescribeRuntime(spec)
+	if err := PreflightProfile(profile); err != nil {
+		t.Fatalf("unset world quota refused create: %v", err)
+	}
+	if hasIssue(profile, RuntimeIssueWorldQuotaExceeded) {
+		t.Fatalf("issues = %v, want no world_quota_exceeded when unset", issueCodes(profile))
+	}
+}
+
+func TestPreflightRefusesWhenMeasuredWorldBytesMeetQuota(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.WorldQuotaMB = 1
+	spec.WorldBytes = 1 << 20
+	spec.WorldBytesKnown = true
+
+	profile := DescribeRuntime(spec)
+	err := PreflightProfile(profile)
+	if !errors.Is(err, ErrRuntimeIncompatible) {
+		t.Fatalf("error = %v, want ErrRuntimeIncompatible", err)
+	}
+	if !strings.Contains(err.Error(), string(RuntimeIssueWorldQuotaExceeded)) {
+		t.Fatalf("error = %q, want world_quota_exceeded", err)
+	}
+	if !hasIssue(profile, RuntimeIssueWorldQuotaExceeded) {
+		t.Fatalf("issues = %v, want world_quota_exceeded", issueCodes(profile))
+	}
+}
+
+func TestPreflightDoesNotClaimStorageOptAsWorldQuotaWhenAdmissionIsSet(t *testing.T) {
+	spec := resolvedMinecraftContainer(&v1.DockerOverrides{
+		Environment: map[string]string{writableRootfsEnv: "1"},
+	}, false)
+	ApplyDiskQuota(spec.HostConfig, 1024)
+	spec.WritableLayerMB = 1024
+	spec.WorldQuotaMB = 512
+	spec.WorldBytes = 1
+	spec.WorldBytesKnown = true
+
+	profile := DescribeRuntime(spec)
+	if !hasIssue(profile, RuntimeIssueStorageQuotaIsNotAWorldQuota) {
+		t.Fatalf("issues = %v, want storage_quota_is_not_a_world_quota", issueCodes(profile))
+	}
+	if profile.Limits.WorldDiskEnforced {
+		t.Error("WorldDiskEnforced = true, want false: storage-opt is not a world quota")
+	}
+	if hasIssue(profile, RuntimeIssueWorldQuotaExceeded) {
+		t.Fatalf("issues = %v, under-quota world must not be refused", issueCodes(profile))
+	}
+}
+
 func TestPreflightWarnsThatAWritableLayerCapIsIgnoredOnAReadOnlyRoot(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
 	spec.WritableLayerMB = 1024

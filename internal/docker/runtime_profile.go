@@ -95,6 +95,12 @@ const (
 	// RuntimeIssueStorageQuotaIsNotAWorldQuota is raised when a storage-opt
 	// size is presented as if it bounded the world.
 	RuntimeIssueStorageQuotaIsNotAWorldQuota RuntimeIssueCode = "storage_quota_is_not_a_world_quota"
+	// RuntimeIssueWorldQuotaExceeded is raised when storage.world_quota_mb is
+	// set and measured world bytes meet or exceed it. Creation is refused.
+	RuntimeIssueWorldQuotaExceeded RuntimeIssueCode = "world_quota_exceeded"
+	// RuntimeIssueWorldQuotaUnmeasured is raised when a world quota is set but
+	// world bytes could not be measured, so admission fails closed.
+	RuntimeIssueWorldQuotaUnmeasured RuntimeIssueCode = "world_quota_unmeasured"
 	// RuntimeIssueWritableLayerCapIgnored is raised when a writable-layer cap
 	// is configured but the root is read-only, so nothing is capped.
 	RuntimeIssueWritableLayerCapIgnored RuntimeIssueCode = "writable_layer_cap_ignored"
@@ -158,6 +164,13 @@ type RuntimeSpec struct {
 	// WritableLayerMB is the operator's writable-layer cap. It is applied only
 	// when the root filesystem is writable.
 	WritableLayerMB int64
+	// WorldQuotaMB is panel admission against measured world bytes. 0 disables.
+	// It is not a daemon, xfs, or volume quota and does not set WorldDiskEnforced.
+	WorldQuotaMB int64
+	// WorldBytes is the metrics collector's world-directory total when known.
+	WorldBytes int64
+	// WorldBytesKnown is false when a set quota could not be measured.
+	WorldBytesKnown bool
 	// DataOwnerUID is the owner of DataPath when the platform can report it.
 	// It lets the profile tell a supported non-root path (the directory was
 	// prepared for that uid) from one that would fail at boot.
@@ -190,8 +203,9 @@ type ContainerLimits struct {
 	// WritableLayerMB is the storage-opt size applied to the container layer,
 	// or 0 when the layer is unbounded or the root is read-only.
 	WritableLayerMB int64
-	// WorldDiskEnforced is always false today: the world is a bind mount, so
-	// the daemon cannot quota it.
+	// WorldDiskEnforced is true only when the daemon quotas the world bind.
+	// Panel admission (storage.world_quota_mb) can refuse create without
+	// setting this. storage-opt size never sets it.
 	WorldDiskEnforced bool
 }
 
@@ -527,6 +541,7 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 
 	issues = append(issues, limitIssues(profile)...)
 	issues = append(issues, daemonLimitIssues(spec, profile)...)
+	issues = append(issues, worldQuotaIssues(spec)...)
 
 	if spec.WritableLayerMB > 0 && profile.ReadOnlyRootfs {
 		issues = append(issues, RuntimeIssue{
@@ -587,11 +602,38 @@ func limitIssues(profile RuntimeProfile) []RuntimeIssue {
 			Code:     RuntimeIssueStorageQuotaIsNotAWorldQuota,
 			Severity: RuntimeWarning,
 			Detail:   fmt.Sprintf("the %d MB writable-layer cap does not bound the world at %s", profile.Limits.WritableLayerMB, profile.DataMount),
-			Remedy:   "size the world with the node filesystem or a volume quota; a bind-mounted world is measured, not capped, by the daemon",
+			Remedy:   "set storage.world_quota_mb to refuse create when measured world bytes meet the cap; storage-opt size does not quota a bind-mounted world",
 		})
 	}
 
 	return issues
+}
+
+// worldQuotaIssues refuses create when an operator world quota is set and the
+// measured world (metrics collector world bytes) meets or exceeds it. Unset
+// (0) never refuses. A set quota that cannot be measured fails closed.
+func worldQuotaIssues(spec RuntimeSpec) []RuntimeIssue {
+	if spec.WorldQuotaMB <= 0 {
+		return nil
+	}
+	if !spec.WorldBytesKnown {
+		return []RuntimeIssue{{
+			Code:     RuntimeIssueWorldQuotaUnmeasured,
+			Severity: RuntimeFatal,
+			Detail:   fmt.Sprintf("storage.world_quota_mb is %d MB but world bytes could not be measured", spec.WorldQuotaMB),
+			Remedy:   "make the world directory readable to the panel, or unset storage.world_quota_mb",
+		}}
+	}
+	quotaBytes := spec.WorldQuotaMB << 20
+	if spec.WorldBytes < quotaBytes {
+		return nil
+	}
+	return []RuntimeIssue{{
+		Code:     RuntimeIssueWorldQuotaExceeded,
+		Severity: RuntimeFatal,
+		Detail:   fmt.Sprintf("measured world bytes %d meet or exceed storage.world_quota_mb %d MB", spec.WorldBytes, spec.WorldQuotaMB),
+		Remedy:   "free world data or raise storage.world_quota_mb; this is panel admission, not a daemon or xfs quota",
+	}}
 }
 
 // daemonLimitIssues compares the resolved request to daemon capabilities so an

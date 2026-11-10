@@ -33,11 +33,13 @@ not answer a named node with the local daemon.
 - `internal/module/hooks.go:execInModule` still uses the manager's client.
 - Creating a server, deleting it, mod installation, packwiz bake, snapshot
   create/restore, scheduled backup archives, and scheduled modpack sync use
-  the node's mapped storage root. A remote node with no shared mount is
-  refused unless `storage.worker_image` is configured and the call path uses
-  `nodestorage.ForNode` (Get/Rename/List/Update/Delete, CreateFolder,
-  Copy/Move, uploads, InitFileDownload, `serverLatestLog`, and staged
-  content). Zip/extract/archive and world export pipelines still require
+  the node's mapped storage root. CreateServer places a manual server pack
+  through `nodestorage.ForNode` and refuses a missing remote adapter. A
+  remote node with no shared mount is refused unless `storage.worker_image`
+  is configured and the call path uses `nodestorage.ForNode` (Get/Rename/
+  List/Update/Delete, CreateFolder, Copy/Move, uploads, InitFileDownload,
+  `serverLatestLog`, staged content, and that server-pack write).
+  Zip/extract/archive and world export pipelines still require
   controller-local filesystem walks; transport-only nodes get
   `CodeUnavailable` on those entry points even when a worker is configured.
   Worldstore backup paths are not on the transport yet.

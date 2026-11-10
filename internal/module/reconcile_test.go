@@ -75,6 +75,13 @@ func TestDecideModule(t *testing.T) {
 			want:   actionWaitForParent,
 		},
 		{
+			name:   "running module whose container vanished under a deeply sleeping parent is not resurrected",
+			mod:    &storage.Module{Status: storage.ModuleStatusRunning, ContainerID: "old"},
+			parent: &storage.Server{ID: "srv", Status: storage.StatusDeepSleep},
+			obs:    ModuleObservation{Exists: false},
+			want:   actionMarkGone,
+		},
+		{
 			name: "stopped module whose container vanished is recorded as gone",
 			mod:  &storage.Module{Status: storage.ModuleStatusStopped, ContainerID: "old"},
 			obs:  ModuleObservation{Exists: false},
@@ -472,10 +479,10 @@ func TestReconcileModuleWaitsWhenTheParentIsStarting(t *testing.T) {
 
 	outcome, err := manager.ReconcileModule(ctx, mod.ID)
 	if err != nil {
-		t.Fatalf("ReconcileModule: %v", err)
+		t.Fatalf("ReconcileModule while parent is starting: %v", err)
 	}
 	if outcome != ReconcileWaiting {
-		t.Fatalf("outcome = %s, want waiting", outcome)
+		t.Fatalf("outcome = %s, want waiting so the sidecar is not marked gone", outcome)
 	}
 	got, err := store.GetModule(ctx, mod.ID)
 	if err != nil {
@@ -483,6 +490,17 @@ func TestReconcileModuleWaitsWhenTheParentIsStarting(t *testing.T) {
 	}
 	if got.ContainerID != "gone" || got.Status != storage.ModuleStatusRunning {
 		t.Fatalf("child was marked gone while the parent is starting: %+v", got)
+	}
+
+	if err := store.UpdateServerStatus(ctx, server.ID, storage.StatusRunning); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := store.GetServer(ctx, server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action := decideModule(got, parent, ModuleObservation{Exists: false}, reconcileGates{DependenciesReady: true, HostPortsReady: true}); action != actionRecreate {
+		t.Fatalf("action after parent is running = %s, want recreate", action)
 	}
 }
 

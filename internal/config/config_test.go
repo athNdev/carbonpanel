@@ -132,6 +132,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Storage.MaxUploadSize != 500*1024*1024 {
 		t.Fatalf("storage max_upload_size=%d", cfg.Storage.MaxUploadSize)
 	}
+	if cfg.Storage.WorldQuotaMB != 0 {
+		t.Fatalf("storage world_quota_mb=%d, want 0 (unset, no admission)", cfg.Storage.WorldQuotaMB)
+	}
 	if cfg.Proxy.Enabled || cfg.Proxy.ListenPort != 25565 {
 		t.Fatalf("proxy defaults: %+v", cfg.Proxy)
 	}
@@ -203,6 +206,28 @@ func TestLoadFillsEmptyListenPorts(t *testing.T) {
 	}
 	if len(cfg.Proxy.ListenPorts) != 1 || cfg.Proxy.ListenPorts[0] != 25577 {
 		t.Fatalf("listen_ports=%v want [25577]", cfg.Proxy.ListenPorts)
+	}
+}
+
+func TestLoadWorldQuotaMB(t *testing.T) {
+	dir := writeConfig(t, "storage:\n  world_quota_mb: 256\n")
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Storage.WorldQuotaMB != 256 {
+		t.Fatalf("world_quota_mb=%d want 256", cfg.Storage.WorldQuotaMB)
+	}
+}
+
+func TestValidateRejectsNegativeWorldQuota(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg.Storage.WorldQuotaMB = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("want validation error for negative world_quota_mb")
 	}
 }
 
