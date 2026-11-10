@@ -349,8 +349,10 @@ func TestGenerateSupportBundleIncludesJournalAndObservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gzip: %v", err)
 	}
-	defer gr.Close()
 	raw, err := io.ReadAll(gr)
+	if closeErr := gr.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		t.Fatalf("read gzip: %v", err)
 	}
