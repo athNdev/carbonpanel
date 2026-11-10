@@ -452,7 +452,7 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 					Code:     RuntimeIssueTmpfsTooSmall,
 					Severity: RuntimeWarning,
 					Detail:   fmt.Sprintf("/tmp tmpfs is %s", humanBytes(size)),
-					Remedy:   "give /tmp at least 64m; a modpack or world archive can fill a small tmpfs and abort the boot",
+					Remedy:   "give /tmp at least 64m for small image scratch. Modpack downloads and native libraries use the data-volume work directory, not a larger tmpfs",
 				})
 			}
 			if tmpfsAllowsExec(opts) {

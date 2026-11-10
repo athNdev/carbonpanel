@@ -87,6 +87,12 @@ func TestPreflightAcceptsTheDefaultMinecraftContainer(t *testing.T) {
 	if got := profile.Tmpfs["/tmp"]; !strings.Contains(got, "noexec") {
 		t.Errorf("/tmp tmpfs = %q, want noexec", got)
 	}
+	if got, n := envValues(spec.Config.Env, "TMPDIR"); n != 1 || got != serverWorkTempContainerPath {
+		t.Errorf("TMPDIR = %q (%d entries), want %s", got, n, serverWorkTempContainerPath)
+	}
+	if got, _ := envValues(spec.Config.Env, "JAVA_TOOL_OPTIONS"); !strings.Contains(got, javaIOTmpdirFlag) {
+		t.Errorf("JAVA_TOOL_OPTIONS = %q, want %s", got, javaIOTmpdirFlag)
+	}
 	if len(profile.CapAdd) == 0 {
 		t.Error("default container has no bootstrap capabilities")
 	}
