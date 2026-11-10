@@ -565,7 +565,7 @@ one at https://mozilla.org/MPL/2.0/.
 							/>
 						</div>
 						<div class="space-y-2">
-							<Label for="memory-limit" class="text-sm">Memory Limit (MB)</Label>
+							<Label for="memory-limit" class="text-sm">Memory request (MB)</Label>
 							<Input
 								id="memory-limit"
 								type="number"
@@ -582,6 +582,10 @@ one at https://mozilla.org/MPL/2.0/.
 								{disabled}
 								class="h-8 text-xs"
 							/>
+							<p class="text-xs text-muted-foreground">
+								Advisory until the engine reports the cap as enforced; ignored when
+								memory_limit_unsupported.
+							</p>
 						</div>
 					</div>
 

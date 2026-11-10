@@ -10,6 +10,8 @@ code_refs:
   - internal/proxy
   - internal/db
   - internal/docker
+  - internal/docker/resource_enforcement.go
+  - web/carbon-panel/src/lib/utils/resource-enforcement.ts
   - pkg/files
   - internal/scheduler
   - internal/operation
@@ -186,6 +188,15 @@ runtime profile compares the resolved request to those capabilities. Rootless
 daemons on cgroup v1, memory/swap/pids flags the daemon marks unsupported, and
 writable-layer caps on storage stacks without overlay2+xfs+pquota each produce
 named warnings so an ignored limit is not mistaken for enforcement.
+
+`Server.resource_enforcement` carries that view to the console: requested
+versus effective memory, `memory_enforced` only after `/info` qualification,
+`world_disk_enforced` never from storage-opt, and the named warning codes.
+The OSS console labels RAM as configured, advisory, or enforced from those
+codes (`memoryLimitCopy` / `worldDiskCopy`); frontend tests fail if a warning
+is treated as a hard cap. `storage.world_quota_mb` is shown as admission, not
+kernel enforcement. OOM versus forced-stop stay distinct via `status_reason`
+(`exitFailureCopy`).
 
 # How to check
 

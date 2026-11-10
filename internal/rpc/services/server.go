@@ -83,6 +83,9 @@ type ServerService struct {
 	moduleManager    *module.Manager
 	bus              *events.Bus
 	enforcer         *rbac.Enforcer
+
+	daemonInfoMu sync.Mutex
+	daemonInfo   map[string]daemonEnforcementCache
 }
 
 // beginServerLifecycleTransition claims the lifecycle transition for a server
@@ -541,6 +544,7 @@ func NewServerService(
 		moduleManager:    moduleManager,
 		bus:              bus,
 		enforcer:         enforcer,
+		daemonInfo:       make(map[string]daemonEnforcementCache),
 	}
 }
 
@@ -942,7 +946,7 @@ func (s *ServerService) ListServers(ctx context.Context, req *connect.Request[v1
 	// Convert to proto
 	protoServers := make([]*v1.Server, len(servers))
 	for i, server := range servers {
-		protoServers[i] = dbServerToProto(server)
+		protoServers[i] = s.toProtoServer(ctx, server)
 	}
 
 	return connect.NewResponse(&v1.ListServersResponse{
@@ -1009,7 +1013,7 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 	}
 
 	return connect.NewResponse(&v1.GetServerResponse{
-		Server: dbServerToProto(server),
+		Server: s.toProtoServer(ctx, server),
 	}), nil
 }
 
@@ -1343,7 +1347,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 			if getErr != nil {
 				return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("create request is already in progress"))
 			}
-			return connect.NewResponse(&v1.CreateServerResponse{Server: dbServerToProto(existing)}), nil
+			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, existing)}), nil
 		}
 		releaseClaim = true
 		defer func() {
@@ -1617,7 +1621,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 
 	// Return immediately with the server in "creating" state
 	return connect.NewResponse(&v1.CreateServerResponse{
-		Server: dbServerToProto(server),
+		Server: s.toProtoServer(ctx, server),
 	}), nil
 }
 
@@ -1992,7 +1996,7 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 	}
 
 	return connect.NewResponse(&v1.UpdateServerResponse{
-		Server: dbServerToProto(server),
+		Server: s.toProtoServer(ctx, server),
 	}), nil
 }
 

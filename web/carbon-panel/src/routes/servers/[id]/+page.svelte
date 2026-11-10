@@ -75,6 +75,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonPageHeader
 	} from '$lib/components/carbon';
 	import { memoryUsagePercent } from '$lib/utils/safe-percent';
+	import { exitFailureCopy, memoryLimitCopy, worldDiskCopy } from '$lib/utils/resource-enforcement';
 	import ServerConsole from '$lib/components/server-console.svelte';
 	import ServerConfiguration from '$lib/components/server-configuration.svelte';
 	import ServerSettings from '$lib/components/server-settings.svelte';
@@ -647,9 +648,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{:else if server.status === ServerStatus.STOPPING}
 							Gracefully shutting down
 						{:else if server.status === ServerStatus.ERROR}
-							{server.statusReason
-								? `Server failed: ${server.statusReason}`
-								: 'Daemon status: ERROR'}
+							{exitFailureCopy(server.statusReason)}
 						{:else}
 							Daemon status: {getStatusDisplayName(server.status)}
 						{/if}
@@ -759,7 +758,9 @@ one at https://mozilla.org/MPL/2.0/.
 							<span class="text-[#8d8d8d]">RAM</span>
 							<span class="text-[#f4f4f4]">
 								{#if server.status === ServerStatus.CREATING}
-									Allocated: {(server.memory / 1024).toFixed(1)} GB
+									{memoryLimitCopy(server.resourceEnforcement).label}: {(
+										server.memory / 1024
+									).toFixed(1)} GB
 								{:else}
 									{server.memoryUsage ? (Number(server.memoryUsage) / 1024).toFixed(1) : '0'} / {(
 										server.memory / 1024
@@ -794,6 +795,10 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 
+				<p class="mt-2 font-sans text-[11px] text-[#8d8d8d]">
+					{memoryLimitCopy(server.resourceEnforcement).label}
+					· {worldDiskCopy(server.resourceEnforcement).label}
+				</p>
 				<div
 					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px]"
 				>
