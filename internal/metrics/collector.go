@@ -36,7 +36,7 @@ type ServerMetrics struct {
 	MemoryUsage float64 // MB
 	DiskUsage   int64   // bytes (total server data)
 	DiskTotal   int64   // bytes
-	WorldSize   int64   // bytes (world directory only)
+	WorldSize   int64   // bytes (world directory only); storage.world_quota_mb admits against this
 	// Separate resource budgets (OSS-239). These are measured or explicitly
 	// unknown; they are not a hard world quota and must not be inferred from
 	// DiskUsage or WorldSize.
@@ -519,19 +519,9 @@ func (c *Collector) collectDiskUsage() {
 			continue
 		}
 
-		// Calculate world directory size, including dimension worlds
-		worldPaths, err := files.FindWorldDirs(root)
+		totalWorldSize, err := files.WorldBytes(root)
 		if err != nil {
 			continue
-		}
-
-		var totalWorldSize int64
-		for _, worldPath := range worldPaths {
-			size, err := files.CalculateDirSize(worldPath)
-			if err != nil {
-				continue
-			}
-			totalWorldSize += size
 		}
 
 		serverDiskTotal := diskTotal

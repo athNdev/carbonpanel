@@ -10,6 +10,7 @@ code_refs:
   - internal/proxy
   - internal/db
   - internal/docker
+  - pkg/files
   - internal/scheduler
   - internal/operation
   - internal/reconciler
@@ -132,14 +133,6 @@ explicit non-root uid, a read-only root with and without the nsswitch skip,
 rootless plus host-root-owned data, and an unpinned image warning. Preflight
 must not enable privileged mode, disable no-new-privileges, or make the root
 writable to recover. Live game-readiness on an isolated daemon is OSS-247;
-the in-repo matrix still runs without that daemon. Supported and unsupported combinations
-are encoded as a table against the same resolved request `CreateContainer`
-builds (`DescribeRuntime` / `PreflightRuntime`): root-then-drop versus an
-explicit non-root uid, a read-only root with and without the nsswitch skip,
-`CapDrop ALL` with bootstrap capabilities removed, a missing writable `/data`,
-rootless plus host-root-owned data, and an unpinned image warning. Preflight
-must not enable privileged mode, disable no-new-privileges, or make the root
-writable to recover. Live game-readiness on an isolated daemon is OSS-247;
 the in-repo matrix still runs without that daemon.
 
 The profile also reports the limits that are actually applied, not the ones
@@ -150,7 +143,13 @@ bind mount, so it is never quota-limited by the daemon: `storage-opt size`
 sizes only the container writable layer, is applied only when the root is
 writable, and is reported as `storage_quota_is_not_a_world_quota` whenever it
 is set. World growth is measured by the metrics collector against the node
-filesystem instead. Free inodes on that filesystem and backup staging under
+filesystem instead. `storage.world_quota_mb` is panel admission, not a daemon
+quota: when it is set and measured world bytes (`files.WorldBytes`, the same
+total as the collector's `WorldSize`) meet or exceed it, `PreflightRuntime`
+refuses create with `world_quota_exceeded` before the daemon is asked. Unset
+(0) never refuses. A set quota that cannot be measured fails closed as
+`world_quota_unmeasured`. That refusal is not `WorldDiskEnforced` and is not
+an xfs/project or volume quota. Free inodes on that filesystem and backup staging under
 `storage.temp_dir` are separate budgets: each is measured when possible or
 reported as explicitly unknown, and neither is added to world bytes. The
 collector measures the node's Docker image store (deduplicated TotalSize)

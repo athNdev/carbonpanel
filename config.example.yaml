@@ -77,6 +77,10 @@ storage:
   # writes outside /data). It never bounds the world: /data is a bind mount and
   # is measured, not quota-limited. Leave 0 for no cap.
   container_writable_mb: 0
+  # Panel admission: refuse StartServer/create when measured world bytes meet
+  # or exceed this many MiB. 0 disables. Not an xfs/project or volume quota,
+  # and not the writable-layer cap above.
+  world_quota_mb: 0
   # S3-compatible offsite backup upload (MINE-138). Credentials can also come
   # from env: CARBONPANEL_STORAGE_S3_ACCESS_KEY / CARBONPANEL_STORAGE_S3_SECRET_KEY.
   s3:

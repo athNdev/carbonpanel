@@ -9,14 +9,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
 
+	"github.com/athNdev/carbon-panel/internal/config"
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
@@ -312,6 +317,158 @@ func TestAServerStatusTransitionSchedulesChildModules(t *testing.T) {
 				return callsInclude(calls, "sidecar") && !callsInclude(calls, "other-server")
 			})
 		})
+	}
+}
+
+// hideServersFromSweep keeps the startup sweep from reconciling the parent
+// before the test drives ReconcileServer itself.
+type hideServersFromSweep struct {
+	*db.Store
+	mu          sync.Mutex
+	listModules bool
+}
+
+func (s *hideServersFromSweep) ListServers(context.Context) ([]*db.Server, error) {
+	return nil, nil
+}
+
+func (s *hideServersFromSweep) ListModules(ctx context.Context) ([]*db.Module, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.listModules {
+		return nil, nil
+	}
+	return s.Store.ListModules(ctx)
+}
+
+type recordingManagerPass struct {
+	manager *module.Manager
+	mu      sync.Mutex
+	seen    []string
+	last    string
+}
+
+func (p *recordingManagerPass) ReconcileModule(ctx context.Context, moduleID string) (string, error) {
+	outcome, err := p.manager.ReconcileModule(ctx, moduleID)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.seen = append(p.seen, moduleID)
+	p.last = string(outcome)
+	return string(outcome), err
+}
+
+func (p *recordingManagerPass) calls() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.seen...)
+}
+
+func (p *recordingManagerPass) lastOutcome() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.last
+}
+
+func TestAServerSelfHealDoesNotMarkRunningChildrenGone(t *testing.T) {
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{
+			Path:           ":memory:",
+			AutoMigrate:    true,
+			MaxConnections: 1,
+		},
+	}
+	store, err := db.NewSQLiteStore(cfg)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
+	if err := store.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	ctx := context.Background()
+	server := &db.Server{
+		ID: "srv-parent", Name: "Survival", NodeID: "local",
+		ContainerID: "gone", Status: db.StatusRunning,
+		ModLoader: db.ModLoaderVanilla, MCVersion: "1.21", DataPath: t.TempDir(),
+	}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	mod := &db.Module{
+		ID: "sidecar", Name: "sidecar", ServerID: server.ID, NodeID: "local",
+		ContainerID: "mod-gone", Status: db.ModuleStatusRunning,
+	}
+	if err := store.DB().Create(mod).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/containers/json") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(api.Close)
+	cli, err := docker.NewClient(strings.Replace(api.URL, "http://", "tcp://", 1), logger.New())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cli.Close(); err != nil {
+			t.Errorf("close docker client: %v", err)
+		}
+	})
+	manager := module.NewManager(store, cli, nil, nil, nil, logger.New())
+	pass := &recordingManagerPass{manager: manager}
+	gated := &hideServersFromSweep{Store: store}
+
+	serverCLI := &fakeClient{resolveErr: fmt.Errorf("%w: srv-parent", docker.ErrContainerNotResolved)}
+	r := New(gated, fakeResolver{cli: serverCLI}, nil, nil, nil, logger.New(), Config{
+		DebounceWindow: 10 * time.Millisecond,
+		SweepInterval:  time.Hour,
+	})
+	runCtx, cancel := context.WithCancel(context.Background())
+	r.SetModuleReconciler(pass)
+	r.Start(runCtx, nil)
+	t.Cleanup(func() {
+		r.Stop()
+		cancel()
+	})
+
+	gated.mu.Lock()
+	gated.listModules = true
+	gated.mu.Unlock()
+
+	if err := r.ReconcileServer(runCtx, "srv-parent"); err != nil {
+		t.Fatalf("ReconcileServer: %v", err)
+	}
+	gotServer, err := store.GetServer(ctx, "srv-parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotServer.Status != db.StatusStarting {
+		t.Fatalf("parent status = %s, want starting after self-heal", gotServer.Status)
+	}
+
+	waitFor(t, func() bool {
+		return callsInclude(pass.calls(), "sidecar")
+	})
+	if got := pass.lastOutcome(); got != string(module.ReconcileWaiting) {
+		t.Fatalf("child outcome = %s, want waiting while the parent is starting", got)
+	}
+	gotMod, err := store.GetModule(ctx, "sidecar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMod.Status != db.ModuleStatusRunning || gotMod.ContainerID != "mod-gone" {
+		t.Fatalf("child was marked gone while the parent is starting: %+v", gotMod)
 	}
 }
 

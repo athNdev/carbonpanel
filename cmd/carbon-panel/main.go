@@ -230,6 +230,7 @@ func main() {
 		// A writable-layer cap only helps a writable root; the container
 		// constructor decides whether it applies.
 		ContainerWritableMB: cfg.Storage.ContainerWritableMB,
+		WorldQuotaMB:        cfg.Storage.WorldQuotaMB,
 	})
 	if err != nil {
 		log.Fatal("Failed to initialize Docker client: %v", err)
