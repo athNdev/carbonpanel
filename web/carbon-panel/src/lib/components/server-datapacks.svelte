@@ -151,66 +151,66 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	</div>
 
 	<div class="min-h-0 flex-1 overflow-auto">
-	{#if error}
-		<p class="border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-sm text-[#ff8389]">{error}</p>
-	{/if}
+		{#if error}
+			<p class="border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-sm text-[#ff8389]">{error}</p>
+		{/if}
 
-	{#if loading}
-		<div class="flex items-center justify-center py-8 text-[#8d8d8d]">
-			<Loader2 class="h-5 w-5 animate-spin" />
-		</div>
-	{:else if datapacks.length === 0}
-		<Card class="border-[#393939] bg-[#262626]">
-			<CardContent class="flex flex-col items-center gap-2 py-10 text-center">
-				<Package class="h-8 w-8 text-[#525252]" />
-				<p class="text-sm text-[#8d8d8d]">No datapacks installed</p>
-				<CarbonButton
-					onclick={() => (browseOpen = true)}
-					class="rounded-none bg-[#0f62fe] text-white"
-				>
-					Browse Datapacks
-				</CarbonButton>
-			</CardContent>
-		</Card>
-	{:else}
-		<div class="space-y-2">
-			{#each datapacks as d (d.fileName)}
-				<Card class="border-[#393939] bg-[#262626]">
-					<CardContent class="flex items-center gap-3 p-3">
-						<Package class="h-5 w-5 shrink-0 text-[#0f62fe]" />
-						<div class="min-w-0 flex-1">
-							<p class="truncate font-medium whitespace-nowrap text-white" title={d.displayName}>
-								{d.displayName}
-							</p>
-							<p class="truncate text-xs whitespace-nowrap text-[#8d8d8d]" title={d.fileName}>
-								{d.fileName}
-							</p>
-							{#if d.packFormat}
-								<p class="text-xs text-[#8d8d8d]">pack format {d.packFormat}</p>
-							{/if}
-							{#if d.formatWarning}
-								<p class="text-xs text-[#ff8389]">{d.formatWarning}</p>
-							{/if}
-						</div>
-						<Badge class="border-[#393939] bg-[#393939] whitespace-nowrap text-[#c6c6c6]">
-							{(d.size / 1024).toFixed(1)} KB
-						</Badge>
-						<CarbonButton
-							kind="ghost"
-							onclick={() => remove(d.fileName)}
-							disabled={deleting[d.fileName]}
-							class="shrink-0 rounded-none text-[#ff8389] hover:bg-[#da1e28]/20"
-							aria-label={`Delete ${d.displayName}`}
-						>
-							{#if deleting[d.fileName]}<Loader2 class="h-4 w-4 animate-spin" />{:else}<Trash2
-									class="h-4 w-4"
-								/>{/if}
-						</CarbonButton>
-					</CardContent>
-				</Card>
-			{/each}
-		</div>
-	{/if}
+		{#if loading}
+			<div class="flex items-center justify-center py-8 text-[#8d8d8d]">
+				<Loader2 class="h-5 w-5 animate-spin" />
+			</div>
+		{:else if datapacks.length === 0}
+			<Card class="border-[#393939] bg-[#262626]">
+				<CardContent class="flex flex-col items-center gap-2 py-10 text-center">
+					<Package class="h-8 w-8 text-[#525252]" />
+					<p class="text-sm text-[#8d8d8d]">No datapacks installed</p>
+					<CarbonButton
+						onclick={() => (browseOpen = true)}
+						class="rounded-none bg-[#0f62fe] text-white"
+					>
+						Browse Datapacks
+					</CarbonButton>
+				</CardContent>
+			</Card>
+		{:else}
+			<div class="space-y-2">
+				{#each datapacks as d (d.fileName)}
+					<Card class="border-[#393939] bg-[#262626]">
+						<CardContent class="flex items-center gap-3 p-3">
+							<Package class="h-5 w-5 shrink-0 text-[#0f62fe]" />
+							<div class="min-w-0 flex-1">
+								<p class="truncate font-medium whitespace-nowrap text-white" title={d.displayName}>
+									{d.displayName}
+								</p>
+								<p class="truncate text-xs whitespace-nowrap text-[#8d8d8d]" title={d.fileName}>
+									{d.fileName}
+								</p>
+								{#if d.packFormat}
+									<p class="text-xs text-[#8d8d8d]">pack format {d.packFormat}</p>
+								{/if}
+								{#if d.formatWarning}
+									<p class="text-xs text-[#ff8389]">{d.formatWarning}</p>
+								{/if}
+							</div>
+							<Badge class="border-[#393939] bg-[#393939] whitespace-nowrap text-[#c6c6c6]">
+								{(d.size / 1024).toFixed(1)} KB
+							</Badge>
+							<CarbonButton
+								kind="ghost"
+								onclick={() => remove(d.fileName)}
+								disabled={deleting[d.fileName]}
+								class="shrink-0 rounded-none text-[#ff8389] hover:bg-[#da1e28]/20"
+								aria-label={`Delete ${d.displayName}`}
+							>
+								{#if deleting[d.fileName]}<Loader2 class="h-4 w-4 animate-spin" />{:else}<Trash2
+										class="h-4 w-4"
+									/>{/if}
+							</CarbonButton>
+						</CardContent>
+					</Card>
+				{/each}
+			</div>
+		{/if}
 	</div>
 </div>
 

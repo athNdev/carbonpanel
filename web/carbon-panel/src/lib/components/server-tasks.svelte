@@ -895,180 +895,182 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <div class="tab-fill flex min-h-0 flex-col overflow-hidden">
-{#if loading}
-	<div class="flex flex-1 items-center justify-center py-8">
-		<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
-	</div>
-{:else}
-	<div class="flex min-h-0 flex-1 flex-col gap-4">
-		<!-- Header -->
-		<div class="flex shrink-0 items-center justify-between">
-			<div>
-				<h3 class="text-lg font-semibold">Tasks</h3>
-				<p class="text-sm text-muted-foreground">
-					Schedule operations or run them on server events (including webhooks).
-				</p>
-			</div>
-			<div class="flex gap-2">
-				<Button variant="outline" size="sm" onclick={loadTasks}>
-					<RefreshCw class="mr-2 h-4 w-4" />
-					Refresh
-				</Button>
-				<Button size="sm" onclick={openCreateDialog}>
-					<Plus class="mr-2 h-4 w-4" />
-					New Task
-				</Button>
-			</div>
+	{#if loading}
+		<div class="flex flex-1 items-center justify-center py-8">
+			<Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
 		</div>
+	{:else}
+		<div class="flex min-h-0 flex-1 flex-col gap-4">
+			<!-- Header -->
+			<div class="flex shrink-0 items-center justify-between">
+				<div>
+					<h3 class="text-lg font-semibold">Tasks</h3>
+					<p class="text-sm text-muted-foreground">
+						Schedule operations or run them on server events (including webhooks).
+					</p>
+				</div>
+				<div class="flex gap-2">
+					<Button variant="outline" size="sm" onclick={loadTasks}>
+						<RefreshCw class="mr-2 h-4 w-4" />
+						Refresh
+					</Button>
+					<Button size="sm" onclick={openCreateDialog}>
+						<Plus class="mr-2 h-4 w-4" />
+						New Task
+					</Button>
+				</div>
+			</div>
 
-		<!-- Tasks List -->
-		<div class="min-h-0 flex-1 overflow-auto">
-		{#if loadError && tasks.length === 0}
-			<CarbonErrorState title="Failed to load tasks" message={loadError} onretry={loadTasks} />
-		{:else if tasks.length === 0}
-			<Card>
-				<CardContent class="py-8">
-					<div class="space-y-4 text-center">
-						<Clock class="mx-auto h-12 w-12 text-muted-foreground/50" />
-						<div>
-							<p class="text-lg font-medium">No tasks yet</p>
-							<p class="text-sm text-muted-foreground">
-								Create a scheduled task or a webhook to react to server events.
-							</p>
-						</div>
-						<div class="flex justify-center gap-2">
-							<Button onclick={openCreateDialog}>
-								<Plus class="mr-2 h-4 w-4" />
-								New Task
-							</Button>
-						</div>
-					</div>
-				</CardContent>
-			</Card>
-		{:else}
-			<div class="space-y-3">
-				{#each tasks as task (task.id)}
-					{@const TaskIcon = getTaskTypeIcon(task.taskType)}
-					{@const webhookUrlDisplay = getWebhookUrlForDisplay(task)}
-					<Card class="transition-shadow hover:shadow-md">
-						<CardContent class="p-4">
-							<div class="flex items-start gap-4">
-								<div
-									class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10"
-								>
-									<TaskIcon class="h-5 w-5 text-primary" />
+			<!-- Tasks List -->
+			<div class="min-h-0 flex-1 overflow-auto">
+				{#if loadError && tasks.length === 0}
+					<CarbonErrorState title="Failed to load tasks" message={loadError} onretry={loadTasks} />
+				{:else if tasks.length === 0}
+					<Card>
+						<CardContent class="py-8">
+							<div class="space-y-4 text-center">
+								<Clock class="mx-auto h-12 w-12 text-muted-foreground/50" />
+								<div>
+									<p class="text-lg font-medium">No tasks yet</p>
+									<p class="text-sm text-muted-foreground">
+										Create a scheduled task or a webhook to react to server events.
+									</p>
 								</div>
-								<div class="min-w-0 flex-1">
-									<div class="mb-1 flex items-center gap-2">
-										<h4 class="truncate font-medium">{task.name}</h4>
-										<Badge
-											variant={task.status === TaskStatus.ENABLED ? 'default' : 'secondary'}
-											class="text-xs"
-										>
-											{task.status === TaskStatus.ENABLED ? 'Enabled' : 'Disabled'}
-										</Badge>
-										<Badge variant="outline" class="text-xs">
-											{getTaskTypeLabel(task.taskType)}
-										</Badge>
-										{#if task.schedule === ScheduleType.EVENT}
-											{#each task.eventTriggers as trigger (trigger)}
-												<Badge variant="outline" class="flex items-center gap-1 text-xs">
-													<Zap class="h-3 w-3" />
-													{getEventTypeLabel(trigger)}
-												</Badge>
-											{/each}
-										{/if}
-									</div>
-									{#if task.description}
-										<p class="mb-2 truncate text-sm text-muted-foreground">{task.description}</p>
-									{/if}
-									{#if webhookUrlDisplay}
-										<div class="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-											<span class="max-w-[400px] truncate font-mono">{webhookUrlDisplay}</span>
-											<Button
-												variant="ghost"
-												size="icon"
-												class="h-5 w-5"
-												onclick={() => copyText(webhookUrlDisplay)}
-											>
-												<Copy class="h-3 w-3" />
-											</Button>
-										</div>
-									{/if}
-									<div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
-										<span class="flex items-center gap-1">
-											<Clock class="h-3 w-3" />
-											{getScheduleLabel(task)}
-										</span>
-										{#if task.nextRun && task.status === TaskStatus.ENABLED && task.schedule !== ScheduleType.EVENT}
-											<span class="flex items-center gap-1">
-												Next: {formatNextRun(task)}
-											</span>
-										{/if}
-										{#if task.lastRun}
-											<span>
-												Last: {new Date(Number(task.lastRun.seconds) * 1000).toLocaleString()}
-											</span>
-										{/if}
-									</div>
-								</div>
-								<div class="flex shrink-0 items-center gap-1">
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => viewHistory(task)}
-										title="View History"
-									>
-										<History class="h-4 w-4" />
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => triggerTask(task)}
-										title="Run Now"
-										disabled={task.status !== TaskStatus.ENABLED}
-									>
-										<Play class="h-4 w-4" />
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => toggleTask(task)}
-										title={task.status === TaskStatus.ENABLED ? 'Disable' : 'Enable'}
-									>
-										{#if task.status === TaskStatus.ENABLED}
-											<Pause class="h-4 w-4" />
-										{:else}
-											<Play class="h-4 w-4" />
-										{/if}
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										onclick={() => openEditDialog(task)}
-										title="Edit"
-									>
-										<Pencil class="h-4 w-4" />
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon"
-										class="text-destructive hover:text-destructive"
-										onclick={() => deleteTask(task)}
-										title="Delete"
-									>
-										<Trash2 class="h-4 w-4" />
+								<div class="flex justify-center gap-2">
+									<Button onclick={openCreateDialog}>
+										<Plus class="mr-2 h-4 w-4" />
+										New Task
 									</Button>
 								</div>
 							</div>
 						</CardContent>
 					</Card>
-				{/each}
+				{:else}
+					<div class="space-y-3">
+						{#each tasks as task (task.id)}
+							{@const TaskIcon = getTaskTypeIcon(task.taskType)}
+							{@const webhookUrlDisplay = getWebhookUrlForDisplay(task)}
+							<Card class="transition-shadow hover:shadow-md">
+								<CardContent class="p-4">
+									<div class="flex items-start gap-4">
+										<div
+											class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10"
+										>
+											<TaskIcon class="h-5 w-5 text-primary" />
+										</div>
+										<div class="min-w-0 flex-1">
+											<div class="mb-1 flex items-center gap-2">
+												<h4 class="truncate font-medium">{task.name}</h4>
+												<Badge
+													variant={task.status === TaskStatus.ENABLED ? 'default' : 'secondary'}
+													class="text-xs"
+												>
+													{task.status === TaskStatus.ENABLED ? 'Enabled' : 'Disabled'}
+												</Badge>
+												<Badge variant="outline" class="text-xs">
+													{getTaskTypeLabel(task.taskType)}
+												</Badge>
+												{#if task.schedule === ScheduleType.EVENT}
+													{#each task.eventTriggers as trigger (trigger)}
+														<Badge variant="outline" class="flex items-center gap-1 text-xs">
+															<Zap class="h-3 w-3" />
+															{getEventTypeLabel(trigger)}
+														</Badge>
+													{/each}
+												{/if}
+											</div>
+											{#if task.description}
+												<p class="mb-2 truncate text-sm text-muted-foreground">
+													{task.description}
+												</p>
+											{/if}
+											{#if webhookUrlDisplay}
+												<div class="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+													<span class="max-w-[400px] truncate font-mono">{webhookUrlDisplay}</span>
+													<Button
+														variant="ghost"
+														size="icon"
+														class="h-5 w-5"
+														onclick={() => copyText(webhookUrlDisplay)}
+													>
+														<Copy class="h-3 w-3" />
+													</Button>
+												</div>
+											{/if}
+											<div class="flex flex-wrap gap-2 text-xs text-muted-foreground">
+												<span class="flex items-center gap-1">
+													<Clock class="h-3 w-3" />
+													{getScheduleLabel(task)}
+												</span>
+												{#if task.nextRun && task.status === TaskStatus.ENABLED && task.schedule !== ScheduleType.EVENT}
+													<span class="flex items-center gap-1">
+														Next: {formatNextRun(task)}
+													</span>
+												{/if}
+												{#if task.lastRun}
+													<span>
+														Last: {new Date(Number(task.lastRun.seconds) * 1000).toLocaleString()}
+													</span>
+												{/if}
+											</div>
+										</div>
+										<div class="flex shrink-0 items-center gap-1">
+											<Button
+												variant="ghost"
+												size="icon"
+												onclick={() => viewHistory(task)}
+												title="View History"
+											>
+												<History class="h-4 w-4" />
+											</Button>
+											<Button
+												variant="ghost"
+												size="icon"
+												onclick={() => triggerTask(task)}
+												title="Run Now"
+												disabled={task.status !== TaskStatus.ENABLED}
+											>
+												<Play class="h-4 w-4" />
+											</Button>
+											<Button
+												variant="ghost"
+												size="icon"
+												onclick={() => toggleTask(task)}
+												title={task.status === TaskStatus.ENABLED ? 'Disable' : 'Enable'}
+											>
+												{#if task.status === TaskStatus.ENABLED}
+													<Pause class="h-4 w-4" />
+												{:else}
+													<Play class="h-4 w-4" />
+												{/if}
+											</Button>
+											<Button
+												variant="ghost"
+												size="icon"
+												onclick={() => openEditDialog(task)}
+												title="Edit"
+											>
+												<Pencil class="h-4 w-4" />
+											</Button>
+											<Button
+												variant="ghost"
+												size="icon"
+												class="text-destructive hover:text-destructive"
+												onclick={() => deleteTask(task)}
+												title="Delete"
+											>
+												<Trash2 class="h-4 w-4" />
+											</Button>
+										</div>
+									</div>
+								</CardContent>
+							</Card>
+						{/each}
+					</div>
+				{/if}
 			</div>
-		{/if}
 		</div>
-	</div>
-{/if}
+	{/if}
 
 	<!-- Create/Edit Dialog -->
 	<Dialog.Root bind:open={showCreateDialog}>
@@ -1799,17 +1801,17 @@ one at https://mozilla.org/MPL/2.0/.
 			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>
-<CarbonConfirm
-	bind:open={confirmOpen}
-	title="Delete task?"
-	message="Scheduled executions stop. Run history is kept. This cannot be undone."
-	confirmLabel="Delete Task"
-	danger
-	onconfirm={confirmDeleteTask}
-	onclose={() => (pendingDelete = null)}
->
-	{#snippet details()}
-		{#if pendingDelete}{pendingDelete.name}{/if}
-	{/snippet}
-</CarbonConfirm>
+	<CarbonConfirm
+		bind:open={confirmOpen}
+		title="Delete task?"
+		message="Scheduled executions stop. Run history is kept. This cannot be undone."
+		confirmLabel="Delete Task"
+		danger
+		onconfirm={confirmDeleteTask}
+		onclose={() => (pendingDelete = null)}
+	>
+		{#snippet details()}
+			{#if pendingDelete}{pendingDelete.name}{/if}
+		{/snippet}
+	</CarbonConfirm>
 </div>

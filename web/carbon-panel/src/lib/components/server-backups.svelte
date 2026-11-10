@@ -159,7 +159,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="tab-fill flex min-h-0 flex-col overflow-hidden rounded-none border border-[#393939] bg-[#262626]">
+<div
+	class="tab-fill flex min-h-0 flex-col overflow-hidden rounded-none border border-[#393939] bg-[#262626]"
+>
 	<div class="shrink-0 p-6 pb-0">
 		<div class="mb-1 flex items-center justify-between">
 			<h3 class="text-base font-semibold text-[#f4f4f4]">Backups</h3>

@@ -851,7 +851,6 @@ one at https://mozilla.org/MPL/2.0/.
 		if (uploadAbortController) uploadAbortController.abort();
 		if (uploadProgress?.sessionId) cancelUpload(uploadProgress.sessionId).catch(() => {});
 	}
-
 </script>
 
 <div class="tab-fill flex min-h-0 flex-col overflow-hidden rounded-none border bg-background">

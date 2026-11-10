@@ -893,75 +893,79 @@ one at https://mozilla.org/MPL/2.0/.
 						of the page interactive, and offers a retry instead of a dead tab.
 					-->
 				<div class="flex h-full min-h-0 flex-1 flex-col">
-				<svelte:boundary>
-					{#if activeTab === 'overview'}
-						<div class="min-h-0 flex-1 overflow-y-auto">
-							<div class="rounded-none border border-[#393939] bg-[#262626] p-4 sm:p-6">
-								<h3 class="mb-1 text-base font-semibold text-[#f4f4f4]">Server Settings</h3>
-								<p class="mb-6 text-xs text-[#a8a8a8]">
-									Modify runtime container settings and server parameters
-								</p>
-								<ServerSettings {server} onUpdate={loadServer} />
+					<svelte:boundary>
+						{#if activeTab === 'overview'}
+							<div class="min-h-0 flex-1 overflow-y-auto">
+								<div class="rounded-none border border-[#393939] bg-[#262626] p-4 sm:p-6">
+									<h3 class="mb-1 text-base font-semibold text-[#f4f4f4]">Server Settings</h3>
+									<p class="mb-6 text-xs text-[#a8a8a8]">
+										Modify runtime container settings and server parameters
+									</p>
+									<ServerSettings {server} onUpdate={loadServer} />
+								</div>
 							</div>
-						</div>
-					{:else if activeTab === 'console'}
-						<ServerConsole {server} active={activeTab === 'console'} />
-					{:else if activeTab === 'configuration'}
-						<ServerConfiguration {server} />
-					{:else if activeTab === 'mods'}
-						<ServerMods {server} active={activeTab === 'mods'} />
-					{:else if activeTab === 'datapacks'}
-						<ServerDatapacks {server} />
-					{:else if activeTab === 'modules'}
-						<ServerModules {server} active={activeTab === 'modules'} />
-					{:else if activeTab === 'files'}
-						<ServerFiles {server} active={activeTab === 'files'} />
-					{:else if activeTab === 'tasks'}
-						<ServerTasks {server} active={activeTab === 'tasks'} />
-					{:else if activeTab === 'backups'}
-						<ServerBackups {server} active={activeTab === 'backups'} />
-					{:else if activeTab === 'players'}
-						<ServerPlayers {server} active={activeTab === 'players'} />
-					{:else if activeTab === 'activity'}
-						<div class="tab-fill min-h-0 overflow-y-auto">
-							<div class="flex flex-col gap-4">
-								<ServerOperations {server} active={activeTab === 'activity'} />
-								<ServerActivity {server} active={activeTab === 'activity'} />
+						{:else if activeTab === 'console'}
+							<ServerConsole {server} active={activeTab === 'console'} />
+						{:else if activeTab === 'configuration'}
+							<ServerConfiguration {server} />
+						{:else if activeTab === 'mods'}
+							<ServerMods {server} active={activeTab === 'mods'} />
+						{:else if activeTab === 'datapacks'}
+							<ServerDatapacks {server} />
+						{:else if activeTab === 'modules'}
+							<ServerModules {server} active={activeTab === 'modules'} />
+						{:else if activeTab === 'files'}
+							<ServerFiles {server} active={activeTab === 'files'} />
+						{:else if activeTab === 'tasks'}
+							<ServerTasks {server} active={activeTab === 'tasks'} />
+						{:else if activeTab === 'backups'}
+							<ServerBackups {server} active={activeTab === 'backups'} />
+						{:else if activeTab === 'players'}
+							<ServerPlayers {server} active={activeTab === 'players'} />
+						{:else if activeTab === 'activity'}
+							<div class="tab-fill min-h-0 overflow-y-auto">
+								<div class="flex flex-col gap-4">
+									<ServerOperations {server} active={activeTab === 'activity'} />
+									<ServerActivity {server} active={activeTab === 'activity'} />
+								</div>
 							</div>
-						</div>
-					{:else if activeTab === 'routing'}
-						<div class="min-h-0 flex-1 overflow-y-auto">
-							<ServerRouting {server} bind:router={routingInfo} active={activeTab === 'routing'} />
-						</div>
-					{/if}
+						{:else if activeTab === 'routing'}
+							<div class="min-h-0 flex-1 overflow-y-auto">
+								<ServerRouting
+									{server}
+									bind:router={routingInfo}
+									active={activeTab === 'routing'}
+								/>
+							</div>
+						{/if}
 
-					{#snippet failed(error, reset)}
-						<div
-							class="flex min-h-64 flex-col items-center justify-center gap-3 border border-[#393939] bg-[#262626] p-6 text-center"
-							role="alert"
-						>
-							<p class="font-mono text-sm text-[#ff8389]">This tab failed to render</p>
-							<p class="max-w-lg text-xs break-words text-[#a8a8a8]">
-								{error instanceof Error && error.message ? error.message : String(error)}
-							</p>
-							<div class="mt-1 flex items-center gap-2">
-								<button
-									type="button"
-									onclick={reset}
-									class="flex h-8 cursor-pointer items-center border border-[#0f62fe] bg-[#0f62fe] px-4 font-sans text-xs text-white transition-colors hover:bg-[#0353e9]"
-								>
-									Retry
-								</button>
-								<a
-									href={resolve('/servers')}
-									class="flex h-8 items-center border border-[#393939] bg-[#262626] px-4 font-sans text-xs text-[#f4f4f4] transition-colors hover:bg-[#353535]"
-								>
-									Back to servers
-								</a>
+						{#snippet failed(error, reset)}
+							<div
+								class="flex min-h-64 flex-col items-center justify-center gap-3 border border-[#393939] bg-[#262626] p-6 text-center"
+								role="alert"
+							>
+								<p class="font-mono text-sm text-[#ff8389]">This tab failed to render</p>
+								<p class="max-w-lg text-xs break-words text-[#a8a8a8]">
+									{error instanceof Error && error.message ? error.message : String(error)}
+								</p>
+								<div class="mt-1 flex items-center gap-2">
+									<button
+										type="button"
+										onclick={reset}
+										class="flex h-8 cursor-pointer items-center border border-[#0f62fe] bg-[#0f62fe] px-4 font-sans text-xs text-white transition-colors hover:bg-[#0353e9]"
+									>
+										Retry
+									</button>
+									<a
+										href={resolve('/servers')}
+										class="flex h-8 items-center border border-[#393939] bg-[#262626] px-4 font-sans text-xs text-[#f4f4f4] transition-colors hover:bg-[#353535]"
+									>
+										Back to servers
+									</a>
+								</div>
 							</div>
-						</div>
-					{/snippet}
-				</svelte:boundary>
+						{/snippet}
+					</svelte:boundary>
 				</div>
 			</div>
 		</div>
