@@ -25,6 +25,7 @@ var defaultLifecycleFiles = []string{
 	"scripts/dev.ps1",
 	"scripts/build.sh",
 	"scripts/docker-cd.sh",
+	"scripts/compose-upgrade.sh",
 	"docker-compose.yml",
 }
 
@@ -63,6 +64,9 @@ func TestDefaultLifecyclePreservesWorldsAndDatabase(t *testing.T) {
 	}
 	if !strings.Contains(help, "snapshot-panel-db") {
 		t.Fatal("make help must list the named snapshot-panel-db operator target")
+	}
+	if !strings.Contains(help, "compose-upgrade") {
+		t.Fatal("make help must list the named compose-upgrade operator target")
 	}
 
 	compose := readRepoFile(t, root, "docker-compose.yml")

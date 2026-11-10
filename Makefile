@@ -7,7 +7,7 @@
 # one at https://mozilla.org/MPL/2.0/.
 
 
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs knowledge knowledge-lint knowledge-index knowledge-search knowledge-mcp knowledge-mcp-git knowledge-mcp-smoke knowledge-for-path snapshot-panel-db
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs knowledge knowledge-lint knowledge-index knowledge-search knowledge-mcp knowledge-mcp-git knowledge-mcp-smoke knowledge-for-path snapshot-panel-db compose-upgrade
 
 DATA_DIR := ./data
 FRONTEND_DIR := web/carbon-panel
@@ -108,6 +108,15 @@ clean:
 # web-build, or compose up. Writes a timestamped copy beside the data directory.
 snapshot-panel-db:
 	@bash scripts/snapshot-panel-db.sh
+
+# Named Compose image recreate. Default is dry-run. Pass APPLY=1 to snapshot
+# the controller DB and run `docker compose up -d --pull always` (no --volumes).
+compose-upgrade:
+	@if [ "$(APPLY)" = "1" ]; then \
+		bash scripts/compose-upgrade.sh --apply; \
+	else \
+		bash scripts/compose-upgrade.sh; \
+	fi
 
 # Kill any orphaned dev processes
 kill-dev:
@@ -223,6 +232,7 @@ help:
 	@echo "  make modules        - Build and push all module Docker images"
 	@echo "  make clean          - Remove the generated backend binary; worlds and databases are preserved"
 	@echo "  make snapshot-panel-db - Copy controller SQLite beside the data dir (named operator step)"
+	@echo "  make compose-upgrade - Dry-run Compose image recreate (APPLY=1 to snapshot and up --pull)"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"
 	@echo "  make deps           - Install all dependencies"
 	@echo "  make test           - Run tests"

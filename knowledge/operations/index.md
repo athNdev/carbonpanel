@@ -6,5 +6,6 @@
 
 - [Backup and restore](backup-restore.md) — Where backup storage, snapshots and restore are specified.
 - [Deep sleep and wake](deep-sleep.md) — Where hibernation and deep sleep are specified, sharing one idle-power module.
+- [Deployment modes](deployment-modes.md) — Which install paths are shipped (Compose and native binary), which are not (Helm, Terraform), and how a Compose image upgrade keeps host data.
 - [Health and readiness](health-checks.md) — Which endpoint answers which question, and why a degraded node must not stop the API.
 - [Server lifecycle journal](lifecycle-journal.md) — Interrupted container mutations stay locked until the daemon is observed, and an operator can release that lock without deleting containers.

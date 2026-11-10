@@ -6,6 +6,10 @@
   expect: invariants/data-safety
 - query: How do I snapshot the panel database before an upgrade?
   expect: operations/backup-restore
+- query: How do I upgrade a Compose install without deleting worlds?
+  expect: operations/deployment-modes
+- query: Does Carbon Panel ship Helm or Terraform?
+  expect: operations/deployment-modes
 - query: How does the TCP proxy route a Minecraft handshake by hostname?
   expect: architecture/proxy
 - query: How durable are SQLite migrations?

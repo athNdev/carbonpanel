@@ -49,6 +49,9 @@ services:
       # Before an image upgrade, snapshot the database with
       # scripts/snapshot-panel-db.sh --data-dir <host-data-path>; restore by
       # copying that file back onto carbon-panel.db with the panel stopped.
+      # Recreate onto a newer image with scripts/compose-upgrade.sh (dry-run
+      # by default; --apply snapshots then `docker compose up -d --pull always`).
+      # Helm and Terraform are not shipped in this repository.
       - /opt/carbon-panel/data:/app/data
       - /opt/carbon-panel/backups:/app/backups
       - /tmp/carbon-panel:/app/tmp
