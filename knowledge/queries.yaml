@@ -28,6 +28,8 @@
   expect: architecture/remote-storage-transport
 - query: How does the panel qualify Minecraft container runtime profiles after operator overrides?
   expect: architecture/runtime
+- query: When does a Minecraft container skip recursive chown of /data?
+  expect: architecture/server-data-ownership
 - query: Does storage-opt size bound a bind-mounted world?
   expect: architecture/runtime
 - query: What happens when storage.world_quota_mb is set and world bytes meet it?

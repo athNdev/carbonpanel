@@ -12,6 +12,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/moby/moby/api/types/mount"
 )
 
 const matrixPinnedDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -33,6 +34,7 @@ type runtimeMatrixCase struct {
 	mustNot           []RuntimeIssueCode
 	wantRootStartDrop *bool
 	wantPinned        *bool
+	wantSkipChown     *bool
 }
 
 func boolPtr(v bool) *bool { return &v }
@@ -175,6 +177,95 @@ func TestRuntimeQualificationMatrix(t *testing.T) {
 			wantFatal: false,
 			mustHave:  []RuntimeIssueCode{RuntimeIssueNoNewPrivilegesDisabled},
 		},
+		{
+			name:          "existing_data_matching_uid_skips_recursive_chown",
+			ownerUID:      owner(1000),
+			wantFatal:     false,
+			wantSkipChown: boolPtr(true),
+			mustNot:       []RuntimeIssueCode{RuntimeIssueDataOwnerMismatch, RuntimeIssueReadOnlyRootUserMod},
+		},
+		{
+			name:          "fresh_root_owned_data_keeps_bootstrap_chown",
+			ownerUID:      owner(0),
+			wantFatal:     false,
+			wantSkipChown: boolPtr(false),
+		},
+		{
+			name: "operator_skip_chown_false_is_kept",
+			overrides: &v1.DockerOverrides{
+				Environment: map[string]string{"SKIP_CHOWN": "false"},
+			},
+			ownerUID:      owner(1000),
+			wantFatal:     false,
+			wantSkipChown: boolPtr(false),
+		},
+		{
+			name: "uid_env_requires_usermod_on_read_only_root",
+			overrides: &v1.DockerOverrides{
+				Environment: map[string]string{"UID": "1001"},
+			},
+			wantFatal:         true,
+			wantRootStartDrop: boolPtr(true),
+			mustHave:          []RuntimeIssueCode{RuntimeIssueReadOnlyRootUserMod},
+		},
+		{
+			name: "gid_env_requires_groupmod_on_read_only_root",
+			overrides: &v1.DockerOverrides{
+				Environment: map[string]string{"GID": "1001"},
+			},
+			wantFatal: true,
+			mustHave:  []RuntimeIssueCode{RuntimeIssueReadOnlyRootUserMod},
+		},
+		{
+			name:              "non_root_custom_uid_skips_usermod",
+			overrides:         &v1.DockerOverrides{User: "1001:1001"},
+			ownerUID:          owner(1001),
+			wantFatal:         false,
+			wantRootStartDrop: boolPtr(false),
+			wantSkipChown:     boolPtr(true),
+			mustNot:           []RuntimeIssueCode{RuntimeIssueReadOnlyRootUserMod, RuntimeIssueDataOwnerMismatch},
+		},
+		{
+			name: "override_bind_shadows_etc",
+			overrides: &v1.DockerOverrides{
+				Volumes: []*v1.VolumeMount{{Source: "/srv/worlds/world-a/etc", Target: "/etc"}},
+			},
+			wantFatal: true,
+			mustHave:  []RuntimeIssueCode{RuntimeIssueSensitiveMount},
+		},
+		{
+			name: "override_bind_docker_socket",
+			mutate: func(spec *RuntimeSpec) {
+				spec.HostConfig.Mounts = append(spec.HostConfig.Mounts, mount.Mount{
+					Type:   mount.TypeBind,
+					Source: "/var/run/docker.sock",
+					Target: "/var/run/docker.sock",
+				})
+			},
+			wantFatal: true,
+			mustHave:  []RuntimeIssueCode{RuntimeIssueSensitiveMount},
+		},
+		{
+			name: "override_bind_replaces_tmp_tmpfs",
+			overrides: &v1.DockerOverrides{
+				Volumes: []*v1.VolumeMount{{Source: "/srv/worlds/world-a/tmp", Target: "/tmp"}},
+			},
+			wantFatal: false,
+			mustHave:  []RuntimeIssueCode{RuntimeIssueTmpfsReplaced},
+		},
+		{
+			name: "last_data_mount_is_effective",
+			mutate: func(spec *RuntimeSpec) {
+				spec.HostConfig.Mounts = append(spec.HostConfig.Mounts, mount.Mount{
+					Type:     mount.TypeBind,
+					Source:   "/srv/worlds/world-a-ro",
+					Target:   "/data",
+					ReadOnly: true,
+				})
+			},
+			wantFatal: true,
+			mustHave:  []RuntimeIssueCode{RuntimeIssueDataMountReadOnly},
+		},
 	}
 
 	for _, tc := range cases {
@@ -227,6 +318,9 @@ func TestRuntimeQualificationMatrix(t *testing.T) {
 			}
 			if tc.wantPinned != nil && profile.ImagePinned != *tc.wantPinned {
 				t.Fatalf("ImagePinned = %t, want %t", profile.ImagePinned, *tc.wantPinned)
+			}
+			if tc.wantSkipChown != nil && profile.SkipDataChown != *tc.wantSkipChown {
+				t.Fatalf("SkipDataChown = %t, want %t", profile.SkipDataChown, *tc.wantSkipChown)
 			}
 		})
 	}

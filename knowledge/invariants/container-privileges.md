@@ -70,5 +70,10 @@ Re-verified `2026-11-04` by `agent:zed`:
   after defaults and overrides. A fatal combination must stay refused.
   Qualification must not auto-enable privileged mode, disable
   no-new-privileges, or make the root writable to recover.
+- Extra override binds that shadow `/etc`, `/proc`, `/sys`, `/dev`, or the
+  Docker socket are refused at preflight (`sensitive_mount_target`), even when
+  the host source sits under the server data directory. A bind that replaces
+  `/tmp` is reported (`tmpfs_replaced`) and does not recover by widening the
+  tmpfs.
 
 Re-verified `2026-11-10` by `agent:zed` against the expanded runtime matrix.
