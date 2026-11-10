@@ -24,6 +24,8 @@
   expect: workflows/frontend-change
 - query: Which health endpoint fails when the database is down but not when a Docker node is down?
   expect: operations/health-checks
+- query: How does the panel qualify Minecraft container runtime profiles after operator overrides?
+  expect: architecture/runtime
 - query: Does storage-opt size bound a bind-mounted world?
   expect: architecture/runtime
 - query: What happens when storage.world_quota_mb is set and world bytes meet it?

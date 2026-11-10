@@ -127,7 +127,15 @@ pinned. On a rootless daemon, the default root-then-drop bootstrap is refused
 when the world directory is still owned by host uid 0 (`rootless_host_root_data`);
 chown the data to the game user first. Daemon rootless mode is read from Engine
 `GET /info` during create preflight. The rules and their remedies live in
-`internal/docker/runtime_profile.go`.
+`internal/docker/runtime_profile.go`. Supported and unsupported combinations
+are encoded as a table against the same resolved request `CreateContainer`
+builds (`DescribeRuntime` / `PreflightRuntime`): root-then-drop versus an
+explicit non-root uid, a read-only root with and without the nsswitch skip,
+`CapDrop ALL` with bootstrap capabilities removed, a missing writable `/data`,
+rootless plus host-root-owned data, and an unpinned image warning. Preflight
+must not enable privileged mode, disable no-new-privileges, or make the root
+writable to recover. Live game-readiness on an isolated daemon is OSS-247;
+the in-repo matrix still runs without that daemon.
 
 The profile also reports the limits that are actually applied, not the ones
 that were requested: memory and memory+swap, the process limit, the CPU cap,

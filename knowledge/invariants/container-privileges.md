@@ -10,7 +10,7 @@ code_refs:
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
-verified: { by: agent:zed, at: 2026-11-04 }
+verified: { by: agent:zed, at: 2026-11-10 }
 review_after: 2027-01-23
 ---
 
@@ -66,3 +66,9 @@ Re-verified `2026-11-04` by `agent:zed`:
   on a writable root, because a read-only root cannot grow.
 - Broadening confinement (privileged, `CapAdd`, a writable rootfs) is still
   permission-gated rather than refused, and is reported as a warning.
+- `internal/docker/runtime_matrix_test.go` asserts the *effective* request
+  after defaults and overrides. A fatal combination must stay refused.
+  Qualification must not auto-enable privileged mode, disable
+  no-new-privileges, or make the root writable to recover.
+
+Re-verified `2026-11-10` by `agent:zed` against the expanded runtime matrix.
