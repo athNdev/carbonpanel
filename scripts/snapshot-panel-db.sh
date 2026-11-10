@@ -16,7 +16,8 @@
 #   --data-dir ./data
 #   --db       <data-dir>/carbon-panel.db
 #
-# Restore (panel stopped):
+# Restore (panel stopped): scripts/compose-upgrade-rollback.sh --snapshot FILE
+# or:
 #   cp <snapshot> <database.path>
 #   rm -f <database.path>-wal <database.path>-shm
 # Do not copy over worlds, backups, or other files under the data directory.
@@ -27,7 +28,7 @@ DATA_DIR="./data"
 DB=""
 
 usage() {
-	sed -n '2,22p' "$0" | sed 's/^# \?//'
+	sed -n '2,23p' "$0" | sed 's/^# \?//'
 }
 
 while [[ $# -gt 0 ]]; do

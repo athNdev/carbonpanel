@@ -7,7 +7,7 @@
 # one at https://mozilla.org/MPL/2.0/.
 
 
-.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs knowledge knowledge-lint knowledge-index knowledge-search knowledge-mcp knowledge-mcp-git knowledge-mcp-smoke knowledge-for-path snapshot-panel-db compose-upgrade
+.PHONY: dev prod clean build build-frontend run deps test fmt lint check help kill-dev image dev-docker dev-auth modules proto proto-clean proto-lint proto-format proto-breaking gen dev-docs knowledge knowledge-lint knowledge-index knowledge-search knowledge-mcp knowledge-mcp-git knowledge-mcp-smoke knowledge-for-path snapshot-panel-db compose-upgrade compose-upgrade-rollback review-stack-clean
 
 DATA_DIR := ./data
 FRONTEND_DIR := web/carbon-panel
@@ -94,8 +94,8 @@ module-%: gen
 
 # Remove generated build outputs only. This is not a data-reset: server worlds,
 # the controller SQLite file, backups and Docker bind mounts stay in place.
-# Named destructive cleanup lives on scripts/review/devstack.sh clean (review
-# stack only). Snapshot the controller DB with `make snapshot-panel-db`.
+# Named destructive cleanup is `make review-stack-clean` (review stack only).
+# Snapshot the controller DB with `make snapshot-panel-db`.
 clean:
 	@echo "Removing generated build outputs only; server data and Docker volumes are preserved."
 	@if [ -f "$(CARBONPANEL_BIN)" ]; then \
@@ -117,6 +117,21 @@ compose-upgrade:
 	else \
 		bash scripts/compose-upgrade.sh; \
 	fi
+
+# Copy a snapshot-panel-db artifact back onto the controller SQLite file.
+# Default is dry-run. Pass SNAPSHOT=path APPLY=1. Does not delete worlds.
+compose-upgrade-rollback:
+	@if [ -z "$(SNAPSHOT)" ]; then echo 'usage: make compose-upgrade-rollback SNAPSHOT=path [APPLY=1]'; exit 2; fi
+	@if [ "$(APPLY)" = "1" ]; then \
+		bash scripts/compose-upgrade-rollback.sh --snapshot "$(SNAPSHOT)" --apply; \
+	else \
+		bash scripts/compose-upgrade-rollback.sh --snapshot "$(SNAPSHOT)"; \
+	fi
+
+# Named destructive cleanup for the disposable review stack only. Never a
+# side effect of make clean / test / build.
+review-stack-clean:
+	@bash scripts/review/devstack.sh clean
 
 # Kill any orphaned dev processes
 kill-dev:
@@ -233,6 +248,8 @@ help:
 	@echo "  make clean          - Remove the generated backend binary; worlds and databases are preserved"
 	@echo "  make snapshot-panel-db - Copy controller SQLite beside the data dir (named operator step)"
 	@echo "  make compose-upgrade - Dry-run Compose image recreate (APPLY=1 to snapshot and up --pull)"
+	@echo "  make compose-upgrade-rollback - Copy a DB snapshot back (SNAPSHOT=path, APPLY=1 to write)"
+	@echo "  make review-stack-clean - Delete ONLY the disposable review stack data (named destructive)"
 	@echo "  make kill-dev       - Kill any orphaned dev processes"
 	@echo "  make deps           - Install all dependencies"
 	@echo "  make test           - Run tests"

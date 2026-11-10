@@ -26,6 +26,7 @@ var defaultLifecycleFiles = []string{
 	"scripts/build.sh",
 	"scripts/docker-cd.sh",
 	"scripts/compose-upgrade.sh",
+	"scripts/compose-upgrade-rollback.sh",
 	"docker-compose.yml",
 }
 
@@ -67,6 +68,20 @@ func TestDefaultLifecyclePreservesWorldsAndDatabase(t *testing.T) {
 	}
 	if !strings.Contains(help, "compose-upgrade") {
 		t.Fatal("make help must list the named compose-upgrade operator target")
+	}
+	if !strings.Contains(help, "compose-upgrade-rollback") {
+		t.Fatal("make help must list the named compose-upgrade-rollback operator target")
+	}
+	if !strings.Contains(help, "review-stack-clean") {
+		t.Fatal("make help must list the named review-stack-clean destructive target")
+	}
+	if strings.Contains(clean, "review-stack-clean") || strings.Contains(clean, "devstack.sh") {
+		t.Fatal("make clean must not call review-stack-clean")
+	}
+	rollback := makefileRecipe(t, makefile, "compose-upgrade-rollback")
+	assertNoDataDestruction(t, "Makefile compose-upgrade-rollback", rollback)
+	if !strings.Contains(rollback, "compose-upgrade-rollback.sh") {
+		t.Fatal("make compose-upgrade-rollback must invoke the named rollback script")
 	}
 
 	compose := readRepoFile(t, root, "docker-compose.yml")

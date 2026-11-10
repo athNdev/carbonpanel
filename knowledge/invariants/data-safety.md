@@ -14,10 +14,12 @@ code_refs:
   - docker-compose.yml
   - scripts/snapshot-panel-db.sh
   - scripts/compose-upgrade.sh
+  - scripts/compose-upgrade-rollback.sh
   - scripts/web-build.sh
   - scripts/dev.sh
   - scripts/review/devstack.sh
   - internal/docscheck/upgrade_safety_test.go
+  - internal/docscheck/compose_upgrade_test.go
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
@@ -53,14 +55,19 @@ losing a world is not recoverable by rebuilding the controller.
   destructive command for the disposable review stack only.
 - Before a controller upgrade, `scripts/snapshot-panel-db.sh` (also
   `make snapshot-panel-db`) writes a timestamped SQLite copy beside the data
-  directory. Rollback copies that file onto `carbon-panel.db` and leaves
-  worlds and bind mounts untouched. Ordinary test/build/compose paths must
-  not invoke it.
+  directory. Rollback is `scripts/compose-upgrade-rollback.sh` (also
+  `make compose-upgrade-rollback`): copy that file onto `carbon-panel.db` and
+  leave worlds and bind mounts untouched. Ordinary test/build/compose paths
+  must not invoke it.
 - A Compose image upgrade uses `scripts/compose-upgrade.sh` (also
   `make compose-upgrade`). It recreates the panel with
   `docker compose up -d --pull always` and never a volumes-deleting compose
-  down. The shipped file bind-mounts data and backups, so worlds survive the
+  down. A failed snapshot (disk-full or interrupted copy) stops before `up`.
+  The shipped file bind-mounts data and backups, so worlds survive the
   container recreate. Helm and Terraform are not shipped.
+- Named destructive cleanup for the disposable review stack is
+  `make review-stack-clean` (`scripts/review/devstack.sh clean`). It is never
+  a side effect of `make clean`, `make test` or `make build`.
 - Backup and restore must be tested; a backup that cannot be restored is not a
   backup.
 - Remote archive paths must not silently read the controller filesystem.
@@ -103,9 +110,9 @@ Reviewed `2026-10-24` by `agent:mimo-v2.6-pro` against the code and attested by
   copy (`internal/snapshot/integrity_retention_test.go`).
 - Restore coverage exists in `internal/snapshot`.
 - Upgrade snapshots and copy-back rollback are covered by
-  `internal/docscheck/upgrade_safety_test.go`. Compose bind-mount upgrades and
-  the unshipped Helm/Terraform claim are covered by
-  `internal/docscheck/compose_upgrade_test.go`.
+  `internal/docscheck/upgrade_safety_test.go`. Compose bind-mount upgrades,
+  snapshot-failure abort-before-up, copy-back rollback, and the unshipped
+  Helm/Terraform claim are covered by `internal/docscheck/compose_upgrade_test.go`.
 
 The remote archive path gap is tracked in
 [known gaps](../failures/known-gaps.md).

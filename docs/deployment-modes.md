@@ -12,6 +12,7 @@ a create→join after upgrade.
 | Docker Compose, bridge | Commented alternative in the same compose file | File still bind-mounts data; ports stay comments until an operator uncomments them | Same join path on a host that cannot use host network |
 | Native binary | `make prod` / `go build` with `./data` | `make clean` / `make test` / `make build` must not delete `./data` (`upgrade_safety_test.go`) | Process upgrade (stop, replace binary, start) with the same data directory |
 | Operator DB snapshot | `scripts/snapshot-panel-db.sh` / `make snapshot-panel-db` | Script writes beside the data dir; restore is copy-back | Snapshot on a running install before a real image bump |
+| Compose DB rollback | `scripts/compose-upgrade-rollback.sh` / `make compose-upgrade-rollback` | Copy-back onto `carbon-panel.db`; never a volumes-deleting compose down; worlds and backups dirs stay | Interrupted upgrade and disk-full while a world stays joinable |
 
 The compose upgrade path is:
 
@@ -22,10 +23,27 @@ scripts/compose-upgrade.sh --data-dir /opt/carbon-panel/data --apply
 ```
 
 `--apply` snapshots the controller SQLite file, then runs
-`docker compose up -d --pull always`. It does not run `docker compose down`,
-does not pass `--volumes`, and does not `docker volume rm`. Bind-mounted worlds
-and backups stay on the host. See `docs/runbook-panel-db-restore.md` for
-copy-back rollback.
+`docker compose up -d --pull always`. If the snapshot fails (disk-full or an
+interrupted copy), the script **stops before compose up**. It does not run
+`docker compose down`, does not pass `--volumes`, and does not `docker volume rm`.
+Bind-mounted worlds and backups stay on the host.
+
+Copy-back rollback (panel stopped):
+
+```sh
+scripts/compose-upgrade-rollback.sh \
+  --data-dir /opt/carbon-panel/data \
+  --snapshot /opt/carbon-panel/carbon-panel-db-YYYYMMDDTHHMMSSZ.sqlite
+# review the printed commands, then:
+scripts/compose-upgrade-rollback.sh \
+  --data-dir /opt/carbon-panel/data \
+  --snapshot /opt/carbon-panel/carbon-panel-db-YYYYMMDDTHHMMSSZ.sqlite \
+  --apply
+```
+
+That copies the snapshot onto `carbon-panel.db` and drops WAL sidecars. It does
+not prune Docker volumes and does not delete world or backups directories.
+See `docs/runbook-panel-db-restore.md`.
 
 ## Not shipped
 
@@ -48,7 +66,9 @@ These remain unqualified until run on an owned disposable host:
   checkout or workstation paths.
 - Full user path in each claimed mode: create → join → edit → backup → restore
   → restart → export.
-- Interrupted upgrade and disk-full rollback while a world stays joinable.
+- Interrupted upgrade and disk-full rollback **on a live host** while a world
+  stays joinable. In-repo policy: snapshot failure aborts before `up`; rollback
+  is copy-back (`scripts/compose-upgrade-rollback.sh`), not a prune.
 - Rootless Docker, Docker Desktop/WSL path translation, and remote Docker
   endpoints: engine capability is preflighted in `internal/docker`, but a real
   upgrade of the panel itself on those daemons is not CI.
