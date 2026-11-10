@@ -28,6 +28,8 @@
   expect: architecture/module-system
 - query: How does the Modules tab show sidecar container identity after reconcile?
   expect: architecture/module-system
+- query: Are privileged host-extension module templates auto-enabled?
+  expect: architecture/module-system
 - query: Where are backup and restore procedures described?
   expect: operations/backup-restore
 - query: Why does deep sleep still use the local Docker client?

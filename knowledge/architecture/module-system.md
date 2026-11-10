@@ -85,6 +85,11 @@ The Modules tab renders container id and status from that reconciled
 `listModules` record (`moduleIdentityFromRecord`), not from a stale inspect
 helper.
 
+Privileged host-extension templates (Docker socket, `privileged: true`) are
+operator features. Builtin templates do not ship them, `CreateModuleContainer`
+clears `HostConfig.Privileged`, and bind sources stay inside the server data
+path and backup dir so a socket mount is not auto-broadened.
+
 Parent deletion has an explicit child policy. A full delete stops and
 removes sidecar containers before the server row. `DeleteServer` with
 `keep_data` drops module panel records through `ForgetModule` and leaves
