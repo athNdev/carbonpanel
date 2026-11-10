@@ -21,6 +21,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import type { Module } from '$lib/proto/carbonpanel/v1/module_pb';
 	import { ModuleStatus } from '$lib/proto/carbonpanel/v1/module_pb';
+	import { moduleIdentityFromRecord, moduleStatusLabel } from '$lib/module-identity';
 	import {
 		Loader2,
 		Play,
@@ -176,25 +177,6 @@ one at https://mozilla.org/MPL/2.0/.
 				return 'gray';
 		}
 	}
-
-	function getStatusLabel(status: ModuleStatus): string {
-		switch (status) {
-			case ModuleStatus.RUNNING:
-				return 'Running';
-			case ModuleStatus.STOPPED:
-				return 'Stopped';
-			case ModuleStatus.STARTING:
-				return 'Starting';
-			case ModuleStatus.STOPPING:
-				return 'Stopping';
-			case ModuleStatus.ERROR:
-				return 'Error';
-			case ModuleStatus.CREATING:
-				return 'Creating';
-			default:
-				return 'Unknown';
-		}
-	}
 </script>
 
 <div class="space-y-4 rounded-none font-sans text-[#f4f4f4]">
@@ -268,6 +250,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{:else}
 			{#each modules as module (module.id)}
 				{@const isLoading = actionLoading === module.id}
+				{@const identity = moduleIdentityFromRecord(module)}
 				<tr class="transition-colors hover:bg-[#353535]">
 					<td class="max-w-[240px] px-4 py-3">
 						<div class="space-y-0.5">
@@ -291,9 +274,20 @@ one at https://mozilla.org/MPL/2.0/.
 					</td>
 
 					<td class="px-4 py-3 whitespace-nowrap">
-						<CarbonTag type={getStatusTagType(module.status)} size="sm">
-							{getStatusLabel(module.status)}
-						</CarbonTag>
+						<div class="space-y-1">
+							<CarbonTag type={getStatusTagType(identity.status)} size="sm">
+								{moduleStatusLabel(identity.status)}
+							</CarbonTag>
+							{#if identity.shortContainerId}
+								<div
+									class="font-mono text-[11px] text-[#8d8d8d]"
+									title={identity.containerId}
+									data-testid="module-container-id"
+								>
+									{identity.shortContainerId}
+								</div>
+							{/if}
+						</div>
 					</td>
 
 					<td class="px-4 py-3 font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
