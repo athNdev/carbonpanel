@@ -13,6 +13,7 @@ import (
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
 // ReconcileOutcome says what a module convergence pass did. It is returned
@@ -35,18 +36,29 @@ const (
 	// ReconcileSkipped means there was nothing safe to do: the module is gone,
 	// its node cannot be reached, or its parent is not running.
 	ReconcileSkipped ReconcileOutcome = "skipped"
+	// ReconcileWaiting means convergence is blocked on a declared dependency,
+	// a host port reservation, or another precondition that may clear later.
+	ReconcileWaiting ReconcileOutcome = "waiting"
 )
 
 // moduleAction is the decision a pass makes before it touches Docker.
 type moduleAction string
 
 const (
-	actionNone          moduleAction = "none"
-	actionAdopt         moduleAction = "adopt"
-	actionRecreate      moduleAction = "recreate"
-	actionMarkGone      moduleAction = "mark_gone"
-	actionWaitForParent moduleAction = "wait_for_parent"
+	actionNone              moduleAction = "none"
+	actionAdopt             moduleAction = "adopt"
+	actionRecreate          moduleAction = "recreate"
+	actionMarkGone          moduleAction = "mark_gone"
+	actionWaitForDependency moduleAction = "wait_for_dependency"
+	actionWaitForPorts      moduleAction = "wait_for_ports"
 )
+
+// reconcileGates carries preconditions that only the module manager enforces at
+// start time; the pure decision uses them so recreate and in_sync stay gated.
+type reconcileGates struct {
+	DependenciesReady bool
+	HostPortsReady    bool
+}
 
 // ModuleObservation is what the daemon reported about a module's container.
 type ModuleObservation struct {
@@ -60,12 +72,18 @@ type ModuleObservation struct {
 }
 
 // decideModule is the pure part of a convergence pass: given the record, the
-// parent's stored status and the observed container, it says what to do.
-// Keeping this separate is what makes every branch testable without a daemon.
-func decideModule(mod *storage.Module, parent *storage.Server, obs ModuleObservation) moduleAction {
+// parent's stored status, the observed container, and readiness gates, it says
+// what to do. Keeping this separate is what makes every branch testable without
+// a daemon.
+func decideModule(mod *storage.Module, parent *storage.Server, obs ModuleObservation, gates reconcileGates) moduleAction {
 	if mod == nil {
 		return actionNone
 	}
+	action := decideModuleObservation(mod, parent, obs)
+	return applyReconcileGates(mod, action, gates)
+}
+
+func decideModuleObservation(mod *storage.Module, parent *storage.Server, obs ModuleObservation) moduleAction {
 	if !obs.Exists {
 		// A module that is not supposed to be running is simply recorded as
 		// stopped. There is nothing to resurrect.
@@ -94,6 +112,28 @@ func decideModule(mod *storage.Module, parent *storage.Server, obs ModuleObserva
 		return actionAdopt
 	}
 	return actionNone
+}
+
+// applyReconcileGates blocks recreate and in_sync while a running module still
+// waits on a dependency or on a host port reservation.
+func applyReconcileGates(mod *storage.Module, action moduleAction, gates reconcileGates) moduleAction {
+	if mod == nil || mod.Status != storage.ModuleStatusRunning {
+		return action
+	}
+	switch action {
+	case actionRecreate:
+		if !gates.DependenciesReady {
+			return actionWaitForDependency
+		}
+		if !gates.HostPortsReady {
+			return actionWaitForPorts
+		}
+	case actionNone:
+		if !gates.DependenciesReady {
+			return actionWaitForDependency
+		}
+	}
+	return action
 }
 
 // ReconcileModule converges one module record with the container the daemon
@@ -125,7 +165,22 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 	}
 
 	parent, _ := m.store.GetServer(ctx, mod.ServerID)
-	action := decideModule(mod, parent, obs)
+	depsReady, err := m.moduleDependenciesRunning(ctx, mod)
+	if err != nil {
+		return ReconcileSkipped, fmt.Errorf("check dependencies for module %s: %w", mod.Name, err)
+	}
+	portsReady := true
+	if mod.Status == storage.ModuleStatusRunning && parent != nil && parent.Status == storage.StatusRunning {
+		portsReady, err = m.moduleHostPortsReadyForRecreate(ctx, mod, parent, cli)
+		if err != nil {
+			return ReconcileSkipped, fmt.Errorf("check module ports for %s: %w", mod.Name, err)
+		}
+	}
+	gates := reconcileGates{
+		DependenciesReady: depsReady,
+		HostPortsReady:    portsReady,
+	}
+	action := decideModule(mod, parent, obs, gates)
 
 	switch action {
 	case actionNone:
@@ -168,9 +223,76 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 		m.logger.Info("Recreated missing container for module %s", mod.Name)
 		return ReconcileRecreated, nil
 
+	case actionWaitForDependency:
+		m.logger.Info("Module %s is waiting for a dependency before it can converge", mod.Name)
+		return ReconcileWaiting, nil
+
+	case actionWaitForPorts:
+		m.logger.Info("Module %s is waiting for host port reservations before recreate", mod.Name)
+		return ReconcileWaiting, nil
+
 	default:
 		return ReconcileSkipped, nil
 	}
+}
+
+func (m *Manager) moduleDependenciesRunning(ctx context.Context, mod *storage.Module) (bool, error) {
+	if mod == nil || len(mod.Dependencies) == 0 {
+		return true, nil
+	}
+	for _, dep := range mod.Dependencies {
+		if dep == nil || dep.ModuleId == "" {
+			continue
+		}
+		depModule, err := m.store.GetModule(ctx, dep.ModuleId)
+		if err != nil {
+			return false, err
+		}
+		if depModule == nil || depModule.Status != storage.ModuleStatusRunning {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// modulePublishesHostPort mirrors docker.publishModuleHostPort so reconcile can
+// decide which recorded ports must be free before recreate.
+func modulePublishesHostPort(port *v1.ModulePort) bool {
+	return port != nil && port.HostPort > 0 && (!port.ProxyEnabled || port.ExposePublic)
+}
+
+func (m *Manager) moduleHostPortsReadyForRecreate(ctx context.Context, mod *storage.Module, server *storage.Server, cli *docker.Client) (bool, error) {
+	if mod == nil || cli == nil {
+		return true, nil
+	}
+	hostname := ""
+	if server != nil {
+		hostname = server.ProxyHostname
+	}
+	for _, port := range mod.Ports {
+		if !modulePublishesHostPort(port) {
+			continue
+		}
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		conflict, err := m.store.CheckPortAvailability(ctx, int(port.HostPort), protocol, port.ProxyEnabled, hostname, mod.ID)
+		if err != nil {
+			return false, err
+		}
+		if conflict != nil {
+			return false, nil
+		}
+		allocated, err := cli.AllocatedHostPorts(ctx, protocol)
+		if err != nil {
+			return false, err
+		}
+		if allocated[int(port.HostPort)] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // observeModule resolves and inspects a module's container. A container that

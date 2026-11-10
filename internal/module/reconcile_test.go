@@ -15,6 +15,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
 // The decision table is the contract every daemon interaction is built on, so
@@ -23,11 +24,14 @@ func TestDecideModule(t *testing.T) {
 	running := &storage.Server{ID: "srv", Status: storage.StatusRunning}
 	stopped := &storage.Server{ID: "srv", Status: storage.StatusStopped}
 
+	allReady := reconcileGates{DependenciesReady: true, HostPortsReady: true}
+
 	cases := []struct {
 		name   string
 		mod    *storage.Module
 		parent *storage.Server
 		obs    ModuleObservation
+		gates  reconcileGates
 		want   moduleAction
 	}{
 		{
@@ -94,16 +98,103 @@ func TestDecideModule(t *testing.T) {
 			mod:    &storage.Module{Status: storage.ModuleStatusRunning, ContainerID: "same"},
 			parent: running,
 			obs:    ModuleObservation{Exists: true, ContainerID: "same", Running: true},
+			gates:  allReady,
 			want:   actionNone,
+		},
+		{
+			name: "a missing container is not recreated while a dependency is stopped",
+			mod: &storage.Module{
+				Status: storage.ModuleStatusRunning, ContainerID: "old",
+				Dependencies: []*v1.ModuleDependency{{ModuleId: "dep-a"}},
+			},
+			parent: running,
+			obs:    ModuleObservation{Exists: false},
+			gates:  reconcileGates{DependenciesReady: false, HostPortsReady: true},
+			want:   actionWaitForDependency,
+		},
+		{
+			name: "a missing container is recreated when dependencies are running",
+			mod: &storage.Module{
+				Status: storage.ModuleStatusRunning, ContainerID: "old",
+				Dependencies: []*v1.ModuleDependency{{ModuleId: "dep-a"}},
+			},
+			parent: running,
+			obs:    ModuleObservation{Exists: false},
+			gates:  allReady,
+			want:   actionRecreate,
+		},
+		{
+			name: "an agreeing observation is not in sync while a dependency is stopped",
+			mod: &storage.Module{
+				Status: storage.ModuleStatusRunning, ContainerID: "same",
+				Dependencies: []*v1.ModuleDependency{{ModuleId: "dep-a"}},
+			},
+			parent: running,
+			obs:    ModuleObservation{Exists: true, ContainerID: "same", Running: true},
+			gates:  reconcileGates{DependenciesReady: false, HostPortsReady: true},
+			want:   actionWaitForDependency,
+		},
+		{
+			name: "recreate waits on host port reservations",
+			mod: &storage.Module{
+				Status: storage.ModuleStatusRunning, ContainerID: "old",
+				Ports: []*v1.ModulePort{{Name: "web", HostPort: 8100, ContainerPort: 8100}},
+			},
+			parent: running,
+			obs:    ModuleObservation{Exists: false},
+			gates:  reconcileGates{DependenciesReady: true, HostPortsReady: false},
+			want:   actionWaitForPorts,
+		},
+		{
+			name:   "a stopped parent still prevents resurrection when dependencies are ready",
+			mod:    &storage.Module{Status: storage.ModuleStatusRunning, ContainerID: "old"},
+			parent: stopped,
+			obs:    ModuleObservation{Exists: false},
+			gates:  allReady,
+			want:   actionMarkGone,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := decideModule(tc.mod, tc.parent, tc.obs); got != tc.want {
+			gates := tc.gates
+			if gates == (reconcileGates{}) {
+				gates = allReady
+			}
+			if got := decideModule(tc.mod, tc.parent, tc.obs, gates); got != tc.want {
 				t.Fatalf("action = %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestApplyReconcileGates(t *testing.T) {
+	running := &storage.Module{Status: storage.ModuleStatusRunning}
+	stopped := &storage.Module{Status: storage.ModuleStatusStopped}
+
+	if got := applyReconcileGates(running, actionRecreate, reconcileGates{DependenciesReady: false, HostPortsReady: true}); got != actionWaitForDependency {
+		t.Fatalf("recreate with blocked dependency = %s, want %s", got, actionWaitForDependency)
+	}
+	if got := applyReconcileGates(running, actionRecreate, reconcileGates{DependenciesReady: true, HostPortsReady: false}); got != actionWaitForPorts {
+		t.Fatalf("recreate with blocked port = %s, want %s", got, actionWaitForPorts)
+	}
+	if got := applyReconcileGates(running, actionNone, reconcileGates{DependenciesReady: false, HostPortsReady: true}); got != actionWaitForDependency {
+		t.Fatalf("in sync with blocked dependency = %s, want %s", got, actionWaitForDependency)
+	}
+	if got := applyReconcileGates(stopped, actionRecreate, reconcileGates{DependenciesReady: false, HostPortsReady: false}); got != actionRecreate {
+		t.Fatalf("stopped module should ignore gates, got %s", got)
+	}
+}
+
+func TestModulePublishesHostPort(t *testing.T) {
+	if !modulePublishesHostPort(&v1.ModulePort{HostPort: 8080, ProxyEnabled: false}) {
+		t.Fatal("direct host bind should publish")
+	}
+	if modulePublishesHostPort(&v1.ModulePort{HostPort: 8080, ProxyEnabled: true}) {
+		t.Fatal("proxy-only port should not publish on the host")
+	}
+	if !modulePublishesHostPort(&v1.ModulePort{HostPort: 19132, ProxyEnabled: true, ExposePublic: true}) {
+		t.Fatal("public proxied port should publish on the host")
 	}
 }
 
