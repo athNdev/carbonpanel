@@ -1,3 +1,5 @@
+- query: Does the create path treat a Bedrock blueprint seed as a native edition?
+  expect: decisions/blueprint-create-qualification
 - query: How do I add a new RPC?
   expect: workflows/add-rpc
 - query: What happens when a remote node's Docker client cannot be resolved?

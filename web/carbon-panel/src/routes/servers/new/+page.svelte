@@ -33,6 +33,8 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { CreateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
 	import { CreateServerRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 	import { ModLoader, type ProxyListener } from '$lib/proto/carbonpanel/v1/common_pb';
+	import type { ServerBlueprint } from '$lib/proto/carbonpanel/v1/blueprint_pb';
+	import { resolveCreateBlueprint } from '$lib/utils/server-blueprint';
 	import type { ModLoaderInfo, DockerImage } from '$lib/proto/carbonpanel/v1/minecraft_pb';
 	import type { IndexedModpack, Version } from '$lib/proto/carbonpanel/v1/modpack_pb';
 	import type { Node } from '$lib/proto/carbonpanel/v1/node_pb';
@@ -75,6 +77,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 	// Datapack selection — installed into the world after the server is created
 	let selectedDatapacks = $state<Array<{ id: string; name: string; indexer: string }>>([]);
+	let catalogBlueprints = $state<ServerBlueprint[]>([]);
+	let selectedBlueprintId = $state('');
 
 	function toggleDatapack(id: string, name: string, indexer: string) {
 		if (selectedDatapacks.some((p) => p.id === id)) {
@@ -176,16 +180,25 @@ one at https://mozilla.org/MPL/2.0/.
 
 	onMount(async () => {
 		try {
-			const [versionsData, loadersData, imagesData, proxyStatus, portData, listeners, nodesData] =
-				await Promise.allSettled([
-					rpcClient.minecraft.getMinecraftVersions({}),
-					rpcClient.minecraft.getModLoaders({}),
-					rpcClient.minecraft.getDockerImages({}),
-					rpcClient.proxy.getProxyStatus({}),
-					rpcClient.server.getNextAvailablePort({}),
-					rpcClient.proxy.getProxyListeners({}),
-					rpcClient.node.listNodes({})
-				]);
+			const [
+				versionsData,
+				loadersData,
+				imagesData,
+				proxyStatus,
+				portData,
+				listeners,
+				nodesData,
+				blueprintsData
+			] = await Promise.allSettled([
+				rpcClient.minecraft.getMinecraftVersions({}),
+				rpcClient.minecraft.getModLoaders({}),
+				rpcClient.minecraft.getDockerImages({}),
+				rpcClient.proxy.getProxyStatus({}),
+				rpcClient.server.getNextAvailablePort({}),
+				rpcClient.proxy.getProxyListeners({}),
+				rpcClient.node.listNodes({}),
+				rpcClient.blueprint.listBlueprints({})
+			]);
 
 			if (versionsData.status === 'fulfilled') {
 				minecraftVersions = versionsData.value.versions.map((v) => v.id);
@@ -226,6 +239,10 @@ one at https://mozilla.org/MPL/2.0/.
 				usedPorts = Object.fromEntries(
 					portData.value.usedPorts?.map((p) => [p.port, p.inUse]) || []
 				);
+			}
+
+			if (blueprintsData.status === 'fulfilled') {
+				catalogBlueprints = blueprintsData.value.blueprints || [];
 			}
 
 			if (nodesData.status === 'fulfilled') {
@@ -294,8 +311,26 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	function applyBlueprint(seed: ServerBlueprint) {
+		const spec = resolveCreateBlueprint(seed);
+		if (!spec.qualified) {
+			return;
+		}
+		selectedBlueprintId = seed.id;
+		selectedModpack = null;
+		formData.modLoader = spec.modLoader;
+		formData.dockerImage = spec.storedImage;
+		if (spec.memoryMb > 0) {
+			formData.memory = spec.memoryMb;
+		}
+		if (!formData.mcVersion || formData.mcVersion.toUpperCase() === 'LATEST') {
+			formData.mcVersion = latestVersion || formData.mcVersion;
+		}
+	}
+
 	async function selectModpack(modpack: IndexedModpack) {
 		selectedModpack = modpack;
+		selectedBlueprintId = '';
 		showModpackDialog = false;
 
 		try {
@@ -312,6 +347,11 @@ one at https://mozilla.org/MPL/2.0/.
 			console.error(error);
 			selectedModpack = null;
 		}
+	}
+
+	function clearBlueprint() {
+		selectedBlueprintId = '';
+		formData.dockerImage = '';
 	}
 
 	function removeModpack() {
@@ -405,6 +445,15 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.error('Server name is required');
 			currentStep = 0;
 			return;
+		}
+
+		if (selectedBlueprintId) {
+			const seed = catalogBlueprints.find((b) => b.id === selectedBlueprintId);
+			if (seed && !resolveCreateBlueprint(seed).qualified) {
+				toast.error('That catalog seed is not a qualified create path.');
+				currentStep = 0;
+				return;
+			}
 		}
 
 		if (!useProxyMode && !validatePort(formData.port)) {
@@ -706,6 +755,58 @@ one at https://mozilla.org/MPL/2.0/.
 							class="focus-ring w-full resize-none rounded-none border border-[#393939] bg-[#161616] p-3 text-sm text-[#f4f4f4] transition-colors placeholder:text-[#8d8d8d] focus:bg-[#353535]"
 						></textarea>
 					</div>
+
+					{#if catalogBlueprints.length > 0}
+						<div class="space-y-2">
+							<div class="flex items-center justify-between gap-2">
+								<p class="font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase">
+									Catalog seed
+								</p>
+								{#if selectedBlueprintId}
+									<button
+										type="button"
+										onclick={clearBlueprint}
+										class="font-mono text-xs text-[#78a9ff] uppercase hover:underline"
+									>
+										Clear seed
+									</button>
+								{/if}
+							</div>
+							<p class="font-sans text-xs text-[#8d8d8d]">
+								A qualified seed fills Java image, loader TYPE and protocol. Unsupported rows are
+								not a native Bedrock edition path.
+							</p>
+							<div class="grid gap-2 sm:grid-cols-2">
+								{#each catalogBlueprints as seed (seed.id)}
+									{@const spec = resolveCreateBlueprint(seed)}
+									<button
+										type="button"
+										disabled={!spec.qualified || loading}
+										onclick={() => applyBlueprint(seed)}
+										class="rounded-none border p-3 text-left transition-colors {selectedBlueprintId ===
+										seed.id
+											? 'border-[#0f62fe] bg-[#161616]'
+											: 'border-[#393939] bg-[#161616]'} {spec.qualified
+											? 'hover:border-[#78a9ff]'
+											: 'cursor-not-allowed opacity-80'}"
+									>
+										<div class="flex items-center justify-between gap-2">
+											<span class="text-sm font-semibold text-[#f4f4f4]">{seed.name}</span>
+											{#if spec.qualified}
+												<CarbonTag type="green" size="sm">Java</CarbonTag>
+											{:else}
+												<CarbonTag type="yellow" size="sm">Unsupported</CarbonTag>
+											{/if}
+										</div>
+										<p class="mt-1 font-sans text-xs text-[#a8a8a8]">{seed.description}</p>
+										{#if !spec.qualified}
+											<p class="mt-2 font-sans text-xs text-[#f1c21b]">{spec.limitation}</p>
+										{/if}
+									</button>
+								{/each}
+							</div>
+						</div>
+					{/if}
 				</div>
 
 				<!-- Step 1: Game Engine & Version -->
