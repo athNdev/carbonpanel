@@ -1015,7 +1015,7 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 			op.fail(fmt.Sprintf("download request failed: %v", err))
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			op.fail(fmt.Sprintf("remote server returned HTTP status %d", resp.StatusCode))
@@ -1038,8 +1038,8 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 			return
 		}
 		tmpPath := tmpFile.Name()
-		defer os.Remove(tmpPath)
-		defer tmpFile.Close()
+		defer func() { _ = os.Remove(tmpPath) }()
+		defer func() { _ = tmpFile.Close() }()
 
 		hasher := sha256.New()
 		writer := io.MultiWriter(tmpFile, hasher)
