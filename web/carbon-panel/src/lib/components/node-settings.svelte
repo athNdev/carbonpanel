@@ -865,63 +865,59 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	size="xl"
 	hasFooter={false}
 >
-	{#snippet children()}
-		<div class="max-h-[50vh] space-y-3 overflow-y-auto">
-			{#each detectedDaemons as d (d.host)}
-				<div class="space-y-2 rounded-none border border-[#393939] bg-[#262626] p-3">
-					<div class="flex items-center justify-between gap-2">
-						<div class="min-w-0">
-							<div class="flex items-center gap-2">
-								<CheckCircle2 class="h-4 w-4 shrink-0 text-[#42be65]" />
-								<span class="truncate font-mono text-xs text-[#f4f4f4]" title={d.host}
-									>{d.host}</span
-								>
-							</div>
-							<p class="mt-0.5 text-xs text-[#8d8d8d]">
-								{#if d.latencyMs > 0}responded in {d.latencyMs}ms ·
-								{/if}{d.source}
-							</p>
+	<div class="max-h-[50vh] space-y-3 overflow-y-auto">
+		{#each detectedDaemons as d (d.host)}
+			<div class="space-y-2 rounded-none border border-[#393939] bg-[#262626] p-3">
+				<div class="flex items-center justify-between gap-2">
+					<div class="min-w-0">
+						<div class="flex items-center gap-2">
+							<CheckCircle2 class="h-4 w-4 shrink-0 text-[#42be65]" />
+							<span class="truncate font-mono text-xs text-[#f4f4f4]" title={d.host}>{d.host}</span>
 						</div>
-						<CarbonButton
-							size="sm"
-							kind="primary"
-							onclick={() => addDetectedDaemon(d)}
-							disabled={d.alreadyRegistered || addingDaemonHost !== null}
-						>
-							{#if addingDaemonHost === d.host}
-								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-								Adding...
-							{:else if d.alreadyRegistered}
-								Added
-							{:else}
-								<Plus class="mr-2 h-4 w-4" />
-								Add
-							{/if}
-						</CarbonButton>
+						<p class="mt-0.5 text-xs text-[#8d8d8d]">
+							{#if d.latencyMs > 0}responded in {d.latencyMs}ms ·
+							{/if}{d.source}
+						</p>
 					</div>
-					{#if !d.alreadyRegistered}
-						<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-							<CarbonTextInput
-								id="det-name-{d.host}"
-								label="Node name"
-								class="text-xs [&_input]:h-8 [&_input]:text-xs [&_label]:text-xs"
-								bind:value={d.name}
-								disabled={addingDaemonHost !== null}
-							/>
-							<CarbonTextInput
-								id="det-ip-{d.host}"
-								label="Advertised IP"
-								class="text-xs [&_input]:h-8 [&_input]:text-xs [&_label]:text-xs"
-								placeholder="e.g. 192.168.1.10"
-								bind:value={d.advertisedIp}
-								disabled={addingDaemonHost !== null}
-							/>
-						</div>
-					{/if}
+					<CarbonButton
+						size="sm"
+						kind="primary"
+						onclick={() => addDetectedDaemon(d)}
+						disabled={d.alreadyRegistered || addingDaemonHost !== null}
+					>
+						{#if addingDaemonHost === d.host}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							Adding...
+						{:else if d.alreadyRegistered}
+							Added
+						{:else}
+							<Plus class="mr-2 h-4 w-4" />
+							Add
+						{/if}
+					</CarbonButton>
 				</div>
-			{/each}
-		</div>
-	{/snippet}
+				{#if !d.alreadyRegistered}
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+						<CarbonTextInput
+							id="det-name-{d.host}"
+							label="Node name"
+							class="text-xs [&_input]:h-8 [&_input]:text-xs [&_label]:text-xs"
+							bind:value={d.name}
+							disabled={addingDaemonHost !== null}
+						/>
+						<CarbonTextInput
+							id="det-ip-{d.host}"
+							label="Advertised IP"
+							class="text-xs [&_input]:h-8 [&_input]:text-xs [&_label]:text-xs"
+							placeholder="e.g. 192.168.1.10"
+							bind:value={d.advertisedIp}
+							disabled={addingDaemonHost !== null}
+						/>
+					</div>
+				{/if}
+			</div>
+		{/each}
+	</div>
 	{#snippet footer()}
 		<div class="flex justify-end p-4">
 			<CarbonButton kind="secondary" size="md" onclick={() => (showDetectedDialog = false)}>
@@ -943,151 +939,148 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	size="lg"
 	hasFooter={false}
 >
-	{#snippet children()}
-		<div class="space-y-4">
+	<div class="space-y-4">
+		<CarbonTextInput
+			id="node-name"
+			label="Node Name *"
+			placeholder="e.g. worker-1"
+			bind:value={newNode.name}
+			disabled={isSaving}
+			class="[&_input]:bg-[#262626]"
+		/>
+
+		<CarbonTextInput
+			id="node-host"
+			label="Docker Host URL *"
+			placeholder="tcp://192.168.0.102:2376 or unix:///var/run/docker.sock"
+			bind:value={newNode.host}
+			disabled={isSaving}
+			helperText="Ensure Docker daemon on the host is listening on this socket/address."
+			class="[&_input]:bg-[#262626]"
+		/>
+
+		<CarbonTextInput
+			id="node-adv-ip"
+			label="Advertised IP Address"
+			placeholder="e.g. 192.168.0.102"
+			bind:value={newNode.advertisedIp}
+			disabled={isSaving}
+			helperText="External IP address that players connect to when servers run on this node."
+			class="[&_input]:bg-[#262626]"
+		/>
+
+		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 			<CarbonTextInput
-				id="node-name"
-				label="Node Name *"
-				placeholder="e.g. worker-1"
-				bind:value={newNode.name}
+				id="node-max-mem"
+				label="Max Memory Limit (MB)"
+				type="number"
+				min={0}
+				step={1024}
+				placeholder="0 = Unlimited"
+				bind:value={newNodeMemoryText}
+				error={newMemoryError}
 				disabled={isSaving}
 				class="[&_input]:bg-[#262626]"
 			/>
-
 			<CarbonTextInput
-				id="node-host"
-				label="Docker Host URL *"
-				placeholder="tcp://192.168.0.102:2376 or unix:///var/run/docker.sock"
-				bind:value={newNode.host}
+				id="node-max-srv"
+				label="Max Server Containers"
+				type="number"
+				min={0}
+				placeholder="0 = Unlimited"
+				bind:value={newNodeServersText}
+				error={newServersError}
 				disabled={isSaving}
-				helperText="Ensure Docker daemon on the host is listening on this socket/address."
 				class="[&_input]:bg-[#262626]"
 			/>
+		</div>
 
-			<CarbonTextInput
-				id="node-adv-ip"
-				label="Advertised IP Address"
-				placeholder="e.g. 192.168.0.102"
-				bind:value={newNode.advertisedIp}
-				disabled={isSaving}
-				helperText="External IP address that players connect to when servers run on this node."
-				class="[&_input]:bg-[#262626]"
-			/>
-
-			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-				<CarbonTextInput
-					id="node-max-mem"
-					label="Max Memory Limit (MB)"
-					type="number"
-					min={0}
-					step={1024}
-					placeholder="0 = Unlimited"
-					bind:value={newNodeMemoryText}
-					error={newMemoryError}
-					disabled={isSaving}
-					class="[&_input]:bg-[#262626]"
-				/>
-				<CarbonTextInput
-					id="node-max-srv"
-					label="Max Server Containers"
-					type="number"
-					min={0}
-					placeholder="0 = Unlimited"
-					bind:value={newNodeServersText}
-					error={newServersError}
-					disabled={isSaving}
-					class="[&_input]:bg-[#262626]"
-				/>
+		<div
+			class="flex items-center justify-between rounded-none border border-[#393939] bg-[#262626] p-3"
+		>
+			<div class="space-y-0.5 pr-4">
+				<label for="node-enabled" class="font-sans text-sm text-[#f4f4f4]">Enable Node</label>
+				<p class="text-xs text-[#8d8d8d]">
+					Allow placement engine to assign servers to this Docker node.
+				</p>
 			</div>
+			<input
+				id="node-enabled"
+				type="checkbox"
+				class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+				bind:checked={newNode.enabled}
+				disabled={isSaving}
+			/>
+		</div>
 
-			<div
-				class="flex items-center justify-between rounded-none border border-[#393939] bg-[#262626] p-3"
-			>
-				<div class="space-y-0.5 pr-4">
-					<label for="node-enabled" class="font-sans text-sm text-[#f4f4f4]">Enable Node</label>
+		<div class="space-y-3 rounded-none border border-[#393939] bg-[#262626] p-3">
+			<div class="flex items-center justify-between gap-4">
+				<div class="space-y-0.5">
+					<label for="node-tls" class="font-sans text-sm text-[#f4f4f4]">TLS Authentication</label>
 					<p class="text-xs text-[#8d8d8d]">
-						Allow placement engine to assign servers to this Docker node.
+						Use client certificates for mutual TLS docker daemon auth.
 					</p>
 				</div>
 				<input
-					id="node-enabled"
+					id="node-tls"
 					type="checkbox"
 					class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
-					bind:checked={newNode.enabled}
+					bind:checked={newNode.tlsEnabled}
 					disabled={isSaving}
 				/>
 			</div>
 
-			<div class="space-y-3 rounded-none border border-[#393939] bg-[#262626] p-3">
-				<div class="flex items-center justify-between gap-4">
-					<div class="space-y-0.5">
-						<label for="node-tls" class="font-sans text-sm text-[#f4f4f4]">TLS Authentication</label
+			{#if newNode.tlsEnabled}
+				<div class="space-y-3 border-t border-[#393939] pt-3">
+					<div class="flex items-center justify-between gap-4">
+						<label for="node-skip-verify" class="text-xs text-[#c6c6c6]"
+							>Skip TLS Certificate Verification</label
 						>
-						<p class="text-xs text-[#8d8d8d]">
-							Use client certificates for mutual TLS docker daemon auth.
-						</p>
+						<input
+							id="node-skip-verify"
+							type="checkbox"
+							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+							bind:checked={newNode.tlsSkipVerify}
+							disabled={isSaving}
+						/>
 					</div>
-					<input
-						id="node-tls"
-						type="checkbox"
-						class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
-						bind:checked={newNode.tlsEnabled}
-						disabled={isSaving}
-					/>
+
+					<div class="space-y-1">
+						<label for="node-ca-cert" class="text-xs text-[#c6c6c6]">CA Certificate (PEM)</label>
+						<textarea
+							id="node-ca-cert"
+							placeholder="-----BEGIN CERTIFICATE-----&#10;..."
+							bind:value={newNode.tlsCaCert}
+							disabled={isSaving}
+							class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+						></textarea>
+					</div>
+
+					<div class="space-y-1">
+						<label for="node-cert" class="text-xs text-[#c6c6c6]">Client Certificate (PEM)</label>
+						<textarea
+							id="node-cert"
+							placeholder="-----BEGIN CERTIFICATE-----&#10;..."
+							bind:value={newNode.tlsCert}
+							disabled={isSaving}
+							class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+						></textarea>
+					</div>
+
+					<div class="space-y-1">
+						<label for="node-key" class="text-xs text-[#c6c6c6]">Client Private Key (PEM)</label>
+						<textarea
+							id="node-key"
+							placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..."
+							bind:value={newNode.tlsKey}
+							disabled={isSaving}
+							class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+						></textarea>
+					</div>
 				</div>
-
-				{#if newNode.tlsEnabled}
-					<div class="space-y-3 border-t border-[#393939] pt-3">
-						<div class="flex items-center justify-between gap-4">
-							<label for="node-skip-verify" class="text-xs text-[#c6c6c6]"
-								>Skip TLS Certificate Verification</label
-							>
-							<input
-								id="node-skip-verify"
-								type="checkbox"
-								class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
-								bind:checked={newNode.tlsSkipVerify}
-								disabled={isSaving}
-							/>
-						</div>
-
-						<div class="space-y-1">
-							<label for="node-ca-cert" class="text-xs text-[#c6c6c6]">CA Certificate (PEM)</label>
-							<textarea
-								id="node-ca-cert"
-								placeholder="-----BEGIN CERTIFICATE-----&#10;..."
-								bind:value={newNode.tlsCaCert}
-								disabled={isSaving}
-								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-							></textarea>
-						</div>
-
-						<div class="space-y-1">
-							<label for="node-cert" class="text-xs text-[#c6c6c6]">Client Certificate (PEM)</label>
-							<textarea
-								id="node-cert"
-								placeholder="-----BEGIN CERTIFICATE-----&#10;..."
-								bind:value={newNode.tlsCert}
-								disabled={isSaving}
-								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-							></textarea>
-						</div>
-
-						<div class="space-y-1">
-							<label for="node-key" class="text-xs text-[#c6c6c6]">Client Private Key (PEM)</label>
-							<textarea
-								id="node-key"
-								placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..."
-								bind:value={newNode.tlsKey}
-								disabled={isSaving}
-								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-							></textarea>
-						</div>
-					</div>
-				{/if}
-			</div>
+			{/if}
 		</div>
-	{/snippet}
+	</div>
 	{#snippet footer()}
 		<div class="flex w-full items-center justify-end">
 			<CarbonButton
@@ -1125,165 +1118,162 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	size="lg"
 	hasFooter={false}
 >
-	{#snippet children()}
-		{#if editingNode}
-			<div class="space-y-4">
+	{#if editingNode}
+		<div class="space-y-4">
+			<CarbonTextInput
+				id="edit-node-name"
+				label="Node Name *"
+				bind:value={editingNode.name}
+				disabled={isSaving}
+				class="[&_input]:bg-[#262626]"
+			/>
+
+			<CarbonTextInput
+				id="edit-node-host"
+				label="Docker Host URL *"
+				bind:value={editingNode.host}
+				disabled={isSaving}
+				class="[&_input]:bg-[#262626]"
+			/>
+
+			<CarbonTextInput
+				id="edit-node-adv-ip"
+				label="Advertised IP Address"
+				placeholder="e.g. 192.168.0.102"
+				bind:value={editingNode.advertisedIp}
+				disabled={isSaving}
+				class="[&_input]:bg-[#262626]"
+			/>
+
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<CarbonTextInput
-					id="edit-node-name"
-					label="Node Name *"
-					bind:value={editingNode.name}
+					id="edit-node-max-mem"
+					label="Max Memory Limit (MB)"
+					type="number"
+					min={0}
+					step={1024}
+					placeholder="0 = Unlimited"
+					bind:value={editMemoryText}
+					error={editMemoryError}
 					disabled={isSaving}
 					class="[&_input]:bg-[#262626]"
 				/>
-
 				<CarbonTextInput
-					id="edit-node-host"
-					label="Docker Host URL *"
-					bind:value={editingNode.host}
+					id="edit-node-max-srv"
+					label="Max Server Containers"
+					type="number"
+					min={0}
+					placeholder="0 = Unlimited"
+					bind:value={editServersText}
+					error={editServersError}
 					disabled={isSaving}
 					class="[&_input]:bg-[#262626]"
 				/>
+			</div>
 
-				<CarbonTextInput
-					id="edit-node-adv-ip"
-					label="Advertised IP Address"
-					placeholder="e.g. 192.168.0.102"
-					bind:value={editingNode.advertisedIp}
-					disabled={isSaving}
-					class="[&_input]:bg-[#262626]"
-				/>
-
-				<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-					<CarbonTextInput
-						id="edit-node-max-mem"
-						label="Max Memory Limit (MB)"
-						type="number"
-						min={0}
-						step={1024}
-						placeholder="0 = Unlimited"
-						bind:value={editMemoryText}
-						error={editMemoryError}
-						disabled={isSaving}
-						class="[&_input]:bg-[#262626]"
-					/>
-					<CarbonTextInput
-						id="edit-node-max-srv"
-						label="Max Server Containers"
-						type="number"
-						min={0}
-						placeholder="0 = Unlimited"
-						bind:value={editServersText}
-						error={editServersError}
-						disabled={isSaving}
-						class="[&_input]:bg-[#262626]"
-					/>
+			<div
+				class="flex items-center justify-between rounded-none border border-[#393939] bg-[#262626] p-3"
+			>
+				<div class="space-y-0.5 pr-4">
+					<label for="edit-node-enabled" class="font-sans text-sm text-[#f4f4f4]">Enable Node</label
+					>
+					<p class="text-xs text-[#8d8d8d]">
+						Allow placement engine to assign servers to this Docker node.
+					</p>
 				</div>
+				<input
+					id="edit-node-enabled"
+					type="checkbox"
+					class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+					checked={editingNode.enabled}
+					onchange={(e) => {
+						if (editingNode) editingNode.enabled = e.currentTarget.checked;
+					}}
+					disabled={isSaving}
+				/>
+			</div>
 
-				<div
-					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#262626] p-3"
-				>
-					<div class="space-y-0.5 pr-4">
-						<label for="edit-node-enabled" class="font-sans text-sm text-[#f4f4f4]"
-							>Enable Node</label
+			<div class="space-y-3 rounded-none border border-[#393939] bg-[#262626] p-3">
+				<div class="flex items-center justify-between gap-4">
+					<div class="space-y-0.5">
+						<label for="edit-node-tls" class="font-sans text-sm text-[#f4f4f4]"
+							>TLS Authentication</label
 						>
-						<p class="text-xs text-[#8d8d8d]">
-							Allow placement engine to assign servers to this Docker node.
-						</p>
+						<p class="text-xs text-[#8d8d8d]">Use client certificates for mutual TLS auth.</p>
 					</div>
 					<input
-						id="edit-node-enabled"
+						id="edit-node-tls"
 						type="checkbox"
 						class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
-						checked={editingNode.enabled}
+						checked={editingNode.tlsEnabled}
 						onchange={(e) => {
-							if (editingNode) editingNode.enabled = e.currentTarget.checked;
+							if (editingNode) editingNode.tlsEnabled = e.currentTarget.checked;
 						}}
 						disabled={isSaving}
 					/>
 				</div>
 
-				<div class="space-y-3 rounded-none border border-[#393939] bg-[#262626] p-3">
-					<div class="flex items-center justify-between gap-4">
-						<div class="space-y-0.5">
-							<label for="edit-node-tls" class="font-sans text-sm text-[#f4f4f4]"
-								>TLS Authentication</label
+				{#if editingNode.tlsEnabled}
+					<div class="space-y-3 border-t border-[#393939] pt-3">
+						<div class="flex items-center justify-between gap-4">
+							<label for="edit-node-skip-verify" class="text-xs text-[#c6c6c6]"
+								>Skip TLS Certificate Verification</label
 							>
-							<p class="text-xs text-[#8d8d8d]">Use client certificates for mutual TLS auth.</p>
+							<input
+								id="edit-node-skip-verify"
+								type="checkbox"
+								class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+								checked={editingNode.tlsSkipVerify}
+								onchange={(e) => {
+									if (editingNode) editingNode.tlsSkipVerify = e.currentTarget.checked;
+								}}
+								disabled={isSaving}
+							/>
 						</div>
-						<input
-							id="edit-node-tls"
-							type="checkbox"
-							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
-							checked={editingNode.tlsEnabled}
-							onchange={(e) => {
-								if (editingNode) editingNode.tlsEnabled = e.currentTarget.checked;
-							}}
-							disabled={isSaving}
-						/>
+
+						<div class="space-y-1">
+							<label for="edit-node-ca-cert" class="text-xs text-[#c6c6c6]"
+								>CA Certificate (PEM)</label
+							>
+							<textarea
+								id="edit-node-ca-cert"
+								placeholder="-----BEGIN CERTIFICATE-----&#10;..."
+								bind:value={editingNode.tlsCaCert}
+								disabled={isSaving}
+								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+							></textarea>
+						</div>
+
+						<div class="space-y-1">
+							<label for="edit-node-cert" class="text-xs text-[#c6c6c6]"
+								>Client Certificate (PEM)</label
+							>
+							<textarea
+								id="edit-node-cert"
+								placeholder="-----BEGIN CERTIFICATE-----&#10;..."
+								bind:value={editingNode.tlsCert}
+								disabled={isSaving}
+								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+							></textarea>
+						</div>
+
+						<div class="space-y-1">
+							<label for="edit-node-key" class="text-xs text-[#c6c6c6]"
+								>Client Private Key (PEM)</label
+							>
+							<textarea
+								id="edit-node-key"
+								placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..."
+								bind:value={editingNode.tlsKey}
+								disabled={isSaving}
+								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+							></textarea>
+						</div>
 					</div>
-
-					{#if editingNode.tlsEnabled}
-						<div class="space-y-3 border-t border-[#393939] pt-3">
-							<div class="flex items-center justify-between gap-4">
-								<label for="edit-node-skip-verify" class="text-xs text-[#c6c6c6]"
-									>Skip TLS Certificate Verification</label
-								>
-								<input
-									id="edit-node-skip-verify"
-									type="checkbox"
-									class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
-									checked={editingNode.tlsSkipVerify}
-									onchange={(e) => {
-										if (editingNode) editingNode.tlsSkipVerify = e.currentTarget.checked;
-									}}
-									disabled={isSaving}
-								/>
-							</div>
-
-							<div class="space-y-1">
-								<label for="edit-node-ca-cert" class="text-xs text-[#c6c6c6]"
-									>CA Certificate (PEM)</label
-								>
-								<textarea
-									id="edit-node-ca-cert"
-									placeholder="-----BEGIN CERTIFICATE-----&#10;..."
-									bind:value={editingNode.tlsCaCert}
-									disabled={isSaving}
-									class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-								></textarea>
-							</div>
-
-							<div class="space-y-1">
-								<label for="edit-node-cert" class="text-xs text-[#c6c6c6]"
-									>Client Certificate (PEM)</label
-								>
-								<textarea
-									id="edit-node-cert"
-									placeholder="-----BEGIN CERTIFICATE-----&#10;..."
-									bind:value={editingNode.tlsCert}
-									disabled={isSaving}
-									class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-								></textarea>
-							</div>
-
-							<div class="space-y-1">
-								<label for="edit-node-key" class="text-xs text-[#c6c6c6]"
-									>Client Private Key (PEM)</label
-								>
-								<textarea
-									id="edit-node-key"
-									placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..."
-									bind:value={editingNode.tlsKey}
-									disabled={isSaving}
-									class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-								></textarea>
-							</div>
-						</div>
-					{/if}
-				</div>
+				{/if}
 			</div>
-		{/if}
-	{/snippet}
+		</div>
+	{/if}
 	{#snippet footer()}
 		<div class="flex w-full items-center justify-end">
 			<CarbonButton

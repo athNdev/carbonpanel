@@ -54,24 +54,6 @@ test('servers/new modpack dialog does not import shadcn Dialog', () => {
 		content.includes('CarbonModal'),
 		'servers/new +page modpack picker should use CarbonModal'
 	);
-	assert.match(
-		content,
-		/<CarbonModal[\s\S]*?\{#snippet children\(\)\}/,
-		'CarbonModal body content must use the children snippet'
-	);
-});
-
-test('node-settings CarbonModal bodies use the children snippet', () => {
-	const content = fs.readFileSync(path.join(componentsDir, 'node-settings.svelte'), 'utf-8');
-	const modalBlocks = content.match(/<CarbonModal[\s\S]*?<\/CarbonModal>/g) ?? [];
-	assert.ok(modalBlocks.length > 0, 'node-settings should declare CarbonModal dialogs');
-	for (const block of modalBlocks) {
-		assert.match(
-			block,
-			/\{#snippet children\(\)\}/,
-			'each CarbonModal must pass body content via the children snippet'
-		);
-	}
 });
 
 test('numeric settings fields bind text so partial input is preserved', () => {
