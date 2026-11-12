@@ -137,7 +137,7 @@ func TestUDPProxyLoopbackRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 	backendDone := make(chan error, 1)
 	go func() {
 		buf := make([]byte, 128)
@@ -159,12 +159,12 @@ func TestUDPProxyLoopbackRoundTrip(t *testing.T) {
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer p.Stop()
+	defer func() { _ = p.Stop() }()
 	client, err := net.DialUDP("udp", nil, p.conn.LocalAddr().(*net.UDPAddr))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
 	want := "loopback forwarding"
 	if _, err := client.Write([]byte(want)); err != nil {

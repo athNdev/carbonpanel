@@ -48,7 +48,7 @@ func TestManagerListenerPolicy(t *testing.T) {
 		for _, path := range []string{"start", "add", "tcp", "minecraft", "http", "udp", "knock"} {
 			t.Run(host+"/"+path, func(t *testing.T) {
 				store := setupTestStore(t)
-				defer store.Close()
+				defer func() { _ = store.Close() }()
 				cfg := &config.Config{Proxy: config.ProxyConfig{Enabled: true, BindHost: host}}
 				factory := loopbackTestListeners()
 				calls := 0
@@ -72,7 +72,7 @@ func TestManagerListenerPolicy(t *testing.T) {
 					return udp(network, address)
 				}
 				mgr := NewManagerWithListeners(store, cfg, logger.New(), factory, &mockDockerClient{})
-				defer mgr.Stop()
+				defer func() { _ = mgr.Stop() }()
 				var err error
 				switch path {
 				case "start":
