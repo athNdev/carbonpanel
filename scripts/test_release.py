@@ -14,6 +14,17 @@ from scripts import release
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_unpublished_draft_is_read_by_its_stable_id(self):
+        api_url = "https://api.github.com/repos/owner/panel/releases/123"
+        def reply(*args):
+            if args == ("release", "view", "v3.0.0-alpha.1", "--json", "apiUrl", "--jq", ".apiUrl"):
+                return api_url
+            if args == ("api", api_url):
+                return json.dumps({"id": 123, "draft": True, "assets": []})
+            raise AssertionError(f"Unsupported draft lookup: {args}")
+        with patch.object(release, "github", side_effect=reply):
+            self.assertTrue(release.get_release("v3.0.0-alpha.1")["draft"])
+
     def test_cd_concurrency_belongs_to_the_gated_publish_job(self):
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
         self.assertNotRegex(source, r"(?m)^concurrency:")
