@@ -32,8 +32,10 @@ sources:
 - Application prose, imported examples and API schema come from the same full
   commit in `docs/website-source.json`. Never substitute the current checkout or
   a floating branch if that commit is unavailable.
-- The standalone shared design system is published with the homepage from the
-  current branch, including its canonical tokens. It is not application content.
+- The shared design system is published with the homepage from the current
+  branch, including its canonical tokens. It shares site branding, local fonts
+  and navigation with the website and docs, while keeping its component
+  specimens and theme preview independent. It is not pinned application content.
 - The website theme and docs navigation can evolve independently of the source
   pin. Display the pin on every documentation page.
 - A published release pin uses the release tag as its label. Any other commit is

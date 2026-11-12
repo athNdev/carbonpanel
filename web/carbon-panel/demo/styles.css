@@ -5,6 +5,8 @@
 @source '../src/lib/components/carbon/CarbonButton.svelte';
 @source '../src/lib/components/carbon/CarbonTag.svelte';
 @source '../src/lib/components/carbon/CarbonSearch.svelte';
+@source '../src/lib/components/carbon/CarbonTabs.svelte';
+@source '../src/lib/components/carbon/CarbonTile.svelte';
 @theme inline {
 	--font-sans: var(--carbon-font-sans);
 	--font-mono: var(--carbon-font-mono);
@@ -17,6 +19,8 @@
 	--color-foreground: var(--foreground);
 	--color-destructive: var(--destructive);
 	--color-border: var(--border);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
 }
 :host {
 	display: block;
@@ -134,6 +138,111 @@ button:disabled {
 	align-items: end;
 	gap: 16px;
 	padding: 20px 22px;
+}
+.scroll-strip {
+	overflow-x: auto;
+	scrollbar-width: thin;
+}
+.studio-stage {
+	min-height: 324px;
+}
+.studio-catalog,
+.studio-export {
+	display: grid;
+	gap: 12px;
+	padding: 18px;
+}
+.studio-hint {
+	color: var(--muted-foreground);
+	font-size: 11px;
+	line-height: 1.6;
+	margin: 0;
+}
+.studio-catalog-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+}
+.studio-catalog-item > div {
+	min-width: 0;
+}
+.studio-catalog-item h4 {
+	font-weight: 500;
+	font-size: 14px;
+	margin: 0 0 4px;
+}
+.studio-catalog-item p {
+	color: var(--muted-foreground);
+	font-size: 12px;
+	margin: 0;
+}
+.studio-dependency {
+	display: block;
+	color: var(--accent-text);
+	font-size: 10px;
+	margin-top: 8px;
+}
+.studio-table-hint {
+	padding: 14px 18px;
+}
+.studio-format {
+	display: grid;
+	gap: 6px;
+	font-size: 12px;
+}
+.studio-format select {
+	background: var(--card);
+	color: var(--foreground);
+	border: 0;
+	border-bottom: 1px solid var(--input);
+	height: 40px;
+	padding: 0 12px;
+	width: 100%;
+}
+.studio-client {
+	display: flex;
+	gap: 10px;
+	align-items: start;
+	font-size: 12px;
+	padding-block: 6px;
+}
+.studio-client input {
+	margin-top: 3px;
+}
+.studio-client small {
+	display: block;
+	color: var(--muted-foreground);
+	font-size: 11px;
+	margin-top: 3px;
+}
+.studio-export-summary {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+	padding-top: 8px;
+}
+.studio-export-summary code {
+	font-family: var(--carbon-font-mono);
+	font-size: 10px;
+	overflow-wrap: anywhere;
+}
+.studio-export-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.studio-export-list li {
+	display: flex;
+	justify-content: space-between;
+	gap: 16px;
+	font-size: 11px;
+	border-bottom: 1px solid var(--border);
+	padding-block: 8px;
+}
+.studio-export-list li span:last-child {
+	color: var(--muted-foreground);
 }
 .demo-fields label {
 	display: grid;

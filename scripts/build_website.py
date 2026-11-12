@@ -53,8 +53,10 @@ def publish_design_system(root, output):
     source = root / "docs/design-system"
     destination = output / "design-system"
     destination.mkdir(parents=True, exist_ok=True)
-    for name in ("site.css", "site.js"):
-        shutil.copy2(source / name, destination / name)
+    shutil.copy2(source / "site.js", destination / "site.js")
+    stylesheet = (source / "site.css").read_text(encoding="utf-8")
+    (destination / "site.css").write_text(
+        stylesheet.replace("../../landing/assets/", "../assets/"), encoding="utf-8")
     tokens = "web/carbon-panel/src/lib/design-system/tokens.css"
     shutil.copy2(root / tokens, destination / "tokens.css")
     page = (source / "index.html").read_text(encoding="utf-8")
@@ -63,6 +65,11 @@ def publish_design_system(root, output):
         raise ValueError("Design-system publication links no longer match the source page.")
     page = page.replace(source_link, "./tokens.css").replace(
         "./README.md", "https://github.com/athNdev/carbonpanel/blob/main/docs/design-system/README.md")
+    page = page.replace("../../landing/index.html", "../").replace(
+        "../../landing/assets/", "../assets/").replace(
+        "../carbon-panel/src/content/docs/index.mdx", "../docs/").replace(
+        "../carbon-panel/src/content/docs/getting-started/docker-compose.mdx",
+        "../docs/getting-started/docker-compose/")
     (destination / "index.html").write_text(page, encoding="utf-8")
 
 

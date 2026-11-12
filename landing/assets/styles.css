@@ -23,6 +23,7 @@
   --minor-line: rgba(243, 240, 230, 0.028);
   --frame: 1248px;
   --gutter: 32px;
+  --rail-offset: 24px;
   --gap: 24px;
   --columns: 12;
   --sans: "IBM Plex Sans", sans-serif;
@@ -200,7 +201,6 @@ dl {
   inset: -40px 0;
   z-index: -1;
   pointer-events: none;
-  border-inline: 1px solid var(--line);
   background: repeating-linear-gradient(
     90deg,
     transparent 0,
@@ -210,6 +210,15 @@ dl {
     transparent calc((100% + var(--gap)) / var(--columns) + 0.5px),
     transparent calc((100% + var(--gap)) / var(--columns))
   );
+  mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent);
+}
+.structural-grid::after {
+  content: "";
+  position: absolute;
+  inset: -40px calc(-1 * var(--rail-offset));
+  z-index: -1;
+  pointer-events: none;
+  border-inline: 1px solid var(--line);
   mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent);
 }
 .hero {
@@ -292,7 +301,20 @@ h1 span {
   min-width: 0;
   position: relative;
   align-self: start;
-  padding: 125px 0 0 42px;
+  padding: 205px 0 0;
+}
+.hero-object::before {
+  content: "";
+  position: absolute;
+  z-index: -3;
+  inset: -240px -180px -70px -100px;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 65% 28%,
+    rgba(239, 240, 235, 0.085),
+    rgba(205, 208, 201, 0.035) 32%,
+    transparent 67%
+  );
 }
 .terrain {
   position: absolute;
@@ -301,17 +323,23 @@ h1 span {
   max-width: none;
   height: 640px;
   object-fit: cover;
-  right: -210px;
-  top: -124px;
-  opacity: 0.87;
+  right: -100px;
+  top: -132px;
+  opacity: 1;
   mask-image: linear-gradient(
       90deg,
       transparent,
       #000 18%,
-      #000 86%,
+      #000 94%,
       transparent
     ),
-    linear-gradient(to bottom, #000 68%, transparent 98%);
+    linear-gradient(
+      to bottom,
+      transparent,
+      #000 12%,
+      #000 82%,
+      transparent 100%
+    );
   mask-composite: intersect;
 }
 .hero-object::after {
@@ -323,7 +351,7 @@ h1 span {
     90deg,
     var(--bg),
     transparent 18%,
-    transparent 85%,
+    transparent 96%,
     var(--bg)
   );
   pointer-events: none;
@@ -401,8 +429,8 @@ h1 span {
 }
 .hero-fragment {
   width: 100%;
-  max-width: 558px;
-  margin-left: auto;
+  max-width: 510px;
+  margin-right: auto;
 }
 .hero-bottom {
   grid-column: 1/-1;
@@ -751,6 +779,107 @@ h2 {
   color: #a09d93;
   max-width: 300px;
 }
+.craft-section {
+  padding-block: 88px;
+  border-top: 1px solid var(--line);
+}
+.craft-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 100px;
+}
+.craft-specimen {
+  position: relative;
+  isolation: isolate;
+  padding: 30px;
+  border: 1px solid #36352f;
+  background: radial-gradient(ellipse at 20% 0%, #272725, #191918 70%);
+  box-shadow: 0 -24px 100px -35px rgba(225, 227, 217, 0.12);
+}
+.specimen-type {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 22px 0;
+  font:
+    96px/1.15 "Inter Variable",
+    sans-serif;
+  letter-spacing: -0.06em;
+}
+.specimen-type span {
+  font:
+    28px "JetBrains Mono Variable",
+    monospace;
+  color: #aaa9a3;
+  letter-spacing: -0.05em;
+}
+.specimen-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  height: 38px;
+}
+.specimen-swatches i {
+  background: #262626;
+}
+.specimen-swatches i:nth-child(2) {
+  background: #393939;
+}
+.specimen-swatches i:nth-child(3) {
+  background: #a8a8a8;
+}
+.specimen-swatches i:nth-child(4) {
+  background: #f4f4f4;
+}
+.specimen-swatches i:nth-child(5) {
+  background: #0f62fe;
+}
+.specimen-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  font: 8px/1.6 var(--mono);
+  color: var(--quiet);
+}
+.craft-copy h2 {
+  margin: 18px 0 22px;
+}
+.craft-copy > p:not(.eyebrow) {
+  max-width: 400px;
+  font-size: 15px;
+  color: #b7b5ad;
+}
+.craft-copy .text-link {
+  margin-top: 20px;
+}
+@media (max-width: 1000px) {
+  .craft-grid {
+    gap: 40px;
+  }
+  .specimen-type {
+    font-size: 72px;
+  }
+  .specimen-type span {
+    font-size: 22px;
+  }
+}
+@media (max-width: 700px) {
+  .craft-section {
+    padding-block: 64px;
+  }
+  .craft-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .craft-copy {
+    grid-row: 1;
+  }
+  .craft-specimen {
+    padding: 24px;
+  }
+}
 .install-section {
   padding-block: 110px;
   background: #1b1b19;
@@ -816,6 +945,10 @@ h2 {
   margin-top: 5px;
 }
 .source-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 14px;
   border: 1px solid #3a3831;
   padding: 15px 17px;
   background: #161615;
@@ -825,22 +958,21 @@ h2 {
   color: #8c887c;
 }
 .source-command > div {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 10px;
+  display: contents;
 }
 .source-command code {
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: block;
   min-width: 0;
-  flex: 1;
-  overflow-x: auto;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   font: 11px/2 var(--mono);
   color: #beb7a6;
-  scrollbar-width: thin;
 }
 .source-command button {
+  grid-column: 2;
+  grid-row: 1;
   flex-shrink: 0;
   border: 1px solid #4d493e;
   color: #c7c0ae;
@@ -850,9 +982,10 @@ h2 {
   min-height: 32px;
 }
 .source-command p {
+  grid-column: 1 / -1;
   font-size: 11px;
   color: #938d7f;
-  margin-top: 11px;
+  margin: 0;
 }
 .copy-status {
   display: block;
@@ -1030,7 +1163,7 @@ h2 {
     font-size: 64px;
   }
   .hero-object {
-    padding-top: 142px;
+    padding-top: 205px;
   }
   .hero-copy .eyebrow {
     font-size: 10px;
@@ -1162,15 +1295,15 @@ h2 {
     gap: 24px;
   }
   .hero-object {
-    padding: 90px 0 0;
+    padding: 180px 0 0;
     margin-top: 35px;
   }
   .hero-fragment {
     max-width: 570px;
   }
   .terrain {
-    right: -170px;
-    top: -190px;
+    right: -40px;
+    top: -150px;
   }
   .hero-bottom {
     margin-top: 60px;
@@ -1179,6 +1312,7 @@ h2 {
 @media (max-width: 700px) {
   :root {
     --gutter: 20px;
+    --rail-offset: 10px;
     --columns: 4;
     --gap: 16px;
   }
@@ -1266,18 +1400,22 @@ h2 {
     margin-top: 16px;
   }
   .hero-object {
-    padding: 72px 0 0;
-    margin-top: 22px;
+    padding: 168px 0 0;
+    margin-top: 32px;
   }
   .terrain {
     width: 650px;
     height: 434px;
-    top: -76px;
-    right: -110px;
-    opacity: 0.7;
+    top: -65px;
+    right: -55px;
+    opacity: 1;
   }
   .hero-object::after {
     inset: -90px -20px 0;
+  }
+  .hero-object::before {
+    inset: -80px -20px 0;
+    opacity: 0.7;
   }
   .chunk-detail {
     width: 96px;
@@ -1342,7 +1480,7 @@ h2 {
   .story-reversed .story-copy {
     margin-left: 0;
   }
-  .structural-grid::before {
+  .structural-grid::after {
     border-inline-color: rgba(243, 240, 230, 0.035);
   }
   .staging-section {
@@ -1518,7 +1656,9 @@ h2 {
 }
 @media (forced-colors: active) {
   .structural-grid::before,
+  .structural-grid::after,
   .terrain,
+  .hero-object::before,
   .chunk-detail,
   .rest-symbol {
     display: none;

@@ -20,6 +20,9 @@ The homepage reuses feature components consumed by the installed panel. It
 shows small server-control, Studio and update-batch examples rather than an
 entire application shell. Each example has independent, labelled sample data
 and in-memory actions; reset and reload restore the fixture.
+Studio's compact tabs connect a sample catalog, the shared mod table and an
+export preview. Dependency additions are illustrative fixtures, and the preview
+does not download or claim to resolve a working pack.
 
 The dedicated Svelte build must not import application API clients, stores,
 SvelteKit route modules or Monaco. Production wrappers continue to own auth,

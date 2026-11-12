@@ -2,7 +2,7 @@
 # Website and pinned documentation
 
 The Pages deployment contains the marketing homepage at `/` and
-Starlight documentation at `/docs/`, and the standalone shared
+Starlight documentation at `/docs/`, and the shared
 design system at `/design-system/`. Only
 `.github/workflows/landing.yml` publishes Pages. The docs workflow validates the
 combined site on pull requests; it cannot replace the homepage.
@@ -42,6 +42,10 @@ landing QA pages. The link check validates local page and asset paths, including
 the API iframe, schema and design-system assets, under the deployment base.
 The design-system page and tokens come from the current branch, independently
 of the application documentation pin. Its source remains usable from a checkout.
+Its website header, breadcrumb, local fonts and return links connect it to the
+homepage and docs. The builder rebases checkout-relative asset and navigation
+links for publication, including installations under a subpath. The homepage
+introduces it in the design section; docs also link to it in the sidebar.
 
 For a local preview rooted at the server's root:
 
@@ -68,6 +72,10 @@ batch. Each island has independent sample state and a reset. It cannot import
 application API clients, stores, SvelteKit routes or Monaco; the Vite build
 enforces this boundary. Browser actions simulate changes in memory and never
 connect to a server or mod provider.
+The Studio island uses Carbon tabs, search, tiles and buttons around its shared
+mod table. Its sample catalog demonstrates adding a required dependency and
+curating a pack; the export view reflects side and pin choices without creating
+an archive or claiming current provider compatibility.
 
 The builder prerenders the real components into declarative shadow roots,
 which isolate the panel's tokens and utilities from the marketing CSS. It
