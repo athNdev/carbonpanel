@@ -10,7 +10,8 @@ updates. Proto generation uses Buf 1.50.0 and the pinned remote plugins in
 and formatting before replacing generated output; `make proto-clean` is the
 separately named removal operation. For native Windows or Linux with Buf 1.50.0
 on PATH, `bun scripts/proto-generate.mjs --check` compares regenerated Go and
-TypeScript with the checkout without modifying them. `BUF` and `BUF_VERSION`
+TypeScript with the checkout without modifying them; omit `--check` to install
+the staged outputs. `BUF` and `BUF_VERSION`
 select an explicit local executable and expected version; `BUF_IMAGE` selects
 an explicit Docker image for Make. Review compatibility and regenerate after any
 intentional tool or remote-plugin update. OpenAPI schemas are generated build
