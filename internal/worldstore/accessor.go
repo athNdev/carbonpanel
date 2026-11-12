@@ -35,7 +35,7 @@ func BackupToAccessor(acc nodestorage.Accessor, destPath string, skip func(rel s
 	if acc == nil {
 		return "", fmt.Errorf("%w: accessor is required", nodestorage.ErrUnavailable)
 	}
-	entries, err := listAccessor(acc)
+	entries, err := listAccessor(acc, skip)
 	if err != nil {
 		return "", err
 	}
@@ -59,12 +59,6 @@ func BackupToAccessor(acc nodestorage.Accessor, destPath string, skip func(rel s
 		return "", err
 	}
 	for _, e := range entries {
-		if skip != nil && skip(e.Path) {
-			continue
-		}
-		if skipRestoreRel(e.Path) {
-			continue
-		}
 		data, err := acc.ReadFile(e.Path)
 		if err != nil {
 			return failed(err)
@@ -195,7 +189,9 @@ func (sx *zipArchive) extractAccessor(acc nodestorage.Accessor, stage string) er
 	return nil
 }
 
-func listAccessor(acc nodestorage.Accessor) ([]Entry, error) {
+// listAccessor gathers metadata only. Excluded paths are never statted or read;
+// file contents and checksums are collected once when the archive is written.
+func listAccessor(acc nodestorage.Accessor, skip func(string) bool) ([]Entry, error) {
 	var entries []Entry
 	var walk func(rel string) error
 	walk = func(rel string) error {
@@ -208,7 +204,7 @@ func listAccessor(acc nodestorage.Accessor) ([]Entry, error) {
 			if rel != "." && rel != "" {
 				child = path.Join(rel, d.Name())
 			}
-			if skipRestoreRel(child) {
+			if skipRestoreRel(child) || (skip != nil && skip(child)) {
 				continue
 			}
 			info, err := acc.Stat(child)
@@ -224,15 +220,10 @@ func listAccessor(acc nodestorage.Accessor) ([]Entry, error) {
 			if !info.Mode().IsRegular() {
 				return fmt.Errorf("%w: non-regular file: %s", ErrPath, child)
 			}
-			data, err := acc.ReadFile(child)
-			if err != nil {
-				return err
-			}
-			if int64(len(data)) > streamMaxFileBytes {
+			if info.Size() > streamMaxFileBytes {
 				return fmt.Errorf("worldstore: file too large: %s", child)
 			}
-			sum := sha256.Sum256(data)
-			entries = append(entries, Entry{Path: child, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])})
+			entries = append(entries, Entry{Path: child, Size: info.Size()})
 			if len(entries) > streamMaxEntries {
 				return errors.New("worldstore: too many files")
 			}

@@ -39,6 +39,15 @@ Production wiring: set `storage.worker_image` to an image that ships
 `/usr/local/bin/carbon-storage` (the panel image build includes it). The panel
 registers `docker.StorageTransport` on startup.
 
+The subprocess adapter uses inherited OS pipes: the parent closes its copies
+of the child ends after startup and retains the session ends until shutdown.
+Its roundtrip test must assert that transport was selected, rather than
+pre-creating a controller-visible root and inadvertently testing shared storage.
+
+Accessor backups enumerate metadata and apply exclusions before reading file
+contents. Each retained file is read once while writing its archive entry and
+checksum; excluded temporary files cannot fail a backup through content reads.
+
 # Fail-closed
 
 With no transport configured, transport-only nodes keep `ErrUnavailable`. Remote

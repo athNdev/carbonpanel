@@ -8,7 +8,6 @@ package nodestorage
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,8 +86,16 @@ func (p *ProcessTransport) Open(ctx context.Context, node NodeInfo, dataRoot str
 }
 
 func startProcessWorker(ctx context.Context, bin, dataRoot string) (*storageworker.Session, error) {
-	pr, pw := io.Pipe()
-	cr, cw := io.Pipe()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	cr, cw, err := os.Pipe()
+	if err != nil {
+		_ = pr.Close()
+		_ = pw.Close()
+		return nil, err
+	}
 	cmd := exec.CommandContext(ctx, bin, "--mode=accessor", "--root", dataRoot)
 	cmd.Stdin = pr
 	cmd.Stdout = cw
@@ -100,22 +107,32 @@ func startProcessWorker(ctx context.Context, bin, dataRoot string) (*storagework
 		_ = cw.Close()
 		return nil, err
 	}
+	// These are the child's descriptors. os/exec has inherited them, so only
+	// the parent's copies close here; unlike io.Pipe, this does not close the
+	// child's stdout stream before it can send the handshake.
+	_ = pr.Close()
 	_ = cw.Close()
+	var closeOnce sync.Once
+	var waitErr error
+	ready := false
 	closeF := func() error {
-		_ = pw.Close()
-		_ = pr.Close()
-		waitErr := cmd.Wait()
-		_ = cr.Close()
+		closeOnce.Do(func() {
+			// A malformed/refused handshake is not a usable session. Terminate
+			// that owned child rather than waiting for it to honour stdin EOF.
+			if !ready {
+				_ = cmd.Process.Kill()
+			}
+			_ = pw.Close()
+			waitErr = cmd.Wait()
+			_ = cr.Close()
+		})
 		return waitErr
 	}
 	sess, err := storageworker.NewSession(pw, cr, closeF)
 	if err != nil {
-		_ = pw.Close()
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		_ = pr.Close()
-		_ = cr.Close()
+		_ = closeF()
 		return nil, err
 	}
+	ready = true
 	return sess, nil
 }
