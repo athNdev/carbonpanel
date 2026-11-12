@@ -27,6 +27,10 @@ sources:
 
 - A release note must describe shipped behavior, not planned behavior.
 - Do not publish an image that was built from a dirty or unverified tree.
+- The controller image is published to Docker Hub as
+  `atharvnaphade/carbon-panel`. CD's permission probe, image tags, tagged release
+  metadata and the local publishing script must agree on that destination.
+  The GitHub owner name is not a Docker Hub namespace mapping.
 - If a check cannot run, say so; do not describe it as passed.
 - Changes to module image inputs also run the build-only `build-inputs.yml`
   workflow for Geyser and status on Linux amd64/arm64. PR checks do not log in
