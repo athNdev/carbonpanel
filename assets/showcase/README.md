@@ -2,9 +2,12 @@
 
 # Current application captures
 
-Captured on 12 November 2026 from application sources at
-`a30c385bbb560454d1ed31f350209f5a5c40655e`, compiled into a production Docker image.
-No application source changed during this capture pass.
+Captured on 12 November 2026. The dashboard, Studio, console and modpack catalog
+use application sources at `a30c385bbb560454d1ed31f350209f5a5c40655e`, compiled into
+a production Docker image. The staging image was refreshed from the production
+frontend built at `cf3725d0dffff06a2de62b14c90ff1356515bab9`, served through Vite
+preview against the same isolated backend installation. It shows the current
+shared inventory rather than the earlier select-and-list layout.
 
 These are unretouched browser crops of an isolated installation, not mockups or
 the homepage's sample islands. The installation contains a real running Vanilla
@@ -22,7 +25,7 @@ are not replaced with invented readings.
 | `showcase-modpacks.png`      | The live Modrinth catalog as displayed by the review installation.                       |
 
 The standard viewport is 1440 × 1000 at 2× device scale. The staged-batch crop
-uses the actual responsive UI at 1100 × 1000, also at 2×. Crops remove navigation
+uses the actual responsive UI at 1100 × 1200, also at 2×. Crops remove navigation
 and unrelated fields to keep features readable at README width. No UI elements,
 labels, metrics or logs are repainted. Both this directory and
 `landing/assets/showcase/` carry identical PNGs.
@@ -51,9 +54,11 @@ cp /tmp/showcase/showcase-*.png landing/assets/showcase/
 For a manual capture, use the same real routes and controls through a browser.
 In Configuration → Game Settings, enable a custom View Distance, enter `12`,
 and choose **Stage**. Keep **On next restart** selected. Use keyboard focus to
-bring the batch controls into view, then crop the complete batch, including its
-apply window, staged item, discard actions and explanatory text. Do not apply
-the batch merely to obtain an image.
+bring the batch controls into view. Use a viewport tall enough for the whole
+inventory to fit inside the form pane, then crop the complete batch, including
+its apply window, staged item, discard actions and explanatory text. Keep the
+native safety disclosure collapsed. Do not apply the batch merely to obtain
+an image.
 
 Inspect exports at README display size before replacing files. Record the new
 application revision and date here, update both PNG directories together, and
