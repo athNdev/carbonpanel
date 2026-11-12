@@ -3,8 +3,11 @@
 
 # Persistent local data and generated configuration; never delete these here.
 data/
+Data/
 backups/
+Backups/
 worlds/
+Worlds/
 /servers/
 sandbox/
 *.db
@@ -39,6 +42,12 @@ config.yaml
 .zed/settings.local.json
 .claude/
 .direnv/
+.vs/
+.idea/
+.history/
+*.suo
+*.user
+*.rsuser
 .vscode/*
 !.vscode/tasks.json
 !.vscode/launch.json

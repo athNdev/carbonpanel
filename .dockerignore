@@ -34,6 +34,18 @@
 **/.direnv
 .vscode
 **/.vscode
+.vs
+**/.vs
+.idea
+**/.idea
+.history
+**/.history
+*.suo
+**/*.suo
+*.user
+**/*.user
+*.rsuser
+**/*.rsuser
 .worktrees
 **/.worktrees
 worktrees
@@ -62,10 +74,16 @@ config.yaml
 # Persisted runtime data and disposable outputs are not build inputs.
 data
 **/data
+Data
+**/Data
 backups
 **/backups
+Backups
+**/Backups
 worlds
 **/worlds
+Worlds
+**/Worlds
 /servers
 sandbox
 **/sandbox

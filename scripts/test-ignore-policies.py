@@ -13,11 +13,13 @@ import tempfile
 ROOT = Path(__file__).resolve().parent.parent
 
 EXCLUDED = (
-    "data/world/level.dat", "backups/server.zip", "worlds/world/level.dat", "servers/server/level.dat",
+    "data/world/level.dat", "nested/Data/world.dat", "backups/server.zip", "Backups/server.zip",
+    "worlds/world/level.dat", "Worlds/world/level.dat", "servers/server/level.dat",
     ".env", ".env.local", "private.env", "secrets/token.key", "secrets/tls.pem",
     "secrets/client.p12", "secrets/client.pfx", "nested/.mcp.json",
     ".mcp.local.json", ".cline/mcp.json", "nested/.cline/mcp.json", ".cursor/mcp.json", "nested/.cursor/mcp.json",
-    ".zed/mcp.json", ".zed/settings.local.json", ".claude/config.json", "nested/.claude/config.json", "config.yaml", "panel.db",
+    ".zed/mcp.json", ".zed/settings.local.json", ".claude/config.json", "nested/.claude/config.json",
+    ".vs/settings", "nested/.idea/workspace.xml", "developer.suo", "config.yaml", "panel.db",
     "panel.db-wal", "nested/cache.sqlite3", "nested/cache.sqlite3-wal", ".worktrees/other/source.go",
     "worktrees/other/source.go", "nested/.worktrees/other/source.go", "tmp/compiler.exe", "nested/node_modules/lib.js",
     "nested/.terraform/provider", "nested/.cache/local", "artifacts/build-output.bin", "local-worker.exe",
