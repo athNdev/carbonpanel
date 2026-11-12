@@ -9,6 +9,7 @@ code_refs:
   - Makefile
   - CHANGELOG.md
   - scripts/release.py
+  - scripts/go_mod_download.py
   - internal/buildinfo
   - docker/Dockerfile.release
   - docker/Dockerfile.carbon-panel
@@ -61,6 +62,16 @@ for exact artifact names, native runner targets and checksum verification.
   `latest` and the matching minor tag; prereleases do not change either.
   Main CD publishes development `edge` and commit tags. It does not handle tag
   pushes, so one version cannot launch two competing image publishers.
+- Versioned releases also publish the same image to GitHub's container registry,
+  under the lowercased GitHub repository name. The source label links the package
+  to the repository; its first publication needs public visibility set in Package
+  settings. Both registries' architectures are verified before release publication.
+- CD serialization belongs to its gated publishing job, never the outer workflow.
+  Skipped PR and failed-CI events must not cancel an active publish. Image commit
+  tags and revision labels identify the tested checkout, not a later branch tip.
+- Dependency fetches retry transport failures before race checks and native
+  release builds. Retries are bounded; tests and race failures are never retried
+  or reclassified as a successful check.
 - If a check cannot run, say so; do not describe it as passed.
 - Changes to module image inputs also run the build-only `build-inputs.yml`
   workflow for Geyser and status on Linux amd64/arm64. PR checks do not log in

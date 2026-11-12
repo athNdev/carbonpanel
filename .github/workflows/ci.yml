@@ -20,6 +20,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-tools:
+    name: Release tooling contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m unittest scripts.test_release scripts.test_go_mod_download
+
   test-backend:
     name: Backend Test Suite
     runs-on: ubuntu-latest
@@ -189,6 +196,10 @@ jobs:
 
       - name: Ensure embedded web build directory exists
         run: mkdir -p web/carbon-panel/build && touch web/carbon-panel/build/.gitkeep
+
+      - name: Fetch dependencies with bounded transport retries
+        timeout-minutes: 10
+        run: python3 scripts/go_mod_download.py
 
       - name: Run race detector
         run: go test -race -count=1 ./internal/rpc/... ./internal/reconciler/ ./internal/scheduler/ ./internal/docker/ ./internal/activity/ ./internal/metrics/ ./internal/proxy/ ./internal/db/ ./internal/ws/ ./internal/s3/ ./internal/snapshot/ ./internal/module/

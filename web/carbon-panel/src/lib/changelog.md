@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [3.0.0-beta.5] - 2026-11-13
+## [3.0.0-alpha.1] - 2026-11-13
 
 ### Added
 
@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Versioned containers are mirrored to the repository-linked GitHub package. Skipped PR checks cannot interrupt CD, and dependency transport failures retry before tests run.
 - Release publication validates exact-commit main CI and the complete native bundle/image set before publishing a GitHub release. Tagged images use the tested Linux downloads; main development images use `edge`, while stable releases own `latest`.
 - Controller image builds compile the web UI natively and cross-compile pure-Go binaries, avoiding compiler work under ARM emulation.
 - Design-system page documents all nineteen exported Carbon components with prop tables and behaviour notes, full light and dark token tables, and composition rules. A regression test now asserts every `carbon/index.ts` export has a documented section.

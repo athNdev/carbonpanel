@@ -14,8 +14,19 @@ from scripts import release
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_cd_concurrency_belongs_to_the_gated_publish_job(self):
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"(?m)^concurrency:")
+        self.assertRegex(source, r"(?m)^    concurrency:\n      group:")
+        self.assertIn("github.event.workflow_run.event == 'push'", source)
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", source)
+
+    def test_github_package_namespace_matches_the_repository(self):
+        self.assertEqual(release.github_image("v3.0.0-alpha.1", "Owner/Fork"),
+                         "ghcr.io/owner/fork:3.0.0-alpha.1")
+
     def test_version_accepts_stable_and_prerelease_tags_but_not_shell_or_path_input(self):
-        for tag in ("v3.0.0", "v3.0.0-beta.5", "v3.0.0-rc.1", "v2.1.15"):
+        for tag in ("v3.0.0", "v3.0.0-alpha.1", "v3.0.0-beta.5", "v3.0.0-rc.1", "v2.1.15"):
             self.assertEqual(release.version(tag), tag)
         for tag in ("main", "3.0.0", "v03.0.0", "v3.0.0-beta.05", "v3.0.0\n",
                     "v3.0.0/../../main", "v3.0.0;echo", "v3.0.0-", "v3.٠.0"):

@@ -1,14 +1,14 @@
 # Releases and versioning
 
 Carbon Panel uses Semantic Versioning with a `v` prefix: `vMAJOR.MINOR.PATCH`.
-The current 3.0 line is a prerelease series (`v3.0.0-beta.4`,
-`v3.0.0-beta.5`, then further betas or release candidates). Publishing a beta
-does not mark it as a stable release.
+Current builds are alpha prereleases, starting with `v3.0.0-alpha.1`.
+Earlier beta tags are retained as historical versions. Alpha releases are for
+early testing and are not promoted to stable releases for visibility.
 
 - **Patch:** compatible fixes and maintenance.
 - **Minor:** compatible new features.
 - **Major:** incompatible operator or API changes that require migration.
-- **Prerelease:** append `-beta.N` or `-rc.N`; increment N for each published build.
+- **Prerelease:** append `-alpha.N`, `-beta.N` or `-rc.N`; increment N for each published build.
 
 A tag identifies one source commit. Published releases and their assets are not
 overwritten. Correct a bad release with a new version. The tag is the release
@@ -22,11 +22,11 @@ The five targets are Linux amd64/arm64, macOS Intel/Apple Silicon, and Windows
 amd64. For example:
 
 ```text
-carbon-panel_v3.0.0-beta.5_linux_amd64.tar.gz
-carbon-panel_v3.0.0-beta.5_linux_arm64.tar.gz
-carbon-panel_v3.0.0-beta.5_darwin_amd64.tar.gz
-carbon-panel_v3.0.0-beta.5_darwin_arm64.tar.gz
-carbon-panel_v3.0.0-beta.5_windows_amd64.zip
+carbon-panel_v3.0.0-alpha.1_linux_amd64.tar.gz
+carbon-panel_v3.0.0-alpha.1_linux_arm64.tar.gz
+carbon-panel_v3.0.0-alpha.1_darwin_amd64.tar.gz
+carbon-panel_v3.0.0-alpha.1_darwin_arm64.tar.gz
+carbon-panel_v3.0.0-alpha.1_windows_amd64.zip
 ```
 
 Every archive contains `carbon-panel`, `carbon-storage` (with `.exe` on
@@ -47,12 +47,12 @@ Download `checksums.txt` beside the archive and verify before extracting:
 # Linux; verifies whichever listed files you downloaded.
 sha256sum --check --ignore-missing checksums.txt
 # macOS: compare this output with the matching line in checksums.txt.
-shasum -a 256 carbon-panel_v3.0.0-beta.5_darwin_arm64.tar.gz
+shasum -a 256 carbon-panel_v3.0.0-alpha.1_darwin_arm64.tar.gz
 ```
 
 ```powershell
 # Windows: compare this hash with the matching line in checksums.txt.
-Get-FileHash .\carbon-panel_v3.0.0-beta.5_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\carbon-panel_v3.0.0-alpha.1_windows_amd64.zip -Algorithm SHA256
 ```
 
 Checksums detect changed downloads; they are not a code-signing certificate.
@@ -63,19 +63,33 @@ overwriting the existing configuration. See the
 
 ## Container channels
 
-The controller repository is `atharvnaphade/carbon-panel` on Docker Hub.
+Release images are published to both `atharvnaphade/carbon-panel` on Docker Hub
+and `ghcr.io/athndev/carbonpanel` in GitHub Packages. Both references use the
+same multi-architecture image digest and tested Linux downloads. The manifest
+records both references. Development `edge` images remain on Docker Hub.
 
 | Tag | Meaning |
 | --- | --- |
-| `3.0.0-beta.5` | The exact prerelease, built from its tested Linux downloads |
+| `3.0.0-alpha.1` | The exact prerelease, built from its tested Linux downloads |
 | `3.0.0`, `3.0` | An exact stable release and its moving minor-release channel |
 | `latest` | Stable releases only under this release workflow |
 | `edge`, `sha-…` | Development builds from CI-verified main commits |
 
-Betas never move `latest` or the stable minor tag. Main builds move `edge`.
+Prereleases never move `latest` or the stable minor tag. Main builds move `edge`.
 An older `latest` image may predate this channel policy; pin an explicit
 version for upgrades. The image digest in the release manifest is the immutable
 reference for that release. Module images have their own publishing workflow.
+
+The GitHub container package links to the source repository, so it appears in
+the repository's Packages sidebar. On first publication, GitHub defaults the
+package to private; an owner must make it public in Package settings. Later
+versions retain the package's visibility. This does not change repository
+permissions or require a saved package token: publishing uses the workflow's
+short-lived `GITHUB_TOKEN` with package-write permission.
+
+GitHub omits prereleases from the repository homepage's latest-release card.
+Alpha downloads are available on the Releases page and through the README's
+Releases link; they remain correctly marked as prereleases.
 
 ## Maintainer workflow
 
@@ -102,7 +116,7 @@ database with release settings. Archive ordering, ownership and timestamps are
 normalized; the commit timestamp supplies `SOURCE_DATE_EPOCH` and the embedded
 build date. Cross-OS archives are assembled into a complete set before any
 GitHub release is public. The image contains the exact tested Linux binaries;
-both architectures must be retrievable from Docker Hub before publication.
+both architectures must be retrievable from both registries before publication.
 
 Only after all of those steps pass does the workflow create or resume a draft,
 upload and verify its complete local asset set, and publish it with generated

@@ -25,10 +25,6 @@ on:
         type: boolean
         default: true
 
-concurrency:
-  group: cd-${{ github.event_name == 'workflow_run' && 'refs/heads/main' || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build-and-push:
     name: Build & Push Docker Hub Image
@@ -37,6 +33,11 @@ jobs:
     # runs for a push-triggered CI run (i.e. main) that succeeded - PR CI runs
     # and failed runs never publish.
     if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success') }}
+    # Job-level concurrency is applied only after this job's if condition.
+    # Skipped PR/failed-CI workflow_run events cannot cancel a real publication.
+    concurrency:
+      group: cd-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - name: Checkout code
@@ -146,11 +147,12 @@ jobs:
           tags: |
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
-            type=sha,format=short,prefix=sha-
+            type=raw,value=sha-${{ github.event.workflow_run.head_sha || github.sha }}
           labels: |
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.description=A modern Minecraft server and modpack management panel
             org.opencontainers.image.source=https://github.com/athNdev/carbonpanel
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
           flavor: |
             latest=false
 
