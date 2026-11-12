@@ -6,5 +6,5 @@ package main
 import "errors"
 
 func run([]string) (int, error) {
-	return 1, errors.New("Windows supervisor invoked on another operating system; use the canonical development launcher")
+	return 1, errors.New("windows supervisor invoked on another operating system; use the canonical development launcher")
 }

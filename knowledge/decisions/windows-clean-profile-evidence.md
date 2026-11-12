@@ -24,6 +24,11 @@ profile, enabled effective firewall policy and an independently observed public
 listener control. The child supplies its token facts; the administrator observer
 supplies read-only machine-policy and event facts with explicit provenance.
 
+Event 2097 alone is a generic rule event. Query User evidence requires the
+native TCP/UDP Query User rule identifier and an owned `ApplicationPath`.
+Record the rule identifier, action and application path for review; numeric
+action values and `ModifyingApplication` do not classify consent events.
+
 # Alternatives
 
 A passing inherited runner-administrator session cannot establish ordinary-user

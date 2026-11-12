@@ -200,12 +200,30 @@ namespace Carbon.WindowsQualification {
     @($full, (($target.ToString() -split [char]0)[0] + $full.Substring(2)))
 }
 
-function Get-FirewallApplicationPath {
+function ConvertTo-FirewallQueryUserRecord {
     param([object]$Event)
     [xml]$xml = $Event.ToXml()
-    $paths = $xml.SelectNodes("/*[local-name()='Event']/*[local-name()='EventData']/*[local-name()='Data' and @Name='ApplicationPath']")
-    if ($paths.Count -eq 1) { return [string]$paths[0].InnerText }
-    ''
+    $readField = {
+        param([string]$Name)
+        $fields = $xml.SelectNodes("/*[local-name()='Event']/*[local-name()='EventData']/*[local-name()='Data' and @Name='$Name']")
+        if ($fields.Count -eq 1) { return [string]$fields[0].InnerText }
+        ''
+    }
+    $ruleId = & $readField 'RuleId'
+    if ([string]::IsNullOrWhiteSpace($ruleId)) { throw 'Firewall rule event has no unique nonempty RuleId; observation is incomplete.' }
+    # Event 2097 is a generic rule-add event. Query User is identified by the
+    # native rule identifier, not EventId alone or a numeric Action value.
+    $queryId = '^(?:TCP|UDP) Query User\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}'
+    if ($ruleId -notmatch $queryId) {
+        if ($ruleId -match 'Query[\s_-]*User') { throw 'Firewall Query User identifier has an unsupported format; observation is incomplete.' }
+        return
+    }
+    $application = & $readField 'ApplicationPath'
+    $action = & $readField 'Action'
+    if ([string]::IsNullOrWhiteSpace($application) -or [string]::IsNullOrWhiteSpace($action)) {
+        throw 'Firewall Query User event lacks unique application/action metadata; observation is incomplete.'
+    }
+    [pscustomobject]@{ RecordId = [long]$Event.RecordId; RuleId = $ruleId; Action = $action; ApplicationPath = $application }
 }
 
 function Get-AttributedQueries {
@@ -216,11 +234,13 @@ function Get-AttributedQueries {
     } catch {
         if ($_.FullyQualifiedErrorId -notmatch '^NoMatchingEventsFound') { throw }
     }
-    @($events | Where-Object {
-        $application = Get-FirewallApplicationPath $_
-        $application.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase) -and
+    @(foreach ($event in $events) {
+        $record = ConvertTo-FirewallQueryUserRecord $event
+        if ($null -eq $record) { continue }
+        $application = $record.ApplicationPath
+        if ($application.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase) -and
             (Test-ProgramPathMatch $application $Aliases -Descendants:$Descendants) -and
-            -not (Test-ProgramPathMatch $application $ExcludeAliases)
+            -not (Test-ProgramPathMatch $application $ExcludeAliases)) { $record }
     })
 }
 
@@ -322,7 +342,7 @@ try {
         if ($controlQueries.Count) { break }
         Start-Sleep -Seconds 1
     }
-    $control = [pscustomobject]@{ ExitCode = $controlExit; QueryUserEventCount = $controlQueries.Count; RecordIds = @($controlQueries | ForEach-Object RecordId) }
+    $control = [pscustomobject]@{ ExitCode = $controlExit; QueryUserEventCount = $controlQueries.Count; RecordIds = @($controlQueries | ForEach-Object RecordId); Records = @($controlQueries) }
     Write-QualificationJson $control (Join-Path $artifacts 'positive-control.json')
     if (Test-Path -LiteralPath (Join-Path $work 'token-control.json')) {
         Copy-Item -LiteralPath (Join-Path $work 'token-control.json') -Destination (Join-Path $artifacts 'control-user-token.json')
@@ -367,6 +387,7 @@ try {
         AfterRecordId = [long]$afterTests.FirewallLog.LatestRecordId
         OldestRecordId = [long]$afterTests.FirewallLog.OldestRecordId
         QueryUserEventCount = $queries.Count
+        QueryUserRecords = @($queries)
         ExpectedUserSid = $standardUser.SID.Value; ProfileWasAbsent = $profileWasAbsent
         PositiveControlDetected = $controlExit -eq 0 -and $controlQueries.Count -gt 0
     }

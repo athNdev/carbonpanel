@@ -49,3 +49,6 @@ Windows and Linux when changing supervision or process ownership. The fixture
 uses a native process so runtime-specific JavaScript child cleanup cannot hide
 an orphaned descendant. Windows also covers abrupt owner/helper death and
 stdin/stdout inheritance, plus real hidden-terminal input, output and Ctrl+C.
+Cold native Go setup has an explicit three-minute runner allowance, including
+Bun's hook timeout behavior. Already-prepared service readiness remains bounded
+at five seconds; setup time must not be mistaken for a service ownership failure.

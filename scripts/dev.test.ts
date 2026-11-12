@@ -20,6 +20,14 @@ import { supervise, type Command } from './dev-processes.ts';
 import { pathToFileURL } from 'node:url';
 import { rm } from 'node:fs/promises';
 
+// Bun's node:test adapter ignores hook timeout options. Configure its supported
+// runner API so a cold Go build can complete under the ordinary documented
+// command; Node keeps its hook timeout below and never imports bun:test.
+if (process.versions.bun) {
+	const { setDefaultTimeout } = await import('bun:test');
+	setDefaultTimeout(180000);
+}
+
 const directories: string[] = [];
 // Prepare the checked-in native tool before measuring service readiness. A cold
 // Go compiler is setup work, and can legitimately take longer than a service's
