@@ -121,9 +121,14 @@ card share `landing/assets/og.png`.
 
 The documentation home, introduction, Docker Compose, API reference and the
 design system have dedicated cards in `landing/assets/og-*.png`. Regenerate
-them with `python3 scripts/generate_social_cards.py`; the script renders the
-shared layout with the vendored Inter and JetBrains Mono faces and needs a
-Chromium-family browser. Advance a card's `?v=` query when its artwork changes.
+them with `python3 scripts/generate_social_cards.py`; the script renders
+`assets/branding/social-preview.html` with the website's approved terrain,
+logo and vendored IBM Plex fonts. It needs a Chromium-family browser, or use
+`--html-only --html-dir .website-build/social-cards` to prepare standalone HTML
+for browser captures. Advance each card's `?v=` query when its artwork changes.
+The same template renders a 1280 by 640 repository card at
+`assets/branding/social-preview.png`. Upload that PNG in GitHub's repository
+Settings → Social preview; committing it alone does not change that setting.
 `scripts/check_website.py` fails when a page is missing metadata, points at a
 relative or missing image, or lets a prominent route fall back to the shared
 card. Keep preview titles, descriptions and alt text free of em dashes.

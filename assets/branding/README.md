@@ -6,17 +6,19 @@ Minecraft world; the wordmark gives the project a practical, technical tone.
 
 ## Files
 
-| Asset                                            | Use                                                                                |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| `mark-dark.svg`, `mark-light.svg`                | Symbol alone; scalable, transparent SVG.                                           |
-| `wordmark-dark.svg`, `wordmark-light.svg`        | Lettering alone; scalable, transparent SVG.                                        |
-| `horizontal-dark.svg`, `horizontal-light.svg`    | Symbol and wordmark side by side.                                                  |
-| `stacked-dark.svg`, `stacked-light.svg`          | Compact symbol and two-line wordmark.                                              |
-| `sizes/horizontal-{24,40,64}px-{dark,light}.svg` | Horizontal lockups adjusted for 24, 40, and 64 px symbol heights.                  |
-| `sizes/horizontal-{24,40,64}px-{dark,light}.png` | Transparent 1x raster exports of those lockups.                                    |
-| `sizes/mark-{24,40,64}px-{dark,light}.png`       | Transparent, square symbol-only raster exports.                                    |
-| `approved-logo.vectorcraft`                      | Editable VectorCraft source and the approved comparison sheet.                     |
-| `social-preview.vectorcraft`                     | Editable 1200 by 630 social card with the approved identity and feature messaging. |
+| Asset                                            | Use                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------- |
+| `mark-dark.svg`, `mark-light.svg`                | Symbol alone; scalable, transparent SVG.                                  |
+| `wordmark-dark.svg`, `wordmark-light.svg`        | Lettering alone; scalable, transparent SVG.                               |
+| `horizontal-dark.svg`, `horizontal-light.svg`    | Symbol and wordmark side by side.                                         |
+| `stacked-dark.svg`, `stacked-light.svg`          | Compact symbol and two-line wordmark.                                     |
+| `sizes/horizontal-{24,40,64}px-{dark,light}.svg` | Horizontal lockups adjusted for 24, 40, and 64 px symbol heights.         |
+| `sizes/horizontal-{24,40,64}px-{dark,light}.png` | Transparent 1x raster exports of those lockups.                           |
+| `sizes/mark-{24,40,64}px-{dark,light}.png`       | Transparent, square symbol-only raster exports.                           |
+| `approved-logo.vectorcraft`                      | Editable VectorCraft source and the approved comparison sheet.            |
+| `social-preview.html`                            | Current social-card template using approved terrain, logo and Plex fonts. |
+| `social-preview.png`                             | 1280 by 640 repository social image, ready to upload to GitHub.           |
+| `social-preview.vectorcraft`                     | Preserved source for the earlier vector social card.                      |
 
 `dark` means dark artwork for a light background (`#202427`); `light` means
 light artwork for a dark background (`#f4f4f4`). All SVG text has been
@@ -55,11 +57,12 @@ copies of the approved artwork; update those copies when the master changes.
 `assets/readme/hero.png` is the root README banner, rendered from the portable
 HTML source beside it using the website's terrain, fonts and approved lockup.
 See [README artwork](../readme/README.md) for regeneration. The older
-`assets/banner.svg` remains available at its existing path. `landing/assets/og.svg` and
-`landing/assets/og.png` are the shared social-card exports. Open `social-preview.vectorcraft` in VectorCraft to edit the card;
-export its first artboard as SVG with text outlined and PNG at 1x (1200 by 630).
-The editable card uses Inter for its feature captions; the exported SVG contains
-paths and needs no installed fonts.
+`assets/banner.svg` remains available at its existing path. The current shared
+website card is `landing/assets/og.png`; `social-preview.png` is its repository
+variant. Both use `social-preview.html` through the generator below. The
+terrain's provenance is recorded in [homepage artwork](../../docs/homepage-artwork.md).
+`social-preview.vectorcraft` and `landing/assets/og.svg` preserve the earlier
+vector design; they are not the current PNG's editable source.
 
 `landing/assets/og.png` is the shared card: the homepage, the documentation home
 when no dedicated card exists, and every docs page without its own card use its
@@ -67,7 +70,7 @@ versioned URL in their Open Graph and Twitter metadata. Advance the query
 version when replacing the artwork.
 
 Prominent pages carry dedicated cards drawn from the same layout and the
-vendored Inter and JetBrains Mono faces. Regenerate them with
+vendored IBM Plex Sans and Mono faces. Regenerate all website and repository cards with
 `python3 scripts/generate_social_cards.py` (requires a Chromium-family browser):
 
 | Card                    | Page                                           |
@@ -78,9 +81,14 @@ vendored Inter and JetBrains Mono faces. Regenerate them with
 | `og-api.png`            | API reference and its generated reference page |
 | `og-design-system.png`  | Design system                                  |
 
+Use `--only og` for the website's main card or `--only github-social-preview`
+for the repository card. `--html-only --html-dir .website-build/social-cards`
+writes self-contained browser inputs without launching a renderer. Website
+PNGs are 1200 by 630; the repository PNG is 1280 by 640 and under 1 MB.
+
 Keep preview titles, descriptions and alt text free of em dashes.
 `scripts/check_website.py` fails the build if any published page is missing the
 full Open Graph and Twitter set, if its image is not an absolute 1200 by 630
 PNG under the website base, or if a prominent route falls back to the shared
-card. A repository social preview is a separate GitHub setting: upload the same
-PNG there after reviewing the export.
+card. A repository social preview is a separate GitHub setting: upload
+`assets/branding/social-preview.png` there after reviewing the export.

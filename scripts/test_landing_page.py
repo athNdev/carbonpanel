@@ -50,6 +50,13 @@ class PreviewMetadataParser(HTMLParser):
 
 
 class LandingPageTests(unittest.TestCase):
+    def test_diagonal_link_arrows_cannot_fall_back_to_emoji(self):
+        root = Path(__file__).resolve().parent.parent
+        for source in ("landing/index.html", "docs/design-system/index.html"):
+            page = (root / source).read_text(encoding="utf-8")
+            self.assertNotIn("↗", page, source)
+            self.assertIn('class="arrow-up-right"', page, source)
+
     def test_copy_target_contains_a_runnable_command_without_the_prompt(self):
         page = Path(__file__).resolve().parent.parent / "landing" / "index.html"
         parser = InstallCommandParser()

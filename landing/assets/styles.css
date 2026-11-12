@@ -287,6 +287,11 @@ h1 span {
 .text-link:hover {
   text-decoration: underline;
 }
+.arrow-up-right {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: -0.15em;
+}
 .text-link span {
   font-size: 18px;
 }

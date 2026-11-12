@@ -11,25 +11,25 @@ import Default from '@astrojs/starlight/components/Head.astro';
 
 const ORIGIN = process.env.WEBSITE_ORIGIN || 'https://carbonpanel.dev';
 const SITE_BASE = process.env.WEBSITE_BASE_PATH || '/';
-const DEFAULT_CARD = 'assets/og.png?v=20261029i';
+const DEFAULT_CARD = 'assets/og.png?v=20261113';
 const DEFAULT_ALT =
-	'Carbon Panel. Create and share modpacks, search and add datapacks, stage updates, and wake on join.';
+	'Carbon Panel. Your worlds. Yours to run. Your Minecraft servers. Fully equipped.';
 
 const PAGE_CARDS: Record<string, { file: string; alt: string }> = {
 	docs: {
-		file: 'assets/og-docs.png?v=2',
+		file: 'assets/og-docs.png?v=20261113',
 		alt: 'Carbon Panel documentation. Install, configure, and run the panel.'
 	},
 	introduction: {
-		file: 'assets/og-introduction.png?v=2',
+		file: 'assets/og-introduction.png?v=20261113',
 		alt: 'Introduction to Carbon Panel.'
 	},
 	'getting-started/docker-compose': {
-		file: 'assets/og-docker-compose.png?v=2',
+		file: 'assets/og-docker-compose.png?v=20261113',
 		alt: 'Getting started with Docker Compose for Carbon Panel.'
 	},
 	api: {
-		file: 'assets/og-api.png?v=2',
+		file: 'assets/og-api.png?v=20261113',
 		alt: 'Carbon Panel API reference generated from the protobuf definitions.'
 	}
 };

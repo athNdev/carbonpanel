@@ -392,3 +392,5 @@ footer a { text-underline-offset: 4px; }
 	*, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 	.button:active:not(:disabled) { transform: none; }
 }
+
+.arrow-up-right { display: inline-block; flex-shrink: 0; vertical-align: -0.15em; }
