@@ -192,7 +192,7 @@ def collect(args):
                 (platform / program).write_bytes(members[program])
                 (platform / program).chmod(0o755)
     shutil.copyfile(ROOT / "config.example.yaml", image / "config.example.yaml")
-    shutil.copyfile(ROOT / "web/carbon-panel/static/schemav1.yaml", output / "openapi.yaml")
+    shutil.copyfile(ROOT / ".website-build/release-schema/openapi.yaml", output / "openapi.yaml")
     (output / "release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     finalize(argparse.Namespace(output=str(output), digest=None))
 

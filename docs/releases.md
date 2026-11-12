@@ -94,7 +94,9 @@ succeeded. A `v*` tag starts the same guarded publishing pipeline. The main CD
 workflow does not also publish tags. Publication refuses invalid versions,
 unverified commits, moved tags and already-published versions.
 
-The frontend and API schema are generated once with pinned tools. Native
+The frontend and API schema are generated once with pinned tools. The checked-in
+Go and TypeScript RPC sources are the same sources verified by main CI; schema
+generation writes separately rather than replacing those licensed source files. Native
 runners build each target and exercise both binaries' version commands and the
 database with release settings. Archive ordering, ownership and timestamps are
 normalized; the commit timestamp supplies `SOURCE_DATE_EPOCH` and the embedded

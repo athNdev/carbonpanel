@@ -40,6 +40,8 @@ driver permits `CGO_ENABLED=0`. Both CLIs expose metadata through `--version`
 before configuration or data access.
 The Changelog page shows the installed UI version. Its bundled markdown stays
 byte-for-byte synchronized with the root `CHANGELOG.md`.
+Release builds use the checked-in RPC sources verified by CI. OpenAPI generation
+writes a separate build artifact and never overwrites tracked source files.
 
 The release image is assembled from the same tested Linux binaries. The full
 bundle set, hashes and both registry architectures must be ready before the
