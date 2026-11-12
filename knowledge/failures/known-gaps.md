@@ -5,7 +5,6 @@ description: Cross-cutting gaps that are not defects to rush, with the live trac
 status: stable
 owners: [oss-runtime]
 code_refs:
-  - internal/module/hooks.go
   - internal/docker/freezer.go
   - cmd/carbon-panel
   - internal/nodestorage
@@ -44,9 +43,6 @@ sources:
   ignores cgroup and storage-opt flags remains OSS-247; the panel does not
   claim kernel enforcement from `/info` flags alone.
 
-- `internal/module/hooks.go:execInModule` runs hook commands through the
-  manager's own Docker client (`m.docker.Exec`), so a module hook does not
-  follow the node its server runs on.
 - `internal/docker/freezer.go` takes a `ContainerFreezer` seam, but
   `cmd/carbon-panel` wires it to the local client unconditionally.
 - Remote nodes without a controller-side storage mount can use the

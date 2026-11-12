@@ -8,6 +8,8 @@ code_refs: [cmd, internal, pkg, proto, web, docs, docker, scripts, oidc]
 sources:
   - title: Design specification
     resource: ../../DESIGN.md
+  - title: Documentation ownership
+    resource: ../docs/README.md
 ---
 
 # Layout
@@ -34,6 +36,12 @@ under `architecture/` instead.
 Internal packages must have a runtime caller or an explicitly supported tool
 or test seam. Keep unimplemented feature requirements in Jira; an uncalled
 placeholder that returns synthetic credentials is not a provisioned capability.
+
+Documentation ownership is mapped in [docs/README.md](../docs/README.md):
+Starlight holds user guides, runbooks hold operations, ADRs hold accepted design,
+and knowledge holds concise governing concepts. Jira owns current work and
+status. Dated plans and research retain their recorded scope; handoff prompts,
+checkout ledgers and workstation configuration are not durable project context.
 
 # Read next
 

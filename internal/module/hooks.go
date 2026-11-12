@@ -16,6 +16,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/alias"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/events"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
@@ -210,7 +211,14 @@ func (m *Manager) execInModule(ctx context.Context, module *storage.Module, comm
 		return nil // Cannot exec in non-existent container
 	}
 
-	_, err := m.docker.Exec(ctx, module.ContainerID, []string{command})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	cli, err := docker.NewLocator(m.pool, m.docker, m.store).For(ctx, module.NodeID)
+	if err != nil {
+		return err
+	}
+	_, err = cli.Exec(ctx, module.ContainerID, []string{command})
 	return err
 }
 

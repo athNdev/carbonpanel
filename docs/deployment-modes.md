@@ -50,7 +50,7 @@ See `docs/runbook-panel-db-restore.md`.
 | Mode | Status |
 | --- | --- |
 | Helm | **Not shipped.** There is no chart in this repository. Do not document or test a Helm upgrade path until a chart exists. |
-| Terraform / OpenTofu | **Not shipped.** There is no Terraform root module for OSS Carbon Panel. Cloud provisioning notes in `docs/agents/` do not apply here. |
+| Terraform / OpenTofu | **Not shipped.** There is no Terraform root module for OSS Carbon Panel. Managed Cloud provisioning belongs to the separate Cloud product; see the [documentation map](README.md#cloud-product-policy). |
 | Kubernetes manifests | **Not shipped.** |
 | Windows containers | **Not supported.** A Windows controller talking to Linux Docker (Desktop/WSL) is a different mode from running the panel image as a Windows container. |
 
