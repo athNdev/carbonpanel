@@ -148,11 +148,12 @@ func TestProcessTransportCancellationAndClose(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	if role := os.Getenv("CARBONPANEL_TEST_STORAGE_WORKER"); role != "" {
-		if role == "stall" {
+		switch role {
+		case "stall":
 			fmt.Println(`{"ok":true,"root":"test"}`)
-		} else if role == "refuse" {
+		case "refuse":
 			fmt.Println(`{"ok":false,"error":"worker refused root"}`)
-		} else {
+		default:
 			fmt.Println("invalid-json")
 		}
 		// Deliberately ignore stdin EOF. Failed handshakes must reap this child.

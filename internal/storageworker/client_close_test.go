@@ -30,7 +30,7 @@ func TestRejectedHandshakeClosesTransport(t *testing.T) {
 func TestCancelInterruptsBlockedHandshake(t *testing.T) {
 	workerInput, clientOutput := io.Pipe()
 	clientInput, workerOutput := io.Pipe()
-	defer workerOutput.Close()
+	defer func() { _ = workerOutput.Close() }()
 	handshakeRead := make(chan struct{})
 	go func() {
 		var request Request
