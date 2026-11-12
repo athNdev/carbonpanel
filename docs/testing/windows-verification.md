@@ -47,6 +47,62 @@ or remove existing rules as a side effect of the test command. A clean disposabl
 Windows profile is useful for proving that earlier approvals do not mask a
 recurrence.
 
+## Record the qualification environment
+
+The read-only helper records the current token, UAC setting, effective firewall
+profiles and event-channel availability. It does not enable logging, remove
+rules, create accounts or request elevation:
+
+```powershell
+. ./scripts/windows-verification-evidence.ps1
+Get-WindowsVerificationEnvironment | ConvertTo-Json -Depth 8
+```
+
+Keep raw environment and command records outside tracked source. Record the
+source revision, completed commands and exit codes, distinct rebuilt executable
+paths, event-log bounds, attributed Query User events, and any observer errors.
+An observer must start before the commands and finish after them; log reset or
+rollover makes the interval incomplete. Successful commands alone do not prove
+that consent was avoided.
+
+`Test-WindowsVerificationEvidence` evaluates those records without running the
+commands. Missing token, policy, command, fresh-binary, observer or event-range
+evidence produces `incomplete`; a failed command or attributed Query User event
+produces `failed`. A complete record can be accepted only for its stated
+`native-firewall-listener-regression` scope. The pure policy fixtures run with:
+
+```powershell
+pwsh -NoProfile -File scripts/test-windows-verification-evidence.ps1
+```
+
+Pure fixtures establish record classification, not native Windows acceptance.
+
+## Qualify a genuinely clean profile
+
+Use a disposable Windows environment with a newly created standard user and
+effective firewall profiles that enable listen notifications and block default
+ingress. A new `TEMP`, `APPDATA` or checkout directory is not a new Windows
+profile. Capture that the profile was absent before loading it and that the
+test process token matches the expected new user SID.
+
+Before accepting clean-profile evidence, an intentionally public listener in
+that disposable environment must generate an attributable Query User event.
+This positive control establishes that the event observer can detect the
+failure being checked. Run it only through the separately named CI qualification
+setup, never as part of normal tests or on a developer workstation. Missing
+positive-control evidence leaves qualification incomplete.
+
+A privileged observer may collect machine policy and event facts separately
+from the standard test process. Keep both records and identify their sources;
+the privileged observer's token is not the token that ran the tests.
+[GitHub documents administrator sessions and disabled UAC as hosted Windows defaults](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#administrative-privileges),
+so an ordinary green test job is not standard-user qualification. When UAC is disabled,
+the evaluator emits a warning and makes no secure-desktop UAC-dialog claim.
+Record current-profile and clean-profile results separately; neither silently
+substitutes for the other.
+
+## Intentional LAN setup
+
 Intentional public/LAN or privileged infrastructure setup is separate from
 ordinary verification. If Windows configuration is demonstrably necessary,
 perform it through one deliberate setup operation, with at most one initial

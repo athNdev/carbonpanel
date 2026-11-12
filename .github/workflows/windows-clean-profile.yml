@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Clean Windows profile qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Disposable hosted Windows image
+        type: choice
+        options: [windows-latest, windows-11-arm]
+        default: windows-latest
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-clean-profile-${{ github.ref }}-${{ inputs.runner || 'windows-latest' }}
+  cancel-in-progress: true
+
+jobs:
+  qualification:
+    name: Fresh standard user and firewall evidence
+    runs-on: ${{ inputs.runner || 'windows-latest' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - name: Check the setup guards and evidence evaluator
+        shell: pwsh
+        run: |
+          ./scripts/test-windows-clean-profile-ci.ps1
+          ./scripts/test-windows-verification-evidence.ps1
+          go test ./scripts/testdata/windows-firewall-control
+      - name: Qualify a new standard-user profile in this disposable VM
+        shell: pwsh
+        run: ./scripts/windows-clean-profile-ci.ps1 -AllowDisposableRunnerSetup
+      - name: Preserve the sanitized qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-clean-profile-${{ inputs.runner || 'windows-latest' }}-${{ github.sha }}
+          path: tmp/windows-clean-profile-evidence/
+          if-no-files-found: warn

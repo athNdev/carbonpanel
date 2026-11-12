@@ -37,6 +37,13 @@ sources:
 - Editor changes also run `editor-dialog.yml`, which renders the actual dialog
   in Chromium with deferred RPC responses. Session adapter tests alone cannot
   prove Svelte initialization, props timing or Monaco cleanup behavior.
+- Development launcher checks use the pinned Go toolchain to build their native
+  Windows supervisor and fixtures. Both Linux and Windows run the launcher tests;
+  Windows also checks the qualification evidence evaluator and setup guards.
+- Clean-profile Windows qualification is a separate manual workflow. Its
+  disposable VM must prove a fresh standard-user profile and a working listener
+  control before zero test events can be accepted. See the
+  [evidence decision](../decisions/windows-clean-profile-evidence.md).
 
 # Read next
 

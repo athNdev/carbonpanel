@@ -7,6 +7,7 @@ package services
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -105,6 +106,16 @@ func ctxWithRole(role string) context.Context {
 	})
 }
 
+func newDockerOverrideAuthorizationTestService(t *testing.T) (*ServerService, *rbac.Enforcer) {
+	t.Helper()
+	svc, enforcer := newDockerPrivilegeTestService(t)
+	// These cases exercise override authorization, persistence and audit events.
+	// The instance-owned port seam supplies their prerequisite independently of
+	// workstation listeners. Real local-port checks remain in server_port_test.go.
+	svc.hostPortBound = func(int) bool { return false }
+	return svc, enforcer
+}
+
 func dangerousOverrides() *v1.DockerOverrides {
 	return &v1.DockerOverrides{
 		Privileged:  true,
@@ -114,7 +125,7 @@ func dangerousOverrides() *v1.DockerOverrides {
 }
 
 func TestCreateServer_PrivilegedOverrides_RejectedWithoutElevatedPermission(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	ctx := ctxWithRole("operator")
 
 	_, err := svc.CreateServer(ctx, connect.NewRequest(&v1.CreateServerRequest{
@@ -137,15 +148,23 @@ func TestCreateServer_PrivilegedOverrides_RejectedWithoutElevatedPermission(t *t
 }
 
 func TestCreateServer_PrivilegedOverrides_AllowedWithElevatedPermission(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	ctx := ctxWithRole("docker-admin")
+	// Authorization fixtures must not depend on the workstation's socket table.
+	// An owned occupied port proves this case uses fixture-controlled availability.
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = occupied.Close() })
+	port := occupied.Addr().(*net.TCPAddr).Port
 
 	resp, err := svc.CreateServer(ctx, connect.NewRequest(&v1.CreateServerRequest{
 		Name:            "test-server",
 		NodeId:          "test-node",
 		McVersion:       "1.20.1",
 		DockerImage:     "java21",
-		Port:            25566,
+		Port:            int32(port),
 		DockerOverrides: dangerousOverrides(),
 	}))
 	if err != nil {
@@ -157,7 +176,7 @@ func TestCreateServer_PrivilegedOverrides_AllowedWithElevatedPermission(t *testi
 }
 
 func TestCreateServer_BenignOverrides_AllowedWithoutElevatedPermission(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	ctx := ctxWithRole("operator")
 
 	resp, err := svc.CreateServer(ctx, connect.NewRequest(&v1.CreateServerRequest{
@@ -183,7 +202,7 @@ func TestCreateServer_BenignOverrides_AllowedWithoutElevatedPermission(t *testin
 }
 
 func TestCreateServer_NoOverrides_UnaffectedByPrivilegeCheck(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	ctx := ctxWithRole("operator")
 
 	_, err := svc.CreateServer(ctx, connect.NewRequest(&v1.CreateServerRequest{
@@ -199,7 +218,7 @@ func TestCreateServer_NoOverrides_UnaffectedByPrivilegeCheck(t *testing.T) {
 }
 
 func TestUpdateServer_PrivilegedOverrides_RejectedWithoutElevatedPermission(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	adminCtx := ctxWithRole("docker-admin")
 
 	created, err := svc.CreateServer(adminCtx, connect.NewRequest(&v1.CreateServerRequest{
@@ -232,7 +251,7 @@ func TestUpdateServer_PrivilegedOverrides_RejectedWithoutElevatedPermission(t *t
 }
 
 func TestUpdateServer_PrivilegedOverrides_AllowedWithElevatedPermission(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	adminCtx := ctxWithRole("docker-admin")
 
 	created, err := svc.CreateServer(adminCtx, connect.NewRequest(&v1.CreateServerRequest{
@@ -265,7 +284,7 @@ func TestUpdateServer_PrivilegedOverrides_AllowedWithElevatedPermission(t *testi
 }
 
 func TestCreateServer_PrivilegedOverrides_AuditLogRecorded(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	ctx := ctxWithRole("docker-admin")
 
 	resp, err := svc.CreateServer(ctx, connect.NewRequest(&v1.CreateServerRequest{
@@ -313,7 +332,7 @@ func TestCreateServer_PrivilegedOverrides_AuditLogRecorded(t *testing.T) {
 }
 
 func TestCreateServer_BenignOverrides_NoPrivilegedAuditLog(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	ctx := ctxWithRole("operator")
 
 	resp, err := svc.CreateServer(ctx, connect.NewRequest(&v1.CreateServerRequest{
@@ -354,7 +373,7 @@ func TestCreateServer_BenignOverrides_NoPrivilegedAuditLog(t *testing.T) {
 }
 
 func TestUpdateServer_PrivilegedOverrides_AuditLogRecorded(t *testing.T) {
-	svc, _ := newDockerPrivilegeTestService(t)
+	svc, _ := newDockerOverrideAuthorizationTestService(t)
 	adminCtx := ctxWithRole("docker-admin")
 
 	created, err := svc.CreateServer(adminCtx, connect.NewRequest(&v1.CreateServerRequest{
