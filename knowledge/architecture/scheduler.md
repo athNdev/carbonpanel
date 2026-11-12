@@ -58,6 +58,9 @@ streamed through the WebSocket hub.
 - A scheduled stop and a live modpack file sync take that same transition.
   The sync releases it before a restart claims it again.
 - Validate cron expressions before persisting them.
+- Scheduled start and restart verify live host memory and the configured node
+  limit before starting, stopping or recreating a container. Running/starting
+  memory reservations are counted once; unknown capacity refuses the action.
 
 # How to check
 

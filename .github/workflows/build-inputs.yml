@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Developer and module build inputs
+on:
+  pull_request:
+    paths:
+      - 'scripts/dev*'
+      - 'web/carbon-panel/vite.config.ts'
+      - 'Makefile'
+      - '.air.toml'
+      - 'docker/Dockerfile.geyser'
+      - 'docker/Dockerfile.status'
+      - 'cmd/geyser/**'
+      - 'cmd/status/**'
+      - 'pkg/proto/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.dockerignore'
+      - '.github/workflows/build-inputs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Makefile'
+      - '.air.toml'
+      - 'scripts/dev*'
+      - 'web/carbon-panel/vite.config.ts'
+      - 'docker/Dockerfile.geyser'
+      - 'docker/Dockerfile.status'
+      - 'cmd/geyser/**'
+      - 'cmd/status/**'
+      - 'pkg/proto/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.dockerignore'
+      - '.github/workflows/build-inputs.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  launcher:
+    name: Development launcher (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - run: bun test scripts/dev.test.ts
+  module-images:
+    name: Build module image (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [geyser, status]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build without publishing
+        run: docker buildx build --platform linux/amd64,linux/arm64 --file docker/Dockerfile.${{ matrix.module }} .

@@ -53,6 +53,7 @@ type ActivityHandler func(serverID string)
 
 // Config holds proxy configuration
 type Config struct {
+	Listeners        ListenerFactory
 	ListenAddr       string // Address to listen on (e.g., ":25565" or ":8080")
 	Logger           *logger.Logger
 	ProxyProtocol    bool            // Whether PROXY protocol v2 support is enabled on this listener

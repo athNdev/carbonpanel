@@ -40,6 +40,7 @@ type Manager struct {
 	sleepWakeHandler WakeHandler
 	valkeySync       *ValkeySyncManager
 	serverHostnames  map[string]string
+	listeners        ListenerFactory
 }
 
 // DockerInspector is the subset of the Docker client used for container IP
@@ -50,6 +51,12 @@ type DockerInspector interface {
 
 // NewManager creates a new proxy manager
 func NewManager(store *db.Store, cfg *config.Config, logger *logger.Logger, dockerCli ...DockerInspector) *Manager {
+	return NewManagerWithListeners(store, cfg, logger, ListenerFactory{}, dockerCli...)
+}
+
+// NewManagerWithListeners supplies instance-owned sockets for an isolated
+// environment. The ordinary constructor retains the operating system defaults.
+func NewManagerWithListeners(store *db.Store, cfg *config.Config, logger *logger.Logger, listeners ListenerFactory, dockerCli ...DockerInspector) *Manager {
 	m := &Manager{
 		proxies:         make(map[int]Proxier),
 		directKnocks:    NewDirectKnockManager(nil, logger),
@@ -58,7 +65,10 @@ func NewManager(store *db.Store, cfg *config.Config, logger *logger.Logger, dock
 		logger:          logger,
 		networkName:     cfg.Docker.NetworkName,
 		serverHostnames: make(map[string]string),
+		listeners:       listeners,
 	}
+	m.directKnocks.SetKnockBindHost(cfg.Proxy.BindHost)
+	m.directKnocks.listen = listeners.listenTCP
 	if cfg.Proxy.AcceptsTransfers != nil {
 		m.directKnocks.SetAcceptsTransfers(*cfg.Proxy.AcceptsTransfers)
 	}
@@ -226,8 +236,9 @@ func (m *Manager) Start() error {
 			continue
 		}
 
-		listenAddr := fmt.Sprintf(":%d", listener.Port)
+		listenAddr := m.listenAddress(listener.Port)
 		proxy := NewMinecraftProxy(&Config{
+			Listeners:        m.listeners,
 			ListenAddr:       listenAddr,
 			Logger:           m.logger,
 			ProxyProtocol:    listener.ProxyProtocol,
@@ -667,6 +678,10 @@ func (m *Manager) acceptsTransfers() *bool {
 	return m.config.AcceptsTransfers
 }
 
+func (m *Manager) listenAddress(port int) string {
+	return net.JoinHostPort(m.config.BindHost, fmt.Sprint(port))
+}
+
 func (m *Manager) loginRateLimit() time.Duration {
 	if m.config == nil || m.config.LoginRateLimitMS <= 0 {
 		return 0
@@ -689,8 +704,9 @@ func (m *Manager) AddListener(listener *db.ProxyListener) error {
 	}
 
 	// Create new proxy instance
-	listenAddr := fmt.Sprintf(":%d", listener.Port)
+	listenAddr := m.listenAddress(listener.Port)
 	proxy := NewMinecraftProxy(&Config{
+		Listeners:        m.listeners,
 		ListenAddr:       listenAddr,
 		Logger:           m.logger,
 		ProxyProtocol:    listener.ProxyProtocol,
@@ -808,8 +824,9 @@ func (m *Manager) addPortRouteUnlocked(routeID, hostname, containerIP string, ho
 	// Check if a proxy already exists for this port
 	proxy, exists := m.proxies[hostPort]
 	if !exists {
-		listenAddr := fmt.Sprintf(":%d", hostPort)
+		listenAddr := m.listenAddress(hostPort)
 		cfg := &Config{
+			Listeners:        m.listeners,
 			ListenAddr:       listenAddr,
 			Logger:           m.logger,
 			AcceptsTransfers: m.acceptsTransfers(),

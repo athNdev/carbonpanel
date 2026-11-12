@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package proxy
 
 import (
@@ -11,12 +10,12 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/api/types/network"
-	"github.com/google/uuid"
 	"github.com/athNdev/carbon-panel/internal/config"
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	"github.com/google/uuid"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 )
 
 func TestResolveBackend_LocalServer(t *testing.T) {
@@ -180,7 +179,7 @@ func TestManager_UpdateServerRoute_RemoteNode(t *testing.T) {
 	// 2. Create proxy listener
 	listener := &db.ProxyListener{
 		ID:      "listener-1",
-		Port:    25565,
+		Port:    0,
 		Enabled: true,
 	}
 	if err := store.CreateProxyListener(context.Background(), listener); err != nil {
@@ -204,11 +203,12 @@ func TestManager_UpdateServerRoute_RemoteNode(t *testing.T) {
 	cfg := &config.Config{
 		Proxy: config.ProxyConfig{
 			Enabled:     true,
-			ListenPorts: []int{25565},
+			BindHost:    "127.0.0.1",
+			ListenPorts: []int{0},
 		},
 	}
 	log := logger.New()
-	mgr := NewManager(store, cfg, log, mockCli)
+	mgr := NewManagerWithListeners(store, cfg, log, loopbackTestListeners(), mockCli)
 
 	// Start manager
 	if err := mgr.Start(); err != nil {

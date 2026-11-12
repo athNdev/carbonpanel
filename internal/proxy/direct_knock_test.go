@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package proxy
 
 import (
@@ -77,6 +76,7 @@ func getFreePort(t *testing.T) int {
 func newTestDirectKnockManager(wakeHandler WakeHandler, log *logger.Logger) *DirectKnockManager {
 	mgr := NewDirectKnockManager(wakeHandler, log)
 	mgr.SetKnockBindHost("127.0.0.1")
+	mgr.listen = loopbackOnlyDirectKnockListener
 	return mgr
 }
 
@@ -114,17 +114,13 @@ func TestLoopbackOnlyDirectKnockListenerRejectsWildcard(t *testing.T) {
 }
 
 func TestDirectKnock_StartKnockUsesLoopbackBindAndInjectedListen(t *testing.T) {
-	orig := directKnockListen
-	t.Cleanup(func() { directKnockListen = orig })
-
 	var seenAddr string
-	directKnockListen = func(network, address string) (net.Listener, error) {
+	port := getFreePort(t)
+	mgr := newTestDirectKnockManager(nil, logger.New())
+	mgr.listen = func(network, address string) (net.Listener, error) {
 		seenAddr = address
 		return loopbackOnlyDirectKnockListener(network, address)
 	}
-
-	port := getFreePort(t)
-	mgr := newTestDirectKnockManager(nil, logger.New())
 	srv := &db.Server{ID: "bind-host", Name: "bind", Port: port, Status: db.StatusDeepSleep}
 	if err := mgr.StartKnock(srv); err != nil {
 		t.Fatalf("StartKnock: %v", err)

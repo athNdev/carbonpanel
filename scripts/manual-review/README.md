@@ -3,6 +3,30 @@
 Throwaway Carbon Panel instances for reviewing a branch end to end, with no
 changes to the repository or your existing deployment.
 
+## File editor browser regression
+
+This focused check mounts the real file-editor dialog, Carbon controls, Bits UI
+and Monaco in Chromium. Only the RPC boundary is replaced with deferred responses.
+It needs no Docker daemon, server account or running Panel installation.
+
+```sh
+cd web/carbon-panel
+bun install --frozen-lockfile
+cd ../../scripts/manual-review/e2e
+bun install --frozen-lockfile
+bun run install-browser
+bun run editor-dialog
+```
+
+The check covers stale loads and saves, same-turn file switches, close/reopen,
+the same path on different servers, edits during save, and callbacks queued by a
+disposed editor. Screenshots and results go to ignored `e2e/out/editor-dialog/`.
+The Vite server binds only to loopback; the check closes its browser/server and
+removes its own temporary dependency cache. Set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use an explicitly selected local Chromium
+installation instead of Playwright's browser. CI runs this check separately from
+the frontend unit and build gate.
+
 ## Quick start (Windows, WSL)
 
 ```sh

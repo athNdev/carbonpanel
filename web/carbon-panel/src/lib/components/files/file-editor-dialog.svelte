@@ -24,6 +24,8 @@ one at https://mozilla.org/MPL/2.0/.
 	import { CarbonConfirm } from '$lib/components/carbon';
 	import { Loader2, Save, X, Maximize2, Minimize2 } from '@lucide/svelte';
 	import type { FileInfo } from '$lib/proto/carbonpanel/v1/file_pb';
+	import { untrack } from 'svelte';
+	import { FileEditorSession, type FileEditorState } from '$lib/features/files/editor-session';
 	import * as monaco from 'monaco-editor';
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 	import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
@@ -62,43 +64,63 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let { serverId, file, open = false, onClose, onSave }: Props = $props();
 
-	let content = $state('');
-	let originalContent = $state('');
-	let loading = $state(false);
-	let saving = $state(false);
-	let isDirty = $derived(content !== originalContent);
+	const fileSession = new FileEditorSession(
+		{
+			async readFile(identity) {
+				const response = await rpcClient.file.getFile(identity);
+				return new TextDecoder().decode(response.content);
+			},
+			writeFile({ serverId, path, content }) {
+				return rpcClient.file.updateFile({
+					serverId,
+					path,
+					content: new TextEncoder().encode(content)
+				});
+			},
+			onLoadError() {
+				if (!isDisplayedSession()) return;
+				toast.error('Failed to load file content');
+				closeDialog();
+			},
+			onSaveError() {
+				if (isDisplayedSession()) toast.error('Failed to save file');
+			},
+			onSaved() {
+				if (!isDisplayedSession()) return;
+				toast.success('File saved successfully');
+				onSave?.();
+			}
+		},
+		(nextState) => {
+			sessionState = nextState;
+		}
+	);
+	let sessionState = $state<FileEditorState>(fileSession.state);
+	let content = $derived(sessionState.content);
+	let loading = $derived(sessionState.loading);
+	let saving = $derived(sessionState.saving);
+	let isDirty = $derived(sessionState.dirty);
 	let isFullscreen = $state(false);
+	let confirmDiscardOpen = $state(false);
 	let editorContainer = $state<HTMLDivElement>();
 	let editor = $state<monaco.editor.IStandaloneCodeEditor | null>(null);
-	let loadedFilePath = $state<string | null>(null);
 	let resizeObserver = $state<ResizeObserver | null>(null);
-	let contentLoaded = $state(false);
+	let contentLoaded = $derived(sessionState.loaded);
 
-	// Load file content when dialog opens
-	$effect(() => {
-		if (open && file && !file.isDir && file.path !== loadedFilePath) {
-			loadedFilePath = file.path;
-			loadFileContent();
-		}
-	});
-
-	// Reset state when dialog closes
-	$effect(() => {
-		if (!open) {
-			content = '';
-			originalContent = '';
-			isFullscreen = false;
-			loadedFilePath = null;
-			contentLoaded = false;
-			if (editor) {
-				editor.dispose();
-				editor = null;
+	// Props select an identity. File content belongs to that session, not current props.
+	$effect.pre(() => {
+		const selected = open && file && !file.isDir ? { serverId, path: file.path } : null;
+		untrack(() => {
+			if (selected && fileSession.isFor(selected)) return;
+			disposeEditor();
+			confirmDiscardOpen = false;
+			if (selected) {
+				void fileSession.open(selected);
+			} else {
+				fileSession.close();
+				isFullscreen = false;
 			}
-			if (resizeObserver) {
-				resizeObserver.disconnect();
-				resizeObserver = null;
-			}
-		}
+		});
 	});
 
 	// Create editor when content is loaded
@@ -111,70 +133,49 @@ one at https://mozilla.org/MPL/2.0/.
 	// Cleanup on unmount
 	$effect(() => {
 		return () => {
-			if (editor) {
-				editor.dispose();
-			}
-			if (resizeObserver) {
-				resizeObserver.disconnect();
-			}
+			fileSession.close();
+			disposeEditor();
 		};
 	});
 
-	async function loadFileContent() {
-		if (!file) return;
+	function disposeEditor() {
+		editor?.dispose();
+		editor = null;
+		resizeObserver?.disconnect();
+		resizeObserver = null;
+	}
 
-		loading = true;
-		try {
-			const response = await rpcClient.file.getFile({ serverId: serverId, path: file.path });
-			const text = new TextDecoder().decode(response.content);
-			content = text;
-			originalContent = text;
-			contentLoaded = true;
-		} catch {
-			toast.error('Failed to load file content');
-			onClose();
-		} finally {
-			loading = false;
-		}
+	function isDisplayedSession() {
+		return open && file !== null && !file.isDir && fileSession.isFor({ serverId, path: file.path });
 	}
 
 	async function handleSave() {
-		if (!file || !isDirty) return;
-
-		saving = true;
-		try {
-			await rpcClient.file.updateFile({
-				serverId: serverId,
-				path: file.path,
-				content: new TextEncoder().encode(content)
-			});
-			toast.success('File saved successfully');
-			originalContent = content;
-			onSave?.();
-		} catch {
-			toast.error('Failed to save file');
-		} finally {
-			saving = false;
-		}
+		if (isDisplayedSession()) await fileSession.save();
 	}
 
-	let confirmDiscardOpen = $state(false);
+	function closeDialog() {
+		fileSession.close();
+		disposeEditor();
+		confirmDiscardOpen = false;
+		onClose();
+	}
 
 	function handleClose() {
 		if (isDirty) {
 			confirmDiscardOpen = true;
 			return;
 		}
-		onClose();
+		closeDialog();
 	}
 
 	function createEditor() {
-		if (!editorContainer) return;
+		const editorIdentity = fileSession.state.identity;
+		if (!editorContainer || !editorIdentity) return;
 
 		// Determine if file is large (over 100KB)
 		const isLargeFile = content.length > 100000;
 
-		editor = monaco.editor.create(editorContainer, {
+		const instance = monaco.editor.create(editorContainer, {
 			value: content,
 			language: file ? getFileLanguage(file.name) : 'plaintext',
 			theme: 'vs-dark',
@@ -203,6 +204,7 @@ one at https://mozilla.org/MPL/2.0/.
 			mouseWheelZoom: false,
 			quickSuggestions: !isLargeFile
 		});
+		editor = instance;
 
 		// Manual resize handling for better performance
 		resizeObserver = new ResizeObserver(() => {
@@ -211,14 +213,14 @@ one at https://mozilla.org/MPL/2.0/.
 		resizeObserver.observe(editorContainer);
 
 		// Add save shortcut
-		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-			handleSave();
+		instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+			if (fileSession.isCurrent(editorIdentity)) void handleSave();
 		});
 
 		// Track content changes
-		editor.onDidChangeModelContent(() => {
-			if (editor) {
-				content = editor.getValue();
+		instance.onDidChangeModelContent(() => {
+			if (editor === instance && fileSession.isCurrent(editorIdentity)) {
+				fileSession.setContent(instance.getValue());
 			}
 		});
 
@@ -323,7 +325,7 @@ one at https://mozilla.org/MPL/2.0/.
 				{#if file}
 					{file.name}
 					{#if isDirty}
-						<span class="text-sm text-muted-foreground">●</span>
+						<span class="text-sm text-muted-foreground">●</span>
 					{/if}
 				{:else}
 					File Editor
@@ -359,9 +361,9 @@ one at https://mozilla.org/MPL/2.0/.
 						{content.split('\n').length} lines, {content.length} characters
 					</span>
 					{#if isDirty}
-						<span class="text-orange-500">● Modified</span>
+						<span class="text-orange-500">● Modified</span>
 					{:else}
-						<span class="text-green-500">● Saved</span>
+						<span class="text-green-500">● Saved</span>
 					{/if}
 				</div>
 				<div class="flex items-center gap-2">
@@ -393,5 +395,5 @@ one at https://mozilla.org/MPL/2.0/.
 	message="Your edits will be lost."
 	confirmLabel="Discard Changes"
 	danger
-	onconfirm={onClose}
+	onconfirm={closeDialog}
 />

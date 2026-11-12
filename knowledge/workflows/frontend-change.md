@@ -74,6 +74,17 @@ bun run test
   motion. Animate color/opacity/transform only; do not `transition: all`. Cloud
   visual verification of the same states is out of this repository.
 - Loading, empty and error states are part of the change, not follow-up work.
+- Reused file-editor dialogs keep content and async requests under one
+  `FileEditorSession` identity (generation, server ID and path). Closing or
+  selecting another file invalidates earlier load/save completions, including
+  their error and cleanup callbacks. A save commits its captured revision;
+  newer edits remain dirty. Test delayed completions through the session's
+  actual read/write adapters, including the same path on different servers.
+  UI callbacks also verify the currently displayed props before closing or
+  notifying: props can change before Svelte flushes the session effect. Keep
+  state used by a pre-effect initialized before registering that effect.
+  `scripts/manual-review/e2e/editor-dialog-check.mjs` mounts the real dialog,
+  Carbon controls and Monaco with deferred RPC responses to verify this seam.
 - Overlays that must sit above the app chrome portal to `<body>`. A fixed
   overlay rendered inside `<main>` is trapped by the page stacking context: the
   fixed header and sidebar paint over it and the scroll container clips it.

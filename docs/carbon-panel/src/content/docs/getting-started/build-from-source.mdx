@@ -17,8 +17,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 Carbon Panel manages Minecraft servers as Docker containers, so Docker is required both at build time and runtime.
 
-- **Go** 1.24+
-- **Bun** 1.2+
+- **Go** at the version declared by `go.mod`
+- **Bun** at the version declared by CI
 - **Docker** (also used to run [buf](https://buf.build/) for protobuf code generation)
 - **Make**
 
@@ -36,7 +36,7 @@ make gen
 cd web/carbon-panel && bun install && bun run build && cd ../..
 
 # Build the Go binary with embedded frontend
-go build -o carbon-panel cmd/carbon-panel/main.go
+go build -o carbon-panel ./cmd/carbon-panel
 ```
 
 The `//go:embed` directives bake the frontend build into the binary so it serves the UI without a separate web server.
@@ -61,6 +61,10 @@ make dev
 
 - **Frontend (Vite HMR)**: `http://localhost:5174`
 - **Backend API**: `http://localhost:8080`
+
+The development profile binds to loopback by default. Select `bun run dev --lan`
+explicitly to expose development listeners to the LAN. Ctrl+C stops only the
+process trees owned by that session; a child failure stops its peer.
 
 ## Running
 

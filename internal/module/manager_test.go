@@ -3,24 +3,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package module
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"testing"
 
 	"net/netip"
 
-	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/api/types/network"
-	"github.com/moby/moby/client"
-	"github.com/google/uuid"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/proxy"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/google/uuid"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 )
 
 type mockDockerClient struct {
@@ -77,7 +78,8 @@ func TestModuleManager_RestoreProxyRoutesOnStart(t *testing.T) {
 			Enabled: true,
 		},
 		Proxy: config.ProxyConfig{
-			Enabled: true,
+			Enabled:  true,
+			BindHost: "127.0.0.1",
 		},
 		Docker: config.DockerConfig{
 			NetworkName: "test-net",
@@ -85,7 +87,21 @@ func TestModuleManager_RestoreProxyRoutesOnStart(t *testing.T) {
 	}
 	log := logger.New()
 
-	proxyMgr := proxy.NewManager(store, cfg, log, mockCli)
+	proxyMgr := proxy.NewManagerWithListeners(store, cfg, log, proxy.ListenerFactory{
+		TCP: func(network, address string) (net.Listener, error) {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil || !net.ParseIP(host).IsLoopback() {
+				return nil, fmt.Errorf("test refuses non-loopback TCP bind %q", address)
+			}
+			return net.Listen(network, address)
+		},
+		UDP: func(network string, address *net.UDPAddr) (*net.UDPConn, error) {
+			if address == nil || !address.IP.IsLoopback() {
+				return nil, fmt.Errorf("test refuses non-loopback UDP bind %v", address)
+			}
+			return net.ListenUDP(network, address)
+		},
+	}, mockCli)
 	defer proxyMgr.Stop()
 
 	// Create server
@@ -99,6 +115,15 @@ func TestModuleManager_RestoreProxyRoutesOnStart(t *testing.T) {
 		t.Fatalf("failed to create server: %v", err)
 	}
 
+	portProbe, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostPort := portProbe.LocalAddr().(*net.UDPAddr).Port
+	if err := portProbe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	// Create running module with proxy-enabled port (e.g. Geyser UDP)
 	runningMod := &storage.Module{
 		ID:          uuid.New().String(),
@@ -109,7 +134,7 @@ func TestModuleManager_RestoreProxyRoutesOnStart(t *testing.T) {
 		Ports: []*v1.ModulePort{
 			{
 				Name:          "bedrock",
-				HostPort:      19132,
+				HostPort:      int32(hostPort),
 				ContainerPort: 19132,
 				Protocol:      "udp",
 				ProxyEnabled:  true,

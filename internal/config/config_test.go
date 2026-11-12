@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 // Merged in the MINE-172 integration: this file existed independently on
 // both lines of development, so the union of both test sets is kept.
 
@@ -79,6 +78,25 @@ func TestLoad_AcceptsTransfersFalse(t *testing.T) {
 	}
 	if cfg.Proxy.AcceptsTransfers == nil || *cfg.Proxy.AcceptsTransfers {
 		t.Fatalf("accepts_transfers = %v, want false", cfg.Proxy.AcceptsTransfers)
+	}
+}
+
+func TestLoadProxyBindHost(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Proxy.BindHost != "" {
+		t.Fatalf("production bind host = %q, want all interfaces", cfg.Proxy.BindHost)
+	}
+	dir := writeConfigYAML(t, "proxy:\n  bind_host: 192.0.2.1\n")
+	t.Setenv("CARBONPANEL_PROXY_BIND_HOST", "127.0.0.1")
+	cfg, err = Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Proxy.BindHost != "127.0.0.1" {
+		t.Fatalf("environment bind override = %q", cfg.Proxy.BindHost)
 	}
 }
 

@@ -155,6 +155,8 @@ type S3Config struct {
 }
 
 type ProxyConfig struct {
+	// BindHost selects ingress interfaces; empty preserves public production binds.
+	BindHost     string `mapstructure:"bind_host" json:"bind_host"`
 	Enabled      bool   `mapstructure:"enabled" json:"enabled"`
 	BaseURL      string `mapstructure:"base_url" json:"base_url"`
 	ListenPort   int    `mapstructure:"listen_port" json:"listen_port"`   // Primary listen port
@@ -312,6 +314,7 @@ func setDefaults(v *viper.Viper) {
 
 	// Proxy defaults
 	v.SetDefault("proxy.enabled", false)
+	v.SetDefault("proxy.bind_host", "")
 	v.SetDefault("proxy.base_url", "")
 	v.SetDefault("proxy.listen_port", 25565)
 	v.SetDefault("proxy.listen_ports", []int{25565})

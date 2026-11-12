@@ -7,10 +7,12 @@ package nodestorage
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func carbonStorageBin(t *testing.T) string {
@@ -49,27 +51,26 @@ func TestRequiresRemoteTransport(t *testing.T) {
 }
 
 func TestForNodeRemoteTransportRoundTrip(t *testing.T) {
-	t.Setenv("TEST_WORKER_BIN", "1")
 	bin := carbonStorageBin(t)
-	SetTransport(&ProcessTransport{Bin: bin})
+	provider := &creatingProcessTransport{ProcessTransport: ProcessTransport{Bin: bin}}
+	SetTransport(provider)
 	defer SetTransport(nil)
 
 	base := t.TempDir()
 	nodeRoot := filepath.Join(base, "remote-root")
-	dataRoot := filepath.Join("var", "data", "servers", "srv-a")
-	if err := os.MkdirAll(filepath.Join(nodeRoot, "srv-a"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	dataRoot := filepath.Join(base, "controller", "servers", "srv-a")
 	node := NodeInfo{ID: "node-1", Name: "node-1", StorageRoot: nodeRoot}
-
-	if _, err := MapDataPath(node, dataRoot); err != nil {
-		t.Fatalf("MapDataPath: %v", err)
+	if !RequiresRemoteTransport(node) {
+		t.Fatal("fixture must require worker transport before the node-side root is created")
 	}
 	acc, err := ForNode(node, dataRoot)
 	if err != nil {
 		t.Fatalf("ForNode transport: %v", err)
 	}
 	defer func() { _ = acc.Close() }()
+	if provider.opens != 1 {
+		t.Fatalf("worker transport opened %d times, want 1", provider.opens)
+	}
 
 	if err := acc.WriteFile("server.properties", []byte("motd=remote")); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -83,9 +84,114 @@ func TestForNodeRemoteTransportRoundTrip(t *testing.T) {
 	if err != nil || string(raw) != "motd=remote" {
 		t.Fatalf("data must land on node-side root only: %q, %v", raw, err)
 	}
-	controllerSibling := filepath.Join(base, "srv-a")
+	controllerSibling := dataRoot
 	if _, err := os.Stat(controllerSibling); !os.IsNotExist(err) {
 		t.Fatalf("controller must not create %q, stat err=%v", controllerSibling, err)
+	}
+}
+
+// The node-side directory appears only when the transport is selected. A
+// pre-created controller-visible root would silently test shared storage.
+type creatingProcessTransport struct {
+	ProcessTransport
+	opens int
+}
+
+func (p *creatingProcessTransport) Open(ctx context.Context, node NodeInfo, root string) (Accessor, error) {
+	p.opens++
+	if err := os.MkdirAll(nodeDataRoot(node, root), 0o700); err != nil {
+		return nil, err
+	}
+	return p.ProcessTransport.Open(ctx, node, root)
+}
+
+func TestProcessTransportCancellationAndClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node := NodeInfo{Name: "worker", StorageRoot: t.TempDir()}
+	if err := os.MkdirAll(nodeDataRoot(node, "srv"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := ProcessTransport{Bin: carbonStorageBin(t)}
+	acc, err := p.Open(ctx, node, "srv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acc.WriteFile("server.properties", []byte("motd=worker")); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	done := make(chan error, 1)
+	go func() {
+		for {
+			_, err := acc.ReadFile("server.properties")
+			if err != nil {
+				_ = acc.Close()
+				done <- err
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled worker accepted a read")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled worker did not release its pipes")
+	}
+	if err := acc.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+func TestMain(m *testing.M) {
+	if role := os.Getenv("CARBONPANEL_TEST_STORAGE_WORKER"); role != "" {
+		if role == "refuse" {
+			fmt.Println(`{"ok":false,"error":"worker refused root"}`)
+		} else {
+			fmt.Println("invalid-json")
+		}
+		// Deliberately ignore stdin EOF. Failed handshakes must reap this child.
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func TestProcessTransportReapsFailedHandshake(t *testing.T) {
+	for _, role := range []string{"refuse", "malformed"} {
+		t.Run(role, func(t *testing.T) {
+			t.Setenv("CARBONPANEL_TEST_STORAGE_WORKER", role)
+			bin, err := os.Executable()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_, err = (&ProcessTransport{Bin: bin}).Open(ctx, NodeInfo{StorageRoot: t.TempDir()}, "srv")
+			if !IsUnavailable(err) {
+				t.Fatalf("handshake error=%v, want unavailable", err)
+			}
+			if ctx.Err() != nil {
+				t.Fatal("failed handshake waited for caller cancellation instead of reaping worker")
+			}
+		})
+	}
+}
+
+func TestProcessTransportEarlyExit(t *testing.T) {
+	// The test executable rejects accessor arguments before running any tests.
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p := ProcessTransport{Bin: bin}
+	if _, err := p.Open(ctx, NodeInfo{StorageRoot: t.TempDir()}, "srv"); !IsUnavailable(err) {
+		t.Fatalf("early worker exit: %v, want unavailable", err)
 	}
 }
 
