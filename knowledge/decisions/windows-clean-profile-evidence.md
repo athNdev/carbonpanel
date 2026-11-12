@@ -2,7 +2,7 @@
 type: Decision
 title: Clean Windows profile evidence
 description: Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
-status: draft
+status: stable
 owners: [oss-runtime]
 code_refs:
   - .github/workflows/windows-clean-profile.yml

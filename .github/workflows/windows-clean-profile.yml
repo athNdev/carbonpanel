@@ -2,8 +2,6 @@
 name: Clean Windows profile qualification
 
 on:
-  push:
-    branches: [codex/windows-process-qualification]
   workflow_dispatch:
     inputs:
       runner:
