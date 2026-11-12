@@ -34,3 +34,12 @@ but avoids emulating compiler work. Unsigned portable archives remain the
 distribution format; installers and code signing are separate future work.
 The source commit timestamp is used for reproducible archive metadata and
 build dates. See [release operations](../releases.md).
+
+## Registry mirror
+
+Versioned images are mirrored to GitHub's container registry and linked to the
+source repository, while retaining the Docker Hub destination. Both registries
+must serve the verified image index before the GitHub release is published.
+This makes the actual container discoverable in the repository's Packages
+section. Alpha builds remain prereleases even though GitHub omits them from
+the homepage's latest-release card.

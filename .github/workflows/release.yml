@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'SemVer tag, for example v3.0.0-beta.5'
+        description: 'SemVer tag, for example v3.0.0-alpha.1'
         required: true
         type: string
       revision:
@@ -154,6 +154,14 @@ jobs:
         with:
           name: release-build-inputs
           path: .
+      - name: Fetch Go dependencies with bounded transport retries
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        run: python scripts/go_mod_download.py
+      - name: Fetch Go dependencies with bounded transport retries
+        if: runner.os != 'Windows'
+        timeout-minutes: 10
+        run: python3 scripts/go_mod_download.py
       - name: Test the database with the release's pure-Go build settings
         env:
           CGO_ENABLED: '0'
@@ -181,6 +189,10 @@ jobs:
     name: Assemble release and matching Docker image
     needs: [plan, frontend, binaries]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      actions: read
     outputs:
       digest: ${{ steps.image.outputs.digest }}
     steps:
@@ -208,10 +220,19 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+      - name: Sign in to the linked GitHub container registry
+        if: needs.plan.outputs.publish == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
         with:
-          images: atharvnaphade/carbon-panel
+          images: |
+            atharvnaphade/carbon-panel
+            ghcr.io/${{ github.repository }}
           flavor: latest=false
           tags: |
             type=semver,pattern={{version}},value=${{ needs.plan.outputs.version }}
@@ -235,13 +256,16 @@ jobs:
           build-args: APP_VERSION=${{ needs.plan.outputs.version }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
-      - name: Confirm both architectures are available in Docker Hub
+      - name: Confirm both architectures are available in both registries
         if: needs.plan.outputs.publish == 'true'
         env:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          GITHUB_IMAGE: ghcr.io/${{ github.repository }}
         run: |
           docker buildx imagetools inspect "atharvnaphade/carbon-panel@$IMAGE_DIGEST" --raw > dist/image-manifest.json
           python3 scripts/release.py verify-image --manifest dist/image-manifest.json
+          docker buildx imagetools inspect "${GITHUB_IMAGE,,}@$IMAGE_DIGEST" --raw > dist/github-image-manifest.json
+          python3 scripts/release.py verify-image --manifest dist/github-image-manifest.json
       - name: Record image digest and final download checksums
         env:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}

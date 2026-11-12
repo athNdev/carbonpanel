@@ -27,7 +27,7 @@ def version(value):
     match = SEMVER.fullmatch(value)
     if not match or any(part.isdigit() and len(part) > 1 and part[0] == "0"
                         for part in (match[4] or "").split(".")):
-        raise ValueError("Use vMAJOR.MINOR.PATCH or a SemVer prerelease, such as v3.0.0-beta.5")
+        raise ValueError("Use vMAJOR.MINOR.PATCH or a SemVer prerelease, such as v3.0.0-alpha.1")
     return value
 
 
@@ -38,6 +38,11 @@ def run(*args, **kwargs):
 
 def archive_name(tag, goos, goarch):
     return f"carbon-panel_{version(tag)}_{goos}_{goarch}" + (".zip" if goos == "windows" else ".tar.gz")
+
+
+def github_image(tag, repository=None):
+    repository = repository or os.environ.get("GITHUB_REPOSITORY", "athNdev/carbonpanel")
+    return "ghcr.io/" + repository.lower() + ":" + version(tag)[1:]
 
 
 def github(*args):
@@ -170,7 +175,8 @@ def collect(args):
     output.mkdir(parents=True, exist_ok=True)
     image = output.parent / "image"
     image.mkdir(parents=True, exist_ok=True)
-    manifest = {"version": tag, "commit": args.commit, "image": IMAGE + ":" + tag[1:], "artifacts": []}
+    manifest = {"version": tag, "commit": args.commit, "image": IMAGE + ":" + tag[1:],
+                "github_image": github_image(tag), "artifacts": []}
     for goos, goarch in TARGETS:
         name = archive_name(tag, goos, goarch)
         path = source / name
@@ -235,10 +241,11 @@ def publish(args):
     if not run("git", "tag", "--list", tag):
         github("api", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/tags/{tag}", "-f", f"sha={args.commit}")
     generated = json.loads(github("api", "repos/{owner}/{repo}/releases/generate-notes", "-f", f"tag_name={tag}", "-f", f"target_commitish={args.commit}"))
-    channel = "This is a beta/prerelease build.\n\n" if "-" in tag else ""
+    channel = "This is an alpha/prerelease build for early testing.\n\n" if "-alpha." in tag else (
+        "This is a prerelease build.\n\n" if "-" in tag else "")
     body = (f"{channel}## Downloads\n\nChoose the archive for your operating system and CPU. Each includes the panel with its web UI, the storage helper, configuration example and licenses.\n\n"
             f"Verify downloads against **checksums.txt**. **release-manifest.json** records the exact source commit and Docker image digest. Back up your database and configuration before upgrading; preserve server worlds and existing data.\n\n"
-            f"Docker: `{manifest['image']}` (Linux amd64 and arm64).\n\n"
+            f"Container images (Linux amd64 and arm64):\n\n- Docker Hub: `{manifest['image']}`\n- GitHub Packages: `{manifest['github_image']}`\n\n"
             f"[Installation and verification](https://github.com/{os.environ['GITHUB_REPOSITORY']}/blob/{tag}/docs/releases.md)\n\n" + generated["body"])
     with tempfile.TemporaryDirectory(prefix="carbon-release-notes-") as temporary:
         notes = Path(temporary) / "notes.md"
