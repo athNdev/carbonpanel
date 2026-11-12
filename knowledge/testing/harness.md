@@ -11,6 +11,8 @@ code_refs:
   - Makefile
   - internal/proxy/listeners_test.go
   - docs/testing/windows-verification.md
+  - scripts/windows-verification-evidence.ps1
+  - scripts/test-windows-verification-evidence.ps1
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
@@ -52,6 +54,14 @@ cannot outlive the code it names.
 - A passing native suite is not proof of unattended execution: repeat uncached
   runs and check for Windows approval prompts/query rules as described in the
   [Windows verification procedure](../../docs/testing/windows-verification.md).
+- Windows qualification records the test token, effective firewall policy,
+  fresh executable paths, completed commands and continuous event observations.
+  Missing proof is incomplete, while a failed command or attributed Query User
+  event is a failed regression. Clean-profile acceptance additionally needs a
+  genuinely new standard-user profile and a working positive control in a
+  disposable environment. Pure evidence fixtures and elevated hosted-runner
+  results do not establish that acceptance. The read-only evidence helper never
+  changes host policy; UAC-disabled results retain their narrower firewall scope.
 - If a failure cannot be reproduced in a test, say so in the change.
 - The runtime qualification matrix in `internal/docker/runtime_matrix_test.go`
   always inspects the resolved CreateContainer request. Skip only the

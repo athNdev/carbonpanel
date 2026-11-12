@@ -10,6 +10,8 @@ code_refs:
   - scripts/dev.test.ts
   - scripts/dev.sh
   - scripts/dev.ps1
+  - cmd/carbon-dev-supervisor
+  - scripts/testdata/dev-process
   - .air.toml
   - web/carbon-panel/vite.config.ts
 sources:
@@ -24,9 +26,16 @@ It builds the complete Go command package and owns only the process trees it
 starts. Child failure stops its peer. Ctrl+C stops that session; name-based
 machine-wide process cleanup is unsupported.
 
-Windows live-PID tree cleanup does not establish durable ownership after a
-service has already exited; full failed-parent orphan recovery remains an
-explicit acceptance requirement. Do not infer it from normal-stop tests.
+Windows commands use a native helper; Windows assigns the suspended root to a
+kill-on-close Job Object during creation, before it resumes. It owns descendants
+across root exit/crash and watches a held launcher handle; a reused PID cannot become the
+owner. Helper death also closes the non-inherited job handle. A failed
+assignment refuses startup. See the [ownership decision](../decisions/development-process-ownership.md).
+
+The content-keyed helper is prepared by a nonprivileged Go build in `tmp`.
+Normal stop owns that live compiler tree. Abrupt launcher death during this
+first bootstrap remains outside the native job guarantee; ordinary service
+and fallback-build commands start only after preparation and use jobs.
 
 The ordinary development profile binds controller, proxy and Vite ingress to
 loopback. LAN exposure requires `--lan`; production defaults are unaffected.
@@ -36,4 +45,7 @@ No launcher path changes firewall policy, elevates, or deletes persistent data.
 
 `bun test scripts/dev.test.ts` exercises actual temporary child/descendant
 lifetimes, including failure and unrelated-process/data preservation. Run it on
-Windows and Linux when changing supervision or process ownership.
+Windows and Linux when changing supervision or process ownership. The fixture
+uses a native process so runtime-specific JavaScript child cleanup cannot hide
+an orphaned descendant. Windows also covers abrupt owner/helper death and
+stdin/stdout inheritance, plus real hidden-terminal input, output and Ctrl+C.

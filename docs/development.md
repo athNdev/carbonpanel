@@ -39,15 +39,33 @@ production controller and public proxy bind defaults are unchanged.
 
 Press Ctrl+C in the owning session to stop its children and process trees. A
 child's unexpected exit stops the peer and returns failure. POSIX uses owned
-process groups; Windows stops the owned PID tree with `taskkill /T /F`. Do not
+process groups. Windows uses a native Job Object for each command: the operating
+system assigns the suspended command to its job during creation, before the
+helper resumes it. This also contains a command whose helper dies during startup.
+The job owns descendants even after the original command exits. A held launcher handle
+also ends the job if the JavaScript owner disappears. The helper's non-inherited
+job handle makes abrupt helper termination end its descendants too. Do not
 match process names across the machine: another worktree may use the same tools.
 `make kill-dev` now explains this safe shutdown instead of killing every Bun,
 Air, Vite or Panel process. Inspect an orphan's exact PID before stopping it.
 
-Windows cleanup currently follows live direct-child PID trees. Descendants of
-a service that has already exited are not covered by a durable ownership
-guarantee. Keep that failure scenario as an explicit follow-up before claiming
-complete Windows orphan recovery; ordinary stop and peer cleanup are tested.
+On Windows, the launcher first builds the small `cmd/carbon-dev-supervisor`
+developer tool when its source/dependency key is missing from `tmp`. This is a
+nonprivileged tooling bootstrap, not a controller installation or firewall setup.
+The content-keyed executable is reused rather than replacing a helper used by
+another session. All subsequent command phases, including a fallback backend
+build, run inside jobs. A failed job assignment refuses startup before the
+command executes.
+
+The helper preserves an existing terminal without opening a new console window.
+Interactive stdin/stdout remain terminal handles. Ctrl+C reaches the JavaScript
+owner, which stops the session's jobs together.
+
+The initial compiler runs before that native helper is available. Normal stop
+terminates its live compiler tree and starts no services. Abruptly killing the
+JavaScript launcher during this first compilation is outside the job ownership
+guarantee; the guarantee applies once the helper has been prepared. No claim of
+durable arbitrary descendant ownership is made for that one bootstrap window.
 
 Start, stop and build preserve worlds, databases and backups. The launcher only
 creates missing `data` and `tmp` directories; it does not reset them.
@@ -62,7 +80,11 @@ node --test scripts/dev.test.ts
 
 These tests run real temporary child processes and descendants, without opening
 network listeners. They cover startup failure, peer shutdown, explicit stop,
-path arguments, tool selection and preservation of unrelated processes/data.
+native service-root exit/crash, abrupt Windows launcher/helper death, command
+stdin/stdout, a real hidden Windows terminal with keyboard input and Ctrl+C,
+initial bootstrap stop, path arguments, tool selection and
+preservation of unrelated processes/data. Native fixtures compile with the
+repository's Go toolchain, so Go must be on `PATH` for the launcher CI tests too.
 Run the complete contributor checks for the affected Go/frontend surfaces too.
 
 Module Dockerfiles are built by the `Developer and module build inputs` workflow
