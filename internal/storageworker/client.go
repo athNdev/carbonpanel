@@ -25,6 +25,7 @@ type Session struct {
 	dec       *json.Decoder
 	closed    atomic.Bool
 	closeOnce sync.Once
+	closeErr  error
 	closeF    func() error
 	done      chan struct{}
 	root      string
@@ -56,19 +57,17 @@ func NewSessionContext(ctx context.Context, in io.Writer, out io.Reader, closeF 
 	}
 	res, err := s.call(Request{Op: "root"})
 	if err != nil {
-		_ = s.Close()
+		cleanupErr := s.Close()
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, errors.Join(ctx.Err(), cleanupErr)
 		}
-		return nil, err
+		return nil, errors.Join(err, cleanupErr)
 	}
 	if !res.OK {
-		_ = s.Close()
-		return nil, errors.New(res.Error)
+		return nil, errors.Join(errors.New(res.Error), s.Close())
 	}
 	if err := ctx.Err(); err != nil {
-		_ = s.Close()
-		return nil, err
+		return nil, errors.Join(err, s.Close())
 	}
 	s.root = res.Root
 	return s, nil
@@ -109,15 +108,14 @@ func (s *Session) Root() string { return s.root }
 
 // Close ends the worker session.
 func (s *Session) Close() error {
-	var closeErr error
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
 		close(s.done)
 		if s.closeF != nil {
-			closeErr = s.closeF()
+			s.closeErr = s.closeF()
 		}
 	})
-	return closeErr
+	return s.closeErr
 }
 
 // RemoteAccessor implements nodestorage.Accessor over a worker session.

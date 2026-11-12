@@ -27,6 +27,37 @@ func TestRejectedHandshakeClosesTransport(t *testing.T) {
 	}
 }
 
+func TestRejectedHandshakeReportsCleanupFailure(t *testing.T) {
+	cleanupErr := errors.New("cleanup failed")
+	_, err := NewSession(io.Discard, strings.NewReader(`{"ok":false,"error":"refused"}`), func() error { return cleanupErr })
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("cleanup failure lost: %v", err)
+	}
+}
+
+func TestCancellationRetainsCleanupError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cleanupErr := errors.New("cleanup failed")
+	cleaned := make(chan struct{})
+	session, err := NewSessionContext(ctx, io.Discard, strings.NewReader(`{"ok":true,"root":"root"}`), func() error {
+		defer close(cleaned)
+		return cleanupErr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case <-cleaned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancellation did not run cleanup")
+	}
+	if err := session.Close(); !errors.Is(err, cleanupErr) {
+		t.Fatalf("cleanup error lost: %v", err)
+	}
+}
+
 func TestCancelInterruptsBlockedHandshake(t *testing.T) {
 	workerInput, clientOutput := io.Pipe()
 	clientInput, workerOutput := io.Pipe()
