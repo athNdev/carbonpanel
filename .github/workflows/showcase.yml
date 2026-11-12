@@ -3,9 +3,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-# Showcase screenshots: regenerate the static console PNGs used by the
-# marketing site and README. CSP frame-ancestors is 'self', so the site uses
-# static PNGs only (no live iframe embeds).
+# Showcase screenshots: capture the actual console for the README. The
+# homepage demonstrates shared components with isolated sample data instead.
 #
 # AGENT INSTRUCTIONS:
 # - PNGs are GENERATED artifacts, never hand-drawn. Do not commit binaries you
@@ -26,7 +25,7 @@
 #   ~/.cache/carbon-panel-review.port. Credentials come from
 #   PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD only and are never committed.
 # - After copying PNGs, run `python3 scripts/build_website.py` and
-#   `python3 scripts/check_website.py` to verify the landing <img> grid.
+#   `python3 scripts/check_website.py` to verify the website assets.
 
 name: Showcase Screenshots
 
@@ -39,8 +38,10 @@ on:
       - 'web/carbon-panel/src/routes/changelog/**'
       - 'web/carbon-panel/src/routes/servers/**'
       - 'web/carbon-panel/src/routes/modpacks/**'
-      - 'landing/index.html'
-      - 'landing/assets/styles.css'
+      - 'web/carbon-panel/src/lib/components/**'
+      - 'web/carbon-panel/src/lib/design-system/**'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/bun.lock'
       - 'scripts/review/plan-showcase.json'
       - 'scripts/review/journey.mjs'
       - 'scripts/review/devstack.sh'
@@ -74,6 +75,11 @@ jobs:
         uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99
         with:
           version: '1.50.0'
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
 
       - name: Install review driver
         run: |

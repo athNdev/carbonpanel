@@ -35,3 +35,7 @@ framing. Review exports at README display size and refresh them when that UI cha
 journey maintains the core captures; additional manual feature captures have explicit
 regeneration instructions. Local review stacks preserve worlds and databases during
 shutdown, and never borrow another installation's data for a public screenshot.
+
+The capture journey targets stable tab and panel IDs instead of exact text on
+the button's own text nodes. Capture CI runs for application UI changes, not
+homepage-only edits, and pins Bun to the frontend CI version for the website build.
