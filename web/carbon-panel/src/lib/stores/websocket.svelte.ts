@@ -25,8 +25,6 @@ import {
 } from '$lib/proto/carbonpanel/v1/websocket_pb';
 import { authStore } from '$lib/stores/auth';
 
-/* eslint-disable svelte/prefer-svelte-reactivity -- Private queues and handler registries are not UI state. */
-
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'authenticated';
 
 export interface WebSocketState {
@@ -68,7 +66,7 @@ const defaultDependencies: WebSocketDependencies = {
 	clearInterval: (timer) => globalThis.clearInterval(timer)
 };
 
-export class WebSocketClient {
+class WebSocketClient {
 	constructor(private readonly deps: WebSocketDependencies = defaultDependencies) {}
 	private socket: WebSocket | null = null;
 	private generation = 0;
