@@ -38,6 +38,14 @@ bun run test
   must not add another `p-6`/`p-8`.
 - Use `CarbonButton` for actions. Labels stay on one line and icon-only buttons
   inherit the requested size.
+- Keep UI scaffolding only when a retained feature consumes it. Before deleting
+  a primitive group, trace imports, dynamic registries, generator inputs and
+  documented interfaces; do not remove the entire legacy `ui/` directory.
+  Select, dialog, table, dropdown, tooltip and resizable primitives still serve
+  live features. Preserve the intentionally unmounted staged-configuration view.
+  The retained `bits-ui` dependency requires `@internationalized/date` as a peer,
+  even when the application has no direct date-component imports. Remove only
+  exclusive dependencies and regenerate the lockfile through Bun.
 - A missing metric is unavailable, not zero. Render `—`, `IDLE` or `AWAITING
   SAMPLE`; never substitute a plausible-looking number.
 - Use the approved artwork in [brand assets](../../assets/branding/README.md)

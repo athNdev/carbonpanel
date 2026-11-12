@@ -31,6 +31,10 @@ Do not add a top-level directory without a concept that names its owner and
 boundary. If a directory exists only for one subsystem, document that subsystem
 under `architecture/` instead.
 
+Internal packages must have a runtime caller or an explicitly supported tool
+or test seam. Keep unimplemented feature requirements in Jira; an uncalled
+placeholder that returns synthetic credentials is not a provisioned capability.
+
 # Read next
 
 - [Runtime model](architecture/runtime.md)
