@@ -16,6 +16,15 @@ an explicit Docker image for Make. Review compatibility and regenerate after any
 intentional tool or remote-plugin update. OpenAPI schemas are generated build
 artifacts and are not part of the tracked output comparison.
 
+`toolchain-versions.json` records the tested Go, Bun and Buf CLI defaults. Go
+also appears in `go.mod`, Docker builder arguments and CI; Bun and Buf defaults
+appear in Docker and workflow files. Run `bun scripts/check-toolchain-policy.mjs`
+after updating the policy and all those consumers. Update pinned remote plugins
+separately, regenerate and compare Go/TypeScript, then run frontend, backend,
+proto and image checks. Image builds accept explicit `GO_IMAGE`, `BUN_IMAGE`
+and `BUF_IMAGE` build arguments for a deliberate compatible alternative. Tags
+select versions but are not immutable image digests.
+
 From any working directory, the Bash or PowerShell wrapper locates this checkout:
 
 ```sh

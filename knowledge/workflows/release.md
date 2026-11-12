@@ -30,6 +30,9 @@ sources:
   generator plugin versions are pinned separately in `buf.gen.yaml`. The
   [development guide](../../docs/development.md) describes explicit overrides
   and the staged generation check.
+- `toolchain-versions.json` records tested Go, Bun and Buf defaults. Update its
+  checked consumers together and run the policy gate, staged generation check
+  and applicable image builds before release; version tags are not digests.
 - Do not publish an image that was built from a dirty or unverified tree.
 - The controller image is published to Docker Hub as
   `atharvnaphade/carbon-panel`. CD's permission probe, image tags, tagged release

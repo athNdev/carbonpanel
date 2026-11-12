@@ -7,7 +7,9 @@
 # one at https://mozilla.org/MPL/2.0/.
 
 
-FROM golang:alpine AS builder
+ARG GO_IMAGE=golang:1.26.11-alpine
+FROM ${GO_IMAGE} AS builder
+ENV GOTOOLCHAIN=local
 
 WORKDIR /build
 
