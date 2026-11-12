@@ -25,6 +25,8 @@ import {
 } from '$lib/proto/carbonpanel/v1/websocket_pb';
 import { authStore } from '$lib/stores/auth';
 
+/* eslint-disable svelte/prefer-svelte-reactivity -- Private queues and handler registries are not UI state. */
+
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'authenticated';
 
 export interface WebSocketState {
