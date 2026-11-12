@@ -7,6 +7,7 @@ package nodestorage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -127,7 +128,8 @@ func startProcessWorker(ctx context.Context, bin, dataRoot string) (*storagework
 		closeOnce.Do(func() {
 			// A malformed/refused handshake is not a usable session. Terminate
 			// that owned child rather than waiting for it to honour stdin EOF.
-			if !ready.Load() {
+			forced := !ready.Load()
+			if forced {
 				_ = cmd.Process.Kill()
 			}
 			_ = pw.Close()
@@ -136,9 +138,17 @@ func startProcessWorker(ctx context.Context, bin, dataRoot string) (*storagework
 			go func() { done <- cmd.Wait() }()
 			select {
 			case waitErr = <-done:
+				if forced || ctx.Err() != nil {
+					waitErr = nil
+				}
 			case <-time.After(time.Second):
-				_ = cmd.Process.Kill()
+				killErr := cmd.Process.Kill()
 				waitErr = <-done
+				if killErr == nil || errors.Is(killErr, os.ErrProcessDone) {
+					waitErr = nil
+				} else {
+					waitErr = errors.Join(killErr, waitErr)
+				}
 			}
 		})
 		return waitErr

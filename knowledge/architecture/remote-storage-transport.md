@@ -48,6 +48,8 @@ request lock. The subprocess adapter closes both session pipes and reaps the
 worker, terminating it after a bounded grace period if it does not exit.
 Process and Docker worker sessions bind the handshake and session lifetime to
 the supplied context; cancellation closes their transport.
+Docker worker removal uses an independent bounded cleanup context, including
+when startup fails after container creation. Removal failures are reported.
 An instance-owned resolver can select a transport with the caller's context.
 Legacy `ForNode` callers still use the registered process-wide transport and a
 background context until each owning subsystem is migrated.
