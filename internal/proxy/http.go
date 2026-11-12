@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package proxy
 
 import (
@@ -27,6 +26,7 @@ import (
 // HTTPProxy handles HTTP reverse proxying with Host header based routing
 type HTTPProxy struct {
 	server       *http.Server
+	listeners    ListenerFactory
 	routes       map[string]*Route
 	routesMutex  sync.RWMutex
 	logger       *logger.Logger
@@ -38,6 +38,7 @@ type HTTPProxy struct {
 // NewHTTPProxy creates a new HTTP reverse proxy instance
 func NewHTTPProxy(cfg *Config) *HTTPProxy {
 	p := &HTTPProxy{
+		listeners:  cfg.Listeners,
 		routes:     make(map[string]*Route),
 		logger:     cfg.Logger,
 		listenAddr: cfg.ListenAddr,
@@ -241,7 +242,7 @@ func (p *HTTPProxy) Start() error {
 		return fmt.Errorf("HTTP proxy already running")
 	}
 
-	listener, err := net.Listen("tcp", p.listenAddr)
+	listener, err := p.listeners.listenTCP("tcp", p.listenAddr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", p.listenAddr, err)
 	}

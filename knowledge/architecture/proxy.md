@@ -7,6 +7,8 @@ owners: [oss-runtime]
 code_refs:
   - internal/proxy
   - internal/proxy/plan.go
+  - internal/config/config.go
+  - config.example.yaml
   - pkg/routing
   - web/carbon-panel/src/lib/components/server-routing.svelte
 sources:
@@ -20,6 +22,11 @@ The proxy listens on `:25565`, reads the Minecraft handshake packet, extracts
 the requested hostname, resolves the route and forwards the connection to the
 right container port. SRV records are handled so clients do not need a port.
 
+`proxy.bind_host` selects manager-created ingress interfaces, including module
+ports and direct knocks. Empty retains the public production default;
+`CARBONPANEL_PROXY_BIND_HOST=127.0.0.1` confines local development to loopback.
+The address builder handles IPv6 hosts without losing their brackets.
+
 # Rules
 
 - An unknown or ambiguous host closes the connection. There is no default
@@ -30,6 +37,9 @@ right container port. SRV records are handled so clients do not need a port.
   observes state, then applies the plan. See [runtime seams](runtime-seams.md).
 - A route change must be reflected in the console and the proxy without a
   restart where the existing implementation allows it.
+- TCP/UDP socket factories belong to each manager/proxy instance. Test adapters
+  reject unintended public binds before the operating system sees them; backend
+  UDP source-address selection stays independent from ingress binding.
 
 # How to check
 

@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package proxy
 
 import (
@@ -22,16 +21,18 @@ import (
 // UDPProxy handles UDP forwarding for modules like Geyser
 // Implements the Proxier interface
 type UDPProxy struct {
-	listenAddr  string
-	backendHost string
-	backendPort int
-	serverID    string
-	conn        *net.UDPConn
-	logger      *logger.Logger
-	running     bool
-	mu          sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
+	listeners     ListenerFactory
+	listenBackend func(network string, address *net.UDPAddr) (*net.UDPConn, error)
+	listenAddr    string
+	backendHost   string
+	backendPort   int
+	serverID      string
+	conn          *net.UDPConn
+	logger        *logger.Logger
+	running       bool
+	mu            sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
 
 	// Client session tracking - maintains backend connection per client
 	sessions   map[string]*udpSession
@@ -39,21 +40,36 @@ type UDPProxy struct {
 }
 
 type udpSession struct {
+	activityMu  sync.RWMutex
 	clientAddr  *net.UDPAddr
 	backendConn *net.UDPConn
 	backendAddr *net.UDPAddr
 	lastActive  time.Time
 }
 
+func (s *udpSession) touch() {
+	s.activityMu.Lock()
+	s.lastActive = time.Now()
+	s.activityMu.Unlock()
+}
+
+func (s *udpSession) idleAt(now time.Time) time.Duration {
+	s.activityMu.RLock()
+	defer s.activityMu.RUnlock()
+	return now.Sub(s.lastActive)
+}
+
 // NewUDPProxy creates a new UDP proxy
 func NewUDPProxy(cfg *Config) *UDPProxy {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &UDPProxy{
-		listenAddr: cfg.ListenAddr,
-		logger:     cfg.Logger,
-		ctx:        ctx,
-		cancel:     cancel,
-		sessions:   make(map[string]*udpSession),
+		listeners:     cfg.Listeners,
+		listenBackend: net.ListenUDP,
+		listenAddr:    cfg.ListenAddr,
+		logger:        cfg.Logger,
+		ctx:           ctx,
+		cancel:        cancel,
+		sessions:      make(map[string]*udpSession),
 	}
 }
 
@@ -71,7 +87,7 @@ func (p *UDPProxy) Start() error {
 		return fmt.Errorf("failed to resolve listen address: %w", err)
 	}
 
-	conn, err := net.ListenUDP("udp", addr)
+	conn, err := p.listeners.listenUDP("udp", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", p.listenAddr, err)
 	}
@@ -203,7 +219,7 @@ func (p *UDPProxy) proxyLoop() {
 		}
 
 		// Update last active time
-		session.lastActive = time.Now()
+		session.touch()
 
 		// Forward packet to backend
 		_, err = session.backendConn.WriteToUDP(buf[:n], session.backendAddr)
@@ -213,11 +229,6 @@ func (p *UDPProxy) proxyLoop() {
 		}
 	}
 }
-
-// udpListen creates the per-session backend socket. It is a variable (not a
-// direct net.ListenUDP call) so tests can count creations/closes and prove
-// the loser of a session-creation race cleans up its socket.
-var udpListen = net.ListenUDP
 
 // getOrCreateSession gets an existing session or creates a new one
 func (p *UDPProxy) getOrCreateSession(clientAddr *net.UDPAddr) (*udpSession, error) {
@@ -247,7 +258,7 @@ func (p *UDPProxy) getOrCreateSession(clientAddr *net.UDPAddr) (*udpSession, err
 	}
 
 	// Use unconnected socket to debug response routing
-	backendConn, err := udpListen("udp", nil)
+	backendConn, err := p.listenBackend("udp", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create backend socket: %w", err)
 	}
@@ -295,7 +306,7 @@ func (p *UDPProxy) handleBackendResponses(session *udpSession, clientKey string)
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				// Check if session is stale
-				if time.Since(session.lastActive) > 5*time.Minute {
+				if session.idleAt(time.Now()) > 5*time.Minute {
 					p.removeSession(clientKey)
 					return
 				}
@@ -317,7 +328,7 @@ func (p *UDPProxy) handleBackendResponses(session *udpSession, clientKey string)
 			p.logger.Error("Failed to send to client %s: %v", clientKey, err)
 		}
 
-		session.lastActive = time.Now()
+		session.touch()
 	}
 }
 
@@ -346,7 +357,7 @@ func (p *UDPProxy) cleanupLoop() {
 			p.sessionsMu.Lock()
 			now := time.Now()
 			for key, session := range p.sessions {
-				if now.Sub(session.lastActive) > 5*time.Minute {
+				if session.idleAt(now) > 5*time.Minute {
 					session.backendConn.Close()
 					delete(p.sessions, key)
 					p.logger.Debug("Cleaned up stale UDP session for %s", key)

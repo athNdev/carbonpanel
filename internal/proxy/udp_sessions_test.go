@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package proxy
 
 import (
@@ -11,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
@@ -21,14 +21,12 @@ import (
 // leaked; the fixed code re-checks under the write lock so exactly one
 // socket survives and every loser socket is closed.
 func TestGetOrCreateSessionRace(t *testing.T) {
-	origListen := udpListen
-	defer func() { udpListen = origListen }()
-
+	p := NewUDPProxy(&Config{ListenAddr: "127.0.0.1:0", Logger: logger.New()})
 	var created atomic.Int32
 	var mu sync.Mutex
 	var conns []*net.UDPConn
-	udpListen = func(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
-		c, err := origListen(network, laddr)
+	p.listenBackend = func(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
+		c, err := net.ListenUDP(network, &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 		if err != nil {
 			return nil, err
 		}
@@ -39,7 +37,6 @@ func TestGetOrCreateSessionRace(t *testing.T) {
 		return c, nil
 	}
 
-	p := NewUDPProxy(&Config{ListenAddr: "127.0.0.1:0", Logger: logger.New()})
 	p.AddRoute("srv", "udp", "127.0.0.1", 19132)
 	defer p.cancel()
 
@@ -119,15 +116,12 @@ func TestGetOrCreateSessionRace(t *testing.T) {
 
 // TestGetOrCreateSessionNoBackend ensures the error path creates no socket.
 func TestGetOrCreateSessionNoBackend(t *testing.T) {
-	origListen := udpListen
-	defer func() { udpListen = origListen }()
 	calls := 0
-	udpListen = func(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
-		calls++
-		return origListen(network, laddr)
-	}
-
 	p := NewUDPProxy(&Config{ListenAddr: "127.0.0.1:0", Logger: logger.New()})
+	p.listenBackend = func(network string, laddr *net.UDPAddr) (*net.UDPConn, error) {
+		calls++
+		return net.ListenUDP(network, &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	}
 	defer p.cancel()
 	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:50001")
 	if _, err := p.getOrCreateSession(addr); err == nil {
@@ -135,5 +129,59 @@ func TestGetOrCreateSessionNoBackend(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Errorf("created %d sockets despite missing backend", calls)
+	}
+}
+
+func TestUDPProxyLoopbackRoundTrip(t *testing.T) {
+	backend, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	backendDone := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 128)
+		_ = backend.SetDeadline(time.Now().Add(3 * time.Second))
+		n, addr, err := backend.ReadFromUDP(buf)
+		if err == nil {
+			_, err = backend.WriteToUDP(buf[:n], addr)
+		}
+		backendDone <- err
+	}()
+
+	p := NewUDPProxy(&Config{ListenAddr: "127.0.0.1:0", Logger: logger.New(), Listeners: loopbackTestListeners()})
+	var backendSockets atomic.Int32
+	p.listenBackend = func(network string, _ *net.UDPAddr) (*net.UDPConn, error) {
+		backendSockets.Add(1)
+		return net.ListenUDP(network, &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	}
+	p.AddRoute("test", "udp", "127.0.0.1", backend.LocalAddr().(*net.UDPAddr).Port)
+	if err := p.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer p.Stop()
+	client, err := net.DialUDP("udp", nil, p.conn.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	want := "loopback forwarding"
+	if _, err := client.Write([]byte(want)); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 128)
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(buf[:n]); got != want {
+		t.Fatalf("reply=%q, want %q", got, want)
+	}
+	if err := <-backendDone; err != nil {
+		t.Fatal(err)
+	}
+	if got := backendSockets.Load(); got != 1 {
+		t.Fatalf("created %d backend sockets, want one", got)
 	}
 }

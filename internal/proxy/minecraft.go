@@ -24,6 +24,7 @@ import (
 // MinecraftProxy handles Minecraft protocol proxying with handshake parsing for hostname-based routing
 type MinecraftProxy struct {
 	listener          net.Listener
+	listeners         ListenerFactory
 	routes            map[string]*Route
 	routesMutex       sync.RWMutex
 	logger            *logger.Logger
@@ -57,6 +58,7 @@ func NewMinecraftProxy(cfg *Config) *MinecraftProxy {
 		acceptsTransfers = *cfg.AcceptsTransfers
 	}
 	return &MinecraftProxy{
+		listeners:         cfg.Listeners,
 		routes:            make(map[string]*Route),
 		logger:            log,
 		listenAddr:        cfg.ListenAddr,
@@ -186,7 +188,7 @@ func (p *MinecraftProxy) Start() error {
 		return fmt.Errorf("proxy already running")
 	}
 
-	listener, err := net.Listen("tcp", p.listenAddr)
+	listener, err := p.listeners.listenTCP("tcp", p.listenAddr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", p.listenAddr, err)
 	}

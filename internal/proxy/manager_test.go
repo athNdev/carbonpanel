@@ -3,23 +3,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package proxy
 
 import (
 	"context"
-	"net/netip"
 	"fmt"
+	"net/netip"
 	"testing"
 
-	"github.com/moby/moby/api/types/container"
-	"github.com/moby/moby/api/types/network"
-	"github.com/moby/moby/client"
-	"github.com/google/uuid"
 	"github.com/athNdev/carbon-panel/internal/config"
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/google/uuid"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 )
 
 type mockDockerClient struct {
@@ -184,7 +183,8 @@ func TestManager_AddAndRemoveModuleRoute(t *testing.T) {
 
 	cfg := &config.Config{
 		Proxy: config.ProxyConfig{
-			Enabled: true,
+			Enabled:  true,
+			BindHost: "127.0.0.1",
 		},
 		Docker: config.DockerConfig{
 			NetworkName: "test-net",
@@ -192,7 +192,7 @@ func TestManager_AddAndRemoveModuleRoute(t *testing.T) {
 	}
 	log := logger.New()
 
-	mgr := NewManager(store, cfg, log, mockCli)
+	mgr := NewManagerWithListeners(store, cfg, log, loopbackTestListeners(), mockCli)
 
 	server := &db.Server{
 		ID:            uuid.New().String(),
@@ -212,7 +212,7 @@ func TestManager_AddAndRemoveModuleRoute(t *testing.T) {
 		Ports: []*v1.ModulePort{
 			{
 				Name:          "bedrock",
-				HostPort:      19132,
+				HostPort:      int32(freeUDPPort(t)),
 				ContainerPort: 19132,
 				Protocol:      "udp",
 				ProxyEnabled:  true,
@@ -253,7 +253,6 @@ func TestManager_AddAndRemoveModuleRoute(t *testing.T) {
 		t.Errorf("expected routes to be empty after removal, got %+v", routes)
 	}
 }
-
 
 func TestIsDirectPortServer(t *testing.T) {
 	// Nil or zero port

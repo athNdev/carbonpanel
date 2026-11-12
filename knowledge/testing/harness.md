@@ -9,6 +9,8 @@ code_refs:
   - internal/db
   - .github/workflows/ci.yml
   - Makefile
+  - internal/proxy/listeners_test.go
+  - docs/testing/windows-verification.md
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
@@ -43,6 +45,13 @@ cannot outlive the code it names.
 - Test the failure path at the closest integration seam, not only the happy
   path.
 - Do not require a live Minecraft server for a unit-level failure test.
+- Native network fixtures use loopback-only, instance-owned socket adapters and
+  ephemeral ports. Cover indirect manager/module starts as well as direct
+  listeners. A wildcard regression must fail before calling the OS, not after
+  opening a public port and triggering consent for a temporary test executable.
+- A passing native suite is not proof of unattended execution: repeat uncached
+  runs and check for Windows approval prompts/query rules as described in the
+  [Windows verification procedure](../../docs/testing/windows-verification.md).
 - If a failure cannot be reproduced in a test, say so in the change.
 - The runtime qualification matrix in `internal/docker/runtime_matrix_test.go`
   always inspects the resolved CreateContainer request. Skip only the

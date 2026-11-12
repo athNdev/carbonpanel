@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package proxy
 
 import (
@@ -23,6 +22,7 @@ import (
 // TCPProxy handles raw TCP forwarding without protocol parsing
 type TCPProxy struct {
 	listener      net.Listener
+	listeners     ListenerFactory
 	backendHost   string
 	backendPort   int
 	serverID      string
@@ -39,6 +39,7 @@ type TCPProxy struct {
 func NewTCPProxy(cfg *Config) *TCPProxy {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TCPProxy{
+		listeners:     cfg.Listeners,
 		logger:        cfg.Logger,
 		listenAddr:    cfg.ListenAddr,
 		proxyProtocol: cfg.ProxyProtocol,
@@ -111,7 +112,7 @@ func (p *TCPProxy) Start() error {
 		return fmt.Errorf("TCP proxy already running")
 	}
 
-	listener, err := net.Listen("tcp", p.listenAddr)
+	listener, err := p.listeners.listenTCP("tcp", p.listenAddr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", p.listenAddr, err)
 	}
