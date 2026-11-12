@@ -303,19 +303,6 @@ h1 span {
   align-self: start;
   padding: 205px 0 0;
 }
-.hero-object::before {
-  content: "";
-  position: absolute;
-  z-index: -3;
-  inset: -240px -180px -70px -100px;
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse at 65% 28%,
-    rgba(239, 240, 235, 0.085),
-    rgba(205, 208, 201, 0.035) 32%,
-    transparent 67%
-  );
-}
 .terrain {
   position: absolute;
   z-index: -2;
@@ -326,10 +313,12 @@ h1 span {
   right: -100px;
   top: -132px;
   opacity: 1;
+  /* Let the dark photographic backdrop disappear into the page without a halo. */
+  mix-blend-mode: lighten;
   mask-image: linear-gradient(
       90deg,
-      transparent,
-      #000 18%,
+      transparent 8%,
+      #000 40%,
       #000 94%,
       transparent
     ),
@@ -341,20 +330,6 @@ h1 span {
       transparent 100%
     );
   mask-composite: intersect;
-}
-.hero-object::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: -110px -260px -120px -40px;
-  background: linear-gradient(
-    90deg,
-    var(--bg),
-    transparent 18%,
-    transparent 96%,
-    var(--bg)
-  );
-  pointer-events: none;
 }
 .chunk-detail {
   position: absolute;
@@ -1410,13 +1385,6 @@ h2 {
     right: -55px;
     opacity: 1;
   }
-  .hero-object::after {
-    inset: -90px -20px 0;
-  }
-  .hero-object::before {
-    inset: -80px -20px 0;
-    opacity: 0.7;
-  }
   .chunk-detail {
     width: 96px;
     height: 96px;
@@ -1658,7 +1626,6 @@ h2 {
   .structural-grid::before,
   .structural-grid::after,
   .terrain,
-  .hero-object::before,
   .chunk-detail,
   .rest-symbol {
     display: none;
