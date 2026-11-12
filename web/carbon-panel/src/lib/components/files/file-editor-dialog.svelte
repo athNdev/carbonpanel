@@ -78,11 +78,15 @@ one at https://mozilla.org/MPL/2.0/.
 				});
 			},
 			onLoadError() {
+				if (!isDisplayedSession()) return;
 				toast.error('Failed to load file content');
 				closeDialog();
 			},
-			onSaveError: () => toast.error('Failed to save file'),
+			onSaveError() {
+				if (isDisplayedSession()) toast.error('Failed to save file');
+			},
 			onSaved() {
+				if (!isDisplayedSession()) return;
 				toast.success('File saved successfully');
 				onSave?.();
 			}
@@ -97,6 +101,7 @@ one at https://mozilla.org/MPL/2.0/.
 	let saving = $derived(sessionState.saving);
 	let isDirty = $derived(sessionState.dirty);
 	let isFullscreen = $state(false);
+	let confirmDiscardOpen = $state(false);
 	let editorContainer = $state<HTMLDivElement>();
 	let editor = $state<monaco.editor.IStandaloneCodeEditor | null>(null);
 	let resizeObserver = $state<ResizeObserver | null>(null);
@@ -140,12 +145,13 @@ one at https://mozilla.org/MPL/2.0/.
 		resizeObserver = null;
 	}
 
-	async function handleSave() {
-		if (!open || !file || !fileSession.isFor({ serverId, path: file.path })) return;
-		await fileSession.save();
+	function isDisplayedSession() {
+		return open && file !== null && !file.isDir && fileSession.isFor({ serverId, path: file.path });
 	}
 
-	let confirmDiscardOpen = $state(false);
+	async function handleSave() {
+		if (isDisplayedSession()) await fileSession.save();
+	}
 
 	function closeDialog() {
 		fileSession.close();
@@ -319,7 +325,7 @@ one at https://mozilla.org/MPL/2.0/.
 				{#if file}
 					{file.name}
 					{#if isDirty}
-						<span class="text-sm text-muted-foreground">●</span>
+						<span class="text-sm text-muted-foreground">●</span>
 					{/if}
 				{:else}
 					File Editor
@@ -355,9 +361,9 @@ one at https://mozilla.org/MPL/2.0/.
 						{content.split('\n').length} lines, {content.length} characters
 					</span>
 					{#if isDirty}
-						<span class="text-orange-500">● Modified</span>
+						<span class="text-orange-500">● Modified</span>
 					{:else}
-						<span class="text-green-500">● Saved</span>
+						<span class="text-green-500">● Saved</span>
 					{/if}
 				</div>
 				<div class="flex items-center gap-2">

@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Editor dialog browser regression
+
+on:
+  pull_request:
+    paths:
+      - 'web/carbon-panel/**'
+      - 'scripts/manual-review/e2e/editor-dialog/**'
+      - 'scripts/manual-review/e2e/editor-dialog-check.mjs'
+      - 'scripts/manual-review/e2e/package.json'
+      - 'scripts/manual-review/e2e/bun.lock'
+      - '.github/workflows/editor-dialog.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'web/carbon-panel/**'
+      - 'scripts/manual-review/e2e/editor-dialog/**'
+      - 'scripts/manual-review/e2e/editor-dialog-check.mjs'
+      - 'scripts/manual-review/e2e/package.json'
+      - 'scripts/manual-review/e2e/bun.lock'
+      - '.github/workflows/editor-dialog.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  editor-dialog:
+    name: File editor in Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - name: Install frontend dependencies
+        working-directory: web/carbon-panel
+        run: bun install --frozen-lockfile
+      - name: Install browser harness
+        working-directory: scripts/manual-review/e2e
+        run: bun install --frozen-lockfile
+      - name: Install Chromium
+        working-directory: scripts/manual-review/e2e
+        run: bunx playwright install --with-deps chromium
+      - name: Exercise real dialog and Monaco with deferred RPCs
+        working-directory: scripts/manual-review/e2e
+        run: bun run editor-dialog
