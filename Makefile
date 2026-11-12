@@ -12,7 +12,7 @@
 DATA_DIR := ./data
 FRONTEND_DIR := web/carbon-panel
 CARBONPANEL_BIN := build/carbon-panel
-BUF_IMAGE := bufbuild/buf:latest
+BUF_IMAGE ?= bufbuild/buf:1.50.0
 BUF_RUN := docker run --rm \
 	--volume "$(shell pwd):/workspace" \
 	--workdir /workspace \
@@ -142,10 +142,15 @@ kill-dev:
 deps:
 	@echo "Installing Go dependencies..."
 	go mod download
-	@echo "Updating buf dependencies (using Docker)..."
-	$(BUF_RUN) dep update
 	@echo "Installing frontend dependencies..."
-	cd $(FRONTEND_DIR) && bun install
+	cd $(FRONTEND_DIR) && bun install --frozen-lockfile
+
+# Dependency updates are deliberate and separate from the frozen install.
+deps-update-buf:
+	$(BUF_RUN) dep update
+
+deps-update-frontend:
+	cd $(FRONTEND_DIR) && bun update
 
 # Run tests
 test:
@@ -198,9 +203,7 @@ knowledge-mcp-smoke:
 
 proto:
 	@echo "Generating protocol buffer code (using Docker)..."
-	$(BUF_RUN) generate
-	@echo "Formatting generated TypeScript..."
-	cd $(FRONTEND_DIR) && ./node_modules/.bin/prettier --write "src/lib/proto" >/dev/null
+	BUF_IMAGE="$(BUF_IMAGE)" bun scripts/proto-generate.mjs --docker
 	@echo "Proto generation complete!"
 
 proto-clean:
@@ -214,7 +217,7 @@ proto-lint:
 	$(BUF_RUN) lint
 	@echo "Proto linting complete!"
 
-gen: proto-clean proto
+gen: proto
 
 proto-format:
 	@echo "Formatting proto files (using Docker)..."
@@ -255,7 +258,8 @@ help:
 	@echo "  make knowledge-search - Search the knowledge base (q=...)"
 	@echo "  make knowledge-mcp-smoke - Exercise the pinned MCP servers"
 	@echo "  make knowledge-for-path - Show concepts governing a path (path=...)"
-	@echo "  make gen            - Clean and regenerate proto code (via Docker)"
+	@echo "  make gen            - Stage and regenerate proto code (via Docker)"
+	@echo "  make deps-update-buf / deps-update-frontend - Deliberately update lockfiles"
 	@echo "  make proto          - Generate Go and TypeScript code from proto files (via Docker)"
 	@echo "  make proto-clean    - Remove all generated proto files"
 	@echo "  make proto-lint     - Lint proto files for style and correctness (via Docker)"

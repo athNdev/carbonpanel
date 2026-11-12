@@ -29,7 +29,7 @@ jobs:
           docker run --rm \
             --volume "${{ github.workspace }}:/workspace" \
             --workdir /workspace \
-            bufbuild/buf:latest generate
+            bufbuild/buf:1.50.0 generate
 
       - name: Upload generated Go proto code
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

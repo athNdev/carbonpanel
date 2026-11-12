@@ -26,6 +26,10 @@ sources:
 # Rules
 
 - A release note must describe shipped behavior, not planned behavior.
+- Buf CLI 1.50.0 is the default in Make, container and publication workflows;
+  generator plugin versions are pinned separately in `buf.gen.yaml`. The
+  [development guide](../../docs/development.md) describes explicit overrides
+  and the staged generation check.
 - Do not publish an image that was built from a dirty or unverified tree.
 - The controller image is published to Docker Hub as
   `atharvnaphade/carbon-panel`. CD's permission probe, image tags, tagged release
