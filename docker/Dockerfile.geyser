@@ -1,8 +1,9 @@
 FROM golang:alpine AS builder
 
 WORKDIR /build
-COPY cmd/geyser/main.go .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /geyser-entrypoint main.go
+COPY go.mod go.sum ./
+COPY cmd/geyser/ ./cmd/geyser/
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /geyser-entrypoint ./cmd/geyser
 
 FROM eclipse-temurin:21-jre-alpine
 

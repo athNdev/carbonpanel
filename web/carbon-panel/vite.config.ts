@@ -57,7 +57,7 @@ export default defineConfig({
 		}
 	},
 	server: {
-		host: '0.0.0.0',
+		host: process.env.CARBONPANEL_DEV_HOST ?? '127.0.0.1',
 		port: 5174,
 		strictPort: true,
 		proxy: (() => {

@@ -22,7 +22,7 @@ BUF_RUN := docker run --rm \
 
 # Development mode - runs backend (with live reload) and frontend concurrently
 run:
-	@bash scripts/dev.sh
+	@bun run scripts/dev.ts
 
 dev: run
 
@@ -42,7 +42,7 @@ dev-docs:
 prod: build-frontend
 	@echo "Building for production..."
 	@mkdir -p $(DATA_DIR)
-	go build -o $(CARBONPANEL_BIN) cmd/carbon-panel/main.go
+	go build -o $(CARBONPANEL_BIN) ./cmd/carbon-panel
 
 # Build frontend for production
 build-frontend:
@@ -52,7 +52,7 @@ build-frontend:
 # Build backend with embedded frontend
 build: build-frontend
 	@echo "Building backend with embedded frontend..."
-	go build -o $(CARBONPANEL_BIN) cmd/carbon-panel/main.go
+	go build -o $(CARBONPANEL_BIN) ./cmd/carbon-panel
 
 # Build and push Docker image to :dev tag
 image:
@@ -133,16 +133,10 @@ compose-upgrade-rollback:
 review-stack-clean:
 	@bash scripts/review/devstack.sh clean
 
-# Kill any orphaned dev processes
+# Never infer process ownership from an executable name.
 kill-dev:
-	@echo "Killing orphaned development processes..."
-	@pkill -f "air" || true
-	@pkill -f "bun" || true
-	@pkill -f "npm run dev" || true
-	@pkill -f "vite" || true
-	@pkill -f "go run cmd/carbon-panel/main.go" || true
-	@pkill -f "carbon-panel" || true
-	@echo "Cleanup complete!"
+	@echo "Use Ctrl+C in the owning development session to stop its process trees."
+	@echo "For an orphan, inspect its exact PID and stop it explicitly; process-name killing is unsupported."
 
 # Install dependencies
 deps:
@@ -250,7 +244,7 @@ help:
 	@echo "  make compose-upgrade - Dry-run Compose image recreate (APPLY=1 to snapshot and up --pull)"
 	@echo "  make compose-upgrade-rollback - Copy a DB snapshot back (SNAPSHOT=path, APPLY=1 to write)"
 	@echo "  make review-stack-clean - Delete ONLY the disposable review stack data (named destructive)"
-	@echo "  make kill-dev       - Kill any orphaned dev processes"
+	@echo "  make kill-dev       - Explain safe session-owned development shutdown"
 	@echo "  make deps           - Install all dependencies"
 	@echo "  make test           - Run tests"
 	@echo "  make fmt            - Format code"

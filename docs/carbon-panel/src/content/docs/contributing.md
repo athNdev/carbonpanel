@@ -76,6 +76,12 @@ disposable review stack is the separately named
 `scripts/review/devstack.sh clean`. Snapshot the controller database before an
 upgrade with `make snapshot-panel-db`.
 
+The default development profile binds controller, proxy and Vite listeners to
+loopback. Use `bun run dev --lan` only for intentional LAN exposure. Ctrl+C
+stops the owning session's process trees; child startup/exit failure stops its
+peer and returns failure. `make kill-dev` no longer kills tools by process name
+across unrelated checkouts. Test the launcher with `bun test scripts/dev.test.ts`.
+
 ## What a change needs
 
 - A regression test at the closest practical seam for any fixed bug.

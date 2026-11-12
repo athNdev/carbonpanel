@@ -197,6 +197,9 @@ bun run dev
 
 The development frontend runs at <http://localhost:5174> and proxies API/RPC
 requests to the backend at <http://localhost:8080>.
+The default development profile binds to loopback. Use `bun run dev --lan` for
+intentional LAN exposure, and Ctrl+C to stop only that session's process trees.
+See [development commands](docs/development.md) for tool selection and shutdown.
 
 ## Acknowledgments and credits
 

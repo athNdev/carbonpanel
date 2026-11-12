@@ -28,6 +28,9 @@ sources:
 - A release note must describe shipped behavior, not planned behavior.
 - Do not publish an image that was built from a dirty or unverified tree.
 - If a check cannot run, say so; do not describe it as passed.
+- Changes to module image inputs also run the build-only `build-inputs.yml`
+  workflow for Geyser and status on Linux amd64/arm64. PR checks do not log in
+  to a registry or publish images; module-tag publication remains separate.
 
 # Read next
 
