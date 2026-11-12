@@ -1,5 +1,18 @@
 # Development commands
 
+## Git and container build inputs
+
+Local data, databases, generated output, keys, and local integration settings
+are excluded by the repository's Git and Docker policies. Git ignore rules do
+not protect files already tracked by Git; review changes to tracked config
+before committing. The Docker policy also excludes the tracked root MCP config
+and environment setup from image build contexts.
+
+Run `python scripts/test-ignore-policies.py` for the Git sentinel matrix. With
+Docker available, add `--docker` to compare clean and cluttered disposable build
+contexts and verify essential source inputs. These checks only create and remove
+their own temporary fixtures; they do not clean project data.
+
 Use the Go version in `go.mod` and the Bun version in CI. Install the console
 dependencies with `bun install --frozen-lockfile` from `web/carbon-panel`.
 
