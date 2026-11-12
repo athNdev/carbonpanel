@@ -835,6 +835,9 @@ func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Serv
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server has no container")
 	}
+	if err := s.checkNodeMemoryCapacity(ctx, server); err != nil {
+		return "", err
+	}
 	dockerCli, err := s.dockerForNode(server.NodeID)
 	if err != nil {
 		return "", err
@@ -891,6 +894,9 @@ func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server
 
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server has no container")
+	}
+	if err := s.checkNodeMemoryCapacity(ctx, server); err != nil {
+		return "", err
 	}
 	dockerCli, err := s.dockerForNode(server.NodeID)
 	if err != nil {
@@ -970,8 +976,8 @@ func (s *Scheduler) StartServerForBoot(ctx context.Context, server *storage.Serv
 	return nil
 }
 
-// checkNodeMemoryCapacity protects scheduler-owned starts (boot and deep-sleep
-// wake) with the same persisted reservation and live Docker host limits as RPC
+// checkNodeMemoryCapacity protects scheduler-owned starts and restarts (including
+// boot and deep-sleep wake) with the same persisted reservation and host limits as RPC
 // lifecycle operations.
 func (s *Scheduler) checkNodeMemoryCapacity(ctx context.Context, server *storage.Server) error {
 	if server == nil {
