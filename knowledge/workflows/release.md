@@ -38,6 +38,8 @@ archives with an embedded, identically versioned UI, controller, storage helper,
 example configuration, license files and build metadata. The pure-Go SQLite
 driver permits `CGO_ENABLED=0`. Both CLIs expose metadata through `--version`
 before configuration or data access.
+The Changelog page shows the installed UI version. Its bundled markdown stays
+byte-for-byte synchronized with the root `CHANGELOG.md`.
 
 The release image is assembled from the same tested Linux binaries. The full
 bundle set, hashes and both registry architectures must be ready before the
