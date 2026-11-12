@@ -203,15 +203,19 @@
               Free and open source <span>·</span> Runs with Docker
             </p>
           </div>
-          <div class="hero-object" id="product">
-            <img
-              class="terrain"
-              src="./assets/graphite-terrain.webp"
-              width="1536"
-              height="1024"
-              alt=""
-              fetchpriority="high"
-            />
+          <div class="hero-object" id="product" data-world-state="running">
+            <div class="world-scene" aria-hidden="true">
+              <img
+                class="terrain"
+                src="./assets/graphite-world.webp"
+                width="1536"
+                height="1024"
+                alt=""
+                fetchpriority="high"
+              />
+              <div class="world-entrance"></div>
+              <div class="world-threshold"></div>
+            </div>
             <div class="chunk-detail" aria-hidden="true">
               <span>+</span><span>+</span>
             </div>
@@ -221,7 +225,7 @@
               </figcaption>
               <div class="fragment-surface"><!-- fragment:server --></div>
               <p class="fragment-note" data-fragment-note>
-                Interactive demo · Sample data. Changes stay in your browser.
+                Interactive demo · Stop the sample server. Watch the doorway.
               </p>
               <p class="fragment-recovery" hidden data-fragment-recovery>
                 <a href="">Reload page</a> ·
@@ -259,26 +263,24 @@
       >
         <span class="anchor-alias" id="modpack-studio"></span
         ><span class="anchor-alias" id="signature"></span>
-        <div class="frame structural-grid story-grid">
+        <div class="frame structural-grid studio-layout">
           <div class="story-copy">
             <p class="eyebrow">01 / MODPACK STUDIO</p>
-            <h2 id="studio-title">A world with<br />your fingerprints.</h2>
+            <h2 id="studio-title">
+              A world with<br /><span>your fingerprints.</span>
+            </h2>
+          </div>
+          <div class="studio-introduction">
             <p>
-              The little additions. The completely different adventures. Bring
-              your idea together in Modpack Studio.
+              The little additions.<br />The completely different adventures.
             </p>
-            <p class="secondary-copy">
-              Find your next addition, work through its dependencies, then shape
-              the pack and choose how to share it. Try a little of that workflow
-              here.
+            <p>
+              Find your next addition, bring its dependencies along, and make
+              the pack your own. Try it here.
             </p>
             <a class="text-link" href="./docs/guides/modpack-studio/"
               >Explore Modpack Studio <span aria-hidden="true">↗</span></a
             >
-            <div class="format-note">
-              <span>TAKE IT WITH YOU</span>
-              <p>.mrpack <b>/</b> CurseForge <b>/</b> packwiz</p>
-            </div>
           </div>
           <figure class="product-fragment studio-fragment">
             <figcaption class="fragment-caption">
@@ -299,6 +301,15 @@
               </p></noscript
             >
           </figure>
+          <div class="studio-margin" aria-hidden="true">
+            <span class="margin-cross">+</span>
+            <p>A FEW GOOD ADDITIONS.<br />AN ENTIRELY NEW WORLD.</p>
+            <div class="format-note">
+              <span>TAKE IT WITH YOU</span>
+              <p>.mrpack<br />CurseForge<br />packwiz</p>
+            </div>
+            <span class="margin-rule"></span>
+          </div>
         </div>
       </section>
       <section
@@ -465,12 +476,15 @@
         <div class="frame craft-grid structural-grid">
           <div class="craft-specimen" aria-hidden="true">
             <span class="diagram-label">THE CARBON DESIGN SYSTEM</span>
-            <div class="specimen-type">Aa<span>01—09</span></div>
+            <div class="specimen-type">Ag<span>{ }</span></div>
+            <div class="specimen-rule">
+              <span>INTER</span><span>JETBRAINS MONO</span>
+            </div>
             <div class="specimen-swatches">
               <i></i><i></i><i></i><i></i><i></i>
             </div>
             <div class="specimen-caption">
-              <span>INTER / JETBRAINS MONO</span><span>FORM + FUNCTION</span>
+              <span>SURFACE → ACCENT</span><span>FORM + FUNCTION</span>
             </div>
           </div>
           <div class="craft-copy">
@@ -636,7 +650,16 @@
         </div>
       </section>
       <section class="closing chapter">
-        <div class="frame">
+        <div class="closing-landscape" aria-hidden="true">
+          <img
+            src="./assets/graphite-world.webp"
+            width="1536"
+            height="1024"
+            alt=""
+            loading="lazy"
+          />
+        </div>
+        <div class="frame closing-copy">
           <div class="closing-mark">
             <img
               src="./assets/brand-mark-light.svg"

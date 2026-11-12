@@ -50,6 +50,7 @@
 		)
 	);
 	let exportMods = $derived(exportSelection(mods, includeClient));
+	let excludedMods = $derived(mods.filter((mod) => !exportMods.includes(mod)));
 	let tabs = $derived([
 		{ id: 'discover', label: 'Discover' },
 		{ id: 'mods', label: 'Your pack', badge: mods.length },
@@ -123,15 +124,29 @@
 						A small sample catalog. Versions and dependencies are illustrative.
 					</p>
 					{#each catalog as item (item.slug)}
-						<CarbonTile class="studio-catalog-item">
+						<CarbonTile
+							class={`studio-catalog-item ${mods.some((mod) => mod.slug === item.slug) ? 'is-added' : ''}`}
+						>
 							<div>
 								<h4>{item.name}</h4>
 								<p>{item.description}</p>
-								<span class="studio-dependency"
-									>{item.dependency
-										? `+ ${item.dependency.name} · required dependency`
-										: 'Client-side · leaves the server pack lean'}</span
-								>
+								{#if item.dependency}
+									<div
+										class="studio-relation"
+										aria-label={`${item.name} requires ${item.dependency.name}`}
+									>
+										<span>{item.name}</span><span aria-hidden="true">↳</span><span
+											>{item.dependency.name}</span
+										>
+										<small
+											>{mods.some((mod) => mod.slug === item.slug)
+												? '✓ In your pack'
+												: 'Required · added together'}</small
+										>
+									</div>
+								{:else}<span class="studio-dependency"
+										>Client-side · leaves the server pack lean</span
+									>{/if}
 							</div>
 							<CarbonButton
 								size="sm"
@@ -195,6 +210,18 @@
 								<span>{mod.name}</span><span>{mod.side}{mod.pinned ? ' · pinned' : ''}</span>
 							</li>{/each}
 					</ul>
+					{#if excludedMods.length}
+						<div class="studio-excluded">
+							<span aria-hidden="true">↳</span>
+							<p>
+								<strong
+									>{excludedMods.length} client-only {excludedMods.length === 1 ? 'mod' : 'mods'} left
+									out</strong
+								><br />{excludedMods.map((mod) => mod.name).join(', ')} stays in your pack. This export
+								is for the server.
+							</p>
+						</div>
+					{/if}
 					<p class="studio-hint">
 						Preview only. Install Carbon Panel to resolve real versions and download a working pack.
 					</p>

@@ -24,6 +24,12 @@ Studio's compact tabs connect a sample catalog, the shared mod table and an
 export preview. Dependency additions are illustrative fixtures, and the preview
 does not download or claim to resolve a working pack.
 
+Studio's dependency relationship and export exclusions remain visible as text;
+color and motion are supplementary feedback. The sample server may publish a
+completed-state event across its shadow boundary to switch the decorative
+terrain entrance light. The event is local to the fixture, carries no server
+identity, and never replaces the status text in the actual control.
+
 The dedicated Svelte build must not import application API clients, stores,
 SvelteKit route modules or Monaco. Production wrappers continue to own auth,
 requests and persistence. Never add a production auth bypass or a demo URL

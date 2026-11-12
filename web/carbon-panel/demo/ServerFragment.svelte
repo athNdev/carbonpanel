@@ -9,8 +9,19 @@
 	let busy = $state(false);
 	let message = $state('Try restarting this sample server.');
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let fragmentRoot: HTMLDivElement;
+	function publishWorldState() {
+		fragmentRoot?.dispatchEvent(
+			new CustomEvent('carbon-demo-server-state', {
+				bubbles: true,
+				composed: true,
+				detail: { running: status === ServerStatus.RUNNING }
+			})
+		);
+	}
 	onMount(() => {
 		ready = true;
+		publishWorldState();
 	});
 	onDestroy(() => clearTimeout(timer));
 	function reset() {
@@ -18,6 +29,7 @@
 		status = ServerStatus.RUNNING;
 		busy = false;
 		message = 'Sample restored. Try the server controls.';
+		publishWorldState();
 	}
 	function act(action: 'start' | 'stop' | 'restart') {
 		if (busy) return;
@@ -30,6 +42,7 @@
 		timer = setTimeout(() => {
 			status = action === 'stop' ? ServerStatus.STOPPED : ServerStatus.RUNNING;
 			busy = false;
+			publishWorldState();
 			message =
 				action === 'stop'
 					? 'Sample server stopped. Start it again when you are ready.'
@@ -38,7 +51,7 @@
 	}
 </script>
 
-<div class="fragment-root" data-carbon-theme="dark">
+<div class="fragment-root" data-carbon-theme="dark" bind:this={fragmentRoot}>
 	<fieldset disabled={!ready}>
 		<div class="demo-heading">
 			<div>

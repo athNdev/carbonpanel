@@ -210,7 +210,9 @@ dl {
     transparent calc((100% + var(--gap)) / var(--columns) + 0.5px),
     transparent calc((100% + var(--gap)) / var(--columns))
   );
-  mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent);
+  mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent),
+    linear-gradient(90deg, transparent 35%, #000 62%, #000);
+  mask-composite: intersect;
 }
 .structural-grid::after {
   content: "";
@@ -238,7 +240,7 @@ dl {
   grid-column: 1/6;
   position: relative;
   z-index: 2;
-  padding-top: 9px;
+  padding-top: 28px;
 }
 .eyebrow {
   font: 11px/1.8 var(--mono);
@@ -301,35 +303,59 @@ h1 span {
   min-width: 0;
   position: relative;
   align-self: start;
-  padding: 205px 0 0;
+  padding: 330px 0 0;
+}
+.world-scene {
+  position: absolute;
+  z-index: -1;
+  width: 850px;
+  aspect-ratio: 3 / 2;
+  right: -150px;
+  top: -90px;
+  pointer-events: none;
 }
 .terrain {
-  position: absolute;
-  z-index: -2;
-  width: 960px;
+  width: 100%;
+  height: 100%;
   max-width: none;
-  height: 640px;
-  object-fit: cover;
-  right: -100px;
-  top: -132px;
-  opacity: 1;
-  /* Let the dark photographic backdrop disappear into the page without a halo. */
-  mix-blend-mode: lighten;
-  mask-image: linear-gradient(
-      90deg,
-      transparent 8%,
-      #000 40%,
-      #000 94%,
-      transparent
-    ),
-    linear-gradient(
-      to bottom,
-      transparent,
-      #000 12%,
-      #000 82%,
-      transparent 100%
-    );
-  mask-composite: intersect;
+  object-fit: contain;
+}
+.world-entrance {
+  position: absolute;
+  left: 67.8%;
+  top: 43.5%;
+  width: 4.5%;
+  height: 11.7%;
+  clip-path: polygon(0 0, 100% 4%, 100% 100%, 0 94%);
+  background: radial-gradient(
+    ellipse at 5% 40%,
+    #f2c27a 0%,
+    #a76c30 12%,
+    #5b371e 36%,
+    #19120b 85%
+  );
+  opacity: 0.94;
+  transition: opacity 450ms ease;
+}
+.world-threshold {
+  position: absolute;
+  left: 65%;
+  top: 55%;
+  width: 10%;
+  height: 5%;
+  clip-path: polygon(26% 0, 73% 0, 100% 65%, 0 100%);
+  background: radial-gradient(
+    ellipse at 50% 0,
+    #ce9958a6,
+    #a3713433 55%,
+    transparent 75%
+  );
+  mix-blend-mode: screen;
+  transition: opacity 450ms ease;
+}
+[data-world-state="stopped"] .world-entrance,
+[data-world-state="stopped"] .world-threshold {
+  opacity: 0;
 }
 .chunk-detail {
   position: absolute;
@@ -404,7 +430,7 @@ h1 span {
 }
 .hero-fragment {
   width: 100%;
-  max-width: 510px;
+  max-width: 450px;
   margin-right: auto;
 }
 .hero-bottom {
@@ -414,7 +440,7 @@ h1 span {
   align-items: center;
   color: #92918a;
   font-size: 12px;
-  margin-top: 95px;
+  margin-top: 58px;
   padding-top: 22px;
   border-top: 1px solid var(--line);
 }
@@ -453,7 +479,97 @@ h1 span {
   align-items: center;
 }
 .studio-section {
-  padding-block: 136px 140px;
+  padding-block: 120px 112px;
+}
+.studio-layout {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 54px var(--gap);
+  align-items: start;
+}
+.studio-layout::before {
+  inset: 220px 0 -32px;
+  mask-image: linear-gradient(90deg, transparent 65%, #000);
+}
+.studio-layout .story-copy {
+  grid-column: 1 / 8;
+}
+.studio-layout h2 {
+  font-size: clamp(48px, 5.2vw, 76px);
+  line-height: 1.06;
+  letter-spacing: -0.055em;
+  margin: 20px 0 0;
+}
+.studio-layout h2 span {
+  color: #aaa9a3;
+}
+.studio-introduction {
+  grid-column: 9 / 13;
+  padding-top: 41px;
+}
+.studio-introduction > p:first-child {
+  color: #e1dfd6;
+  font-size: 18px;
+  line-height: 1.5;
+}
+.studio-introduction > p + p {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--muted);
+  margin-top: 18px;
+}
+.studio-introduction .text-link {
+  margin-top: 15px;
+}
+.studio-layout .studio-fragment {
+  grid-column: 1 / 10;
+}
+.studio-margin {
+  grid-column: 11 / 13;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  padding-block: 40px;
+  color: var(--quiet);
+}
+.margin-cross {
+  font: 25px/1 var(--mono);
+  color: #d0ccbf;
+}
+.studio-margin > p {
+  font: 9px/1.9 var(--mono);
+  margin-top: 24px;
+}
+.studio-margin .format-note {
+  margin-top: auto;
+}
+.studio-margin .format-note p {
+  font-size: 13px;
+  line-height: 2;
+}
+.margin-rule {
+  margin-top: 32px;
+  width: 72px;
+  max-width: 100%;
+  height: 48px;
+  border-left: 1px solid #77736a;
+  border-bottom: 1px solid #77736a;
+  clip-path: polygon(
+    0 0,
+    34% 0,
+    34% 33%,
+    67% 33%,
+    67% 67%,
+    100% 67%,
+    100% 100%,
+    0 100%
+  );
+  background: repeating-linear-gradient(
+      90deg,
+      transparent 0 23px,
+      #ffffff0c 23px 24px
+    ),
+    repeating-linear-gradient(0deg, transparent 0 15px, #ffffff0c 15px 16px);
 }
 .story-copy {
   grid-column: 1/5;
@@ -755,40 +871,53 @@ h2 {
   max-width: 300px;
 }
 .craft-section {
-  padding-block: 88px;
+  padding-block: 104px;
   border-top: 1px solid var(--line);
 }
 .craft-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
-  gap: 100px;
+  gap: 90px;
 }
 .craft-specimen {
   position: relative;
   isolation: isolate;
-  padding: 30px;
-  border: 1px solid #36352f;
-  background: radial-gradient(ellipse at 20% 0%, #272725, #191918 70%);
-  box-shadow: 0 -24px 100px -35px rgba(225, 227, 217, 0.12);
+  padding: 34px;
+  border: 1px solid #e5e0d4;
+  background: #e9e5da;
+  color: #262621;
+  transform: translateY(-8px);
+}
+.craft-specimen .diagram-label {
+  color: #656259;
 }
 .specimen-type {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  margin: 22px 0;
+  margin: 26px 0 22px;
   font:
-    96px/1.15 "Inter Variable",
+    140px/1.1 "Inter Variable",
     sans-serif;
   letter-spacing: -0.06em;
 }
 .specimen-type span {
   font:
-    28px "JetBrains Mono Variable",
+    40px "JetBrains Mono Variable",
     monospace;
-  color: #aaa9a3;
+  color: #716c60;
   letter-spacing: -0.05em;
+}
+.specimen-rule {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 12px;
+  margin-bottom: 30px;
+  border-top: 1px solid #bab5a7;
+  font: 9px var(--mono);
+  color: #656259;
 }
 .specimen-swatches {
   display: grid;
@@ -816,7 +945,7 @@ h2 {
   gap: 16px;
   margin-top: 12px;
   font: 8px/1.6 var(--mono);
-  color: var(--quiet);
+  color: #656259;
 }
 .craft-copy h2 {
   margin: 18px 0 22px;
@@ -1014,16 +1143,38 @@ h2 {
   text-underline-offset: 3px;
 }
 .closing {
-  padding-block: 45px 80px;
-  text-align: center;
+  overflow: clip;
+  min-height: 420px;
+  display: flex;
+  align-items: center;
+  padding-block: 80px 100px;
+}
+.closing-landscape {
+  position: absolute;
+  width: 850px;
+  height: 650px;
+  right: calc(50% - 740px);
+  top: -60px;
+  mask-image: linear-gradient(90deg, transparent, #000 25%),
+    linear-gradient(#000 70%, transparent 95%);
+  mask-composite: intersect;
+  z-index: -1;
+}
+.closing-landscape img {
+  width: 1050px;
+  height: auto;
+  max-width: none;
+  transform: translate(-80px, -60px);
+}
+.closing-copy {
+  padding-right: 48%;
 }
 .closing-mark {
   display: flex;
-  justify-content: center;
   margin-bottom: 25px;
 }
 .closing p {
-  font-size: 35px;
+  font-size: clamp(32px, 3.5vw, 50px);
   line-height: 1.25;
   letter-spacing: -0.035em;
 }
@@ -1074,7 +1225,12 @@ h2 {
   .hero-object {
     grid-column: 7/13;
     padding-left: 10px;
-    padding-top: 135px;
+    padding-top: 300px;
+  }
+  .world-scene {
+    width: 760px;
+    right: -155px;
+    top: -50px;
   }
   h1 {
     font-size: 72px;
@@ -1137,9 +1293,6 @@ h2 {
   h1 {
     font-size: 64px;
   }
-  .hero-object {
-    padding-top: 205px;
-  }
   .hero-copy .eyebrow {
     font-size: 10px;
   }
@@ -1153,10 +1306,6 @@ h2 {
   }
   .hero-footnote {
     font-size: 11px;
-  }
-  .terrain {
-    right: -250px;
-    top: -60px;
   }
   .story-grid {
     gap: 56px;
@@ -1270,15 +1419,16 @@ h2 {
     gap: 24px;
   }
   .hero-object {
-    padding: 180px 0 0;
+    padding: 320px 0 0;
     margin-top: 35px;
   }
   .hero-fragment {
     max-width: 570px;
   }
-  .terrain {
+  .world-scene {
+    width: 800px;
     right: -40px;
-    top: -150px;
+    top: -110px;
   }
   .hero-bottom {
     margin-top: 60px;
@@ -1375,15 +1525,13 @@ h2 {
     margin-top: 16px;
   }
   .hero-object {
-    padding: 168px 0 0;
+    padding: 270px 0 0;
     margin-top: 32px;
   }
-  .terrain {
-    width: 650px;
-    height: 434px;
-    top: -65px;
-    right: -55px;
-    opacity: 1;
+  .world-scene {
+    width: 600px;
+    top: -25px;
+    right: -120px;
   }
   .chunk-detail {
     width: 96px;
@@ -1563,7 +1711,23 @@ h2 {
     font-size: 15px;
   }
   .closing {
-    padding-block: 30px 60px;
+    padding-block: 35px 280px;
+    min-height: 580px;
+    align-items: start;
+  }
+  .closing-copy {
+    padding-right: 0;
+  }
+  .closing-landscape {
+    width: 600px;
+    height: 340px;
+    right: -180px;
+    top: auto;
+    bottom: -25px;
+  }
+  .closing-landscape img {
+    width: 700px;
+    transform: translate(-40px, -65px);
   }
   .closing p {
     font-size: 31px;
@@ -1611,6 +1775,58 @@ h2 {
     font-size: 8px;
   }
 }
+@media (max-width: 1000px) {
+  .studio-layout .story-copy {
+    grid-column: 1 / 8;
+  }
+  .studio-introduction {
+    grid-column: 8 / 13;
+  }
+  .studio-layout .studio-fragment {
+    grid-column: 1 / 11;
+    margin-left: 0;
+  }
+  .studio-margin {
+    grid-column: 12;
+  }
+  .studio-margin > p,
+  .studio-margin .format-note {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .studio-layout {
+    display: block;
+  }
+  .studio-layout h2 {
+    font-size: clamp(39px, 10.4vw, 64px);
+  }
+  .studio-introduction {
+    padding-top: 28px;
+    max-width: 450px;
+  }
+  .studio-introduction > p:first-child {
+    font-size: 17px;
+  }
+  .studio-introduction > p + p {
+    margin-top: 12px;
+  }
+  .studio-layout .studio-fragment {
+    margin-top: 34px;
+  }
+  .studio-margin {
+    display: none;
+  }
+  .craft-specimen {
+    transform: none;
+  }
+  .specimen-type {
+    font-size: 116px;
+  }
+  .specimen-type span {
+    font-size: 32px;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -1626,6 +1842,9 @@ h2 {
   .structural-grid::before,
   .structural-grid::after,
   .terrain,
+  .world-entrance,
+  .world-threshold,
+  .closing-landscape,
   .chunk-detail,
   .rest-symbol {
     display: none;

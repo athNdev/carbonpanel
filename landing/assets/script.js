@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 const menu = document.querySelector(".menu-toggle");
 const navigation = document.querySelector("#navigation");
+// Only the fixture server island emits this event. The artwork mirrors its
+// completed state; text in the real control remains the status indicator.
+document.addEventListener("carbon-demo-server-state", (event) => {
+  if (event.target?.dataset?.fragment !== "server") return;
+  const world = document.querySelector("[data-world-state]");
+  if (world)
+    world.dataset.worldState = event.detail.running ? "running" : "stopped";
+});
 function closeMenu(restoreFocus = false) {
   navigation?.classList.remove("is-open");
   menu?.setAttribute("aria-expanded", "false");
