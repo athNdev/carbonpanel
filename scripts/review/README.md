@@ -41,11 +41,11 @@ full page, so a clipped element is still visible.
 
 Environment overrides:
 
-| Variable | Purpose |
-| --- | --- |
-| `PANEL_REVIEW_USER` / `PANEL_REVIEW_PASSWORD` | login (names configurable per plan) |
-| `REVIEW_MODULES` | directory containing `playwright-core` |
-| `REVIEW_CHROME` | explicit Chromium executable path |
+| Variable                                      | Purpose                                |
+| --------------------------------------------- | -------------------------------------- |
+| `PANEL_REVIEW_USER` / `PANEL_REVIEW_PASSWORD` | login (names configurable per plan)    |
+| `REVIEW_MODULES`                              | directory containing `playwright-core` |
+| `REVIEW_CHROME`                               | explicit Chromium executable path      |
 
 ## Plan format
 
@@ -61,7 +61,13 @@ Environment overrides:
     "submitSelector": "button[type=\"submit\"]",
     "successSelector": "a[href^=\"/servers/\"]"
   },
-  "steps": [{ "goto": "/servers", "waitFor": "a[href^=\"/servers/\"]", "screenshot": "01-list" }]
+  "steps": [
+    {
+      "goto": "/servers",
+      "waitFor": "a[href^=\"/servers/\"]",
+      "screenshot": "01-list"
+    }
+  ]
 }
 ```
 
@@ -74,16 +80,19 @@ shot is a viewport clip, so the themed page renders exactly as a person sees
 it). Crops scroll the element into view first; set `"scroll": false` for a
 full-height page column so it is captured from the top instead of being
 aligned under the fixed app header.
+Use `"maxHeight": 528` on an element screenshot to end a crop after a focused
+region, such as the first complete row of library cards. This caps the native
+viewport crop; it does not resize or repaint the UI.
 
-| Action | Meaning |
-| --- | --- |
-| `goto` | navigate to a path under the base URL |
-| `click` / `fill` / `press` | act on a selector |
-| `waitFor` | wait for a selector to be visible |
-| `wait` | sleep, in milliseconds |
-| `assertVisible` / `assertHidden` | assert a selector's visibility |
-| `assertText` | `{ "assertText": sel, "contains": "..." }` |
-| `assertNoScrollbar` | fail if the element scrolls vertically |
+| Action                           | Meaning                                    |
+| -------------------------------- | ------------------------------------------ |
+| `goto`                           | navigate to a path under the base URL      |
+| `click` / `fill` / `press`       | act on a selector                          |
+| `waitFor`                        | wait for a selector to be visible          |
+| `wait`                           | sleep, in milliseconds                     |
+| `assertVisible` / `assertHidden` | assert a selector's visibility             |
+| `assertText`                     | `{ "assertText": sel, "contains": "..." }` |
+| `assertNoScrollbar`              | fail if the element scrolls vertically     |
 
 ## Plans in this directory
 

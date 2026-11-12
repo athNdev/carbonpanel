@@ -86,6 +86,8 @@ export default defineConfig({
 				{ label: 'Changelog', slug: 'changelog' },
 				{ label: 'Documentation version', slug: 'versions' },
 				{ label: 'Contributing', slug: 'contributing' },
+				// Starlight prefixes local links with its docs base; this is a sibling route.
+				{ label: 'Design system', link: '../design-system/' },
 			],
 		}),
 	],

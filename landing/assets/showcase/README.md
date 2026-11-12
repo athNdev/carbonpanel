@@ -1,26 +1,13 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
-# Showcase screenshots
 
-Seeded-stack captures, regenerated 2026-11-06 from the dashboard branch via devstack + journey (see commands below). Re-run on UI changes to dashboard, server detail, studio, or modpacks.
+# Application captures
 
-Regenerate from a disposable seeded stack:
+These PNGs mirror `assets/showcase/` for website distribution. The homepage
+uses real interactive UI fragments instead of these images.
 
-```sh
-scripts/review/devstack.sh up
-node scripts/review/journey.mjs \
-  --plan scripts/review/plan-showcase.json \
-  --base http://127.0.0.1:<port-from-devstack> \
-  --out /tmp/showcase
-cp /tmp/showcase/showcase-*.png landing/assets/showcase/
-cp /tmp/showcase/showcase-*.png assets/showcase/
-```
-
-Expected files:
-
-- `showcase-dashboard.png`
-- `showcase-server-detail.png`
-- `showcase-studio.png`
-- `showcase-modpacks.png`
+See [capture provenance and regeneration](../../../assets/showcase/README.md)
+for the application revision, date, review data and crop choices. Update both
+directories together whenever the represented application UI changes.
 
 Re-run on UI changes to the dashboard, server detail, studio, or modpacks.
 Static PNGs only: CSP `frame-ancestors 'self'` forbids live iframe embeds.

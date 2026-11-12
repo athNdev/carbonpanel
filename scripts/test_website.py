@@ -109,6 +109,16 @@ class WebsiteTests(unittest.TestCase):
                 (root / "web/carbon-panel/src/lib/design-system/tokens.css").read_bytes())
             self.assertTrue((design / "site.css").is_file())
             self.assertTrue((design / "site.js").is_file())
+            # Checkout links and font URLs must resolve within the same website,
+            # including when it is published below a path such as /carbonpanel/.
+            for href in ('../', '../docs/', '../docs/getting-started/docker-compose/'):
+                self.assertIn(f'href="{href}"', page)
+            self.assertIn('src="../assets/brand-horizontal-light.svg"', page)
+            self.assertNotIn('../../landing/', page)
+            self.assertNotIn('../carbon-panel/src/', page)
+            css = (design / "site.css").read_text(encoding="utf-8")
+            self.assertIn('../assets/fonts/inter-latin-wght-normal.woff2', css)
+            self.assertNotIn('../../landing/', css)
             links = Links()
             links.feed((root / "landing/index.html").read_text(encoding="utf-8"))
             self.assertIn("./design-system/", links.urls)
