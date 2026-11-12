@@ -26,6 +26,8 @@ sources:
 
 - The homepage and documentation share one artifact. Only the website deployment
   workflow publishes Pages; docs validation must not replace the root homepage.
+- Website CI pins the same Bun version as the frontend CI so frozen installs
+  can read the application's checked-in lockfile format.
 - The homepage's interactive examples compile from shared Svelte feature
   components with browser-local fixtures; the combined build includes their
   prerendered HTML and hashed assets. See [Homepage UI fragments](homepage-fragments.md).

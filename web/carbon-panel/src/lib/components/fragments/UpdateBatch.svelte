@@ -120,7 +120,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<fieldset disabled={windowLocked}>
 			<legend><Clock3 size={13} aria-hidden="true" /> Apply this batch</legend>
 			<div class="window-choices">
-				{#each [{ value: 'next', label: 'Next restart' }, { value: 'idle', label: 'When empty' }, { value: 'time', label: 'Pick a time' }] as option}
+				{#each [{ value: 'next', label: 'Next restart' }, { value: 'idle', label: 'When empty' }, { value: 'time', label: 'Pick a time' }] as option (option.value)}
 					<label class:selected={applyWindow === option.value}
 						><input
 							type="radio"

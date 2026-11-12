@@ -28,7 +28,7 @@ in the [documentation backlog plan](plans/website-documentation-backlog.md).
 ## Build and verify
 
 Requirements: Git with the pinned commit available, Python 3.12+, Node.js 24.22.1,
-Bun 1.3.3, npm and Buf 1.50.0. Network access is needed for locked packages and the
+Bun 1.4.2, npm and Buf 1.50.0. Network access is needed for locked packages and the
 versioned Buf generator. No application, Docker daemon or database is required.
 
 ```sh
