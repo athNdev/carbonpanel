@@ -134,6 +134,7 @@ func (o *remoteDownloadOp) snapshot() (status, errMsg string) {
 // FileService implements the File service
 type FileService struct {
 	store           *storage.Store
+	storageResolver *nodestorage.Resolver
 	docker          *docker.Client
 	log             *logger.Logger
 	uploadManager   *upload.Manager
@@ -147,6 +148,11 @@ type FileService struct {
 	// includes every test that builds one.
 	cleanupStop chan struct{}
 	stopOnce    sync.Once
+}
+
+// SetStorageResolver selects the storage transport before the service starts.
+func (s *FileService) SetStorageResolver(resolver *nodestorage.Resolver) {
+	s.storageResolver = resolver
 }
 
 // NewFileService creates a new file service
@@ -186,7 +192,7 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 		path = "."
 	}
 
-	root, acc, err := s.openMappedStorage(ctx, server, false)
+	root, acc, err := s.openReadOnlyStorage(ctx, server)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -220,6 +226,17 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 // pipelines may create the server directory on shared or local storage; they
 // never mkdir a transport-only node onto the controller.
 func (s *FileService) openMappedStorage(ctx context.Context, server *storage.Server, write bool) (string, nodestorage.Accessor, error) {
+	return s.openStorage(ctx, server, write, false)
+}
+
+// Read-only requests can end their worker with the RPC context. Mutating and
+// background operations retain their existing lifetime until they have an
+// independently owned cancellation and rollback policy.
+func (s *FileService) openReadOnlyStorage(ctx context.Context, server *storage.Server) (string, nodestorage.Accessor, error) {
+	return s.openStorage(ctx, server, false, true)
+}
+
+func (s *FileService) openStorage(ctx context.Context, server *storage.Server, write, cancelWithRequest bool) (string, nodestorage.Accessor, error) {
 	if write {
 		if _, err := dataRootFor(ctx, s.store, server, true); err != nil {
 			return "", nil, err
@@ -229,7 +246,12 @@ func (s *FileService) openMappedStorage(ctx context.Context, server *storage.Ser
 	if err != nil {
 		return "", nil, err
 	}
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	var acc nodestorage.Accessor
+	if s.storageResolver != nil && cancelWithRequest {
+		acc, err = s.storageResolver.ForNode(ctx, info, server.DataPath)
+	} else {
+		acc, err = nodestorage.ForNode(info, server.DataPath)
+	}
 	if err != nil {
 		return "", nil, err
 	}
@@ -240,6 +262,10 @@ func (s *FileService) openMappedStorage(ctx context.Context, server *storage.Ser
 // without an adapter is unavailable, a bad path is an invalid request.
 func storageError(err error) error {
 	switch {
+	case errors.Is(err, context.Canceled):
+		return connect.NewError(connect.CodeCanceled, err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
 	case nodestorage.IsUnavailable(err):
 		return connect.NewError(connect.CodeUnavailable, err)
 	case nodestorage.IsEscape(err):
@@ -261,7 +287,7 @@ func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFi
 
 	// Resolve the owning node's root before any path check, so a controller
 	// copy of the data path cannot reject or stand in for the world.
-	root, acc, err := s.openMappedStorage(ctx, server, false)
+	root, acc, err := s.openReadOnlyStorage(ctx, server)
 	if err != nil {
 		return nil, storageError(err)
 	}
