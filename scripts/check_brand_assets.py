@@ -41,6 +41,7 @@ def main():
         ("landing/assets/og-docker-compose.png", (1200, 630)),
         ("landing/assets/og-api.png", (1200, 630)),
         ("landing/assets/og-design-system.png", (1200, 630)),
+        ("assets/branding/social-preview.png", (1280, 640)),
         ("landing/assets/favicon.png", (32, 32)),
         ("web/carbon-panel/static/g1_16x16.png", (16, 16)),
         ("web/carbon-panel/static/g1_32x32.png", (32, 32)),
@@ -50,6 +51,9 @@ def main():
         data = (ROOT / relative).read_bytes()
         if data[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", data[16:24]) != dimensions:
             errors.append(relative)
+
+    if (MASTER / "social-preview.png").stat().st_size >= 1_000_000:
+        errors.append("assets/branding/social-preview.png must be under 1 MB for GitHub")
 
     if errors:
         raise SystemExit("Brand asset mismatch: " + ", ".join(errors))

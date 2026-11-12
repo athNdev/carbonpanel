@@ -20,6 +20,8 @@ The homepage reuses feature components consumed by the installed panel. It
 shows small server-control, Studio and update-batch examples rather than an
 entire application shell. Each example has independent, labelled sample data
 and in-memory actions; reset and reload restore the fixture.
+Marketing link arrows use decorative SVGs rather than Unicode diagonal-arrow
+characters so Safari cannot choose an emoji presentation for a control icon.
 The staging example collects illustrative configuration, mod, datapack, file,
 module and modpack edits in the shared update-batch inventory. Its review step
 is a local demonstration of preparing one server's batch, not a claim that

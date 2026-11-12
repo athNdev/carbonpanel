@@ -103,7 +103,7 @@ class WebsiteTests(unittest.TestCase):
             self.assertIn("github.com/athNdev/carbonpanel/blob/main/docs/design-system/README.md", page)
             self.assertNotIn("../../web/carbon-panel/", page)
             self.assertIn('property="og:image"', page)
-            self.assertIn('content="https://carbonpanel.dev/assets/og-design-system.png?v=2"', page)
+            self.assertIn('content="https://carbonpanel.dev/assets/og-design-system.png?v=20261113"', page)
             self.assertEqual(
                 (design / "tokens.css").read_bytes(),
                 (root / "web/carbon-panel/src/lib/design-system/tokens.css").read_bytes())

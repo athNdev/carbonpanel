@@ -53,6 +53,10 @@ sources:
   page that is missing metadata, points at a relative or missing image, or lets
   a prominent route fall back to the shared card. Keep preview copy free of em
   dashes.
+- Current social cards are rendered from `assets/branding/social-preview.html`
+  with the approved logo, homepage terrain and Plex fonts. The website uses
+  1200 by 630 PNGs; GitHub has a separate 1280 by 640 repository PNG and an
+  independent upload setting. Regeneration must not alter the approved logo.
 
 # Rationale
 
