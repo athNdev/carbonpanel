@@ -14,7 +14,7 @@
 #   ./scripts/docker-cd.sh [TAG] [--push] [--multiarch]
 #
 # Environment variables:
-#   DOCKER_HUB_USERNAME / DOCKERHUB_USERNAME  (default: athndev)
+#   DOCKER_HUB_USERNAME / DOCKERHUB_USERNAME  (default: atharvnaphade)
 #   DOCKER_HUB_PASSWORD / DOCKERHUB_TOKEN     (optional, logs in if set)
 #   PLATFORMS                                 (default: linux/amd64,linux/arm64)
 # ==============================================================================
@@ -22,7 +22,7 @@
 set -e
 
 TAG="${1:-latest}"
-REGISTRY="${DOCKER_HUB_USERNAME:-${DOCKERHUB_USERNAME:-athndev}}"
+REGISTRY="${DOCKER_HUB_USERNAME:-${DOCKERHUB_USERNAME:-atharvnaphade}}"
 IMAGE="${REGISTRY}/carbon-panel:${TAG}"
 PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 
