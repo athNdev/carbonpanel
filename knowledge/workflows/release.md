@@ -49,6 +49,9 @@ bundle set, hashes and both registry architectures must be ready before the
 draft release is published. A completed release is not overwritten. A draft
 can be retried; a public fix receives a new version. See release operations
 for exact artifact names, native runner targets and checksum verification.
+Draft verification uses the release-by-ID API resolved by the CLI; GitHub's
+by-tag REST lookup omits unpublished drafts. A final-publication failure can
+resume from the original verified download artifact without rebuilding images.
 
 # Rules
 

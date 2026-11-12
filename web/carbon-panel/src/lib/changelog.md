@@ -103,7 +103,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI with Carbon Design System.
 - Docker-based server isolation.
 
-[Unreleased]: https://github.com/athNdev/carbon-panel/compare/v3.0.0-beta.4...HEAD
+[Unreleased]: https://github.com/athNdev/carbonpanel/compare/v3.0.0-alpha.1...HEAD
+[3.0.0-alpha.1]: https://github.com/athNdev/carbonpanel/releases/tag/v3.0.0-alpha.1
 [3.0.0-beta.4]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.4
 [3.0.0-beta.3]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.3
 [2.0.15]: https://github.com/athNdev/carbon-panel/releases/tag/v2.0.15

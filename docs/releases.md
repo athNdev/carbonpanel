@@ -81,9 +81,9 @@ version for upgrades. The image digest in the release manifest is the immutable
 reference for that release. Module images have their own publishing workflow.
 
 The GitHub container package links to the source repository, so it appears in
-the repository's Packages sidebar. On first publication, GitHub defaults the
-package to private; an owner must make it public in Package settings. Later
-versions retain the package's visibility. This does not change repository
+the repository's Packages sidebar. Verify visibility after first publication;
+if the package is private, an owner can make it public in Package settings.
+Later versions retain the package's visibility. This does not change repository
 permissions or require a saved package token: publishing uses the workflow's
 short-lived `GITHUB_TOKEN` with package-write permission.
 
@@ -123,3 +123,23 @@ upload and verify its complete local asset set, and publish it with generated
 pull-request notes. A failure before publication leaves no public partial
 GitHub release. Retrying an unpublished draft is supported; published versions
 require a new tag. GitHub release publication does not send a Discord message.
+
+## Recover a staged release
+
+If only the final publication job fails, keep the version and its built images.
+Do not move the tag or rebuild a different image under that version.
+
+1. Confirm that all five native archive jobs and the matching-image job succeeded
+   in the original release run. Start with current `main` tooling if the failure
+   required a publisher fix; re-running an old job uses its old tooling.
+2. Download that run's `verified-release-downloads` artifact. Read the version
+   and source commit from its `release-manifest.json`. Fetch the existing release
+   tag into the local checkout without overwriting any other tag.
+3. Run `python3 scripts/release.py publish --version VERSION --commit COMMIT --output DIRECTORY`,
+   replacing the three values with that artifact's metadata and download directory.
+
+The publisher verifies exact-commit CI, tag identity, the complete download set,
+local checksums and GitHub's uploaded asset digests before exposing the release.
+It resolves drafts by their stable release ID; GitHub's by-tag REST endpoint
+does not return unpublished drafts. Existing public releases remain immutable
+under the tool's policy and require a new version for further changes.

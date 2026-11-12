@@ -49,6 +49,13 @@ def github(*args):
     return run("gh", *args)
 
 
+def get_release(tag):
+    # GitHub's by-tag REST endpoint omits unpublished drafts. The CLI resolves
+    # drafts too and supplies their stable, authenticated release-by-ID URL.
+    api_url = github("release", "view", tag, "--json", "apiUrl", "--jq", ".apiUrl")
+    return json.loads(github("api", api_url))
+
+
 def guard_publishing(tag, commit):
     subprocess.run(["git", "merge-base", "--is-ancestor", commit, "origin/main"], check=True)
     runs = json.loads(github("run", "list", "--workflow", "ci.yml", "--event", "push",
@@ -241,12 +248,13 @@ def publish(args):
     if not run("git", "tag", "--list", tag):
         github("api", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/tags/{tag}", "-f", f"sha={args.commit}")
     generated = json.loads(github("api", "repos/{owner}/{repo}/releases/generate-notes", "-f", f"tag_name={tag}", "-f", f"target_commitish={args.commit}"))
+    repository = os.environ.get("GITHUB_REPOSITORY") or github("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     channel = "This is an alpha/prerelease build for early testing.\n\n" if "-alpha." in tag else (
         "This is a prerelease build.\n\n" if "-" in tag else "")
     body = (f"{channel}## Downloads\n\nChoose the archive for your operating system and CPU. Each includes the panel with its web UI, the storage helper, configuration example and licenses.\n\n"
             f"Verify downloads against **checksums.txt**. **release-manifest.json** records the exact source commit and Docker image digest. Back up your database and configuration before upgrading; preserve server worlds and existing data.\n\n"
             f"Container images (Linux amd64 and arm64):\n\n- Docker Hub: `{manifest['image']}`\n- GitHub Packages: `{manifest['github_image']}`\n\n"
-            f"[Installation and verification](https://github.com/{os.environ['GITHUB_REPOSITORY']}/blob/{tag}/docs/releases.md)\n\n" + generated["body"])
+            f"[Installation and verification](https://github.com/{repository}/blob/{tag}/docs/releases.md)\n\n" + generated["body"])
     with tempfile.TemporaryDirectory(prefix="carbon-release-notes-") as temporary:
         notes = Path(temporary) / "notes.md"
         notes.write_text(body, encoding="utf-8")
@@ -256,7 +264,7 @@ def publish(args):
             github("release", "create", tag, "--verify-tag", "--draft", "--title", f"Carbon Panel {tag}", "--notes-file", str(notes))
         github("release", "edit", tag, "--notes-file", str(notes))
         github("release", "upload", tag, *(str(output / name) for name in sorted(expected | {"checksums.txt"})), "--clobber")
-        uploaded = json.loads(github("api", f"repos/{{owner}}/{{repo}}/releases/tags/{tag}"))
+        uploaded = get_release(tag)
         remote = {asset["name"]: asset.get("digest") for asset in uploaded["assets"]}
         complete = expected | {"checksums.txt"}
         if not uploaded["draft"] or set(remote) != complete or any(
