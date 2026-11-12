@@ -99,11 +99,19 @@ the detached server. After a parent migration, module rows follow the
 target node and clear their container ids; source sidecar containers are
 not removed.
 
-# Known gap
+# Hook execution
 
-`internal/module/hooks.go:execInModule` still uses the manager's client
-directly. It is tracked with the other node-resolution gaps in
-[failure modes](../failures/remote-node-fallback.md).
+EXEC hooks resolve the module's `NodeID` through the Docker Locator with the
+operation context before executing on its recorded container. An unresolved or
+unavailable assigned node returns an error without executing locally. A remote
+pool client works even when no controller-local client is configured.
+
+The command remains one exec argument; routing adds no shell or command splitting.
+An absent container remains a no-op. Cancellation already present on entry stops
+the hook before lookup, and the operation context reaches the Docker exec calls.
+The event dispatcher retains its bounded hook slots and existing event-context
+lifetime policy. Tests use two loopback fake daemons to prove remote execution,
+local non-interference, command/exit behavior and cancellation.
 
 # Read next
 

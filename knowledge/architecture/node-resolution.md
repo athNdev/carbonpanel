@@ -45,7 +45,9 @@ wrong host. That is a data-safety bug, not a degraded mode.
   when the historical fallback flag is set. Local aliases still use the
   controller client.
 - Hibernation uses `SetFreezerResolver` so freeze/wake go through `internal/docker/locator.go` for the server's node. The remaining freezer exposure is a resolver that returns nil rather than a typed locator error.
-- `internal/module/hooks.go:execInModule` still uses the manager's client.
+- Module EXEC hooks resolve the module's assigned node through Locator with
+  the operation context. Lookup and remote execution failures never retry on
+  the manager's local daemon; no local client is required for a remote hook.
 - Disk usage measures the node's mapped world root. A remote node without
   reachable storage is left unmeasured.
 - File read, update, delete, and rename resolve that mapped root before
