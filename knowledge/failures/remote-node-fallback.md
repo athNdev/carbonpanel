@@ -28,11 +28,15 @@ cannot be resolved, and a module records the server's node ID. A cached client
 is not reused after that node's host or TLS material changes. `GetClient` does
 not answer a named node with the local daemon.
 
+Module EXEC hooks also resolve their assigned node through Locator before
+executing. A missing or unavailable node fails without a local exec, including
+when the manager has only remote pool clients. A two-daemon regression fixture
+guards against a successful command on the wrong daemon.
+
 # Remaining exposure
 
 - Hibernation resolves through Locator via `SetFreezerResolver`; a nil freezer
   from that callback must not be treated as the local daemon for a remote node.
-- `internal/module/hooks.go:execInModule` still uses the manager's client.
 - Creating a server, deleting it, mod installation, packwiz bake, snapshot
   create/restore, scheduled backup archives, and scheduled modpack sync use
   the node's mapped storage root. CreateServer places a manual server pack
