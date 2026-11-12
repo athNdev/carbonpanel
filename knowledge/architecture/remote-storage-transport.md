@@ -43,6 +43,14 @@ The subprocess adapter uses inherited OS pipes: the parent closes its copies
 of the child ends after startup and retains the session ends until shutdown.
 Its roundtrip test must assert that transport was selected, rather than
 pre-creating a controller-visible root and inadvertently testing shared storage.
+Closing a session interrupts an in-flight request without waiting for the
+request lock. The subprocess adapter closes both session pipes and reaps the
+worker, terminating it after a bounded grace period if it does not exit.
+Process and Docker worker sessions bind the handshake and session lifetime to
+the supplied context; cancellation closes their transport.
+An instance-owned resolver can select a transport with the caller's context.
+Legacy `ForNode` callers still use the registered process-wide transport and a
+background context until each owning subsystem is migrated.
 
 Accessor backups enumerate metadata and apply exclusions before reading file
 contents. Each retained file is read once while writing its archive entry and

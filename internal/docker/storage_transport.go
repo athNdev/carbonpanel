@@ -40,6 +40,9 @@ func NewStorageTransport(pool *ClientPool, log *logger.Logger, workerImage strin
 
 // Open implements nodestorage.Transport.
 func (t *StorageTransport) Open(ctx context.Context, node nodestorage.NodeInfo, dataRoot string) (nodestorage.Accessor, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t == nil || t.pool == nil || t.workerImage == "" {
 		return nil, fmt.Errorf("%w: remote storage worker image is not configured", nodestorage.ErrUnavailable)
 	}
@@ -54,7 +57,7 @@ func (t *StorageTransport) Open(ctx context.Context, node nodestorage.NodeInfo, 
 	hostRoot := nodestorage.NodePath(node, dataRoot, dataRoot)
 	sess, err := dockerCli.startStorageWorker(ctx, t.workerImage, hostRoot)
 	if err != nil {
-		return nil, fmt.Errorf("%w: storage worker on node %q: %v", nodestorage.ErrUnavailable, node.Name, err)
+		return nil, fmt.Errorf("%w: storage worker on node %q: %w", nodestorage.ErrUnavailable, node.Name, err)
 	}
 	return storageworker.NewRemoteAccessor(sess), nil
 }
@@ -125,7 +128,7 @@ func (c *Client) startStorageWorker(ctx context.Context, image, hostDataRoot str
 		})
 		return closeErr
 	}
-	return storageworker.NewSession(attach.Conn, stdoutR, closeF)
+	return storageworker.NewSessionContext(ctx, attach.Conn, stdoutR, closeF)
 }
 
 var _ nodestorage.Transport = (*StorageTransport)(nil)
