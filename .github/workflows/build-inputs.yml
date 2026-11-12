@@ -32,6 +32,10 @@ on:
       - 'go.sum'
       - '.dockerignore'
       - '.github/workflows/build-inputs.yml'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   launcher:
     name: Development launcher (${{ matrix.os }})

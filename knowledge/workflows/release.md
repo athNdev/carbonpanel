@@ -31,6 +31,12 @@ sources:
 - Changes to module image inputs also run the build-only `build-inputs.yml`
   workflow for Geyser and status on Linux amd64/arm64. PR checks do not log in
   to a registry or publish images; module-tag publication remains separate.
+- Validation retains the full lint debt and structured vulnerability scan
+  reports alongside the gates; incomplete scans fail. See
+  [verification](../testing/verification.md) for the policy and pinned tools.
+- Editor changes also run `editor-dialog.yml`, which renders the actual dialog
+  in Chromium with deferred RPC responses. Session adapter tests alone cannot
+  prove Svelte initialization, props timing or Monaco cleanup behavior.
 
 # Read next
 

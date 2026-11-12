@@ -32,7 +32,6 @@ issues:
 #
 #   golangci-lint run --max-issues-per-linter=0 --max-same-issues=0 ./...
 #
-# Baseline as of golangci-lint v2.13.2 / Go 1.27 on main: 356 errcheck findings
-# (unchecked Close/Remove on best-effort paths) and 2 staticcheck SA1019
-# findings for httputil.ReverseProxy.Director in internal/proxy/http.go.
-# New code is held to the full standard.
+# CI uploads the full report with its revision and actual toolchain; use that
+# artifact instead of a stale hard-coded debt count. New code is held to the
+# full standard.
