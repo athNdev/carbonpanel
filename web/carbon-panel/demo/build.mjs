@@ -69,7 +69,7 @@ await writeFile(
 				cwd: root,
 				encoding: 'utf8'
 			}).trim(),
-			fixtureVersion: 2,
+			fixtureVersion: 3,
 			components: ['ServerLifecycleActions', 'StudioModTable', 'UpdateBatch'],
 			data: 'browser-local samples; no connected server'
 		},

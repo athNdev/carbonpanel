@@ -635,10 +635,10 @@ h2 {
   background: none;
 }
 .story-reversed .product-fragment {
-  grid-column: 1/7;
+  grid-column: 1/8;
 }
 .story-reversed .story-copy {
-  grid-column: 8/13;
+  grid-column: 9/13;
 }
 .process-list {
   list-style: none;

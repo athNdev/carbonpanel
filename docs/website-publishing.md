@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
+
 # Website and pinned documentation
 
 The Pages deployment contains the marketing homepage at `/` and
@@ -76,6 +77,15 @@ The Studio island uses Carbon tabs, search, tiles and buttons around its shared
 mod table. Its sample catalog demonstrates adding a required dependency and
 curating a pack; the export view reflects side and pin choices without creating
 an archive or claiming current provider compatibility.
+
+The staging island collects sample edits from six supported staging areas into
+the shared update-batch inventory. It shows before/after values, individual
+removal, a batch-wide apply window, review and staged states, and an expandable
+live sample. Stage captures a snapshot; simulated apply publishes only its
+remaining items. There is no timer, server restart or automatic interception of
+edits elsewhere on the homepage. The installed panel supplies its existing
+batch summaries, kinds and actions to the same inventory; demo-specific
+before/after values and review actions are optional presentation inputs.
 
 The builder prerenders the real components into declarative shadow roots,
 which isolate the panel's tokens and utilities from the marketing CSS. It
