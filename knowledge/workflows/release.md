@@ -41,6 +41,8 @@ sources:
 - Editor changes also run `editor-dialog.yml`, which renders the actual dialog
   in Chromium with deferred RPC responses. Session adapter tests alone cannot
   prove Svelte initialization, props timing or Monaco cleanup behavior.
+- The same browser workflow verifies a real local WebSocket reconnect and
+  subscription history options in Chromium when frontend inputs change.
 - Development launcher checks use the pinned Go toolchain to build their native
   Windows supervisor and fixtures. Both Linux and Windows run the launcher tests;
   Windows also checks the qualification evidence evaluator and setup guards.

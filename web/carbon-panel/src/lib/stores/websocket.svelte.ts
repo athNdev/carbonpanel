@@ -37,8 +37,39 @@ type LogHandler = (serverId: string, logs: LogEntry[]) => void;
 type LogEntryHandler = (serverId: string, logs: LogEntry[]) => void;
 type CommandResultHandler = (result: CommandResultMessage) => void;
 
-class WebSocketClient {
+export interface WebSocketDependencies {
+	enabled: () => boolean;
+	url: () => string;
+	token: () => string;
+	setSessionCookie: (token: string) => void;
+	createSocket: (url: string) => WebSocket;
+	setTimeout: typeof setTimeout;
+	clearTimeout: typeof clearTimeout;
+	setInterval: typeof setInterval;
+	clearInterval: typeof clearInterval;
+}
+
+const defaultDependencies: WebSocketDependencies = {
+	enabled: () => browser,
+	url: () =>
+		`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`,
+	token: () => get(authStore).token || '',
+	setSessionCookie: (token) => {
+		document.cookie = `cp_session=${encodeURIComponent(token)}; Path=/; SameSite=Strict`;
+	},
+	createSocket: (url) => new WebSocket(url),
+	setTimeout: ((...args: Parameters<typeof setTimeout>) =>
+		globalThis.setTimeout(...args)) as typeof setTimeout,
+	clearTimeout: (timer) => globalThis.clearTimeout(timer),
+	setInterval: ((...args: Parameters<typeof setInterval>) =>
+		globalThis.setInterval(...args)) as typeof setInterval,
+	clearInterval: (timer) => globalThis.clearInterval(timer)
+};
+
+export class WebSocketClient {
+	constructor(private readonly deps: WebSocketDependencies = defaultDependencies) {}
 	private socket: WebSocket | null = null;
+	private generation = 0;
 	private reconnectAttempts = 0;
 	private maxReconnectAttempts = 5;
 	private reconnectDelay = 1000;
@@ -62,13 +93,18 @@ class WebSocketClient {
 	private logEntryHandlers = new Set<LogEntryHandler>();
 	private commandResultHandlers = new Set<CommandResultHandler>();
 
-	// Active subscriptions (serverId -> true)
-	private subscriptions = new Map<string, boolean>();
+	// Preserve each subscription's requested history across reconnects.
+	private subscriptions = new Map<string, number>();
 
 	connect(isRetry = false): void {
-		if (!browser) return;
-		if (this.socket?.readyState === WebSocket.OPEN) return;
+		if (!this.deps.enabled()) return;
+		if (this.socket?.readyState === 1) return;
 		if (this.state.connectionState === 'connecting') return;
+		if (this.reconnectTimer) {
+			this.deps.clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		const generation = ++this.generation;
 
 		// A fresh, user-initiated connect resets the backoff budget so a manual
 		// retry (or a page interaction) is not permanently blocked by the five
@@ -80,76 +116,83 @@ class WebSocketClient {
 		this.state.connectionState = 'connecting';
 		this.state.error = null;
 
-		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 		// Pre-upgrade credential (MINE-164) rides the cp_session cookie so the
 		// session token is not written into the URL (MINE-185).
-		const preAuth = get(authStore).token || '';
+		const preAuth = this.deps.token();
 		if (preAuth) {
-			document.cookie = `cp_session=${encodeURIComponent(preAuth)}; Path=/; SameSite=Strict`;
+			this.deps.setSessionCookie(preAuth);
 		}
-		const wsUrl = `${protocol}//${window.location.host}/ws`;
+		const wsUrl = this.deps.url();
 
 		try {
-			this.socket = new WebSocket(wsUrl);
-			this.socket.binaryType = 'arraybuffer';
+			const socket = this.deps.createSocket(wsUrl);
+			this.socket = socket;
+			socket.binaryType = 'arraybuffer';
+			const current = () => this.generation === generation && this.socket === socket;
 
-			this.socket.onopen = () => {
+			socket.onopen = () => {
+				if (!current()) return;
 				console.log('[WS] Connected');
 				this.state.connectionState = 'connected';
 				this.reconnectAttempts = 0;
 
 				// Authenticate with token or empty string for non auth to get anon token
-				const authState = get(authStore);
-				this.authenticate(authState.token || '');
+				this.authenticate(this.deps.token());
 
 				// Start ping timer and log flush timer
 				this.startPingTimer();
 				this.startLogFlushTimer();
 			};
 
-			this.socket.onclose = (event) => {
+			socket.onclose = (event) => {
+				if (!current()) return;
+				this.socket = null;
 				console.log('[WS] Disconnected:', event.code, event.reason);
 				this.cleanup();
+				if (generation !== this.generation) return;
 				this.state.connectionState = 'disconnected';
 
 				// Attempt reconnection if not a clean close
 				if (event.code !== 1000) {
-					this.scheduleReconnect();
+					this.scheduleReconnect(generation);
 				}
 			};
 
-			this.socket.onerror = (error) => {
+			socket.onerror = (error) => {
+				if (!current()) return;
 				console.error('[WS] Error:', error);
 				this.state.error = 'WebSocket connection error';
 				// Some failures surface as onerror without a following onclose;
 				// close explicitly so the reconnect path always runs.
-				if (this.socket && this.socket.readyState !== WebSocket.CLOSED) {
-					this.socket.close();
+				if (socket.readyState !== 3) {
+					socket.close();
 				}
 			};
 
-			this.socket.onmessage = (event) => {
-				this.handleMessage(event.data);
+			socket.onmessage = (event) => {
+				if (!current()) return;
+				this.handleMessage(event.data, generation);
 			};
 		} catch (error) {
 			console.error('[WS] Failed to connect:', error);
 			this.state.connectionState = 'disconnected';
 			this.state.error = 'Failed to establish connection';
-			this.scheduleReconnect();
+			this.scheduleReconnect(generation);
 		}
 	}
 
 	disconnect(): void {
-		if (this.socket) {
-			this.socket.close(1000, 'Client disconnect');
-			this.socket = null;
-		}
+		++this.generation;
+		const socket = this.socket;
+		this.socket = null;
+		if (socket) socket.close(1000, 'Client disconnect');
 		this.cleanup();
 		this.state.connectionState = 'disconnected';
 		this.subscriptions.clear();
 	}
 
 	reconnect(): void {
+		++this.generation;
 		this.cleanup();
 		if (this.socket) {
 			try {
@@ -167,15 +210,15 @@ class WebSocketClient {
 
 	private cleanup(): void {
 		if (this.pingTimer) {
-			clearInterval(this.pingTimer);
+			this.deps.clearInterval(this.pingTimer);
 			this.pingTimer = null;
 		}
 		if (this.reconnectTimer) {
-			clearTimeout(this.reconnectTimer);
+			this.deps.clearTimeout(this.reconnectTimer);
 			this.reconnectTimer = null;
 		}
 		if (this.logFlushTimer) {
-			clearInterval(this.logFlushTimer);
+			this.deps.clearInterval(this.logFlushTimer);
 			this.logFlushTimer = null;
 		}
 		this.flushLogBuffer();
@@ -183,7 +226,9 @@ class WebSocketClient {
 
 	private startLogFlushTimer(): void {
 		if (this.logFlushTimer) return;
-		this.logFlushTimer = setInterval(() => {
+		const generation = this.generation;
+		this.logFlushTimer = this.deps.setInterval(() => {
+			if (generation !== this.generation) return;
 			this.flushLogBuffer();
 		}, WebSocketClient.LOG_FLUSH_INTERVAL_MS);
 	}
@@ -210,7 +255,8 @@ class WebSocketClient {
 		this.logBuffer.clear();
 	}
 
-	private scheduleReconnect(): void {
+	private scheduleReconnect(generation: number): void {
+		if (generation !== this.generation || this.reconnectTimer) return;
 		const isTerminalBackoff = this.reconnectAttempts >= this.maxReconnectAttempts;
 		if (isTerminalBackoff) {
 			console.log('[WS] Max rapid reconnect attempts reached; continuing periodic retries');
@@ -225,24 +271,29 @@ class WebSocketClient {
 		this.reconnectAttempts++;
 
 		console.log(`[WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-		this.reconnectTimer = setTimeout(() => {
+		this.reconnectTimer = this.deps.setTimeout(() => {
+			if (generation !== this.generation) return;
+			this.reconnectTimer = null;
 			this.connect(true);
 		}, delay);
 	}
 
 	private startPingTimer(): void {
 		// Send ping every 30 seconds
-		this.pingTimer = setInterval(() => {
+		const generation = this.generation;
+		this.pingTimer = this.deps.setInterval(() => {
+			if (generation !== this.generation) return;
 			this.sendPing();
 		}, 30000);
 	}
 
-	private handleMessage(data: ArrayBuffer): void {
+	private handleMessage(data: ArrayBuffer, generation: number): void {
 		try {
 			const msg = fromBinary(WebSocketServerMessageSchema, new Uint8Array(data));
 
 			// Notify all message handlers
 			this.messageHandlers.forEach((handler) => handler(msg));
+			if (generation !== this.generation) return;
 
 			switch (msg.type) {
 				case WSMessageType.WS_MESSAGE_TYPE_AUTH_OK:
@@ -312,7 +363,7 @@ class WebSocketClient {
 	}
 
 	private send(data: Uint8Array): boolean {
-		if (this.socket?.readyState !== WebSocket.OPEN) {
+		if (this.socket?.readyState !== 1) {
 			console.warn('[WS] Cannot send, socket not open');
 			return false;
 		}
@@ -332,7 +383,7 @@ class WebSocketClient {
 	}
 
 	subscribe(serverId: string, tail: number = 500): void {
-		this.subscriptions.set(serverId, true);
+		this.subscriptions.set(serverId, tail);
 
 		if (this.state.connectionState !== 'authenticated') {
 			return;
@@ -396,12 +447,12 @@ class WebSocketClient {
 	}
 
 	private resubscribeAll(): void {
-		for (const serverId of this.subscriptions.keys()) {
+		for (const [serverId, tail] of this.subscriptions) {
 			const msg = create(WebSocketClientMessageSchema, {
 				type: WSMessageType.WS_MESSAGE_TYPE_SUBSCRIBE,
 				payload: {
 					case: 'subscribe',
-					value: create(SubscribeMessageSchema, { serverId, tail: 500 })
+					value: create(SubscribeMessageSchema, { serverId, tail })
 				}
 			});
 			this.send(toBinary(WebSocketClientMessageSchema, msg));
@@ -435,4 +486,10 @@ class WebSocketClient {
 	}
 }
 
-export const wsClient = new WebSocketClient();
+export function createWebSocketClient(
+	deps: WebSocketDependencies = defaultDependencies
+): WebSocketClient {
+	return new WebSocketClient(deps);
+}
+
+export const wsClient = createWebSocketClient();

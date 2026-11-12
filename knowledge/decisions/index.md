@@ -15,3 +15,4 @@
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
 - [Server work temp is on the data volume](server-work-temp.md) — Modpack downloads, extracts, and native libraries use /data/.tmp, not the 64 MiB noexec /tmp tmpfs.
 - [Website and documentation publication](website-docs.md) — Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.
+- [WebSocket connection lifetime](websocket-lifetime.md) — Socket callbacks and timers belong to one connection generation, and subscriptions retain their requested tail on reconnect.
