@@ -16,6 +16,7 @@ code_refs:
   - scripts/build_website.py
   - scripts/check_website.py
   - scripts/generate_social_cards.py
+  - web/carbon-panel/demo
 sources:
   - title: Website publishing
     resource: ../../docs/website-publishing.md
@@ -25,11 +26,18 @@ sources:
 
 - The homepage and documentation share one artifact. Only the website deployment
   workflow publishes Pages; docs validation must not replace the root homepage.
+- Website CI pins the same Bun version as the frontend CI so frozen installs
+  can read the application's checked-in lockfile format.
+- The homepage's interactive examples compile from shared Svelte feature
+  components with browser-local fixtures; the combined build includes their
+  prerendered HTML and hashed assets. See [Homepage UI fragments](homepage-fragments.md).
 - Application prose, imported examples and API schema come from the same full
   commit in `docs/website-source.json`. Never substitute the current checkout or
   a floating branch if that commit is unavailable.
-- The standalone shared design system is published with the homepage from the
-  current branch, including its canonical tokens. It is not application content.
+- The shared design system is published with the homepage from the current
+  branch, including its canonical tokens. It shares site branding, local fonts
+  and navigation with the website and docs, while keeping its component
+  specimens and theme preview independent. It is not pinned application content.
 - The website theme and docs navigation can evolve independently of the source
   pin. Display the pin on every documentation page.
 - A published release pin uses the release tag as its label. Any other commit is

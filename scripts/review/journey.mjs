@@ -248,13 +248,24 @@ async function main() {
           const clip = {
             x: Math.max(0, Math.round(box.x)),
             y: Math.max(0, Math.round(box.y)),
-            width: Math.min(Math.round(box.width), vp.width - Math.max(0, Math.round(box.x))),
-            height: Math.min(Math.round(box.height), vp.height - Math.max(0, Math.round(box.y))),
+            width: Math.min(
+              Math.round(box.width),
+              vp.width - Math.max(0, Math.round(box.x)),
+            ),
+            height: Math.min(
+              Math.round(box.height),
+              vp.height - Math.max(0, Math.round(box.y)),
+              spec.maxHeight ?? Infinity,
+            ),
           };
-          if (clip.width < 2 || clip.height < 2) throw new Error(`empty clip for ${spec.element}`);
+          if (clip.width < 2 || clip.height < 2)
+            throw new Error(`empty clip for ${spec.element}`);
           await page.screenshot({ path: file, clip });
         } else {
-          await page.screenshot({ path: file, fullPage: spec.fullPage ?? false });
+          await page.screenshot({
+            path: file,
+            fullPage: spec.fullPage ?? false,
+          });
         }
         record(label, true, `screenshot ${file}`);
       } else {

@@ -6,17 +6,17 @@ Minecraft world; the wordmark gives the project a practical, technical tone.
 
 ## Files
 
-| Asset | Use |
-| --- | --- |
-| `mark-dark.svg`, `mark-light.svg` | Symbol alone; scalable, transparent SVG. |
-| `wordmark-dark.svg`, `wordmark-light.svg` | Lettering alone; scalable, transparent SVG. |
-| `horizontal-dark.svg`, `horizontal-light.svg` | Symbol and wordmark side by side. |
-| `stacked-dark.svg`, `stacked-light.svg` | Compact symbol and two-line wordmark. |
-| `sizes/horizontal-{24,40,64}px-{dark,light}.svg` | Horizontal lockups adjusted for 24, 40, and 64 px symbol heights. |
-| `sizes/horizontal-{24,40,64}px-{dark,light}.png` | Transparent 1x raster exports of those lockups. |
-| `sizes/mark-{24,40,64}px-{dark,light}.png` | Transparent, square symbol-only raster exports. |
-| `approved-logo.vectorcraft` | Editable VectorCraft source and the approved comparison sheet. |
-| `social-preview.vectorcraft` | Editable 1200 by 630 social card with the approved identity and feature messaging. |
+| Asset                                            | Use                                                                                |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `mark-dark.svg`, `mark-light.svg`                | Symbol alone; scalable, transparent SVG.                                           |
+| `wordmark-dark.svg`, `wordmark-light.svg`        | Lettering alone; scalable, transparent SVG.                                        |
+| `horizontal-dark.svg`, `horizontal-light.svg`    | Symbol and wordmark side by side.                                                  |
+| `stacked-dark.svg`, `stacked-light.svg`          | Compact symbol and two-line wordmark.                                              |
+| `sizes/horizontal-{24,40,64}px-{dark,light}.svg` | Horizontal lockups adjusted for 24, 40, and 64 px symbol heights.                  |
+| `sizes/horizontal-{24,40,64}px-{dark,light}.png` | Transparent 1x raster exports of those lockups.                                    |
+| `sizes/mark-{24,40,64}px-{dark,light}.png`       | Transparent, square symbol-only raster exports.                                    |
+| `approved-logo.vectorcraft`                      | Editable VectorCraft source and the approved comparison sheet.                     |
+| `social-preview.vectorcraft`                     | Editable 1200 by 630 social card with the approved identity and feature messaging. |
 
 `dark` means dark artwork for a light background (`#202427`); `light` means
 light artwork for a dark background (`#f4f4f4`). All SVG text has been
@@ -52,7 +52,10 @@ copies of the approved artwork; update those copies when the master changes.
 
 ## Repository and social previews
 
-`assets/banner.svg` is the root README banner. `landing/assets/og.svg` and
+`assets/readme/hero.png` is the root README banner, rendered from the portable
+HTML source beside it using the website's terrain, fonts and approved lockup.
+See [README artwork](../readme/README.md) for regeneration. The older
+`assets/banner.svg` remains available at its existing path. `landing/assets/og.svg` and
 `landing/assets/og.png` are the shared social-card exports. Open `social-preview.vectorcraft` in VectorCraft to edit the card;
 export its first artboard as SVG with text outlined and PNG at 1x (1200 by 630).
 The editable card uses Inter for its feature captions; the exported SVG contains
@@ -67,13 +70,13 @@ Prominent pages carry dedicated cards drawn from the same layout and the
 vendored Inter and JetBrains Mono faces. Regenerate them with
 `python3 scripts/generate_social_cards.py` (requires a Chromium-family browser):
 
-| Card | Page |
-| --- | --- |
-| `og-docs.png` | Documentation home |
-| `og-introduction.png` | Introduction |
-| `og-docker-compose.png` | Docker Compose getting started |
-| `og-api.png` | API reference and its generated reference page |
-| `og-design-system.png` | Design system |
+| Card                    | Page                                           |
+| ----------------------- | ---------------------------------------------- |
+| `og-docs.png`           | Documentation home                             |
+| `og-introduction.png`   | Introduction                                   |
+| `og-docker-compose.png` | Docker Compose getting started                 |
+| `og-api.png`            | API reference and its generated reference page |
+| `og-design-system.png`  | Design system                                  |
 
 Keep preview titles, descriptions and alt text free of em dashes.
 `scripts/check_website.py` fails the build if any published page is missing the

@@ -43,14 +43,16 @@
 		</script>
 		<link rel="stylesheet" href="../../web/carbon-panel/src/lib/design-system/tokens.css" />
 		<link rel="stylesheet" href="./site.css" />
+		<link rel="icon" href="../../landing/assets/favicon.png" />
 		<script src="./site.js" defer></script>
 	</head>
 	<body>
 		<a class="skip-link" href="#main">Skip to content</a>
 		<header class="topbar">
-			<a class="wordmark" href="#top" aria-label="Carbon design system home"><span class="mark" aria-hidden="true">C</span><span>Carbon <span class="wordmark-sub">/ Design system</span></span></a>
-			<button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to light preview">Light preview <span aria-hidden="true">◐</span></button>
+			<a class="wordmark" href="../../landing/index.html" aria-label="Carbon Panel home"><img src="../../landing/assets/brand-horizontal-light.svg" width="156" height="30" alt="Carbon Panel" /></a>
+			<nav class="website-nav" aria-label="Website"><a href="../../landing/index.html">Home</a><a href="../carbon-panel/src/content/docs/index.mdx">Docs</a><a href="https://github.com/athNdev/carbonpanel" class="source-link">GitHub ↗</a><a class="website-install" href="../carbon-panel/src/content/docs/getting-started/docker-compose.mdx">Install <span aria-hidden="true">↗</span></a></nav>
 		</header>
+		<div class="guide-bar"><nav aria-label="Breadcrumb"><a href="../../landing/index.html">Carbon Panel</a><span aria-hidden="true">/</span><a href="#overview" aria-current="page">Design system</a></nav><button class="theme-toggle" type="button" data-theme-toggle aria-label="Switch to light preview">Light preview <span aria-hidden="true">◐</span></button></div>
 		<details class="mobile-nav">
 			<summary>Contents</summary>
 			<nav aria-label="Design system sections"><a href="#overview">Overview</a><a href="#color">Color</a><a href="#type">Typography</a><a href="#space">Space and geometry</a><a href="#elevation">Elevation</a><a href="#motion">Motion</a><a href="#components">Components</a><a href="#composition">Composition</a><a href="#patterns">Patterns</a><a href="#accessibility">Accessibility</a><a href="#workflow">Workflow</a></nav>
@@ -66,8 +68,9 @@
 			<main id="main">
 				<section class="hero" id="overview" aria-labelledby="hero-title">
 					<p class="eyebrow"><span class="eyebrow-dot"></span> REFERENCE / FOUNDATIONS <span class="draft">WORKING SYSTEM</span></p>
-					<h1 id="hero-title">Tokens and components<br /><span>for Carbon Panel and Carbon Cloud.</span></h1>
-					<p class="hero-copy">A single reference for the shared visual layer: CSS custom properties, control geometry, motion contracts, and the nineteen Svelte components exported from <code>$lib/components/carbon</code>. The examples on this page are static HTML reproductions; the Svelte files remain the implementation.</p>
+					<h1 id="hero-title">The details<br /><span>that make it Carbon.</span></h1>
+					<p class="hero-copy">The design language shared by Carbon Panel and Carbon Cloud. Explore the colours, typography and controls that turn a collection of features into one considered interface.</p>
+					<p class="annotation">A working reference for nineteen Svelte components and their foundations. Examples below are static HTML specimens; the component source remains the implementation.</p>
 					<div class="hero-actions"><a class="button primary" href="#components">Component inventory <span aria-hidden="true">↗</span></a><a class="button secondary" href="./README.md">Design contract <span aria-hidden="true">→</span></a></div>
 					<dl class="source-list">
 						<div><dt>tokens.css</dt><dd><code>web/carbon-panel/src/lib/design-system/tokens.css</code><span>Canonical colour, spacing, control, motion and shadow values for both themes.</span></dd></div>
@@ -997,7 +1000,7 @@
 					</div>
 					<div class="hero-actions"><a class="button primary" href="./README.md">Read the contract <span aria-hidden="true">→</span></a><a class="button secondary" href="../../web/carbon-panel/src/lib/design-system/tokens.css">Open tokens.css <span aria-hidden="true">↗</span></a></div>
 				</section>
-				<footer><span>CARBON / DESIGN SYSTEM</span><span>Panel + Cloud · 19 components · 2 themes</span></footer>
+				<footer><span>CARBON / DESIGN SYSTEM</span><nav aria-label="More from Carbon"><a href="../../landing/index.html">Back to Carbon Panel</a><a href="../carbon-panel/src/content/docs/index.mdx">Documentation</a><a href="https://github.com/athNdev/carbonpanel">GitHub ↗</a></nav><span>Panel + Cloud · 19 components · 2 themes</span></footer>
 			</main>
 		</div>
 	</body>

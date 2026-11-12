@@ -78,25 +78,14 @@ class LandingPageTests(unittest.TestCase):
         self.assertTrue(image.query, "A replaced preview needs a cache version")
         self.assertTrue((root / "landing" / image.path.removeprefix("/")).is_file())
 
-    def test_tour_screenshots_keep_the_wide_track_on_both_sides(self):
+    def test_homepage_presents_focused_interactive_fragments(self):
         root = Path(__file__).resolve().parent.parent
-        css = (root / "landing/assets/styles.css").read_text(encoding="utf-8")
-        # Odd rows: copy in the narrow track, screenshot in the wide one.
-        self.assertRegex(
-            css,
-            r"\.tour-row \{[^}]*grid-template-columns: minmax\(0, 4fr\) minmax\(0, 8fr\);",
-        )
-        # Even rows flip the sides, so the tracks must flip with them. Without
-        # this the screenshot lands in the 4fr track and becomes unreadable.
-        self.assertRegex(
-            css,
-            r"\.tour-row:nth-child\(even\) \{[^}]*"
-            r"grid-template-columns: minmax\(0, 8fr\) minmax\(0, 4fr\);",
-        )
-        # Both row variants stack below the breakpoint.
-        self.assertIn(
-            ".tour-row:nth-child(even) { grid-template-columns: 1fr;", css
-        )
+        page = (root / "landing/index.html").read_text(encoding="utf-8")
+        for fragment in ("server", "studio", "staging", "loader"):
+            self.assertEqual(page.count(f"<!-- fragment:{fragment} -->"), 1)
+        self.assertNotIn("<iframe", page)
+        self.assertNotIn("showcase/", page)
+        self.assertIn("No server connected", page)
 
 
 if __name__ == "__main__":

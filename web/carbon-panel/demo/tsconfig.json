@@ -1,0 +1,6 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": { "types": ["svelte", "vite/client"] },
+	"include": ["./**/*.ts", "./**/*.svelte", "../src/lib/components/fragments/**/*.svelte"],
+	"exclude": ["./**/*.test.ts"]
+}

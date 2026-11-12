@@ -1,0 +1,157 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Carbon Panel README artwork</title>
+    <link
+      rel="stylesheet"
+      href="../../landing/assets/fonts/ibm-plex-sans.css"
+    />
+    <link
+      rel="stylesheet"
+      href="../../landing/assets/fonts/ibm-plex-mono.css"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #141414;
+        color: #f1f0ea;
+        font-family: "IBM Plex Sans", sans-serif;
+      }
+      .banner {
+        position: relative;
+        isolation: isolate;
+        width: 1200px;
+        height: 440px;
+        overflow: hidden;
+      }
+      .rails {
+        position: absolute;
+        inset: 0 28px;
+        border-inline: 1px solid #ffffff0d;
+        z-index: -1;
+      }
+      .grid {
+        position: absolute;
+        inset: 0 28px 0 560px;
+        z-index: -1;
+        background: repeating-linear-gradient(
+          90deg,
+          transparent 0 79px,
+          #ffffff08 79px 80px
+        );
+        mask-image: linear-gradient(
+          transparent,
+          #000 25%,
+          #000 75%,
+          transparent
+        );
+      }
+      .brand {
+        position: absolute;
+        top: 35px;
+        left: 55px;
+        width: 159px;
+      }
+      .copy {
+        position: absolute;
+        left: 55px;
+        top: 125px;
+        z-index: 2;
+      }
+      .eyebrow {
+        margin: 0 0 20px;
+        color: #b8b7b0;
+        font:
+          10px "IBM Plex Mono",
+          monospace;
+        letter-spacing: 0.08em;
+      }
+      .eyebrow span {
+        margin-right: 10px;
+        color: #f1f0ea;
+      }
+      h1 {
+        font-weight: 400;
+        font-size: 76px;
+        line-height: 1.04;
+        letter-spacing: -0.055em;
+        margin: 0;
+      }
+      h1 span {
+        color: #a9a8a1;
+      }
+      .footnote {
+        margin: 25px 0 0;
+        color: #b8b7b0;
+        font-size: 15px;
+      }
+      .world {
+        position: absolute;
+        width: 760px;
+        height: 506.6667px;
+        right: -90px;
+        top: -18px;
+        z-index: -1;
+      }
+      .world img {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .entrance {
+        position: absolute;
+        left: 67.8%;
+        top: 43.5%;
+        width: 4.5%;
+        height: 11.7%;
+        clip-path: polygon(0 0, 100% 4%, 100% 100%, 0 94%);
+        background: radial-gradient(
+          ellipse at 5% 40%,
+          #f2c27a,
+          #a76c30 12%,
+          #5b371e 36%,
+          #19120b 85%
+        );
+        opacity: 0.94;
+      }
+      .cross {
+        position: absolute;
+        left: 596px;
+        top: 168px;
+        color: #85837b;
+        font:
+          14px "IBM Plex Mono",
+          monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="banner" aria-label="Carbon Panel. Your worlds. Yours to run.">
+      <div class="rails"></div>
+      <div class="grid"></div>
+      <img
+        class="brand"
+        src="../branding/horizontal-light.svg"
+        alt="Carbon Panel"
+      />
+      <div class="copy">
+        <p class="eyebrow">
+          <span>+</span> SELF-HOSTED. OPEN SOURCE. MINECRAFT.
+        </p>
+        <h1>Your worlds.<br /><span>Yours to run.</span></h1>
+        <p class="footnote">Build a world worth keeping.</p>
+      </div>
+      <span class="cross" aria-hidden="true">+</span>
+      <div class="world" aria-hidden="true">
+        <img src="../../landing/assets/graphite-world.webp" alt="" />
+        <div class="entrance"></div>
+      </div>
+    </main>
+  </body>
+</html>

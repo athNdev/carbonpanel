@@ -6,9 +6,17 @@ on:
       - 'landing/**'
       - 'docs/carbon-panel/**'
       - 'docs/design-system/**'
-      - 'web/carbon-panel/src/lib/design-system/tokens.css'
+      - 'web/carbon-panel/src/lib/**'
+      - 'web/carbon-panel/demo/**'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/bun.lock'
+      - 'web/carbon-panel/src/routes/servers/**'
+      - 'web/carbon-panel/src/routes/modpacks/studio/**'
       - 'docs/website-source.json'
       - 'scripts/*website*'
+      - 'scripts/test_landing_page.py'
+      - 'scripts/test_design_system_page.py'
+      - 'scripts/check_brand_assets.py'
       - '.github/workflows/docs.yml'
       - '.github/workflows/landing.yml'
   workflow_dispatch:
@@ -25,6 +33,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.22.1'
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99
         with:
           version: '1.50.0'
