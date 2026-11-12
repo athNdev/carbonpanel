@@ -16,6 +16,7 @@ code_refs:
   - scripts/build_website.py
   - scripts/check_website.py
   - scripts/generate_social_cards.py
+  - web/carbon-panel/demo
 sources:
   - title: Website publishing
     resource: ../../docs/website-publishing.md
@@ -25,6 +26,9 @@ sources:
 
 - The homepage and documentation share one artifact. Only the website deployment
   workflow publishes Pages; docs validation must not replace the root homepage.
+- The homepage's interactive examples compile from shared Svelte feature
+  components with browser-local fixtures; the combined build includes their
+  prerendered HTML and hashed assets. See [Homepage UI fragments](homepage-fragments.md).
 - Application prose, imported examples and API schema come from the same full
   commit in `docs/website-source.json`. Never substitute the current checkout or
   a floating branch if that commit is unavailable.

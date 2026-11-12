@@ -18,6 +18,17 @@ SOURCE_PATHS = ("docs/carbon-panel/src/content/docs", "docker-compose.yml",
                 "config.example.yaml", "oidc", "proto", "buf.yaml", "buf.lock")
 
 
+def build_homepage(root):
+    """Compile and prerender shared Svelte fragments without starting the panel."""
+    bun = shutil.which("bun")
+    if not bun:
+        raise RuntimeError("Bun is required for the homepage's shared UI fragments.")
+    project = root / "web/carbon-panel"
+    subprocess.run([bun, "install", "--frozen-lockfile"], cwd=project, check=True)
+    subprocess.run([bun, "run", "build:homepage"], cwd=project, check=True)
+    return root / ".website-build/landing"
+
+
 def export_snapshot(root, revision, destination):
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("The documentation pin must be a full commit SHA.")
@@ -58,6 +69,7 @@ def publish_design_system(root, output):
 def build(root, base, site):
     if not base.startswith("/") or not base.endswith("/") or ".." in base:
         raise ValueError("The website base must be an absolute path ending in /.")
+    homepage = build_homepage(root)
     pin = json.loads((root / "docs/website-source.json").read_text(encoding="utf-8"))
     docs_base = base + "docs/"
     output = root / ".website-build/site"
@@ -105,7 +117,7 @@ def build(root, base, site):
         subprocess.run([npm, "run", "build"], cwd=project, env=environment, check=True)
         if output.exists():
             shutil.rmtree(output)
-        shutil.copytree(root / "landing", output, ignore=shutil.ignore_patterns("qa-*.html"))
+        shutil.copytree(homepage, output)
         shutil.copytree(project / "dist", output / "docs")
         publish_design_system(root, output)
     namespace = "http://www.sitemaps.org/schemas/sitemap/0.9"

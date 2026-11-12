@@ -7,6 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
+	import StudioModTable from '$lib/components/fragments/StudioModTable.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -31,8 +32,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		Rocket,
 		Plus,
 		Trash2,
-		Pin,
-		PinOff,
 		Package,
 		Loader2,
 		CheckCircle2,
@@ -1224,138 +1223,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								/>
 							</div>
 						{:else}
-							<div class="overflow-x-auto" data-testid="showcase-mods-table">
-								<table class="w-full border-collapse text-left text-xs">
-									<thead
-										class="border-b border-[#525252] bg-[#393939] font-semibold tracking-wider text-[#f4f4f4] uppercase"
-									>
-										<tr>
-											<th scope="col" class="w-8 px-3 py-2.5">
-												<input
-													type="checkbox"
-													aria-label="Select all mods"
-													class="cursor-pointer rounded-none border-[#8d8d8d] bg-[#262626]"
-													checked={selectedSlugs.length > 0 &&
-														selectedSlugs.length === filteredMods.length}
-													onchange={(e) => {
-														const checked = (e.target as HTMLInputElement).checked;
-														selectedSlugs = checked ? filteredMods.map((m) => m.slug) : [];
-													}}
-												/>
-											</th>
-											<th scope="col" class="px-3 py-2.5">Mod Name</th>
-											<th scope="col" class="px-3 py-2.5">File Name</th>
-											<th scope="col" class="px-3 py-2.5">Platform</th>
-											<th scope="col" class="px-3 py-2.5">Side</th>
-											<th scope="col" class="px-3 py-2.5">Pin</th>
-											<th scope="col" class="px-3 py-2.5">Status</th>
-											<th scope="col" class="px-3 py-2.5 text-right">Actions</th>
-										</tr>
-									</thead>
-									<tbody class="divide-y divide-[#393939] bg-[#262626] text-[#f4f4f4]">
-										{#each filteredMods as mod (mod.slug)}
-											<tr
-												class="transition-colors hover:bg-[#353535] {selectedSlugs.includes(
-													mod.slug
-												)
-													? 'bg-[#0f62fe]/10'
-													: ''}"
-											>
-												<td class="px-3 py-3">
-													<input
-														type="checkbox"
-														aria-label={`Select ${mod.slug}`}
-														class="cursor-pointer rounded-none border-[#8d8d8d] bg-[#262626]"
-														checked={selectedSlugs.includes(mod.slug)}
-														onchange={(e) => {
-															const checked = (e.target as HTMLInputElement).checked;
-															if (checked) {
-																selectedSlugs = [...selectedSlugs, mod.slug];
-															} else {
-																selectedSlugs = selectedSlugs.filter((s) => s !== mod.slug);
-															}
-														}}
-													/>
-												</td>
-												<td class="px-3 py-3 font-semibold text-white">
-													<div class="flex items-center gap-2">
-														<Package class="h-4 w-4 shrink-0 text-accent-text" />
-														<span>{mod.name}</span>
-													</div>
-												</td>
-												<td
-													class="max-w-[180px] truncate px-3 py-3 font-mono text-xs text-[#a8a8a8]"
-												>
-													{mod.file_name}
-												</td>
-												<td class="px-3 py-3">
-													<CarbonTag type="cyan" size="sm" class="uppercase">
-														{mod.platform}
-													</CarbonTag>
-												</td>
-												<td class="px-3 py-3">
-													<CarbonButton
-														size="sm"
-														kind="ghost"
-														class="rounded-none"
-														onclick={() => toggleSide(mod)}
-														title="Click to toggle side (Both -> Server -> Client)"
-														aria-label={`Toggle side for ${mod.name} (currently ${mod.side})`}
-													>
-														<CarbonTag
-															type={mod.side === 'both'
-																? 'blue'
-																: mod.side === 'server'
-																	? 'green'
-																	: 'purple'}
-															size="sm"
-														>
-															{mod.side.toUpperCase()}
-														</CarbonTag>
-													</CarbonButton>
-												</td>
-												<td class="px-3 py-3">
-													<button
-														type="button"
-														onclick={() => togglePin(mod)}
-														class="cursor-pointer rounded-none p-1 text-[#8d8d8d] transition-colors hover:text-white"
-														title={mod.pinned ? 'Version pinned' : 'Click to pin version'}
-														aria-label={mod.pinned
-															? `Unpin version for ${mod.name}`
-															: `Pin version for ${mod.name}`}
-													>
-														{#if mod.pinned}
-															<Pin class="h-3.5 w-3.5 text-accent-text" />
-														{:else}
-															<PinOff class="h-3.5 w-3.5 opacity-40 hover:opacity-100" />
-														{/if}
-													</button>
-												</td>
-												<td class="px-3 py-3">
-													{#if updatesMap[mod.slug]?.update_available}
-														<CarbonTag type="magenta" size="sm">Update Ready</CarbonTag>
-													{:else}
-														<span class="font-mono text-xs text-[#8d8d8d]">Up to date</span>
-													{/if}
-												</td>
-												<td class="px-3 py-3 text-right">
-													<CarbonButton
-														kind="ghost"
-														size="sm"
-														iconOnly
-														class="rounded-none text-[#da1e28] hover:bg-[#da1e28]/20"
-														onclick={() => removeMod(mod)}
-														title="Remove mod"
-														aria-label="Remove mod"
-													>
-														<Trash2 class="h-3.5 w-3.5" />
-													</CarbonButton>
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
+							<StudioModTable
+								{filteredMods}
+								bind:selectedSlugs
+								{updatesMap}
+								{toggleSide}
+								{togglePin}
+								{removeMod}
+							/>
 						{/if}
 					</CarbonTile>
 				{/if}

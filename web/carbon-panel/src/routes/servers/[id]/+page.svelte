@@ -17,12 +17,10 @@ one at https://mozilla.org/MPL/2.0/.
 	import { serversStore } from '$lib/stores/servers';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import ServerLifecycleActions from '$lib/components/fragments/ServerLifecycleActions.svelte';
 	import ScrollToTop from '$lib/components/scroll-to-top.svelte';
 	import { toast } from 'svelte-sonner';
 	import {
-		Play,
-		Square,
-		RotateCw,
 		RefreshCcw,
 		MoreVertical,
 		Package,
@@ -423,127 +421,12 @@ one at https://mozilla.org/MPL/2.0/.
 				<!-- Sharp Action Buttons -->
 				{#if server}
 					<div class="flex flex-wrap items-center gap-2">
-						{#if server.status === ServerStatus.CREATING}
-							<div
-								class="flex h-10 items-center gap-2 rounded-none border border-[#393939] bg-[#262626] px-4 font-sans text-sm text-[#f4f4f4] select-none"
-							>
-								<Loader2 class="h-4 w-4 animate-spin text-accent-text" />
-								<span>Creating Server...</span>
-							</div>
-						{:else if server.status === ServerStatus.DEEPSLEEP}
-							<button
-								type="button"
-								onclick={() => handleServerAction('start')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#8a3ffc] px-4 font-sans text-sm text-white transition-colors hover:bg-[#a56eff] disabled:opacity-50"
-							>
-								{#if actionLoading}
-									<Loader2 class="h-4 w-4 animate-spin" />
-								{:else}
-									<Play class="h-4 w-4 fill-current" />
-								{/if}
-								<span>Wake Server</span>
-							</button>
-							<button
-								type="button"
-								onclick={() => handleServerAction('stop')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
-							>
-								<Square class="h-4 w-4 fill-current" />
-								<span>Stop</span>
-							</button>
-						{:else if server.status === ServerStatus.PAUSED}
-							<button
-								type="button"
-								onclick={() => handleServerAction('start')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#0f62fe] px-4 font-sans text-sm text-white transition-colors hover:bg-[#4589ff] disabled:opacity-50"
-							>
-								{#if actionLoading}
-									<Loader2 class="h-4 w-4 animate-spin" />
-								{:else}
-									<Play class="h-4 w-4 fill-current" />
-								{/if}
-								<span>Resume Server</span>
-							</button>
-							<button
-								type="button"
-								onclick={() => handleServerAction('stop')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
-							>
-								<Square class="h-4 w-4 fill-current" />
-								<span>Stop</span>
-							</button>
-						{:else if server.status === ServerStatus.STOPPED || !server.containerId}
-							<button
-								type="button"
-								onclick={() => handleServerAction('start')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#198038] px-4 font-sans text-sm text-white transition-colors hover:bg-[#24a148] disabled:opacity-50"
-							>
-								{#if actionLoading}
-									<Loader2 class="h-4 w-4 animate-spin" />
-								{:else}
-									<Play class="h-4 w-4 fill-current" />
-								{/if}
-								<span>Start Server</span>
-							</button>
-						{:else if server.status === ServerStatus.ERROR}
-							<button
-								type="button"
-								onclick={() => handleServerAction('restart')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#f1c21b] px-4 font-sans text-sm font-medium text-black transition-colors hover:bg-[#d2a106] disabled:opacity-50"
-							>
-								{#if actionLoading}
-									<Loader2 class="h-4 w-4 animate-spin" />
-								{:else}
-									<RotateCw class="h-4 w-4" />
-								{/if}
-								<span>Restart</span>
-							</button>
-							<button
-								type="button"
-								onclick={() => handleServerAction('stop')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
-							>
-								<Square class="h-4 w-4 fill-current" />
-								<span>Stop</span>
-							</button>
-						{:else if server.status === ServerStatus.RUNNING || server.status === ServerStatus.STARTING || server.status === ServerStatus.UNHEALTHY}
-							<button
-								type="button"
-								onclick={() => handleServerAction('stop')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none bg-[#da1e28] px-4 font-sans text-sm text-white transition-colors hover:bg-[#ba1b23] disabled:opacity-50"
-							>
-								{#if actionLoading}
-									<Loader2 class="h-4 w-4 animate-spin" />
-								{:else}
-									<Square class="h-4 w-4 fill-current" />
-								{/if}
-								<span>Stop</span>
-							</button>
-							<button
-								type="button"
-								onclick={() => handleServerAction('restart')}
-								disabled={actionLoading}
-								class="flex h-10 cursor-pointer items-center gap-2 rounded-none border border-[#525252] bg-[#393939] px-4 font-sans text-sm text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
-							>
-								<RotateCw class="h-4 w-4" />
-								<span>Restart</span>
-							</button>
-						{:else if server.status === ServerStatus.STOPPING}
-							<div
-								class="flex h-10 items-center gap-2 rounded-none border border-[#525252] bg-[#393939] px-4 font-sans text-sm text-[#c6c6c6]"
-							>
-								<Loader2 class="h-4 w-4 animate-spin" />
-								<span>Stopping...</span>
-							</div>
-						{/if}
+						<ServerLifecycleActions
+							status={server.status}
+							hasContainer={!!server.containerId}
+							{actionLoading}
+							onaction={handleServerAction}
+						/>
 
 						<!-- Dropdown for recreate and delete -->
 						<DropdownMenu>

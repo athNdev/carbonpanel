@@ -6,6 +6,7 @@
 
 - [Architecture decisions](adrs.md) — Index of the accepted ADRs and the concept each one governs.
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
+- [Homepage UI fragments](homepage-fragments.md) — Render real panel feature components as isolated, browser-local homepage examples.
 - [Instance owned proxy test sockets](test-listeners.md) — Proxy tests inject instance-owned socket factories and reject non-loopback binds before reaching the operating system.
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.

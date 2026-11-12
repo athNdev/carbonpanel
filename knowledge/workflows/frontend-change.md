@@ -109,6 +109,11 @@ bun run test
 
 # Read next
 
+Shared homepage feature components also run in the fixture-only build. After
+changing `src/lib/components/fragments`, run `bun run build:homepage` and the
+combined website checks. Keep network and authorization in the production
+wrapper; see [Homepage UI fragments](../decisions/homepage-fragments.md).
+
 - [RPC contract](../architecture/rpc-contract.md)
 - [Verification](../testing/verification.md)
 
