@@ -40,3 +40,11 @@ world download and never deletes inventory. Recreate has no backend request ID
 field, so the frontend deduplicates its in-flight call. Notifications and the
 actual download stay in the view. ERROR is red and UNHEALTHY is yellow in the
 shared presentation policy.
+
+# Verification
+
+Deferred-response tests exercise the same inventory/action interface as views.
+The Chromium fixture mounts the real app routes through the generated RPC
+transport with local JSON fixtures, including direct/empty/error/login/logout
+and late response cases. CI installs the pinned browser into a job-owned cache;
+local runs may explicitly select an existing executable without cache changes.
