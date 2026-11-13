@@ -10,84 +10,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import * as monaco from 'monaco-editor';
-	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
-	import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
-	import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
-	import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
-	import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
-
-	// Configure the Monaco worker environment
-	interface MonacoGlobal {
-		MonacoEnvironment?: unknown;
-		__jsonTemplateLang?: boolean;
-	}
-	const monacoGlobal = self as unknown as MonacoGlobal;
-	if (!monacoGlobal.MonacoEnvironment) {
-		monacoGlobal.MonacoEnvironment = {
-			getWorker(_: unknown, label: string) {
-				if (label === 'json') return new jsonWorker();
-				if (label === 'css' || label === 'scss' || label === 'less') return new cssWorker();
-				if (label === 'html' || label === 'handlebars' || label === 'razor')
-					return new htmlWorker();
-				if (label === 'typescript' || label === 'javascript') return new tsWorker();
-				return new editorWorker();
-			}
-		};
-	}
-
-	// MONACO PSEUDO JSON-LIKE TEMPLATE AND LINTER, NEEDED FOR GO TEMPLATING
-	if (!monacoGlobal.__jsonTemplateLang) {
-		monacoGlobal.__jsonTemplateLang = true;
-		monaco.languages.register({ id: 'json-template' });
-		monaco.languages.setLanguageConfiguration('json-template', {
-			brackets: [
-				['{', '}'],
-				['[', ']']
-			],
-			autoClosingPairs: [
-				{ open: '{', close: '}' },
-				{ open: '[', close: ']' },
-				{ open: '"', close: '"' }
-			],
-			surroundingPairs: [
-				{ open: '{', close: '}' },
-				{ open: '[', close: ']' },
-				{ open: '"', close: '"' }
-			]
-		});
-		monaco.languages.setMonarchTokensProvider('json-template', {
-			defaultToken: '',
-			tokenizer: {
-				root: [
-					[/\{\{/, { token: 'variable.template', next: '@template' }],
-					[/"(?:[^"\\]|\\.)*"(?=\s*:)/, 'type'],
-					[/"/, { token: 'string', next: '@string' }],
-					[/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/, 'number'],
-					[/\b(?:true|false|null)\b/, 'keyword'],
-					[/[{}[\]]/, 'delimiter.bracket'],
-					[/[,:]/, 'delimiter']
-				],
-				template: [
-					[/\}\}/, { token: 'variable.template', next: '@pop' }],
-					[/[^}]+/, 'variable.template'],
-					[/\}/, 'variable.template']
-				],
-				string: [
-					[/\{\{/, { token: 'variable.template', next: '@templateInString' }],
-					[/[^"\\{]+/, 'string'],
-					[/\\./, 'string.escape'],
-					[/"/, { token: 'string', next: '@pop' }],
-					[/\{/, 'string']
-				],
-				templateInString: [
-					[/\}\}/, { token: 'variable.template', next: '@pop' }],
-					[/[^}]+/, 'variable.template'],
-					[/\}/, 'variable.template']
-				]
-			}
-		} as monaco.languages.IMonarchLanguage);
-	}
+	import type * as Monaco from 'monaco-editor';
+	import { loadEditorRuntime } from '$lib/features/editor/runtime';
 
 	interface Props {
 		value?: string;
@@ -106,7 +30,10 @@ one at https://mozilla.org/MPL/2.0/.
 	}: Props = $props();
 
 	let container = $state<HTMLDivElement>();
-	let editor: monaco.editor.IStandaloneCodeEditor | null = null;
+	let editor = $state<Monaco.editor.IStandaloneCodeEditor | null>(null);
+	let monaco: typeof Monaco | undefined;
+	let runtimeLoading = $state(true);
+	let runtimeError = $state<string | null>(null);
 	let resizeObserver: ResizeObserver | null = null;
 
 	// Guards onChange from firing while we push an external value into the editor
@@ -115,35 +42,53 @@ one at https://mozilla.org/MPL/2.0/.
 	// Create the editor when the container mounts
 	$effect(() => {
 		if (!container) return;
+		const element = container;
+		let disposed = false;
+		runtimeLoading = true;
+		runtimeError = null;
+		void loadEditorRuntime()
+			.then((runtime) => {
+				if (disposed) return;
+				monaco = runtime;
+				const instance = runtime.editor.create(element, {
+					value: untrack(() => value),
+					language: untrack(() => language),
+					readOnly: untrack(() => readOnly),
+					theme: 'vs-dark',
+					fontSize: 12,
+					fontFamily: "'JetBrains Mono', 'Fira Code', 'Monaco', 'Consolas', monospace",
+					minimap: { enabled: false },
+					scrollBeyondLastLine: false,
+					wordWrap: 'on',
+					lineNumbers: 'on',
+					automaticLayout: false,
+					fixedOverflowWidgets: true,
+					scrollbar: { useShadows: false }
+				});
 
-		editor = monaco.editor.create(container, {
-			value: untrack(() => value),
-			language: untrack(() => language),
-			readOnly: untrack(() => readOnly),
-			theme: 'vs-dark',
-			fontSize: 12,
-			fontFamily: "'JetBrains Mono', 'Fira Code', 'Monaco', 'Consolas', monospace",
-			minimap: { enabled: false },
-			scrollBeyondLastLine: false,
-			wordWrap: 'on',
-			lineNumbers: 'on',
-			automaticLayout: false,
-			fixedOverflowWidgets: true,
-			scrollbar: { useShadows: false }
-		});
+				editor = instance;
+				instance.onDidChangeModelContent(() => {
+					if (applyingExternal || editor !== instance) return;
+					onChange?.(instance.getValue());
+				});
 
-		editor.onDidChangeModelContent(() => {
-			if (applyingExternal || !editor) return;
-			onChange?.(editor.getValue());
-		});
-
-		resizeObserver = new ResizeObserver(() => editor?.layout());
-		resizeObserver.observe(container);
+				resizeObserver = new ResizeObserver(() => editor?.layout());
+				resizeObserver.observe(element);
+				runtimeLoading = false;
+			})
+			.catch(() => {
+				if (disposed) return;
+				runtimeLoading = false;
+				runtimeError = 'Failed to load editor. Reload the page to try again.';
+			});
 
 		return () => {
+			disposed = true;
 			resizeObserver?.disconnect();
 			resizeObserver = null;
+			const model = editor?.getModel();
 			editor?.dispose();
+			model?.dispose();
 			editor = null;
 		};
 	});
@@ -165,7 +110,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	$effect(() => {
 		const model = editor?.getModel();
-		if (model) monaco.editor.setModelLanguage(model, language);
+		if (model) monaco?.editor.setModelLanguage(model, language);
 	});
 </script>
 
@@ -174,3 +119,7 @@ one at https://mozilla.org/MPL/2.0/.
 	style="height: {height}; width: 100%;"
 	class="overflow-hidden rounded-md border border-border/50"
 ></div>
+
+{#if runtimeError}<p role="alert">{runtimeError}</p>{:else if runtimeLoading}<p role="status">
+		Loading editor...
+	</p>{/if}

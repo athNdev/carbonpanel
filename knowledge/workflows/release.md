@@ -94,6 +94,8 @@ resume from the original verified download artifact without rebuilding images.
 - Editor changes also run `editor-dialog.yml`, which renders the actual dialog
   in Chromium with deferred RPC responses. Session adapter tests alone cannot
   prove Svelte initialization, props timing or Monaco cleanup behavior.
+  The same workflow builds a production editor fixture and checks both Monaco
+  consumers plus HTTP serving of the emitted worker bundles.
 - Showcase review stacks use a marked per-session data directory and a matching
   container label before teardown. The selected port is inside that directory.
 - The same browser workflow verifies a real local WebSocket reconnect and
