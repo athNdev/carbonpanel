@@ -26,33 +26,8 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { FileInfo } from '$lib/proto/carbonpanel/v1/file_pb';
 	import { untrack } from 'svelte';
 	import { FileEditorSession, type FileEditorState } from '$lib/features/files/editor-session';
-	import * as monaco from 'monaco-editor';
-	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
-	import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
-	import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
-	import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
-	import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
-
-	// Configure Monaco Environment only once globally
-	if (!self.MonacoEnvironment) {
-		self.MonacoEnvironment = {
-			getWorker(_, label: string) {
-				if (label === 'json') {
-					return new jsonWorker();
-				}
-				if (label === 'css' || label === 'scss' || label === 'less') {
-					return new cssWorker();
-				}
-				if (label === 'html' || label === 'handlebars' || label === 'razor') {
-					return new htmlWorker();
-				}
-				if (label === 'typescript' || label === 'javascript') {
-					return new tsWorker();
-				}
-				return new editorWorker();
-			}
-		};
-	}
+	import type * as Monaco from 'monaco-editor';
+	import { loadEditorRuntime } from '$lib/features/editor/runtime';
 
 	interface Props {
 		serverId: string;
@@ -103,8 +78,11 @@ one at https://mozilla.org/MPL/2.0/.
 	let isFullscreen = $state(false);
 	let confirmDiscardOpen = $state(false);
 	let editorContainer = $state<HTMLDivElement>();
-	let editor = $state<monaco.editor.IStandaloneCodeEditor | null>(null);
+	let editor = $state<Monaco.editor.IStandaloneCodeEditor | null>(null);
 	let resizeObserver = $state<ResizeObserver | null>(null);
+	let runtimeLoading = $state(false);
+	let runtimeError = $state<string | null>(null);
+	let editorGeneration = 0;
 	let contentLoaded = $derived(sessionState.loaded);
 
 	// Props select an identity. File content belongs to that session, not current props.
@@ -125,7 +103,15 @@ one at https://mozilla.org/MPL/2.0/.
 
 	// Create editor when content is loaded
 	$effect(() => {
-		if (open && editorContainer && contentLoaded && !editor && !loading) {
+		if (
+			open &&
+			editorContainer &&
+			contentLoaded &&
+			!editor &&
+			!loading &&
+			!runtimeLoading &&
+			!runtimeError
+		) {
 			createEditor();
 		}
 	});
@@ -139,7 +125,12 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	function disposeEditor() {
+		++editorGeneration;
+		runtimeLoading = false;
+		runtimeError = null;
+		const model = editor?.getModel();
 		editor?.dispose();
+		model?.dispose();
 		editor = null;
 		resizeObserver?.disconnect();
 		resizeObserver = null;
@@ -168,14 +159,36 @@ one at https://mozilla.org/MPL/2.0/.
 		closeDialog();
 	}
 
-	function createEditor() {
+	async function createEditor() {
 		const editorIdentity = fileSession.state.identity;
 		if (!editorContainer || !editorIdentity) return;
+		const generation = ++editorGeneration;
+		const element = editorContainer;
+		runtimeLoading = true;
+		runtimeError = null;
+		let monaco: typeof Monaco;
+		try {
+			monaco = await loadEditorRuntime();
+		} catch {
+			if (generation === editorGeneration) {
+				runtimeLoading = false;
+				runtimeError = 'Failed to load editor. Reload the page to try again.';
+			}
+			return;
+		}
+		if (
+			generation !== editorGeneration ||
+			!isDisplayedSession() ||
+			!fileSession.isCurrent(editorIdentity) ||
+			editorContainer !== element
+		)
+			return;
+		runtimeLoading = false;
 
 		// Determine if file is large (over 100KB)
 		const isLargeFile = content.length > 100000;
 
-		const instance = monaco.editor.create(editorContainer, {
+		const instance = monaco.editor.create(element, {
 			value: content,
 			language: file ? getFileLanguage(file.name) : 'plaintext',
 			theme: 'vs-dark',
@@ -339,7 +352,8 @@ one at https://mozilla.org/MPL/2.0/.
 		</DialogHeader>
 
 		<div class="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-background">
-			{#if loading}
+			{#if runtimeError}<p role="alert">{runtimeError}</p>{/if}
+			{#if loading || runtimeLoading}
 				<div class="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
 					<Loader2 class="h-8 w-8 animate-spin" />
 				</div>

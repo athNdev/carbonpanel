@@ -17,12 +17,16 @@
 // PANEL_REVIEW_PASSWORD) and are never written to the report.
 
 import { launchReviewBrowser } from "./browser.mjs";
+import { writeReviewReport } from "./report.mjs";
 import {
   mkdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+let activeBrowser;
+let reportState;
 
 function parseArgs(argv) {
   const args = {};
@@ -41,10 +45,14 @@ async function main() {
   }
 
   const plan = JSON.parse(readFileSync(resolve(args.plan), "utf8"));
-  const out = resolve(args.out ?? "review-out");
+  const out = resolve(args.out ?? fileURLToPath(new URL(`../../tmp/review-output/single/${new Date().toISOString().replace(/[:.]/g, '-')}/`, import.meta.url)));
   mkdirSync(out, { recursive: true });
+  const results = [];
+  reportState = { out, profile: 'single-seeded', base: args.base, checks: results };
 
   const { browser, metadata: browserMetadata } = await launchReviewBrowser();
+  activeBrowser = browser;
+  reportState.driver = browserMetadata;
   writeFileSync(join(out, "browser.json"), JSON.stringify(browserMetadata, null, 2) + "\n");
   const context = await browser.newContext({
     viewport: plan.viewport ?? { width: 1440, height: 900 },
@@ -53,7 +61,7 @@ async function main() {
   });
   const page = await context.newPage();
 
-  const results = [];
+  let critical = true;
   const consoleErrors = [];
   page.on("console", (msg) => {
     if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -242,6 +250,7 @@ async function main() {
         const file = join(out, `FAILED-${spec.screenshot}.png`);
         await page.screenshot({ path: file, fullPage: true }).catch(() => {});
       }
+      if (critical) throw error;
     }
   }
 
@@ -318,8 +327,10 @@ async function main() {
     await step("waitFor", {
       waitFor: login.successSelector,
       name: "logged in",
+      timeout: login.timeout ?? 20000,
     });
   }
+  critical = false;
 
   for (const spec of plan.steps ?? []) {
     if (spec.screenshot && Object.keys(spec).length === 1) {
@@ -347,13 +358,14 @@ async function main() {
   }
 
   await browser.close();
+  activeBrowser = undefined;
 
   const failed = results.filter((r) => !r.ok);
   const lines = [
     `# Manual review: ${plan.title ?? plan.name ?? "journey"}`,
     "",
     `Base: \`${base}\``,
-    `Result: ${failed.length === 0 ? "PASS" : `FAIL (${failed.length})`}`,
+    `Result: ${results.length === 0 ? "INCOMPLETE" : failed.length === 0 ? "PASS" : `FAIL (${failed.length})`}`,
     "",
     "| Step | Result | Detail |",
     "| --- | --- | --- |",
@@ -384,12 +396,19 @@ async function main() {
   }
   const report = join(out, "report.md");
   writeFileSync(report, lines.join("\n") + "\n", "utf8");
+  writeReviewReport({ out, profile: 'single-seeded', base, driver: browserMetadata, checks: results.map(item => ({ name: item.name, status: item.ok ? 'passed' : 'failed', detail: item.detail })) });
 
   process.stdout.write(lines.join("\n") + "\n");
-  process.exit(failed.length === 0 ? 0 : 1);
+  process.exit(results.length === 0 ? 2 : failed.length === 0 ? 0 : 1);
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+  if (activeBrowser) await activeBrowser.close().catch(() => {});
+  if (reportState) {
+    const checks = reportState.checks.map(item => ({ name: item.name, status: item.ok ? 'passed' : 'failed', detail: item.detail }));
+    checks.push({ name: 'runner', status: 'failed', detail: 'Review stopped before completion; see runner error.' });
+    writeReviewReport({ ...reportState, checks });
+  }
   console.error(error instanceof Error ? error.message : error);
   process.exit(2);
 });

@@ -14,7 +14,7 @@
 #
 # Safe by design: state lives outside the repository in
 #   $HOME/.cache/carbon-review/<sha>/
-# and `down` keeps data unless `--purge` is passed explicitly.
+# and `down` keeps data; only the separately named reset deletes owned data.
 
 set -euo pipefail
 
@@ -335,9 +335,8 @@ cmd_logs() {
 }
 
 cmd_down() {
-  local purge="" sha dir
-  [ "${1:-}" = "--purge" ] && purge="--purge"
-  [ "$purge" != "--purge" ] || die "reset is unavailable until this legacy harness has an ownership manifest; data was not deleted"
+  local sha dir
+  [ "$#" -eq 0 ] || die "down preserves data; use the separately named reset command"
   sha="$(current_sha)"; [ -n "$sha" ] || die "no review instance recorded"
   dir="$(state_dir_for "$sha")"
   local names name
@@ -348,7 +347,25 @@ cmd_down() {
   log "instances stopped; data kept at $dir"
 }
 
-cmd_reset() { cmd_down --purge; }
+cmd_reset() {
+  local sha dir suffix target
+  sha="$(current_sha)"; [ -n "$sha" ] || die "no review instance recorded"
+  dir="$(state_dir_for "$sha")"; assert_session "$sha" "$dir"
+  # Validate every target before stopping/removing anything. Never follow a
+  # substituted instance symlink into another session or an operator directory.
+  for suffix in a b; do
+    target="$dir/$suffix"
+    [ ! -L "$target" ] && [ "$(realpath -m "$target")" = "$dir/$suffix" ] || die "invalid reset data path"
+  done
+  cmd_down
+  assert_session "$sha" "$dir"
+  for suffix in a b; do
+    target="$dir/$suffix"
+    [ ! -L "$target" ] && [ "$(realpath -m "$target")" = "$dir/$suffix" ] || die "reset path changed"
+    rm -rf -- "$target"
+  done
+  log "owned instance data reset; source checkout preserved at $dir/src"
+}
 
 cmd_urls() {
   local sha
@@ -362,7 +379,7 @@ case "$command" in
   up) cmd_up "$@" ;;
   status) cmd_status ;;
   logs) cmd_logs "$@" ;;
-  down) cmd_down "${1:-}" ;;
+  down) cmd_down "$@" ;;
   reset) cmd_reset ;;
   urls) cmd_urls ;;
   ""|-h|--help|help) usage ;;

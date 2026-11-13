@@ -50,6 +50,9 @@ jobs:
       - name: Exercise real dialog and Monaco with deferred RPCs
         working-directory: scripts/manual-review/e2e
         run: bun run editor-dialog
+      - name: Verify compiled editor views and worker serving
+        working-directory: scripts/manual-review/e2e
+        run: node editor-dialog-check.mjs --production
       - name: Exercise WebSocket reconnection in Chromium
         working-directory: scripts/manual-review/e2e
         run: node websocket-reconnect-check.mjs
