@@ -367,7 +367,7 @@ func (c *Client) ResolveSlug(ctx context.Context, slug string) (int, error) {
 	var result SearchModsResponse
 	err := c.keyless.DoJSON(ctx, KeylessBaseURL+path, &result)
 	var providerErr *indexers.IndexerError
-	if err != nil && ctx.Err() == nil && c.apiKey != "" && !(errors.As(err, &providerErr) && providerErr.Kind == indexers.ErrDecode) {
+	if err != nil && ctx.Err() == nil && c.apiKey != "" && (!errors.As(err, &providerErr) || providerErr.Kind != indexers.ErrDecode) {
 		err = c.http.DoJSON(ctx, OfficialBaseURL+path, &result)
 	}
 	if err != nil {

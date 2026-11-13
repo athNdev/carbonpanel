@@ -548,7 +548,7 @@ func (m *ModOnlineManager) handleCurseForgeVersions(w http.ResponseWriter, r *ht
 	provider := m.curseForgeClient(apiKey)
 	files, err := provider.GetFiles(r.Context(), id, fuego.FilesOptions{PageSize: 50, GameVersion: mcVersion, ModLoader: curseForgeLoader(loader)})
 	var providerErr *indexers.IndexerError
-	if err != nil && r.Context().Err() == nil && !(errors.As(err, &providerErr) && providerErr.Kind == indexers.ErrDecode) {
+	if err != nil && r.Context().Err() == nil && (!errors.As(err, &providerErr) || providerErr.Kind != indexers.ErrDecode) {
 		files, err = provider.GetFiles(r.Context(), id, fuego.FilesOptions{PageSize: 50})
 	}
 	if err != nil {
