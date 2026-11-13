@@ -3,20 +3,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package packwiz
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"net/url"
+	"strconv"
 	"strings"
+
+	"github.com/athNdev/carbon-panel/internal/indexers/fuego"
 )
 
 // DependencyRef describes a single mod dependency discovered during resolution.
 type DependencyRef struct {
-	Platform       string `json:"platform"`        // "modrinth" | "curseforge"
-	ProjectID      string `json:"project_id"`      // Modrinth project id/slug or CurseForge numeric mod id
+	Platform       string `json:"platform"`   // "modrinth" | "curseforge"
+	ProjectID      string `json:"project_id"` // Modrinth project id/slug or CurseForge numeric mod id
 	VersionID      string `json:"version_id,omitempty"`
 	Title          string `json:"title,omitempty"`
 	DependencyType string `json:"dependency_type"` // "required" | "optional"
@@ -176,11 +177,17 @@ func (m *Manager) AddModWithDependencies(packID string, mod ModItem, loader, mcV
 // fallback chain used by the mod search handler).
 type httpDependencyFetcher struct {
 	manager *Manager
+	ctx     context.Context
 }
 
 // NewHTTPDependencyFetcher returns the production fetcher for a Manager.
 func (m *Manager) NewHTTPDependencyFetcher() VersionDependencyFetcher {
-	return &httpDependencyFetcher{manager: m}
+	return m.NewHTTPDependencyFetcherContext(context.Background())
+}
+
+// NewHTTPDependencyFetcherContext binds provider calls to the operation lifetime.
+func (m *Manager) NewHTTPDependencyFetcherContext(ctx context.Context) VersionDependencyFetcher {
+	return &httpDependencyFetcher{manager: m, ctx: ctx}
 }
 
 func (f *httpDependencyFetcher) LatestCompatibleMod(platform, projectID, loader, mcVersion string) (ModItem, []DependencyRef, error) {
@@ -192,76 +199,24 @@ func (f *httpDependencyFetcher) LatestCompatibleMod(platform, projectID, loader,
 	}
 }
 
-func primaryFileName(files []struct {
-	URL      string `json:"url"`
-	FileName string `json:"filename"`
-	Primary  bool   `json:"primary"`
-	Size     int64  `json:"size"`
-}) (url, name string, size int64) {
-	if len(files) == 0 {
-		return "", "", 0
-	}
-	sel := files[0]
-	for _, f := range files {
-		if f.Primary {
-			sel = f
-			break
-		}
-	}
-	return sel.URL, sel.FileName, sel.Size
-}
-
 func (f *httpDependencyFetcher) latestModrinthMod(projectID, loader, mcVersion string) (ModItem, []DependencyRef, error) {
-	reqURL := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version", url.PathEscape(projectID))
-	params := url.Values{}
-	if loader != "" && loader != "vanilla" {
-		if b, err := json.Marshal([]string{strings.ToLower(loader)}); err == nil {
-			params.Set("loaders", string(b))
-		}
+	if loader == "vanilla" {
+		loader = ""
 	}
-	if mcVersion != "" {
-		if b, err := json.Marshal([]string{mcVersion}); err == nil {
-			params.Set("game_versions", string(b))
-		}
-	}
-	if len(params) > 0 {
-		reqURL += "?" + params.Encode()
-	}
-
-	resp, err := f.manager.httpClient.Get(reqURL)
+	versions, err := f.manager.modrinthClient().GetVersions(f.ctx, projectID, strings.ToLower(loader), mcVersion)
 	if err != nil {
-		return ModItem{}, nil, fmt.Errorf("modrinth request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
-		return ModItem{}, nil, fmt.Errorf("modrinth returned HTTP %d for %s", resp.StatusCode, projectID)
-	}
-
-	var versions []struct {
-		ID            string `json:"id"`
-		Name          string `json:"name"`
-		VersionNumber string `json:"version_number"`
-		Files         []struct {
-			URL      string `json:"url"`
-			FileName string `json:"filename"`
-			Primary  bool   `json:"primary"`
-			Size     int64  `json:"size"`
-		} `json:"files"`
-		Dependencies []struct {
-			ProjectID      *string `json:"project_id"`
-			VersionID      *string `json:"version_id"`
-			DependencyType string  `json:"dependency_type"`
-		} `json:"dependencies"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&versions); err != nil {
-		return ModItem{}, nil, fmt.Errorf("failed to parse modrinth versions: %w", err)
+		return ModItem{}, nil, err
 	}
 	if len(versions) == 0 {
 		return ModItem{}, nil, fmt.Errorf("no compatible version of %s for %s %s", projectID, loader, mcVersion)
 	}
 
 	latest := versions[0]
-	dlURL, fileName, size := primaryFileName(latest.Files)
+	file := primaryVersionFile(latest.Files)
+	dlURL, fileName, size := "", "", int64(0)
+	if file != nil {
+		dlURL, fileName, size = file.URL, file.Filename, file.Size
+	}
 	title := latest.Name
 	if title == "" {
 		title = latest.VersionNumber
@@ -302,44 +257,21 @@ func (f *httpDependencyFetcher) latestModrinthMod(projectID, loader, mcVersion s
 }
 
 func (f *httpDependencyFetcher) latestCurseForgeMod(modID, loader, mcVersion string) (ModItem, []DependencyRef, error) {
-	reqURL := fmt.Sprintf("https://api.curse.tools/v1/cf/mods/%s/files?pageSize=50", url.PathEscape(modID))
-	if mcVersion != "" {
-		reqURL += "&gameVersion=" + url.QueryEscape(mcVersion)
-	}
-
-	resp, err := f.manager.httpClient.Get(reqURL)
+	id, err := strconv.Atoi(modID)
 	if err != nil {
-		return ModItem{}, nil, fmt.Errorf("curseforge request failed: %w", err)
+		return ModItem{}, nil, fmt.Errorf("invalid CurseForge project ID %q: %w", modID, err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != 200 {
-		return ModItem{}, nil, fmt.Errorf("curseforge returned HTTP %d for %s", resp.StatusCode, modID)
+	files, err := f.manager.curseForgeClient().GetFiles(f.ctx, id, fuego.FilesOptions{GameVersion: mcVersion, PageSize: 50})
+	if err != nil {
+		return ModItem{}, nil, err
 	}
-
-	var payload struct {
-		Data []struct {
-			ID           int      `json:"id"`
-			DisplayName  string   `json:"displayName"`
-			FileName     string   `json:"fileName"`
-			DownloadURL  string   `json:"downloadUrl"`
-			FileLength   int64    `json:"fileLength"`
-			GameVersions []string `json:"gameVersions"`
-			Dependencies []struct {
-				ModID        int `json:"modId"`
-				RelationType int `json:"relationType"` // 3 == required
-			} `json:"dependencies"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return ModItem{}, nil, fmt.Errorf("failed to parse curseforge files: %w", err)
-	}
-	if len(payload.Data) == 0 {
+	if len(files) == 0 {
 		return ModItem{}, nil, fmt.Errorf("no compatible file of %s for %s", modID, mcVersion)
 	}
 
-	file := payload.Data[0]
+	file := files[0]
 	if loader != "" && loader != "vanilla" {
-		for _, entry := range payload.Data {
+		for _, entry := range files {
 			for _, gv := range entry.GameVersions {
 				if strings.EqualFold(gv, loader) {
 					file = entry
@@ -347,11 +279,6 @@ func (f *httpDependencyFetcher) latestCurseForgeMod(modID, loader, mcVersion str
 				}
 			}
 		}
-	}
-
-	dlURL := file.DownloadURL
-	if dlURL == "" && file.FileName != "" {
-		dlURL = fmt.Sprintf("https://edge.forgecdn.net/files/%d/%d/%s", file.ID/1000, file.ID%1000, url.PathEscape(file.FileName))
 	}
 
 	mod := ModItem{
@@ -362,7 +289,7 @@ func (f *httpDependencyFetcher) latestCurseForgeMod(modID, loader, mcVersion str
 		Platform:    "curseforge",
 		ProjectID:   modID,
 		VersionID:   fmt.Sprintf("%d", file.ID),
-		DownloadURL: dlURL,
+		DownloadURL: file.DownloadURL,
 		FileSize:    file.FileLength,
 	}
 
