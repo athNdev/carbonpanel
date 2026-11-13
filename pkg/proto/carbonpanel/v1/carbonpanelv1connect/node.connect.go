@@ -50,6 +50,8 @@ const (
 	NodeServiceDeleteNodeProcedure = "/carbonpanel.v1.NodeService/DeleteNode"
 	// NodeServicePingNodeProcedure is the fully-qualified name of the NodeService's PingNode RPC.
 	NodeServicePingNodeProcedure = "/carbonpanel.v1.NodeService/PingNode"
+	// NodeServiceScanNodesProcedure is the fully-qualified name of the NodeService's ScanNodes RPC.
+	NodeServiceScanNodesProcedure = "/carbonpanel.v1.NodeService/ScanNodes"
 )
 
 // NodeServiceClient is a client for the carbonpanel.v1.NodeService service.
@@ -66,6 +68,8 @@ type NodeServiceClient interface {
 	DeleteNode(context.Context, *connect.Request[v1.DeleteNodeRequest]) (*connect.Response[v1.DeleteNodeResponse], error)
 	// Test node connectivity and latency
 	PingNode(context.Context, *connect.Request[v1.PingNodeRequest]) (*connect.Response[v1.PingNodeResponse], error)
+	// Discover candidate Docker daemons using the bounded local-interface scan.
+	ScanNodes(context.Context, *connect.Request[v1.ScanNodesRequest]) (*connect.Response[v1.ScanNodesResponse], error)
 }
 
 // NewNodeServiceClient constructs a client for the carbonpanel.v1.NodeService service. By default,
@@ -115,6 +119,12 @@ func NewNodeServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(nodeServiceMethods.ByName("PingNode")),
 			connect.WithClientOptions(opts...),
 		),
+		scanNodes: connect.NewClient[v1.ScanNodesRequest, v1.ScanNodesResponse](
+			httpClient,
+			baseURL+NodeServiceScanNodesProcedure,
+			connect.WithSchema(nodeServiceMethods.ByName("ScanNodes")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -126,6 +136,7 @@ type nodeServiceClient struct {
 	updateNode *connect.Client[v1.UpdateNodeRequest, v1.UpdateNodeResponse]
 	deleteNode *connect.Client[v1.DeleteNodeRequest, v1.DeleteNodeResponse]
 	pingNode   *connect.Client[v1.PingNodeRequest, v1.PingNodeResponse]
+	scanNodes  *connect.Client[v1.ScanNodesRequest, v1.ScanNodesResponse]
 }
 
 // ListNodes calls carbonpanel.v1.NodeService.ListNodes.
@@ -158,6 +169,11 @@ func (c *nodeServiceClient) PingNode(ctx context.Context, req *connect.Request[v
 	return c.pingNode.CallUnary(ctx, req)
 }
 
+// ScanNodes calls carbonpanel.v1.NodeService.ScanNodes.
+func (c *nodeServiceClient) ScanNodes(ctx context.Context, req *connect.Request[v1.ScanNodesRequest]) (*connect.Response[v1.ScanNodesResponse], error) {
+	return c.scanNodes.CallUnary(ctx, req)
+}
+
 // NodeServiceHandler is an implementation of the carbonpanel.v1.NodeService service.
 type NodeServiceHandler interface {
 	// List all nodes with optional runtime stats
@@ -172,6 +188,8 @@ type NodeServiceHandler interface {
 	DeleteNode(context.Context, *connect.Request[v1.DeleteNodeRequest]) (*connect.Response[v1.DeleteNodeResponse], error)
 	// Test node connectivity and latency
 	PingNode(context.Context, *connect.Request[v1.PingNodeRequest]) (*connect.Response[v1.PingNodeResponse], error)
+	// Discover candidate Docker daemons using the bounded local-interface scan.
+	ScanNodes(context.Context, *connect.Request[v1.ScanNodesRequest]) (*connect.Response[v1.ScanNodesResponse], error)
 }
 
 // NewNodeServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -217,6 +235,12 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(nodeServiceMethods.ByName("PingNode")),
 		connect.WithHandlerOptions(opts...),
 	)
+	nodeServiceScanNodesHandler := connect.NewUnaryHandler(
+		NodeServiceScanNodesProcedure,
+		svc.ScanNodes,
+		connect.WithSchema(nodeServiceMethods.ByName("ScanNodes")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/carbonpanel.v1.NodeService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case NodeServiceListNodesProcedure:
@@ -231,6 +255,8 @@ func NewNodeServiceHandler(svc NodeServiceHandler, opts ...connect.HandlerOption
 			nodeServiceDeleteNodeHandler.ServeHTTP(w, r)
 		case NodeServicePingNodeProcedure:
 			nodeServicePingNodeHandler.ServeHTTP(w, r)
+		case NodeServiceScanNodesProcedure:
+			nodeServiceScanNodesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -262,4 +288,8 @@ func (UnimplementedNodeServiceHandler) DeleteNode(context.Context, *connect.Requ
 
 func (UnimplementedNodeServiceHandler) PingNode(context.Context, *connect.Request[v1.PingNodeRequest]) (*connect.Response[v1.PingNodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.NodeService.PingNode is not implemented"))
+}
+
+func (UnimplementedNodeServiceHandler) ScanNodes(context.Context, *connect.Request[v1.ScanNodesRequest]) (*connect.Response[v1.ScanNodesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.NodeService.ScanNodes is not implemented"))
 }

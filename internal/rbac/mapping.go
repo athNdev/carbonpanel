@@ -160,6 +160,7 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// this table, which meant any authenticated user fell through the
 	// interceptor's "no mapping found" path with zero RBAC enforcement.
 	"/carbonpanel.v1.NodeService/ListNodes":  {Resource: ResourceNodes, Action: ActionRead},
+	"/carbonpanel.v1.NodeService/ScanNodes":  {Resource: ResourceNodes, Action: ActionRead},
 	"/carbonpanel.v1.NodeService/GetNode":    {Resource: ResourceNodes, Action: ActionRead, ObjectIDField: "id"},
 	"/carbonpanel.v1.NodeService/CreateNode": {Resource: ResourceNodes, Action: ActionCreate},
 	"/carbonpanel.v1.NodeService/UpdateNode": {Resource: ResourceNodes, Action: ActionUpdate, ObjectIDField: "id"},
@@ -225,7 +226,7 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.BackupService/DeleteBackup":    {Resource: ResourceBackups, Action: ActionDelete},
 	"/carbonpanel.v1.BackupService/RestoreBackup":   {Resource: ResourceBackups, Action: ActionUpdate},
 	"/carbonpanel.v1.BackupService/SetBackupLocked": {Resource: ResourceBackups, Action: ActionUpdate},
-	"/carbonpanel.v1.BackupService/CreateBackup":      {Resource: ResourceBackups, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.BackupService/CreateBackup":    {Resource: ResourceBackups, Action: ActionCreate, ObjectIDField: "server_id"},
 
 	// â”€â”€ UserService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	"/carbonpanel.v1.UserService/ListUsers":  {Resource: ResourceUsers, Action: ActionRead},
