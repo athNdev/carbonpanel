@@ -1,0 +1,37 @@
+# Carbon Panel
+
+> Carbon Panel is an open-source, self-hosted control plane for running and
+> managing Minecraft servers with Docker.
+
+## What it does
+
+- Manage Vanilla, Paper, Fabric, Forge, NeoForge, and Purpur servers.
+- Create and share modpacks with Modpack Studio.
+- Browse and manage datapacks.
+- Stage configuration, mod, datapack, file, module, and modpack updates.
+- Run servers locally or across compatible remote Docker nodes.
+- Use native pause, cgroup freeze, or deep sleep to reduce idle resource use.
+- Operate through a web console and Connect RPC API.
+
+## Access control
+
+Carbon Panel supports local accounts, roles, server-scoped permissions, API
+tokens, an audit log, and OIDC single sign-on (SSO). It is designed for
+self-hosted installations: there is no required Carbon Cloud account, and the
+operator controls the infrastructure, worlds, configuration, and database.
+
+## Important links
+
+- Homepage: https://carbonpanel.dev/
+- Documentation: https://carbonpanel.dev/docs/
+- Getting started with Docker Compose: https://carbonpanel.dev/docs/getting-started/docker-compose/
+- OIDC and SSO guide: https://carbonpanel.dev/docs/guides/oidc/keycloak/
+- API reference: https://carbonpanel.dev/docs/api/
+- Source repository: https://github.com/athNdev/carbonpanel
+- License: https://github.com/athNdev/carbonpanel/blob/main/LICENSE
+
+## Scope
+
+This file is a concise orientation for search engines and AI assistants. The
+documentation is authoritative for installation, configuration, security,
+supported providers, and version-specific behavior.

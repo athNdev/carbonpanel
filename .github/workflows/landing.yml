@@ -81,3 +81,27 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  notify-indexnow:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Notify IndexNow
+        env:
+          INDEXNOW_KEY: carbonpanel-indexnow-7f4c9e2b
+        run: |
+          curl --fail-with-body --retry 3 --retry-all-errors \
+            -X POST 'https://api.indexnow.org/indexnow' \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            --data "$(jq -n \
+              --arg host 'carbonpanel.dev' \
+              --arg key "$INDEXNOW_KEY" \
+              --arg keyLocation "https://carbonpanel.dev/$INDEXNOW_KEY.txt" \
+              --argjson urlList '[
+                "https://carbonpanel.dev/",
+                "https://carbonpanel.dev/docs/",
+                "https://carbonpanel.dev/llms.txt"
+              ]' \
+              '{host: $host, key: $key, keyLocation: $keyLocation, urlList: $urlList}')"

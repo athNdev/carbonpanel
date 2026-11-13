@@ -12,7 +12,7 @@
     <title>Carbon Panel | Self-hosted Minecraft server management</title>
     <meta
       name="description"
-      content="Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers."
+      content="Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on."
     />
     <meta
       name="robots"
@@ -28,6 +28,12 @@
       title="Sitemap"
       href="https://carbonpanel.dev/sitemap.xml"
     />
+    <link
+      rel="alternate"
+      type="text/plain"
+      title="AI-readable overview"
+      href="./llms.txt"
+    />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Carbon Panel" />
     <meta property="og:locale" content="en_US" />
@@ -37,7 +43,7 @@
     />
     <meta
       property="og:description"
-      content="Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers."
+      content="Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on."
     />
     <meta property="og:url" content="https://carbonpanel.dev/" />
     <meta
@@ -58,7 +64,7 @@
     />
     <meta
       name="twitter:description"
-      content="Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers."
+      content="Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on."
     />
     <meta
       name="twitter:image"
@@ -94,7 +100,7 @@
             "@id": "https://carbonpanel.dev/#webpage",
             "url": "https://carbonpanel.dev/",
             "name": "Carbon Panel | Self-hosted Minecraft server management",
-            "description": "Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers.",
+            "description": "Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on.",
             "isPartOf": { "@id": "https://carbonpanel.dev/#website" },
             "about": { "@id": "https://carbonpanel.dev/#software" },
             "inLanguage": "en",
@@ -109,7 +115,7 @@
             "@type": "SoftwareSourceCode",
             "@id": "https://carbonpanel.dev/#software",
             "name": "Carbon Panel",
-            "description": "Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers.",
+            "description": "Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on.",
             "url": "https://carbonpanel.dev/",
             "codeRepository": "https://github.com/athNdev/carbonpanel",
             "programmingLanguage": "Go",
@@ -118,6 +124,30 @@
             "isAccessibleForFree": true,
             "softwareVersion": "v3.0.0-beta.4",
             "image": "https://carbonpanel.dev/assets/og.png?v=20261113-2"
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://carbonpanel.dev/#faq",
+            "url": "https://carbonpanel.dev/#faq",
+            "isPartOf": { "@id": "https://carbonpanel.dev/#website" },
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Can Carbon Panel use single sign-on?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Carbon Panel supports OIDC single sign-on alongside local accounts, roles, server-scoped permissions, API tokens, and an audit log. See the OIDC guides in the documentation."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Do I need a Carbon Cloud account to self-host Carbon Panel?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. Carbon Panel is free and open source under MPL-2.0. You run it on infrastructure you control, and your worlds, configuration, and database stay with your installation."
+                }
+              }
+            ]
           }
         ]
       }
@@ -669,10 +699,10 @@
               <li>
                 <span>03</span>
                 <div>
-                  <h3>Create your first server</h3>
+                  <h3>Set up access and your first server</h3>
                   <p>
-                    Set up your administrator, choose your software, and invite
-                    your friends.
+                    Create an administrator or connect an OIDC provider, choose
+                    your software, and invite your friends.
                   </p>
                 </div>
               </li>
@@ -757,6 +787,18 @@
             </details>
             <details>
               <summary>
+                Can I use single sign-on?<span aria-hidden="true">+</span>
+              </summary>
+              <p>
+                Yes. Carbon Panel supports OIDC single sign-on as well as local
+                accounts, roles, server-scoped permissions, API tokens, and an
+                audit log. See the
+                <a href="./docs/guides/oidc/keycloak/">OIDC guide</a> to
+                configure a provider.
+              </p>
+            </details>
+            <details>
+              <summary>
                 Is Carbon Panel really free?<span aria-hidden="true">+</span>
               </summary>
               <p>
@@ -835,6 +877,7 @@
           ><a href="https://github.com/athNdev/carbonpanel/blob/main/LICENSE"
             >MPL-2.0</a
           ><a href="./design-system/">Design system</a>
+          <a href="./llms.txt">AI-readable overview</a>
         </div>
         <small
           >An independent project. Not affiliated with Mojang or
