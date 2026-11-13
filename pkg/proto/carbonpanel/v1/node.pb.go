@@ -313,6 +313,181 @@ func (x *Node) GetControllerStorageRoot() string {
 	return ""
 }
 
+// Request a bounded scan of local Docker daemon candidates.
+type ScanNodesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScanNodesRequest) Reset() {
+	*x = ScanNodesRequest{}
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScanNodesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScanNodesRequest) ProtoMessage() {}
+
+func (x *ScanNodesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScanNodesRequest.ProtoReflect.Descriptor instead.
+func (*ScanNodesRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{1}
+}
+
+// One reachable or unreachable daemon candidate from the interface scan.
+type DockerCandidate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Host          string                 `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	Port          int32                  `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	Reachable     bool                   `protobuf:"varint,3,opt,name=reachable,proto3" json:"reachable,omitempty"`
+	LatencyMs     int64                  `protobuf:"varint,4,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
+	Source        string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DockerCandidate) Reset() {
+	*x = DockerCandidate{}
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DockerCandidate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DockerCandidate) ProtoMessage() {}
+
+func (x *DockerCandidate) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DockerCandidate.ProtoReflect.Descriptor instead.
+func (*DockerCandidate) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *DockerCandidate) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *DockerCandidate) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *DockerCandidate) GetReachable() bool {
+	if x != nil {
+		return x.Reachable
+	}
+	return false
+}
+
+func (x *DockerCandidate) GetLatencyMs() int64 {
+	if x != nil {
+		return x.LatencyMs
+	}
+	return 0
+}
+
+func (x *DockerCandidate) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+// Probe results and best-effort count of already registered nodes.
+type ScanNodesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Candidates    []*DockerCandidate     `protobuf:"bytes,1,rep,name=candidates,proto3" json:"candidates,omitempty"`
+	KnownNodes    int32                  `protobuf:"varint,2,opt,name=known_nodes,json=knownNodes,proto3" json:"known_nodes,omitempty"`
+	ScannedAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=scanned_at,json=scannedAt,proto3" json:"scanned_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScanNodesResponse) Reset() {
+	*x = ScanNodesResponse{}
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScanNodesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScanNodesResponse) ProtoMessage() {}
+
+func (x *ScanNodesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScanNodesResponse.ProtoReflect.Descriptor instead.
+func (*ScanNodesResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ScanNodesResponse) GetCandidates() []*DockerCandidate {
+	if x != nil {
+		return x.Candidates
+	}
+	return nil
+}
+
+func (x *ScanNodesResponse) GetKnownNodes() int32 {
+	if x != nil {
+		return x.KnownNodes
+	}
+	return 0
+}
+
+func (x *ScanNodesResponse) GetScannedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ScannedAt
+	}
+	return nil
+}
+
 // Node list request
 type ListNodesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -322,7 +497,7 @@ type ListNodesRequest struct {
 
 func (x *ListNodesRequest) Reset() {
 	*x = ListNodesRequest{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[1]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -334,7 +509,7 @@ func (x *ListNodesRequest) String() string {
 func (*ListNodesRequest) ProtoMessage() {}
 
 func (x *ListNodesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[1]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -347,7 +522,7 @@ func (x *ListNodesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNodesRequest.ProtoReflect.Descriptor instead.
 func (*ListNodesRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{1}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{4}
 }
 
 // Node list response
@@ -360,7 +535,7 @@ type ListNodesResponse struct {
 
 func (x *ListNodesResponse) Reset() {
 	*x = ListNodesResponse{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -372,7 +547,7 @@ func (x *ListNodesResponse) String() string {
 func (*ListNodesResponse) ProtoMessage() {}
 
 func (x *ListNodesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -385,7 +560,7 @@ func (x *ListNodesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNodesResponse.ProtoReflect.Descriptor instead.
 func (*ListNodesResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{2}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListNodesResponse) GetNodes() []*Node {
@@ -405,7 +580,7 @@ type GetNodeRequest struct {
 
 func (x *GetNodeRequest) Reset() {
 	*x = GetNodeRequest{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -417,7 +592,7 @@ func (x *GetNodeRequest) String() string {
 func (*GetNodeRequest) ProtoMessage() {}
 
 func (x *GetNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -430,7 +605,7 @@ func (x *GetNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeRequest.ProtoReflect.Descriptor instead.
 func (*GetNodeRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{3}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetNodeRequest) GetId() string {
@@ -450,7 +625,7 @@ type GetNodeResponse struct {
 
 func (x *GetNodeResponse) Reset() {
 	*x = GetNodeResponse{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -462,7 +637,7 @@ func (x *GetNodeResponse) String() string {
 func (*GetNodeResponse) ProtoMessage() {}
 
 func (x *GetNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -475,7 +650,7 @@ func (x *GetNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeResponse.ProtoReflect.Descriptor instead.
 func (*GetNodeResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{4}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetNodeResponse) GetNode() *Node {
@@ -507,7 +682,7 @@ type CreateNodeRequest struct {
 
 func (x *CreateNodeRequest) Reset() {
 	*x = CreateNodeRequest{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -519,7 +694,7 @@ func (x *CreateNodeRequest) String() string {
 func (*CreateNodeRequest) ProtoMessage() {}
 
 func (x *CreateNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -532,7 +707,7 @@ func (x *CreateNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateNodeRequest.ProtoReflect.Descriptor instead.
 func (*CreateNodeRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{5}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CreateNodeRequest) GetName() string {
@@ -636,7 +811,7 @@ type CreateNodeResponse struct {
 
 func (x *CreateNodeResponse) Reset() {
 	*x = CreateNodeResponse{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -648,7 +823,7 @@ func (x *CreateNodeResponse) String() string {
 func (*CreateNodeResponse) ProtoMessage() {}
 
 func (x *CreateNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -661,7 +836,7 @@ func (x *CreateNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateNodeResponse.ProtoReflect.Descriptor instead.
 func (*CreateNodeResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{6}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CreateNodeResponse) GetNode() *Node {
@@ -694,7 +869,7 @@ type UpdateNodeRequest struct {
 
 func (x *UpdateNodeRequest) Reset() {
 	*x = UpdateNodeRequest{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -706,7 +881,7 @@ func (x *UpdateNodeRequest) String() string {
 func (*UpdateNodeRequest) ProtoMessage() {}
 
 func (x *UpdateNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -719,7 +894,7 @@ func (x *UpdateNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateNodeRequest.ProtoReflect.Descriptor instead.
 func (*UpdateNodeRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{7}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UpdateNodeRequest) GetId() string {
@@ -830,7 +1005,7 @@ type UpdateNodeResponse struct {
 
 func (x *UpdateNodeResponse) Reset() {
 	*x = UpdateNodeResponse{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -842,7 +1017,7 @@ func (x *UpdateNodeResponse) String() string {
 func (*UpdateNodeResponse) ProtoMessage() {}
 
 func (x *UpdateNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -855,7 +1030,7 @@ func (x *UpdateNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateNodeResponse.ProtoReflect.Descriptor instead.
 func (*UpdateNodeResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{8}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *UpdateNodeResponse) GetNode() *Node {
@@ -875,7 +1050,7 @@ type DeleteNodeRequest struct {
 
 func (x *DeleteNodeRequest) Reset() {
 	*x = DeleteNodeRequest{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -887,7 +1062,7 @@ func (x *DeleteNodeRequest) String() string {
 func (*DeleteNodeRequest) ProtoMessage() {}
 
 func (x *DeleteNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -900,7 +1075,7 @@ func (x *DeleteNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteNodeRequest.ProtoReflect.Descriptor instead.
 func (*DeleteNodeRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{9}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DeleteNodeRequest) GetId() string {
@@ -920,7 +1095,7 @@ type DeleteNodeResponse struct {
 
 func (x *DeleteNodeResponse) Reset() {
 	*x = DeleteNodeResponse{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[10]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -932,7 +1107,7 @@ func (x *DeleteNodeResponse) String() string {
 func (*DeleteNodeResponse) ProtoMessage() {}
 
 func (x *DeleteNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[10]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -945,7 +1120,7 @@ func (x *DeleteNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteNodeResponse.ProtoReflect.Descriptor instead.
 func (*DeleteNodeResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{10}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *DeleteNodeResponse) GetSuccess() bool {
@@ -965,7 +1140,7 @@ type PingNodeRequest struct {
 
 func (x *PingNodeRequest) Reset() {
 	*x = PingNodeRequest{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[11]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -977,7 +1152,7 @@ func (x *PingNodeRequest) String() string {
 func (*PingNodeRequest) ProtoMessage() {}
 
 func (x *PingNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[11]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -990,7 +1165,7 @@ func (x *PingNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingNodeRequest.ProtoReflect.Descriptor instead.
 func (*PingNodeRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{11}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PingNodeRequest) GetId() string {
@@ -1013,7 +1188,7 @@ type PingNodeResponse struct {
 
 func (x *PingNodeResponse) Reset() {
 	*x = PingNodeResponse{}
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +1200,7 @@ func (x *PingNodeResponse) String() string {
 func (*PingNodeResponse) ProtoMessage() {}
 
 func (x *PingNodeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +1213,7 @@ func (x *PingNodeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PingNodeResponse.ProtoReflect.Descriptor instead.
 func (*PingNodeResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{12}
+	return file_carbonpanel_v1_node_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PingNodeResponse) GetSuccess() bool {
@@ -1105,6 +1280,22 @@ const file_carbonpanel_v1_node_proto_rawDesc = "" +
 	"\fstorage_root\x18\x17 \x01(\tR\vstorageRoot\x126\n" +
 	"\x17controller_storage_root\x18\x18 \x01(\tR\x15controllerStorageRootB\x11\n" +
 	"\x0f_last_heartbeat\"\x12\n" +
+	"\x10ScanNodesRequest\"\x8e\x01\n" +
+	"\x0fDockerCandidate\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1c\n" +
+	"\treachable\x18\x03 \x01(\bR\treachable\x12\x1d\n" +
+	"\n" +
+	"latency_ms\x18\x04 \x01(\x03R\tlatencyMs\x12\x16\n" +
+	"\x06source\x18\x05 \x01(\tR\x06source\"\xb0\x01\n" +
+	"\x11ScanNodesResponse\x12?\n" +
+	"\n" +
+	"candidates\x18\x01 \x03(\v2\x1f.carbonpanel.v1.DockerCandidateR\n" +
+	"candidates\x12\x1f\n" +
+	"\vknown_nodes\x18\x02 \x01(\x05R\n" +
+	"knownNodes\x129\n" +
+	"\n" +
+	"scanned_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tscannedAt\"\x12\n" +
 	"\x10ListNodesRequest\"?\n" +
 	"\x11ListNodesResponse\x12*\n" +
 	"\x05nodes\x18\x01 \x03(\v2\x14.carbonpanel.v1.NodeR\x05nodes\" \n" +
@@ -1184,7 +1375,7 @@ const file_carbonpanel_v1_node_proto_rawDesc = "" +
 	"\x17NODE_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12NODE_STATUS_ONLINE\x10\x01\x12\x17\n" +
 	"\x13NODE_STATUS_OFFLINE\x10\x02\x12\x15\n" +
-	"\x11NODE_STATUS_ERROR\x10\x032\xf9\x03\n" +
+	"\x11NODE_STATUS_ERROR\x10\x032\xcb\x04\n" +
 	"\vNodeService\x12P\n" +
 	"\tListNodes\x12 .carbonpanel.v1.ListNodesRequest\x1a!.carbonpanel.v1.ListNodesResponse\x12J\n" +
 	"\aGetNode\x12\x1e.carbonpanel.v1.GetNodeRequest\x1a\x1f.carbonpanel.v1.GetNodeResponse\x12S\n" +
@@ -1194,7 +1385,8 @@ const file_carbonpanel_v1_node_proto_rawDesc = "" +
 	"UpdateNode\x12!.carbonpanel.v1.UpdateNodeRequest\x1a\".carbonpanel.v1.UpdateNodeResponse\x12S\n" +
 	"\n" +
 	"DeleteNode\x12!.carbonpanel.v1.DeleteNodeRequest\x1a\".carbonpanel.v1.DeleteNodeResponse\x12M\n" +
-	"\bPingNode\x12\x1f.carbonpanel.v1.PingNodeRequest\x1a .carbonpanel.v1.PingNodeResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
+	"\bPingNode\x12\x1f.carbonpanel.v1.PingNodeRequest\x1a .carbonpanel.v1.PingNodeResponse\x12P\n" +
+	"\tScanNodes\x12 .carbonpanel.v1.ScanNodesRequest\x1a!.carbonpanel.v1.ScanNodesResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
 
 var (
 	file_carbonpanel_v1_node_proto_rawDescOnce sync.Once
@@ -1209,51 +1401,58 @@ func file_carbonpanel_v1_node_proto_rawDescGZIP() []byte {
 }
 
 var file_carbonpanel_v1_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_carbonpanel_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_carbonpanel_v1_node_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_carbonpanel_v1_node_proto_goTypes = []any{
 	(NodeStatus)(0),               // 0: carbonpanel.v1.NodeStatus
 	(*Node)(nil),                  // 1: carbonpanel.v1.Node
-	(*ListNodesRequest)(nil),      // 2: carbonpanel.v1.ListNodesRequest
-	(*ListNodesResponse)(nil),     // 3: carbonpanel.v1.ListNodesResponse
-	(*GetNodeRequest)(nil),        // 4: carbonpanel.v1.GetNodeRequest
-	(*GetNodeResponse)(nil),       // 5: carbonpanel.v1.GetNodeResponse
-	(*CreateNodeRequest)(nil),     // 6: carbonpanel.v1.CreateNodeRequest
-	(*CreateNodeResponse)(nil),    // 7: carbonpanel.v1.CreateNodeResponse
-	(*UpdateNodeRequest)(nil),     // 8: carbonpanel.v1.UpdateNodeRequest
-	(*UpdateNodeResponse)(nil),    // 9: carbonpanel.v1.UpdateNodeResponse
-	(*DeleteNodeRequest)(nil),     // 10: carbonpanel.v1.DeleteNodeRequest
-	(*DeleteNodeResponse)(nil),    // 11: carbonpanel.v1.DeleteNodeResponse
-	(*PingNodeRequest)(nil),       // 12: carbonpanel.v1.PingNodeRequest
-	(*PingNodeResponse)(nil),      // 13: carbonpanel.v1.PingNodeResponse
-	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
+	(*ScanNodesRequest)(nil),      // 2: carbonpanel.v1.ScanNodesRequest
+	(*DockerCandidate)(nil),       // 3: carbonpanel.v1.DockerCandidate
+	(*ScanNodesResponse)(nil),     // 4: carbonpanel.v1.ScanNodesResponse
+	(*ListNodesRequest)(nil),      // 5: carbonpanel.v1.ListNodesRequest
+	(*ListNodesResponse)(nil),     // 6: carbonpanel.v1.ListNodesResponse
+	(*GetNodeRequest)(nil),        // 7: carbonpanel.v1.GetNodeRequest
+	(*GetNodeResponse)(nil),       // 8: carbonpanel.v1.GetNodeResponse
+	(*CreateNodeRequest)(nil),     // 9: carbonpanel.v1.CreateNodeRequest
+	(*CreateNodeResponse)(nil),    // 10: carbonpanel.v1.CreateNodeResponse
+	(*UpdateNodeRequest)(nil),     // 11: carbonpanel.v1.UpdateNodeRequest
+	(*UpdateNodeResponse)(nil),    // 12: carbonpanel.v1.UpdateNodeResponse
+	(*DeleteNodeRequest)(nil),     // 13: carbonpanel.v1.DeleteNodeRequest
+	(*DeleteNodeResponse)(nil),    // 14: carbonpanel.v1.DeleteNodeResponse
+	(*PingNodeRequest)(nil),       // 15: carbonpanel.v1.PingNodeRequest
+	(*PingNodeResponse)(nil),      // 16: carbonpanel.v1.PingNodeResponse
+	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
 }
 var file_carbonpanel_v1_node_proto_depIdxs = []int32{
 	0,  // 0: carbonpanel.v1.Node.status:type_name -> carbonpanel.v1.NodeStatus
-	14, // 1: carbonpanel.v1.Node.last_heartbeat:type_name -> google.protobuf.Timestamp
-	14, // 2: carbonpanel.v1.Node.created_at:type_name -> google.protobuf.Timestamp
-	14, // 3: carbonpanel.v1.Node.updated_at:type_name -> google.protobuf.Timestamp
-	1,  // 4: carbonpanel.v1.ListNodesResponse.nodes:type_name -> carbonpanel.v1.Node
-	1,  // 5: carbonpanel.v1.GetNodeResponse.node:type_name -> carbonpanel.v1.Node
-	1,  // 6: carbonpanel.v1.CreateNodeResponse.node:type_name -> carbonpanel.v1.Node
-	1,  // 7: carbonpanel.v1.UpdateNodeResponse.node:type_name -> carbonpanel.v1.Node
-	0,  // 8: carbonpanel.v1.PingNodeResponse.status:type_name -> carbonpanel.v1.NodeStatus
-	2,  // 9: carbonpanel.v1.NodeService.ListNodes:input_type -> carbonpanel.v1.ListNodesRequest
-	4,  // 10: carbonpanel.v1.NodeService.GetNode:input_type -> carbonpanel.v1.GetNodeRequest
-	6,  // 11: carbonpanel.v1.NodeService.CreateNode:input_type -> carbonpanel.v1.CreateNodeRequest
-	8,  // 12: carbonpanel.v1.NodeService.UpdateNode:input_type -> carbonpanel.v1.UpdateNodeRequest
-	10, // 13: carbonpanel.v1.NodeService.DeleteNode:input_type -> carbonpanel.v1.DeleteNodeRequest
-	12, // 14: carbonpanel.v1.NodeService.PingNode:input_type -> carbonpanel.v1.PingNodeRequest
-	3,  // 15: carbonpanel.v1.NodeService.ListNodes:output_type -> carbonpanel.v1.ListNodesResponse
-	5,  // 16: carbonpanel.v1.NodeService.GetNode:output_type -> carbonpanel.v1.GetNodeResponse
-	7,  // 17: carbonpanel.v1.NodeService.CreateNode:output_type -> carbonpanel.v1.CreateNodeResponse
-	9,  // 18: carbonpanel.v1.NodeService.UpdateNode:output_type -> carbonpanel.v1.UpdateNodeResponse
-	11, // 19: carbonpanel.v1.NodeService.DeleteNode:output_type -> carbonpanel.v1.DeleteNodeResponse
-	13, // 20: carbonpanel.v1.NodeService.PingNode:output_type -> carbonpanel.v1.PingNodeResponse
-	15, // [15:21] is the sub-list for method output_type
-	9,  // [9:15] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	17, // 1: carbonpanel.v1.Node.last_heartbeat:type_name -> google.protobuf.Timestamp
+	17, // 2: carbonpanel.v1.Node.created_at:type_name -> google.protobuf.Timestamp
+	17, // 3: carbonpanel.v1.Node.updated_at:type_name -> google.protobuf.Timestamp
+	3,  // 4: carbonpanel.v1.ScanNodesResponse.candidates:type_name -> carbonpanel.v1.DockerCandidate
+	17, // 5: carbonpanel.v1.ScanNodesResponse.scanned_at:type_name -> google.protobuf.Timestamp
+	1,  // 6: carbonpanel.v1.ListNodesResponse.nodes:type_name -> carbonpanel.v1.Node
+	1,  // 7: carbonpanel.v1.GetNodeResponse.node:type_name -> carbonpanel.v1.Node
+	1,  // 8: carbonpanel.v1.CreateNodeResponse.node:type_name -> carbonpanel.v1.Node
+	1,  // 9: carbonpanel.v1.UpdateNodeResponse.node:type_name -> carbonpanel.v1.Node
+	0,  // 10: carbonpanel.v1.PingNodeResponse.status:type_name -> carbonpanel.v1.NodeStatus
+	5,  // 11: carbonpanel.v1.NodeService.ListNodes:input_type -> carbonpanel.v1.ListNodesRequest
+	7,  // 12: carbonpanel.v1.NodeService.GetNode:input_type -> carbonpanel.v1.GetNodeRequest
+	9,  // 13: carbonpanel.v1.NodeService.CreateNode:input_type -> carbonpanel.v1.CreateNodeRequest
+	11, // 14: carbonpanel.v1.NodeService.UpdateNode:input_type -> carbonpanel.v1.UpdateNodeRequest
+	13, // 15: carbonpanel.v1.NodeService.DeleteNode:input_type -> carbonpanel.v1.DeleteNodeRequest
+	15, // 16: carbonpanel.v1.NodeService.PingNode:input_type -> carbonpanel.v1.PingNodeRequest
+	2,  // 17: carbonpanel.v1.NodeService.ScanNodes:input_type -> carbonpanel.v1.ScanNodesRequest
+	6,  // 18: carbonpanel.v1.NodeService.ListNodes:output_type -> carbonpanel.v1.ListNodesResponse
+	8,  // 19: carbonpanel.v1.NodeService.GetNode:output_type -> carbonpanel.v1.GetNodeResponse
+	10, // 20: carbonpanel.v1.NodeService.CreateNode:output_type -> carbonpanel.v1.CreateNodeResponse
+	12, // 21: carbonpanel.v1.NodeService.UpdateNode:output_type -> carbonpanel.v1.UpdateNodeResponse
+	14, // 22: carbonpanel.v1.NodeService.DeleteNode:output_type -> carbonpanel.v1.DeleteNodeResponse
+	16, // 23: carbonpanel.v1.NodeService.PingNode:output_type -> carbonpanel.v1.PingNodeResponse
+	4,  // 24: carbonpanel.v1.NodeService.ScanNodes:output_type -> carbonpanel.v1.ScanNodesResponse
+	18, // [18:25] is the sub-list for method output_type
+	11, // [11:18] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_node_proto_init() }
@@ -1262,14 +1461,14 @@ func file_carbonpanel_v1_node_proto_init() {
 		return
 	}
 	file_carbonpanel_v1_node_proto_msgTypes[0].OneofWrappers = []any{}
-	file_carbonpanel_v1_node_proto_msgTypes[7].OneofWrappers = []any{}
+	file_carbonpanel_v1_node_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_node_proto_rawDesc), len(file_carbonpanel_v1_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
