@@ -23,3 +23,6 @@ new active allocation. Admission neither mutates status nor updates LastStarted.
 RPC translates typed refusals; the scheduler retains task and node resolution.
 This check does not reserve capacity atomically across concurrent starts.
 Staged recreation and rollback remain owned by their existing callers.
+Scheduled staged publication resolves the server's node before any module or
+container mutation. Plans that start a server also pass shared admission first;
+an unavailable remote node never substitutes the controller daemon.

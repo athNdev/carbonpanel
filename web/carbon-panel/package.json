@@ -16,8 +16,6 @@
 		"test": "bun test"
 	},
 	"devDependencies": {
-		"@bufbuild/buf": "^1.75.0",
-		"@bufbuild/protoc-gen-es": "^2.10.0",
 		"@eslint/compat": "^1.2.5",
 		"@eslint/js": "^9.18.0",
 		"@internationalized/date": "^3.12.4",

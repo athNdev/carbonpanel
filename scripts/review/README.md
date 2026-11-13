@@ -20,15 +20,14 @@ automatically adopted. `down` preserves the session's data; the explicitly
 named `clean` command deletes only a matching owned session. The selected port
 is in the session's `port` file. Listeners bind to loopback.
 
-- Node 20+.
-- `playwright-core`, plus a Chromium build. Playwright's own browser cache is
-  reused automatically.
+- Node 24.
+- Bun and the locked Playwright package used by both review profiles.
 - A running panel with a local account. Credentials are read from the
   environment and never written to the report.
 
 ```sh
-npm i playwright-core            # once, anywhere
-npx playwright install chromium  # once, if you have no browser build yet
+node scripts/review/setup-browser.mjs
+node scripts/review/browser-check.mjs
 ```
 
 ## Run
@@ -36,7 +35,6 @@ npx playwright install chromium  # once, if you have no browser build yet
 ```sh
 export PANEL_REVIEW_USER=you
 export PANEL_REVIEW_PASSWORD=...
-export REVIEW_MODULES=/path/to/node_modules   # where playwright-core lives
 
 node scripts/review/journey.mjs \
   --plan scripts/review/plan-console.json \
@@ -53,8 +51,16 @@ Environment overrides:
 | Variable                                      | Purpose                                |
 | --------------------------------------------- | -------------------------------------- |
 | `PANEL_REVIEW_USER` / `PANEL_REVIEW_PASSWORD` | login (names configurable per plan)    |
-| `REVIEW_MODULES`                              | directory containing `playwright-core` |
 | `REVIEW_CHROME`                               | explicit Chromium executable path      |
+
+Both profiles use the checked-in `scripts/manual-review/e2e` package and frozen
+lockfile through `scripts/review/browser.mjs`. They emit `browser.json` with the
+driver version, actual browser version, executable path and override status.
+Setup installs the exact driver's Chromium build into the checkout's ignored
+`tmp/review-browsers/<driver-version>` directory, without scanning or garbage
+collecting shared home-directory browser caches. `PLAYWRIGHT_BROWSERS_PATH`
+is an explicit cache override. On disposable Linux CI, `--with-deps` also installs OS
+browser dependencies; ordinary setup does not request that system change.
 
 ## Plan format
 

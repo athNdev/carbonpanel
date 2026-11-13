@@ -26,6 +26,7 @@ on:
       - '.air.toml'
       - 'docker/Dockerfile.geyser'
       - 'docker/Dockerfile.status'
+      - 'docker/Dockerfile.carbon-panel'
       - 'cmd/geyser/**'
       - 'cmd/status/**'
       - 'pkg/proto/**'
@@ -59,6 +60,7 @@ on:
       - 'web/carbon-panel/vite.config.ts'
       - 'docker/Dockerfile.geyser'
       - 'docker/Dockerfile.status'
+      - 'docker/Dockerfile.carbon-panel'
       - 'cmd/geyser/**'
       - 'cmd/status/**'
       - 'pkg/proto/**'
@@ -130,3 +132,11 @@ jobs:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build without publishing
         run: docker buildx build --platform linux/amd64,linux/arm64 --file docker/Dockerfile.${{ matrix.module }} .
+  panel-image:
+    name: Build panel image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build without publishing
+        run: docker buildx build --platform linux/amd64 --file docker/Dockerfile.carbon-panel .

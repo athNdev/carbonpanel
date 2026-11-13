@@ -239,18 +239,33 @@ type tomlMod struct {
 }
 
 type Manager struct {
-	baseDir    string
-	log        *logger.Logger
-	mu         sync.RWMutex
-	httpClient *http.Client
+	baseDir         string
+	log             *logger.Logger
+	mu              sync.RWMutex
+	httpClient      *http.Client
+	modrinthBaseURL string
 }
 
-func NewManager(baseDir string, log *logger.Logger) *Manager {
+type ManagerOptions struct {
+	HTTPClient      *http.Client
+	ModrinthBaseURL string
+}
+
+func NewManager(baseDir string, log *logger.Logger, options ...ManagerOptions) *Manager {
 	_ = os.MkdirAll(baseDir, 0755)
+	var option ManagerOptions
+	if len(options) > 0 {
+		option = options[0]
+	}
+	client := option.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 	return &Manager{
-		baseDir:    baseDir,
-		log:        log,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseDir:         baseDir,
+		log:             log,
+		httpClient:      client,
+		modrinthBaseURL: option.ModrinthBaseURL,
 	}
 }
 

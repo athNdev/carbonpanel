@@ -38,10 +38,9 @@ plugins:
 
   # Generate TypeScript
   #
-  # Pinned to v2.15.0 to match the committed tree and the installed runtime
-  # floor in package.json ("@bufbuild/protobuf": "^2.10.0"). Bumping either side
-  # independently means the generated code targets runtime APIs that may not
-  # exist, so they move together and deliberately.
+  # Pinned to v2.15.0 because it produced the committed tree. The frontend
+  # runtime has its own version constraint; validate generated code with its
+  # actual installed runtime when changing either rather than assuming equality.
   - remote: buf.build/bufbuild/es:v2.15.0
     out: web/carbon-panel/src/lib/proto
     opt:

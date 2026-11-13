@@ -39,6 +39,9 @@ describe a server's desired configuration.
 - Surface indexer and delivery failures; do not turn a partial download into a
   successful install.
 - Verify checksums before declaring a modpack delivered.
+- Provider credentials must not accompany keyless fallbacks or cross-origin
+  redirects. The CurseForge adapter owns fallback policy; see
+  [provider credentials](../decisions/provider-http-policy.md).
 - A hook failure must be attributable to the module and the server.
 - Create-path blueprints are Java/tag seeds resolved to image, env and
   protocol. A Bedrock full-image seed is labeled unsupported and is not a

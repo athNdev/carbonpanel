@@ -3,8 +3,10 @@ package indexers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -18,14 +20,49 @@ type HTTPClient struct {
 
 // NewHTTPClient creates a shared HTTP client for an indexer.
 func NewHTTPClient(indexer string, userAgent string, extraHeaders map[string]string) *HTTPClient {
+	return NewHTTPClientWithClient(indexer, userAgent, extraHeaders, nil)
+}
+
+// NewHTTPClientWithClient permits a caller to supply an HTTP transport and
+// timeout. A nil client retains the standard indexer timeout.
+func NewHTTPClientWithClient(indexer string, userAgent string, extraHeaders map[string]string, client *http.Client) *HTTPClient {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	headers := make(map[string]string, len(extraHeaders))
+	for key, value := range extraHeaders {
+		headers[key] = value
+	}
 	return &HTTPClient{
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		client:       ProtectCredentialsOnRedirect(client),
 		userAgent:    userAgent,
 		indexer:      indexer,
-		extraHeaders: extraHeaders,
+		extraHeaders: headers,
 	}
+}
+
+// ProtectCredentialsOnRedirect copies the client and prevents credentials from
+// crossing scheme, host or port boundaries. It preserves a caller's redirect
+// policy and the standard ten-redirect limit when no policy was supplied.
+func ProtectCredentialsOnRedirect(client *http.Client) *http.Client {
+	copyClient := *client
+	previous := copyClient.CheckRedirect
+	copyClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if previous != nil {
+			if err := previous(req, via); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if len(via) > 0 && (!strings.EqualFold(req.URL.Scheme, via[0].URL.Scheme) || !strings.EqualFold(req.URL.Host, via[0].URL.Host)) {
+			for _, name := range []string{"X-Api-Key", "Authorization", "Proxy-Authorization", "Cookie"} {
+				req.Header.Del(name)
+			}
+		}
+		return nil
+	}
+	return &copyClient
 }
 
 // DoJSON performs a GET request, checks the status, and JSON-decodes into dest.
