@@ -53,6 +53,9 @@ when startup fails after container creation. Removal failures are reported.
 An instance-owned resolver can select a transport with the caller's context.
 Legacy `ForNode` callers still use the registered process-wide transport and a
 background context until each owning subsystem is migrated.
+ListFiles and GetFile use the composition-root resolver and the RPC context.
+Mutations and background archive operations retain their existing lifetime
+until they gain independently owned cancellation and rollback policies.
 
 Accessor backups enumerate metadata and apply exclusions before reading file
 contents. Each retained file is read once while writing its archive entry and

@@ -16,6 +16,29 @@ their own temporary fixtures; they do not clean project data.
 Use the Go version in `go.mod` and the Bun version in CI. Install the console
 dependencies with `bun install --frozen-lockfile` from `web/carbon-panel`.
 
+`make deps` downloads Go modules and installs the frontend with its frozen lockfile.
+Use `make deps-update-buf` or `make deps-update-frontend` for deliberate lockfile
+updates. Proto generation uses Buf 1.50.0 and the pinned remote plugins in
+`buf.gen.yaml`. After the frozen frontend install, `make gen` stages generation
+and formatting before replacing generated output; `make proto-clean` is the
+separately named removal operation. For native Windows or Linux with Buf 1.50.0
+on PATH, `bun scripts/proto-generate.mjs --check` compares regenerated Go and
+TypeScript with the checkout without modifying them; omit `--check` to install
+the staged outputs. `BUF` and `BUF_VERSION`
+select an explicit local executable and expected version; `BUF_IMAGE` selects
+an explicit Docker image for Make. Review compatibility and regenerate after any
+intentional tool or remote-plugin update. OpenAPI schemas are generated build
+artifacts and are not part of the tracked output comparison.
+
+`toolchain-versions.json` records the tested Go, Bun and Buf CLI defaults. Go
+also appears in `go.mod`, Docker builder arguments and CI; Bun and Buf defaults
+appear in Docker and workflow files. Run `bun scripts/check-toolchain-policy.mjs`
+after updating the policy and all those consumers. Update pinned remote plugins
+separately, regenerate and compare Go/TypeScript, then run frontend, backend,
+proto and image checks. Image builds accept explicit `GO_IMAGE`, `BUN_IMAGE`
+and `BUF_IMAGE` build arguments for a deliberate compatible alternative. Tags
+select versions but are not immutable image digests.
+
 From any working directory, the Bash or PowerShell wrapper locates this checkout:
 
 ```sh

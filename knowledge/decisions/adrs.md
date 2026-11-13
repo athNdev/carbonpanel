@@ -27,6 +27,7 @@ sources:
 | [0008](../../docs/adr/0008-carbon-panel-brand-identity.md) | Use the approved lower-cut block and technical-capitals wordmark | [Brand assets](../../assets/branding/README.md) |
 | [0009](../../docs/adr/0009-shared-design-system.md) | Proposed shared design-system source and Cloud snapshot | [Frontend change](../workflows/frontend-change.md) |
 | [0010](../../docs/adr/0010-versioned-release-artifacts.md) | SemVer bundles, matching images and gated publication | [Release](../workflows/release.md) |
+| [0011](../../docs/adr/0011-server-runtime-admission.md) | Share server start admission | [Server lifecycle admission](../architecture/server-lifecycle.md) |
 
 # Rule
 

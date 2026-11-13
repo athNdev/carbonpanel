@@ -11,6 +11,15 @@ on the wrong tab, a scrollbar appearing under the pointer.
 
 ## Requirements
 
+The disposable stack stores each named session under
+`~/.cache/carbon-panel-review/sessions/<name>`. `REVIEW_STACK_NAME` selects a
+session; a custom `REVIEW_DATA_DIR` must resolve to that exact owned location.
+An ownership marker and a matching Docker container label are required before
+stopping or cleaning a session. Existing unmarked data and containers are not
+automatically adopted. `down` preserves the session's data; the explicitly
+named `clean` command deletes only a matching owned session. The selected port
+is in the session's `port` file. Listeners bind to loopback.
+
 - Node 20+.
 - `playwright-core`, plus a Chromium build. Playwright's own browser cache is
   reused automatically.

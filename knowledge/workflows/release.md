@@ -56,6 +56,13 @@ resume from the original verified download artifact without rebuilding images.
 # Rules
 
 - A release note must describe shipped behavior, not planned behavior.
+- Buf CLI 1.50.0 is the default in Make, container and publication workflows;
+  generator plugin versions are pinned separately in `buf.gen.yaml`. The
+  [development guide](../../docs/development.md) describes explicit overrides
+  and the staged generation check.
+- `toolchain-versions.json` records tested Go, Bun and Buf defaults. Update its
+  checked consumers together and run the policy gate, staged generation check
+  and applicable image builds before release; version tags are not digests.
 - Do not publish an image that was built from a dirty or unverified tree.
 - The controller image is published to Docker Hub as
   `atharvnaphade/carbon-panel`. CD's permission probe, image tags, tagged release
@@ -87,6 +94,8 @@ resume from the original verified download artifact without rebuilding images.
 - Editor changes also run `editor-dialog.yml`, which renders the actual dialog
   in Chromium with deferred RPC responses. Session adapter tests alone cannot
   prove Svelte initialization, props timing or Monaco cleanup behavior.
+- Showcase review stacks use a marked per-session data directory and a matching
+  container label before teardown. The selected port is inside that directory.
 - The same browser workflow verifies a real local WebSocket reconnect and
   subscription history options in Chromium when frontend inputs change.
 - Development launcher checks use the pinned Go toolchain to build their native
