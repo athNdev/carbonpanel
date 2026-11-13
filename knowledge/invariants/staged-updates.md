@@ -16,7 +16,7 @@ code_refs:
 sources:
   - title: Staged update research
     resource: ../../docs/research/staged-update-application.md
-verified: { by: agent:cursor, at: 2026-10-28 }
+verified: { by: agent:codex, at: 2026-11-13 }
 review_after: 2027-01-28
 ---
 
@@ -31,6 +31,14 @@ File bytes for a staged install or replace go through node storage at
 live path and removes nothing. Discard deletes those staged bytes. A remote
 node whose storage is unreachable refuses the stage and gets no
 controller-local copy.
+
+Binary staging and publication use bounded streams. Before any live file
+mutation, old contents and a versioned SHA-256 manifest are committed under
+`.carbon-panel/undo/<batch-id>/` on the owning node. Rollback verifies these
+copies before promoting them; failed rollback/interruption retains recovery
+and prevents a fresh apply from overwriting it. Successful rollback or finalized
+publication cleans only that batch's undo directory. See
+[storage recovery](../../docs/storage-streaming.md).
 
 Client-only mod jars and archives that are not datapacks are rejected before
 any staged byte is kept.

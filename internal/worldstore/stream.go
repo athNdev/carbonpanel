@@ -24,9 +24,10 @@ import (
 // higher because they protect real world backups (region files are large) and
 // every extracted byte is still verified against the manifest.
 const (
-	streamMaxFileBytes  = 4 << 30
-	streamMaxWorldBytes = 64 << 30
-	streamMaxEntries    = 500_000
+	streamMaxFileBytes     = 4 << 30
+	streamMaxWorldBytes    = 64 << 30
+	streamMaxEntries       = 500_000
+	streamMaxManifestBytes = 1 << 20
 )
 
 const manifestName = ".worldstore-manifest.json"
@@ -88,14 +89,14 @@ func openZipArchive(path string) (*zipArchive, error) {
 			if !zf.Mode().IsRegular() || zf.Mode()&os.ModeSymlink != 0 {
 				return fail(errors.New("worldstore: invalid manifest entry"))
 			}
-			if zf.UncompressedSize64 > 1<<20 {
+			if zf.UncompressedSize64 > streamMaxManifestBytes {
 				return fail(errors.New("worldstore: manifest too large"))
 			}
 			f, err := zf.Open()
 			if err != nil {
 				return fail(err)
 			}
-			manifestBytes, err = io.ReadAll(io.LimitReader(f, 1<<20+1))
+			manifestBytes, err = io.ReadAll(io.LimitReader(f, streamMaxManifestBytes+1))
 			ce := f.Close()
 			if err != nil {
 				return fail(err)

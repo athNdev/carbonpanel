@@ -65,11 +65,12 @@ func StageModpackTree(ctx context.Context, store *storage.Store, server *storage
 		if info.IsDir() {
 			return nil
 		}
-		data, err := os.ReadFile(current)
+		source, err := os.Open(current)
 		if err != nil {
 			return err
 		}
-		if err := acc.WriteFile(stageRoot+"/"+live, data); err != nil {
+		defer source.Close()
+		if _, err := nodestorage.WriteFrom(ctx, acc, stageRoot+"/"+live, source, 64<<30); err != nil {
 			return err
 		}
 		files++
@@ -140,6 +141,9 @@ func modpackFiles(acc nodestorage.Accessor, stageRoot string) ([]modpackFile, er
 				continue
 			}
 			entry := byName[name]
+			if entry.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("staged modpack refuses symlink %s", name)
+			}
 			child := dir + "/" + name
 			if entry.IsDir() {
 				if err := walk(child); err != nil {
@@ -163,48 +167,4 @@ func modpackFiles(acc nodestorage.Accessor, stageRoot string) ([]modpackFile, er
 		return nil, fmt.Errorf("staged modpack is empty")
 	}
 	return files, nil
-}
-
-func snapshotModpack(acc nodestorage.Accessor, row storage.StagedContentChange) ([]fileSnap, error) {
-	files, err := modpackFiles(acc, row.StagePath)
-	if err != nil {
-		return nil, err
-	}
-	snaps := make([]fileSnap, 0, len(files))
-	for _, file := range files {
-		info, statErr := acc.Stat(file.live)
-		if statErr != nil && !os.IsNotExist(statErr) {
-			return snaps, statErr
-		}
-		if statErr == nil && info.IsDir() {
-			return snaps, fmt.Errorf("staged modpack path %s is a directory", file.live)
-		}
-		item := fileSnap{target: file.live}
-		if statErr == nil {
-			item.existed = true
-			item.data, err = acc.ReadFile(file.live)
-			if err != nil {
-				return snaps, err
-			}
-		}
-		snaps = append(snaps, item)
-	}
-	return snaps, nil
-}
-
-func writeModpack(acc nodestorage.Accessor, row storage.StagedContentChange) error {
-	files, err := modpackFiles(acc, row.StagePath)
-	if err != nil {
-		return err
-	}
-	for _, file := range files {
-		data, err := acc.ReadFile(file.stage)
-		if err != nil {
-			return err
-		}
-		if err := acc.WriteFile(file.live, data); err != nil {
-			return err
-		}
-	}
-	return nil
 }

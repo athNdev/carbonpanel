@@ -6,6 +6,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -82,7 +83,7 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 	stagePath := ""
 	if action != storage.StagedActionDelete {
 		stagePath = stagedContentRoot + "/" + id + "/" + base
-		if err := acc.WriteFile(stagePath, data); err != nil {
+		if _, err := nodestorage.WriteFrom(ctx, acc, stagePath, bytes.NewReader(data), 64<<30); err != nil {
 			return nil, err
 		}
 	}

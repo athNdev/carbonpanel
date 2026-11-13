@@ -3145,10 +3145,11 @@ func (s *ServerService) writeManualServerPack(ctx context.Context, server *stora
 	if len(modpackFile) == 0 {
 		return false, nil
 	}
-	data, err := os.ReadFile(modpackFile[0].DownloadURL)
+	source, err := os.Open(modpackFile[0].DownloadURL)
 	if err != nil {
 		return false, err
 	}
+	defer source.Close()
 	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
 	if err != nil {
 		return false, err
@@ -3158,7 +3159,7 @@ func (s *ServerService) writeManualServerPack(ctx context.Context, server *stora
 		return false, err
 	}
 	defer func() { _ = acc.Close() }()
-	if err := acc.WriteFile("modpack.zip", data); err != nil {
+	if _, err := nodestorage.WriteFrom(ctx, acc, "modpack.zip", source, 64<<30); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -3177,7 +3178,18 @@ func serverLatestLog(ctx context.Context, store *storage.Store, server *storage.
 		return nil, err
 	}
 	defer func() { _ = acc.Close() }()
-	return acc.ReadFile(filepath.Join("logs", "latest.log"))
+	rel := filepath.Join("logs", "latest.log")
+	source, err := acc.OpenRead(ctx, rel)
+	if err != nil {
+		return nil, err
+	}
+	defer source.Close()
+	fi, err := acc.Stat(rel)
+	if err != nil {
+		return nil, err
+	}
+	// Diagnostics retain the recent tail instead of failing on a large log.
+	return io.ReadAll(io.NewSectionReader(source, max(0, fi.Size()-(8<<20)), 8<<20))
 }
 
 // Reads the server's latest.log and uploads it to mclo.gs

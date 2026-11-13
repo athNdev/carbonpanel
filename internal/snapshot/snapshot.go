@@ -361,11 +361,7 @@ func (e *Engine) Rollback(ctx context.Context, server *storage.Server, snapshotI
 				return aerr
 			}
 			defer func() { _ = acc.Close() }()
-			raw, rerr := os.ReadFile(snapshot.FilePath)
-			if rerr != nil {
-				return fmt.Errorf("failed to read snapshot archive: %w", rerr)
-			}
-			extracted, err = nodestorage.ReplaceTreeFromZip(ctx, acc, raw)
+			extracted, err = nodestorage.ReplaceTreeFromZipFile(ctx, acc, snapshot.FilePath)
 			if err != nil {
 				return fmt.Errorf("failed to extract snapshot archive: %w", err)
 			}
