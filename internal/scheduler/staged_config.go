@@ -11,6 +11,8 @@ import (
 	"time"
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/staging"
 )
 
@@ -38,6 +40,24 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 	if server == nil {
 		return errors.New("server is required")
 	}
+	var dockerClient *docker.Client
+	if server.ContainerID != "" && plan.TouchesContainer() {
+		var err error
+		dockerClient, err = s.dockerForNode(server.NodeID)
+		if err != nil {
+			return err
+		}
+		if dockerClient == nil {
+			return errors.New("docker client is not configured")
+		}
+		if plan.StartAfter {
+			if err := serverruntime.CheckStartCapacity(ctx, s.store, server, func(ctx context.Context, _ string) (int64, error) {
+				return dockerClient.HostMemoryMB(ctx)
+			}); err != nil {
+				return err
+			}
+		}
+	}
 	for _, id := range plan.ModuleIDs {
 		if s.recreateModule == nil {
 			return errors.New("module recreate is not configured")
@@ -54,9 +74,6 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 			s.log.Warn("save-all before staged apply failed for %s: %v", server.ID, err)
 		}
 	}
-	if s.docker == nil {
-		return errors.New("docker client is not configured")
-	}
 	if plan.Recreate {
 		cfg, err := s.store.GetServerConfig(ctx, server.ID)
 		if err != nil {
@@ -65,7 +82,7 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 		if cfg == nil {
 			return errors.New("server configuration is empty")
 		}
-		result, err := s.docker.RecreateContainer(ctx, server.ContainerID, server, cfg)
+		result, err := dockerClient.RecreateContainer(ctx, server.ContainerID, server, cfg)
 		if err != nil {
 			return err
 		}
@@ -76,16 +93,16 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 			}
 		}
 		if plan.StartAfter && (result == nil || !result.WasRunning) {
-			return s.docker.StartContainer(ctx, server.ContainerID)
+			return dockerClient.StartContainer(ctx, server.ContainerID)
 		}
 		return nil
 	}
 	if plan.Restart {
-		if _, err := s.docker.StopContainer(ctx, server.ContainerID); err != nil {
+		if _, err := dockerClient.StopContainer(ctx, server.ContainerID); err != nil {
 			return err
 		}
 		if plan.StartAfter {
-			return s.docker.StartContainer(ctx, server.ContainerID)
+			return dockerClient.StartContainer(ctx, server.ContainerID)
 		}
 	}
 	return nil
