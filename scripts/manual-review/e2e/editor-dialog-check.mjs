@@ -11,7 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, 'editor-dialog');
 const project = path.resolve(here, '../../../web/carbon-panel');
 const requireFrontend = createRequire(path.join(project, 'package.json'));
-const { createServer } = await import(pathToFileURL(requireFrontend.resolve('vite')).href);
+const { createServer, build, preview } = await import(pathToFileURL(requireFrontend.resolve('vite')).href);
 const { svelte } = await import(pathToFileURL(requireFrontend.resolve('@sveltejs/vite-plugin-svelte')).href);
 const { default: tailwind } = await import(pathToFileURL(requireFrontend.resolve('@tailwindcss/vite')).href);
 const cache = await fs.mkdtemp(path.join(os.tmpdir(), 'carbon-editor-browser-'));
@@ -19,9 +19,10 @@ let server;
 let browser;
 
 try {
-  server = await createServer({
+  const viteConfig = {
     configFile: false, root: project, cacheDir: cache, publicDir: path.join(project, 'static'),
     resolve: { dedupe: ['svelte'], alias: [
+      { find: /^monaco-editor$/, replacement: path.join(project, 'node_modules/monaco-editor/esm/vs/editor/editor.main.js') },
       { find: '$lib/api/rpc-client', replacement: path.join(fixture, 'rpc-stub.js') },
       { find: /^\$lib\/components\/carbon$/, replacement: path.join(fixture, 'carbon.js') },
       { find: '$lib', replacement: path.join(project, 'src/lib') }
@@ -44,8 +45,26 @@ try {
     server: { host: '127.0.0.1', port: 0, hmr: false, fs: { allow: [project, fixture, cache] } },
     optimizeDeps: { include: ['svelte', 'monaco-editor', 'bits-ui', 'svelte-sonner',
       '@lucide/svelte', '@lucide/svelte/icons/x', 'tailwind-merge'] }
-  });
-  await server.listen();
+  };
+  const production = process.argv.includes('--production');
+  if (production) {
+    const outDir = path.join(cache, 'production');
+    await build({ ...viteConfig, publicDir: false, build: {
+      outDir, emptyOutDir: false,
+      rollupOptions: { input: path.join(fixture, 'main.js'), output: { entryFileNames: 'entry.js' } }
+    } });
+    const assets = await fs.readdir(path.join(outDir, 'assets'));
+    const styles = assets.filter((name) => name.endsWith('.css')).map((name) => `<link rel="stylesheet" href="assets/${name}">`).join('');
+    await fs.writeFile(path.join(outDir, 'editor.html'), `<html><head>${styles}</head><body><div id="app"></div><script type="module" src="entry.js"></script></body></html>`);
+    server = await preview({ configFile: false, root: project, build: { outDir }, preview: { host: '127.0.0.1', port: 0 } });
+    const base = `http://127.0.0.1:${server.httpServer.address().port}`;
+    const workers = assets.filter((name) => /worker.*\.js$/.test(name));
+    assert.equal(workers.length, 5, 'all five production worker bundles must be emitted');
+    for (const worker of workers) assert.equal((await fetch(`${base}/assets/${worker}`)).status, 200);
+  } else {
+    server = await createServer(viteConfig);
+    await server.listen();
+  }
   const base = `http://127.0.0.1:${server.httpServer.address().port}/editor.html`;
   browser = await chromium.launch({
     headless: true,
@@ -54,7 +73,7 @@ try {
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = [];
-  page.on('pageerror', (error) => { errors.push(error.message); console.error(error.message); });
+  page.on('pageerror', (error) => { errors.push(error.message); console.error(error.stack); });
   const results = [];
   async function reset() {
     await page.goto(base);
@@ -172,7 +191,56 @@ try {
   assert.deepEqual(errors, [], 'the mounted dialog must not throw browser errors');
   results.push('closing and reopening the same file invalidates the old generation');
 
-  const output = path.join(here, 'out', 'editor-dialog');
+  for (const first of ['code', 'file']) {
+    await reset();
+    const openCode = async () => {
+      await page.evaluate(() => __editorUi.code(true));
+    };
+    const openFile = async () => {
+      await select('server-1', 'order.json');
+      await page.waitForFunction(() => __editorProbe.reads.length === 1);
+      await page.evaluate(() => __editorProbe.reads[0].resolve('{"ok":true}'));
+    };
+    await (first === 'code' ? openCode() : openFile());
+    await page.waitForFunction(() => __editorUi.snapshot().modelCount === 1);
+    await (first === 'code' ? openFile() : openCode());
+    await page.waitForFunction(() => __editorUi.snapshot().modelCount === 2);
+    assert.ok((await snapshot()).languages.includes('json-template'), 'shared bootstrap registers the template language');
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await page.waitForFunction(() => [...document.querySelectorAll('.monaco-editor')].every((editor) =>
+      editor.getBoundingClientRect().width <= editor.parentElement.getBoundingClientRect().width + 1));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    // Exercise established views after Monaco's initial contribution startup.
+    // Pending runtime navigation is covered separately below.
+    await page.waitForTimeout(1000);
+    await page.evaluate(() => { __editorUi.code(false); __editorUi.close(); });
+    await page.waitForFunction(() => __editorUi.snapshot().modelCount === 0);
+    results.push(`${first} editor initializes first, resizes and registers templates; close releases both models`);
+  }
+
+  if (!production) {
+  await reset();
+  let releaseLoad;
+  let sawLoad;
+  const blocked = new Promise((resolve) => { sawLoad = resolve; });
+  const release = new Promise((resolve) => { releaseLoad = resolve; });
+  await page.route('**/features/editor/bootstrap.ts*', async (route) => {
+    sawLoad();
+    await release;
+    await route.continue();
+  });
+  await page.evaluate(() => __editorUi.code(true));
+  await blocked;
+  await page.evaluate(() => __editorUi.code(false));
+  releaseLoad();
+  await page.waitForTimeout(500);
+  assert.equal((await snapshot()).modelCount, 0);
+  await page.unroute('**/features/editor/bootstrap.ts*');
+  results.push('navigation during lazy runtime loading creates no orphaned model');
+  }
+  assert.deepEqual(errors, [], 'both real editor consumers must initialize without page errors');
+
+  const output = path.join(here, 'out', production ? 'editor-production' : 'editor-dialog');
   await fs.mkdir(output, { recursive: true });
   await page.screenshot({ path: path.join(output, 'editor.png') });
   await fs.writeFile(path.join(output, 'results.json'), JSON.stringify({ results, errors }, null, 2));

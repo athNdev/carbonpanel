@@ -14,4 +14,5 @@
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
 - [Server work temp is on the data volume](server-work-temp.md) — Modpack downloads, extracts, and native libraries use /data/.tmp, not the 64 MiB noexec /tmp tmpfs.
+- [Shared lazy editor runtime](editor-runtime.md) — Both Monaco views share a cached lazy bootstrap while owning their editor models and pending-load lifetime.
 - [Website and documentation publication](website-docs.md) — Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.
