@@ -172,7 +172,7 @@ one at https://mozilla.org/MPL/2.0/.
 		} catch {
 			if (generation === editorGeneration) {
 				runtimeLoading = false;
-				runtimeError = 'Failed to load editor';
+				runtimeError = 'Failed to load editor. Reload the page to try again.';
 			}
 			return;
 		}

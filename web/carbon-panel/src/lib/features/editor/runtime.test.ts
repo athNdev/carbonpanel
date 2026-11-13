@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cachedRuntime } from './runtime';
 
-test('concurrent editor loads share initialization and failed loads can retry', async () => {
+test('concurrent editor loads share initialization and rejection clears the promise cache', async () => {
 	let calls = 0;
 	let resolve!: (value: object) => void;
 	const load = cachedRuntime(() => {

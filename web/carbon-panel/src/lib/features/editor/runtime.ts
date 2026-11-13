@@ -8,6 +8,7 @@ export function cachedRuntime<T>(load: () => Promise<T>): () => Promise<T> {
 		}));
 }
 
+// Browsers may retain failed imports until page reload, even after our cache resets.
 export const loadEditorRuntime = cachedRuntime(() =>
 	import('./bootstrap').then(({ monaco }) => monaco)
 );

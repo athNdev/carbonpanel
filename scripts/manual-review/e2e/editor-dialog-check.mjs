@@ -86,6 +86,35 @@ try {
   async function flush() { await page.evaluate(() => __editorUi.flush()); }
   const snapshot = () => page.evaluate(() => __editorUi.snapshot());
 
+  // Exercise an actual module-fetch rejection, rather than only the promise cache.
+  await reset();
+  const bootstrapUrl = production ? '**/assets/bootstrap-*.js' : '**/features/editor/bootstrap.ts*';
+  let failedBootstrap = 0;
+  await page.route(bootstrapUrl, async (route) => {
+    failedBootstrap++;
+    if (failedBootstrap === 1) await route.abort('failed');
+    else await route.continue();
+  });
+  await page.evaluate(() => __editorUi.code(true));
+  await page.getByRole('alert').filter({ hasText: 'Failed to load editor' }).waitFor();
+  assert.equal((await snapshot()).modelCount, 0);
+  await page.evaluate(() => __editorUi.code(false));
+  await flush();
+  await page.evaluate(() => __editorUi.code(true));
+  await page.getByRole('alert').filter({ hasText: 'Reload the page to try again' }).waitFor();
+  assert.equal((await snapshot()).modelCount, 0);
+  assert.equal(failedBootstrap, 1, 'Chromium retains failed imports in the document module map');
+  await reset();
+  await select('server-1', 'retry.json');
+  await page.waitForFunction(() => __editorProbe.reads.length === 1);
+  await page.evaluate(() => __editorProbe.reads[0].resolve('{}'));
+  await page.waitForFunction(() => __editorUi.snapshot().modelCount === 1);
+  assert.equal(failedBootstrap, 2, 'page reload must fetch the rejected module again');
+  await page.evaluate(() => __editorUi.code(true));
+  await page.waitForFunction(() => __editorUi.snapshot().modelCount === 2);
+  await page.unroute(bootstrapUrl);
+  results.push('failed bootstrap stays contained on reopen; page reload recovers both consumers');
+
   await reset();
   await page.getByRole('button', { name: 'Open A', exact: true }).click();
   await page.waitForFunction(() => __editorProbe.reads.length === 1);
