@@ -36,6 +36,10 @@ Routing recreation returns a failure when Docker cannot apply its new spec,
 and retains deep sleep when a successful replacement stays stopped. Staged
 start/restart retain their applied recovery marker when Docker succeeds but
 identity persistence fails; they do not roll back only the database.
+Explicit starts share failure persistence without advancing LastStarted.
+Restart fallback starts a stopped replacement before recording success; a
+failed start or state save returns failure without a restart event. Primary
+restart and fallback failure details are retained together.
 Runtime config preparation inherits only missing provider credentials, using
 one best-effort global lookup without persisting inherited secrets. Launch and
 scheduled staged publication retain the AutoCurseForge name-derived slug
