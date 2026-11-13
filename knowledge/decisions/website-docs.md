@@ -40,6 +40,10 @@ sources:
   specimens and theme preview independent. It is not pinned application content.
 - The website theme and docs navigation can evolve independently of the source
   pin. Display the pin on every documentation page.
+- Homepage closing-banner columns divide the capped content frame. Do not
+  reserve artwork space with viewport-relative percentage padding on that
+  frame: it collapses the copy at ultrawide sizes. The mobile layout uses one
+  content column above the terrain.
 - A published release pin uses the release tag as its label. Any other commit is
   labelled a development snapshot. Do not infer a release from a package version
   or an inherited tag; the label names an explicit tag or the maintainer's
@@ -68,3 +72,5 @@ silently following unreleased changes.
 
 Use the commands and review procedure in the publishing guide. Snapshot-isolation
 tests verify that working-tree edits cannot leak into pinned docs or examples.
+Serve `landing/qa-closing-layout.html` for browser checks of the actual closing
+banner from 320px through 3440px, including desktop title and link wrapping.

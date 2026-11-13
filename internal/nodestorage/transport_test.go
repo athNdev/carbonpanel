@@ -148,9 +148,12 @@ func TestProcessTransportCancellationAndClose(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	if role := os.Getenv("CARBONPANEL_TEST_STORAGE_WORKER"); role != "" {
-		if role == "refuse" {
+		switch role {
+		case "stall":
+			fmt.Println(`{"ok":true,"root":"test"}`)
+		case "refuse":
 			fmt.Println(`{"ok":false,"error":"worker refused root"}`)
-		} else {
+		default:
 			fmt.Println("invalid-json")
 		}
 		// Deliberately ignore stdin EOF. Failed handshakes must reap this child.
@@ -158,6 +161,42 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestProcessTransportCloseInterruptsStalledWorker(t *testing.T) {
+	t.Setenv("CARBONPANEL_TEST_STORAGE_WORKER", "stall")
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	accessor, err := (&ProcessTransport{Bin: bin}).Open(ctx, NodeInfo{StorageRoot: t.TempDir()}, "srv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestDone := make(chan error, 1)
+	go func() { _, err := accessor.Stat("file"); requestDone <- err }()
+	select {
+	case err := <-requestDone:
+		t.Fatalf("request unexpectedly finished: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- accessor.Close() }()
+	select {
+	case <-closeDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("close blocked on stalled worker")
+	}
+	select {
+	case err := <-requestDone:
+		if err == nil {
+			t.Fatal("stalled request succeeded")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("request remained blocked")
+	}
 }
 
 func TestProcessTransportReapsFailedHandshake(t *testing.T) {
