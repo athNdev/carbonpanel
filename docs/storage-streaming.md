@@ -39,6 +39,11 @@ Each write owns one exclusive `.carbon-write-<random>.partial` in the target
 directory. These names are reserved recovery artifacts and are excluded from
 backup/archive walks. Ordinary abort or cancellation removes only that
 transaction's temporary. The old destination remains visible until `Commit`.
+Worker shutdown first delivers stdin EOF and gives the worker one second to
+abort open transactions before forced termination/removal. A shutdown timeout
+reports that recovery staging may remain. If the worker was forcibly stopped,
+inspect those reserved temporary files with the operation stopped; do not treat
+an unconfirmed cleanup as a committed write or delete unrelated recovery data.
 
 Commit syncs and closes the staged file before renaming it into place. If commit
 fails, its error identifies the retained temporary; closing the writer preserves

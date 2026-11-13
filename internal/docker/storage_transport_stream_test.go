@@ -41,8 +41,9 @@ func TestStorageWorkerDockerAttachLargeStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer fs.Close()
+	defer func() { _ = fs.Close() }()
 	workerDone := make(chan error, 1)
+	workerStopped := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_ping":
@@ -61,11 +62,16 @@ func TestStorageWorkerDockerAttachLargeStream(t *testing.T) {
 			_, _ = fmt.Fprint(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n")
 			_ = rw.Flush()
 			go func() {
-				defer conn.Close()
+				defer func() { _ = conn.Close() }()
+				defer close(workerStopped)
 				workerDone <- storageworker.ServeAccessor(rw.Reader, dockerStdoutFrame{conn}, fs)
 			}()
 		case strings.HasSuffix(r.URL.Path, "/containers/stream-fixture/start"):
 			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/containers/stream-fixture/wait"):
+			<-workerStopped
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"StatusCode":0}`)
 		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/containers/stream-fixture"):
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -78,13 +84,13 @@ func TestStorageWorkerDockerAttachLargeStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sdk.Close()
+	defer func() { _ = sdk.Close() }()
 	sess, err := (&Client{docker: sdk}).startStorageWorker(context.Background(), "isolated-fixture", fs.Root())
 	if err != nil {
 		t.Fatal(err)
 	}
 	acc := storageworker.NewRemoteAccessor(sess)
-	defer acc.Close()
+	defer func() { _ = acc.Close() }()
 	const size int64 = 130 << 20
 	out, err := acc.BeginWrite(context.Background(), "large", size)
 	if err != nil {
