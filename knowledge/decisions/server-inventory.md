@@ -30,8 +30,10 @@ Matching refresh subscriptions share a timer and release it on the last close.
 Login/logout clears inventory and invalidates pending reads before another
 account can populate it. RPC interception also captures the auth session
 revision: an older account's delayed authentication error cannot log out or
-toast in a newer session. Login, logout and validation completions verify their
-session before changing account state. Views retain confirmation, copy and navigation.
+toast in a newer session. Login, logout, permission hydration and validation completions verify their
+session before changing account state. Recovery advances the revision before
+resetting identity; superseded registration cannot automatically log in over
+a newer account. Views retain confirmation, copy and navigation.
 
 ListServers and GetServer currently both apply cached metrics and use the same
 complete Server conversion. A newer complete response is authoritative even

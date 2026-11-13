@@ -35,6 +35,11 @@ try {
   let failList = false;
   let empty = false;
   let authEnabled = false;
+  let anonymousEnabled = false;
+  let holdIdentity = false;
+  let identities = [];
+  let holdRegistration = false;
+  let registrations = [];
   let validToken = "fixture-token";
   let tokenCounter = 0;
   let delayedStatus = 0;
@@ -74,7 +79,11 @@ try {
         body: JSON.stringify(body),
       });
     if (method === "GetAuthStatus")
-      return reply({ localAuthEnabled: authEnabled, oidcEnabled: false });
+      return reply({
+        localAuthEnabled: authEnabled,
+        oidcEnabled: false,
+        anonymousAccessEnabled: anonymousEnabled,
+      });
     if (method === "Login") {
       validToken = `fixture-token-${++tokenCounter}`;
       return reply({
@@ -82,6 +91,20 @@ try {
         user: { id: "fixture", username: "Fixture" },
       });
     }
+    if (method === "GetCurrentUser" && holdIdentity) {
+      await new Promise((resolve) => identities.push(resolve));
+      return reply({
+        user: { id: "old", username: "Old identity" },
+        permissions: [
+          { resource: "old-permissions", action: "read", objectId: "*" },
+        ],
+      });
+    }
+    if (method === "Register" && holdRegistration) {
+      await new Promise((resolve) => registrations.push(resolve));
+      return reply({});
+    }
+    if (method === "UseRecoveryKey") return reply({});
     if (
       method === "GetCurrentUser" &&
       authEnabled &&
@@ -320,6 +343,112 @@ try {
     });
     await page.waitForURL("**/login");
   }
+  async function waitForDeferred(queue, label) {
+    const deadline = Date.now() + 15000;
+    while (queue.length === 0 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(queue.length, label);
+  }
+  const authSnapshot = () =>
+    page.evaluate(async () => {
+      const { authStore } = await import("/src/lib/stores/auth.ts");
+      let value;
+      const off = authStore.subscribe((state) => {
+        value = {
+          authenticated: state.isAuthenticated,
+          user: state.user?.username,
+          resources: state.permissions.map((permission) => permission.resource),
+          hasToken: Boolean(state.token),
+        };
+      });
+      off();
+      return value;
+    });
+  for (const mode of ["anonymous", "disabled"]) {
+    authEnabled = mode === "anonymous";
+    anonymousEnabled = mode === "anonymous";
+    holdIdentity = true;
+    await page.evaluate(() => {
+      window.__authPending = import("/src/lib/stores/auth.ts").then(
+        ({ authStore }) => authStore.checkAuthStatus(),
+      );
+    });
+    await waitForDeferred(identities, "status permission lookup");
+    holdIdentity = false;
+    authEnabled = true;
+    anonymousEnabled = false;
+    await page.evaluate(async () => {
+      const { authStore } = await import("/src/lib/stores/auth.ts");
+      await authStore.login("fixture", "fixture-password");
+    });
+    identities.splice(0).forEach((release) => release());
+    await page.evaluate(() => window.__authPending);
+    const state = await authSnapshot();
+    assert.equal(state.user, "Fixture");
+    assert.deepEqual(state.resources, ["*"]);
+    results.push(
+      `delayed ${mode} permission hydration cannot overwrite a new login`,
+    );
+    await page.evaluate(async () => {
+      const { authStore } = await import("/src/lib/stores/auth.ts");
+      await authStore.logout();
+    });
+  }
+  await page.evaluate(async () => {
+    const { authStore } = await import("/src/lib/stores/auth.ts");
+    await authStore.login("fixture", "fixture-password");
+  });
+  holdIdentity = true;
+  await page.evaluate(() => {
+    window.__validationPending = import("/src/lib/stores/auth.ts").then(
+      ({ authStore }) => authStore.validateSession(),
+    );
+  });
+  await waitForDeferred(identities, "validation lookup");
+  holdIdentity = false;
+  await page.evaluate(async () => {
+    const { authStore } = await import("/src/lib/stores/auth.ts");
+    await authStore.useRecoveryKey("fixture-recovery");
+  });
+  identities.splice(0).forEach((release) => release());
+  await page.evaluate(() => window.__validationPending);
+  let recovered = await authSnapshot();
+  assert.equal(recovered.authenticated, false);
+  assert.equal(recovered.user, undefined);
+  assert.equal(recovered.hasToken, false);
+  results.push(
+    "recovery reset fences pending validation of the previous identity",
+  );
+  holdRegistration = true;
+  await page.evaluate(() => {
+    window.__registrationPending = import("/src/lib/stores/auth.ts").then(
+      ({ authStore }) =>
+        authStore.register(
+          "stale-registration",
+          "fixture@example.invalid",
+          "fixture-password",
+        ),
+    );
+  });
+  await waitForDeferred(registrations, "registration request");
+  holdRegistration = false;
+  await page.evaluate(async () => {
+    const { authStore } = await import("/src/lib/stores/auth.ts");
+    await authStore.login("fixture", "fixture-password");
+  });
+  const logins = requests.filter(
+    (request) => request.method === "Login",
+  ).length;
+  registrations.splice(0).forEach((release) => release());
+  await page.evaluate(() => window.__registrationPending);
+  assert.equal(
+    requests.filter((request) => request.method === "Login").length,
+    logins,
+  );
+  assert.equal((await authSnapshot()).user, "Fixture");
+  results.push(
+    "superseded registration cannot automatically log in over a newer account",
+  );
   assert.deepEqual(errors, []);
   const out = path.join(here, "out", "server-inventory");
   await fs.mkdir(out, { recursive: true });
