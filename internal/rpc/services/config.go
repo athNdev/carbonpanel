@@ -21,6 +21,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -386,28 +387,9 @@ func (s *ConfigService) recreateContainer(ctx context.Context, server *storage.S
 }
 
 func recreateServerContainerWithClient(ctx context.Context, store *storage.Store, dockerCli configContainerRecreator, log *logger.Logger, server *storage.Server, config *storage.ServerConfig) error {
-	result, recreateErr := dockerCli.RecreateContainer(ctx, server.ContainerID, server, config)
-	if recreateErr != nil || result == nil || result.NewContainerID == "" {
-		if result != nil {
-			server.ContainerID = result.NewContainerID
-		} else {
-			server.ContainerID = ""
-		}
-		server.Status = storage.StatusError
-		persistErr := store.UpdateServer(ctx, server)
-		if persistErr != nil && log != nil {
-			log.Error("Failed to persist server state after config container recreation failed: %v", persistErr)
-		}
-		if recreateErr != nil {
-			if persistErr != nil {
-				return fmt.Errorf("failed to recreate container with updated configuration: %w (also failed to persist recovery state: %v)", recreateErr, persistErr)
-			}
-			return fmt.Errorf("failed to recreate container with updated configuration: %w", recreateErr)
-		}
-		if persistErr != nil {
-			return fmt.Errorf("container recreation returned no container ID and failed to persist recovery state: %w", persistErr)
-		}
-		return fmt.Errorf("container recreation returned no container ID")
+	result, recreateErr := serverruntime.Recreate(ctx, store, dockerCli, server, config)
+	if recreateErr != nil {
+		return fmt.Errorf("failed to recreate container with updated configuration: %w", recreateErr)
 	}
 
 	server.ContainerID = result.NewContainerID
