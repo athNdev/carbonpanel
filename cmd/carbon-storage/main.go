@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/athNdev/carbon-panel/internal/buildinfo"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/internal/worldstore"
@@ -31,6 +32,7 @@ type response struct {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "Print version and build information, then exit")
 	var mode, root, journal, server, node, daemon, owner string
 	var generation uint64
 	flag.StringVar(&mode, "mode", "worldstore", "worldstore or accessor")
@@ -42,6 +44,10 @@ func main() {
 	flag.StringVar(&owner, "owner", "", "bound owner identity")
 	flag.Uint64Var(&generation, "generation", 0, "bound nonzero assignment generation")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String("carbon-storage"))
+		return
+	}
 	if root == "" {
 		fmt.Fprintln(os.Stderr, "--root is required")
 		os.Exit(2)

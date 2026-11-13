@@ -9,6 +9,9 @@ code_refs:
   - internal/db
   - .github/workflows/ci.yml
   - Makefile
+  - .gitignore
+  - .dockerignore
+  - scripts/test-ignore-policies.py
   - internal/proxy/listeners_test.go
   - internal/rpc/services/server_docker_privilege_test.go
   - internal/rpc/services/server_port_test.go
@@ -21,6 +24,12 @@ sources:
 ---
 
 # Shape
+
+The ignore-policy check uses a disposable Git repository and synthetic canaries.
+With `--docker` it compares real exported build contexts from a clean source
+archive and a copy containing synthetic local state; it also checks required
+controller, worker, protocol and backup-encryption inputs. It never deletes or
+reads a developer's actual local data.
 
 Tests are ordinary Go package tests. Docker-facing code sits behind seams, for
 example `ContainerFreezer` in `internal/docker`, so a test can substitute a
