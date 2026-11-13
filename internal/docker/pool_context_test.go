@@ -168,3 +168,54 @@ func TestNodeEndpointLookupUsesOperationContext(t *testing.T) {
 		})
 	}
 }
+
+func TestLocatorCancellationDoesNotRetryOnLocalClient(t *testing.T) {
+	for _, executor := range []bool{false, true} {
+		t.Run(map[bool]string{false: "client", true: "executor"}[executor], func(t *testing.T) {
+			store := &contextBlockedNodeStore{mockNodeStore: newMockNodeStore(), entered: make(chan struct{})}
+			pool := NewClientPool(store, &Client{}, logger.New())
+			locator := NewLocator(pool, &Client{}, store)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				if executor {
+					value, err := locator.ExecutorFor(ctx, "remote")
+					if value != nil {
+						t.Error("canceled lookup returned executor")
+					}
+					done <- err
+				} else {
+					value, err := locator.For(ctx, "remote")
+					if value != nil {
+						t.Error("canceled lookup returned client")
+					}
+					done <- err
+				}
+			}()
+			select {
+			case <-store.entered:
+			case <-time.After(time.Second):
+				t.Fatal("locator did not enter node lookup")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("locator lost cancellation: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("locator ignored cancellation")
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	locator := NewLocator(nil, &Client{}, nil)
+	if value, err := locator.For(ctx, "local"); value != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled local client=%v error=%v", value, err)
+	}
+	if value, err := locator.ExecutorFor(ctx, "local"); value != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled local executor=%v error=%v", value, err)
+	}
+}
