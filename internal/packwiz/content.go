@@ -6,10 +6,10 @@
 package packwiz
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 )
 
@@ -599,6 +601,10 @@ func hashFile(path string) (sha256Hex, sha512Hex string, err error) {
 // filter by the pack loader; datapacks, resource packs and shader packs only
 // filter by Minecraft version.
 func (m *Manager) CheckContentUpdates(packID string) ([]ModUpdateInfo, error) {
+	return m.CheckContentUpdatesContext(context.Background(), packID)
+}
+
+func (m *Manager) CheckContentUpdatesContext(ctx context.Context, packID string) ([]ModUpdateInfo, error) {
 	pack, err := m.GetPack(packID)
 	if err != nil {
 		return nil, err
@@ -615,13 +621,19 @@ func (m *Manager) CheckContentUpdates(packID string) ([]ModUpdateInfo, error) {
 	var updates []ModUpdateInfo
 	for _, group := range groups {
 		for _, item := range group.items {
-			updates = append(updates, m.checkContentUpdate(pack, group.kind, item))
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			updates = append(updates, m.checkContentUpdate(ctx, pack, group.kind, item))
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return updates, nil
 }
 
-func (m *Manager) checkContentUpdate(pack *Pack, kind string, item ModItem) ModUpdateInfo {
+func (m *Manager) checkContentUpdate(ctx context.Context, pack *Pack, kind string, item ModItem) ModUpdateInfo {
 	info := ModUpdateInfo{
 		Slug:             item.Slug,
 		Name:             item.Name,
@@ -634,23 +646,9 @@ func (m *Manager) checkContentUpdate(pack *Pack, kind string, item ModItem) ModU
 		return info
 	}
 
-	url := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version", item.ProjectID)
-	resp, err := m.httpClient.Get(url)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-		return info
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	var versions []struct {
-		ID           string                `json:"id"`
-		GameVersions []string              `json:"game_versions"`
-		Loaders      []string              `json:"loaders"`
-		Files        []modrinthVersionFile `json:"files"`
-	}
-	if json.NewDecoder(resp.Body).Decode(&versions) != nil {
+	provider := modrinth.NewClientWithOptions(&config.Config{}, modrinth.Options{BaseURL: m.modrinthBaseURL, HTTPClient: m.httpClient})
+	versions, err := provider.GetVersions(ctx, item.ProjectID, "", "")
+	if err != nil {
 		return info
 	}
 
@@ -666,7 +664,7 @@ func (m *Manager) checkContentUpdate(pack *Pack, kind string, item ModItem) ModU
 			continue
 		}
 		info.LatestVersionID = v.ID
-		info.LatestFileName = file.FileName
+		info.LatestFileName = file.Filename
 		info.LatestDownloadURL = file.URL
 		info.LatestSHA512 = file.Hashes.SHA512
 		if file.Hashes.SHA512 != "" {
@@ -682,17 +680,7 @@ func (m *Manager) checkContentUpdate(pack *Pack, kind string, item ModItem) ModU
 	return info
 }
 
-type modrinthVersionFile struct {
-	URL      string `json:"url"`
-	FileName string `json:"filename"`
-	Primary  bool   `json:"primary"`
-	Hashes   struct {
-		SHA512 string `json:"sha512"`
-		SHA1   string `json:"sha1"`
-	} `json:"hashes"`
-}
-
-func primaryVersionFile(files []modrinthVersionFile) *modrinthVersionFile {
+func primaryVersionFile(files []modrinth.File) *modrinth.File {
 	for i := range files {
 		if files[i].Primary {
 			return &files[i]

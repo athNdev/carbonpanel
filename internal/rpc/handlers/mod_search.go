@@ -8,6 +8,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers"
+	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -285,55 +287,14 @@ func (m *ModOnlineManager) handleSearch(w http.ResponseWriter, r *http.Request, 
 }
 
 func (m *ModOnlineManager) searchModrinth(ctx context.Context, token, ua, query, loader, mcVersion string, installed map[string]bool) []SearchModResult {
-	facets := [][]string{{"project_type:mod"}}
-	if loader != "" && loader != "vanilla" {
-		facets = append(facets, []string{fmt.Sprintf("categories:%s", loader)})
+	if loader == "vanilla" {
+		loader = ""
 	}
-	if mcVersion != "" {
-		facets = append(facets, []string{fmt.Sprintf("versions:%s", mcVersion)})
-	}
-
-	facetsBytes, _ := json.Marshal(facets)
-	reqURL := fmt.Sprintf("https://api.modrinth.com/v2/search?query=%s&facets=%s&limit=25",
-		url.QueryEscape(query), url.QueryEscape(string(facetsBytes)))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	provider := modrinth.NewClientWithOptions(nil, modrinth.Options{UserAgent: ua, Token: token, HTTPClient: m.httpClient})
+	mrResp, err := provider.Search(ctx, modrinth.SearchOptions{ProjectType: "mod", Query: query, Loader: loader, GameVersion: mcVersion, Limit: 25})
 	if err != nil {
 		return []SearchModResult{}
 	}
-	req.Header.Set("User-Agent", ua)
-	if token != "" {
-		req.Header.Set("Authorization", token)
-	}
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		return []SearchModResult{}
-	}
-	defer resp.Body.Close()
-
-	var mrResp struct {
-		Hits []struct {
-			ProjectID   string   `json:"project_id"`
-			Slug        string   `json:"slug"`
-			Title       string   `json:"title"`
-			Description string   `json:"description"`
-			IconURL     string   `json:"icon_url"`
-			Author      string   `json:"author"`
-			Downloads   int64    `json:"downloads"`
-			Categories  []string `json:"categories"`
-			ClientSide  string   `json:"client_side"`
-			ServerSide  string   `json:"server_side"`
-		} `json:"hits"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&mrResp); err != nil {
-		return []SearchModResult{}
-	}
-
 	var results []SearchModResult
 	for _, hit := range mrResp.Hits {
 		isInstalled := false
@@ -549,65 +510,19 @@ func (m *ModOnlineManager) handleVersions(w http.ResponseWriter, r *http.Request
 }
 
 func (m *ModOnlineManager) handleModrinthVersions(w http.ResponseWriter, r *http.Request, token, ua, slug, loader, mcVersion string) {
-	reqURL := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version", slug)
-	params := url.Values{}
-	if loader != "" && loader != "vanilla" {
-		loadersJSON, _ := json.Marshal([]string{loader})
-		params.Set("loaders", string(loadersJSON))
-	}
-	if mcVersion != "" {
-		versionsJSON, _ := json.Marshal([]string{mcVersion})
-		params.Set("game_versions", string(versionsJSON))
-	}
-	if len(params) > 0 {
-		reqURL += "?" + params.Encode()
-	}
-
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, reqURL, nil)
+	provider := modrinth.NewClientWithOptions(nil, modrinth.Options{UserAgent: ua, Token: token, HTTPClient: m.httpClient})
+	rawVersions, err := provider.GetVersions(r.Context(), slug, loader, mcVersion)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		var providerErr *indexers.IndexerError
+		if errors.As(err, &providerErr) && providerErr.StatusCode != 0 {
+			http.Error(w, fmt.Sprintf("modrinth returned %d", providerErr.StatusCode), providerErr.StatusCode)
+		} else if errors.As(err, &providerErr) && providerErr.Kind == indexers.ErrDecode {
+			http.Error(w, "failed to parse versions", http.StatusInternalServerError)
+		} else {
+			http.Error(w, fmt.Sprintf("failed to fetch versions: %v", err), http.StatusBadGateway)
+		}
 		return
 	}
-	req.Header.Set("User-Agent", ua)
-	if token != "" {
-		req.Header.Set("Authorization", token)
-	}
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to fetch versions: %v", err), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		http.Error(w, fmt.Sprintf("modrinth returned %d", resp.StatusCode), resp.StatusCode)
-		return
-	}
-
-	var rawVersions []struct {
-		ID            string `json:"id"`
-		Name          string `json:"name"`
-		VersionNumber string `json:"version_number"`
-		VersionType   string `json:"version_type"`
-		Files         []struct {
-			URL      string `json:"url"`
-			Filename string `json:"filename"`
-			Primary  bool   `json:"primary"`
-			Size     int64  `json:"size"`
-		} `json:"files"`
-		Dependencies []struct {
-			ProjectID      *string `json:"project_id"`
-			VersionID      *string `json:"version_id"`
-			DependencyType string  `json:"dependency_type"`
-		} `json:"dependencies"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&rawVersions); err != nil {
-		http.Error(w, "failed to parse versions", http.StatusInternalServerError)
-		return
-	}
-
 	var versions []ModVersionItem
 	for _, v := range rawVersions {
 		if len(v.Files) == 0 {

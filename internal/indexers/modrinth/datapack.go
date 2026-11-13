@@ -50,7 +50,7 @@ func (m *ModrinthDatapackIndexer) GetIndexerName() string {
 
 // Origin returns the configured Modrinth API origin (OriginReporter).
 func (m *ModrinthDatapackIndexer) Origin() string {
-	return BaseURL
+	return m.client.baseURL
 }
 
 // SearchDatapacks searches Modrinth for datapacks. Datapacks are loader-agnostic,
@@ -76,7 +76,7 @@ func (m *ModrinthDatapackIndexer) SearchDatapacks(ctx context.Context, query str
 	params.Set("limit", strconv.Itoa(limit))
 
 	var resp SearchResponse
-	if err := m.client.http.DoJSON(ctx, fmt.Sprintf("%s/search?%s", BaseURL, params.Encode()), &resp); err != nil {
+	if err := m.client.http.DoJSON(ctx, fmt.Sprintf("%s/search?%s", m.client.baseURL, params.Encode()), &resp); err != nil {
 		return nil, err
 	}
 
