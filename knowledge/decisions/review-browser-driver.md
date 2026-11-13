@@ -9,6 +9,10 @@ code_refs:
   - scripts/review/setup-browser.mjs
   - scripts/review/browser-check.mjs
   - scripts/review/browser.test.mjs
+  - scripts/review/run.mjs
+  - scripts/review/report.mjs
+  - scripts/review/profile.test.mjs
+  - scripts/review/profile-browser.test.mjs
   - scripts/review/journey.mjs
   - scripts/manual-review/e2e/run.mjs
   - .github/workflows/review-ownership.yml
@@ -31,3 +35,14 @@ Each run records driver and actual browser versions, executable/cache paths and
 override status in browser.json. These facts identify its UI evidence; they do
 not establish lifecycle or gameplay acceptance. Native Windows and Linux CI
 exercise a real browser launch with the shared driver.
+
+The shared entrypoint selects single-seeded or dual-ownership explicitly.
+Both profiles emit schema-versioned review.json with the same UI-review scope,
+driver metadata and check outcomes. Empty evidence is incomplete; findings
+requiring human review remain distinct from passed checks. Critical setup or
+login errors stop navigation, return failure and close the browser. The
+machine report removes credentials, query parameters and fragments from its
+base URL; detailed screenshots and reports remain local review artifacts.
+Default artifacts are timestamped beneath the checkout's ignored tmp tree,
+independent of the caller's working directory; explicit output overrides are
+supported for attaching evidence elsewhere.

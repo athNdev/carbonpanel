@@ -28,6 +28,16 @@ Ordinary down preserves its files. Listeners bind to loopback.
 Old unmarked sessions require a deliberate migration; they are never silently
 removed. New dual sessions require an equivalent revision-bound marker and
 matching container labels; teardown checks both immutable container IDs before
-removing either. The legacy dual destructive reset is unavailable and it
+removing either. Dual reset validates both instance paths before stopping
+anything, then deletes only the marked session's a/b instance data after
+revalidating ownership. Source checkouts and neighboring sessions survive;
+symlinked instance paths are refused. Down always preserves data, and up
 refuses to replace a mismatched worktree. This does not establish lifecycle or
 gameplay acceptance.
+
+Single-profile seeding waits for asynchronous container creation to finish
+before starting its fixture. Error/unhealthy states and a bounded readiness
+timeout fail setup; they cannot produce a ready URL.
+Fresh starter game ports are selected from a bounded free-port range beginning
+at 25585 by default, with an explicit per-session override, so reviews do not
+occupy the ordinary development/test game port.

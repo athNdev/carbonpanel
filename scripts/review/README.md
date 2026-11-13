@@ -19,6 +19,12 @@ stopping or cleaning a session. Existing unmarked data and containers are not
 automatically adopted. `down` preserves the session's data; the explicitly
 named `clean` command deletes only a matching owned session. The selected port
 is in the session's `port` file. Listeners bind to loopback.
+Seeding waits for asynchronous starter-container creation before starting it;
+error/unhealthy state or readiness timeout fails setup. The bounded timeout is
+180 seconds by default (`REVIEW_SEED_TIMEOUT_SECONDS`, range 1–600).
+The starter uses the first free game port from 25585 through 25605, keeping
+the ordinary 25565 development/test port available. `REVIEW_GAME_PORT` changes
+the start of that 21-port range for a fresh session.
 
 - Node 24.
 - Bun and the locked Playwright package used by both review profiles.
@@ -32,6 +38,25 @@ node scripts/review/browser-check.mjs
 
 ## Run
 
+The shared entrypoint selects an explicit profile. Docker stack commands run in
+WSL or Linux; the locked browser driver is the same on Windows and Linux.
+
+```sh
+node scripts/review/run.mjs driver setup
+node scripts/review/run.mjs single-seeded up
+node scripts/review/run.mjs dual-ownership up --instances 2
+node scripts/review/run.mjs single-seeded review --plan scripts/review/plan-console.json --base http://127.0.0.1:8080 --out /tmp/review
+node scripts/review/run.mjs dual-ownership review
+```
+
+Both profiles write `review.json`, schema version 1, alongside their detailed
+Markdown/findings. Its `scope` is `ui-review`; `passed`, `failed`, `incomplete`
+and `review-required` describe the recorded checks, not gameplay acceptance.
+URL credentials/query parameters are excluded. A critical login/setup failure
+returns failure rather than continuing through screenshots of the login page.
+Default artifacts stay in the checkout's ignored `tmp/review-output/` tree;
+single review accepts `--out`, and dual review accepts the `REVIEW_OUT` parent.
+
 ```sh
 export PANEL_REVIEW_USER=you
 export PANEL_REVIEW_PASSWORD=...
@@ -42,8 +67,8 @@ node scripts/review/journey.mjs \
   --out /tmp/review
 ```
 
-Exit code is 0 when every step passed, 1 when a step failed, 2 on a setup
-error. Screenshots of failed steps are written as `FAILED-<name>.png` with the
+Exit code is 0 when recorded steps passed, 1 when a step failed, 2 on a setup
+error or empty plan. Screenshots of failed steps are written as `FAILED-<name>.png` with the
 full page, so a clipped element is still visible.
 
 Environment overrides:
