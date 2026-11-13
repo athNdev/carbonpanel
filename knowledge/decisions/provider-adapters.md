@@ -6,6 +6,7 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/indexers/modrinth
+  - internal/packwiz/dependencies.go
   - internal/packwiz/content.go
   - internal/packwiz/packwiz.go
   - internal/rpc/handlers/mod_search.go
@@ -28,5 +29,9 @@ SHA-512 preference over SHA-1. An operation context reaches update-check request
 Browse and update checks use the same transport and redirect policy as the
 indexer. Compatibility wrappers retain existing callers. Packwiz still reports
 an unavailable update as unchanged when the provider fails; cancellation returns
-an error rather than a successful empty check. Dependency lookup, compatibility
-upgrade and remaining CurseForge browse paths require separate migrations.
+an error rather than a successful empty check. Dependency lookup and compatibility checks use the same adapters. Dependency
+resolution keeps primary-file selection; legacy mod updates and migration
+previews keep first-file selection. CurseForge dependency lookup retains the
+last matching loader entry, required/optional relations and CDN URL synthesis.
+Read-only compatibility previews propagate cancellation. Remaining CurseForge
+browse paths require a separate migration.

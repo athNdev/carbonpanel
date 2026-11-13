@@ -50,8 +50,12 @@ func NewClient(apiKey string, cfg *config.Config, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.http = indexers.NewHTTPClientWithClient("fuego", cfg.Server.UserAgent, headers, c.client)
-	c.keyless = indexers.NewHTTPClientWithClient("fuego", cfg.Server.UserAgent, nil, c.client)
+	userAgent := ""
+	if cfg != nil {
+		userAgent = cfg.Server.UserAgent
+	}
+	c.http = indexers.NewHTTPClientWithClient("fuego", userAgent, headers, c.client)
+	c.keyless = indexers.NewHTTPClientWithClient("fuego", userAgent, nil, c.client)
 	return c
 }
 
@@ -264,11 +268,35 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 	return &result, nil
 }
 
+type FilesOptions struct {
+	GameVersion string
+	ModLoader   ModLoaderType
+	PageSize    int
+}
+
 func (c *Client) GetModpackFiles(ctx context.Context, modID int) ([]File, error) {
+	return c.GetFiles(ctx, modID, FilesOptions{})
+}
+
+func (c *Client) GetFiles(ctx context.Context, modID int, options FilesOptions) ([]File, error) {
+	params := url.Values{}
+	if options.GameVersion != "" {
+		params.Set("gameVersion", options.GameVersion)
+	}
+	if options.ModLoader != ModLoaderAny {
+		params.Set("modLoaderType", strconv.Itoa(int(options.ModLoader)))
+	}
+	if options.PageSize > 0 {
+		params.Set("pageSize", strconv.Itoa(options.PageSize))
+	}
+	path := fmt.Sprintf("/mods/%d/files", modID)
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
 	var result struct {
 		Data []File `json:"data"`
 	}
-	if err := c.getJSON(ctx, fmt.Sprintf("/mods/%d/files", modID), &result); err != nil {
+	if err := c.getJSON(ctx, path, &result); err != nil {
 		return nil, err
 	}
 
