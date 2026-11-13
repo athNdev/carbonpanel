@@ -41,6 +41,8 @@ sources:
 - Editor changes also run `editor-dialog.yml`, which renders the actual dialog
   in Chromium with deferred RPC responses. Session adapter tests alone cannot
   prove Svelte initialization, props timing or Monaco cleanup behavior.
+- Showcase review stacks use a marked per-session data directory and a matching
+  container label before teardown. The selected port is inside that directory.
 - Development launcher checks use the pinned Go toolchain to build their native
   Windows supervisor and fixtures. Both Linux and Windows run the launcher tests;
   Windows also checks the qualification evidence evaluator and setup guards.
