@@ -4,6 +4,7 @@
 	import { CarbonPageHeader, CarbonTag } from '$lib/components/carbon';
 	import { Check, Plus, RefreshCw } from '@lucide/svelte';
 	import { marked } from 'marked';
+	const installedVersion = __APP_VERSION__;
 
 	// Drop the markdown's leading H1 so it does not duplicate the page title.
 	const body = changelog.replace(/^#\s+Changelog\s*$/m, '');
@@ -97,7 +98,7 @@
 </script>
 
 <div class="space-y-4">
-	<CarbonPageHeader title="Changelog" />
+	<CarbonPageHeader title="Changelog" description={`Installed version: ${installedVersion}`} />
 	{#if introHtml.trim()}
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -- changelog.md is trusted repository content, not user input -->
 		<div class="changelog-md changelog-intro">{@html introHtml}</div>

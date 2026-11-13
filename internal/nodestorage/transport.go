@@ -7,11 +7,14 @@ package nodestorage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/athNdev/carbon-panel/internal/storageworker"
 )
@@ -21,6 +24,12 @@ import (
 type Transport interface {
 	Open(ctx context.Context, node NodeInfo, dataRoot string) (Accessor, error)
 }
+
+// Resolver owns the transport used for node-aware storage access.
+type Resolver struct{ transport Transport }
+
+// NewResolver constructs an independent node storage resolver.
+func NewResolver(transport Transport) *Resolver { return &Resolver{transport: transport} }
 
 var (
 	transportMu sync.RWMutex
@@ -80,7 +89,7 @@ func (p *ProcessTransport) Open(ctx context.Context, node NodeInfo, dataRoot str
 	root := nodeDataRoot(node, dataRoot)
 	sess, err := startProcessWorker(ctx, p.Bin, root)
 	if err != nil {
-		return nil, fmt.Errorf("%w: start storage worker for node %q: %v", ErrUnavailable, node.Name, err)
+		return nil, fmt.Errorf("%w: start storage worker for node %q: %w", ErrUnavailable, node.Name, err)
 	}
 	return storageworker.NewRemoteAccessor(sess), nil
 }
@@ -114,25 +123,41 @@ func startProcessWorker(ctx context.Context, bin, dataRoot string) (*storagework
 	_ = cw.Close()
 	var closeOnce sync.Once
 	var waitErr error
-	ready := false
+	var ready atomic.Bool
 	closeF := func() error {
 		closeOnce.Do(func() {
 			// A malformed/refused handshake is not a usable session. Terminate
 			// that owned child rather than waiting for it to honour stdin EOF.
-			if !ready {
+			forced := !ready.Load()
+			if forced {
 				_ = cmd.Process.Kill()
 			}
 			_ = pw.Close()
-			waitErr = cmd.Wait()
 			_ = cr.Close()
+			done := make(chan error, 1)
+			go func() { done <- cmd.Wait() }()
+			select {
+			case waitErr = <-done:
+				if forced || ctx.Err() != nil {
+					waitErr = nil
+				}
+			case <-time.After(time.Second):
+				killErr := cmd.Process.Kill()
+				waitErr = <-done
+				if killErr == nil || errors.Is(killErr, os.ErrProcessDone) {
+					waitErr = nil
+				} else {
+					waitErr = errors.Join(killErr, waitErr)
+				}
+			}
 		})
 		return waitErr
 	}
-	sess, err := storageworker.NewSession(pw, cr, closeF)
+	sess, err := storageworker.NewSessionContext(ctx, pw, cr, closeF)
 	if err != nil {
 		_ = closeF()
 		return nil, err
 	}
-	ready = true
+	ready.Store(true)
 	return sess, nil
 }
