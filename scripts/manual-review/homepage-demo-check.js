@@ -79,11 +79,22 @@
         `${name} hydration`,
       );
     }
+    assert(
+      ["server", "studio", "staging"].every(
+        (name) =>
+          !root(name).querySelector(".demo-result") &&
+          root(name).querySelector(".demo-heading .demo-reset"),
+      ),
+      "all demos use concise status announcements and consistent header actions",
+    );
     await reset("server");
     await click("server", "Stop");
     await wait(() => !!button("server", "Start Server"), "stop");
     assert(
-      text("server").includes("0 / 4 GiB") &&
+      root("server")
+        .querySelectorAll(".server-resources dd")[1]
+        .textContent.trim()
+        .startsWith("0") &&
         document.querySelector("[data-world-state]").dataset.worldState ===
           "stopped",
       "stop releases sample RAM and extinguishes entrance",
@@ -96,7 +107,10 @@
       "start",
     );
     assert(
-      text("server").includes("3 / 20") &&
+      root("server")
+        .querySelectorAll(".server-resources dd")[0]
+        .textContent.trim()
+        .startsWith("3") &&
         document.querySelector("[data-world-state]").dataset.worldState ===
           "running",
       "start restores players, resources and entrance",
@@ -114,6 +128,22 @@
       "server reset cancels pending action",
     );
     await reset("studio");
+    await input(
+      root("studio").querySelector('[aria-label="Search sample catalog"]'),
+      "no-such-mod",
+    );
+    assert(
+      root("studio").querySelector(".demo-empty h4").textContent ===
+        "No results",
+      "catalog empty state has a clear title and recovery action",
+    );
+    await click("studio", "Clear filters");
+    await click("studio", "Next");
+    assert(
+      root("studio").querySelectorAll(".studio-catalog-item").length === 4,
+      "catalog paging keeps a populated working surface",
+    );
+    await click("studio", "Previous");
     await click("studio", "Add Waystones");
     await tab("Your pack 8");
     assert(
@@ -122,9 +152,9 @@
       "dependency addition and Studio light reflect eight mods",
     );
     await click("studio", "Check updates");
-    await click("studio", "Apply sample updates");
+    await click("studio", "Update all");
     assert(
-      text("studio").includes("0 updates available"),
+      button("studio", "Update all").matches(":disabled"),
       "sample updates complete",
     );
     root("studio").querySelector('[aria-label="Select lithium"]').click();
@@ -147,7 +177,7 @@
     await click("studio", "Pin selected");
     await tab("Export");
     const selectedTab = root("studio")
-      .querySelector('#studio-demo-tab-export')
+      .querySelector("#studio-demo-tab-export")
       .getBoundingClientRect();
     const tabStrip = root("studio")
       .querySelector("[data-carbon-tabs]")
@@ -165,6 +195,11 @@
     await pause();
     await click("studio", "Build export preview");
     const built = recipe();
+    assert(
+      !button("studio", "Build export preview") &&
+        root("studio").querySelectorAll("a[download]").length === 1,
+      "ready exports have one primary download action",
+    );
     assert(
       built.mods.length === 6 &&
         built.overrides.length === 1 &&
@@ -236,32 +271,55 @@
         text("staging").includes("Build 18 (sample)"),
       "staging leaves live values unchanged",
     );
+    assert(
+      root("staging").querySelector(".locked-window") &&
+        !root("staging").querySelector(".window-choices"),
+      "staged schedule is readable metadata rather than disabled form controls",
+    );
+    await click("staging", "Revise batch");
+    assert(
+      root("staging").querySelector(".window-choices"),
+      "revision restores editable apply-window controls",
+    );
+    await stage();
     await click("staging", "Simulate players leaving");
     await click("staging", "Advance 1 empty minute");
     assert(
-      text("staging").includes("1 / 5 empty minutes"),
+      root("staging").querySelector("progress").value === 1,
       "idle progress is visible before the batch can apply",
     );
     await click("staging", "Simulate player joining");
     assert(
-      text("staging").includes("0 / 5 empty minutes"),
+      root("staging").querySelector("progress").value === 0,
       "a player joining resets the idle stretch",
     );
     await click("staging", "Simulate players leaving");
     await click("staging", "Advance 5 empty minutes");
+    assert(
+      root("staging").querySelector('[role="progressbar"]') &&
+        root("staging").querySelectorAll(".operation-steps li").length === 3,
+      "applying state shows a distinct three-step operation view",
+    );
     await wait(
       () => !!root("staging").querySelector(".batch-receipt"),
       "idle result",
     );
     assert(
-      text("staging").includes("7 changes published") &&
+      root("staging").querySelectorAll(".result-row").length === 7 &&
         !root("staging")
           .querySelector(".batch-receipt")
           .textContent.includes("Lithium") &&
         document.querySelector("#updates").dataset.demoPhase === "applied",
       "only reviewed edits publish; completion lights respond",
     );
-    await click("staging", "Prepare another batch");
+    assert(
+      root("staging").querySelectorAll(".batch-result-table thead th")
+        .length === 3 &&
+        !text("staging").includes("simulated restart") &&
+        !text("staging").includes("Review the exact result"),
+      "applied state is a labelled before/after table without narration",
+    );
+    await click("staging", "New batch");
     await click("staging", "Add mod change");
     await radio("next");
     await stage();
@@ -271,8 +329,17 @@
       "second batch",
     );
     assert(
-      text("staging").includes("1 change published"),
+      root("staging").querySelectorAll(".result-row").length === 1,
       "second batch works against updated live state",
+    );
+    await reset("staging");
+    await click("staging", "Clear batch");
+    assert(
+      root("staging").querySelector(".inventory-empty") &&
+        [...root("staging").querySelectorAll("button")]
+          .find((el) => /^Stage/.test(el.textContent.trim()))
+          .matches(":disabled"),
+      "empty batch state cannot stage and retains collection controls",
     );
     await reset("staging");
     await radio("time");
@@ -282,7 +349,7 @@
         .matches(":disabled"),
       "missing schedule blocks staging",
     );
-    await click("staging", "Use one hour from now");
+    await click("staging", "+1 hour");
     await stage();
     await click("staging", "Advance to scheduled time");
     await wait(
@@ -290,7 +357,7 @@
       "timed result",
     );
     assert(
-      text("staging").includes("4 changes published"),
+      root("staging").querySelectorAll(".result-row").length === 4,
       "scheduled apply can be completed explicitly",
     );
     await reset("staging");

@@ -42,6 +42,13 @@ not a launcher archive or real mod binaries; no provider request is made.
 The shared tab strip keeps the selected tab horizontally visible on resize or
 programmatic selection without scrolling the surrounding page.
 
+Demo cards use concise labels, grouped metrics and one primary action per state.
+Results expose previous/current columns; waiting uses a read-only schedule and
+applying uses a dedicated progress view. Scope notes live in the outer caption.
+Action announcements remain accessible without visible narration bars. The
+shared batch component keeps its operational help enabled by default; only the
+homepage opts out of that help.
+
 Studio's dependency relationship and export exclusions remain visible as text;
 color and motion are supplementary feedback. The sample server may publish a
 state event across its shadow boundary to switch the decorative terrain entrance
