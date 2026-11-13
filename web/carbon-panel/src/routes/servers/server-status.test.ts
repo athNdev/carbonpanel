@@ -12,21 +12,19 @@ const overview = fs.readFileSync(path.resolve(import.meta.dirname, '../+page.sve
 const list = fs.readFileSync(path.resolve(import.meta.dirname, './+page.svelte'), 'utf-8');
 const detail = fs.readFileSync(path.resolve(import.meta.dirname, './[id]/+page.svelte'), 'utf-8');
 
-const fallthroughPattern = 'case ServerStatus.ERROR:\n\t\t\tcase ServerStatus.UNHEALTHY:';
-
-test('UNHEALTHY renders yellow while ERROR stays red', () => {
+test('all inventory routes consume the shared severity policy', () => {
 	for (const [name, content] of [
 		['overview', overview],
 		['list', list],
 		['detail', detail]
 	] as const) {
 		assert.ok(
-			content.includes('case ServerStatus.UNHEALTHY:') && content.includes("return 'yellow'"),
-			`${name} must map UNHEALTHY to the yellow tag`
+			content.includes("from '$lib/features/servers/presentation'"),
+			`${name} must use shared status policy`
 		);
 		assert.ok(
-			!content.includes(fallthroughPattern),
-			`${name} must not share an ERROR/UNHEALTHY red fallthrough`
+			content.includes('getStatusTagType(server.status)'),
+			`${name} renders the shared status tone`
 		);
 	}
 });

@@ -72,3 +72,6 @@
   expect: operations/health-checks
 - query: What is the recovery path for a stale node or failed image pull?
   expect: operations/actionable-recovery
+
+- query: How does the frontend server inventory reject stale reads after deletion or logout?
+  expect: decisions/server-inventory

@@ -6,50 +6,47 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-import { writable, derived } from 'svelte/store';
+import { derived } from 'svelte/store';
 import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 import { ServerStatus } from '$lib/proto/carbonpanel/v1/common_pb';
 import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 import { create } from '@bufbuild/protobuf';
 import { ListServersRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
 
-function createServersStore() {
-	const { subscribe, set, update } = writable<Server[]>([]);
+import { createServerActions } from '$lib/features/servers/actions';
+import { createServerInventory } from '$lib/features/servers/inventory.svelte';
 
-	return {
-		subscribe,
-		set,
-		fetchServers: async (skipLoading = false) => {
-			try {
-				const request = create(ListServersRequestSchema, { fullStats: false });
-				const callOptions = skipLoading ? silentCallOptions : undefined;
-				const response = await rpcClient.server.listServers(request, callOptions);
-				set(response.servers);
-				return response.servers;
-			} catch (error) {
-				console.error('Failed to fetch servers:', error);
-				throw error;
-			}
-		},
-		updateServer: (server: Server) => {
-			update((servers) => {
-				const index = servers.findIndex((s) => s.id === server.id);
-				if (index !== -1) {
-					return [...servers.slice(0, index), server, ...servers.slice(index + 1)];
-				}
-				return [...servers, server];
-			});
-		},
-		removeServer: (id: string) => {
-			update((servers) => servers.filter((s) => s.id !== id));
-		},
-		addServer: (server: Server) => {
-			update((servers) => [...servers, server]);
-		}
-	};
-}
+export const serverInventory = createServerInventory({
+	async list(fullStats, silent) {
+		const response = await rpcClient.server.listServers(
+			create(ListServersRequestSchema, { fullStats }),
+			silent ? silentCallOptions : undefined
+		);
+		return response.servers;
+	},
+	async detail(id, silent) {
+		const response = await rpcClient.server.getServer(
+			{ id },
+			silent ? silentCallOptions : undefined
+		);
+		return response.server;
+	}
+});
 
-export const serversStore = createServersStore();
+export const serverActions = createServerActions(
+	{ ...rpcClient.server, exportWorld: (request) => rpcClient.file.exportWorld(request) },
+	serverInventory
+);
+
+// Compatibility surface for existing consumers; all writes share generations.
+export const serversStore = {
+	subscribe: serverInventory.subscribe,
+	fetchServers: (silent = false) => serverInventory.refresh(false, silent),
+	updateServer: serverInventory.upsert,
+	addServer: serverInventory.upsert,
+	removeServer: serverInventory.remove,
+	reset: serverInventory.reset
+};
 
 export const runningServers = derived(serversStore, ($servers) =>
 	$servers.filter((server) => server.status === ServerStatus.RUNNING)
