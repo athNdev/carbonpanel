@@ -9,6 +9,8 @@ code_refs:
   - scripts/proto-generate.mjs
   - scripts/proto-generate.test.mjs
   - buf.gen.yaml
+  - toolchain-versions.json
+  - scripts/check-toolchain-policy.mjs
 sources:
   - title: Development and generation commands
     resource: ../../docs/development.md
@@ -30,3 +32,6 @@ single crash-atomic transaction across all trees. The installer rejects unexpect
 non-generated files in managed trees. Dependencies install from frozen lockfiles;
 updates are separately named commands. Buf CLI defaults to 1.50.0, independent
 of the pinned remote plugin versions. See the development guide for overrides.
+`toolchain-versions.json` records the Go, Bun and Buf defaults; CI checks their
+duplicated Docker, Go module and workflow consumers for drift. Version tags are
+not immutable digests, and explicit image build arguments remain available.

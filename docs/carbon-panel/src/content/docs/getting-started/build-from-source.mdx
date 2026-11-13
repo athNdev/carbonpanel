@@ -18,7 +18,7 @@ one at https://mozilla.org/MPL/2.0/.
 Carbon Panel manages Minecraft servers as Docker containers, so Docker is required both at build time and runtime.
 
 - **Go** at the version declared by `go.mod`
-- **Bun** at the version declared by CI
+- **Bun** at the version recorded in `toolchain-versions.json`
 - **Docker** (also used to run [buf](https://buf.build/) for protobuf code generation)
 - **Make**
 
@@ -29,17 +29,24 @@ Carbon Panel manages Minecraft servers as Docker containers, so Docker is requir
 git clone https://github.com/athNdev/carbon-panel.git
 cd carbon-panel
 
-# Generate protobuf code (Go + TypeScript) via Docker buf
-make gen
+# Install the pinned frontend dependencies used to format generated code
+cd web/carbon-panel && bun install --frozen-lockfile && cd ../..
 
-# Install frontend dependencies and build
-cd web/carbon-panel && bun install && bun run build && cd ../..
+# Generate protobuf code (Go + TypeScript) via Docker buf, then build frontend
+make gen
+cd web/carbon-panel && bun run build && cd ../..
 
 # Build the Go binary with embedded frontend
 go build -o carbon-panel ./cmd/carbon-panel
 ```
 
 The `//go:embed` directives bake the frontend build into the binary so it serves the UI without a separate web server.
+
+The container build defaults to the Go, Bun and Buf versions recorded in
+`toolchain-versions.json`. Operators can explicitly select compatible images
+using the `GO_IMAGE`, `BUN_IMAGE` and `BUF_IMAGE` Docker build arguments.
+Version tags are not immutable digests; use digest-pinned image references when
+your deployment requires immutable inputs.
 
 ## Live Development (Hot Reloading)
 
