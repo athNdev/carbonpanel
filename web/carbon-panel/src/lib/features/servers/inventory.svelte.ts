@@ -123,8 +123,10 @@ export function createServerInventory(
 			const next = new Map(snapshot.servers.map((server) => [server.id, server]));
 			const ids = new Set(incoming.map((server) => server.id));
 			for (const server of snapshot.servers) {
-				if (!ids.has(server.id) && (versions.get(server.id) ?? 0) <= sequence)
+				if (!ids.has(server.id) && (versions.get(server.id) ?? 0) <= sequence) {
 					next.delete(server.id);
+					versions.set(server.id, sequence);
+				}
 			}
 			for (const server of incoming) {
 				if (removed.has(server.id) || (versions.get(server.id) ?? 0) > sequence) continue;
@@ -139,7 +141,14 @@ export function createServerInventory(
 		if (removed.has(id)) return Promise.resolve(undefined);
 		return run(`detail:${id}`, async (sequence, valid) => {
 			const server = await requests.detail(id, silent);
-			if (!valid() || removed.has(id) || (versions.get(id) ?? 0) > sequence) return current(id);
+			// A complete list also establishes absence, including IDs not yet cached.
+			if (
+				!valid() ||
+				sequence < listVersion ||
+				removed.has(id) ||
+				(versions.get(id) ?? 0) > sequence
+			)
+				return current(id);
 			versions.set(id, sequence);
 			const entries = server
 				? withServer(mergeServerObservation(current(id), server))

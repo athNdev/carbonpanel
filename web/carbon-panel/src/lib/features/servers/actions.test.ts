@@ -162,3 +162,34 @@ test('account reset isolates pending action results and new idempotency keys', a
 	assert.equal((await fresh).kind, 'removed');
 	assert.equal(removals, 1);
 });
+
+for (const reset of [false, true]) {
+	test(`export failure obeys account generation, reset=${reset}`, async () => {
+		let generation = 0;
+		let reject!: (error: Error) => void;
+		const actions = createServerActions(
+			{
+				startServer: async () => {},
+				stopServer: async () => {},
+				restartServer: async () => {},
+				recreateServer: async () => {},
+				deleteServer: async () => assert.fail('export deleted'),
+				exportWorld: () =>
+					new Promise((_yes, no) => {
+						reject = no;
+					})
+			},
+			{
+				generation: () => generation,
+				invalidate: () => assert.fail('export invalidated'),
+				remove: () => assert.fail('export removed'),
+				load: async () => undefined
+			}
+		);
+		const attempt = actions.perform('a', 'delete', 'export');
+		if (reset) generation++;
+		reject(new Error('export offline'));
+		if (reset) assert.equal((await attempt).kind, 'superseded');
+		else await assert.rejects(attempt, /export offline/);
+	});
+}

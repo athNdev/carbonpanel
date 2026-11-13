@@ -79,16 +79,18 @@ export function createServerActions(
 				// A read failure does not turn a successful mutation into a reported failure.
 				await inventory.load(id, true).catch(() => undefined);
 				return active() ? { kind: 'updated' } : { kind: 'superseded' };
-			} catch (error) {
-				if (!active()) return { kind: 'superseded' };
-				throw error;
 			} finally {
 				attempt?.finish();
 				if (active()) inventory.invalidate(id);
 			}
-		})().finally(() => {
-			if (pending.get(key) === operation) pending.delete(key);
-		});
+		})()
+			.catch((error): ServerActionOutcome => {
+				if (!active()) return { kind: 'superseded' };
+				throw error;
+			})
+			.finally(() => {
+				if (pending.get(key) === operation) pending.delete(key);
+			});
 		pending.set(key, operation);
 		return operation;
 	}

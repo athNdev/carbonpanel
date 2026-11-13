@@ -32,7 +32,9 @@ ListServers and GetServer currently both apply cached metrics and use the same
 complete Server conversion. A newer complete response is authoritative even
 when its fields are zero, false or empty: preserving truthy values would revive
 stale join/player evidence. Older list/detail completions cannot replace newer
-observations. A future sparse response requires an explicit field contract.
+observations. A complete list also establishes absence, fencing older detail
+requests even for IDs not already cached. A later fresh read can discover a
+server again; explicit deletion tombstones last until account reset. A future sparse response requires an explicit field contract.
 
 Shared actions construct generated RPC payloads and own in-flight idempotency.
 Delete, keep-data and detach retain different flags; export only creates a

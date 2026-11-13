@@ -188,3 +188,21 @@ test('refresh subscriptions share one timer and close on last unmount', () => {
 	assert.equal(callbacks.size, 0);
 	assert.equal(calls, 0);
 });
+
+for (const cached of [true, false]) {
+	test(`authoritative list absence fences older detail, cached=${cached}`, async () => {
+		const { inventory, lists, details } = fixture();
+		if (cached) inventory.upsert(server('a'));
+		const old = inventory.load('a');
+		const list = inventory.refresh();
+		lists[0].resolve([]);
+		await list;
+		details[0].resolve(server('a', 'stale'));
+		await old;
+		assert.equal(inventory.get('a'), undefined);
+		const fresh = inventory.load('a');
+		details[1].resolve(server('a', 'fresh'));
+		await fresh;
+		assert.equal(inventory.get('a')?.name, 'fresh');
+	});
+}

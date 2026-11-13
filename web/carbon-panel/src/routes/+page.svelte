@@ -98,8 +98,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 	async function handleServerAction(action: 'start' | 'stop', server: ServerType) {
 		try {
-			const outcome=await serverActions.perform(server.id, action);
-if(outcome.kind==='superseded')return;
+			const outcome = await serverActions.perform(server.id, action);
+			if (outcome.kind === 'superseded') return;
 			toast.success(`${action === 'start' ? 'Starting' : 'Stopping'} ${server.name}...`);
 		} catch (error) {
 			toast.error(
