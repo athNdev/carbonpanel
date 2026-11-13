@@ -7,6 +7,13 @@ on:
       - 'web/carbon-panel/.gitignore'
       - 'scripts/test-ignore-policies.py'
       - 'scripts/dev*'
+      - 'scripts/proto-generate*'
+      - 'proto/**'
+      - 'buf.yaml'
+      - 'buf.gen.yaml'
+      - 'buf.lock'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/bun.lock'
       - 'scripts/testdata/dev-process/**'
       - 'cmd/carbon-dev-supervisor/**'
       - 'scripts/windows-verification-evidence.ps1'
@@ -35,6 +42,13 @@ on:
       - 'Makefile'
       - '.air.toml'
       - 'scripts/dev*'
+      - 'scripts/proto-generate*'
+      - 'proto/**'
+      - 'buf.yaml'
+      - 'buf.gen.yaml'
+      - 'buf.lock'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/bun.lock'
       - 'scripts/testdata/dev-process/**'
       - 'cmd/carbon-dev-supervisor/**'
       - 'scripts/windows-verification-evidence.ps1'
@@ -57,6 +71,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  generated-proto:
+    name: Generated proto output (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
+        with:
+          version: '1.50.0'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - run: bun install --frozen-lockfile
+        working-directory: web/carbon-panel
+      - run: bun scripts/proto-generate.mjs --check
   ignore-policy:
     name: Git and Docker context policy
     runs-on: ubuntu-latest
@@ -79,6 +110,7 @@ jobs:
         with:
           bun-version: '1.4.2'
       - run: bun test scripts/dev.test.ts
+      - run: bun test scripts/proto-generate.test.mjs
       - name: Check Windows qualification evidence policy
         if: runner.os == 'Windows'
         shell: pwsh
