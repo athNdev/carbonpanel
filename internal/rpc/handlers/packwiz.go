@@ -293,7 +293,7 @@ func (h *PackwizHandler) handleRefreshPack(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *PackwizHandler) handleCheckUpdates(w http.ResponseWriter, r *http.Request, packID string) {
-	updates, err := h.manager.CheckContentUpdates(packID)
+	updates, err := h.manager.CheckContentUpdatesContext(r.Context(), packID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to check updates: %v", err), http.StatusInternalServerError)
 		return
@@ -331,7 +331,7 @@ func (h *PackwizHandler) handleApplyUpdates(w http.ResponseWriter, r *http.Reque
 	}
 
 	if req.ApplyAll {
-		updates, err := h.manager.CheckContentUpdates(packID)
+		updates, err := h.manager.CheckContentUpdatesContext(r.Context(), packID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("failed to check updates: %v", err), http.StatusInternalServerError)
 			return
@@ -393,7 +393,7 @@ func (h *PackwizHandler) handleAddMod(w http.ResponseWriter, r *http.Request, pa
 		}
 	}
 
-	report, err := h.manager.AddModWithDependencies(packID, mod, loader, mcVersion, h.manager.NewHTTPDependencyFetcher())
+	report, err := h.manager.AddModWithDependencies(packID, mod, loader, mcVersion, h.manager.NewHTTPDependencyFetcherContext(r.Context()))
 	if err != nil {
 		// The root mod is already installed; surface the resolver failure
 		// without failing the request.
@@ -573,7 +573,7 @@ func (h *PackwizHandler) handleMigrate(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 
-	report, err := h.manager.SimulateMigration(packID, req.TargetMC, req.TargetLoader)
+	report, err := h.manager.SimulateMigrationContext(r.Context(), packID, req.TargetMC, req.TargetLoader)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to simulate migration: %v", err), http.StatusInternalServerError)
 		return
@@ -620,7 +620,7 @@ func (h *PackwizHandler) handleSetMCVersion(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "pack not found after MC version change", http.StatusInternalServerError)
 		return
 	}
-	migration, err := h.manager.SimulateMigration(packID, req.TargetMC, pack.ModLoader)
+	migration, err := h.manager.SimulateMigrationContext(r.Context(), packID, req.TargetMC, pack.ModLoader)
 	if err != nil {
 		// Stale marking succeeded; surface the simulation failure alongside.
 		writeJSON(w, http.StatusOK, map[string]any{"stale": stale, "migration_error": err.Error()})

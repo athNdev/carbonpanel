@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -26,13 +27,35 @@ var (
 )
 
 type Client struct {
-	http *indexers.HTTPClient
+	http    *indexers.HTTPClient
+	baseURL string
 }
 
-func NewClient(cfg *config.Config) *Client {
-	return &Client{
-		http: indexers.NewHTTPClient("modrinth", cfg.Server.UserAgent, nil),
+type Options struct {
+	BaseURL    string
+	Token      string
+	UserAgent  string
+	HTTPClient *http.Client
+}
+
+func NewClient(cfg *config.Config) *Client { return NewClientWithOptions(cfg, Options{}) }
+
+// NewClientWithOptions keeps provider endpoint, credentials and transport
+// instance-owned while preserving the default client behavior.
+func NewClientWithOptions(cfg *config.Config, options Options) *Client {
+	baseURL := options.BaseURL
+	if baseURL == "" {
+		baseURL = BaseURL
 	}
+	headers := map[string]string{}
+	if options.Token != "" {
+		headers["Authorization"] = options.Token
+	}
+	userAgent := options.UserAgent
+	if userAgent == "" && cfg != nil {
+		userAgent = cfg.Server.UserAgent
+	}
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: indexers.NewHTTPClientWithClient("modrinth", userAgent, headers, options.HTTPClient)}
 }
 
 // SearchResponse represents the Modrinth search API response
@@ -164,12 +187,23 @@ type Dependency struct {
 // packs and shader packs are loader-agnostic; pass loader only when the caller
 // wants to narrow projects that advertise it (for example iris for shaders).
 func (c *Client) SearchProjects(ctx context.Context, projectType, query, gameVersion, loader string, offset, limit int) (*SearchResponse, error) {
+	return c.Search(ctx, SearchOptions{ProjectType: projectType, Query: query, GameVersion: gameVersion, Loader: strings.ToLower(loader), Offset: offset, Limit: limit, Index: "downloads"})
+}
+
+type SearchOptions struct {
+	ProjectType, Query, GameVersion, Loader, Index string
+	Offset, Limit                                  int
+}
+
+// Search shares request construction while keeping each caller's sort policy.
+func (c *Client) Search(ctx context.Context, options SearchOptions) (*SearchResponse, error) {
+	projectType, query, gameVersion, loader, offset, limit := options.ProjectType, options.Query, options.GameVersion, options.Loader, options.Offset, options.Limit
 	facets := [][]string{{fmt.Sprintf("project_type:%s", projectType)}}
 	if gameVersion != "" {
 		facets = append(facets, []string{fmt.Sprintf("versions:%s", gameVersion)})
 	}
 	if loader != "" {
-		facets = append(facets, []string{fmt.Sprintf("categories:%s", strings.ToLower(loader))})
+		facets = append(facets, []string{fmt.Sprintf("categories:%s", loader)})
 	}
 
 	facetsJSON, err := json.Marshal(facets)
@@ -182,12 +216,14 @@ func (c *Client) SearchProjects(ctx context.Context, projectType, query, gameVer
 		params.Set("query", query)
 	}
 	params.Set("facets", string(facetsJSON))
-	params.Set("index", "downloads")
+	if options.Index != "" {
+		params.Set("index", options.Index)
+	}
 	params.Set("offset", strconv.Itoa(offset))
 	params.Set("limit", strconv.Itoa(limit))
 
 	var resp SearchResponse
-	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/search?%s", BaseURL, params.Encode()), &resp); err != nil {
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/search?%s", c.baseURL, params.Encode()), &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -195,45 +231,13 @@ func (c *Client) SearchProjects(ctx context.Context, projectType, query, gameVer
 
 // SearchModpacks searches for modpacks on Modrinth
 func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader string, offset, limit int) (*SearchResponse, error) {
-	// Build facets for filtering
-	facets := [][]string{
-		{"project_type:modpack"},
-	}
-
-	if gameVersion != "" {
-		facets = append(facets, []string{fmt.Sprintf("versions:%s", gameVersion)})
-	}
-
-	if modLoader != "" {
-		facets = append(facets, []string{fmt.Sprintf("categories:%s", strings.ToLower(modLoader))})
-	}
-
-	facetsJSON, err := json.Marshal(facets)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal facets: %w", err)
-	}
-
-	params := url.Values{}
-	if query != "" {
-		params.Set("query", query)
-	}
-	params.Set("facets", string(facetsJSON))
-	params.Set("index", "downloads") // Sort by downloads
-	params.Set("offset", strconv.Itoa(offset))
-	params.Set("limit", strconv.Itoa(limit))
-
-	var searchResp SearchResponse
-	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/search?%s", BaseURL, params.Encode()), &searchResp); err != nil {
-		return nil, err
-	}
-
-	return &searchResp, nil
+	return c.SearchProjects(ctx, "modpack", query, gameVersion, modLoader, offset, limit)
 }
 
 // GetModpack retrieves detailed information about a specific modpack
 func (c *Client) GetModpack(ctx context.Context, modpackID string) (*ProjectDetails, error) {
 	var project ProjectDetails
-	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/project/%s", BaseURL, modpackID), &project); err != nil {
+	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/project/%s", c.baseURL, url.PathEscape(modpackID)), &project); err != nil {
 		return nil, err
 	}
 
@@ -242,8 +246,26 @@ func (c *Client) GetModpack(ctx context.Context, modpackID string) (*ProjectDeta
 
 // GetModpackVersions retrieves all versions for a specific modpack
 func (c *Client) GetModpackVersions(ctx context.Context, modpackID string) ([]Version, error) {
+	return c.GetVersions(ctx, modpackID, "", "")
+}
+
+// GetVersions preserves provider order and optional server-side filtering.
+func (c *Client) GetVersions(ctx context.Context, projectID, loader, gameVersion string) ([]Version, error) {
+	params := url.Values{}
+	if loader != "" && loader != "vanilla" {
+		encoded, _ := json.Marshal([]string{loader})
+		params.Set("loaders", string(encoded))
+	}
+	if gameVersion != "" {
+		encoded, _ := json.Marshal([]string{gameVersion})
+		params.Set("game_versions", string(encoded))
+	}
+	endpoint := fmt.Sprintf("%s/project/%s/version", c.baseURL, url.PathEscape(projectID))
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
 	var versions []Version
-	if err := c.http.DoJSON(ctx, fmt.Sprintf("%s/project/%s/version", BaseURL, modpackID), &versions); err != nil {
+	if err := c.http.DoJSON(ctx, endpoint, &versions); err != nil {
 		return nil, err
 	}
 
