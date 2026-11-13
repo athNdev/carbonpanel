@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/athNdev/carbon-panel/internal/config"
@@ -72,17 +73,32 @@ func WithHTTPClient(client *http.Client) Option {
 // provider, and a canceled operation does not start another provider request.
 func (c *Client) getJSON(ctx context.Context, path string, result any) error {
 	primary := c.http
-	if c.baseURL == KeylessBaseURL {
+	keyless := isKeylessEndpoint(c.baseURL)
+	if keyless {
 		primary = c.keyless
 	}
 	err := primary.DoJSON(ctx, c.baseURL+path, result)
-	if err == nil || ctx.Err() != nil || c.baseURL == KeylessBaseURL {
+	if err == nil || ctx.Err() != nil || keyless {
 		return err
 	}
 	if fallbackErr := c.keyless.DoJSON(ctx, KeylessBaseURL+path, result); fallbackErr == nil {
 		return nil
 	}
 	return err
+}
+
+// Credential policy follows the provider host, independent of URL spelling,
+// scheme, port or endpoint path. Custom official mirrors retain their policy.
+func isKeylessEndpoint(rawURL string) bool {
+	endpoint, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	keyless, err := url.Parse(KeylessBaseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSuffix(endpoint.Hostname(), "."), keyless.Hostname())
 }
 
 type SearchModsResponse struct {

@@ -47,15 +47,46 @@ func TestProviderCancellationDoesNotStartFallback(t *testing.T) {
 }
 
 func TestExplicitKeylessProviderNeverReceivesKey(t *testing.T) {
+	for _, endpoint := range []string{
+		KeylessBaseURL,
+		KeylessBaseURL + "/",
+		"https://API.CURSE.TOOLS/v1/cf",
+		"https://api.curse.tools/alternate-path",
+		"http://api.curse.tools:8080/v1/cf",
+		"https://api.curse.tools./v1/cf",
+	} {
+		t.Run(endpoint, func(t *testing.T) {
+			calls := 0
+			transport := fixtureTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.Header.Get("X-Api-Key") != "" {
+					t.Error("keyless provider received credential")
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[]}`)), Header: make(http.Header)}, nil
+			})
+			c := NewClient("test-key", testCfg(), WithBaseURL(endpoint), WithHTTPClient(&http.Client{Transport: transport}))
+			if _, err := c.SearchModpacks(context.Background(), "", "", ModLoaderAny, 0, 10); err != nil {
+				t.Fatal(err)
+			}
+			if calls != 1 {
+				t.Fatalf("request count %d, want 1", calls)
+			}
+		})
+	}
+}
+
+func TestKeylessProviderFailureDoesNotRetryItself(t *testing.T) {
+	calls := 0
 	transport := fixtureTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
 		if r.Header.Get("X-Api-Key") != "" {
-			t.Fatal("keyless provider received credential")
+			t.Error("keyless failure request received credential")
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[]}`)), Header: make(http.Header)}, nil
+		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header)}, nil
 	})
-	c := NewClient("test-key", testCfg(), WithBaseURL(KeylessBaseURL), WithHTTPClient(&http.Client{Transport: transport}))
-	if _, err := c.SearchModpacks(context.Background(), "", "", ModLoaderAny, 0, 10); err != nil {
-		t.Fatal(err)
+	c := NewClient("test-key", testCfg(), WithBaseURL(KeylessBaseURL+"/"), WithHTTPClient(&http.Client{Transport: transport}))
+	if _, err := c.SearchModpacks(context.Background(), "", "", ModLoaderAny, 0, 10); err == nil || calls != 1 {
+		t.Fatalf("error=%v calls=%d, want one failed request", err, calls)
 	}
 }
 

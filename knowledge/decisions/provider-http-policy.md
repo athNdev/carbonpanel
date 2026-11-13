@@ -19,6 +19,8 @@ The CurseForge adapter owns its official/keyless fallback policy. A keyless
 request never uses the keyed client. Canceled operations do not start a
 fallback request. Provider clients accept an instance-owned HTTP client for
 local fixtures and caller-specific transport or timeout policy.
+The known keyless provider is recognized by its parsed hostname, so alternate
+paths, ports, schemes, trailing slashes and hostname case cannot enable a key.
 
 The shared redirect policy clones the supplied client, preserves its redirect
 limit or callback, and removes API keys, authorization and cookies when scheme,
