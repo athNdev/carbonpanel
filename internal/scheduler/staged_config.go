@@ -82,16 +82,12 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 		if cfg == nil {
 			return errors.New("server configuration is empty")
 		}
-		result, err := dockerClient.RecreateContainer(ctx, server.ContainerID, server, cfg)
+		serverruntime.PrepareConfig(ctx, s.store, server, cfg)
+		result, err := serverruntime.Recreate(ctx, s.store, dockerClient, server, cfg)
 		if err != nil {
 			return err
 		}
-		if result != nil && result.NewContainerID != "" && result.NewContainerID != server.ContainerID {
-			server.ContainerID = result.NewContainerID
-			if err := s.store.UpdateServer(ctx, server); err != nil {
-				return err
-			}
-		}
+
 		if plan.StartAfter && (result == nil || !result.WasRunning) {
 			return dockerClient.StartContainer(ctx, server.ContainerID)
 		}

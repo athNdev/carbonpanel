@@ -8,7 +8,6 @@ package fuego
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -60,23 +59,8 @@ func (f *FuegoDatapackIndexer) Origin() string {
 // SearchDatapacks searches CurseForge's Data Packs class. Data packs are
 // loader-agnostic, so only the game version narrows the results.
 func (f *FuegoDatapackIndexer) SearchDatapacks(ctx context.Context, query string, gameVersion string, offset, limit int) (*indexers.DatapackSearchResult, error) {
-	params := url.Values{}
-	params.Set("gameId", strconv.Itoa(MinecraftGameID))
-	params.Set("classId", strconv.Itoa(DataPackClassID))
-	params.Set("index", strconv.Itoa(offset))
-	params.Set("pageSize", strconv.Itoa(limit))
-	params.Set("sortField", "6") // Sort by total downloads
-	params.Set("sortOrder", "desc")
-	if query != "" {
-		params.Set("searchFilter", query)
-	}
-	if gameVersion != "" {
-		params.Set("gameVersion", gameVersion)
-	}
-
-	var result SearchModsResponse
-	urlStr := fmt.Sprintf("%s/mods/search?%s", f.client.baseURL, params.Encode())
-	if err := f.client.http.DoJSON(ctx, urlStr, &result); err != nil {
+	result, err := f.client.Search(ctx, SearchOptions{ClassID: DataPackClassID, Query: query, GameVersion: gameVersion, Index: offset, PageSize: limit, SortField: 6, SortOrder: "desc"})
+	if err != nil {
 		return nil, err
 	}
 

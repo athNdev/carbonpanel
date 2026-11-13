@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/athNdev/carbon-panel/internal/config"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 )
@@ -646,7 +645,7 @@ func (m *Manager) checkContentUpdate(ctx context.Context, pack *Pack, kind strin
 		return info
 	}
 
-	provider := modrinth.NewClientWithOptions(&config.Config{}, modrinth.Options{BaseURL: m.modrinthBaseURL, HTTPClient: m.httpClient})
+	provider := m.modrinthClient()
 	versions, err := provider.GetVersions(ctx, item.ProjectID, "", "")
 	if err != nil {
 		return info

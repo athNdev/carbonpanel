@@ -10,6 +10,7 @@ package fuego
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -29,11 +30,12 @@ const (
 )
 
 type Client struct {
-	apiKey  string
-	baseURL string
-	http    *indexers.HTTPClient
-	keyless *indexers.HTTPClient
-	client  *http.Client
+	apiKey    string
+	baseURL   string
+	http      *indexers.HTTPClient
+	keyless   *indexers.HTTPClient
+	client    *http.Client
+	userAgent string
 }
 
 func NewClient(apiKey string, cfg *config.Config, opts ...Option) *Client {
@@ -50,8 +52,15 @@ func NewClient(apiKey string, cfg *config.Config, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.http = indexers.NewHTTPClientWithClient("fuego", cfg.Server.UserAgent, headers, c.client)
-	c.keyless = indexers.NewHTTPClientWithClient("fuego", cfg.Server.UserAgent, nil, c.client)
+	userAgent := ""
+	if cfg != nil {
+		userAgent = cfg.Server.UserAgent
+	}
+	if c.userAgent != "" {
+		userAgent = c.userAgent
+	}
+	c.http = indexers.NewHTTPClientWithClient("fuego", userAgent, headers, c.client)
+	c.keyless = indexers.NewHTTPClientWithClient("fuego", userAgent, nil, c.client)
 	return c
 }
 
@@ -69,19 +78,32 @@ func WithHTTPClient(client *http.Client) Option {
 	return func(c *Client) { c.client = client }
 }
 
+// WithUserAgent overrides caller identification without a full service config.
+func WithUserAgent(value string) Option { return func(c *Client) { c.userAgent = value } }
+
 // getJSON owns fallback policy; official credentials never reach the keyless
 // provider, and a canceled operation does not start another provider request.
 func (c *Client) getJSON(ctx context.Context, path string, result any) error {
+	return c.requestJSON(ctx, path, nil, result)
+}
+
+func (c *Client) requestJSON(ctx context.Context, path string, payload any, result any) error {
+	do := func(client *indexers.HTTPClient, endpoint string) error {
+		if payload == nil {
+			return client.DoJSON(ctx, endpoint, result)
+		}
+		return client.PostJSON(ctx, endpoint, payload, result)
+	}
 	primary := c.http
 	keyless := isKeylessEndpoint(c.baseURL)
 	if keyless {
 		primary = c.keyless
 	}
-	err := primary.DoJSON(ctx, c.baseURL+path, result)
+	err := do(primary, c.baseURL+path)
 	if err == nil || ctx.Err() != nil || keyless {
 		return err
 	}
-	if fallbackErr := c.keyless.DoJSON(ctx, KeylessBaseURL+path, result); fallbackErr == nil {
+	if fallbackErr := do(c.keyless, KeylessBaseURL+path); fallbackErr == nil {
 		return nil
 	}
 	return err
@@ -236,24 +258,44 @@ const (
 )
 
 func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion string, modLoader ModLoaderType, index, pageSize int) (*SearchModsResponse, error) {
+	return c.Search(ctx, SearchOptions{ClassID: ModpackClassID, Query: query, GameVersion: gameVersion, ModLoader: modLoader, Index: index, PageSize: pageSize, SortField: 2, SortOrder: "desc"})
+}
+
+type SearchOptions struct {
+	ClassID                    int
+	Query, Slug, GameVersion   string
+	ModLoader                  ModLoaderType
+	Index, PageSize, SortField int
+	SortOrder                  string
+}
+
+func (c *Client) Search(ctx context.Context, options SearchOptions) (*SearchModsResponse, error) {
 	params := url.Values{}
 	params.Set("gameId", strconv.Itoa(MinecraftGameID))
-	params.Set("classId", strconv.Itoa(ModpackClassID))
-	params.Set("index", strconv.Itoa(index))
-	params.Set("pageSize", strconv.Itoa(pageSize))
-	params.Set("sortField", "2") // Sort by popularity
-	params.Set("sortOrder", "desc")
-
-	if query != "" {
-		params.Set("searchFilter", query)
+	if options.ClassID > 0 {
+		params.Set("classId", strconv.Itoa(options.ClassID))
 	}
-
-	if gameVersion != "" {
-		params.Set("gameVersion", gameVersion)
+	if options.PageSize > 0 {
+		params.Set("pageSize", strconv.Itoa(options.PageSize))
+		params.Set("index", strconv.Itoa(options.Index))
 	}
-
-	if modLoader != ModLoaderAny {
-		params.Set("modLoaderType", strconv.Itoa(int(modLoader)))
+	if options.SortField > 0 {
+		params.Set("sortField", strconv.Itoa(options.SortField))
+	}
+	if options.SortOrder != "" {
+		params.Set("sortOrder", options.SortOrder)
+	}
+	if options.Query != "" {
+		params.Set("searchFilter", options.Query)
+	}
+	if options.Slug != "" {
+		params.Set("slug", options.Slug)
+	}
+	if options.GameVersion != "" {
+		params.Set("gameVersion", options.GameVersion)
+	}
+	if options.ModLoader != ModLoaderAny {
+		params.Set("modLoaderType", strconv.Itoa(int(options.ModLoader)))
 	}
 
 	var result SearchModsResponse
@@ -264,11 +306,35 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 	return &result, nil
 }
 
+type FilesOptions struct {
+	GameVersion string
+	ModLoader   ModLoaderType
+	PageSize    int
+}
+
 func (c *Client) GetModpackFiles(ctx context.Context, modID int) ([]File, error) {
+	return c.GetFiles(ctx, modID, FilesOptions{})
+}
+
+func (c *Client) GetFiles(ctx context.Context, modID int, options FilesOptions) ([]File, error) {
+	params := url.Values{}
+	if options.GameVersion != "" {
+		params.Set("gameVersion", options.GameVersion)
+	}
+	if options.ModLoader != ModLoaderAny {
+		params.Set("modLoaderType", strconv.Itoa(int(options.ModLoader)))
+	}
+	if options.PageSize > 0 {
+		params.Set("pageSize", strconv.Itoa(options.PageSize))
+	}
+	path := fmt.Sprintf("/mods/%d/files", modID)
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
 	var result struct {
 		Data []File `json:"data"`
 	}
-	if err := c.getJSON(ctx, fmt.Sprintf("/mods/%d/files", modID), &result); err != nil {
+	if err := c.getJSON(ctx, path, &result); err != nil {
 		return nil, err
 	}
 
@@ -292,4 +358,33 @@ func (c *Client) GetModpack(ctx context.Context, modID int) (*Modpack, error) {
 	}
 
 	return &result.Data, nil
+}
+
+// ResolveSlug preserves community-first resolution without ever sending its host a key.
+func (c *Client) ResolveSlug(ctx context.Context, slug string) (int, error) {
+	params := url.Values{"gameId": {strconv.Itoa(MinecraftGameID)}, "slug": {strings.TrimSpace(slug)}}
+	path := "/mods/search?" + params.Encode()
+	var result SearchModsResponse
+	err := c.keyless.DoJSON(ctx, KeylessBaseURL+path, &result)
+	var providerErr *indexers.IndexerError
+	if err != nil && ctx.Err() == nil && c.apiKey != "" && (!errors.As(err, &providerErr) || providerErr.Kind != indexers.ErrDecode) {
+		err = c.http.DoJSON(ctx, OfficialBaseURL+path, &result)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(result.Data) == 0 {
+		return 0, nil
+	}
+	return result.Data[0].ID, nil
+}
+
+func (c *Client) GetMods(ctx context.Context, ids []int) ([]Modpack, error) {
+	var result struct {
+		Data []Modpack `json:"data"`
+	}
+	if err := c.requestJSON(ctx, "/mods", map[string]any{"modIds": ids, "filterPcOnly": false}, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
 }

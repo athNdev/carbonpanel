@@ -59,3 +59,106 @@ func TestUpdateCheckCancellationDoesNotReportFalseSuccess(t *testing.T) {
 		t.Fatalf("cancellation lost: %v", err)
 	}
 }
+
+func TestAuthoringPreservesDistinctFileSelections(t *testing.T) {
+	calls := 0
+	m := providerUpdateManager(t, packPolicyTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Query().Get("loaders") != `["fabric"]` || r.URL.Query().Get("game_versions") != `["1.21.1"]` {
+			t.Errorf("filters: %s", r.URL)
+		}
+		body := `[{"id":"new","name":"New","files":[{"filename":"first.jar","url":"https://cdn.fixture/first.jar"},{"filename":"primary.jar","url":"https://cdn.fixture/primary.jar","primary":true,"size":42}],"dependencies":[{"project_id":"required","version_id":"pinned","dependency_type":"required"},{"project_id":null,"dependency_type":"required"}]}]`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	}))
+	mod, deps, err := m.NewHTTPDependencyFetcher().LatestCompatibleMod("modrinth", "project", "fabric", "1.21.1")
+	if err != nil || mod.FileName != "primary.jar" || mod.FileSize != 42 || len(deps) != 1 || deps[0].VersionID != "pinned" {
+		t.Fatalf("dependency: %+v %+v %v", mod, deps, err)
+	}
+	updates, err := m.CheckModUpdatesContext(context.Background(), "pack")
+	if err != nil || len(updates) != 1 || updates[0].LatestFileName != "first.jar" || !updates[0].UpdateAvailable {
+		t.Fatalf("updates: %+v %v", updates, err)
+	}
+	report, err := m.SimulateMigrationContext(context.Background(), "pack", "1.21.1", "fabric")
+	if err != nil || report.CompatibleCount != 1 || report.Mods[0].TargetFileName != "first.jar" || calls != 3 {
+		t.Fatalf("migration: %+v %v calls=%d", report, err, calls)
+	}
+}
+
+func TestAuthoringCancellationStopsProviderWork(t *testing.T) {
+	for _, operation := range []string{"dependencies", "updates", "migration"} {
+		t.Run(operation, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls := 0
+			m := providerUpdateManager(t, packPolicyTransport(func(r *http.Request) (*http.Response, error) { calls++; cancel(); return nil, r.Context().Err() }))
+			var err error
+			switch operation {
+			case "dependencies":
+				_, _, err = m.NewHTTPDependencyFetcherContext(ctx).LatestCompatibleMod("modrinth", "project", "fabric", "1.21.1")
+			case "updates":
+				_, err = m.CheckModUpdatesContext(ctx, "pack")
+			case "migration":
+				_, err = m.SimulateMigrationContext(ctx, "pack", "1.21.1", "fabric")
+			}
+			if !errors.Is(err, context.Canceled) || calls != 1 {
+				t.Fatalf("err=%v calls=%d", err, calls)
+			}
+		})
+	}
+}
+
+func TestCurseForgeDependencyUsesSharedAdapter(t *testing.T) {
+	m := NewManager(t.TempDir(), logger.New(), ManagerOptions{CurseForgeBaseURL: "https://api.curse.tools/v1/cf", HTTPClient: &http.Client{Transport: packPolicyTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("X-Api-Key") != "" || r.URL.Query().Get("pageSize") != "50" || r.URL.Query().Get("gameVersion") != "1.21.1" {
+			t.Errorf("request %+v", r)
+		}
+		body := `{"data":[{"id":1234567,"displayName":"First","fileName":"first.jar","gameVersions":["Forge"]},{"id":2345678,"displayName":"Last matching","fileName":"file name.jar","fileLength":99,"gameVersions":["Forge"],"dependencies":[{"modId":7,"relationType":3},{"modId":8,"relationType":2}]}]}`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}})
+	mod, deps, err := m.NewHTTPDependencyFetcher().LatestCompatibleMod("curseforge", "12", "forge", "1.21.1")
+	if err != nil || mod.VersionID != "2345678" || mod.DownloadURL != "https://edge.forgecdn.net/files/2345/678/file%20name.jar" || mod.FileSize != 99 || len(deps) != 2 || deps[0].DependencyType != "required" || deps[1].DependencyType != "optional" {
+		t.Fatalf("mod=%+v deps=%+v err=%v", mod, deps, err)
+	}
+}
+
+func TestLegacyCompatibilityKeepsLiteralVanillaFilter(t *testing.T) {
+	m := providerUpdateManager(t, packPolicyTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Query().Get("loaders") != `["vanilla"]` || r.URL.Query().Get("game_versions") != `[""]` {
+			t.Errorf("legacy literal filters changed: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
+	}))
+	if _, err := m.SimulateMigrationContext(context.Background(), "pack", "", "vanilla"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProviderUpdateChecksSkipPinnedAndKeepPackMetadata(t *testing.T) {
+	calls := 0
+	m := providerUpdateManager(t, packPolicyTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		t.Error("pinned mod triggered a provider request")
+		return nil, context.Canceled
+	}))
+	pinned, side := true, "client"
+	if err := m.UpdateContent("pack", ContentKindMod, "mod", ContentPatch{Pinned: &pinned, Side: &side}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := m.GetPack("pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []func() ([]ModUpdateInfo, error){func() ([]ModUpdateInfo, error) { return m.CheckModUpdates("pack") }, func() ([]ModUpdateInfo, error) { return m.CheckContentUpdates("pack") }} {
+		updates, err := check()
+		if err != nil || len(updates) != 1 || !updates[0].Pinned || updates[0].UpdateAvailable {
+			t.Fatalf("updates=%+v err=%v", updates, err)
+		}
+	}
+	after, err := m.GetPack("pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || after.Mods[0] != before.Mods[0] {
+		t.Fatalf("metadata changed: before=%+v after=%+v", before.Mods, after.Mods)
+	}
+}
