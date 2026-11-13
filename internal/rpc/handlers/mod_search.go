@@ -21,6 +21,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -127,7 +128,7 @@ func NewModOnlineManager(store *storage.Store, log *logger.Logger, authManager *
 		log:         log,
 		authManager: authManager,
 		enforcer:    enforcer,
-		httpClient:  &http.Client{Timeout: 20 * time.Second},
+		httpClient:  indexers.ProtectCredentialsOnRedirect(&http.Client{Timeout: 20 * time.Second}),
 	}
 }
 
@@ -671,16 +672,12 @@ func (m *ModOnlineManager) resolveCurseForgeSlug(ctx context.Context, apiKey, sl
 	}
 	req.Header.Set("User-Agent", "CarbonPanel/1.0 (CarbonPanel-admin)")
 	req.Header.Set("Accept", "application/json")
-	if apiKey != "" {
-		req.Header.Set("x-api-key", apiKey)
-	}
-
 	resp, err := m.httpClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		if apiKey != "" {
+		if apiKey != "" && ctx.Err() == nil {
 			officialURL := fmt.Sprintf("https://api.curseforge.com/v1/mods/search?gameId=432&slug=%s", url.QueryEscape(slug))
 			if oReq, oErr := http.NewRequestWithContext(ctx, http.MethodGet, officialURL, nil); oErr == nil {
 				oReq.Header.Set("x-api-key", apiKey)

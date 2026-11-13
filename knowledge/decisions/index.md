@@ -12,6 +12,7 @@
 - [Instance owned proxy test sockets](test-listeners.md) — Proxy tests inject instance-owned socket factories and reject non-loopback binds before reaching the operating system.
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
+- [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
 - [Server work temp is on the data volume](server-work-temp.md) — Modpack downloads, extracts, and native libraries use /data/.tmp, not the 64 MiB noexec /tmp tmpfs.
 - [Website and documentation publication](website-docs.md) — Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.

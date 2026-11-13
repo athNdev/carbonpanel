@@ -6,12 +6,12 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package fuego
 
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -31,6 +31,8 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *indexers.HTTPClient
+	keyless *indexers.HTTPClient
+	client  *http.Client
 }
 
 func NewClient(apiKey string, cfg *config.Config, opts ...Option) *Client {
@@ -43,11 +45,12 @@ func NewClient(apiKey string, cfg *config.Config, opts ...Option) *Client {
 	c := &Client{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		http:    indexers.NewHTTPClient("fuego", cfg.Server.UserAgent, headers),
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.http = indexers.NewHTTPClientWithClient("fuego", cfg.Server.UserAgent, headers, c.client)
+	c.keyless = indexers.NewHTTPClientWithClient("fuego", cfg.Server.UserAgent, nil, c.client)
 	return c
 }
 
@@ -57,6 +60,29 @@ type Option func(*Client)
 // WithBaseURL overrides the API endpoint (custom mirrors, tests).
 func WithBaseURL(url string) Option {
 	return func(c *Client) { c.baseURL = url }
+}
+
+// WithHTTPClient supplies an instance-owned HTTP client, for example for a
+// caller-specific timeout or a transport that targets local test fixtures.
+func WithHTTPClient(client *http.Client) Option {
+	return func(c *Client) { c.client = client }
+}
+
+// getJSON owns fallback policy; official credentials never reach the keyless
+// provider, and a canceled operation does not start another provider request.
+func (c *Client) getJSON(ctx context.Context, path string, result any) error {
+	primary := c.http
+	if c.baseURL == KeylessBaseURL {
+		primary = c.keyless
+	}
+	err := primary.DoJSON(ctx, c.baseURL+path, result)
+	if err == nil || ctx.Err() != nil || c.baseURL == KeylessBaseURL {
+		return err
+	}
+	if fallbackErr := c.keyless.DoJSON(ctx, KeylessBaseURL+path, result); fallbackErr == nil {
+		return nil
+	}
+	return err
 }
 
 type SearchModsResponse struct {
@@ -215,14 +241,7 @@ func (c *Client) SearchModpacks(ctx context.Context, query string, gameVersion s
 	}
 
 	var result SearchModsResponse
-	urlStr := fmt.Sprintf("%s/mods/search?%s", c.baseURL, params.Encode())
-	if err := c.http.DoJSON(ctx, urlStr, &result); err != nil {
-		if c.baseURL != KeylessBaseURL {
-			fallbackURL := fmt.Sprintf("%s/mods/search?%s", KeylessBaseURL, params.Encode())
-			if fbErr := c.http.DoJSON(ctx, fallbackURL, &result); fbErr == nil {
-				return &result, nil
-			}
-		}
+	if err := c.getJSON(ctx, "/mods/search?"+params.Encode(), &result); err != nil {
 		return nil, err
 	}
 
@@ -233,16 +252,8 @@ func (c *Client) GetModpackFiles(ctx context.Context, modID int) ([]File, error)
 	var result struct {
 		Data []File `json:"data"`
 	}
-	urlStr := fmt.Sprintf("%s/mods/%d/files", c.baseURL, modID)
-	if err := c.http.DoJSON(ctx, urlStr, &result); err != nil {
-		if c.baseURL != KeylessBaseURL {
-			fallbackURL := fmt.Sprintf("%s/mods/%d/files", KeylessBaseURL, modID)
-			if fbErr := c.http.DoJSON(ctx, fallbackURL, &result); fbErr != nil {
-				return nil, err
-			}
-		} else {
-			return nil, err
-		}
+	if err := c.getJSON(ctx, fmt.Sprintf("/mods/%d/files", modID), &result); err != nil {
+		return nil, err
 	}
 
 	// Ensure each file has a download URL, falling back to CurseForge edge CDN if missing
@@ -260,14 +271,7 @@ func (c *Client) GetModpack(ctx context.Context, modID int) (*Modpack, error) {
 	var result struct {
 		Data Modpack `json:"data"`
 	}
-	urlStr := fmt.Sprintf("%s/mods/%d", c.baseURL, modID)
-	if err := c.http.DoJSON(ctx, urlStr, &result); err != nil {
-		if c.baseURL != KeylessBaseURL {
-			fallbackURL := fmt.Sprintf("%s/mods/%d", KeylessBaseURL, modID)
-			if fbErr := c.http.DoJSON(ctx, fallbackURL, &result); fbErr == nil {
-				return &result.Data, nil
-			}
-		}
+	if err := c.getJSON(ctx, fmt.Sprintf("/mods/%d", modID), &result); err != nil {
 		return nil, err
 	}
 
