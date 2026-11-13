@@ -7,7 +7,12 @@ from urllib.parse import urlsplit
 import subprocess
 import tempfile
 import unittest
-from scripts.build_website import export_snapshot, publish_design_system, scoped_links
+from scripts.build_website import (
+    build_sitemap,
+    export_snapshot,
+    publish_design_system,
+    scoped_links,
+)
 from scripts.check_website import Links, check
 
 
@@ -127,6 +132,23 @@ class WebsiteTests(unittest.TestCase):
         parser = Links(not_found=True)
         parser.feed('<link rel="canonical" href="/404/"><a href="/docs/">Docs</a>')
         self.assertEqual(parser.urls, ["/docs/"])
+
+    def test_sitemap_includes_every_published_page_and_lastmod(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            (output / "index.html").write_text("home", encoding="utf-8")
+            docs = output / "docs" / "guide"
+            docs.mkdir(parents=True)
+            (docs / "index.html").write_text("guide", encoding="utf-8")
+            (output / "404.html").write_text("not found", encoding="utf-8")
+
+            build_sitemap(output, "/", "https://carbonpanel.dev", "2026-11-13")
+
+            sitemap = (output / "sitemap.xml").read_text(encoding="utf-8")
+            self.assertIn("<loc>https://carbonpanel.dev/</loc>", sitemap)
+            self.assertIn("<loc>https://carbonpanel.dev/docs/guide/</loc>", sitemap)
+            self.assertNotIn("404.html", sitemap)
+            self.assertEqual(sitemap.count("<lastmod>2026-11-13</lastmod>"), 2)
 
     def test_a_page_without_social_metadata_fails_the_website_check(self):
         with tempfile.TemporaryDirectory() as temporary:
