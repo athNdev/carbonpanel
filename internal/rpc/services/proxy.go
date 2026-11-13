@@ -10,6 +10,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -574,7 +575,9 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 		if err != nil {
 			s.log.Error("Failed to recreate container for proxy change: %v", err)
 			if server.ContainerID == "" && s.proxyManager != nil && hostname != "" {
-				s.proxyManager.RemoveRouteByHostname(hostname, listenerID)
+				if routeErr := s.proxyManager.RemoveRouteByHostname(hostname, listenerID); routeErr != nil {
+					err = errors.Join(err, fmt.Errorf("failed to remove stale proxy route: %w", routeErr))
+				}
 			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate container for proxy change: %w", err))
 		}
