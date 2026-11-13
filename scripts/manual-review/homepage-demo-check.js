@@ -292,6 +292,10 @@
         text("staging").includes("4 changes across 4 areas"),
       "reset cancels an in-flight apply",
     );
+    assert(
+      document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      "decorative effects and controls stay within the viewport",
+    );
     return { pass: true, checks };
   } catch (error) {
     return { pass: false, error: String(error), checks };
