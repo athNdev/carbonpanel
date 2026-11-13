@@ -17,6 +17,7 @@ import (
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/nodescan"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -30,6 +31,7 @@ type NodeService struct {
 	store *storage.Store
 	pool  *docker.ClientPool
 	log   *logger.Logger
+	scan  func(context.Context) *v1.ScanNodesResponse
 }
 
 // NewNodeService creates a new NodeService instance
@@ -38,7 +40,12 @@ func NewNodeService(store *storage.Store, pool *docker.ClientPool, log *logger.L
 		store: store,
 		pool:  pool,
 		log:   log,
+		scan:  nodescan.New(store, log).Scan,
 	}
+}
+
+func (s *NodeService) ScanNodes(ctx context.Context, _ *connect.Request[v1.ScanNodesRequest]) (*connect.Response[v1.ScanNodesResponse], error) {
+	return connect.NewResponse(s.scan(ctx)), nil
 }
 
 // dbNodeToProto converts a database Node model to proto Node message
