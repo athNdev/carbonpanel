@@ -881,12 +881,17 @@ h2 {
 }
 .craft-grid {
   --minor-line: rgba(243, 240, 230, 0.075);
+  --craft-grid-step: clamp(64px, 7.5vw, 104px);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
   gap: 90px;
 }
 .craft-grid::before {
+  background-image:
+    linear-gradient(var(--minor-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--minor-line) 1px, transparent 1px);
+  background-size: var(--craft-grid-step) var(--craft-grid-step);
   mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent),
     linear-gradient(90deg, transparent 22%, #000 48%, #000);
 }
@@ -987,6 +992,9 @@ h2 {
   .craft-grid {
     grid-template-columns: 1fr;
     gap: 32px;
+  }
+  .craft-grid::before {
+    mask-image: linear-gradient(transparent, #000 8%, #000 88%, transparent);
   }
   .craft-copy {
     grid-row: 1;
@@ -1295,7 +1303,7 @@ h2 {
   }
 }
 @media (max-width: 900px) {
-  .structural-grid::before {
+  .structural-grid:not(.craft-grid)::before {
     background: none;
   }
   .nav-links {
