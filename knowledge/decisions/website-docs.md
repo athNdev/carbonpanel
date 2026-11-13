@@ -28,6 +28,9 @@ sources:
   workflow publishes Pages; docs validation must not replace the root homepage.
 - Website CI pins the same Bun version as the frontend CI so frozen installs
   can read the application's checked-in lockfile format.
+- The source-build guide installs frontend dependencies with the frozen lockfile
+  before generation, which requires the pinned local formatter. It names the
+  explicit container builder image overrides and version-policy record.
 - The homepage's interactive examples compile from shared Svelte feature
   components with browser-local fixtures; the combined build includes their
   prerendered HTML and hashed assets. See [Homepage UI fragments](homepage-fragments.md).

@@ -8,15 +8,18 @@
 
 
 ARG APP_VERSION=dev
+ARG GO_IMAGE=golang:1.26.11-alpine
+ARG BUN_IMAGE=oven/bun:1.4.2-alpine
 
 # Generate protobuf code using buf
-FROM --platform=$BUILDPLATFORM bufbuild/buf:1.50.0 AS proto-builder
+ARG BUF_IMAGE=bufbuild/buf:1.50.0
+FROM --platform=$BUILDPLATFORM ${BUF_IMAGE} AS proto-builder
 WORKDIR /app
 COPY buf.yaml buf.gen.yaml buf.lock ./
 COPY proto/ ./proto/
 RUN mkdir -p web/carbon-panel/static pkg/proto web/carbon-panel/src/lib/proto && buf generate
 
-FROM --platform=$BUILDPLATFORM oven/bun:1.4.2-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM ${BUN_IMAGE} AS frontend-builder
 
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
@@ -36,10 +39,11 @@ COPY --from=proto-builder /app/web/carbon-panel/static/schemav1.yaml ./static/
 
 RUN bun run build
 
-FROM --platform=$BUILDPLATFORM golang:1.26.11-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS backend-builder
 
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
+ENV GOTOOLCHAIN=local
 
 WORKDIR /app
 

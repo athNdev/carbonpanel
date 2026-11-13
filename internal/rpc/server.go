@@ -29,6 +29,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/health"
 	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/internal/module"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/packwiz"
 	"github.com/athNdev/carbon-panel/internal/proxy"
 	"github.com/athNdev/carbon-panel/internal/rbac"
@@ -50,6 +51,7 @@ type Server struct {
 	store            *storage.Store
 	docker           *docker.Client
 	clientPool       *docker.ClientPool
+	storageResolver  *nodestorage.Resolver
 	placementEngine  *docker.PlacementEngine
 	sender           *command.Sender
 	config           *config.Config
@@ -96,6 +98,7 @@ func NewServer(
 	log *logger.Logger,
 	clientPool *docker.ClientPool,
 	placementEngine *docker.PlacementEngine,
+	storageResolvers ...*nodestorage.Resolver,
 ) *Server {
 	// Initialize RBAC enforcer
 	enforcer, err := rbac.NewEnforcer(store.DB())
@@ -169,10 +172,15 @@ func NewServer(
 		logStreamer.SetClientResolver(docker.NewContainerLogClientResolver(store, clientPool))
 	}
 
+	var storageResolver *nodestorage.Resolver
+	if len(storageResolvers) > 0 {
+		storageResolver = storageResolvers[0]
+	}
 	s := &Server{
 		store:            store,
 		docker:           dockerCli,
 		clientPool:       clientPool,
+		storageResolver:  storageResolver,
 		placementEngine:  placementEngine,
 		sender:           sender,
 		config:           cfg,
@@ -302,6 +310,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.clientPool, s.log)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
+	fileService.SetStorageResolver(s.storageResolver)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)

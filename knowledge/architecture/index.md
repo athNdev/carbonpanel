@@ -14,4 +14,5 @@
 - [Runtime model](runtime.md) — The daemon owns the API, console, proxy, scheduler and SQLite, and starts them from cmd/carbon-panel.
 - [Scheduler](scheduler.md) — Cron and lifecycle tasks run in the controller and surface progress over the WebSocket hub.
 - [Server data ownership](server-data-ownership.md) — The panel and the game container share a bind mount but not a uid, so anything the panel writes must be handed to the game container's user. Existing /data matching the game uid sets SKIP_CHOWN so a restart does not recursively chown.
+- [Server lifecycle admission](server-lifecycle.md) — RPC and scheduled starts share node capacity admission before container mutation.
 - [TCP proxy](proxy.md) — One public TCP port multiplexes Minecraft traffic by inspecting the handshake and routing on hostname.

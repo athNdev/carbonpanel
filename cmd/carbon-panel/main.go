@@ -353,9 +353,12 @@ func main() {
 	clientPool.SetProxyEnabled(cfg.Proxy.Enabled)
 	clientPool.StartHealthChecker(30 * time.Second)
 	defer clientPool.StopHealthChecker()
+	var storageTransport nodestorage.Transport
 	if cfg.Storage.WorkerImage != "" {
-		nodestorage.SetTransport(docker.NewStorageTransport(clientPool, log, cfg.Storage.WorkerImage))
+		storageTransport = docker.NewStorageTransport(clientPool, log, cfg.Storage.WorkerImage)
+		nodestorage.SetTransport(storageTransport)
 	}
+	storageResolver := nodestorage.NewResolver(storageTransport)
 
 	// Initialize command sender
 	sender := command.NewSender(store, cfg, dockerClient, clientPool)
@@ -516,7 +519,7 @@ func main() {
 	placementEngine := docker.NewPlacementEngine(store)
 
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine)
+	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine, storageResolver)
 	rpcServer.SetHibernationManager(hibernationMgr)
 
 	// The auth manager persists the recovery key. Announce the secret only

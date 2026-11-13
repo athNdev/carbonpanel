@@ -46,6 +46,9 @@ bun run test
   The retained `bits-ui` dependency requires `@internationalized/date` as a peer,
   even when the application has no direct date-component imports. Remove only
   exclusive dependencies and regenerate the lockfile through Bun.
+- Proto generation uses pinned remote plugins rather than frontend-installed Buf
+  or protoc generator executables. Keep the frontend protobuf runtime dependency;
+  validate its compatibility through the actual generated client checks.
 - A missing metric is unavailable, not zero. Render `—`, `IDLE` or `AWAITING
   SAMPLE`; never substitute a plausible-looking number.
 - Use the approved artwork in [brand assets](../../assets/branding/README.md)
