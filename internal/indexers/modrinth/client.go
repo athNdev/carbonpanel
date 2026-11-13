@@ -251,13 +251,26 @@ func (c *Client) GetModpackVersions(ctx context.Context, modpackID string) ([]Ve
 
 // GetVersions preserves provider order and optional server-side filtering.
 func (c *Client) GetVersions(ctx context.Context, projectID, loader, gameVersion string) ([]Version, error) {
-	params := url.Values{}
+	var loaders, gameVersions []string
 	if loader != "" && loader != "vanilla" {
-		encoded, _ := json.Marshal([]string{loader})
-		params.Set("loaders", string(encoded))
+		loaders = []string{loader}
 	}
 	if gameVersion != "" {
-		encoded, _ := json.Marshal([]string{gameVersion})
+		gameVersions = []string{gameVersion}
+	}
+	return c.GetVersionsWithFilters(ctx, projectID, loaders, gameVersions)
+}
+
+// GetVersionsWithFilters accepts literal filters for callers whose legacy policy
+// includes vanilla or an empty target value, preserving their provider query.
+func (c *Client) GetVersionsWithFilters(ctx context.Context, projectID string, loaders, gameVersions []string) ([]Version, error) {
+	params := url.Values{}
+	if len(loaders) > 0 {
+		encoded, _ := json.Marshal(loaders)
+		params.Set("loaders", string(encoded))
+	}
+	if len(gameVersions) > 0 {
+		encoded, _ := json.Marshal(gameVersions)
 		params.Set("game_versions", string(encoded))
 	}
 	endpoint := fmt.Sprintf("%s/project/%s/version", c.baseURL, url.PathEscape(projectID))
@@ -270,4 +283,24 @@ func (c *Client) GetVersions(ctx context.Context, projectID, loader, gameVersion
 	}
 
 	return versions, nil
+}
+
+func (c *Client) GetVersion(ctx context.Context, id string) (*Version, error) {
+	var version Version
+	if err := c.http.DoJSON(ctx, c.baseURL+"/version/"+url.PathEscape(id), &version); err != nil {
+		return nil, err
+	}
+	return &version, nil
+}
+
+func (c *Client) GetProjects(ctx context.Context, ids []string) ([]ProjectDetails, error) {
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	var projects []ProjectDetails
+	if err := c.http.DoJSON(ctx, c.baseURL+"/projects?"+url.Values{"ids": {string(encoded)}}.Encode(), &projects); err != nil {
+		return nil, err
+	}
+	return projects, nil
 }

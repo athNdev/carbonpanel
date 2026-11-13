@@ -51,7 +51,7 @@ review.sh status
 review.sh logs a|b
 review.sh urls
 review.sh down            # keeps database, worlds and review data
-review.sh reset           # currently refuses until legacy ownership is verified
+review.sh reset           # explicitly deletes only marked instance data, preserving source
 ```
 
 `--ref` accepts any branch or commit. Building a new ref reuses Docker's layer
@@ -80,8 +80,9 @@ with Git and is not automatically removed during teardown.
 - **No prompts.** Health is polled via Docker health checks; the admin is created
   through the public `AuthService.Register` RPC. The first registered user is
   admin by design. No credentials from 1Password are needed.
-- **Safe teardown.** `down` keeps data. Legacy `reset` currently refuses to
-  delete data until a separately verified reset is available. Newly created
+- **Safe teardown.** `down` keeps data. The separately named `reset` verifies
+  the session marker, container labels and resolved instance paths before deleting
+  only that session's instance data; its source checkout remains. Newly created
   sessions require a matching ownership marker and container labels; existing
   unmarked review data is not adopted automatically. Use `REVIEW_SESSION_SHA`
   to select a previously created session instead of the latest one.

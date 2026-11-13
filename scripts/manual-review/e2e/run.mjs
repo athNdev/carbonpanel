@@ -11,16 +11,19 @@
 //   BASE_URL=http://localhost:18082 node run.mjs
 //   BASE_URL_A=... BASE_URL_B=... node run.mjs   # both (ownership checks)
 //
-// Artifacts land in ./out/<timestamp>/ as PNGs plus report.md and report.json.
+// Artifacts land in ignored tmp/review-output/dual/<timestamp>/ (REVIEW_OUT
+// overrides the parent) as PNGs plus report.md, report.json and review.json.
 
 import { launchReviewBrowser } from "../../review/browser.mjs";
+import { writeReviewReport } from "../../review/report.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const BASE = process.env.BASE_URL || "http://localhost:18081";
 const USER = process.env.REVIEW_USER || "review";
 const PASS = process.env.REVIEW_PASS || "CarbonReview123!";
-const OUT = join(process.cwd(), "out", new Date().toISOString().replace(/[:.]/g, "-"));
+const OUT = join(process.env.REVIEW_OUT || fileURLToPath(new URL('../../../tmp/review-output/dual/', import.meta.url)), new Date().toISOString().replace(/[:.]/g, "-"));
 
 const VIEWPORTS = [
   { name: "desktop-1280", width: 1280, height: 900 },
@@ -30,6 +33,8 @@ const VIEWPORTS = [
 ];
 
 const findings = [];
+let browserMetadata;
+let activeBrowser;
 const note = (id, area, severity, what, detail) => {
   findings.push({ id, area, severity, what, detail });
   const tag = severity === "HIGH" ? "!!" : severity === "MEDIUM" ? " !" : "  ";
@@ -50,7 +55,7 @@ async function login(page, base) {
   await user.fill(USER);
   await pass.fill(PASS);
   await Promise.all([
-    page.waitForURL((u) => !String(u).includes("/login"), { timeout: 15000 }).catch(() => {}),
+    page.waitForURL((u) => !String(u).includes("/login"), { timeout: 15000 }),
     page.keyboard.press("Enter"),
   ]);
   await page.waitForTimeout(800);
@@ -89,6 +94,8 @@ async function horizontalOverflow(page) {
 async function run() {
   await mkdir(OUT, { recursive: true });
   const { browser, metadata } = await launchReviewBrowser();
+  activeBrowser = browser;
+  browserMetadata = metadata;
   await writeFile(join(OUT, "browser.json"), JSON.stringify(metadata, null, 2));
   const ctx = await browser.newContext({ viewport: VIEWPORTS[0] });
   const page = await ctx.newPage();
@@ -104,6 +111,7 @@ async function run() {
     note("A1", "auth", "HIGH", "login failed", String(e));
     await shot(page, "A1-login-FAILURE");
     await browser.close();
+    activeBrowser = undefined;
     await emit();
     return;
   }
@@ -258,6 +266,7 @@ async function run() {
     narrow.overflow ? `create-server overflows at 390px (scrollW ${narrow.scrollW})` : "create-server fits 390px", "");
 
   await browser.close();
+  activeBrowser = undefined;
   await emit();
 }
 
@@ -282,12 +291,17 @@ async function emit() {
 
   await writeFile(join(OUT, "report.md"), md);
   await writeFile(join(OUT, "report.json"), JSON.stringify({ base: BASE, at: new Date().toISOString(), findings }, null, 2));
+  writeReviewReport({ out: OUT, profile: 'dual-ownership', base: BASE, driver: browserMetadata, checks: findings.map(item => ({ name: item.id, status: item.severity === 'PASS' ? 'passed' : item.severity === 'HIGH' ? 'failed' : 'review-required', detail: item.what })) });
+  if (findings.some(item => item.severity === 'HIGH')) process.exitCode = 1;
   console.log("\n" + md);
   console.log(`\nreport: ${join(OUT, "report.md")}`);
   console.log(`shots:  ${OUT}`);
 }
 
-run().catch((e) => {
+run().catch(async (e) => {
+  if (activeBrowser) await activeBrowser.close().catch(() => {});
+  findings.push({ id: 'runner', severity: 'HIGH', what: 'Review stopped before completion; see runner error.' });
+  writeReviewReport({ out: OUT, profile: 'dual-ownership', base: BASE, driver: browserMetadata, checks: findings.map(item => ({ name: item.id, status: item.severity === 'PASS' ? 'passed' : item.severity === 'HIGH' ? 'failed' : 'review-required', detail: item.what })) });
   console.error("review run failed:", e);
   process.exit(1);
 });

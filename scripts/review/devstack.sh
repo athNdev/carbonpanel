@@ -24,12 +24,16 @@ set -euo pipefail
 
 NAME="${REVIEW_STACK_NAME:-carbon-panel-review}"
 PORT="${REVIEW_PORT:-8099}"
+GAME_PORT="${REVIEW_GAME_PORT:-25585}"
 IMAGE="${REVIEW_IMAGE:-carbon-panel:review}"
 USER_NAME="${PANEL_REVIEW_USER:-reviewer}"
 USER_PASS="${PANEL_REVIEW_PASSWORD:-Review-Panel-2026}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT >= 1 && 10#$PORT <= 65515)) || {
 	echo "review port must be in 1..65515" >&2; exit 2;
+}
+[[ "$GAME_PORT" =~ ^[0-9]+$ ]] && ((10#$GAME_PORT >= 1 && 10#$GAME_PORT <= 65515)) || {
+	echo "review game port must be in 1..65515" >&2; exit 2;
 }
 
 # A session may only manage its own direct child of this fixed user cache.
@@ -140,15 +144,30 @@ seed() {
 
 	count="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" | list_count servers)"
 	if [ "$count" -eq 0 ]; then
+		GAME_PORT="$(free_port "$GAME_PORT")"
 		rpc /carbonpanel.v1.ServerService/CreateServer \
-			'{"name":"review-vanilla","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","memory":2048,"maxPlayers":10,"port":25565,"requestId":"review-bootstrap-server"}' \
+			'{"name":"review-vanilla","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","memory":2048,"maxPlayers":10,"port":'"$GAME_PORT"',"requestId":"review-bootstrap-server"}' \
 			"${token}" >/dev/null
 	fi
 	# A missing or failed starter is a setup failure, not a successful capture.
-	local servers server_id server_status
-	servers="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}")"
-	server_id="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s).servers;if(!Array.isArray(v)||!v[0]?.id)throw Error();console.log(v[0].id)}catch(e){process.exitCode=1}})')"
-	server_status="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).servers[0].status??"")}catch(e){process.exitCode=1}})')"
+	local servers server_id server_status container_id record deadline timeout="${REVIEW_SEED_TIMEOUT_SECONDS:-180}"
+	[[ "$timeout" =~ ^[0-9]+$ ]] && ((10#$timeout >= 1 && 10#$timeout <= 600)) || { echo "review seed timeout must be in 1..600 seconds" >&2; return 1; }
+	deadline=$((SECONDS + 10#$timeout))
+	# CreateServer returns before image/container creation finishes. Do not send
+	# StartServer while that asynchronous lifecycle operation still owns the row.
+	while :; do
+		servers="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}")"
+		record="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s).servers;if(!Array.isArray(v)||!v[0]?.id)throw Error();console.log([v[0].id,v[0].status??"",v[0].containerId??""].join("|"))}catch(e){process.exitCode=1}})')"
+		IFS='|' read -r server_id server_status container_id <<< "$record"
+		case "$server_status" in
+			SERVER_STATUS_ERROR|SERVER_STATUS_UNHEALTHY|7|8) echo "review starter creation failed: $server_status" >&2; return 1 ;;
+			SERVER_STATUS_CREATING|1) ;;
+			SERVER_STATUS_STOPPED|SERVER_STATUS_RUNNING|SERVER_STATUS_STARTING|5|3|2) [ -z "$container_id" ] || break ;;
+			*) echo "unexpected review starter status: $server_status" >&2; return 1 ;;
+		esac
+		((SECONDS < deadline)) || { echo "review starter did not finish creation within $timeout seconds" >&2; return 1; }
+		sleep 1
+	done
 	case "$server_status" in
 		SERVER_STATUS_RUNNING|SERVER_STATUS_STARTING|3|2) ;;
 		*) rpc /carbonpanel.v1.ServerService/StartServer '{"id":"'${server_id}'","requestId":"review-bootstrap-start"}' "${token}" >/dev/null ;;
