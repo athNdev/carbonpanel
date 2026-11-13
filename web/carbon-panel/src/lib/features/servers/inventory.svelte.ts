@@ -33,10 +33,14 @@ export function createServerInventory(
 	let clock = 0;
 	let listVersion = 0;
 	let outcomeVersion = 0;
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Private bookkeeping; only writable snapshots are reactive.
 	const versions = new Map<string, number>();
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Private bookkeeping; only writable snapshots are reactive.
 	const removed = new Set<string>();
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Private bookkeeping; only writable snapshots are reactive.
 	const pending = new Map<string, Promise<unknown>>();
 	let activeRequests = 0;
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Private bookkeeping; only writable snapshots are reactive.
 	const watches = new Map<string, { timer: ReturnType<typeof setInterval>; users: number }>();
 	const publish = (patch: Partial<InventoryState>) => {
 		snapshot = { ...snapshot, ...patch };
@@ -120,7 +124,9 @@ export function createServerInventory(
 			const incoming = await requests.list(fullStats, silent);
 			if (!valid() || sequence < listVersion) return snapshot.servers;
 			listVersion = sequence;
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Private bookkeeping; only writable snapshots are reactive.
 			const next = new Map(snapshot.servers.map((server) => [server.id, server]));
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Private bookkeeping; only writable snapshots are reactive.
 			const ids = new Set(incoming.map((server) => server.id));
 			for (const server of snapshot.servers) {
 				if (!ids.has(server.id) && (versions.get(server.id) ?? 0) <= sequence) {

@@ -50,6 +50,7 @@ function checkPermission(
 }
 
 function createAuthStore() {
+	let sessionRevision = 0;
 	const { subscribe, set, update } = writable<AuthState>({
 		user: null,
 		token: null,
@@ -73,6 +74,7 @@ function createAuthStore() {
 
 	return {
 		subscribe,
+		getSessionRevision: () => sessionRevision,
 
 		async checkAuthStatus() {
 			try {
@@ -139,9 +141,11 @@ function createAuthStore() {
 		},
 
 		async login(username: string, password: string) {
+			const generation = ++sessionRevision;
 			try {
 				const request = create(LoginRequestSchema, { username, password });
 				const response = await rpcClient.auth.login(request);
+				if (generation !== sessionRevision) return response;
 
 				// Store token
 				if (browser && response.token) {
@@ -161,12 +165,13 @@ function createAuthStore() {
 
 				return response;
 			} catch (error) {
-				update((state) => ({ ...state, isLoading: false }));
+				if (generation === sessionRevision) update((state) => ({ ...state, isLoading: false }));
 				throw error;
 			}
 		},
 
 		async logout() {
+			const generation = ++sessionRevision;
 			const currentState: AuthState = get({ subscribe });
 
 			try {
@@ -177,6 +182,7 @@ function createAuthStore() {
 				console.error('Logout error:', error);
 			}
 
+			if (generation !== sessionRevision) return;
 			// Clear local storage
 			if (browser) {
 				localStorage.removeItem('auth_token');
@@ -221,6 +227,7 @@ function createAuthStore() {
 		},
 
 		setToken(token: string) {
+			sessionRevision++;
 			if (browser) {
 				localStorage.setItem('auth_token', token);
 			}
@@ -262,6 +269,7 @@ function createAuthStore() {
 		},
 
 		async validateSession() {
+			const generation = sessionRevision;
 			let currentToken: string | null = null;
 			update((state) => {
 				currentToken = state.token;
@@ -275,6 +283,7 @@ function createAuthStore() {
 
 			try {
 				const response = await rpcClient.auth.getCurrentUser({});
+				if (generation !== sessionRevision) return false;
 
 				if (response.user) {
 					update((state) => ({
@@ -287,6 +296,7 @@ function createAuthStore() {
 					return true;
 				} else {
 					// Invalid token, clear it
+					sessionRevision++;
 					if (browser) {
 						localStorage.removeItem('auth_token');
 					}
@@ -301,6 +311,7 @@ function createAuthStore() {
 					return false;
 				}
 			} catch {
+				if (generation !== sessionRevision) return false;
 				update((state) => ({ ...state, isLoading: false }));
 				return false;
 			}

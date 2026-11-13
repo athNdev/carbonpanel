@@ -53,7 +53,6 @@ one at https://mozilla.org/MPL/2.0/.
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
-	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { GetServerRoutingResponse } from '$lib/proto/carbonpanel/v1/proxy_pb';
 

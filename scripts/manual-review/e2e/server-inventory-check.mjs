@@ -35,6 +35,10 @@ try {
   let failList = false;
   let empty = false;
   let authEnabled = false;
+  let validToken = "fixture-token";
+  let tokenCounter = 0;
+  let delayedStatus = 0;
+  let delayedErrors = [];
   let fleet = [
     {
       id: "ready",
@@ -71,15 +75,17 @@ try {
       });
     if (method === "GetAuthStatus")
       return reply({ localAuthEnabled: authEnabled, oidcEnabled: false });
-    if (method === "Login")
+    if (method === "Login") {
+      validToken = `fixture-token-${++tokenCounter}`;
       return reply({
-        token: "fixture-token",
+        token: validToken,
         user: { id: "fixture", username: "Fixture" },
       });
+    }
     if (
       method === "GetCurrentUser" &&
       authEnabled &&
-      route.request().headers().authorization !== "Bearer fixture-token"
+      route.request().headers().authorization !== `Bearer ${validToken}`
     )
       return reply({});
     if (method === "GetCurrentUser")
@@ -88,6 +94,18 @@ try {
         permissions: [{ resource: "*", action: "*", objectId: "*" }],
       });
     if (method === "ListServers") {
+      if (delayedStatus) {
+        const status = delayedStatus;
+        await new Promise((resolve) => delayedErrors.push(resolve));
+        return route.fulfill({
+          status,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: status === 401 ? "unauthenticated" : "invalid_argument",
+            message: "Old session failure",
+          }),
+        });
+      }
       if (holding) {
         await new Promise((resolve) => held.push(resolve));
       }
@@ -239,6 +257,69 @@ try {
   results.push(
     "logout clears inventory and rejects a late authenticated response",
   );
+  for (const status of [401, 400]) {
+    await page.getByLabel("Username", { exact: true }).fill("fixture");
+    await page.getByLabel("Password", { exact: true }).fill("fixture-password");
+    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+    await page.getByText("Ready Server", { exact: true }).last().waitFor();
+    delayedStatus = status;
+    await page.evaluate(() => {
+      window.__oldRejected = import("/src/lib/api/rpc-client.ts")
+        .then(({ rpcClient }) =>
+          rpcClient.server.listServers({ fullStats: true }),
+        )
+        .catch(() => {});
+    });
+    const errorDeadline = Date.now() + 15000;
+    while (delayedErrors.length === 0 && Date.now() < errorDeadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(delayedErrors.length);
+    delayedStatus = 0;
+    await page.evaluate(async () => {
+      const { authStore } = await import("/src/lib/stores/auth.ts");
+      await authStore.logout();
+    });
+    await page.waitForURL("**/login");
+    await page.getByLabel("Username", { exact: true }).fill("fixture");
+    await page.getByLabel("Password", { exact: true }).fill("fixture-password");
+    await page.getByRole("button", { name: "Sign In", exact: true }).click();
+    await page.getByText("Ready Server", { exact: true }).last().waitFor();
+    const logoutCalls = requests.filter(
+      (request) => request.method === "Logout",
+    ).length;
+    delayedErrors.splice(0).forEach((release) => release());
+    await page.evaluate(() => window.__oldRejected);
+    await page.waitForTimeout(100);
+    assert.equal(
+      requests.filter((request) => request.method === "Logout").length,
+      logoutCalls,
+      "old account failure triggered logout",
+    );
+    assert.equal(
+      await page.evaluate(async () => {
+        const { authStore } = await import("/src/lib/stores/auth.ts");
+        let authenticated = false;
+        const off = authStore.subscribe((state) => {
+          authenticated = state.isAuthenticated;
+        });
+        off();
+        return authenticated;
+      }),
+      true,
+    );
+    assert.equal(
+      await page.getByText("Old session failure", { exact: true }).count(),
+      0,
+    );
+    results.push(
+      `delayed previous-account HTTP ${status} cannot log out or toast in the new session`,
+    );
+    await page.evaluate(async () => {
+      const { authStore } = await import("/src/lib/stores/auth.ts");
+      await authStore.logout();
+    });
+    await page.waitForURL("**/login");
+  }
   assert.deepEqual(errors, []);
   const out = path.join(here, "out", "server-inventory");
   await fs.mkdir(out, { recursive: true });

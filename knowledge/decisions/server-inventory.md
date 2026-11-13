@@ -7,6 +7,8 @@ owners: [oss-runtime]
 code_refs:
   - web/carbon-panel/src/lib/features/servers
   - web/carbon-panel/src/lib/stores/servers.ts
+  - web/carbon-panel/src/lib/stores/auth.ts
+  - web/carbon-panel/src/lib/api/rpc-client.ts
   - web/carbon-panel/src/routes/+layout.svelte
   - web/carbon-panel/src/routes/+page.svelte
   - web/carbon-panel/src/routes/servers
@@ -26,7 +28,10 @@ local mutations invalidate older reads, and removed IDs remain tombstoned until
 an account reset. Account generations also isolate pending action outcomes.
 Matching refresh subscriptions share a timer and release it on the last close.
 Login/logout clears inventory and invalidates pending reads before another
-account can populate it. Views retain confirmation, copy and navigation.
+account can populate it. RPC interception also captures the auth session
+revision: an older account's delayed authentication error cannot log out or
+toast in a newer session. Login, logout and validation completions verify their
+session before changing account state. Views retain confirmation, copy and navigation.
 
 ListServers and GetServer currently both apply cached metrics and use the same
 complete Server conversion. A newer complete response is authoritative even

@@ -66,6 +66,7 @@ const recentErrorToasts = new Set<string>();
 // Login auth interception
 const authInterceptor: Interceptor = (next) => async (req) => {
 	// Auth headers
+	const sessionRevision = authStore.getSessionRevision();
 	const authHeaders = authStore.getHeaders();
 	Object.entries(authHeaders).forEach(([key, value]) => {
 		req.header.set(key, value as string);
@@ -87,6 +88,8 @@ const authInterceptor: Interceptor = (next) => async (req) => {
 		const res = await next(req);
 		return res;
 	} catch (error) {
+		// A previous account's response must not log out or toast in a newer session.
+		if (sessionRevision !== authStore.getSessionRevision()) throw error;
 		const onLoginPage = typeof window !== 'undefined' && window.location.pathname === '/login';
 
 		// Log out on expired/invalid session

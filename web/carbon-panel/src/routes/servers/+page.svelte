@@ -16,7 +16,6 @@ one at https://mozilla.org/MPL/2.0/.
 		serverActions,
 		sortServersByActivity
 	} from '$lib/stores/servers';
-	import { rpcClient } from '$lib/api/rpc-client';
 	import { triggerStreamDownload } from '$lib/api/stream-download';
 	import {
 		serverStatusLabel as getStatusDisplayName,

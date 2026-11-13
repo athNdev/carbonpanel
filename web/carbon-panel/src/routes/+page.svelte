@@ -16,7 +16,7 @@ one at https://mozilla.org/MPL/2.0/.
 		serverStatusTone as getStatusTagType,
 		serverStatusLabel
 	} from '$lib/features/servers/presentation';
-	import { formatBytes, getStringForEnum } from '$lib/utils';
+	import { formatBytes } from '$lib/utils';
 	import {
 		Server,
 		MemoryStick,
