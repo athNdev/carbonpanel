@@ -82,6 +82,7 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 		if cfg == nil {
 			return errors.New("server configuration is empty")
 		}
+		serverruntime.PrepareConfig(ctx, s.store, server, cfg)
 		result, err := serverruntime.Recreate(ctx, s.store, dockerClient, server, cfg)
 		if err != nil {
 			return err

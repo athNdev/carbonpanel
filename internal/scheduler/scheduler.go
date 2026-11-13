@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -1047,23 +1046,7 @@ func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleSt
 	if serverConfig == nil {
 		return true, fmt.Errorf("server configuration is empty")
 	}
-	if serverConfig.CFAPIKey == nil || *serverConfig.CFAPIKey == "" || serverConfig.ModrinthToken == nil || *serverConfig.ModrinthToken == "" {
-		if global, _, globalErr := store.GetGlobalSettings(ctx); globalErr == nil && global != nil {
-			if (serverConfig.CFAPIKey == nil || *serverConfig.CFAPIKey == "") && global.CFAPIKey != nil && *global.CFAPIKey != "" {
-				serverConfig.CFAPIKey = global.CFAPIKey
-			}
-			if (serverConfig.ModrinthToken == nil || *serverConfig.ModrinthToken == "") && global.ModrinthToken != nil && *global.ModrinthToken != "" {
-				serverConfig.ModrinthToken = global.ModrinthToken
-			}
-		}
-	}
-	if server.ModLoader == storage.ModLoaderAutoCurseForge && (serverConfig.CFSlug == nil || *serverConfig.CFSlug == "") && (serverConfig.CFPageURL == nil || *serverConfig.CFPageURL == "") && server.Name != "" {
-		slug := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(server.Name)), "-")
-		slug = strings.Trim(slug, "-")
-		if slug != "" {
-			serverConfig.CFSlug = &slug
-		}
-	}
+	serverruntime.PrepareConfig(ctx, store, server, serverConfig)
 
 	result, recreateErr := serverruntime.Recreate(ctx, store, dockerClient, server, serverConfig)
 	if recreateErr != nil {
