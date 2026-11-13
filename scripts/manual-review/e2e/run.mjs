@@ -13,7 +13,7 @@
 //
 // Artifacts land in ./out/<timestamp>/ as PNGs plus report.md and report.json.
 
-import { chromium } from "playwright";
+import { launchReviewBrowser } from "../../review/browser.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -88,7 +88,8 @@ async function horizontalOverflow(page) {
 
 async function run() {
   await mkdir(OUT, { recursive: true });
-  const browser = await chromium.launch({ headless: true });
+  const { browser, metadata } = await launchReviewBrowser();
+  await writeFile(join(OUT, "browser.json"), JSON.stringify(metadata, null, 2));
   const ctx = await browser.newContext({ viewport: VIEWPORTS[0] });
   const page = await ctx.newPage();
 
