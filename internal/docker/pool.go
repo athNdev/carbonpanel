@@ -189,66 +189,7 @@ func (p *ClientPool) Stats() PoolStats {
 // daemon. Empty, "local", the default node id, and a node marked local use
 // the controller client.
 func (p *ClientPool) GetClient(nodeID string) (*Client, error) {
-	atomic.AddUint64(&p.stats.totalRequests, 1)
-
-	if nodeID == "" || nodeID == p.defaultNodeID || nodeID == "local" {
-		def := p.GetDefaultClient()
-		if def != nil {
-			atomic.AddUint64(&p.stats.cacheHits, 1)
-			return def, nil
-		}
-	}
-
-	cached, fresh, err := p.lookupCachedClient(nodeID)
-	if err != nil {
-		return nil, err
-	}
-	if fresh {
-		atomic.AddUint64(&p.stats.cacheHits, 1)
-		return cached, nil
-	}
-
-	atomic.AddUint64(&p.stats.cacheMisses, 1)
-
-	if p.store == nil {
-		return nil, fmt.Errorf("node store is nil and client not found for node: %s", nodeID)
-	}
-
-	node, err := p.store.GetNode(context.Background(), nodeID)
-	if err != nil {
-		return nil, fmt.Errorf("node %s not found in store: %w", nodeID, err)
-	}
-
-	if node.IsLocal && p.defaultClient != nil {
-		p.mu.Lock()
-		p.clients[nodeID] = p.defaultClient
-		p.nodeConfigs[nodeID] = cloneNode(node)
-		p.mu.Unlock()
-		atomic.AddUint64(&p.stats.cacheHits, 1)
-		return p.defaultClient, nil
-	}
-
-	// Build the client outside the pool lock: NewClientForNode performs a
-	// bounded API-version ping, and holding p.mu across that network call
-	// would stall every other node's callers behind an unresponsive daemon.
-	newCli, err := p.createClientForNode(node)
-	if err != nil {
-		atomic.AddUint64(&p.stats.createErrors, 1)
-		return nil, fmt.Errorf("failed to create client for node %s: %w", nodeID, err)
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Another goroutine may have registered a client while this one was built.
-	if existing, ok := p.clients[nodeID]; ok && existing != nil {
-		_ = newCli.Close()
-		return existing, nil
-	}
-
-	p.clients[nodeID] = newCli
-	p.nodeConfigs[nodeID] = cloneNode(node)
-	return newCli, nil
+	return p.GetClientStrictContext(context.Background(), nodeID)
 }
 
 // GetClientStrict retrieves the Docker client for the given nodeID without fallback to default.
@@ -257,6 +198,15 @@ func (p *ClientPool) GetClient(nodeID string) (*Client, error) {
 // when the requested node is unavailable. See GetClient's doc comment for why the
 // fallback there is risky.
 func (p *ClientPool) GetClientStrict(nodeID string) (*Client, error) {
+	return p.GetClientStrictContext(context.Background(), nodeID)
+}
+
+// GetClientStrictContext resolves and constructs a node client within the
+// operation lifetime. Cancellation never substitutes the controller client.
+func (p *ClientPool) GetClientStrictContext(ctx context.Context, nodeID string) (*Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	atomic.AddUint64(&p.stats.totalRequests, 1)
 
 	if nodeID == "" || nodeID == p.defaultNodeID || nodeID == "local" {
@@ -267,7 +217,7 @@ func (p *ClientPool) GetClientStrict(nodeID string) (*Client, error) {
 		}
 	}
 
-	cached, fresh, err := p.lookupCachedClient(nodeID)
+	cached, fresh, err := p.lookupCachedClient(ctx, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -282,9 +232,12 @@ func (p *ClientPool) GetClientStrict(nodeID string) (*Client, error) {
 		return nil, fmt.Errorf("node store is nil and client not found for node: %s", nodeID)
 	}
 
-	node, err := p.store.GetNode(context.Background(), nodeID)
+	node, err := p.store.GetNode(ctx, nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("node %s not found: %w", nodeID, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	if node.IsLocal && p.defaultClient != nil {
@@ -298,15 +251,21 @@ func (p *ClientPool) GetClientStrict(nodeID string) (*Client, error) {
 
 	// See GetClient: build the client outside the pool lock so its bounded
 	// API-version ping cannot stall callers for other nodes.
-	newCli, err := p.createClientForNode(node)
+	newCli, err := p.createClientForNodeContext(ctx, node)
 	if err != nil {
 		atomic.AddUint64(&p.stats.createErrors, 1)
 		return nil, fmt.Errorf("failed to create client for node %s: %w", nodeID, err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(err, newCli.Close())
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(err, newCli.Close())
+	}
 	if existing, ok := p.clients[nodeID]; ok && existing != nil {
 		_ = newCli.Close()
 		return existing, nil
@@ -321,7 +280,7 @@ func (p *ClientPool) GetClientStrict(nodeID string) (*Client, error) {
 // still matches the node row. A changed host or TLS material drops that
 // client so the caller builds one for the current daemon. A client registered
 // without an endpoint, such as a test double, is returned as-is.
-func (p *ClientPool) lookupCachedClient(nodeID string) (*Client, bool, error) {
+func (p *ClientPool) lookupCachedClient(ctx context.Context, nodeID string) (*Client, bool, error) {
 	p.mu.RLock()
 	cli := p.clients[nodeID]
 	var cached *models.Node
@@ -338,9 +297,12 @@ func (p *ClientPool) lookupCachedClient(nodeID string) (*Client, bool, error) {
 	if cached == nil || store == nil {
 		return cli, true, nil
 	}
-	node, err := store.GetNode(context.Background(), nodeID)
+	node, err := store.GetNode(ctx, nodeID)
 	if err != nil {
 		return nil, false, fmt.Errorf("node %s endpoint could not be confirmed: %w", nodeID, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
 	}
 	if !endpointChanged(cached, node) {
 		return cli, true, nil
@@ -650,8 +612,8 @@ func (p *ClientPool) Close() error {
 	return firstErr
 }
 
-func (p *ClientPool) createClientForNode(node *models.Node) (*Client, error) {
-	cli, err := NewClientForNode(node, p.log, p.baseConfig)
+func (p *ClientPool) createClientForNodeContext(ctx context.Context, node *models.Node) (*Client, error) {
+	cli, err := NewClientForNodeContext(ctx, node, p.log, p.baseConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -670,6 +632,15 @@ func dockerTLSInsecure(nodeSkipVerify bool) bool {
 // NewClientForNode constructs a *Client configured specifically for a Node.
 // Supports unix:// sockets, tcp:// (with optional TLS certs or TLS skip verify), and ssh://.
 func NewClientForNode(node *models.Node, log *logger.Logger, baseConfig ClientConfig) (*Client, error) {
+	return NewClientForNodeContext(context.Background(), node, log, baseConfig)
+}
+
+// NewClientForNodeContext cancels node construction and owned network setup
+// with the initiating operation, while keeping the legacy bounded wrappers.
+func NewClientForNodeContext(ctx context.Context, node *models.Node, log *logger.Logger, baseConfig ClientConfig) (*Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	opts := []client.Opt{
 		client.FromEnv,
 	}
@@ -729,7 +700,7 @@ func NewClientForNode(node *models.Node, log *logger.Logger, baseConfig ClientCo
 		opts = append(opts, client.WithHTTPClient(&http.Client{Transport: transport}))
 	}
 
-	dockerCli, err := NewAPIClient(opts...)
+	dockerCli, err := NewAPIClientContext(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client for host %s: %w", host, err)
 	}
@@ -743,7 +714,7 @@ func NewClientForNode(node *models.Node, log *logger.Logger, baseConfig ClientCo
 	}
 
 	go func() {
-		_ = c.EnsureNetwork()
+		_ = c.EnsureNetworkContext(ctx)
 	}()
 
 	return c, nil
