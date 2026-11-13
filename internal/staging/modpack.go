@@ -69,7 +69,7 @@ func StageModpackTree(ctx context.Context, store *storage.Store, server *storage
 		if err != nil {
 			return err
 		}
-		defer source.Close()
+		defer func() { _ = source.Close() }()
 		if _, err := nodestorage.WriteFrom(ctx, acc, stageRoot+"/"+live, source, 64<<30); err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func modpackLivePath(rel string) (string, error) {
 		return "", fmt.Errorf("modpack path %q is not inside the pack", rel)
 	}
 	top := strings.SplitN(rel, "/", 2)[0]
-	switch top {
+	switch strings.ToLower(top) {
 	case ".git", ".carbon-panel", ".carbon-panel_modpack_git", ".carbon-panel_modpack_staged", ".carbon-panel_snapshots":
 		return "", fmt.Errorf("modpack path %q is reserved", rel)
 	}

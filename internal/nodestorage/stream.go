@@ -21,7 +21,7 @@ func WriteFrom(ctx context.Context, acc Accessor, rel string, src io.Reader, lim
 	if err != nil {
 		return 0, err
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	n, err := io.CopyBuffer(w, io.LimitReader(src, limit+1), make([]byte, storageworker.ChunkBytes))
 	if err != nil {
 		return n, err
@@ -58,7 +58,7 @@ func (l *local) OpenRead(ctx context.Context, rel string) (storageworker.ReadHan
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	if p == l.dir {
 		p = "."
 	} else {
@@ -255,7 +255,7 @@ func (w *localWriter) Commit() error {
 	if w.closed {
 		return os.ErrClosed
 	}
-	defer w.root.Close()
+	defer func() { _ = w.root.Close() }()
 	err := w.err
 	if err == nil {
 		err = w.ctx.Err()

@@ -74,7 +74,7 @@ func TestLargeStagedModpackAndUndoUseBoundedStreams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer acc.Close()
+	defer func() { _ = acc.Close() }()
 	snaps, err := commitFiles(ctx, acc, []storage.StagedContentChange{*row})
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestCorruptUndoRefusesPromotionAndPreservesRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer acc.Close()
+	defer func() { _ = acc.Close() }()
 	_ = acc.WriteFile("target", []byte("old"))
 	_ = acc.WriteFile("stage", []byte("new"))
 	rows := []storage.StagedContentChange{{BatchID: uuid.NewString(), Kind: storage.StagedKindFile, Action: storage.StagedActionReplace, TargetPath: "target", StagePath: "stage"}}
@@ -131,5 +131,27 @@ func TestCorruptUndoRefusesPromotionAndPreservesRecovery(t *testing.T) {
 	}
 	if _, err := commitFiles(context.Background(), acc, rows); err == nil {
 		t.Fatal("retry erased unresolved recovery")
+	}
+}
+
+func TestCommitFilesRefusesRecoveryTargets(t *testing.T) {
+	acc, err := nodestorage.NewLocal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = acc.Close() }()
+	batchID := uuid.NewString()
+	_ = acc.WriteFile("stage", []byte("new"))
+	for _, target := range []string{undoRoot, undoRoot + "/" + batchID + "/manifest.json", undoRoot + "/" + batchID + "/000000.data", ".CARBON-PANEL/UNDO/" + batchID + "/manifest.json"} {
+		rows := []storage.StagedContentChange{{BatchID: batchID, Kind: storage.StagedKindFile, Action: storage.StagedActionReplace, TargetPath: target, StagePath: "stage"}}
+		if _, err := commitFiles(context.Background(), acc, rows); err == nil {
+			t.Fatalf("accepted recovery target %s", target)
+		}
+	}
+	if _, err := acc.Stat(undoRoot); !os.IsNotExist(err) {
+		t.Fatalf("rejected target created recovery state: %v", err)
+	}
+	if _, err := modpackLivePath(".CARBON-PANEL/UNDO/manifest.json"); err == nil {
+		t.Fatal("modpack case alias accepted")
 	}
 }

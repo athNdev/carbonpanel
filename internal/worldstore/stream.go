@@ -138,6 +138,7 @@ func openZipArchive(path string) (*zipArchive, error) {
 		return fail(fmt.Errorf("worldstore: unsupported manifest version %d", manifest.Version))
 	}
 	sx.manifest = make(map[string]Entry, len(manifest.Files))
+	var total int64
 	for _, e := range manifest.Files {
 		p, err := cleanRelative(e.Path)
 		if err != nil || p != e.Path {
@@ -149,6 +150,10 @@ func openZipArchive(path string) (*zipArchive, error) {
 		if e.Size < 0 || e.Size > streamMaxFileBytes {
 			return fail(fmt.Errorf("worldstore: manifest size out of bounds: %s", p))
 		}
+		if e.Size > streamMaxWorldBytes-total {
+			return fail(errors.New("worldstore: expanded archive exceeds streaming limit"))
+		}
+		total += e.Size
 		sx.manifest[p] = e
 	}
 	// Coverage: the archive and the manifest must describe the same file set.
@@ -156,8 +161,12 @@ func openZipArchive(path string) (*zipArchive, error) {
 		return fail(errors.New("worldstore: manifest does not match archive contents"))
 	}
 	for p := range sx.byPath {
-		if _, ok := sx.manifest[p]; !ok {
+		entry, ok := sx.manifest[p]
+		if !ok {
 			return fail(fmt.Errorf("worldstore: entry %q missing from manifest", p))
+		}
+		if sx.byPath[p].UncompressedSize64 != uint64(entry.Size) {
+			return fail(fmt.Errorf("worldstore: archive/header size mismatch for %s", p))
 		}
 	}
 	return sx, nil

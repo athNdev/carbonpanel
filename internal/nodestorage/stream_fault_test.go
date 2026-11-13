@@ -117,25 +117,26 @@ func TestProcessStreamRejectsCorruptionAndCancellation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer sess.Close()
+			defer func() { _ = sess.Close() }()
 			acc := storageworker.NewRemoteAccessor(sess)
 			w, err := acc.BeginWrite(ctx, "target", 1024)
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, err = w.Write([]byte("new"))
-			if fault == "checksum" || fault == "sequence" || fault == "oversized" {
+			switch fault {
+			case "checksum", "sequence", "oversized":
 				if err == nil {
 					t.Fatal("invalid frame accepted")
 				}
-			} else if fault == "commit" {
+			case "commit":
 				if err != nil {
 					t.Fatal(err)
 				}
 				if err = w.Commit(); err == nil {
 					t.Fatal("invalid digest accepted")
 				}
-			} else if fault == "readchecksum" {
+			case "readchecksum":
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -148,7 +149,7 @@ func TestProcessStreamRejectsCorruptionAndCancellation(t *testing.T) {
 					t.Fatal("corrupt worker response accepted")
 				}
 				_ = r.Close()
-			} else {
+			default:
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -183,7 +184,7 @@ func TestProcessStreamHandleCapAndRandomAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer acc.Close()
+	defer func() { _ = acc.Close() }()
 	if err := acc.WriteFile("file", []byte("0123456789")); err != nil {
 		t.Fatal(err)
 	}

@@ -179,12 +179,13 @@ func TestStreamLargeProcessAndLocalParity(t *testing.T) {
 			defer cancel()
 			var acc Accessor
 			var err error
-			if kind == "local" {
+			switch kind {
+			case "local":
 				acc, err = NewLocal(t.TempDir())
-			} else if kind == "shared" {
+			case "shared":
 				root := t.TempDir()
 				acc, err = NewResolver(nil).ForNode(ctx, NodeInfo{StorageRoot: "/remote-root", ControllerStorageRoot: root}, filepath.Join("controller", "srv"))
-			} else {
+			default:
 				node := NodeInfo{Name: "worker", StorageRoot: t.TempDir()}
 				_ = os.MkdirAll(nodeDataRoot(node, "srv"), 0700)
 				acc, err = (&ProcessTransport{Bin: bin}).Open(ctx, node, "srv")
@@ -192,7 +193,7 @@ func TestStreamLargeProcessAndLocalParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer acc.Close()
+			defer func() { _ = acc.Close() }()
 			runtime.GC()
 			var baseline runtime.MemStats
 			runtime.ReadMemStats(&baseline)
@@ -214,7 +215,7 @@ func TestStreamLargeProcessAndLocalParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer r.Close()
+			defer func() { _ = r.Close() }()
 			got := sha256.New()
 			var peak uint64
 			for {

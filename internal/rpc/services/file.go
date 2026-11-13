@@ -398,7 +398,7 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 		s.log.Error("Failed to read upload temp file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to read uploaded file"))
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 
 	destRel := filepath.Join(targetPath, targetFilename)
 	if _, err := nodestorage.WriteFrom(ctx, acc, destRel, source, storageworker.MaxStreamBytes); err != nil {
@@ -1809,7 +1809,7 @@ func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request
 		return nil, storageError(err)
 	}
 
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	filename := filepath.Base(msg.Path)
 	temp, err := os.CreateTemp(s.downloadManager.TempDir(), "file-*")
 	if err != nil {
@@ -1886,7 +1886,7 @@ func copyViaAccessor(acc nodestorage.Accessor, src, dst string, isDir bool) erro
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	_, err = nodestorage.WriteFrom(context.Background(), acc, dst, source, storageworker.MaxStreamBytes)
 	return err
 }

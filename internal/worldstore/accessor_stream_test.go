@@ -79,7 +79,7 @@ func TestAccessorLargeProcessBackupRestoreDeterministic(t *testing.T) {
 		}
 		return store, store.Identity(), acc.Root()
 	}()
-	defer local.Close()
+	defer func() { _ = local.Close() }()
 	localHash, err := local.BackupTo(id, filepath.Join(t.TempDir(), "local.zip"), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +98,7 @@ func TestAccessorLargeProcessBackupRestoreDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	got := sha256.New()
 	if n, err := io.CopyBuffer(got, r, buf); err != nil || n != size {
 		t.Fatalf("restore %d %v", n, err)
@@ -140,7 +140,7 @@ func TestAccessorInterruptedRestoreRetainsRecoveryAndOldWorld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	_ = source.WriteFile("world", make([]byte, 1<<20))
 	archive := filepath.Join(t.TempDir(), "backup.zip")
 	if _, err := BackupToAccessor(source, archive, nil); err != nil {
@@ -150,7 +150,7 @@ func TestAccessorInterruptedRestoreRetainsRecoveryAndOldWorld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dest.Close()
+	defer func() { _ = dest.Close() }()
 	_ = dest.WriteFile("world", []byte("old"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -183,7 +183,7 @@ func TestAccessorPromotionFailurePreservesBothRecoveryTrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	_ = source.WriteFile("world", []byte("new"))
 	archive := filepath.Join(t.TempDir(), "backup.zip")
 	if _, err := BackupToAccessor(source, archive, nil); err != nil {
@@ -193,7 +193,7 @@ func TestAccessorPromotionFailurePreservesBothRecoveryTrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dest.Close()
+	defer func() { _ = dest.Close() }()
 	_ = dest.WriteFile("world", []byte("old"))
 	if err := RestoreFromAccessor(failPromotionAccessor{dest}, archive); err == nil {
 		t.Fatal("missing promotion failure")

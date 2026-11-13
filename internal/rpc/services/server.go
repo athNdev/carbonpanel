@@ -3148,7 +3148,7 @@ func (s *ServerService) writeManualServerPack(ctx context.Context, server *stora
 	if err != nil {
 		return false, err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
 	if err != nil {
 		return false, err
@@ -3182,7 +3182,7 @@ func serverLatestLog(ctx context.Context, store *storage.Store, server *storage.
 	if err != nil {
 		return nil, err
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 	fi, err := acc.Stat(rel)
 	if err != nil {
 		return nil, err

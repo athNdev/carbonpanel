@@ -36,7 +36,7 @@ func CreateZip(ctx context.Context, acc Accessor, paths []string, destRel string
 	if err != nil {
 		return 0, err
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	n, err := writeZip(ctx, acc, paths, w, compress, destRel)
 	if err != nil {
 		return n, err
@@ -137,7 +137,7 @@ func addZipPath(ctx context.Context, acc Accessor, zw *zip.Writer, rel string, m
 	if err != nil {
 		return 0, err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 	header, err := zip.FileInfoHeader(info)
 	if err != nil {
 		return 0, err

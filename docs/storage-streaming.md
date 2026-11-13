@@ -32,6 +32,8 @@ Protocol line readers allow the base64 expansion of 8 MiB plus 1 MiB overhead;
 malformed or oversized frames terminate the affected channel. Directory listing
 returns metadata, never file bodies. Memory for metadata and ZIP directory
 structures grows with entry counts, separately from bounded transfer buffers.
+Worldstore validates expanded totals and archive-header/manifest size agreement
+before extraction starts.
 
 ## Ownership and recovery
 

@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strings"
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
@@ -33,12 +34,12 @@ func copyStream(ctx context.Context, acc nodestorage.Accessor, src, dst string, 
 	if err != nil {
 		return 0, "", err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	w, err := acc.BeginWrite(ctx, dst, max(1, limit))
 	if err != nil {
 		return 0, "", err
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	h := sha256.New()
 	n, err := io.CopyBuffer(io.MultiWriter(w, h), io.LimitReader(r, limit+1), make([]byte, storageworker.ChunkBytes))
 	err = errors.Join(err, r.Close())
@@ -64,6 +65,10 @@ func commitStreamingFiles(ctx context.Context, acc nodestorage.Accessor, rows []
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
 			continue
+		}
+		target := strings.ToLower(path.Clean(strings.ReplaceAll(row.TargetPath, "\\", "/")))
+		if target == undoRoot || strings.HasPrefix(target, undoRoot+"/") {
+			return nil, fmt.Errorf("staged target %q is reserved for recovery", row.TargetPath)
 		}
 		if row.Kind == storage.StagedKindModpack {
 			entries, err := modpackFiles(acc, row.StagePath)
@@ -199,6 +204,6 @@ func cleanupBatchRecovery(ctx context.Context, store *storage.Store, server *sto
 	if err != nil {
 		return err
 	}
-	defer acc.Close()
+	defer func() { _ = acc.Close() }()
 	return acc.RemoveAll(path.Join(undoRoot, batchID))
 }

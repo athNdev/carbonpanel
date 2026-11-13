@@ -39,6 +39,9 @@ copies before promoting them; failed rollback/interruption retains recovery
 and prevents a fresh apply from overwriting it. Successful rollback or finalized
 publication cleans only that batch's undo directory. See
 [storage recovery](../../docs/storage-streaming.md).
+Staging validation and direct commit refuse targets inside the undo subtree,
+including case and separator aliases, so publication cannot overwrite its own
+recovery manifest or backup files.
 
 Client-only mod jars and archives that are not datapacks are rejected before
 any staged byte is kept.

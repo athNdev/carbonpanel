@@ -116,7 +116,7 @@ func (l *local) ReadFile(rel string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	b, err := io.ReadAll(io.LimitReader(r, storageworker.SmallFileBytes+1))
 	if err == nil && int64(len(b)) > storageworker.SmallFileBytes {
 		err = fmt.Errorf("storage: file exceeds small-file limit; use streaming")
@@ -135,7 +135,7 @@ func (l *local) WriteFile(rel string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	if _, err = w.Write(data); err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func (l *local) MkdirAllMode(rel string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	if p == l.dir {
 		return nil
 	}

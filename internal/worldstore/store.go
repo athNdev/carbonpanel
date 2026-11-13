@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"io"
 	"io/fs"
 	"os"
@@ -20,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 )
 
 const (
@@ -475,7 +476,7 @@ func (l *Local) BackupTo(id Identity, destPath string, skip func(rel string) boo
 	if err != nil {
 		return "", err
 	}
-	defer acc.Close()
+	defer func() { _ = acc.Close() }()
 	return BackupToAccessor(acc, destPath, skip)
 }
 

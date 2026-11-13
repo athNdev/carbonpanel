@@ -47,7 +47,7 @@ func ExtractZip(ctx context.Context, acc Accessor, archiveRel, destRel string, c
 	if err != nil {
 		return 0, err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 	return ExtractZipReader(ctx, acc, src, info.Size(), destRel, counter)
 }
 
@@ -132,7 +132,7 @@ func ReplaceTreeFromZipFile(ctx context.Context, acc Accessor, archivePath strin
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
 	if err != nil {
 		return 0, err
@@ -224,7 +224,7 @@ func extractZipFile(ctx context.Context, acc Accessor, f *zip.File, rel string, 
 	if err != nil {
 		return err
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 	n, err := io.CopyBuffer(w, io.LimitReader(rc, remaining+1), make([]byte, 256<<10))
 	if err != nil {
 		return fmt.Errorf("failed to extract %s: %w", f.Name, err)
