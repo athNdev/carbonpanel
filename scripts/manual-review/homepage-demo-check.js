@@ -147,7 +147,7 @@
     await click("studio", "Pin selected");
     await tab("Export");
     const selectedTab = root("studio")
-      .querySelector('[data-tab="export"]')
+      .querySelector('#studio-demo-tab-export')
       .getBoundingClientRect();
     const tabStrip = root("studio")
       .querySelector("[data-carbon-tabs]")
