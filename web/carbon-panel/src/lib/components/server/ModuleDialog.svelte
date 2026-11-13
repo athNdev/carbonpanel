@@ -65,20 +65,21 @@ one at https://mozilla.org/MPL/2.0/.
 		onTemplateDeleted?: () => void;
 	}
 
-	interface EnvVar {
-		key: string;
-		value: string;
-	}
-	interface VolumeMount {
-		hostPath: string;
-		containerPath: string;
-		readOnly: boolean;
-		createDir: boolean;
-	}
-	interface MetadataEntry {
-		key: string;
-		value: string;
-	}
+	import {
+		instanceHealthDefaults,
+		envVarsToJson,
+		volumesToJson,
+		parseEnvVars,
+		parseVolumes,
+		parsePorts,
+		parseDependencies,
+		parseEventHooks,
+		parseMetadata,
+		metadataToMap,
+		type EnvVar,
+		type VolumeMount,
+		type MetadataEntry
+	} from '$lib/features/modules/form-codecs';
 
 	type ConfigSection = 'general' | 'ports' | 'environment' | 'volumes' | 'advanced';
 
@@ -136,105 +137,6 @@ one at https://mozilla.org/MPL/2.0/.
 	];
 
 	// Helpers
-	function envVarsToJson(): string {
-		const obj: Record<string, string> = {};
-		for (const env of envVars) {
-			if (env.key.trim()) obj[env.key.trim()] = env.value;
-		}
-		return JSON.stringify(obj);
-	}
-
-	function volumesToJson(): string {
-		return JSON.stringify(
-			volumes
-				.filter((v) => v.hostPath.trim() && v.containerPath.trim())
-				.map((v) => ({
-					source: v.hostPath.trim(),
-					target: v.containerPath.trim(),
-					read_only: v.readOnly,
-					create_dir: v.createDir
-				}))
-		);
-	}
-
-	function parseEnvVars(json: string): EnvVar[] {
-		try {
-			return Object.entries(JSON.parse(json || '{}')).map(([key, value]) => ({
-				key,
-				value: String(value)
-			}));
-		} catch {
-			return [];
-		}
-	}
-
-	function parseVolumes(json: string): VolumeMount[] {
-		try {
-			return JSON.parse(json || '[]').map((v: Record<string, unknown>) => ({
-				hostPath: v.source || '',
-				containerPath: v.target || '',
-				readOnly: v.read_only || false,
-				createDir: v.create_dir || false
-			}));
-		} catch {
-			return [];
-		}
-	}
-
-	function parsePorts(p: ModulePort[] | undefined): ModulePort[] {
-		return (
-			p?.map(
-				(x) =>
-					({
-						name: x.name,
-						containerPort: x.containerPort,
-						hostPort: x.hostPort,
-						protocol: x.protocol || 'tcp',
-						proxyEnabled: x.proxyEnabled
-					}) as ModulePort
-			) || []
-		);
-	}
-
-	function parseDependencies(d: ModuleDependency[] | undefined): ModuleDependency[] {
-		return (
-			d?.map(
-				(x) =>
-					({
-						moduleId: x.moduleId,
-						waitForHealthy: x.waitForHealthy,
-						timeoutSeconds: x.timeoutSeconds
-					}) as ModuleDependency
-			) || []
-		);
-	}
-
-	function parseEventHooks(h: ModuleEventHook[] | undefined): ModuleEventHook[] {
-		return (
-			h?.map(
-				(x) =>
-					({
-						event: x.event,
-						action: x.action,
-						command: x.command,
-						delaySeconds: x.delaySeconds,
-						condition: x.condition
-					}) as ModuleEventHook
-			) || []
-		);
-	}
-
-	function parseMetadata(m: { [key: string]: string } | undefined): MetadataEntry[] {
-		return m ? Object.entries(m).map(([key, value]) => ({ key, value })) : [];
-	}
-
-	function metadataToMap(): { [key: string]: string } {
-		const map: { [key: string]: string } = {};
-		for (const e of metadata) {
-			if (e.key.trim()) map[e.key.trim()] = e.value;
-		}
-		return map;
-	}
 
 	function addEnvVar() {
 		envVars = [...envVars, { key: '', value: '' }];
@@ -481,9 +383,8 @@ one at https://mozilla.org/MPL/2.0/.
 			volumes = parseVolumes(module.volumeOverrides || '[]');
 			ports = parsePorts(module.ports);
 			dependencies = parseDependencies(module.dependencies);
-			healthCheckInterval = module.healthCheckInterval || 30;
-			healthCheckTimeout = module.healthCheckTimeout || 5;
-			healthCheckRetries = module.healthCheckRetries || 3;
+			({ healthCheckInterval, healthCheckTimeout, healthCheckRetries } =
+				instanceHealthDefaults(module));
 			eventHooks = parseEventHooks(module.eventHooks);
 			metadata = parseMetadata(module.metadata);
 			loadServerModules();
@@ -534,8 +435,8 @@ one at https://mozilla.org/MPL/2.0/.
 					serverId: serverId || '',
 					templateId: selectedTemplate.id,
 					config: '{}',
-					envOverrides: envVarsToJson(),
-					volumeOverrides: volumesToJson(),
+					envOverrides: envVarsToJson(envVars),
+					volumeOverrides: volumesToJson(volumes),
 					memory,
 					cpuLimit,
 					autoStart,
@@ -548,7 +449,7 @@ one at https://mozilla.org/MPL/2.0/.
 					healthCheckTimeout,
 					healthCheckRetries,
 					eventHooks: hooksPayload,
-					metadata: metadataToMap(),
+					metadata: metadataToMap(metadata),
 					uid,
 					gid,
 					initCommand,
@@ -560,8 +461,8 @@ one at https://mozilla.org/MPL/2.0/.
 				const stagedScalars = {
 					id: module.id,
 					name,
-					envOverrides: envVarsToJson(),
-					volumeOverrides: volumesToJson(),
+					envOverrides: envVarsToJson(envVars),
+					volumeOverrides: volumesToJson(volumes),
 					memory,
 					cpuLimit,
 					autoStart,
@@ -586,7 +487,7 @@ one at https://mozilla.org/MPL/2.0/.
 								healthCheckTimeout,
 								healthCheckRetries,
 								eventHooks: hooksPayload,
-								metadata: metadataToMap()
+								metadata: metadataToMap(metadata)
 							}
 				);
 				toast.success(
