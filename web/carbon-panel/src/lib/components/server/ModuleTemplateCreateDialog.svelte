@@ -62,6 +62,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	import {
+		parseVolumes,
 		envVarsToJson,
 		volumesToJson,
 		parseEnvVars,
@@ -231,11 +232,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		envVars = parseEnvVars(t.defaultEnv);
 
-		try {
-			volumes = JSON.parse(t.defaultVolumes || '[]');
-		} catch {
-			volumes = [];
-		}
+		volumes = parseVolumes(t.defaultVolumes);
 
 		ports = t.ports.map((p) => ({
 			name: p.name,

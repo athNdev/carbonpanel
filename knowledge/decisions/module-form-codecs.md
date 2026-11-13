@@ -6,6 +6,7 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - web/carbon-panel/src/lib/features/modules/form-codecs.ts
+  - scripts/manual-review/e2e/module-forms-check.mjs
   - web/carbon-panel/src/lib/components/server/ModuleDialog.svelte
   - web/carbon-panel/src/lib/components/server/ModuleTemplateCreateDialog.svelte
 sources:
@@ -26,3 +27,10 @@ extraction; this is a lossy interpretation, not validation. Generated request
 fields remain distinct: template defaults, instance overrides and staged scalar
 updates must not be collapsed into one generic form payload. Scalar staging
 omits topology and hook updates; immediate saves retain those fields.
+
+Template editing decodes persisted source/target volume JSON into the same
+hostPath/containerPath rows used by instance forms. Assigning the wire objects
+directly leaves paths blank and breaks a later save. The real-dialog Chromium
+fixture covers stored volume/env round trips, template-to-instance default/port
+requests, scalar staging without topology, and immediate updates with topology
+and numeric defaults. These tests use fixture RPCs and the real form controls.
