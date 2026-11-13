@@ -37,11 +37,18 @@ func TestBinaryFileRPCsExceedSmallFileLimit(t *testing.T) {
 	if _, done, err := um.WriteStream(session.ID, io.LimitReader(fileStreamZeros{}, size), 0); err != nil || !done {
 		t.Fatalf("upload done=%v %v", done, err)
 	}
+	uploadPath, _, err := um.GetTempPath(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.SaveUploadedFile(ctx, connect.NewRequest(&v1.SaveUploadedFileRequest{ServerId: server.ID, UploadSessionId: session.ID, DestinationPath: "mods"})); err != nil {
 		t.Fatal(err)
 	}
 	if fi, err := os.Stat(filepath.Join(workerRoot, "mods", "large.jar")); err != nil || fi.Size() != size {
 		t.Fatalf("uploaded file %v %v", fi, err)
+	}
+	if _, err := os.Stat(uploadPath); !os.IsNotExist(err) {
+		t.Fatalf("upload source not cleaned after streaming: %v", err)
 	}
 	if _, err := svc.CopyFile(ctx, connect.NewRequest(&v1.CopyFileRequest{ServerId: server.ID, SourcePath: "mods/large.jar", DestinationPath: "mods/copied.jar"})); err != nil {
 		t.Fatal(err)

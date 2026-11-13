@@ -408,6 +408,8 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 		s.log.Error("Failed to save file: %v", err)
 		return nil, storageError(err)
 	}
+	// Release the reader before session cleanup deletes its source on Windows.
+	_ = source.Close()
 	_ = os.Remove(tempPath)
 
 	destFilePath := filepath.Join(root, destRel)
