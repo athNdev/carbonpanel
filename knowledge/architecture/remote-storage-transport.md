@@ -69,6 +69,11 @@ can abort. Subprocess cancellation closes stdin instead of immediately killing
 the child; Docker workers use StdinOnce and an independent one-second exit wait
 before removal. A worker exceeding its shutdown grace is forcibly reaped and
 reports that recovery staging may remain. The original target is preserved.
+Docker transport resolution carries the operation context through cold pool
+lookup and version negotiation, before worker creation. Cancellation remains
+identifiable through the unavailable-storage wrapper and never selects the
+controller client.
+
 An instance-owned resolver can select a transport with the caller's context.
 Legacy `ForNode` callers still use the registered process-wide transport and a
 background context until each owning subsystem is migrated.

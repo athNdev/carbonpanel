@@ -44,6 +44,12 @@ wrong host. That is a data-safety bug, not a degraded mode.
 - `GetClient` does not serve a named node from the local daemon, including
   when the historical fallback flag is set. Local aliases still use the
   controller client.
+- `GetClientStrictContext` carries operation cancellation through node lookup,
+  cached endpoint validation and eager API-version negotiation. Canceled cold
+  construction closes its client instead of caching it or starting network
+  setup. Legacy wrappers keep their bounded background lifetime.
+  Missing-network create/start retries use the same operation context and
+  retain both the original daemon failure and a failed network repair.
 - Hibernation uses `SetFreezerResolver` so freeze/wake go through `internal/docker/locator.go` for the server's node. The remaining freezer exposure is a resolver that returns nil rather than a typed locator error.
 - Module EXEC hooks resolve the module's assigned node through Locator with
   the operation context. Lookup and remote execution failures never retry on

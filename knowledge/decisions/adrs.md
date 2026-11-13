@@ -28,7 +28,9 @@ sources:
 | [0009](../../docs/adr/0009-shared-design-system.md) | Proposed shared design-system source and Cloud snapshot | [Frontend change](../workflows/frontend-change.md) |
 | [0010](../../docs/adr/0010-versioned-release-artifacts.md) | SemVer bundles, matching images and gated publication | [Release](../workflows/release.md) |
 | [0011](../../docs/adr/0011-server-runtime-admission.md) | Share server lifecycle policy | [Server lifecycle policy](../architecture/server-lifecycle.md) |
+| [0012](../../docs/adr/0012-product-transports.md) | Generated product control with tested HTTP compatibility | [RPC contract](../architecture/rpc-contract.md) |
 | [0013](../../docs/adr/0013-bounded-storage-streaming.md) | Bound storage frames and commit staged writes explicitly | [Remote storage transport](../architecture/remote-storage-transport.md), [Backup and restore](../operations/backup-restore.md) |
+
 
 # Rule
 

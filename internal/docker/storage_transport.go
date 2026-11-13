@@ -54,9 +54,9 @@ func (t *StorageTransport) Open(ctx context.Context, node nodestorage.NodeInfo, 
 	if nodeID == "" {
 		nodeID = node.Name
 	}
-	dockerCli, err := t.pool.GetClient(nodeID)
+	dockerCli, err := t.pool.GetClientStrictContext(ctx, nodeID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: docker client for node %q: %v", nodestorage.ErrUnavailable, node.Name, err)
+		return nil, fmt.Errorf("%w: docker client for node %q: %w", nodestorage.ErrUnavailable, node.Name, err)
 	}
 	hostRoot := nodestorage.NodePath(node, dataRoot, dataRoot)
 	sess, err := dockerCli.startStorageWorker(ctx, t.workerImage, hostRoot)
