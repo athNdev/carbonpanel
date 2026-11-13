@@ -32,6 +32,11 @@ are failures. A bounded recovery context saves the observed outcome even after
 request cancellation. Docker and persistence failures are both returned.
 Success status, explicit start intent, staged rollback, journals and events
 remain owned by the existing callers.
+Runtime config preparation inherits only missing provider credentials, using
+one best-effort global lookup without persisting inherited secrets. Launch and
+scheduled staged publication retain the AutoCurseForge name-derived slug
+default when neither a slug nor page URL is explicit. Config-only recreation
+retains its explicit source and does not infer one from the server name.
 Scheduled staged publication resolves the server's node before any module or
 container mutation. Plans that start a server also pass shared admission first;
 an unavailable remote node never substitutes the controller daemon.

@@ -3,6 +3,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -64,11 +65,15 @@ func TestStagedPublishPersistsRecreationRecoveryIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			lastStarted := time.Now().Add(-time.Hour).Truncate(time.Second)
-			server := &db.Server{ID: "server", Name: "Server", NodeID: "node", Port: 25565, Memory: 1024, DataPath: t.TempDir(), ContainerID: "original", Status: db.StatusRunning, LastStarted: &lastStarted}
+			server := &db.Server{ID: "server", Name: "Server", NodeID: "node", Port: 25565, Memory: 1024, ModLoader: db.ModLoaderAutoCurseForge, DataPath: t.TempDir(), ContainerID: "original", Status: db.StatusRunning, LastStarted: &lastStarted}
 			if err := store.CreateServer(ctx, server); err != nil {
 				t.Fatal(err)
 			}
 			if err := store.SaveServerConfig(ctx, store.CreateDefaultServerConfig(server.ID)); err != nil {
+				t.Fatal(err)
+			}
+			cf, token := "fixture-global-cf", "fixture-global-modrinth"
+			if err := store.UpdateGlobalSettings(ctx, &db.ServerConfig{CFAPIKey: &cf, ModrinthToken: &token}); err != nil {
 				t.Fatal(err)
 			}
 			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +89,16 @@ func TestStagedPublishPersistsRecreationRecoveryIdentity(t *testing.T) {
 				case strings.HasSuffix(r.URL.Path, "/containers/original/json"):
 					_, _ = w.Write([]byte(`{"Id":"original","Name":"/original","State":{"Running":true,"Status":"running"}}`))
 				case strings.HasSuffix(r.URL.Path, "/containers/create"):
+					var request struct{ Env []string }
+					if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+						t.Errorf("decode container config: %v", err)
+					}
+					env := "\n" + strings.Join(request.Env, "\n") + "\n"
+					for _, want := range []string{"CF_API_KEY=" + cf, "MODRINTH_TOKEN=" + token, "CF_SLUG=server"} {
+						if !strings.Contains(env, "\n"+want+"\n") {
+							t.Error("staged container omitted inherited runtime provider configuration")
+						}
+					}
 					w.WriteHeader(http.StatusCreated)
 					_, _ = w.Write([]byte(`{"Id":"replacement"}`))
 				case strings.HasSuffix(r.URL.Path, "/containers/replacement/start"):
