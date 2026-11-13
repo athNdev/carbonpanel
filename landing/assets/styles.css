@@ -896,6 +896,7 @@ h2 {
 }
 .craft-specimen .diagram-label {
   color: #656259;
+  font-size: 11px;
 }
 .specimen-type {
   display: flex;
@@ -921,7 +922,7 @@ h2 {
   padding-top: 12px;
   margin-bottom: 30px;
   border-top: 1px solid #bab5a7;
-  font: 9px var(--mono);
+  font: 11px var(--mono);
   color: #656259;
 }
 .specimen-swatches {
@@ -949,7 +950,7 @@ h2 {
   justify-content: space-between;
   gap: 16px;
   margin-top: 12px;
-  font: 8px/1.6 var(--mono);
+  font: 10px/1.6 var(--mono);
   color: #656259;
 }
 .craft-copy h2 {
