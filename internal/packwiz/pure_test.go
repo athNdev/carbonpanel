@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package packwiz
 
 import (
@@ -11,49 +10,25 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
-func TestPrimaryFileName(t *testing.T) {
-	newFiles := func() []struct {
-		URL      string `json:"url"`
-		FileName string `json:"filename"`
-		Primary  bool   `json:"primary"`
-		Size     int64  `json:"size"`
+func TestPrimaryVersionFile(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		files []modrinth.File
+		want  modrinth.File
+	}{
+		{name: "empty"},
+		{name: "primary", files: []modrinth.File{{URL: "u1", Filename: "a.jar", Size: 1}, {URL: "u2", Filename: "b.jar", Primary: true, Size: 2}}, want: modrinth.File{URL: "u2", Filename: "b.jar", Primary: true, Size: 2}},
+		{name: "first", files: []modrinth.File{{URL: "u1", Filename: "a.jar", Size: 1}}, want: modrinth.File{URL: "u1", Filename: "a.jar", Size: 1}},
 	} {
-		return nil
-	}
-
-	url, name, size := primaryFileName(newFiles())
-	if url != "" || name != "" || size != 0 {
-		t.Errorf("empty = %q %q %d", url, name, size)
-	}
-
-	multi := []struct {
-		URL      string `json:"url"`
-		FileName string `json:"filename"`
-		Primary  bool   `json:"primary"`
-		Size     int64  `json:"size"`
-	}{
-		{URL: "u1", FileName: "a.jar", Size: 1},
-		{URL: "u2", FileName: "b.jar", Primary: true, Size: 2},
-	}
-	url, name, size = primaryFileName(multi)
-	if url != "u2" || name != "b.jar" || size != 2 {
-		t.Errorf("primary pick = %q %q %d", url, name, size)
-	}
-
-	single := []struct {
-		URL      string `json:"url"`
-		FileName string `json:"filename"`
-		Primary  bool   `json:"primary"`
-		Size     int64  `json:"size"`
-	}{
-		{URL: "u1", FileName: "a.jar", Size: 1},
-	}
-	url, name, size = primaryFileName(single)
-	if url != "u1" || name != "a.jar" || size != 1 {
-		t.Errorf("single pick = %q %q %d", url, name, size)
+		t.Run(tc.name, func(t *testing.T) {
+			if got := primaryVersionFile(tc.files); (got == nil && tc.want != (modrinth.File{})) || (got != nil && *got != tc.want) {
+				t.Fatalf("got %+v want %+v", got, tc.want)
+			}
+		})
 	}
 }
 

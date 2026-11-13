@@ -10,11 +10,8 @@ package modrinth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/athNdev/carbon-panel/internal/config"
@@ -50,33 +47,14 @@ func (m *ModrinthDatapackIndexer) GetIndexerName() string {
 
 // Origin returns the configured Modrinth API origin (OriginReporter).
 func (m *ModrinthDatapackIndexer) Origin() string {
-	return BaseURL
+	return m.client.baseURL
 }
 
 // SearchDatapacks searches Modrinth for datapacks. Datapacks are loader-agnostic,
 // so only the game version narrows the results.
 func (m *ModrinthDatapackIndexer) SearchDatapacks(ctx context.Context, query string, gameVersion string, offset, limit int) (*indexers.DatapackSearchResult, error) {
-	facets := [][]string{{"project_type:datapack"}}
-	if gameVersion != "" {
-		facets = append(facets, []string{fmt.Sprintf("versions:%s", gameVersion)})
-	}
-
-	facetsJSON, err := json.Marshal(facets)
+	resp, err := m.client.SearchProjects(ctx, "datapack", query, gameVersion, "", offset, limit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal facets: %w", err)
-	}
-
-	params := url.Values{}
-	if query != "" {
-		params.Set("query", query)
-	}
-	params.Set("facets", string(facetsJSON))
-	params.Set("index", "downloads")
-	params.Set("offset", strconv.Itoa(offset))
-	params.Set("limit", strconv.Itoa(limit))
-
-	var resp SearchResponse
-	if err := m.client.http.DoJSON(ctx, fmt.Sprintf("%s/search?%s", BaseURL, params.Encode()), &resp); err != nil {
 		return nil, err
 	}
 

@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -3465,37 +3464,7 @@ func (s *ServerService) GetNextAvailablePort(ctx context.Context, req *connect.R
 
 // prepareServerConfig fills in global settings and defaults for server config before container launch
 func (s *ServerService) prepareServerConfig(ctx context.Context, server *storage.Server, serverConfig *storage.ServerConfig) {
-	if serverConfig == nil {
-		return
-	}
-	// Inherit global CF API Key if not set on server
-	if serverConfig.CFAPIKey == nil || *serverConfig.CFAPIKey == "" {
-		if globalSettings, _, err := s.store.GetGlobalSettings(ctx); err == nil && globalSettings != nil && globalSettings.CFAPIKey != nil && *globalSettings.CFAPIKey != "" {
-			serverConfig.CFAPIKey = globalSettings.CFAPIKey
-		}
-	}
-	// Inherit global Modrinth Token if not set on server
-	if serverConfig.ModrinthToken == nil || *serverConfig.ModrinthToken == "" {
-		if globalSettings, _, err := s.store.GetGlobalSettings(ctx); err == nil && globalSettings != nil && globalSettings.ModrinthToken != nil && *globalSettings.ModrinthToken != "" {
-			serverConfig.ModrinthToken = globalSettings.ModrinthToken
-		}
-	}
-	// Auto-assume CF slug from server name if AUTO_CURSEFORGE and no slug or page URL is set
-	if server != nil && server.ModLoader == storage.ModLoaderAutoCurseForge {
-		if (serverConfig.CFSlug == nil || *serverConfig.CFSlug == "") && (serverConfig.CFPageURL == nil || *serverConfig.CFPageURL == "") && server.Name != "" {
-			slug := slugifyName(server.Name)
-			if slug != "" {
-				serverConfig.CFSlug = &slug
-			}
-		}
-	}
-}
-
-func slugifyName(name string) string {
-	name = strings.ToLower(strings.TrimSpace(name))
-	re := regexp.MustCompile(`[^a-z0-9]+`)
-	slug := re.ReplaceAllString(name, "-")
-	return strings.Trim(slug, "-")
+	serverruntime.PrepareConfig(ctx, s.store, server, serverConfig)
 }
 
 // MigrateServer moves a server instance from its current node to a target node

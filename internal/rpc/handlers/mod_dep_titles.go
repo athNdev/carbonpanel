@@ -6,14 +6,11 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 )
 
 // enrichModrinthDependencyTitles fills each dependency Title with the real
@@ -67,103 +64,46 @@ func (m *ModOnlineManager) enrichModrinthDependencyTitles(ctx context.Context, t
 }
 
 func (m *ModOnlineManager) resolveModrinthVersionProject(ctx context.Context, token, ua, versionID string) string {
-	reqURL := "https://api.modrinth.com/v2/version/" + url.PathEscape(versionID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	version, err := m.modrinthClient(token, ua).GetVersion(ctx, versionID)
 	if err != nil {
 		return ""
 	}
-	req.Header.Set("User-Agent", ua)
-	if token != "" {
-		req.Header.Set("Authorization", token)
-	}
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-	var data struct {
-		ProjectID string `json:"project_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(data.ProjectID)
+	return strings.TrimSpace(version.ProjectID)
+}
+
+func (m *ModOnlineManager) modrinthClient(token, ua string) *modrinth.Client {
+	return modrinth.NewClientWithOptions(nil, modrinth.Options{BaseURL: m.modrinthBaseURL, Token: token, UserAgent: ua, HTTPClient: m.httpClient})
 }
 
 func (m *ModOnlineManager) fetchModrinthProjectTitles(ctx context.Context, token, ua string, ids []string) map[string]string {
 	out := map[string]string{}
-	if len(ids) == 0 {
+	if len(ids) == 0 || ctx.Err() != nil {
 		return out
 	}
-	idsJSON, _ := json.Marshal(ids)
-	reqURL := "https://api.modrinth.com/v2/projects?ids=" + url.QueryEscape(string(idsJSON))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	provider := m.modrinthClient(token, ua)
+	projects, err := provider.GetProjects(ctx, ids)
 	if err == nil {
-		req.Header.Set("User-Agent", ua)
-		if token != "" {
-			req.Header.Set("Authorization", token)
-		}
-		if resp, err := m.httpClient.Do(req); err == nil {
-			if resp.StatusCode == http.StatusOK {
-				var projects []struct {
-					ID    string `json:"id"`
-					Title string `json:"title"`
-					Slug  string `json:"slug"`
-				}
-				if err := json.NewDecoder(resp.Body).Decode(&projects); err == nil {
-					for _, pr := range projects {
-						if pr.ID != "" && pr.Title != "" {
-							out[pr.ID] = pr.Title
-						}
-					}
-				}
+		for _, project := range projects {
+			if project.ID != "" && project.Title != "" {
+				out[project.ID] = project.Title
 			}
-			resp.Body.Close()
 		}
 	}
-	if len(out) > 0 {
-		return out
-	}
-	if len(ids) > 10 {
-		m.log.Warn("Modrinth batch project lookup failed; leaving dependency titles unresolved")
+	if len(out) > 0 || len(ids) > 10 || ctx.Err() != nil {
 		return out
 	}
 	for _, id := range ids {
-		if _, ok := out[id]; ok {
-			continue
+		if ctx.Err() != nil {
+			break
 		}
-		singleURL := "https://api.modrinth.com/v2/project/" + url.PathEscape(id)
-		sreq, err := http.NewRequestWithContext(ctx, http.MethodGet, singleURL, nil)
-		if err != nil {
-			continue
-		}
-		sreq.Header.Set("User-Agent", ua)
-		if token != "" {
-			sreq.Header.Set("Authorization", token)
-		}
-		sresp, err := m.httpClient.Do(sreq)
-		if err != nil {
-			continue
-		}
-		if sresp.StatusCode != http.StatusOK {
-			sresp.Body.Close()
-			continue
-		}
-		var project struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
-		}
-		if err := json.NewDecoder(sresp.Body).Decode(&project); err == nil && project.Title != "" {
+		project, err := provider.GetModpack(ctx, id)
+		if err == nil && project.Title != "" {
 			key := project.ID
 			if key == "" {
 				key = id
 			}
 			out[key] = project.Title
 		}
-		sresp.Body.Close()
 	}
 	return out
 }
@@ -222,98 +162,33 @@ func (m *ModOnlineManager) fetchCurseForgeModTitles(ctx context.Context, apiKey 
 	if len(modIDs) == 0 {
 		return out
 	}
-	body, _ := json.Marshal(map[string]any{"modIds": modIDs, "filterPcOnly": false})
-	tryBatch := func(baseURL string, withKey bool) bool {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/mods", bytes.NewReader(body))
-		if err != nil {
-			return false
-		}
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("Content-Type", "application/json")
-		if withKey {
-			req.Header.Set("x-api-key", apiKey)
-		} else {
-			req.Header.Set("User-Agent", "CarbonPanel/1.0 (CarbonPanel-admin)")
-		}
-		resp, err := m.httpClient.Do(req)
-		if err != nil {
-			return false
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return false
-		}
-		var data struct {
-			Data []struct {
-				ID   int    `json:"id"`
-				Name string `json:"name"`
-				Slug string `json:"slug"`
-			} `json:"data"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-			return false
-		}
-		for _, mod := range data.Data {
+	if ctx.Err() != nil {
+		return out
+	}
+	provider := m.curseForgeClient(apiKey)
+	mods, err := provider.GetMods(ctx, modIDs)
+	if err == nil {
+		for _, mod := range mods {
 			if mod.Name != "" {
-				out[fmt.Sprintf("%d", mod.ID)] = mod.Name
+				out[strconv.Itoa(mod.ID)] = mod.Name
 			}
 		}
-		return len(out) > 0
 	}
-	if apiKey != "" && tryBatch("https://api.curseforge.com/v1", true) {
-		return out
-	}
-	if tryBatch("https://api.curse.tools/v1/cf", false) {
-		return out
-	}
-	if len(ids) > 10 {
-		m.log.Warn("CurseForge batch mod lookup failed; leaving dependency titles unresolved")
+	if len(out) > 0 || len(ids) > 10 || ctx.Err() != nil {
 		return out
 	}
 	for _, id := range ids {
-		if _, ok := out[id]; ok {
+		if ctx.Err() != nil {
+			break
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(id))
+		if err != nil {
 			continue
 		}
-		fetched := ""
-		if apiKey != "" {
-			fetched = m.fetchCurseForgeModTitle(ctx, "https://api.curseforge.com/v1/mods/"+url.PathEscape(id), apiKey, true)
-		}
-		if fetched == "" {
-			fetched = m.fetchCurseForgeModTitle(ctx, "https://api.curse.tools/v1/cf/mods/"+url.PathEscape(id), "", false)
-		}
-		if fetched != "" {
-			out[id] = fetched
+		mod, err := provider.GetModpack(ctx, n)
+		if err == nil && strings.TrimSpace(mod.Name) != "" {
+			out[id] = strings.TrimSpace(mod.Name)
 		}
 	}
 	return out
-}
-
-func (m *ModOnlineManager) fetchCurseForgeModTitle(ctx context.Context, reqURL, apiKey string, withKey bool) string {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("Accept", "application/json")
-	if withKey {
-		req.Header.Set("x-api-key", apiKey)
-	} else {
-		req.Header.Set("User-Agent", "CarbonPanel/1.0 (CarbonPanel-admin)")
-	}
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return ""
-	}
-	var data struct {
-		Data struct {
-			Name string `json:"name"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(data.Data.Name)
 }

@@ -7,6 +7,7 @@ package packwiz
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/indexers/fuego"
+	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/google/uuid"
@@ -239,18 +242,36 @@ type tomlMod struct {
 }
 
 type Manager struct {
-	baseDir    string
-	log        *logger.Logger
-	mu         sync.RWMutex
-	httpClient *http.Client
+	baseDir           string
+	log               *logger.Logger
+	mu                sync.RWMutex
+	httpClient        *http.Client
+	modrinthBaseURL   string
+	curseForgeBaseURL string
 }
 
-func NewManager(baseDir string, log *logger.Logger) *Manager {
+type ManagerOptions struct {
+	HTTPClient        *http.Client
+	ModrinthBaseURL   string
+	CurseForgeBaseURL string
+}
+
+func NewManager(baseDir string, log *logger.Logger, options ...ManagerOptions) *Manager {
 	_ = os.MkdirAll(baseDir, 0755)
+	var option ManagerOptions
+	if len(options) > 0 {
+		option = options[0]
+	}
+	client := option.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
 	return &Manager{
-		baseDir:    baseDir,
-		log:        log,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseDir:           baseDir,
+		log:               log,
+		httpClient:        client,
+		modrinthBaseURL:   option.ModrinthBaseURL,
+		curseForgeBaseURL: option.CurseForgeBaseURL,
 	}
 }
 
@@ -1765,8 +1786,23 @@ func (m *Manager) AddModFromURL(packID string, req DirectURLModRequest) (*ModIte
 	return &modItem, nil
 }
 
+func (m *Manager) modrinthClient() *modrinth.Client {
+	return modrinth.NewClientWithOptions(nil, modrinth.Options{BaseURL: m.modrinthBaseURL, HTTPClient: m.httpClient})
+}
+func (m *Manager) curseForgeClient() *fuego.Client {
+	options := []fuego.Option{fuego.WithHTTPClient(m.httpClient)}
+	if m.curseForgeBaseURL != "" {
+		options = append(options, fuego.WithBaseURL(m.curseForgeBaseURL))
+	}
+	return fuego.NewClient("", nil, options...)
+}
+
 // CheckModUpdates queries platform APIs for updates to mods in the pack
 func (m *Manager) CheckModUpdates(packID string) ([]ModUpdateInfo, error) {
+	return m.CheckModUpdatesContext(context.Background(), packID)
+}
+
+func (m *Manager) CheckModUpdatesContext(ctx context.Context, packID string) ([]ModUpdateInfo, error) {
 	pack, err := m.GetPack(packID)
 	if err != nil {
 		return nil, err
@@ -1774,6 +1810,9 @@ func (m *Manager) CheckModUpdates(packID string) ([]ModUpdateInfo, error) {
 
 	var updates []ModUpdateInfo
 	for _, mod := range pack.Mods {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		info := ModUpdateInfo{
 			Slug:             mod.Slug,
 			Name:             mod.Name,
@@ -1789,30 +1828,18 @@ func (m *Manager) CheckModUpdates(packID string) ([]ModUpdateInfo, error) {
 		}
 
 		if mod.Platform == "modrinth" && mod.ProjectID != "" {
-			url := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version?loaders=[\"%s\"]&game_versions=[\"%s\"]", mod.ProjectID, strings.ToLower(pack.ModLoader), pack.MCVersion)
-			resp, err := m.httpClient.Get(url)
-			if err == nil && resp.StatusCode == http.StatusOK {
-				var versions []struct {
-					ID    string `json:"id"`
-					Name  string `json:"name"`
-					Files []struct {
-						URL      string `json:"url"`
-						FileName string `json:"filename"`
-						Primary  bool   `json:"primary"`
-					} `json:"files"`
+			versions, err := m.modrinthClient().GetVersionsWithFilters(ctx, mod.ProjectID, []string{strings.ToLower(pack.ModLoader)}, []string{pack.MCVersion})
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if err == nil && len(versions) > 0 {
+				latest := versions[0]
+				info.LatestVersionID = latest.ID
+				if len(latest.Files) > 0 {
+					info.LatestFileName = latest.Files[0].Filename
+					info.LatestDownloadURL = latest.Files[0].URL
 				}
-				if json.NewDecoder(resp.Body).Decode(&versions) == nil && len(versions) > 0 {
-					latest := versions[0]
-					info.LatestVersionID = latest.ID
-					if len(latest.Files) > 0 {
-						info.LatestFileName = latest.Files[0].FileName
-						info.LatestDownloadURL = latest.Files[0].URL
-					}
-					if latest.ID != mod.VersionID {
-						info.UpdateAvailable = true
-					}
-				}
-				resp.Body.Close()
+				info.UpdateAvailable = latest.ID != mod.VersionID
 			}
 		}
 
@@ -2076,6 +2103,10 @@ func (m *Manager) AddDatapackFile(packID, fileName string, r io.Reader) error {
 
 // SimulateMigration tests if mods in a pack support a new target Minecraft & loader version
 func (m *Manager) SimulateMigration(packID, targetMC, targetLoader string) (*MigrationReport, error) {
+	return m.SimulateMigrationContext(context.Background(), packID, targetMC, targetLoader)
+}
+
+func (m *Manager) SimulateMigrationContext(ctx context.Context, packID, targetMC, targetLoader string) (*MigrationReport, error) {
 	pack, err := m.GetPack(packID)
 	if err != nil {
 		return nil, err
@@ -2092,6 +2123,9 @@ func (m *Manager) SimulateMigration(packID, targetMC, targetLoader string) (*Mig
 	}
 
 	for _, mod := range pack.Mods {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		item := MigrationModItem{
 			Slug:             mod.Slug,
 			Name:             mod.Name,
@@ -2101,28 +2135,18 @@ func (m *Manager) SimulateMigration(packID, targetMC, targetLoader string) (*Mig
 		}
 
 		if mod.Platform == "modrinth" && mod.ProjectID != "" {
-			url := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version?loaders=[\"%s\"]&game_versions=[\"%s\"]", mod.ProjectID, strings.ToLower(targetLoader), targetMC)
-			resp, err := m.httpClient.Get(url)
-			if err == nil && resp.StatusCode == http.StatusOK {
-				var versions []struct {
-					ID    string `json:"id"`
-					Files []struct {
-						URL      string `json:"url"`
-						FileName string `json:"filename"`
-					} `json:"files"`
+			versions, err := m.modrinthClient().GetVersionsWithFilters(ctx, mod.ProjectID, []string{strings.ToLower(targetLoader)}, []string{targetMC})
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if err == nil && len(versions) > 0 {
+				item.Compatible = true
+				item.TargetVersionID = versions[0].ID
+				if len(versions[0].Files) > 0 {
+					item.TargetFileName = versions[0].Files[0].Filename
+					item.TargetDownloadURL = versions[0].Files[0].URL
 				}
-				if json.NewDecoder(resp.Body).Decode(&versions) == nil && len(versions) > 0 {
-					item.Compatible = true
-					item.TargetVersionID = versions[0].ID
-					if len(versions[0].Files) > 0 {
-						item.TargetFileName = versions[0].Files[0].FileName
-						item.TargetDownloadURL = versions[0].Files[0].URL
-					}
-					report.CompatibleCount++
-				} else {
-					report.IncompatibleCount++
-				}
-				resp.Body.Close()
+				report.CompatibleCount++
 			} else {
 				report.IncompatibleCount++
 			}
