@@ -1172,7 +1172,13 @@ h2 {
   transform: translate(-80px, -60px);
 }
 .closing-copy {
-  padding-right: 48%;
+  display: grid;
+  /* Reserve artwork space within the capped frame, not the full viewport. */
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  justify-items: start;
+}
+.closing-copy > * {
+  grid-column: 1;
 }
 .closing-mark {
   display: flex;
@@ -1721,7 +1727,7 @@ h2 {
     align-items: start;
   }
   .closing-copy {
-    padding-right: 0;
+    grid-template-columns: minmax(0, 1fr);
   }
   .closing-landscape {
     width: 600px;

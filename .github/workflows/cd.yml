@@ -7,7 +7,7 @@
 name: Docker Hub CD
 
 on:
-  # Publish :latest from a push to main only after the "Continuous
+  # Publish :edge from a push to main only after the "Continuous
   # Integration" workflow has succeeded for that same commit. Previously this
   # workflow triggered on the raw push to main, so a commit that failed CI
   # could still publish a broken :latest image to Docker Hub (DESIGN.md §10.1
@@ -16,9 +16,7 @@ on:
     workflows: ["Continuous Integration"]
     types:
       - completed
-  push:
-    tags:
-      - 'v*'
+  # Version tags are owned by release.yml. Main builds are development images.
   workflow_dispatch:
     inputs:
       push:
@@ -27,18 +25,19 @@ on:
         type: boolean
         default: true
 
-concurrency:
-  group: cd-${{ github.event.workflow_run.head_sha || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build-and-push:
     name: Build & Push Docker Hub Image
     runs-on: ubuntu-latest
-    # Tag pushes and manual dispatches always run. A workflow_run event only
+    # Manual dispatches always run. A workflow_run event only
     # runs for a push-triggered CI run (i.e. main) that succeeded - PR CI runs
     # and failed runs never publish.
     if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success') }}
+    # Job-level concurrency is applied only after this job's if condition.
+    # Skipped PR/failed-CI workflow_run events cannot cancel a real publication.
+    concurrency:
+      group: cd-${{ github.ref }}
+      cancel-in-progress: true
 
     steps:
       - name: Checkout code
@@ -47,9 +46,6 @@ jobs:
           # workflow_run events must check out the exact commit CI tested, not
           # the default-branch tip.
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -149,15 +145,16 @@ jobs:
           images: |
             atharvnaphade/carbon-panel
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short,prefix=sha-
+            type=raw,value=sha-${{ github.event.workflow_run.head_sha || github.sha }}
           labels: |
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.description=A modern Minecraft server and modpack management panel
-            org.opencontainers.image.source=https://github.com/athNdev/carbon-panel
+            org.opencontainers.image.source=https://github.com/athNdev/carbonpanel
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
+          flavor: |
+            latest=false
 
       - name: Build and Push Docker Image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -171,4 +168,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            APP_VERSION=${{ github.ref_name }}
+            APP_VERSION=edge
+            APP_COMMIT=${{ github.event.workflow_run.head_sha || github.sha }}

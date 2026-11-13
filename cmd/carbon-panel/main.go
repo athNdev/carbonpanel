@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/athNdev/carbon-panel/internal/blueprint"
+	"github.com/athNdev/carbon-panel/internal/buildinfo"
 	"github.com/athNdev/carbon-panel/internal/command"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
@@ -71,6 +72,7 @@ func shouldAutoStartOnBoot(server *storage.Server) bool {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "Print version and build information, then exit")
 	var configPath = flag.String("config", "./config.yaml", "Path to configuration file")
 	restorePanelBackup := flag.String("restore-panel-backup", "",
 		"Restore the panel database from a snapshot and exit; the panel must be stopped")
@@ -82,6 +84,10 @@ func main() {
 	operationNote := flag.String("operation-note", "", "Note stored when -operations resolve releases a lock")
 	serverID := flag.String("server-id", "", "Server id for -operations release-port")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String("carbon-panel"))
+		return
+	}
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
