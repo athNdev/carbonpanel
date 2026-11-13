@@ -33,6 +33,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/events"
 	"github.com/athNdev/carbon-panel/internal/metrics"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/snapshot"
 	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/internal/webhook"
@@ -987,36 +988,12 @@ func (s *Scheduler) checkNodeMemoryCapacity(ctx context.Context, server *storage
 	if err != nil {
 		return err
 	}
-	if s.store == nil || dockerCli == nil {
+	if dockerCli == nil {
 		return fmt.Errorf("cannot verify node memory capacity without a store and Docker client")
 	}
-	node, err := s.store.GetNode(ctx, server.NodeID)
-	if err != nil {
-		return fmt.Errorf("failed to load node capacity: %w", err)
-	}
-	hostMemoryMB, err := dockerCli.HostMemoryMB(ctx)
-	if err != nil {
-		return fmt.Errorf("cannot verify memory capacity on node %s: %w", node.Name, err)
-	}
-	capacityMB := hostMemoryMB
-	if node.MaxMemoryMB > 0 && node.MaxMemoryMB < capacityMB {
-		capacityMB = node.MaxMemoryMB
-	}
-	if int64(server.Memory) > capacityMB {
-		return fmt.Errorf("node %s lacks memory capacity (server requires %d MB > limit %d MB)", node.Name, server.Memory, capacityMB)
-	}
-	runningMemoryMB, err := s.store.GetNodeRunningMemoryMB(ctx, server.NodeID)
-	if err != nil {
-		return fmt.Errorf("cannot verify running memory on node %s: %w", node.Name, err)
-	}
-	additionalMB := int64(server.Memory)
-	if server.Status == storage.StatusRunning || server.Status == storage.StatusStarting {
-		additionalMB = 0
-	}
-	if runningMemoryMB+additionalMB > capacityMB {
-		return fmt.Errorf("node %s lacks memory capacity (running %d MB + requested %d MB > limit %d MB)", node.Name, runningMemoryMB, additionalMB, capacityMB)
-	}
-	return nil
+	return serverruntime.CheckStartCapacity(ctx, s.store, server, func(ctx context.Context, _ string) (int64, error) {
+		return dockerCli.HostMemoryMB(ctx)
+	})
 }
 
 type stagedLifecycleStore interface {

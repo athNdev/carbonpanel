@@ -42,6 +42,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/proxy"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/internal/scheduler"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -262,43 +263,19 @@ func (s *ServerService) checkNodeMemoryCapacity(ctx context.Context, nodeID stri
 // checkServerStartCapacity ensures starting a server does not exceed the node's
 // memory limit when combined with other currently active (running/starting) servers.
 func (s *ServerService) checkServerStartCapacity(ctx context.Context, server *storage.Server) error {
-	if server == nil {
-		return fmt.Errorf("server is nil")
+	err := serverruntime.CheckStartCapacity(ctx, s.store, server, s.getHostMemoryMB)
+	var refusal *serverruntime.AdmissionError
+	if !errors.As(err, &refusal) {
+		return err
 	}
-	node, err := s.store.GetNode(ctx, server.NodeID)
-	if err != nil {
-		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("failed to load target node capacity: %w", err))
+	code := connect.CodeUnavailable
+	switch refusal.Kind {
+	case serverruntime.InvalidNode:
+		code = connect.CodeFailedPrecondition
+	case serverruntime.CapacityExceeded:
+		code = connect.CodeResourceExhausted
 	}
-	hostMemoryMB, err := s.getHostMemoryMB(ctx, server.NodeID)
-	if err != nil {
-		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("cannot verify memory capacity on node %s: %w", node.Name, err))
-	}
-
-	capacityMB := hostMemoryMB
-	if node.MaxMemoryMB > 0 && node.MaxMemoryMB < capacityMB {
-		capacityMB = node.MaxMemoryMB
-	}
-
-	// Server itself cannot exceed node capacity
-	if int64(server.Memory) > capacityMB {
-		return connect.NewError(connect.CodeResourceExhausted, fmt.Errorf("node %s lacks memory capacity (server requires %d MB > limit %d MB)", node.Name, server.Memory, capacityMB))
-	}
-
-	// Active running/starting memory + this server (if not already running) cannot exceed capacity
-	runningMemoryMB, err := s.store.GetNodeRunningMemoryMB(ctx, server.NodeID)
-	if err != nil {
-		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("cannot verify running memory on node %s: %w", node.Name, err))
-	}
-
-	additionalMB := int64(server.Memory)
-	if server.Status == storage.StatusRunning || server.Status == storage.StatusStarting {
-		additionalMB = 0
-	}
-
-	if runningMemoryMB+additionalMB > capacityMB {
-		return connect.NewError(connect.CodeResourceExhausted, fmt.Errorf("node %s lacks memory capacity to run server (running %d MB + requested %d MB > limit %d MB)", node.Name, runningMemoryMB, additionalMB, capacityMB))
-	}
-	return nil
+	return connect.NewError(code, err)
 }
 
 // statusAfterContainerRecreation preserves intentional deep sleep when a
