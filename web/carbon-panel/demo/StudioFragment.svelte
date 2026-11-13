@@ -161,7 +161,7 @@
 			revision,
 			recipe: buildExportRecipe(mods, { format, includeClient, includeOverrides })
 		};
-		message = `Export preview built: ${built.recipe.mods.length} mods, ${built.recipe.overrides.length} override files. Inspect it or download the sample manifest.`;
+		message = `Export preview built: ${built.recipe.mods.length} ${built.recipe.mods.length === 1 ? 'mod' : 'mods'}, ${built.recipe.overrides.length} override ${built.recipe.overrides.length === 1 ? 'file' : 'files'}. Inspect it or download the sample manifest.`;
 	}
 </script>
 
@@ -412,7 +412,9 @@
 							</div>
 							<code class="studio-filename">{built.recipe.filename}</code>
 							<p>
-								{built.recipe.mods.length} mods · {built.recipe.overrides.length} override files · {exportFormats[
+								{built.recipe.mods.length}
+								{built.recipe.mods.length === 1 ? 'mod' : 'mods'} · {built.recipe.overrides.length} override
+								{built.recipe.overrides.length === 1 ? 'file' : 'files'} · {exportFormats[
 									built.recipe.format
 								].label}
 							</p>

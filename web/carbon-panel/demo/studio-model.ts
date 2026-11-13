@@ -123,14 +123,14 @@ export function updateMods(mods: SampleMod[]): SampleMod[] {
 }
 export const sampleOverrides = [
 	{
-		path: 'config/voicechat/voicechat-server.properties',
+		path: 'server.properties',
 		side: 'server',
-		content: 'port=24454\nmax_voice_distance=48\n'
+		content: 'view-distance=10\nsimulation-distance=6\nmotd=A little more adventure\n'
 	},
 	{
-		path: 'config/sodium-options.json',
+		path: 'README-players.txt',
 		side: 'client',
-		content: '{"quality":{"weather_quality":"FAST"}}\n'
+		content: 'A little more adventure\nFabric 1.21.1\nCurated and packaged with Carbon Panel.\n'
 	},
 	{ path: 'options.txt', side: 'client', content: 'autoJump:false\nguiScale:3\n' }
 ];

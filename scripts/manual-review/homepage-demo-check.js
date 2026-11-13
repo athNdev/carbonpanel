@@ -146,9 +146,17 @@
     );
     await click("studio", "Pin selected");
     await tab("Export");
-    const selectedTab = root("studio").querySelector('[data-tab="export"]').getBoundingClientRect();
-    const tabStrip = root("studio").querySelector('[data-carbon-tabs]').getBoundingClientRect();
-    assert(selectedTab.left >= tabStrip.left - 1 && selectedTab.right <= tabStrip.right + 1, "selected tab remains visible in a narrow strip");
+    const selectedTab = root("studio")
+      .querySelector('[data-tab="export"]')
+      .getBoundingClientRect();
+    const tabStrip = root("studio")
+      .querySelector("[data-carbon-tabs]")
+      .getBoundingClientRect();
+    assert(
+      selectedTab.left >= tabStrip.left - 1 &&
+        selectedTab.right <= tabStrip.right + 1,
+      "selected tab remains visible in a narrow strip",
+    );
     await input(
       root("studio").querySelector('[aria-label="Export format"]'),
       "packwiz",
@@ -194,7 +202,7 @@
     root("studio").querySelector(".studio-file summary").click();
     await pause();
     assert(
-      text("studio").includes("port=24454"),
+      text("studio").includes("view-distance=10"),
       "override contents can be inspected",
     );
     await reset("studio");
@@ -296,7 +304,8 @@
       "reset cancels an in-flight apply",
     );
     assert(
-      document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      document.documentElement.scrollWidth <=
+        document.documentElement.clientWidth,
       "decorative effects and controls stay within the viewport",
     );
     return { pass: true, checks };
