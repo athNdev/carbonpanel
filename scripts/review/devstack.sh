@@ -18,17 +18,52 @@
 #
 # `up` seeds what a review needs to be useful on the first tap: the admin
 # account, a local Docker node and one stopped vanilla server. The chosen port
-# is written to "<data dir>.port" so other scripts do not guess.
+# is written to "<data dir>/port" so other scripts do not guess.
 
 set -euo pipefail
 
 NAME="${REVIEW_STACK_NAME:-carbon-panel-review}"
 PORT="${REVIEW_PORT:-8099}"
-DATA="${REVIEW_DATA_DIR:-${HOME}/.cache/carbon-panel-review}"
 IMAGE="${REVIEW_IMAGE:-carbon-panel:review}"
 USER_NAME="${PANEL_REVIEW_USER:-reviewer}"
 USER_PASS="${PANEL_REVIEW_PASSWORD:-Review-Panel-2026}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+[[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT >= 1 && 10#$PORT <= 65515)) || {
+	echo "review port must be in 1..65515" >&2; exit 2;
+}
+
+# A session may only manage its own direct child of this fixed user cache.
+# Existing unmarked directories are never adopted automatically.
+[[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]] || { echo "invalid review session name" >&2; exit 2; }
+HOME_REAL="$(realpath -m "$HOME")"
+ROOT="$(realpath -m "$HOME/.cache/carbon-panel-review/sessions")"
+case "$ROOT/" in "$HOME_REAL"/*) ;; *) echo "review root is outside the user home" >&2; exit 2 ;; esac
+DATA_RAW="${REVIEW_DATA_DIR:-$ROOT/$NAME}"
+[ ! -L "$DATA_RAW" ] || { echo "review data must not be a symlink" >&2; exit 2; }
+DATA="$(realpath -m "$DATA_RAW")"
+[ "$DATA" = "$ROOT/$NAME" ] || { echo "review data must be the named session beneath $ROOT" >&2; exit 2; }
+[[ "$DATA" != *$'\n'* && "$DATA" != *$'\r'* ]] || { echo "invalid review data path" >&2; exit 2; }
+MARKER="$DATA/.carbon-review-owner"
+
+assert_owner() {
+	[ -f "$MARKER" ] && [ ! -L "$MARKER" ] &&
+		[ "$(cat "$MARKER")" = "$(printf 'carbon-review-v1\n%s\n%s' "$NAME" "$DATA")" ] || {
+		echo "refusing operation: review data has no matching ownership marker" >&2
+		return 1
+	}
+}
+
+init_owner() {
+	if [ -e "$DATA" ] && [ ! -f "$MARKER" ]; then
+		echo "refusing to adopt existing unmarked review data: $DATA" >&2
+		return 1
+	fi
+	mkdir -p "$DATA"
+	if [ ! -e "$MARKER" ]; then
+		(umask 077; set -o noclobber; printf 'carbon-review-v1\n%s\n%s\n' "$NAME" "$DATA" > "$MARKER")
+	fi
+	assert_owner
+}
 
 # free_port picks the first port from base upward that nothing is listening on,
 # so a review stack does not fight the cloud stack for a fixed number.
@@ -48,7 +83,7 @@ free_port() {
 wait_for_health() {
 	local deadline=$((SECONDS + 180))
 	while ((SECONDS < deadline)); do
-		if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/healthz"; then
+		if curl -fsS --max-time 5 -o /dev/null "http://127.0.0.1:${PORT}/healthz"; then
 			return 0
 		fi
 		sleep 2
@@ -70,41 +105,54 @@ rpc() {
 	fi
 }
 
+list_count() {
+	node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s)[process.argv[1]]??[];if(!Array.isArray(v))throw Error("invalid list");console.log(v.length)}catch(e){console.error("invalid review fixture response");process.exitCode=1}})' "$1"
+}
+
 # seed makes a fresh stack usable: the first admin account, a local Docker node
 # and a stopped starter server. Every step is safe to repeat.
 seed() {
+	local auth_payload
+	auth_payload="$(REVIEW_SEED_USER="$USER_NAME" REVIEW_SEED_PASS="$USER_PASS" node -e 'console.log(JSON.stringify({username:process.env.REVIEW_SEED_USER,password:process.env.REVIEW_SEED_PASS}))')"
 	rpc /carbonpanel.v1.AuthService/Register \
-		"{\"username\":\"${USER_NAME}\",\"password\":\"${USER_PASS}\"}" >/dev/null 2>&1 || true
+		"${auth_payload}" >/dev/null 2>&1 || true
 
 	local token
 	token=$(rpc /carbonpanel.v1.AuthService/Login \
-		"{\"username\":\"${USER_NAME}\",\"password\":\"${USER_PASS}\"}" |
-		sed 's/.*"token":"\([^"]*\)".*/\1/')
+		"${auth_payload}" |
+		node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).token;if(typeof t!=="string"||!t)throw Error();console.log(t)}catch(e){process.exitCode=1}})')
 	if [ -z "${token}" ]; then
 		echo "could not sign in as ${USER_NAME}; create the account by hand" >&2
-		return 0
+		return 1
 	fi
 
 	# Without a node the panel has nowhere to place a server and every create
 	# fails with "no reachable Docker node has capacity".
-	if ! rpc /carbonpanel.v1.NodeService/ListNodes '{}' "${token}" | grep -q '"nodes"'; then
+	local count
+	count="$(rpc /carbonpanel.v1.NodeService/ListNodes '{}' "${token}" | list_count nodes)"
+	if [ "$count" -eq 0 ]; then
 		rpc /carbonpanel.v1.NodeService/CreateNode \
 			'{"name":"review-local","host":"unix:///var/run/docker.sock","enabled":true,"maxMemoryMb":16384,"maxServers":20}' \
-			"${token}" >/dev/null 2>&1 || true
+			"${token}" >/dev/null
 	fi
+	count="$(rpc /carbonpanel.v1.NodeService/ListNodes '{}' "${token}" | list_count nodes)"
+	[ "$count" -gt 0 ] || { echo "review node was not created" >&2; return 1; }
 
-	if ! rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" | grep -q '"servers"'; then
+	count="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" | list_count servers)"
+	if [ "$count" -eq 0 ]; then
 		rpc /carbonpanel.v1.ServerService/CreateServer \
 			'{"name":"review-vanilla","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","memory":2048,"maxPlayers":10,"port":25565,"requestId":"review-bootstrap-server"}' \
-			"${token}" >/dev/null 2>&1 ||
-			echo "could not create the starter server; create one in the UI" >&2
+			"${token}" >/dev/null
 	fi
-	# Boot the starter so captures show running telemetry. Idempotent:
-	# starting a running server is refused and ignored.
-	server_id=$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const l=JSON.parse(s);const arr=l.servers||[];console.log(((Array.isArray(arr)?arr:[])[0]||{}).id||"")}catch(e){}})')
-	if [ -n "${server_id}" ]; then
-		rpc /carbonpanel.v1.ServerService/StartServer '{"id":"'${server_id}'","requestId":"review-bootstrap-start"}' "${token}" >/dev/null 2>&1 || true
-	fi
+	# A missing or failed starter is a setup failure, not a successful capture.
+	local servers server_id server_status
+	servers="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}")"
+	server_id="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s).servers;if(!Array.isArray(v)||!v[0]?.id)throw Error();console.log(v[0].id)}catch(e){process.exitCode=1}})')"
+	server_status="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).servers[0].status??"")}catch(e){process.exitCode=1}})')"
+	case "$server_status" in
+		SERVER_STATUS_RUNNING|SERVER_STATUS_STARTING|3|2) ;;
+		*) rpc /carbonpanel.v1.ServerService/StartServer '{"id":"'${server_id}'","requestId":"review-bootstrap-start"}' "${token}" >/dev/null ;;
+	esac
 
 	seed_showcase_pack "${token}"
 }
@@ -150,20 +198,32 @@ seed_showcase_pack() {
 }
 
 down() {
-	docker rm -f "${NAME}" >/dev/null 2>&1 || true
+	docker info >/dev/null 2>&1 || { echo "Docker is unavailable; refusing teardown" >&2; return 1; }
+	local names
+	names="$(docker ps -a --format '{{.Names}}')" || { echo "cannot list containers; refusing teardown" >&2; return 1; }
+	if printf '%s\n' "$names" | grep -Fxq "$NAME"; then
+		assert_owner
+		local record id owner
+		record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "$NAME")"
+		id="${record%% *}"; owner="${record#* }"
+		[[ "$id" =~ ^[0-9a-f]{64}$ ]] && [ "$owner" = "$DATA" ] || { echo "refusing to stop an unowned container: $NAME" >&2; return 1; }
+		docker rm -f "$id" >/dev/null
+	fi
 }
 
 case "${1:-up}" in
 up)
+	init_owner
 	down
 	PORT="$(free_port "${PORT}")"
 	mkdir -p "${DATA}/data" "${DATA}/backups" "${DATA}/tmp"
-	echo "${PORT}" >"${DATA}.port"
+	echo "${PORT}" >"${DATA}/port"
 	docker build -q -f "${REPO}/docker/Dockerfile.carbon-panel" \
 		-t "${IMAGE}" --build-arg APP_VERSION=review "${REPO}" >/dev/null
 	docker run -d --name "${NAME}" \
+		--label "carbonpanel.review.owner=${DATA}" \
 		--restart unless-stopped \
-		-p "${PORT}:8080" \
+		-p "127.0.0.1:${PORT}:8080" \
 		-v "${DATA}/data:/app/data" \
 		-v "${DATA}/backups:/app/backups" \
 		-v "${DATA}/tmp:/app/tmp" \
@@ -172,15 +232,18 @@ up)
 	wait_for_health
 	seed
 	echo "review panel: http://127.0.0.1:${PORT}  (data: ${DATA})"
-	echo "account: ${USER_NAME} / ${USER_PASS}"
+	echo "account: ${USER_NAME} (password from PANEL_REVIEW_PASSWORD or the local default)"
 	;;
 down)
 	down
 	echo "stopped ${NAME}"
 	;;
 clean)
+	assert_owner
 	down
-	rm -rf "${DATA}" "${DATA}.port"
+	# Re-resolve immediately before deletion; never follow a substituted link.
+	[ ! -L "$DATA" ] && [ "$(realpath -e "$DATA")" = "$ROOT/$NAME" ] && assert_owner || exit 1
+	rm -rf -- "$DATA"
 	echo "removed ${NAME} and ${DATA}"
 	;;
 *)

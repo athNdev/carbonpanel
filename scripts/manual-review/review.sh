@@ -68,7 +68,57 @@ compose_file() { echo "$1/compose.yaml"; }
 project_name() { echo "carbon-review-${1:0:12}"; }
 
 current_sha() {
-  if [ -f "$CACHE_ROOT/current" ]; then cat "$CACHE_ROOT/current"; fi
+  local sha="${REVIEW_SESSION_SHA:-}"
+  if [ -z "$sha" ] && [ -f "$CACHE_ROOT/current" ]; then sha="$(cat "$CACHE_ROOT/current")"; fi
+  [ -z "$sha" ] || [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "invalid review session revision"
+  printf '%s' "$sha"
+}
+
+session_marker() { printf 'carbon-dual-review-v1\n%s\n%s\n%s' "$1" "$2" "$REPO_ROOT"; }
+
+check_session_path() {
+  local sha="$1" dir="$2" root home_real
+  [[ "$dir" = /* ]] || die "review session path must be absolute"
+  [[ "$dir" != *$'\n'* && "$dir" != *$'\r'* ]] || die "invalid review session path"
+  root="$(realpath -m "$CACHE_ROOT")"; home_real="$(realpath -m "$HOME")"
+  case "$root/" in "$home_real"/*) ;; *) die "review cache is outside the user home" ;; esac
+  [ ! -L "$dir" ] && [ "$(realpath -m "$dir")" = "$root/${sha:0:12}" ] || die "invalid review session path"
+}
+
+assert_session() {
+  local sha="$1" dir="$2" marker="$2/.carbon-review-owner"
+  check_session_path "$sha" "$dir"
+  [ -f "$marker" ] && [ ! -L "$marker" ] && [ "$(cat "$marker")" = "$(session_marker "$sha" "$dir")" ] ||
+    die "review session has no matching ownership marker"
+}
+
+init_session() {
+  local sha="$1" dir="$2" marker="$2/.carbon-review-owner"
+  check_session_path "$sha" "$dir"
+  if [ -e "$dir" ] && [ ! -f "$marker" ]; then
+    die "refusing to adopt existing unmarked review data: $dir"
+  fi
+  mkdir -p "$dir"
+  if [ ! -e "$marker" ]; then
+    (umask 077; set -o noclobber; session_marker "$sha" "$dir" > "$marker")
+  fi
+  assert_session "$sha" "$dir"
+}
+
+owned_containers() {
+  local sha="$1" dir="$2" names name record id owner suffix
+  assert_session "$sha" "$dir"
+  docker info >/dev/null 2>&1 || die "Docker is unavailable; refusing teardown"
+  names="$(docker ps -a --format '{{.Names}}')" || die "cannot list containers; refusing teardown"
+  for suffix in a b; do
+    name="$(project_name "$sha")-$suffix"
+    if printf '%s\n' "$names" | grep -Fxq "$name"; then
+      record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "$name")"
+      id="${record%% *}"; owner="${record#* }"
+      [[ "$id" =~ ^[0-9a-f]{64}$ ]] && [ "$owner" = "$dir" ] || die "refusing to modify unowned container: $name"
+      printf '%s\n' "$id"
+    fi
+  done
 }
 
 ensure_worktree() {
@@ -77,8 +127,7 @@ ensure_worktree() {
     local existing
     existing="$(git -C "$dir/src" rev-parse HEAD 2>/dev/null || true)"
     [ "$existing" = "$sha" ] && return 0
-    git -C "$REPO_ROOT" worktree remove --force "$dir/src" >/dev/null 2>&1 || true
-    rm -rf "$dir/src"
+    die "existing review checkout belongs to another revision; refusing to remove $dir/src"
   fi
   mkdir -p "$dir"
   git -C "$REPO_ROOT" worktree add --detach --force "$dir/src" "$sha" >/dev/null
@@ -107,9 +156,11 @@ port_free() {
 
 write_compose() {
   local sha="$1" dir="$2" tag="carbon-panel:review-${1:0:12}" instances="$3"
-  local project base
+  local project base escaped
   project="$(project_name "$sha")"
   base="$CACHE_ROOT/${sha:0:12}"
+  escaped="${base//\\/\\\\}"
+  escaped="${escaped//\"/\\\"}"
 
   health() {
     cat <<'EOF'
@@ -127,13 +178,14 @@ EOF
     printf '  panel-a:\n'
     printf '    image: %s\n' "$tag"
     printf '    container_name: %s-a\n' "$project"
+    printf '    labels:\n      carbonpanel.review.owner: "%s"\n' "$escaped"
     printf '    restart: unless-stopped\n'
-    printf '    ports:\n      - "%s:8080"\n' "$BASE_PORT_A"
+    printf '    ports:\n      - "127.0.0.1:%s:8080"\n' "$BASE_PORT_A"
     printf '    volumes:\n'
     printf '      - /var/run/docker.sock:/var/run/docker.sock\n'
-    printf '      - %s/a/data:/app/data\n' "$base"
-    printf '      - %s/a/backups:/app/backups\n' "$base"
-    printf '      - %s/a/tmp:/app/tmp\n' "$base"
+    printf '      - "%s/a/data:/app/data"\n' "$escaped"
+    printf '      - "%s/a/backups:/app/backups"\n' "$escaped"
+    printf '      - "%s/a/tmp:/app/tmp"\n' "$escaped"
     printf '    environment:\n'
 
     printf '      TZ: UTC\n'
@@ -144,13 +196,14 @@ EOF
       printf '\n  panel-b:\n'
       printf '    image: %s\n' "$tag"
       printf '    container_name: %s-b\n' "$project"
+      printf '    labels:\n      carbonpanel.review.owner: "%s"\n' "$escaped"
       printf '    restart: unless-stopped\n'
-      printf '    ports:\n      - "%s:8080"\n' "$BASE_PORT_B"
+      printf '    ports:\n      - "127.0.0.1:%s:8080"\n' "$BASE_PORT_B"
       printf '    volumes:\n'
       printf '      - /var/run/docker.sock:/var/run/docker.sock\n'
-      printf '      - %s/b/data:/app/data\n' "$base"
-      printf '      - %s/b/backups:/app/backups\n' "$base"
-      printf '      - %s/b/tmp:/app/tmp\n' "$base"
+      printf '      - "%s/b/data:/app/data"\n' "$escaped"
+      printf '      - "%s/b/backups:/app/backups"\n' "$escaped"
+      printf '      - "%s/b/tmp:/app/tmp"\n' "$escaped"
       printf '    environment:\n'
 
       printf '      TZ: UTC\n'
@@ -184,11 +237,14 @@ bootstrap_admin() {
     --header="Content-Type: application/json" \
     --post-data="$payload" \
     "http://127.0.0.1:8080/carbonpanel.v1.AuthService/Register" 2>/dev/null || true)"
-  if [ -n "$response" ]; then
-    log "admin $ADMIN_USER bootstrapped on :$port"
-  else
-    warn "admin bootstrap returned no body on :$port (account may already exist)"
-  fi
+  # Registration may fail because the account already exists; prove login.
+  response="$(docker exec "$container" wget -qO- \
+    --header="Content-Type: application/json" \
+    --post-data="{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASSWORD\"}" \
+    "http://127.0.0.1:8080/carbonpanel.v1.AuthService/Login" 2>/dev/null || true)"
+  printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{if(!JSON.parse(s).token)throw Error()}catch(e){process.exitCode=1}})' ||
+    die "admin bootstrap and login failed on :$port"
+  log "admin $ADMIN_USER verified on :$port"
 }
 
 cmd_up() {
@@ -204,13 +260,15 @@ cmd_up() {
   done
   [ "$instances" = "1" ] || [ "$instances" = "2" ] || die "--instances must be 1 or 2"
 
-  need docker; need git
+  need docker; need git; need node
   docker compose version >/dev/null 2>&1 || die "docker compose plugin required"
   docker info >/dev/null 2>&1 || die "Docker daemon not reachable inside WSL"
 
   local sha dir
   sha="$(resolve_ref "$ref")"
-  dir="$(state_dir_for "$sha")"; mkdir -p "$dir"
+  dir="$(state_dir_for "$sha")"; init_session "$sha" "$dir"
+  # Verify both names before compose can recreate either container.
+  owned_containers "$sha" "$dir" >/dev/null
 
   port_free "$BASE_PORT_A" || die "port $BASE_PORT_A is already in use"
   if [ "$instances" = "2" ]; then
@@ -237,7 +295,7 @@ cmd_up() {
         bootstrap_admin "$container" "$BASE_PORT_A"
       fi
     else
-      warn "$container did not become healthy; inspect: docker logs $container"
+      die "$container did not become healthy; inspect: docker logs $container"
     fi
   done
 
@@ -279,14 +337,15 @@ cmd_logs() {
 cmd_down() {
   local purge="" sha dir
   [ "${1:-}" = "--purge" ] && purge="--purge"
+  [ "$purge" != "--purge" ] || die "reset is unavailable until this legacy harness has an ownership manifest; data was not deleted"
   sha="$(current_sha)"; [ -n "$sha" ] || die "no review instance recorded"
   dir="$(state_dir_for "$sha")"
-  compose "$sha" "$dir" down --remove-orphans || true
+  local names name
+  names="$(owned_containers "$sha" "$dir")"
+  while IFS= read -r name; do
+    [ -z "$name" ] || docker rm -f "$name" >/dev/null
+  done <<< "$names"
   log "instances stopped; data kept at $dir"
-  if [ "$purge" = "--purge" ]; then
-    rm -rf "$dir" "$CACHE_ROOT/current"
-    log "review data purged"
-  fi
 }
 
 cmd_reset() { cmd_down --purge; }

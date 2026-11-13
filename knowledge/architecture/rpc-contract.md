@@ -22,7 +22,9 @@ Every frontend or CLI call goes through a service defined in
 # Flow
 
 1. Edit the `.proto` file.
-2. Regenerate with `make proto` (Docker + buf).
+2. Regenerate with `make proto` (Docker + pinned Buf); generation and formatting
+   complete in a staging directory before tracked outputs are replaced. See
+   [development](../../docs/development.md) for the native comparison command.
 3. Implement the handler in `internal/rpc/handlers` and the service in
    `internal/rpc/services`.
 4. Map the RPC to a permission and add negative authorization tests.

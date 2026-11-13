@@ -59,10 +59,10 @@ paste only redacted material.
 
 | # | Steps | Expected |
 | --- | --- | --- |
-| G1 | Remove any stale `services.test.exe` firewall rule, then run `go test ./internal/rpc/services` in an unelevated Windows shell | No firewall prompt |
+| G1 | Run `go test ./internal/rpc/services` in an unelevated Windows shell and inspect firewall events read-only as described in the Windows verification procedure | No test-related Query User event |
 
 ## Teardown
 
 ```sh
-MSYS_NO_PATHCONV=1 wsl.exe -e bash /mnt/c/research_learning_new/carbonpanel/scripts/manual-review/review.sh down
+bash scripts/manual-review/review.sh down
 ```

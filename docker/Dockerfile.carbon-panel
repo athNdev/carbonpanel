@@ -10,13 +10,14 @@
 ARG APP_VERSION=dev
 
 # Generate protobuf code using buf
-FROM bufbuild/buf:latest AS proto-builder
+ARG BUF_IMAGE=bufbuild/buf:1.50.0
+FROM --platform=$BUILDPLATFORM ${BUF_IMAGE} AS proto-builder
 WORKDIR /app
 COPY buf.yaml buf.gen.yaml buf.lock ./
 COPY proto/ ./proto/
 RUN mkdir -p web/carbon-panel/static pkg/proto web/carbon-panel/src/lib/proto && buf generate
 
-FROM oven/bun:1-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.2-alpine AS frontend-builder
 
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
@@ -36,12 +37,10 @@ COPY --from=proto-builder /app/web/carbon-panel/static/schemav1.yaml ./static/
 
 RUN bun run build
 
-FROM golang:alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.11-alpine AS backend-builder
 
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
-
-RUN apk add --no-cache gcc musl-dev sqlite-dev
 
 WORKDIR /app
 
@@ -52,18 +51,28 @@ COPY . .
 COPY --from=proto-builder /app/pkg/proto ./pkg/proto/
 COPY --from=frontend-builder /app/web/carbon-panel/build ./web/carbon-panel/build
 
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o carbon-panel ./cmd/carbon-panel
-RUN CGO_ENABLED=0 GOOS=linux go build -o carbon-storage ./cmd/carbon-storage
+ARG TARGETOS
+ARG TARGETARCH
+ARG APP_COMMIT=unknown
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+    -ldflags="-s -w -X github.com/athNdev/carbon-panel/internal/buildinfo.Version=$APP_VERSION -X github.com/athNdev/carbon-panel/internal/buildinfo.Commit=$APP_COMMIT -X github.com/athNdev/carbon-panel/internal/buildinfo.Date=$BUILD_DATE" \
+    -o carbon-panel ./cmd/carbon-panel
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+    -ldflags="-s -w -X github.com/athNdev/carbon-panel/internal/buildinfo.Version=$APP_VERSION -X github.com/athNdev/carbon-panel/internal/buildinfo.Commit=$APP_COMMIT -X github.com/athNdev/carbon-panel/internal/buildinfo.Date=$BUILD_DATE" \
+    -o carbon-storage ./cmd/carbon-storage
 
-FROM alpine:latest
+FROM --platform=$BUILDPLATFORM alpine:3.24.4 AS certificates
+RUN apk --no-cache add ca-certificates
+
+FROM alpine:3.24.4
 
 ARG APP_VERSION
 ENV APP_VERSION=${APP_VERSION}
 
-RUN apk --no-cache add ca-certificates sqlite-libs
-
 WORKDIR /app
 
+COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=backend-builder /app/carbon-panel .
 COPY --from=backend-builder /app/carbon-storage /usr/local/bin/carbon-storage
 COPY config.example.yaml ./

@@ -7,6 +7,8 @@ on:
       - 'web/carbon-panel/**'
       - 'scripts/manual-review/e2e/editor-dialog/**'
       - 'scripts/manual-review/e2e/editor-dialog-check.mjs'
+      - 'scripts/manual-review/e2e/websocket-browser/**'
+      - 'scripts/manual-review/e2e/websocket-reconnect-check.mjs'
       - 'scripts/manual-review/e2e/package.json'
       - 'scripts/manual-review/e2e/bun.lock'
       - '.github/workflows/editor-dialog.yml'
@@ -16,6 +18,8 @@ on:
       - 'web/carbon-panel/**'
       - 'scripts/manual-review/e2e/editor-dialog/**'
       - 'scripts/manual-review/e2e/editor-dialog-check.mjs'
+      - 'scripts/manual-review/e2e/websocket-browser/**'
+      - 'scripts/manual-review/e2e/websocket-reconnect-check.mjs'
       - 'scripts/manual-review/e2e/package.json'
       - 'scripts/manual-review/e2e/bun.lock'
       - '.github/workflows/editor-dialog.yml'
@@ -49,3 +53,6 @@ jobs:
       - name: Verify compiled editor views and worker serving
         working-directory: scripts/manual-review/e2e
         run: node editor-dialog-check.mjs --production
+      - name: Exercise WebSocket reconnection in Chromium
+        working-directory: scripts/manual-review/e2e
+        run: node websocket-reconnect-check.mjs

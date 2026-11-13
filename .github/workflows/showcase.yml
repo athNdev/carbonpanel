@@ -22,7 +22,7 @@
 #     cp /tmp/showcase/showcase-*.png landing/assets/showcase/
 #     cp /tmp/showcase/showcase-*.png assets/showcase/
 # - The devstack port is printed by `devstack.sh up` and written to
-#   ~/.cache/carbon-panel-review.port. Credentials come from
+#   ~/.cache/carbon-panel-review/sessions/carbon-panel-review/port. Credentials come from
 #   PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD only and are never committed.
 # - After copying PNGs, run `python3 scripts/build_website.py` and
 #   `python3 scripts/check_website.py` to verify the website assets.
@@ -94,7 +94,7 @@ jobs:
 
       - name: Run showcase journey
         run: |
-          PORT="$(cat "${HOME}/.cache/carbon-panel-review.port")"
+          PORT="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/port")"
           REVIEW_MODULES="${GITHUB_WORKSPACE}/node_modules" \
           PANEL_REVIEW_USER=reviewer \
           PANEL_REVIEW_PASSWORD=Review-Panel-2026 \

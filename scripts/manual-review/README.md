@@ -27,10 +27,10 @@ removes its own temporary dependency cache. Set
 installation instead of Playwright's browser. CI runs this check separately from
 the frontend unit and build gate.
 
-## Quick start (Windows, WSL)
+## Quick start (WSL or Linux)
 
 ```sh
-MSYS_NO_PATHCONV=1 wsl.exe -e bash /mnt/c/research_learning_new/carbonpanel/scripts/manual-review/review.sh up
+bash scripts/manual-review/review.sh up
 ```
 
 This builds a production image (proto + frontend + backend) from `HEAD`, starts
@@ -51,7 +51,7 @@ review.sh status
 review.sh logs a|b
 review.sh urls
 review.sh down            # keeps database, worlds and review data
-review.sh reset           # stops and DELETES review data (explicit)
+review.sh reset           # currently refuses until legacy ownership is verified
 ```
 
 `--ref` accepts any branch or commit. Building a new ref reuses Docker's layer
@@ -67,9 +67,8 @@ cached.
 | `~/.cache/carbon-review/<sha>/compose.yaml` | generated compose file |
 | `~/.cache/carbon-review/current` | the ref currently running |
 
-Nothing is written inside the repository. The worktree is registered with the
-repo, so `git worktree prune` cleans it up if a cache directory is ever removed
-by hand.
+Nothing is written inside the repository. The source worktree is registered
+with Git and is not automatically removed during teardown.
 
 ## Design notes
 
@@ -81,8 +80,11 @@ by hand.
 - **No prompts.** Health is polled via Docker health checks; the admin is created
   through the public `AuthService.Register` RPC. The first registered user is
   admin by design. No credentials from 1Password are needed.
-- **Safe teardown.** `down` keeps data. Only `reset` deletes it, and only under
-  the cache directory.
+- **Safe teardown.** `down` keeps data. Legacy `reset` currently refuses to
+  delete data until a separately verified reset is available. Newly created
+  sessions require a matching ownership marker and container labels; existing
+  unmarked review data is not adopted automatically. Use `REVIEW_SESSION_SHA`
+  to select a previously created session instead of the latest one.
 - **Port discipline.** 18081/18082 are reserved for this harness. If either is
   busy, `up` fails with a clear message instead of binding something else.
 

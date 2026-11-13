@@ -55,6 +55,10 @@ cannot outlive the code it names.
 
 # Rules
 
+- Proto generation tests exercise the real entrypoint with a failing generator
+  and require every previous output to survive. The native comparison command
+  verifies generated Go and TypeScript after staging and formatting.
+
 - Test the failure path at the closest integration seam, not only the happy
   path.
 - Do not require a live Minecraft server for a unit-level failure test.

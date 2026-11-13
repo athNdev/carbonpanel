@@ -5,8 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.0.0-alpha.1] - 2026-11-13
+
+### Added
+
+- Versioned release bundles for Linux amd64/arm64, macOS Intel/Apple Silicon and Windows amd64, with the embedded UI, storage helper, example configuration, licenses, build metadata and SHA-256 checksums. Both binaries report their release version with `--version`.
+
 ### Changed
 
+- Versioned containers are mirrored to the repository-linked GitHub package. Skipped PR checks cannot interrupt CD, and dependency transport failures retry before tests run.
+- Release publication validates exact-commit main CI and the complete native bundle/image set before publishing a GitHub release. Tagged images use the tested Linux downloads; main development images use `edge`, while stable releases own `latest`.
+- Controller image builds compile the web UI natively and cross-compile pure-Go binaries, avoiding compiler work under ARM emulation.
 - Design-system page documents all nineteen exported Carbon components with prop tables and behaviour notes, full light and dark token tables, and composition rules. A regression test now asserts every `carbon/index.ts` export has a documented section.
 - Design-system page layout redo: every component pairs a captioned demo pane with a scrollable prop table, badges are fixed pills, and demo groups follow one spacing rhythm at 360, 768 and 1440 px.
 - Server detail working panes (console, mods, datapacks, modules, files, tasks, backups, players, activity) fill the remaining column through a `min-h-0` / `flex-1` chain instead of a viewport-minus-chrome height, so the log, list, or tree scrolls inside the pane.
@@ -94,7 +103,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI with Carbon Design System.
 - Docker-based server isolation.
 
-[Unreleased]: https://github.com/athNdev/carbon-panel/compare/v3.0.0-beta.4...HEAD
+[Unreleased]: https://github.com/athNdev/carbonpanel/compare/v3.0.0-alpha.1...HEAD
+[3.0.0-alpha.1]: https://github.com/athNdev/carbonpanel/releases/tag/v3.0.0-alpha.1
 [3.0.0-beta.4]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.4
 [3.0.0-beta.3]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.3
 [2.0.15]: https://github.com/athNdev/carbon-panel/releases/tag/v2.0.15
