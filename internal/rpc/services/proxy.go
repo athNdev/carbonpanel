@@ -19,6 +19,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/internal/proxy"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -568,28 +569,16 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration"))
 		}
 
-		result, err := dockerCli.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
+		serverruntime.PrepareConfig(ctx, s.store, nil, serverConfig)
+		result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 		if err != nil {
 			s.log.Error("Failed to recreate container for proxy change: %v", err)
-			if result != nil && result.NewContainerID != "" {
-				server.ContainerID = result.NewContainerID
-				server.Status = storage.StatusError
-			} else {
-				server.Status = storage.StatusError
-				server.ContainerID = ""
-				// Remove route since there's no valid container
-				if s.proxyManager != nil && hostname != "" {
-					s.proxyManager.RemoveRouteByHostname(hostname, listenerID)
-				}
+			if server.ContainerID == "" && s.proxyManager != nil && hostname != "" {
+				s.proxyManager.RemoveRouteByHostname(hostname, listenerID)
 			}
-		} else {
-			server.ContainerID = result.NewContainerID
-			if result.WasRunning {
-				server.Status = storage.StatusRunning
-			} else {
-				server.Status = storage.StatusStopped
-			}
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate container for proxy change: %w", err))
 		}
+		server.Status = statusAfterContainerRecreation(server.Status, result.WasRunning)
 
 		s.log.Info("Container recreated for server %s (proxy: %q -> %q, listener: %s -> %s)",
 			server.Name, oldProxyHostname, hostname, oldProxyListenerID, listenerID)
