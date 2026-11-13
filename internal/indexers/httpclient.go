@@ -1,6 +1,7 @@
 package indexers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -68,12 +69,28 @@ func ProtectCredentialsOnRedirect(client *http.Client) *http.Client {
 // DoJSON performs a GET request, checks the status, and JSON-decodes into dest.
 // It returns structured IndexerErrors for all failure modes.
 func (h *HTTPClient) DoJSON(ctx context.Context, url string, dest any) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	return h.requestJSON(ctx, http.MethodGet, url, nil, dest)
+}
+
+// PostJSON uses the same credentials, redirects, timeout and errors as GET.
+func (h *HTTPClient) PostJSON(ctx context.Context, url string, payload any, dest any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return NewDecodeError(h.indexer, url, err)
+	}
+	return h.requestJSON(ctx, http.MethodPost, url, bytes.NewReader(body), dest)
+}
+
+func (h *HTTPClient) requestJSON(ctx context.Context, method, url string, body io.Reader, dest any) error {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return &IndexerError{Kind: ErrNetwork, Indexer: h.indexer, URL: url, Err: err}
 	}
 
 	req.Header.Set("Accept", "application/json")
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if h.userAgent != "" {
 		req.Header.Set("User-Agent", h.userAgent)
 	}

@@ -136,3 +136,18 @@ func TestFallbackNeverReceivesOfficialAPIKey(t *testing.T) {
 		})
 	}
 }
+
+func TestDatapackSearchUsesCredentialBoundary(t *testing.T) {
+	calls := 0
+	c := NewClient("fixture-key", testCfg(), WithBaseURL("https://API.CURSE.TOOLS/alternate"), WithHTTPClient(&http.Client{Transport: fixtureTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Header.Get("X-Api-Key") != "" || r.URL.Query().Get("classId") != "6945" || r.URL.Query().Get("sortField") != "6" {
+			t.Errorf("datapack policy: %+v", r)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[]}`)), Header: make(http.Header)}, nil
+	})}))
+	_, err := (&FuegoDatapackIndexer{client: c}).SearchDatapacks(context.Background(), "", "", 0, 20)
+	if err != nil || calls != 1 {
+		t.Fatalf("err=%v calls=%d", err, calls)
+	}
+}

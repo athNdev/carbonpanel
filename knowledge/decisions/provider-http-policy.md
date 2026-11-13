@@ -29,7 +29,7 @@ host or port changes. The original client and supplied header map are not mutate
 # Consequences
 
 The community proxy receives no official API key, including slug lookup.
-Filtering, file ordering, checksum selection and existing fallback error results
-are preserved. Fixture-only tests cover redirects, authentication/status and
-malformed responses, cancellation, and credential-free fallback. Remaining
-browse/Packwiz request consolidation is tracked in the source issue.
+Filtering, file ordering and checksum selection stay with the caller. GET and
+batch POST use the same redirect and credential policy. Fixture-only tests cover redirects, authentication/status and
+malformed responses, cancellation, and credential-free fallback. The request adapters are shared by browse, dependency lookup, Packwiz update
+checks, compatibility previews and datapack search.

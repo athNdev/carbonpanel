@@ -120,3 +120,15 @@ func TestCurseForgeDependencyUsesSharedAdapter(t *testing.T) {
 		t.Fatalf("mod=%+v deps=%+v err=%v", mod, deps, err)
 	}
 }
+
+func TestLegacyCompatibilityKeepsLiteralVanillaFilter(t *testing.T) {
+	m := providerUpdateManager(t, packPolicyTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Query().Get("loaders") != `["vanilla"]` || r.URL.Query().Get("game_versions") != `[""]` {
+			t.Errorf("legacy literal filters changed: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
+	}))
+	if _, err := m.SimulateMigrationContext(context.Background(), "pack", "", "vanilla"); err != nil {
+		t.Fatal(err)
+	}
+}
