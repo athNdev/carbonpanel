@@ -6,11 +6,11 @@
 package packwiz
 
 import (
-	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 

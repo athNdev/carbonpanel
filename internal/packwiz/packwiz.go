@@ -1828,7 +1828,7 @@ func (m *Manager) CheckModUpdatesContext(ctx context.Context, packID string) ([]
 		}
 
 		if mod.Platform == "modrinth" && mod.ProjectID != "" {
-			versions, err := m.modrinthClient().GetVersions(ctx, mod.ProjectID, strings.ToLower(pack.ModLoader), pack.MCVersion)
+			versions, err := m.modrinthClient().GetVersionsWithFilters(ctx, mod.ProjectID, []string{strings.ToLower(pack.ModLoader)}, []string{pack.MCVersion})
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
@@ -2135,7 +2135,7 @@ func (m *Manager) SimulateMigrationContext(ctx context.Context, packID, targetMC
 		}
 
 		if mod.Platform == "modrinth" && mod.ProjectID != "" {
-			versions, err := m.modrinthClient().GetVersions(ctx, mod.ProjectID, strings.ToLower(targetLoader), targetMC)
+			versions, err := m.modrinthClient().GetVersionsWithFilters(ctx, mod.ProjectID, []string{strings.ToLower(targetLoader)}, []string{targetMC})
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
