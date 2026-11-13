@@ -130,4 +130,19 @@ fi
 export FAKE_OWNER_B="$legacy"
 bash "$script_dir/../manual-review/review.sh" down >/dev/null
 [ "$(wc -l < "$FAKE_DOCKER_LOG")" -eq 2 ] && [ -f "$legacy/world.dat" ]
+
+# A named reset deletes only a marked session's instance data, never its source
+# checkout or a symlink target/neighboring session.
+mkdir -p "$legacy/a/data" "$legacy/b/data" "$legacy/src"
+printf 'world\n' > "$legacy/a/data/world.dat"
+printf 'source\n' > "$legacy/src/source.go"
+rm -rf -- "$legacy/b"
+ln -s "$neighbor" "$legacy/b"
+: > "$FAKE_DOCKER_LOG"
+if bash "$script_dir/../manual-review/review.sh" reset >/dev/null 2>&1; then echo "reset accepted an instance symlink" >&2; exit 1; fi
+[ ! -s "$FAKE_DOCKER_LOG" ] && [ -f "$legacy/a/data/world.dat" ]
+rm -- "$legacy/b"
+mkdir -p "$legacy/b/data"
+bash "$script_dir/../manual-review/review.sh" reset >/dev/null
+[ ! -e "$legacy/a" ] && [ ! -e "$legacy/b" ] && [ -f "$legacy/src/source.go" ] && [ -d "$neighbor" ]
 echo "PASS: review teardown preserves unowned and neighboring data"
