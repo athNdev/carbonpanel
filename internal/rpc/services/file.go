@@ -212,6 +212,9 @@ func (s *FileService) ListFiles(ctx context.Context, req *connect.Request[v1.Lis
 
 	if err != nil {
 		s.log.Error("Failed to list files: %v", err)
+		if ctx.Err() != nil {
+			return nil, storageError(ctx.Err())
+		}
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list files"))
 	}
 
@@ -298,6 +301,9 @@ func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFi
 	}
 	info, err := acc.Stat(msg.Path)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, storageError(ctx.Err())
+		}
 		if os.IsNotExist(err) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("file not found"))
 		}
@@ -312,6 +318,9 @@ func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFi
 	// Read file content
 	content, err := acc.ReadFile(msg.Path)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, storageError(ctx.Err())
+		}
 		s.log.Error("Failed to read file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to read file"))
 	}

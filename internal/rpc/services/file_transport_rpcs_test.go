@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +30,63 @@ import (
 )
 
 type cancelledFileTransport struct{ started chan struct{} }
+
+type blockedReadFileTransport struct {
+	root    string
+	started chan struct{}
+}
+
+type blockedReadFileAccessor struct {
+	nodestorage.Accessor
+	ctx     context.Context
+	started chan struct{}
+}
+
+func (p *blockedReadFileTransport) Open(ctx context.Context, _ nodestorage.NodeInfo, _ string) (nodestorage.Accessor, error) {
+	local, err := nodestorage.NewLocal(p.root)
+	if err != nil {
+		return nil, err
+	}
+	return &blockedReadFileAccessor{Accessor: local, ctx: ctx, started: p.started}, nil
+}
+
+func (a *blockedReadFileAccessor) ReadFile(string) ([]byte, error) {
+	close(a.started)
+	<-a.ctx.Done()
+	return nil, io.ErrClosedPipe
+}
+
+func TestGetFileMapsPostOpenReadCancellation(t *testing.T) {
+	_, server, svc, globalTransport, workerRoot, phantomRoot, cleanup := transportOnlyFixture(t)
+	defer cleanup()
+	started := make(chan struct{})
+	svc.SetStorageResolver(nodestorage.NewResolver(&blockedReadFileTransport{root: workerRoot, started: started}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.GetFile(ctx, connect.NewRequest(&v1.GetFileRequest{ServerId: server.ID, Path: "server.properties"}))
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("file read did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || connect.CodeOf(err) != connect.CodeCanceled {
+			t.Fatalf("read cancellation error = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("file read did not cancel")
+	}
+	if globalTransport.opened != 0 {
+		t.Fatal("file read used the global transport")
+	}
+	assertNoControllerLocalTree(t, phantomRoot, server.DataPath)
+}
 
 func (p *cancelledFileTransport) Open(ctx context.Context, _ nodestorage.NodeInfo, _ string) (nodestorage.Accessor, error) {
 	close(p.started)
