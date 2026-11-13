@@ -12,7 +12,10 @@ one at https://mozilla.org/MPL/2.0/.
 	import { onMount } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { toast } from 'svelte-sonner';
-	import { beginLifecycleRequest } from '$lib/lifecycle-request';
+	import {
+		serverStatusTone as getStatusTagType,
+		serverStatusLabel
+	} from '$lib/features/servers/presentation';
 	import { formatBytes, getStringForEnum } from '$lib/utils';
 	import {
 		Server,
@@ -36,7 +39,12 @@ one at https://mozilla.org/MPL/2.0/.
 	} from '$lib/proto/carbonpanel/v1/node_pb';
 	import { formatRpcError } from '$lib/api/rpc-error';
 	import { prefersReducedMotion } from '$lib/motion';
-	import { serversStore, sortServersByActivity } from '$lib/stores/servers';
+	import {
+		serversStore,
+		serverInventory,
+		serverActions,
+		sortServersByActivity
+	} from '$lib/stores/servers';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import {
 		CarbonButton,
@@ -47,7 +55,9 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 
 	// Dashboard data
-	let dashboardServers: ServerType[] = $state([]);
+	let dashboardServers = $derived($serversStore);
+	let dashboardLoadGeneration = 0;
+	let mounted = false;
 	let dashboardNodes: NodeType[] = $state([]);
 	let isLoading = $state(true);
 	let loadError = $state<string | null>(null);
@@ -58,23 +68,23 @@ one at https://mozilla.org/MPL/2.0/.
 	// NodeService.listNodes runs in parallel with listServers so a node
 	// failure never blocks the server tiles; nodes stay empty on error.
 	async function loadDashboardData() {
+		const generation = ++dashboardLoadGeneration;
 		loadError = null;
 		try {
-			const [serversResponse] = await Promise.all([
-				rpcClient.server.listServers({ fullStats: true }),
+			await Promise.all([
+				serverInventory.refresh(true),
 				rpcClient.node
 					.listNodes({}, silentCallOptions)
 					.then((res) => {
-						dashboardNodes = res.nodes ?? [];
+						if (mounted && generation === dashboardLoadGeneration) dashboardNodes = res.nodes ?? [];
 					})
 					.catch((nodeError) => {
 						console.error('Failed to load node inventory (fail-open):', nodeError);
 					})
 			]);
-			dashboardServers = serversResponse.servers;
-			serversStore.set(serversResponse.servers);
 		} catch (error) {
-			loadError = formatRpcError(error, 'Could not load dashboard data. Try again.');
+			if (mounted && generation === dashboardLoadGeneration)
+				loadError = formatRpcError(error, 'Could not load dashboard data. Try again.');
 			console.error('Failed to load dashboard data:', error);
 		}
 	}
@@ -87,28 +97,14 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function handleServerAction(action: 'start' | 'stop', server: ServerType) {
-		const attempt = beginLifecycleRequest(server.id, action);
 		try {
-			if (action === 'start') {
-				await rpcClient.server.startServer({
-					id: server.id,
-					requestId: attempt.requestId
-				});
-				toast.success(`Starting ${server.name}...`);
-			} else {
-				await rpcClient.server.stopServer({
-					id: server.id,
-					requestId: attempt.requestId
-				});
-				toast.success(`Stopping ${server.name}...`);
-			}
-			await loadDashboardData();
+			const outcome=await serverActions.perform(server.id, action);
+if(outcome.kind==='superseded')return;
+			toast.success(`${action === 'start' ? 'Starting' : 'Stopping'} ${server.name}...`);
 		} catch (error) {
 			toast.error(
 				`Failed to ${action} server: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
-		} finally {
-			attempt.finish();
 		}
 	}
 
@@ -234,6 +230,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	onMount(() => {
+		mounted = true;
 		loadDashboardData().then(() => {
 			isLoading = false;
 		});
@@ -241,32 +238,12 @@ one at https://mozilla.org/MPL/2.0/.
 		const interval = setInterval(() => {
 			currentTime = new Date();
 		}, 1000);
-		return () => clearInterval(interval);
+		return () => {
+			mounted = false;
+			++dashboardLoadGeneration;
+			clearInterval(interval);
+		};
 	});
-
-	function getStatusTagType(
-		status: ServerStatus
-	): 'green' | 'red' | 'yellow' | 'purple' | 'blue' | 'gray' {
-		switch (status) {
-			case ServerStatus.RUNNING:
-				return 'green';
-			case ServerStatus.STARTING:
-			case ServerStatus.STOPPING:
-			case ServerStatus.CREATING:
-			case ServerStatus.RESTARTING:
-			case ServerStatus.DEEPSLEEP:
-				return 'purple';
-			case ServerStatus.PAUSED:
-				return 'blue';
-			case ServerStatus.ERROR:
-				return 'red';
-			case ServerStatus.UNHEALTHY:
-				return 'yellow';
-			case ServerStatus.STOPPED:
-			default:
-				return 'gray';
-		}
-	}
 
 	// Status pip colours derive from getStatusTagType so a transient state
 	// (starting, sleeping, paused) is never shown as an error red. Only
@@ -278,7 +255,8 @@ one at https://mozilla.org/MPL/2.0/.
 		yellow: 'bg-[#f1c21b]',
 		purple: 'bg-[#a56eff]',
 		blue: 'bg-[#0f62fe]',
-		gray: 'bg-[#8d8d8d]'
+		gray: 'bg-[#8d8d8d]',
+		'warm-gray': 'bg-[#8d8d8d]'
 	};
 
 	const formatUptime = (lastStarted?: Timestamp) => {
@@ -758,7 +736,7 @@ one at https://mozilla.org/MPL/2.0/.
 														server.status !== ServerStatus.PAUSED &&
 														server.status !== ServerStatus.DEEPSLEEP}
 												>
-													{getStringForEnum(ServerStatus, server.status)}
+													{serverStatusLabel(server.status)}
 												</CarbonTag>
 											</td>
 											<td
@@ -907,8 +885,8 @@ one at https://mozilla.org/MPL/2.0/.
 									<!-- Sharp status pip -->
 									<div
 										role="img"
-										aria-label={getStringForEnum(ServerStatus, activity.status)}
-										title={getStringForEnum(ServerStatus, activity.status)}
+										aria-label={serverStatusLabel(activity.status)}
+										title={serverStatusLabel(activity.status)}
 										class="h-2 w-2 shrink-0 {statusPipColor[
 											getStatusTagType(activity.status)
 										]} {activity.status === ServerStatus.ERROR ||

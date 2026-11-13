@@ -11,10 +11,13 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount, untrack } from 'svelte';
-	import { rpcClient, silentCallOptions, wasRpcErrorToasted } from '$lib/api/rpc-client';
+	import { rpcClient, wasRpcErrorToasted } from '$lib/api/rpc-client';
 	import { triggerStreamDownload } from '$lib/api/stream-download';
-	import { beginLifecycleRequest } from '$lib/lifecycle-request';
-	import { serversStore } from '$lib/stores/servers';
+	import {
+		serverStatusLabel as getStatusDisplayName,
+		serverStatusTone as getStatusTagType
+	} from '$lib/features/servers/presentation';
+	import { serversStore, serverInventory, serverActions } from '$lib/stores/servers';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import ServerLifecycleActions from '$lib/components/fragments/ServerLifecycleActions.svelte';
@@ -49,19 +52,11 @@ one at https://mozilla.org/MPL/2.0/.
 		DropdownMenuItem,
 		DropdownMenuTrigger
 	} from '$lib/components/ui/dropdown-menu';
-	import { create } from '@bufbuild/protobuf';
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { ServerStatus, ModLoader } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { GetServerRoutingResponse } from '$lib/proto/carbonpanel/v1/proxy_pb';
-	import {
-		GetServerRequestSchema,
-		DeleteServerRequestSchema,
-		StartServerRequestSchema,
-		StopServerRequestSchema,
-		RestartServerRequestSchema,
-		RecreateServerRequestSchema
-	} from '$lib/proto/carbonpanel/v1/server_pb';
+
 	import { enumToString } from '$lib/utils';
 	import { effectiveLoader } from '$lib/utils/mod-loader';
 	import { copyToClipboard as copyText } from '$lib/utils/clipboard';
@@ -90,16 +85,13 @@ one at https://mozilla.org/MPL/2.0/.
 	import ServerModules from '$lib/components/server/ServerModules.svelte';
 	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
 
-	let server = $state<Server | null>(null);
+	let serverId = $derived(page.params.id);
+	let server = $derived($serversStore.find((entry) => entry.id === serverId) ?? null);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let actionLoading = $state(false);
-	let serverId = $derived(page.params.id);
-	let prevServerId = $state<string | undefined>(undefined);
 	let activeTab = $state('overview');
 	let routingInfo = $state<GetServerRoutingResponse | null>(null);
-
-	let interval: ReturnType<typeof setInterval> | undefined;
 
 	function timestampToDate(timestamp: Timestamp | undefined): Date {
 		if (!timestamp) return new Date();
@@ -117,9 +109,6 @@ one at https://mozilla.org/MPL/2.0/.
 			.catch(() => {
 				// Proxy might be disabled or unreachable, ignore
 			});
-		return () => {
-			if (interval) clearInterval(interval);
-		};
 	});
 
 	const isProxied = $derived(
@@ -141,36 +130,35 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
-		if (serverId) {
-			if (interval) clearInterval(interval);
-			const prev = untrack(() => prevServerId);
-			if (prev !== serverId) {
-				untrack(() => {
-					loading = true;
-					prevServerId = serverId;
-				});
-			}
-			loadServer(true);
-			interval = setInterval(() => loadServer(true), 5000);
+		const id = serverId;
+		if (!id) return;
+		untrack(() => {
+			loading = true;
+			loadError = null;
+			void loadServer(true);
+		});
+		return serverInventory.watch({ id });
+	});
+
+	$effect(() => {
+		if (server) {
+			loading = false;
+			loadError = null;
 		}
 	});
 
 	async function loadServer(skipLoading = false) {
 		if (!serverId) return;
 		const requestedId = serverId;
+		const generation = serverInventory.generation();
 		if (!skipLoading) {
 			loading = true;
 			loadError = null;
 		}
 		try {
-			const request = create(GetServerRequestSchema, { id: requestedId });
-			const callOptions = skipLoading ? silentCallOptions : undefined;
-			const response = await rpcClient.server.getServer(request, callOptions);
-			if (serverId !== requestedId) return;
-
-			if (response.server) {
-				server = response.server;
-				serversStore.updateServer(server);
+			const loaded = await serverInventory.load(requestedId, skipLoading);
+			if (serverId !== requestedId || generation !== serverInventory.generation()) return;
+			if (loaded) {
 				loadError = null;
 				loading = false;
 			} else {
@@ -183,7 +171,8 @@ one at https://mozilla.org/MPL/2.0/.
 				}
 			}
 		} catch (error) {
-			if (serverId !== requestedId) return;
+			if (serverId !== requestedId || generation !== serverInventory.generation()) return;
+			loading = false;
 
 			if (!server) {
 				// First load failed: stop the spinner and report (unless the RPC
@@ -205,51 +194,20 @@ one at https://mozilla.org/MPL/2.0/.
 		if (!server) return;
 
 		actionLoading = true;
-		const attempt = action === 'recreate' ? null : beginLifecycleRequest(server.id, action);
+
+		const target = server;
 		try {
-			switch (action) {
-				case 'start': {
-					const startRequest = create(StartServerRequestSchema, {
-						id: server.id,
-						requestId: attempt?.requestId ?? ''
-					});
-					await rpcClient.server.startServer(startRequest);
-					toast.success('Server is starting...');
-					break;
-				}
-				case 'stop': {
-					const stopRequest = create(StopServerRequestSchema, {
-						id: server.id,
-						requestId: attempt?.requestId ?? ''
-					});
-					await rpcClient.server.stopServer(stopRequest);
-					toast.success('Server is stopping...');
-					break;
-				}
-				case 'restart': {
-					const restartRequest = create(RestartServerRequestSchema, {
-						id: server.id,
-						requestId: attempt?.requestId ?? ''
-					});
-					await rpcClient.server.restartServer(restartRequest);
-					toast.success('Server is restarting...');
-					break;
-				}
-				case 'recreate': {
-					const recreateRequest = create(RecreateServerRequestSchema, { id: server.id });
-					await rpcClient.server.recreateServer(recreateRequest);
-					toast.success('Server is recreating...');
-					break;
-				}
-			}
-			await loadServer(true);
+			const outcome = await serverActions.perform(target.id, action);
+			if (outcome.kind === 'superseded') return;
+			toast.success(
+				`Server is ${action === 'recreate' ? 'recreating' : action === 'stop' ? 'stopping' : action === 'restart' ? 'restarting' : 'starting'}...`
+			);
 		} catch (error) {
 			toast.error(
 				`Failed to ${action} server: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
 			await loadServer(true);
 		} finally {
-			attempt?.finish();
 			actionLoading = false;
 		}
 	}
@@ -267,22 +225,15 @@ one at https://mozilla.org/MPL/2.0/.
 		if (!server) return;
 		actionLoading = true;
 		const disposition = deleteDisposition;
-		const attempt = disposition === 'export' ? null : beginLifecycleRequest(server.id, 'delete');
+		const target = server;
 		try {
-			if (disposition === 'export') {
-				const response = await rpcClient.file.exportWorld({ serverId: server.id });
-				triggerStreamDownload(response.sessionId, response.filename);
+			const outcome = await serverActions.perform(target.id, 'delete', disposition);
+			if (outcome.kind === 'superseded') return;
+			if (outcome.kind === 'exported') {
+				triggerStreamDownload(outcome.sessionId, outcome.filename);
 				toast.success('World exported. The server was left in place.');
 				return;
 			}
-			const deleteRequest = create(DeleteServerRequestSchema, {
-				id: server.id,
-				requestId: attempt?.requestId ?? '',
-				keepData: disposition === 'keep',
-				detach: disposition === 'detach'
-			});
-			await rpcClient.server.deleteServer(deleteRequest);
-			serversStore.removeServer(server.id);
 			toast.success(
 				disposition === 'detach'
 					? 'Server detached. The container and world files were left in place.'
@@ -290,68 +241,13 @@ one at https://mozilla.org/MPL/2.0/.
 						? 'Server removed. World files were kept.'
 						: 'Server deleted successfully'
 			);
-			goto(resolve('/servers'));
+			if (serverId === target.id) goto(resolve('/servers'));
 		} catch (error) {
 			toast.error(
 				`Failed to ${disposition === 'export' ? 'export' : 'delete'} server: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
 		} finally {
-			attempt?.finish();
 			actionLoading = false;
-		}
-	}
-
-	function getStatusTagType(
-		status: ServerStatus
-	): 'green' | 'gray' | 'blue' | 'red' | 'yellow' | 'warm-gray' | 'purple' {
-		switch (status) {
-			case ServerStatus.RUNNING:
-				return 'green';
-			case ServerStatus.STOPPED:
-				return 'gray';
-			case ServerStatus.STARTING:
-			case ServerStatus.CREATING:
-				return 'blue';
-			case ServerStatus.RESTARTING:
-			case ServerStatus.DEEPSLEEP:
-				return 'purple';
-			case ServerStatus.PAUSED:
-				return 'blue';
-			case ServerStatus.STOPPING:
-				return 'warm-gray';
-			case ServerStatus.ERROR:
-				return 'red';
-			case ServerStatus.UNHEALTHY:
-				return 'yellow';
-			default:
-				return 'gray';
-		}
-	}
-
-	function getStatusDisplayName(status: ServerStatus): string {
-		switch (status) {
-			case ServerStatus.RUNNING:
-				return 'RUNNING';
-			case ServerStatus.STOPPED:
-				return 'STOPPED';
-			case ServerStatus.STARTING:
-				return 'STARTING';
-			case ServerStatus.STOPPING:
-				return 'STOPPING';
-			case ServerStatus.ERROR:
-				return 'ERROR';
-			case ServerStatus.CREATING:
-				return 'CREATING';
-			case ServerStatus.RESTARTING:
-				return 'RESTARTING';
-			case ServerStatus.UNHEALTHY:
-				return 'UNHEALTHY';
-			case ServerStatus.DEEPSLEEP:
-				return 'DEEP SLEEP';
-			case ServerStatus.PAUSED:
-				return 'PAUSED';
-			default:
-				return 'UNKNOWN';
 		}
 	}
 

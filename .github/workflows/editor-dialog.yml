@@ -7,6 +7,7 @@ on:
       - 'web/carbon-panel/**'
       - 'scripts/manual-review/e2e/editor-dialog/**'
       - 'scripts/manual-review/e2e/editor-dialog-check.mjs'
+      - 'scripts/manual-review/e2e/server-inventory-check.mjs'
       - 'scripts/manual-review/e2e/websocket-browser/**'
       - 'scripts/manual-review/e2e/websocket-reconnect-check.mjs'
       - 'scripts/manual-review/e2e/package.json'
@@ -18,6 +19,7 @@ on:
       - 'web/carbon-panel/**'
       - 'scripts/manual-review/e2e/editor-dialog/**'
       - 'scripts/manual-review/e2e/editor-dialog-check.mjs'
+      - 'scripts/manual-review/e2e/server-inventory-check.mjs'
       - 'scripts/manual-review/e2e/websocket-browser/**'
       - 'scripts/manual-review/e2e/websocket-reconnect-check.mjs'
       - 'scripts/manual-review/e2e/package.json'
@@ -53,3 +55,6 @@ jobs:
       - name: Exercise WebSocket reconnection in Chromium
         working-directory: scripts/manual-review/e2e
         run: node websocket-reconnect-check.mjs
+      - name: Exercise real server inventory routes and delayed RPCs
+        working-directory: scripts/manual-review/e2e
+        run: node server-inventory-check.mjs
