@@ -24,6 +24,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 let activeBrowser;
 let reportState;
 
@@ -44,7 +45,7 @@ async function main() {
   }
 
   const plan = JSON.parse(readFileSync(resolve(args.plan), "utf8"));
-  const out = resolve(args.out ?? "review-out");
+  const out = resolve(args.out ?? fileURLToPath(new URL(`../../tmp/review-output/single/${new Date().toISOString().replace(/[:.]/g, '-')}/`, import.meta.url)));
   mkdirSync(out, { recursive: true });
   const results = [];
   reportState = { out, profile: 'single-seeded', base: args.base, checks: results };

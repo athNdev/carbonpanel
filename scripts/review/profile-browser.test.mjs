@@ -23,7 +23,7 @@ test('both real-browser profiles fail closed when login stays on the login page'
   const run = args => {
     const [command, browserArgs] = reviewCommand(args);
     return new Promise((resolve, reject) => {
-      const child = spawn(command, browserArgs, { cwd:owned, stdio:'ignore', env:{...process.env,BASE_URL:base,PANEL_REVIEW_USER:'fixture',PANEL_REVIEW_PASSWORD:'fixture',REVIEW_USER:'fixture',REVIEW_PASS:'fixture'} });
+      const child = spawn(command, browserArgs, { cwd:owned, stdio:'ignore', env:{...process.env,BASE_URL:base,REVIEW_OUT:join(owned,'dual'),PANEL_REVIEW_USER:'fixture',PANEL_REVIEW_PASSWORD:'fixture',REVIEW_USER:'fixture',REVIEW_PASS:'fixture'} });
       child.on('error', reject);
       child.on('close', resolve);
     });
@@ -36,7 +36,7 @@ test('both real-browser profiles fail closed when login stays on the login page'
       // script with a task-owned artifact directory rather than checkout out/.
       const exitCode = await run(args);
       assert.notEqual(exitCode, 0, profile);
-      const out = profile === 'single-seeded' ? join(owned, 'single') : join(owned, 'out', readdirSync(join(owned, 'out'))[0]);
+      const out = profile === 'single-seeded' ? join(owned, 'single') : join(owned, 'dual', readdirSync(join(owned, 'dual'))[0]);
       const report = JSON.parse(readFileSync(join(out, 'review.json'), 'utf8'));
       assert.equal(report.profile, profile);
       assert.equal(report.status, 'failed');

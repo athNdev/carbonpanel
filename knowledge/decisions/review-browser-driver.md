@@ -43,3 +43,6 @@ requiring human review remain distinct from passed checks. Critical setup or
 login errors stop navigation, return failure and close the browser. The
 machine report removes credentials, query parameters and fragments from its
 base URL; detailed screenshots and reports remain local review artifacts.
+Default artifacts are timestamped beneath the checkout's ignored tmp tree,
+independent of the caller's working directory; explicit output overrides are
+supported for attaching evidence elsewhere.

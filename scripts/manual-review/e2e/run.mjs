@@ -11,17 +11,19 @@
 //   BASE_URL=http://localhost:18082 node run.mjs
 //   BASE_URL_A=... BASE_URL_B=... node run.mjs   # both (ownership checks)
 //
-// Artifacts land in ./out/<timestamp>/ as PNGs plus report.md and report.json.
+// Artifacts land in ignored tmp/review-output/dual/<timestamp>/ (REVIEW_OUT
+// overrides the parent) as PNGs plus report.md, report.json and review.json.
 
 import { launchReviewBrowser } from "../../review/browser.mjs";
 import { writeReviewReport } from "../../review/report.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const BASE = process.env.BASE_URL || "http://localhost:18081";
 const USER = process.env.REVIEW_USER || "review";
 const PASS = process.env.REVIEW_PASS || "CarbonReview123!";
-const OUT = join(process.cwd(), "out", new Date().toISOString().replace(/[:.]/g, "-"));
+const OUT = join(process.env.REVIEW_OUT || fileURLToPath(new URL('../../../tmp/review-output/dual/', import.meta.url)), new Date().toISOString().replace(/[:.]/g, "-"));
 
 const VIEWPORTS = [
   { name: "desktop-1280", width: 1280, height: 900 },

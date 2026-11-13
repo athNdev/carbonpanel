@@ -65,6 +65,12 @@ case "$*" in
   *ServerService/StartServer*)
     [ "$(cat "$FAKE_CURL_STATE")" -ge 3 ] || exit 1
     echo start > "$FAKE_CURL_START"; printf '{}' ;;
+  *ServerService/CreateServer*)
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = -d ]; then shift; printf '%s' "$1" > "$FAKE_CURL_CREATE"; break; fi
+      shift
+    done
+    printf '{}' ;;
   *) printf '{}' ;;
 esac
 EOF
@@ -122,13 +128,14 @@ for failure in auth node; do
 done
 # Real CreateServer is asynchronous: polling must observe a container before
 # starting; error and timeout must fail without announcing ready or starting.
-export REVIEW_STACK_NAME="${name}-auth" REVIEW_SEED_TIMEOUT_SECONDS=2
-export FAKE_CURL_STATE="$test_root/curl-state" FAKE_CURL_START="$test_root/curl-start"
+export REVIEW_STACK_NAME="${name}-auth" REVIEW_SEED_TIMEOUT_SECONDS=2 REVIEW_GAME_PORT=29261
+export FAKE_CURL_STATE="$test_root/curl-state" FAKE_CURL_START="$test_root/curl-start" FAKE_CURL_CREATE="$test_root/curl-create"
 for mode in ready error timeout; do
   export FAKE_CURL_MODE="starter-$mode"
   rm -f -- "$FAKE_CURL_STATE" "$FAKE_CURL_START"
   if output="$(bash "$script_dir/devstack.sh" up 2>&1)"; then
     [ "$mode" = ready ] && [ -f "$FAKE_CURL_START" ] || { echo "failed starter reported ready" >&2; exit 1; }
+    grep -Fq '"port":29261' "$FAKE_CURL_CREATE" || { echo "game port override lost" >&2; exit 1; }
     case "$output" in *"review panel:"*) ;; *) echo "ready starter missing URL" >&2; exit 1 ;; esac
   else
     [ "$mode" != ready ] && [ ! -e "$FAKE_CURL_START" ] || { echo "ready starter failed or premature start" >&2; exit 1; }

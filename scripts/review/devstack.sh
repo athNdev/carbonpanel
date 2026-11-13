@@ -24,12 +24,16 @@ set -euo pipefail
 
 NAME="${REVIEW_STACK_NAME:-carbon-panel-review}"
 PORT="${REVIEW_PORT:-8099}"
+GAME_PORT="${REVIEW_GAME_PORT:-25585}"
 IMAGE="${REVIEW_IMAGE:-carbon-panel:review}"
 USER_NAME="${PANEL_REVIEW_USER:-reviewer}"
 USER_PASS="${PANEL_REVIEW_PASSWORD:-Review-Panel-2026}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT >= 1 && 10#$PORT <= 65515)) || {
 	echo "review port must be in 1..65515" >&2; exit 2;
+}
+[[ "$GAME_PORT" =~ ^[0-9]+$ ]] && ((10#$GAME_PORT >= 1 && 10#$GAME_PORT <= 65515)) || {
+	echo "review game port must be in 1..65515" >&2; exit 2;
 }
 
 # A session may only manage its own direct child of this fixed user cache.
@@ -140,8 +144,9 @@ seed() {
 
 	count="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" | list_count servers)"
 	if [ "$count" -eq 0 ]; then
+		GAME_PORT="$(free_port "$GAME_PORT")"
 		rpc /carbonpanel.v1.ServerService/CreateServer \
-			'{"name":"review-vanilla","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","memory":2048,"maxPlayers":10,"port":25565,"requestId":"review-bootstrap-server"}' \
+			'{"name":"review-vanilla","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","memory":2048,"maxPlayers":10,"port":'"$GAME_PORT"',"requestId":"review-bootstrap-server"}' \
 			"${token}" >/dev/null
 	fi
 	# A missing or failed starter is a setup failure, not a successful capture.

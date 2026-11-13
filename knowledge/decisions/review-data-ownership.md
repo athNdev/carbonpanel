@@ -38,3 +38,6 @@ gameplay acceptance.
 Single-profile seeding waits for asynchronous container creation to finish
 before starting its fixture. Error/unhealthy states and a bounded readiness
 timeout fail setup; they cannot produce a ready URL.
+Fresh starter game ports are selected from a bounded free-port range beginning
+at 25585 by default, with an explicit per-session override, so reviews do not
+occupy the ordinary development/test game port.
