@@ -1520,7 +1520,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		// Start the container immediately if requested
 		if startImmediately {
 			if err := s.runJournaledMutation(bgCtx, server, "start", requestID, func() error {
-				return dockerCli.StartContainer(bgCtx, containerID)
+				return serverruntime.Start(bgCtx, s.store, dockerCli, server)
 			}); err != nil {
 				s.log.Error("Failed to start container: %v", err)
 				server.Status = storage.StatusError
@@ -2300,7 +2300,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr))
 		}
 		if !result.WasRunning {
-			if err := dockerCli.StartContainer(ctx, result.NewContainerID); err != nil {
+			if err := serverruntime.Start(ctx, s.store, dockerCli, server); err != nil {
 				server.Status = storage.StatusError
 				_ = s.store.UpdateServer(ctx, server)
 				undoFiles()
@@ -2363,7 +2363,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 
 		// Start container
 		if err := s.runJournaledMutation(ctx, server, "start", requestID, func() error {
-			return dockerCli.StartContainer(ctx, server.ContainerID)
+			return serverruntime.Start(ctx, s.store, dockerCli, server)
 		}); err != nil {
 			s.log.Error("Failed to start container, attempting to recreate: %v", err)
 
@@ -2387,7 +2387,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			// RecreateContainer only starts the container if result.WasRunning was true.
 			// Since StartServer was requested, start the newly recreated container.
 			if !result.WasRunning {
-				if startErr := dockerCli.StartContainer(ctx, result.NewContainerID); startErr != nil {
+				if startErr := serverruntime.Start(ctx, s.store, dockerCli, server); startErr != nil {
 					s.log.Error("Failed to start recreated container: %v", startErr)
 					server.Status = storage.StatusError
 					_ = s.store.UpdateServer(ctx, server)
@@ -2705,7 +2705,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		}
 		if !result.WasRunning {
 			if err := s.runJournaledMutation(ctx, server, "restart_start", requestID, func() error {
-				return dockerCli.StartContainer(ctx, result.NewContainerID)
+				return serverruntime.Start(ctx, s.store, dockerCli, server)
 			}); err != nil {
 				server.Status = storage.StatusError
 				_ = s.store.UpdateServer(ctx, server)
@@ -2775,7 +2775,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		// Now start the container. These kinds stay distinct from StartServer
 		// so a reused request id cannot replay a completed start as this restart.
 		if err := s.runJournaledMutation(ctx, server, "restart_start", requestID, func() error {
-			return dockerCli.StartContainer(ctx, server.ContainerID)
+			return serverruntime.Start(ctx, s.store, dockerCli, server)
 		}); err != nil {
 			s.log.Error("Failed to start container: %v", err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server"))
@@ -2826,13 +2826,20 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		if cfgErr == nil {
 			s.prepareServerConfig(ctx, server, serverConfig)
 			recResult, recErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
-			if recErr == nil && recResult != nil && recResult.NewContainerID != "" {
+			if recErr == nil && !recResult.WasRunning {
+				recErr = serverruntime.Start(ctx, s.store, dockerCli, server)
+			}
+			if recErr == nil {
 				server.ContainerID = recResult.NewContainerID
 				now := time.Now()
 				server.Status = storage.StatusStarting
 				server.LastStarted = &now
-				_ = s.store.UpdateServer(ctx, server)
-				_ = s.store.ClearEphemeralConfigFields(ctx, server.ID)
+				if saveErr := s.store.UpdateServer(ctx, server); saveErr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server restarted but status could not be saved: %w", saveErr))
+				}
+				if clearErr := s.store.ClearEphemeralConfigFields(ctx, server.ID); clearErr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server restarted but temporary config could not be cleared: %w", clearErr))
+				}
 				if s.bus != nil {
 					s.bus.Emit(ctx, events.Event{
 						Type:     v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_RESTART,
@@ -2848,11 +2855,14 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 					Status: "starting",
 				}), nil
 			}
+			err = errors.Join(err, recErr)
+		} else {
+			err = errors.Join(err, cfgErr)
 		}
 		s.log.Error("Failed to restart container: %v", err)
 		server.Status = storage.StatusError
 		_ = s.store.UpdateServer(ctx, server)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart server"))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart server: %w", err))
 	}
 
 	// Update server status
@@ -2933,7 +2943,7 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 	// If the container was not already running (and thus not started by RecreateContainer),
 	// start it now since RecreateServer intends to start the freshly recreated container.
 	if !result.WasRunning {
-		if startErr := dockerCli.StartContainer(ctx, result.NewContainerID); startErr != nil {
+		if startErr := serverruntime.Start(ctx, s.store, dockerCli, server); startErr != nil {
 			s.log.Error("Failed to start recreated container: %v", startErr)
 			server.Status = storage.StatusError
 			_ = s.store.UpdateServer(ctx, server)
