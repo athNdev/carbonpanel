@@ -89,7 +89,7 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 		}
 
 		if plan.StartAfter && (result == nil || !result.WasRunning) {
-			return dockerClient.StartContainer(ctx, server.ContainerID)
+			return serverruntime.Start(ctx, s.store, dockerClient, server)
 		}
 		return nil
 	}
@@ -98,7 +98,7 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 			return err
 		}
 		if plan.StartAfter {
-			return dockerClient.StartContainer(ctx, server.ContainerID)
+			return serverruntime.Start(ctx, s.store, dockerClient, server)
 		}
 	}
 	return nil

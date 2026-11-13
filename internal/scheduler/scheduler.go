@@ -1068,7 +1068,7 @@ func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleSt
 		return true, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr)
 	}
 	if startReplacement && !result.WasRunning {
-		if err := dockerClient.StartContainer(ctx, result.NewContainerID); err != nil {
+		if err := serverruntime.Start(ctx, store, dockerClient, server); err != nil {
 			server.Status = storage.StatusError
 			_ = store.UpdateServer(ctx, server)
 			undoFiles()

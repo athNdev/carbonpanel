@@ -1520,7 +1520,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		// Start the container immediately if requested
 		if startImmediately {
 			if err := s.runJournaledMutation(bgCtx, server, "start", requestID, func() error {
-				return dockerCli.StartContainer(bgCtx, containerID)
+				return serverruntime.Start(bgCtx, s.store, dockerCli, server)
 			}); err != nil {
 				s.log.Error("Failed to start container: %v", err)
 				server.Status = storage.StatusError
@@ -1899,38 +1899,13 @@ func (s *ServerService) UpdateServer(ctx context.Context, req *connect.Request[v
 			_ = s.store.UpdateServer(ctx, server)
 			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("docker node %q unavailable: %w", server.NodeID, err))
 		}
-		result, err := dockerCli.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
+		s.prepareServerConfig(ctx, server, serverConfig)
+		result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 		if err != nil {
 			s.log.Error("Failed to recreate container: %v", err)
-			if result != nil && result.NewContainerID != "" {
-				// Keep whichever container identity remains authoritative after
-				// partial recreation, including the original ID on pre-removal
-				// failure and a replacement ID after create/start failure.
-				server.ContainerID = result.NewContainerID
-				server.Status = storage.StatusError
-			} else {
-				server.Status = storage.StatusError
-				server.ContainerID = ""
-			}
-			persistErr := s.store.UpdateServer(ctx, server)
 			operationErr := fmt.Errorf("server settings were saved, but container recreation failed: %w", err)
-			if persistErr != nil {
-				s.log.Error("Failed to persist server state after container recreation failed: %v", persistErr)
-				operationErr = fmt.Errorf("%w (also failed to persist recovery state: %v)", operationErr, persistErr)
-			}
 			return nil, connect.NewError(connect.CodeInternal, operationErr)
 		} else {
-			if result == nil || result.NewContainerID == "" {
-				server.ContainerID = ""
-				server.Status = storage.StatusError
-				persistErr := s.store.UpdateServer(ctx, server)
-				operationErr := errors.New("server settings were saved, but container recreation returned no container ID")
-				if persistErr != nil {
-					operationErr = fmt.Errorf("%w (also failed to persist recovery state: %v)", operationErr, persistErr)
-				}
-				return nil, connect.NewError(connect.CodeInternal, operationErr)
-			}
-			server.ContainerID = result.NewContainerID
 			server.Status = statusAfterContainerRecreation(server.Status, result.WasRunning)
 			if result.ImageID != "" {
 				server.AppliedImageID = result.ImageID
@@ -2308,15 +2283,12 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration: %w", err))
 		}
 		s.prepareServerConfig(ctx, server, serverConfig)
-		result, recreateErr := dockerCli.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
+		result, recreateErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 		if recreateErr != nil {
-			if result != nil && result.NewContainerID != "" {
-				server.ContainerID = result.NewContainerID
-			} else {
-				server.ContainerID = ""
+			var outcomeErr *serverruntime.RecreationError
+			if errors.As(recreateErr, &outcomeErr) && outcomeErr.Operation == nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", recreateErr))
 			}
-			server.Status = storage.StatusError
-			_ = s.store.UpdateServer(ctx, server)
 			undoFiles()
 			for _, rec := range appliedStaged {
 				if _, rbErr := s.store.RollbackStagedConfigChange(ctx, rec.ID); rbErr != nil {
@@ -2327,19 +2299,8 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", recreateErr))
 		}
-		if result == nil || result.NewContainerID == "" {
-			undoFiles()
-			for _, rec := range appliedStaged {
-				_, _ = s.store.RollbackStagedConfigChange(ctx, rec.ID)
-			}
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreation returned no container ID"))
-		}
-		server.ContainerID = result.NewContainerID
-		if err := s.store.UpdateServer(ctx, server); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", err))
-		}
 		if !result.WasRunning {
-			if err := dockerCli.StartContainer(ctx, result.NewContainerID); err != nil {
+			if err := serverruntime.Start(ctx, s.store, dockerCli, server); err != nil {
 				server.Status = storage.StatusError
 				_ = s.store.UpdateServer(ctx, server)
 				undoFiles()
@@ -2402,7 +2363,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 
 		// Start container
 		if err := s.runJournaledMutation(ctx, server, "start", requestID, func() error {
-			return dockerCli.StartContainer(ctx, server.ContainerID)
+			return serverruntime.Start(ctx, s.store, dockerCli, server)
 		}); err != nil {
 			s.log.Error("Failed to start container, attempting to recreate: %v", err)
 
@@ -2416,27 +2377,17 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 			}
 
 			// Recreate container
-			result, err := dockerCli.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
+			s.prepareServerConfig(ctx, server, serverConfig)
+			result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 			if err != nil {
 				s.log.Error("Failed to recreate container: %v", err)
-				if result != nil && result.NewContainerID != "" {
-					// Container was created but failed to start
-					server.ContainerID = result.NewContainerID
-				} else {
-					// Complete failure
-					server.ContainerID = ""
-				}
-				server.Status = storage.StatusError
-				_ = s.store.UpdateServer(ctx, server)
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server: %w", err))
 			}
-
-			server.ContainerID = result.NewContainerID
 
 			// RecreateContainer only starts the container if result.WasRunning was true.
 			// Since StartServer was requested, start the newly recreated container.
 			if !result.WasRunning {
-				if startErr := dockerCli.StartContainer(ctx, result.NewContainerID); startErr != nil {
+				if startErr := serverruntime.Start(ctx, s.store, dockerCli, server); startErr != nil {
 					s.log.Error("Failed to start recreated container: %v", startErr)
 					server.Status = storage.StatusError
 					_ = s.store.UpdateServer(ctx, server)
@@ -2736,19 +2687,11 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server configuration: %w", err))
 		}
 		s.prepareServerConfig(ctx, server, serverConfig)
-		result, err := dockerCli.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
+		result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 		if err != nil {
-			// RecreateContainer can remove the old container and then fail while
-			// starting the replacement. Preserve its partial result so a retry can
-			// address the live replacement instead of a stale container ID.
-			if result != nil && result.NewContainerID != "" {
-				server.ContainerID = result.NewContainerID
-			} else {
-				server.ContainerID = ""
-			}
-			server.Status = storage.StatusError
-			if persistErr := s.store.UpdateServer(ctx, server); persistErr != nil {
-				s.log.Error("Failed to persist server state after staged recreation error for server %s: %v", server.ID, persistErr)
+			var outcomeErr *serverruntime.RecreationError
+			if errors.As(err, &outcomeErr) && outcomeErr.Operation == nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", err))
 			}
 			undoFiles()
 			for _, rec := range appliedStaged {
@@ -2760,20 +2703,9 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server with staged configuration: %w", err))
 		}
-		if result == nil || result.NewContainerID == "" {
-			undoFiles()
-			for _, rec := range appliedStaged {
-				_, _ = s.store.RollbackStagedConfigChange(ctx, rec.ID)
-			}
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreation returned no container ID"))
-		}
-		server.ContainerID = result.NewContainerID
-		if err := s.store.UpdateServer(ctx, server); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("container recreated but its ID could not be saved: %w", err))
-		}
 		if !result.WasRunning {
 			if err := s.runJournaledMutation(ctx, server, "restart_start", requestID, func() error {
-				return dockerCli.StartContainer(ctx, result.NewContainerID)
+				return serverruntime.Start(ctx, s.store, dockerCli, server)
 			}); err != nil {
 				server.Status = storage.StatusError
 				_ = s.store.UpdateServer(ctx, server)
@@ -2843,7 +2775,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		// Now start the container. These kinds stay distinct from StartServer
 		// so a reused request id cannot replay a completed start as this restart.
 		if err := s.runJournaledMutation(ctx, server, "restart_start", requestID, func() error {
-			return dockerCli.StartContainer(ctx, server.ContainerID)
+			return serverruntime.Start(ctx, s.store, dockerCli, server)
 		}); err != nil {
 			s.log.Error("Failed to start container: %v", err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to start server"))
@@ -2893,14 +2825,21 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 		serverConfig, cfgErr := s.store.GetServerConfig(ctx, server.ID)
 		if cfgErr == nil {
 			s.prepareServerConfig(ctx, server, serverConfig)
-			recResult, recErr := dockerCli.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
-			if recErr == nil && recResult != nil && recResult.NewContainerID != "" {
+			recResult, recErr := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
+			if recErr == nil && !recResult.WasRunning {
+				recErr = serverruntime.Start(ctx, s.store, dockerCli, server)
+			}
+			if recErr == nil {
 				server.ContainerID = recResult.NewContainerID
 				now := time.Now()
 				server.Status = storage.StatusStarting
 				server.LastStarted = &now
-				_ = s.store.UpdateServer(ctx, server)
-				_ = s.store.ClearEphemeralConfigFields(ctx, server.ID)
+				if saveErr := s.store.UpdateServer(ctx, server); saveErr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server restarted but status could not be saved: %w", saveErr))
+				}
+				if clearErr := s.store.ClearEphemeralConfigFields(ctx, server.ID); clearErr != nil {
+					return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("server restarted but temporary config could not be cleared: %w", clearErr))
+				}
 				if s.bus != nil {
 					s.bus.Emit(ctx, events.Event{
 						Type:     v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_RESTART,
@@ -2916,11 +2855,14 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 					Status: "starting",
 				}), nil
 			}
+			err = errors.Join(err, recErr)
+		} else {
+			err = errors.Join(err, cfgErr)
 		}
 		s.log.Error("Failed to restart container: %v", err)
 		server.Status = storage.StatusError
 		_ = s.store.UpdateServer(ctx, server)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart server"))
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restart server: %w", err))
 	}
 
 	// Update server status
@@ -2991,27 +2933,17 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 	if err := s.checkServerStartCapacity(ctx, server); err != nil {
 		return nil, err
 	}
-	result, err := dockerCli.RecreateContainer(ctx, server.ContainerID, server, serverConfig)
+	s.prepareServerConfig(ctx, server, serverConfig)
+	result, err := serverruntime.Recreate(ctx, s.store, dockerCli, server, serverConfig)
 	if err != nil {
 		s.log.Error("Failed to recreate container: %v", err)
-		server.Status = storage.StatusError
-		if result != nil && result.NewContainerID != "" {
-			server.ContainerID = result.NewContainerID
-		} else {
-			server.ContainerID = ""
-		}
-		if updateErr := s.store.UpdateServer(ctx, server); updateErr != nil {
-			s.log.Error("Failed to update server status: %v", updateErr)
-		}
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to recreate server container: %w", err))
 	}
-
-	server.ContainerID = result.NewContainerID
 
 	// If the container was not already running (and thus not started by RecreateContainer),
 	// start it now since RecreateServer intends to start the freshly recreated container.
 	if !result.WasRunning {
-		if startErr := dockerCli.StartContainer(ctx, result.NewContainerID); startErr != nil {
+		if startErr := serverruntime.Start(ctx, s.store, dockerCli, server); startErr != nil {
 			s.log.Error("Failed to start recreated container: %v", startErr)
 			server.Status = storage.StatusError
 			_ = s.store.UpdateServer(ctx, server)
