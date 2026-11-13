@@ -132,3 +132,33 @@ func TestLegacyCompatibilityKeepsLiteralVanillaFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProviderUpdateChecksSkipPinnedAndKeepPackMetadata(t *testing.T) {
+	calls := 0
+	m := providerUpdateManager(t, packPolicyTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		t.Error("pinned mod triggered a provider request")
+		return nil, context.Canceled
+	}))
+	pinned, side := true, "client"
+	if err := m.UpdateContent("pack", ContentKindMod, "mod", ContentPatch{Pinned: &pinned, Side: &side}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := m.GetPack("pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []func() ([]ModUpdateInfo, error){func() ([]ModUpdateInfo, error) { return m.CheckModUpdates("pack") }, func() ([]ModUpdateInfo, error) { return m.CheckContentUpdates("pack") }} {
+		updates, err := check()
+		if err != nil || len(updates) != 1 || !updates[0].Pinned || updates[0].UpdateAvailable {
+			t.Fatalf("updates=%+v err=%v", updates, err)
+		}
+	}
+	after, err := m.GetPack("pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || after.Mods[0] != before.Mods[0] {
+		t.Fatalf("metadata changed: before=%+v after=%+v", before.Mods, after.Mods)
+	}
+}
