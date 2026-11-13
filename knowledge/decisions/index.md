@@ -16,5 +16,6 @@
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review stack data ownership](review-data-ownership.md) — Review stack cleanup requires a scoped session path, matching marker and matching container label.
 - [Server work temp is on the data volume](server-work-temp.md) — Modpack downloads, extracts, and native libraries use /data/.tmp, not the 64 MiB noexec /tmp tmpfs.
+- [Staged proto generation](proto-generation.md) — Generate and format proto outputs before replacing owned trees, and keep dependency installation frozen.
 - [Website and documentation publication](website-docs.md) — Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.
 - [WebSocket connection lifetime](websocket-lifetime.md) — Socket callbacks and timers belong to one connection generation, and subscriptions retain their requested tail on reconnect.

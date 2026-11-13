@@ -10,7 +10,8 @@
 ARG APP_VERSION=dev
 
 # Generate protobuf code using buf
-FROM --platform=$BUILDPLATFORM bufbuild/buf:1.50.0 AS proto-builder
+ARG BUF_IMAGE=bufbuild/buf:1.50.0
+FROM --platform=$BUILDPLATFORM ${BUF_IMAGE} AS proto-builder
 WORKDIR /app
 COPY buf.yaml buf.gen.yaml buf.lock ./
 COPY proto/ ./proto/
