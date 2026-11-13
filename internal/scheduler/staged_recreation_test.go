@@ -34,7 +34,7 @@ func TestPendingStagedRecreationKeepsAppliedConfigWhenIdentitySaveFails(t *testi
 	persistErr := errors.New("identity save unavailable")
 	if err := store.DB().Callback().Update().Before("gorm:update").Register("test:fail_identity_save", func(tx *gorm.DB) {
 		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "servers" {
-			tx.AddError(persistErr)
+			_ = tx.AddError(persistErr)
 		}
 	}); err != nil {
 		t.Fatal(err)
