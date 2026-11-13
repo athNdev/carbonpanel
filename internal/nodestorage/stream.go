@@ -191,13 +191,25 @@ func refuseStreamSymlink(root *os.Root, p string) error {
 type localWriter struct {
 	root                        *os.Root
 	ctx                         context.Context
-	file                        *os.File
+	file                        streamFile
 	target, tmp                 string
 	limit, written              int64
 	mode                        os.FileMode
 	owner                       os.FileInfo
 	err                         error
 	closed, committed, preserve bool
+}
+
+type ownershipFile interface {
+	Stat() (os.FileInfo, error)
+	Chown(int, int) error
+}
+
+type streamFile interface {
+	io.WriteCloser
+	ownershipFile
+	Chmod(os.FileMode) error
+	Sync() error
 }
 
 func (w *localWriter) Write(p []byte) (int, error) {

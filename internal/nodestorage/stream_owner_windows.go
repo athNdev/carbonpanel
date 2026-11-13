@@ -5,4 +5,4 @@ package nodestorage
 
 import "os"
 
-func adoptStreamOwnership(*os.File, os.FileInfo) {}
+func adoptStreamOwnership(ownershipFile, os.FileInfo) {}

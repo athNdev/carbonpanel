@@ -122,6 +122,44 @@ func TestStreamLimitAndPartialWriteNeverPromote(t *testing.T) {
 
 type repeatedBytes struct{}
 
+type shortStreamFile struct{ streamFile }
+
+func (f shortStreamFile) Write(p []byte) (int, error) {
+	n, err := f.streamFile.Write(p[:len(p)/2])
+	if err != nil {
+		return n, err
+	}
+	return n, io.ErrShortWrite
+}
+
+func TestStreamPartialFilesystemWritePreservesTarget(t *testing.T) {
+	acc, root := testAccessor(t)
+	_ = acc.WriteFile("target", []byte("old"))
+	w, err := acc.BeginWrite(context.Background(), "target", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := w.(*localWriter)
+	local.file = shortStreamFile{local.file}
+	if n, err := w.Write([]byte("new-data")); n != 4 || !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("partial write n=%d err=%v", n, err)
+	}
+	if err := w.Commit(); err == nil {
+		t.Fatal("partial write promoted")
+	}
+	_ = w.Close()
+	if b, err := acc.ReadFile("target"); err != nil || string(b) != "old" {
+		t.Fatalf("target changed %q %v", b, err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(root, ".carbon-write-*.partial"))
+	if len(matches) != 1 {
+		t.Fatalf("recovery %v", matches)
+	}
+	if b, err := os.ReadFile(matches[0]); err != nil || string(b) != "new-" {
+		t.Fatalf("partial recovery %q %v", b, err)
+	}
+}
+
 func (repeatedBytes) Read(p []byte) (int, error) {
 	for i := range p {
 		p[i] = byte(i % 251)

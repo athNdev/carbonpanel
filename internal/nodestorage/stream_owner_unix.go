@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-func adoptStreamOwnership(file *os.File, reference os.FileInfo) {
+func adoptStreamOwnership(file ownershipFile, reference os.FileInfo) {
 	if reference == nil {
 		return
 	}
