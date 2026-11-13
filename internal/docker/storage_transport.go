@@ -7,6 +7,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	"github.com/containerd/errdefs"
 	stdcopy "github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -40,6 +42,9 @@ func NewStorageTransport(pool *ClientPool, log *logger.Logger, workerImage strin
 
 // Open implements nodestorage.Transport.
 func (t *StorageTransport) Open(ctx context.Context, node nodestorage.NodeInfo, dataRoot string) (nodestorage.Accessor, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t == nil || t.pool == nil || t.workerImage == "" {
 		return nil, fmt.Errorf("%w: remote storage worker image is not configured", nodestorage.ErrUnavailable)
 	}
@@ -54,7 +59,7 @@ func (t *StorageTransport) Open(ctx context.Context, node nodestorage.NodeInfo, 
 	hostRoot := nodestorage.NodePath(node, dataRoot, dataRoot)
 	sess, err := dockerCli.startStorageWorker(ctx, t.workerImage, hostRoot)
 	if err != nil {
-		return nil, fmt.Errorf("%w: storage worker on node %q: %v", nodestorage.ErrUnavailable, node.Name, err)
+		return nil, fmt.Errorf("%w: storage worker on node %q: %w", nodestorage.ErrUnavailable, node.Name, err)
 	}
 	return storageworker.NewRemoteAccessor(sess), nil
 }
@@ -97,13 +102,11 @@ func (c *Client) startStorageWorker(ctx context.Context, image, hostDataRoot str
 		Stderr: true,
 	})
 	if err != nil {
-		_, _ = c.docker.ContainerRemove(ctx, resp.ID, client.ContainerRemoveOptions{Force: true})
-		return nil, fmt.Errorf("attach storage worker: %w", err)
+		return nil, errors.Join(fmt.Errorf("attach storage worker: %w", err), c.removeStorageWorker(resp.ID))
 	}
 	if _, err := c.docker.ContainerStart(ctx, resp.ID, client.ContainerStartOptions{}); err != nil {
 		attach.Close()
-		_, _ = c.docker.ContainerRemove(ctx, resp.ID, client.ContainerRemoveOptions{Force: true})
-		return nil, fmt.Errorf("start storage worker: %w", err)
+		return nil, errors.Join(fmt.Errorf("start storage worker: %w", err), c.removeStorageWorker(resp.ID))
 	}
 	stdoutR, stdoutW := io.Pipe()
 	go func() {
@@ -119,13 +122,22 @@ func (c *Client) startStorageWorker(ctx context.Context, image, hostDataRoot str
 			}
 			attach.Close()
 			_ = stdoutR.Close()
-			waitCtx, cancel := context.WithTimeout(context.Background(), defaultAPITimeout*6)
-			defer cancel()
-			_, _ = c.docker.ContainerRemove(waitCtx, resp.ID, client.ContainerRemoveOptions{Force: true})
+			closeErr = c.removeStorageWorker(resp.ID)
 		})
 		return closeErr
 	}
-	return storageworker.NewSession(attach.Conn, stdoutR, closeF)
+	return storageworker.NewSessionContext(ctx, attach.Conn, stdoutR, closeF)
+}
+
+// Cleanup must outlive a canceled operation, but must not wait indefinitely.
+func (c *Client) removeStorageWorker(id string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultAPITimeout)
+	defer cancel()
+	_, err := c.docker.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
+	if err == nil || errdefs.IsNotFound(err) {
+		return nil
+	}
+	return fmt.Errorf("remove storage worker %q: %w", id, err)
 }
 
 var _ nodestorage.Transport = (*StorageTransport)(nil)

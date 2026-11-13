@@ -12,3 +12,6 @@ IBM Plex fonts, and `landing/assets/graphite-world.webp`. The terrain's original
 generation prompt is recorded in [artwork provenance](../../docs/homepage-artwork.md).
 This banner is decorative artwork. Product images in `assets/showcase/` are
 separate, unretouched captures from the running application.
+
+The terrain retains its natural 3:2 proportions. The banner crops a closer view
+around the doorway and terraces; it never scales width and height separately.

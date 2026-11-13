@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/athNdev/carbon-panel/internal/blueprint"
+	"github.com/athNdev/carbon-panel/internal/buildinfo"
 	"github.com/athNdev/carbon-panel/internal/command"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
@@ -71,6 +72,7 @@ func shouldAutoStartOnBoot(server *storage.Server) bool {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "Print version and build information, then exit")
 	var configPath = flag.String("config", "./config.yaml", "Path to configuration file")
 	restorePanelBackup := flag.String("restore-panel-backup", "",
 		"Restore the panel database from a snapshot and exit; the panel must be stopped")
@@ -82,6 +84,10 @@ func main() {
 	operationNote := flag.String("operation-note", "", "Note stored when -operations resolve releases a lock")
 	serverID := flag.String("server-id", "", "Server id for -operations release-port")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.String("carbon-panel"))
+		return
+	}
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
@@ -347,9 +353,12 @@ func main() {
 	clientPool.SetProxyEnabled(cfg.Proxy.Enabled)
 	clientPool.StartHealthChecker(30 * time.Second)
 	defer clientPool.StopHealthChecker()
+	var storageTransport nodestorage.Transport
 	if cfg.Storage.WorkerImage != "" {
-		nodestorage.SetTransport(docker.NewStorageTransport(clientPool, log, cfg.Storage.WorkerImage))
+		storageTransport = docker.NewStorageTransport(clientPool, log, cfg.Storage.WorkerImage)
+		nodestorage.SetTransport(storageTransport)
 	}
+	storageResolver := nodestorage.NewResolver(storageTransport)
 
 	// Initialize command sender
 	sender := command.NewSender(store, cfg, dockerClient, clientPool)
@@ -510,7 +519,7 @@ func main() {
 	placementEngine := docker.NewPlacementEngine(store)
 
 	// Initialize RPC server with full configuration
-	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine)
+	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine, storageResolver)
 	rpcServer.SetHibernationManager(hibernationMgr)
 
 	// The auth manager persists the recovery key. Announce the secret only

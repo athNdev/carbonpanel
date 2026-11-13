@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MPL-2.0
+# Assemble the exact Linux binaries already built and smoke-tested for a release.
+FROM --platform=$BUILDPLATFORM alpine:3.24.4 AS certificates
+RUN apk add --no-cache ca-certificates
+
+FROM alpine:3.24.4
+ARG TARGETARCH
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+WORKDIR /app
+COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY linux_${TARGETARCH}/carbon-panel ./carbon-panel
+COPY linux_${TARGETARCH}/carbon-storage /usr/local/bin/carbon-storage
+COPY config.example.yaml ./config.example.yaml
+EXPOSE 8080
+CMD ["./carbon-panel"]

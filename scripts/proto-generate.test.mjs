@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 import { test } from 'node:test';
+
+// Bun's node:test adapter does not apply Node hook/test timeout options.
+// Filesystem rollback probes can take longer on cold Windows runners.
+if (process.versions.bun) {
+	const { setDefaultTimeout } = await import('bun:test');
+	setDefaultTimeout(30000);
+}
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

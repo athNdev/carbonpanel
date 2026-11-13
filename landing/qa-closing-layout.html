@@ -1,0 +1,68 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: MPL-2.0
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Closing banner responsive regression</title>
+    <style>
+      body { font: 16px/1.6 system-ui, sans-serif; padding: 24px; }
+      iframe { position: absolute; left: -10000px; height: 900px; border: 0; }
+      [data-pass="true"] { color: #166534; }
+      [data-pass="false"] { color: #b91c1c; }
+    </style>
+  </head>
+  <body>
+    <h1>Closing banner responsive regression</h1>
+    <p>Checks the real homepage after its fonts load. QA pages are excluded from publication.</p>
+    <p id="status" role="status">Running…</p>
+    <ul id="results"></ul>
+    <script type="module">
+      // Keep the frame wider than typical monitors: percentage padding can
+      // otherwise pass at laptop widths while collapsing a capped container.
+      const widths = [320, 390, 700, 701, 900, 1210, 1440, 1920, 2560, 3440];
+      const revision = Date.now();
+      const results = [];
+      for (const width of widths) {
+        const frame = document.createElement('iframe');
+        frame.width = width;
+        frame.title = `Homepage at ${width}px`;
+        const loaded = new Promise((resolve) => { frame.onload = resolve; });
+        frame.src = `./index.html?layout-qa=${revision}`;
+        document.body.append(frame);
+        await loaded;
+        const doc = frame.contentDocument;
+        await doc.fonts.ready;
+        const title = doc.querySelector('.closing-copy p');
+        const link = doc.querySelector('.closing-copy .text-link');
+        const style = frame.contentWindow.getComputedStyle(title);
+        const linkStyle = frame.contentWindow.getComputedStyle(link);
+        const bounds = title.getBoundingClientRect();
+        const range = doc.createRange();
+        range.selectNode(link.firstChild);
+        const lines = Math.round(bounds.height / parseFloat(style.lineHeight));
+        const labelLines = Math.round(range.getBoundingClientRect().height / parseFloat(linkStyle.lineHeight));
+        const pass = lines <= (width >= 1000 ? 2 : 4)
+          && labelLines === 1
+          && bounds.left >= 0 && bounds.right <= width
+          && doc.documentElement.scrollWidth <= width;
+        const result = { width, lines, labelLines, pass };
+        results.push(result);
+        const row = document.createElement('li');
+        row.dataset.pass = pass;
+        row.textContent = `${pass ? 'PASS' : 'FAIL'} ${width}px: ${lines} title lines, ${labelLines} link label lines`;
+        document.querySelector('#results').append(row);
+        frame.remove();
+      }
+      const pass = results.every((result) => result.pass);
+      document.querySelector('#status').textContent = `${pass ? 'PASS' : 'FAIL'}: ${results.filter((result) => result.pass).length}/${results.length} viewport checks`;
+      document.body.dataset.complete = 'true';
+      document.body.dataset.pass = pass;
+    </script>
+  </body>
+</html>

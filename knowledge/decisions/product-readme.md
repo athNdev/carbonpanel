@@ -21,8 +21,10 @@ sources:
 # Decision
 
 The root README carries the website's terrain and approved logo in a decorative
-banner, with portable HTML source beside its raster export. Product screenshots
-are a separate kind of asset: native browser captures of the current application
+banner, with portable HTML source beside its raster export. The terrain keeps
+its natural 3:2 proportions; close framing is achieved by cropping the composition
+rather than stretching the artwork. Product screenshots are a separate kind of
+asset: native browser captures of the current application
 running in an isolated installation with review data. Never substitute generated
 UI, the homepage's fixture islands or edited telemetry for an application capture.
 

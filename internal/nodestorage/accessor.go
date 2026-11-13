@@ -317,15 +317,26 @@ func EnsureDataRoot(node NodeInfo, dataRoot string) (string, error) {
 // the controller's mount of that storage (see MapDataPath). Remote nodes
 // without shared storage are refused until their storage adapter is wired.
 func ForNode(node NodeInfo, dataRoot string) (Accessor, error) {
+	return NewResolver(getTransport()).ForNode(context.Background(), node, dataRoot)
+}
+
+// ForNode opens node-owned storage using the resolver's transport and context.
+func (r *Resolver) ForNode(ctx context.Context, node NodeInfo, dataRoot string) (Accessor, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if node.IsLocal {
 		return NewLocal(dataRoot)
 	}
 	if RequiresRemoteTransport(node) {
-		t := getTransport()
+		var t Transport
+		if r != nil {
+			t = r.transport
+		}
 		if t == nil {
 			return nil, fmt.Errorf("%w: remote transport is not configured for node %q", ErrUnavailable, node.Name)
 		}
-		return t.Open(context.Background(), node, dataRoot)
+		return t.Open(ctx, node, dataRoot)
 	}
 	mapped, err := EnsureDataRoot(node, dataRoot)
 	if err != nil {

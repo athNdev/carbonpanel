@@ -104,6 +104,11 @@ bun run test
   fullscreen mode renders the same pane as the inline console, so the toolbar,
   command bar and tail controls never drop out.
 - A frontend-only fix must not bypass an authorization check in the backend.
+- The WebSocket client owns callbacks and timers by connection generation.
+  A replaced connection cannot update state or close its successor; explicit
+  disconnect invalidates queued retries. Preserve subscription tail options
+  when an authenticated connection returns. Exercise fake late events and the
+  Chromium reconnect smoke in `scripts/manual-review/e2e/websocket-reconnect-check.mjs`.
 - No page may scroll horizontally at 360/768/1440 widths. Wide tables and tab
   strips scroll inside their own `overflow-x-auto`/`scroll-strip` container;
   grid children get `min-w-0` (or `[&>*]:min-w-0` on the grid) so tracks cannot

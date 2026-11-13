@@ -30,10 +30,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 </div>
 
-## A world with your fingerprints.
+## Modpack Studio. Modpacks, made simple.
 
-The little additions. The completely different adventures. Bring your idea
-together in **Modpack Studio**.
+Bring your pack together, choose your export format, and get it ready to share
+with your players. **Modpack Studio** keeps the workflow in one place.
 
 - **Find your next addition.** Search Modrinth and CurseForge, choose versions,
   and work through dependencies.
@@ -131,6 +131,10 @@ your installation when following a guide.
 
 For the full walkthrough, see
 [Docker Compose setup](https://carbonpanel.dev/docs/getting-started/docker-compose/).
+
+Prefer a prebuilt download? [GitHub Releases](https://github.com/athNdev/carbonpanel/releases)
+provides versioned archives for Linux, macOS and Windows.
+See [release downloads and checksum verification](docs/releases.md).
 
 ### 1. Download the repository and build the image
 
