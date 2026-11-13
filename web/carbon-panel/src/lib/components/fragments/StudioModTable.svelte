@@ -47,10 +47,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						type="checkbox"
 						aria-label="Select all mods"
 						class="cursor-pointer rounded-none border-[#8d8d8d] bg-[#262626]"
-						checked={selectedSlugs.length > 0 && selectedSlugs.length === filteredMods.length}
+						checked={filteredMods.length > 0 &&
+							filteredMods.every((mod) => selectedSlugs.includes(mod.slug))}
 						onchange={(e) => {
 							const checked = (e.target as HTMLInputElement).checked;
-							selectedSlugs = checked ? filteredMods.map((m) => m.slug) : [];
+							const visible = new Set(filteredMods.map((mod) => mod.slug));
+							selectedSlugs = checked
+								? [...new Set([...selectedSlugs, ...visible])]
+								: selectedSlugs.filter((slug) => !visible.has(slug));
 						}}
 					/>
 				</th>
@@ -126,6 +130,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							aria-label={mod.pinned
 								? `Unpin version for ${mod.name}`
 								: `Pin version for ${mod.name}`}
+							aria-pressed={!!mod.pinned}
 						>
 							{#if mod.pinned}
 								<Pin class="h-3.5 w-3.5 text-accent-text" />

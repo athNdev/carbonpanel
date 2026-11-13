@@ -28,16 +28,25 @@ is a local demonstration of preparing one server's batch, not a claim that
 every panel action is automatically intercepted. Staging snapshots the reviewed
 items and window; simulate-apply publishes that snapshot only. Removing items,
 clearing a batch or revising it never changes the live fixture. Timing is
-explicitly simulated; the example has no scheduler or connected server.
-Studio's compact tabs connect a sample catalog, the shared mod table and an
-export preview. Dependency additions are illustrative fixtures, and the preview
-does not download or claim to resolve a working pack.
+explicitly simulated; the example has no scheduler or connected server. Visitors
+explicitly simulate a restart, player departures/joins and idle time, or reaching
+a selected timestamp. Only the reviewed snapshot publishes after that window;
+the result shows each applied before/after value. Reset cancels pending work.
+Studio connects a twelve-entry sample catalog, six seeded mods, the shared mod
+table with bulk actions, three inspectable override files and an export builder.
+Sample dependency additions are idempotent; removing a library removes its
+dependants, and exports reject missing dependencies after side filtering.
+Sample updates respect pins. Changing a pack or export option invalidates the
+previous result. The download is explicitly a JSON recipe with `playable: false`,
+not a launcher archive or real mod binaries; no provider request is made.
 
 Studio's dependency relationship and export exclusions remain visible as text;
 color and motion are supplementary feedback. The sample server may publish a
-completed-state event across its shadow boundary to switch the decorative
-terrain entrance light. The event is local to the fixture, carries no server
-identity, and never replaces the status text in the actual control.
+state event across its shadow boundary to switch the decorative terrain entrance
+light, including an unlit transition during restart. Studio and staging publish
+allowlisted presentation phases for localized light and progress motifs. These
+events carry no identities and never change another fixture's data or replace
+text feedback. Reduced motion and forced colors remain usable without effects.
 
 The dedicated Svelte build must not import application API clients, stores,
 SvelteKit route modules or Monaco. Production wrappers continue to own auth,

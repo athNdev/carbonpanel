@@ -8,6 +8,13 @@
 	let status = $state(ServerStatus.RUNNING);
 	let busy = $state(false);
 	let message = $state('Try restarting this sample server.');
+	const initialActivity = [
+		'World loaded: The Overworld',
+		'Alex, River and Sam joined the sample server',
+		'Server ready · Paper 1.21.1'
+	];
+	let activity = $state([...initialActivity]);
+	let showActivity = $state(false);
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let fragmentRoot: HTMLDivElement;
 	function publishWorldState() {
@@ -29,12 +36,19 @@
 		status = ServerStatus.RUNNING;
 		busy = false;
 		message = 'Sample restored. Try the server controls.';
+		activity = [...initialActivity];
+		showActivity = false;
 		publishWorldState();
 	}
 	function act(action: 'start' | 'stop' | 'restart') {
 		if (busy) return;
 		busy = true;
 		status = action === 'stop' ? ServerStatus.STOPPING : ServerStatus.STARTING;
+		publishWorldState();
+		showActivity = true;
+		activity = [
+			action === 'start' ? 'Starting the sample container…' : 'Saving world and player data…'
+		];
 		message =
 			action === 'restart'
 				? 'Simulating a restart. Your real servers are unaffected.'
@@ -43,6 +57,14 @@
 			status = action === 'stop' ? ServerStatus.STOPPED : ServerStatus.RUNNING;
 			busy = false;
 			publishWorldState();
+			activity =
+				action === 'stop'
+					? ['World and player data saved', 'Sample container stopped · memory released']
+					: [
+							'World loaded: The Overworld',
+							'Server ready · accepting connections',
+							'Alex, River and Sam rejoined the sample server'
+						];
 			message =
 				action === 'stop'
 					? 'Sample server stopped. Start it again when you are ready.'
@@ -86,7 +108,41 @@
 			</dl>
 			<ServerLifecycleActions {status} actionLoading={busy} onaction={act} />
 		</div>
+		<dl class="server-resources" aria-label="Sample server resources">
+			<div>
+				<dt>PLAYERS</dt>
+				<dd>{status === ServerStatus.RUNNING ? '3 / 20' : '0 / 20'}</dd>
+			</div>
+			<div>
+				<dt>MEMORY</dt>
+				<dd>
+					{status === ServerStatus.RUNNING
+						? '1.8 / 4 GiB'
+						: busy
+							? 'Starting / stopping'
+							: '0 / 4 GiB'}
+				</dd>
+			</div>
+		</dl>
+		<details class="server-activity" bind:open={showActivity}>
+			<summary
+				>Sample activity <span
+					>{busy
+						? 'Working'
+						: status === ServerStatus.RUNNING
+							? '3 players online'
+							: 'World safely stopped'}</span
+				></summary
+			>
+			<ol>
+				{#each activity as line (line)}<li>{line}</li>{/each}
+			</ol>
+		</details>
 		<div class="demo-result" role="status">{message}</div>
-		<div class="px-5 py-2"><button class="demo-reset" onclick={reset}>↺ Reset example</button></div>
+		<div class="demo-footer">
+			<span>Sample server · nothing connected</span><button class="demo-reset" onclick={reset}
+				>↺ Reset example</button
+			>
+		</div>
 	</fieldset>
 </div>

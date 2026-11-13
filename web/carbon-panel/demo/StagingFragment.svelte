@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { ArrowRight, Check, Plus, RotateCcw } from '@lucide/svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { ArrowRight, Check, Plus, RotateCcw, CheckCheck } from '@lucide/svelte';
 	import UpdateBatch from '$lib/components/fragments/UpdateBatch.svelte';
 	import CarbonButton from '$lib/components/carbon/CarbonButton.svelte';
 	import CarbonTag from '$lib/components/carbon/CarbonTag.svelte';
@@ -12,278 +12,352 @@
 		windowError,
 		stageBatch,
 		applyBatch,
-		type SampleBatch
+		windowReached,
+		type SampleBatch,
+		type WindowSimulation
 	} from './staging-model';
+	import { publishDemoState } from './feedback';
+	let root: HTMLDivElement;
 	let ready = $state(false);
 	let live = $state(initialLive());
-	let draft = $state(sampleChanges.slice(0, 3).map((item) => ({ ...item })));
-	let staged = $state<SampleBatch | undefined>();
+	let draft = $state(sampleChanges.slice(0, 4).map((item) => ({ ...item })));
+	let staged = $state<SampleBatch>();
+	let receipt = $state<SampleBatch>();
 	let applyWindow = $state('next');
 	let applyAtLocal = $state('');
 	let idleMinutes = $state(10);
-	let applied = $state(false);
-	let showLive = $state(false);
+	let applying = $state('');
+	let simulation = $state<WindowSimulation>({
+		players: 2,
+		emptyMinutes: 0,
+		now: 0,
+		restart: false
+	});
 	let message = $state(
-		'Three sample changes, one batch. Add another or remove anything you don’t need.'
+		'Four edits are ready to review. Add more from across the panel, then stage them together.'
 	);
+	let timers: ReturnType<typeof setTimeout>[] = [];
 	let items = $derived(staged?.items ?? draft);
 	let schedule = $derived({ mode: applyWindow, at: applyAtLocal, idle: idleMinutes });
 	let error = $derived(windowError(schedule));
-	let when = $derived(
-		applyWindow === 'idle'
-			? `after ${idleMinutes} empty minutes`
-			: applyWindow === 'time' && applyAtLocal
-				? `at ${new Date(applyAtLocal).toLocaleString()}`
-				: 'on the next restart'
+	let phase = $derived(
+		applying ? 'applying' : staged ? 'staged' : receipt && !draft.length ? 'applied' : 'review'
 	);
-	const sourceNames: Record<string, string> = {
-		config: 'Config',
-		mod: 'Mod',
-		datapack: 'Datapack',
-		file: 'File',
-		module: 'Module',
-		modpack: 'Modpack'
-	};
+	const sources = [
+		{ kind: 'config', label: 'Config' },
+		{ kind: 'mod', label: 'Mod' },
+		{ kind: 'datapack', label: 'Datapack' },
+		{ kind: 'file', label: 'File' },
+		{ kind: 'module', label: 'Module' },
+		{ kind: 'modpack', label: 'Modpack' }
+	];
 	onMount(() => {
 		ready = true;
+		simulation.now = Date.now();
 	});
+	onDestroy(() => timers.forEach(clearTimeout));
+	$effect(() => {
+		if (ready) publishDemoState(root, 'staging', phase);
+	});
+	function cancelTimers() {
+		timers.forEach(clearTimeout);
+		timers = [];
+	}
 	function reset() {
+		cancelTimers();
 		live = initialLive();
-		draft = sampleChanges.slice(0, 3).map((item) => ({ ...item }));
+		draft = sampleChanges.slice(0, 4).map((item) => ({ ...item }));
 		staged = undefined;
+		receipt = undefined;
+		applying = '';
 		applyWindow = 'next';
 		applyAtLocal = '';
 		idleMinutes = 10;
-		applied = false;
-		showLive = false;
-		message = 'Sample restored. Review changes from across the panel in one place.';
+		simulation = { players: 2, emptyMinutes: 0, now: Date.now(), restart: false };
+		message = 'Sample restored. Review four changes without touching the live server.';
 	}
-	function add(id: string) {
-		if (staged) return;
-		draft = addChange(draft, id, live);
-		applied = false;
-		message = 'Added to your review. The live sample is unchanged.';
+	function add(kind: string) {
+		const item = sampleChanges.find(
+			(item) =>
+				item.kind === kind &&
+				!items.some((change) => change.id === item.id) &&
+				live[item.id] !== item.after
+		);
+		if (!item || staged || applying) return;
+		draft = addChange(draft, item.id, live);
+		receipt = undefined;
+		message = `${item.summary} added to review. Live values have not changed.`;
 	}
 	function stage() {
 		if (error || !draft.length) return;
 		try {
 			staged = stageBatch(draft, schedule);
-			message = `${staged.items.length} changes staged ${when}. The live sample is unchanged.`;
+			receipt = undefined;
+			simulation = { players: 2, emptyMinutes: 0, now: Date.now(), restart: false };
+			message = `${staged.items.length} changes staged. Reproduce the chosen window below to see them go live.`;
 		} catch (cause) {
-			message = cause instanceof Error ? cause.message : 'Review the apply window and try again.';
+			message = cause instanceof Error ? cause.message : 'Review the apply window.';
 		}
 	}
 	function revise() {
 		if (!staged) return;
 		draft = staged.items.map((item) => ({ ...item }));
 		staged = undefined;
-		message = 'Back in review. Stage the batch again when your changes are ready.';
-	}
-	function apply() {
-		if (!staged) return;
-		const count = staged.items.length;
-		live = applyBatch(live, staged);
-		draft = [];
-		staged = undefined;
-		applied = true;
-		message = `${count} changes applied together. One restart simulated. Open the live sample to see the result.`;
+		message = 'Back in review. The live server still has its original values.';
 	}
 	function discard(id: string) {
-		if (staged) {
-			const remaining = id ? staged.items.filter((item) => item.id !== id) : [];
-			staged = remaining.length ? { ...staged, items: remaining } : undefined;
-			draft = remaining.map((item) => ({ ...item }));
-		} else draft = id ? draft.filter((item) => item.id !== id) : [];
-		message = `${id ? 'Change removed' : 'Batch cleared'}. The live sample is unchanged.`;
+		if (applying) return;
+		const remaining = id ? items.filter((item) => item.id !== id) : [];
+		if (staged) staged = remaining.length ? { ...staged, items: remaining } : undefined;
+		draft = remaining.map((item) => ({ ...item }));
+		message = `${id ? 'Change removed' : 'Batch discarded'}. Live values remain unchanged.`;
+	}
+	function apply() {
+		if (!staged || applying || !windowReached(staged, simulation)) return;
+		const snapshot = staged;
+		applying = 'Saving the world';
+		message = 'Window reached. Saving the sample world before one restart.';
+		timers.push(
+			setTimeout(() => {
+				applying = 'Publishing the batch';
+			}, 350)
+		);
+		timers.push(
+			setTimeout(() => {
+				applying = 'Starting the server';
+			}, 700)
+		);
+		timers.push(
+			setTimeout(() => {
+				live = applyBatch(live, snapshot);
+				receipt = snapshot;
+				draft = [];
+				staged = undefined;
+				applying = '';
+				message = `${snapshot.items.length} ${snapshot.items.length === 1 ? 'change' : 'changes'} applied with one simulated restart. Review the exact result below.`;
+			}, 1100)
+		);
+	}
+	function trigger(action: 'restart' | 'leave' | 'join' | 'minute' | 'advance') {
+		if (!staged || applying) return;
+		if (action === 'restart') simulation = { ...simulation, restart: true };
+		if (action === 'leave') simulation = { ...simulation, players: 0, emptyMinutes: 0 };
+		if (action === 'join') simulation = { ...simulation, players: 1, emptyMinutes: 0 };
+		if (action === 'minute')
+			simulation = {
+				...simulation,
+				emptyMinutes: simulation.players ? 0 : simulation.emptyMinutes + 1
+			};
+		if (action === 'advance')
+			simulation =
+				staged.window.mode === 'time'
+					? { ...simulation, now: Date.parse(staged.window.at) }
+					: {
+							...simulation,
+							emptyMinutes: simulation.players ? 0 : simulation.emptyMinutes + staged.window.idle
+						};
+		message = simulation.players
+			? 'A sample player is online. The idle wait resets.'
+			: 'The sample server is empty. Advance the idle wait to apply the batch.';
+		apply();
+	}
+	function suggestTime() {
+		const later = new Date(Date.now() + 60 * 60 * 1000);
+		applyAtLocal = new Date(later.getTime() - later.getTimezoneOffset() * 60000)
+			.toISOString()
+			.slice(0, 16);
 	}
 </script>
 
-<div class="fragment-root" data-carbon-theme="dark">
+<div class="fragment-root" data-carbon-theme="dark" bind:this={root}>
 	<fieldset disabled={!ready}>
 		<div class="demo-heading">
 			<div>
 				<h3>Weekend survival</h3>
 				<p>ONE SERVER · ONE UPDATE BATCH</p>
 			</div>
-			<CarbonTag type={staged ? 'blue' : applied ? 'green' : 'gray'}
-				>{staged ? 'Staged' : applied ? 'Applied' : 'In review'}</CarbonTag
+			<CarbonTag type={phase === 'applied' ? 'green' : phase === 'review' ? 'gray' : 'blue'}
+				>{phase === 'review'
+					? 'In review'
+					: phase === 'staged'
+						? 'Waiting'
+						: phase === 'applying'
+							? 'Applying'
+							: 'Applied'}</CarbonTag
 			>
 		</div>
 		<ol class="batch-steps" aria-label="Batch progress">
-			<li class:current={!staged && !applied}><span>01</span> Collect</li>
-			<li class:current={!!staged}><span>02</span> Stage</li>
-			<li class:current={applied}><span>03</span> Apply together</li>
+			<li class:current={phase === 'review'}><span>01</span> Collect</li>
+			<li class:current={phase === 'staged'}><span>02</span> Stage</li>
+			<li class:current={phase === 'applying' || phase === 'applied'}>
+				<span>03</span> Apply together
+			</li>
 		</ol>
-		{#if !staged}
-			<div class="batch-sources">
-				<p>Add a sample change from</p>
-				<div class="batch-source-buttons">
-					{#each sampleChanges as item (item.id)}
-						{@const included = items.some((change) => change.id === item.id)}
-						<CarbonButton
-							kind="secondary"
-							size="sm"
-							disabled={included || live[item.id] === item.after}
-							onclick={() => add(item.id)}
-							aria-label={`Add ${sourceNames[item.kind].toLowerCase()} change`}
-						>
-							{#if included}<Check size={12} aria-hidden="true" />{:else}<Plus
-									size={12}
-									aria-hidden="true"
-								/>{/if}
-							<span class="ml-1.5">{sourceNames[item.kind]}</span>
-						</CarbonButton>
-					{/each}
+		<fieldset disabled={!!applying}>
+			{#if phase !== 'applied'}
+				{#if !staged}<div class="batch-sources">
+						<p>Add edits from across the panel</p>
+						<div class="batch-source-buttons">
+							{#each sources as source (source.kind)}{@const available = sampleChanges.some(
+									(item) =>
+										item.kind === source.kind &&
+										!items.some((change) => change.id === item.id) &&
+										live[item.id] !== item.after
+								)}{@const count = items.filter(
+									(item) => item.kind === source.kind
+								).length}<CarbonButton
+									kind="secondary"
+									size="sm"
+									disabled={!available}
+									onclick={() => add(source.kind)}
+									aria-label={`Add ${source.kind} change`}
+									>{#if available}<Plus size={12} aria-hidden="true" />{:else}<Check
+											size={12}
+											aria-hidden="true"
+										/>{/if}<span class="ml-1.5">{source.label}{count ? ` ${count}` : ''}</span
+									></CarbonButton
+								>{/each}
+						</div>
+					</div>{/if}
+				<div class="batch-inventory">
+					<UpdateBatch
+						bind:applyWindow
+						bind:applyAtLocal
+						bind:idleMinutes
+						batchOpen={items.length > 0}
+						batchItems={items}
+						discardStaged={discard}
+						phase={staged ? 'staged' : 'draft'}
+						windowLocked={!!staged}
+					>
+						{#snippet actions()}{#if staged}<CarbonButton
+									kind="secondary"
+									size="sm"
+									onclick={revise}>Revise batch</CarbonButton
+								>{:else}<CarbonButton size="sm" disabled={!items.length || !!error} onclick={stage}
+									>Stage {items.length || ''}
+									{items.length === 1 ? 'change' : 'changes'}<ArrowRight
+										size={14}
+										class="ml-3"
+										aria-hidden="true"
+									/></CarbonButton
+								>{/if}{/snippet}
+					</UpdateBatch>
 				</div>
-			</div>
-		{/if}
-		<UpdateBatch
-			bind:applyWindow
-			bind:applyAtLocal
-			bind:idleMinutes
-			batchOpen={items.length > 0}
-			batchItems={items}
-			discardStaged={discard}
-			phase={staged ? 'staged' : 'draft'}
-			windowLocked={!!staged}
-		>
-			{#snippet actions()}
-				{#if staged}
-					<CarbonButton kind="secondary" size="sm" onclick={revise}>Revise batch</CarbonButton>
-					<CarbonButton size="sm" onclick={apply}
-						>Simulate apply <ArrowRight size={14} class="ml-3" aria-hidden="true" /></CarbonButton
+				{#if !staged && applyWindow === 'time'}<div class="batch-time-help">
+						<CarbonButton size="sm" kind="ghost" onclick={suggestTime}
+							>Use one hour from now</CarbonButton
+						>
+					</div>{/if}
+				{#if error && !staged}<p class="batch-error" role="alert">{error}</p>{/if}
+				{#if staged}<section class="batch-simulation" aria-label="Simulate the apply window">
+						<div>
+							<h4>{applying || 'Try the apply window'}</h4>
+							<p>
+								Browser-only simulation · live values stay unchanged until the window is reached.
+							</p>
+						</div>
+						{#if staged.window.mode === 'next'}<p>
+								The batch waits for a restart. It will publish all {staged.items.length} changes in that
+								restart.
+							</p>
+							<CarbonButton size="sm" onclick={() => trigger('restart')}
+								>Simulate restart</CarbonButton
+							>
+						{:else if staged.window.mode === 'idle'}<p>
+								<strong>{simulation.players} online</strong> · {simulation.emptyMinutes} / {staged
+									.window.idle} empty minutes
+							</p>
+							<div class="batch-source-buttons">
+								<CarbonButton
+									size="sm"
+									kind="secondary"
+									disabled={simulation.players === 0}
+									onclick={() => trigger('leave')}>Simulate players leaving</CarbonButton
+								><CarbonButton
+									size="sm"
+									kind="secondary"
+									disabled={simulation.players > 0}
+									onclick={() => trigger('join')}>Simulate player joining</CarbonButton
+								><CarbonButton
+									size="sm"
+									kind="secondary"
+									disabled={simulation.players > 0}
+									onclick={() => trigger('minute')}>Advance 1 empty minute</CarbonButton
+								><CarbonButton
+									size="sm"
+									disabled={simulation.players > 0}
+									onclick={() => trigger('advance')}
+									>Advance {staged.window.idle} empty minutes</CarbonButton
+								>
+							</div>
+						{:else}<p>
+								Scheduled for {new Date(staged.window.at).toLocaleString()}. No real timer is
+								running.
+							</p>
+							<CarbonButton size="sm" onclick={() => trigger('advance')}
+								>Advance to scheduled time</CarbonButton
+							>{/if}
+						{#if applying}<ol class="apply-progress" aria-label="Apply progress">
+								<li>Save world</li>
+								<li>Publish {staged.items.length} changes</li>
+								<li>Restart once</li>
+							</ol>{/if}
+					</section>{/if}
+			{:else if receipt}
+				<section class="batch-receipt" aria-label="Applied batch result">
+					<CheckCheck size={24} strokeWidth={1.5} aria-hidden="true" />
+					<h4>Everything landed together.</h4>
+					<p>
+						{receipt.items.length}
+						{receipt.items.length === 1 ? 'change' : 'changes'} published · one simulated restart · server
+						running
+					</p>
+					<p>
+						Window reached: {receipt.window.mode === 'next'
+							? 'next restart'
+							: receipt.window.mode === 'idle'
+								? `${receipt.window.idle} empty minutes`
+								: new Date(receipt.window.at).toLocaleString()}.
+					</p>
+					<ul>
+						{#each receipt.items as item (item.id)}<li>
+								<strong>{item.summary}</strong><span
+									><s>{item.before}</s><ArrowRight size={12} aria-hidden="true" /><b
+										>{live[item.id]}</b
+									></span
+								>
+							</li>{/each}
+					</ul>
+					<CarbonButton
+						size="sm"
+						kind="secondary"
+						onclick={() => {
+							receipt = undefined;
+							message = 'Previous changes are live. Collect the remaining edits for another batch.';
+						}}>Prepare another batch</CarbonButton
 					>
-				{:else}
-					<CarbonButton size="sm" disabled={!items.length || !!error} onclick={stage}
-						>Stage {items.length || ''}
-						{items.length === 1 ? 'change' : 'changes'}
-						<ArrowRight size={14} class="ml-3" aria-hidden="true" /></CarbonButton
-					>
-				{/if}
-			{/snippet}
-		</UpdateBatch>
-		{#if error && !staged}<p class="batch-error" role="alert">{error}</p>{/if}
+				</section>
+			{/if}
+		</fieldset>
 		<div class="demo-result" role="status">{message}</div>
-		<details class="batch-live" bind:open={showLive}>
-			<summary>Live sample <span>{applied ? 'Updated together' : 'Unchanged'}</span></summary>
-			<dl>
-				{#each sampleChanges as item (item.id)}<div>
-						<dt>{item.summary}</dt>
-						<dd>{live[item.id]}</dd>
-					</div>{/each}
-			</dl>
-		</details>
-		<div class="batch-footnote">
-			<span>Sample data. Timing is simulated.</span><button class="demo-reset" onclick={reset}
+		{#if phase !== 'applied'}<details class="batch-live">
+				<summary
+					>Inspect live server <span
+						>{receipt ? 'Previous batch applied' : 'Not changed by this batch'}</span
+					></summary
+				>
+				<dl>
+					{#each sampleChanges as item (item.id)}<div>
+							<dt>{item.summary}</dt>
+							<dd>{live[item.id]}</dd>
+						</div>{/each}
+				</dl>
+			</details>{/if}
+		<div class="demo-footer">
+			<span>Sample data · timing is simulated</span><button class="demo-reset" onclick={reset}
 				><RotateCcw size={12} aria-hidden="true" /> Reset example</button
 			>
 		</div>
 	</fieldset>
 </div>
-
-<style>
-	.batch-steps {
-		display: flex;
-		justify-content: space-between;
-		gap: 10px;
-		list-style: none;
-		padding: 14px 22px;
-		margin: 0;
-		border-bottom: 1px solid var(--border);
-		font: 10px/1.5 var(--carbon-font-mono);
-		color: var(--muted-foreground);
-	}
-	.batch-steps li {
-		display: flex;
-		gap: 7px;
-		align-items: center;
-	}
-	.batch-steps span {
-		opacity: 0.65;
-	}
-	.batch-steps .current {
-		color: var(--accent-text);
-	}
-	.batch-sources {
-		padding: 16px 22px;
-		border-bottom: 1px solid var(--border);
-	}
-	.batch-sources p {
-		margin: 0 0 10px;
-		font-size: 11px;
-		color: var(--muted-foreground);
-	}
-	.batch-source-buttons {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-	}
-	.batch-error {
-		color: var(--destructive-text);
-		font-size: 12px;
-		padding: 0 22px 12px;
-	}
-	.batch-live {
-		border-top: 1px solid var(--border);
-		padding: 0 22px;
-		font-size: 11px;
-	}
-	.batch-live summary {
-		cursor: pointer;
-		padding: 12px 0;
-	}
-	.batch-live summary span {
-		color: var(--muted-foreground);
-		margin-left: 8px;
-	}
-	.batch-live dl {
-		margin: 0;
-		padding-bottom: 12px;
-	}
-	.batch-live dl div {
-		display: flex;
-		justify-content: space-between;
-		gap: 16px;
-		padding: 5px 0;
-	}
-	.batch-live dt {
-		color: var(--muted-foreground);
-		overflow-wrap: anywhere;
-	}
-	.batch-live dd {
-		margin: 0;
-		text-align: right;
-	}
-	.batch-footnote {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		flex-wrap: wrap;
-		gap: 4px 10px;
-		padding: 8px 18px 8px 22px;
-		border-top: 1px solid var(--border);
-		color: var(--muted-foreground);
-		font-size: 10px;
-	}
-	.batch-footnote button {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-	}
-	@media (max-width: 400px) {
-		.batch-steps,
-		.batch-sources,
-		.batch-live {
-			padding-inline: 16px;
-		}
-		.batch-steps {
-			font-size: 9px;
-		}
-		.batch-steps li {
-			gap: 4px;
-		}
-		.batch-footnote {
-			padding-inline: 16px;
-		}
-	}
-</style>

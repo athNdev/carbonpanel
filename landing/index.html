@@ -134,7 +134,7 @@
     />
     <link rel="stylesheet" href="./assets/fonts/ibm-plex-sans.css" />
     <link rel="stylesheet" href="./assets/fonts/ibm-plex-mono.css" />
-    <link rel="stylesheet" href="./assets/styles.css?v=20261113b" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261113c" />
     <noscript
       ><style>
         .menu-toggle {
@@ -296,6 +296,7 @@
       </section>
       <section
         class="chapter studio-section"
+        data-demo-phase="idle"
         id="features"
         aria-labelledby="studio-title"
       >
@@ -309,9 +310,7 @@
             </h2>
           </div>
           <div class="studio-introduction">
-            <p>
-              Package your modpack.<br />Share it with your players.
-            </p>
+            <p>Package your modpack.<br />Share it with your players.</p>
             <p>
               Bring your pack together, choose your export format, and get it
               ready to share. Try the workflow here.
@@ -338,8 +337,9 @@
             </figcaption>
             <div class="fragment-surface"><!-- fragment:studio --></div>
             <p class="fragment-note" data-fragment-note>
-              Interactive demo · Browse sample mods, curate your pack, and
-              preview an export. No downloads or provider connections.
+              Interactive demo · Discover, curate and build an export preview.
+              Download its sample manifest. No real mod files or provider
+              connections.
             </p>
             <p class="fragment-recovery" hidden data-fragment-recovery>
               <a href="">Reload page</a> ·
@@ -364,6 +364,7 @@
       </section>
       <section
         class="chapter staging-section"
+        data-demo-phase="review"
         id="updates"
         aria-labelledby="staging-title"
       >
@@ -374,8 +375,8 @@
             </figcaption>
             <div class="fragment-surface"><!-- fragment:staging --></div>
             <p class="fragment-note" data-fragment-note>
-              Interactive demo · No server connected. Collect, review and stage
-              a sample batch.
+              Interactive demo · Collect, stage and simulate your apply window.
+              Inspect every change afterwards. No server connected.
             </p>
             <p class="fragment-recovery" hidden data-fragment-recovery>
               <a href="">Reload page</a> ·
@@ -390,6 +391,9 @@
           <div class="story-copy">
             <p class="eyebrow">02 / KEEP YOUR MOMENTUM</p>
             <h2 id="staging-title">The next update.<br />When you're ready.</h2>
+            <div class="update-signal" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
             <p>
               A config tweak. A new datapack. The next mod update. Bring your
               changes together in one batch, see what’s changing, and choose
@@ -838,7 +842,7 @@
         >
       </div>
     </footer>
-    <script src="./assets/script.js?v=20261112a" defer></script>
+    <script src="./assets/script.js?v=20261113c" defer></script>
     <!-- fragment:loader -->
   </body>
 </html>
