@@ -10,23 +10,19 @@
 // screenshot per named step plus a Markdown report. The point is evidence: the
 // report and images can be attached to a review without re-running anything.
 //
-//	REVIEW_MODULES=~/.cache/review/node_modules \
 //	  node scripts/review/journey.mjs --plan scripts/review/plans/console.json \
 //	  --base http://127.0.0.1:8080 --out /tmp/review
 //
 // Credentials are read from the environment only (PANEL_REVIEW_USER /
 // PANEL_REVIEW_PASSWORD) and are never written to the report.
 
-import { createRequire } from "node:module";
+import { launchReviewBrowser } from "./browser.mjs";
 import {
   mkdirSync,
   readFileSync,
   writeFileSync,
-  existsSync,
-  readdirSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 function parseArgs(argv) {
   const args = {};
@@ -36,38 +32,6 @@ function parseArgs(argv) {
     args[key.slice(2)] = argv[i + 1];
   }
   return args;
-}
-
-function loadPlaywright() {
-  const candidates = [
-    process.env.REVIEW_MODULES,
-    join(homedir(), "review", "node_modules"),
-    join(process.cwd(), "node_modules"),
-  ].filter(Boolean);
-
-  for (const dir of candidates) {
-    if (!existsSync(join(dir, "playwright-core"))) continue;
-    const require = createRequire(join(dir, "noop.cjs"));
-    return require("playwright-core");
-  }
-  throw new Error(
-    "playwright-core not found. Install it (npm i playwright-core) and set REVIEW_MODULES to its node_modules directory.",
-  );
-}
-
-function findChromium() {
-  if (process.env.REVIEW_CHROME) return process.env.REVIEW_CHROME;
-  const cache = join(homedir(), ".cache", "ms-playwright");
-  if (!existsSync(cache)) return undefined;
-  const builds = readdirSync(cache)
-    .filter((name) => name.startsWith("chromium-"))
-    .sort()
-    .reverse();
-  for (const build of builds) {
-    const candidate = join(cache, build, "chrome-linux", "chrome");
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
 }
 
 async function main() {
@@ -80,11 +44,8 @@ async function main() {
   const out = resolve(args.out ?? "review-out");
   mkdirSync(out, { recursive: true });
 
-  const { chromium } = loadPlaywright();
-  const browser = await chromium.launch({
-    executablePath: findChromium(),
-    args: ["--no-sandbox"],
-  });
+  const { browser, metadata: browserMetadata } = await launchReviewBrowser();
+  writeFileSync(join(out, "browser.json"), JSON.stringify(browserMetadata, null, 2) + "\n");
   const context = await browser.newContext({
     viewport: plan.viewport ?? { width: 1440, height: 900 },
     ignoreHTTPSErrors: true,
