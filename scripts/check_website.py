@@ -148,8 +148,17 @@ def check_sitemap(root, pages, base, site, errors):
         relative = page.relative_to(root).as_posix()
         route = page_route(relative)
         expected.append(site.rstrip("/") + base + route)
-    if actual != sorted(expected):
-        errors.append("sitemap.xml: entries do not exactly match published HTML routes")
+    if len(actual) != len(set(actual)):
+        errors.append("sitemap.xml: duplicate URL entries")
+    missing = sorted(set(expected) - set(actual))
+    extra = sorted(set(actual) - set(expected))
+    if missing or extra:
+        details = []
+        if missing:
+            details.append(f"missing {', '.join(missing)}")
+        if extra:
+            details.append(f"unexpected {', '.join(extra)}")
+        errors.append("sitemap.xml: " + "; ".join(details))
 
 
 def check(root, base="/", site="https://carbonpanel.dev"):
