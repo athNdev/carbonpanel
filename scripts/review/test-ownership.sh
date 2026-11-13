@@ -52,8 +52,19 @@ cat > "$test_root/bin/curl" <<'EOF'
 case "$*" in
   *AuthService/Login*)
     if [ "${FAKE_CURL_MODE:-}" = auth-failure ]; then printf '{}'; else printf '{"token":"fixture"}'; fi ;;
-  *NodeService/ListNodes*) printf '{"nodes":[]}' ;;
+  *NodeService/ListNodes*)
+    case "${FAKE_CURL_MODE:-}" in starter-*) printf '{"nodes":[{"id":"node"}]}' ;; *) printf '{"nodes":[]}' ;; esac ;;
   *NodeService/CreateNode*) exit 1 ;;
+  *ServerService/ListServers*)
+    count=$(cat "$FAKE_CURL_STATE" 2>/dev/null || echo 0); count=$((count + 1)); echo "$count" > "$FAKE_CURL_STATE"
+    if [ "$count" = 1 ]; then printf '{"servers":[]}'
+    elif [ "${FAKE_CURL_MODE:-}" = starter-error ]; then printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_ERROR"}]}'
+    elif [ "${FAKE_CURL_MODE:-}" = starter-timeout ] || [ "$count" = 2 ]; then printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_CREATING"}]}'
+    else printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_STOPPED","containerId":"container"}]}'
+    fi ;;
+  *ServerService/StartServer*)
+    [ "$(cat "$FAKE_CURL_STATE")" -ge 3 ] || exit 1
+    echo start > "$FAKE_CURL_START"; printf '{}' ;;
   *) printf '{}' ;;
 esac
 EOF
@@ -108,6 +119,21 @@ for failure in auth node; do
     echo "failed $failure fixture reported success" >&2; exit 1
   fi
   case "$output" in *"review panel:"*) echo "failed $failure fixture reported ready" >&2; exit 1 ;; esac
+done
+# Real CreateServer is asynchronous: polling must observe a container before
+# starting; error and timeout must fail without announcing ready or starting.
+export REVIEW_STACK_NAME="${name}-auth" REVIEW_SEED_TIMEOUT_SECONDS=2
+export FAKE_CURL_STATE="$test_root/curl-state" FAKE_CURL_START="$test_root/curl-start"
+for mode in ready error timeout; do
+  export FAKE_CURL_MODE="starter-$mode"
+  rm -f -- "$FAKE_CURL_STATE" "$FAKE_CURL_START"
+  if output="$(bash "$script_dir/devstack.sh" up 2>&1)"; then
+    [ "$mode" = ready ] && [ -f "$FAKE_CURL_START" ] || { echo "failed starter reported ready" >&2; exit 1; }
+    case "$output" in *"review panel:"*) ;; *) echo "ready starter missing URL" >&2; exit 1 ;; esac
+  else
+    [ "$mode" != ready ] && [ ! -e "$FAKE_CURL_START" ] || { echo "ready starter failed or premature start" >&2; exit 1; }
+    case "$output" in *"review panel:"*) echo "failed starter announced ready" >&2; exit 1 ;; esac
+  fi
 done
 export REVIEW_STACK_NAME="$name" FAKE_DOCKER_MODE=present
 if bash "$script_dir/../manual-review/review.sh" reset >/dev/null 2>&1; then

@@ -145,10 +145,24 @@ seed() {
 			"${token}" >/dev/null
 	fi
 	# A missing or failed starter is a setup failure, not a successful capture.
-	local servers server_id server_status
-	servers="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}")"
-	server_id="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s).servers;if(!Array.isArray(v)||!v[0]?.id)throw Error();console.log(v[0].id)}catch(e){process.exitCode=1}})')"
-	server_status="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).servers[0].status??"")}catch(e){process.exitCode=1}})')"
+	local servers server_id server_status container_id record deadline timeout="${REVIEW_SEED_TIMEOUT_SECONDS:-180}"
+	[[ "$timeout" =~ ^[0-9]+$ ]] && ((10#$timeout >= 1 && 10#$timeout <= 600)) || { echo "review seed timeout must be in 1..600 seconds" >&2; return 1; }
+	deadline=$((SECONDS + 10#$timeout))
+	# CreateServer returns before image/container creation finishes. Do not send
+	# StartServer while that asynchronous lifecycle operation still owns the row.
+	while :; do
+		servers="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}")"
+		record="$(printf '%s' "$servers" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s).servers;if(!Array.isArray(v)||!v[0]?.id)throw Error();console.log([v[0].id,v[0].status??"",v[0].containerId??""].join("|"))}catch(e){process.exitCode=1}})')"
+		IFS='|' read -r server_id server_status container_id <<< "$record"
+		case "$server_status" in
+			SERVER_STATUS_ERROR|SERVER_STATUS_UNHEALTHY|7|8) echo "review starter creation failed: $server_status" >&2; return 1 ;;
+			SERVER_STATUS_CREATING|1) ;;
+			SERVER_STATUS_STOPPED|SERVER_STATUS_RUNNING|SERVER_STATUS_STARTING|5|3|2) [ -z "$container_id" ] || break ;;
+			*) echo "unexpected review starter status: $server_status" >&2; return 1 ;;
+		esac
+		((SECONDS < deadline)) || { echo "review starter did not finish creation within $timeout seconds" >&2; return 1; }
+		sleep 1
+	done
 	case "$server_status" in
 		SERVER_STATUS_RUNNING|SERVER_STATUS_STARTING|3|2) ;;
 		*) rpc /carbonpanel.v1.ServerService/StartServer '{"id":"'${server_id}'","requestId":"review-bootstrap-start"}' "${token}" >/dev/null ;;

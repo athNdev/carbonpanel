@@ -34,3 +34,7 @@ revalidating ownership. Source checkouts and neighboring sessions survive;
 symlinked instance paths are refused. Down always preserves data, and up
 refuses to replace a mismatched worktree. This does not establish lifecycle or
 gameplay acceptance.
+
+Single-profile seeding waits for asynchronous container creation to finish
+before starting its fixture. Error/unhealthy states and a bounded readiness
+timeout fail setup; they cannot produce a ready URL.

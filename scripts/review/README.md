@@ -19,6 +19,9 @@ stopping or cleaning a session. Existing unmarked data and containers are not
 automatically adopted. `down` preserves the session's data; the explicitly
 named `clean` command deletes only a matching owned session. The selected port
 is in the session's `port` file. Listeners bind to loopback.
+Seeding waits for asynchronous starter-container creation before starting it;
+error/unhealthy state or readiness timeout fails setup. The bounded timeout is
+180 seconds by default (`REVIEW_SEED_TIMEOUT_SECONDS`, range 1–600).
 
 - Node 24.
 - Bun and the locked Playwright package used by both review profiles.
