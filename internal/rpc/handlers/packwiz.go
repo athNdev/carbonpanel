@@ -293,7 +293,7 @@ func (h *PackwizHandler) handleRefreshPack(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *PackwizHandler) handleCheckUpdates(w http.ResponseWriter, r *http.Request, packID string) {
-	updates, err := h.manager.CheckContentUpdates(packID)
+	updates, err := h.manager.CheckContentUpdatesContext(r.Context(), packID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to check updates: %v", err), http.StatusInternalServerError)
 		return
@@ -331,7 +331,7 @@ func (h *PackwizHandler) handleApplyUpdates(w http.ResponseWriter, r *http.Reque
 	}
 
 	if req.ApplyAll {
-		updates, err := h.manager.CheckContentUpdates(packID)
+		updates, err := h.manager.CheckContentUpdatesContext(r.Context(), packID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("failed to check updates: %v", err), http.StatusInternalServerError)
 			return
