@@ -75,14 +75,23 @@ enforces this boundary. Browser actions simulate changes in memory and never
 connect to a server or mod provider.
 The Studio island uses Carbon tabs, search, tiles and buttons around its shared
 mod table. Its sample catalog demonstrates adding a required dependency and
-curating a pack; the export view reflects side and pin choices without creating
-an archive or claiming current provider compatibility.
+curating a pack. Twelve catalog entries and six seeded mods support filtering,
+paging, bulk side/pin/removal actions and sample updates that respect pins.
+Three inspectable override files accompany the export workflow. Building an
+export reflects its format, sides, versions and override choices in an inspector
+and a downloadable JSON sample manifest (`playable: false`). It includes no mod
+binaries, provider IDs or download URLs and is not a playable launcher archive.
+Pack or option changes invalidate the previous export preview.
 
 The staging island collects sample edits from six supported staging areas into
 the shared update-batch inventory. It shows before/after values, individual
 removal, a batch-wide apply window, review and staged states, and an expandable
-live sample. Stage captures a snapshot; simulated apply publishes only its
-remaining items. There is no timer, server restart or automatic interception of
+live sample. Eight edits cover six supported areas, with four edits seeded.
+Stage captures a snapshot; visitors simulate the chosen restart, idle stretch
+or timestamp, and only the remaining staged items publish. Player joins reset
+the simulated idle wait. The completion receipt exposes the exact before/after
+result. Reset cancels any in-progress demonstration. There is no real scheduler,
+server restart or automatic interception of
 edits elsewhere on the homepage. The installed panel supplies its existing
 batch summaries, kinds and actions to the same inventory; demo-specific
 before/after values and review actions are optional presentation inputs.
@@ -111,6 +120,14 @@ sources, not those outputs. Keep component changes in the website CI path
 filters. The marketing site self-hosts IBM Plex; the fragments retain the
 panel's current Inter and JetBrains Mono font roles. Font licences are included
 alongside the vendored files. See [artwork provenance](homepage-artwork.md).
+
+The browser-console expression in
+`scripts/manual-review/homepage-demo-check.js` exercises the built, hydrated
+islands through their actual controls, including filtered bulk selection,
+download contents, each apply window and reset during pending work. Run it
+against a local preview, then check desktop/mobile layout, keyboard controls,
+reduced motion and forced colors. Decorative state events only illuminate the
+homepage artwork; each fixture retains its independent data and text feedback.
 
 ## Social previews
 

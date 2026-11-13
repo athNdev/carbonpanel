@@ -47,6 +47,10 @@ sources:
   reserve artwork space with viewport-relative percentage padding on that
   frame: it collapses the copy at ultrawide sizes. The mobile layout uses one
   content column above the terrain.
+- The craft section raises its local grid contrast without changing the other
+  homepage grids, and preserves the fade around the content frame. Its square
+  grid uses both axes at every viewport size, with smaller cells and a full-width
+  fade on mobile; the general mobile grid suppression does not apply here.
 - A published release pin uses the release tag as its label. Any other commit is
   labelled a development snapshot. Do not infer a release from a package version
   or an inherited tag; the label names an explicit tag or the maintainer's
