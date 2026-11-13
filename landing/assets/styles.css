@@ -1896,12 +1896,12 @@ h2 {
   position: absolute;
   z-index: -1;
   pointer-events: none;
-  inset: 4px -55px auto 35%;
-  height: 330px;
+  inset: -120px -55px auto 35%;
+  height: 300px;
   background: radial-gradient(
-    ellipse at 65% 15%,
+    ellipse at center,
     rgba(225, 216, 187, 0.2),
-    transparent 67%
+    transparent 65%
   );
   opacity: 0;
   transition: opacity 600ms ease;

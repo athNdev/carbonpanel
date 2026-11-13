@@ -146,6 +146,9 @@
     );
     await click("studio", "Pin selected");
     await tab("Export");
+    const selectedTab = root("studio").querySelector('[data-tab="export"]').getBoundingClientRect();
+    const tabStrip = root("studio").querySelector('[data-carbon-tabs]').getBoundingClientRect();
+    assert(selectedTab.left >= tabStrip.left - 1 && selectedTab.right <= tabStrip.right + 1, "selected tab remains visible in a narrow strip");
     await input(
       root("studio").querySelector('[aria-label="Export format"]'),
       "packwiz",

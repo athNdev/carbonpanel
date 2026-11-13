@@ -39,6 +39,8 @@ dependants, and exports reject missing dependencies after side filtering.
 Sample updates respect pins. Changing a pack or export option invalidates the
 previous result. The download is explicitly a JSON recipe with `playable: false`,
 not a launcher archive or real mod binaries; no provider request is made.
+The shared tab strip keeps the selected tab horizontally visible on resize or
+programmatic selection without scrolling the surrounding page.
 
 Studio's dependency relationship and export exclusions remain visible as text;
 color and motion are supplementary feedback. The sample server may publish a
