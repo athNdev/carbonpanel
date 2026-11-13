@@ -45,18 +45,6 @@ one at https://mozilla.org/MPL/2.0/.
 		onSuccess: () => void;
 	}
 
-	interface EnvVar {
-		key: string;
-		value: string;
-	}
-
-	interface VolumeMount {
-		hostPath: string;
-		containerPath: string;
-		readOnly: boolean;
-		createDir: boolean;
-	}
-
 	interface PortConfig {
 		name: string;
 		containerPort: number;
@@ -73,11 +61,15 @@ one at https://mozilla.org/MPL/2.0/.
 		condition: string;
 	}
 
-	interface MetadataEntry {
-		key: string;
-		value: string;
-	}
-
+	import {
+		envVarsToJson,
+		volumesToJson,
+		parseEnvVars,
+		metadataToMap,
+		type EnvVar,
+		type VolumeMount,
+		type MetadataEntry
+	} from '$lib/features/modules/form-codecs';
 	type ConfigSection = 'basic' | 'docker' | 'ports' | 'environment' | 'volumes' | 'advanced';
 
 	let { open = $bindable(), mode = 'create', template, onSuccess }: Props = $props();
@@ -122,30 +114,6 @@ one at https://mozilla.org/MPL/2.0/.
 	];
 
 	// Convert env vars array to JSON string for API
-	function envVarsToJson(): string {
-		const obj: Record<string, string> = {};
-		for (const env of envVars) {
-			if (env.key.trim()) {
-				obj[env.key.trim()] = env.value;
-			}
-		}
-		return JSON.stringify(obj);
-	}
-
-	// Convert volumes array to JSON string for API
-	function volumesToJson(): string {
-		return JSON.stringify(
-			volumes
-				.filter((v) => v.hostPath.trim() && v.containerPath.trim())
-				.map((v) => ({
-					source: v.hostPath.trim(),
-					target: v.containerPath.trim(),
-					read_only: v.readOnly,
-					create_dir: v.createDir
-				}))
-		);
-	}
-
 	function addEnvVar() {
 		envVars = [...envVars, { key: '', value: '' }];
 	}
@@ -196,16 +164,6 @@ one at https://mozilla.org/MPL/2.0/.
 
 	function removeMetadataEntry(index: number) {
 		metadata = metadata.filter((_, i) => i !== index);
-	}
-
-	function metadataToMap(): { [key: string]: string } {
-		const map: { [key: string]: string } = {};
-		for (const entry of metadata) {
-			if (entry.key.trim()) {
-				map[entry.key.trim()] = entry.value;
-			}
-		}
-		return map;
 	}
 
 	function getEventTypeLabel(event: TriggeredEventType): string {
@@ -271,12 +229,7 @@ one at https://mozilla.org/MPL/2.0/.
 		defaultInitCommandDelay = t.defaultInitCommandDelay;
 		defaultRestartAfterInit = t.defaultRestartAfterInit;
 
-		try {
-			const envObj = JSON.parse(t.defaultEnv || '{}');
-			envVars = Object.entries(envObj).map(([key, value]) => ({ key, value: String(value) }));
-		} catch {
-			envVars = [];
-		}
+		envVars = parseEnvVars(t.defaultEnv);
 
 		try {
 			volumes = JSON.parse(t.defaultVolumes || '[]');
@@ -339,8 +292,8 @@ one at https://mozilla.org/MPL/2.0/.
 				name: name.trim(),
 				description: description.trim(),
 				dockerImage: dockerImage.trim(),
-				defaultEnv: envVarsToJson(),
-				defaultVolumes: volumesToJson(),
+				defaultEnv: envVarsToJson(envVars),
+				defaultVolumes: volumesToJson(volumes),
 				healthCheckPath: healthCheckPath.trim(),
 				healthCheckPort,
 				requiresServer,
@@ -370,7 +323,7 @@ one at https://mozilla.org/MPL/2.0/.
 					delaySeconds: h.delaySeconds,
 					condition: h.condition
 				})),
-				metadata: metadataToMap(),
+				metadata: metadataToMap(metadata),
 				defaultUid,
 				defaultGid,
 				defaultInitCommand,
