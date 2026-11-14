@@ -36,6 +36,10 @@ tree (which captures the previous owner *before* the swap).
   operator override or a rootless daemon can all change who runs the game.
 - Adoption is best-effort and never fails the write: it is a portability
   detail, and a platform without uid/gid (Windows) is a no-op, not an error.
+- Accessor streaming transactions adopt the old file's owner before replacement,
+  or the server-root owner for a new file and newly created parent directories.
+  This runs through pinned handles inside the worker as well as locally, so
+  remote replacement does not depend on a controller-visible ownership path.
 - Do not "fix" a permission problem by making the root filesystem writable or
   by running the game container privileged. The ownership is the contract.
 - When the world directory already belongs to the game uid, create sets

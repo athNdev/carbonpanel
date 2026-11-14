@@ -22,13 +22,14 @@ import (
 type Session struct {
 	mu        sync.Mutex
 	enc       *json.Encoder
-	dec       *json.Decoder
+	dec       *bufio.Scanner
 	closed    atomic.Bool
 	closeOnce sync.Once
 	closeErr  error
 	closeF    func() error
 	done      chan struct{}
 	root      string
+	version   int
 }
 
 // NewSession starts a worker session. closeF is invoked on Close (typically
@@ -42,10 +43,11 @@ func NewSession(in io.Writer, out io.Reader, closeF func() error) (*Session, err
 func NewSessionContext(ctx context.Context, in io.Writer, out io.Reader, closeF func() error) (*Session, error) {
 	s := &Session{
 		enc:    json.NewEncoder(in),
-		dec:    json.NewDecoder(bufio.NewReader(out)),
+		dec:    bufio.NewScanner(out),
 		closeF: closeF,
 		done:   make(chan struct{}),
 	}
+	s.dec.Buffer(make([]byte, 64*1024), maxFrameBytes)
 	if ctx.Done() != nil {
 		go func() {
 			select {
@@ -70,6 +72,7 @@ func NewSessionContext(ctx context.Context, in io.Writer, out io.Reader, closeF 
 		return nil, errors.Join(err, s.Close())
 	}
 	s.root = res.Root
+	s.version = res.Version
 	return s, nil
 }
 
@@ -80,11 +83,17 @@ func (s *Session) call(req Request) (Response, error) {
 		return Response{}, errors.New("storageworker: session closed")
 	}
 	if err := s.enc.Encode(req); err != nil {
-		return Response{}, err
+		return Response{}, errors.Join(err, s.Close())
 	}
 	var res Response
-	if err := s.dec.Decode(&res); err != nil {
-		return Response{}, err
+	if !s.dec.Scan() {
+		if err := s.dec.Err(); err != nil {
+			return Response{}, errors.Join(err, s.Close())
+		}
+		return Response{}, errors.Join(io.EOF, s.Close())
+	}
+	if err := json.Unmarshal(s.dec.Bytes(), &res); err != nil {
+		return Response{}, errors.Join(err, s.Close())
 	}
 	return res, nil
 }
@@ -97,6 +106,9 @@ func (s *Session) callOK(req Request) (Response, error) {
 	if !res.OK {
 		if res.Error == "" {
 			res.Error = "worker refused operation"
+		}
+		if res.ErrorCode == "not_exist" {
+			return res, &os.PathError{Op: "remote storage", Path: res.Error, Err: os.ErrNotExist}
 		}
 		return res, errors.New(res.Error)
 	}
@@ -141,14 +153,27 @@ func (r *RemoteAccessor) Stat(rel string) (os.FileInfo, error) {
 }
 
 func (r *RemoteAccessor) ReadFile(rel string) ([]byte, error) {
+	fi, err := r.Stat(rel)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Size() > SmallFileBytes {
+		return nil, fmt.Errorf("storageworker: file exceeds small-file limit; use streaming")
+	}
 	res, err := r.s.callOK(Request{Op: "read", Path: rel})
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(res.Data)) > SmallFileBytes {
+		return nil, fmt.Errorf("storageworker: oversized small-file response")
 	}
 	return res.Data, nil
 }
 
 func (r *RemoteAccessor) WriteFile(rel string, data []byte) error {
+	if int64(len(data)) > SmallFileBytes {
+		return fmt.Errorf("storageworker: file exceeds small-file limit; use streaming")
+	}
 	_, err := r.s.callOK(Request{Op: "write", Path: rel, Data: data})
 	return err
 }
@@ -160,13 +185,21 @@ func (r *RemoteAccessor) ReadDir(rel string) ([]os.DirEntry, error) {
 	}
 	entries := make([]os.DirEntry, len(res.Entries))
 	for i, e := range res.Entries {
-		entries[i] = remoteDirEntry{name: e.Name, isDir: e.IsDir}
+		entries[i] = remoteDirEntry{name: e.Name, isDir: e.IsDir, mode: os.FileMode(e.Mode)}
 	}
 	return entries, nil
 }
 
 func (r *RemoteAccessor) MkdirAll(rel string) error {
 	_, err := r.s.callOK(Request{Op: "mkdir", Path: rel})
+	return err
+}
+
+func (r *RemoteAccessor) MkdirAllMode(rel string, mode os.FileMode) error {
+	if mode != 0700 && mode != 0755 {
+		return fmt.Errorf("storageworker: unsupported directory mode %o", mode)
+	}
+	_, err := r.s.callOK(Request{Op: "mkdir", Path: rel, Perms: uint32(mode)})
 	return err
 }
 
@@ -197,13 +230,14 @@ func (f remoteFileInfo) IsDir() bool        { return f.info.IsDir }
 func (f remoteFileInfo) Sys() any           { return nil }
 
 type remoteDirEntry struct {
+	mode  os.FileMode
 	name  string
 	isDir bool
 }
 
 func (e remoteDirEntry) Name() string      { return e.name }
 func (e remoteDirEntry) IsDir() bool       { return e.isDir }
-func (e remoteDirEntry) Type() os.FileMode { return 0 }
+func (e remoteDirEntry) Type() os.FileMode { return e.mode.Type() }
 func (e remoteDirEntry) Info() (os.FileInfo, error) {
 	return nil, fmt.Errorf("storageworker: Info not supported for %q", e.name)
 }

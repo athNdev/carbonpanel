@@ -32,6 +32,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/pkg/download"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -316,6 +317,9 @@ func (s *FileService) GetFile(ctx context.Context, req *connect.Request[v1.GetFi
 	}
 
 	// Read file content
+	if info.Size() > storageworker.SmallFileBytes {
+		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("file exceeds 8 MiB editor limit; download it instead"))
+	}
 	content, err := acc.ReadFile(msg.Path)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -389,20 +393,23 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 		return nil, storageError(err)
 	}
 
-	data, err := os.ReadFile(tempPath)
+	source, err := os.Open(tempPath)
 	if err != nil {
 		s.log.Error("Failed to read upload temp file: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to read uploaded file"))
 	}
+	defer func() { _ = source.Close() }()
 
 	destRel := filepath.Join(targetPath, targetFilename)
-	if err := acc.WriteFile(destRel, data); err != nil {
+	if _, err := nodestorage.WriteFrom(ctx, acc, destRel, source, storageworker.MaxStreamBytes); err != nil {
 		if nodestorage.IsSymlink(err) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 		s.log.Error("Failed to save file: %v", err)
 		return nil, storageError(err)
 	}
+	// Release the reader before session cleanup deletes its source on Windows.
+	_ = source.Close()
 	_ = os.Remove(tempPath)
 
 	destFilePath := filepath.Join(root, destRel)
@@ -420,6 +427,9 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 // UpdateFile updates a file's content
 func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.UpdateFileRequest]) (*connect.Response[v1.UpdateFileResponse], error) {
 	msg := req.Msg
+	if int64(len(msg.Content)) > storageworker.SmallFileBytes {
+		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("file exceeds 8 MiB editor limit; use file upload instead"))
+	}
 
 	// Get server
 	server, err := s.store.GetServer(ctx, msg.ServerId)
@@ -1126,15 +1136,9 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 			op.fail(fmt.Sprintf("failed to rewind downloaded archive: %v", err))
 			return
 		}
-		data, err := io.ReadAll(io.LimitReader(tmpFile, maxRemoteDownloadBytes+1))
-		if err != nil {
-			op.fail(fmt.Sprintf("failed to read downloaded archive: %v", err))
-			return
-		}
-
 		if msg.AutoExtract {
 			op.setStatus("extracting")
-			if _, err := nodestorage.ExtractZipBytes(context.Background(), acc, data, destRel, nil); err != nil {
+			if _, err := nodestorage.ExtractZipReader(context.Background(), acc, tmpFile, downloaded, destRel, nil); err != nil {
 				op.fail(fmt.Sprintf("failed to extract archive: %v", err))
 				return
 			}
@@ -1144,7 +1148,7 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 			if destRel != "." && destRel != "" {
 				targetRel = path.Join(destRel, fileName)
 			}
-			if err := acc.WriteFile(targetRel, data); err != nil {
+			if _, err := nodestorage.WriteFrom(context.Background(), acc, targetRel, tmpFile, maxRemoteDownloadBytes); err != nil {
 				op.fail(fmt.Sprintf("failed to save file to destination: %v", err))
 				return
 			}
@@ -1799,15 +1803,23 @@ func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path is a directory, use DownloadArchive instead"))
 	}
 
-	content, err := acc.ReadFile(msg.Path)
+	source, err := acc.OpenRead(ctx, msg.Path)
 	if err != nil {
 		s.log.Error("Failed to read file for download: %v", err)
 		return nil, storageError(err)
 	}
 
+	defer func() { _ = source.Close() }()
 	filename := filepath.Base(msg.Path)
-	tempPath := filepath.Join(s.downloadManager.TempDir(), fmt.Sprintf("file-%s-%s", time.Now().Format("20060102-150405.000"), filename))
-	if err := os.WriteFile(tempPath, content, 0o644); err != nil {
+	temp, err := os.CreateTemp(s.downloadManager.TempDir(), "file-*")
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stage download"))
+	}
+	tempPath := temp.Name()
+	n, copyErr := io.CopyBuffer(temp, source, make([]byte, storageworker.ChunkBytes))
+	copyErr = errors.Join(copyErr, temp.Close())
+	if copyErr != nil {
+		_ = os.Remove(tempPath)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stage download"))
 	}
 
@@ -1816,12 +1828,12 @@ func (s *FileService) InitFileDownload(ctx context.Context, req *connect.Request
 	if user != nil {
 		creatorID = user.ID
 	}
-	session := s.downloadManager.InitSessionFor(tempPath, filename, info.Size(), true, msg.ServerId, creatorID)
+	session := s.downloadManager.InitSessionFor(tempPath, filename, n, true, msg.ServerId, creatorID)
 
 	return connect.NewResponse(&v1.InitFileDownloadResponse{
 		SessionId: session.ID,
 		Filename:  filename,
-		TotalSize: info.Size(),
+		TotalSize: n,
 	}), nil
 }
 
@@ -1870,11 +1882,13 @@ func copyViaAccessor(acc nodestorage.Accessor, src, dst string, isDir bool) erro
 		}
 		return nil
 	}
-	data, err := acc.ReadFile(src)
+	source, err := acc.OpenRead(context.Background(), src)
 	if err != nil {
 		return err
 	}
-	return acc.WriteFile(dst, data)
+	defer func() { _ = source.Close() }()
+	_, err = nodestorage.WriteFrom(context.Background(), acc, dst, source, storageworker.MaxStreamBytes)
+	return err
 }
 
 func joinRelDir(rel, name string) string {
@@ -1898,27 +1912,22 @@ func (s *FileService) fileInfoFromAccessor(acc nodestorage.Accessor, rel string,
 		IsDir:      isDir,
 		Size:       info.Size(),
 		Modified:   info.ModTime().Unix(),
-		IsEditable: !isDir && !isSymlink && isTextFromAccessor(acc, rel),
+		IsEditable: !isDir && !isSymlink && info.Size() <= storageworker.SmallFileBytes && isEditableFilename(rel),
 	}
 }
 
-func isTextFromAccessor(acc nodestorage.Accessor, rel string) bool {
-	data, err := acc.ReadFile(rel)
-	if err != nil {
-		return false
-	}
-	if len(data) == 0 {
+func isEditableFilename(rel string) bool {
+	// Listing must remain metadata-only. This is an editor affordance based on
+	// the filename; GetFile detects the actual response MIME type when opened.
+	switch strings.ToLower(filepath.Ext(rel)) {
+	case ".txt", ".log", ".properties", ".json", ".json5", ".yaml", ".yml", ".toml", ".conf", ".cfg", ".ini", ".md", ".csv", ".xml", ".sh", ".bat", ".ps1", ".mcmeta", ".snbt", ".js", ".ts", ".css", ".html", ".lua", ".sk", ".skript", ".rules", ".hocon", ".jvmargs":
 		return true
 	}
-	if len(data) > 512 {
-		data = data[:512]
+	switch strings.ToLower(filepath.Base(rel)) {
+	case "dockerfile", "license", ".gitignore", ".env":
+		return true
 	}
-	for _, b := range data {
-		if b == 0 {
-			return false
-		}
-	}
-	return true
+	return false
 }
 
 func (s *FileService) listDirectoryAcc(acc nodestorage.Accessor, rel string) ([]*v1.FileInfo, error) {

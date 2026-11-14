@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
@@ -22,9 +23,10 @@ import (
 )
 
 const (
-	storageWorkerMount     = "/carbon-storage-root"
-	storageWorkerBin       = "/usr/local/bin/carbon-storage"
-	storageWorkerNameLabel = "com.carbonpanel.storage-worker"
+	storageWorkerMount         = "/carbon-storage-root"
+	storageWorkerBin           = "/usr/local/bin/carbon-storage"
+	storageWorkerNameLabel     = "com.carbonpanel.storage-worker"
+	storageWorkerShutdownGrace = time.Second
 )
 
 // StorageTransport runs the carbon-storage accessor worker on remote daemons
@@ -76,6 +78,7 @@ func (c *Client) startStorageWorker(ctx context.Context, image, hostDataRoot str
 			"--root", storageWorkerMount,
 		},
 		OpenStdin:    true,
+		StdinOnce:    true,
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
@@ -122,11 +125,31 @@ func (c *Client) startStorageWorker(ctx context.Context, image, hostDataRoot str
 			}
 			attach.Close()
 			_ = stdoutR.Close()
-			closeErr = c.removeStorageWorker(resp.ID)
+			// StdinOnce makes attach disconnect deliver EOF. Let the worker
+			// abort its owned transactions before force-removal can kill it.
+			closeErr = errors.Join(c.waitStorageWorkerExit(resp.ID), c.removeStorageWorker(resp.ID))
 		})
 		return closeErr
 	}
 	return storageworker.NewSessionContext(ctx, attach.Conn, stdoutR, closeF)
+}
+
+func (c *Client) waitStorageWorkerExit(id string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), storageWorkerShutdownGrace)
+	defer cancel()
+	wait := c.docker.ContainerWait(ctx, id, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	select {
+	case result := <-wait.Result:
+		if result.Error != nil {
+			return fmt.Errorf("storage worker %q exit wait failed: %s", id, result.Error.Message)
+		}
+		return nil
+	case err := <-wait.Error:
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("wait for storage worker %q shutdown; forced removal may leave recovery staging: %w", id, err)
+	}
 }
 
 // Cleanup must outlive a canceled operation, but must not wait indefinitely.

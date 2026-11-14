@@ -7,13 +7,14 @@ package nodestorage
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 )
 
 // CreateZip walks source paths through acc and writes a zip to destRel through
@@ -31,17 +32,16 @@ func CreateZip(ctx context.Context, acc Accessor, paths []string, destRel string
 		return 0, fmt.Errorf("%w: empty archive destination", ErrEscape)
 	}
 
-	var buf bytes.Buffer
-	n, err := writeZip(ctx, acc, paths, &buf, compress, destRel)
+	w, err := acc.BeginWrite(ctx, destRel, storageworker.MaxStreamBytes)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = w.Close() }()
+	n, err := writeZip(ctx, acc, paths, w, compress, destRel)
 	if err != nil {
 		return n, err
 	}
-	if parent := path.Dir(destRel); parent != "." && parent != "" {
-		if err := acc.MkdirAll(parent); err != nil {
-			return n, err
-		}
-	}
-	if err := acc.WriteFile(destRel, buf.Bytes()); err != nil {
+	if err := w.Commit(); err != nil {
 		return n, err
 	}
 	return n, nil
@@ -93,6 +93,9 @@ func writeZip(ctx context.Context, acc Accessor, paths []string, w io.Writer, co
 }
 
 func addZipPath(ctx context.Context, acc Accessor, zw *zip.Writer, rel string, method uint16, skipRel string) (int, error) {
+	if IsWriteStaging(rel) {
+		return 0, nil
+	}
 	if skipRel != "" && rel == skipRel {
 		return 0, nil
 	}
@@ -130,10 +133,11 @@ func addZipPath(ctx context.Context, acc Accessor, zw *zip.Writer, rel string, m
 	if !info.Mode().IsRegular() {
 		return 0, nil
 	}
-	data, err := acc.ReadFile(rel)
+	src, err := acc.OpenRead(ctx, rel)
 	if err != nil {
 		return 0, err
 	}
+	defer func() { _ = src.Close() }()
 	header, err := zip.FileInfoHeader(info)
 	if err != nil {
 		return 0, err
@@ -144,7 +148,7 @@ func addZipPath(ctx context.Context, acc Accessor, zw *zip.Writer, rel string, m
 	if err != nil {
 		return 0, err
 	}
-	if _, err := w.Write(data); err != nil {
+	if _, err := io.CopyBuffer(w, src, make([]byte, storageworker.ChunkBytes)); err != nil {
 		return 0, err
 	}
 	return 1, nil
