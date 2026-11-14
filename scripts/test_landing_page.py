@@ -98,12 +98,15 @@ class LandingPageTests(unittest.TestCase):
     def test_indexnow_is_limited_to_homepage_changes_and_has_cooldown(self):
         root = Path(__file__).resolve().parent.parent
         workflow = (root / ".github/workflows/landing.yml").read_text(encoding="utf-8")
-        self.assertIn("landing/index.html landing/llms.txt", workflow)
-        self.assertIn("if: needs.homepage-change.outputs.changed == 'true'", workflow)
+        self.assertIn("landing/index.html)", workflow)
+        self.assertIn("landing/llms.txt)", workflow)
+        self.assertIn("docs/carbon-panel/src/content/docs/*.md", workflow)
+        self.assertIn("docs/design-system/*)", workflow)
+        self.assertIn("if: needs.indexable-changes.outputs.urls != '[]'", workflow)
         self.assertIn("actions/cache/restore@", workflow)
         self.assertIn("actions/cache/save@", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
-        self.assertNotIn("https://carbonpanel.dev/docs/", workflow.split("urlList:", 1)[1])
+        self.assertIn('--argjson urlList "$INDEXNOW_URLS"', workflow)
 
     def test_homepage_presents_focused_interactive_fragments(self):
         root = Path(__file__).resolve().parent.parent
