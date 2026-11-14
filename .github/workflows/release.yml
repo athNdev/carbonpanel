@@ -259,6 +259,12 @@ jobs:
           build-args: APP_VERSION=${{ needs.plan.outputs.version }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
+      - name: Update Docker Hub repository description
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+        run: python3 scripts/update-dockerhub-description.py
       - name: Confirm both architectures are available in both registries
         if: needs.plan.outputs.publish == 'true'
         env:
