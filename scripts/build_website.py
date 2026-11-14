@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 """Build one website with docs and examples from an explicit application commit."""
 import argparse
+from datetime import datetime, timezone
 import io
 import json
 import os
@@ -73,6 +74,27 @@ def publish_design_system(root, output):
     (destination / "index.html").write_text(page, encoding="utf-8")
 
 
+def build_sitemap(output, base, site, lastmod=None):
+    """Write a sitemap for every navigable HTML page in the published site."""
+    if lastmod is None:
+        lastmod = datetime.now(timezone.utc).date().isoformat()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", lastmod):
+        raise ValueError("The sitemap lastmod must be an ISO 8601 date.")
+
+    namespace = "http://www.sitemaps.org/schemas/sitemap/0.9"
+    ET.register_namespace("", namespace)
+    sitemap = ET.Element(f"{{{namespace}}}urlset")
+    for page in sorted(output.rglob("*.html")):
+        if page.name == "404.html":
+            continue
+        route = page.relative_to(output).as_posix().removesuffix("index.html")
+        url = ET.SubElement(sitemap, f"{{{namespace}}}url")
+        ET.SubElement(url, f"{{{namespace}}}loc").text = site.rstrip("/") + base + route
+        ET.SubElement(url, f"{{{namespace}}}lastmod").text = lastmod
+    ET.ElementTree(sitemap).write(
+        output / "sitemap.xml", encoding="utf-8", xml_declaration=True)
+
+
 def build(root, base, site):
     if not base.startswith("/") or not base.endswith("/") or ".." in base:
         raise ValueError("The website base must be an absolute path ending in /.")
@@ -127,16 +149,7 @@ def build(root, base, site):
         shutil.copytree(homepage, output)
         shutil.copytree(project / "dist", output / "docs")
         publish_design_system(root, output)
-    namespace = "http://www.sitemaps.org/schemas/sitemap/0.9"
-    ET.register_namespace("", namespace)
-    sitemap = ET.Element(f"{{{namespace}}}urlset")
-    for page in sorted(output.rglob("*.html")):
-        if page.name == "404.html":
-            continue
-        route = page.relative_to(output).as_posix().removesuffix("index.html")
-        url = ET.SubElement(sitemap, f"{{{namespace}}}url")
-        ET.SubElement(url, f"{{{namespace}}}loc").text = site.rstrip("/") + base + route
-    ET.ElementTree(sitemap).write(output / "sitemap.xml", encoding="utf-8", xml_declaration=True)
+    build_sitemap(output, base, site)
     print(f"Website built at {output}; docs pinned to {pin['revision']}", flush=True)
     return output
 

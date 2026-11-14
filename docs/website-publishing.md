@@ -47,6 +47,10 @@ Its website header, breadcrumb, local fonts and return links connect it to the
 homepage and docs. The builder rebases checkout-relative asset and navigation
 links for publication, including installations under a subpath. The homepage
 introduces it in the design section; docs also link to it in the sidebar.
+The builder writes `sitemap.xml` at the artifact root on every deployment,
+including every published HTML route except the synthetic 404 page and a
+deployment-date `lastmod` value. `check_website.py` rejects missing, malformed
+or incomplete sitemap output.
 
 For a local preview rooted at the server's root:
 
