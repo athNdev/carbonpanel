@@ -70,10 +70,10 @@ modules: gen
 	@for dockerfile in docker/Dockerfile.*; do \
 		name=$$(basename $$dockerfile | sed 's/Dockerfile\.//'); \
 		if [ "$$name" != "carbon-panel" ]; then \
-			echo "Building athndev/carbon-panel-$$name:latest..."; \
-			docker build -t "athndev/carbon-panel-$$name:latest" -f "$$dockerfile" . && \
-			echo "Pushing athndev/carbon-panel-$$name:latest..." && \
-			docker push "athndev/carbon-panel-$$name:latest"; \
+			echo "Building atharvnaphade/carbonpanel-$$name:latest..."; \
+			docker build -t "atharvnaphade/carbonpanel-$$name:latest" -f "$$dockerfile" . && \
+			echo "Pushing atharvnaphade/carbonpanel-$$name:latest..." && \
+			docker push "atharvnaphade/carbonpanel-$$name:latest"; \
 		fi \
 	done
 	@echo "Module builds complete!"
@@ -86,10 +86,10 @@ module-%: gen
 		ls docker/Dockerfile.* 2>/dev/null | sed 's/docker\/Dockerfile\./  /g' | grep -v carbon-panel; \
 		exit 1; \
 	fi
-	@echo "Building athndev/carbon-panel-$*:latest..."
-	@docker build -t "athndev/carbon-panel-$*:latest" -f "docker/Dockerfile.$*" .
-	@echo "Pushing athndev/carbon-panel-$*:latest..."
-	@docker push "athndev/carbon-panel-$*:latest"
+	@echo "Building atharvnaphade/carbonpanel-$*:latest..."
+	@docker build -t "atharvnaphade/carbonpanel-$*:latest" -f "docker/Dockerfile.$*" .
+	@echo "Pushing atharvnaphade/carbonpanel-$*:latest..."
+	@docker push "atharvnaphade/carbonpanel-$*:latest"
 	@echo "Module $* build complete!"
 
 # Remove generated build outputs only. This is not a data-reset: server worlds,

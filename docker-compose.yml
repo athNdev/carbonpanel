@@ -9,7 +9,7 @@
 
 services:
   carbon-panel:
-    image: carbon-panel:latest
+    image: atharvnaphade/carbonpanel:latest
     container_name: carbon-panel
     restart: unless-stopped
 

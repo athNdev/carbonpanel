@@ -113,20 +113,20 @@ jobs:
             # Fail fast if this account cannot push. A login can succeed
             # while the push is later denied (insufficient_scope), which
             # otherwise only shows up after the full multi-arch build.
-            echo "Checking push permission on atharvnaphade/carbon-panel..."
+            echo "Checking push permission on atharvnaphade/carbonpanel..."
             TOKEN=$(curl -s -u "$USER_CLEAN:$PASS_CLEAN" \
-              "https://auth.docker.io/token?service=registry.docker.io&scope=repository:atharvnaphade/carbon-panel:push,pull" \
+              "https://auth.docker.io/token?service=registry.docker.io&scope=repository:atharvnaphade/carbonpanel:push,pull" \
               | jq -r '.token // empty')
             PAYLOAD=$(printf '%s' "$TOKEN" | cut -d. -f2 | tr '_-' '/+')
             while [ $(( ${#PAYLOAD} % 4 )) -ne 0 ]; do PAYLOAD="$PAYLOAD="; done
             ACTIONS=$(printf '%s' "$PAYLOAD" | base64 -d 2>/dev/null \
-              | jq -r '[.access[]? | select(.name == "atharvnaphade/carbon-panel") | .actions[]] | join(",")' 2>/dev/null || true)
-            echo "Granted actions on atharvnaphade/carbon-panel: ${ACTIONS:-none}"
+              | jq -r '[.access[]? | select(.name == "atharvnaphade/carbonpanel") | .actions[]] | join(",")' 2>/dev/null || true)
+            echo "Granted actions on atharvnaphade/carbonpanel: ${ACTIONS:-none}"
             case ",$ACTIONS," in
               *,push,*) echo "Push permission confirmed." ;;
               *)
                 echo "has_creds=false" >> "$GITHUB_OUTPUT"
-                echo "::error::Docker Hub login works but this account has no push access to atharvnaphade/carbon-panel. Use an account with write access to that repository and a PAT with Read & Write scope."
+                echo "::error::Docker Hub login works but this account has no push access to atharvnaphade/carbonpanel. Use an account with write access to that repository and a PAT with Read & Write scope."
                 exit 1
                 ;;
             esac
@@ -143,7 +143,7 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: |
-            atharvnaphade/carbon-panel
+            atharvnaphade/carbonpanel
           tags: |
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
@@ -151,6 +151,9 @@ jobs:
           labels: |
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.description=A modern Minecraft server and modpack management panel
+            org.opencontainers.image.url=https://carbonpanel.dev/
+            org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
+            org.opencontainers.image.licenses=MPL-2.0
             org.opencontainers.image.source=https://github.com/athNdev/carbonpanel
             org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
           flavor: |

@@ -23,7 +23,7 @@ set -e
 
 TAG="${1:-latest}"
 REGISTRY="${DOCKER_HUB_USERNAME:-${DOCKERHUB_USERNAME:-atharvnaphade}}"
-IMAGE="${REGISTRY}/carbon-panel:${TAG}"
+IMAGE="${REGISTRY}/carbonpanel:${TAG}"
 PLATFORMS="${PLATFORMS:-linux/amd64,linux/arm64}"
 
 PUSH=false

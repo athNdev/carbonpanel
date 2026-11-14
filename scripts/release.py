@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-IMAGE = "atharvnaphade/carbon-panel"
+IMAGE = "atharvnaphade/carbonpanel"
 TARGETS = (("linux", "amd64"), ("linux", "arm64"), ("darwin", "amd64"),
            ("darwin", "arm64"), ("windows", "amd64"))
 SEMVER = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")

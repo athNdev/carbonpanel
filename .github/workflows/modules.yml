@@ -76,10 +76,10 @@ jobs:
           for dockerfile in docker/Dockerfile.*; do
             name=$(basename "$dockerfile" | sed 's/Dockerfile\.//')
             if [ "$name" != "carbon-panel" ]; then
-              echo "Building athndev/carbon-panel-$name (linux/amd64,linux/arm64)..."
-              TAGS="--tag athndev/carbon-panel-$name:latest"
+              echo "Building atharvnaphade/carbonpanel-$name (linux/amd64,linux/arm64)..."
+              TAGS="--tag atharvnaphade/carbonpanel-$name:latest"
               if [ -n "$VERSION" ]; then
-                TAGS="$TAGS --tag athndev/carbon-panel-$name:$VERSION"
+                TAGS="$TAGS --tag atharvnaphade/carbonpanel-$name:$VERSION"
               fi
 
               docker buildx build \
@@ -89,7 +89,7 @@ jobs:
                 --push \
                 .
 
-              echo "Pushed athndev/carbon-panel-$name"
+              echo "Pushed atharvnaphade/carbonpanel-$name"
             fi
           done
 

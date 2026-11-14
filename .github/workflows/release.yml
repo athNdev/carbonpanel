@@ -231,7 +231,7 @@ jobs:
         id: meta
         with:
           images: |
-            atharvnaphade/carbon-panel
+            atharvnaphade/carbonpanel
             ghcr.io/${{ github.repository }}
           flavor: latest=false
           tags: |
@@ -252,6 +252,9 @@ jobs:
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.version=${{ needs.plan.outputs.version }}
             org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
+            org.opencontainers.image.url=https://carbonpanel.dev/
+            org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
+            org.opencontainers.image.licenses=MPL-2.0
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           build-args: APP_VERSION=${{ needs.plan.outputs.version }}
           cache-from: type=gha,scope=release-image
@@ -262,7 +265,7 @@ jobs:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           GITHUB_IMAGE: ghcr.io/${{ github.repository }}
         run: |
-          docker buildx imagetools inspect "atharvnaphade/carbon-panel@$IMAGE_DIGEST" --raw > dist/image-manifest.json
+          docker buildx imagetools inspect "atharvnaphade/carbonpanel@$IMAGE_DIGEST" --raw > dist/image-manifest.json
           python3 scripts/release.py verify-image --manifest dist/image-manifest.json
           docker buildx imagetools inspect "${GITHUB_IMAGE,,}@$IMAGE_DIGEST" --raw > dist/github-image-manifest.json
           python3 scripts/release.py verify-image --manifest dist/github-image-manifest.json
