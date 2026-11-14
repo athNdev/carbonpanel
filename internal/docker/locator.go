@@ -63,16 +63,22 @@ func NewExecutorLocator(pool *ClientPool, local Executor, store NodeStore) *Loca
 // For resolves the Docker client for nodeID. A specified remote node never
 // falls back to the local daemon: the caller gets ErrUnknownNode instead.
 func (l *Locator) For(ctx context.Context, nodeID string) (*Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if l == nil {
 		return nil, ErrNoClient
 	}
 	if l.pool != nil {
-		cli, err := l.pool.GetClientStrict(nodeID)
+		cli, err := l.pool.GetClientStrictContext(ctx, nodeID)
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return nil, cancelErr
+		}
 		if err == nil && cli != nil {
 			return cli, nil
 		}
 		if err != nil && !l.isLocal(ctx, nodeID) {
-			return nil, fmt.Errorf("%w: node %q: %v", ErrUnknownNode, nodeID, err)
+			return nil, fmt.Errorf("%w: node %q: %w", ErrUnknownNode, nodeID, err)
 		}
 	}
 	if l.isLocal(ctx, nodeID) {
@@ -81,21 +87,30 @@ func (l *Locator) For(ctx context.Context, nodeID string) (*Client, error) {
 		}
 		return nil, fmt.Errorf("%w: node %q", ErrNoClient, nodeID)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return nil, fmt.Errorf("%w: node %q", ErrUnknownNode, nodeID)
 }
 
 // ExecutorFor is For cast to the command-execution interface.
 func (l *Locator) ExecutorFor(ctx context.Context, nodeID string) (Executor, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if l == nil {
 		return nil, ErrNoClient
 	}
 	if l.pool != nil {
-		cli, err := l.pool.GetClientStrict(nodeID)
+		cli, err := l.pool.GetClientStrictContext(ctx, nodeID)
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return nil, cancelErr
+		}
 		if err == nil && cli != nil {
 			return cli, nil
 		}
 		if err != nil && !l.isLocal(ctx, nodeID) {
-			return nil, fmt.Errorf("%w: node %q: %v", ErrUnknownNode, nodeID, err)
+			return nil, fmt.Errorf("%w: node %q: %w", ErrUnknownNode, nodeID, err)
 		}
 	}
 	if l.isLocal(ctx, nodeID) {
@@ -107,11 +122,17 @@ func (l *Locator) ExecutorFor(ctx context.Context, nodeID string) (Executor, err
 		}
 		return nil, fmt.Errorf("%w: node %q", ErrNoClient, nodeID)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return nil, fmt.Errorf("%w: node %q", ErrUnknownNode, nodeID)
 }
 
 // IsLocal reports whether nodeID addresses the controller's local daemon.
 func (l *Locator) IsLocal(ctx context.Context, nodeID string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if l == nil {
 		return false, ErrNoClient
 	}
@@ -148,8 +169,11 @@ func (l *Locator) node(ctx context.Context, nodeID string) (*models.Node, error)
 		return nil, fmt.Errorf("%w: node %q", ErrUnknownNode, nodeID)
 	}
 	node, err := l.store.GetNode(ctx, nodeID)
-	if err != nil || node == nil {
-		return nil, fmt.Errorf("%w: node %q: %v", ErrUnknownNode, nodeID, err)
+	if err != nil {
+		return nil, fmt.Errorf("%w: node %q: %w", ErrUnknownNode, nodeID, err)
+	}
+	if node == nil {
+		return nil, fmt.Errorf("%w: node %q", ErrUnknownNode, nodeID)
 	}
 	return node, nil
 }
