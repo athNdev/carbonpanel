@@ -65,7 +65,7 @@ resume from the original verified download artifact without rebuilding images.
   and applicable image builds before release; version tags are not digests.
 - Do not publish an image that was built from a dirty or unverified tree.
 - The controller image is published to Docker Hub as
-  `atharvnaphade/carbon-panel`. CD's permission probe, image tags, tagged release
+  `atharvnaphade/carbonpanel`. CD's permission probe, image tags, tagged release
   metadata and the local publishing script must agree on that destination.
   The GitHub owner name is not a Docker Hub namespace mapping.
 - The release workflow alone publishes versioned images. Stable releases own

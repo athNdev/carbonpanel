@@ -19,7 +19,8 @@ one at https://mozilla.org/MPL/2.0/.
     <a href="#quick-start"><strong>Get started ↗</strong></a> &nbsp; · &nbsp;
     <a href="https://carbonpanel.dev/">Explore the website</a> &nbsp; · &nbsp;
     <a href="https://carbonpanel.dev/docs/">Documentation</a> &nbsp; · &nbsp;
-    <a href="https://github.com/athNdev/carbonpanel/releases">Releases</a>
+    <a href="https://github.com/athNdev/carbonpanel/releases">Releases</a> &nbsp; · &nbsp;
+    <a href="https://hub.docker.com/r/atharvnaphade/carbonpanel">Docker image</a>
   </p>
 
   <p>
@@ -136,7 +137,7 @@ Prefer a prebuilt download? [GitHub Releases](https://github.com/athNdev/carbonp
 provides versioned archives for Linux, macOS and Windows.
 See [release downloads and checksum verification](docs/releases.md).
 
-### 1. Download the repository and build the image
+### 1. Download the repository and build or pull the image
 
 Requires Docker with Linux containers and Docker Compose.
 
@@ -144,6 +145,13 @@ Requires Docker with Linux containers and Docker Compose.
 git clone https://github.com/athNdev/carbonpanel.git
 cd carbonpanel
 docker build -f docker/Dockerfile.carbon-panel -t carbon-panel:latest .
+```
+
+Or pull the published multi-architecture image from
+[Docker Hub](https://hub.docker.com/r/atharvnaphade/carbonpanel):
+
+```bash
+docker pull atharvnaphade/carbonpanel:latest
 ```
 
 ### 2. Choose your persistent storage paths
