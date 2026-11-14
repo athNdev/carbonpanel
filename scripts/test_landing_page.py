@@ -85,6 +85,16 @@ class LandingPageTests(unittest.TestCase):
         self.assertTrue(image.query, "A replaced preview needs a cache version")
         self.assertTrue((root / "landing" / image.path.removeprefix("/")).is_file())
 
+    def test_homepage_describes_oidc_and_publishes_ai_overview(self):
+        root = Path(__file__).resolve().parent.parent
+        page = (root / "landing/index.html").read_text(encoding="utf-8")
+        self.assertIn("OIDC single sign-on", page)
+        self.assertIn("./docs/guides/oidc/keycloak/", page)
+        self.assertIn('title="AI-readable overview"', page)
+        overview = (root / "landing/llms.txt").read_text(encoding="utf-8")
+        self.assertIn("OIDC single sign-on", overview)
+        self.assertTrue((root / "landing/carbonpanel-indexnow-7f4c9e2b.txt").is_file())
+
     def test_homepage_presents_focused_interactive_fragments(self):
         root = Path(__file__).resolve().parent.parent
         page = (root / "landing/index.html").read_text(encoding="utf-8")
