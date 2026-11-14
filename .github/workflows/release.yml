@@ -84,6 +84,7 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           version: '1.50.0'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       # Go and TypeScript RPC code is checked in and tested by main CI. Generate
       # the download schema separately; do not replace tracked, licensed sources.
       - name: Generate the release OpenAPI schema
