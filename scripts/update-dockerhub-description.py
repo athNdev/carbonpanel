@@ -31,12 +31,12 @@ def main():
 
     readme = Path("README.md").read_text(encoding="utf-8")
     auth = request_json(
-        "https://hub.docker.com/v2/users/login/",
+        "https://hub.docker.com/v2/auth/token",
         method="POST",
-        payload={"username": USERNAME, "password": PASSWORD},
+        payload={"identifier": USERNAME, "secret": PASSWORD},
         headers={"Content-Type": "application/json"},
     )
-    token = auth.get("token")
+    token = auth.get("access_token")
     if not token:
         raise RuntimeError("Docker Hub authentication response did not contain a token")
 
@@ -48,7 +48,7 @@ def main():
             "full_description": readme,
         },
         headers={
-            "Authorization": f"JWT {token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
     )
