@@ -82,13 +82,63 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
+  homepage-change:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.detect.outputs.changed }}
+    steps:
+      - name: Checkout history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Detect indexable homepage changes
+        id: detect
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "push" ] ||
+             [ -z "$BEFORE_SHA" ] ||
+             [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$BEFORE_SHA" "$GITHUB_SHA" -- \
+            landing/index.html landing/llms.txt; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   notify-indexnow:
-    needs: deploy
+    needs: [deploy, homepage-change]
+    if: needs.homepage-change.outputs.changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    concurrency:
+      group: indexnow-carbonpanel
+      cancel-in-progress: false
     steps:
+      - name: Restore IndexNow cooldown
+        id: cooldown
+        uses: actions/cache/restore@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .indexnow-cooldown
+          key: indexnow-${{ github.repository }}-${{ github.run_id }}
+          restore-keys: |
+            indexnow-${{ github.repository }}-
+      - name: Check IndexNow cooldown
+        id: cooldown-check
+        run: |
+          if [ -f .indexnow-cooldown/last-notified ]; then
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            echo "IndexNow was notified recently; skipping this notification."
+          else
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Notify IndexNow
+        if: steps.cooldown-check.outputs.allowed == 'true'
         env:
           INDEXNOW_KEY: carbonpanel-indexnow-7f4c9e2b
         run: |
@@ -101,7 +151,14 @@ jobs:
               --arg keyLocation "https://carbonpanel.dev/$INDEXNOW_KEY.txt" \
               --argjson urlList '[
                 "https://carbonpanel.dev/",
-                "https://carbonpanel.dev/docs/",
                 "https://carbonpanel.dev/llms.txt"
               ]' \
               '{host: $host, key: $key, keyLocation: $keyLocation, urlList: $urlList}')"
+          mkdir -p .indexnow-cooldown
+          date -u +%FT%TZ > .indexnow-cooldown/last-notified
+      - name: Save IndexNow cooldown
+        if: steps.cooldown-check.outputs.allowed == 'true'
+        uses: actions/cache/save@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .indexnow-cooldown
+          key: indexnow-${{ github.repository }}-${{ github.run_id }}
