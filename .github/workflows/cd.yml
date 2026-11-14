@@ -173,9 +173,12 @@ jobs:
           build-args: |
             APP_VERSION=edge
             APP_COMMIT=${{ github.event.workflow_run.head_sha || github.sha }}
-      - name: Update Docker Hub repository description
+      - name: Sync Docker Hub repository description
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
         if: steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push)
-        env:
-          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-        run: python3 scripts/update-dockerhub-description.py
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+          repository: atharvnaphade/carbonpanel
+          short-description: Self-hosted Minecraft server and modpack management with Docker.
+          enable-url-completion: true

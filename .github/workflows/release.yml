@@ -260,12 +260,15 @@ jobs:
           build-args: APP_VERSION=${{ needs.plan.outputs.version }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
-      - name: Update Docker Hub repository description
+      - name: Sync Docker Hub repository description
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
         if: needs.plan.outputs.publish == 'true'
-        env:
-          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-        run: python3 scripts/update-dockerhub-description.py
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+          repository: atharvnaphade/carbonpanel
+          short-description: Self-hosted Minecraft server and modpack management with Docker.
+          enable-url-completion: true
       - name: Confirm both architectures are available in both registries
         if: needs.plan.outputs.publish == 'true'
         env:
