@@ -56,7 +56,7 @@
 	},
 	"dependencies": {
 		"@bufbuild/protobuf": "^2.10.0",
-		"@connectrpc/connect": "2.2.0",
+		"@connectrpc/connect": "2.3.0",
 		"@connectrpc/connect-web": "^2.1.0",
 		"marked": "^18.1.1",
 		"monaco-editor": "^0.52.2"
