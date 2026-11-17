@@ -361,22 +361,23 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 		out = append(out, summary)
 	}
 
-	sort.SliceStable(out, func(i, j int) bool {
-		less := false
+	ascending := func(a, b *v1.PlayerSummary) bool {
 		switch msg.SortBy {
 		case "last_seen":
-			less = stampBefore(out[i].LastSeen, out[j].LastSeen)
+			return stampBefore(a.LastSeen, b.LastSeen)
 		case "server":
-			less = out[i].ServerName < out[j].ServerName
+			return a.ServerName < b.ServerName
 		case "presence":
-			less = out[i].Presence < out[j].Presence
+			return a.Presence < b.Presence
 		default:
-			less = strings.ToLower(out[i].Ref.Name) < strings.ToLower(out[j].Ref.Name)
+			return strings.ToLower(a.Ref.Name) < strings.ToLower(b.Ref.Name)
 		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
 		if msg.SortDescending {
-			return !less && out[i].Ref.IdentityKey != out[j].Ref.IdentityKey
+			return ascending(out[j], out[i])
 		}
-		return less
+		return ascending(out[i], out[j])
 	})
 	if len(out) > limit {
 		out = out[:limit]
@@ -784,7 +785,7 @@ func (s *PlayerService) actionContext(ctx context.Context, serverID, identityKey
 
 // runAction persists intent, performs one external mutation and finalizes the
 // journal. An uncertain outcome keeps the journal executing: no blind retry.
-func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey, name, action, event, reason, requestID string, undoable bool, mutate func(playerSource) (string, error)) (*v1.PlayerActionOutcome, error) {
+func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey, name, action, event, reason, requestID string, undoable bool, mutate func(playerSource, string) (string, error)) (*v1.PlayerActionOutcome, error) {
 	if err := operation.ValidateRequestID(requestID); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
@@ -806,14 +807,18 @@ func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey
 	if !claimed && row.Phase == storage.PlayerActionComplete {
 		return &v1.PlayerActionOutcome{RequestId: requestID, JournalId: row.ID, Results: []*v1.PlayerActionResult{{IdentityKey: identityKey, Success: true, Message: "already completed"}}}, nil
 	}
-	_, _, source, sourceName, err := s.actionContext(ctx, serverID, identityKey, name)
+	_, identity, source, sourceName, err := s.actionContext(ctx, serverID, identityKey, name)
 	if err != nil {
 		return nil, err
+	}
+	targetName := name
+	if targetName == "" {
+		targetName = identity.CurrentName
 	}
 	if err := s.store.AdvancePlayerAction(ctx, row.ID, storage.PlayerActionPrepared, storage.PlayerActionExecuting, ""); err != nil {
 		return nil, connect.NewError(connect.CodeAborted, err)
 	}
-	prior, mutateErr := mutate(source)
+	prior, mutateErr := mutate(source, targetName)
 	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if mutateErr != nil {
@@ -842,8 +847,8 @@ func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey
 func (s *PlayerService) KickPlayer(ctx context.Context, req *connect.Request[v1.KickPlayerRequest]) (*connect.Response[v1.KickPlayerResponse], error) {
 	msg := req.Msg
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, "kick", activity.EventPlayerKick, msg.Reason, msg.RequestId, false,
-		func(source playerSource) (string, error) {
-			return "{}", source.Kick(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Reason)
+		func(source playerSource, target string) (string, error) {
+			return "{}", source.Kick(ctx, target, msg.Reason)
 		})
 	if err != nil {
 		return nil, err
@@ -854,8 +859,8 @@ func (s *PlayerService) KickPlayer(ctx context.Context, req *connect.Request[v1.
 func (s *PlayerService) BanPlayer(ctx context.Context, req *connect.Request[v1.BanPlayerRequest]) (*connect.Response[v1.BanPlayerResponse], error) {
 	msg := req.Msg
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, "ban", activity.EventPlayerBan, msg.Reason, msg.RequestId, true,
-		func(source playerSource) (string, error) {
-			return `{"inverse":"pardon"}`, source.Ban(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Reason)
+		func(source playerSource, target string) (string, error) {
+			return `{"inverse":"pardon"}`, source.Ban(ctx, target, msg.Reason)
 		})
 	if err != nil {
 		return nil, err
@@ -866,8 +871,8 @@ func (s *PlayerService) BanPlayer(ctx context.Context, req *connect.Request[v1.B
 func (s *PlayerService) PardonPlayer(ctx context.Context, req *connect.Request[v1.PardonPlayerRequest]) (*connect.Response[v1.PardonPlayerResponse], error) {
 	msg := req.Msg
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, "pardon", activity.EventPlayerPardon, "", msg.RequestId, true,
-		func(source playerSource) (string, error) {
-			return `{"inverse":"ban"}`, source.Pardon(ctx, nameOr(msg.PlayerName, msg.IdentityKey))
+		func(source playerSource, target string) (string, error) {
+			return `{"inverse":"ban"}`, source.Pardon(ctx, target)
 		})
 	if err != nil {
 		return nil, err
@@ -888,8 +893,8 @@ func (s *PlayerService) SetOperator(ctx context.Context, req *connect.Request[v1
 		inverse = `{"inverse":"op"}`
 	}
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, action, event, "", msg.RequestId, true,
-		func(source playerSource) (string, error) {
-			return inverse, source.SetOperator(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Level, msg.Remove)
+		func(source playerSource, target string) (string, error) {
+			return inverse, source.SetOperator(ctx, target, msg.Level, msg.Remove)
 		})
 	if err != nil {
 		return nil, err
@@ -906,20 +911,13 @@ func (s *PlayerService) SetWhitelistEntry(ctx context.Context, req *connect.Requ
 		inverse = `{"inverse":"allowlist_add"}`
 	}
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, action, event, "", msg.RequestId, true,
-		func(source playerSource) (string, error) {
-			return inverse, source.SetWhitelist(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Remove)
+		func(source playerSource, target string) (string, error) {
+			return inverse, source.SetWhitelist(ctx, target, msg.Remove)
 		})
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&v1.SetWhitelistEntryResponse{Outcome: out}), nil
-}
-
-func nameOr(name, key string) string {
-	if strings.TrimSpace(name) != "" {
-		return name
-	}
-	return key
 }
 
 // BulkPlayerAction applies one typed action to a bounded set of targets. Each
@@ -1016,6 +1014,13 @@ func (s *PlayerService) UndoPlayerAction(ctx context.Context, req *connect.Reque
 	}
 	if strings.TrimSpace(row.PriorValue) == "" || row.PriorValue == "{}" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("this action has no recorded prior value and cannot be undone"))
+	}
+	claimed, err := s.store.ClaimPlayerActionUndo(ctx, row.UndoToken)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if !claimed {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("undo token already used"))
 	}
 	_, _, source, sourceName, err := s.actionContext(ctx, row.ServerID, row.IdentityKey, "")
 	if err != nil {

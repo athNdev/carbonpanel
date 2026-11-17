@@ -47,9 +47,9 @@ type PlayerAlias struct {
 
 // PlayerSession joins an identity to a server for a join/leave observation.
 type PlayerSession struct {
-	ID         string `json:"id" gorm:"primaryKey"`
-	IdentityID string `json:"identity_id" gorm:"index;size:64"`
-	ServerID   string `json:"server_id" gorm:"index;size:64"`
+	ID         string    `json:"id" gorm:"primaryKey"`
+	IdentityID string    `json:"identity_id" gorm:"index;size:64"`
+	ServerID   string    `json:"server_id" gorm:"index;size:64"`
 	JoinedAt   time.Time `gorm:"index"`
 	LeftAt     *time.Time
 	Source     string `json:"source" gorm:"size:32"`
@@ -91,6 +91,7 @@ type PlayerModerationAction struct {
 	// PriorValue is a bounded JSON snapshot used only for reversible actions.
 	PriorValue string `json:"prior_value" gorm:"type:text"`
 	UndoToken  string `json:"undo_token" gorm:"uniqueIndex;size:128"`
+	Undone     bool   `json:"undone"`
 	Phase      string `json:"phase" gorm:"index;size:32"`
 	LastError  string `json:"last_error" gorm:"type:text"`
 	CreatedAt  time.Time
@@ -333,6 +334,18 @@ func (s *Store) AdvancePlayerAction(ctx context.Context, id, from, to, detail st
 		return fmt.Errorf("player action %s phase changed; reconcile before retry", id)
 	}
 	return nil
+}
+
+// ClaimPlayerActionUndo atomically marks an undo token as consumed before the
+// external inverse mutation, so concurrent or repeated undos cannot both apply.
+func (s *Store) ClaimPlayerActionUndo(ctx context.Context, token string) (bool, error) {
+	r := s.db.WithContext(ctx).Model(&PlayerModerationAction{}).
+		Where("undo_token = ? AND undone = ? AND prior_value <> ? AND prior_value <> ?", token, false, "", "{}").
+		Updates(map[string]any{"undone": true, "updated_at": time.Now().UTC()})
+	if r.Error != nil {
+		return false, r.Error
+	}
+	return r.RowsAffected == 1, nil
 }
 
 // GetPlayerActionByUndoToken loads a reversible action for undo.
