@@ -82,6 +82,10 @@ type Server struct {
 	// operationService backs SetReconcilerNudge. It is created in
 	// registerServices, so it may be nil on a server that never registered.
 	operationService *services.OperationService
+
+	// playerService owns the skin cache janitor and any management-protocol
+	// WebSocket reader; it is stopped with the controller.
+	playerService *services.PlayerService
 }
 
 // Creates new Connect RPC server
@@ -242,6 +246,7 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.TaskServiceName,
 		carbonpanelv1connect.UploadServiceName,
 		carbonpanelv1connect.UserServiceName,
+		carbonpanelv1connect.PlayerServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -357,6 +362,14 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
 	moduleService.SetStorageResolver(s.storageResolver)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
+	// Player management uses the injected node resolver for read-only deep data
+	// and the node-scoped command sender for the exec fallback. The skin cache
+	// lives under the configured data directory, never a workstation path.
+	playerService := services.NewConfiguredPlayerService(
+		s.store, s.config, s.sender, s.storageResolver, s.metricsCollector, s.log,
+		filepath.Join(s.config.Storage.DataDir, "player-skin-cache"),
+	)
+	s.playerService = playerService
 
 	// Register service handlers
 	authPath, authHandler := carbonpanelv1connect.NewAuthServiceHandler(authService, opts...)
@@ -421,6 +434,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	uploadPath, uploadHandler := carbonpanelv1connect.NewUploadServiceHandler(uploadService, opts...)
 	mux.Handle(uploadPath, uploadHandler)
+
+	playerPath, playerHandler := carbonpanelv1connect.NewPlayerServiceHandler(playerService, opts...)
+	mux.Handle(playerPath, playerHandler)
 }
 
 // The HTTP handler for the server
@@ -528,6 +544,9 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 func (s *Server) Shutdown() {
 	if s.wsHub != nil {
 		s.wsHub.Stop()
+	}
+	if s.playerService != nil {
+		s.playerService.Stop()
 	}
 }
 

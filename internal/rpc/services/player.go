@@ -59,11 +59,11 @@ type sourceNegotiator interface {
 }
 
 type skinAsset struct {
-	Data                        []byte
-	ContentType                 string
-	FromCache                   bool
-	Source, Confidence, Note    string
-	ObservedAt                  time.Time
+	Data                     []byte
+	ContentType              string
+	FromCache                bool
+	Source, Confidence, Note string
+	ObservedAt               time.Time
 }
 
 type skinProvider interface {
@@ -110,6 +110,11 @@ func (s *PlayerService) SetDeepDataReader(r deepProvider)       { s.deep = r }
 func (s *PlayerService) Stop() {
 	if s.skins != nil {
 		s.skins.Close()
+	}
+	// A management-protocol adapter owns a background WebSocket reader; its
+	// lifetime belongs to the controller, not to an individual RPC.
+	if closer, ok := s.negotiator.(interface{ Close() }); ok {
+		closer.Close()
 	}
 }
 
@@ -425,12 +430,12 @@ func (s *PlayerService) GetPlayer(ctx context.Context, req *connect.Request[v1.G
 	}
 	presence, obs, lastSeen := s.presenceFor(identity, msg.ServerId)
 	detail := &v1.PlayerDetail{
-		Ref:                  playerRef(identity),
-		Aliases:              protoAliases(s.aliasesFor(ctx, identity.ID)),
-		Presence:             presence,
-		PresenceObservation:  obs,
-		PrimaryServerId:      msg.ServerId,
-		NameHistoryNote:      "Mojang removed public name history on 2022-09-13; only names observed by this panel are shown.",
+		Ref:                 playerRef(identity),
+		Aliases:             protoAliases(s.aliasesFor(ctx, identity.ID)),
+		Presence:            presence,
+		PresenceObservation: obs,
+		PrimaryServerId:     msg.ServerId,
+		NameHistoryNote:     "Mojang removed public name history on 2022-09-13; only names observed by this panel are shown.",
 	}
 	if !identity.FirstSeenAt.IsZero() {
 		detail.FirstSeen = timestamppb.New(identity.FirstSeenAt)
@@ -837,7 +842,9 @@ func (s *PlayerService) runAction(ctx context.Context, ip, serverID, identityKey
 func (s *PlayerService) KickPlayer(ctx context.Context, req *connect.Request[v1.KickPlayerRequest]) (*connect.Response[v1.KickPlayerResponse], error) {
 	msg := req.Msg
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, "kick", activity.EventPlayerKick, msg.Reason, msg.RequestId, false,
-		func(source playerSource) (string, error) { return "{}", source.Kick(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Reason) })
+		func(source playerSource) (string, error) {
+			return "{}", source.Kick(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Reason)
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -847,7 +854,9 @@ func (s *PlayerService) KickPlayer(ctx context.Context, req *connect.Request[v1.
 func (s *PlayerService) BanPlayer(ctx context.Context, req *connect.Request[v1.BanPlayerRequest]) (*connect.Response[v1.BanPlayerResponse], error) {
 	msg := req.Msg
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, "ban", activity.EventPlayerBan, msg.Reason, msg.RequestId, true,
-		func(source playerSource) (string, error) { return `{"inverse":"pardon"}`, source.Ban(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Reason) })
+		func(source playerSource) (string, error) {
+			return `{"inverse":"pardon"}`, source.Ban(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Reason)
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -857,7 +866,9 @@ func (s *PlayerService) BanPlayer(ctx context.Context, req *connect.Request[v1.B
 func (s *PlayerService) PardonPlayer(ctx context.Context, req *connect.Request[v1.PardonPlayerRequest]) (*connect.Response[v1.PardonPlayerResponse], error) {
 	msg := req.Msg
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, "pardon", activity.EventPlayerPardon, "", msg.RequestId, true,
-		func(source playerSource) (string, error) { return `{"inverse":"ban"}`, source.Pardon(ctx, nameOr(msg.PlayerName, msg.IdentityKey)) })
+		func(source playerSource) (string, error) {
+			return `{"inverse":"ban"}`, source.Pardon(ctx, nameOr(msg.PlayerName, msg.IdentityKey))
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -877,7 +888,9 @@ func (s *PlayerService) SetOperator(ctx context.Context, req *connect.Request[v1
 		inverse = `{"inverse":"op"}`
 	}
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, action, event, "", msg.RequestId, true,
-		func(source playerSource) (string, error) { return inverse, source.SetOperator(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Level, msg.Remove) })
+		func(source playerSource) (string, error) {
+			return inverse, source.SetOperator(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Level, msg.Remove)
+		})
 	if err != nil {
 		return nil, err
 	}
@@ -893,7 +906,9 @@ func (s *PlayerService) SetWhitelistEntry(ctx context.Context, req *connect.Requ
 		inverse = `{"inverse":"allowlist_add"}`
 	}
 	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, action, event, "", msg.RequestId, true,
-		func(source playerSource) (string, error) { return inverse, source.SetWhitelist(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Remove) })
+		func(source playerSource) (string, error) {
+			return inverse, source.SetWhitelist(ctx, nameOr(msg.PlayerName, msg.IdentityKey), msg.Remove)
+		})
 	if err != nil {
 		return nil, err
 	}

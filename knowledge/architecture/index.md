@@ -8,6 +8,7 @@
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.
+- [Player management](player-management.md) — Player identity, provenance, moderation and capability gates for the PlayerService surface.
 - [Remote storage transport](remote-storage-transport.md) — JSON accessor worker and Docker attach path for nodes without shared controller storage.
 - [RPC contract](rpc-contract.md) — Proto definitions are the single API contract for the backend, console and CLI.
 - [Runtime lifecycle and world-data seams](runtime-seams.md) — Locator, lifecycle handle, idle-power module, route PlanFor and worldstore are the five stable architecture seams.
