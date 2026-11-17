@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -46,22 +47,12 @@ func nodeScanHandler(scan func(context.Context) *v1.ScanNodesResponse, authManag
 		// Match the generated method: authenticate even in explicit no-auth
 		// mode, then enforce nodes/read on the global object. Missing policy
 		// dependencies must fail closed rather than bypassing the check.
-		if authManager == nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		user, err := authManager.AuthenticateFromHeader(r.Context(), r.Header.Get("Authorization"))
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if enforcer == nil {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceNodes, rbac.ActionRead, "*")
-		if rbacErr != nil || !allowed {
-			http.Error(w, "forbidden", http.StatusForbidden)
+		if err := requireGlobalObject(r, authManager, enforcer, rbac.ResourceNodes, rbac.ActionRead); err != nil {
+			if errors.Is(err, errForbidden) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+			} else {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			}
 			return
 		}
 

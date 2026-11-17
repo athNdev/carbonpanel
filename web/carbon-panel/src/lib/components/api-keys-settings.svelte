@@ -20,7 +20,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		Save
 	} from '@lucide/svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
-	import { apiFetch } from '$lib/api/fetch';
 
 	let cfApiKey = $state('');
 	let modrinthToken = $state('');
@@ -67,15 +66,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		testingCf = true;
 		cfTestResult = null;
 		try {
-			const res = await apiFetch('/api/v1/settings/validate-key', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					provider: 'curseforge',
-					api_key: cfApiKey.trim()
-				})
+			const res = await rpcClient.config.validateProviderKey({
+				provider: 'curseforge',
+				apiKey: cfApiKey.trim()
 			});
-			const data = await res.json();
+			const data = { valid: res.valid, message: res.message };
 			cfTestResult = data;
 			if (data.valid) {
 				toast.success(data.message);
@@ -94,16 +89,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		testingModrinth = true;
 		modrinthTestResult = null;
 		try {
-			const res = await apiFetch('/api/v1/settings/validate-key', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					provider: 'modrinth',
-					api_key: modrinthToken.trim(),
-					user_agent: modrinthUserAgent.trim()
-				})
+			const res = await rpcClient.config.validateProviderKey({
+				provider: 'modrinth',
+				apiKey: modrinthToken.trim(),
+				userAgent: modrinthUserAgent.trim()
 			});
-			const data = await res.json();
+			const data = { valid: res.valid, message: res.message };
 			modrinthTestResult = data;
 			if (data.valid) {
 				toast.success(data.message);
