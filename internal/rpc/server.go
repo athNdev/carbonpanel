@@ -277,12 +277,14 @@ func (s *Server) setupHandler() {
 	mux.Handle("/api/v1/nodes/scan", handlers.NewNodeScanHandler(s.store, s.authManager, s.enforcer, s.log))
 
 	// Online mod search and 1-click install endpoints (MINE-25)
-	mux.Handle("/api/v1/servers/", handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer))
+	mux.Handle("/api/v1/servers/", handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer, handlers.ModOnlineOptions{StorageResolver: s.storageResolver}))
 
 	// Packwiz Modpack Studio and Server Deployment Engine (MINE-30, MINE-31)
 	packwizDir := filepath.Join(s.config.Storage.DataDir, "packwiz")
 	packwizManager := packwiz.NewManager(packwizDir, s.log)
-	mux.Handle("/api/v1/packwiz/", handlers.NewPackwizHandler(packwizManager, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config))
+	packwizHandler := handlers.NewPackwizHandler(packwizManager, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config)
+	packwizHandler.SetStorageResolver(s.storageResolver)
+	mux.Handle("/api/v1/packwiz/", packwizHandler)
 
 	// Scheduled/staged config rollout for instances (staged diffs applied on restart or cron)
 	mux.Handle("/api/v1/staged-config/", handlers.NewStagedConfigHandler(s.store, s.log, s.authManager, s.enforcer))
@@ -309,15 +311,19 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.clientPool, s.log)
+	configService.SetStorageResolver(s.storageResolver)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	fileService.SetStorageResolver(s.storageResolver)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
+	modService.SetStorageResolver(s.storageResolver)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	datapackService := services.NewDatapackService(s.store, s.config, s.uploadManager, s.log)
+	datapackService.SetStorageResolver(s.storageResolver)
 	nodeService := services.NewNodeService(s.store, s.clientPool, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.clientPool, s.proxyManager, s.config, s.logStreamer, s.log)
 	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log, s.clientPool, s.placementEngine, s.enforcer)
+	serverService.SetStorageResolver(s.storageResolver)
 	if finished, err := serverService.ResumeUnsettledDispositions(context.Background()); err != nil {
 		s.log.Error("Failed to list unfinished deletions: %v", err)
 	} else if finished > 0 {
@@ -332,6 +338,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	subuserService := services.NewSubuserService(s.store, s.log)
 	blueprintService := services.NewBlueprintService(s.store, s.log)
 	backupService := services.NewBackupService(s.store, s.docker, s.clientPool, s.config.Storage.S3, s.log)
+	backupService.SetStorageResolver(s.storageResolver)
 	backupService.SetWorldDataDir(s.config.Storage.DataDir)
 	if err := backupService.SetBackupEncryption(s.config.Storage.BackupEncryption.KeyID, s.config.Storage.BackupEncryption.Key); err != nil {
 		// Never silently run unencrypted (OSS-236): a misconfigured key fails
@@ -348,6 +355,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
+	moduleService.SetStorageResolver(s.storageResolver)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 
 	// Register service handlers

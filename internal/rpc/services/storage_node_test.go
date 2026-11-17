@@ -92,7 +92,9 @@ func TestDataRootForRefusals(t *testing.T) {
 	}
 
 	unmounted := &db.Server{ID: "srv-unmounted", Name: "srv-unmounted", DataPath: filepath.Join("srv", "servers", "unmounted"), NodeID: "remote-unmounted"}
-	if _, err := dataRootFor(ctx, store, unmounted, true); err == nil || !nodestorage.IsUnavailable(err) {
+	// Transport-only nodes are refused at the operation seam; mapping is a
+	// pure path calculation and no longer consults a process-global transport.
+	if err := refuseLocalPathPipeline(ctx, store, unmounted); !nodestorage.IsUnavailable(err) {
 		t.Fatalf("missing mount must be refused with ErrUnavailable, got %v", err)
 	}
 

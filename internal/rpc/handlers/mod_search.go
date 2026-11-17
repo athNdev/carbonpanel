@@ -121,6 +121,7 @@ type ModOnlineManager struct {
 	log               *logger.Logger
 	authManager       *auth.Manager
 	enforcer          *rbac.Enforcer
+	storageResolver   *nodestorage.Resolver
 	httpClient        *http.Client
 	modrinthBaseURL   string
 	curseForgeBaseURL string
@@ -129,6 +130,7 @@ type ModOnlineManager struct {
 type ModOnlineOptions struct {
 	HTTPClient                         *http.Client
 	ModrinthBaseURL, CurseForgeBaseURL string
+	StorageResolver                    *nodestorage.Resolver
 }
 
 func NewModOnlineManager(store *storage.Store, log *logger.Logger, authManager *auth.Manager, enforcer *rbac.Enforcer, options ...ModOnlineOptions) *ModOnlineManager {
@@ -145,6 +147,7 @@ func NewModOnlineManager(store *storage.Store, log *logger.Logger, authManager *
 		log:               log,
 		authManager:       authManager,
 		enforcer:          enforcer,
+		storageResolver:   option.StorageResolver,
 		httpClient:        indexers.ProtectCredentialsOnRedirect(client),
 		modrinthBaseURL:   option.ModrinthBaseURL,
 		curseForgeBaseURL: option.CurseForgeBaseURL,
@@ -253,7 +256,7 @@ func (m *ModOnlineManager) handleSearch(w http.ResponseWriter, r *http.Request, 
 		side = "server"
 	}
 
-	installedMods := installedModJars(r.Context(), m.store, server)
+	installedMods := installedModJars(r.Context(), m.store, server, m.storageResolver)
 
 	globalSettings, _, _ := m.store.GetGlobalSettings(r.Context())
 
@@ -704,7 +707,7 @@ func (m *ModOnlineManager) auditModInstall(r *http.Request, server *storage.Serv
 }
 
 func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request, server *storage.Server) {
-	modsDir, err := modsDirectory(r.Context(), m.store, server, true)
+	modsDir, err := modsDirectory(r.Context(), m.store, server, true, m.storageResolver)
 	if err != nil {
 		if nodestorage.IsUnavailable(err) {
 			m.log.Error("mod install refused: %v", err)

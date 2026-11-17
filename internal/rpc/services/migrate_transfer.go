@@ -221,7 +221,7 @@ func (s *ServerService) migrationWorldRoots(ctx context.Context, server *storage
 	if err != nil {
 		return "", "", fmt.Errorf("cannot identify source storage: %w", err)
 	}
-	srcRoot, err = nodestorage.MapDataPath(srcInfo, server.DataPath)
+	srcRoot, err = nodestorage.MapDataPath(srcInfo, server.DataPath, s.storageResolver)
 	if err != nil {
 		return "", "", fmt.Errorf("source node %q storage is not reachable from the controller: %w", server.NodeID, err)
 	}
@@ -229,7 +229,7 @@ func (s *ServerService) migrationWorldRoots(ctx context.Context, server *storage
 		return "", "", fmt.Errorf("source world %q is not reachable: %w", srcRoot, serr)
 	}
 
-	dstRoot, err = nodestorage.EnsureDataRoot(targetNode.StorageInfo(), server.DataPath)
+	dstRoot, err = nodestorage.EnsureDataRoot(targetNode.StorageInfo(), server.DataPath, s.storageResolver)
 	if err != nil {
 		return "", "", fmt.Errorf("target node %q storage is not reachable from the controller: %w", targetNode.ID, err)
 	}

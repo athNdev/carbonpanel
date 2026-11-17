@@ -64,8 +64,7 @@ func TestBackupTransportOnlyUsesForNodeNotControllerLocal(t *testing.T) {
 	}
 
 	rt := &recordingTransport{workerRoot: workerRoot}
-	nodestorage.SetTransport(rt)
-	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+	resolver := nodestorage.NewResolver(rt)
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	ctx := context.Background()
@@ -91,7 +90,8 @@ func TestBackupTransportOnlyUsesForNodeNotControllerLocal(t *testing.T) {
 				BackupDir: filepath.Join(dir, "backups"),
 			},
 		},
-		log: logger.New(),
+		log:             logger.New(),
+		storageResolver: resolver,
 	}
 	out, err := s.executeBackupTask(ctx, server, &storage.ScheduledTask{Name: "nightly"})
 	if err != nil {
@@ -143,7 +143,7 @@ func TestBackupTransportOnlyWithoutProviderCreatesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	nodestorage.SetTransport(nil)
+	resolver := nodestorage.NewResolver(nil)
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	ctx := context.Background()
@@ -168,7 +168,8 @@ func TestBackupTransportOnlyWithoutProviderCreatesNothing(t *testing.T) {
 				BackupDir: filepath.Join(dir, "backups"),
 			},
 		},
-		log: logger.New(),
+		log:             logger.New(),
+		storageResolver: resolver,
 	}
 	_, err = s.executeBackupTask(ctx, server, &storage.ScheduledTask{Name: "nightly"})
 	if !nodestorage.IsUnavailable(err) {

@@ -196,11 +196,11 @@ func restoreFiles(ctx context.Context, acc nodestorage.Accessor, snaps []fileSna
 	return failed
 }
 
-func cleanupBatchRecovery(ctx context.Context, store *storage.Store, server *storage.Server, batchID string) error {
+func cleanupBatchRecovery(ctx context.Context, store *storage.Store, server *storage.Server, batchID string, resolver *nodestorage.Resolver) error {
 	if _, err := uuid.Parse(batchID); err != nil {
 		return err
 	}
-	acc, err := openAccessor(ctx, store, server)
+	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return err
 	}

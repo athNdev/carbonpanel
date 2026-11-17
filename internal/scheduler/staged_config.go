@@ -31,7 +31,7 @@ func (s *Scheduler) applyDueStagedConfigs(ctx context.Context) {
 		players = func(serverID string) (int, bool) { return count(serverID), true }
 	}
 	s.mu.RUnlock()
-	if err := staging.Sweep(ctx, s.store, s.log, time.Now(), players, s.publishStagedBatch); err != nil && s.log != nil {
+	if err := staging.Sweep(ctx, s.store, s.log, time.Now(), players, s.publishStagedBatch, s.storageResolver); err != nil && s.log != nil {
 		s.log.Error("Failed to apply a staged update batch: %v", err)
 	}
 }

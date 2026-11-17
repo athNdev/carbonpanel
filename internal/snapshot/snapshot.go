@@ -28,14 +28,15 @@ import (
 
 // Engine manages volume snapshots, pre-update backups, and rollbacks for servers (MINE-23)
 type Engine struct {
-	store         *storage.Store
-	docker        *docker.Client
-	pool          *docker.ClientPool
-	sender        *command.Sender
-	backupDir     string
-	maxSnapshots  int
-	retentionDays int
-	log           *logger.Logger
+	store           *storage.Store
+	docker          *docker.Client
+	pool            *docker.ClientPool
+	sender          *command.Sender
+	backupDir       string
+	maxSnapshots    int
+	retentionDays   int
+	log             *logger.Logger
+	storageResolver *nodestorage.Resolver
 }
 
 // Config holds configuration for the SnapshotEngine
@@ -43,6 +44,9 @@ type Config struct {
 	BackupDir     string
 	MaxSnapshots  int // Max pre-update snapshots to retain per server (default: 5)
 	RetentionDays int // Max age in days to retain pre-update snapshots (0 = unlimited age)
+	// StorageResolver is the instance-owned node storage resolver. A nil
+	// resolver still serves local/shared nodes and refuses remote-only nodes.
+	StorageResolver *nodestorage.Resolver
 }
 
 // NewEngine creates a new SnapshotEngine
@@ -72,15 +76,20 @@ func NewEngineWithPool(store *storage.Store, dockerClient *docker.Client, pool *
 		pool = docker.NewClientPool(store, dockerClient, log)
 	}
 
+	var resolver *nodestorage.Resolver
+	if len(cfg) > 0 {
+		resolver = cfg[0].StorageResolver
+	}
 	return &Engine{
-		store:         store,
-		docker:        dockerClient,
-		pool:          pool,
-		sender:        sender,
-		backupDir:     backupDir,
-		maxSnapshots:  maxSnapshots,
-		retentionDays: retentionDays,
-		log:           log,
+		store:           store,
+		docker:          dockerClient,
+		pool:            pool,
+		sender:          sender,
+		backupDir:       backupDir,
+		maxSnapshots:    maxSnapshots,
+		retentionDays:   retentionDays,
+		log:             log,
+		storageResolver: resolver,
 	}
 }
 
@@ -148,7 +157,7 @@ func (e *Engine) CreatePreUpdateSnapshot(ctx context.Context, server *storage.Se
 
 	var count int
 	if transportOnly {
-		acc, aerr := nodestorage.ForNode(info, server.DataPath)
+		acc, aerr := e.storageResolver.ForNode(ctx, info, server.DataPath)
 		if aerr != nil {
 			return nil, aerr
 		}
@@ -356,7 +365,7 @@ func (e *Engine) Rollback(ctx context.Context, server *storage.Server, snapshotI
 
 		var extracted int
 		if transportOnly {
-			acc, aerr := nodestorage.ForNode(info, server.DataPath)
+			acc, aerr := e.storageResolver.ForNode(ctx, info, server.DataPath)
 			if aerr != nil {
 				return aerr
 			}
@@ -509,9 +518,9 @@ func (e *Engine) worldRoot(ctx context.Context, server *storage.Server, write bo
 		return "", err
 	}
 	if write {
-		return nodestorage.EnsureDataRoot(info, server.DataPath)
+		return nodestorage.EnsureDataRoot(info, server.DataPath, e.storageResolver)
 	}
-	return nodestorage.MapDataPath(info, server.DataPath)
+	return nodestorage.MapDataPath(info, server.DataPath, e.storageResolver)
 }
 
 func (e *Engine) storageInfo(ctx context.Context, server *storage.Server) (nodestorage.NodeInfo, error) {

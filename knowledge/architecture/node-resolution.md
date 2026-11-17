@@ -63,7 +63,7 @@ wrong host. That is a data-safety bug, not a degraded mode.
   The latest-log upload uses that same root.
 - Creating a server writes the world directory on that mapped root. A manual
   server pack (the zip the panel extracts onto the world so the image can
-  generate the server) is written through `nodestorage.ForNode`. A remote node
+  generate the server) is written through the instance-owned resolver. A remote node
   without a reachable mount or remote adapter is refused, so no
   controller-local world or zip is created.
 - Scheduled backup archives resolve the mapped root before reading the world.

@@ -47,7 +47,7 @@ A backup, snapshot, restore or retention change is being made.
 # Known gap
 
 Scheduled backup archives, snapshot create/restore, and scheduled modpack
-sync use the mapped world root, or `nodestorage.ForNode` when the node is
+sync use the mapped world root, or the injected resolver's accessor when the node is
 transport-only. Mod installation and packwiz bake write the mods folder on
 that same root. Deleting a server still removes the stored data path.
 

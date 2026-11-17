@@ -44,8 +44,7 @@ func TestSnapshotTransportOnlyUsesForNodeNotControllerLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := &recordingTransport{workerRoot: workerRoot}
-	nodestorage.SetTransport(rt)
-	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+	resolver := nodestorage.NewResolver(rt)
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	if err := store.CreateNode(ctx, &storage.Node{
@@ -74,7 +73,7 @@ func TestSnapshotTransportOnlyUsesForNodeNotControllerLocal(t *testing.T) {
 	pool.RegisterClient("transport-snap", cli)
 	t.Cleanup(func() { _ = pool.Close() })
 
-	engine := NewEngineWithPool(store, cli, pool, nil, logger.New(), Config{BackupDir: filepath.Join(t.TempDir(), "backups")})
+	engine := NewEngineWithPool(store, cli, pool, nil, logger.New(), Config{BackupDir: filepath.Join(t.TempDir(), "backups"), StorageResolver: resolver})
 	snap, err := engine.CreatePreUpdateSnapshot(ctx, server, "mapped")
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +114,7 @@ func TestSnapshotTransportOnlyWithoutProviderCreatesNothing(t *testing.T) {
 	store := setupTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
-	nodestorage.SetTransport(nil)
+	resolver := nodestorage.NewResolver(nil)
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	if err := store.CreateNode(ctx, &storage.Node{
@@ -131,7 +130,7 @@ func TestSnapshotTransportOnlyWithoutProviderCreatesNothing(t *testing.T) {
 	if err := store.CreateServer(ctx, server); err != nil {
 		t.Fatal(err)
 	}
-	engine := NewEngine(store, nil, nil, logger.New(), Config{BackupDir: filepath.Join(t.TempDir(), "backups")})
+	engine := NewEngine(store, nil, nil, logger.New(), Config{BackupDir: filepath.Join(t.TempDir(), "backups"), StorageResolver: resolver})
 	if _, err := engine.CreatePreUpdateSnapshot(ctx, server, "bare"); !nodestorage.IsUnavailable(err) {
 		t.Fatalf("create error = %v, want unavailable", err)
 	}
