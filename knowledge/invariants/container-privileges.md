@@ -6,11 +6,12 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/docker
+  - pkg/runtimeprofile
   - docker
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
-verified: { by: agent:zed, at: 2026-11-10 }
+verified: { by: agent:cursor, at: 2026-11-17 }
 review_after: 2027-01-23
 ---
 
@@ -31,7 +32,8 @@ host or the Docker socket can escape that boundary.
 - Inspect the effective config after overrides, not only the defaults.
   `docker.PreflightRuntime` runs on the resolved request in
   `Client.CreateContainer` and refuses a container that cannot boot before the
-  daemon is asked to create anything.
+  daemon is asked to create anything. The checks themselves are
+  `pkg/runtimeprofile`, which has no panel database, handler, or protobuf types.
 - A new mount needs a path and a reason; a new capability needs a named
   requirement.
 - Do not copy a hardening exemption from one image to another.
@@ -81,3 +83,8 @@ Re-verified `2026-11-04` by `agent:zed`:
   builtin default.
 
 Re-verified `2026-11-10` by `agent:zed` against the expanded runtime matrix.
+
+Re-verified `2026-11-17` by `agent:cursor`: the same preflight still runs after
+overrides. The rule implementation moved to `pkg/runtimeprofile`, and
+`internal/docker` calls it. Default hardening still uses that package's
+bootstrap capability list.

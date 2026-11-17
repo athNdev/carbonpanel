@@ -8,22 +8,13 @@ package docker
 import (
 	"strings"
 
+	"github.com/athNdev/carbon-panel/pkg/runtimeprofile"
 	"github.com/moby/moby/api/types/system"
 )
 
-// DaemonEnforcement records which cgroup and storage limits the Docker daemon
-// reports as supported. Callers compare this against the resolved container
-// request so an ignored limit is never presented as enforced.
-type DaemonEnforcement struct {
-	Rootless                    bool
-	CgroupDriver                string
-	CgroupVersion               string
-	StorageDriver               string
-	MemoryLimitSupported        bool
-	SwapLimitSupported          bool
-	PidsLimitSupported          bool
-	WritableLayerQuotaSupported bool
-}
+// DaemonEnforcement is the public daemon capability record. DescribeDaemonEnforcement
+// maps a Docker /info payload onto it.
+type DaemonEnforcement = runtimeprofile.DaemonEnforcement
 
 // DescribeDaemonEnforcement maps a Docker /info payload into the panel's
 // qualification view. It uses the daemon's own capability flags instead of
@@ -67,14 +58,4 @@ func overlayWritableQuotaSupported(driver string, status [][2]string) bool {
 		}
 	}
 	return false
-}
-
-// CgroupLimitsQualified reports whether memory/swap/pids caps are expected to
-// apply on this daemon. Rootless mode needs cgroup v2 delegation; a v1 rootless
-// daemon may ignore resource flags even when MemoryLimit is true.
-func (d DaemonEnforcement) CgroupLimitsQualified() bool {
-	if d.Rootless && d.CgroupVersion != "2" {
-		return false
-	}
-	return d.MemoryLimitSupported && d.SwapLimitSupported && d.PidsLimitSupported
 }
