@@ -162,19 +162,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	interface NavItem {
-		href:
-			| '/'
-			| '/servers'
-			| '/servers/new'
-			| '/players'
-			| '/worlds'
-			| '/library'
-			| '/modpacks/studio'
-			| '/modpacks'
-			| '/modules'
-			| '/settings'
-			| '/docs/api'
-			| '/changelog';
+		// Destinations owned by sibling epics (Players, World Library) are not
+		// in the generated route union on this branch. `resolve` accepts any
+		// pathname at runtime; resolveNav narrows at the single type boundary.
+		href: string;
 		label: string;
 		icon: string;
 		badge?: boolean;
@@ -388,7 +379,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{#each navItems as item (item.href)}
 					{#if item.href !== '/settings' || showSettingsNav}
 						<a
-							href={resolve(item.href)}
+							href={resolve(item.href as '/')}
 							onclick={closeMobileNav}
 							class="relative flex items-center gap-3 py-2.5 font-sans text-sm transition-colors {sideNavExpanded
 								? 'px-3.5'
