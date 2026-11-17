@@ -44,6 +44,20 @@ inventory, Bedrock parity) have no verified vanilla source.
    RPC report each such capability as `DECISION_PENDING` or `UNSUPPORTED` with
    an actionable explanation and a licence/verification requirement.
 
+## Decision register (OSS-353)
+
+| Candidate | Capability evidence | Licence evidence | Decision |
+| --- | --- | --- | --- |
+| Native management protocol (Java 1.21.9+) | Structured `Player{id,name}`, typed allowlist/bans/ops, joined/left notifications — Minecraft Wiki, *Minecraft Server Management Protocol* (accessed 2026-11-18) | First-party protocol; no bundled artifact | **GO** behind explicit configuration and version gate; fixture tests only, one real 1.21.9+ server qualification still required |
+| RCON / node-scoped exec fallback | Java-only, text replies with ambiguous termination — Minecraft Wiki, *RCON* and */list* (accessed 2026-11-18) | In-repo wrappers, no new dependency | **GO** with allowlisted commands, bounded timeout, redaction and node-scoped exec only |
+| Paper bridge (vitals, inventory, groups, mute) | Loader API can enumerate players and listen to join/leave (PaperMC docs) but specific field parity is **UNVERIFIED**; mute/groups are plugin-only | Paper server is GPL-3.0; plugins compile against the API — legal review required | **NO-GO for bundling now**; decision-pending in the capability RPC; revisit only with a separate licence-reviewed artifact |
+| Fabric bridge | Loader-side bridge feasibility documented (fabricmc.net); field parity **UNVERIFIED** | Fabric API Apache-2.0 | **NO-GO now**; separate artifact and verification required |
+| NeoForge bridge | Loader docs exist (neoforged.net); field parity **UNVERIFIED** | NeoForge docs MIT | **NO-GO now**; do not assume one bridge binary covers all loaders |
+| Bedrock identity parity | XUID identity and Floodgate Java-shaped UUID mapping documented (GeyserMC/Floodgate; Microsoft Learn Bedrock `/list`) | No bundled artifact | **NO-GO for full parity now**; identity presentation may be added after an explicit scope decision; never default to offline auth (CLOU-29) |
+| Official name history | Removed 2022-09-13; current authenticated endpoint returns only change metadata, not a name list (Minecraft Help Center) | n/a | **NO-GO**; observed aliases only |
+
+Licence notes are orientation, not legal advice. "UNVERIFIED" is a decision gate, not a promise that a capability is absent forever.
+
 ## Consequences
 
 - Roster and detail work on vanilla data alone; plugin-only fields degrade to
