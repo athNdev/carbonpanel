@@ -142,7 +142,11 @@ outranks an explicit theme; do not 'simplify' it back to `:root`.
   `.mono-label` utilities in `app.css`, not scattered tracking utilities.
 - Metric tiles share one hierarchy: `p-6`, sans semibold uppercase label,
   dividers only above footers, hover border. Stored display preferences
-  (theme/motion/density) apply in `CarbonShell` on boot; see
-  `display-preferences.test.ts`.
+  (theme/motion/density) are owned by `lib/display-preferences.svelte.ts`:
+  it validates, persists and applies `data-carbon-*` attributes. The shell
+  hydrates it on boot, the dialog and toast host consume its stores, and code
+  editors take their initial theme from it and follow live changes through an
+  already-loaded runtime (never bootstrapping Monaco for a preference change).
+  See `display-preferences.test.ts`.
 
 See [ADR 0009](../../docs/adr/0009-shared-design-system.md).
