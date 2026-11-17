@@ -9,7 +9,7 @@ error mapping and generated clients are verified.
 | HTTP family | Current first-party consumers | Shared behavior and migration boundary |
 | --- | --- | --- |
 | `/api/v1/nodes/scan` | Compatibility integrations; `node-settings.svelte` uses generated NodeService.ScanNodes | Shared bounded daemon discovery plus known-node count; nodes/read on global scope. Adapter retains numeric legacy candidate fields. |
-| `/api/v1/settings/validate-key` | `api-keys-settings.svelte` | Provider credential validation; settings/read on global scope. Provider validation results remain distinct from transport/authentication failures. |
+| `/api/v1/settings/validate-key` | Compatibility integrations only; `api-keys-settings.svelte` uses generated ConfigService.ValidateProviderKey | Provider credential validation; settings/read on global scope. Both transports share indexers.ValidateProviderKey and the requireGlobalObject policy. Provider validation results remain distinct from transport/authentication failures. |
 | `/api/v1/servers/{id}/mods/{search,install}` and `/{project}/versions` | `mod-browser-dialog.svelte`, Studio detail | Shared provider lookup and install policy; preserve server scope and the explicit Studio `none` browse mode. Dependency selection and install rollback remain application behavior. |
 | `/api/v1/packwiz/packs` and `/{id}` | Studio list/detail | List/create/get/update/delete/clone/import pack control; preserve global pack authorization and filesystem ownership. |
 | `/api/v1/packwiz/packs/{id}/{refresh,updates,migrate,mc-version,deploy}` | Studio detail and deploy dialog | Update selection, staged changes, deployment and migration are separate control operations with their existing recovery boundaries. |

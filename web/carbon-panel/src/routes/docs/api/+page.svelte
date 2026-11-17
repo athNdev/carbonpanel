@@ -133,7 +133,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{ name: 'RoleService', methods: 10, blurb: 'RBAC roles' },
 		{ name: 'ModService', methods: 7, blurb: 'Mod install, versions' },
 		{ name: 'NodeService', methods: 6, blurb: 'Docker nodes, placement' },
-		{ name: 'ConfigService', methods: 5, blurb: 'Settings, config' },
+		{ name: 'ConfigService', methods: 8, blurb: 'Settings, config, credential validation' },
 		{ name: 'UserService', methods: 5, blurb: 'Users, profiles' },
 		{ name: 'SupportService', methods: 4, blurb: 'Diagnostics, bundles' },
 		{ name: 'UploadService', methods: 4, blurb: 'Upload sessions' },
@@ -193,7 +193,8 @@ one at https://mozilla.org/MPL/2.0/.
 		{
 			method: 'POST',
 			path: '/api/v1/settings/validate-key',
-			blurb: 'API key / credential validation'
+			blurb:
+				'Legacy adapter for API key / credential validation (use ConfigService.ValidateProviderKey)'
 		},
 		{ method: 'GET', path: '/api/v1/auth/oidc/callback', blurb: 'OIDC sign-in callback' }
 	];

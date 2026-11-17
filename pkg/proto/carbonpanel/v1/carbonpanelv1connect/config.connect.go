@@ -62,6 +62,9 @@ const (
 	// ConfigServiceSyncGlobalSettingsToServersProcedure is the fully-qualified name of the
 	// ConfigService's SyncGlobalSettingsToServers RPC.
 	ConfigServiceSyncGlobalSettingsToServersProcedure = "/carbonpanel.v1.ConfigService/SyncGlobalSettingsToServers"
+	// ConfigServiceValidateProviderKeyProcedure is the fully-qualified name of the ConfigService's
+	// ValidateProviderKey RPC.
+	ConfigServiceValidateProviderKeyProcedure = "/carbonpanel.v1.ConfigService/ValidateProviderKey"
 )
 
 // ConfigServiceClient is a client for the carbonpanel.v1.ConfigService service.
@@ -80,6 +83,10 @@ type ConfigServiceClient interface {
 	UpdateGlobalSettings(context.Context, *connect.Request[v1.UpdateGlobalSettingsRequest]) (*connect.Response[v1.UpdateGlobalSettingsResponse], error)
 	// Apply global defaults (or specific categories like Ops and Whitelist) to all existing servers
 	SyncGlobalSettingsToServers(context.Context, *connect.Request[v1.SyncGlobalSettingsToServersRequest]) (*connect.Response[v1.SyncGlobalSettingsToServersResponse], error)
+	// Check a content-provider credential (CurseForge or Modrinth) against its
+	// upstream API without storing it. Provider-side outcomes are reported as a
+	// soft result; only transport failures surface as RPC errors.
+	ValidateProviderKey(context.Context, *connect.Request[v1.ValidateProviderKeyRequest]) (*connect.Response[v1.ValidateProviderKeyResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the carbonpanel.v1.ConfigService service. By
@@ -135,6 +142,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("SyncGlobalSettingsToServers")),
 			connect.WithClientOptions(opts...),
 		),
+		validateProviderKey: connect.NewClient[v1.ValidateProviderKeyRequest, v1.ValidateProviderKeyResponse](
+			httpClient,
+			baseURL+ConfigServiceValidateProviderKeyProcedure,
+			connect.WithSchema(configServiceMethods.ByName("ValidateProviderKey")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -147,6 +160,7 @@ type configServiceClient struct {
 	getGlobalSettings           *connect.Client[v1.GetGlobalSettingsRequest, v1.GetGlobalSettingsResponse]
 	updateGlobalSettings        *connect.Client[v1.UpdateGlobalSettingsRequest, v1.UpdateGlobalSettingsResponse]
 	syncGlobalSettingsToServers *connect.Client[v1.SyncGlobalSettingsToServersRequest, v1.SyncGlobalSettingsToServersResponse]
+	validateProviderKey         *connect.Client[v1.ValidateProviderKeyRequest, v1.ValidateProviderKeyResponse]
 }
 
 // GetServerConfig calls carbonpanel.v1.ConfigService.GetServerConfig.
@@ -184,6 +198,11 @@ func (c *configServiceClient) SyncGlobalSettingsToServers(ctx context.Context, r
 	return c.syncGlobalSettingsToServers.CallUnary(ctx, req)
 }
 
+// ValidateProviderKey calls carbonpanel.v1.ConfigService.ValidateProviderKey.
+func (c *configServiceClient) ValidateProviderKey(ctx context.Context, req *connect.Request[v1.ValidateProviderKeyRequest]) (*connect.Response[v1.ValidateProviderKeyResponse], error) {
+	return c.validateProviderKey.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the carbonpanel.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// Fetch server environment variables
@@ -200,6 +219,10 @@ type ConfigServiceHandler interface {
 	UpdateGlobalSettings(context.Context, *connect.Request[v1.UpdateGlobalSettingsRequest]) (*connect.Response[v1.UpdateGlobalSettingsResponse], error)
 	// Apply global defaults (or specific categories like Ops and Whitelist) to all existing servers
 	SyncGlobalSettingsToServers(context.Context, *connect.Request[v1.SyncGlobalSettingsToServersRequest]) (*connect.Response[v1.SyncGlobalSettingsToServersResponse], error)
+	// Check a content-provider credential (CurseForge or Modrinth) against its
+	// upstream API without storing it. Provider-side outcomes are reported as a
+	// soft result; only transport failures surface as RPC errors.
+	ValidateProviderKey(context.Context, *connect.Request[v1.ValidateProviderKeyRequest]) (*connect.Response[v1.ValidateProviderKeyResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -251,6 +274,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("SyncGlobalSettingsToServers")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceValidateProviderKeyHandler := connect.NewUnaryHandler(
+		ConfigServiceValidateProviderKeyProcedure,
+		svc.ValidateProviderKey,
+		connect.WithSchema(configServiceMethods.ByName("ValidateProviderKey")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/carbonpanel.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetServerConfigProcedure:
@@ -267,6 +296,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceUpdateGlobalSettingsHandler.ServeHTTP(w, r)
 		case ConfigServiceSyncGlobalSettingsToServersProcedure:
 			configServiceSyncGlobalSettingsToServersHandler.ServeHTTP(w, r)
+		case ConfigServiceValidateProviderKeyProcedure:
+			configServiceValidateProviderKeyHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -302,4 +333,8 @@ func (UnimplementedConfigServiceHandler) UpdateGlobalSettings(context.Context, *
 
 func (UnimplementedConfigServiceHandler) SyncGlobalSettingsToServers(context.Context, *connect.Request[v1.SyncGlobalSettingsToServersRequest]) (*connect.Response[v1.SyncGlobalSettingsToServersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.ConfigService.SyncGlobalSettingsToServers is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) ValidateProviderKey(context.Context, *connect.Request[v1.ValidateProviderKeyRequest]) (*connect.Response[v1.ValidateProviderKeyResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.ConfigService.ValidateProviderKey is not implemented"))
 }
