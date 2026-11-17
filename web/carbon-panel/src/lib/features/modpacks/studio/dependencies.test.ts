@@ -59,7 +59,8 @@ function singleVersion(overrides: Record<string, unknown> = {}): Record<string, 
 	};
 }
 
-const VERSIONS_URL = '/api/v1/servers/none/mods/fapi/versions?platform=modrinth&loader=fabric&mc_version=1.20.1';
+const VERSIONS_URL =
+	'/api/v1/servers/none/mods/fapi/versions?platform=modrinth&loader=fabric&mc_version=1.20.1';
 
 describe('studio dependency reconciliation', () => {
 	test('installs required dependencies with exact outgoing requests', async () => {

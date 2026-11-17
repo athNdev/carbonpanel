@@ -29,7 +29,10 @@ export interface InstalledPackMod {
 export type PackModSide = 'both' | 'client' | 'server';
 
 /** Transport seam: the panel's real `apiFetch` satisfies this signature. */
-export type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>;
+export type ApiFetch = (
+	input: RequestInfo | URL,
+	init?: RequestInit
+) => Response | Promise<Response>;
 
 export interface DependencyInstallInput {
 	/** Direct dependencies of the mod that was just added to the pack. */
