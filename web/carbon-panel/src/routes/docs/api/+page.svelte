@@ -193,7 +193,8 @@ one at https://mozilla.org/MPL/2.0/.
 		{
 			method: 'POST',
 			path: '/api/v1/settings/validate-key',
-			blurb: 'Legacy adapter for API key / credential validation (use ConfigService.ValidateProviderKey)'
+			blurb:
+				'Legacy adapter for API key / credential validation (use ConfigService.ValidateProviderKey)'
 		},
 		{ method: 'GET', path: '/api/v1/auth/oidc/callback', blurb: 'OIDC sign-in callback' }
 	];

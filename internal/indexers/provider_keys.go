@@ -71,7 +71,7 @@ func validateCurseForgeKey(ctx context.Context, apiKey string) ProviderKeyValida
 	if err != nil {
 		return ProviderKeyValidation{Message: fmt.Sprintf("Connection to CurseForge API failed: %v", err)}
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	switch res.StatusCode {
 	case http.StatusOK:
@@ -82,7 +82,7 @@ func validateCurseForgeKey(ctx context.Context, apiKey string) ProviderKeyValida
 			reqSearch.Header.Set("Accept", "application/json")
 			resSearch, doErr := httpClient.Do(reqSearch)
 			if doErr == nil {
-				defer resSearch.Body.Close()
+				defer func() { _ = resSearch.Body.Close() }()
 				switch resSearch.StatusCode {
 				case http.StatusOK:
 					return ProviderKeyValidation{Valid: true, Message: "Connected successfully! CurseForge API key is valid and approved for mod searches."}
@@ -125,7 +125,7 @@ func validateModrinthKey(ctx context.Context, apiKey, userAgent string) Provider
 		if err != nil {
 			return ProviderKeyValidation{Message: fmt.Sprintf("Connection to Modrinth failed: %v", err)}
 		}
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 
 		switch res.StatusCode {
 		case http.StatusOK:
@@ -155,7 +155,7 @@ func validateModrinthKey(ctx context.Context, apiKey, userAgent string) Provider
 	if err != nil {
 		return ProviderKeyValidation{Message: fmt.Sprintf("Connection to Modrinth failed: %v", err)}
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode == http.StatusOK {
 		return ProviderKeyValidation{Valid: true, Message: "Modrinth API connected successfully (public access)."}
