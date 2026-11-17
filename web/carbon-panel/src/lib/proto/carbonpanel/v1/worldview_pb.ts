@@ -7,17 +7,21 @@
 // @generated from file carbonpanel/v1/worldview.proto (package carbonpanel.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { Message } from "@bufbuild/protobuf";
+import type { GenEnum, GenFile, GenMessage, GenService } from '@bufbuild/protobuf/codegenv2';
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from '@bufbuild/protobuf/codegenv2';
+import type { Timestamp } from '@bufbuild/protobuf/wkt';
+import { file_google_protobuf_timestamp } from '@bufbuild/protobuf/wkt';
+import type { Message } from '@bufbuild/protobuf';
 
 /**
  * Describes the file carbonpanel/v1/worldview.proto.
  */
-export const file_carbonpanel_v1_worldview: GenFile = /*@__PURE__*/
-  fileDesc("Ch5jYXJib25wYW5lbC92MS93b3JsZHZpZXcucHJvdG8SDmNhcmJvbnBhbmVsLnYxIt8BCghXb3JsZFJlZhIrCgRraW5kGAEgASgOMh0uY2FyYm9ucGFuZWwudjEuV29ybGRSZWYuS2luZBIRCglzZXJ2ZXJfaWQYAiABKAkSEgoKbGV2ZWxfbmFtZRgDIAEoCRISCgpiaW5kaW5nX2lkGAQgASgJEhMKC3NuYXBzaG90X2lkGAUgASgJIlYKBEtpbmQSFAoQS0lORF9VTlNQRUNJRklFRBAAEhMKD0xJQlJBUllfQklORElORxABEhAKDFNFUlZFUl9MT0NBTBACEhEKDVNUQVRJQ19JTVBPUlQQAyKQAQoLT2JzZXJ2YXRpb24SDgoGc291cmNlGAEgASgJEi8KC29ic2VydmVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1hcHBsaWNhYmlsaXR5GAMgASgJEhIKCmNvbmZpZGVuY2UYBCABKAkSFQoNY29uZmxpY3Rfbm90ZRgFIAEoCSJ+ChJSZW5kZXJlckRlc2NyaXB0b3ISKgoEdHlwZRgBIAEoDjIcLmNhcmJvbnBhbmVsLnYxLlJlbmRlcmVyVHlwZRIPCgd2ZXJzaW9uGAIgASgJEhQKDGNhcGFiaWxpdGllcxgDIAMoCRIVCg13ZWJfYmFzZV9wYXRoGAQgASgJIpUDCg9Xb3JsZFZpZXdUYXJnZXQSEQoJc2VydmVyX2lkGAEgASgJEisKCXdvcmxkX3JlZhgCIAEoCzIYLmNhcmJvbnBhbmVsLnYxLldvcmxkUmVmEgwKBG5hbWUYAyABKAkSEQoJZGltZW5zaW9uGAQgASgJEjMKDXJlbmRlcmVyX3R5cGUYBSABKA4yHC5jYXJib25wYW5lbC52MS5SZW5kZXJlclR5cGUSNQoOcmVuZGVyZXJfc3RhdGUYBiABKA4yHS5jYXJib25wYW5lbC52MS5SZW5kZXJlclN0YXRlEi8KC2xhc3RfcmVuZGVyGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0CghyZW5kZXJlchgIIAEoCzIiLmNhcmJvbnBhbmVsLnYxLlJlbmRlcmVyRGVzY3JpcHRvchIuCglmcmVzaG5lc3MYCSABKAsyGy5jYXJib25wYW5lbC52MS5PYnNlcnZhdGlvbhIPCgdub2RlX2lkGAogASgJEg0KBWVycm9yGAsgASgJIv8BCgpNYXBPdmVybGF5EgoKAmlkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIrCgl3b3JsZF9yZWYYAyABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZhIRCglkaW1lbnNpb24YBCABKAkSDAoEa2luZBgFIAEoCRIJCgF4GAYgASgBEgkKAXoYByABKAESDQoFbGFiZWwYCCABKAkSDQoFc3R5bGUYCSABKAkSDQoFb3duZXIYCiABKAkSEQoJc2Vuc2l0aXZlGAsgASgIEi4KCnVwZGF0ZWRfYXQYDCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIh0KG0xpc3RXb3JsZFZpZXdUYXJnZXRzUmVxdWVzdCJQChxMaXN0V29ybGRWaWV3VGFyZ2V0c1Jlc3BvbnNlEjAKB3RhcmdldHMYASADKAsyHy5jYXJib25wYW5lbC52MS5Xb3JsZFZpZXdUYXJnZXQiWwoZR2V0V29ybGRWaWV3U3RhdHVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoJd29ybGRfcmVmGAIgASgLMhguY2FyYm9ucGFuZWwudjEuV29ybGRSZWYiTQoaR2V0V29ybGRWaWV3U3RhdHVzUmVzcG9uc2USLwoGdGFyZ2V0GAEgASgLMh8uY2FyYm9ucGFuZWwudjEuV29ybGRWaWV3VGFyZ2V0IlwKGkdldFdvcmxkVmlld1Nlc3Npb25SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIrCgl3b3JsZF9yZWYYAiABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZiKfAQobR2V0V29ybGRWaWV3U2Vzc2lvblJlc3BvbnNlEhIKCnByb3h5X3BhdGgYASABKAkSLgoKZXhwaXJlc19hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoFc3RhdGUYAyABKA4yHS5jYXJib25wYW5lbC52MS5SZW5kZXJlclN0YXRlEg4KBnJlYXNvbhgEIAEoCSIsChdMaXN0Q2FwYWJpbGl0aWVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPQoKQ2FwYWJpbGl0eRIMCgRuYW1lGAEgASgJEhEKCXN1cHBvcnRlZBgCIAEoCBIOCgZkZXRhaWwYAyABKAkigQEKGExpc3RDYXBhYmlsaXRpZXNSZXNwb25zZRIzCg1yZW5kZXJlcl90eXBlGAEgASgOMhwuY2FyYm9ucGFuZWwudjEuUmVuZGVyZXJUeXBlEjAKDGNhcGFiaWxpdGllcxgCIAMoCzIaLmNhcmJvbnBhbmVsLnYxLkNhcGFiaWxpdHkiawoWTGlzdE1hcE92ZXJsYXlzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoJd29ybGRfcmVmGAIgASgLMhguY2FyYm9ucGFuZWwudjEuV29ybGRSZWYSEQoJZGltZW5zaW9uGAMgASgJIkcKF0xpc3RNYXBPdmVybGF5c1Jlc3BvbnNlEiwKCG92ZXJsYXlzGAEgAygLMhouY2FyYm9ucGFuZWwudjEuTWFwT3ZlcmxheSJWChRTZXRNYXBPdmVybGF5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoHb3ZlcmxheRgCIAEoCzIaLmNhcmJvbnBhbmVsLnYxLk1hcE92ZXJsYXkiRAoVU2V0TWFwT3ZlcmxheVJlc3BvbnNlEisKB292ZXJsYXkYASABKAsyGi5jYXJib25wYW5lbC52MS5NYXBPdmVybGF5Im0KGlNldFBsYXllclZpc2liaWxpdHlSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIrCgl3b3JsZF9yZWYYAiABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZhIPCgd2aXNpYmxlGAMgASgIImAKG1NldFBsYXllclZpc2liaWxpdHlSZXNwb25zZRIPCgd2aXNpYmxlGAEgASgIEjAKC29ic2VydmF0aW9uGAIgASgLMhsuY2FyYm9ucGFuZWwudjEuT2JzZXJ2YXRpb24qYQoMUmVuZGVyZXJUeXBlEh0KGVJFTkRFUkVSX1RZUEVfVU5TUEVDSUZJRUQQABILCgdCTFVFTUFQEAESDQoJU1FVQVJFTUFQEAISCgoGRFlOTUFQEAMSCgoGU1RBVElDEAQqmQEKDVJlbmRlcmVyU3RhdGUSHgoaUkVOREVSRVJfU1RBVEVfVU5TUEVDSUZJRUQQABIKCgZBQlNFTlQQARIOCgpJTlNUQUxMSU5HEAISDQoJUkVOREVSSU5HEAMSCQoFUkVBRFkQBBIJCgVTVEFMRRAFEgsKB1NUT1BQRUQQBhIJCgVFUlJPUhAHEg8KC1VOU1VQUE9SVEVEEAgy+wUKEFdvcmxkVmlld1NlcnZpY2UScQoUTGlzdFdvcmxkVmlld1RhcmdldHMSKy5jYXJib25wYW5lbC52MS5MaXN0V29ybGRWaWV3VGFyZ2V0c1JlcXVlc3QaLC5jYXJib25wYW5lbC52MS5MaXN0V29ybGRWaWV3VGFyZ2V0c1Jlc3BvbnNlEmsKEkdldFdvcmxkVmlld1N0YXR1cxIpLmNhcmJvbnBhbmVsLnYxLkdldFdvcmxkVmlld1N0YXR1c1JlcXVlc3QaKi5jYXJib25wYW5lbC52MS5HZXRXb3JsZFZpZXdTdGF0dXNSZXNwb25zZRJuChNHZXRXb3JsZFZpZXdTZXNzaW9uEiouY2FyYm9ucGFuZWwudjEuR2V0V29ybGRWaWV3U2Vzc2lvblJlcXVlc3QaKy5jYXJib25wYW5lbC52MS5HZXRXb3JsZFZpZXdTZXNzaW9uUmVzcG9uc2USZQoQTGlzdENhcGFiaWxpdGllcxInLmNhcmJvbnBhbmVsLnYxLkxpc3RDYXBhYmlsaXRpZXNSZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuTGlzdENhcGFiaWxpdGllc1Jlc3BvbnNlEmIKD0xpc3RNYXBPdmVybGF5cxImLmNhcmJvbnBhbmVsLnYxLkxpc3RNYXBPdmVybGF5c1JlcXVlc3QaJy5jYXJib25wYW5lbC52MS5MaXN0TWFwT3ZlcmxheXNSZXNwb25zZRJcCg1TZXRNYXBPdmVybGF5EiQuY2FyYm9ucGFuZWwudjEuU2V0TWFwT3ZlcmxheVJlcXVlc3QaJS5jYXJib25wYW5lbC52MS5TZXRNYXBPdmVybGF5UmVzcG9uc2USbgoTU2V0UGxheWVyVmlzaWJpbGl0eRIqLmNhcmJvbnBhbmVsLnYxLlNldFBsYXllclZpc2liaWxpdHlSZXF1ZXN0GisuY2FyYm9ucGFuZWwudjEuU2V0UGxheWVyVmlzaWJpbGl0eVJlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+export const file_carbonpanel_v1_worldview: GenFile =
+	/*@__PURE__*/
+	fileDesc(
+		'Ch5jYXJib25wYW5lbC92MS93b3JsZHZpZXcucHJvdG8SDmNhcmJvbnBhbmVsLnYxIu4BCghXb3JsZFJlZhIrCgRraW5kGAEgASgOMh0uY2FyYm9ucGFuZWwudjEuV29ybGRSZWYuS2luZBIRCglzZXJ2ZXJfaWQYAiABKAkSEgoKbGV2ZWxfbmFtZRgDIAEoCRISCgpiaW5kaW5nX2lkGAQgASgJEhMKC3NuYXBzaG90X2lkGAUgASgJImUKBEtpbmQSFAoQS0lORF9VTlNQRUNJRklFRBAAEhgKFEtJTkRfTElCUkFSWV9CSU5ESU5HEAESFQoRS0lORF9TRVJWRVJfTE9DQUwQAhIWChJLSU5EX1NUQVRJQ19JTVBPUlQQAyKQAQoLT2JzZXJ2YXRpb24SDgoGc291cmNlGAEgASgJEi8KC29ic2VydmVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1hcHBsaWNhYmlsaXR5GAMgASgJEhIKCmNvbmZpZGVuY2UYBCABKAkSFQoNY29uZmxpY3Rfbm90ZRgFIAEoCSJ+ChJSZW5kZXJlckRlc2NyaXB0b3ISKgoEdHlwZRgBIAEoDjIcLmNhcmJvbnBhbmVsLnYxLlJlbmRlcmVyVHlwZRIPCgd2ZXJzaW9uGAIgASgJEhQKDGNhcGFiaWxpdGllcxgDIAMoCRIVCg13ZWJfYmFzZV9wYXRoGAQgASgJIpUDCg9Xb3JsZFZpZXdUYXJnZXQSEQoJc2VydmVyX2lkGAEgASgJEisKCXdvcmxkX3JlZhgCIAEoCzIYLmNhcmJvbnBhbmVsLnYxLldvcmxkUmVmEgwKBG5hbWUYAyABKAkSEQoJZGltZW5zaW9uGAQgASgJEjMKDXJlbmRlcmVyX3R5cGUYBSABKA4yHC5jYXJib25wYW5lbC52MS5SZW5kZXJlclR5cGUSNQoOcmVuZGVyZXJfc3RhdGUYBiABKA4yHS5jYXJib25wYW5lbC52MS5SZW5kZXJlclN0YXRlEi8KC2xhc3RfcmVuZGVyGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0CghyZW5kZXJlchgIIAEoCzIiLmNhcmJvbnBhbmVsLnYxLlJlbmRlcmVyRGVzY3JpcHRvchIuCglmcmVzaG5lc3MYCSABKAsyGy5jYXJib25wYW5lbC52MS5PYnNlcnZhdGlvbhIPCgdub2RlX2lkGAogASgJEg0KBWVycm9yGAsgASgJIv8BCgpNYXBPdmVybGF5EgoKAmlkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIrCgl3b3JsZF9yZWYYAyABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZhIRCglkaW1lbnNpb24YBCABKAkSDAoEa2luZBgFIAEoCRIJCgF4GAYgASgBEgkKAXoYByABKAESDQoFbGFiZWwYCCABKAkSDQoFc3R5bGUYCSABKAkSDQoFb3duZXIYCiABKAkSEQoJc2Vuc2l0aXZlGAsgASgIEi4KCnVwZGF0ZWRfYXQYDCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIh0KG0xpc3RXb3JsZFZpZXdUYXJnZXRzUmVxdWVzdCJQChxMaXN0V29ybGRWaWV3VGFyZ2V0c1Jlc3BvbnNlEjAKB3RhcmdldHMYASADKAsyHy5jYXJib25wYW5lbC52MS5Xb3JsZFZpZXdUYXJnZXQiWwoZR2V0V29ybGRWaWV3U3RhdHVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoJd29ybGRfcmVmGAIgASgLMhguY2FyYm9ucGFuZWwudjEuV29ybGRSZWYiTQoaR2V0V29ybGRWaWV3U3RhdHVzUmVzcG9uc2USLwoGdGFyZ2V0GAEgASgLMh8uY2FyYm9ucGFuZWwudjEuV29ybGRWaWV3VGFyZ2V0IlwKGkdldFdvcmxkVmlld1Nlc3Npb25SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIrCgl3b3JsZF9yZWYYAiABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZiKfAQobR2V0V29ybGRWaWV3U2Vzc2lvblJlc3BvbnNlEhIKCnByb3h5X3BhdGgYASABKAkSLgoKZXhwaXJlc19hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoFc3RhdGUYAyABKA4yHS5jYXJib25wYW5lbC52MS5SZW5kZXJlclN0YXRlEg4KBnJlYXNvbhgEIAEoCSIsChdMaXN0Q2FwYWJpbGl0aWVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPQoKQ2FwYWJpbGl0eRIMCgRuYW1lGAEgASgJEhEKCXN1cHBvcnRlZBgCIAEoCBIOCgZkZXRhaWwYAyABKAkigQEKGExpc3RDYXBhYmlsaXRpZXNSZXNwb25zZRIzCg1yZW5kZXJlcl90eXBlGAEgASgOMhwuY2FyYm9ucGFuZWwudjEuUmVuZGVyZXJUeXBlEjAKDGNhcGFiaWxpdGllcxgCIAMoCzIaLmNhcmJvbnBhbmVsLnYxLkNhcGFiaWxpdHkiawoWTGlzdE1hcE92ZXJsYXlzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoJd29ybGRfcmVmGAIgASgLMhguY2FyYm9ucGFuZWwudjEuV29ybGRSZWYSEQoJZGltZW5zaW9uGAMgASgJIkcKF0xpc3RNYXBPdmVybGF5c1Jlc3BvbnNlEiwKCG92ZXJsYXlzGAEgAygLMhouY2FyYm9ucGFuZWwudjEuTWFwT3ZlcmxheSJWChRTZXRNYXBPdmVybGF5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoHb3ZlcmxheRgCIAEoCzIaLmNhcmJvbnBhbmVsLnYxLk1hcE92ZXJsYXkiRAoVU2V0TWFwT3ZlcmxheVJlc3BvbnNlEisKB292ZXJsYXkYASABKAsyGi5jYXJib25wYW5lbC52MS5NYXBPdmVybGF5Im0KGlNldFBsYXllclZpc2liaWxpdHlSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIrCgl3b3JsZF9yZWYYAiABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZhIPCgd2aXNpYmxlGAMgASgIImAKG1NldFBsYXllclZpc2liaWxpdHlSZXNwb25zZRIPCgd2aXNpYmxlGAEgASgIEjAKC29ic2VydmF0aW9uGAIgASgLMhsuY2FyYm9ucGFuZWwudjEuT2JzZXJ2YXRpb24qmQEKDFJlbmRlcmVyVHlwZRIdChlSRU5ERVJFUl9UWVBFX1VOU1BFQ0lGSUVEEAASGQoVUkVOREVSRVJfVFlQRV9CTFVFTUFQEAESGwoXUkVOREVSRVJfVFlQRV9TUVVBUkVNQVAQAhIYChRSRU5ERVJFUl9UWVBFX0RZTk1BUBADEhgKFFJFTkRFUkVSX1RZUEVfU1RBVElDEAQqkQIKDVJlbmRlcmVyU3RhdGUSHgoaUkVOREVSRVJfU1RBVEVfVU5TUEVDSUZJRUQQABIZChVSRU5ERVJFUl9TVEFURV9BQlNFTlQQARIdChlSRU5ERVJFUl9TVEFURV9JTlNUQUxMSU5HEAISHAoYUkVOREVSRVJfU1RBVEVfUkVOREVSSU5HEAMSGAoUUkVOREVSRVJfU1RBVEVfUkVBRFkQBBIYChRSRU5ERVJFUl9TVEFURV9TVEFMRRAFEhoKFlJFTkRFUkVSX1NUQVRFX1NUT1BQRUQQBhIYChRSRU5ERVJFUl9TVEFURV9FUlJPUhAHEh4KGlJFTkRFUkVSX1NUQVRFX1VOU1VQUE9SVEVEEAgy+wUKEFdvcmxkVmlld1NlcnZpY2UScQoUTGlzdFdvcmxkVmlld1RhcmdldHMSKy5jYXJib25wYW5lbC52MS5MaXN0V29ybGRWaWV3VGFyZ2V0c1JlcXVlc3QaLC5jYXJib25wYW5lbC52MS5MaXN0V29ybGRWaWV3VGFyZ2V0c1Jlc3BvbnNlEmsKEkdldFdvcmxkVmlld1N0YXR1cxIpLmNhcmJvbnBhbmVsLnYxLkdldFdvcmxkVmlld1N0YXR1c1JlcXVlc3QaKi5jYXJib25wYW5lbC52MS5HZXRXb3JsZFZpZXdTdGF0dXNSZXNwb25zZRJuChNHZXRXb3JsZFZpZXdTZXNzaW9uEiouY2FyYm9ucGFuZWwudjEuR2V0V29ybGRWaWV3U2Vzc2lvblJlcXVlc3QaKy5jYXJib25wYW5lbC52MS5HZXRXb3JsZFZpZXdTZXNzaW9uUmVzcG9uc2USZQoQTGlzdENhcGFiaWxpdGllcxInLmNhcmJvbnBhbmVsLnYxLkxpc3RDYXBhYmlsaXRpZXNSZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuTGlzdENhcGFiaWxpdGllc1Jlc3BvbnNlEmIKD0xpc3RNYXBPdmVybGF5cxImLmNhcmJvbnBhbmVsLnYxLkxpc3RNYXBPdmVybGF5c1JlcXVlc3QaJy5jYXJib25wYW5lbC52MS5MaXN0TWFwT3ZlcmxheXNSZXNwb25zZRJcCg1TZXRNYXBPdmVybGF5EiQuY2FyYm9ucGFuZWwudjEuU2V0TWFwT3ZlcmxheVJlcXVlc3QaJS5jYXJib25wYW5lbC52MS5TZXRNYXBPdmVybGF5UmVzcG9uc2USbgoTU2V0UGxheWVyVmlzaWJpbGl0eRIqLmNhcmJvbnBhbmVsLnYxLlNldFBsYXllclZpc2liaWxpdHlSZXF1ZXN0GisuY2FyYm9ucGFuZWwudjEuU2V0UGxheWVyVmlzaWJpbGl0eVJlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw',
+		[file_google_protobuf_timestamp]
+	);
 
 /**
  * WorldRef is the single tagged reference used by world viewing to identify a
@@ -28,70 +32,74 @@ export const file_carbonpanel_v1_worldview: GenFile = /*@__PURE__*/
  *
  * @generated from message carbonpanel.v1.WorldRef
  */
-export type WorldRef = Message<"carbonpanel.v1.WorldRef"> & {
-  /**
-   * @generated from field: carbonpanel.v1.WorldRef.Kind kind = 1;
-   */
-  kind: WorldRef_Kind;
+export type WorldRef = Message<'carbonpanel.v1.WorldRef'> & {
+	/**
+	 * @generated from field: carbonpanel.v1.WorldRef.Kind kind = 1;
+	 */
+	kind: WorldRef_Kind;
 
-  /**
-   * @generated from field: string server_id = 2;
-   */
-  serverId: string;
+	/**
+	 * @generated from field: string server_id = 2;
+	 */
+	serverId: string;
 
-  /**
-   * @generated from field: string level_name = 3;
-   */
-  levelName: string;
+	/**
+	 * @generated from field: string level_name = 3;
+	 */
+	levelName: string;
 
-  /**
-   * @generated from field: string binding_id = 4;
-   */
-  bindingId: string;
+	/**
+	 * @generated from field: string binding_id = 4;
+	 */
+	bindingId: string;
 
-  /**
-   * @generated from field: string snapshot_id = 5;
-   */
-  snapshotId: string;
+	/**
+	 * @generated from field: string snapshot_id = 5;
+	 */
+	snapshotId: string;
 };
 
 /**
  * Describes the message carbonpanel.v1.WorldRef.
  * Use `create(WorldRefSchema)` to create a new message.
  */
-export const WorldRefSchema: GenMessage<WorldRef> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 0);
+export const WorldRefSchema: GenMessage<WorldRef> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 0);
 
 /**
+ * Kind names the authority that owns the referenced world.
+ *
  * @generated from enum carbonpanel.v1.WorldRef.Kind
  */
 export enum WorldRef_Kind {
-  /**
-   * @generated from enum value: KIND_UNSPECIFIED = 0;
-   */
-  KIND_UNSPECIFIED = 0,
+	/**
+	 * @generated from enum value: KIND_UNSPECIFIED = 0;
+	 */
+	UNSPECIFIED = 0,
 
-  /**
-   * @generated from enum value: LIBRARY_BINDING = 1;
-   */
-  LIBRARY_BINDING = 1,
+	/**
+	 * @generated from enum value: KIND_LIBRARY_BINDING = 1;
+	 */
+	LIBRARY_BINDING = 1,
 
-  /**
-   * @generated from enum value: SERVER_LOCAL = 2;
-   */
-  SERVER_LOCAL = 2,
+	/**
+	 * @generated from enum value: KIND_SERVER_LOCAL = 2;
+	 */
+	SERVER_LOCAL = 2,
 
-  /**
-   * @generated from enum value: STATIC_IMPORT = 3;
-   */
-  STATIC_IMPORT = 3,
+	/**
+	 * @generated from enum value: KIND_STATIC_IMPORT = 3;
+	 */
+	STATIC_IMPORT = 3
 }
 
 /**
  * Describes the enum carbonpanel.v1.WorldRef.Kind.
  */
-export const WorldRef_KindSchema: GenEnum<WorldRef_Kind> = /*@__PURE__*/
-  enumDesc(file_carbonpanel_v1_worldview, 0, 0);
+export const WorldRef_KindSchema: GenEnum<WorldRef_Kind> =
+	/*@__PURE__*/
+	enumDesc(file_carbonpanel_v1_worldview, 0, 0);
 
 /**
  * Observation is the shared provenance envelope. Unknown or stale values are
@@ -99,41 +107,42 @@ export const WorldRef_KindSchema: GenEnum<WorldRef_Kind> = /*@__PURE__*/
  *
  * @generated from message carbonpanel.v1.Observation
  */
-export type Observation = Message<"carbonpanel.v1.Observation"> & {
-  /**
-   * @generated from field: string source = 1;
-   */
-  source: string;
+export type Observation = Message<'carbonpanel.v1.Observation'> & {
+	/**
+	 * @generated from field: string source = 1;
+	 */
+	source: string;
 
-  /**
-   * @generated from field: google.protobuf.Timestamp observed_at = 2;
-   */
-  observedAt?: Timestamp | undefined;
+	/**
+	 * @generated from field: google.protobuf.Timestamp observed_at = 2;
+	 */
+	observedAt?: Timestamp | undefined;
 
-  /**
-   * @generated from field: string applicability = 3;
-   */
-  applicability: string;
+	/**
+	 * @generated from field: string applicability = 3;
+	 */
+	applicability: string;
 
-  /**
-   * detected | inferred | unknown | stale | conflict
-   *
-   * @generated from field: string confidence = 4;
-   */
-  confidence: string;
+	/**
+	 * detected | inferred | unknown | stale | conflict
+	 *
+	 * @generated from field: string confidence = 4;
+	 */
+	confidence: string;
 
-  /**
-   * @generated from field: string conflict_note = 5;
-   */
-  conflictNote: string;
+	/**
+	 * @generated from field: string conflict_note = 5;
+	 */
+	conflictNote: string;
 };
 
 /**
  * Describes the message carbonpanel.v1.Observation.
  * Use `create(ObservationSchema)` to create a new message.
  */
-export const ObservationSchema: GenMessage<Observation> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 1);
+export const ObservationSchema: GenMessage<Observation> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 1);
 
 /**
  * RendererDescriptor lists only capabilities verified against the renderer's
@@ -142,613 +151,670 @@ export const ObservationSchema: GenMessage<Observation> = /*@__PURE__*/
  *
  * @generated from message carbonpanel.v1.RendererDescriptor
  */
-export type RendererDescriptor = Message<"carbonpanel.v1.RendererDescriptor"> & {
-  /**
-   * @generated from field: carbonpanel.v1.RendererType type = 1;
-   */
-  type: RendererType;
+export type RendererDescriptor = Message<'carbonpanel.v1.RendererDescriptor'> & {
+	/**
+	 * @generated from field: carbonpanel.v1.RendererType type = 1;
+	 */
+	type: RendererType;
 
-  /**
-   * @generated from field: string version = 2;
-   */
-  version: string;
+	/**
+	 * @generated from field: string version = 2;
+	 */
+	version: string;
 
-  /**
-   * map.2d, map.3d, dimensions, markers, players, time_weather, telemetry, static
-   *
-   * @generated from field: repeated string capabilities = 3;
-   */
-  capabilities: string[];
+	/**
+	 * map.2d, map.3d, dimensions, markers, players, time_weather, telemetry, static
+	 *
+	 * @generated from field: repeated string capabilities = 3;
+	 */
+	capabilities: string[];
 
-  /**
-   * same-origin reverse-proxy prefix, never an external URL
-   *
-   * @generated from field: string web_base_path = 4;
-   */
-  webBasePath: string;
+	/**
+	 * same-origin reverse-proxy prefix, never an external URL
+	 *
+	 * @generated from field: string web_base_path = 4;
+	 */
+	webBasePath: string;
 };
 
 /**
  * Describes the message carbonpanel.v1.RendererDescriptor.
  * Use `create(RendererDescriptorSchema)` to create a new message.
  */
-export const RendererDescriptorSchema: GenMessage<RendererDescriptor> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 2);
+export const RendererDescriptorSchema: GenMessage<RendererDescriptor> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 2);
 
 /**
  * WorldViewTarget is a read-only projection: it never owns world identity.
  *
  * @generated from message carbonpanel.v1.WorldViewTarget
  */
-export type WorldViewTarget = Message<"carbonpanel.v1.WorldViewTarget"> & {
-  /**
-   * @generated from field: string server_id = 1;
-   */
-  serverId: string;
+export type WorldViewTarget = Message<'carbonpanel.v1.WorldViewTarget'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
 
-  /**
-   * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
-   */
-  worldRef?: WorldRef | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
+	 */
+	worldRef?: WorldRef | undefined;
 
-  /**
-   * @generated from field: string name = 3;
-   */
-  name: string;
+	/**
+	 * @generated from field: string name = 3;
+	 */
+	name: string;
 
-  /**
-   * @generated from field: string dimension = 4;
-   */
-  dimension: string;
+	/**
+	 * @generated from field: string dimension = 4;
+	 */
+	dimension: string;
 
-  /**
-   * @generated from field: carbonpanel.v1.RendererType renderer_type = 5;
-   */
-  rendererType: RendererType;
+	/**
+	 * @generated from field: carbonpanel.v1.RendererType renderer_type = 5;
+	 */
+	rendererType: RendererType;
 
-  /**
-   * @generated from field: carbonpanel.v1.RendererState renderer_state = 6;
-   */
-  rendererState: RendererState;
+	/**
+	 * @generated from field: carbonpanel.v1.RendererState renderer_state = 6;
+	 */
+	rendererState: RendererState;
 
-  /**
-   * @generated from field: google.protobuf.Timestamp last_render = 7;
-   */
-  lastRender?: Timestamp | undefined;
+	/**
+	 * @generated from field: google.protobuf.Timestamp last_render = 7;
+	 */
+	lastRender?: Timestamp | undefined;
 
-  /**
-   * @generated from field: carbonpanel.v1.RendererDescriptor renderer = 8;
-   */
-  renderer?: RendererDescriptor | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.RendererDescriptor renderer = 8;
+	 */
+	renderer?: RendererDescriptor | undefined;
 
-  /**
-   * @generated from field: carbonpanel.v1.Observation freshness = 9;
-   */
-  freshness?: Observation | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.Observation freshness = 9;
+	 */
+	freshness?: Observation | undefined;
 
-  /**
-   * @generated from field: string node_id = 10;
-   */
-  nodeId: string;
+	/**
+	 * @generated from field: string node_id = 10;
+	 */
+	nodeId: string;
 
-  /**
-   * @generated from field: string error = 11;
-   */
-  error: string;
+	/**
+	 * @generated from field: string error = 11;
+	 */
+	error: string;
 };
 
 /**
  * Describes the message carbonpanel.v1.WorldViewTarget.
  * Use `create(WorldViewTargetSchema)` to create a new message.
  */
-export const WorldViewTargetSchema: GenMessage<WorldViewTarget> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 3);
+export const WorldViewTargetSchema: GenMessage<WorldViewTarget> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 3);
 
 /**
+ * MapOverlay is a panel-owned POI, waypoint, marker or region for a world.
+ *
  * @generated from message carbonpanel.v1.MapOverlay
  */
-export type MapOverlay = Message<"carbonpanel.v1.MapOverlay"> & {
-  /**
-   * @generated from field: string id = 1;
-   */
-  id: string;
+export type MapOverlay = Message<'carbonpanel.v1.MapOverlay'> & {
+	/**
+	 * @generated from field: string id = 1;
+	 */
+	id: string;
 
-  /**
-   * @generated from field: string server_id = 2;
-   */
-  serverId: string;
+	/**
+	 * @generated from field: string server_id = 2;
+	 */
+	serverId: string;
 
-  /**
-   * @generated from field: carbonpanel.v1.WorldRef world_ref = 3;
-   */
-  worldRef?: WorldRef | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.WorldRef world_ref = 3;
+	 */
+	worldRef?: WorldRef | undefined;
 
-  /**
-   * @generated from field: string dimension = 4;
-   */
-  dimension: string;
+	/**
+	 * @generated from field: string dimension = 4;
+	 */
+	dimension: string;
 
-  /**
-   * marker | poi | waypoint | region
-   *
-   * @generated from field: string kind = 5;
-   */
-  kind: string;
+	/**
+	 * marker | poi | waypoint | region
+	 *
+	 * @generated from field: string kind = 5;
+	 */
+	kind: string;
 
-  /**
-   * @generated from field: double x = 6;
-   */
-  x: number;
+	/**
+	 * @generated from field: double x = 6;
+	 */
+	x: number;
 
-  /**
-   * @generated from field: double z = 7;
-   */
-  z: number;
+	/**
+	 * @generated from field: double z = 7;
+	 */
+	z: number;
 
-  /**
-   * @generated from field: string label = 8;
-   */
-  label: string;
+	/**
+	 * @generated from field: string label = 8;
+	 */
+	label: string;
 
-  /**
-   * @generated from field: string style = 9;
-   */
-  style: string;
+	/**
+	 * @generated from field: string style = 9;
+	 */
+	style: string;
 
-  /**
-   * @generated from field: string owner = 10;
-   */
-  owner: string;
+	/**
+	 * @generated from field: string owner = 10;
+	 */
+	owner: string;
 
-  /**
-   * @generated from field: bool sensitive = 11;
-   */
-  sensitive: boolean;
+	/**
+	 * @generated from field: bool sensitive = 11;
+	 */
+	sensitive: boolean;
 
-  /**
-   * @generated from field: google.protobuf.Timestamp updated_at = 12;
-   */
-  updatedAt?: Timestamp | undefined;
+	/**
+	 * @generated from field: google.protobuf.Timestamp updated_at = 12;
+	 */
+	updatedAt?: Timestamp | undefined;
 };
 
 /**
  * Describes the message carbonpanel.v1.MapOverlay.
  * Use `create(MapOverlaySchema)` to create a new message.
  */
-export const MapOverlaySchema: GenMessage<MapOverlay> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 4);
+export const MapOverlaySchema: GenMessage<MapOverlay> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 4);
 
 /**
+ * ListWorldViewTargetsRequest asks for every world the caller may read.
+ *
  * @generated from message carbonpanel.v1.ListWorldViewTargetsRequest
  */
-export type ListWorldViewTargetsRequest = Message<"carbonpanel.v1.ListWorldViewTargetsRequest"> & {
-};
+export type ListWorldViewTargetsRequest =
+	Message<'carbonpanel.v1.ListWorldViewTargetsRequest'> & {};
 
 /**
  * Describes the message carbonpanel.v1.ListWorldViewTargetsRequest.
  * Use `create(ListWorldViewTargetsRequestSchema)` to create a new message.
  */
-export const ListWorldViewTargetsRequestSchema: GenMessage<ListWorldViewTargetsRequest> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 5);
+export const ListWorldViewTargetsRequestSchema: GenMessage<ListWorldViewTargetsRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 5);
 
 /**
+ * ListWorldViewTargetsResponse carries the RBAC-filtered world inventory.
+ *
  * @generated from message carbonpanel.v1.ListWorldViewTargetsResponse
  */
-export type ListWorldViewTargetsResponse = Message<"carbonpanel.v1.ListWorldViewTargetsResponse"> & {
-  /**
-   * @generated from field: repeated carbonpanel.v1.WorldViewTarget targets = 1;
-   */
-  targets: WorldViewTarget[];
-};
+export type ListWorldViewTargetsResponse =
+	Message<'carbonpanel.v1.ListWorldViewTargetsResponse'> & {
+		/**
+		 * @generated from field: repeated carbonpanel.v1.WorldViewTarget targets = 1;
+		 */
+		targets: WorldViewTarget[];
+	};
 
 /**
  * Describes the message carbonpanel.v1.ListWorldViewTargetsResponse.
  * Use `create(ListWorldViewTargetsResponseSchema)` to create a new message.
  */
-export const ListWorldViewTargetsResponseSchema: GenMessage<ListWorldViewTargetsResponse> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 6);
+export const ListWorldViewTargetsResponseSchema: GenMessage<ListWorldViewTargetsResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 6);
 
 /**
+ * GetWorldViewStatusRequest asks for the status of one server-local world.
+ *
  * @generated from message carbonpanel.v1.GetWorldViewStatusRequest
  */
-export type GetWorldViewStatusRequest = Message<"carbonpanel.v1.GetWorldViewStatusRequest"> & {
-  /**
-   * @generated from field: string server_id = 1;
-   */
-  serverId: string;
+export type GetWorldViewStatusRequest = Message<'carbonpanel.v1.GetWorldViewStatusRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
 
-  /**
-   * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
-   */
-  worldRef?: WorldRef | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
+	 */
+	worldRef?: WorldRef | undefined;
 };
 
 /**
  * Describes the message carbonpanel.v1.GetWorldViewStatusRequest.
  * Use `create(GetWorldViewStatusRequestSchema)` to create a new message.
  */
-export const GetWorldViewStatusRequestSchema: GenMessage<GetWorldViewStatusRequest> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 7);
+export const GetWorldViewStatusRequestSchema: GenMessage<GetWorldViewStatusRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 7);
 
 /**
+ * GetWorldViewStatusResponse returns the current target projection.
+ *
  * @generated from message carbonpanel.v1.GetWorldViewStatusResponse
  */
-export type GetWorldViewStatusResponse = Message<"carbonpanel.v1.GetWorldViewStatusResponse"> & {
-  /**
-   * @generated from field: carbonpanel.v1.WorldViewTarget target = 1;
-   */
-  target?: WorldViewTarget | undefined;
+export type GetWorldViewStatusResponse = Message<'carbonpanel.v1.GetWorldViewStatusResponse'> & {
+	/**
+	 * @generated from field: carbonpanel.v1.WorldViewTarget target = 1;
+	 */
+	target?: WorldViewTarget | undefined;
 };
 
 /**
  * Describes the message carbonpanel.v1.GetWorldViewStatusResponse.
  * Use `create(GetWorldViewStatusResponseSchema)` to create a new message.
  */
-export const GetWorldViewStatusResponseSchema: GenMessage<GetWorldViewStatusResponse> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 8);
+export const GetWorldViewStatusResponseSchema: GenMessage<GetWorldViewStatusResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 8);
 
 /**
+ * GetWorldViewSessionRequest asks for a same-origin map proxy session.
+ *
  * @generated from message carbonpanel.v1.GetWorldViewSessionRequest
  */
-export type GetWorldViewSessionRequest = Message<"carbonpanel.v1.GetWorldViewSessionRequest"> & {
-  /**
-   * @generated from field: string server_id = 1;
-   */
-  serverId: string;
+export type GetWorldViewSessionRequest = Message<'carbonpanel.v1.GetWorldViewSessionRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
 
-  /**
-   * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
-   */
-  worldRef?: WorldRef | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
+	 */
+	worldRef?: WorldRef | undefined;
 };
 
 /**
  * Describes the message carbonpanel.v1.GetWorldViewSessionRequest.
  * Use `create(GetWorldViewSessionRequestSchema)` to create a new message.
  */
-export const GetWorldViewSessionRequestSchema: GenMessage<GetWorldViewSessionRequest> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 9);
+export const GetWorldViewSessionRequestSchema: GenMessage<GetWorldViewSessionRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 9);
 
 /**
+ * GetWorldViewSessionResponse carries an opaque key and honest readiness state.
+ *
  * @generated from message carbonpanel.v1.GetWorldViewSessionResponse
  */
-export type GetWorldViewSessionResponse = Message<"carbonpanel.v1.GetWorldViewSessionResponse"> & {
-  /**
-   * Same-origin path prefix; append the renderer asset path. Empty when the
-   * renderer is unavailable or the caller lacks world_view/read.
-   *
-   * @generated from field: string proxy_path = 1;
-   */
-  proxyPath: string;
+export type GetWorldViewSessionResponse = Message<'carbonpanel.v1.GetWorldViewSessionResponse'> & {
+	/**
+	 * Same-origin path prefix; append the renderer asset path. Empty when the
+	 * renderer is unavailable or the caller lacks world_view/read.
+	 *
+	 * @generated from field: string proxy_path = 1;
+	 */
+	proxyPath: string;
 
-  /**
-   * @generated from field: google.protobuf.Timestamp expires_at = 2;
-   */
-  expiresAt?: Timestamp | undefined;
+	/**
+	 * @generated from field: google.protobuf.Timestamp expires_at = 2;
+	 */
+	expiresAt?: Timestamp | undefined;
 
-  /**
-   * @generated from field: carbonpanel.v1.RendererState state = 3;
-   */
-  state: RendererState;
+	/**
+	 * @generated from field: carbonpanel.v1.RendererState state = 3;
+	 */
+	state: RendererState;
 
-  /**
-   * @generated from field: string reason = 4;
-   */
-  reason: string;
+	/**
+	 * @generated from field: string reason = 4;
+	 */
+	reason: string;
 };
 
 /**
  * Describes the message carbonpanel.v1.GetWorldViewSessionResponse.
  * Use `create(GetWorldViewSessionResponseSchema)` to create a new message.
  */
-export const GetWorldViewSessionResponseSchema: GenMessage<GetWorldViewSessionResponse> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 10);
+export const GetWorldViewSessionResponseSchema: GenMessage<GetWorldViewSessionResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 10);
 
 /**
+ * ListCapabilitiesRequest asks which features a renderer actually supports.
+ *
  * @generated from message carbonpanel.v1.ListCapabilitiesRequest
  */
-export type ListCapabilitiesRequest = Message<"carbonpanel.v1.ListCapabilitiesRequest"> & {
-  /**
-   * @generated from field: string server_id = 1;
-   */
-  serverId: string;
+export type ListCapabilitiesRequest = Message<'carbonpanel.v1.ListCapabilitiesRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
 };
 
 /**
  * Describes the message carbonpanel.v1.ListCapabilitiesRequest.
  * Use `create(ListCapabilitiesRequestSchema)` to create a new message.
  */
-export const ListCapabilitiesRequestSchema: GenMessage<ListCapabilitiesRequest> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 11);
+export const ListCapabilitiesRequestSchema: GenMessage<ListCapabilitiesRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 11);
 
 /**
+ * Capability is a single gated renderer feature with a human-readable detail.
+ *
  * @generated from message carbonpanel.v1.Capability
  */
-export type Capability = Message<"carbonpanel.v1.Capability"> & {
-  /**
-   * @generated from field: string name = 1;
-   */
-  name: string;
+export type Capability = Message<'carbonpanel.v1.Capability'> & {
+	/**
+	 * @generated from field: string name = 1;
+	 */
+	name: string;
 
-  /**
-   * @generated from field: bool supported = 2;
-   */
-  supported: boolean;
+	/**
+	 * @generated from field: bool supported = 2;
+	 */
+	supported: boolean;
 
-  /**
-   * @generated from field: string detail = 3;
-   */
-  detail: string;
+	/**
+	 * @generated from field: string detail = 3;
+	 */
+	detail: string;
 };
 
 /**
  * Describes the message carbonpanel.v1.Capability.
  * Use `create(CapabilitySchema)` to create a new message.
  */
-export const CapabilitySchema: GenMessage<Capability> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 12);
+export const CapabilitySchema: GenMessage<Capability> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 12);
 
 /**
+ * ListCapabilitiesResponse returns the renderer's verified capability matrix.
+ *
  * @generated from message carbonpanel.v1.ListCapabilitiesResponse
  */
-export type ListCapabilitiesResponse = Message<"carbonpanel.v1.ListCapabilitiesResponse"> & {
-  /**
-   * @generated from field: carbonpanel.v1.RendererType renderer_type = 1;
-   */
-  rendererType: RendererType;
+export type ListCapabilitiesResponse = Message<'carbonpanel.v1.ListCapabilitiesResponse'> & {
+	/**
+	 * @generated from field: carbonpanel.v1.RendererType renderer_type = 1;
+	 */
+	rendererType: RendererType;
 
-  /**
-   * @generated from field: repeated carbonpanel.v1.Capability capabilities = 2;
-   */
-  capabilities: Capability[];
+	/**
+	 * @generated from field: repeated carbonpanel.v1.Capability capabilities = 2;
+	 */
+	capabilities: Capability[];
 };
 
 /**
  * Describes the message carbonpanel.v1.ListCapabilitiesResponse.
  * Use `create(ListCapabilitiesResponseSchema)` to create a new message.
  */
-export const ListCapabilitiesResponseSchema: GenMessage<ListCapabilitiesResponse> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 13);
+export const ListCapabilitiesResponseSchema: GenMessage<ListCapabilitiesResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 13);
 
 /**
+ * ListMapOverlaysRequest selects overlays for one world and dimension.
+ *
  * @generated from message carbonpanel.v1.ListMapOverlaysRequest
  */
-export type ListMapOverlaysRequest = Message<"carbonpanel.v1.ListMapOverlaysRequest"> & {
-  /**
-   * @generated from field: string server_id = 1;
-   */
-  serverId: string;
+export type ListMapOverlaysRequest = Message<'carbonpanel.v1.ListMapOverlaysRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
 
-  /**
-   * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
-   */
-  worldRef?: WorldRef | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
+	 */
+	worldRef?: WorldRef | undefined;
 
-  /**
-   * @generated from field: string dimension = 3;
-   */
-  dimension: string;
+	/**
+	 * @generated from field: string dimension = 3;
+	 */
+	dimension: string;
 };
 
 /**
  * Describes the message carbonpanel.v1.ListMapOverlaysRequest.
  * Use `create(ListMapOverlaysRequestSchema)` to create a new message.
  */
-export const ListMapOverlaysRequestSchema: GenMessage<ListMapOverlaysRequest> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 14);
+export const ListMapOverlaysRequestSchema: GenMessage<ListMapOverlaysRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 14);
 
 /**
+ * ListMapOverlaysResponse carries the visible overlays.
+ *
  * @generated from message carbonpanel.v1.ListMapOverlaysResponse
  */
-export type ListMapOverlaysResponse = Message<"carbonpanel.v1.ListMapOverlaysResponse"> & {
-  /**
-   * @generated from field: repeated carbonpanel.v1.MapOverlay overlays = 1;
-   */
-  overlays: MapOverlay[];
+export type ListMapOverlaysResponse = Message<'carbonpanel.v1.ListMapOverlaysResponse'> & {
+	/**
+	 * @generated from field: repeated carbonpanel.v1.MapOverlay overlays = 1;
+	 */
+	overlays: MapOverlay[];
 };
 
 /**
  * Describes the message carbonpanel.v1.ListMapOverlaysResponse.
  * Use `create(ListMapOverlaysResponseSchema)` to create a new message.
  */
-export const ListMapOverlaysResponseSchema: GenMessage<ListMapOverlaysResponse> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 15);
+export const ListMapOverlaysResponseSchema: GenMessage<ListMapOverlaysResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 15);
 
 /**
+ * SetMapOverlayRequest carries the overlay to create or update.
+ *
  * @generated from message carbonpanel.v1.SetMapOverlayRequest
  */
-export type SetMapOverlayRequest = Message<"carbonpanel.v1.SetMapOverlayRequest"> & {
-  /**
-   * @generated from field: string server_id = 1;
-   */
-  serverId: string;
+export type SetMapOverlayRequest = Message<'carbonpanel.v1.SetMapOverlayRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
 
-  /**
-   * @generated from field: carbonpanel.v1.MapOverlay overlay = 2;
-   */
-  overlay?: MapOverlay | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.MapOverlay overlay = 2;
+	 */
+	overlay?: MapOverlay | undefined;
 };
 
 /**
  * Describes the message carbonpanel.v1.SetMapOverlayRequest.
  * Use `create(SetMapOverlayRequestSchema)` to create a new message.
  */
-export const SetMapOverlayRequestSchema: GenMessage<SetMapOverlayRequest> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 16);
+export const SetMapOverlayRequestSchema: GenMessage<SetMapOverlayRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 16);
 
 /**
+ * SetMapOverlayResponse confirms the stored overlay.
+ *
  * @generated from message carbonpanel.v1.SetMapOverlayResponse
  */
-export type SetMapOverlayResponse = Message<"carbonpanel.v1.SetMapOverlayResponse"> & {
-  /**
-   * @generated from field: carbonpanel.v1.MapOverlay overlay = 1;
-   */
-  overlay?: MapOverlay | undefined;
+export type SetMapOverlayResponse = Message<'carbonpanel.v1.SetMapOverlayResponse'> & {
+	/**
+	 * @generated from field: carbonpanel.v1.MapOverlay overlay = 1;
+	 */
+	overlay?: MapOverlay | undefined;
 };
 
 /**
  * Describes the message carbonpanel.v1.SetMapOverlayResponse.
  * Use `create(SetMapOverlayResponseSchema)` to create a new message.
  */
-export const SetMapOverlayResponseSchema: GenMessage<SetMapOverlayResponse> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 17);
+export const SetMapOverlayResponseSchema: GenMessage<SetMapOverlayResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 17);
 
 /**
+ * SetPlayerVisibilityRequest opts sensitive player positions in or out.
+ *
  * @generated from message carbonpanel.v1.SetPlayerVisibilityRequest
  */
-export type SetPlayerVisibilityRequest = Message<"carbonpanel.v1.SetPlayerVisibilityRequest"> & {
-  /**
-   * @generated from field: string server_id = 1;
-   */
-  serverId: string;
+export type SetPlayerVisibilityRequest = Message<'carbonpanel.v1.SetPlayerVisibilityRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
 
-  /**
-   * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
-   */
-  worldRef?: WorldRef | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.WorldRef world_ref = 2;
+	 */
+	worldRef?: WorldRef | undefined;
 
-  /**
-   * @generated from field: bool visible = 3;
-   */
-  visible: boolean;
+	/**
+	 * @generated from field: bool visible = 3;
+	 */
+	visible: boolean;
 };
 
 /**
  * Describes the message carbonpanel.v1.SetPlayerVisibilityRequest.
  * Use `create(SetPlayerVisibilityRequestSchema)` to create a new message.
  */
-export const SetPlayerVisibilityRequestSchema: GenMessage<SetPlayerVisibilityRequest> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 18);
+export const SetPlayerVisibilityRequestSchema: GenMessage<SetPlayerVisibilityRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 18);
 
 /**
+ * SetPlayerVisibilityResponse reports the applied opt-in and its provenance.
+ *
  * @generated from message carbonpanel.v1.SetPlayerVisibilityResponse
  */
-export type SetPlayerVisibilityResponse = Message<"carbonpanel.v1.SetPlayerVisibilityResponse"> & {
-  /**
-   * @generated from field: bool visible = 1;
-   */
-  visible: boolean;
+export type SetPlayerVisibilityResponse = Message<'carbonpanel.v1.SetPlayerVisibilityResponse'> & {
+	/**
+	 * @generated from field: bool visible = 1;
+	 */
+	visible: boolean;
 
-  /**
-   * @generated from field: carbonpanel.v1.Observation observation = 2;
-   */
-  observation?: Observation | undefined;
+	/**
+	 * @generated from field: carbonpanel.v1.Observation observation = 2;
+	 */
+	observation?: Observation | undefined;
 };
 
 /**
  * Describes the message carbonpanel.v1.SetPlayerVisibilityResponse.
  * Use `create(SetPlayerVisibilityResponseSchema)` to create a new message.
  */
-export const SetPlayerVisibilityResponseSchema: GenMessage<SetPlayerVisibilityResponse> = /*@__PURE__*/
-  messageDesc(file_carbonpanel_v1_worldview, 19);
+export const SetPlayerVisibilityResponseSchema: GenMessage<SetPlayerVisibilityResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_worldview, 19);
 
 /**
+ * RendererType identifies the renderer adapter used for a world view.
+ *
  * @generated from enum carbonpanel.v1.RendererType
  */
 export enum RendererType {
-  /**
-   * @generated from enum value: RENDERER_TYPE_UNSPECIFIED = 0;
-   */
-  RENDERER_TYPE_UNSPECIFIED = 0,
+	/**
+	 * @generated from enum value: RENDERER_TYPE_UNSPECIFIED = 0;
+	 */
+	UNSPECIFIED = 0,
 
-  /**
-   * @generated from enum value: BLUEMAP = 1;
-   */
-  BLUEMAP = 1,
+	/**
+	 * @generated from enum value: RENDERER_TYPE_BLUEMAP = 1;
+	 */
+	BLUEMAP = 1,
 
-  /**
-   * @generated from enum value: SQUAREMAP = 2;
-   */
-  SQUAREMAP = 2,
+	/**
+	 * @generated from enum value: RENDERER_TYPE_SQUAREMAP = 2;
+	 */
+	SQUAREMAP = 2,
 
-  /**
-   * @generated from enum value: DYNMAP = 3;
-   */
-  DYNMAP = 3,
+	/**
+	 * @generated from enum value: RENDERER_TYPE_DYNMAP = 3;
+	 */
+	DYNMAP = 3,
 
-  /**
-   * @generated from enum value: STATIC = 4;
-   */
-  STATIC = 4,
+	/**
+	 * @generated from enum value: RENDERER_TYPE_STATIC = 4;
+	 */
+	STATIC = 4
 }
 
 /**
  * Describes the enum carbonpanel.v1.RendererType.
  */
-export const RendererTypeSchema: GenEnum<RendererType> = /*@__PURE__*/
-  enumDesc(file_carbonpanel_v1_worldview, 0);
+export const RendererTypeSchema: GenEnum<RendererType> =
+	/*@__PURE__*/
+	enumDesc(file_carbonpanel_v1_worldview, 0);
 
 /**
+ * RendererState is the honest lifecycle state of a renderer for one world.
+ *
  * @generated from enum carbonpanel.v1.RendererState
  */
 export enum RendererState {
-  /**
-   * @generated from enum value: RENDERER_STATE_UNSPECIFIED = 0;
-   */
-  RENDERER_STATE_UNSPECIFIED = 0,
+	/**
+	 * @generated from enum value: RENDERER_STATE_UNSPECIFIED = 0;
+	 */
+	UNSPECIFIED = 0,
 
-  /**
-   * no renderer installed - onboarding
-   *
-   * @generated from enum value: ABSENT = 1;
-   */
-  ABSENT = 1,
+	/**
+	 * no renderer installed - onboarding
+	 *
+	 * @generated from enum value: RENDERER_STATE_ABSENT = 1;
+	 */
+	ABSENT = 1,
 
-  /**
-   * module being created/started
-   *
-   * @generated from enum value: INSTALLING = 2;
-   */
-  INSTALLING = 2,
+	/**
+	 * module being created/started
+	 *
+	 * @generated from enum value: RENDERER_STATE_INSTALLING = 2;
+	 */
+	INSTALLING = 2,
 
-  /**
-   * initial/full render in progress
-   *
-   * @generated from enum value: RENDERING = 3;
-   */
-  RENDERING = 3,
+	/**
+	 * initial/full render in progress
+	 *
+	 * @generated from enum value: RENDERER_STATE_RENDERING = 3;
+	 */
+	RENDERING = 3,
 
-  /**
-   * tiles fresh and reachable
-   *
-   * @generated from enum value: READY = 4;
-   */
-  READY = 4,
+	/**
+	 * tiles fresh and reachable
+	 *
+	 * @generated from enum value: RENDERER_STATE_READY = 4;
+	 */
+	READY = 4,
 
-  /**
-   * last-known tiles, renderer or server stopped
-   *
-   * @generated from enum value: STALE = 5;
-   */
-  STALE = 5,
+	/**
+	 * last-known tiles, renderer or server stopped
+	 *
+	 * @generated from enum value: RENDERER_STATE_STALE = 5;
+	 */
+	STALE = 5,
 
-  /**
-   * renderer stopped, no live overlay
-   *
-   * @generated from enum value: STOPPED = 6;
-   */
-  STOPPED = 6,
+	/**
+	 * renderer stopped, no live overlay
+	 *
+	 * @generated from enum value: RENDERER_STATE_STOPPED = 6;
+	 */
+	STOPPED = 6,
 
-  /**
-   * renderer failed/unreachable, diagnostics available
-   *
-   * @generated from enum value: ERROR = 7;
-   */
-  ERROR = 7,
+	/**
+	 * renderer failed/unreachable, diagnostics available
+	 *
+	 * @generated from enum value: RENDERER_STATE_ERROR = 7;
+	 */
+	ERROR = 7,
 
-  /**
-   * renderer type has no verified adapter capability
-   *
-   * @generated from enum value: UNSUPPORTED = 8;
-   */
-  UNSUPPORTED = 8,
+	/**
+	 * renderer type has no verified adapter capability
+	 *
+	 * @generated from enum value: RENDERER_STATE_UNSUPPORTED = 8;
+	 */
+	UNSUPPORTED = 8
 }
 
 /**
  * Describes the enum carbonpanel.v1.RendererState.
  */
-export const RendererStateSchema: GenEnum<RendererState> = /*@__PURE__*/
-  enumDesc(file_carbonpanel_v1_worldview, 1);
+export const RendererStateSchema: GenEnum<RendererState> =
+	/*@__PURE__*/
+	enumDesc(file_carbonpanel_v1_worldview, 1);
 
 /**
  * The WorldViewService is observation-only. Administrative actions (teleport,
@@ -758,74 +824,76 @@ export const RendererStateSchema: GenEnum<RendererState> = /*@__PURE__*/
  * @generated from service carbonpanel.v1.WorldViewService
  */
 export const WorldViewService: GenService<{
-  /**
-   * Global, RBAC-filtered inventory of viewable worlds.
-   *
-   * @generated from rpc carbonpanel.v1.WorldViewService.ListWorldViewTargets
-   */
-  listWorldViewTargets: {
-    methodKind: "unary";
-    input: typeof ListWorldViewTargetsRequestSchema;
-    output: typeof ListWorldViewTargetsResponseSchema;
-  },
-  /**
-   * Pollable status for one world (baseline push-free freshness channel).
-   *
-   * @generated from rpc carbonpanel.v1.WorldViewService.GetWorldViewStatus
-   */
-  getWorldViewStatus: {
-    methodKind: "unary";
-    input: typeof GetWorldViewStatusRequestSchema;
-    output: typeof GetWorldViewStatusResponseSchema;
-  },
-  /**
-   * Issues an opaque, short-lived, per-user session key for the same-origin
-   * map proxy. No token is placed in a URL; the browser's cp_session cookie
-   * authenticates each proxied asset request.
-   *
-   * @generated from rpc carbonpanel.v1.WorldViewService.GetWorldViewSession
-   */
-  getWorldViewSession: {
-    methodKind: "unary";
-    input: typeof GetWorldViewSessionRequestSchema;
-    output: typeof GetWorldViewSessionResponseSchema;
-  },
-  /**
-   * Capability matrix for the selected renderer, used to gate visible controls.
-   *
-   * @generated from rpc carbonpanel.v1.WorldViewService.ListCapabilities
-   */
-  listCapabilities: {
-    methodKind: "unary";
-    input: typeof ListCapabilitiesRequestSchema;
-    output: typeof ListCapabilitiesResponseSchema;
-  },
-  /**
-   * @generated from rpc carbonpanel.v1.WorldViewService.ListMapOverlays
-   */
-  listMapOverlays: {
-    methodKind: "unary";
-    input: typeof ListMapOverlaysRequestSchema;
-    output: typeof ListMapOverlaysResponseSchema;
-  },
-  /**
-   * @generated from rpc carbonpanel.v1.WorldViewService.SetMapOverlay
-   */
-  setMapOverlay: {
-    methodKind: "unary";
-    input: typeof SetMapOverlayRequestSchema;
-    output: typeof SetMapOverlayResponseSchema;
-  },
-  /**
-   * Opt-in, audited disclosure of sensitive player locations.
-   *
-   * @generated from rpc carbonpanel.v1.WorldViewService.SetPlayerVisibility
-   */
-  setPlayerVisibility: {
-    methodKind: "unary";
-    input: typeof SetPlayerVisibilityRequestSchema;
-    output: typeof SetPlayerVisibilityResponseSchema;
-  },
-}> = /*@__PURE__*/
-  serviceDesc(file_carbonpanel_v1_worldview, 0);
-
+	/**
+	 * Global, RBAC-filtered inventory of viewable worlds.
+	 *
+	 * @generated from rpc carbonpanel.v1.WorldViewService.ListWorldViewTargets
+	 */
+	listWorldViewTargets: {
+		methodKind: 'unary';
+		input: typeof ListWorldViewTargetsRequestSchema;
+		output: typeof ListWorldViewTargetsResponseSchema;
+	};
+	/**
+	 * Pollable status for one world (baseline push-free freshness channel).
+	 *
+	 * @generated from rpc carbonpanel.v1.WorldViewService.GetWorldViewStatus
+	 */
+	getWorldViewStatus: {
+		methodKind: 'unary';
+		input: typeof GetWorldViewStatusRequestSchema;
+		output: typeof GetWorldViewStatusResponseSchema;
+	};
+	/**
+	 * Issues an opaque, short-lived, per-user session key for the same-origin
+	 * map proxy. No token is placed in a URL; the browser's cp_session cookie
+	 * authenticates each proxied asset request.
+	 *
+	 * @generated from rpc carbonpanel.v1.WorldViewService.GetWorldViewSession
+	 */
+	getWorldViewSession: {
+		methodKind: 'unary';
+		input: typeof GetWorldViewSessionRequestSchema;
+		output: typeof GetWorldViewSessionResponseSchema;
+	};
+	/**
+	 * Capability matrix for the selected renderer, used to gate visible controls.
+	 *
+	 * @generated from rpc carbonpanel.v1.WorldViewService.ListCapabilities
+	 */
+	listCapabilities: {
+		methodKind: 'unary';
+		input: typeof ListCapabilitiesRequestSchema;
+		output: typeof ListCapabilitiesResponseSchema;
+	};
+	/**
+	 * Lists panel-owned overlays for one world and dimension.
+	 *
+	 * @generated from rpc carbonpanel.v1.WorldViewService.ListMapOverlays
+	 */
+	listMapOverlays: {
+		methodKind: 'unary';
+		input: typeof ListMapOverlaysRequestSchema;
+		output: typeof ListMapOverlaysResponseSchema;
+	};
+	/**
+	 * Creates or updates an overlay; requires the world_view/update permission.
+	 *
+	 * @generated from rpc carbonpanel.v1.WorldViewService.SetMapOverlay
+	 */
+	setMapOverlay: {
+		methodKind: 'unary';
+		input: typeof SetMapOverlayRequestSchema;
+		output: typeof SetMapOverlayResponseSchema;
+	};
+	/**
+	 * Opt-in, audited disclosure of sensitive player locations.
+	 *
+	 * @generated from rpc carbonpanel.v1.WorldViewService.SetPlayerVisibility
+	 */
+	setPlayerVisibility: {
+		methodKind: 'unary';
+		input: typeof SetPlayerVisibilityRequestSchema;
+		output: typeof SetPlayerVisibilityResponseSchema;
+	};
+}> = /*@__PURE__*/ serviceDesc(file_carbonpanel_v1_worldview, 0);

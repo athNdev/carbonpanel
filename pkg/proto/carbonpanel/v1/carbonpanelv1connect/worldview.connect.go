@@ -73,7 +73,9 @@ type WorldViewServiceClient interface {
 	GetWorldViewSession(context.Context, *connect.Request[v1.GetWorldViewSessionRequest]) (*connect.Response[v1.GetWorldViewSessionResponse], error)
 	// Capability matrix for the selected renderer, used to gate visible controls.
 	ListCapabilities(context.Context, *connect.Request[v1.ListCapabilitiesRequest]) (*connect.Response[v1.ListCapabilitiesResponse], error)
+	// Lists panel-owned overlays for one world and dimension.
 	ListMapOverlays(context.Context, *connect.Request[v1.ListMapOverlaysRequest]) (*connect.Response[v1.ListMapOverlaysResponse], error)
+	// Creates or updates an overlay; requires the world_view/update permission.
 	SetMapOverlay(context.Context, *connect.Request[v1.SetMapOverlayRequest]) (*connect.Response[v1.SetMapOverlayResponse], error)
 	// Opt-in, audited disclosure of sensitive player locations.
 	SetPlayerVisibility(context.Context, *connect.Request[v1.SetPlayerVisibilityRequest]) (*connect.Response[v1.SetPlayerVisibilityResponse], error)
@@ -193,7 +195,9 @@ type WorldViewServiceHandler interface {
 	GetWorldViewSession(context.Context, *connect.Request[v1.GetWorldViewSessionRequest]) (*connect.Response[v1.GetWorldViewSessionResponse], error)
 	// Capability matrix for the selected renderer, used to gate visible controls.
 	ListCapabilities(context.Context, *connect.Request[v1.ListCapabilitiesRequest]) (*connect.Response[v1.ListCapabilitiesResponse], error)
+	// Lists panel-owned overlays for one world and dimension.
 	ListMapOverlays(context.Context, *connect.Request[v1.ListMapOverlaysRequest]) (*connect.Response[v1.ListMapOverlaysResponse], error)
+	// Creates or updates an overlay; requires the world_view/update permission.
 	SetMapOverlay(context.Context, *connect.Request[v1.SetMapOverlayRequest]) (*connect.Response[v1.SetMapOverlayResponse], error)
 	// Opt-in, audited disclosure of sensitive player locations.
 	SetPlayerVisibility(context.Context, *connect.Request[v1.SetPlayerVisibilityRequest]) (*connect.Response[v1.SetPlayerVisibilityResponse], error)

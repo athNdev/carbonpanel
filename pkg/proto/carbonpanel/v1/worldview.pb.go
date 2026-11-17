@@ -27,31 +27,32 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// RendererType identifies the renderer adapter used for a world view.
 type RendererType int32
 
 const (
 	RendererType_RENDERER_TYPE_UNSPECIFIED RendererType = 0
-	RendererType_BLUEMAP                   RendererType = 1
-	RendererType_SQUAREMAP                 RendererType = 2
-	RendererType_DYNMAP                    RendererType = 3
-	RendererType_STATIC                    RendererType = 4
+	RendererType_RENDERER_TYPE_BLUEMAP     RendererType = 1
+	RendererType_RENDERER_TYPE_SQUAREMAP   RendererType = 2
+	RendererType_RENDERER_TYPE_DYNMAP      RendererType = 3
+	RendererType_RENDERER_TYPE_STATIC      RendererType = 4
 )
 
 // Enum value maps for RendererType.
 var (
 	RendererType_name = map[int32]string{
 		0: "RENDERER_TYPE_UNSPECIFIED",
-		1: "BLUEMAP",
-		2: "SQUAREMAP",
-		3: "DYNMAP",
-		4: "STATIC",
+		1: "RENDERER_TYPE_BLUEMAP",
+		2: "RENDERER_TYPE_SQUAREMAP",
+		3: "RENDERER_TYPE_DYNMAP",
+		4: "RENDERER_TYPE_STATIC",
 	}
 	RendererType_value = map[string]int32{
 		"RENDERER_TYPE_UNSPECIFIED": 0,
-		"BLUEMAP":                   1,
-		"SQUAREMAP":                 2,
-		"DYNMAP":                    3,
-		"STATIC":                    4,
+		"RENDERER_TYPE_BLUEMAP":     1,
+		"RENDERER_TYPE_SQUAREMAP":   2,
+		"RENDERER_TYPE_DYNMAP":      3,
+		"RENDERER_TYPE_STATIC":      4,
 	}
 )
 
@@ -82,43 +83,44 @@ func (RendererType) EnumDescriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{0}
 }
 
+// RendererState is the honest lifecycle state of a renderer for one world.
 type RendererState int32
 
 const (
 	RendererState_RENDERER_STATE_UNSPECIFIED RendererState = 0
-	RendererState_ABSENT                     RendererState = 1 // no renderer installed - onboarding
-	RendererState_INSTALLING                 RendererState = 2 // module being created/started
-	RendererState_RENDERING                  RendererState = 3 // initial/full render in progress
-	RendererState_READY                      RendererState = 4 // tiles fresh and reachable
-	RendererState_STALE                      RendererState = 5 // last-known tiles, renderer or server stopped
-	RendererState_STOPPED                    RendererState = 6 // renderer stopped, no live overlay
-	RendererState_ERROR                      RendererState = 7 // renderer failed/unreachable, diagnostics available
-	RendererState_UNSUPPORTED                RendererState = 8 // renderer type has no verified adapter capability
+	RendererState_RENDERER_STATE_ABSENT      RendererState = 1 // no renderer installed - onboarding
+	RendererState_RENDERER_STATE_INSTALLING  RendererState = 2 // module being created/started
+	RendererState_RENDERER_STATE_RENDERING   RendererState = 3 // initial/full render in progress
+	RendererState_RENDERER_STATE_READY       RendererState = 4 // tiles fresh and reachable
+	RendererState_RENDERER_STATE_STALE       RendererState = 5 // last-known tiles, renderer or server stopped
+	RendererState_RENDERER_STATE_STOPPED     RendererState = 6 // renderer stopped, no live overlay
+	RendererState_RENDERER_STATE_ERROR       RendererState = 7 // renderer failed/unreachable, diagnostics available
+	RendererState_RENDERER_STATE_UNSUPPORTED RendererState = 8 // renderer type has no verified adapter capability
 )
 
 // Enum value maps for RendererState.
 var (
 	RendererState_name = map[int32]string{
 		0: "RENDERER_STATE_UNSPECIFIED",
-		1: "ABSENT",
-		2: "INSTALLING",
-		3: "RENDERING",
-		4: "READY",
-		5: "STALE",
-		6: "STOPPED",
-		7: "ERROR",
-		8: "UNSUPPORTED",
+		1: "RENDERER_STATE_ABSENT",
+		2: "RENDERER_STATE_INSTALLING",
+		3: "RENDERER_STATE_RENDERING",
+		4: "RENDERER_STATE_READY",
+		5: "RENDERER_STATE_STALE",
+		6: "RENDERER_STATE_STOPPED",
+		7: "RENDERER_STATE_ERROR",
+		8: "RENDERER_STATE_UNSUPPORTED",
 	}
 	RendererState_value = map[string]int32{
 		"RENDERER_STATE_UNSPECIFIED": 0,
-		"ABSENT":                     1,
-		"INSTALLING":                 2,
-		"RENDERING":                  3,
-		"READY":                      4,
-		"STALE":                      5,
-		"STOPPED":                    6,
-		"ERROR":                      7,
-		"UNSUPPORTED":                8,
+		"RENDERER_STATE_ABSENT":      1,
+		"RENDERER_STATE_INSTALLING":  2,
+		"RENDERER_STATE_RENDERING":   3,
+		"RENDERER_STATE_READY":       4,
+		"RENDERER_STATE_STALE":       5,
+		"RENDERER_STATE_STOPPED":     6,
+		"RENDERER_STATE_ERROR":       7,
+		"RENDERER_STATE_UNSUPPORTED": 8,
 	}
 )
 
@@ -149,28 +151,29 @@ func (RendererState) EnumDescriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{1}
 }
 
+// Kind names the authority that owns the referenced world.
 type WorldRef_Kind int32
 
 const (
-	WorldRef_KIND_UNSPECIFIED WorldRef_Kind = 0
-	WorldRef_LIBRARY_BINDING  WorldRef_Kind = 1
-	WorldRef_SERVER_LOCAL     WorldRef_Kind = 2
-	WorldRef_STATIC_IMPORT    WorldRef_Kind = 3
+	WorldRef_KIND_UNSPECIFIED     WorldRef_Kind = 0
+	WorldRef_KIND_LIBRARY_BINDING WorldRef_Kind = 1
+	WorldRef_KIND_SERVER_LOCAL    WorldRef_Kind = 2
+	WorldRef_KIND_STATIC_IMPORT   WorldRef_Kind = 3
 )
 
 // Enum value maps for WorldRef_Kind.
 var (
 	WorldRef_Kind_name = map[int32]string{
 		0: "KIND_UNSPECIFIED",
-		1: "LIBRARY_BINDING",
-		2: "SERVER_LOCAL",
-		3: "STATIC_IMPORT",
+		1: "KIND_LIBRARY_BINDING",
+		2: "KIND_SERVER_LOCAL",
+		3: "KIND_STATIC_IMPORT",
 	}
 	WorldRef_Kind_value = map[string]int32{
-		"KIND_UNSPECIFIED": 0,
-		"LIBRARY_BINDING":  1,
-		"SERVER_LOCAL":     2,
-		"STATIC_IMPORT":    3,
+		"KIND_UNSPECIFIED":     0,
+		"KIND_LIBRARY_BINDING": 1,
+		"KIND_SERVER_LOCAL":    2,
+		"KIND_STATIC_IMPORT":   3,
 	}
 )
 
@@ -556,6 +559,7 @@ func (x *WorldViewTarget) GetError() string {
 	return ""
 }
 
+// MapOverlay is a panel-owned POI, waypoint, marker or region for a world.
 type MapOverlay struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -688,6 +692,7 @@ func (x *MapOverlay) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// ListWorldViewTargetsRequest asks for every world the caller may read.
 type ListWorldViewTargetsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -724,6 +729,7 @@ func (*ListWorldViewTargetsRequest) Descriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{5}
 }
 
+// ListWorldViewTargetsResponse carries the RBAC-filtered world inventory.
 type ListWorldViewTargetsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Targets       []*WorldViewTarget     `protobuf:"bytes,1,rep,name=targets,proto3" json:"targets,omitempty"`
@@ -768,6 +774,7 @@ func (x *ListWorldViewTargetsResponse) GetTargets() []*WorldViewTarget {
 	return nil
 }
 
+// GetWorldViewStatusRequest asks for the status of one server-local world.
 type GetWorldViewStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -820,6 +827,7 @@ func (x *GetWorldViewStatusRequest) GetWorldRef() *WorldRef {
 	return nil
 }
 
+// GetWorldViewStatusResponse returns the current target projection.
 type GetWorldViewStatusResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Target        *WorldViewTarget       `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
@@ -864,6 +872,7 @@ func (x *GetWorldViewStatusResponse) GetTarget() *WorldViewTarget {
 	return nil
 }
 
+// GetWorldViewSessionRequest asks for a same-origin map proxy session.
 type GetWorldViewSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -916,6 +925,7 @@ func (x *GetWorldViewSessionRequest) GetWorldRef() *WorldRef {
 	return nil
 }
 
+// GetWorldViewSessionResponse carries an opaque key and honest readiness state.
 type GetWorldViewSessionResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Same-origin path prefix; append the renderer asset path. Empty when the
@@ -986,6 +996,7 @@ func (x *GetWorldViewSessionResponse) GetReason() string {
 	return ""
 }
 
+// ListCapabilitiesRequest asks which features a renderer actually supports.
 type ListCapabilitiesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -1030,6 +1041,7 @@ func (x *ListCapabilitiesRequest) GetServerId() string {
 	return ""
 }
 
+// Capability is a single gated renderer feature with a human-readable detail.
 type Capability struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -1090,6 +1102,7 @@ func (x *Capability) GetDetail() string {
 	return ""
 }
 
+// ListCapabilitiesResponse returns the renderer's verified capability matrix.
 type ListCapabilitiesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RendererType  RendererType           `protobuf:"varint,1,opt,name=renderer_type,json=rendererType,proto3,enum=carbonpanel.v1.RendererType" json:"renderer_type,omitempty"`
@@ -1142,6 +1155,7 @@ func (x *ListCapabilitiesResponse) GetCapabilities() []*Capability {
 	return nil
 }
 
+// ListMapOverlaysRequest selects overlays for one world and dimension.
 type ListMapOverlaysRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -1202,6 +1216,7 @@ func (x *ListMapOverlaysRequest) GetDimension() string {
 	return ""
 }
 
+// ListMapOverlaysResponse carries the visible overlays.
 type ListMapOverlaysResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Overlays      []*MapOverlay          `protobuf:"bytes,1,rep,name=overlays,proto3" json:"overlays,omitempty"`
@@ -1246,6 +1261,7 @@ func (x *ListMapOverlaysResponse) GetOverlays() []*MapOverlay {
 	return nil
 }
 
+// SetMapOverlayRequest carries the overlay to create or update.
 type SetMapOverlayRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -1298,6 +1314,7 @@ func (x *SetMapOverlayRequest) GetOverlay() *MapOverlay {
 	return nil
 }
 
+// SetMapOverlayResponse confirms the stored overlay.
 type SetMapOverlayResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Overlay       *MapOverlay            `protobuf:"bytes,1,opt,name=overlay,proto3" json:"overlay,omitempty"`
@@ -1342,6 +1359,7 @@ func (x *SetMapOverlayResponse) GetOverlay() *MapOverlay {
 	return nil
 }
 
+// SetPlayerVisibilityRequest opts sensitive player positions in or out.
 type SetPlayerVisibilityRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -1402,6 +1420,7 @@ func (x *SetPlayerVisibilityRequest) GetVisible() bool {
 	return false
 }
 
+// SetPlayerVisibilityResponse reports the applied opt-in and its provenance.
 type SetPlayerVisibilityResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Visible       bool                   `protobuf:"varint,1,opt,name=visible,proto3" json:"visible,omitempty"`
@@ -1458,7 +1477,7 @@ var File_carbonpanel_v1_worldview_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_worldview_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecarbonpanel/v1/worldview.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x91\x02\n" +
+	"\x1ecarbonpanel/v1/worldview.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa0\x02\n" +
 	"\bWorldRef\x121\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.carbonpanel.v1.WorldRef.KindR\x04kind\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x1d\n" +
@@ -1467,12 +1486,12 @@ const file_carbonpanel_v1_worldview_proto_rawDesc = "" +
 	"\n" +
 	"binding_id\x18\x04 \x01(\tR\tbindingId\x12\x1f\n" +
 	"\vsnapshot_id\x18\x05 \x01(\tR\n" +
-	"snapshotId\"V\n" +
+	"snapshotId\"e\n" +
 	"\x04Kind\x12\x14\n" +
-	"\x10KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
-	"\x0fLIBRARY_BINDING\x10\x01\x12\x10\n" +
-	"\fSERVER_LOCAL\x10\x02\x12\x11\n" +
-	"\rSTATIC_IMPORT\x10\x03\"\xcd\x01\n" +
+	"\x10KIND_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14KIND_LIBRARY_BINDING\x10\x01\x12\x15\n" +
+	"\x11KIND_SERVER_LOCAL\x10\x02\x12\x16\n" +
+	"\x12KIND_STATIC_IMPORT\x10\x03\"\xcd\x01\n" +
 	"\vObservation\x12\x16\n" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12;\n" +
 	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -1562,27 +1581,23 @@ const file_carbonpanel_v1_worldview_proto_rawDesc = "" +
 	"\avisible\x18\x03 \x01(\bR\avisible\"v\n" +
 	"\x1bSetPlayerVisibilityResponse\x12\x18\n" +
 	"\avisible\x18\x01 \x01(\bR\avisible\x12=\n" +
-	"\vobservation\x18\x02 \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation*a\n" +
+	"\vobservation\x18\x02 \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation*\x99\x01\n" +
 	"\fRendererType\x12\x1d\n" +
-	"\x19RENDERER_TYPE_UNSPECIFIED\x10\x00\x12\v\n" +
-	"\aBLUEMAP\x10\x01\x12\r\n" +
-	"\tSQUAREMAP\x10\x02\x12\n" +
-	"\n" +
-	"\x06DYNMAP\x10\x03\x12\n" +
-	"\n" +
-	"\x06STATIC\x10\x04*\x99\x01\n" +
+	"\x19RENDERER_TYPE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15RENDERER_TYPE_BLUEMAP\x10\x01\x12\x1b\n" +
+	"\x17RENDERER_TYPE_SQUAREMAP\x10\x02\x12\x18\n" +
+	"\x14RENDERER_TYPE_DYNMAP\x10\x03\x12\x18\n" +
+	"\x14RENDERER_TYPE_STATIC\x10\x04*\x91\x02\n" +
 	"\rRendererState\x12\x1e\n" +
-	"\x1aRENDERER_STATE_UNSPECIFIED\x10\x00\x12\n" +
-	"\n" +
-	"\x06ABSENT\x10\x01\x12\x0e\n" +
-	"\n" +
-	"INSTALLING\x10\x02\x12\r\n" +
-	"\tRENDERING\x10\x03\x12\t\n" +
-	"\x05READY\x10\x04\x12\t\n" +
-	"\x05STALE\x10\x05\x12\v\n" +
-	"\aSTOPPED\x10\x06\x12\t\n" +
-	"\x05ERROR\x10\a\x12\x0f\n" +
-	"\vUNSUPPORTED\x10\b2\xfb\x05\n" +
+	"\x1aRENDERER_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15RENDERER_STATE_ABSENT\x10\x01\x12\x1d\n" +
+	"\x19RENDERER_STATE_INSTALLING\x10\x02\x12\x1c\n" +
+	"\x18RENDERER_STATE_RENDERING\x10\x03\x12\x18\n" +
+	"\x14RENDERER_STATE_READY\x10\x04\x12\x18\n" +
+	"\x14RENDERER_STATE_STALE\x10\x05\x12\x1a\n" +
+	"\x16RENDERER_STATE_STOPPED\x10\x06\x12\x18\n" +
+	"\x14RENDERER_STATE_ERROR\x10\a\x12\x1e\n" +
+	"\x1aRENDERER_STATE_UNSUPPORTED\x10\b2\xfb\x05\n" +
 	"\x10WorldViewService\x12q\n" +
 	"\x14ListWorldViewTargets\x12+.carbonpanel.v1.ListWorldViewTargetsRequest\x1a,.carbonpanel.v1.ListWorldViewTargetsResponse\x12k\n" +
 	"\x12GetWorldViewStatus\x12).carbonpanel.v1.GetWorldViewStatusRequest\x1a*.carbonpanel.v1.GetWorldViewStatusResponse\x12n\n" +

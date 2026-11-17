@@ -17,11 +17,12 @@ option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;ca
 // through the server's configured level name, and STATIC_IMPORT is a read-only
 // historical tile snapshot.
 message WorldRef {
+  // Kind names the authority that owns the referenced world.
   enum Kind {
     KIND_UNSPECIFIED = 0;
-    LIBRARY_BINDING = 1;
-    SERVER_LOCAL = 2;
-    STATIC_IMPORT = 3;
+    KIND_LIBRARY_BINDING = 1;
+    KIND_SERVER_LOCAL = 2;
+    KIND_STATIC_IMPORT = 3;
   }
   Kind kind = 1;
   string server_id = 2;
@@ -40,24 +41,26 @@ message Observation {
   string conflict_note = 5;
 }
 
+// RendererType identifies the renderer adapter used for a world view.
 enum RendererType {
   RENDERER_TYPE_UNSPECIFIED = 0;
-  BLUEMAP = 1;
-  SQUAREMAP = 2;
-  DYNMAP = 3;
-  STATIC = 4;
+  RENDERER_TYPE_BLUEMAP = 1;
+  RENDERER_TYPE_SQUAREMAP = 2;
+  RENDERER_TYPE_DYNMAP = 3;
+  RENDERER_TYPE_STATIC = 4;
 }
 
+// RendererState is the honest lifecycle state of a renderer for one world.
 enum RendererState {
   RENDERER_STATE_UNSPECIFIED = 0;
-  ABSENT = 1;      // no renderer installed - onboarding
-  INSTALLING = 2;  // module being created/started
-  RENDERING = 3;   // initial/full render in progress
-  READY = 4;       // tiles fresh and reachable
-  STALE = 5;       // last-known tiles, renderer or server stopped
-  STOPPED = 6;     // renderer stopped, no live overlay
-  ERROR = 7;       // renderer failed/unreachable, diagnostics available
-  UNSUPPORTED = 8; // renderer type has no verified adapter capability
+  RENDERER_STATE_ABSENT = 1;      // no renderer installed - onboarding
+  RENDERER_STATE_INSTALLING = 2;  // module being created/started
+  RENDERER_STATE_RENDERING = 3;   // initial/full render in progress
+  RENDERER_STATE_READY = 4;       // tiles fresh and reachable
+  RENDERER_STATE_STALE = 5;       // last-known tiles, renderer or server stopped
+  RENDERER_STATE_STOPPED = 6;     // renderer stopped, no live overlay
+  RENDERER_STATE_ERROR = 7;       // renderer failed/unreachable, diagnostics available
+  RENDERER_STATE_UNSUPPORTED = 8; // renderer type has no verified adapter capability
 }
 
 // RendererDescriptor lists only capabilities verified against the renderer's
@@ -85,6 +88,7 @@ message WorldViewTarget {
   string error = 11;
 }
 
+// MapOverlay is a panel-owned POI, waypoint, marker or region for a world.
 message MapOverlay {
   string id = 1;
   string server_id = 2;
@@ -114,32 +118,40 @@ service WorldViewService {
   rpc GetWorldViewSession(GetWorldViewSessionRequest) returns (GetWorldViewSessionResponse);
   // Capability matrix for the selected renderer, used to gate visible controls.
   rpc ListCapabilities(ListCapabilitiesRequest) returns (ListCapabilitiesResponse);
+  // Lists panel-owned overlays for one world and dimension.
   rpc ListMapOverlays(ListMapOverlaysRequest) returns (ListMapOverlaysResponse);
+  // Creates or updates an overlay; requires the world_view/update permission.
   rpc SetMapOverlay(SetMapOverlayRequest) returns (SetMapOverlayResponse);
   // Opt-in, audited disclosure of sensitive player locations.
   rpc SetPlayerVisibility(SetPlayerVisibilityRequest) returns (SetPlayerVisibilityResponse);
 }
 
+// ListWorldViewTargetsRequest asks for every world the caller may read.
 message ListWorldViewTargetsRequest {}
 
+// ListWorldViewTargetsResponse carries the RBAC-filtered world inventory.
 message ListWorldViewTargetsResponse {
   repeated WorldViewTarget targets = 1;
 }
 
+// GetWorldViewStatusRequest asks for the status of one server-local world.
 message GetWorldViewStatusRequest {
   string server_id = 1;
   WorldRef world_ref = 2;
 }
 
+// GetWorldViewStatusResponse returns the current target projection.
 message GetWorldViewStatusResponse {
   WorldViewTarget target = 1;
 }
 
+// GetWorldViewSessionRequest asks for a same-origin map proxy session.
 message GetWorldViewSessionRequest {
   string server_id = 1;
   WorldRef world_ref = 2;
 }
 
+// GetWorldViewSessionResponse carries an opaque key and honest readiness state.
 message GetWorldViewSessionResponse {
   // Same-origin path prefix; append the renderer asset path. Empty when the
   // renderer is unavailable or the caller lacks world_view/read.
@@ -149,46 +161,55 @@ message GetWorldViewSessionResponse {
   string reason = 4;
 }
 
+// ListCapabilitiesRequest asks which features a renderer actually supports.
 message ListCapabilitiesRequest {
   string server_id = 1;
 }
 
+// Capability is a single gated renderer feature with a human-readable detail.
 message Capability {
   string name = 1;
   bool supported = 2;
   string detail = 3;
 }
 
+// ListCapabilitiesResponse returns the renderer's verified capability matrix.
 message ListCapabilitiesResponse {
   RendererType renderer_type = 1;
   repeated Capability capabilities = 2;
 }
 
+// ListMapOverlaysRequest selects overlays for one world and dimension.
 message ListMapOverlaysRequest {
   string server_id = 1;
   WorldRef world_ref = 2;
   string dimension = 3;
 }
 
+// ListMapOverlaysResponse carries the visible overlays.
 message ListMapOverlaysResponse {
   repeated MapOverlay overlays = 1;
 }
 
+// SetMapOverlayRequest carries the overlay to create or update.
 message SetMapOverlayRequest {
   string server_id = 1;
   MapOverlay overlay = 2;
 }
 
+// SetMapOverlayResponse confirms the stored overlay.
 message SetMapOverlayResponse {
   MapOverlay overlay = 1;
 }
 
+// SetPlayerVisibilityRequest opts sensitive player positions in or out.
 message SetPlayerVisibilityRequest {
   string server_id = 1;
   WorldRef world_ref = 2;
   bool visible = 3;
 }
 
+// SetPlayerVisibilityResponse reports the applied opt-in and its provenance.
 message SetPlayerVisibilityResponse {
   bool visible = 1;
   Observation observation = 2;
