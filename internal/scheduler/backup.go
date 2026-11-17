@@ -364,7 +364,7 @@ func (s *Scheduler) runBackupArchive(ctx context.Context, server *storage.Server
 // The artifact lands in destPath on the controller; world bytes never pass
 // through a controller-local data tree (ADR 0004/0005).
 func (s *Scheduler) archiveWorldViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, destPath string, config BackupTaskConfig, excludes []string) (int, error) {
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	acc, err := s.storageResolver.ForNode(ctx, info, server.DataPath)
 	if err != nil {
 		return 0, err
 	}

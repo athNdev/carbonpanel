@@ -113,7 +113,7 @@ func (s *ConfigService) discardWholeBatch(ctx context.Context, server *storage.S
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	for i := range content {
-		if err := discardStagedContent(ctx, s.store, server, content[i].ID); err != nil {
+		if err := discardStagedContent(ctx, s.store, server, s.storageResolver, content[i].ID); err != nil {
 			return connect.NewError(connect.CodeInternal, err)
 		}
 	}
@@ -138,7 +138,7 @@ func (s *ConfigService) discardBatchItem(ctx context.Context, server *storage.Se
 		if row.ServerID != server.ID || row.Status != storage.StagedStatusStaged {
 			return connect.NewError(connect.CodeNotFound, errors.New("staged item not found"))
 		}
-		if err := discardStagedContent(ctx, s.store, server, id); err != nil {
+		if err := discardStagedContent(ctx, s.store, server, s.storageResolver, id); err != nil {
 			return connect.NewError(connect.CodeInternal, err)
 		}
 		return nil

@@ -36,11 +36,17 @@ import (
 
 var _ carbonpanelv1connect.BackupServiceHandler = (*BackupService)(nil)
 
+// SetStorageResolver supplies the instance-owned node storage resolver.
+func (s *BackupService) SetStorageResolver(resolver *nodestorage.Resolver) {
+	s.storageResolver = resolver
+}
+
 // BackupService manages on-demand backup records (MINE-138).
 type BackupService struct {
 	store            *storage.Store
 	docker           *docker.Client
 	pool             *docker.ClientPool
+	storageResolver  *nodestorage.Resolver
 	s3cfg            appconfig.S3Config
 	log              *logger.Logger
 	enforcer         *rbac.Enforcer
@@ -318,7 +324,7 @@ func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[
 	var worldDataPath string
 	var acc nodestorage.Accessor
 	if nodestorage.RequiresRemoteTransport(nodeInfo) {
-		acc, err = nodestorage.ForNode(nodeInfo, server.DataPath)
+		acc, err = s.storageResolver.ForNode(ctx, nodeInfo, server.DataPath)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeUnavailable, err)
 		}
@@ -329,7 +335,7 @@ func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[
 		}
 		// Restores land in the server's data root on the owning node; map it to the
 		// controller-side path for nodes on shared storage (ADR 0005).
-		worldDataPath, err = nodestorage.EnsureDataRoot(nodeInfo, server.DataPath)
+		worldDataPath, err = nodestorage.EnsureDataRoot(nodeInfo, server.DataPath, s.storageResolver)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeUnavailable, err)
 		}

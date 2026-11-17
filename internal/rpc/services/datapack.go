@@ -19,6 +19,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -30,10 +31,11 @@ import (
 // world-data bundles that run on Vanilla servers (no mod loader) and live under
 // <world>/datapacks.
 type DatapackService struct {
-	store         *storage.Store
-	config        *config.Config
-	log           *logger.Logger
-	uploadManager *upload.Manager
+	store           *storage.Store
+	config          *config.Config
+	log             *logger.Logger
+	uploadManager   *upload.Manager
+	storageResolver *nodestorage.Resolver
 	// indexer, when set, overrides the registry lookup. Tests use this to
 	// inject a fake index; production leaves it nil.
 	indexer indexers.DatapackIndexer
@@ -46,6 +48,11 @@ type DatapackService struct {
 // NewDatapackService creates a datapack service.
 func NewDatapackService(store *storage.Store, cfg *config.Config, uploadManager *upload.Manager, log *logger.Logger) *DatapackService {
 	return &DatapackService{store: store, config: cfg, uploadManager: uploadManager, log: log}
+}
+
+// SetStorageResolver supplies the instance-owned node storage resolver.
+func (s *DatapackService) SetStorageResolver(resolver *nodestorage.Resolver) {
+	s.storageResolver = resolver
 }
 
 // getDatapackIndexer resolves a datapack indexer by name (default: modrinth).
@@ -235,7 +242,7 @@ func (s *DatapackService) InstallDatapack(ctx context.Context, req *connect.Requ
 	var destPath string
 	removeDownload := func() {}
 	if msg.GetStage() {
-		acc, accErr := serverAccessor(ctx, s.store, server)
+		acc, accErr := serverAccessor(ctx, s.store, server, s.storageResolver)
 		if accErr != nil {
 			return nil, stageContentError(accErr)
 		}
@@ -287,7 +294,7 @@ func (s *DatapackService) InstallDatapack(ctx context.Context, req *connect.Requ
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read datapack: %w", readErr))
 		}
 		target := minecraft.DefaultLevelName + "/datapacks/" + filename
-		if _, stageErr := stageContentBytes(ctx, s.store, server, storage.StagedKindDatapack, storage.StagedActionInstall, target, filename, data); stageErr != nil {
+		if _, stageErr := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindDatapack, storage.StagedActionInstall, target, filename, data); stageErr != nil {
 			_ = os.Remove(destPath)
 			return nil, stageContentError(stageErr)
 		}
@@ -363,7 +370,7 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 			return fail(connect.NewError(connect.CodeInternal, fmt.Errorf("read uploaded datapack: %w", readErr)))
 		}
 		target := minecraft.DefaultLevelName + "/datapacks/" + filename
-		if _, stageErr := stageContentBytes(ctx, s.store, server, storage.StagedKindDatapack, storage.StagedActionInstall, target, filename, data); stageErr != nil {
+		if _, stageErr := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindDatapack, storage.StagedActionInstall, target, filename, data); stageErr != nil {
 			return fail(stageContentError(stageErr))
 		}
 		pack := withPackFormat(&v1.InstalledDatapack{

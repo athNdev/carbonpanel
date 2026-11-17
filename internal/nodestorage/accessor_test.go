@@ -6,6 +6,7 @@
 package nodestorage
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,13 +89,13 @@ func TestForNodeRefusesRemoteWithoutAdapter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	localAcc, err := ForNode(NodeInfo{Name: "local", IsLocal: true}, root)
+	localAcc, err := NewResolver(nil).ForNode(context.Background(), NodeInfo{Name: "local", IsLocal: true}, root)
 	defer func() { _ = localAcc.Close() }()
 	if err != nil || localAcc == nil {
 		t.Fatalf("local node must get an accessor: %v", err)
 	}
 
-	if _, err := ForNode(NodeInfo{Name: "remote-1", IsLocal: false}, root); err == nil || !IsUnavailable(err) {
+	if _, err := NewResolver(nil).ForNode(context.Background(), NodeInfo{Name: "remote-1", IsLocal: false}, root); err == nil || !IsUnavailable(err) {
 		t.Fatalf("remote node must be refused with ErrUnavailable, got %v", err)
 	}
 }
@@ -109,7 +110,7 @@ func TestForNodeMissingAdapterCreatesNothing(t *testing.T) {
 	}
 	beforeNames := entryNames(before)
 
-	acc, err := ForNode(NodeInfo{
+	acc, err := NewResolver(nil).ForNode(context.Background(), NodeInfo{
 		Name:                  "remote-1",
 		IsLocal:               false,
 		StorageRoot:           "",
@@ -219,7 +220,7 @@ func TestForNodeMapsRemoteSharedStorage(t *testing.T) {
 	node := NodeInfo{Name: "r1", StorageRoot: mount}
 	dataRoot := filepath.Join("var", "data", "servers", "mc")
 
-	acc, err := ForNode(node, dataRoot)
+	acc, err := NewResolver(nil).ForNode(context.Background(), node, dataRoot)
 	if err != nil {
 		t.Fatalf("ForNode: %v", err)
 	}
@@ -269,8 +270,8 @@ func TestEnsureDataRootTransportRefusedWithoutProvider(t *testing.T) {
 	base := t.TempDir()
 	nodeRoot := filepath.Join(base, "only-on-node")
 	node := NodeInfo{Name: "r-transport", StorageRoot: nodeRoot}
-	SetTransport(nil)
-	if _, err := EnsureDataRoot(node, filepath.Join("var", "data", "servers", "mc")); err == nil || !IsUnavailable(err) {
+	resolver := NewResolver(nil)
+	if _, err := EnsureDataRoot(node, filepath.Join("var", "data", "servers", "mc"), resolver); err == nil || !IsUnavailable(err) {
 		t.Fatalf("transport-only node without provider must be refused, got %v", err)
 	}
 	want := filepath.Join(nodeRoot, "mc")

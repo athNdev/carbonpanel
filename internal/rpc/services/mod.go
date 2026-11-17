@@ -27,6 +27,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -41,10 +42,16 @@ var _ carbonpanelv1connect.ModServiceHandler = (*ModService)(nil)
 
 // ModService implements the Mod service
 type ModService struct {
-	store         *storage.Store
-	docker        *docker.Client
-	log           *logger.Logger
-	uploadManager *upload.Manager
+	store           *storage.Store
+	docker          *docker.Client
+	log             *logger.Logger
+	uploadManager   *upload.Manager
+	storageResolver *nodestorage.Resolver
+}
+
+// SetStorageResolver supplies the instance-owned node storage resolver.
+func (s *ModService) SetStorageResolver(resolver *nodestorage.Resolver) {
+	s.storageResolver = resolver
 }
 
 func modInstallPath(modsDir, filename string) (string, error) {
@@ -415,7 +422,7 @@ func (s *ModService) stageUploadedMod(ctx context.Context, msg *v1.ImportUploade
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get mod info"))
 	}
 	target := info.ModsDirectory + "/" + filepath.Base(originalFilename)
-	if _, err := stageContentBytes(ctx, s.store, server, storage.StagedKindMod, storage.StagedActionInstall, target, originalFilename, data); err != nil {
+	if _, err := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindMod, storage.StagedActionInstall, target, originalFilename, data); err != nil {
 		return nil, stageContentError(err)
 	}
 	_ = os.Remove(tempPath)

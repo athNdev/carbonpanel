@@ -148,6 +148,13 @@ type FileService struct {
 	// includes every test that builds one.
 	cleanupStop chan struct{}
 	stopOnce    sync.Once
+
+	// Detached operations (archive extraction, remote downloads) own their
+	// lifetime: their contexts come from jobCtx, not from the HTTP request.
+	jobCtx      context.Context
+	jobCancel   context.CancelFunc
+	jobWait     sync.WaitGroup
+	jobWaitDone sync.Once
 }
 
 // SetStorageResolver selects the storage transport before the service starts.
@@ -157,6 +164,7 @@ func (s *FileService) SetStorageResolver(resolver *nodestorage.Resolver) {
 
 // NewFileService creates a new file service
 func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *upload.Manager, downloadManager *download.Manager, log *logger.Logger) *FileService {
+	jobCtx, jobCancel := context.WithCancel(context.Background())
 	svc := &FileService{
 		store:           store,
 		docker:          docker,
@@ -164,16 +172,30 @@ func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *
 		uploadManager:   uploadManager,
 		downloadManager: downloadManager,
 		cleanupStop:     make(chan struct{}),
+		jobCtx:          jobCtx,
+		jobCancel:       jobCancel,
 	}
 	go svc.cleanupExtractions()
 	return svc
 }
 
-// Stop terminates the background cleanup goroutine. Safe to call more than once.
-// Callers that construct a FileService outside the normal server startup path
-// (notably tests) should defer this so they do not leak the goroutine.
+// beginDetached claims a slot for an operation that outlives its RPC. The
+// caller must invoke the release inside the spawned goroutine (or on every
+// early return before handoff).
+func (s *FileService) beginDetached() (context.Context, func()) {
+	s.jobWait.Add(1)
+	return s.jobCtx, s.jobWait.Done
+}
+
+// Stop terminates the cleanup goroutine and cancels all detached operations
+// owned by this service, then waits for their accessor cleanup. Safe to call
+// more than once.
 func (s *FileService) Stop() {
-	s.stopOnce.Do(func() { close(s.cleanupStop) })
+	s.stopOnce.Do(func() {
+		close(s.cleanupStop)
+		s.jobCancel()
+	})
+	s.jobWaitDone.Do(func() { s.jobWait.Wait() })
 }
 
 // ListFiles lists files in a directory
@@ -239,6 +261,16 @@ func (s *FileService) openReadOnlyStorage(ctx context.Context, server *storage.S
 	return s.openStorage(ctx, server, false, true)
 }
 
+// resolveAccessor is the single seam that opens node-owned storage for this
+// service instance. A nil receiver is valid for local/shared nodes; remote
+// transport-only nodes fail closed with ErrUnavailable. No process-global
+// transport exists.
+func (s *FileService) resolveAccessor(ctx context.Context, info nodestorage.NodeInfo, server *storage.Server) (nodestorage.Accessor, error) {
+	return s.storageResolver.ForNode(ctx, info, server.DataPath)
+}
+
+// openStorage resolves the owning node's root before any path check, so a
+// controller copy of the data path cannot reject or stand in for the world.
 func (s *FileService) openStorage(ctx context.Context, server *storage.Server, write, cancelWithRequest bool) (string, nodestorage.Accessor, error) {
 	if write {
 		if _, err := dataRootFor(ctx, s.store, server, true); err != nil {
@@ -249,12 +281,16 @@ func (s *FileService) openStorage(ctx context.Context, server *storage.Server, w
 	if err != nil {
 		return "", nil, err
 	}
-	var acc nodestorage.Accessor
-	if s.storageResolver != nil && cancelWithRequest {
-		acc, err = s.storageResolver.ForNode(ctx, info, server.DataPath)
-	} else {
-		acc, err = nodestorage.ForNode(info, server.DataPath)
+	opCtx := ctx
+	if !cancelWithRequest {
+		// Mutating/background work outlives the request; its worker and
+		// temporary files are owned by this service, not by the client.
+		opCtx = s.jobCtx
+		if opCtx == nil {
+			opCtx = context.WithoutCancel(ctx)
+		}
 	}
+	acc, err := s.resolveAccessor(opCtx, info, server)
 	if err != nil {
 		return "", nil, err
 	}
@@ -440,7 +476,7 @@ func (s *FileService) UpdateFile(ctx context.Context, req *connect.Request[v1.Up
 	}
 
 	if msg.GetStage() {
-		if _, err := stageContentBytes(ctx, s.store, server, storage.StagedKindFile, storage.StagedActionReplace, msg.Path, msg.Path, msg.Content); err != nil {
+		if _, err := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindFile, storage.StagedActionReplace, msg.Path, msg.Path, msg.Content); err != nil {
 			return nil, stageContentError(err)
 		}
 		return connect.NewResponse(&v1.UpdateFileResponse{
@@ -503,7 +539,7 @@ func (s *FileService) DeleteFile(ctx context.Context, req *connect.Request[v1.De
 
 	if msg.GetStage() {
 		for _, p := range paths {
-			if _, err := stageContentBytes(ctx, s.store, server, storage.StagedKindFile, storage.StagedActionDelete, p, p, nil); err != nil {
+			if _, err := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindFile, storage.StagedActionDelete, p, p, nil); err != nil {
 				return nil, stageContentError(err)
 			}
 		}
@@ -684,8 +720,10 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 	op := &extractionOp{State: "extracting", ServerID: server.ID, UserID: userID}
 	s.extractions.Store(opID, op)
 
+	detachedCtx, release := s.beginDetached()
 	go func() {
-		_, err := files.ExtractArchive(context.Background(), fullArchivePath, destPath, &op.FilesExtracted)
+		defer release()
+		_, err := files.ExtractArchive(detachedCtx, fullArchivePath, destPath, &op.FilesExtracted)
 		if err != nil {
 			op.fail(err.Error())
 			s.log.Error("Extraction %s failed: %v", opID, err)
@@ -711,14 +749,19 @@ func (s *FileService) extractArchiveViaAccessor(ctx context.Context, server *sto
 	if err != nil {
 		return nil, storageError(err)
 	}
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	// The accessor is handed to a detached job: open it with the service-owned
+	// context so a client disconnect cannot kill the worker mid-extraction.
+	detachedCtx, release := s.beginDetached()
+	acc, err := s.resolveAccessor(detachedCtx, info, server)
 	if err != nil {
+		release()
 		return nil, storageError(err)
 	}
 
 	st, err := acc.Stat(msg.Path)
 	if err != nil {
 		_ = acc.Close()
+		release()
 		if os.IsNotExist(err) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("archive not found"))
 		}
@@ -729,6 +772,7 @@ func (s *FileService) extractArchiveViaAccessor(ctx context.Context, server *sto
 	}
 	if st.IsDir() {
 		_ = acc.Close()
+		release()
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path is a directory, not an archive"))
 	}
 
@@ -742,8 +786,9 @@ func (s *FileService) extractArchiveViaAccessor(ctx context.Context, server *sto
 	s.extractions.Store(opID, op)
 
 	go func() {
+		defer release()
 		defer func() { _ = acc.Close() }()
-		_, err := nodestorage.ExtractZip(context.Background(), acc, msg.Path, destRel, &op.FilesExtracted)
+		_, err := nodestorage.ExtractZip(detachedCtx, acc, msg.Path, destRel, &op.FilesExtracted)
 		if err != nil {
 			op.fail(err.Error())
 			s.log.Error("Extraction %s failed: %v", opID, err)
@@ -855,12 +900,15 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 	}
 	s.remoteDownloads.Store(taskID, op)
 
-	// Run download in background
+	// Run download in background with an owned context: the RPC may end while
+	// the archive is still streaming.
+	detachedCtx, release := s.beginDetached()
 	go func() {
 		defer op.markCompletedAt()
+		defer release()
 
 		client := utils.NewSafeHTTPClient(15*time.Minute, true)
-		httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
+		httpReq, err := http.NewRequestWithContext(detachedCtx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			op.fail(fmt.Sprintf("failed to create HTTP request: %v", err))
 			return
@@ -954,7 +1002,7 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		// Auto-extract if requested
 		if msg.AutoExtract {
 			op.setStatus("extracting")
-			_, err := files.ExtractArchive(context.Background(), tmpPath, destPath, nil)
+			_, err := files.ExtractArchive(detachedCtx, tmpPath, destPath, nil)
 			if err != nil {
 				op.fail(fmt.Sprintf("failed to extract archive: %v", err))
 				return
@@ -1002,7 +1050,16 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 // writes or extracts through nodestorage.ForNode. It never calls dataRootFor
 // or os.MkdirAll on the server tree (ADR 0005).
 func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.DownloadRemoteArchiveRequest, rawURL string) (*connect.Response[v1.DownloadRemoteArchiveResponse], error) {
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	// The accessor is handed to a detached download job: use the service-owned
+	// context so request cancellation cannot strand a half-written archive.
+	detachedCtx, release := s.beginDetached()
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			release()
+		}
+	}()
+	acc, err := s.resolveAccessor(detachedCtx, info, server)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -1033,12 +1090,14 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 	}
 	s.remoteDownloads.Store(taskID, op)
 
+	handedOff = true
 	go func() {
 		defer op.markCompletedAt()
+		defer release()
 		defer func() { _ = acc.Close() }()
 
 		client := utils.NewSafeHTTPClient(15*time.Minute, true)
-		httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
+		httpReq, err := http.NewRequestWithContext(detachedCtx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			op.fail(fmt.Sprintf("failed to create HTTP request: %v", err))
 			return
@@ -1134,7 +1193,7 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 
 		if msg.AutoExtract {
 			op.setStatus("extracting")
-			if _, err := nodestorage.ExtractZipBytes(context.Background(), acc, data, destRel, nil); err != nil {
+			if _, err := nodestorage.ExtractZipBytes(detachedCtx, acc, data, destRel, nil); err != nil {
 				op.fail(fmt.Sprintf("failed to extract archive: %v", err))
 				return
 			}
@@ -1419,7 +1478,7 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 // calls dataRootFor or os.MkdirAll, so a transport-only node cannot grow a
 // controller-local tree (ADR 0005).
 func (s *FileService) createArchiveViaAccessor(ctx context.Context, server *storage.Server, info nodestorage.NodeInfo, msg *v1.CreateArchiveRequest) (*connect.Response[v1.CreateArchiveResponse], error) {
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	acc, err := s.resolveAccessor(ctx, info, server)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -1535,7 +1594,7 @@ func (s *FileService) downloadArchiveViaAccessor(ctx context.Context, server *st
 	if s.downloadManager == nil {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("download manager is not configured"))
 	}
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	acc, err := s.resolveAccessor(ctx, info, server)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -1660,7 +1719,7 @@ func (s *FileService) exportWorldViaAccessor(ctx context.Context, req *connect.R
 	if unsafeWorldExport(server.DataPath) {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("refusing to export unsafe server data path %q", server.DataPath))
 	}
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	acc, err := s.resolveAccessor(ctx, info, server)
 	if err != nil {
 		return nil, storageError(err)
 	}

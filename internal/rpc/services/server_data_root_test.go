@@ -210,8 +210,7 @@ func TestCreateServerPlacesManualModpackThroughRemoteTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := &recordingTransport{workerRoot: workerRoot}
-	nodestorage.SetTransport(rt)
-	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+	svc.SetStorageResolver(nodestorage.NewResolver(rt))
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	registerRemoteCreateNode(t, svc, "transport-create", phantomRoot)
@@ -246,8 +245,7 @@ func TestCreateServerPlacesManualModpackThroughRemoteTransport(t *testing.T) {
 
 func TestCreateServerRefusesManualModpackWithoutRemoteAdapter(t *testing.T) {
 	svc, _ := newDockerPrivilegeTestService(t)
-	nodestorage.SetTransport(nil)
-	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+	svc.SetStorageResolver(nodestorage.NewResolver(nil))
 
 	phantomRoot := filepath.Join(t.TempDir(), "only-on-node")
 	registerRemoteCreateNode(t, svc, "transport-bare", phantomRoot)

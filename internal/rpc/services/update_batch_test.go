@@ -30,7 +30,7 @@ func TestUpdateBatchListsAndDiscardsWithoutTouchingLiveFiles(t *testing.T) {
 	when := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	staged, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "later"}, storage.UpdateWindowAtTime, &when, 0)
 	require.NoError(t, err)
-	content, err := stageContentBytes(ctx, store, server, storage.StagedKindFile, storage.StagedActionReplace, "keep.txt", "keep.txt", []byte("staged"))
+	content, err := stageContentBytes(ctx, store, server, nil, storage.StagedKindFile, storage.StagedActionReplace, "keep.txt", "keep.txt", []byte("staged"))
 	require.NoError(t, err)
 
 	got, err := svc.GetUpdateBatch(ctx, connect.NewRequest(&v1.GetUpdateBatchRequest{ServerId: server.ID}))

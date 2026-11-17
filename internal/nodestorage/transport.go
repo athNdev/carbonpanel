@@ -31,25 +31,6 @@ type Resolver struct{ transport Transport }
 // NewResolver constructs an independent node storage resolver.
 func NewResolver(transport Transport) *Resolver { return &Resolver{transport: transport} }
 
-var (
-	transportMu sync.RWMutex
-	transport   Transport
-)
-
-// SetTransport installs the process-wide remote storage transport. A nil
-// transport leaves remote nodes without shared storage refused.
-func SetTransport(t Transport) {
-	transportMu.Lock()
-	transport = t
-	transportMu.Unlock()
-}
-
-func getTransport() Transport {
-	transportMu.RLock()
-	defer transportMu.RUnlock()
-	return transport
-}
-
 // RequiresRemoteTransport reports whether the node owns storage only on the
 // remote host and the controller must reach it through the worker channel.
 // Shared-storage nodes (controller mount present or node root visible locally)

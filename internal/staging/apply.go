@@ -30,7 +30,18 @@ type fileSnap struct {
 
 // Sweep updates idle clocks and publishes batches whose window has arrived.
 // A lock held by another lifecycle mutation is left for the next sweep.
-func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now time.Time, players func(serverID string) (int, bool), publish Publisher) error {
+// firstResolver allows existing in-package callers to omit the resolver; a nil
+// resolver still resolves local/shared storage and fails closed for remote
+// transport-only nodes. Production callers always pass their owned resolver.
+func firstResolver(resolvers []*nodestorage.Resolver) *nodestorage.Resolver {
+	if len(resolvers) > 0 {
+		return resolvers[0]
+	}
+	return nil
+}
+
+func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now time.Time, players func(serverID string) (int, bool), publish Publisher, resolvers ...*nodestorage.Resolver) error {
+	resolver := firstResolver(resolvers)
 	if store == nil {
 		return nil
 	}
@@ -61,7 +72,7 @@ func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now ti
 			failed = errors.Join(failed, err)
 			continue
 		}
-		err = ApplyBatch(ctx, store, log, server, batch, publish)
+		err = ApplyBatch(ctx, store, log, server, batch, publish, resolver)
 		if lockHeld(err) {
 			if log != nil {
 				log.Warn("Staged batch %s for server %s waits because a lifecycle lock is held", batch.ID, server.ID)
@@ -81,7 +92,8 @@ func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now ti
 // ApplyBatch publishes one due batch. Files and config are restored when the
 // container mutation fails, and the batch stays open. A live config field that
 // moved after staging stops the apply before anything is written.
-func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, server *storage.Server, batch storage.ServerUpdateBatch, publish Publisher) error {
+func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, server *storage.Server, batch storage.ServerUpdateBatch, publish Publisher, resolvers ...*nodestorage.Resolver) error {
+	resolver := firstResolver(resolvers)
 	return operation.RunJournaled(ctx, store, log, server, "apply-batch", "", func() error {
 		if err := store.StagedConfigConflict(ctx, server.ID, batch.ID); err != nil {
 			return err
@@ -94,19 +106,19 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if err != nil {
 			return err
 		}
-		if err := stagedModuleConflict(ctx, store, server, content); err != nil {
+		if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 			return err
 		}
 		var restore func() error
 		if len(content) > 0 {
-			acc, accErr := openAccessor(ctx, store, server)
+			acc, accErr := openAccessor(ctx, store, server, resolver)
 			if accErr != nil {
 				return accErr
 			}
 			snaps, commitErr := commitFiles(acc, content)
 			_ = acc.Close()
 			restore = func() error {
-				again, openErr := openAccessor(ctx, store, server)
+				again, openErr := openAccessor(ctx, store, server, resolver)
 				if openErr != nil {
 					return openErr
 				}
@@ -129,7 +141,7 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 			}
 			applied = append(applied, rec)
 		}
-		moduleIDs, undoModules, modErr := applyStagedModules(ctx, store, server, content)
+		moduleIDs, undoModules, modErr := applyStagedModules(ctx, store, server, content, resolver)
 		if modErr != nil {
 			_ = undoApply(ctx, store, restore, applied, nil)
 			return modErr
@@ -160,7 +172,8 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 // incidental restart does not publish it. recreateModule runs for a staged
 // module whose container spec changed. The returned function puts the files
 // and module fields back and returns the rows to staged.
-func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *storage.Server, recreateModule func(context.Context, string) error) (func(), error) {
+func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *storage.Server, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (func(), error) {
+	resolver := firstResolver(resolvers)
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	if err != nil || batch == nil || batch.Window != string(storage.UpdateWindowNextRestart) {
 		return nil, err
@@ -169,17 +182,17 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 	if err != nil || len(content) == 0 {
 		return nil, err
 	}
-	if err := stagedModuleConflict(ctx, store, server, content); err != nil {
+	if err := stagedModuleConflict(ctx, store, server, content, resolver); err != nil {
 		return nil, err
 	}
-	acc, err := openAccessor(ctx, store, server)
+	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
 	}
 	snaps, err := commitFiles(acc, content)
 	_ = acc.Close()
 	restoreFilesNow := func() error {
-		again, openErr := openAccessor(ctx, store, server)
+		again, openErr := openAccessor(ctx, store, server, resolver)
 		if openErr != nil {
 			return openErr
 		}
@@ -190,7 +203,7 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 		_ = restoreFilesNow()
 		return nil, err
 	}
-	moduleIDs, undoModules, err := applyStagedModules(ctx, store, server, content)
+	moduleIDs, undoModules, err := applyStagedModules(ctx, store, server, content, resolver)
 	if err != nil {
 		_ = restoreFilesNow()
 		return nil, err
@@ -252,7 +265,7 @@ func moduleRestore(undoModules func() error, restore func() error) func() error 
 	}
 }
 
-func stagedModuleConflict(ctx context.Context, store *storage.Store, server *storage.Server, rows []storage.StagedContentChange) error {
+func stagedModuleConflict(ctx context.Context, store *storage.Store, server *storage.Server, rows []storage.StagedContentChange, resolver *nodestorage.Resolver) error {
 	var moduleRows []storage.StagedContentChange
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
@@ -262,7 +275,7 @@ func stagedModuleConflict(ctx context.Context, store *storage.Store, server *sto
 	if len(moduleRows) == 0 {
 		return nil
 	}
-	acc, err := openAccessor(ctx, store, server)
+	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return err
 	}
@@ -384,7 +397,7 @@ func restoreFiles(acc nodestorage.Accessor, snaps []fileSnap) error {
 	return failed
 }
 
-func openAccessor(ctx context.Context, store *storage.Store, server *storage.Server) (nodestorage.Accessor, error) {
+func openAccessor(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver) (nodestorage.Accessor, error) {
 	if nodestorage.IsLegacyLocalNodeID(server.NodeID) {
 		return nodestorage.NewLocal(server.DataPath)
 	}
@@ -392,7 +405,7 @@ func openAccessor(ctx context.Context, store *storage.Store, server *storage.Ser
 	if err != nil {
 		return nil, err
 	}
-	return nodestorage.ForNode(node.StorageInfo(), server.DataPath)
+	return resolver.ForNode(ctx, node.StorageInfo(), server.DataPath)
 }
 
 func lockHeld(err error) bool {

@@ -32,12 +32,12 @@ of the server tree.
 
 `cmd/carbon-storage --mode=accessor` serves the `storageworker` JSON line
 protocol over stdin/stdout, delegating to the same confined rules as
-`nodestorage.NewLocal`. `nodestorage.ForNode` opens a `Transport` when
-`RequiresRemoteTransport` is true.
-
-Production wiring: set `storage.worker_image` to an image that ships
-`/usr/local/bin/carbon-storage` (the panel image build includes it). The panel
-registers `docker.StorageTransport` on startup.
+`nodestorage.NewLocal`. `(*nodestorage.Resolver).ForNode(ctx, node, dataRoot)`
+opens a `Transport` when `RequiresRemoteTransport` is true. The resolver is
+instance-owned: the composition root builds one and injects it into RPC
+services, the scheduler (and its snapshot engine), staging and backup owners.
+There is no process-global transport or `ForNode` free function, so two
+controller instances cannot change one another's storage selection.
 
 The subprocess adapter uses inherited OS pipes: the parent closes its copies
 of the child ends after startup and retains the session ends until shutdown.
@@ -54,12 +54,12 @@ Docker transport resolution carries the operation context through cold pool
 lookup and version negotiation, before worker creation. Cancellation remains
 identifiable through the unavailable-storage wrapper and never selects the
 controller client.
-An instance-owned resolver can select a transport with the caller's context.
-Legacy `ForNode` callers still use the registered process-wide transport and a
-background context until each owning subsystem is migrated.
-ListFiles and GetFile use the composition-root resolver and the RPC context.
-Mutations and background archive operations retain their existing lifetime
-until they gain independently owned cancellation and rollback policies.
+Request-bound reads use the RPC context so a cancelled client closes the worker
+promptly. Detached jobs (archive extraction, remote downloads) use an
+independently owned FileService job context; Stop cancels that context and waits
+for those jobs to release their accessors. Remote-only nodes are refused with
+`ErrUnavailable` by the injected resolver, which never falls back to a
+controller-local tree.
 
 Accessor backups enumerate metadata and apply exclusions before reading file
 contents. Each retained file is read once while writing its archive entry and
@@ -75,14 +75,14 @@ accessors never fall back to controller paths.
 Accessor-backed file RPCs (`ListFiles`, `UpdateFile`, `DeleteFile`,
 `SaveUploadedFile`, `GetFile`, `RenameFile`, `CreateFolder`, `CopyFile`,
 `MoveFile`, `InitFileDownload`), `serverLatestLog`, and CreateServer's
-manual server-pack zip open storage through `nodestorage.ForNode`.
+manual server-pack zip open storage through the instance-owned resolver.
 `ExtractArchive` streams a zip through the same accessor
 (`nodestorage.ExtractZip`) on transport-only nodes. Zip *write* RPCs
 `CreateArchive`, `DownloadArchive`, and `ExportWorld` walk and write
 through `nodestorage.CreateZip` / `WriteZip` (accessor `WriteFile` for
 on-node archives; download/export zip bytes land only in the controller
 download temp). Snapshot create/rollback and worldstore backup/restore
-stream through `nodestorage.ForNode` (`worldstore.BackupToAccessor` /
+stream through the injected resolver's accessor (`worldstore.BackupToAccessor` /
 `RestoreFromAccessor`, `WriteZip` / `ReplaceTreeFromZip`). Backup
 artifacts stay in the controller backup directory. `DownloadRemoteArchive`
 downloads to a controller temp file then writes or extracts through the

@@ -223,12 +223,15 @@ func sharedStorageRoot(node NodeInfo) string {
 // storage are mapped through the controller's mount of that storage: the
 // server directory keeps its name under the controller-side root. Other
 // remote nodes are refused with ErrUnavailable.
-func MapDataPath(node NodeInfo, dataRoot string) (string, error) {
+func MapDataPath(node NodeInfo, dataRoot string, resolvers ...*Resolver) (string, error) {
 	if node.IsLocal {
 		return dataRoot, nil
 	}
 	if RequiresRemoteTransport(node) {
-		if getTransport() == nil {
+		// The instance-owned resolver decides whether a remote adapter exists.
+		// Without one, a remote-only node must never be mapped to a path that
+		// a caller could write on the controller.
+		if len(resolvers) > 0 && resolvers[0] != nil && resolvers[0].transport == nil {
 			return "", fmt.Errorf("%w: remote transport is not configured for node %q", ErrUnavailable, node.Name)
 		}
 		return nodeDataRoot(node, dataRoot), nil
@@ -288,8 +291,8 @@ func NodePath(node NodeInfo, dataRoot, p string) string {
 // directory on shared storage. The controller-side storage root itself must
 // already exist: creating it could hide a missing mount and silently store
 // server data on the controller's local disk.
-func EnsureDataRoot(node NodeInfo, dataRoot string) (string, error) {
-	mapped, err := MapDataPath(node, dataRoot)
+func EnsureDataRoot(node NodeInfo, dataRoot string, resolvers ...*Resolver) (string, error) {
+	mapped, err := MapDataPath(node, dataRoot, resolvers...)
 	if err != nil {
 		return "", err
 	}
@@ -309,15 +312,6 @@ func EnsureDataRoot(node NodeInfo, dataRoot string) (string, error) {
 		}
 	}
 	return mapped, nil
-}
-
-// ForNode returns the accessor for a server data root owned by a node. Local
-// nodes (the controller's own daemon) use the confined local accessor rooted
-// at the server's data path. Remote nodes on shared storage are served through
-// the controller's mount of that storage (see MapDataPath). Remote nodes
-// without shared storage are refused until their storage adapter is wired.
-func ForNode(node NodeInfo, dataRoot string) (Accessor, error) {
-	return NewResolver(getTransport()).ForNode(context.Background(), node, dataRoot)
 }
 
 // ForNode opens node-owned storage using the resolver's transport and context.

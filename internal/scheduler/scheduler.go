@@ -81,6 +81,10 @@ type Scheduler struct {
 	// Snapshot engine for pre-update snapshots and rollback (MINE-23)
 	snapshotEngine *snapshot.Engine
 
+	// Instance-owned node storage resolver (W16), shared with backups and
+	// staged content. No process-global transport is consulted.
+	storageResolver *nodestorage.Resolver
+
 	// Multi-node Docker client pool (optional; falls back to s.docker)
 	clientPool *docker.ClientPool
 
@@ -96,6 +100,9 @@ type Scheduler struct {
 // Config holds scheduler configuration
 type Config struct {
 	CheckInterval time.Duration // How often to check for due tasks
+	// StorageResolver is the instance-owned node storage resolver shared with
+	// the snapshot engine and backup archive operations.
+	StorageResolver *nodestorage.Resolver
 }
 
 // DefaultConfig returns default scheduler configuration
@@ -115,9 +122,10 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 	var snapEngine *snapshot.Engine
 	if appCfg != nil {
 		snapEngine = snapshot.NewEngine(store, docker, sender, log, snapshot.Config{
-			BackupDir:     appCfg.Storage.BackupDir,
-			MaxSnapshots:  appCfg.Storage.MaxSnapshots,
-			RetentionDays: appCfg.Storage.SnapshotRetentionDays,
+			BackupDir:       appCfg.Storage.BackupDir,
+			MaxSnapshots:    appCfg.Storage.MaxSnapshots,
+			RetentionDays:   appCfg.Storage.SnapshotRetentionDays,
+			StorageResolver: cfg.StorageResolver,
 		})
 	}
 
@@ -134,6 +142,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		runningTasks:      make(map[string]bool),
 		cronParser:        cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
 		snapshotEngine:    snapEngine,
+		storageResolver:   cfg.StorageResolver,
 	}
 }
 
@@ -842,7 +851,7 @@ func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Serv
 	if err != nil {
 		return "", err
 	}
-	if handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, true, true, s.recreateModule); handled {
+	if handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, true, true, s.recreateModule, s.storageResolver); handled {
 		if err != nil {
 			return "", err
 		}
@@ -902,7 +911,7 @@ func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server
 	if err != nil {
 		return "", err
 	}
-	if handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, true, true, s.recreateModule); handled {
+	if handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, true, true, s.recreateModule, s.storageResolver); handled {
 		if err != nil {
 			return "", err
 		}
@@ -946,7 +955,7 @@ func (s *Scheduler) StartServerForBoot(ctx context.Context, server *storage.Serv
 	if err != nil {
 		return err
 	}
-	if handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, true, true, s.recreateModule); handled {
+	if handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, true, true, s.recreateModule, s.storageResolver); handled {
 		return err
 	}
 
@@ -1012,11 +1021,15 @@ type stagedLifecycleDocker interface {
 // start an old container and advance LastStarted past an applied on-restart
 // change. A replacement ID is persisted even when Docker reports a partial
 // recreate failure, allowing the next attempt to recover from the right object.
-func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleStore, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error) (bool, error) {
+func recreateForPendingStagedConfig(ctx context.Context, store stagedLifecycleStore, dockerClient stagedLifecycleDocker, log *logger.Logger, server *storage.Server, startReplacement, markStarted bool, recreateModule func(context.Context, string) error, resolvers ...*nodestorage.Resolver) (bool, error) {
+	var resolver *nodestorage.Resolver
+	if len(resolvers) > 0 {
+		resolver = resolvers[0]
+	}
 	undoFiles := func() {}
 	contentReady := false
 	if concrete, ok := store.(*storage.Store); ok {
-		undo, fileErr := staging.CommitNextRestartFiles(ctx, concrete, server, recreateModule)
+		undo, fileErr := staging.CommitNextRestartFiles(ctx, concrete, server, recreateModule, resolver)
 		if fileErr != nil {
 			return true, fmt.Errorf("failed to apply staged content: %w", fileErr)
 		}
@@ -1114,7 +1127,7 @@ func (s *Scheduler) PrepareDeepSleepWake(ctx context.Context, server *storage.Se
 	if err != nil {
 		return err
 	}
-	handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, false, false, s.recreateModule)
+	handled, err := recreateForPendingStagedConfig(ctx, s.store, dockerCli, s.log, server, false, false, s.recreateModule, s.storageResolver)
 	if err != nil {
 		return err
 	}
@@ -1465,7 +1478,7 @@ func (s *Scheduler) executeModpackUpdateTask(ctx context.Context, server *storag
 			if remoteHash != "" {
 				label = "modpack " + remoteHash[:min(8, len(remoteHash))]
 			}
-			if _, err := staging.StageModpackTree(ctx, s.store, server, srcDir, label); err != nil {
+			if _, err := staging.StageModpackTree(ctx, s.store, server, srcDir, label, s.storageResolver); err != nil {
 				return updateSummary, fmt.Errorf("stage modpack into batch: %w", err)
 			}
 			return updateSummary + "; staged into the open batch", nil

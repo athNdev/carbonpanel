@@ -23,11 +23,12 @@ const stagedContentRoot = ".carbon-panel/staged"
 
 // StageModpackTree copies a fetched pack into the open batch. The live pack
 // and the container are left as they are. A later window copies the tree.
-func StageModpackTree(ctx context.Context, store *storage.Store, server *storage.Server, srcDir, summary string) (*storage.StagedContentChange, error) {
+func StageModpackTree(ctx context.Context, store *storage.Store, server *storage.Server, srcDir, summary string, resolvers ...*nodestorage.Resolver) (*storage.StagedContentChange, error) {
+	resolver := firstResolver(resolvers)
 	if store == nil || server == nil || server.ID == "" || server.DataPath == "" || srcDir == "" {
 		return nil, fmt.Errorf("modpack stage requires a store, a server, and a source tree")
 	}
-	acc, err := openAccessor(ctx, store, server)
+	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
 	}

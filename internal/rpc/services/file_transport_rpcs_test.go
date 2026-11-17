@@ -150,7 +150,7 @@ func transportOnlyFixture(t *testing.T) (*db.Store, *db.Server, *FileService, *r
 	}
 
 	rt := &recordingTransport{workerRoot: workerRoot}
-	nodestorage.SetTransport(rt)
+	resolver := nodestorage.NewResolver(rt)
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	if err := store.CreateNode(ctx, &db.Node{
@@ -169,10 +169,10 @@ func transportOnlyFixture(t *testing.T) (*db.Store, *db.Server, *FileService, *r
 
 	downloads := download.NewManager(t.TempDir(), time.Minute, logger.New())
 	svc := NewFileService(store, nil, nil, downloads, logger.New())
+	svc.SetStorageResolver(resolver)
 	cleanup := func() {
 		svc.Stop()
 		downloads.Stop()
-		nodestorage.SetTransport(nil)
 		_ = store.Close()
 	}
 	return store, server, svc, rt, workerRoot, phantomRoot, cleanup
@@ -301,7 +301,6 @@ func TestFileRPCsRefuseTransportOnlyWithoutProvider(t *testing.T) {
 	store := setupTestStore(t)
 	defer func() { _ = store.Close() }()
 	ctx := context.Background()
-	nodestorage.SetTransport(nil)
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	if err := store.CreateNode(ctx, &db.Node{
@@ -321,6 +320,7 @@ func TestFileRPCsRefuseTransportOnlyWithoutProvider(t *testing.T) {
 	t.Cleanup(downloads.Stop)
 	svc := NewFileService(store, nil, nil, downloads, logger.New())
 	t.Cleanup(svc.Stop)
+	svc.SetStorageResolver(nodestorage.NewResolver(nil))
 
 	cases := []struct {
 		name string
@@ -729,7 +729,7 @@ func TestServerLatestLogUsesTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body, err := serverLatestLog(ctx, store, server)
+	body, err := serverLatestLog(ctx, store, server, nodestorage.NewResolver(rt))
 	if err != nil || string(body) != "log-line" {
 		t.Fatalf("log = %q, %v", body, err)
 	}

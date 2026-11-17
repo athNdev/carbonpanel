@@ -128,7 +128,7 @@ func TestStageContentLeavesLiveTreeUntouched(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, status, stored.Status)
 
-			require.NoError(t, discardStagedContent(ctx, store, server, rows[0].ID))
+			require.NoError(t, discardStagedContent(ctx, store, server, nil, rows[0].ID))
 			require.Len(t, stagedFiles(t, server.DataPath), 2)
 			discarded, err := store.GetStagedContent(ctx, rows[0].ID)
 			require.NoError(t, err)

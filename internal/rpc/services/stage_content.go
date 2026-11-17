@@ -48,7 +48,7 @@ func stagedFileBase(name string) (string, error) {
 	return base, nil
 }
 
-func serverAccessor(ctx context.Context, store *storage.Store, server *storage.Server) (nodestorage.Accessor, error) {
+func serverAccessor(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver) (nodestorage.Accessor, error) {
 	if _, err := dataRootFor(ctx, store, server, true); err != nil {
 		return nil, err
 	}
@@ -56,14 +56,14 @@ func serverAccessor(ctx context.Context, store *storage.Store, server *storage.S
 	if err != nil {
 		return nil, err
 	}
-	return nodestorage.ForNode(info, server.DataPath)
+	return resolver.ForNode(ctx, info, server.DataPath)
 }
 
 // stageContentBytes records an install, replace, or delete on the open batch.
 // Install and replace bytes are written through nodestorage under
 // .carbon-panel/staged. A delete records the live path and writes nothing.
 // The server's mods directory, datapacks directory, and world are not modified.
-func stageContentBytes(ctx context.Context, store *storage.Store, server *storage.Server, kind, action, targetRel, fileName string, data []byte) (*storage.StagedContentChange, error) {
+func stageContentBytes(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, kind, action, targetRel, fileName string, data []byte) (*storage.StagedContentChange, error) {
 	target, err := safeStageTarget(targetRel)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 	if err != nil {
 		return nil, err
 	}
-	acc, err := serverAccessor(ctx, store, server)
+	acc, err := serverAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 
 // discardStagedContent deletes staged bytes, then marks the row discarded.
 // The live tree is left as it is. A delete item has no bytes to remove.
-func discardStagedContent(ctx context.Context, store *storage.Store, server *storage.Server, id string) error {
+func discardStagedContent(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver, id string) error {
 	row, err := store.GetStagedContent(ctx, id)
 	if err != nil {
 		return err
@@ -115,7 +115,7 @@ func discardStagedContent(ctx context.Context, store *storage.Store, server *sto
 		return fmt.Errorf("staged content %s is not on this server", id)
 	}
 	if row.StagePath != "" {
-		acc, err := serverAccessor(ctx, store, server)
+		acc, err := serverAccessor(ctx, store, server, resolver)
 		if err != nil {
 			return err
 		}
