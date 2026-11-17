@@ -70,6 +70,9 @@ type Server struct {
 	downloadManager  *download.Manager
 	wsHub            *ws.Hub
 	metricsHandler   *handlers.MetricsHandler
+	// modBrowseManager is the single shared operation used by both the
+	// generated ModBrowseService and the legacy /mods/* JSON adapter.
+	modBrowseManager *handlers.ModOnlineManager
 
 	// startedAt is the server construction time, surfaced by /healthz and
 	// /readyz as an uptime.
@@ -199,6 +202,7 @@ func NewServer(
 		wsHub:            wsHub,
 		startedAt:        time.Now(),
 	}
+	s.modBrowseManager = handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer, handlers.ModOnlineOptions{StorageResolver: s.storageResolver})
 
 	s.setupHandler()
 	return s
@@ -232,6 +236,7 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.FileServiceName,
 		carbonpanelv1connect.MinecraftServiceName,
 		carbonpanelv1connect.ModServiceName,
+		carbonpanelv1connect.ModBrowseServiceName,
 		carbonpanelv1connect.ModpackServiceName,
 		carbonpanelv1connect.ModuleServiceName,
 		carbonpanelv1connect.NodeServiceName,
@@ -276,8 +281,10 @@ func (s *Server) setupHandler() {
 	// Docker daemon auto-detect scan across local network interfaces
 	mux.Handle("/api/v1/nodes/scan", handlers.NewNodeScanHandler(s.store, s.authManager, s.enforcer, s.log))
 
-	// Online mod search and 1-click install endpoints (MINE-25)
-	mux.Handle("/api/v1/servers/", handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer, handlers.ModOnlineOptions{StorageResolver: s.storageResolver}))
+	// Online mod search and 1-click install endpoints (MINE-25). This legacy
+	// JSON adapter delegates to the same shared operation as the generated
+	// ModBrowseService and is retained for the ADR 0012 deprecation window.
+	mux.Handle("/api/v1/servers/", s.modBrowseManager)
 
 	// Packwiz Modpack Studio and Server Deployment Engine (MINE-30, MINE-31)
 	packwizDir := filepath.Join(s.config.Storage.DataDir, "packwiz")
@@ -317,6 +324,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modService.SetStorageResolver(s.storageResolver)
+	// The generated RPC and the legacy JSON adapter share one operation
+	// instance so provider, credential and audit policy cannot diverge.
+	modBrowseService := services.NewModBrowseService(s.store, s.modBrowseManager)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	datapackService := services.NewDatapackService(s.store, s.config, s.uploadManager, s.log)
 	datapackService.SetStorageResolver(s.storageResolver)
@@ -373,6 +383,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	modPath, modHandler := carbonpanelv1connect.NewModServiceHandler(modService, opts...)
 	mux.Handle(modPath, modHandler)
+
+	modBrowsePath, modBrowseHandler := carbonpanelv1connect.NewModBrowseServiceHandler(modBrowseService, opts...)
+	mux.Handle(modBrowsePath, modBrowseHandler)
 
 	modpackPath, modpackHandler := carbonpanelv1connect.NewModpackServiceHandler(modpackService, opts...)
 	mux.Handle(modpackPath, modpackHandler)

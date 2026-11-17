@@ -35,7 +35,10 @@ an error rather than a successful empty check. Dependency lookup and compatibili
 resolution keeps primary-file selection; legacy mod updates and migration
 previews keep first-file selection. CurseForge dependency lookup retains the
 last matching loader entry, required/optional relations and CDN URL synthesis.
-Read-only compatibility previews propagate cancellation. Browse retains
+Read-only compatibility previews propagate cancellation. The generated
+`ModBrowseService` and the legacy mod JSON routes delegate to the same
+`ModOnlineManager` operation, so transport mapping cannot fork provider,
+credential, side-filter or install-audit policy. Browse retains
 Minecraft-version relaxation after an empty search and local version filtering
 with an all-files fallback. Dependency titles remain best-effort: at most 200
 projects per batch, then individual lookups only for at most 10 IDs. Cancellation
