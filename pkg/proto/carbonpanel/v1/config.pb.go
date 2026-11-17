@@ -1047,6 +1047,124 @@ func (*DiscardUpdateBatchResponse) Descriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_config_proto_rawDescGZIP(), []int{16}
 }
 
+// Request to validate a content-provider credential.
+type ValidateProviderKeyRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// "curseforge" or "modrinth" (case-insensitive).
+	Provider string `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	// Token or API key. Empty performs the anonymous connectivity check.
+	ApiKey string `protobuf:"bytes,2,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`
+	// Optional custom User-Agent for Modrinth.
+	UserAgent     string `protobuf:"bytes,3,opt,name=user_agent,json=userAgent,proto3" json:"user_agent,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateProviderKeyRequest) Reset() {
+	*x = ValidateProviderKeyRequest{}
+	mi := &file_carbonpanel_v1_config_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateProviderKeyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateProviderKeyRequest) ProtoMessage() {}
+
+func (x *ValidateProviderKeyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_config_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateProviderKeyRequest.ProtoReflect.Descriptor instead.
+func (*ValidateProviderKeyRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_config_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ValidateProviderKeyRequest) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *ValidateProviderKeyRequest) GetApiKey() string {
+	if x != nil {
+		return x.ApiKey
+	}
+	return ""
+}
+
+func (x *ValidateProviderKeyRequest) GetUserAgent() string {
+	if x != nil {
+		return x.UserAgent
+	}
+	return ""
+}
+
+// Soft validation outcome. A false valid with a message is a normal result,
+// not an error.
+type ValidateProviderKeyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Valid         bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateProviderKeyResponse) Reset() {
+	*x = ValidateProviderKeyResponse{}
+	mi := &file_carbonpanel_v1_config_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateProviderKeyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateProviderKeyResponse) ProtoMessage() {}
+
+func (x *ValidateProviderKeyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_config_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateProviderKeyResponse.ProtoReflect.Descriptor instead.
+func (*ValidateProviderKeyResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_config_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ValidateProviderKeyResponse) GetValid() bool {
+	if x != nil {
+		return x.Valid
+	}
+	return false
+}
+
+func (x *ValidateProviderKeyResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_carbonpanel_v1_config_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_config_proto_rawDesc = "" +
@@ -1127,12 +1245,20 @@ const file_carbonpanel_v1_config_proto_rawDesc = "" +
 	"\x19DiscardUpdateBatchRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x17\n" +
 	"\aitem_id\x18\x02 \x01(\tR\x06itemId\"\x1c\n" +
-	"\x1aDiscardUpdateBatchResponse*\x9d\x01\n" +
+	"\x1aDiscardUpdateBatchResponse\"p\n" +
+	"\x1aValidateProviderKeyRequest\x12\x1a\n" +
+	"\bprovider\x18\x01 \x01(\tR\bprovider\x12\x17\n" +
+	"\aapi_key\x18\x02 \x01(\tR\x06apiKey\x12\x1d\n" +
+	"\n" +
+	"user_agent\x18\x03 \x01(\tR\tuserAgent\"M\n" +
+	"\x1bValidateProviderKeyResponse\x12\x14\n" +
+	"\x05valid\x18\x01 \x01(\bR\x05valid\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage*\x9d\x01\n" +
 	"\x11ConfigApplyWindow\x12#\n" +
 	"\x1fCONFIG_APPLY_WINDOW_UNSPECIFIED\x10\x00\x12$\n" +
 	" CONFIG_APPLY_WINDOW_NEXT_RESTART\x10\x01\x12\x1f\n" +
 	"\x1bCONFIG_APPLY_WINDOW_AT_TIME\x10\x02\x12\x1c\n" +
-	"\x18CONFIG_APPLY_WINDOW_IDLE\x10\x032\x94\x06\n" +
+	"\x18CONFIG_APPLY_WINDOW_IDLE\x10\x032\x84\a\n" +
 	"\rConfigService\x12b\n" +
 	"\x0fGetServerConfig\x12&.carbonpanel.v1.GetServerConfigRequest\x1a'.carbonpanel.v1.GetServerConfigResponse\x12k\n" +
 	"\x12UpdateServerConfig\x12).carbonpanel.v1.UpdateServerConfigRequest\x1a*.carbonpanel.v1.UpdateServerConfigResponse\x12_\n" +
@@ -1140,7 +1266,8 @@ const file_carbonpanel_v1_config_proto_rawDesc = "" +
 	"\x12DiscardUpdateBatch\x12).carbonpanel.v1.DiscardUpdateBatchRequest\x1a*.carbonpanel.v1.DiscardUpdateBatchResponse\x12h\n" +
 	"\x11GetGlobalSettings\x12(.carbonpanel.v1.GetGlobalSettingsRequest\x1a).carbonpanel.v1.GetGlobalSettingsResponse\x12q\n" +
 	"\x14UpdateGlobalSettings\x12+.carbonpanel.v1.UpdateGlobalSettingsRequest\x1a,.carbonpanel.v1.UpdateGlobalSettingsResponse\x12\x86\x01\n" +
-	"\x1bSyncGlobalSettingsToServers\x122.carbonpanel.v1.SyncGlobalSettingsToServersRequest\x1a3.carbonpanel.v1.SyncGlobalSettingsToServersResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
+	"\x1bSyncGlobalSettingsToServers\x122.carbonpanel.v1.SyncGlobalSettingsToServersRequest\x1a3.carbonpanel.v1.SyncGlobalSettingsToServersResponse\x12n\n" +
+	"\x13ValidateProviderKey\x12*.carbonpanel.v1.ValidateProviderKeyRequest\x1a+.carbonpanel.v1.ValidateProviderKeyResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
 
 var (
 	file_carbonpanel_v1_config_proto_rawDescOnce sync.Once
@@ -1155,7 +1282,7 @@ func file_carbonpanel_v1_config_proto_rawDescGZIP() []byte {
 }
 
 var file_carbonpanel_v1_config_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_carbonpanel_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_carbonpanel_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_carbonpanel_v1_config_proto_goTypes = []any{
 	(ConfigApplyWindow)(0),                      // 0: carbonpanel.v1.ConfigApplyWindow
 	(*ConfigProperty)(nil),                      // 1: carbonpanel.v1.ConfigProperty
@@ -1175,17 +1302,19 @@ var file_carbonpanel_v1_config_proto_goTypes = []any{
 	(*GetUpdateBatchResponse)(nil),              // 15: carbonpanel.v1.GetUpdateBatchResponse
 	(*DiscardUpdateBatchRequest)(nil),           // 16: carbonpanel.v1.DiscardUpdateBatchRequest
 	(*DiscardUpdateBatchResponse)(nil),          // 17: carbonpanel.v1.DiscardUpdateBatchResponse
-	nil,                                         // 18: carbonpanel.v1.UpdateServerConfigRequest.UpdatesEntry
-	nil,                                         // 19: carbonpanel.v1.UpdateGlobalSettingsRequest.UpdatesEntry
+	(*ValidateProviderKeyRequest)(nil),          // 18: carbonpanel.v1.ValidateProviderKeyRequest
+	(*ValidateProviderKeyResponse)(nil),         // 19: carbonpanel.v1.ValidateProviderKeyResponse
+	nil,                                         // 20: carbonpanel.v1.UpdateServerConfigRequest.UpdatesEntry
+	nil,                                         // 21: carbonpanel.v1.UpdateGlobalSettingsRequest.UpdatesEntry
 }
 var file_carbonpanel_v1_config_proto_depIdxs = []int32{
 	1,  // 0: carbonpanel.v1.ConfigCategory.properties:type_name -> carbonpanel.v1.ConfigProperty
 	2,  // 1: carbonpanel.v1.GetServerConfigResponse.categories:type_name -> carbonpanel.v1.ConfigCategory
-	18, // 2: carbonpanel.v1.UpdateServerConfigRequest.updates:type_name -> carbonpanel.v1.UpdateServerConfigRequest.UpdatesEntry
+	20, // 2: carbonpanel.v1.UpdateServerConfigRequest.updates:type_name -> carbonpanel.v1.UpdateServerConfigRequest.UpdatesEntry
 	0,  // 3: carbonpanel.v1.UpdateServerConfigRequest.window:type_name -> carbonpanel.v1.ConfigApplyWindow
 	2,  // 4: carbonpanel.v1.UpdateServerConfigResponse.categories:type_name -> carbonpanel.v1.ConfigCategory
 	2,  // 5: carbonpanel.v1.GetGlobalSettingsResponse.categories:type_name -> carbonpanel.v1.ConfigCategory
-	19, // 6: carbonpanel.v1.UpdateGlobalSettingsRequest.updates:type_name -> carbonpanel.v1.UpdateGlobalSettingsRequest.UpdatesEntry
+	21, // 6: carbonpanel.v1.UpdateGlobalSettingsRequest.updates:type_name -> carbonpanel.v1.UpdateGlobalSettingsRequest.UpdatesEntry
 	2,  // 7: carbonpanel.v1.UpdateGlobalSettingsResponse.categories:type_name -> carbonpanel.v1.ConfigCategory
 	0,  // 8: carbonpanel.v1.GetUpdateBatchResponse.window:type_name -> carbonpanel.v1.ConfigApplyWindow
 	13, // 9: carbonpanel.v1.GetUpdateBatchResponse.items:type_name -> carbonpanel.v1.StagedUpdateItem
@@ -1196,15 +1325,17 @@ var file_carbonpanel_v1_config_proto_depIdxs = []int32{
 	7,  // 14: carbonpanel.v1.ConfigService.GetGlobalSettings:input_type -> carbonpanel.v1.GetGlobalSettingsRequest
 	9,  // 15: carbonpanel.v1.ConfigService.UpdateGlobalSettings:input_type -> carbonpanel.v1.UpdateGlobalSettingsRequest
 	11, // 16: carbonpanel.v1.ConfigService.SyncGlobalSettingsToServers:input_type -> carbonpanel.v1.SyncGlobalSettingsToServersRequest
-	4,  // 17: carbonpanel.v1.ConfigService.GetServerConfig:output_type -> carbonpanel.v1.GetServerConfigResponse
-	6,  // 18: carbonpanel.v1.ConfigService.UpdateServerConfig:output_type -> carbonpanel.v1.UpdateServerConfigResponse
-	15, // 19: carbonpanel.v1.ConfigService.GetUpdateBatch:output_type -> carbonpanel.v1.GetUpdateBatchResponse
-	17, // 20: carbonpanel.v1.ConfigService.DiscardUpdateBatch:output_type -> carbonpanel.v1.DiscardUpdateBatchResponse
-	8,  // 21: carbonpanel.v1.ConfigService.GetGlobalSettings:output_type -> carbonpanel.v1.GetGlobalSettingsResponse
-	10, // 22: carbonpanel.v1.ConfigService.UpdateGlobalSettings:output_type -> carbonpanel.v1.UpdateGlobalSettingsResponse
-	12, // 23: carbonpanel.v1.ConfigService.SyncGlobalSettingsToServers:output_type -> carbonpanel.v1.SyncGlobalSettingsToServersResponse
-	17, // [17:24] is the sub-list for method output_type
-	10, // [10:17] is the sub-list for method input_type
+	18, // 17: carbonpanel.v1.ConfigService.ValidateProviderKey:input_type -> carbonpanel.v1.ValidateProviderKeyRequest
+	4,  // 18: carbonpanel.v1.ConfigService.GetServerConfig:output_type -> carbonpanel.v1.GetServerConfigResponse
+	6,  // 19: carbonpanel.v1.ConfigService.UpdateServerConfig:output_type -> carbonpanel.v1.UpdateServerConfigResponse
+	15, // 20: carbonpanel.v1.ConfigService.GetUpdateBatch:output_type -> carbonpanel.v1.GetUpdateBatchResponse
+	17, // 21: carbonpanel.v1.ConfigService.DiscardUpdateBatch:output_type -> carbonpanel.v1.DiscardUpdateBatchResponse
+	8,  // 22: carbonpanel.v1.ConfigService.GetGlobalSettings:output_type -> carbonpanel.v1.GetGlobalSettingsResponse
+	10, // 23: carbonpanel.v1.ConfigService.UpdateGlobalSettings:output_type -> carbonpanel.v1.UpdateGlobalSettingsResponse
+	12, // 24: carbonpanel.v1.ConfigService.SyncGlobalSettingsToServers:output_type -> carbonpanel.v1.SyncGlobalSettingsToServersResponse
+	19, // 25: carbonpanel.v1.ConfigService.ValidateProviderKey:output_type -> carbonpanel.v1.ValidateProviderKeyResponse
+	18, // [18:26] is the sub-list for method output_type
+	10, // [10:18] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name
 	10, // [10:10] is the sub-list for extension extendee
 	0,  // [0:10] is the sub-list for field type_name
@@ -1222,7 +1353,7 @@ func file_carbonpanel_v1_config_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_config_proto_rawDesc), len(file_carbonpanel_v1_config_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
