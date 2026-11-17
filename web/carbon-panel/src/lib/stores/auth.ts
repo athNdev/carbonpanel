@@ -50,6 +50,7 @@ function checkPermission(
 }
 
 function createAuthStore() {
+	let sessionRevision = 0;
 	const { subscribe, set, update } = writable<AuthState>({
 		user: null,
 		token: null,
@@ -73,13 +74,19 @@ function createAuthStore() {
 
 	return {
 		subscribe,
+		getSessionRevision: () => sessionRevision,
 
 		async checkAuthStatus() {
+			const generation = sessionRevision;
 			try {
 				const response = await rpcClient.auth.getAuthStatus({});
-
 				const authEnabled = response.localAuthEnabled || response.oidcEnabled;
-
+				const result = {
+					enabled: authEnabled,
+					firstUserSetup: response.firstUserSetup,
+					allowRegistration: response.allowRegistration
+				};
+				if (generation !== sessionRevision) return result;
 				update((state) => ({
 					...state,
 					localAuthEnabled: response.localAuthEnabled,
@@ -88,60 +95,41 @@ function createAuthStore() {
 					allowRegistration: response.allowRegistration,
 					anonymousAccessEnabled: response.anonymousAccessEnabled
 				}));
-
-				// If auth is enabled and we have a token, validate it
-				let currentToken: string | null = null;
-				update((state) => {
-					currentToken = state.token;
-					return state;
-				});
-
-				if (!authEnabled) {
-					// Auth is disabled - backend grants full admin access, fetch permissions
-					await rpcClient.auth
-						.getCurrentUser({})
-						.then((r) =>
+				const currentToken = get({ subscribe }).token;
+				if (!authEnabled || (!currentToken && response.anonymousAccessEnabled)) {
+					try {
+						const current = await rpcClient.auth.getCurrentUser({});
+						if (generation === sessionRevision)
 							update((state) => ({
 								...state,
-								user: r.user || null,
-								permissions: r.permissions ?? [],
+								...(!authEnabled ? { user: current.user || null } : {}),
+								permissions: current.permissions ?? [],
 								isLoading: false
-							}))
-						)
-						.catch(() => update((state) => ({ ...state, isLoading: false })));
+							}));
+					} catch {
+						if (generation === sessionRevision) update((state) => ({ ...state, isLoading: false }));
+					}
 				} else if (currentToken) {
 					await this.validateSession();
-				} else if (response.anonymousAccessEnabled) {
-					try {
-						const r = await rpcClient.auth.getCurrentUser({});
-						update((state) => ({
-							...state,
-							permissions: r.permissions ?? [],
-							isLoading: false
-						}));
-					} catch {
-						update((state) => ({ ...state, isLoading: false }));
-					}
-				} else {
+				} else if (generation === sessionRevision) {
 					update((state) => ({ ...state, isLoading: false }));
 				}
-
-				return {
-					enabled: authEnabled,
-					firstUserSetup: response.firstUserSetup,
-					allowRegistration: response.allowRegistration
-				};
+				return result;
 			} catch (error) {
-				console.error('Failed to check auth status:', error);
-				update((state) => ({ ...state, isLoading: false }));
+				if (generation === sessionRevision) {
+					console.error('Failed to check auth status:', error);
+					update((state) => ({ ...state, isLoading: false }));
+				}
 				return { enabled: false, firstUserSetup: false, allowRegistration: false };
 			}
 		},
 
 		async login(username: string, password: string) {
+			const generation = ++sessionRevision;
 			try {
 				const request = create(LoginRequestSchema, { username, password });
 				const response = await rpcClient.auth.login(request);
+				if (generation !== sessionRevision) return response;
 
 				// Store token
 				if (browser && response.token) {
@@ -161,12 +149,13 @@ function createAuthStore() {
 
 				return response;
 			} catch (error) {
-				update((state) => ({ ...state, isLoading: false }));
+				if (generation === sessionRevision) update((state) => ({ ...state, isLoading: false }));
 				throw error;
 			}
 		},
 
 		async logout() {
+			const generation = ++sessionRevision;
 			const currentState: AuthState = get({ subscribe });
 
 			try {
@@ -177,6 +166,7 @@ function createAuthStore() {
 				console.error('Logout error:', error);
 			}
 
+			if (generation !== sessionRevision) return;
 			// Clear local storage
 			if (browser) {
 				localStorage.removeItem('auth_token');
@@ -207,6 +197,7 @@ function createAuthStore() {
 			inviteCode?: string,
 			invitePin?: string
 		) {
+			const generation = sessionRevision;
 			const request = create(RegisterRequestSchema, {
 				username,
 				email,
@@ -215,12 +206,14 @@ function createAuthStore() {
 				invitePin: invitePin || undefined
 			});
 			await rpcClient.auth.register(request);
+			if (generation !== sessionRevision) return;
 
 			// After successful registration, log them in
 			return await this.login(username, password);
 		},
 
 		setToken(token: string) {
+			sessionRevision++;
 			if (browser) {
 				localStorage.setItem('auth_token', token);
 			}
@@ -241,8 +234,10 @@ function createAuthStore() {
 		},
 
 		async useRecoveryKey(key: string) {
+			const generation = ++sessionRevision;
 			const request = create(UseRecoveryKeyRequestSchema, { recoveryKey: key });
 			const response = await rpcClient.auth.useRecoveryKey(request);
+			if (generation !== sessionRevision) return response;
 			if (browser) {
 				localStorage.removeItem('auth_token');
 			}
@@ -262,6 +257,7 @@ function createAuthStore() {
 		},
 
 		async validateSession() {
+			const generation = sessionRevision;
 			let currentToken: string | null = null;
 			update((state) => {
 				currentToken = state.token;
@@ -275,6 +271,7 @@ function createAuthStore() {
 
 			try {
 				const response = await rpcClient.auth.getCurrentUser({});
+				if (generation !== sessionRevision) return false;
 
 				if (response.user) {
 					update((state) => ({
@@ -287,6 +284,7 @@ function createAuthStore() {
 					return true;
 				} else {
 					// Invalid token, clear it
+					sessionRevision++;
 					if (browser) {
 						localStorage.removeItem('auth_token');
 					}
@@ -301,6 +299,7 @@ function createAuthStore() {
 					return false;
 				}
 			} catch {
+				if (generation !== sessionRevision) return false;
 				update((state) => ({ ...state, isLoading: false }));
 				return false;
 			}
