@@ -380,6 +380,7 @@ func main() {
 
 	// Initialize metrics collector
 	metricsCollector := metrics.NewCollectorWithPool(store, dockerClient, clientPool, sender, cfg, eventBus, log)
+	metricsCollector.SetStorageResolver(storageResolver)
 
 	// MINE-120: hibernation lifecycle — idle freeze plus proxy-gated
 	// wake/activity. Only acts on servers with AutoHibernate enabled; the

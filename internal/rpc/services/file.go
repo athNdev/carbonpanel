@@ -274,7 +274,7 @@ func (s *FileService) resolveAccessor(ctx context.Context, info nodestorage.Node
 // controller copy of the data path cannot reject or stand in for the world.
 func (s *FileService) openStorage(ctx context.Context, server *storage.Server, write, cancelWithRequest bool) (string, nodestorage.Accessor, error) {
 	if write {
-		if _, err := dataRootFor(ctx, s.store, server, true); err != nil {
+		if _, err := dataRootFor(ctx, s.store, server, true, s.storageResolver); err != nil {
 			return "", nil, err
 		}
 	}
@@ -679,7 +679,7 @@ func (s *FileService) ExtractArchive(ctx context.Context, req *connect.Request[v
 		return nil, storageError(err)
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -889,7 +889,7 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		return nil, storageError(err)
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -1433,7 +1433,7 @@ func (s *FileService) CreateArchive(ctx context.Context, req *connect.Request[v1
 		return nil, storageError(err)
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -1541,7 +1541,7 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 		return nil, storageError(err)
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, false)
+	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}

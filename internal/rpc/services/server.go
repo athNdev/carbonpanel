@@ -1388,7 +1388,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Create the world on the node's storage. A remote node with no reachable
 	// mount is refused before a controller-local directory can be mistaken for
 	// the world the remote daemon will use.
-	if _, err := dataRootFor(ctx, s.store, server, true); err != nil {
+	if _, err := dataRootFor(ctx, s.store, server, true, s.storageResolver); err != nil {
 		s.capacityMu.Unlock()
 		if nodestorage.IsUnavailable(err) {
 			return nil, connect.NewError(connect.CodeUnavailable, err)

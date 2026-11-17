@@ -1605,7 +1605,7 @@ func (s *Scheduler) serverWorldRoot(ctx context.Context, server *storage.Server)
 	if err != nil {
 		return "", fmt.Errorf("resolve storage node %q: %w", server.NodeID, err)
 	}
-	return nodestorage.EnsureDataRoot(node.StorageInfo(), server.DataPath)
+	return nodestorage.EnsureDataRoot(node.StorageInfo(), server.DataPath, s.storageResolver)
 }
 
 // syncModpackFiles copies a modpack tree into the world root on the node's

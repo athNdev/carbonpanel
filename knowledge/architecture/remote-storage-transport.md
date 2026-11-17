@@ -87,7 +87,13 @@ checksum; excluded temporary files cannot fail a backup through content reads.
 # Fail-closed
 
 With no transport configured, transport-only nodes keep `ErrUnavailable`. Remote
-accessors never fall back to controller paths.
+accessors never fall back to controller paths. `MapDataPath` and `EnsureDataRoot`
+apply the same default: a transport-only node is refused when the caller passes
+no resolver, an explicit nil resolver, or a resolver without a transport. The
+instance-owned resolver is passed explicitly by callers that may map a path with
+a configured transport (RPC services, mod/packwiz handlers, scheduler, snapshot
+engine, metrics collector). No process-global transport or context value is
+consulted, and nil-receiver `ForNode` still serves local/shared nodes.
 
 # File RPC coverage
 

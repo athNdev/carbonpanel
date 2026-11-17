@@ -518,9 +518,9 @@ func (e *Engine) worldRoot(ctx context.Context, server *storage.Server, write bo
 		return "", err
 	}
 	if write {
-		return nodestorage.EnsureDataRoot(info, server.DataPath)
+		return nodestorage.EnsureDataRoot(info, server.DataPath, e.storageResolver)
 	}
-	return nodestorage.MapDataPath(info, server.DataPath)
+	return nodestorage.MapDataPath(info, server.DataPath, e.storageResolver)
 }
 
 func (e *Engine) storageInfo(ctx context.Context, server *storage.Server) (nodestorage.NodeInfo, error) {

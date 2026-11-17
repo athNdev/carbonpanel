@@ -211,6 +211,53 @@ func TestMapDataPath(t *testing.T) {
 	}
 }
 
+func TestTransportOnlyPathMappingFailsClosedWithoutConfiguredTransport(t *testing.T) {
+	nodeRoot := filepath.Join(t.TempDir(), "only-on-node")
+	node := NodeInfo{Name: "r-transport", StorageRoot: nodeRoot}
+	dataRoot := filepath.Join("var", "data", "servers", "mc")
+	if !RequiresRemoteTransport(node) {
+		t.Fatal("fixture must be transport-only")
+	}
+
+	cases := []struct {
+		name      string
+		resolvers []*Resolver
+	}{
+		{name: "no resolver argument"},
+		{name: "explicit nil resolver", resolvers: []*Resolver{nil}},
+		{name: "resolver without transport", resolvers: []*Resolver{NewResolver(nil)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, err := MapDataPath(node, dataRoot, tc.resolvers...); got != "" || !IsUnavailable(err) {
+				t.Fatalf("MapDataPath = %q, %v; want empty path and ErrUnavailable", got, err)
+			}
+			if got, err := EnsureDataRoot(node, dataRoot, tc.resolvers...); got != "" || !IsUnavailable(err) {
+				t.Fatalf("EnsureDataRoot = %q, %v; want empty path and ErrUnavailable", got, err)
+			}
+			if _, err := os.Stat(filepath.Join(nodeRoot, "mc")); !os.IsNotExist(err) {
+				t.Fatalf("must not create a controller-local server dir, stat err=%v", err)
+			}
+		})
+	}
+
+	// A configured transport keeps the node-side mapping; it does not create
+	// or read a controller-local tree.
+	resolver := NewResolver(&resolverTransport{root: t.TempDir()})
+	want := filepath.Join(nodeRoot, "mc")
+	got, err := MapDataPath(node, dataRoot, resolver)
+	if err != nil || got != want {
+		t.Fatalf("MapDataPath with transport = %q, %v; want %q", got, err, want)
+	}
+	got, err = EnsureDataRoot(node, dataRoot, resolver)
+	if err != nil || got != want {
+		t.Fatalf("EnsureDataRoot with transport = %q, %v; want %q", got, err, want)
+	}
+	if _, err := os.Stat(want); !os.IsNotExist(err) {
+		t.Fatalf("mapping a transport-only node must not create a controller dir, stat err=%v", err)
+	}
+}
+
 func TestForNodeMapsRemoteSharedStorage(t *testing.T) {
 	base := t.TempDir()
 	mount := filepath.Join(base, "shared")

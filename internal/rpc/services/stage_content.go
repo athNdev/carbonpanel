@@ -53,7 +53,7 @@ func stagedFileBase(name string) (string, error) {
 }
 
 func serverAccessor(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver) (nodestorage.Accessor, error) {
-	if _, err := dataRootFor(ctx, store, server, true); err != nil {
+	if _, err := dataRootFor(ctx, store, server, true, resolver); err != nil {
 		return nil, err
 	}
 	info, err := storageNodeInfo(ctx, store, server.NodeID)

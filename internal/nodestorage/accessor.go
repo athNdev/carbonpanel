@@ -257,15 +257,22 @@ func sharedStorageRoot(node NodeInfo) string {
 // storage are mapped through the controller's mount of that storage: the
 // server directory keeps its name under the controller-side root. Other
 // remote nodes are refused with ErrUnavailable.
+//
+// A transport-only node is fail-closed: the instance-owned resolver decides
+// whether a remote adapter exists. Passing no resolver (or an explicit nil)
+// counts as unconfigured and is refused, so a caller cannot fall back to a
+// controller-side path for storage that lives only on the node. A resolver
+// with a configured transport still maps the node-side path.
 func MapDataPath(node NodeInfo, dataRoot string, resolvers ...*Resolver) (string, error) {
 	if node.IsLocal {
 		return dataRoot, nil
 	}
 	if RequiresRemoteTransport(node) {
-		// The instance-owned resolver decides whether a remote adapter exists.
-		// Without one, a remote-only node must never be mapped to a path that
-		// a caller could write on the controller.
-		if len(resolvers) > 0 && resolvers[0] != nil && resolvers[0].transport == nil {
+		var resolver *Resolver
+		if len(resolvers) > 0 {
+			resolver = resolvers[0]
+		}
+		if resolver == nil || resolver.transport == nil {
 			return "", fmt.Errorf("%w: remote transport is not configured for node %q", ErrUnavailable, node.Name)
 		}
 		return nodeDataRoot(node, dataRoot), nil

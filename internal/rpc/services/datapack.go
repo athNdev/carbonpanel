@@ -19,8 +19,8 @@ import (
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers"
-	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -255,7 +255,7 @@ func (s *DatapackService) InstallDatapack(ctx context.Context, req *connect.Requ
 		_ = tmp.Close()
 		removeDownload = func() { _ = os.Remove(destPath) }
 	} else {
-		root, rootErr := dataRootFor(ctx, s.store, server, true)
+		root, rootErr := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 		if rootErr != nil {
 			return nil, storageError(rootErr)
 		}
@@ -388,7 +388,7 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 		}), nil
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return fail(storageError(err))
 	}
@@ -429,7 +429,7 @@ func (s *DatapackService) ListDatapacks(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, false)
+	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -473,7 +473,7 @@ func (s *DatapackService) DeleteDatapack(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}

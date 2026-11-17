@@ -30,13 +30,20 @@ import (
 )
 
 type PackwizHandler struct {
-	uploadManager *upload.Manager
-	manager       *packwiz.Manager
-	store         *storage.Store
-	log           *logger.Logger
-	authManager   *auth.Manager
-	enforcer      *rbac.Enforcer
-	config        *config.Config
+	uploadManager   *upload.Manager
+	manager         *packwiz.Manager
+	store           *storage.Store
+	log             *logger.Logger
+	authManager     *auth.Manager
+	enforcer        *rbac.Enforcer
+	config          *config.Config
+	storageResolver *nodestorage.Resolver
+}
+
+// SetStorageResolver supplies the instance-owned node storage resolver so the
+// bake path keeps its mapped-root behaviour when a transport is configured.
+func (h *PackwizHandler) SetStorageResolver(resolver *nodestorage.Resolver) {
+	h.storageResolver = resolver
 }
 
 func NewPackwizHandler(manager *packwiz.Manager, store *storage.Store, uploadManager *upload.Manager, log *logger.Logger, authManager *auth.Manager, enforcer *rbac.Enforcer, cfg *config.Config) *PackwizHandler {
@@ -848,7 +855,7 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 	}
 
 	// Mode B: bake into the server's data directory on the node's mapped storage.
-	dataRoot, err := serverDataDirectory(r.Context(), h.store, server, true)
+	dataRoot, err := serverDataDirectory(r.Context(), h.store, server, true, h.storageResolver)
 	if err != nil {
 		if nodestorage.IsUnavailable(err) {
 			h.log.Error("packwiz bake refused: %v", err)

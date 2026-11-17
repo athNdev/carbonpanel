@@ -277,12 +277,14 @@ func (s *Server) setupHandler() {
 	mux.Handle("/api/v1/nodes/scan", handlers.NewNodeScanHandler(s.store, s.authManager, s.enforcer, s.log))
 
 	// Online mod search and 1-click install endpoints (MINE-25)
-	mux.Handle("/api/v1/servers/", handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer))
+	mux.Handle("/api/v1/servers/", handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer, handlers.ModOnlineOptions{StorageResolver: s.storageResolver}))
 
 	// Packwiz Modpack Studio and Server Deployment Engine (MINE-30, MINE-31)
 	packwizDir := filepath.Join(s.config.Storage.DataDir, "packwiz")
 	packwizManager := packwiz.NewManager(packwizDir, s.log)
-	mux.Handle("/api/v1/packwiz/", handlers.NewPackwizHandler(packwizManager, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config))
+	packwizHandler := handlers.NewPackwizHandler(packwizManager, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config)
+	packwizHandler.SetStorageResolver(s.storageResolver)
+	mux.Handle("/api/v1/packwiz/", packwizHandler)
 
 	// Scheduled/staged config rollout for instances (staged diffs applied on restart or cron)
 	mux.Handle("/api/v1/staged-config/", handlers.NewStagedConfigHandler(s.store, s.log, s.authManager, s.enforcer))
