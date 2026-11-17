@@ -90,6 +90,11 @@ type ServerService struct {
 	bus              *events.Bus
 	enforcer         *rbac.Enforcer
 
+	// admission is the shared in-process start gate. It is supplied by the
+	// composition root and serializes same-node starts across RPC and scheduler
+	// entrypoints. Nil fails closed at the acquire helper.
+	admission *serverruntime.AdmissionCoordinator
+
 	daemonInfoMu sync.Mutex
 	daemonInfo   map[string]daemonEnforcementCache
 }
@@ -263,6 +268,37 @@ func (s *ServerService) checkNodeMemoryCapacity(ctx context.Context, nodeID stri
 		return connect.NewError(connect.CodeResourceExhausted, fmt.Errorf("node %s lacks memory capacity (allocated %d MB + requested %d MB > limit %d MB)", node.Name, allocatedMemoryMB, additionalMemoryMB, capacityMB))
 	}
 	return nil
+}
+
+// SetAdmissionCoordinator supplies the shared in-process admission gate.
+func (s *ServerService) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) {
+	s.admission = c
+}
+
+// acquireNodeAdmission claims the per-node gate before a capacity check. The
+// caller must defer the returned release at function scope so the gate is held
+// through runtime mutation and status persistence. A refusal or cancellation
+// uses the same typed-to-Connect mapping as the shared capacity check.
+func (s *ServerService) acquireNodeAdmission(ctx context.Context, server *storage.Server) (func(), error) {
+	release, err := s.admission.Acquire(ctx, server.NodeID)
+	if err == nil {
+		return release, nil
+	}
+	var refusal *serverruntime.AdmissionError
+	if errors.As(err, &refusal) {
+		code := connect.CodeUnavailable
+		if refusal.Kind == serverruntime.InvalidNode {
+			code = connect.CodeFailedPrecondition
+		}
+		return nil, connect.NewError(code, err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return nil, connect.NewError(connect.CodeCanceled, err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil, connect.NewError(connect.CodeDeadlineExceeded, err)
+	}
+	return nil, connect.NewError(connect.CodeUnavailable, err)
 }
 
 // checkServerStartCapacity ensures starting a server does not exceed the node's
@@ -526,7 +562,10 @@ func NewServerService(
 		moduleManager:    moduleManager,
 		bus:              bus,
 		enforcer:         enforcer,
-		daemonInfo:       make(map[string]daemonEnforcementCache),
+		// Every service owns a gate by default; the composition root replaces
+		// it with the one shared by RPC and scheduler starts.
+		admission: serverruntime.NewAdmissionCoordinator(),
+		daemonInfo: make(map[string]daemonEnforcementCache),
 	}
 }
 
@@ -2216,6 +2255,11 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 		_ = s.store.UpdateServer(ctx, server)
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("docker node %q is unavailable: %w", server.NodeID, err))
 	}
+	release, err := s.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.checkServerStartCapacity(ctx, server); err != nil {
 		return nil, err
 	}
@@ -2648,6 +2692,11 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("docker node %q is unavailable: %w", server.NodeID, err))
 	}
+	release, err := s.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.checkServerStartCapacity(ctx, server); err != nil {
 		return nil, err
 	}
@@ -2936,6 +2985,11 @@ func (s *ServerService) RecreateServer(ctx context.Context, req *connect.Request
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("docker node %q is unavailable: %w", server.NodeID, err))
 	}
+	release, err := s.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.checkServerStartCapacity(ctx, server); err != nil {
 		return nil, err
 	}
