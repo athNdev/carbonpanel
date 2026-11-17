@@ -28,6 +28,15 @@ one at https://mozilla.org/MPL/2.0/.
 	import { FileEditorSession, type FileEditorState } from '$lib/features/files/editor-session';
 	import type * as Monaco from 'monaco-editor';
 	import { loadEditorRuntime } from '$lib/features/editor/runtime';
+	import { get } from 'svelte/store';
+	import { theme as preferenceTheme } from '$lib/display-preferences.svelte';
+
+	// Only an already-open editor's runtime is used for live theming. A closed
+	// dialog never bootstraps Monaco just to follow a preference change.
+	$effect(() => {
+		const next = $preferenceTheme === 'light' ? 'vs' : 'vs-dark';
+		if (activeRuntime) activeRuntime.editor.setTheme(next);
+	});
 
 	interface Props {
 		serverId: string;
@@ -79,6 +88,7 @@ one at https://mozilla.org/MPL/2.0/.
 	let confirmDiscardOpen = $state(false);
 	let editorContainer = $state<HTMLDivElement>();
 	let editor = $state<Monaco.editor.IStandaloneCodeEditor | null>(null);
+	let activeRuntime: typeof Monaco | null = null;
 	let resizeObserver = $state<ResizeObserver | null>(null);
 	let runtimeLoading = $state(false);
 	let runtimeError = $state<string | null>(null);
@@ -132,6 +142,7 @@ one at https://mozilla.org/MPL/2.0/.
 		editor?.dispose();
 		model?.dispose();
 		editor = null;
+		activeRuntime = null;
 		resizeObserver?.disconnect();
 		resizeObserver = null;
 	}
@@ -184,6 +195,7 @@ one at https://mozilla.org/MPL/2.0/.
 		)
 			return;
 		runtimeLoading = false;
+		activeRuntime = monaco;
 
 		// Determine if file is large (over 100KB)
 		const isLargeFile = content.length > 100000;
@@ -191,7 +203,7 @@ one at https://mozilla.org/MPL/2.0/.
 		const instance = monaco.editor.create(element, {
 			value: content,
 			language: file ? getFileLanguage(file.name) : 'plaintext',
-			theme: 'vs-dark',
+			theme: get(preferenceTheme) === 'light' ? 'vs' : 'vs-dark',
 			fontSize: 14,
 			fontFamily: "'JetBrains Mono', 'Monaco', 'Consolas', 'Courier New', monospace",
 			minimap: { enabled: !isFullscreen && !isLargeFile },

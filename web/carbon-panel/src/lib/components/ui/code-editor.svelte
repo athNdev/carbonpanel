@@ -10,8 +10,17 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { get } from 'svelte/store';
 	import type * as Monaco from 'monaco-editor';
 	import { loadEditorRuntime } from '$lib/features/editor/runtime';
+	import { theme as preferenceTheme } from '$lib/display-preferences.svelte';
+
+	// Apply live theme changes only to an already-loaded runtime. A closed or
+	// unmounted editor must stay lazy, so this effect never bootstraps Monaco.
+	$effect(() => {
+		const next = $preferenceTheme === 'light' ? 'vs' : 'vs-dark';
+		if (monaco) monaco.editor.setTheme(next);
+	});
 
 	interface Props {
 		value?: string;
@@ -54,7 +63,7 @@ one at https://mozilla.org/MPL/2.0/.
 					value: untrack(() => value),
 					language: untrack(() => language),
 					readOnly: untrack(() => readOnly),
-					theme: 'vs-dark',
+					theme: get(preferenceTheme) === 'light' ? 'vs' : 'vs-dark',
 					fontSize: 12,
 					fontFamily: "'JetBrains Mono', 'Fira Code', 'Monaco', 'Consolas', monospace",
 					minimap: { enabled: false },
