@@ -10,10 +10,17 @@ one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { serversStore, sortServersByActivity } from '$lib/stores/servers';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import {
+		serversStore,
+		serverInventory,
+		serverActions,
+		sortServersByActivity
+	} from '$lib/stores/servers';
 	import { triggerStreamDownload } from '$lib/api/stream-download';
-	import { beginLifecycleRequest } from '$lib/lifecycle-request';
+	import {
+		serverStatusLabel as getStatusDisplayName,
+		serverStatusTone as getStatusTagType
+	} from '$lib/features/servers/presentation';
 	import { formatRpcError } from '$lib/api/rpc-error';
 	import { toast } from 'svelte-sonner';
 	import {
@@ -46,14 +53,19 @@ one at https://mozilla.org/MPL/2.0/.
 	let hasErrorIssue = $derived(servers.some((s) => s.status === ServerStatus.ERROR));
 	let viewMode = $state<'table' | 'tiles'>('table');
 	let loading = $state(false);
-	let loadError = $state<string | null>(null);
+	const inventoryState = serverInventory.state;
+	let loadError = $derived(
+		$inventoryState.error && servers.length === 0
+			? formatRpcError($inventoryState.error, 'Could not load servers. Try again.')
+			: null
+	);
 	let pendingDelete = $state<Server | null>(null);
 	let confirmOpen = $state(false);
 	let deleteDisposition = $state<'delete' | 'keep' | 'detach' | 'export'>('delete');
 	// Cold direct loads render before the layout's fetch lands; hold the
 	// empty state until the first fetch settles so "no servers" never
 	// flashes for fleets that simply haven't loaded yet.
-	let hydrated = $state(servers.length > 0);
+	let hydrated = $derived($inventoryState.hydrated);
 
 	onMount(async () => {
 		if (hydrated) return;
@@ -61,14 +73,10 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	async function loadServers() {
-		loadError = null;
 		try {
 			await serversStore.fetchServers(false);
 		} catch (err) {
-			loadError = formatRpcError(err, 'Could not load servers. Try again.');
 			console.error('Failed to fetch servers:', err);
-		} finally {
-			hydrated = true;
 		}
 	}
 
@@ -112,41 +120,18 @@ one at https://mozilla.org/MPL/2.0/.
 	) {
 		event?.stopPropagation();
 		loading = true;
-		const attempt = action === 'recreate' ? null : beginLifecycleRequest(server.id, action);
+
 		try {
-			switch (action) {
-				case 'start':
-					await rpcClient.server.startServer({
-						id: server.id,
-						requestId: attempt?.requestId ?? ''
-					});
-					toast.success(`Starting ${server.name}...`);
-					break;
-				case 'stop':
-					await rpcClient.server.stopServer({
-						id: server.id,
-						requestId: attempt?.requestId ?? ''
-					});
-					toast.success(`Stopping ${server.name}...`);
-					break;
-				case 'restart':
-					await rpcClient.server.restartServer({
-						id: server.id,
-						requestId: attempt?.requestId ?? ''
-					});
-					toast.success(`Restarting ${server.name}...`);
-					break;
-				case 'recreate':
-					await rpcClient.server.recreateServer({ id: server.id });
-					toast.success(`Recreating ${server.name}...`);
-					break;
-			}
+			const outcome = await serverActions.perform(server.id, action);
+			if (outcome.kind === 'superseded') return;
+			toast.success(
+				`${action === 'recreate' ? 'Recreating' : action === 'stop' ? 'Stopping' : action === 'restart' ? 'Restarting' : 'Starting'} ${server.name}...`
+			);
 		} catch (error) {
 			toast.error(
 				`Failed to ${action} server: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
 		} finally {
-			attempt?.finish();
 			loading = false;
 		}
 	}
@@ -163,21 +148,15 @@ one at https://mozilla.org/MPL/2.0/.
 		if (!server) return;
 		loading = true;
 		const disposition = deleteDisposition;
-		const attempt = disposition === 'export' ? null : beginLifecycleRequest(server.id, 'delete');
+		const target = server;
 		try {
-			if (disposition === 'export') {
-				const response = await rpcClient.file.exportWorld({ serverId: server.id });
-				triggerStreamDownload(response.sessionId, response.filename);
-				toast.success(`Exported ${server.name}. The server was left in place.`);
+			const outcome = await serverActions.perform(target.id, 'delete', disposition);
+			if (outcome.kind === 'superseded') return;
+			if (outcome.kind === 'exported') {
+				triggerStreamDownload(outcome.sessionId, outcome.filename);
+				toast.success('World exported. The server was left in place.');
 				return;
 			}
-			await rpcClient.server.deleteServer({
-				id: server.id,
-				requestId: attempt?.requestId ?? '',
-				keepData: disposition === 'keep',
-				detach: disposition === 'detach'
-			});
-			serversStore.removeServer(server.id);
 			toast.success(
 				disposition === 'detach'
 					? `Detached ${server.name}. The container and world files were left in place.`
@@ -190,63 +169,8 @@ one at https://mozilla.org/MPL/2.0/.
 				`Failed to ${disposition === 'export' ? 'export' : 'delete'} server: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
 		} finally {
-			attempt?.finish();
 			loading = false;
 			pendingDelete = null;
-		}
-	}
-
-	function getStatusTagType(
-		status: ServerStatus
-	): 'green' | 'gray' | 'blue' | 'red' | 'yellow' | 'warm-gray' | 'purple' {
-		switch (status) {
-			case ServerStatus.RUNNING:
-				return 'green';
-			case ServerStatus.STOPPED:
-				return 'gray';
-			case ServerStatus.STARTING:
-			case ServerStatus.CREATING:
-				return 'blue';
-			case ServerStatus.RESTARTING:
-			case ServerStatus.DEEPSLEEP:
-				return 'purple';
-			case ServerStatus.PAUSED:
-				return 'blue';
-			case ServerStatus.STOPPING:
-				return 'warm-gray';
-			case ServerStatus.ERROR:
-				return 'red';
-			case ServerStatus.UNHEALTHY:
-				return 'yellow';
-			default:
-				return 'gray';
-		}
-	}
-
-	function getStatusDisplayName(status: ServerStatus): string {
-		switch (status) {
-			case ServerStatus.RUNNING:
-				return 'RUNNING';
-			case ServerStatus.STOPPED:
-				return 'STOPPED';
-			case ServerStatus.STARTING:
-				return 'STARTING';
-			case ServerStatus.STOPPING:
-				return 'STOPPING';
-			case ServerStatus.ERROR:
-				return 'ERROR';
-			case ServerStatus.CREATING:
-				return 'CREATING';
-			case ServerStatus.RESTARTING:
-				return 'RESTARTING';
-			case ServerStatus.UNHEALTHY:
-				return 'UNHEALTHY';
-			case ServerStatus.DEEPSLEEP:
-				return 'DEEP SLEEP';
-			case ServerStatus.PAUSED:
-				return 'PAUSED';
-			default:
-				return 'UNKNOWN';
 		}
 	}
 

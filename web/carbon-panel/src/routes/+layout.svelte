@@ -16,9 +16,9 @@ one at https://mozilla.org/MPL/2.0/.
 	import { goto } from '$app/navigation';
 	import { resolve as resolvePath } from '$app/paths';
 	import { get } from 'svelte/store';
-	import { serversStore } from '$lib/stores/servers';
+	import { serverInventory } from '$lib/stores/servers';
 	import { authStore } from '$lib/stores/auth';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 	import { onNavigate } from '$app/navigation';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import GlobalLoading from '$lib/components/global-loading.svelte';
@@ -29,7 +29,6 @@ one at https://mozilla.org/MPL/2.0/.
 
 	let loading = $state(true);
 
-	let statusPollingInterval: ReturnType<typeof setInterval> | null = null;
 	let activeViewTransition: ViewTransition | null = null;
 
 	// Animate only client-side route changes. Resolve after SvelteKit updates the
@@ -58,13 +57,6 @@ one at https://mozilla.org/MPL/2.0/.
 		return () => finishTransition();
 	});
 
-	function stopStatusPolling() {
-		if (statusPollingInterval) {
-			clearInterval(statusPollingInterval);
-			statusPollingInterval = null;
-		}
-	}
-
 	async function initialize() {
 		try {
 			const authStatus = await authStore.checkAuthStatus();
@@ -91,22 +83,6 @@ one at https://mozilla.org/MPL/2.0/.
 			if (!shouldFetch || page.url.pathname === '/login') {
 				return;
 			}
-
-			serversStore.fetchServers(false).catch((err) => {
-				console.error('Failed to fetch initial servers:', err);
-			});
-
-			// Keep the sidebar status fresh. Each poll swallows its own error so a
-			// transient backend hiccup cannot raise an unhandled rejection every 10s.
-			if (!statusPollingInterval) {
-				statusPollingInterval = setInterval(() => {
-					if (page.url.pathname !== '/login') {
-						serversStore.fetchServers(true).catch((err) => {
-							console.debug('Status poll failed:', err);
-						});
-					}
-				}, 10000);
-			}
 		} catch (err) {
 			// Never reject the mount lifecycle: that would skip cleanup and leak
 			// the polling interval.
@@ -119,7 +95,25 @@ one at https://mozilla.org/MPL/2.0/.
 		initialize();
 	});
 
-	onDestroy(stopStatusPolling);
+	$effect(() => {
+		if (loading) return;
+		const auth = $authStore;
+		if (
+			page.url.pathname === '/login' ||
+			auth.isLoading ||
+			auth.firstUserSetup ||
+			((auth.localAuthEnabled || auth.oidcEnabled) &&
+				!auth.isAuthenticated &&
+				!auth.anonymousAccessEnabled)
+		) {
+			serverInventory.reset();
+			return;
+		}
+		void serverInventory
+			.refresh()
+			.catch((error) => console.debug('Inventory hydration failed:', error));
+		return serverInventory.watch();
+	});
 </script>
 
 <svelte:head>
