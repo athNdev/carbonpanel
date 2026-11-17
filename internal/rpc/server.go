@@ -242,6 +242,7 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.TaskServiceName,
 		carbonpanelv1connect.UploadServiceName,
 		carbonpanelv1connect.UserServiceName,
+		carbonpanelv1connect.WorldServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -358,6 +359,13 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	moduleService.SetStorageResolver(s.storageResolver)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 
+	// World Library (OSS-347). Its binder takes explicit lifecycle, resolver
+	// and authorization dependencies; a worlds:bind grant never implies a
+	// servers:stop/start grant (checked again in the lifecycle adapter).
+	worldService := services.NewWorldService(s.store, s.config, s.log, s.storageResolver, s.uploadManager, services.WorldLibraryRoot(s.config))
+	worldService.SetBinder(services.NewWorldBinder(s.store, s.config, s.log, s.storageResolver, s.sender, serverService, s.enforcer))
+	worldService.ConfigureProviders()
+
 	// Register service handlers
 	authPath, authHandler := carbonpanelv1connect.NewAuthServiceHandler(authService, opts...)
 	mux.Handle(authPath, authHandler)
@@ -421,6 +429,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	uploadPath, uploadHandler := carbonpanelv1connect.NewUploadServiceHandler(uploadService, opts...)
 	mux.Handle(uploadPath, uploadHandler)
+
+	worldPath, worldHandler := carbonpanelv1connect.NewWorldServiceHandler(worldService, opts...)
+	mux.Handle(worldPath, worldHandler)
 }
 
 // The HTTP handler for the server

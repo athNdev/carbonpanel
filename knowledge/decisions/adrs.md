@@ -30,7 +30,7 @@ sources:
 | [0011](../../docs/adr/0011-server-runtime-admission.md) | Share server lifecycle policy | [Server lifecycle policy](../architecture/server-lifecycle.md) |
 | [0012](../../docs/adr/0012-product-transports.md) | Generated product control with tested HTTP compatibility | [RPC contract](../architecture/rpc-contract.md) |
 | [0013](../../docs/adr/0013-bounded-storage-streaming.md) | Bound storage frames and commit staged writes explicitly | [Remote storage transport](../architecture/remote-storage-transport.md), [Backup and restore](../operations/backup-restore.md) |
-
+| [0014](../../docs/adr/0014-world-library-identity-and-binding.md) | Immutable world revisions and clone-on-bind, stop-based journaled bindings | [World Library](../architecture/world-library.md) |
 
 # Rule
 

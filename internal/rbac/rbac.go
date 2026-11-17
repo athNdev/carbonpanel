@@ -117,6 +117,7 @@ func DefaultRolePolicies() map[string][][]string {
 			{"user", ResourceTasks, ActionRead, "*"},
 			{"user", ResourceProxy, ActionRead, "*"},
 			{"user", ResourceActivity, ActionRead, "*"},
+			{"user", ResourceWorlds, ActionRead, "*"},
 		},
 		"anonymous": {
 			{"anonymous", ResourceServers, ActionRead, "*"},
