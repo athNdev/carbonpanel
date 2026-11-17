@@ -50,6 +50,8 @@ wrong host. That is a data-safety bug, not a degraded mode.
   setup. Legacy wrappers keep their bounded background lifetime.
   Missing-network create/start retries use the same operation context and
   retain both the original daemon failure and a failed network repair.
+  Locator client/executor resolution forwards that context and preserves
+  cancellation before considering any local alias or fallback.
 - Hibernation uses `SetFreezerResolver` so freeze/wake go through `internal/docker/locator.go` for the server's node. The remaining freezer exposure is a resolver that returns nil rather than a typed locator error.
 - Module EXEC hooks resolve the module's assigned node through Locator with
   the operation context. Lookup and remote execution failures never retry on
