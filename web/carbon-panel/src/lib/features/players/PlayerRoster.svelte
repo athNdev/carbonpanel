@@ -219,7 +219,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	function openDetail(player: PlayerSummary) {
 		const key = keyOf(player);
-		void goto(resolve(`/players/${encodeURIComponent(key)}`), { keepFocus: true });
+		// Carry the row's server scope into detail: every players:* RPC is
+		// server_id-scoped, so dropping it would deny scoped grants.
+		const scope = player.serverId || serverId;
+		const query = scope ? `?server=${encodeURIComponent(scope)}` : '';
+		void goto(resolve(`/players/${encodeURIComponent(key)}${query}`), { keepFocus: true });
 	}
 
 	function handleGlobalKeydown(event: KeyboardEvent) {

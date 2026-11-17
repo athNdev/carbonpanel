@@ -268,6 +268,95 @@ func (s *PlayerService) presenceFor(identity *storage.PlayerIdentity, serverID s
 	return presence, o, lastSeen
 }
 
+// ingestRoster is the production ingestion path from live observations into
+// the panel's identity index. Structured adapter observations are preferred;
+// the existing metrics roster is the vanilla fallback. Names that disappear
+// close their open session instead of being reported as currently online.
+func (s *PlayerService) ingestRoster(ctx context.Context, serverID string) {
+	serverIDs := []string{serverID}
+	if serverID == "" && s.metrics != nil {
+		serverIDs = make([]string, 0, len(s.metrics.GetAllMetrics()))
+		for id := range s.metrics.GetAllMetrics() {
+			serverIDs = append(serverIDs, id)
+		}
+	}
+	for _, id := range serverIDs {
+		if id == "" {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		var observed []observedPlayer
+		hasObservation := false
+		sourceName := "metrics"
+		if s.negotiator != nil {
+			if server, err := s.server(ctx, id); err == nil {
+				var cfg *storage.ServerConfig
+				if stored, cfgErr := s.store.GetServerConfig(ctx, server.ID); cfgErr == nil {
+					cfg = stored
+				}
+				if source, _, err := s.negotiator.Negotiate(ctx, server, cfg); err == nil {
+					if listed, listErr := source.List(ctx); listErr == nil && len(listed) > 0 {
+						observed = listed
+						hasObservation = true
+						sourceName = source.Source()
+					}
+				}
+			}
+		}
+		if !hasObservation && s.metrics != nil {
+			if m := s.metrics.GetMetrics(id); m != nil {
+				hasObservation = true
+				for _, name := range m.PlayerSample {
+					if strings.TrimSpace(name) != "" {
+						observed = append(observed, observedPlayer{Name: name})
+					}
+				}
+			}
+		}
+		if !hasObservation {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, player := range observed {
+			if strings.TrimSpace(player.Name) == "" {
+				continue
+			}
+			seen[strings.ToLower(player.Name)] = true
+			var identity *storage.PlayerIdentity
+			var err error
+			if player.UUID != "" {
+				identity, err = s.store.EnsurePlayerIdentity(ctx, player.UUID, player.Name, "", "", false)
+			} else {
+				identity, err = s.store.EnsureOfflinePlayerIdentity(ctx, player.Name, id, sourceName)
+			}
+			if err != nil {
+				s.log.Debug("Player ingestion failed for %s on %s: %v", player.Name, id, err)
+				continue
+			}
+			open, err := s.store.HasOpenPlayerSession(ctx, identity.ID, id)
+			if err != nil {
+				continue
+			}
+			if !open {
+				if _, err := s.store.StartPlayerSession(ctx, identity.ID, id, sourceName, time.Now().UTC()); err != nil {
+					s.log.Debug("Could not start player session for %s: %v", identity.ID, err)
+				}
+			}
+		}
+		stale, err := s.store.OpenPlayerSessions(ctx, id)
+		if err != nil {
+			continue
+		}
+		for _, row := range stale {
+			if !seen[strings.ToLower(row.Name)] {
+				_ = s.store.EndPlayerSessionById(ctx, row.SessionID, time.Now().UTC())
+			}
+		}
+	}
+}
+
 // ListPlayers returns a bounded, sorted roster. Filters are applied over
 // observed identities only; no fabricated zero values are produced.
 func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1.ListPlayersRequest]) (*connect.Response[v1.ListPlayersResponse], error) {
@@ -281,6 +370,9 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
+	// Refresh the index from live observations before reading it. This is the
+	// production ingestion seam; without it the roster would never see a player.
+	s.ingestRoster(ctx, msg.ServerId)
 	identities, err := s.store.ListPlayerIdentities(ctx, msg.ServerId, msg.Query, limit)
 	if err != nil {
 		s.log.Error("Failed to list players: %v", err)
@@ -425,6 +517,9 @@ func stampBefore(a, b interface{ AsTime() time.Time }) bool {
 // group. Character/progress are read-only snapshots, never live NBT edits.
 func (s *PlayerService) GetPlayer(ctx context.Context, req *connect.Request[v1.GetPlayerRequest]) (*connect.Response[v1.GetPlayerResponse], error) {
 	msg := req.Msg
+	if msg.ServerId != "" {
+		s.ingestRoster(ctx, msg.ServerId)
+	}
 	identity, err := s.identity(ctx, msg.IdentityKey)
 	if err != nil {
 		return nil, err
@@ -882,9 +977,17 @@ func (s *PlayerService) PardonPlayer(ctx context.Context, req *connect.Request[v
 
 func (s *PlayerService) SetOperator(ctx context.Context, req *connect.Request[v1.SetOperatorRequest]) (*connect.Response[v1.SetOperatorResponse], error) {
 	msg := req.Msg
-	// No self-elevation: the actor may not raise their own game permission.
-	if user := auth.GetUserFromContext(ctx); user != nil && strings.EqualFold(user.Username, msg.PlayerName) && !msg.Remove {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("an actor cannot op themselves"))
+	// No self-elevation: resolve the actual target first. Comparing only the
+	// supplied player_name is bypassable by sending an empty name with one's
+	// own identity key; the service fills the name from the stored identity.
+	if user := auth.GetUserFromContext(ctx); user != nil && !msg.Remove {
+		targetName := strings.TrimSpace(msg.PlayerName)
+		if identity, err := s.identity(ctx, msg.IdentityKey); err == nil && identity.CurrentName != "" {
+			targetName = identity.CurrentName
+		}
+		if targetName != "" && strings.EqualFold(user.Username, targetName) {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("an actor cannot op themselves"))
+		}
 	}
 	action, event := "op", activity.EventPlayerOp
 	inverse := `{"inverse":"deop"}`
@@ -935,7 +1038,7 @@ func (s *PlayerService) BulkPlayerAction(ctx context.Context, req *connect.Reque
 	if user := auth.GetUserFromContext(ctx); user != nil {
 		actorID, actorName = user.ID, user.Username
 	}
-	row, _, err := s.store.BeginPlayerAction(ctx, msg.RequestId, msg.ServerId, strings.Join(msg.IdentityKeys, ","), "bulk_"+msg.Kind, actorID, actorName, msg.Reason, "", len(msg.IdentityKeys))
+	row, claimed, err := s.store.BeginPlayerAction(ctx, msg.RequestId, msg.ServerId, strings.Join(msg.IdentityKeys, ","), "bulk_"+msg.Kind, actorID, actorName, msg.Reason, "", len(msg.IdentityKeys))
 	if err != nil {
 		switch {
 		case errors.Is(err, storage.ErrPlayerActionInProgress):
@@ -945,6 +1048,23 @@ func (s *PlayerService) BulkPlayerAction(ctx context.Context, req *connect.Reque
 		default:
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
+	}
+	if !claimed {
+		// A replayed request id must not re-apply external mutations or write
+		// a second audit row. The journal row is the source of truth here.
+		replay := make([]*v1.PlayerActionResult, 0, len(msg.IdentityKeys))
+		for _, key := range msg.IdentityKeys {
+			message := "bulk action already in progress"
+			if row.Phase == storage.PlayerActionComplete {
+				message = "bulk action already completed"
+			} else if row.Phase == storage.PlayerActionFailed {
+				message = "bulk action previously failed; retry with a new request id"
+			}
+			replay = append(replay, &v1.PlayerActionResult{IdentityKey: key, Success: row.Phase == storage.PlayerActionComplete, Message: message})
+		}
+		return connect.NewResponse(&v1.BulkPlayerActionResponse{Outcome: &v1.PlayerActionOutcome{
+			RequestId: msg.RequestId, JournalId: row.ID, Results: replay,
+		}}), nil
 	}
 	_, _, source, sourceName, err := s.actionContext(ctx, msg.ServerId, msg.IdentityKeys[0], "")
 	if err != nil {

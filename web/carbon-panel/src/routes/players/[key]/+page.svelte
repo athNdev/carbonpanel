@@ -185,7 +185,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				}
 				case 'access': {
 					const response = await rpcClient.player.listPlayerAccess(
-						create(ListPlayerAccessRequestSchema, { identityKey: key })
+						create(ListPlayerAccessRequestSchema, {
+							identityKey: key,
+							serverId: primaryServerId
+						})
 					);
 					if (generation === sectionGenerations[tab]) accessStates = response.states ?? [];
 					break;
@@ -527,7 +530,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<PlayerActions
 									serverId={primaryServerId}
 									targets={[{ identityKey: key, name: displayName }]}
-									action={detail.access.some((f) => f.name === 'operator' && f.value === 'true')
+									action={detail.access.some(
+										(f) =>
+											f.name === 'operator' &&
+											(f.value === 'yes' || f.value === 'true')
+									)
 										? 'deop'
 										: 'op'}
 								/>

@@ -27,19 +27,20 @@ import (
 // fakes implement the local ports so service seams can be tested without a
 // live Minecraft server, Docker daemon or third-party skin host.
 type fakeSource struct {
-	name       string
-	kicks      int
-	bans       int
-	pardons    int
-	ops        int
-	allowlist  int
-	failNext   error
-	lastReason string
+	name        string
+	kicks       int
+	bans        int
+	pardons     int
+	ops         int
+	allowlist   int
+	failNext    error
+	lastReason  string
+	listPlayers []observedPlayer
 }
 
 func (f *fakeSource) Source() string { return f.name }
 func (f *fakeSource) List(context.Context) ([]observedPlayer, error) {
-	return []observedPlayer{{Name: "Steve", UUID: "11111111-1111-1111-1111-111111111111"}}, nil
+	return f.listPlayers, nil
 }
 func (f *fakeSource) fail() error {
 	err := f.failNext
@@ -85,10 +86,10 @@ func (f *fakeSource) SetWhitelist(context.Context, string, bool) error {
 }
 
 type fakeNegotiator struct {
-	source  playerSource
-	caps    capabilityInfo
-	err     error
-	called  int
+	source playerSource
+	caps   capabilityInfo
+	err    error
+	called int
 }
 
 func (f *fakeNegotiator) Negotiate(context.Context, *storage.Server, *storage.ServerConfig) (playerSource, capabilityInfo, error) {
@@ -382,6 +383,92 @@ func TestDeepDataIsBoundedAndProvenanced(t *testing.T) {
 	}
 	if res.Msg.SnapshotNote == "" {
 		t.Fatal("snapshot note missing")
+	}
+}
+
+func TestListPlayersIngestsLiveObservations(t *testing.T) {
+	svc, store, source, _ := newPlayerTestService(t)
+	source.listPlayers = []observedPlayer{{Name: "LiveSteve", UUID: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}}
+	request := connect.NewRequest(&v1.ListPlayersRequest{ServerId: "srv-1"})
+	res, err := svc.ListPlayers(context.Background(), request)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(res.Msg.Players) != 1 || res.Msg.Players[0].Ref.Name != "LiveSteve" {
+		t.Fatalf("observed player not ingested: %+v", res.Msg.Players)
+	}
+	if res.Msg.Players[0].Ref.Uuid != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" {
+		t.Fatalf("observed UUID lost: %+v", res.Msg.Players[0].Ref)
+	}
+	if res.Msg.Players[0].Ref.OfflineUuid {
+		t.Fatal("structured observation wrongly marked offline")
+	}
+	identity, err := store.GetPlayerIdentity(context.Background(), res.Msg.Players[0].Ref.IdentityKey)
+	if err != nil {
+		t.Fatalf("identity not persisted: %v", err)
+	}
+	open, err := store.HasOpenPlayerSession(context.Background(), identity.ID, "srv-1")
+	if err != nil || !open {
+		t.Fatalf("open session missing: open=%v err=%v", open, err)
+	}
+	// A repeated roster load must not stack sessions for the same player.
+	if _, err := svc.ListPlayers(context.Background(), connect.NewRequest(&v1.ListPlayersRequest{ServerId: "srv-1"})); err != nil {
+		t.Fatalf("second list: %v", err)
+	}
+	var sessions []storage.PlayerSession
+	if err := store.DB().Where("identity_id = ? AND server_id = ? AND left_at IS NULL", identity.ID, "srv-1").Find(&sessions).Error; err != nil {
+		t.Fatalf("session query: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("duplicate open sessions: %d", len(sessions))
+	}
+}
+
+func TestSelfElevationCannotHideNameBehindIdentityKey(t *testing.T) {
+	svc, store, _, _ := newPlayerTestService(t)
+	identity := seedIdentity(t, store, "alice", "cccccccc-cccc-cccc-cccc-cccccccccccc", "srv-1", time.Now())
+	ctx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "actor-1", Username: "alice"})
+	_, err := svc.SetOperator(ctx, connect.NewRequest(&v1.SetOperatorRequest{
+		ServerId: "srv-1", IdentityKey: identity.ID, PlayerName: "", RequestId: "op-self-hidden-1",
+	}))
+	if err == nil || connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("self-elevation with hidden name not denied: %v", err)
+	}
+}
+
+func TestBulkReplayDoesNotReapplyMutations(t *testing.T) {
+	svc, store, source, _ := newPlayerTestService(t)
+	keys := []string{
+		seedIdentity(t, store, "ReplayA", "dddddddd-dddd-dddd-dddd-ddddddddddd1", "srv-1", time.Now()).ID,
+		seedIdentity(t, store, "ReplayB", "dddddddd-dddd-dddd-dddd-ddddddddddd2", "srv-1", time.Now()).ID,
+	}
+	request := connect.NewRequest(&v1.BulkPlayerActionRequest{
+		ServerId: "srv-1", Kind: "kick", IdentityKeys: keys, RequestId: "bulk-replay-1",
+	})
+	if _, err := svc.BulkPlayerAction(context.Background(), request); err != nil {
+		t.Fatalf("bulk: %v", err)
+	}
+	if source.kicks != 2 {
+		t.Fatalf("first bulk applied %d kicks, want 2", source.kicks)
+	}
+	res, err := svc.BulkPlayerAction(context.Background(), request)
+	if err != nil {
+		t.Fatalf("bulk replay: %v", err)
+	}
+	if source.kicks != 2 {
+		t.Fatalf("replay re-applied mutations: %d kicks", source.kicks)
+	}
+	for _, result := range res.Msg.Outcome.Results {
+		if !result.Success || !strings.Contains(result.Message, "already completed") {
+			t.Fatalf("replay result not honest: %+v", result)
+		}
+	}
+	var rows []storage.ActivityLog
+	if err := store.DB().Where("event = ? AND request_id = ?", activity.EventPlayerBulk, "bulk-replay-1").Find(&rows).Error; err != nil {
+		t.Fatalf("audit query: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("replay wrote %d audit rows, want 1", len(rows))
 	}
 }
 

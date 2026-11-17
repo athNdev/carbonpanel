@@ -7,6 +7,8 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -166,6 +168,60 @@ func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xui
 	return &identity, nil
 }
 
+// OfflineUUIDFor derives a stable, server-scoped pseudo UUID for a name that
+// has no authoritative online UUID. It is explicitly marked offline and is
+// never merged with an online identity: the same name on two servers is two
+// distinct observations.
+func OfflineUUIDFor(serverID, name string) string {
+	sum := sha256.Sum256([]byte("carbonpanel:offline:" + serverID + ":" + strings.ToLower(strings.TrimSpace(name))))
+	hexed := hex.EncodeToString(sum[:16])
+	return hexed[0:8] + "-" + hexed[8:12] + "-" + hexed[12:16] + "-" + hexed[16:20] + "-" + hexed[20:32]
+}
+
+// EnsureOfflinePlayerIdentity records a name-only observation from presence or
+// metrics. The derived UUID is a local index key, not a Minecraft online id.
+func (s *Store) EnsureOfflinePlayerIdentity(ctx context.Context, name, serverID, source string) (*PlayerIdentity, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, errors.New("player name is required")
+	}
+	identity, err := s.EnsurePlayerIdentity(ctx, OfflineUUIDFor(serverID, name), name, "", "", true)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.RecordAlias(ctx, identity.ID, name, serverID, source, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	return identity, nil
+}
+
+// HasOpenPlayerSession reports whether an identity is currently observed as
+// present on a server, so roster ingestion does not stack duplicate sessions.
+func (s *Store) HasOpenPlayerSession(ctx context.Context, identityID, serverID string) (bool, error) {
+	var count int64
+	err := s.db.WithContext(ctx).Model(&PlayerSession{}).
+		Where("identity_id = ? AND server_id = ? AND left_at IS NULL", identityID, serverID).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// OpenPlayerSessions returns open sessions joined with their identity's current
+// name, for closing observations that disappeared from a roster.
+type OpenPlayerSession struct {
+	SessionID  string
+	IdentityID string
+	Name       string
+}
+
+func (s *Store) OpenPlayerSessions(ctx context.Context, serverID string) ([]OpenPlayerSession, error) {
+	var rows []OpenPlayerSession
+	err := s.db.WithContext(ctx).Model(&PlayerSession{}).
+		Select("player_sessions.id as session_id, player_sessions.identity_id as identity_id, player_identities.current_name as name").
+		Joins("JOIN player_identities ON player_identities.id = player_sessions.identity_id").
+		Where("player_sessions.server_id = ? AND player_sessions.left_at IS NULL", serverID).
+		Find(&rows).Error
+	return rows, err
+}
+
 // GetPlayerIdentity loads one identity by opaque key.
 func (s *Store) GetPlayerIdentity(ctx context.Context, key string) (*PlayerIdentity, error) {
 	var identity PlayerIdentity
@@ -239,6 +295,13 @@ func (s *Store) EndPlayerSession(ctx context.Context, identityID, serverID strin
 		return err
 	}
 	return s.db.WithContext(ctx).Model(&session).Updates(map[string]any{"left_at": leftAt}).Error
+}
+
+// EndPlayerSessionById closes a specific open session during roster ingestion.
+func (s *Store) EndPlayerSessionById(ctx context.Context, sessionID string, leftAt time.Time) error {
+	return s.db.WithContext(ctx).Model(&PlayerSession{}).
+		Where("id = ? AND left_at IS NULL", sessionID).
+		Update("left_at", leftAt).Error
 }
 
 // ListPlayerSessions returns newest-first sessions for one identity.

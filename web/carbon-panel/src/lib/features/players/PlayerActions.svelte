@@ -235,6 +235,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		undoMessage = '';
 		try {
 			const messages: string[] = [];
+			let allSucceeded = true;
 			for (const result of undoable) {
 				const response = await rpcClient.player.undoPlayerAction(
 					create(UndoPlayerActionRequestSchema, {
@@ -245,6 +246,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				);
 				const outcome = response.outcome;
 				const own = outcome?.results?.[0];
+				if (!own?.success) allSucceeded = false;
 				messages.push(
 					own?.success
 						? `Undone for ${result.identityKey}`
@@ -252,7 +254,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				);
 			}
 			undoMessage = messages.join(' · ');
-			toast.success('Undo requested');
+			if (allSucceeded) {
+				toast.success('Undo applied');
+			} else {
+				toast.error(undoMessage);
+			}
 			await onDone?.();
 		} catch (error) {
 			undoMessage = formatRpcError(error, 'Undo failed. Check the audit history.');

@@ -45,14 +45,16 @@ func (a adapterShim) List(ctx context.Context) ([]observedPlayer, error) {
 // negotiatorShim builds adapter inputs from controller configuration. It never
 // writes controller state into a world and never logs secrets.
 type negotiatorShim struct {
-	cfg     *config.Config
-	sender  *command.Sender
-	mu      sync.Mutex
-	closers []interface{ Close() }
+	cfg    *config.Config
+	sender *command.Sender
+	mu     sync.Mutex
+	// One owned reader per server: re-negotiating replaces the previous
+	// reader instead of growing an unbounded slice for the process lifetime.
+	closers map[string]interface{ Close() }
 }
 
 func newNegotiatorShim(cfg *config.Config, sender *command.Sender) *negotiatorShim {
-	return &negotiatorShim{cfg: cfg, sender: sender}
+	return &negotiatorShim{cfg: cfg, sender: sender, closers: make(map[string]interface{ Close() })}
 }
 
 func globalString(cfg *config.Config, key string) string {
@@ -109,7 +111,13 @@ func (n *negotiatorShim) Negotiate(ctx context.Context, server *storage.Server, 
 	adapter, caps, err := playeradapters.Negotiate(ctx, info, exec)
 	if closer, ok := adapter.(interface{ Close() }); ok {
 		n.mu.Lock()
-		n.closers = append(n.closers, closer)
+		if previous := n.closers[server.ID]; previous != nil {
+			previous.Close()
+		}
+		if n.closers == nil {
+			n.closers = make(map[string]interface{ Close() })
+		}
+		n.closers[server.ID] = closer
 		n.mu.Unlock()
 	}
 	unsupported := make([]unsupportedInfo, 0, len(caps.Unsupported))
@@ -129,7 +137,7 @@ func (n *negotiatorShim) Close() {
 	for _, closer := range n.closers {
 		closer.Close()
 	}
-	n.closers = nil
+	n.closers = make(map[string]interface{ Close() })
 }
 
 type skinShim struct{ cache *playerskin.Cache }
