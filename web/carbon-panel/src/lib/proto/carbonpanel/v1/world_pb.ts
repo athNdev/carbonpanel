@@ -852,6 +852,8 @@ export const ProviderCapabilitySchema: GenMessage<ProviderCapability> =
 	messageDesc(file_carbonpanel_v1_world, 14);
 
 /**
+ * ListWorldEntriesRequest Query for browsing library entries.
+ *
  * @generated from message carbonpanel.v1.ListWorldEntriesRequest
  */
 export type ListWorldEntriesRequest = Message<'carbonpanel.v1.ListWorldEntriesRequest'> & {
@@ -884,6 +886,8 @@ export const ListWorldEntriesRequestSchema: GenMessage<ListWorldEntriesRequest> 
 	messageDesc(file_carbonpanel_v1_world, 15);
 
 /**
+ * ListWorldEntriesResponse Matching library entries.
+ *
  * @generated from message carbonpanel.v1.ListWorldEntriesResponse
  */
 export type ListWorldEntriesResponse = Message<'carbonpanel.v1.ListWorldEntriesResponse'> & {
@@ -902,6 +906,8 @@ export const ListWorldEntriesResponseSchema: GenMessage<ListWorldEntriesResponse
 	messageDesc(file_carbonpanel_v1_world, 16);
 
 /**
+ * GetWorldEntryRequest Identifies one library entry.
+ *
  * @generated from message carbonpanel.v1.GetWorldEntryRequest
  */
 export type GetWorldEntryRequest = Message<'carbonpanel.v1.GetWorldEntryRequest'> & {
@@ -920,6 +926,8 @@ export const GetWorldEntryRequestSchema: GenMessage<GetWorldEntryRequest> =
 	messageDesc(file_carbonpanel_v1_world, 17);
 
 /**
+ * GetWorldEntryResponse The requested library entry.
+ *
  * @generated from message carbonpanel.v1.GetWorldEntryResponse
  */
 export type GetWorldEntryResponse = Message<'carbonpanel.v1.GetWorldEntryResponse'> & {
@@ -938,6 +946,8 @@ export const GetWorldEntryResponseSchema: GenMessage<GetWorldEntryResponse> =
 	messageDesc(file_carbonpanel_v1_world, 18);
 
 /**
+ * ListRevisionsRequest Identifies the entry whose revisions are listed.
+ *
  * @generated from message carbonpanel.v1.ListRevisionsRequest
  */
 export type ListRevisionsRequest = Message<'carbonpanel.v1.ListRevisionsRequest'> & {
@@ -956,6 +966,8 @@ export const ListRevisionsRequestSchema: GenMessage<ListRevisionsRequest> =
 	messageDesc(file_carbonpanel_v1_world, 19);
 
 /**
+ * ListRevisionsResponse Immutable revisions, newest first.
+ *
  * @generated from message carbonpanel.v1.ListRevisionsResponse
  */
 export type ListRevisionsResponse = Message<'carbonpanel.v1.ListRevisionsResponse'> & {
@@ -974,6 +986,8 @@ export const ListRevisionsResponseSchema: GenMessage<ListRevisionsResponse> =
 	messageDesc(file_carbonpanel_v1_world, 20);
 
 /**
+ * GetRevisionRequest Identifies one immutable revision.
+ *
  * @generated from message carbonpanel.v1.GetRevisionRequest
  */
 export type GetRevisionRequest = Message<'carbonpanel.v1.GetRevisionRequest'> & {
@@ -992,6 +1006,8 @@ export const GetRevisionRequestSchema: GenMessage<GetRevisionRequest> =
 	messageDesc(file_carbonpanel_v1_world, 21);
 
 /**
+ * GetRevisionResponse The requested revision and provenance.
+ *
  * @generated from message carbonpanel.v1.GetRevisionResponse
  */
 export type GetRevisionResponse = Message<'carbonpanel.v1.GetRevisionResponse'> & {
@@ -1010,6 +1026,8 @@ export const GetRevisionResponseSchema: GenMessage<GetRevisionResponse> =
 	messageDesc(file_carbonpanel_v1_world, 22);
 
 /**
+ * ListBindingsRequest Optional server and revision filters.
+ *
  * @generated from message carbonpanel.v1.ListBindingsRequest
  */
 export type ListBindingsRequest = Message<'carbonpanel.v1.ListBindingsRequest'> & {
@@ -1035,6 +1053,8 @@ export const ListBindingsRequestSchema: GenMessage<ListBindingsRequest> =
 	messageDesc(file_carbonpanel_v1_world, 23);
 
 /**
+ * ListBindingsResponse Active bindings matching the filters.
+ *
  * @generated from message carbonpanel.v1.ListBindingsResponse
  */
 export type ListBindingsResponse = Message<'carbonpanel.v1.ListBindingsResponse'> & {
@@ -1053,6 +1073,8 @@ export const ListBindingsResponseSchema: GenMessage<ListBindingsResponse> =
 	messageDesc(file_carbonpanel_v1_world, 24);
 
 /**
+ * GetBindingRequest Server and level of the binding.
+ *
  * @generated from message carbonpanel.v1.GetBindingRequest
  */
 export type GetBindingRequest = Message<'carbonpanel.v1.GetBindingRequest'> & {
@@ -1076,6 +1098,8 @@ export const GetBindingRequestSchema: GenMessage<GetBindingRequest> =
 	messageDesc(file_carbonpanel_v1_world, 25);
 
 /**
+ * GetBindingResponse The active binding, if any.
+ *
  * @generated from message carbonpanel.v1.GetBindingResponse
  */
 export type GetBindingResponse = Message<'carbonpanel.v1.GetBindingResponse'> & {
@@ -1094,6 +1118,8 @@ export const GetBindingResponseSchema: GenMessage<GetBindingResponse> =
 	messageDesc(file_carbonpanel_v1_world, 26);
 
 /**
+ * ListImportJobsRequest Optional entry filter and result limit.
+ *
  * @generated from message carbonpanel.v1.ListImportJobsRequest
  */
 export type ListImportJobsRequest = Message<'carbonpanel.v1.ListImportJobsRequest'> & {
@@ -1117,6 +1143,8 @@ export const ListImportJobsRequestSchema: GenMessage<ListImportJobsRequest> =
 	messageDesc(file_carbonpanel_v1_world, 27);
 
 /**
+ * ListImportJobsResponse Recent durable import jobs.
+ *
  * @generated from message carbonpanel.v1.ListImportJobsResponse
  */
 export type ListImportJobsResponse = Message<'carbonpanel.v1.ListImportJobsResponse'> & {
@@ -1135,6 +1163,8 @@ export const ListImportJobsResponseSchema: GenMessage<ListImportJobsResponse> =
 	messageDesc(file_carbonpanel_v1_world, 28);
 
 /**
+ * GetImportJobRequest Identifies one import job.
+ *
  * @generated from message carbonpanel.v1.GetImportJobRequest
  */
 export type GetImportJobRequest = Message<'carbonpanel.v1.GetImportJobRequest'> & {
@@ -1153,6 +1183,8 @@ export const GetImportJobRequestSchema: GenMessage<GetImportJobRequest> =
 	messageDesc(file_carbonpanel_v1_world, 29);
 
 /**
+ * GetImportJobResponse The requested import job.
+ *
  * @generated from message carbonpanel.v1.GetImportJobResponse
  */
 export type GetImportJobResponse = Message<'carbonpanel.v1.GetImportJobResponse'> & {
@@ -1171,6 +1203,8 @@ export const GetImportJobResponseSchema: GenMessage<GetImportJobResponse> =
 	messageDesc(file_carbonpanel_v1_world, 30);
 
 /**
+ * ImportWorldRequest Operator attestation and source for an import.
+ *
  * @generated from message carbonpanel.v1.ImportWorldRequest
  */
 export type ImportWorldRequest = Message<'carbonpanel.v1.ImportWorldRequest'> & {
@@ -1232,6 +1266,8 @@ export const ImportWorldRequestSchema: GenMessage<ImportWorldRequest> =
 	messageDesc(file_carbonpanel_v1_world, 31);
 
 /**
+ * ImportWorldResponse The import job and resulting immutable revision.
+ *
  * @generated from message carbonpanel.v1.ImportWorldResponse
  */
 export type ImportWorldResponse = Message<'carbonpanel.v1.ImportWorldResponse'> & {
@@ -1255,6 +1291,8 @@ export const ImportWorldResponseSchema: GenMessage<ImportWorldResponse> =
 	messageDesc(file_carbonpanel_v1_world, 32);
 
 /**
+ * CheckCompatibilityRequest Revision and target server or version.
+ *
  * @generated from message carbonpanel.v1.CheckCompatibilityRequest
  */
 export type CheckCompatibilityRequest = Message<'carbonpanel.v1.CheckCompatibilityRequest'> & {
@@ -1283,6 +1321,8 @@ export const CheckCompatibilityRequestSchema: GenMessage<CheckCompatibilityReque
 	messageDesc(file_carbonpanel_v1_world, 33);
 
 /**
+ * CheckCompatibilityResponse Read-only compatibility and dry-run report.
+ *
  * @generated from message carbonpanel.v1.CheckCompatibilityResponse
  */
 export type CheckCompatibilityResponse = Message<'carbonpanel.v1.CheckCompatibilityResponse'> & {
@@ -1301,6 +1341,8 @@ export const CheckCompatibilityResponseSchema: GenMessage<CheckCompatibilityResp
 	messageDesc(file_carbonpanel_v1_world, 34);
 
 /**
+ * BindWorldRequest Server level, revision and chosen change window.
+ *
  * @generated from message carbonpanel.v1.BindWorldRequest
  */
 export type BindWorldRequest = Message<'carbonpanel.v1.BindWorldRequest'> & {
@@ -1341,6 +1383,8 @@ export const BindWorldRequestSchema: GenMessage<BindWorldRequest> =
 	messageDesc(file_carbonpanel_v1_world, 35);
 
 /**
+ * BindWorldResponse Persisted binding and journal outcome.
+ *
  * @generated from message carbonpanel.v1.BindWorldResponse
  */
 export type BindWorldResponse = Message<'carbonpanel.v1.BindWorldResponse'> & {
@@ -1376,6 +1420,8 @@ export const BindWorldResponseSchema: GenMessage<BindWorldResponse> =
 	messageDesc(file_carbonpanel_v1_world, 36);
 
 /**
+ * UnbindWorldRequest Server level whose binding is removed.
+ *
  * @generated from message carbonpanel.v1.UnbindWorldRequest
  */
 export type UnbindWorldRequest = Message<'carbonpanel.v1.UnbindWorldRequest'> & {
@@ -1404,6 +1450,8 @@ export const UnbindWorldRequestSchema: GenMessage<UnbindWorldRequest> =
 	messageDesc(file_carbonpanel_v1_world, 37);
 
 /**
+ * UnbindWorldResponse Whether a binding was removed.
+ *
  * @generated from message carbonpanel.v1.UnbindWorldResponse
  */
 export type UnbindWorldResponse = Message<'carbonpanel.v1.UnbindWorldResponse'> & {
@@ -1422,6 +1470,8 @@ export const UnbindWorldResponseSchema: GenMessage<UnbindWorldResponse> =
 	messageDesc(file_carbonpanel_v1_world, 38);
 
 /**
+ * ResolveWorldOperationRequest Operator decision on an uncertain operation.
+ *
  * @generated from message carbonpanel.v1.ResolveWorldOperationRequest
  */
 export type ResolveWorldOperationRequest =
@@ -1458,6 +1508,8 @@ export const ResolveWorldOperationRequestSchema: GenMessage<ResolveWorldOperatio
 	messageDesc(file_carbonpanel_v1_world, 39);
 
 /**
+ * ResolveWorldOperationResponse Resolution outcome.
+ *
  * @generated from message carbonpanel.v1.ResolveWorldOperationResponse
  */
 export type ResolveWorldOperationResponse =
@@ -1477,6 +1529,8 @@ export const ResolveWorldOperationResponseSchema: GenMessage<ResolveWorldOperati
 	messageDesc(file_carbonpanel_v1_world, 40);
 
 /**
+ * GetWorldConfigSchemaRequest Target version tuple for the wizard schema.
+ *
  * @generated from message carbonpanel.v1.GetWorldConfigSchemaRequest
  */
 export type GetWorldConfigSchemaRequest = Message<'carbonpanel.v1.GetWorldConfigSchemaRequest'> & {
@@ -1510,6 +1564,8 @@ export const GetWorldConfigSchemaRequestSchema: GenMessage<GetWorldConfigSchemaR
 	messageDesc(file_carbonpanel_v1_world, 41);
 
 /**
+ * GetWorldConfigSchemaResponse Version-driven grouped controls and presets.
+ *
  * @generated from message carbonpanel.v1.GetWorldConfigSchemaResponse
  */
 export type GetWorldConfigSchemaResponse =
@@ -1529,6 +1585,8 @@ export const GetWorldConfigSchemaResponseSchema: GenMessage<GetWorldConfigSchema
 	messageDesc(file_carbonpanel_v1_world, 42);
 
 /**
+ * PreviewWorldConfigRequest Draft values to validate without applying.
+ *
  * @generated from message carbonpanel.v1.PreviewWorldConfigRequest
  */
 export type PreviewWorldConfigRequest = Message<'carbonpanel.v1.PreviewWorldConfigRequest'> & {
@@ -1572,6 +1630,8 @@ export const PreviewWorldConfigRequestSchema: GenMessage<PreviewWorldConfigReque
 	messageDesc(file_carbonpanel_v1_world, 43);
 
 /**
+ * PreviewWorldConfigResponse Classified dry-run diff and conflicts.
+ *
  * @generated from message carbonpanel.v1.PreviewWorldConfigResponse
  */
 export type PreviewWorldConfigResponse = Message<'carbonpanel.v1.PreviewWorldConfigResponse'> & {
@@ -1590,6 +1650,8 @@ export const PreviewWorldConfigResponseSchema: GenMessage<PreviewWorldConfigResp
 	messageDesc(file_carbonpanel_v1_world, 44);
 
 /**
+ * CreateWorldFromConfigRequest Validated draft used to create a fresh revision.
+ *
  * @generated from message carbonpanel.v1.CreateWorldFromConfigRequest
  */
 export type CreateWorldFromConfigRequest =
@@ -1649,6 +1711,8 @@ export const CreateWorldFromConfigRequestSchema: GenMessage<CreateWorldFromConfi
 	messageDesc(file_carbonpanel_v1_world, 45);
 
 /**
+ * CreateWorldFromConfigResponse The new immutable revision and library entry.
+ *
  * @generated from message carbonpanel.v1.CreateWorldFromConfigResponse
  */
 export type CreateWorldFromConfigResponse =
@@ -1673,6 +1737,8 @@ export const CreateWorldFromConfigResponseSchema: GenMessage<CreateWorldFromConf
 	messageDesc(file_carbonpanel_v1_world, 46);
 
 /**
+ * SearchWorldArtifactsRequest Provider, filters and pagination cursor.
+ *
  * @generated from message carbonpanel.v1.SearchWorldArtifactsRequest
  */
 export type SearchWorldArtifactsRequest = Message<'carbonpanel.v1.SearchWorldArtifactsRequest'> & {
@@ -1725,6 +1791,8 @@ export const SearchWorldArtifactsRequestSchema: GenMessage<SearchWorldArtifactsR
 	messageDesc(file_carbonpanel_v1_world, 47);
 
 /**
+ * SearchWorldArtifactsResponse Axis (a) content artifacts, never prebuilt worlds.
+ *
  * @generated from message carbonpanel.v1.SearchWorldArtifactsResponse
  */
 export type SearchWorldArtifactsResponse =
@@ -1754,6 +1822,8 @@ export const SearchWorldArtifactsResponseSchema: GenMessage<SearchWorldArtifacts
 	messageDesc(file_carbonpanel_v1_world, 48);
 
 /**
+ * GetProviderCapabilitiesRequest has no arguments; it reports both support axes.
+ *
  * @generated from message carbonpanel.v1.GetProviderCapabilitiesRequest
  */
 export type GetProviderCapabilitiesRequest =
@@ -1768,6 +1838,8 @@ export const GetProviderCapabilitiesRequestSchema: GenMessage<GetProviderCapabil
 	messageDesc(file_carbonpanel_v1_world, 49);
 
 /**
+ * GetProviderCapabilitiesResponse Per-provider capability and discovery gate.
+ *
  * @generated from message carbonpanel.v1.GetProviderCapabilitiesResponse
  */
 export type GetProviderCapabilitiesResponse =

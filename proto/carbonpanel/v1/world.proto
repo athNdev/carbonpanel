@@ -245,6 +245,7 @@ message ProviderCapability {
   string note = 5;
 }
 
+// ListWorldEntriesRequest Query for browsing library entries.
 message ListWorldEntriesRequest {
   // Optional text filter over entry name and provenance.
   string query = 1;
@@ -253,70 +254,86 @@ message ListWorldEntriesRequest {
   int32 limit = 3;
 }
 
+// ListWorldEntriesResponse Matching library entries.
 message ListWorldEntriesResponse {
   repeated WorldEntry entries = 1;
 }
 
+// GetWorldEntryRequest Identifies one library entry.
 message GetWorldEntryRequest {
   string world_entry_id = 1;
 }
 
+// GetWorldEntryResponse The requested library entry.
 message GetWorldEntryResponse {
   WorldEntry entry = 1;
 }
 
+// ListRevisionsRequest Identifies the entry whose revisions are listed.
 message ListRevisionsRequest {
   string world_entry_id = 1;
 }
 
+// ListRevisionsResponse Immutable revisions, newest first.
 message ListRevisionsResponse {
   repeated WorldRevision revisions = 1;
 }
 
+// GetRevisionRequest Identifies one immutable revision.
 message GetRevisionRequest {
   string revision_id = 1;
 }
 
+// GetRevisionResponse The requested revision and provenance.
 message GetRevisionResponse {
   WorldRevision revision = 1;
 }
 
+// ListBindingsRequest Optional server and revision filters.
 message ListBindingsRequest {
   // Empty lists every binding (unscoped grant).
   string server_id = 1;
   string revision_id = 2;
 }
 
+// ListBindingsResponse Active bindings matching the filters.
 message ListBindingsResponse {
   repeated WorldBinding bindings = 1;
 }
 
+// GetBindingRequest Server and level of the binding.
 message GetBindingRequest {
   string server_id = 1;
   string level_name = 2;
 }
 
+// GetBindingResponse The active binding, if any.
 message GetBindingResponse {
   WorldBinding binding = 1;
 }
 
+// ListImportJobsRequest Optional entry filter and result limit.
 message ListImportJobsRequest {
   string world_entry_id = 1;
   int32 limit = 2;
 }
 
+// ListImportJobsResponse Recent durable import jobs.
 message ListImportJobsResponse {
   repeated WorldImportJob jobs = 1;
 }
 
+// GetImportJobRequest Identifies one import job.
 message GetImportJobRequest {
   string job_id = 1;
 }
 
+// GetImportJobResponse The requested import job.
 message GetImportJobResponse {
   WorldImportJob job = 1;
 }
 
+// ImportWorldRequest Operator attestation and source for an import.
 message ImportWorldRequest {
   // url, upload or backup. Generic URL/file import is the supported fallback.
   string source = 1;
@@ -332,21 +349,25 @@ message ImportWorldRequest {
   string request_id = 8;
 }
 
+// ImportWorldResponse The import job and resulting immutable revision.
 message ImportWorldResponse {
   WorldImportJob job = 1;
   WorldRevision revision = 2;
 }
 
+// CheckCompatibilityRequest Revision and target server or version.
 message CheckCompatibilityRequest {
   string revision_id = 1;
   string server_id = 2;
   string target_mc_version = 3;
 }
 
+// CheckCompatibilityResponse Read-only compatibility and dry-run report.
 message CheckCompatibilityResponse {
   CompatibilityReport report = 1;
 }
 
+// BindWorldRequest Server level, revision and chosen change window.
 message BindWorldRequest {
   string server_id = 1;
   string level_name = 2;
@@ -356,6 +377,7 @@ message BindWorldRequest {
   string request_id = 5;
 }
 
+// BindWorldResponse Persisted binding and journal outcome.
 message BindWorldResponse {
   WorldBinding binding = 1;
   // request_id, journal phase and outcome for the recovery UI.
@@ -364,16 +386,19 @@ message BindWorldResponse {
   string consistency = 4;
 }
 
+// UnbindWorldRequest Server level whose binding is removed.
 message UnbindWorldRequest {
   string server_id = 1;
   string level_name = 2;
   string request_id = 3;
 }
 
+// UnbindWorldResponse Whether a binding was removed.
 message UnbindWorldResponse {
   bool removed = 1;
 }
 
+// ResolveWorldOperationRequest Operator decision on an uncertain operation.
 message ResolveWorldOperationRequest {
   string server_id = 1;
   string operation_id = 2;
@@ -382,10 +407,12 @@ message ResolveWorldOperationRequest {
   string note = 4;
 }
 
+// ResolveWorldOperationResponse Resolution outcome.
 message ResolveWorldOperationResponse {
   string outcome = 1;
 }
 
+// GetWorldConfigSchemaRequest Target version tuple for the wizard schema.
 message GetWorldConfigSchemaRequest {
   string edition = 1;
   string mc_version = 2;
@@ -393,10 +420,12 @@ message GetWorldConfigSchemaRequest {
   string data_version = 4;
 }
 
+// GetWorldConfigSchemaResponse Version-driven grouped controls and presets.
 message GetWorldConfigSchemaResponse {
   WorldConfigSchema schema = 1;
 }
 
+// PreviewWorldConfigRequest Draft values to validate without applying.
 message PreviewWorldConfigRequest {
   string edition = 1;
   string mc_version = 2;
@@ -406,10 +435,12 @@ message PreviewWorldConfigRequest {
   string preset = 6;
 }
 
+// PreviewWorldConfigResponse Classified dry-run diff and conflicts.
 message PreviewWorldConfigResponse {
   ConfigDraftPreview preview = 1;
 }
 
+// CreateWorldFromConfigRequest Validated draft used to create a fresh revision.
 message CreateWorldFromConfigRequest {
   string name = 1;
   string edition = 2;
@@ -422,11 +453,13 @@ message CreateWorldFromConfigRequest {
   string request_id = 9;
 }
 
+// CreateWorldFromConfigResponse The new immutable revision and library entry.
 message CreateWorldFromConfigResponse {
   WorldRevision revision = 1;
   WorldEntry entry = 2;
 }
 
+// SearchWorldArtifactsRequest Provider, filters and pagination cursor.
 message SearchWorldArtifactsRequest {
   // modrinth or curseforge. Manual platforms are never searched.
   string provider = 1;
@@ -439,14 +472,17 @@ message SearchWorldArtifactsRequest {
   string cursor = 7;
 }
 
+// SearchWorldArtifactsResponse Axis (a) content artifacts, never prebuilt worlds.
 message SearchWorldArtifactsResponse {
   repeated WorldArtifact artifacts = 1;
   string next_cursor = 2;
   bool rate_limited = 3;
 }
 
+// GetProviderCapabilitiesRequest has no arguments; it reports both support axes.
 message GetProviderCapabilitiesRequest {}
 
+// GetProviderCapabilitiesResponse Per-provider capability and discovery gate.
 message GetProviderCapabilitiesResponse {
   repeated ProviderCapability providers = 1;
 }

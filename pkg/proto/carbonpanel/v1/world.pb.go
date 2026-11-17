@@ -1504,6 +1504,7 @@ func (x *ProviderCapability) GetNote() string {
 	return ""
 }
 
+// ListWorldEntriesRequest Query for browsing library entries.
 type ListWorldEntriesRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Optional text filter over entry name and provenance.
@@ -1566,6 +1567,7 @@ func (x *ListWorldEntriesRequest) GetLimit() int32 {
 	return 0
 }
 
+// ListWorldEntriesResponse Matching library entries.
 type ListWorldEntriesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Entries       []*WorldEntry          `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
@@ -1610,6 +1612,7 @@ func (x *ListWorldEntriesResponse) GetEntries() []*WorldEntry {
 	return nil
 }
 
+// GetWorldEntryRequest Identifies one library entry.
 type GetWorldEntryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorldEntryId  string                 `protobuf:"bytes,1,opt,name=world_entry_id,json=worldEntryId,proto3" json:"world_entry_id,omitempty"`
@@ -1654,6 +1657,7 @@ func (x *GetWorldEntryRequest) GetWorldEntryId() string {
 	return ""
 }
 
+// GetWorldEntryResponse The requested library entry.
 type GetWorldEntryResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Entry         *WorldEntry            `protobuf:"bytes,1,opt,name=entry,proto3" json:"entry,omitempty"`
@@ -1698,6 +1702,7 @@ func (x *GetWorldEntryResponse) GetEntry() *WorldEntry {
 	return nil
 }
 
+// ListRevisionsRequest Identifies the entry whose revisions are listed.
 type ListRevisionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorldEntryId  string                 `protobuf:"bytes,1,opt,name=world_entry_id,json=worldEntryId,proto3" json:"world_entry_id,omitempty"`
@@ -1742,6 +1747,7 @@ func (x *ListRevisionsRequest) GetWorldEntryId() string {
 	return ""
 }
 
+// ListRevisionsResponse Immutable revisions, newest first.
 type ListRevisionsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Revisions     []*WorldRevision       `protobuf:"bytes,1,rep,name=revisions,proto3" json:"revisions,omitempty"`
@@ -1786,6 +1792,7 @@ func (x *ListRevisionsResponse) GetRevisions() []*WorldRevision {
 	return nil
 }
 
+// GetRevisionRequest Identifies one immutable revision.
 type GetRevisionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RevisionId    string                 `protobuf:"bytes,1,opt,name=revision_id,json=revisionId,proto3" json:"revision_id,omitempty"`
@@ -1830,6 +1837,7 @@ func (x *GetRevisionRequest) GetRevisionId() string {
 	return ""
 }
 
+// GetRevisionResponse The requested revision and provenance.
 type GetRevisionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Revision      *WorldRevision         `protobuf:"bytes,1,opt,name=revision,proto3" json:"revision,omitempty"`
@@ -1874,6 +1882,7 @@ func (x *GetRevisionResponse) GetRevision() *WorldRevision {
 	return nil
 }
 
+// ListBindingsRequest Optional server and revision filters.
 type ListBindingsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Empty lists every binding (unscoped grant).
@@ -1927,6 +1936,7 @@ func (x *ListBindingsRequest) GetRevisionId() string {
 	return ""
 }
 
+// ListBindingsResponse Active bindings matching the filters.
 type ListBindingsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Bindings      []*WorldBinding        `protobuf:"bytes,1,rep,name=bindings,proto3" json:"bindings,omitempty"`
@@ -1971,6 +1981,7 @@ func (x *ListBindingsResponse) GetBindings() []*WorldBinding {
 	return nil
 }
 
+// GetBindingRequest Server and level of the binding.
 type GetBindingRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -2023,6 +2034,7 @@ func (x *GetBindingRequest) GetLevelName() string {
 	return ""
 }
 
+// GetBindingResponse The active binding, if any.
 type GetBindingResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Binding       *WorldBinding          `protobuf:"bytes,1,opt,name=binding,proto3" json:"binding,omitempty"`
@@ -2067,6 +2079,7 @@ func (x *GetBindingResponse) GetBinding() *WorldBinding {
 	return nil
 }
 
+// ListImportJobsRequest Optional entry filter and result limit.
 type ListImportJobsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorldEntryId  string                 `protobuf:"bytes,1,opt,name=world_entry_id,json=worldEntryId,proto3" json:"world_entry_id,omitempty"`
@@ -2119,6 +2132,7 @@ func (x *ListImportJobsRequest) GetLimit() int32 {
 	return 0
 }
 
+// ListImportJobsResponse Recent durable import jobs.
 type ListImportJobsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Jobs          []*WorldImportJob      `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty"`
@@ -2163,6 +2177,7 @@ func (x *ListImportJobsResponse) GetJobs() []*WorldImportJob {
 	return nil
 }
 
+// GetImportJobRequest Identifies one import job.
 type GetImportJobRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -2207,6 +2222,7 @@ func (x *GetImportJobRequest) GetJobId() string {
 	return ""
 }
 
+// GetImportJobResponse The requested import job.
 type GetImportJobResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Job           *WorldImportJob        `protobuf:"bytes,1,opt,name=job,proto3" json:"job,omitempty"`
@@ -2251,6 +2267,7 @@ func (x *GetImportJobResponse) GetJob() *WorldImportJob {
 	return nil
 }
 
+// ImportWorldRequest Operator attestation and source for an import.
 type ImportWorldRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// url, upload or backup. Generic URL/file import is the supported fallback.
@@ -2355,6 +2372,7 @@ func (x *ImportWorldRequest) GetRequestId() string {
 	return ""
 }
 
+// ImportWorldResponse The import job and resulting immutable revision.
 type ImportWorldResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Job           *WorldImportJob        `protobuf:"bytes,1,opt,name=job,proto3" json:"job,omitempty"`
@@ -2407,6 +2425,7 @@ func (x *ImportWorldResponse) GetRevision() *WorldRevision {
 	return nil
 }
 
+// CheckCompatibilityRequest Revision and target server or version.
 type CheckCompatibilityRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	RevisionId      string                 `protobuf:"bytes,1,opt,name=revision_id,json=revisionId,proto3" json:"revision_id,omitempty"`
@@ -2467,6 +2486,7 @@ func (x *CheckCompatibilityRequest) GetTargetMcVersion() string {
 	return ""
 }
 
+// CheckCompatibilityResponse Read-only compatibility and dry-run report.
 type CheckCompatibilityResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Report        *CompatibilityReport   `protobuf:"bytes,1,opt,name=report,proto3" json:"report,omitempty"`
@@ -2511,6 +2531,7 @@ func (x *CheckCompatibilityResponse) GetReport() *CompatibilityReport {
 	return nil
 }
 
+// BindWorldRequest Server level, revision and chosen change window.
 type BindWorldRequest struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	ServerId   string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -2588,6 +2609,7 @@ func (x *BindWorldRequest) GetRequestId() string {
 	return ""
 }
 
+// BindWorldResponse Persisted binding and journal outcome.
 type BindWorldResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Binding *WorldBinding          `protobuf:"bytes,1,opt,name=binding,proto3" json:"binding,omitempty"`
@@ -2657,6 +2679,7 @@ func (x *BindWorldResponse) GetConsistency() string {
 	return ""
 }
 
+// UnbindWorldRequest Server level whose binding is removed.
 type UnbindWorldRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -2717,6 +2740,7 @@ func (x *UnbindWorldRequest) GetRequestId() string {
 	return ""
 }
 
+// UnbindWorldResponse Whether a binding was removed.
 type UnbindWorldResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Removed       bool                   `protobuf:"varint,1,opt,name=removed,proto3" json:"removed,omitempty"`
@@ -2761,6 +2785,7 @@ func (x *UnbindWorldResponse) GetRemoved() bool {
 	return false
 }
 
+// ResolveWorldOperationRequest Operator decision on an uncertain operation.
 type ResolveWorldOperationRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	ServerId    string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -2830,6 +2855,7 @@ func (x *ResolveWorldOperationRequest) GetNote() string {
 	return ""
 }
 
+// ResolveWorldOperationResponse Resolution outcome.
 type ResolveWorldOperationResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Outcome       string                 `protobuf:"bytes,1,opt,name=outcome,proto3" json:"outcome,omitempty"`
@@ -2874,6 +2900,7 @@ func (x *ResolveWorldOperationResponse) GetOutcome() string {
 	return ""
 }
 
+// GetWorldConfigSchemaRequest Target version tuple for the wizard schema.
 type GetWorldConfigSchemaRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Edition       string                 `protobuf:"bytes,1,opt,name=edition,proto3" json:"edition,omitempty"`
@@ -2942,6 +2969,7 @@ func (x *GetWorldConfigSchemaRequest) GetDataVersion() string {
 	return ""
 }
 
+// GetWorldConfigSchemaResponse Version-driven grouped controls and presets.
 type GetWorldConfigSchemaResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Schema        *WorldConfigSchema     `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`
@@ -2986,6 +3014,7 @@ func (x *GetWorldConfigSchemaResponse) GetSchema() *WorldConfigSchema {
 	return nil
 }
 
+// PreviewWorldConfigRequest Draft values to validate without applying.
 type PreviewWorldConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Edition       string                 `protobuf:"bytes,1,opt,name=edition,proto3" json:"edition,omitempty"`
@@ -3070,6 +3099,7 @@ func (x *PreviewWorldConfigRequest) GetPreset() string {
 	return ""
 }
 
+// PreviewWorldConfigResponse Classified dry-run diff and conflicts.
 type PreviewWorldConfigResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Preview       *ConfigDraftPreview    `protobuf:"bytes,1,opt,name=preview,proto3" json:"preview,omitempty"`
@@ -3114,6 +3144,7 @@ func (x *PreviewWorldConfigResponse) GetPreview() *ConfigDraftPreview {
 	return nil
 }
 
+// CreateWorldFromConfigRequest Validated draft used to create a fresh revision.
 type CreateWorldFromConfigRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Name               string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -3222,6 +3253,7 @@ func (x *CreateWorldFromConfigRequest) GetRequestId() string {
 	return ""
 }
 
+// CreateWorldFromConfigResponse The new immutable revision and library entry.
 type CreateWorldFromConfigResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Revision      *WorldRevision         `protobuf:"bytes,1,opt,name=revision,proto3" json:"revision,omitempty"`
@@ -3274,6 +3306,7 @@ func (x *CreateWorldFromConfigResponse) GetEntry() *WorldEntry {
 	return nil
 }
 
+// SearchWorldArtifactsRequest Provider, filters and pagination cursor.
 type SearchWorldArtifactsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// modrinth or curseforge. Manual platforms are never searched.
@@ -3368,6 +3401,7 @@ func (x *SearchWorldArtifactsRequest) GetCursor() string {
 	return ""
 }
 
+// SearchWorldArtifactsResponse Axis (a) content artifacts, never prebuilt worlds.
 type SearchWorldArtifactsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Artifacts     []*WorldArtifact       `protobuf:"bytes,1,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
@@ -3428,6 +3462,7 @@ func (x *SearchWorldArtifactsResponse) GetRateLimited() bool {
 	return false
 }
 
+// GetProviderCapabilitiesRequest has no arguments; it reports both support axes.
 type GetProviderCapabilitiesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -3464,6 +3499,7 @@ func (*GetProviderCapabilitiesRequest) Descriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_world_proto_rawDescGZIP(), []int{49}
 }
 
+// GetProviderCapabilitiesResponse Per-provider capability and discovery gate.
 type GetProviderCapabilitiesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Providers     []*ProviderCapability  `protobuf:"bytes,1,rep,name=providers,proto3" json:"providers,omitempty"`
