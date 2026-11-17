@@ -84,6 +84,7 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           version: '1.50.0'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       # Go and TypeScript RPC code is checked in and tested by main CI. Generate
       # the download schema separately; do not replace tracked, licensed sources.
       - name: Generate the release OpenAPI schema
@@ -216,13 +217,13 @@ jobs:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Sign in to Docker Hub for publication
         if: needs.plan.outputs.publish == 'true'
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
       - name: Sign in to the linked GitHub container registry
         if: needs.plan.outputs.publish == 'true'
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -231,7 +232,7 @@ jobs:
         id: meta
         with:
           images: |
-            atharvnaphade/carbon-panel
+            atharvnaphade/carbonpanel
             ghcr.io/${{ github.repository }}
           flavor: latest=false
           tags: |
@@ -252,17 +253,29 @@ jobs:
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.version=${{ needs.plan.outputs.version }}
             org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
+            org.opencontainers.image.url=https://carbonpanel.dev/
+            org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
+            org.opencontainers.image.licenses=MPL-2.0
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           build-args: APP_VERSION=${{ needs.plan.outputs.version }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
+      - name: Sync Docker Hub repository description
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
+        if: needs.plan.outputs.publish == 'true'
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+          repository: atharvnaphade/carbonpanel
+          short-description: Self-hosted Minecraft server and modpack management with Docker.
+          enable-url-completion: true
       - name: Confirm both architectures are available in both registries
         if: needs.plan.outputs.publish == 'true'
         env:
           IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
           GITHUB_IMAGE: ghcr.io/${{ github.repository }}
         run: |
-          docker buildx imagetools inspect "atharvnaphade/carbon-panel@$IMAGE_DIGEST" --raw > dist/image-manifest.json
+          docker buildx imagetools inspect "atharvnaphade/carbonpanel@$IMAGE_DIGEST" --raw > dist/image-manifest.json
           python3 scripts/release.py verify-image --manifest dist/image-manifest.json
           docker buildx imagetools inspect "${GITHUB_IMAGE,,}@$IMAGE_DIGEST" --raw > dist/github-image-manifest.json
           python3 scripts/release.py verify-image --manifest dist/github-image-manifest.json

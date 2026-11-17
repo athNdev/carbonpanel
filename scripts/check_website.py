@@ -5,7 +5,9 @@ import argparse
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import re
 from urllib.parse import unquote, urljoin, urlsplit
+import xml.etree.ElementTree as ET
 
 
 class Links(HTMLParser):
@@ -118,6 +120,47 @@ def check_social(parser, page, root, base, site, errors):
         errors.append(f"{relative}: expected the dedicated card {card}")
 
 
+def check_sitemap(root, pages, base, site, errors):
+    sitemap_path = root / "sitemap.xml"
+    if not sitemap_path.is_file():
+        errors.append("sitemap.xml: missing generated sitemap")
+        return
+    try:
+        sitemap = ET.parse(sitemap_path)
+    except ET.ParseError as error:
+        errors.append(f"sitemap.xml: invalid XML: {error}")
+        return
+
+    namespace = {"sitemap": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    entries = sitemap.findall("sitemap:url", namespace)
+    actual = []
+    for entry in entries:
+        loc = entry.findtext("sitemap:loc", default="", namespaces=namespace)
+        lastmod = entry.findtext("sitemap:lastmod", default="", namespaces=namespace)
+        if not lastmod or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", lastmod):
+            errors.append(f"sitemap.xml: invalid lastmod for {loc or '<missing loc>'}")
+        actual.append(loc)
+
+    expected = []
+    for page in pages:
+        if page.name == "404.html":
+            continue
+        relative = page.relative_to(root).as_posix()
+        route = page_route(relative)
+        expected.append(site.rstrip("/") + base + route)
+    if len(actual) != len(set(actual)):
+        errors.append("sitemap.xml: duplicate URL entries")
+    missing = sorted(set(expected) - set(actual))
+    extra = sorted(set(actual) - set(expected))
+    if missing or extra:
+        details = []
+        if missing:
+            details.append(f"missing {', '.join(missing)}")
+        if extra:
+            details.append(f"unexpected {', '.join(extra)}")
+        errors.append("sitemap.xml: " + "; ".join(details))
+
+
 def check(root, base="/", site="https://carbonpanel.dev"):
     errors = []
     pages = list(root.rglob("*.html"))
@@ -139,6 +182,7 @@ def check(root, base="/", site="https://carbonpanel.dev"):
                 errors.append(f"{page.relative_to(root)}: missing {link}")
         if page.name != "404.html":
             check_social(parser, page, root, base, site, errors)
+    check_sitemap(root, pages, base, site, errors)
     if errors:
         raise ValueError("\n".join(sorted(set(errors))))
     pin = json.loads((root / "docs/source.json").read_text(encoding="utf-8"))

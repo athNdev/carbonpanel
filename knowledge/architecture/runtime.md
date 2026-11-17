@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: Runtime model
-description: The daemon owns the API, console, proxy, scheduler and SQLite, and starts them from cmd/carbon-panel.
+description: The daemon owns the API, console, proxy, scheduler and SQLite. Effective container limits are qualified before create, and storage-opt size does not bound a bind-mounted world.
 status: stable
 owners: [oss-runtime]
 code_refs:
@@ -11,6 +11,7 @@ code_refs:
   - internal/db
   - internal/docker
   - internal/docker/resource_enforcement.go
+  - pkg/runtimeprofile
   - web/carbon-panel/src/lib/utils/resource-enforcement.ts
   - pkg/files
   - internal/scheduler
@@ -128,8 +129,10 @@ profile records `ImageDigest` and `ImagePinned` only when the reference is
 pinned. On a rootless daemon, the default root-then-drop bootstrap is refused
 when the world directory is still owned by host uid 0 (`rootless_host_root_data`);
 chown the data to the game user first. Daemon rootless mode is read from Engine
-`GET /info` during create preflight. The rules and their remedies live in
-`internal/docker/runtime_profile.go`. Supported and unsupported combinations
+`GET /info` during create preflight. The rules and their remedies live in `pkg/runtimeprofile`. Panel's
+`CreateContainer` path builds a `RuntimeSpec` after overrides and calls that
+package through `docker.DescribeRuntime` / `docker.PreflightRuntime`. Cloud
+imports the same package; it does not copy the checks. Supported and unsupported combinations
 are encoded as a table against the same resolved request `CreateContainer`
 builds (`DescribeRuntime` / `PreflightRuntime`): root-then-drop versus an
 explicit non-root uid, a read-only root with and without the nsswitch skip,

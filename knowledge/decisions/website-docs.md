@@ -47,6 +47,10 @@ sources:
   reserve artwork space with viewport-relative percentage padding on that
   frame: it collapses the copy at ultrawide sizes. The mobile layout uses one
   content column above the terrain.
+- The craft section raises its local grid contrast without changing the other
+  homepage grids, and preserves the fade around the content frame. Its square
+  grid uses both axes at every viewport size, with smaller cells and a full-width
+  fade on mobile; the general mobile grid suppression does not apply here.
 - A published release pin uses the release tag as its label. Any other commit is
   labelled a development snapshot. Do not infer a release from a package version
   or an inherited tag; the label names an explicit tag or the maintainer's
@@ -60,6 +64,9 @@ sources:
   page that is missing metadata, points at a relative or missing image, or lets
   a prominent route fall back to the shared card. Keep preview copy free of em
   dashes.
+- The combined Pages artifact generates its root `sitemap.xml` from every
+  published HTML route except the synthetic 404 page, with the deployment date
+  as `lastmod`; website validation rejects missing or incomplete output.
 - Current social cards are rendered from `assets/branding/social-preview.html`
   with the approved logo, homepage terrain and Plex fonts. The website uses
   1200 by 630 PNGs; GitHub has a separate 1280 by 640 repository PNG and an

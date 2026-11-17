@@ -19,7 +19,7 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_node: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChljYXJib25wYW5lbC92MS9ub2RlLnByb3RvEg5jYXJib25wYW5lbC52MSKJBQoETm9kZRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBGhvc3QYAyABKAkSFQoNYWR2ZXJ0aXNlZF9pcBgEIAEoCRITCgt0bHNfY2FfY2VydBgFIAEoCRIQCgh0bHNfY2VydBgGIAEoCRIPCgd0bHNfa2V5GAcgASgJEhMKC3Rsc19lbmFibGVkGAggASgIEhcKD3Rsc19za2lwX3ZlcmlmeRgJIAEoCBIVCg1tYXhfbWVtb3J5X21iGAogASgDEhMKC21heF9zZXJ2ZXJzGAsgASgFEg8KB2VuYWJsZWQYDCABKAgSKgoGc3RhdHVzGA0gASgOMhouY2FyYm9ucGFuZWwudjEuTm9kZVN0YXR1cxIQCghpc19sb2NhbBgOIAEoCBI3Cg5sYXN0X2hlYXJ0YmVhdBgPIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBARIuCgpjcmVhdGVkX2F0GBAgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GBEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIbChNhbGxvY2F0ZWRfbWVtb3J5X21iGBIgASgDEhQKDHNlcnZlcl9jb3VudBgTIAEoBRIVCg1ydW5uaW5nX2NvdW50GBQgASgFEhcKD3RvdGFsX21lbW9yeV9tYhgVIAEoAxIbChNhdmFpbGFibGVfbWVtb3J5X21iGBYgASgDEhQKDHN0b3JhZ2Vfcm9vdBgXIAEoCRIfChdjb250cm9sbGVyX3N0b3JhZ2Vfcm9vdBgYIAEoCUIRCg9fbGFzdF9oZWFydGJlYXQiEgoQTGlzdE5vZGVzUmVxdWVzdCI4ChFMaXN0Tm9kZXNSZXNwb25zZRIjCgVub2RlcxgBIAMoCzIULmNhcmJvbnBhbmVsLnYxLk5vZGUiHAoOR2V0Tm9kZVJlcXVlc3QSCgoCaWQYASABKAkiNQoPR2V0Tm9kZVJlc3BvbnNlEiIKBG5vZGUYASABKAsyFC5jYXJib25wYW5lbC52MS5Ob2RlIqACChFDcmVhdGVOb2RlUmVxdWVzdBIMCgRuYW1lGAEgASgJEgwKBGhvc3QYAiABKAkSFQoNYWR2ZXJ0aXNlZF9pcBgDIAEoCRITCgt0bHNfY2FfY2VydBgEIAEoCRIQCgh0bHNfY2VydBgFIAEoCRIPCgd0bHNfa2V5GAYgASgJEhMKC3Rsc19lbmFibGVkGAcgASgIEhcKD3Rsc19za2lwX3ZlcmlmeRgIIAEoCBIVCg1tYXhfbWVtb3J5X21iGAkgASgDEhMKC21heF9zZXJ2ZXJzGAogASgFEg8KB2VuYWJsZWQYCyABKAgSFAoMc3RvcmFnZV9yb290GAwgASgJEh8KF2NvbnRyb2xsZXJfc3RvcmFnZV9yb290GA0gASgJIjgKEkNyZWF0ZU5vZGVSZXNwb25zZRIiCgRub2RlGAEgASgLMhQuY2FyYm9ucGFuZWwudjEuTm9kZSK5BAoRVXBkYXRlTm9kZVJlcXVlc3QSCgoCaWQYASABKAkSEQoEbmFtZRgCIAEoCUgAiAEBEhEKBGhvc3QYAyABKAlIAYgBARIaCg1hZHZlcnRpc2VkX2lwGAQgASgJSAKIAQESGAoLdGxzX2NhX2NlcnQYBSABKAlIA4gBARIVCgh0bHNfY2VydBgGIAEoCUgEiAEBEhQKB3Rsc19rZXkYByABKAlIBYgBARIYCgt0bHNfZW5hYmxlZBgIIAEoCEgGiAEBEhwKD3Rsc19za2lwX3ZlcmlmeRgJIAEoCEgHiAEBEhoKDW1heF9tZW1vcnlfbWIYCiABKANICIgBARIYCgttYXhfc2VydmVycxgLIAEoBUgJiAEBEhQKB2VuYWJsZWQYDCABKAhICogBARIZCgxzdG9yYWdlX3Jvb3QYDSABKAlIC4gBARIkChdjb250cm9sbGVyX3N0b3JhZ2Vfcm9vdBgOIAEoCUgMiAEBQgcKBV9uYW1lQgcKBV9ob3N0QhAKDl9hZHZlcnRpc2VkX2lwQg4KDF90bHNfY2FfY2VydEILCglfdGxzX2NlcnRCCgoIX3Rsc19rZXlCDgoMX3Rsc19lbmFibGVkQhIKEF90bHNfc2tpcF92ZXJpZnlCEAoOX21heF9tZW1vcnlfbWJCDgoMX21heF9zZXJ2ZXJzQgoKCF9lbmFibGVkQg8KDV9zdG9yYWdlX3Jvb3RCGgoYX2NvbnRyb2xsZXJfc3RvcmFnZV9yb290IjgKElVwZGF0ZU5vZGVSZXNwb25zZRIiCgRub2RlGAEgASgLMhQuY2FyYm9ucGFuZWwudjEuTm9kZSIfChFEZWxldGVOb2RlUmVxdWVzdBIKCgJpZBgBIAEoCSIlChJEZWxldGVOb2RlUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCCIdCg9QaW5nTm9kZVJlcXVlc3QSCgoCaWQYASABKAkidAoQUGluZ05vZGVSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIEg8KB21lc3NhZ2UYAiABKAkSKgoGc3RhdHVzGAMgASgOMhouY2FyYm9ucGFuZWwudjEuTm9kZVN0YXR1cxISCgpsYXRlbmN5X21zGAQgASgDKnEKCk5vZGVTdGF0dXMSGwoXTk9ERV9TVEFUVVNfVU5TUEVDSUZJRUQQABIWChJOT0RFX1NUQVRVU19PTkxJTkUQARIXChNOT0RFX1NUQVRVU19PRkZMSU5FEAISFQoRTk9ERV9TVEFUVVNfRVJST1IQAzL5AwoLTm9kZVNlcnZpY2USUAoJTGlzdE5vZGVzEiAuY2FyYm9ucGFuZWwudjEuTGlzdE5vZGVzUmVxdWVzdBohLmNhcmJvbnBhbmVsLnYxLkxpc3ROb2Rlc1Jlc3BvbnNlEkoKB0dldE5vZGUSHi5jYXJib25wYW5lbC52MS5HZXROb2RlUmVxdWVzdBofLmNhcmJvbnBhbmVsLnYxLkdldE5vZGVSZXNwb25zZRJTCgpDcmVhdGVOb2RlEiEuY2FyYm9ucGFuZWwudjEuQ3JlYXRlTm9kZVJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5DcmVhdGVOb2RlUmVzcG9uc2USUwoKVXBkYXRlTm9kZRIhLmNhcmJvbnBhbmVsLnYxLlVwZGF0ZU5vZGVSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuVXBkYXRlTm9kZVJlc3BvbnNlElMKCkRlbGV0ZU5vZGUSIS5jYXJib25wYW5lbC52MS5EZWxldGVOb2RlUmVxdWVzdBoiLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZU5vZGVSZXNwb25zZRJNCghQaW5nTm9kZRIfLmNhcmJvbnBhbmVsLnYxLlBpbmdOb2RlUmVxdWVzdBogLmNhcmJvbnBhbmVsLnYxLlBpbmdOb2RlUmVzcG9uc2VCSFpGZ2l0aHViLmNvbS9hdGhOZGV2L2NhcmJvbi1wYW5lbC9wa2cvcHJvdG8vY2FyYm9ucGFuZWwvdjE7Y2FyYm9ucGFuZWx2MWIGcHJvdG8z',
+		'ChljYXJib25wYW5lbC92MS9ub2RlLnByb3RvEg5jYXJib25wYW5lbC52MSKJBQoETm9kZRIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBGhvc3QYAyABKAkSFQoNYWR2ZXJ0aXNlZF9pcBgEIAEoCRITCgt0bHNfY2FfY2VydBgFIAEoCRIQCgh0bHNfY2VydBgGIAEoCRIPCgd0bHNfa2V5GAcgASgJEhMKC3Rsc19lbmFibGVkGAggASgIEhcKD3Rsc19za2lwX3ZlcmlmeRgJIAEoCBIVCg1tYXhfbWVtb3J5X21iGAogASgDEhMKC21heF9zZXJ2ZXJzGAsgASgFEg8KB2VuYWJsZWQYDCABKAgSKgoGc3RhdHVzGA0gASgOMhouY2FyYm9ucGFuZWwudjEuTm9kZVN0YXR1cxIQCghpc19sb2NhbBgOIAEoCBI3Cg5sYXN0X2hlYXJ0YmVhdBgPIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBIAIgBARIuCgpjcmVhdGVkX2F0GBAgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GBEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIbChNhbGxvY2F0ZWRfbWVtb3J5X21iGBIgASgDEhQKDHNlcnZlcl9jb3VudBgTIAEoBRIVCg1ydW5uaW5nX2NvdW50GBQgASgFEhcKD3RvdGFsX21lbW9yeV9tYhgVIAEoAxIbChNhdmFpbGFibGVfbWVtb3J5X21iGBYgASgDEhQKDHN0b3JhZ2Vfcm9vdBgXIAEoCRIfChdjb250cm9sbGVyX3N0b3JhZ2Vfcm9vdBgYIAEoCUIRCg9fbGFzdF9oZWFydGJlYXQiEgoQU2Nhbk5vZGVzUmVxdWVzdCJkCg9Eb2NrZXJDYW5kaWRhdGUSDAoEaG9zdBgBIAEoCRIMCgRwb3J0GAIgASgFEhEKCXJlYWNoYWJsZRgDIAEoCBISCgpsYXRlbmN5X21zGAQgASgDEg4KBnNvdXJjZRgFIAEoCSKNAQoRU2Nhbk5vZGVzUmVzcG9uc2USMwoKY2FuZGlkYXRlcxgBIAMoCzIfLmNhcmJvbnBhbmVsLnYxLkRvY2tlckNhbmRpZGF0ZRITCgtrbm93bl9ub2RlcxgCIAEoBRIuCgpzY2FubmVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCISChBMaXN0Tm9kZXNSZXF1ZXN0IjgKEUxpc3ROb2Rlc1Jlc3BvbnNlEiMKBW5vZGVzGAEgAygLMhQuY2FyYm9ucGFuZWwudjEuTm9kZSIcCg5HZXROb2RlUmVxdWVzdBIKCgJpZBgBIAEoCSI1Cg9HZXROb2RlUmVzcG9uc2USIgoEbm9kZRgBIAEoCzIULmNhcmJvbnBhbmVsLnYxLk5vZGUioAIKEUNyZWF0ZU5vZGVSZXF1ZXN0EgwKBG5hbWUYASABKAkSDAoEaG9zdBgCIAEoCRIVCg1hZHZlcnRpc2VkX2lwGAMgASgJEhMKC3Rsc19jYV9jZXJ0GAQgASgJEhAKCHRsc19jZXJ0GAUgASgJEg8KB3Rsc19rZXkYBiABKAkSEwoLdGxzX2VuYWJsZWQYByABKAgSFwoPdGxzX3NraXBfdmVyaWZ5GAggASgIEhUKDW1heF9tZW1vcnlfbWIYCSABKAMSEwoLbWF4X3NlcnZlcnMYCiABKAUSDwoHZW5hYmxlZBgLIAEoCBIUCgxzdG9yYWdlX3Jvb3QYDCABKAkSHwoXY29udHJvbGxlcl9zdG9yYWdlX3Jvb3QYDSABKAkiOAoSQ3JlYXRlTm9kZVJlc3BvbnNlEiIKBG5vZGUYASABKAsyFC5jYXJib25wYW5lbC52MS5Ob2RlIrkEChFVcGRhdGVOb2RlUmVxdWVzdBIKCgJpZBgBIAEoCRIRCgRuYW1lGAIgASgJSACIAQESEQoEaG9zdBgDIAEoCUgBiAEBEhoKDWFkdmVydGlzZWRfaXAYBCABKAlIAogBARIYCgt0bHNfY2FfY2VydBgFIAEoCUgDiAEBEhUKCHRsc19jZXJ0GAYgASgJSASIAQESFAoHdGxzX2tleRgHIAEoCUgFiAEBEhgKC3Rsc19lbmFibGVkGAggASgISAaIAQESHAoPdGxzX3NraXBfdmVyaWZ5GAkgASgISAeIAQESGgoNbWF4X21lbW9yeV9tYhgKIAEoA0gIiAEBEhgKC21heF9zZXJ2ZXJzGAsgASgFSAmIAQESFAoHZW5hYmxlZBgMIAEoCEgKiAEBEhkKDHN0b3JhZ2Vfcm9vdBgNIAEoCUgLiAEBEiQKF2NvbnRyb2xsZXJfc3RvcmFnZV9yb290GA4gASgJSAyIAQFCBwoFX25hbWVCBwoFX2hvc3RCEAoOX2FkdmVydGlzZWRfaXBCDgoMX3Rsc19jYV9jZXJ0QgsKCV90bHNfY2VydEIKCghfdGxzX2tleUIOCgxfdGxzX2VuYWJsZWRCEgoQX3Rsc19za2lwX3ZlcmlmeUIQCg5fbWF4X21lbW9yeV9tYkIOCgxfbWF4X3NlcnZlcnNCCgoIX2VuYWJsZWRCDwoNX3N0b3JhZ2Vfcm9vdEIaChhfY29udHJvbGxlcl9zdG9yYWdlX3Jvb3QiOAoSVXBkYXRlTm9kZVJlc3BvbnNlEiIKBG5vZGUYASABKAsyFC5jYXJib25wYW5lbC52MS5Ob2RlIh8KEURlbGV0ZU5vZGVSZXF1ZXN0EgoKAmlkGAEgASgJIiUKEkRlbGV0ZU5vZGVSZXNwb25zZRIPCgdzdWNjZXNzGAEgASgIIh0KD1BpbmdOb2RlUmVxdWVzdBIKCgJpZBgBIAEoCSJ0ChBQaW5nTm9kZVJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgSDwoHbWVzc2FnZRgCIAEoCRIqCgZzdGF0dXMYAyABKA4yGi5jYXJib25wYW5lbC52MS5Ob2RlU3RhdHVzEhIKCmxhdGVuY3lfbXMYBCABKAMqcQoKTm9kZVN0YXR1cxIbChdOT0RFX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKEk5PREVfU1RBVFVTX09OTElORRABEhcKE05PREVfU1RBVFVTX09GRkxJTkUQAhIVChFOT0RFX1NUQVRVU19FUlJPUhADMssECgtOb2RlU2VydmljZRJQCglMaXN0Tm9kZXMSIC5jYXJib25wYW5lbC52MS5MaXN0Tm9kZXNSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuTGlzdE5vZGVzUmVzcG9uc2USSgoHR2V0Tm9kZRIeLmNhcmJvbnBhbmVsLnYxLkdldE5vZGVSZXF1ZXN0Gh8uY2FyYm9ucGFuZWwudjEuR2V0Tm9kZVJlc3BvbnNlElMKCkNyZWF0ZU5vZGUSIS5jYXJib25wYW5lbC52MS5DcmVhdGVOb2RlUmVxdWVzdBoiLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZU5vZGVSZXNwb25zZRJTCgpVcGRhdGVOb2RlEiEuY2FyYm9ucGFuZWwudjEuVXBkYXRlTm9kZVJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5VcGRhdGVOb2RlUmVzcG9uc2USUwoKRGVsZXRlTm9kZRIhLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZU5vZGVSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuRGVsZXRlTm9kZVJlc3BvbnNlEk0KCFBpbmdOb2RlEh8uY2FyYm9ucGFuZWwudjEuUGluZ05vZGVSZXF1ZXN0GiAuY2FyYm9ucGFuZWwudjEuUGluZ05vZGVSZXNwb25zZRJQCglTY2FuTm9kZXMSIC5jYXJib25wYW5lbC52MS5TY2FuTm9kZXNSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuU2Nhbk5vZGVzUmVzcG9uc2VCSFpGZ2l0aHViLmNvbS9hdGhOZGV2L2NhcmJvbi1wYW5lbC9wa2cvcHJvdG8vY2FyYm9ucGFuZWwvdjE7Y2FyYm9ucGFuZWx2MWIGcHJvdG8z',
 		[file_google_protobuf_timestamp]
 	);
 
@@ -163,6 +163,91 @@ export type Node = Message<'carbonpanel.v1.Node'> & {
 export const NodeSchema: GenMessage<Node> = /*@__PURE__*/ messageDesc(file_carbonpanel_v1_node, 0);
 
 /**
+ * Request a bounded scan of local Docker daemon candidates.
+ *
+ * @generated from message carbonpanel.v1.ScanNodesRequest
+ */
+export type ScanNodesRequest = Message<'carbonpanel.v1.ScanNodesRequest'> & {};
+
+/**
+ * Describes the message carbonpanel.v1.ScanNodesRequest.
+ * Use `create(ScanNodesRequestSchema)` to create a new message.
+ */
+export const ScanNodesRequestSchema: GenMessage<ScanNodesRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_node, 1);
+
+/**
+ * One reachable or unreachable daemon candidate from the interface scan.
+ *
+ * @generated from message carbonpanel.v1.DockerCandidate
+ */
+export type DockerCandidate = Message<'carbonpanel.v1.DockerCandidate'> & {
+	/**
+	 * @generated from field: string host = 1;
+	 */
+	host: string;
+
+	/**
+	 * @generated from field: int32 port = 2;
+	 */
+	port: number;
+
+	/**
+	 * @generated from field: bool reachable = 3;
+	 */
+	reachable: boolean;
+
+	/**
+	 * @generated from field: int64 latency_ms = 4;
+	 */
+	latencyMs: bigint;
+
+	/**
+	 * @generated from field: string source = 5;
+	 */
+	source: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.DockerCandidate.
+ * Use `create(DockerCandidateSchema)` to create a new message.
+ */
+export const DockerCandidateSchema: GenMessage<DockerCandidate> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_node, 2);
+
+/**
+ * Probe results and best-effort count of already registered nodes.
+ *
+ * @generated from message carbonpanel.v1.ScanNodesResponse
+ */
+export type ScanNodesResponse = Message<'carbonpanel.v1.ScanNodesResponse'> & {
+	/**
+	 * @generated from field: repeated carbonpanel.v1.DockerCandidate candidates = 1;
+	 */
+	candidates: DockerCandidate[];
+
+	/**
+	 * @generated from field: int32 known_nodes = 2;
+	 */
+	knownNodes: number;
+
+	/**
+	 * @generated from field: google.protobuf.Timestamp scanned_at = 3;
+	 */
+	scannedAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message carbonpanel.v1.ScanNodesResponse.
+ * Use `create(ScanNodesResponseSchema)` to create a new message.
+ */
+export const ScanNodesResponseSchema: GenMessage<ScanNodesResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_node, 3);
+
+/**
  * Node list request
  *
  * @generated from message carbonpanel.v1.ListNodesRequest
@@ -175,7 +260,7 @@ export type ListNodesRequest = Message<'carbonpanel.v1.ListNodesRequest'> & {};
  */
 export const ListNodesRequestSchema: GenMessage<ListNodesRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 1);
+	messageDesc(file_carbonpanel_v1_node, 4);
 
 /**
  * Node list response
@@ -195,7 +280,7 @@ export type ListNodesResponse = Message<'carbonpanel.v1.ListNodesResponse'> & {
  */
 export const ListNodesResponseSchema: GenMessage<ListNodesResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 2);
+	messageDesc(file_carbonpanel_v1_node, 5);
 
 /**
  * Single node lookup request
@@ -215,7 +300,7 @@ export type GetNodeRequest = Message<'carbonpanel.v1.GetNodeRequest'> & {
  */
 export const GetNodeRequestSchema: GenMessage<GetNodeRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 3);
+	messageDesc(file_carbonpanel_v1_node, 6);
 
 /**
  * Single node lookup response
@@ -235,7 +320,7 @@ export type GetNodeResponse = Message<'carbonpanel.v1.GetNodeResponse'> & {
  */
 export const GetNodeResponseSchema: GenMessage<GetNodeResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 4);
+	messageDesc(file_carbonpanel_v1_node, 7);
 
 /**
  * Create node request
@@ -315,7 +400,7 @@ export type CreateNodeRequest = Message<'carbonpanel.v1.CreateNodeRequest'> & {
  */
 export const CreateNodeRequestSchema: GenMessage<CreateNodeRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 5);
+	messageDesc(file_carbonpanel_v1_node, 8);
 
 /**
  * Create node response
@@ -335,7 +420,7 @@ export type CreateNodeResponse = Message<'carbonpanel.v1.CreateNodeResponse'> & 
  */
 export const CreateNodeResponseSchema: GenMessage<CreateNodeResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 6);
+	messageDesc(file_carbonpanel_v1_node, 9);
 
 /**
  * Update node request
@@ -420,7 +505,7 @@ export type UpdateNodeRequest = Message<'carbonpanel.v1.UpdateNodeRequest'> & {
  */
 export const UpdateNodeRequestSchema: GenMessage<UpdateNodeRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 7);
+	messageDesc(file_carbonpanel_v1_node, 10);
 
 /**
  * Update node response
@@ -440,7 +525,7 @@ export type UpdateNodeResponse = Message<'carbonpanel.v1.UpdateNodeResponse'> & 
  */
 export const UpdateNodeResponseSchema: GenMessage<UpdateNodeResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 8);
+	messageDesc(file_carbonpanel_v1_node, 11);
 
 /**
  * Delete node request
@@ -460,7 +545,7 @@ export type DeleteNodeRequest = Message<'carbonpanel.v1.DeleteNodeRequest'> & {
  */
 export const DeleteNodeRequestSchema: GenMessage<DeleteNodeRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 9);
+	messageDesc(file_carbonpanel_v1_node, 12);
 
 /**
  * Delete node response
@@ -480,7 +565,7 @@ export type DeleteNodeResponse = Message<'carbonpanel.v1.DeleteNodeResponse'> & 
  */
 export const DeleteNodeResponseSchema: GenMessage<DeleteNodeResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 10);
+	messageDesc(file_carbonpanel_v1_node, 13);
 
 /**
  * Ping node request
@@ -500,7 +585,7 @@ export type PingNodeRequest = Message<'carbonpanel.v1.PingNodeRequest'> & {
  */
 export const PingNodeRequestSchema: GenMessage<PingNodeRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 11);
+	messageDesc(file_carbonpanel_v1_node, 14);
 
 /**
  * Ping node response
@@ -535,7 +620,7 @@ export type PingNodeResponse = Message<'carbonpanel.v1.PingNodeResponse'> & {
  */
 export const PingNodeResponseSchema: GenMessage<PingNodeResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node, 12);
+	messageDesc(file_carbonpanel_v1_node, 15);
 
 /**
  * Node health and connectivity status
@@ -636,5 +721,15 @@ export const NodeService: GenService<{
 		methodKind: 'unary';
 		input: typeof PingNodeRequestSchema;
 		output: typeof PingNodeResponseSchema;
+	};
+	/**
+	 * Discover candidate Docker daemons using the bounded local-interface scan.
+	 *
+	 * @generated from rpc carbonpanel.v1.NodeService.ScanNodes
+	 */
+	scanNodes: {
+		methodKind: 'unary';
+		input: typeof ScanNodesRequestSchema;
+		output: typeof ScanNodesResponseSchema;
 	};
 }> = /*@__PURE__*/ serviceDesc(file_carbonpanel_v1_node, 0);

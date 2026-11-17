@@ -33,6 +33,7 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/runtimeprofile"
 	"github.com/athNdev/carbon-panel/pkg/utils"
 	"github.com/containerd/errdefs"
 	stdcopy "github.com/moby/moby/api/pkg/stdcopy"
@@ -109,15 +110,27 @@ func boundedCall(ctx context.Context) (context.Context, context.CancelFunc) {
 // client.WithAPIVersionNegotiation, or the SDK re-enters the lazy path whenever
 // this eager ping fails.
 func NewAPIClient(opts ...client.Opt) (*client.Client, error) {
+	return NewAPIClientContext(context.Background(), opts...)
+}
+
+// NewAPIClientContext carries the caller's lifetime through eager negotiation.
+// A canceled construction closes its client rather than caching a live handle.
+func NewAPIClientContext(parent context.Context, opts ...client.Opt) (*client.Client, error) {
+	if err := parent.Err(); err != nil {
+		return nil, err
+	}
 	cli, err := client.New(opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), negotiationTimeout)
+	ctx, cancel := context.WithTimeout(parent, negotiationTimeout)
 	defer cancel()
 
 	ping, err := cli.Ping(ctx, client.PingOptions{NegotiateAPIVersion: true})
+	if cancelErr := parent.Err(); cancelErr != nil {
+		return nil, errors.Join(cancelErr, cli.Close())
+	}
 	if err != nil {
 		// Leave the client at its default API version; requests still fail
 		// fast with their own bounded contexts rather than hanging.
@@ -139,7 +152,7 @@ func applyContainerHardening(hostConfig *container.HostConfig) {
 }
 
 func minecraftBootstrapCapabilities() []string {
-	return []string{"CHOWN", "SETGID", "SETUID"}
+	return runtimeprofile.MinecraftBootstrapCapabilities()
 }
 
 // DefaultRestartPolicy is the Docker restart policy applied to every
@@ -1276,7 +1289,7 @@ func (c *Client) createContainerWithConflictRetry(ctx context.Context, config *c
 	}
 	if isMissingNetworkError(err, c.config.NetworkName) {
 		c.log.Warn("Docker network %q missing during container create (%v); ensuring network and retrying", c.config.NetworkName, err)
-		if netErr := c.EnsureNetwork(); netErr == nil {
+		if netErr := c.EnsureNetworkContext(ctx); netErr == nil {
 			resp, err = c.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 				Config:           config,
 				HostConfig:       hostConfig,
@@ -1286,6 +1299,8 @@ func (c *Client) createContainerWithConflictRetry(ctx context.Context, config *c
 			if err == nil {
 				return resp.ID, nil
 			}
+		} else {
+			err = errors.Join(err, netErr)
 		}
 	}
 	if !isConflictError(err) {
@@ -1543,12 +1558,14 @@ func inspectToSummary(inspect container.InspectResponse) *container.Summary {
 func (c *Client) StartContainer(ctx context.Context, containerID string) error {
 	if _, err := c.docker.ContainerStart(ctx, containerID, client.ContainerStartOptions{}); err != nil {
 		if isMissingNetworkError(err, c.config.NetworkName) {
-			if netErr := c.EnsureNetwork(); netErr == nil {
+			if netErr := c.EnsureNetworkContext(ctx); netErr == nil {
 				if _, retryErr := c.docker.ContainerStart(ctx, containerID, client.ContainerStartOptions{}); retryErr == nil {
 					err = nil
 				} else {
 					err = retryErr
 				}
+			} else {
+				err = errors.Join(err, netErr)
 			}
 		}
 		if err != nil {
@@ -2132,10 +2149,14 @@ func getDockerImage(loader models.ModLoader, mcVersion string) string {
 
 // Creates the Docker network if it doesn't exist - attaches itself to that network when applicable
 func (c *Client) EnsureNetwork() error {
+	return c.EnsureNetworkContext(context.Background())
+}
+
+func (c *Client) EnsureNetworkContext(parent context.Context) error {
 	if c == nil || c.docker == nil {
 		return fmt.Errorf("docker client is nil")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), defaultAPITimeout)
+	ctx, cancel := context.WithTimeout(parent, defaultAPITimeout)
 	defer cancel()
 
 	// List existing networks

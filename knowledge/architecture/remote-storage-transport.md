@@ -50,6 +50,10 @@ Process and Docker worker sessions bind the handshake and session lifetime to
 the supplied context; cancellation closes their transport.
 Docker worker removal uses an independent bounded cleanup context, including
 when startup fails after container creation. Removal failures are reported.
+Docker transport resolution carries the operation context through cold pool
+lookup and version negotiation, before worker creation. Cancellation remains
+identifiable through the unavailable-storage wrapper and never selects the
+controller client.
 An instance-owned resolver can select a transport with the caller's context.
 Legacy `ForNode` callers still use the registered process-wide transport and a
 background context until each owning subsystem is migrated.

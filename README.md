@@ -9,7 +9,7 @@ one at https://mozilla.org/MPL/2.0/.
 -->
 
 <div align="center">
-  <img src="assets/readme/hero.png" alt="Carbon Panel. Your worlds. Yours to run." width="100%" />
+  <img src="https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/readme/hero.png" alt="Carbon Panel. Your worlds. Yours to run." width="100%" />
 
   <p><strong>A home for the worlds you make.</strong></p>
   <p>Build your modpacks, look after your servers, and keep every block on your own terms.<br />
@@ -19,7 +19,8 @@ one at https://mozilla.org/MPL/2.0/.
     <a href="#quick-start"><strong>Get started ↗</strong></a> &nbsp; · &nbsp;
     <a href="https://carbonpanel.dev/">Explore the website</a> &nbsp; · &nbsp;
     <a href="https://carbonpanel.dev/docs/">Documentation</a> &nbsp; · &nbsp;
-    <a href="https://github.com/athNdev/carbonpanel/releases">Releases</a>
+    <a href="https://github.com/athNdev/carbonpanel/releases">Releases</a> &nbsp; · &nbsp;
+    <a href="https://hub.docker.com/r/atharvnaphade/carbonpanel">Docker image</a>
   </p>
 
   <p>
@@ -42,7 +43,7 @@ with your players. **Modpack Studio** keeps the workflow in one place.
 - **Take it with you.** Export `.mrpack`, CurseForge or packwiz formats, share
   with friends, or deploy to a server.
 
-[![Modpack Studio: a real pack, with mod sides, pinned versions and export controls](assets/showcase/showcase-studio.png)](assets/showcase/showcase-studio.png)
+[![Modpack Studio: a real pack, with mod sides, pinned versions and export controls](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-studio.png)](https://github.com/athNdev/carbonpanel/blob/main/assets/showcase/showcase-studio.png)
 
 [Explore Modpack Studio ↗](https://carbonpanel.dev/docs/guides/modpack-studio/)
 
@@ -52,7 +53,7 @@ Give each server its own Docker container. Keep the console, live logs, files,
 backups and settings within reach. Run on a machine at home, a dedicated host,
 or compatible remote Docker nodes, all through one panel.
 
-[![Live server console with filtered startup logs and command controls](assets/showcase/showcase-server-detail.png)](assets/showcase/showcase-server-detail.png)
+[![Live server console with filtered startup logs and command controls](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-server-detail.png)](https://github.com/athNdev/carbonpanel/blob/main/assets/showcase/showcase-server-detail.png)
 
 ### The next update. When you're ready.
 
@@ -60,7 +61,7 @@ Prepare compatible configuration and content changes in one batch. Review
 them together, then choose the next restart, a scheduled time or an idle window.
 Staging leaves the live files alone; applying to a running server includes a restart.
 
-[![Staged updates: review a prepared change and choose when to apply it](assets/showcase/showcase-staging.png)](assets/showcase/showcase-staging.png)
+[![Staged updates: review a prepared change and choose when to apply it](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-staging.png)](https://github.com/athNdev/carbonpanel/blob/main/assets/showcase/showcase-staging.png)
 
 [Read the update guide ↗](https://carbonpanel.dev/docs/guides/staged-updates/)
 
@@ -93,11 +94,11 @@ depend on the server version, host and idle-mode configuration.
 
 ### Your machines, together
 
-![Cluster dashboard with server state and observed host resources](assets/showcase/showcase-dashboard.png)
+![Cluster dashboard with server state and observed host resources](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-dashboard.png)
 
 ### A home for your packs
 
-![Modpack browser with provider filters and real catalog results](assets/showcase/showcase-modpacks.png)
+![Modpack browser with provider filters and real catalog results](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-modpacks.png)
 
 </details>
 
@@ -136,7 +137,7 @@ Prefer a prebuilt download? [GitHub Releases](https://github.com/athNdev/carbonp
 provides versioned archives for Linux, macOS and Windows.
 See [release downloads and checksum verification](docs/releases.md).
 
-### 1. Download the repository and build the image
+### 1. Download the repository and build or pull the image
 
 Requires Docker with Linux containers and Docker Compose.
 
@@ -144,6 +145,13 @@ Requires Docker with Linux containers and Docker Compose.
 git clone https://github.com/athNdev/carbonpanel.git
 cd carbonpanel
 docker build -f docker/Dockerfile.carbon-panel -t carbon-panel:latest .
+```
+
+Or pull the published multi-architecture image from
+[Docker Hub](https://hub.docker.com/r/atharvnaphade/carbonpanel):
+
+```bash
+docker pull atharvnaphade/carbonpanel:latest
 ```
 
 ### 2. Choose your persistent storage paths

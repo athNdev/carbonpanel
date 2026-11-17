@@ -20,6 +20,7 @@ one at https://mozilla.org/MPL/2.0/.
 		discardStaged,
 		phase = 'staged',
 		windowLocked = false,
+		showHelp = true,
 		actions
 	}: {
 		applyWindow?: string;
@@ -37,6 +38,7 @@ one at https://mozilla.org/MPL/2.0/.
 		discardStaged: (itemId: string) => void;
 		phase?: 'draft' | 'staged';
 		windowLocked?: boolean;
+		showHelp?: boolean;
 		actions?: Snippet;
 	} = $props();
 	const labels: Record<string, string> = {
@@ -65,15 +67,12 @@ one at https://mozilla.org/MPL/2.0/.
 >
 	<header class="inventory-heading">
 		<div>
-			<h4>{phase === 'draft' ? 'Review your changes' : 'Staged changes'}</h4>
+			<h4>{phase === 'draft' ? 'Review changes' : 'Staged changes'}</h4>
 			<p>
 				{batchItems.length}
 				{batchItems.length === 1 ? 'change' : 'changes'}{kinds > 1 ? ` across ${kinds} areas` : ''}
 			</p>
 		</div>
-		<span class="inventory-count" aria-hidden="true"
-			>{String(batchItems.length).padStart(2, '0')}</span
-		>
 	</header>
 	{#if batchOpen && batchItems.length}
 		<ul class="inventory-list">
@@ -111,59 +110,75 @@ one at https://mozilla.org/MPL/2.0/.
 		</ul>
 	{:else}
 		<p class="inventory-empty">
-			{phase === 'draft'
-				? 'Your batch is clear. Add a sample change to start a new review.'
-				: 'No staged changes. Stage an edit to collect it here.'}
+			{phase === 'draft' ? 'No changes in this batch.' : 'No staged changes.'}
 		</p>
 	{/if}
 	<div class="batch-window">
-		<fieldset disabled={windowLocked}>
-			<legend><Clock3 size={13} aria-hidden="true" /> Apply this batch</legend>
-			<div class="window-choices">
-				{#each [{ value: 'next', label: 'Next restart' }, { value: 'idle', label: 'When empty' }, { value: 'time', label: 'Pick a time' }] as option (option.value)}
-					<label class:selected={applyWindow === option.value}
-						><input
-							type="radio"
-							name={windowId}
-							value={option.value}
-							bind:group={applyWindow}
-						/><span>{option.label}</span></label
-					>
-				{/each}
+		{#if windowLocked}
+			<div class="locked-window">
+				<Clock3 size={16} aria-hidden="true" />
+				<dl>
+					<dt>Apply window</dt>
+					<dd>
+						{applyWindow === 'next'
+							? 'Next restart'
+							: applyWindow === 'idle'
+								? `${idleMinutes} min idle`
+								: new Date(applyAtLocal).toLocaleString()}
+					</dd>
+				</dl>
 			</div>
-			{#if applyWindow === 'time'}
-				<label class="window-input"
-					>Date and time <span class="window-hint">Local time, saved as UTC</span><input
-						type="datetime-local"
-						bind:value={applyAtLocal}
-					/></label
-				>
-			{:else if applyWindow === 'idle'}
-				<label class="window-input"
-					>Minutes with nobody online<input
-						type="number"
-						min="1"
-						step="1"
-						bind:value={idleMinutes}
-					/></label
-				>
-			{/if}
-		</fieldset>
-		<p class="window-explanation">
-			{#if applyWindow === 'idle'}A player joining resets the wait. A running server restarts once.{:else if applyWindow === 'time'}A
-				running server restarts once at the chosen time.{:else}All changes land together with the
-				server’s next restart.{/if}
-		</p>
-		<details class="batch-safety">
-			<summary>What happens to the live server?</summary>
-			<p>
-				Staging leaves live files and server state unchanged. Timed and idle batches save and
-				restart a running server once; a frozen server restarts and stays running. Stopped and
-				deep-sleeping servers stay stopped. If publishing fails, the previous files and
-				configuration are restored and the batch stays open. Apply now restarts a running server
-				immediately.
+		{:else}
+			<fieldset disabled={windowLocked}>
+				<legend><Clock3 size={13} aria-hidden="true" /> Apply window</legend>
+				<div class="window-choices">
+					{#each [{ value: 'next', label: 'Next restart' }, { value: 'idle', label: 'When empty' }, { value: 'time', label: 'Pick a time' }] as option (option.value)}
+						<label class:selected={applyWindow === option.value}
+							><input
+								type="radio"
+								name={windowId}
+								value={option.value}
+								bind:group={applyWindow}
+							/><span>{option.label}</span></label
+						>
+					{/each}
+				</div>
+				{#if applyWindow === 'time'}
+					<label class="window-input"
+						>Date and time <span class="window-hint">Local time, saved as UTC</span><input
+							type="datetime-local"
+							bind:value={applyAtLocal}
+						/></label
+					>
+				{:else if applyWindow === 'idle'}
+					<label class="window-input"
+						>Minutes with nobody online<input
+							type="number"
+							min="1"
+							step="1"
+							bind:value={idleMinutes}
+						/></label
+					>
+				{/if}
+			</fieldset>
+		{/if}
+		{#if showHelp}
+			<p class="window-explanation">
+				{#if applyWindow === 'idle'}A player joining resets the wait. A running server restarts
+					once.{:else if applyWindow === 'time'}A running server restarts once at the chosen time.{:else}All
+					changes land together with the server’s next restart.{/if}
 			</p>
-		</details>
+			<details class="batch-safety">
+				<summary>What happens to the live server?</summary>
+				<p>
+					Staging leaves live files and server state unchanged. Timed and idle batches save and
+					restart a running server once; a frozen server restarts and stays running. Stopped and
+					deep-sleeping servers stay stopped. If publishing fails, the previous files and
+					configuration are restored and the batch stays open. Apply now restarts a running server
+					immediately.
+				</p>
+			</details>
+		{/if}
 	</div>
 	{#if batchOpen || actions}
 		<footer class="inventory-actions">
@@ -190,18 +205,35 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 	.inventory-heading h4 {
 		margin: 0;
-		font-size: 14px;
+		font-size: 16px;
 		font-weight: 500;
 	}
 	.inventory-heading p {
 		margin: 4px 0 0;
-		font-size: 11px;
+		font-size: 12px;
 		color: var(--muted-foreground);
 	}
-	.inventory-count {
-		font: 28px/1 var(--carbon-font-mono);
+	.locked-window {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+	.locked-window dl {
+		display: flex;
+		flex: 1;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		margin: 0;
+	}
+	.locked-window dt {
+		font-size: 12px;
 		color: var(--muted-foreground);
-		font-weight: 300;
+	}
+	.locked-window dd {
+		margin: 0;
+		font-size: 13px;
+		font-weight: 500;
 	}
 	.inventory-list {
 		list-style: none;
@@ -241,7 +273,7 @@ one at https://mozilla.org/MPL/2.0/.
 		margin-right: 9px;
 	}
 	.item-title {
-		font-size: 13px;
+		font-size: 14px;
 		font-weight: 500;
 		line-height: 1.5;
 		margin: 3px 0;
@@ -252,7 +284,7 @@ one at https://mozilla.org/MPL/2.0/.
 		gap: 8px;
 		align-items: center;
 		flex-wrap: wrap;
-		font: 11px/1.5 var(--carbon-font-mono);
+		font: 12px/1.5 var(--carbon-font-mono);
 		color: var(--muted-foreground);
 	}
 	.item-diff strong {

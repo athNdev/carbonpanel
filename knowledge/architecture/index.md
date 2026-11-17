@@ -11,7 +11,7 @@
 - [Remote storage transport](remote-storage-transport.md) — JSON accessor worker and Docker attach path for nodes without shared controller storage.
 - [RPC contract](rpc-contract.md) — Proto definitions are the single API contract for the backend, console and CLI.
 - [Runtime lifecycle and world-data seams](runtime-seams.md) — Locator, lifecycle handle, idle-power module, route PlanFor and worldstore are the five stable architecture seams.
-- [Runtime model](runtime.md) — The daemon owns the API, console, proxy, scheduler and SQLite, and starts them from cmd/carbon-panel.
+- [Runtime model](runtime.md) — The daemon owns the API, console, proxy, scheduler and SQLite. Effective container limits are qualified before create, and storage-opt size does not bound a bind-mounted world.
 - [Scheduler](scheduler.md) — Cron and lifecycle tasks run in the controller and surface progress over the WebSocket hub.
 - [Server data ownership](server-data-ownership.md) — The panel and the game container share a bind mount but not a uid, so anything the panel writes must be handed to the game container's user. Existing /data matching the game uid sets SKIP_CHOWN so a restart does not recursively chown.
 - [Server lifecycle policy](server-lifecycle.md) — Starts share node admission and config recreation records canonical container recovery identities.

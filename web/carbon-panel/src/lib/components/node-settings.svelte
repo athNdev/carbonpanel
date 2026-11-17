@@ -7,8 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { rpcClient } from '$lib/api/rpc-client';
-	import { apiFetch } from '$lib/api/fetch';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { NodeStatus, type Node } from '$lib/proto/carbonpanel/v1/node_pb';
 	import { toast } from 'svelte-sonner';
 	import {
@@ -147,17 +146,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	async function handleAutoDetect() {
 		scanning = true;
 		try {
-			const res = await apiFetch('/api/v1/nodes/scan', { method: 'GET' });
-			if (!res.ok) {
-				throw new Error(`Scan endpoint returned ${res.status}`);
-			}
-			const data = await res.json();
-			const candidates: Array<{
-				host: string;
-				reachable: boolean;
-				latencyMs: number;
-				source?: string;
-			}> = data.candidates || [];
+			const data = await rpcClient.node.scanNodes({}, silentCallOptions);
+			const candidates = data.candidates.map((candidate) => ({
+				...candidate,
+				latencyMs: Number(candidate.latencyMs)
+			}));
 
 			await loadNodes();
 

@@ -880,10 +880,20 @@ h2 {
   border-top: 1px solid var(--line);
 }
 .craft-grid {
+  --minor-line: rgba(243, 240, 230, 0.075);
+  --craft-grid-step: clamp(64px, 7.5vw, 104px);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
   gap: 90px;
+}
+.craft-grid::before {
+  background-image:
+    linear-gradient(var(--minor-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--minor-line) 1px, transparent 1px);
+  background-size: var(--craft-grid-step) var(--craft-grid-step);
+  mask-image: linear-gradient(transparent, #000 12%, #000 80%, transparent),
+    linear-gradient(90deg, transparent 22%, #000 48%, #000);
 }
 .craft-specimen {
   position: relative;
@@ -896,6 +906,7 @@ h2 {
 }
 .craft-specimen .diagram-label {
   color: #656259;
+  font-size: 11px;
 }
 .specimen-type {
   display: flex;
@@ -921,7 +932,7 @@ h2 {
   padding-top: 12px;
   margin-bottom: 30px;
   border-top: 1px solid #bab5a7;
-  font: 9px var(--mono);
+  font: 11px var(--mono);
   color: #656259;
 }
 .specimen-swatches {
@@ -949,7 +960,7 @@ h2 {
   justify-content: space-between;
   gap: 16px;
   margin-top: 12px;
-  font: 8px/1.6 var(--mono);
+  font: 10px/1.6 var(--mono);
   color: #656259;
 }
 .craft-copy h2 {
@@ -981,6 +992,9 @@ h2 {
   .craft-grid {
     grid-template-columns: 1fr;
     gap: 32px;
+  }
+  .craft-grid::before {
+    mask-image: linear-gradient(transparent, #000 8%, #000 88%, transparent);
   }
   .craft-copy {
     grid-row: 1;
@@ -1289,7 +1303,7 @@ h2 {
   }
 }
 @media (max-width: 900px) {
-  .structural-grid::before {
+  .structural-grid:not(.craft-grid)::before {
     background: none;
   }
   .nav-links {
@@ -1887,4 +1901,112 @@ h2 {
 .fragment-recovery a {
   text-decoration: underline;
   text-underline-offset: 4px;
+}
+
+/* Localized light responds to completed fixture actions, without moving copy. */
+.studio-fragment::before,
+.staging-fragment::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  inset: -120px -55px auto 35%;
+  height: 300px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(225, 216, 187, 0.2),
+    transparent 65%
+  );
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+.studio-section[data-demo-phase="curating"] .studio-fragment::before {
+  opacity: 0.45;
+}
+.studio-section[data-demo-phase="ready"] .studio-fragment::before,
+.staging-section[data-demo-phase="applied"] .staging-fragment::before {
+  opacity: 1;
+}
+.staging-section[data-demo-phase="staged"] .staging-fragment::before,
+.staging-section[data-demo-phase="applying"] .staging-fragment::before {
+  opacity: 0.5;
+}
+.studio-section .fragment-surface,
+.staging-section .fragment-surface {
+  transition: border-color 150ms ease;
+}
+.studio-section[data-demo-phase="ready"] .fragment-surface,
+.staging-section[data-demo-phase="applied"] .fragment-surface {
+  border-color: #8c8877;
+}
+.studio-margin .margin-cross {
+  transition:
+    color 150ms ease,
+    text-shadow 600ms ease;
+}
+.studio-section[data-demo-phase="curating"] .margin-cross {
+  color: #f0ecdd;
+  text-shadow: 0 0 24px #ede2bf66;
+}
+.studio-section[data-demo-phase="ready"] .margin-cross {
+  color: #fffdf2;
+  text-shadow:
+    0 0 12px #f5eacaaa,
+    0 0 40px #e2d4a455;
+}
+.update-signal {
+  display: flex;
+  align-items: end;
+  gap: 5px;
+  height: 30px;
+  margin: -4px 0 24px;
+  position: relative;
+  width: 76px;
+}
+.update-signal span {
+  width: 20px;
+  height: 8px;
+  background: #383832;
+  border: 1px solid #6d6b60;
+  transition:
+    background-color 150ms ease,
+    box-shadow 600ms ease;
+}
+.update-signal span:nth-child(2) {
+  height: 16px;
+}
+.update-signal span:nth-child(3) {
+  height: 24px;
+}
+.staging-section[data-demo-phase="review"] .update-signal span:first-child,
+.staging-section[data-demo-phase="staged"]
+  .update-signal
+  span:nth-child(-n + 2),
+.staging-section[data-demo-phase="applying"] .update-signal span,
+.staging-section[data-demo-phase="applied"] .update-signal span {
+  background: #aca797;
+  box-shadow: 0 0 20px #dbcfaa22;
+}
+.staging-section[data-demo-phase="applied"] .update-signal span {
+  background: #e4decb;
+  box-shadow: 0 0 22px #dbcfaa55;
+}
+.staging-section[data-demo-phase="staged"] .process-list li:nth-child(2),
+.staging-section[data-demo-phase="applying"] .process-list li:nth-child(3),
+.staging-section[data-demo-phase="applied"] .process-list li:nth-child(3) {
+  color: #f0ecdd;
+  border-color: #b8b09b55;
+}
+@media (forced-colors: active) {
+  .studio-fragment::before,
+  .staging-fragment::before,
+  .update-signal {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .studio-fragment::before,
+  .staging-fragment::before {
+    right: 0;
+  }
 }

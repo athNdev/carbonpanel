@@ -41,6 +41,7 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99
         with:
           version: '1.50.0'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Test snapshot isolation and URL handling
         run: python3 -m unittest scripts.test_website scripts.test_landing_page scripts.test_design_system_page
       - name: Build the homepage and pinned docs

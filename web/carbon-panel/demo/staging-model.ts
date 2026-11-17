@@ -25,8 +25,8 @@ export const sampleChanges: SampleChange[] = [
 		kind: 'mod',
 		action: 'replace',
 		summary: 'Lithium',
-		before: 'Current build',
-		after: 'New build'
+		before: 'Build 18 (sample)',
+		after: 'Build 19 (sample)'
 	},
 	{
 		id: 'trails',
@@ -34,15 +34,15 @@ export const sampleChanges: SampleChange[] = [
 		action: 'install',
 		summary: 'Trail markers',
 		before: 'Not installed',
-		after: 'Install pack'
+		after: 'Trail markers enabled'
 	},
 	{
 		id: 'rules',
 		kind: 'file',
 		action: 'replace',
 		summary: 'config/server-rules.txt',
-		before: 'Current file',
-		after: 'Revised rules'
+		before: 'Welcome to Weekend Survival.',
+		after: 'Keep builds friendly. Leave room to explore.'
 	},
 	{
 		id: 'map',
@@ -57,8 +57,24 @@ export const sampleChanges: SampleChange[] = [
 		kind: 'modpack',
 		action: 'replace',
 		summary: 'Weekend survival pack',
-		before: 'Current pack',
-		after: 'Next edition'
+		before: 'Weekend survival · edition 1',
+		after: 'Weekend survival · edition 2'
+	},
+	{
+		id: 'simulation',
+		kind: 'config',
+		action: 'update',
+		summary: 'Simulation distance',
+		before: '6 chunks',
+		after: '8 chunks'
+	},
+	{
+		id: 'players',
+		kind: 'config',
+		action: 'update',
+		summary: 'Player limit',
+		before: '12 players',
+		after: '20 players'
 	}
 ];
 
@@ -99,4 +115,17 @@ export function applyBatch(
 ): Record<string, string> {
 	// Publish exactly the reviewed snapshot, never an uncommitted editor value.
 	return { ...live, ...Object.fromEntries(batch.items.map((item) => [item.id, item.after])) };
+}
+
+export type WindowSimulation = {
+	players: number;
+	emptyMinutes: number;
+	now: number;
+	restart: boolean;
+};
+export function windowReached(batch: SampleBatch, simulation: WindowSimulation): boolean {
+	if (batch.window.mode === 'next') return simulation.restart;
+	if (batch.window.mode === 'idle')
+		return simulation.players === 0 && simulation.emptyMinutes >= batch.window.idle;
+	return batch.window.mode === 'time' && simulation.now >= Date.parse(batch.window.at);
 }

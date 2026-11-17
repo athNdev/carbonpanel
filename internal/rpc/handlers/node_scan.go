@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package handlers
 
 import (
@@ -14,8 +13,10 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/nodescan"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
 // NodeScanResponse is the JSON payload for GET /api/v1/nodes/scan.
@@ -31,47 +32,49 @@ type NodeScanResponse struct {
 // per-node PingNode RPC: the scan finds candidate daemons, PingNode verifies
 // registered ones.
 func NewNodeScanHandler(store *storage.Store, authManager *auth.Manager, enforcer *rbac.Enforcer, log *logger.Logger) http.Handler {
+	scanner := nodescan.New(store, log)
+	return nodeScanHandler(scanner.Scan, authManager, enforcer)
+}
+
+func nodeScanHandler(scan func(context.Context) *v1.ScanNodesResponse, authManager *auth.Manager, enforcer *rbac.Enforcer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		// Auth check if enabled (nodes are read-guarded like ListNodes).
-		if authManager != nil && authManager.IsAnyAuthEnabled() {
-			authHeader := r.Header.Get("Authorization")
-			user, err := authManager.AuthenticateFromHeader(r.Context(), authHeader)
-			if err != nil {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-			if enforcer != nil {
-				allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceNodes, rbac.ActionRead, "*")
-				if rbacErr != nil || !allowed {
-					http.Error(w, "forbidden", http.StatusForbidden)
-					return
-				}
-			}
+		// Match the generated method: authenticate even in explicit no-auth
+		// mode, then enforce nodes/read on the global object. Missing policy
+		// dependencies must fail closed rather than bypassing the check.
+		if authManager == nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		user, err := authManager.AuthenticateFromHeader(r.Context(), r.Header.Get("Authorization"))
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if enforcer == nil {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceNodes, rbac.ActionRead, "*")
+		if rbacErr != nil || !allowed {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
-		defer cancel()
-
-		candidates := docker.DetectDockerDaemons(ctx)
-
-		known := 0
-		if store != nil {
-			if nodes, err := store.ListNodes(ctx); err == nil {
-				known = len(nodes)
-			} else if log != nil {
-				log.Warn("Node scan: failed to list known nodes: %v", err)
-			}
+		result := scan(r.Context())
+		var candidates []docker.DockerCandidate
+		for _, candidate := range result.Candidates {
+			candidates = append(candidates, docker.DockerCandidate{Host: candidate.Host, Port: int(candidate.Port), Reachable: candidate.Reachable, LatencyMs: candidate.LatencyMs, Source: candidate.Source})
 		}
 
 		writeJSON(w, http.StatusOK, NodeScanResponse{
 			Candidates: candidates,
-			KnownNodes: known,
-			ScannedAt:  time.Now().UTC().Format(time.RFC3339),
+			KnownNodes: int(result.KnownNodes),
+			ScannedAt:  result.ScannedAt.AsTime().Format(time.RFC3339),
 		})
 	})
 }

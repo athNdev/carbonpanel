@@ -46,6 +46,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 		indicatorLeft = button.offsetLeft;
 		indicatorWidth = button.offsetWidth;
+		// Keep a selected tab visible after programmatic selection or resize,
+		// without scrolling any ancestor or moving the page vertically.
+		if (button.offsetLeft < container.scrollLeft) container.scrollLeft = button.offsetLeft;
+		else if (button.offsetLeft + button.offsetWidth > container.scrollLeft + container.clientWidth)
+			container.scrollLeft = button.offsetLeft + button.offsetWidth - container.clientWidth;
 	}
 
 	$effect(() => {

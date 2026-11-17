@@ -12,7 +12,7 @@
     <title>Carbon Panel | Self-hosted Minecraft server management</title>
     <meta
       name="description"
-      content="Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers."
+      content="Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on."
     />
     <meta
       name="robots"
@@ -28,6 +28,12 @@
       title="Sitemap"
       href="https://carbonpanel.dev/sitemap.xml"
     />
+    <link
+      rel="alternate"
+      type="text/plain"
+      title="AI-readable overview"
+      href="./llms.txt"
+    />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Carbon Panel" />
     <meta property="og:locale" content="en_US" />
@@ -37,7 +43,7 @@
     />
     <meta
       property="og:description"
-      content="Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers."
+      content="Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on."
     />
     <meta property="og:url" content="https://carbonpanel.dev/" />
     <meta
@@ -58,7 +64,7 @@
     />
     <meta
       name="twitter:description"
-      content="Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers."
+      content="Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on."
     />
     <meta
       name="twitter:image"
@@ -94,7 +100,7 @@
             "@id": "https://carbonpanel.dev/#webpage",
             "url": "https://carbonpanel.dev/",
             "name": "Carbon Panel | Self-hosted Minecraft server management",
-            "description": "Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers.",
+            "description": "Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on.",
             "isPartOf": { "@id": "https://carbonpanel.dev/#website" },
             "about": { "@id": "https://carbonpanel.dev/#software" },
             "inLanguage": "en",
@@ -109,7 +115,7 @@
             "@type": "SoftwareSourceCode",
             "@id": "https://carbonpanel.dev/#software",
             "name": "Carbon Panel",
-            "description": "Create and share modpacks in multiple formats, search and add datapacks, stage updates, and wake sleeping servers.",
+            "description": "Self-hosted Minecraft server management with Docker, modpacks, staged updates, sleep modes, role-based access, and OIDC single sign-on.",
             "url": "https://carbonpanel.dev/",
             "codeRepository": "https://github.com/athNdev/carbonpanel",
             "programmingLanguage": "Go",
@@ -118,6 +124,30 @@
             "isAccessibleForFree": true,
             "softwareVersion": "v3.0.0-beta.4",
             "image": "https://carbonpanel.dev/assets/og.png?v=20261113-2"
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://carbonpanel.dev/#faq",
+            "url": "https://carbonpanel.dev/#faq",
+            "isPartOf": { "@id": "https://carbonpanel.dev/#website" },
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Can Carbon Panel use single sign-on?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. Carbon Panel supports OIDC single sign-on alongside local accounts, roles, server-scoped permissions, API tokens, and an audit log. See the OIDC guides in the documentation."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Do I need a Carbon Cloud account to self-host Carbon Panel?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. Carbon Panel is free and open source under MPL-2.0. You run it on infrastructure you control, and your worlds, configuration, and database stay with your installation."
+                }
+              }
+            ]
           }
         ]
       }
@@ -134,7 +164,7 @@
     />
     <link rel="stylesheet" href="./assets/fonts/ibm-plex-sans.css" />
     <link rel="stylesheet" href="./assets/fonts/ibm-plex-mono.css" />
-    <link rel="stylesheet" href="./assets/styles.css?v=20261113b" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20261113f" />
     <noscript
       ><style>
         .menu-toggle {
@@ -263,7 +293,7 @@
               </figcaption>
               <div class="fragment-surface"><!-- fragment:server --></div>
               <p class="fragment-note" data-fragment-note>
-                Interactive demo · Stop the sample server. Watch the doorway.
+                Interactive demo · Sample data. No server connected.
               </p>
               <p class="fragment-recovery" hidden data-fragment-recovery>
                 <a href="">Reload page</a> ·
@@ -296,6 +326,7 @@
       </section>
       <section
         class="chapter studio-section"
+        data-demo-phase="idle"
         id="features"
         aria-labelledby="studio-title"
       >
@@ -309,9 +340,7 @@
             </h2>
           </div>
           <div class="studio-introduction">
-            <p>
-              Package your modpack.<br />Share it with your players.
-            </p>
+            <p>Package your modpack.<br />Share it with your players.</p>
             <p>
               Bring your pack together, choose your export format, and get it
               ready to share. Try the workflow here.
@@ -338,8 +367,8 @@
             </figcaption>
             <div class="fragment-surface"><!-- fragment:studio --></div>
             <p class="fragment-note" data-fragment-note>
-              Interactive demo · Browse sample mods, curate your pack, and
-              preview an export. No downloads or provider connections.
+              Interactive demo · Sample data. Downloads a JSON manifest, not a
+              playable pack.
             </p>
             <p class="fragment-recovery" hidden data-fragment-recovery>
               <a href="">Reload page</a> ·
@@ -364,6 +393,7 @@
       </section>
       <section
         class="chapter staging-section"
+        data-demo-phase="review"
         id="updates"
         aria-labelledby="staging-title"
       >
@@ -374,8 +404,7 @@
             </figcaption>
             <div class="fragment-surface"><!-- fragment:staging --></div>
             <p class="fragment-note" data-fragment-note>
-              Interactive demo · No server connected. Collect, review and stage
-              a sample batch.
+              Interactive demo · Sample data. Simulated apply windows.
             </p>
             <p class="fragment-recovery" hidden data-fragment-recovery>
               <a href="">Reload page</a> ·
@@ -390,6 +419,9 @@
           <div class="story-copy">
             <p class="eyebrow">02 / KEEP YOUR MOMENTUM</p>
             <h2 id="staging-title">The next update.<br />When you're ready.</h2>
+            <div class="update-signal" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
             <p>
               A config tweak. A new datapack. The next mod update. Bring your
               changes together in one batch, see what’s changing, and choose
@@ -476,7 +508,7 @@
         <div class="frame structural-grid">
           <div class="machines-heading">
             <div>
-              <p class="eyebrow">03 / YOUR OWN CORNER OF THE INTERNET</p>
+              <p class="eyebrow">03 / INFRASTRUCTURE</p>
               <h2 id="machines-title">Your machines.<br />One panel.</h2>
             </div>
             <p>
@@ -568,7 +600,9 @@
           </div>
           <div class="craft-copy">
             <p class="eyebrow">A CLOSER LOOK AT THE CRAFT</p>
-            <h2 id="craft-title">Considered down<br />to the controls.</h2>
+            <h2 id="craft-title">
+              Obsessively designed,<br />to the very last pixel.
+            </h2>
             <p>
               The quiet surfaces. The clear states. The details that make a tool
               feel familiar. Explore the foundations and components behind
@@ -639,6 +673,23 @@
               >
                 <path d="M3 13 13 3M3 3h10v10" /></svg
             ></a>
+            <a
+                class="text-link source-link"
+                href="https://hub.docker.com/r/atharvnaphade/carbonpanel"
+                >Docker image
+                <svg
+                  class="arrow-up-right"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <path d="M3 13 13 3M3 3h10v10" /></svg
+            ></a>
           </div>
           <div class="install-guide">
             <p class="diagram-label">A FEW THINGS BEFORE YOU BUILD</p>
@@ -665,10 +716,10 @@
               <li>
                 <span>03</span>
                 <div>
-                  <h3>Create your first server</h3>
+                  <h3>Set up access and your first server</h3>
                   <p>
-                    Set up your administrator, choose your software, and invite
-                    your friends.
+                    Create an administrator or connect an OIDC provider, choose
+                    your software, and invite your friends.
                   </p>
                 </div>
               </li>
@@ -698,7 +749,7 @@
       <section class="chapter faq-section" id="faq" aria-labelledby="faq-title">
         <div class="frame faq-grid">
           <div>
-            <p class="eyebrow">BEFORE YOU JOIN</p>
+            <p class="eyebrow">GOOD TO KNOW</p>
             <h2 id="faq-title">A few good<br />questions.</h2>
           </div>
           <div class="faq-list">
@@ -749,6 +800,18 @@
                 See the
                 <a href="./docs/guides/sleep-and-wake/">sleep and wake guide</a>
                 for conditions.
+              </p>
+            </details>
+            <details>
+              <summary>
+                Can I use single sign-on?<span aria-hidden="true">+</span>
+              </summary>
+              <p>
+                Yes. Carbon Panel supports OIDC single sign-on as well as local
+                accounts, roles, server-scoped permissions, API tokens, and an
+                audit log. See the
+                <a href="./docs/guides/oidc/keycloak/">OIDC guide</a> to
+                configure a provider.
               </p>
             </details>
             <details>
@@ -828,9 +891,12 @@
               focusable="false"
             >
               <path d="M3 13 13 3M3 3h10v10" /></svg></a
+          ><a href="https://hub.docker.com/r/atharvnaphade/carbonpanel"
+            >Docker image</a
           ><a href="https://github.com/athNdev/carbonpanel/blob/main/LICENSE"
             >MPL-2.0</a
           ><a href="./design-system/">Design system</a>
+          <a href="./llms.txt">AI-readable overview</a>
         </div>
         <small
           >An independent project. Not affiliated with Mojang or
@@ -838,7 +904,7 @@
         >
       </div>
     </footer>
-    <script src="./assets/script.js?v=20261112a" defer></script>
+    <script src="./assets/script.js?v=20261113c" defer></script>
     <!-- fragment:loader -->
   </body>
 </html>

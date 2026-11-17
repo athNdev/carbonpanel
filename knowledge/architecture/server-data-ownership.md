@@ -9,6 +9,7 @@ code_refs:
   - internal/rpc/services/file.go
   - internal/hostmount
   - internal/docker/runtime_profile.go
+  - pkg/runtimeprofile
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md

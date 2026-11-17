@@ -380,7 +380,7 @@ flowchart LR
     subgraph CD ["Automated Image Publishing"]
         QEMU["Set up QEMU"]
         Buildx["Buildx Multi-Arch\n(linux/amd64, linux/arm64)"]
-        Push["Push to Docker Hub\n(athndev/carbon-panel)"]
+        Push["Push to Docker Hub\n(atharvnaphade/carbonpanel)"]
     end
 
     Tag["Git Tag v*"] --> REL["Release Workflow (release.yml)"]

@@ -63,7 +63,7 @@ overwriting the existing configuration. See the
 
 ## Container channels
 
-Release images are published to both `atharvnaphade/carbon-panel` on Docker Hub
+Release images are published to both `atharvnaphade/carbonpanel` on Docker Hub
 and `ghcr.io/athndev/carbonpanel` in GitHub Packages. Both references use the
 same multi-architecture image digest and tested Linux downloads. The manifest
 records both references. Development `edge` images remain on Docker Hub.

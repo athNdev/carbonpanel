@@ -9,6 +9,19 @@ document.addEventListener("carbon-demo-server-state", (event) => {
   if (world)
     world.dataset.worldState = event.detail.running ? "running" : "stopped";
 });
+// Each isolated fixture owns its own decorative signal. Payloads carry only
+// allowlisted presentation states; they never drive another demo's data.
+for (const [name, selector, phases] of [
+  ["studio", ".studio-section", ["idle", "curating", "ready"]],
+  ["staging", ".staging-section", ["review", "staged", "applying", "applied"]],
+]) {
+  document.addEventListener(`carbon-demo-${name}-state`, (event) => {
+    if (event.target?.dataset?.fragment !== name) return;
+    if (!phases.includes(event.detail?.phase)) return;
+    const section = document.querySelector(selector);
+    if (section) section.dataset.demoPhase = event.detail.phase;
+  });
+}
 function closeMenu(restoreFocus = false) {
   navigation?.classList.remove("is-open");
   menu?.setAttribute("aria-expanded", "false");

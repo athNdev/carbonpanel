@@ -6,7 +6,8 @@ import {
 	initialLive,
 	sampleChanges,
 	stageBatch,
-	windowError
+	windowError,
+	windowReached
 } from './staging-model';
 
 describe('homepage batch review', () => {
@@ -32,8 +33,8 @@ describe('homepage batch review', () => {
 		expect(live).toEqual(initialLive());
 		const result = applyBatch(live, batch);
 		expect(result.distance).toBe('12 chunks');
-		expect(result.lithium).toBe('New build');
-		expect(result.trails).toBe('Install pack');
+		expect(result.lithium).toBe('Build 19 (sample)');
+		expect(result.trails).toBe('Trail markers enabled');
 		expect(result.rules).toBe(live.rules);
 		expect(live).toEqual(initialLive());
 		expect(addChange([], 'distance', result)).toEqual([]);
@@ -42,7 +43,7 @@ describe('homepage batch review', () => {
 		const batch = stageBatch(sampleChanges.slice(0, 3), { mode: 'next', at: '', idle: 10 });
 		batch.items = batch.items.filter((item) => item.id !== 'lithium');
 		const result = applyBatch(initialLive(), batch);
-		expect(result.lithium).toBe('Current build');
+		expect(result.lithium).toBe('Build 18 (sample)');
 		expect(result.distance).toBe('12 chunks');
 	});
 	test('empty batches and invalid schedules cannot be staged', () => {
@@ -54,5 +55,28 @@ describe('homepage batch review', () => {
 		expect(
 			windowError({ mode: 'time', at: '2030-01-01T00:00Z', idle: 10 }, Date.parse('2029-01-01'))
 		).toBe('');
+	});
+	test('each simulated apply window has to be reached before it can publish', () => {
+		const next = stageBatch(sampleChanges, { mode: 'next', at: '', idle: 10 });
+		const simulation = {
+			players: 2,
+			emptyMinutes: 0,
+			now: Date.parse('2029-01-01'),
+			restart: false
+		};
+		expect(windowReached(next, simulation)).toBe(false);
+		expect(windowReached(next, { ...simulation, restart: true })).toBe(true);
+		const idle = stageBatch(sampleChanges, { mode: 'idle', at: '', idle: 10 });
+		expect(windowReached(idle, { ...simulation, emptyMinutes: 10 })).toBe(false);
+		expect(windowReached(idle, { ...simulation, players: 0, emptyMinutes: 9 })).toBe(false);
+		expect(windowReached(idle, { ...simulation, players: 0, emptyMinutes: 10 })).toBe(true);
+		const at = Date.now() + 3600000;
+		const timed = stageBatch(sampleChanges, {
+			mode: 'time',
+			at: new Date(at).toISOString(),
+			idle: 10
+		});
+		expect(windowReached(timed, { ...simulation, now: at - 1 })).toBe(false);
+		expect(windowReached(timed, { ...simulation, now: at })).toBe(true);
 	});
 });

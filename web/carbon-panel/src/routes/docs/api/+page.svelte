@@ -145,6 +145,11 @@ one at https://mozilla.org/MPL/2.0/.
 	// internal/rpc/server.go and internal/rpc/handlers/.
 	const restEndpoints: { method: string; path: string; blurb: string }[] = [
 		{ method: 'GET', path: '/api/v1/openapi.yaml', blurb: 'Live OpenAPI spec backing this viewer' },
+		{
+			method: 'GET',
+			path: '/api/v1/nodes/scan',
+			blurb: 'Compatibility daemon discovery; generated control: NodeService.ScanNodes'
+		},
 		{ method: 'GET', path: '/api/v1/packwiz/packs', blurb: 'Modpack Studio: list packs' },
 		{ method: 'POST', path: '/api/v1/packwiz/packs', blurb: 'Modpack Studio: create pack' },
 		{ method: 'POST', path: '/api/v1/packwiz/packs/import', blurb: 'Modpack Studio: import pack' },
