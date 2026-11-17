@@ -15,9 +15,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 )
 
 // ErrUnavailable reports that the owning node's storage adapter is not
@@ -36,11 +39,14 @@ var ErrSymlink = errors.New("cannot write through symbolic link")
 // that owns the server. All paths are relative to the root; every operation is
 // confined to it.
 type Accessor interface {
+	OpenRead(context.Context, string) (storageworker.ReadHandle, error)
+	BeginWrite(context.Context, string, int64) (storageworker.AtomicWriter, error)
 	Stat(rel string) (os.FileInfo, error)
 	ReadFile(rel string) ([]byte, error)
 	WriteFile(rel string, data []byte) error
 	ReadDir(rel string) ([]os.DirEntry, error)
 	MkdirAll(rel string) error
+	MkdirAllMode(rel string, mode os.FileMode) error
 	Remove(rel string) error
 	RemoveAll(rel string) error
 	Rename(oldRel, newRel string) error
@@ -106,25 +112,34 @@ func (l *local) Stat(rel string) (os.FileInfo, error) {
 }
 
 func (l *local) ReadFile(rel string) ([]byte, error) {
-	p, err := l.sub(rel)
+	r, err := l.OpenRead(context.Background(), rel)
 	if err != nil {
 		return nil, err
 	}
-	return l.root.ReadFile(p)
+	defer func() { _ = r.Close() }()
+	b, err := io.ReadAll(io.LimitReader(r, storageworker.SmallFileBytes+1))
+	if err == nil && int64(len(b)) > storageworker.SmallFileBytes {
+		err = fmt.Errorf("storage: file exceeds small-file limit; use streaming")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 func (l *local) WriteFile(rel string, data []byte) error {
-	p, err := l.sub(rel)
+	if int64(len(data)) > storageworker.SmallFileBytes {
+		return fmt.Errorf("storage: file exceeds small-file limit; use streaming")
+	}
+	w, err := l.BeginWrite(context.Background(), rel, storageworker.SmallFileBytes)
 	if err != nil {
 		return err
 	}
-	if err := l.refuseSymlink(p); err != nil {
+	defer func() { _ = w.Close() }()
+	if _, err = w.Write(data); err != nil {
 		return err
 	}
-	if err := l.root.MkdirAll(filepath.ToSlash(filepath.Dir(p)), 0o755); err != nil {
-		return err
-	}
-	return l.root.WriteFile(p, data, 0o644)
+	return w.Commit()
 }
 
 func (l *local) ReadDir(rel string) ([]os.DirEntry, error) {
@@ -143,11 +158,30 @@ func (l *local) ReadDir(rel string) ([]os.DirEntry, error) {
 }
 
 func (l *local) MkdirAll(rel string) error {
+	return l.MkdirAllMode(rel, 0755)
+}
+
+func (l *local) MkdirAllMode(rel string, mode os.FileMode) error {
+	if mode != 0700 && mode != 0755 {
+		return fmt.Errorf("storage: unsupported directory mode %o", mode)
+	}
 	p, err := l.sub(rel)
 	if err != nil {
 		return err
 	}
-	return l.root.MkdirAll(p, 0o755)
+	if err := l.root.MkdirAll(l.dir, 0755); err != nil {
+		return err
+	}
+	root, err := l.root.OpenRoot(l.dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	if p == l.dir {
+		return nil
+	}
+	p = strings.TrimPrefix(p, l.dir+"/")
+	return root.MkdirAll(p, mode)
 }
 
 func (l *local) Remove(rel string) error {

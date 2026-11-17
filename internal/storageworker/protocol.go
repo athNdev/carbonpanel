@@ -10,16 +10,24 @@ package storageworker
 
 // Request is one JSON line sent to the worker.
 type Request struct {
-	Op      string `json:"op"`
-	Path    string `json:"path,omitempty"`
-	Path2   string `json:"path2,omitempty"`
-	Data    []byte `json:"data,omitempty"`
-	Perms   uint32 `json:"perms,omitempty"`
-	ModTime int64  `json:"mod_time,omitempty"`
+	Version  int    `json:"version,omitempty"`
+	Handle   uint64 `json:"handle,omitempty"`
+	Sequence uint64 `json:"sequence,omitempty"`
+	Limit    int64  `json:"limit,omitempty"`
+	Offset   int64  `json:"offset,omitempty"`
+	Length   int    `json:"length,omitempty"`
+	Checksum string `json:"checksum,omitempty"`
+	Op       string `json:"op"`
+	Path     string `json:"path,omitempty"`
+	Path2    string `json:"path2,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+	Perms    uint32 `json:"perms,omitempty"`
+	ModTime  int64  `json:"mod_time,omitempty"`
 }
 
 // DirEntry is a directory listing entry returned by readdir.
 type DirEntry struct {
+	Mode  uint32 `json:"mode,omitempty"`
 	Name  string `json:"name"`
 	IsDir bool   `json:"is_dir"`
 }
@@ -35,10 +43,18 @@ type FileInfo struct {
 
 // Response is one JSON line from the worker.
 type Response struct {
-	OK       bool       `json:"ok"`
-	Error    string     `json:"error,omitempty"`
-	Data     []byte     `json:"data,omitempty"`
-	Entries  []DirEntry `json:"entries,omitempty"`
-	FileInfo *FileInfo  `json:"file_info,omitempty"`
-	Root     string     `json:"root,omitempty"`
+	Offset    int64      `json:"offset,omitempty"`
+	Digest    string     `json:"digest,omitempty"`
+	Version   int        `json:"version,omitempty"`
+	Handle    uint64     `json:"handle,omitempty"`
+	Sequence  uint64     `json:"sequence,omitempty"`
+	Checksum  string     `json:"checksum,omitempty"`
+	EOF       bool       `json:"eof,omitempty"`
+	OK        bool       `json:"ok"`
+	Error     string     `json:"error,omitempty"`
+	ErrorCode string     `json:"error_code,omitempty"`
+	Data      []byte     `json:"data,omitempty"`
+	Entries   []DirEntry `json:"entries,omitempty"`
+	FileInfo  *FileInfo  `json:"file_info,omitempty"`
+	Root      string     `json:"root,omitempty"`
 }

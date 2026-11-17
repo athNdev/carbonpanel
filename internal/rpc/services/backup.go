@@ -515,18 +515,13 @@ func (s *BackupService) restoreBackupNow(ctx context.Context, server *storage.Se
 	var verifyNote string
 	if acc != nil {
 		if worldstore.HasWorldstoreManifest(archivePath) {
-			if rerr := worldstore.RestoreFromAccessor(acc, archivePath); rerr != nil {
+			if rerr := worldstore.RestoreFromAccessorContext(ctx, acc, archivePath); rerr != nil {
 				done("failed")
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to restore backup: %w", rerr))
 			}
 			verifyNote = "world verified against the archive's per-file sha256"
 		} else {
-			raw, rerr := os.ReadFile(archivePath)
-			if rerr != nil {
-				done("failed")
-				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to read backup: %w", rerr))
-			}
-			count, xerr := nodestorage.ReplaceTreeFromZip(ctx, acc, raw)
+			count, xerr := nodestorage.ReplaceTreeFromZipFile(ctx, acc, archivePath)
 			if xerr != nil {
 				done("failed")
 				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to extract backup: %w", xerr))

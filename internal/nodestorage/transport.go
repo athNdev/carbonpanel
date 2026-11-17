@@ -106,6 +106,16 @@ func startProcessWorker(ctx context.Context, bin, dataRoot string) (*storagework
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, bin, "--mode=accessor", "--root", dataRoot)
+	// The worker owns uncommitted temporary files. Cancellation must first
+	// deliver stdin EOF so ServeAccessor can abort those handles; the session's
+	// closeF below owns the bounded wait and forced termination fallback.
+	cmd.Cancel = func() error {
+		err := pw.Close()
+		if errors.Is(err, os.ErrClosed) {
+			return nil
+		}
+		return err
+	}
 	cmd.Stdin = pr
 	cmd.Stdout = cw
 	cmd.Stderr = os.Stderr
@@ -145,7 +155,7 @@ func startProcessWorker(ctx context.Context, bin, dataRoot string) (*storagework
 				killErr := cmd.Process.Kill()
 				waitErr = <-done
 				if killErr == nil || errors.Is(killErr, os.ErrProcessDone) {
-					waitErr = nil
+					waitErr = fmt.Errorf("storage worker shutdown grace expired; forced termination may leave recovery staging")
 				} else {
 					waitErr = errors.Join(killErr, waitErr)
 				}

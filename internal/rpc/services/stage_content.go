@@ -6,6 +6,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -34,8 +35,11 @@ func safeStageTarget(rel string) (string, error) {
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("%w: %q", errStagedPath, rel)
 	}
-	if clean == stagedContentRoot || strings.HasPrefix(clean, stagedContentRoot+"/") {
-		return "", fmt.Errorf("%w: %q", errStagedPath, rel)
+	for _, reserved := range []string{stagedContentRoot, ".carbon-panel/undo"} {
+		folded := strings.ToLower(clean)
+		if folded == reserved || strings.HasPrefix(folded, reserved+"/") {
+			return "", fmt.Errorf("%w: %q", errStagedPath, rel)
+		}
 	}
 	return clean, nil
 }
@@ -82,7 +86,7 @@ func stageContentBytes(ctx context.Context, store *storage.Store, server *storag
 	stagePath := ""
 	if action != storage.StagedActionDelete {
 		stagePath = stagedContentRoot + "/" + id + "/" + base
-		if err := acc.WriteFile(stagePath, data); err != nil {
+		if _, err := nodestorage.WriteFrom(ctx, acc, stagePath, bytes.NewReader(data), 64<<30); err != nil {
 			return nil, err
 		}
 	}
