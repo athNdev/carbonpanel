@@ -1,0 +1,454 @@
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+syntax = "proto3";
+
+package carbonpanel.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
+
+// Source that produced a player field. Non-authoritative values always carry
+// an Observation so the console can disclose provenance instead of guessing.
+enum PlayerDataSource {
+  PLAYER_DATA_SOURCE_UNSPECIFIED = 0;
+  PLAYER_DATA_SOURCE_PRESENCE = 1;
+  PLAYER_DATA_SOURCE_MANAGEMENT_PROTOCOL = 2;
+  PLAYER_DATA_SOURCE_RCON = 3;
+  PLAYER_DATA_SOURCE_EXEC = 4;
+  PLAYER_DATA_SOURCE_ON_DISK_NBT = 5;
+  PLAYER_DATA_SOURCE_ON_DISK_JSON = 6;
+  PLAYER_DATA_SOURCE_IDENTITY_SERVICE = 7;
+  PLAYER_DATA_SOURCE_PANEL_DB = 8;
+  PLAYER_DATA_SOURCE_BRIDGE = 9;
+}
+
+// Confidence of an observed value. UNKNOWN and STALE are never rendered as
+// authoritative; CONFLICT means two sources disagreed and both are retained.
+enum PlayerConfidence {
+  PLAYER_CONFIDENCE_UNSPECIFIED = 0;
+  PLAYER_CONFIDENCE_DETECTED = 1;
+  PLAYER_CONFIDENCE_INFERRED = 2;
+  PLAYER_CONFIDENCE_UNKNOWN = 3;
+  PLAYER_CONFIDENCE_STALE = 4;
+  PLAYER_CONFIDENCE_CONFLICT = 5;
+}
+
+// Presence classification. UNOBSERVED is distinct from OFFLINE: the former
+// means no fresh observation exists, not that the player left.
+enum PlayerPresence {
+  PLAYER_PRESENCE_UNSPECIFIED = 0;
+  PLAYER_PRESENCE_ONLINE = 1;
+  PLAYER_PRESENCE_OFFLINE = 2;
+  PLAYER_PRESENCE_RECENTLY_SEEN = 3;
+  PLAYER_PRESENCE_UNOBSERVED = 4;
+}
+
+// Capabilities the panel may use for a server. Optional plugin-bridge and
+// Bedrock capabilities are gated by an explicit decision and are never implied
+// by vanilla sources.
+enum PlayerCapability {
+  PLAYER_CAPABILITY_UNSPECIFIED = 0;
+  PLAYER_CAPABILITY_MANAGEMENT_PROTOCOL = 1;
+  PLAYER_CAPABILITY_RCON_EXEC = 2;
+  PLAYER_CAPABILITY_ON_DISK_READ = 3;
+  PLAYER_CAPABILITY_SKIN_PROXY = 4;
+  PLAYER_CAPABILITY_BRIDGE_VITALS = 5;
+  PLAYER_CAPABILITY_BRIDGE_INVENTORY = 6;
+  PLAYER_CAPABILITY_BRIDGE_GROUPS = 7;
+  PLAYER_CAPABILITY_BRIDGE_MUTE = 8;
+  PLAYER_CAPABILITY_BEDROCK_XUID = 9;
+}
+
+// Whether a capability is available, degraded, unsupported or not yet decided.
+enum PlayerSupportState {
+  PLAYER_SUPPORT_STATE_UNSPECIFIED = 0;
+  PLAYER_SUPPORT_STATE_SUPPORTED = 1;
+  PLAYER_SUPPORT_STATE_DEGRADED = 2;
+  PLAYER_SUPPORT_STATE_UNSUPPORTED = 3;
+  PLAYER_SUPPORT_STATE_DECISION_PENDING = 4;
+}
+
+// Field-level provenance envelope shared by roster, detail and deep data.
+message Observation {
+  PlayerDataSource source = 1;
+  google.protobuf.Timestamp observed_at = 2;
+  PlayerConfidence confidence = 3;
+  string applicability = 4;
+  string conflict_note = 5;
+}
+
+// A stable, opaque player reference. URLs carry identity_key, never a guessed
+// name, UUID or folder path.
+message PlayerRef {
+  string identity_key = 1;
+  string name = 2;
+  string uuid = 3;
+  string xuid = 4;
+  bool offline_uuid = 5;
+}
+
+// One alias observed by the panel. Official name history is not available.
+message PlayerAlias {
+  string name = 1;
+  google.protobuf.Timestamp observed_at = 2;
+  string source_server_id = 3;
+  PlayerDataSource source = 4;
+}
+
+// A roster row. Fields that are not backed by a source stay empty and are
+// described by their Observation, never filled with a plausible default.
+message PlayerSummary {
+  PlayerRef ref = 1;
+  string server_id = 2;
+  string server_name = 3;
+  PlayerPresence presence = 4;
+  Observation presence_observation = 5;
+  repeated PlayerAlias aliases = 6;
+  bool whitelisted = 7;
+  bool operator = 8;
+  bool banned = 9;
+  google.protobuf.Timestamp last_seen = 10;
+  string skin_ref = 11;
+  bool skin_available = 12;
+  string access_band = 13;
+}
+
+// A named field with its own provenance, used for grouped progressive detail.
+message PlayerField {
+  string name = 1;
+  string value = 2;
+  string unit = 3;
+  Observation observation = 4;
+}
+
+// A join/leave record derived from observations or push notifications.
+message PlayerSession {
+  string identity_key = 1;
+  string server_id = 2;
+  google.protobuf.Timestamp joined_at = 3;
+  google.protobuf.Timestamp left_at = 4;
+  string source = 5;
+  bool estimate = 6;
+}
+
+// Observed access state for one server. Unknown booleans are represented by
+// absence of a corresponding field in detail; this message carries only facts.
+message PlayerAccessState {
+  string server_id = 1;
+  bool whitelisted = 2;
+  bool operator = 3;
+  int32 op_level = 4;
+  bool banned = 5;
+  string ban_reason = 6;
+  bool mute = 7;
+  Observation observation = 8;
+}
+
+// One moderation or access event in player history.
+message PlayerHistoryEntry {
+  string id = 1;
+  string action = 2;
+  string actor_name = 3;
+  string server_id = 4;
+  string reason = 5;
+  google.protobuf.Timestamp occurred_at = 6;
+  string request_id = 7;
+  bool undone = 8;
+}
+
+// Status of one player capability on one server, with an actionable note.
+message PlayerCapabilityStatus {
+  PlayerCapability capability = 1;
+  PlayerSupportState state = 2;
+  string detail = 3;
+}
+
+// Rendered skin asset served same-origin from the panel's bounded cache.
+message PlayerSkinAsset {
+  bytes data = 1;
+  string content_type = 2;
+  bool from_cache = 3;
+  Observation observation = 4;
+}
+
+// Grouped player detail. Each group is a list of fields with provenance so the
+// console can present progressive disclosure and honest unavailable states.
+message PlayerDetail {
+  PlayerRef ref = 1;
+  repeated PlayerAlias aliases = 2;
+  PlayerPresence presence = 3;
+  Observation presence_observation = 4;
+  string primary_server_id = 5;
+  google.protobuf.Timestamp first_seen = 6;
+  google.protobuf.Timestamp last_seen = 7;
+  repeated PlayerField character = 8;
+  repeated PlayerField progress = 9;
+  repeated PlayerField access = 10;
+  repeated PlayerCapabilityStatus capabilities = 11;
+  string name_history_note = 12;
+}
+
+// Per-target outcome of a moderation action. Partial success is reported, not
+// collapsed into a single success flag.
+message PlayerActionResult {
+  string identity_key = 1;
+  bool success = 2;
+  string message = 3;
+  string error_code = 4;
+  bool undo_supported = 5;
+  string undo_token = 6;
+}
+
+// Player-facing service. All procedures are denied until explicitly mapped to
+// a players:* permission; server-scoped procedures use server_id so subuser
+// grants apply. Arbitrary commands stay on the existing command path.
+service PlayerService {
+  // List a searchable, filterable and sortable player roster.
+  rpc ListPlayers(ListPlayersRequest) returns (ListPlayersResponse);
+  // Get grouped detail for one opaque player identity.
+  rpc GetPlayer(GetPlayerRequest) returns (GetPlayerResponse);
+  // List join/leave sessions for one identity.
+  rpc ListPlayerSessions(ListPlayerSessionsRequest) returns (ListPlayerSessionsResponse);
+  // List observed access states for one identity.
+  rpc ListPlayerAccess(ListPlayerAccessRequest) returns (ListPlayerAccessResponse);
+  // List moderation history for one identity.
+  rpc ListPlayerHistory(ListPlayerHistoryRequest) returns (ListPlayerHistoryResponse);
+  // Report capability support for a server, including decision-gated items.
+  rpc ListPlayerCapabilities(ListPlayerCapabilitiesRequest) returns (ListPlayerCapabilitiesResponse);
+  // Fetch a cached same-origin skin or cape asset.
+  rpc GetPlayerSkin(GetPlayerSkinRequest) returns (GetPlayerSkinResponse);
+  // Refresh a cached skin after an explicit operator action.
+  rpc RefreshPlayerSkin(RefreshPlayerSkinRequest) returns (RefreshPlayerSkinResponse);
+  // Read bounded, read-only deep data (stats, advancements, NBT snapshots).
+  rpc GetPlayerDeepData(GetPlayerDeepDataRequest) returns (GetPlayerDeepDataResponse);
+  // Kick one connected player with a reason.
+  rpc KickPlayer(KickPlayerRequest) returns (KickPlayerResponse);
+  // Ban one player with a reason.
+  rpc BanPlayer(BanPlayerRequest) returns (BanPlayerResponse);
+  // Pardon one banned player.
+  rpc PardonPlayer(PardonPlayerRequest) returns (PardonPlayerResponse);
+  // Set or remove an operator entry.
+  rpc SetOperator(SetOperatorRequest) returns (SetOperatorResponse);
+  // Add or remove an allowlist entry.
+  rpc SetWhitelistEntry(SetWhitelistEntryRequest) returns (SetWhitelistEntryResponse);
+  // Apply one typed action to a bounded set of targets with per-target results.
+  rpc BulkPlayerAction(BulkPlayerActionRequest) returns (BulkPlayerActionResponse);
+  // Undo a reversible action using its recorded prior value.
+  rpc UndoPlayerAction(UndoPlayerActionRequest) returns (UndoPlayerActionResponse);
+}
+
+// Roster request. An empty server_id means a cross-server search.
+message ListPlayersRequest {
+  string server_id = 1;
+  string query = 2;
+  string state_filter = 3;
+  string access_filter = 4;
+  string sort_by = 5;
+  bool sort_descending = 6;
+  int32 limit = 7;
+}
+
+// Roster response.
+message ListPlayersResponse {
+  repeated PlayerSummary players = 1;
+  string source_detail = 2;
+}
+
+// Detail request.
+message GetPlayerRequest {
+  string identity_key = 1;
+  string server_id = 2;
+}
+
+// Detail response.
+message GetPlayerResponse {
+  PlayerDetail detail = 1;
+}
+
+// Session list request.
+message ListPlayerSessionsRequest {
+  string identity_key = 1;
+  string server_id = 2;
+}
+
+// Session list response.
+message ListPlayerSessionsResponse {
+  repeated PlayerSession sessions = 1;
+}
+
+// Access list request.
+message ListPlayerAccessRequest {
+  string identity_key = 1;
+}
+
+// Access list response.
+message ListPlayerAccessResponse {
+  repeated PlayerAccessState states = 1;
+}
+
+// History list request.
+message ListPlayerHistoryRequest {
+  string identity_key = 1;
+  string server_id = 2;
+  int32 limit = 3;
+}
+
+// History list response.
+message ListPlayerHistoryResponse {
+  repeated PlayerHistoryEntry entries = 1;
+}
+
+// Capability list request.
+message ListPlayerCapabilitiesRequest {
+  string server_id = 1;
+}
+
+// Capability list response.
+message ListPlayerCapabilitiesResponse {
+  repeated PlayerCapabilityStatus capabilities = 1;
+}
+
+// Skin request. skin_ref is an opaque cache key, never an arbitrary URL.
+message GetPlayerSkinRequest {
+  string identity_key = 1;
+  string skin_ref = 2;
+  string kind = 3;
+}
+
+// Skin response.
+message GetPlayerSkinResponse {
+  PlayerSkinAsset asset = 1;
+}
+
+// Skin refresh request.
+message RefreshPlayerSkinRequest {
+  string identity_key = 1;
+  string server_id = 2;
+}
+
+// Skin refresh response.
+message RefreshPlayerSkinResponse {
+  PlayerSkinAsset asset = 1;
+}
+
+// Deep data request. kind is one of stats, advancements, character.
+message GetPlayerDeepDataRequest {
+  string identity_key = 1;
+  string server_id = 2;
+  string kind = 3;
+}
+
+// Deep data response. All values are read-only snapshots with provenance.
+message GetPlayerDeepDataResponse {
+  repeated PlayerField fields = 1;
+  string snapshot_note = 2;
+}
+
+// Kick request.
+message KickPlayerRequest {
+  string server_id = 1;
+  string identity_key = 2;
+  string player_name = 3;
+  string reason = 4;
+  string request_id = 5;
+}
+
+// Ban request.
+message BanPlayerRequest {
+  string server_id = 1;
+  string identity_key = 2;
+  string player_name = 3;
+  string reason = 4;
+  string request_id = 5;
+}
+
+// Pardon request.
+message PardonPlayerRequest {
+  string server_id = 1;
+  string identity_key = 2;
+  string player_name = 3;
+  string request_id = 4;
+}
+
+// Operator request. remove deletes the entry instead of granting it.
+message SetOperatorRequest {
+  string server_id = 1;
+  string identity_key = 2;
+  string player_name = 3;
+  bool remove = 4;
+  int32 level = 5;
+  string request_id = 6;
+}
+
+// Allowlist request. remove deletes the entry instead of adding it.
+message SetWhitelistEntryRequest {
+  string server_id = 1;
+  string identity_key = 2;
+  string player_name = 3;
+  bool remove = 4;
+  string request_id = 5;
+}
+
+// Bulk action request. kind is one of kick, ban, pardon, deop, allowlist_add,
+// allowlist_remove. Target count is bounded by the service.
+message BulkPlayerActionRequest {
+  string server_id = 1;
+  string kind = 2;
+  repeated string identity_keys = 3;
+  string reason = 4;
+  string request_id = 5;
+}
+
+// Undo request.
+message UndoPlayerActionRequest {
+  string server_id = 1;
+  string undo_token = 2;
+  string request_id = 3;
+}
+
+// Common action outcome embedded in every typed action response.
+message PlayerActionOutcome {
+  repeated PlayerActionResult results = 1;
+  string request_id = 2;
+  string journal_id = 3;
+  bool requires_confirmation = 4;
+}
+
+// Kick response.
+message KickPlayerResponse {
+  PlayerActionOutcome outcome = 1;
+}
+
+// Ban response.
+message BanPlayerResponse {
+  PlayerActionOutcome outcome = 1;
+}
+
+// Pardon response.
+message PardonPlayerResponse {
+  PlayerActionOutcome outcome = 1;
+}
+
+// Operator response.
+message SetOperatorResponse {
+  PlayerActionOutcome outcome = 1;
+}
+
+// Allowlist response.
+message SetWhitelistEntryResponse {
+  PlayerActionOutcome outcome = 1;
+}
+
+// Bulk action response.
+message BulkPlayerActionResponse {
+  PlayerActionOutcome outcome = 1;
+}
+
+// Undo response.
+message UndoPlayerActionResponse {
+  PlayerActionOutcome outcome = 1;
+}
