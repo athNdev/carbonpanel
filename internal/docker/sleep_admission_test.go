@@ -102,10 +102,10 @@ func TestDeepSleepWakeRefusesAdmissionBeforeStart(t *testing.T) {
 // TestDeepSleepWakeHoldsAdmissionThroughStartAndPersistence proves the gate is
 // held at StartContainer and at status persistence, then released exactly once.
 func TestDeepSleepWakeHoldsAdmissionThroughStartAndPersistence(t *testing.T) {
-	controller, store, mgr := deepSleepAdmissionHarness()
+	controller, store, _ := deepSleepAdmissionHarness()
 	gate := &recordingAdmissionGate{}
 	checkingStore := &gateCheckingStore{SleeperStore: store, gate: gate}
-	mgr = NewDeepSleepManager(controller, checkingStore, nil, nil, nil)
+	mgr := NewDeepSleepManager(controller, checkingStore, nil, nil, nil)
 	mgr.SetAdmissionGate(gate)
 
 	controller.startHook = func(containerID string) {
