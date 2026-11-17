@@ -9,6 +9,7 @@ code_refs:
   - cmd/carbon-panel
   - internal/nodestorage
   - internal/docker/runtime_profile.go
+  - pkg/runtimeprofile
   - pkg/files
   - internal/s3
 sources:

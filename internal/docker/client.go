@@ -33,6 +33,7 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/runtimeprofile"
 	"github.com/athNdev/carbon-panel/pkg/utils"
 	"github.com/containerd/errdefs"
 	stdcopy "github.com/moby/moby/api/pkg/stdcopy"
@@ -151,7 +152,7 @@ func applyContainerHardening(hostConfig *container.HostConfig) {
 }
 
 func minecraftBootstrapCapabilities() []string {
-	return []string{"CHOWN", "SETGID", "SETUID"}
+	return runtimeprofile.MinecraftBootstrapCapabilities()
 }
 
 // DefaultRestartPolicy is the Docker restart policy applied to every

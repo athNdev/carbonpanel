@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/runtimeprofile"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 )
@@ -42,7 +43,6 @@ func resolvedMinecraftContainer(overrides *v1.DockerOverrides, dataReadOnly bool
 		Image:          image,
 		DataPath:       "/srv/worlds/world-a",
 		MinecraftImage: true,
-		Overrides:      overrides,
 		Config:         config,
 		HostConfig:     hostConfig,
 	}
@@ -63,6 +63,10 @@ func hasIssue(profile RuntimeProfile, code RuntimeIssueCode) bool {
 		}
 	}
 	return false
+}
+
+func TestSharedRuntimeContract(t *testing.T) {
+	runtimeprofile.RunContract(t, DescribeRuntime)
 }
 
 func TestPreflightAcceptsTheDefaultMinecraftContainer(t *testing.T) {

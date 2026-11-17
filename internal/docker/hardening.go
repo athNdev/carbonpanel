@@ -13,6 +13,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/pkg/files"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/runtimeprofile"
 )
 
 // ErrElevatedDockerPermissionRequired is returned by ValidateDockerOverrides
@@ -58,19 +59,8 @@ const writableRootfsEnv = "CARBON_WRITABLE_ROOTFS"
 
 // skipNsswitchConfEnv tells the itzg Minecraft image not to rewrite
 // /etc/nsswitch.conf, which is part of Carbon Panel's read-only rootfs.
-const skipNsswitchConfEnv = "SKIP_NSSWITCH_CONF"
-
-// skipChownEnv tells the itzg Minecraft image not to recursively chown /data.
-// The panel sets it when the world directory already belongs to the game uid
-// so a restart does not rewrite every file. Fresh root-owned /data is left
-// unset so first boot can still prepare ownership.
-const skipChownEnv = "SKIP_CHOWN"
-
-// itzgDefaultUID and itzgDefaultGID are the accounts shipped in
-// itzg/minecraft-server. A different uid/gid during root-then-drop tries to
-// rewrite /etc/passwd and /etc/group, which fails on the read-only root.
-const itzgDefaultUID = 1000
-const itzgDefaultGID = 1000
+// The value is the public runtime-profile constant.
+const skipNsswitchConfEnv = runtimeprofile.SkipNsswitchConf
 
 func wantsWritableRootfs(overrides *v1.DockerOverrides) bool {
 	if overrides == nil {
