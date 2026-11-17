@@ -45,14 +45,21 @@ test('profile dialog changes passwords via authStore.changePassword', () => {
 	assert.ok(shell.includes('Update password'), 'profile dialog must offer a password update');
 });
 
-test('preferences dialog is localStorage-backed with theme and motion', () => {
-	for (const key of ['carbon-theme', 'carbon-motion', 'carbon-density']) {
-		assert.ok(prefs.includes(key), `preferences must persist ${key} in localStorage`);
+test('preferences dialog delegates storage and attributes to the shared owner', () => {
+	assert.ok(
+		prefs.includes('displayPreferences'),
+		'dialog must consume the shared preference owner'
+	);
+	for (const setter of ['setTheme', 'setMotion', 'setDensity', 'reset']) {
+		assert.ok(
+			prefs.includes(`displayPreferences.${setter}`),
+			`dialog must call ${setter} on the owner`
+		);
 	}
-	assert.ok(prefs.includes('data-carbon-theme'), 'theme must apply via data-carbon-theme');
-	assert.ok(prefs.includes('data-carbon-motion'), 'motion must apply via a data attribute');
+	assert.ok(prefs.includes('data-carbon-theme'), 'shared owner applies data-carbon-theme');
 	assert.ok(prefs.includes('CarbonModal'), 'preferences must open via CarbonModal');
 	assert.ok(prefs.includes('Reset defaults'), 'preferences must offer a reset');
+	assert.doesNotMatch(prefs, /localStorage/, 'storage belongs to the owner, not the dialog');
 });
 
 test('preferences dialog offers light/dark without a backend', () => {
@@ -69,14 +76,15 @@ test('Done applies the choices and closes the dialog', () => {
 	);
 });
 
-test('shell applies stored preferences on boot', () => {
+test('shell hydrates shared preferences on boot', () => {
 	assert.ok(
-		shell.includes('applyStoredPreferences'),
-		'shell must apply stored preferences on mount'
+		shell.includes('displayPreferences.hydrate()'),
+		'shell must hydrate the shared owner on mount'
 	);
-	assert.ok(
-		shell.includes("localStorage.getItem('carbon-motion')"),
-		'stored motion must apply without opening the dialog'
+	assert.doesNotMatch(
+		shell,
+		/localStorage\.getItem\('carbon/,
+		'shell must not hydrate preferences independently of the owner'
 	);
 });
 

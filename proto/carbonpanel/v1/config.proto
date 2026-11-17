@@ -29,6 +29,10 @@ service ConfigService {
   rpc UpdateGlobalSettings(UpdateGlobalSettingsRequest) returns (UpdateGlobalSettingsResponse);
   // Apply global defaults (or specific categories like Ops and Whitelist) to all existing servers
   rpc SyncGlobalSettingsToServers(SyncGlobalSettingsToServersRequest) returns (SyncGlobalSettingsToServersResponse);
+  // Check a content-provider credential (CurseForge or Modrinth) against its
+  // upstream API without storing it. Provider-side outcomes are reported as a
+  // soft result; only transport failures surface as RPC errors.
+  rpc ValidateProviderKey(ValidateProviderKeyRequest) returns (ValidateProviderKeyResponse);
 }
 
 // Single configuration field
@@ -153,3 +157,20 @@ message DiscardUpdateBatchRequest {
 
 // Empty after the item or batch is discarded.
 message DiscardUpdateBatchResponse {}
+
+// Request to validate a content-provider credential.
+message ValidateProviderKeyRequest {
+  // "curseforge" or "modrinth" (case-insensitive).
+  string provider = 1;
+  // Token or API key. Empty performs the anonymous connectivity check.
+  string api_key = 2;
+  // Optional custom User-Agent for Modrinth.
+  string user_agent = 3;
+}
+
+// Soft validation outcome. A false valid with a message is a normal result,
+// not an error.
+message ValidateProviderKeyResponse {
+  bool valid = 1;
+  string message = 2;
+}

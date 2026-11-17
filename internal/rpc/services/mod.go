@@ -27,6 +27,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -41,10 +42,16 @@ var _ carbonpanelv1connect.ModServiceHandler = (*ModService)(nil)
 
 // ModService implements the Mod service
 type ModService struct {
-	store         *storage.Store
-	docker        *docker.Client
-	log           *logger.Logger
-	uploadManager *upload.Manager
+	store           *storage.Store
+	docker          *docker.Client
+	log             *logger.Logger
+	uploadManager   *upload.Manager
+	storageResolver *nodestorage.Resolver
+}
+
+// SetStorageResolver supplies the instance-owned node storage resolver.
+func (s *ModService) SetStorageResolver(resolver *nodestorage.Resolver) {
+	s.storageResolver = resolver
 }
 
 func modInstallPath(modsDir, filename string) (string, error) {
@@ -98,7 +105,7 @@ func (s *ModService) ListMods(ctx context.Context, req *connect.Request[v1.ListM
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, false)
+	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -202,7 +209,7 @@ func (s *ModService) GetMod(ctx context.Context, req *connect.Request[v1.GetModR
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, false)
+	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -329,7 +336,7 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 		return stageResp, nil
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -415,7 +422,7 @@ func (s *ModService) stageUploadedMod(ctx context.Context, msg *v1.ImportUploade
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get mod info"))
 	}
 	target := info.ModsDirectory + "/" + filepath.Base(originalFilename)
-	if _, err := stageContentBytes(ctx, s.store, server, storage.StagedKindMod, storage.StagedActionInstall, target, originalFilename, data); err != nil {
+	if _, err := stageContentBytes(ctx, s.store, server, s.storageResolver, storage.StagedKindMod, storage.StagedActionInstall, target, originalFilename, data); err != nil {
 		return nil, stageContentError(err)
 	}
 	_ = os.Remove(tempPath)
@@ -455,7 +462,7 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -580,7 +587,7 @@ func (s *ModService) DeleteMod(ctx context.Context, req *connect.Request[v1.Dele
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -712,7 +719,7 @@ func (s *ModService) GetFabricOptimizationStack(ctx context.Context, req *connec
 	}
 
 	isFabric := server.ModLoader == storage.ModLoaderFabric || server.ModLoader == storage.ModLoaderQuilt
-	root, err := dataRootFor(ctx, s.store, server, false)
+	root, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}
@@ -785,7 +792,7 @@ func (s *ModService) InstallFabricOptimizationStack(ctx context.Context, req *co
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("server mod loader is not Fabric or Quilt"))
 	}
 
-	root, err := dataRootFor(ctx, s.store, server, true)
+	root, err := dataRootFor(ctx, s.store, server, true, s.storageResolver)
 	if err != nil {
 		return nil, storageError(err)
 	}

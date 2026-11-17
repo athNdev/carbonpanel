@@ -63,10 +63,16 @@ var _ carbonpanelv1connect.ServerServiceHandler = (*ServerService)(nil)
 // the stored status fresh, so falling back to it is safe.
 const statusRefreshTimeout = 5 * time.Second
 
+// SetStorageResolver supplies the instance-owned node storage resolver.
+func (s *ServerService) SetStorageResolver(resolver *nodestorage.Resolver) {
+	s.storageResolver = resolver
+}
+
 // ServerService implements the Server service
 type ServerService struct {
 	store            *storage.Store
 	docker           *docker.Client
+	storageResolver  *nodestorage.Resolver
 	hostMemoryMB     func(context.Context, string) (int64, error)
 	hostPortBound    func(int) bool
 	removeData       func(string) error
@@ -1421,7 +1427,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Create the world on the node's storage. A remote node with no reachable
 	// mount is refused before a controller-local directory can be mistaken for
 	// the world the remote daemon will use.
-	if _, err := dataRootFor(ctx, s.store, server, true); err != nil {
+	if _, err := dataRootFor(ctx, s.store, server, true, s.storageResolver); err != nil {
 		s.capacityMu.Unlock()
 		if nodestorage.IsUnavailable(err) {
 			return nil, connect.NewError(connect.CodeUnavailable, err)
@@ -2222,7 +2228,7 @@ func unsafeDataRemoval(path string) bool {
 func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1.StartServerRequest]) (out *connect.Response[v1.StartServerResponse], retErr error) {
 	defer func() {
 		if retErr == nil && out != nil {
-			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId())
+			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId(), s.storageResolver)
 		}
 	}()
 	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())
@@ -2260,7 +2266,7 @@ func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1
 
 	// Apply staged configs on restart/start (STAGED-CONFIG). Content waiting
 	// for a clock time or an idle window stays staged.
-	undoFiles, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule)
+	undoFiles, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
 	if fileErr != nil {
 		s.log.Error("Failed to apply staged content on start for server %s: %v", server.ID, fileErr)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
@@ -2661,7 +2667,7 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[v1.RestartServerRequest]) (out *connect.Response[v1.RestartServerResponse], retErr error) {
 	defer func() {
 		if retErr == nil && out != nil {
-			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId())
+			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId(), s.storageResolver)
 		}
 	}()
 	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())
@@ -2697,7 +2703,7 @@ func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[
 
 	// Apply any staged config changes marked for restart. A future time or idle
 	// window is not published by this restart.
-	undoFiles, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule)
+	undoFiles, fileErr := staging.CommitNextRestartFiles(ctx, s.store, server, s.recreateStagedModule, s.storageResolver)
 	if fileErr != nil {
 		s.log.Error("Failed to apply staged content on restart for server %s: %v", server.ID, fileErr)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to apply staged content: %w", fileErr))
@@ -3139,7 +3145,7 @@ func (s *ServerService) writeManualServerPack(ctx context.Context, server *stora
 	if err != nil {
 		return false, err
 	}
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	acc, err := s.storageResolver.ForNode(ctx, info, server.DataPath)
 	if err != nil {
 		return false, err
 	}
@@ -3153,12 +3159,12 @@ func (s *ServerService) writeManualServerPack(ctx context.Context, server *stora
 // serverLatestLog reads logs/latest.log from the owning node's mapped root.
 // A remote node without reachable storage is refused, so a controller-local
 // copy is not uploaded in its place.
-func serverLatestLog(ctx context.Context, store *storage.Store, server *storage.Server) ([]byte, error) {
+func serverLatestLog(ctx context.Context, store *storage.Store, server *storage.Server, resolver *nodestorage.Resolver) ([]byte, error) {
 	info, err := storageNodeInfo(ctx, store, server.NodeID)
 	if err != nil {
 		return nil, err
 	}
-	acc, err := nodestorage.ForNode(info, server.DataPath)
+	acc, err := resolver.ForNode(ctx, info, server.DataPath)
 	if err != nil {
 		return nil, err
 	}
@@ -3184,7 +3190,7 @@ func (s *ServerService) UploadToMCLogs(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found"))
 	}
 
-	content, err := serverLatestLog(ctx, s.store, server)
+	content, err := serverLatestLog(ctx, s.store, server, s.storageResolver)
 	if nodestorage.IsUnavailable(err) {
 		return nil, connect.NewError(connect.CodeUnavailable, err)
 	}

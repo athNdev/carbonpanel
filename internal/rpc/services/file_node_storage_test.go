@@ -223,7 +223,7 @@ func TestServerLatestLogReadsTheMappedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body, err := serverLatestLog(ctx, store, server)
+	body, err := serverLatestLog(ctx, store, server, nil)
 	if err != nil || string(body) != "from-mount" {
 		t.Fatalf("log = %q, %v", body, err)
 	}
@@ -235,7 +235,7 @@ func TestServerLatestLogReadsTheMappedRoot(t *testing.T) {
 	if err := store.CreateServer(ctx, bare); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := serverLatestLog(ctx, store, bare); !nodestorage.IsUnavailable(err) {
+	if _, err := serverLatestLog(ctx, store, bare, nil); !nodestorage.IsUnavailable(err) {
 		t.Fatalf("unreachable log error = %v, want unavailable", err)
 	}
 }

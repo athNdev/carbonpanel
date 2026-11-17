@@ -48,7 +48,7 @@ sources:
   `cmd/carbon-panel` wires it to the local client unconditionally.
 - Remote nodes without a controller-side storage mount can use the
   `carbon-storage` JSON accessor worker when `storage.worker_image` is set
-  (Docker one-shot attach). File RPCs that open `nodestorage.ForNode` use it
+  (Docker one-shot attach). File RPCs that open the injected storage resolver use it
   (list/get/update/delete/rename, folder create, copy/move, uploads,
   InitFileDownload, latest-log, zip extract, CreateArchive,
   DownloadArchive, ExportWorld, CreateServer manual pack).

@@ -72,6 +72,9 @@ type Server struct {
 	downloadManager  *download.Manager
 	wsHub            *ws.Hub
 	metricsHandler   *handlers.MetricsHandler
+	// modBrowseManager is the single shared operation used by both the
+	// generated ModBrowseService and the legacy /mods/* JSON adapter.
+	modBrowseManager *handlers.ModOnlineManager
 
 	// startedAt is the server construction time, surfaced by /healthz and
 	// /readyz as an uptime.
@@ -205,6 +208,7 @@ func NewServer(
 		wsHub:            wsHub,
 		startedAt:        time.Now(),
 	}
+	s.modBrowseManager = handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer, handlers.ModOnlineOptions{StorageResolver: s.storageResolver})
 
 	s.setupHandler()
 	return s
@@ -238,6 +242,7 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.FileServiceName,
 		carbonpanelv1connect.MinecraftServiceName,
 		carbonpanelv1connect.ModServiceName,
+		carbonpanelv1connect.ModBrowseServiceName,
 		carbonpanelv1connect.ModpackServiceName,
 		carbonpanelv1connect.ModuleServiceName,
 		carbonpanelv1connect.NodeServiceName,
@@ -282,13 +287,17 @@ func (s *Server) setupHandler() {
 	// Docker daemon auto-detect scan across local network interfaces
 	mux.Handle("/api/v1/nodes/scan", handlers.NewNodeScanHandler(s.store, s.authManager, s.enforcer, s.log))
 
-	// Online mod search and 1-click install endpoints (MINE-25)
-	mux.Handle("/api/v1/servers/", handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer))
+	// Online mod search and 1-click install endpoints (MINE-25). This legacy
+	// JSON adapter delegates to the same shared operation as the generated
+	// ModBrowseService and is retained for the ADR 0012 deprecation window.
+	mux.Handle("/api/v1/servers/", s.modBrowseManager)
 
 	// Packwiz Modpack Studio and Server Deployment Engine (MINE-30, MINE-31)
 	packwizDir := filepath.Join(s.config.Storage.DataDir, "packwiz")
 	packwizManager := packwiz.NewManager(packwizDir, s.log)
-	mux.Handle("/api/v1/packwiz/", handlers.NewPackwizHandler(packwizManager, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config))
+	packwizHandler := handlers.NewPackwizHandler(packwizManager, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config)
+	packwizHandler.SetStorageResolver(s.storageResolver)
+	mux.Handle("/api/v1/packwiz/", packwizHandler)
 
 	// Scheduled/staged config rollout for instances (staged diffs applied on restart or cron)
 	mux.Handle("/api/v1/staged-config/", handlers.NewStagedConfigHandler(s.store, s.log, s.authManager, s.enforcer))
@@ -324,12 +333,18 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.clientPool, s.log)
+	configService.SetStorageResolver(s.storageResolver)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	fileService.SetStorageResolver(s.storageResolver)
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
+	modService.SetStorageResolver(s.storageResolver)
+	// The generated RPC and the legacy JSON adapter share one operation
+	// instance so provider, credential and audit policy cannot diverge.
+	modBrowseService := services.NewModBrowseService(s.store, s.modBrowseManager)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	datapackService := services.NewDatapackService(s.store, s.config, s.uploadManager, s.log)
+	datapackService.SetStorageResolver(s.storageResolver)
 	nodeService := services.NewNodeService(s.store, s.clientPool, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.clientPool, s.proxyManager, s.config, s.logStreamer, s.log)
 	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log, s.clientPool, s.placementEngine, s.enforcer)
@@ -337,6 +352,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	if s.admission != nil {
 		serverService.SetAdmissionCoordinator(s.admission)
 	}
+	serverService.SetStorageResolver(s.storageResolver)
 	if finished, err := serverService.ResumeUnsettledDispositions(context.Background()); err != nil {
 		s.log.Error("Failed to list unfinished deletions: %v", err)
 	} else if finished > 0 {
@@ -351,6 +367,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	subuserService := services.NewSubuserService(s.store, s.log)
 	blueprintService := services.NewBlueprintService(s.store, s.log)
 	backupService := services.NewBackupService(s.store, s.docker, s.clientPool, s.config.Storage.S3, s.log)
+	backupService.SetStorageResolver(s.storageResolver)
 	backupService.SetWorldDataDir(s.config.Storage.DataDir)
 	if err := backupService.SetBackupEncryption(s.config.Storage.BackupEncryption.KeyID, s.config.Storage.BackupEncryption.Key); err != nil {
 		// Never silently run unencrypted (OSS-236): a misconfigured key fails
@@ -367,6 +384,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
+	moduleService.SetStorageResolver(s.storageResolver)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 
 	// Register service handlers
@@ -384,6 +402,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	modPath, modHandler := carbonpanelv1connect.NewModServiceHandler(modService, opts...)
 	mux.Handle(modPath, modHandler)
+
+	modBrowsePath, modBrowseHandler := carbonpanelv1connect.NewModBrowseServiceHandler(modBrowseService, opts...)
+	mux.Handle(modBrowsePath, modBrowseHandler)
 
 	modpackPath, modpackHandler := carbonpanelv1connect.NewModpackServiceHandler(modpackService, opts...)
 	mux.Handle(modpackPath, modpackHandler)

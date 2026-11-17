@@ -357,8 +357,10 @@ func main() {
 	var storageTransport nodestorage.Transport
 	if cfg.Storage.WorkerImage != "" {
 		storageTransport = docker.NewStorageTransport(clientPool, log, cfg.Storage.WorkerImage)
-		nodestorage.SetTransport(storageTransport)
 	}
+	// The resolver is owned by this controller instance and injected into every
+	// consumer. No process-global transport means one instance cannot change
+	// another instance's storage selection.
 	storageResolver := nodestorage.NewResolver(storageTransport)
 
 	// Initialize command sender
@@ -379,6 +381,7 @@ func main() {
 
 	// Initialize metrics collector
 	metricsCollector := metrics.NewCollectorWithPool(store, dockerClient, clientPool, sender, cfg, eventBus, log)
+	metricsCollector.SetStorageResolver(storageResolver)
 
 	// MINE-120: hibernation lifecycle — idle freeze plus proxy-gated
 	// wake/activity. Only acts on servers with AutoHibernate enabled; the
@@ -420,8 +423,9 @@ func main() {
 	// Initialize task scheduler before exposing login-triggered wake handlers so
 	// staged configuration preparation is installed before any cold wake can run.
 	taskScheduler := scheduler.NewScheduler(store, dockerClient, sender, cfg, metricsCollector, log, scheduler.Config{
-		CheckInterval: time.Duration(cfg.Docker.SyncInterval) * time.Second, // Use same interval as container status monitor
-		Admission:     admission,
+		CheckInterval:   time.Duration(cfg.Docker.SyncInterval) * time.Second, // Use same interval as container status monitor
+		Admission:       admission,
+		StorageResolver: storageResolver,
 	})
 	taskScheduler.SetClientPool(clientPool)
 	taskScheduler.SetPlayerCountProvider(func(serverID string) int {

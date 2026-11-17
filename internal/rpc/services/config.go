@@ -21,6 +21,8 @@ import (
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/indexers"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -31,11 +33,17 @@ import (
 var _ carbonpanelv1connect.ConfigServiceHandler = (*ConfigService)(nil)
 
 type ConfigService struct {
-	store  *storage.Store
-	config *config.Config
-	docker *docker.Client
-	pool   *docker.ClientPool
-	log    *logger.Logger
+	store           *storage.Store
+	config          *config.Config
+	docker          *docker.Client
+	pool            *docker.ClientPool
+	storageResolver *nodestorage.Resolver
+	log             *logger.Logger
+}
+
+// SetStorageResolver supplies the instance-owned node storage resolver.
+func (s *ConfigService) SetStorageResolver(resolver *nodestorage.Resolver) {
+	s.storageResolver = resolver
 }
 
 type configContainerRecreator interface {
@@ -294,6 +302,18 @@ func (s *ConfigService) SyncGlobalSettingsToServers(ctx context.Context, req *co
 	return connect.NewResponse(&v1.SyncGlobalSettingsToServersResponse{
 		UpdatedServersCount: int32(updatedCount),
 		Message:             msg,
+	}), nil
+}
+
+// ValidateProviderKey checks a content-provider credential against its upstream
+// API without storing it. The shared indexers operation owns the behavior; the
+// RPC keeps provider-side outcomes as a soft result (valid/message) and never
+// turns them into connect errors, matching the legacy REST adapter.
+func (s *ConfigService) ValidateProviderKey(ctx context.Context, req *connect.Request[v1.ValidateProviderKeyRequest]) (*connect.Response[v1.ValidateProviderKeyResponse], error) {
+	result := indexers.ValidateProviderKey(ctx, req.Msg.GetProvider(), req.Msg.GetApiKey(), req.Msg.GetUserAgent())
+	return connect.NewResponse(&v1.ValidateProviderKeyResponse{
+		Valid:   result.Valid,
+		Message: result.Message,
 	}), nil
 }
 

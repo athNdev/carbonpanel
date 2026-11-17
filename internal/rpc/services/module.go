@@ -36,14 +36,20 @@ var _ carbonpanelv1connect.ModuleServiceHandler = (*ModuleService)(nil)
 
 // ModuleService implements the Module service
 type ModuleService struct {
-	store         *storage.Store
-	docker        *docker.Client
-	moduleManager *module.Manager
-	proxyManager  *proxy.Manager
-	authManager   *auth.Manager
-	config        *config.Config
-	log           *logger.Logger
-	logStreamer   *logger.LogStreamer
+	store           *storage.Store
+	docker          *docker.Client
+	moduleManager   *module.Manager
+	proxyManager    *proxy.Manager
+	authManager     *auth.Manager
+	config          *config.Config
+	log             *logger.Logger
+	logStreamer     *logger.LogStreamer
+	storageResolver *nodestorage.Resolver
+}
+
+// SetStorageResolver supplies the instance-owned node storage resolver.
+func (s *ModuleService) SetStorageResolver(resolver *nodestorage.Resolver) {
+	s.storageResolver = resolver
 }
 
 // NewModuleService creates a new module service
@@ -865,7 +871,7 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to get server: %w", err))
 		}
-		if _, err := staging.StageModuleChange(ctx, s.store, server, module.ID, "module "+module.Name, needsRecreate, fields); err != nil {
+		if _, err := staging.StageModuleChange(ctx, s.store, server, module.ID, "module "+module.Name, needsRecreate, fields, s.storageResolver); err != nil {
 			if nodestorage.IsUnavailable(err) {
 				return nil, connect.NewError(connect.CodeUnavailable, err)
 			}
