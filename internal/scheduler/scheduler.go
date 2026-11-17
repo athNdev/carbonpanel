@@ -973,6 +973,11 @@ func (s *Scheduler) StartServerForBoot(ctx context.Context, server *storage.Serv
 	if server.ContainerID == "" {
 		return fmt.Errorf("server has no container")
 	}
+	release, err := s.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := s.checkNodeMemoryCapacity(ctx, server); err != nil {
 		return err
 	}

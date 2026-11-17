@@ -459,6 +459,10 @@ func main() {
 		return cli
 	})
 	deepSleepMgr.SetWakePreparer(taskScheduler.PrepareDeepSleepWake)
+	// The wake preparation checks capacity, but the actual StartContainer and
+	// running-status persistence happen here in WakeServer. Hold the same node
+	// gate across that whole bounded sequence.
+	deepSleepMgr.SetAdmissionGate(admission)
 	deepSleepMgr.SetPlayerCountProvider(func(serverID string) int {
 		if m := metricsCollector.GetMetrics(serverID); m != nil {
 			return m.PlayersOnline

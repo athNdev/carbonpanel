@@ -51,6 +51,14 @@ func (s *Scheduler) publishStagedBatch(ctx context.Context, server *storage.Serv
 			return errors.New("docker client is not configured")
 		}
 		if plan.StartAfter {
+			// Hold the shared node gate from admission through the eventual
+			// Recreate/Start below, so a background staged publication cannot
+			// admit against a total another gated start is about to change.
+			release, err := s.acquireNodeAdmission(ctx, server)
+			if err != nil {
+				return err
+			}
+			defer release()
 			if err := serverruntime.CheckStartCapacity(ctx, s.store, server, func(ctx context.Context, _ string) (int64, error) {
 				return dockerClient.HostMemoryMB(ctx)
 			}); err != nil {

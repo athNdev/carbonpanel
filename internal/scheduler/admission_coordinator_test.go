@@ -7,6 +7,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/serverruntime"
+	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
@@ -40,6 +42,8 @@ func (g *scheduledStartGate) handler() http.Handler {
 			_, _ = w.Write([]byte(`{"MemTotal":4294967296}`))
 		case strings.HasSuffix(r.URL.Path, "/json"):
 			_, _ = w.Write([]byte(`{"Id":"container","State":{"Running":false,"Status":"exited"}}`))
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stop"):
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/start"):
 			parts := strings.Split(r.URL.Path, "/")
 			containerID := parts[len(parts)-2]
@@ -235,5 +239,91 @@ func TestScheduledDifferentNodesDoNotContend(t *testing.T) {
 	}
 	if n := gate.starts.Load(); n != 2 {
 		t.Fatalf("Docker start calls = %d, want 2", n)
+	}
+}
+
+// TestStartServerForBootUsesAdmissionGate proves boot auto-start waits on the
+// shared gate: a queued boot refuses on deadline without touching Docker, then
+// succeeds once the holder releases.
+func TestStartServerForBootUsesAdmissionGate(t *testing.T) {
+	ctx := context.Background()
+	gate := &scheduledStartGate{blockID: "never-blocked", entered: make(chan string, 1), release: make(chan struct{})}
+	coordinator := serverruntime.NewAdmissionCoordinator()
+	s, store := newAdmissionScheduler(t, gate, coordinator)
+	server := &db.Server{ID: "boot-admission", Name: "Boot", NodeID: "node", ContainerID: "container-boot", Memory: 1024, Status: db.StatusStopped}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+
+	release, err := coordinator.Acquire(ctx, "node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+	if err := s.StartServerForBoot(waitCtx, server); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued boot error = %v, want deadline exceeded", err)
+	}
+	if n := gate.starts.Load(); n != 0 {
+		t.Fatalf("queued boot reached Docker %d times", n)
+	}
+	release()
+
+	if err := s.StartServerForBoot(ctx, server); err != nil {
+		t.Fatalf("boot after release failed: %v", err)
+	}
+	if n := gate.starts.Load(); n != 1 {
+		t.Fatalf("Docker start calls = %d, want 1", n)
+	}
+	got, err := store.GetServer(ctx, server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != db.StatusStarting || got.LastStarted == nil {
+		t.Fatalf("boot state = %+v, want starting with LastStarted", got)
+	}
+}
+
+// TestStagedPublicationStartAfterUsesAdmissionGate proves a background staged
+// plan that starts a server cannot admit while another start holds the gate.
+func TestStagedPublicationStartAfterUsesAdmissionGate(t *testing.T) {
+	ctx := context.Background()
+	gate := &scheduledStartGate{blockID: "never-blocked", entered: make(chan string, 1), release: make(chan struct{})}
+	coordinator := serverruntime.NewAdmissionCoordinator()
+	s, store := newAdmissionScheduler(t, gate, coordinator)
+	server := &db.Server{ID: "staged-admission", Name: "Staged", NodeID: "node", ContainerID: "container-staged", Memory: 1024, Status: db.StatusStopped}
+	if err := store.CreateServer(ctx, server); err != nil {
+		t.Fatal(err)
+	}
+	plan := staging.Plan{Restart: true, StartAfter: true}
+
+	release, err := coordinator.Acquire(ctx, "node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	defer cancel()
+	if err := s.publishStagedBatch(waitCtx, server, plan); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued staged publication error = %v, want deadline exceeded", err)
+	}
+	if n := gate.starts.Load(); n != 0 {
+		t.Fatalf("queued staged publication reached Docker %d times", n)
+	}
+	release()
+
+	if err := s.publishStagedBatch(ctx, server, plan); err != nil {
+		t.Fatalf("staged publication after release failed: %v", err)
+	}
+	if n := gate.starts.Load(); n != 1 {
+		t.Fatalf("Docker start calls = %d, want 1", n)
+	}
+	got, err := store.GetServer(ctx, server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Status and LastStarted stay with the reconciler on this path; the gate
+	// must not move them. A failed start would have written StatusError.
+	if got.Status != db.StatusStopped || got.LastStarted != nil {
+		t.Fatalf("staged publication changed owned state = %+v", got)
 	}
 }
