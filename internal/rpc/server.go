@@ -36,6 +36,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
 	"github.com/athNdev/carbon-panel/internal/rpc/services"
 	"github.com/athNdev/carbon-panel/internal/scheduler"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/ws"
 	"github.com/athNdev/carbon-panel/pkg/download"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -52,6 +53,7 @@ type Server struct {
 	docker           *docker.Client
 	clientPool       *docker.ClientPool
 	storageResolver  *nodestorage.Resolver
+	admission        *serverruntime.AdmissionCoordinator
 	placementEngine  *docker.PlacementEngine
 	sender           *command.Sender
 	config           *config.Config
@@ -82,6 +84,10 @@ type Server struct {
 	// operationService backs SetReconcilerNudge. It is created in
 	// registerServices, so it may be nil on a server that never registered.
 	operationService *services.OperationService
+
+	// serverService backs SetAdmissionCoordinator. It is created in
+	// registerServices, so it may be nil on a server that never registered.
+	serverService *services.ServerService
 }
 
 // Creates new Connect RPC server
@@ -304,6 +310,15 @@ func (s *Server) setupHandler() {
 	s.handler = securityHeaders(mux)
 }
 
+// SetAdmissionCoordinator supplies the shared in-process admission gate to the
+// server service created during registration.
+func (s *Server) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) {
+	s.admission = c
+	if s.serverService != nil {
+		s.serverService.SetAdmissionCoordinator(c)
+	}
+}
+
 // Registers all Connect RPC service handlers
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
@@ -318,6 +333,10 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	nodeService := services.NewNodeService(s.store, s.clientPool, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.clientPool, s.proxyManager, s.config, s.logStreamer, s.log)
 	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log, s.clientPool, s.placementEngine, s.enforcer)
+	s.serverService = serverService
+	if s.admission != nil {
+		serverService.SetAdmissionCoordinator(s.admission)
+	}
 	if finished, err := serverService.ResumeUnsettledDispositions(context.Background()); err != nil {
 		s.log.Error("Failed to list unfinished deletions: %v", err)
 	} else if finished > 0 {

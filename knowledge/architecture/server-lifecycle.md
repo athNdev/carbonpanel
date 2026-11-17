@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: Server lifecycle policy
-description: Starts share node admission and config recreation records canonical container recovery identities.
+description: Starts share node admission behind an in-process node gate, and config recreation records canonical container recovery identities.
 status: stable
 owners: [oss-runtime]
 code_refs:
@@ -10,9 +10,12 @@ code_refs:
   - internal/rpc/services/config.go
   - internal/scheduler/scheduler.go
   - internal/scheduler/staged_config.go
+  - cmd/carbon-panel/main.go
 sources:
   - title: Shared server admission
     resource: ../../docs/adr/0011-server-runtime-admission.md
+  - title: In-process start admission gate
+    resource: ../../docs/adr/0014-in-process-admission.md
 ---
 
 # Policy
@@ -23,7 +26,15 @@ Already running/starting targets count once. Paused and stopped targets need a
 new active allocation. Admission neither mutates status nor updates LastStarted.
 
 RPC translates typed refusals; the scheduler retains task and node resolution.
-This check does not reserve capacity atomically across concurrent starts.
+The check itself does not reserve capacity. A shared instance-owned
+`serverruntime.AdmissionCoordinator` gates each start/restart by canonical node
+key from before that check through container mutation and status persistence, so
+same-node starts cannot both admit against the same persisted total; different
+nodes proceed in parallel. It is an in-process gate for one controller process,
+not a distributed lease: a crash releases it and a persistent lease with TTL,
+renewal and uncertain outcomes was rejected (ADR 0014). Persisted running and
+starting counts remain the source of truth. Cancelled waiters never reach Docker;
+the gate owns no journal kinds, events, staged rollback or LastStarted.
 Server/config/routing RPC and scheduled staged recreation share canonical identity persistence
 through `serverruntime.Recreate`. The Docker result can identify the retained
 original, a verified replacement or a partial replacement. Errors record that

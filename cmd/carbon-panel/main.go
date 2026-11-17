@@ -35,6 +35,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/reconciler"
 	"github.com/athNdev/carbon-panel/internal/rpc"
 	"github.com/athNdev/carbon-panel/internal/scheduler"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/snapshot"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
@@ -411,10 +412,16 @@ func main() {
 	hibernationMgr.Start(hibernateCtx, 30*time.Second)
 	defer hibernationMgr.Stop()
 
+	// One instance-owned admission gate is shared by RPC and scheduled starts.
+	// It serializes same-node admission in this controller process; persisted
+	// running/starting counts remain the source of truth on the next check.
+	admission := serverruntime.NewAdmissionCoordinator()
+
 	// Initialize task scheduler before exposing login-triggered wake handlers so
 	// staged configuration preparation is installed before any cold wake can run.
 	taskScheduler := scheduler.NewScheduler(store, dockerClient, sender, cfg, metricsCollector, log, scheduler.Config{
 		CheckInterval: time.Duration(cfg.Docker.SyncInterval) * time.Second, // Use same interval as container status monitor
+		Admission:     admission,
 	})
 	taskScheduler.SetClientPool(clientPool)
 	taskScheduler.SetPlayerCountProvider(func(serverID string) int {
@@ -520,6 +527,7 @@ func main() {
 
 	// Initialize RPC server with full configuration
 	rpcServer := rpc.NewServer(store, dockerClient, sender, cfg, proxyManager, taskScheduler, metricsCollector, moduleManager, eventBus, log, clientPool, placementEngine, storageResolver)
+	rpcServer.SetAdmissionCoordinator(admission)
 	rpcServer.SetHibernationManager(hibernationMgr)
 
 	// The auth manager persists the recovery key. Announce the secret only
