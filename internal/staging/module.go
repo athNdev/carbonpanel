@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/google/uuid"
 )
 
@@ -33,7 +34,8 @@ type stagedModuleFile struct {
 
 // StageModuleChange records a module config or container-spec change on the
 // server's open batch. The live module row and its container stay as they are.
-func StageModuleChange(ctx context.Context, store *storage.Store, server *storage.Server, moduleID, summary string, needsRecreate bool, fields map[string]ModuleField) (*storage.StagedContentChange, error) {
+func StageModuleChange(ctx context.Context, store *storage.Store, server *storage.Server, moduleID, summary string, needsRecreate bool, fields map[string]ModuleField, resolvers ...*nodestorage.Resolver) (*storage.StagedContentChange, error) {
+	resolver := firstResolver(resolvers)
 	if store == nil || server == nil || server.ID == "" || moduleID == "" || len(fields) == 0 {
 		return nil, fmt.Errorf("module stage requires a store, a server, a module, and a change")
 	}
@@ -42,7 +44,7 @@ func StageModuleChange(ctx context.Context, store *storage.Store, server *storag
 			return nil, err
 		}
 	}
-	acc, err := openAccessor(ctx, store, server)
+	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +85,7 @@ func StageModuleChange(ctx context.Context, store *storage.Store, server *storag
 // applyStagedModules writes staged module fields onto the live rows. The
 // returned function puts those fields back. Module containers are not started
 // here; the caller recreates the returned ids.
-func applyStagedModules(ctx context.Context, store *storage.Store, server *storage.Server, rows []storage.StagedContentChange) ([]string, func() error, error) {
+func applyStagedModules(ctx context.Context, store *storage.Store, server *storage.Server, rows []storage.StagedContentChange, resolver *nodestorage.Resolver) ([]string, func() error, error) {
 	var moduleRows []storage.StagedContentChange
 	for _, row := range rows {
 		if row.Kind == storage.StagedKindModule {
@@ -93,7 +95,7 @@ func applyStagedModules(ctx context.Context, store *storage.Store, server *stora
 	if len(moduleRows) == 0 {
 		return nil, nil, nil
 	}
-	acc, err := openAccessor(ctx, store, server)
+	acc, err := openAccessor(ctx, store, server, resolver)
 	if err != nil {
 		return nil, nil, err
 	}

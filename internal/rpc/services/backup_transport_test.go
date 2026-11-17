@@ -36,8 +36,7 @@ func TestRestoreBackupTransportOnlyUsesForNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := &recordingTransport{workerRoot: workerRoot}
-	nodestorage.SetTransport(rt)
-	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+	resolver := nodestorage.NewResolver(rt)
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	if err := store.CreateNode(ctx, &storage.Node{
@@ -81,6 +80,7 @@ func TestRestoreBackupTransportOnlyUsesForNode(t *testing.T) {
 	}
 
 	svc := NewBackupService(store, nil, nil, appconfig.S3Config{}, logger.New())
+	svc.SetStorageResolver(resolver)
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestRestoreBackupTransportOnlyWithoutProviderCreatesNothing(t *testing.T) {
 	store := setupTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })
 	ctx := auth.WithUser(context.Background(), &auth.AuthenticatedUser{ID: "u-admin", Username: "admin", Roles: []string{"admin"}})
-	nodestorage.SetTransport(nil)
+	resolver := nodestorage.NewResolver(nil)
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	if err := store.CreateNode(ctx, &storage.Node{
@@ -136,6 +136,7 @@ func TestRestoreBackupTransportOnlyWithoutProviderCreatesNothing(t *testing.T) {
 	}
 
 	svc := NewBackupService(store, nil, nil, appconfig.S3Config{}, logger.New())
+	svc.SetStorageResolver(resolver)
 	enforcer, err := rbac.NewEnforcer(store.DB())
 	if err != nil {
 		t.Fatal(err)

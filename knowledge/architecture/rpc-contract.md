@@ -30,6 +30,13 @@ same twelve-second scan and best-effort known-node count. ScanNodes requires
 nodes/read globally; the compatibility route preserves numeric JSON fields and
 denies missing authentication or authorization dependencies. A node-scoped grant
 cannot authorize a host-wide scan.
+Provider credential validation is the second migration: generated
+ConfigService.ValidateProviderKey and the legacy settings/validate-key adapter
+share indexers.ValidateProviderKey. Provider outcomes stay soft (valid/message),
+the RPC maps settings/read globally, and both transports use the shared
+requireGlobalObject policy in internal/rpc/handlers, which authenticates even
+in explicit no-auth mode and fails closed on missing policy dependencies.
+The raw validator's HTTP client strips credentials on cross-origin redirects.
 
 Online mod browse is the second compatibility migration: generated
 `ModBrowseService` (SearchMods, GetModVersions, InstallMods) and the legacy

@@ -40,9 +40,9 @@ guards against a successful command on the wrong daemon.
 - Creating a server, deleting it, mod installation, packwiz bake, snapshot
   create/restore, scheduled backup archives, and scheduled modpack sync use
   the node's mapped storage root. CreateServer places a manual server pack
-  through `nodestorage.ForNode` and refuses a missing remote adapter. A
+  through the instance-owned storage resolver and refuses a missing remote adapter. A
   remote node with no shared mount is refused unless `storage.worker_image`
-  is configured and the call path uses `nodestorage.ForNode` (Get/Rename/
+  is configured and the call path uses the instance-owned storage resolver (Get/Rename/
   List/Update/Delete, CreateFolder, Copy/Move, uploads, InitFileDownload,
   `serverLatestLog`, staged content, zip extract, CreateArchive,
   DownloadArchive, ExportWorld, snapshot create/rollback, worldstore

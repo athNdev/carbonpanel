@@ -53,8 +53,7 @@ func TestRequiresRemoteTransport(t *testing.T) {
 func TestForNodeRemoteTransportRoundTrip(t *testing.T) {
 	bin := carbonStorageBin(t)
 	provider := &creatingProcessTransport{ProcessTransport: ProcessTransport{Bin: bin}}
-	SetTransport(provider)
-	defer SetTransport(nil)
+	resolver := NewResolver(provider)
 
 	base := t.TempDir()
 	nodeRoot := filepath.Join(base, "remote-root")
@@ -63,7 +62,7 @@ func TestForNodeRemoteTransportRoundTrip(t *testing.T) {
 	if !RequiresRemoteTransport(node) {
 		t.Fatal("fixture must require worker transport before the node-side root is created")
 	}
-	acc, err := ForNode(node, dataRoot)
+	acc, err := resolver.ForNode(context.Background(), node, dataRoot)
 	if err != nil {
 		t.Fatalf("ForNode transport: %v", err)
 	}
@@ -235,9 +234,9 @@ func TestProcessTransportEarlyExit(t *testing.T) {
 }
 
 func TestForNodeRemoteTransportRefusedWithoutProvider(t *testing.T) {
-	SetTransport(nil)
+	resolver := NewResolver(nil)
 	node := NodeInfo{ID: "node-2", Name: "node-2", StorageRoot: filepath.Join(t.TempDir(), "only-on-node")}
-	if _, err := ForNode(node, filepath.Join("var", "data", "servers", "srv-b")); err == nil || !IsUnavailable(err) {
+	if _, err := resolver.ForNode(context.Background(), node, filepath.Join("var", "data", "servers", "srv-b")); err == nil || !IsUnavailable(err) {
 		t.Fatalf("want ErrUnavailable without transport, got %v", err)
 	}
 }

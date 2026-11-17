@@ -39,6 +39,10 @@ Studio workflows are extracted one cohesive workflow at a time into
 `features/modpacks/studio/`; route entries remain composition shells. Required
 dependency reconciliation is owned by `studio/dependencies.ts`: it walks only
 required dependencies, skips optional/duplicate/visited entries, is depth-bounded
-at three levels and uses best-effort installs. The route keeps presentation and
-toasts. This is a mechanical move of the existing behavior; it does not claim
-stricter validation of malformed persisted JSON.
+at three levels and uses best-effort installs. Version migration is owned by
+`studio/migration.ts`: it issues the same simulate/apply POST with the exact
+`target_mc`/`target_loader`/`apply` body and `HTTP <status>` failure message, and
+returns the compatibility report unchanged; the route keeps the form state,
+toasts and post-apply reload. Both moves are mechanical and preserve outgoing
+requests byte-for-byte; neither claims stricter validation of malformed persisted
+JSON. The route keeps presentation and toasts.

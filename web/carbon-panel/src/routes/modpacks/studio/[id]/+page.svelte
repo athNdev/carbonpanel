@@ -45,6 +45,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { CarbonErrorState } from '$lib/components/carbon';
 	import { apiFetch } from '$lib/api/fetch';
 	import { installRequiredDependencies } from '$lib/features/modpacks/studio/dependencies';
+	import {
+		migrationErrorMessage,
+		runMigration,
+		type MigrationReport
+	} from '$lib/features/modpacks/studio/migration';
 	import { uploadFile } from '$lib/utils/chunked-upload';
 	import ModpackDeployDialog from '$lib/components/modpack-deploy-dialog.svelte';
 	import ManifestInspectorDialog from '$lib/components/manifest-inspector-dialog.svelte';
@@ -118,26 +123,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		latest_download_url: string;
 		update_available: boolean;
 		pinned: boolean;
-	}
-
-	interface MigrationReport {
-		pack_id: string;
-		current_mc: string;
-		current_loader: string;
-		target_mc: string;
-		target_loader: string;
-		total_mods: number;
-		compatible_count: number;
-		incompatible_count: number;
-		mods: {
-			slug: string;
-			name: string;
-			platform: string;
-			current_version_id: string;
-			target_version_id?: string;
-			target_file_name?: string;
-			compatible: boolean;
-		}[];
 	}
 
 	let packId = $derived(page.params.id);
@@ -550,13 +535,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!pack) return;
 		migrating = true;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/migrate`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ target_mc: migrateMC, target_loader: migrateLoader, apply })
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
+			const data = await runMigration(
+				{ packId: packId!, targetMc: migrateMC, targetLoader: migrateLoader },
+				apply,
+				apiFetch
+			);
 			migrationReport = data;
 			if (apply) {
 				toast.success(`Migrated modpack to MC ${migrateMC} (${migrateLoader})`);
@@ -566,9 +549,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			}
 		} catch (err) {
 			console.error('Migration failed:', err);
-			toast.error(
-				(err instanceof Error ? err.message : undefined) || 'Version migration simulation failed'
-			);
+			toast.error(migrationErrorMessage(err));
 		} finally {
 			migrating = false;
 		}

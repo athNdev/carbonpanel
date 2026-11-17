@@ -18,7 +18,7 @@ import (
 
 // serverDataDirectory is the server's data root on the node's mapped storage.
 // A remote node with no reachable storage returns ErrUnavailable.
-func serverDataDirectory(ctx context.Context, store *storage.Store, server *storage.Server, write bool) (string, error) {
+func serverDataDirectory(ctx context.Context, store *storage.Store, server *storage.Server, write bool, resolvers ...*nodestorage.Resolver) (string, error) {
 	if server == nil {
 		return "", fmt.Errorf("server is required")
 	}
@@ -32,9 +32,9 @@ func serverDataDirectory(ctx context.Context, store *storage.Store, server *stor
 			return "", fmt.Errorf("resolve storage node %q: %w", server.NodeID, err)
 		}
 		if write {
-			root, err = nodestorage.EnsureDataRoot(node.StorageInfo(), server.DataPath)
+			root, err = nodestorage.EnsureDataRoot(node.StorageInfo(), server.DataPath, resolvers...)
 		} else {
-			root, err = nodestorage.MapDataPath(node.StorageInfo(), server.DataPath)
+			root, err = nodestorage.MapDataPath(node.StorageInfo(), server.DataPath, resolvers...)
 		}
 		if err != nil {
 			return "", err
@@ -45,8 +45,8 @@ func serverDataDirectory(ctx context.Context, store *storage.Store, server *stor
 
 // modsDirectory is the mods folder on the node's mapped storage. An empty
 // string means this loader has no mods directory.
-func modsDirectory(ctx context.Context, store *storage.Store, server *storage.Server, write bool) (string, error) {
-	root, err := serverDataDirectory(ctx, store, server, write)
+func modsDirectory(ctx context.Context, store *storage.Store, server *storage.Server, write bool, resolvers ...*nodestorage.Resolver) (string, error) {
+	root, err := serverDataDirectory(ctx, store, server, write, resolvers...)
 	if err != nil {
 		return "", err
 	}
@@ -56,9 +56,9 @@ func modsDirectory(ctx context.Context, store *storage.Store, server *storage.Se
 // installedModJars lists jar names already present for a server. An
 // unreachable remote node yields an empty set so a controller copy of the
 // data path is not reported as installed.
-func installedModJars(ctx context.Context, store *storage.Store, server *storage.Server) map[string]bool {
+func installedModJars(ctx context.Context, store *storage.Store, server *storage.Server, resolvers ...*nodestorage.Resolver) map[string]bool {
 	installed := map[string]bool{}
-	modsDir, err := modsDirectory(ctx, store, server, false)
+	modsDir, err := modsDirectory(ctx, store, server, false, resolvers...)
 	if err != nil || modsDir == "" {
 		return installed
 	}

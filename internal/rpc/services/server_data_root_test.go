@@ -210,8 +210,7 @@ func TestCreateServerPlacesManualModpackThroughRemoteTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt := &recordingTransport{workerRoot: workerRoot}
-	nodestorage.SetTransport(rt)
-	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+	svc.SetStorageResolver(nodestorage.NewResolver(rt))
 
 	phantomRoot := filepath.Join(t.TempDir(), "phantom-node-root")
 	registerRemoteCreateNode(t, svc, "transport-create", phantomRoot)
@@ -244,10 +243,36 @@ func TestCreateServerPlacesManualModpackThroughRemoteTransport(t *testing.T) {
 	}
 }
 
+func TestCreateServerRefusesTransportOnlyNodeWithoutResolver(t *testing.T) {
+	svc, _ := newDockerPrivilegeTestService(t)
+	// No SetStorageResolver call: the effective resolver is nil. The guard must
+	// refuse before any controller-local directory or panel row is created.
+	phantomRoot := filepath.Join(t.TempDir(), "only-on-node")
+	registerRemoteCreateNode(t, svc, "transport-no-resolver", phantomRoot)
+
+	_, err := svc.CreateServer(ctxWithRole("operator"), connect.NewRequest(&v1.CreateServerRequest{
+		Name: "no-resolver", McVersion: "1.20.1", DockerImage: "java21",
+		NodeId: "transport-no-resolver", Port: 25593, Memory: 2048,
+	}))
+	if connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("CreateServer error = %v, want unavailable", err)
+	}
+	servers, listErr := svc.store.ListServers(context.Background())
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(servers) != 0 {
+		t.Fatalf("created %d servers after a missing-resolver refusal", len(servers))
+	}
+	assertNoControllerLocalTree(t, phantomRoot, filepath.Join(svc.config.Storage.DataDir, "servers", "no-resolver"))
+	if _, statErr := os.Stat(filepath.Join(svc.config.Storage.DataDir, "servers")); !os.IsNotExist(statErr) {
+		t.Fatalf("controller servers directory must not be created: %v", statErr)
+	}
+}
+
 func TestCreateServerRefusesManualModpackWithoutRemoteAdapter(t *testing.T) {
 	svc, _ := newDockerPrivilegeTestService(t)
-	nodestorage.SetTransport(nil)
-	t.Cleanup(func() { nodestorage.SetTransport(nil) })
+	svc.SetStorageResolver(nodestorage.NewResolver(nil))
 
 	phantomRoot := filepath.Join(t.TempDir(), "only-on-node")
 	registerRemoteCreateNode(t, svc, "transport-bare", phantomRoot)

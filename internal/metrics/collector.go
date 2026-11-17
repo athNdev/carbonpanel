@@ -119,6 +119,18 @@ type Collector struct {
 	collectorConfig CollectorConfig
 
 	imageDiskUsage ImageDiskUsageReader
+
+	storageResolver *nodestorage.Resolver
+}
+
+// SetStorageResolver supplies the instance-owned node storage resolver so
+// world-size sampling keeps its mapped-root behaviour with a configured
+// transport, and refuses a transport-only node when none is configured.
+func (c *Collector) SetStorageResolver(resolver *nodestorage.Resolver) {
+	if c == nil {
+		return
+	}
+	c.storageResolver = resolver
 }
 
 // SetImageDiskUsageReader wires Docker image-store measurement for a node.
@@ -561,7 +573,7 @@ func (c *Collector) worldDiskRoot(ctx context.Context, server *storage.Server) (
 	if err != nil {
 		return "", err
 	}
-	return nodestorage.MapDataPath(node.StorageInfo(), server.DataPath)
+	return nodestorage.MapDataPath(node.StorageInfo(), server.DataPath, c.storageResolver)
 }
 
 // Updates metrics for a server
