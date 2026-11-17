@@ -25,6 +25,7 @@ var procedureServiceNames = []string{
 	carbonpanelv1connect.FileServiceName,
 	carbonpanelv1connect.MinecraftServiceName,
 	carbonpanelv1connect.ModServiceName,
+	carbonpanelv1connect.ModBrowseServiceName,
 	carbonpanelv1connect.ModpackServiceName,
 	carbonpanelv1connect.ModuleServiceName,
 	carbonpanelv1connect.NodeServiceName,
