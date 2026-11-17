@@ -70,6 +70,7 @@ enum PlayerSupportState {
   PLAYER_SUPPORT_STATE_DEGRADED = 2;
   PLAYER_SUPPORT_STATE_UNSUPPORTED = 3;
   PLAYER_SUPPORT_STATE_DECISION_PENDING = 4;
+  PLAYER_SUPPORT_STATE_UNKNOWN = 5;
 }
 
 // Field-level provenance envelope shared by roster, detail and deep data.
@@ -280,9 +281,11 @@ message ListPlayerSessionsResponse {
   repeated PlayerSession sessions = 1;
 }
 
-// Access list request.
+// Access list request. server_id scopes the read to a server so subuser
+// grants apply; an empty server_id becomes the global "*" scope.
 message ListPlayerAccessRequest {
   string identity_key = 1;
+  string server_id = 2;
 }
 
 // Access list response.

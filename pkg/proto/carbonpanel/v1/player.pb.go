@@ -298,6 +298,7 @@ const (
 	PlayerSupportState_PLAYER_SUPPORT_STATE_DEGRADED         PlayerSupportState = 2
 	PlayerSupportState_PLAYER_SUPPORT_STATE_UNSUPPORTED      PlayerSupportState = 3
 	PlayerSupportState_PLAYER_SUPPORT_STATE_DECISION_PENDING PlayerSupportState = 4
+	PlayerSupportState_PLAYER_SUPPORT_STATE_UNKNOWN          PlayerSupportState = 5
 )
 
 // Enum value maps for PlayerSupportState.
@@ -308,6 +309,7 @@ var (
 		2: "PLAYER_SUPPORT_STATE_DEGRADED",
 		3: "PLAYER_SUPPORT_STATE_UNSUPPORTED",
 		4: "PLAYER_SUPPORT_STATE_DECISION_PENDING",
+		5: "PLAYER_SUPPORT_STATE_UNKNOWN",
 	}
 	PlayerSupportState_value = map[string]int32{
 		"PLAYER_SUPPORT_STATE_UNSPECIFIED":      0,
@@ -315,6 +317,7 @@ var (
 		"PLAYER_SUPPORT_STATE_DEGRADED":         2,
 		"PLAYER_SUPPORT_STATE_UNSUPPORTED":      3,
 		"PLAYER_SUPPORT_STATE_DECISION_PENDING": 4,
+		"PLAYER_SUPPORT_STATE_UNKNOWN":          5,
 	}
 )
 
@@ -1760,10 +1763,12 @@ func (x *ListPlayerSessionsResponse) GetSessions() []*PlayerSession {
 	return nil
 }
 
-// Access list request.
+// Access list request. server_id scopes the read to a server so subuser
+// grants apply; an empty server_id becomes the global "*" scope.
 type ListPlayerAccessRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	IdentityKey   string                 `protobuf:"bytes,1,opt,name=identity_key,json=identityKey,proto3" json:"identity_key,omitempty"`
+	ServerId      string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1801,6 +1806,13 @@ func (*ListPlayerAccessRequest) Descriptor() ([]byte, []int) {
 func (x *ListPlayerAccessRequest) GetIdentityKey() string {
 	if x != nil {
 		return x.IdentityKey
+	}
+	return ""
+}
+
+func (x *ListPlayerAccessRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
 	}
 	return ""
 }
@@ -3405,9 +3417,10 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\fidentity_key\x18\x01 \x01(\tR\videntityKey\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\"W\n" +
 	"\x1aListPlayerSessionsResponse\x129\n" +
-	"\bsessions\x18\x01 \x03(\v2\x1d.carbonpanel.v1.PlayerSessionR\bsessions\"<\n" +
+	"\bsessions\x18\x01 \x03(\v2\x1d.carbonpanel.v1.PlayerSessionR\bsessions\"Y\n" +
 	"\x17ListPlayerAccessRequest\x12!\n" +
-	"\fidentity_key\x18\x01 \x01(\tR\videntityKey\"U\n" +
+	"\fidentity_key\x18\x01 \x01(\tR\videntityKey\x12\x1b\n" +
+	"\tserver_id\x18\x02 \x01(\tR\bserverId\"U\n" +
 	"\x18ListPlayerAccessResponse\x129\n" +
 	"\x06states\x18\x01 \x03(\v2!.carbonpanel.v1.PlayerAccessStateR\x06states\"p\n" +
 	"\x18ListPlayerHistoryRequest\x12!\n" +
@@ -3546,13 +3559,14 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\"PLAYER_CAPABILITY_BRIDGE_INVENTORY\x10\x06\x12#\n" +
 	"\x1fPLAYER_CAPABILITY_BRIDGE_GROUPS\x10\a\x12!\n" +
 	"\x1dPLAYER_CAPABILITY_BRIDGE_MUTE\x10\b\x12\"\n" +
-	"\x1ePLAYER_CAPABILITY_BEDROCK_XUID\x10\t*\xd2\x01\n" +
+	"\x1ePLAYER_CAPABILITY_BEDROCK_XUID\x10\t*\xf4\x01\n" +
 	"\x12PlayerSupportState\x12$\n" +
 	" PLAYER_SUPPORT_STATE_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1ePLAYER_SUPPORT_STATE_SUPPORTED\x10\x01\x12!\n" +
 	"\x1dPLAYER_SUPPORT_STATE_DEGRADED\x10\x02\x12$\n" +
 	" PLAYER_SUPPORT_STATE_UNSUPPORTED\x10\x03\x12)\n" +
-	"%PLAYER_SUPPORT_STATE_DECISION_PENDING\x10\x042\xb4\f\n" +
+	"%PLAYER_SUPPORT_STATE_DECISION_PENDING\x10\x04\x12 \n" +
+	"\x1cPLAYER_SUPPORT_STATE_UNKNOWN\x10\x052\xb4\f\n" +
 	"\rPlayerService\x12V\n" +
 	"\vListPlayers\x12\".carbonpanel.v1.ListPlayersRequest\x1a#.carbonpanel.v1.ListPlayersResponse\x12P\n" +
 	"\tGetPlayer\x12 .carbonpanel.v1.GetPlayerRequest\x1a!.carbonpanel.v1.GetPlayerResponse\x12k\n" +
