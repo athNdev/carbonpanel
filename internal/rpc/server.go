@@ -363,8 +363,10 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	// and authorization dependencies; a worlds:bind grant never implies a
 	// servers:stop/start grant (checked again in the lifecycle adapter).
 	worldService := services.NewWorldService(s.store, s.config, s.log, s.storageResolver, s.uploadManager, services.WorldLibraryRoot(s.config))
-	worldService.SetBinder(services.NewWorldBinder(s.store, s.config, s.log, s.storageResolver, s.sender, serverService, s.enforcer))
+	worldBinder := services.NewWorldBinder(s.store, s.config, s.log, s.storageResolver, s.sender, serverService, s.enforcer)
+	worldService.SetBinder(worldBinder)
 	worldService.ConfigureProviders()
+	services.RecoverWorldBindings(context.Background(), s.store, worldBinder, s.log)
 
 	// Register service handlers
 	authPath, authHandler := carbonpanelv1connect.NewAuthServiceHandler(authService, opts...)

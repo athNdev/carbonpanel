@@ -391,6 +391,78 @@ func (b *Binder) Unbind(ctx context.Context, serverID, level, requestID string) 
 	return true, nil
 }
 
+// Recover observes real node state after an interrupted bind. It restores a
+// retained old level family only when the live family is missing, removes
+// staging left before any promotion, and refuses ambiguous states for operator
+// resolution. It never auto-retries the mutation itself.
+func (b *Binder) Recover(ctx context.Context, serverID, dataRoot, nodeID string, generation int64) (string, error) {
+	if serverID == "" || dataRoot == "" {
+		return "", errors.New("recovery requires a server and data root")
+	}
+	if generation <= 0 {
+		return "", fmt.Errorf("%w: node generation is unknown", ErrStaleGeneration)
+	}
+	node := nodestorage.NodeInfo{ID: nodeID, Name: nodeID, IsLocal: nodestorage.IsLegacyLocalNodeID(nodeID)}
+	if !node.IsLocal && b.resolver == nil {
+		return "", fmt.Errorf("%w: no storage resolver for node %q", ErrRemoteUnavailable, nodeID)
+	}
+	acc, err := b.resolver.ForNode(ctx, node, dataRoot)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrRemoteUnavailable, err)
+	}
+	defer acc.Close()
+
+	entries, err := acc.ReadDir(".world-library")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "no world recovery state", nil
+		}
+		return "", err
+	}
+	restored := 0
+	removed := 0
+	ambiguous := []string{}
+	for _, entry := range entries {
+		name := entry.Name()
+		switch {
+		case strings.HasPrefix(name, "old-"):
+			oldRoot := path.Join(".world-library", name)
+			families, listErr := acc.ReadDir(oldRoot)
+			if listErr != nil {
+				ambiguous = append(ambiguous, name+": unreadable recovery tree")
+				continue
+			}
+			for _, family := range families {
+				if !family.IsDir() {
+					continue
+				}
+				familyName := family.Name()
+				_, liveErr := acc.Stat(familyName)
+				_, oldErr := acc.Stat(path.Join(oldRoot, familyName))
+				switch {
+				case liveErr != nil && oldErr == nil:
+					if renameErr := acc.Rename(path.Join(oldRoot, familyName), familyName); renameErr != nil {
+						return "", fmt.Errorf("restore %s from %s: %w", familyName, name, renameErr)
+					}
+					restored++
+				case liveErr == nil && oldErr == nil:
+					ambiguous = append(ambiguous, name+"/"+familyName+": both live and recovery trees exist")
+				}
+			}
+		case strings.HasPrefix(name, "stage-"):
+			stageRoot := path.Join(".world-library", name)
+			if err := acc.RemoveAll(stageRoot); err != nil {
+				return "", err
+			}
+			removed++
+		}
+	}
+	if len(ambiguous) > 0 {
+		return "", fmt.Errorf("%w: %s", ErrUncertainOutcome, strings.Join(ambiguous, "; "))
+	}
+	return fmt.Sprintf("restored %d level families, removed %d incomplete stages", restored, removed), nil
+}
+
 // ResolveOperation records an operator decision on an uncertain operation. It
 // never retries the mutation itself.
 func (b *Binder) ResolveOperation(ctx context.Context, serverID, operationID, note string) error {

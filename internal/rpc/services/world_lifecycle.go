@@ -39,6 +39,38 @@ func NewWorldBinder(store *storage.Store, cfg *config.Config, log *logger.Logger
 		newWorldLifecycleAdapter(servers, store, enforcer), WorldLibraryRoot(cfg))
 }
 
+// RecoverWorldBindings observes retained node state at startup. It restores a
+// level family only when the live family is missing and leaves ambiguous states
+// for operator resolution; it never retries a mutation that may have succeeded.
+func RecoverWorldBindings(ctx context.Context, store *storage.Store, binder *worldlib.Binder, log *logger.Logger) {
+	if binder == nil {
+		return
+	}
+	servers, err := store.ListServers(ctx)
+	if err != nil {
+		if log != nil {
+			log.Warn("World Library recovery could not list servers: %v", err)
+		}
+		return
+	}
+	for _, server := range servers {
+		generation := int64(1)
+		if node, err := store.GetNode(ctx, server.NodeID); err == nil && node.EndpointGeneration > 0 {
+			generation = node.EndpointGeneration
+		}
+		summary, err := binder.Recover(ctx, server.ID, server.DataPath, server.NodeID, generation)
+		if err != nil {
+			if log != nil {
+				log.Warn("World Library recovery for %s is unresolved: %v", server.ID, err)
+			}
+			continue
+		}
+		if summary != "no world recovery state" && log != nil {
+			log.Info("World Library recovery for %s: %s", server.ID, summary)
+		}
+	}
+}
+
 // worldLifecycleAdapter gives the World Binder the narrow stop/start seam it
 // needs without reaching through the HTTP mux. A world binding grant is NOT a
 // servers:stop/start grant, so each call re-checks the server-scoped permission

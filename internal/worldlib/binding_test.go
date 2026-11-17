@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -201,6 +203,97 @@ func TestTwoWritersRefusedAtStore(t *testing.T) {
 	}
 	if !b1.MatchesOwner("local", 1) {
 		t.Fatal("matching generation must match")
+	}
+}
+
+func TestRecoverRestoresRetainedFamilyAndRefusesAmbiguity(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	oldFamily := filepath.Join(dataRoot, ".world-library", "old-drill", "world")
+	if err := os.MkdirAll(oldFamily, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldFamily, "level.dat"), []byte("old-world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, root)
+	summary, err := binder.Recover(ctx, "srv-1", dataRoot, "local", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "restored 1") {
+		t.Fatalf("unexpected recovery summary %q", summary)
+	}
+	data, err := os.ReadFile(filepath.Join(dataRoot, "world", "level.dat"))
+	if err != nil || string(data) != "old-world" {
+		t.Fatalf("recovery did not restore old world: %q, %v", data, err)
+	}
+
+	// Both live and retained trees present: ambiguous, operator must resolve.
+	ambiguousOld := filepath.Join(dataRoot, ".world-library", "old-ambiguous", "world")
+	if err := os.MkdirAll(ambiguousOld, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ambiguousOld, "level.dat"), []byte("other"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = binder.Recover(ctx, "srv-1", dataRoot, "local", 1)
+	if !errors.Is(err, ErrUncertainOutcome) {
+		t.Fatalf("ambiguous recovery must fail closed, got %v", err)
+	}
+}
+
+func TestConcurrentSameNodeBindsHaveOneWinner(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	_ = os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755)
+	_ = os.MkdirAll(libraryRoot, 0o755)
+	server := seedWorldServer(t, store, dataRoot)
+	makeRev := func(sha string) *storage.WorldRevision {
+		archive, err := WriteFreshWorldArchive(map[string]string{"level-name": "world"}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		archivePath := filepath.Join(libraryRoot, sha[:8]+".zip")
+		if err := os.WriteFile(archivePath, archive, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return seedRevision(t, store, "wld_race", archivePath, sha)
+	}
+	r1 := makeRev("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+	r2 := makeRev("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+
+	var wg sync.WaitGroup
+	results := make([]error, 2)
+	start := make(chan struct{})
+	for i, rev := range []*storage.WorldRevision{r1, r2} {
+		wg.Add(1)
+		go func(i int, rev *storage.WorldRevision) {
+			defer wg.Done()
+			<-start
+			_, err := binder.Bind(ctx, BindRequest{
+				ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+				NodeID: "local", Generation: 1, RequestID: "race-" + rev.ID,
+			})
+			results[i] = err
+		}(i, rev)
+	}
+	close(start)
+	wg.Wait()
+	wins := 0
+	for _, err := range results {
+		if err == nil {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("expected exactly one winner, got %d (errors: %v)", wins, results)
 	}
 }
 
