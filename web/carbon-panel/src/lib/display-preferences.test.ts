@@ -11,6 +11,33 @@ import {
 	type PreferenceStorage
 } from './display-preferences.svelte';
 
+// CSS contract assertions kept from the original file: the attributes owned by
+// this store must still have the documented effects in app.css.
+const css = readFileSync(new URL('../app.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+
+test('reduced motion kills animation via the data attribute, not just the media query', () => {
+	assert.ok(
+		css.includes("[data-carbon-motion='reduced']"),
+		'reduced motion must have a data-attribute kill-switch in app.css'
+	);
+	assert.match(css, /animation-duration: 0\.01ms !important/);
+});
+
+test('compact density tightens the control tokens', () => {
+	assert.ok(
+		css.includes("[data-carbon-density='compact']"),
+		'compact density must override tokens in app.css'
+	);
+	assert.match(css, /--carbon-control-md: 2rem/);
+});
+
+test('mono eyebrow labels share one tracking/color contract', () => {
+	for (const utility of ['.mono-label ', '.mono-label-strong', '.mono-label-accent']) {
+		assert.ok(css.includes(utility), `app.css must define ${utility.trim()}`);
+	}
+	assert.match(css, /letter-spacing: 0\.04em/);
+});
+
 function fixture(seed: Record<string, string> = {}, failing = false) {
 	const values = new Map(Object.entries(seed));
 	const storage: PreferenceStorage = {
