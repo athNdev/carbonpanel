@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
 )
 
 const (
@@ -470,83 +472,12 @@ func (l *Local) BackupTo(id Identity, destPath string, skip func(rel string) boo
 	if err := l.check(id); err != nil {
 		return "", err
 	}
-	entries, err := l.List(id)
+	acc, err := nodestorage.NewLocal(l.identity.AuthorizedRoot)
 	if err != nil {
 		return "", err
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-
-	partial := destPath + ".partial"
-	_ = os.Remove(partial)
-	out, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return "", err
-	}
-	hash := sha256.New()
-	z := zip.NewWriter(io.MultiWriter(out, hash))
-
-	manifest := struct {
-		Version int     `json:"version"`
-		Files   []Entry `json:"files"`
-	}{Version: 1, Files: make([]Entry, 0, len(entries))}
-	var total int64
-	failed := func(err error) (string, error) {
-		_ = z.Close()
-		_ = out.Close()
-		_ = os.Remove(partial)
-		return "", err
-	}
-	for _, e := range entries {
-		if skip != nil && skip(e.Path) {
-			continue
-		}
-		data, err := l.Read(id, e.Path)
-		if err != nil {
-			return failed(err)
-		}
-		total += int64(len(data))
-		if total > streamMaxWorldBytes {
-			return failed(errors.New("worldstore: world exceeds streaming backup limit"))
-		}
-		sum := sha256.Sum256(data)
-		manifest.Files = append(manifest.Files, Entry{Path: e.Path, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])})
-		h := &zip.FileHeader{Name: e.Path, Method: zip.Deflate}
-		h.SetMode(0600)
-		h.Modified = time.Unix(0, 0).UTC()
-		w, err := z.CreateHeader(h)
-		if err != nil {
-			return failed(err)
-		}
-		if _, err := w.Write(data); err != nil {
-			return failed(err)
-		}
-	}
-	mb, err := json.Marshal(manifest)
-	if err != nil {
-		return failed(err)
-	}
-	mh := &zip.FileHeader{Name: manifestName, Method: zip.Deflate}
-	mh.SetMode(0600)
-	mh.Modified = time.Unix(0, 0).UTC()
-	mw, err := z.CreateHeader(mh)
-	if err != nil {
-		return failed(err)
-	}
-	if _, err := mw.Write(mb); err != nil {
-		return failed(err)
-	}
-	if err := z.Close(); err != nil {
-		return failed(err)
-	}
-	if err := out.Close(); err != nil {
-		_ = os.Remove(partial)
-		return "", err
-	}
-	if err := os.Rename(partial, destPath); err != nil {
-		_ = os.Remove(partial)
-		return "", err
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	defer func() { _ = acc.Close() }()
+	return BackupToAccessor(acc, destPath, skip)
 }
 
 // RestoreFrom verifies a worldstore archive on disk and swaps it in through

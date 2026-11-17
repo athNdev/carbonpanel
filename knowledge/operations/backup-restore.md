@@ -14,6 +14,8 @@ code_refs:
   - scripts/compose-upgrade-rollback.sh
   - docker-compose.yml
 sources:
+  - title: Streaming limits and recovery
+    resource: ../../docs/storage-streaming.md
   - title: Backup confirmation issue
     resource: ../../docs/issues/013-UI-5-backup-confirmation-dialogs.md
   - title: Snapshot integrity issue
@@ -37,6 +39,10 @@ A backup, snapshot, restore or retention change is being made.
   tracked source.
 - Retention must not delete the only surviving copy of a world.
 - A restore must not overwrite a live world without an explicit confirmation.
+- Streaming local/shared/worker backups enforce the same 4 GiB/file and 64 GiB
+  total limits, plus 500,000 entries and a 1 MiB manifest. Backup refuses a
+  manifest restore would reject. Existing restore stage/old trees and failed
+  commit temporaries require deliberate recovery; retries never erase them.
 
 # Known gap
 

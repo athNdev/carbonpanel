@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -42,11 +43,12 @@ func ExtractZip(ctx context.Context, acc Accessor, archiveRel, destRel string, c
 		return 0, fmt.Errorf("path is a directory, not an archive")
 	}
 
-	raw, err := acc.ReadFile(archiveRel)
+	src, err := acc.OpenRead(ctx, archiveRel)
 	if err != nil {
 		return 0, err
 	}
-	return ExtractZipBytes(ctx, acc, raw, destRel, counter)
+	defer func() { _ = src.Close() }()
+	return ExtractZipReader(ctx, acc, src, info.Size(), destRel, counter)
 }
 
 // ExtractZipBytes writes zip members through acc. data may come from a
@@ -60,7 +62,18 @@ func ExtractZipBytes(ctx context.Context, acc Accessor, data []byte, destRel str
 	if destRel == "" {
 		return 0, fmt.Errorf("%w: empty archive or destination", ErrEscape)
 	}
-	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	return ExtractZipReader(ctx, acc, bytes.NewReader(data), int64(len(data)), destRel, counter)
+}
+
+// ExtractZipReader extracts a caller-owned archive without an archive-sized buffer.
+func ExtractZipReader(ctx context.Context, acc Accessor, source io.ReaderAt, size int64, destRel string, counter *atomic.Int32) (int, error) {
+	if acc == nil {
+		return 0, fmt.Errorf("%w: accessor is required", ErrUnavailable)
+	}
+	if strings.TrimSpace(destRel) == "" {
+		return 0, fmt.Errorf("%w: empty archive destination", ErrEscape)
+	}
+	zr, err := zip.NewReader(source, size)
 	if err != nil {
 		return 0, fmt.Errorf("failed to open zip: %w", err)
 	}
@@ -89,7 +102,7 @@ func ExtractZipBytes(ctx context.Context, acc Accessor, data []byte, destRel str
 			}
 			continue
 		}
-		if err := extractZipFile(acc, f, rel, &total); err != nil {
+		if err := extractZipFile(ctx, acc, f, rel, &total); err != nil {
 			return extracted, err
 		}
 		extracted++
@@ -109,14 +122,40 @@ const (
 // over the existing tree. Staging stays inside the accessor so a transport-only
 // node cannot grow a controller-local copy (ADR 0005).
 func ReplaceTreeFromZip(ctx context.Context, acc Accessor, data []byte) (int, error) {
+	return replaceTreeFromZipReader(ctx, acc, bytes.NewReader(data), int64(len(data)))
+}
+
+// ReplaceTreeFromZipFile restores a controller-side archive through the accessor
+// while keeping its bytes on disk and preserving interrupted recovery trees.
+func ReplaceTreeFromZipFile(ctx context.Context, acc Accessor, archivePath string) (int, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return replaceTreeFromZipReader(ctx, acc, f, fi.Size())
+}
+
+func replaceTreeFromZipReader(ctx context.Context, acc Accessor, source io.ReaderAt, size int64) (int, error) {
 	if acc == nil {
 		return 0, fmt.Errorf("%w: accessor is required", ErrUnavailable)
 	}
-	_ = acc.RemoveAll(restoreStageRel)
-	_ = acc.RemoveAll(restoreOldRel)
-	n, err := ExtractZipBytes(ctx, acc, data, restoreStageRel, nil)
+	for _, rel := range []string{restoreStageRel, restoreOldRel} {
+		if _, err := acc.Stat(rel); err == nil {
+			return 0, fmt.Errorf("storage: recovery staging %q exists; recover or remove it before restoring", rel)
+		} else if !os.IsNotExist(err) {
+			return 0, err
+		}
+	}
+	n, err := ExtractZipReader(ctx, acc, source, size, restoreStageRel, nil)
 	if err != nil {
-		_ = acc.RemoveAll(restoreStageRel)
+		return 0, fmt.Errorf("storage: restore incomplete; recovery staging %q: %w", restoreStageRel, err)
+	}
+	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	if err := SwapAccessorTree(acc, restoreStageRel, restoreOldRel); err != nil {
@@ -165,7 +204,7 @@ func SwapAccessorTree(acc Accessor, stageRel, oldRel string) error {
 	return nil
 }
 
-func extractZipFile(acc Accessor, f *zip.File, rel string, total *int64) error {
+func extractZipFile(ctx context.Context, acc Accessor, f *zip.File, rel string, total *int64) error {
 	if parent := path.Dir(filepath.ToSlash(rel)); parent != "." && parent != "" {
 		if err := acc.MkdirAll(parent); err != nil {
 			return err
@@ -181,16 +220,20 @@ func extractZipFile(acc Accessor, f *zip.File, rel string, total *int64) error {
 	if remaining <= 0 {
 		return fmt.Errorf("archive exceeds maximum extracted size of %d bytes", maxExtractedBytes)
 	}
-	limited := io.LimitReader(rc, remaining+1)
-	data, err := io.ReadAll(limited)
+	w, err := acc.BeginWrite(ctx, rel, remaining)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = w.Close() }()
+	n, err := io.CopyBuffer(w, io.LimitReader(rc, remaining+1), make([]byte, 256<<10))
 	if err != nil {
 		return fmt.Errorf("failed to extract %s: %w", f.Name, err)
 	}
-	if int64(len(data)) > remaining {
+	if n > remaining {
 		return fmt.Errorf("archive exceeds maximum extracted size of %d bytes", maxExtractedBytes)
 	}
-	*total += int64(len(data))
-	return acc.WriteFile(rel, data)
+	*total += n
+	return w.Commit()
 }
 
 // zipMemberRel joins destRel with a zip entry name and rejects traversal,

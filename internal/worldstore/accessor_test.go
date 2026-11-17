@@ -6,6 +6,7 @@
 package worldstore
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 )
 
 type backupReadAccessor struct {
@@ -20,12 +22,12 @@ type backupReadAccessor struct {
 	reads map[string]int
 }
 
-func (a *backupReadAccessor) ReadFile(rel string) ([]byte, error) {
+func (a *backupReadAccessor) OpenRead(ctx context.Context, rel string) (storageworker.ReadHandle, error) {
 	a.reads[rel]++
 	if strings.HasPrefix(rel, ".tmp/") {
 		return nil, fmt.Errorf("excluded temporary file is unreadable")
 	}
-	return a.Accessor.ReadFile(rel)
+	return a.Accessor.OpenRead(ctx, rel)
 }
 
 func TestBackupAccessorExcludesBeforeReadingAndReadsRetainedFilesOnce(t *testing.T) {

@@ -24,9 +24,10 @@ import (
 // higher because they protect real world backups (region files are large) and
 // every extracted byte is still verified against the manifest.
 const (
-	streamMaxFileBytes  = 4 << 30
-	streamMaxWorldBytes = 64 << 30
-	streamMaxEntries    = 500_000
+	streamMaxFileBytes     = 4 << 30
+	streamMaxWorldBytes    = 64 << 30
+	streamMaxEntries       = 500_000
+	streamMaxManifestBytes = 1 << 20
 )
 
 const manifestName = ".worldstore-manifest.json"
@@ -88,14 +89,14 @@ func openZipArchive(path string) (*zipArchive, error) {
 			if !zf.Mode().IsRegular() || zf.Mode()&os.ModeSymlink != 0 {
 				return fail(errors.New("worldstore: invalid manifest entry"))
 			}
-			if zf.UncompressedSize64 > 1<<20 {
+			if zf.UncompressedSize64 > streamMaxManifestBytes {
 				return fail(errors.New("worldstore: manifest too large"))
 			}
 			f, err := zf.Open()
 			if err != nil {
 				return fail(err)
 			}
-			manifestBytes, err = io.ReadAll(io.LimitReader(f, 1<<20+1))
+			manifestBytes, err = io.ReadAll(io.LimitReader(f, streamMaxManifestBytes+1))
 			ce := f.Close()
 			if err != nil {
 				return fail(err)
@@ -137,6 +138,7 @@ func openZipArchive(path string) (*zipArchive, error) {
 		return fail(fmt.Errorf("worldstore: unsupported manifest version %d", manifest.Version))
 	}
 	sx.manifest = make(map[string]Entry, len(manifest.Files))
+	var total int64
 	for _, e := range manifest.Files {
 		p, err := cleanRelative(e.Path)
 		if err != nil || p != e.Path {
@@ -148,6 +150,10 @@ func openZipArchive(path string) (*zipArchive, error) {
 		if e.Size < 0 || e.Size > streamMaxFileBytes {
 			return fail(fmt.Errorf("worldstore: manifest size out of bounds: %s", p))
 		}
+		if e.Size > streamMaxWorldBytes-total {
+			return fail(errors.New("worldstore: expanded archive exceeds streaming limit"))
+		}
+		total += e.Size
 		sx.manifest[p] = e
 	}
 	// Coverage: the archive and the manifest must describe the same file set.
@@ -155,8 +161,12 @@ func openZipArchive(path string) (*zipArchive, error) {
 		return fail(errors.New("worldstore: manifest does not match archive contents"))
 	}
 	for p := range sx.byPath {
-		if _, ok := sx.manifest[p]; !ok {
+		entry, ok := sx.manifest[p]
+		if !ok {
 			return fail(fmt.Errorf("worldstore: entry %q missing from manifest", p))
+		}
+		if sx.byPath[p].UncompressedSize64 != uint64(entry.Size) {
+			return fail(fmt.Errorf("worldstore: archive/header size mismatch for %s", p))
 		}
 	}
 	return sx, nil

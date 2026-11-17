@@ -11,9 +11,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
-
-const maxReadBytes = 128 << 20
 
 // FS exposes the nodestorage.Accessor surface without importing nodestorage
 // (the worker binary and remote client share this package).
@@ -36,7 +35,9 @@ func ServeAccessor(in io.Reader, out io.Writer, fs FS) error {
 
 func serveAccessor(in io.Reader, out io.Writer, fs FS) (err error) {
 	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 64*1024), maxReadBytes+1<<20)
+	scanner.Buffer(make([]byte, 64*1024), maxFrameBytes)
+	streams := newStreams(fs)
+	defer streams.close()
 	w := bufio.NewWriter(out)
 	defer func() {
 		if ferr := w.Flush(); ferr != nil && err == nil {
@@ -50,9 +51,19 @@ func serveAccessor(in io.Reader, out io.Writer, fs FS) (err error) {
 			if e := enc.Encode(Response{Error: uerr.Error()}); e != nil {
 				return e
 			}
+			if e := w.Flush(); e != nil {
+				return e
+			}
 			continue
 		}
-		res := dispatch(fs, req)
+		var res Response
+		if req.Op == "root" {
+			res = Response{OK: true, Root: fs.Root(), Version: ProtocolVersion}
+		} else if strings.HasPrefix(req.Op, "stream_") {
+			res = streams.dispatch(req)
+		} else {
+			res = dispatch(fs, req)
+		}
 		if e := enc.Encode(res); e != nil {
 			return e
 		}
@@ -70,48 +81,70 @@ func dispatch(fs FS, r Request) Response {
 	case "stat":
 		fi, err := fs.Stat(r.Path)
 		if err != nil {
-			return Response{Error: err.Error()}
+			return errorResponse(err)
 		}
 		return Response{OK: true, FileInfo: fileInfoFromOS(fi)}
 	case "read":
+		info, err := fs.Stat(r.Path)
+		if err != nil {
+			return errorResponse(err)
+		}
+		if info.Size() > SmallFileBytes {
+			return Response{Error: "storageworker: file exceeds small-file limit; use streaming"}
+		}
 		data, err := fs.ReadFile(r.Path)
 		if err != nil {
-			return Response{Error: err.Error()}
+			return errorResponse(err)
 		}
 		return Response{OK: true, Data: data}
 	case "write":
+		if int64(len(r.Data)) > SmallFileBytes {
+			return Response{Error: "storageworker: file exceeds small-file limit; use streaming"}
+		}
 		if err := fs.WriteFile(r.Path, r.Data); err != nil {
-			return Response{Error: err.Error()}
+			return errorResponse(err)
 		}
 		return Response{OK: true}
 	case "readdir":
 		entries, err := fs.ReadDir(r.Path)
 		if err != nil {
-			return Response{Error: err.Error()}
+			return errorResponse(err)
 		}
 		out := make([]DirEntry, 0, len(entries))
 		for _, e := range entries {
-			out = append(out, DirEntry{Name: e.Name(), IsDir: e.IsDir()})
+			out = append(out, DirEntry{Name: e.Name(), IsDir: e.IsDir(), Mode: uint32(e.Type())})
 		}
 		return Response{OK: true, Entries: out}
 	case "mkdir":
+		if r.Perms != 0 {
+			fs, ok := fs.(interface {
+				MkdirAllMode(string, os.FileMode) error
+			})
+			if !ok {
+				return Response{Error: "storageworker: directory mode unavailable"}
+			}
+			if err := fs.MkdirAllMode(r.Path, os.FileMode(r.Perms)); err != nil {
+				return errorResponse(err)
+			}
+			return Response{OK: true}
+		}
 		if err := fs.MkdirAll(r.Path); err != nil {
-			return Response{Error: err.Error()}
+			return errorResponse(err)
 		}
 		return Response{OK: true}
 	case "remove":
 		if err := fs.Remove(r.Path); err != nil {
-			return Response{Error: err.Error()}
+			return errorResponse(err)
 		}
 		return Response{OK: true}
 	case "removeall":
 		if err := fs.RemoveAll(r.Path); err != nil {
-			return Response{Error: err.Error()}
+			return errorResponse(err)
 		}
 		return Response{OK: true}
 	case "rename":
 		if err := fs.Rename(r.Path, r.Path2); err != nil {
-			return Response{Error: err.Error()}
+			return errorResponse(err)
 		}
 		return Response{OK: true}
 	default:
@@ -127,4 +160,12 @@ func fileInfoFromOS(fi os.FileInfo) *FileInfo {
 		ModTime: fi.ModTime().UnixNano(),
 		Mode:    uint32(fi.Mode()),
 	}
+}
+
+func errorResponse(err error) Response {
+	res := Response{Error: err.Error()}
+	if os.IsNotExist(err) {
+		res.ErrorCode = "not_exist"
+	}
+	return res
 }
