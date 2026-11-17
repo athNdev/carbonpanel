@@ -7,6 +7,7 @@ package nodestorage
 
 import (
 	"context"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,11 +15,18 @@ import (
 
 type isolationAccessor struct{ root string }
 
+func (a *isolationAccessor) OpenRead(context.Context, string) (storageworker.ReadHandle, error) {
+	return nil, os.ErrNotExist
+}
+func (a *isolationAccessor) BeginWrite(context.Context, string, int64) (storageworker.AtomicWriter, error) {
+	return nil, os.ErrNotExist
+}
 func (a *isolationAccessor) Stat(string) (os.FileInfo, error)          { return nil, os.ErrNotExist }
 func (a *isolationAccessor) ReadFile(string) ([]byte, error)           { return nil, os.ErrNotExist }
 func (a *isolationAccessor) WriteFile(string, []byte) error            { return nil }
 func (a *isolationAccessor) ReadDir(string) ([]os.DirEntry, error)     { return nil, nil }
 func (a *isolationAccessor) MkdirAll(string) error                     { return nil }
+func (a *isolationAccessor) MkdirAllMode(string, os.FileMode) error    { return nil }
 func (a *isolationAccessor) Remove(string) error                       { return nil }
 func (a *isolationAccessor) RemoveAll(string) error                    { return nil }
 func (a *isolationAccessor) Rename(string, string) error               { return nil }

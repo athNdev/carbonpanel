@@ -56,7 +56,7 @@ func stagedFiles(t *testing.T, root string) []string {
 func TestStageContentReservesRecoveryPaths(t *testing.T) {
 	store, server, _ := newContentStageFixture(t, "reserved-undo", storage.StatusStopped)
 	for _, target := range []string{".carbon-panel/undo", ".carbon-panel/undo/batch/manifest.json", ".carbon-panel/undo/batch/000000.data", ".CARBON-PANEL/UNDO/batch/manifest.json", `.carbon-panel\undo\batch\manifest.json`} {
-		if _, err := stageContentBytes(context.Background(), store, server, storage.StagedKindFile, storage.StagedActionReplace, target, "manifest.json", []byte("new")); !errors.Is(err, errStagedPath) {
+		if _, err := stageContentBytes(context.Background(), store, server, nil, storage.StagedKindFile, storage.StagedActionReplace, target, "manifest.json", []byte("new")); !errors.Is(err, errStagedPath) {
 			t.Fatalf("accepted recovery target %s: %v", target, err)
 		}
 	}

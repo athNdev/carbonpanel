@@ -2189,7 +2189,7 @@ func unsafeDataRemoval(path string) bool {
 func (s *ServerService) StartServer(ctx context.Context, req *connect.Request[v1.StartServerRequest]) (out *connect.Response[v1.StartServerResponse], retErr error) {
 	defer func() {
 		if retErr == nil && out != nil {
-			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId())
+			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId(), s.storageResolver)
 		}
 	}()
 	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())
@@ -2623,7 +2623,7 @@ func (s *ServerService) StopServer(ctx context.Context, req *connect.Request[v1.
 func (s *ServerService) RestartServer(ctx context.Context, req *connect.Request[v1.RestartServerRequest]) (out *connect.Response[v1.RestartServerResponse], retErr error) {
 	defer func() {
 		if retErr == nil && out != nil {
-			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId())
+			_ = staging.FinishNextRestartBatch(ctx, s.store, req.Msg.GetId(), s.storageResolver)
 		}
 	}()
 	requestID, reqErr := lifecycleRequestID(req.Msg.GetRequestId())

@@ -166,7 +166,7 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if err := store.CloseUpdateBatch(ctx, batch.ID, storage.UpdateBatchApplied); err != nil {
 			return err
 		}
-		return cleanupBatchRecovery(ctx, store, server, batch.ID)
+		return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
 	})
 }
 
@@ -233,7 +233,8 @@ func CommitNextRestartFiles(ctx context.Context, store *storage.Store, server *s
 
 // FinishNextRestartBatch closes a next-restart batch once nothing in it is
 // still staged. Time and idle batches are left open.
-func FinishNextRestartBatch(ctx context.Context, store *storage.Store, serverID string) error {
+func FinishNextRestartBatch(ctx context.Context, store *storage.Store, serverID string, resolvers ...*nodestorage.Resolver) error {
+	resolver := firstResolver(resolvers)
 	batch, err := store.OpenUpdateBatch(ctx, serverID)
 	if err != nil || batch == nil || batch.Window != string(storage.UpdateWindowNextRestart) {
 		return err
@@ -256,7 +257,7 @@ func FinishNextRestartBatch(ctx context.Context, store *storage.Store, serverID 
 	if err != nil {
 		return err
 	}
-	return cleanupBatchRecovery(ctx, store, server, batch.ID)
+	return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
 }
 
 func moduleRestore(undoModules func() error, restore func() error) func() error {
