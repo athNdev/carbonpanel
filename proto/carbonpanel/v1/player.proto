@@ -316,10 +316,13 @@ message ListPlayerCapabilitiesResponse {
 }
 
 // Skin request. skin_ref is an opaque cache key, never an arbitrary URL.
+// server_id scopes the read so a server-scoped grant can load skins for its
+// own players; an empty server_id falls back to the global "*" check.
 message GetPlayerSkinRequest {
   string identity_key = 1;
   string skin_ref = 2;
   string kind = 3;
+  string server_id = 4;
 }
 
 // Skin response.

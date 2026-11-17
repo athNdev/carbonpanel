@@ -17,7 +17,7 @@ var playerProcedures = map[string]ProcedurePermission{
 	"/carbonpanel.v1.PlayerService/ListPlayerAccess":       {Resource: ResourcePlayers, Action: ActionAccessRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerHistory":      {Resource: ResourcePlayers, Action: ActionHistoryRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerCapabilities": {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/GetPlayerSkin":          {Resource: ResourcePlayers, Action: ActionRead},
+	"/carbonpanel.v1.PlayerService/GetPlayerSkin":          {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/RefreshPlayerSkin":      {Resource: ResourcePlayers, Action: ActionSkinRefresh, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/GetPlayerDeepData":      {Resource: ResourcePlayers, Action: ActionInventory, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/KickPlayer":             {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},

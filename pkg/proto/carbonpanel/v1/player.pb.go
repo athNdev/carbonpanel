@@ -2059,11 +2059,14 @@ func (x *ListPlayerCapabilitiesResponse) GetCapabilities() []*PlayerCapabilitySt
 }
 
 // Skin request. skin_ref is an opaque cache key, never an arbitrary URL.
+// server_id scopes the read so a server-scoped grant can load skins for its
+// own players; an empty server_id falls back to the global "*" check.
 type GetPlayerSkinRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	IdentityKey   string                 `protobuf:"bytes,1,opt,name=identity_key,json=identityKey,proto3" json:"identity_key,omitempty"`
 	SkinRef       string                 `protobuf:"bytes,2,opt,name=skin_ref,json=skinRef,proto3" json:"skin_ref,omitempty"`
 	Kind          string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	ServerId      string                 `protobuf:"bytes,4,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2115,6 +2118,13 @@ func (x *GetPlayerSkinRequest) GetSkinRef() string {
 func (x *GetPlayerSkinRequest) GetKind() string {
 	if x != nil {
 		return x.Kind
+	}
+	return ""
+}
+
+func (x *GetPlayerSkinRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
 	}
 	return ""
 }
@@ -3432,11 +3442,12 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\x1dListPlayerCapabilitiesRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\"l\n" +
 	"\x1eListPlayerCapabilitiesResponse\x12J\n" +
-	"\fcapabilities\x18\x01 \x03(\v2&.carbonpanel.v1.PlayerCapabilityStatusR\fcapabilities\"h\n" +
+	"\fcapabilities\x18\x01 \x03(\v2&.carbonpanel.v1.PlayerCapabilityStatusR\fcapabilities\"\x85\x01\n" +
 	"\x14GetPlayerSkinRequest\x12!\n" +
 	"\fidentity_key\x18\x01 \x01(\tR\videntityKey\x12\x19\n" +
 	"\bskin_ref\x18\x02 \x01(\tR\askinRef\x12\x12\n" +
-	"\x04kind\x18\x03 \x01(\tR\x04kind\"N\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x1b\n" +
+	"\tserver_id\x18\x04 \x01(\tR\bserverId\"N\n" +
 	"\x15GetPlayerSkinResponse\x125\n" +
 	"\x05asset\x18\x01 \x01(\v2\x1f.carbonpanel.v1.PlayerSkinAssetR\x05asset\"Z\n" +
 	"\x18RefreshPlayerSkinRequest\x12!\n" +

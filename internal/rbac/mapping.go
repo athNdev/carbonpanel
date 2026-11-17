@@ -262,15 +262,15 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 
 	// ── PlayerService (OSS-345) ──────────────────────────────────────
 	// Server-scoped procedures use "server_id" so SubuserPermissions apply.
-	// The skin asset lookup is keyed by an opaque ref and has no server id;
-	// it stays a global players:read grant and never accepts a URL.
+	// The skin lookup carries an optional server_id for the same reason; its
+	// skin_ref is an opaque cache key and never an arbitrary URL.
 	"/carbonpanel.v1.PlayerService/ListPlayers":             {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/GetPlayer":               {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerSessions":      {Resource: ResourcePlayers, Action: ActionPresence, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerAccess":        {Resource: ResourcePlayers, Action: ActionAccessRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerHistory":       {Resource: ResourcePlayers, Action: ActionHistoryRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerCapabilities":  {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
-	"/carbonpanel.v1.PlayerService/GetPlayerSkin":           {Resource: ResourcePlayers, Action: ActionRead},
+	"/carbonpanel.v1.PlayerService/GetPlayerSkin":           {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/RefreshPlayerSkin":       {Resource: ResourcePlayers, Action: ActionSkinRefresh, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/GetPlayerDeepData":       {Resource: ResourcePlayers, Action: ActionInventory, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/KickPlayer":              {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
