@@ -34,3 +34,11 @@ directly leaves paths blank and breaks a later save. The real-dialog Chromium
 fixture covers stored volume/env round trips, template-to-instance default/port
 requests, scalar staging without topology, and immediate updates with topology
 and numeric defaults. These tests use fixture RPCs and the real form controls.
+
+Studio workflows are extracted one cohesive workflow at a time into
+`features/modpacks/studio/`; route entries remain composition shells. Required
+dependency reconciliation is owned by `studio/dependencies.ts`: it walks only
+required dependencies, skips optional/duplicate/visited entries, is depth-bounded
+at three levels and uses best-effort installs. The route keeps presentation and
+toasts. This is a mechanical move of the existing behavior; it does not claim
+stricter validation of malformed persisted JSON.
