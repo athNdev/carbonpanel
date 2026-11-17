@@ -6,7 +6,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { SvelteSet } from 'svelte/reactivity';
 	import StudioModTable from '$lib/components/fragments/StudioModTable.svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -45,6 +44,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { CarbonErrorState } from '$lib/components/carbon';
 	import { apiFetch } from '$lib/api/fetch';
+	import { installRequiredDependencies } from '$lib/features/modpacks/studio/dependencies';
 	import { uploadFile } from '$lib/utils/chunked-upload';
 	import ModpackDeployDialog from '$lib/components/modpack-deploy-dialog.svelte';
 	import ManifestInspectorDialog from '$lib/components/manifest-inspector-dialog.svelte';
@@ -679,22 +679,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.success(`Added ${item.title} (${side.toUpperCase()}) to pack!`);
 
 			// Resolve transitive required dependencies (best-effort, depth-bounded).
-			const visited = new SvelteSet<string>();
-			for (const m of pack.mods || []) {
-				if (m.project_id)
-					visited.add(
-						`${(m.platform || item.platform).toLowerCase()}:${m.project_id.toLowerCase()}`
-					);
-				if (m.slug) visited.add(`slug:${m.slug.toLowerCase()}`);
-			}
-			visited.add(`${item.platform.toLowerCase()}:${item.id.toLowerCase()}`);
 			try {
-				const depCount = await resolveAndAddDependencies(
-					selectedVer.dependencies || [],
-					item.platform,
-					side,
-					0,
-					visited
+				const depCount = await installRequiredDependencies(
+					{
+						deps: selectedVer.dependencies || [],
+						platform: item.platform,
+						id: item.id,
+						side,
+						packId: packId || '',
+						modLoader: pack.mod_loader,
+						mcVersion: pack.mc_version,
+						existingMods: pack.mods || []
+					},
+					apiFetch
 				);
 				if (depCount > 0) {
 					toast.success(
@@ -709,85 +706,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			console.error('Failed to add mod:', err);
 			toast.error((err instanceof Error ? err.message : undefined) || 'Failed to add mod to pack');
 		}
-	}
-
-	interface VersionDependency {
-		project_id?: string;
-		version_id?: string;
-		dependency_type?: string;
-	}
-
-	// Recursively installs required (transitive) dependencies of an added mod
-	// for the pack's loader/MC version. Skips optional deps, versions already
-	// in the pack, and cycles via the visited set. Returns the count added.
-	async function resolveAndAddDependencies(
-		deps: VersionDependency[],
-		platform: string,
-		side: 'both' | 'client' | 'server',
-		depth: number,
-		visited: Set<string>
-	): Promise<number> {
-		if (!pack || depth > 3) return 0;
-		let added = 0;
-		const required = (deps || []).filter(
-			(d) => (d.dependency_type || 'required').toLowerCase() === 'required' && d.project_id
-		);
-		for (const dep of required) {
-			const depId = dep.project_id as string;
-			const key = `${platform.toLowerCase()}:${depId.toLowerCase()}`;
-			if (visited.has(key)) continue;
-			visited.add(key);
-			if ((pack.mods || []).some((m) => m.project_id === depId || m.slug === depId.toLowerCase())) {
-				continue;
-			}
-			try {
-				const vParams = new URLSearchParams({
-					platform,
-					loader: pack.mod_loader.toLowerCase(),
-					mc_version: pack.mc_version
-				});
-				const vRes = await apiFetch(
-					`/api/v1/servers/none/mods/${depId}/versions?${vParams.toString()}`
-				);
-				if (!vRes.ok) continue;
-				const vData = await vRes.json();
-				const versions = vData.versions || [];
-				if (versions.length === 0) continue;
-				const ver = versions[0];
-				const depSlug = depId.toLowerCase();
-				if (visited.has(`slug:${depSlug}`)) continue;
-				visited.add(`slug:${depSlug}`);
-				const depMod: ModItem = {
-					slug: depSlug,
-					name: ver.name || ver.version_number || depSlug,
-					file_name: ver.file_name || ver.fileName || 'mod.jar',
-					side,
-					platform,
-					project_id: depId,
-					version_id: ver.id,
-					download_url: ver.download_url || ver.downloadUrl || '',
-					file_size: ver.file_size || ver.fileSize,
-					pinned: false
-				};
-				const addRes = await apiFetch(`/api/v1/packwiz/packs/${packId}/mods`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(depMod)
-				});
-				if (!addRes.ok) continue;
-				added++;
-				added += await resolveAndAddDependencies(
-					ver.dependencies || [],
-					platform,
-					side,
-					depth + 1,
-					visited
-				);
-			} catch (err) {
-				console.warn(`Skipping unresolvable dependency ${depId}:`, err);
-			}
-		}
-		return added;
 	}
 
 	async function handleAddUrlMod() {
