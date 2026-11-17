@@ -31,6 +31,7 @@ import { ConfigService } from '$lib/proto/carbonpanel/v1/config_pb';
 import { FileService } from '$lib/proto/carbonpanel/v1/file_pb';
 import { MinecraftService } from '$lib/proto/carbonpanel/v1/minecraft_pb';
 import { ModService } from '$lib/proto/carbonpanel/v1/mod_pb';
+import { ModBrowseService } from '$lib/proto/carbonpanel/v1/mod_browse_pb';
 import { ModpackService } from '$lib/proto/carbonpanel/v1/modpack_pb';
 import { ProxyService } from '$lib/proto/carbonpanel/v1/proxy_pb';
 import { ServerService } from '$lib/proto/carbonpanel/v1/server_pb';
@@ -144,6 +145,7 @@ export class RpcClient {
 	public readonly file: Client<typeof FileService>;
 	public readonly minecraft: Client<typeof MinecraftService>;
 	public readonly mod: Client<typeof ModService>;
+	public readonly modBrowse: Client<typeof ModBrowseService>;
 	public readonly modpack: Client<typeof ModpackService>;
 	public readonly proxy: Client<typeof ProxyService>;
 	public readonly server: Client<typeof ServerService>;
@@ -166,6 +168,7 @@ export class RpcClient {
 		this.file = createClient(FileService, transport);
 		this.minecraft = createClient(MinecraftService, transport);
 		this.mod = createClient(ModService, transport);
+		this.modBrowse = createClient(ModBrowseService, transport);
 		this.modpack = createClient(ModpackService, transport);
 		this.proxy = createClient(ProxyService, transport);
 		this.server = createClient(ServerService, transport);

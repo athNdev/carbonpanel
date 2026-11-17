@@ -115,6 +115,35 @@ type InstallModsResponse struct {
 	Message   string   `json:"message"`
 }
 
+// ModBrowseError carries the HTTP status and message a provider-backed browse
+// operation wants to report. It is the shared failure contract between the
+// legacy JSON adapter and the generated ModBrowseService: both reproduce the
+// same status (or Connect code) and message instead of inventing policy twice.
+type ModBrowseError struct {
+	Status  int
+	Message string
+}
+
+func (e *ModBrowseError) Error() string { return e.Message }
+
+// ModSearchParams are the raw browse filters; empty loader/mc_version/side are
+// resolved against the target server by search so both transports share the
+// same defaulting policy.
+type ModSearchParams struct {
+	Query, Platform, Loader, MCVersion, Side string
+}
+
+// ModVersionParams are the raw version-lookup filters.
+type ModVersionParams struct {
+	Platform, Loader, MCVersion string
+}
+
+// ModInstallActor is the audit identity for an install. Both transports fill
+// the same fields so activity entries are identical.
+type ModInstallActor struct {
+	ID, Name, IP string
+}
+
 // ModOnlineManager handles searching, fetching versions and 1-click installing mods
 type ModOnlineManager struct {
 	store             *storage.Store
@@ -234,42 +263,62 @@ func normalizeLoaderName(raw string) string {
 }
 
 func (m *ModOnlineManager) handleSearch(w http.ResponseWriter, r *http.Request, server *storage.Server) {
-	query := r.URL.Query().Get("query")
-	platform := strings.ToLower(r.URL.Query().Get("platform"))
+	results, err := m.Search(r.Context(), server, ModSearchParams{
+		Query:     r.URL.Query().Get("query"),
+		Platform:  r.URL.Query().Get("platform"),
+		Loader:    r.URL.Query().Get("loader"),
+		MCVersion: r.URL.Query().Get("mc_version"),
+		Side:      r.URL.Query().Get("side"),
+	})
+	if err != nil {
+		writeModBrowseError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"results": results,
+		"count":   len(results),
+	})
+}
+
+// Search is the shared mod browse operation. Both the legacy JSON adapter and
+// the generated ModBrowseService call it; provider selection, credential
+// resolution and side filtering live here so the two transports cannot drift.
+func (m *ModOnlineManager) Search(ctx context.Context, server *storage.Server, p ModSearchParams) ([]SearchModResult, error) {
+	platform := strings.ToLower(p.Platform)
 	if platform == "" {
 		platform = "modrinth"
 	}
 
-	loader := normalizeLoaderName(r.URL.Query().Get("loader"))
+	loader := normalizeLoaderName(p.Loader)
 	if loader == "" && server != nil {
 		loader = normalizeLoaderName(string(server.ModLoader))
 	}
-	mcVersion := strings.TrimSpace(r.URL.Query().Get("mc_version"))
+	mcVersion := strings.TrimSpace(p.MCVersion)
 	if mcVersion == "" && server != nil {
 		mcVersion = strings.TrimSpace(server.MCVersion)
 	}
-	side := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("side")))
+	side := strings.ToLower(strings.TrimSpace(p.Side))
 	if side == "" && server != nil && server.ID != "" && server.ID != "none" {
 		side = "server"
 	}
 
-	installedMods := installedModJars(r.Context(), m.store, server)
+	installedMods := installedModJars(ctx, m.store, server)
 
-	globalSettings, _, _ := m.store.GetGlobalSettings(r.Context())
+	globalSettings, _, _ := m.store.GetGlobalSettings(ctx)
 
 	var results []SearchModResult
 
 	if platform == "curseforge" {
 		apiKey := ""
 		if server != nil && server.ID != "" && server.ID != "none" {
-			if sCfg, err := m.store.GetServerConfig(r.Context(), server.ID); err == nil && sCfg != nil && sCfg.CFAPIKey != nil && *sCfg.CFAPIKey != "" {
+			if sCfg, err := m.store.GetServerConfig(ctx, server.ID); err == nil && sCfg != nil && sCfg.CFAPIKey != nil && *sCfg.CFAPIKey != "" {
 				apiKey = *sCfg.CFAPIKey
 			}
 		}
 		if apiKey == "" && globalSettings != nil && globalSettings.CFAPIKey != nil {
 			apiKey = *globalSettings.CFAPIKey
 		}
-		results = m.searchCurseForge(r.Context(), apiKey, query, loader, mcVersion, installedMods)
+		results = m.searchCurseForge(ctx, apiKey, p.Query, loader, mcVersion, installedMods)
 	} else {
 		// Modrinth
 		token := ""
@@ -282,7 +331,7 @@ func (m *ModOnlineManager) handleSearch(w http.ResponseWriter, r *http.Request, 
 				ua = *globalSettings.ModrinthUserAgent
 			}
 		}
-		results = m.searchModrinth(r.Context(), token, ua, query, loader, mcVersion, installedMods)
+		results = m.searchModrinth(ctx, token, ua, p.Query, loader, mcVersion, installedMods)
 	}
 
 	// Apply side filter if requested (e.g. side=server)
@@ -297,10 +346,7 @@ func (m *ModOnlineManager) handleSearch(w http.ResponseWriter, r *http.Request, 
 		results = serverResults
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"results": results,
-		"count":   len(results),
-	})
+	return results, nil
 }
 
 func (m *ModOnlineManager) searchModrinth(ctx context.Context, token, ua, query, loader, mcVersion string, installed map[string]bool) []SearchModResult {
@@ -392,61 +438,92 @@ func (m *ModOnlineManager) searchCurseForge(ctx context.Context, apiKey, query, 
 }
 
 func (m *ModOnlineManager) handleVersions(w http.ResponseWriter, r *http.Request, server *storage.Server, slug string) {
-	platform := strings.ToLower(r.URL.Query().Get("platform"))
+	versions, browseErr := m.Versions(r.Context(), server, slug, ModVersionParams{
+		Platform:  r.URL.Query().Get("platform"),
+		Loader:    r.URL.Query().Get("loader"),
+		MCVersion: r.URL.Query().Get("mc_version"),
+	})
+	if browseErr != nil {
+		writeModBrowseError(w, browseErr)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"versions": versions,
+		"count":    len(versions),
+	})
+}
+
+// Versions is the shared version-lookup operation. Provider selection, default
+// resolution, file/dependency mapping and provider error mapping are identical
+// for the legacy JSON adapter and the generated ModBrowseService.
+func (m *ModOnlineManager) Versions(ctx context.Context, server *storage.Server, slug string, p ModVersionParams) ([]ModVersionItem, *ModBrowseError) {
+	platform := strings.ToLower(p.Platform)
 	if platform == "" {
 		platform = "modrinth"
 	}
 
-	loader := normalizeLoaderName(r.URL.Query().Get("loader"))
+	loader := normalizeLoaderName(p.Loader)
 	if loader == "" && server != nil {
 		loader = normalizeLoaderName(string(server.ModLoader))
 	}
-	mcVersion := strings.TrimSpace(r.URL.Query().Get("mc_version"))
+	mcVersion := strings.TrimSpace(p.MCVersion)
 	if mcVersion == "" && server != nil {
 		mcVersion = strings.TrimSpace(server.MCVersion)
 	}
 
-	globalSettings, _, _ := m.store.GetGlobalSettings(r.Context())
+	globalSettings, _, _ := m.store.GetGlobalSettings(ctx)
 
 	if platform == "curseforge" {
 		apiKey := ""
 		if server != nil && server.ID != "" && server.ID != "none" {
-			if sCfg, err := m.store.GetServerConfig(r.Context(), server.ID); err == nil && sCfg != nil && sCfg.CFAPIKey != nil && *sCfg.CFAPIKey != "" {
+			if sCfg, err := m.store.GetServerConfig(ctx, server.ID); err == nil && sCfg != nil && sCfg.CFAPIKey != nil && *sCfg.CFAPIKey != "" {
 				apiKey = *sCfg.CFAPIKey
 			}
 		}
 		if apiKey == "" && globalSettings != nil && globalSettings.CFAPIKey != nil {
 			apiKey = *globalSettings.CFAPIKey
 		}
-		m.handleCurseForgeVersions(w, r, apiKey, slug, loader, mcVersion)
-	} else {
-		token := ""
-		ua := "CarbonPanel/1.0 (CarbonPanel-admin)"
-		if globalSettings != nil {
-			if globalSettings.ModrinthToken != nil && *globalSettings.ModrinthToken != "" {
-				token = *globalSettings.ModrinthToken
-			}
-			if globalSettings.ModrinthUserAgent != nil && *globalSettings.ModrinthUserAgent != "" {
-				ua = *globalSettings.ModrinthUserAgent
-			}
-		}
-		m.handleModrinthVersions(w, r, token, ua, slug, loader, mcVersion)
+		return m.curseForgeVersions(ctx, apiKey, slug, loader, mcVersion)
 	}
+
+	token := ""
+	ua := "CarbonPanel/1.0 (CarbonPanel-admin)"
+	if globalSettings != nil {
+		if globalSettings.ModrinthToken != nil && *globalSettings.ModrinthToken != "" {
+			token = *globalSettings.ModrinthToken
+		}
+		if globalSettings.ModrinthUserAgent != nil && *globalSettings.ModrinthUserAgent != "" {
+			ua = *globalSettings.ModrinthUserAgent
+		}
+	}
+	return m.modrinthVersions(ctx, token, ua, slug, loader, mcVersion)
 }
 
+// handleModrinthVersions is the legacy JSON adapter kept for callers that use
+// the HTTP form directly; the policy lives in modrinthVersions.
 func (m *ModOnlineManager) handleModrinthVersions(w http.ResponseWriter, r *http.Request, token, ua, slug, loader, mcVersion string) {
+	versions, browseErr := m.modrinthVersions(r.Context(), token, ua, slug, loader, mcVersion)
+	if browseErr != nil {
+		writeModBrowseError(w, browseErr)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"versions": versions,
+		"count":    len(versions),
+	})
+}
+
+func (m *ModOnlineManager) modrinthVersions(ctx context.Context, token, ua, slug, loader, mcVersion string) ([]ModVersionItem, *ModBrowseError) {
 	provider := m.modrinthClient(token, ua)
-	rawVersions, err := provider.GetVersions(r.Context(), slug, loader, mcVersion)
+	rawVersions, err := provider.GetVersions(ctx, slug, loader, mcVersion)
 	if err != nil {
 		var providerErr *indexers.IndexerError
 		if errors.As(err, &providerErr) && providerErr.StatusCode != 0 {
-			http.Error(w, fmt.Sprintf("modrinth returned %d", providerErr.StatusCode), providerErr.StatusCode)
+			return nil, &ModBrowseError{Status: providerErr.StatusCode, Message: fmt.Sprintf("modrinth returned %d", providerErr.StatusCode)}
 		} else if errors.As(err, &providerErr) && providerErr.Kind == indexers.ErrDecode {
-			http.Error(w, "failed to parse versions", http.StatusInternalServerError)
-		} else {
-			http.Error(w, fmt.Sprintf("failed to fetch versions: %v", err), http.StatusBadGateway)
+			return nil, &ModBrowseError{Status: http.StatusInternalServerError, Message: "failed to parse versions"}
 		}
-		return
+		return nil, &ModBrowseError{Status: http.StatusBadGateway, Message: fmt.Sprintf("failed to fetch versions: %v", err)}
 	}
 	var versions []ModVersionItem
 	for _, v := range rawVersions {
@@ -491,12 +568,9 @@ func (m *ModOnlineManager) handleModrinthVersions(w http.ResponseWriter, r *http
 		})
 	}
 
-	m.enrichModrinthDependencyTitles(r.Context(), token, ua, versions)
+	m.enrichModrinthDependencyTitles(ctx, token, ua, versions)
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"versions": versions,
-		"count":    len(versions),
-	})
+	return versions, nil
 }
 
 func (m *ModOnlineManager) resolveCurseForgeSlug(ctx context.Context, apiKey, slug string) string {
@@ -532,24 +606,37 @@ func curseForgeLoader(loader string) fuego.ModLoaderType {
 	return fuego.ModLoaderAny
 }
 
+// handleCurseForgeVersions is the legacy JSON adapter kept for callers that use
+// the HTTP form directly; the policy lives in curseForgeVersions.
 func (m *ModOnlineManager) handleCurseForgeVersions(w http.ResponseWriter, r *http.Request, apiKey, modID, loader, mcVersion string) {
+	versions, browseErr := m.curseForgeVersions(r.Context(), apiKey, modID, loader, mcVersion)
+	if browseErr != nil {
+		writeModBrowseError(w, browseErr)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"versions": versions,
+		"count":    len(versions),
+	})
+}
+
+func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID, loader, mcVersion string) ([]ModVersionItem, *ModBrowseError) {
 	// If modID is a slug (contains non-digits), resolve to numeric ID
 	if _, err := strconv.Atoi(modID); err != nil {
-		if resolved := m.resolveCurseForgeSlug(r.Context(), apiKey, modID); resolved != "" {
+		if resolved := m.resolveCurseForgeSlug(ctx, apiKey, modID); resolved != "" {
 			modID = resolved
 		}
 	}
 
 	id, err := strconv.Atoi(modID)
 	if err != nil {
-		http.Error(w, "CurseForge project not found", http.StatusNotFound)
-		return
+		return nil, &ModBrowseError{Status: http.StatusNotFound, Message: "CurseForge project not found"}
 	}
 	provider := m.curseForgeClient(apiKey)
-	files, err := provider.GetFiles(r.Context(), id, fuego.FilesOptions{PageSize: 50, GameVersion: mcVersion, ModLoader: curseForgeLoader(loader)})
+	files, err := provider.GetFiles(ctx, id, fuego.FilesOptions{PageSize: 50, GameVersion: mcVersion, ModLoader: curseForgeLoader(loader)})
 	var providerErr *indexers.IndexerError
-	if err != nil && r.Context().Err() == nil && (!errors.As(err, &providerErr) || providerErr.Kind != indexers.ErrDecode) {
-		files, err = provider.GetFiles(r.Context(), id, fuego.FilesOptions{PageSize: 50})
+	if err != nil && ctx.Err() == nil && (!errors.As(err, &providerErr) || providerErr.Kind != indexers.ErrDecode) {
+		files, err = provider.GetFiles(ctx, id, fuego.FilesOptions{PageSize: 50})
 	}
 	if err != nil {
 		status := http.StatusBadGateway
@@ -561,8 +648,7 @@ func (m *ModOnlineManager) handleCurseForgeVersions(w http.ResponseWriter, r *ht
 				status = http.StatusInternalServerError
 			}
 		}
-		http.Error(w, fmt.Sprintf("failed to fetch curseforge files: %v", err), status)
-		return
+		return nil, &ModBrowseError{Status: status, Message: fmt.Sprintf("failed to fetch curseforge files: %v", err)}
 	}
 
 	var versions []ModVersionItem
@@ -664,27 +750,19 @@ func (m *ModOnlineManager) handleCurseForgeVersions(w http.ResponseWriter, r *ht
 		}
 	}
 
-	m.enrichCurseForgeDependencyTitles(r.Context(), apiKey, versions)
+	m.enrichCurseForgeDependencyTitles(ctx, apiKey, versions)
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"versions": versions,
-		"count":    len(versions),
-	})
+	return versions, nil
 }
 
 // auditModInstall records an online mod install in the Activity tab, failures
 // included. A failed install used to surface only as a toast, leaving no
 // trace of what was tried and why it failed.
-func (m *ModOnlineManager) auditModInstall(r *http.Request, server *storage.Server, success bool, installed, errs []string) {
+func (m *ModOnlineManager) auditModInstall(server *storage.Server, success bool, installed, errs []string, actor ModInstallActor) {
 	if m.store == nil || server == nil {
 		return
 	}
-	actorID, actorName := "", ""
-	if m.authManager != nil {
-		if user, err := m.authManager.AuthenticateFromHeader(r.Context(), r.Header.Get("Authorization")); err == nil && user != nil {
-			actorID, actorName = user.ID, user.Username
-		}
-	}
+	actorID, actorName := actor.ID, actor.Name
 	props, _ := json.Marshal(map[string]any{
 		"success":   success,
 		"installed": installed,
@@ -693,7 +771,7 @@ func (m *ModOnlineManager) auditModInstall(r *http.Request, server *storage.Serv
 	if err := activity.Log(m.store.DB(), activity.Entry{
 		ActorID:    actorID,
 		ActorName:  actorName,
-		IP:         r.RemoteAddr,
+		IP:         actor.IP,
 		Event:      activity.EventModInstall,
 		SubjectTyp: "server",
 		SubjectID:  server.ID,
@@ -704,36 +782,54 @@ func (m *ModOnlineManager) auditModInstall(r *http.Request, server *storage.Serv
 }
 
 func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request, server *storage.Server) {
-	modsDir, err := modsDirectory(r.Context(), m.store, server, true)
-	if err != nil {
-		if nodestorage.IsUnavailable(err) {
-			m.log.Error("mod install refused: %v", err)
-			http.Error(w, "node storage is not available", http.StatusServiceUnavailable)
-			return
-		}
-		m.log.Error("mod install storage: %v", err)
-		http.Error(w, "failed to resolve mods directory", http.StatusInternalServerError)
-		return
-	}
-	if modsDir == "" {
-		http.Error(w, "server does not support mods", http.StatusBadRequest)
-		return
-	}
-
-	if err := os.MkdirAll(modsDir, 0755); err != nil {
-		http.Error(w, fmt.Sprintf("failed to create mods directory: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	var req InstallModsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if len(req.Items) == 0 {
-		http.Error(w, "no mods specified to install", http.StatusBadRequest)
+	actor := ModInstallActor{IP: r.RemoteAddr}
+	if m.authManager != nil {
+		if user, err := m.authManager.AuthenticateFromHeader(r.Context(), r.Header.Get("Authorization")); err == nil && user != nil {
+			actor.ID, actor.Name = user.ID, user.Username
+		}
+	}
+
+	resp, browseErr := m.Install(r.Context(), server, req.Items, actor)
+	if browseErr != nil {
+		writeModBrowseError(w, browseErr)
 		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// Install is the shared one-click install operation. Filename confinement,
+// per-item error aggregation, audit logging and message formatting are shared
+// by the legacy JSON adapter and the generated ModBrowseService.
+func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, items []InstallModItem, actor ModInstallActor) (InstallModsResponse, *ModBrowseError) {
+	if server == nil {
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusBadRequest, Message: "cannot install mods without a target server"}
+	}
+
+	modsDir, err := modsDirectory(ctx, m.store, server, true)
+	if err != nil {
+		if nodestorage.IsUnavailable(err) {
+			m.log.Error("mod install refused: %v", err)
+			return InstallModsResponse{}, &ModBrowseError{Status: http.StatusServiceUnavailable, Message: "node storage is not available"}
+		}
+		m.log.Error("mod install storage: %v", err)
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusInternalServerError, Message: "failed to resolve mods directory"}
+	}
+	if modsDir == "" {
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusBadRequest, Message: "server does not support mods"}
+	}
+
+	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusInternalServerError, Message: fmt.Sprintf("failed to create mods directory: %v", err)}
+	}
+
+	if len(items) == 0 {
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusBadRequest, Message: "no mods specified to install"}
 	}
 
 	resp := InstallModsResponse{
@@ -742,7 +838,7 @@ func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request,
 		Errors:    make([]string, 0),
 	}
 
-	for _, item := range req.Items {
+	for _, item := range items {
 		if item.DownloadURL == "" || strings.TrimSpace(item.FileName) == "" {
 			resp.Errors = append(resp.Errors, fmt.Sprintf("skipped %s: missing url or filename", item.Name))
 			continue
@@ -791,7 +887,7 @@ func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request,
 		resp.Installed = append(resp.Installed, fileName)
 	}
 
-	m.auditModInstall(r, server, resp.Success, resp.Installed, resp.Errors)
+	m.auditModInstall(server, resp.Success, resp.Installed, resp.Errors, actor)
 
 	if len(resp.Installed) == 0 && len(resp.Errors) > 0 {
 		resp.Success = false
@@ -802,5 +898,17 @@ func (m *ModOnlineManager) handleInstall(w http.ResponseWriter, r *http.Request,
 		resp.Message = fmt.Sprintf("Successfully installed %d mod(s).", len(resp.Installed))
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
+}
+
+// writeModBrowseError reproduces the legacy HTTP status and message for a
+// shared browse failure. The generated service maps the same type to a Connect
+// code without changing the operation's policy.
+func writeModBrowseError(w http.ResponseWriter, err error) {
+	var browseErr *ModBrowseError
+	if errors.As(err, &browseErr) {
+		http.Error(w, browseErr.Message, browseErr.Status)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusInternalServerError)
 }

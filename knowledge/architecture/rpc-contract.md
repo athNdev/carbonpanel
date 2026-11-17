@@ -31,6 +31,15 @@ nodes/read globally; the compatibility route preserves numeric JSON fields and
 denies missing authentication or authorization dependencies. A node-scoped grant
 cannot authorize a host-wide scan.
 
+Online mod browse is the second compatibility migration: generated
+`ModBrowseService` (SearchMods, GetModVersions, InstallMods) and the legacy
+`/api/v1/servers/{id}/mods/*` JSON routes share one `ModOnlineManager` operation.
+Browse/version lookup require mods/read and install requires mods/create, both
+on the global `*` object; a server-scoped grant cannot authorize global browse
+and Studio's `none` browse mode stays authorized. The console dialog uses the
+generated client; Studio callers still use the adapter during the deprecation
+window.
+
 # Flow
 
 1. Edit the `.proto` file.

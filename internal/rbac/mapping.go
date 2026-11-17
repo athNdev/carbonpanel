@@ -109,6 +109,15 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.ModService/GetFabricOptimizationStack":     {Resource: ResourceMods, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.ModService/InstallFabricOptimizationStack": {Resource: ResourceMods, Action: ActionUpdate, ObjectIDField: "server_id"},
 
+	// ModBrowseService mirrors the legacy /api/v1/servers/{id}/mods/* adapter:
+	// mods/read for browse and version lookup, mods/create for install. The
+	// legacy handler enforced these actions against the global "*" object;
+	// keeping no ObjectIDField preserves that exact scope and lets Studio's
+	// explicit "none" server browse mode through the same permission check.
+	"/carbonpanel.v1.ModBrowseService/SearchMods":     {Resource: ResourceMods, Action: ActionRead},
+	"/carbonpanel.v1.ModBrowseService/GetModVersions": {Resource: ResourceMods, Action: ActionRead},
+	"/carbonpanel.v1.ModBrowseService/InstallMods":    {Resource: ResourceMods, Action: ActionCreate},
+
 	// ─── DatapackService (world datapacks, scoped like mods) ─────────────────────
 	"/carbonpanel.v1.DatapackService/SearchDatapacks": {Resource: ResourceMods, Action: ActionRead},
 	"/carbonpanel.v1.DatapackService/InstallDatapack": {Resource: ResourceMods, Action: ActionCreate, ObjectIDField: "server_id"},
