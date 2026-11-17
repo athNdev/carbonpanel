@@ -6,7 +6,9 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - proto/carbonpanel/v1/worldview.proto
+  - internal/worldview
   - internal/rpc
+  - web/carbon-panel/src/routes/worlds
 sources:
   - title: ADR 0015 - first-class world viewing through an authenticated renderer proxy
     resource: ../../docs/adr/0015-world-viewing-renderer-proxy.md

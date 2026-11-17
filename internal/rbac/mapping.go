@@ -259,4 +259,17 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.UploadService/InitUpload":      {Resource: ResourceUploads, Action: ActionCreate},
 	"/carbonpanel.v1.UploadService/UploadChunk":     {Resource: ResourceUploads, Action: ActionCreate},
 	"/carbonpanel.v1.UploadService/CancelUpload":    {Resource: ResourceUploads, Action: ActionDelete},
+
+	// ── WorldViewService (OSS-354/355/357) ──────────────────────────
+	// World viewing is observation-only. ListWorldViewTargets is global and
+	// filtered per server in the service; every other procedure is scoped to a
+	// concrete server_id. Map reads never imply player observation or overlay
+	// edits: those actions are mapped separately and are admin-only by default.
+	"/carbonpanel.v1.WorldViewService/ListWorldViewTargets": {Resource: ResourceWorldView, Action: ActionRead},
+	"/carbonpanel.v1.WorldViewService/GetWorldViewStatus":    {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/GetWorldViewSession":   {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/ListCapabilities":      {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/ListMapOverlays":       {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/SetMapOverlay":         {Resource: ResourceWorldView, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/SetPlayerVisibility":   {Resource: ResourceWorldView, Action: ActionObservePlayers, ObjectIDField: "server_id"},
 }

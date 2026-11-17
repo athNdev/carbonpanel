@@ -36,6 +36,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
 	"github.com/athNdev/carbon-panel/internal/rpc/services"
 	"github.com/athNdev/carbon-panel/internal/scheduler"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 	"github.com/athNdev/carbon-panel/internal/ws"
 	"github.com/athNdev/carbon-panel/pkg/download"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -82,6 +83,11 @@ type Server struct {
 	// operationService backs SetReconcilerNudge. It is created in
 	// registerServices, so it may be nil on a server that never registered.
 	operationService *services.OperationService
+
+	// worldViewProxy is the authenticated same-origin renderer proxy. It is
+	// created in registerServices and mounted before the frontend catch-all
+	// in setupHandler.
+	worldViewProxy http.Handler
 }
 
 // Creates new Connect RPC server
@@ -242,6 +248,7 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.TaskServiceName,
 		carbonpanelv1connect.UploadServiceName,
 		carbonpanelv1connect.UserServiceName,
+		carbonpanelv1connect.WorldViewServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -296,6 +303,13 @@ func (s *Server) setupHandler() {
 	}
 	s.metricsHandler = metricsHandler
 	mux.Handle("/api/v2/metrics/", metricsHandler)
+
+	// Authenticated same-origin renderer proxy (ADR 0015). It must be mounted
+	// before the frontend catch-all, otherwise unknown map paths return the
+	// SPA shell instead of a fail-closed 401/403/503.
+	if s.worldViewProxy != nil {
+		mux.Handle(worldview.ProxyPrefix, s.worldViewProxy)
+	}
 
 	// Serve frontend for non-RPC routes
 	s.setupFrontend(mux)
@@ -357,6 +371,36 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
 	moduleService.SetStorageResolver(s.storageResolver)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
+
+	// World viewing is observation-only. The renderer topology comes from
+	// explicit operator configuration: with no node-local endpoint every world
+	// reports ABSENT instead of probing a guessed port or falling back to a
+	// controller-local renderer.
+	worldViewConfig := worldview.Config{AllowedHosts: s.config.WorldView.AllowedHosts}
+	for _, ep := range s.config.WorldView.Endpoints {
+		worldViewConfig.Endpoints = append(worldViewConfig.Endpoints, worldview.Endpoint{
+			NodeID:     ep.NodeID,
+			ServerID:   ep.ServerID,
+			Kind:       worldview.RendererKind(strings.ToLower(strings.TrimSpace(ep.Kind))),
+			Host:       ep.Host,
+			Port:       ep.Port,
+			BasePath:   ep.BasePath,
+			HealthPath: ep.HealthPath,
+			PlayerFeed: ep.PlayerFeed,
+		})
+	}
+	worldViewResolver := worldview.NewResolver(
+		worldViewConfig,
+		docker.NewLocator(s.clientPool, s.docker, s.store),
+	)
+	worldViewService := worldview.NewService(worldview.ServiceDeps{
+		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver,
+		Auditor: worldview.NewAuditLogger(s.store.DB()), Log: s.log,
+	})
+	s.worldViewProxy = worldview.NewProxyHandler(worldview.ProxyDeps{
+		Auth: s.authManager, Authorizer: s.enforcer, Subusers: s.store, Servers: s.store,
+		Resolver: worldViewResolver, Sessions: worldViewService.SessionRegistry(), Log: s.log,
+	})
 
 	// Register service handlers
 	authPath, authHandler := carbonpanelv1connect.NewAuthServiceHandler(authService, opts...)
@@ -421,6 +465,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	uploadPath, uploadHandler := carbonpanelv1connect.NewUploadServiceHandler(uploadService, opts...)
 	mux.Handle(uploadPath, uploadHandler)
+
+	worldViewPath, worldViewHandler := carbonpanelv1connect.NewWorldViewServiceHandler(worldViewService, opts...)
+	mux.Handle(worldViewPath, worldViewHandler)
 }
 
 // The HTTP handler for the server

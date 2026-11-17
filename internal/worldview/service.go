@@ -1,0 +1,448 @@
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+package worldview
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"connectrpc.com/connect"
+	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/athNdev/carbon-panel/internal/activity"
+	"github.com/athNdev/carbon-panel/internal/auth"
+	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/rbac"
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+)
+
+const (
+	auditEventOverlaySet      = "world_view.overlay.set"
+	auditEventObservePlayers  = "world_view.observe_players"
+	auditSubjectTypeServer    = "server"
+	observationSourceResolver = "worldview.resolver"
+	observationSourcePanel    = "panel.visibility-flag"
+)
+
+// Store is the persisted-data seam used by the service. *storage.Store
+// satisfies it; no new global state is introduced.
+type Store interface {
+	ListServers(ctx context.Context) ([]*storage.Server, error)
+	GetServer(ctx context.Context, id string) (*storage.Server, error)
+	GetServerConfig(ctx context.Context, id string) (*storage.ServerConfig, error)
+	SubuserPermissions(ctx context.Context, serverID, userID string) []string
+}
+
+// ServiceDeps are the dependencies of the WorldViewService.
+type ServiceDeps struct {
+	Store     Store
+	Authorizer Authorizer
+	Resolver  *Resolver
+	Sessions  *SessionRegistry
+	Overlays  *OverlayStore
+	Auditor   AuditLogger
+	Log       Logger
+}
+
+// Service implements the generated WorldViewServiceHandler. It is observation
+// only: map reads are filtered per server, player observation and overlay
+// edits use distinct actions, and all mutations are audited.
+type Service struct {
+	deps ServiceDeps
+}
+
+func NewService(deps ServiceDeps) *Service {
+	if deps.Sessions == nil {
+		deps.Sessions = NewSessionRegistry()
+	}
+	if deps.Overlays == nil {
+		deps.Overlays = NewOverlayStore()
+	}
+	return &Service{deps: deps}
+}
+
+// SessionRegistry exposes the registry to the composition root so the
+// same-origin proxy validates the exact keys this service issued.
+func (s *Service) SessionRegistry() *SessionRegistry { return s.deps.Sessions }
+
+func (s *Service) ListWorldViewTargets(ctx context.Context, _ *connect.Request[v1.ListWorldViewTargetsRequest]) (*connect.Response[v1.ListWorldViewTargetsResponse], error) {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
+	}
+	servers, err := s.deps.Store.ListServers(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list servers: %w", err))
+	}
+	targets := make([]*v1.WorldViewTarget, 0, len(servers))
+	for _, server := range servers {
+		if server == nil || !s.authorized(ctx, user, server.ID, rbac.ActionRead) {
+			continue
+		}
+		targets = append(targets, s.targetFor(ctx, server, nil))
+	}
+	return connect.NewResponse(&v1.ListWorldViewTargetsResponse{Targets: targets}), nil
+}
+
+func (s *Service) GetWorldViewStatus(ctx context.Context, req *connect.Request[v1.GetWorldViewStatusRequest]) (*connect.Response[v1.GetWorldViewStatusResponse], error) {
+	_, serverID, err := s.requestContext(ctx, req.Msg.GetServerId(), rbac.ActionRead)
+	if err != nil {
+		return nil, err
+	}
+	server, err := s.deps.Store.GetServer(ctx, serverID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found: %w", err))
+	}
+	ref := req.Msg.GetWorldRef()
+	if ref != nil && ref.GetServerId() != "" && ref.GetServerId() != serverID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
+	}
+	return connect.NewResponse(&v1.GetWorldViewStatusResponse{Target: s.targetFor(ctx, server, ref)}), nil
+}
+
+func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[v1.GetWorldViewSessionRequest]) (*connect.Response[v1.GetWorldViewSessionResponse], error) {
+	user, serverID, err := s.requestContext(ctx, req.Msg.GetServerId(), rbac.ActionRead)
+	if err != nil {
+		return nil, err
+	}
+	server, err := s.deps.Store.GetServer(ctx, serverID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found: %w", err))
+	}
+	ref := req.Msg.GetWorldRef()
+	if ref != nil && ref.GetServerId() != "" && ref.GetServerId() != serverID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
+	}
+	target := s.targetFor(ctx, server, ref)
+	if target.GetRendererState() != v1.RendererState_RENDERER_STATE_READY {
+		reason := target.GetError()
+		if reason == "" {
+			reason = "renderer is not ready; no map session was issued"
+		}
+		return connect.NewResponse(&v1.GetWorldViewSessionResponse{
+			State: target.GetRendererState(), Reason: reason,
+		}), nil
+	}
+
+	key, expires := s.deps.Sessions.Issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL)
+	if key == "" {
+		return nil, connect.NewError(connect.CodeInternal, errors.New("could not issue a map session key"))
+	}
+	return connect.NewResponse(&v1.GetWorldViewSessionResponse{
+		ProxyPath: ProxyPrefix + key + "/",
+		ExpiresAt: timestamppb.New(expires),
+		State:     v1.RendererState_RENDERER_STATE_READY,
+	}), nil
+}
+
+func (s *Service) ListCapabilities(ctx context.Context, req *connect.Request[v1.ListCapabilitiesRequest]) (*connect.Response[v1.ListCapabilitiesResponse], error) {
+	_, serverID, err := s.requestContext(ctx, req.Msg.GetServerId(), rbac.ActionRead)
+	if err != nil {
+		return nil, err
+	}
+	server, err := s.deps.Store.GetServer(ctx, serverID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("server not found: %w", err))
+	}
+	renderer, resolveErr := s.resolver().Resolve(ctx, canonicalNodeID(server.NodeID), serverID)
+	if resolveErr != nil || renderer == nil {
+		detail := "renderer is not configured; map capabilities are unavailable"
+		if errors.Is(resolveErr, ErrUnsupportedRenderer) {
+			detail = "the configured renderer has no verified adapter"
+		} else if errors.Is(resolveErr, ErrInvalidEndpoint) {
+			detail = "renderer endpoint configuration is invalid for this node"
+		} else if resolveErr != nil && !errors.Is(resolveErr, ErrRendererUnavailable) {
+			detail = "renderer is temporarily unavailable; see panel logs"
+		}
+		caps := make([]*v1.Capability, 0, len(AllCapabilityNames))
+		for _, name := range AllCapabilityNames {
+			caps = append(caps, capability(name, false, detail))
+		}
+		return connect.NewResponse(&v1.ListCapabilitiesResponse{Capabilities: caps}), nil
+	}
+	return connect.NewResponse(&v1.ListCapabilitiesResponse{
+		RendererType: renderer.Type(),
+		Capabilities: renderer.Capabilities(),
+	}), nil
+}
+
+func (s *Service) ListMapOverlays(ctx context.Context, req *connect.Request[v1.ListMapOverlaysRequest]) (*connect.Response[v1.ListMapOverlaysResponse], error) {
+	user, serverID, err := s.requestContext(ctx, req.Msg.GetServerId(), rbac.ActionRead)
+	if err != nil {
+		return nil, err
+	}
+	ref := req.Msg.GetWorldRef()
+	if ref == nil || worldKey(ref) == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref is required"))
+	}
+	if ref.GetServerId() != "" && ref.GetServerId() != serverID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
+	}
+	all := s.deps.Overlays.List(serverID, worldKey(ref), req.Msg.GetDimension())
+	mayObserve := s.authorized(ctx, user, serverID, rbac.ActionObservePlayers)
+	out := make([]*v1.MapOverlay, 0, len(all))
+	for _, overlay := range all {
+		if overlay.GetSensitive() && !mayObserve {
+			continue
+		}
+		out = append(out, overlay)
+	}
+	return connect.NewResponse(&v1.ListMapOverlaysResponse{Overlays: out}), nil
+}
+
+func (s *Service) SetMapOverlay(ctx context.Context, req *connect.Request[v1.SetMapOverlayRequest]) (*connect.Response[v1.SetMapOverlayResponse], error) {
+	user, serverID, err := s.requestContext(ctx, req.Msg.GetServerId(), rbac.ActionUpdate)
+	if err != nil {
+		return nil, err
+	}
+	overlay := req.Msg.GetOverlay()
+	if overlay == nil || overlay.GetWorldRef() == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("overlay with a world_ref is required"))
+	}
+	if refServer := overlay.GetWorldRef().GetServerId(); refServer != "" && refServer != serverID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("overlay world_ref.server_id does not match server_id"))
+	}
+	stored := cloneOverlay(overlay)
+	stored.ServerId = serverID
+	stored.WorldRef.ServerId = serverID
+	if stored.Id == "" {
+		stored.Id = uuid.NewString()
+	}
+	stored.UpdatedAt = timestamppb.New(time.Now().UTC())
+	properties, _ := json.Marshal(map[string]any{
+		"overlay_id": stored.Id, "world_key": worldKey(stored.WorldRef),
+		"dimension": stored.Dimension, "kind": stored.Kind, "sensitive": stored.Sensitive,
+	})
+	if err := s.audit(activity.Entry{
+		ActorID: user.ID, ActorName: user.Username,
+		Event: auditEventOverlaySet, SubjectTyp: auditSubjectTypeServer, SubjectID: serverID,
+		Properties: string(properties),
+	}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("overlay change was not audited: %w", err))
+	}
+	saved, err := s.deps.Overlays.Set(stored)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	return connect.NewResponse(&v1.SetMapOverlayResponse{Overlay: saved}), nil
+}
+
+func (s *Service) SetPlayerVisibility(ctx context.Context, req *connect.Request[v1.SetPlayerVisibilityRequest]) (*connect.Response[v1.SetPlayerVisibilityResponse], error) {
+	user, serverID, err := s.requestContext(ctx, req.Msg.GetServerId(), rbac.ActionObservePlayers)
+	if err != nil {
+		return nil, err
+	}
+	ref := req.Msg.GetWorldRef()
+	if ref == nil || worldKey(ref) == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref is required"))
+	}
+	if ref.GetServerId() != "" && ref.GetServerId() != serverID {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
+	}
+	properties, _ := json.Marshal(map[string]any{
+		"world_key": worldKey(ref), "visible": req.Msg.GetVisible(),
+	})
+	if err := s.audit(activity.Entry{
+		ActorID: user.ID, ActorName: user.Username,
+		Event: auditEventObservePlayers, SubjectTyp: auditSubjectTypeServer, SubjectID: serverID,
+		Properties: string(properties),
+	}); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("player visibility change was not audited: %w", err))
+	}
+	return connect.NewResponse(&v1.SetPlayerVisibilityResponse{
+		Visible: req.Msg.GetVisible(),
+		Observation: &v1.Observation{
+			Source: observationSourcePanel, ObservedAt: timestamppb.New(time.Now().UTC()),
+			Applicability: "panel-only player visibility flag",
+			Confidence:    "unknown",
+			ConflictNote:  "this flag is not a verified renderer observation; live positions require an explicitly configured player bridge feed",
+		},
+	}), nil
+}
+
+// requestContext re-checks the server scope inside the handler. The interceptor
+// already checked it; this is defense in depth for handlers that can be called
+// directly and keeps subuser grants consistent with ListWorldViewTargets.
+func (s *Service) requestContext(ctx context.Context, serverID, action string) (*auth.AuthenticatedUser, string, error) {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil {
+		return nil, "", connect.NewError(connect.CodeUnauthenticated, errors.New("authentication required"))
+	}
+	if strings.TrimSpace(serverID) == "" {
+		return nil, "", connect.NewError(connect.CodeInvalidArgument, errors.New("server_id is required"))
+	}
+	if !s.authorized(ctx, user, serverID, action) {
+		return nil, "", connect.NewError(connect.CodePermissionDenied, fmt.Errorf("insufficient permissions for %s/%s", rbac.ResourceWorldView, action))
+	}
+	return user, serverID, nil
+}
+
+func (s *Service) authorized(ctx context.Context, user *auth.AuthenticatedUser, serverID, action string) bool {
+	if user == nil || serverID == "" || s.deps.Authorizer == nil {
+		return false
+	}
+	allowed, err := s.deps.Authorizer.Enforce(user.Roles, rbac.ResourceWorldView, action, serverID)
+	if err != nil {
+		s.logError("worldview: RBAC error: %v", err)
+		return false
+	}
+	if !allowed && s.deps.Store != nil {
+		want := rbac.ResourceWorldView + "." + action
+		for _, p := range s.deps.Store.SubuserPermissions(ctx, serverID, user.ID) {
+			if p == want {
+				allowed = true
+				break
+			}
+		}
+	}
+	return allowed
+}
+
+// targetFor builds one honest target. A missing renderer is an onboarding
+// state with an empty level name and unknown confidence, never a guessed folder
+// name or a fabricated freshness timestamp.
+func (s *Service) targetFor(ctx context.Context, server *storage.Server, requested *v1.WorldRef) *v1.WorldViewTarget {
+	nodeID := canonicalNodeID(server.NodeID)
+	var ref *v1.WorldRef
+	if requested == nil {
+		levelName := ""
+		if s.deps.Store != nil {
+			if cfg, cfgErr := s.deps.Store.GetServerConfig(ctx, server.ID); cfgErr == nil {
+				levelName = configuredLevelName(cfg)
+			}
+		}
+		ref = &v1.WorldRef{Kind: v1.WorldRef_KIND_SERVER_LOCAL, ServerId: server.ID, LevelName: levelName}
+	} else {
+		ref = proto.Clone(requested).(*v1.WorldRef)
+		ref.ServerId = server.ID
+	}
+
+	target := &v1.WorldViewTarget{
+		ServerId:     server.ID,
+		WorldRef:     ref,
+		Name:         server.Name,
+		NodeId:       nodeID,
+		RendererType: v1.RendererType_RENDERER_TYPE_UNSPECIFIED,
+		RendererState: v1.RendererState_RENDERER_STATE_ABSENT,
+		Renderer: &v1.RendererDescriptor{
+			Type:        v1.RendererType_RENDERER_TYPE_UNSPECIFIED,
+			WebBasePath: ProxyPrefix,
+		},
+		Freshness: &v1.Observation{
+			Source: observationSourceResolver, Applicability: "renderer endpoint configuration",
+			Confidence:   "unknown",
+			ConflictNote: "no renderer endpoint is configured for this server/node; install and configure a renderer before viewing maps",
+		},
+	}
+
+	renderer, err := s.resolver().Resolve(ctx, nodeID, server.ID)
+	if err != nil || renderer == nil {
+		if errors.Is(err, ErrUnsupportedRenderer) {
+			target.RendererState = v1.RendererState_RENDERER_STATE_UNSUPPORTED
+		} else if err != nil && !errors.Is(err, ErrRendererUnavailable) {
+			target.RendererState = v1.RendererState_RENDERER_STATE_ERROR
+		}
+		if err != nil {
+			// Do not echo endpoint hosts, ports or internal errors to clients.
+			reason := "renderer is temporarily unavailable; see panel logs"
+			switch {
+			case errors.Is(err, ErrUnsupportedRenderer):
+				reason = "the configured renderer has no verified adapter"
+			case errors.Is(err, ErrInvalidEndpoint):
+				reason = "renderer endpoint configuration is invalid for this node"
+			case errors.Is(err, ErrRendererUnavailable):
+				reason = "no renderer endpoint is configured for this server/node; install and configure a renderer"
+			}
+			target.Error = reason
+			target.Freshness.ConflictNote = reason
+		}
+		return target
+	}
+
+	h, healthErr := renderer.Health(ctx)
+	target.RendererType = renderer.Type()
+	if desc := renderer.Descriptor(); desc != nil {
+		if h != nil {
+			desc.Version = h.Version
+		}
+		target.Renderer = desc
+	}
+	if h == nil {
+		target.RendererState = v1.RendererState_RENDERER_STATE_ERROR
+		target.Error = "renderer health probe returned no observation"
+		target.Freshness.Confidence = "unknown"
+		target.Freshness.ConflictNote = target.Error
+		return target
+	}
+	target.RendererState = h.State
+	target.LastRender = h.LastRender
+	target.Freshness = &v1.Observation{
+		Source: h.Source, ObservedAt: timestamppb.New(time.Now().UTC()),
+		Applicability: "renderer health probe", Confidence: h.Confidence, ConflictNote: h.Detail,
+	}
+	if h.State == v1.RendererState_RENDERER_STATE_ERROR || h.State == v1.RendererState_RENDERER_STATE_UNSUPPORTED {
+		target.Error = h.Detail
+	}
+	if healthErr != nil && target.Error == "" {
+		target.Error = "renderer health probe failed; see panel logs"
+	}
+	return target
+}
+
+func cloneOverlay(overlay *v1.MapOverlay) *v1.MapOverlay {
+	return proto.Clone(overlay).(*v1.MapOverlay)
+}
+
+func canonicalNodeID(nodeID string) string {
+	if strings.TrimSpace(nodeID) == "" {
+		return "default"
+	}
+	return nodeID
+}
+
+func configuredLevelName(cfg *storage.ServerConfig) string {
+	if cfg == nil || cfg.CustomServerProperties == nil {
+		return ""
+	}
+	for _, line := range strings.Split(*cfg.CustomServerProperties, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), "level-name") {
+			continue
+		}
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func (s *Service) audit(e activity.Entry) error {
+	if s.deps.Auditor == nil {
+		return errors.New("worldview: audit writer unavailable")
+	}
+	return s.deps.Auditor.Log(e)
+}
+
+func (s *Service) resolver() *Resolver {
+	if s.deps.Resolver == nil {
+		return &Resolver{}
+	}
+	return s.deps.Resolver
+}
+
+func (s *Service) logError(format string, args ...any) {
+	if s.deps.Log != nil {
+		s.deps.Log.Error(format, args...)
+	}
+}

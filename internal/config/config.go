@@ -32,6 +32,28 @@ type Config struct {
 	Logging   LoggingConfig   `mapstructure:"logging" json:"logging"`
 	Upload    UploadConfig    `mapstructure:"upload" json:"upload"`
 	Auth      AuthConfig      `mapstructure:"auth" json:"auth"`
+	WorldView WorldViewConfig `mapstructure:"world_view" json:"world_view"`
+}
+
+// WorldViewConfig is the explicit renderer topology for the same-origin map
+// proxy (ADR 0015). An empty topology keeps every world in the honest ABSENT
+// state; the panel never guesses a renderer address or publishes its port.
+type WorldViewConfig struct {
+	Endpoints    []WorldViewEndpoint `mapstructure:"endpoints" json:"endpoints"`
+	AllowedHosts []string            `mapstructure:"allowed_hosts" json:"allowed_hosts"`
+}
+
+// WorldViewEndpoint names a node-local renderer. Local nodes must use a
+// loopback host; remote nodes must use an allowlisted host on that node.
+type WorldViewEndpoint struct {
+	NodeID     string `mapstructure:"node_id" json:"node_id"`
+	ServerID   string `mapstructure:"server_id" json:"server_id"`
+	Kind       string `mapstructure:"kind" json:"kind"`
+	Host       string `mapstructure:"host" json:"host"`
+	Port       int    `mapstructure:"port" json:"port"`
+	BasePath   string `mapstructure:"base_path" json:"base_path"`
+	HealthPath string `mapstructure:"health_path" json:"health_path"`
+	PlayerFeed bool   `mapstructure:"player_feed" json:"player_feed"`
 }
 
 type AuthConfig struct {

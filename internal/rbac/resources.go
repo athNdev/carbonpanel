@@ -29,6 +29,7 @@ const (
 	ResourceActivity        = "activity"
 	ResourceSubusers        = "subusers"
 	ResourceBackups         = "backups"
+	ResourceWorldView       = "world_view"
 )
 
 // Action constants
@@ -59,6 +60,14 @@ const (
 	// (which matches "*" actions) has it until an operator explicitly
 	// grants it to another role.
 	ActionManageDockerPrivileged = "manage_docker_privileged"
+
+	// ActionObservePlayers gates the opt-in, audited disclosure of live player
+	// positions in the world view. It is deliberately distinct from ActionRead
+	// so a map reader does not silently become a player tracker.
+	ActionObservePlayers = "observe_players"
+	// ActionAdmin is the full world_view administration action. It is granted
+	// only to the built-in admin role (via its "*" match); no RPC maps to it.
+	ActionAdmin = "admin"
 )
 
 // ResourceActionEntry pairs a resource with its valid actions.
@@ -71,6 +80,7 @@ type ResourceActionEntry struct {
 var AllActions = []string{
 	ActionRead, ActionCreate, ActionUpdate, ActionDelete,
 	ActionStart, ActionStop, ActionRestart, ActionCommand,
+	ActionObservePlayers, ActionAdmin,
 }
 
 // AllResources in display order.
@@ -81,6 +91,7 @@ var AllResources = []string{
 	ResourceUsers, ResourceRoles, ResourceSettings,
 	ResourceSupport, ResourceUploads, ResourceNodes,
 	ResourceActivity, ResourceSubusers, ResourceBackups,
+	ResourceWorldView,
 }
 
 // ResourceScopeSource maps each scopeable resource to the resource that
@@ -101,6 +112,7 @@ var ResourceScopeSource = map[string]string{
 	ResourceActivity:        ResourceServers,
 	ResourceSubusers:        ResourceServers,
 	ResourceBackups:         ResourceServers,
+	ResourceWorldView:       ResourceServers,
 }
 
 // ResourceActionsFromProcedures derives which actions are valid for each
