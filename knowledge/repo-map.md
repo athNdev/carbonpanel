@@ -19,8 +19,9 @@ sources:
 | `cmd/carbon-panel` | Daemon entrypoint, lifecycle, embedded frontend |
 | `cmd/carbon-fault-harness` | Fault-injection harness for tests |
 | `cmd/carbon-storage` | Worldstore JSON worker and nodestorage accessor mode for remote transport |
+| `cmd/carbonpanel-mcp` | stdio MCP server binary for bounded operator workflows |
 | `cmd/geyser`, `cmd/status` | Auxiliary binaries |
-| `internal` | Controllers and subsystems (see the architecture concepts) |
+| `internal` | Controllers and subsystems (see the architecture concepts); `internal/mcp` owns the MCP tool catalog and typed Connect clients |
 | `pkg` | Public shared packages (`mcstatus`, `routing`) also used by Cloud |
 | `proto/carbonpanel/v1` | Connect-RPC contracts |
 | `web/carbon-panel` | SvelteKit 2 / Svelte 5 console |
