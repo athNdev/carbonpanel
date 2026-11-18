@@ -9,7 +9,7 @@ one at https://mozilla.org/MPL/2.0/.
 -->
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/readme/hero.png" alt="Carbon Panel. Your worlds. Yours to run." width="100%" />
+  <img src="https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/readme/hero.png?v=20261118" alt="Carbon Panel. Your worlds. Yours to run." width="100%" />
 
   <p><strong>A home for the worlds you make.</strong></p>
   <p>Build your modpacks, look after your servers, and keep every block on your own terms.<br />
