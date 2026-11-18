@@ -1,4 +1,4 @@
-# ADR 0034: Reproducible node-VM artifact (QCOW2 + cloud-init)
+# ADR 0035: Reproducible node-VM artifact (QCOW2 + cloud-init)
 
 Status: Accepted (design and offline fixtures only; no live qualification)
 
@@ -78,15 +78,18 @@ offline fixtures, not a published image.
   for apply, not a permission.
 - The shared node-control contract, per-node auth scopes, auth middleware and
   daemon lifecycle are unchanged; this lane only consumes the contract.
-- ADR number 0034 is used under the orchestrator's central allocation: 0014 is
-  the merged baseline, 0015-0033 are allocated by other tracks. The Track C
-  index owner writes the single `knowledge/decisions/adrs.md` row; this lane
-  supplies that row text in its report rather than editing the shared index.
+- ADR number 0035 is used under the orchestrator's central allocation. 0014 is
+  the merged baseline; 0015-0033 are allocated to other tracks and 0034 is the
+  merged MCP server distribution ADR. Numbers 0036 (node LXC template), 0037
+  (portable installer) and 0038 (host-native private daemon) are reserved for
+  sibling lanes and are not used here. The orchestrator owns the single
+  `knowledge/decisions/adrs.md` row; this lane supplies that row text in its
+  report rather than editing the shared index.
 
 Suggested index row (for the orchestrator-owned index):
 
 ```
-| [0034](../../docs/adr/0034-node-vm-artifact.md) | Reproducible, secret-free QCOW2/cloud-init node VM artifact with pinned provenance and staged rollback | [Node VM artifact](../architecture/node-vm-artifact.md) |
+| [0035](../../docs/adr/0035-node-vm-artifact.md) | Reproducible, secret-free QCOW2/cloud-init node VM artifact with pinned provenance and staged rollback | [Node VM artifact](../architecture/node-vm-artifact.md) |
 ```
 
 ## Verification (offline evidence in this commit)

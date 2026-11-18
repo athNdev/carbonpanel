@@ -14,8 +14,8 @@ code_refs:
   - scripts/test_node_vm_upgrade.py
   - scripts/test_node_vm_enroll.py
 sources:
-  - title: ADR 0034 node VM artifact
-    resource: ../../docs/adr/0034-node-vm-artifact.md
+  - title: ADR 0035 node VM artifact
+    resource: ../../docs/adr/0035-node-vm-artifact.md
   - title: ADR 0019 node control contract (shared, not forked)
     resource: ../../docs/adr/0019-node-control-contract.md
 ---
@@ -81,6 +81,6 @@ the shared node-control contract without duplicating it.
 
 # Read next
 
-- [ADR 0034](../../docs/adr/0034-node-vm-artifact.md)
+- [ADR 0035](../../docs/adr/0035-node-vm-artifact.md)
 - [Node control protocol](node-control-protocol.md)
 - [Runtime seams](runtime-seams.md)
