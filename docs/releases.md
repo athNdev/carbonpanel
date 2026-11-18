@@ -117,11 +117,45 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | `3.0` | Moving minor channel, promoted only with a stable `3.0.x` release |
 | `latest` | Moving stable channel, promoted only with a stable release |
 | `edge`, `sha-…` | Development builds from CI-verified main commits; not versions |
+| `nightly` | Explicitly promoted development alias; never a stable version |
 
-Prereleases never move `latest` or the stable minor tag. Main builds move `edge`.
-An older `latest` image may predate this channel policy; pin an explicit
-version for upgrades. The image digest in the release manifest is the immutable
-reference for that release. Module images have their own publishing workflow.
+Prereleases never move `latest` or the stable minor tag. `edge` moves only under
+an explicit developer-channel opt-in; an ordinary main merge builds and verifies
+without a registry write. An older `latest` image may predate this channel
+policy; pin an explicit version for upgrades. The image digest in the release
+manifest is the immutable reference for that release. Module images have their
+own publishing workflow.
+
+## Nightly development channel
+
+`nightly` is a development alias, not a release version or a GitHub release. It
+points to the most recent **qualifying** nightly build of a pinned main commit:
+the commit must have exact successful CI, and its `sha-<full-commit>` image must
+be verified for digest, both Linux platforms (`linux/amd64`, `linux/arm64`) and
+commit provenance before the alias moves. The immutable identity is the existing
+`sha-<full-commit>` tag; no date alias or second digest is created for a nightly.
+A nightly never moves `latest`, a stable minor tag, or `edge` — those remain owned
+by their existing policies. The `nightly` alias is Docker Hub only, matching the
+development-channel surface; no GHCR nightly tag is created by this policy.
+
+Both `edge` and `nightly` writers share the `sha-<commit>` tag. Before any
+build or push, the workflow reads that tag: an absent tag may be built; a present
+tag is reused only when its observed digest matches a verified expected digest
+and both platforms are present; a conflict or an unresolvable lookup refuses with
+zero buildx pushes and zero alias moves. Moving `nightly` over a different digest
+additionally requires the observed alias digest to be bound to a verified
+`sha-<previous-commit>` reference; an operator-supplied commit string alone is
+never trusted. Repeating a promotion at the same digest is idempotent and writes
+nothing. All publication uses one fixed, non-cancellable channel concurrency
+group, while verification builds stay per-SHA and cancellable.
+
+There is no scheduled registry write and no infrastructure setting to enable:
+the nightly opt-in is a manual `workflow_dispatch` with `nightly=true` from
+`refs/heads/main` plus exact-commit CI verification. If a scheduled nightly is
+added later it must verify by default and require a separately reviewed,
+default-off operator setting before writing. Seeding a live `nightly` tag is a
+distinct, separately authorized operation; the existing `edge` image predates
+current main and is never relabelled as a fresh nightly.
 
 The GitHub container package links to the source repository, so it appears in
 the repository's Packages sidebar. Verify visibility after first publication;

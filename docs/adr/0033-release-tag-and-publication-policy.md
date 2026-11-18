@@ -46,6 +46,18 @@ If a channel's ordering or immutability cannot be established, its automated
 alias promotion is omitted with a recorded reason instead of guessed.
 Deployments that need reproducible rollbacks pin the full version or digest.
 
+The development channel adds one explicit alias, `nightly`, and no new immutable
+reference: it reuses the verified `sha-<full-commit>` image of a pinned main
+commit with exact successful CI. The shared sha tag is preflighted before any
+build or push by both edge and nightly writers; a verified existing image is
+reused, while a conflict or unknown lookup refuses with zero writes. Nightly
+promotion binds the previously promoted commit to the observed alias digest via
+a verified sha reference before checking ancestry, so a stale operator string
+cannot authorize a move. Nightly never moves `latest`, a minor tag or `edge`,
+and all publication is serialized on the colliding destinations. Seeding a live
+nightly remains a separate authorization; no scheduled write is enabled.
+Deployments that need reproducible rollbacks pin the full version or digest.
+
 Build and verification stay separate from publication. A fail-closed preflight
 checks registry credential presence without reading values, credentialed steps
 run only on an explicit publication, both registries must serve a complete

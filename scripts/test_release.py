@@ -659,7 +659,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertIn("if: github.event_name == 'workflow_dispatch'", source)
             self.assertNotIn("ci_verified:", source)
         self.assertIn("  workflow_run:", cd)
-        self.assertIn("push: ${{ steps.channel.outputs.publish == 'true'", cd)
+        self.assertIn("push: ${{ (steps.channel.outputs.publish == 'true'", cd)
         self.assertIn("if: needs.build.outputs.publish == 'true'", landing)
         # Workflows remain active: build/validate steps are still present.
         self.assertIn("name: Build and validate the combined website", landing)
@@ -695,7 +695,8 @@ class ReleaseTests(unittest.TestCase):
 
     def test_cd_edge_behavior_is_preserved(self):
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
-        self.assertIn("type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}", source)
+        self.assertIn("type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' "
+                      "&& steps.channel.outputs.publish == 'true' }}", source)
         self.assertIn("github.event.workflow_run.conclusion == 'success'", source)
 
     def test_canonical_registry_names_are_consistent(self):
@@ -793,16 +794,16 @@ class ReleaseTests(unittest.TestCase):
                 self.assertNotIn("head_sha || github.sha", line)
         # Publication is one fixed, channel-wide, non-cancelling group: two
         # opted-in publishes of different commits cannot race on :edge.
-        self.assertIn("&& inputs.push && 'cd-publish-edge'", source)
+        self.assertIn("&& (inputs.push || inputs.nightly) && 'cd-publish-edge'", source)
         self.assertIn("|| format('cd-verify-{0}'", source)
         self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' "
-                      "|| !inputs.push }}", source)
+                      "|| !(inputs.push || inputs.nightly) }}", source)
         self.assertIn("&& 'cd-publish-edge' || format('cd-verify-{0}'", source)
         # Pin assertion precedes every side-effecting step.
         self.assertLess(source.index("Assert checked-out HEAD"),
                         source.index("Docker Hub Credentials & Login Check"))
         self.assertLess(source.index("Assert checked-out HEAD"),
-                        source.index("name: Build and Push Docker Image"))
+                        source.index("name: Build (and optionally push) Docker Image"))
 
     def test_landing_checkout_uses_event_commit_implicitly(self):
         source = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
@@ -828,7 +829,7 @@ class ReleaseTests(unittest.TestCase):
     def test_cd_has_read_only_workflow_permissions(self):
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
         self.assertIn("permissions:\n  contents: read\n  actions: read", source)
-        self.assertIn("push: ${{ steps.channel.outputs.publish == 'true'", source)
+        self.assertIn("push: ${{ (steps.channel.outputs.publish == 'true'", source)
 
 
     # --- Exact main CI evidence for opt-in developer writes ------------------
@@ -886,6 +887,173 @@ class ReleaseTests(unittest.TestCase):
                     ref=release.TRUSTED_DEVELOPER_REF, ci_verified=verified)
                 self.assertFalse(allowed)
                 self.assertNotIn("opt-in", reason)
+
+    # --- Bounded nightly channel (offline fixtures) --------------------------
+
+    def test_nightly_decision_requires_opt_in_trusted_ref_and_exact_ci(self):
+        trusted = release.TRUSTED_DEVELOPER_REF
+        allowed, _ = release.nightly_channel_decision(
+            "workflow_dispatch", "true", ref=trusted, ci_verified="true")
+        self.assertTrue(allowed)
+        for label, event, opt_in, ref, ci in (
+            ("missing opt-in", "workflow_dispatch", "false", trusted, "true"),
+            ("failed CI", "workflow_dispatch", "true", trusted, "false"),
+            ("feature ref", "workflow_dispatch", "true", "refs/heads/feature/x", "true"),
+            ("blank ref", "workflow_dispatch", "true", "", "true"),
+            ("tag ref", "workflow_dispatch", "true", "refs/tags/v3.0.0", "true"),
+            ("main push", "push", "true", trusted, "true"),
+            ("tag push", "push", "true", "refs/tags/v3.0.0", "true"),
+            ("pull request", "pull_request", "true", trusted, "true"),
+        ):
+            with self.subTest(case=label):
+                self.assertFalse(release.nightly_channel_decision(
+                    event, opt_in, ref=ref, ci_verified=ci)[0])
+        self.assertFalse(release.nightly_channel_decision(
+            "workflow_run", "true", "push", "success", trusted, "true")[0])
+        self.assertFalse(release.nightly_channel_decision(
+            "schedule", "true", ref=trusted, ci_verified="true")[0])
+
+    def test_sha_tag_gate_reuse_conflict_and_unknown(self):
+        commit, digest = "c" * 40, "sha256:" + "d" * 64
+        self.assertEqual(release.sha_tag_decision(commit, ("absent", None))[0], "push")
+        action, reused, _ = release.sha_tag_decision(
+            commit, present(digest), digest)
+        self.assertEqual((action, reused), ("reuse", digest))
+        for label, observation, expected in (
+            ("conflicting digest", present("sha256:" + "e" * 64), digest),
+            ("missing expected digest", present(digest), ""),
+            ("incomplete platforms", present(digest, {("linux", "amd64")}), digest),
+            ("unknown lookup", ("unknown", None), digest),
+        ):
+            with self.subTest(case=label):
+                action, _, reason = release.sha_tag_decision(
+                    commit, observation, expected)
+                self.assertEqual(action, "refuse")
+                self.assertTrue(reason)
+        # CLI refusal produces no registry write of any kind.
+        with patch.object(release, "observe_reference", return_value=("unknown", None)), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", ["release.py", "sha-tag-gate", "--commit", commit,
+                                "--expected-digest", digest]):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                release.main()
+            self.assertEqual(registry_writes(command), [])
+
+    def test_nightly_identity_binding_requires_live_sha_evidence(self):
+        previous, old_digest = "a" * 40, "sha256:" + "f" * 64
+        observer = lambda ref: present(old_digest)
+        self.assertEqual(release.nightly_identity_binding(
+            previous, old_digest, observer), {old_digest: previous})
+        self.assertEqual(release.nightly_identity_binding(
+            previous, "sha256:" + "1" * 64, observer), {})
+        self.assertEqual(release.nightly_identity_binding(
+            previous, old_digest, lambda ref: ("absent", None)), {})
+        self.assertEqual(release.nightly_identity_binding("", old_digest, observer), {})
+
+    def test_nightly_promotion_is_bound_to_observed_identity(self):
+        candidate, previous = "c" * 40, "a" * 40
+        digest, old_digest = "sha256:" + "d" * 64, "sha256:" + "f" * 64
+        immutable = present(digest)
+        self.assertTrue(release.nightly_promotion_decision(
+            candidate, digest, immutable, ("absent", None))[0])
+        self.assertIn("no move", release.nightly_promotion_decision(
+            candidate, digest, immutable, present(digest))[1])
+        self.assertFalse(release.nightly_promotion_decision(
+            candidate, digest, immutable, present(old_digest))[0])
+        bound = {old_digest: previous}
+        self.assertFalse(release.nightly_promotion_decision(
+            candidate, digest, immutable, present(old_digest),
+            previous_commit="b" * 40, identity_binding=bound)[0])
+        self.assertFalse(release.nightly_promotion_decision(
+            candidate, digest, immutable, present(old_digest),
+            previous_commit=previous, identity_binding=bound,
+            ancestor=lambda old, new: False)[0])
+        self.assertTrue(release.nightly_promotion_decision(
+            candidate, digest, immutable, present(old_digest),
+            previous_commit=previous, identity_binding=bound,
+            ancestor=lambda old, new: True)[0])
+        self.assertFalse(release.nightly_promotion_decision(
+            candidate, digest, present(digest, {("linux", "arm64")}),
+            ("absent", None))[0])
+
+    def test_nightly_promote_apply_has_zero_writes_on_refusal_and_is_idempotent(self):
+        candidate, previous = "c" * 40, "a" * 40
+        digest, old_digest = "sha256:" + "d" * 64, "sha256:" + "f" * 64
+        def invoke(*extra):
+            return ["release.py", "nightly-promote", "--commit", candidate,
+                    "--digest", digest, "--previous-commit", previous,
+                    "--previous-digest", old_digest, *extra]
+
+        with patch.object(release, "observe_reference",
+                          return_value=("unknown", None)), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", invoke("--apply")):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                release.main()
+            self.assertEqual(registry_writes(command), [])
+        with patch.object(release, "nightly_identity_binding", return_value={}), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", invoke("--apply")):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                release.main()
+            self.assertEqual(registry_writes(command), [])
+        # First promotion writes only the nightly alias, then re-verifies it.
+        with patch.object(release, "nightly_identity_binding", return_value={}), \
+             patch.object(release, "observe_reference", side_effect=[
+                 present(digest), ("absent", None), present(digest)]), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", invoke("--apply")):
+            release.main()
+            self.assertEqual(len(registry_writes(command)), 1)
+        # Rerun with the same digest is idempotent: no alias move.
+        with patch.object(release, "nightly_identity_binding", return_value={}), \
+             patch.object(release, "observe_reference", side_effect=[
+                 present(digest), present(digest)]), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", invoke("--apply")):
+            release.main()
+            self.assertEqual(registry_writes(command), [])
+
+    def test_nightly_leaves_stable_aliases_and_edge_untouched(self):
+        self.assertEqual(release.promotion_plan("v3.0.0")[0]["tag"], "3.0.0")
+        self.assertEqual([step["tag"] for step in release.promotion_plan("v3.0.0")],
+                         ["3.0.0", "3.0", "latest"])
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        self.assertNotIn("type=raw,value=latest", source)
+        self.assertIn("value=edge,enable=${{ github.ref == 'refs/heads/main' "
+                      "&& steps.channel.outputs.publish == 'true' }}", source)
+        self.assertNotIn("value=nightly,enable", source)  # alias moved after verification
+        self.assertIn("nightly-promote", source)
+
+    def test_nightly_workflow_wiring_and_verification_only_paths(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        doc = yaml.safe_load(source)
+        triggers = doc.get("on") or doc.get(True)
+        inputs = triggers["workflow_dispatch"]["inputs"]
+        self.assertFalse(inputs["nightly"]["default"])
+        self.assertEqual(inputs["previous_nightly_digest"]["default"], "")
+        self.assertEqual(inputs["expected_sha_digest"]["default"], "")
+        self.assertNotIn("schedule", triggers)
+        names = [step.get("name", "") for step in doc["jobs"]["build-and-push"]["steps"]]
+        sha_gate = next(i for i, name in enumerate(names) if "Preflight shared sha tag" in name)
+        build = next(i for i, name in enumerate(names) if name.startswith("Build (and optionally push)"))
+        promote = next(i for i, name in enumerate(names) if "move only the nightly alias" in name)
+        self.assertLess(sha_gate, build)
+        self.assertLess(build, promote)
+        self.assertIn("steps.sha_gate.outputs.action", source)
+        self.assertIn("--previous-digest \"$PREVIOUS_DIGEST\"", source)
+        for path in (".github/workflows/release.yml", ".github/workflows/modules.yml"):
+            self.assertTrue(yaml.safe_load(
+                (release.ROOT / path).read_text(encoding="utf-8"))["jobs"])
+        # Verification-only CLI path emits no publication.
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "nightly-gate", "--event", "push",
+                                "--commit", "c" * 40, "--ref", release.TRUSTED_DEVELOPER_REF,
+                                "--opt-in", "true", "--ci-verified", "true"]), \
+             redirect_stdout(out):
+            release.main()
+        self.assertEqual(json.loads(out.getvalue())["publish"], "false")
 
 
 if __name__ == "__main__":

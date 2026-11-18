@@ -8,10 +8,11 @@ name: Docker Hub CD
 
 on:
   # An ordinary verified main merge only builds and verifies; it does NOT push
-  # :edge or :sha images. Developer-channel publication requires an explicit
-  # workflow_dispatch with push=true, decided by developer-channel-gate in
-  # scripts/release.py. The workflow is not disabled: CI-completed events still
-  # build the image with push=false (DESIGN.md §10.1 finding #6).
+  # :edge, :sha or :nightly images. Developer-channel publication requires an
+  # explicit workflow_dispatch with push=true or nightly=true, gated in
+  # scripts/release.py. The shared sha-<commit> tag is preflighted before any
+  # build/push and reused when already verified. The workflow is not disabled:
+  # CI-completed events still build with push=false (DESIGN.md §10.1 #6).
   workflow_run:
     workflows: ["Continuous Integration"]
     types:
@@ -24,6 +25,26 @@ on:
         required: true
         type: boolean
         default: false
+      nightly:
+        description: 'EXPLICIT nightly opt-in: publish the verified sha-<commit> image and move only the nightly alias (off = build and verify only)'
+        required: true
+        type: boolean
+        default: false
+      previous_nightly_commit:
+        description: 'Optional verified commit currently held by nightly; required only when moving over a different digest'
+        required: false
+        type: string
+        default: ''
+      previous_nightly_digest:
+        description: 'Observed digest currently held by nightly; must match the live alias and its verified sha reference'
+        required: false
+        type: string
+        default: ''
+      expected_sha_digest:
+        description: 'Verified digest for the pinned commit sha tag; required only when reusing an existing sha image'
+        required: false
+        type: string
+        default: ''
 
 # Least privilege at the workflow level; publication is gated by the opt-in.
 permissions:
@@ -42,11 +63,11 @@ jobs:
     # Verification runs share a cancellable group; an opted-in publication uses
     # a separate group that routine main builds cannot cancel mid-write.
     concurrency:
-      # Publication is serialized channel-wide, with no SHA, so publishes of
-      # different commits cannot race on the moving :edge alias. It never
-      # cancels an in-flight write. Verification stays per-SHA and cancellable.
-      group: ${{ github.event_name == 'workflow_dispatch' && inputs.push && 'cd-publish-edge' || format('cd-verify-{0}', github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha) }}
-      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.push }}
+      # Publication is serialized channel-wide, with no SHA, so edge, nightly
+      # and shared sha-<commit> writes from different commits cannot race. It
+      # never cancels an in-flight write. Verification stays per-SHA cancellable.
+      group: ${{ github.event_name == 'workflow_dispatch' && (inputs.push || inputs.nightly) && 'cd-publish-edge' || format('cd-verify-{0}', github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha) }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !(inputs.push || inputs.nightly) }}
 
     steps:
       - name: Resolve the pinned verified commit
@@ -99,10 +120,38 @@ jobs:
             --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
             --run-event "$CHANNEL_RUN_EVENT" --conclusion "$CHANNEL_CONCLUSION" \
             --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED"
+      - name: Decide nightly publication (explicit opt-in only)
+        id: nightly
+        env:
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_OPT_IN: ${{ inputs.nightly }}
+          CHANNEL_RUN_EVENT: ${{ github.event.workflow_run.event }}
+          CHANNEL_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: |
+          python3 scripts/release.py nightly-gate \
+            --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
+            --run-event "$CHANNEL_RUN_EVENT" --conclusion "$CHANNEL_CONCLUSION" \
+            --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED" \
+            --commit "$PINNED_COMMIT"
+
+      - name: Preflight shared sha tag identity before any build or push
+        id: sha_gate
+        if: steps.channel.outputs.publish == 'true' || steps.nightly.outputs.publish == 'true'
+        env:
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+          EXPECTED_DIGEST: ${{ inputs.expected_sha_digest }}
+        # Reuse a verified existing sha image; a conflict or unknown lookup
+        # fails here with zero buildx pushes and zero alias moves.
+        run: |
+          python3 scripts/release.py sha-tag-gate \
+            --commit "$PINNED_COMMIT" --expected-digest "$EXPECTED_DIGEST"
 
       - name: Docker Hub Credentials & Login Check
         id: check-creds
-        if: steps.channel.outputs.publish == 'true'
+        if: steps.channel.outputs.publish == 'true' || steps.nightly.outputs.publish == 'true'
         env:
           RAW_USER: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           RAW_PASS: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
@@ -196,7 +245,7 @@ jobs:
           images: |
             atharvnaphade/carbonpanel
           tags: |
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' && steps.channel.outputs.publish == 'true' }}
             type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
             type=raw,value=sha-${{ steps.pinned.outputs.sha }}
           labels: |
@@ -210,13 +259,17 @@ jobs:
           flavor: |
             latest=false
 
-      - name: Build and Push Docker Image
+      - name: Build (and optionally push) Docker Image
+        id: push
+        # A reused verified sha image needs no rebuild. Verification-only runs
+        # still build locally with push=false.
+        if: ${{ steps.sha_gate.outputs.action == '' || steps.sha_gate.outputs.action == 'push' }}
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/Dockerfile.carbon-panel
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' }}
+          push: ${{ (steps.channel.outputs.publish == 'true' || steps.nightly.outputs.publish == 'true') && steps.sha_gate.outputs.action == 'push' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -224,6 +277,30 @@ jobs:
           build-args: |
             APP_VERSION=edge
             APP_COMMIT=${{ steps.pinned.outputs.sha }}
+      - name: Resolve the verified immutable digest (new push or verified reuse)
+        id: verified_digest
+        env:
+          SHA_ACTION: ${{ steps.sha_gate.outputs.action }}
+          REUSED_DIGEST: ${{ steps.sha_gate.outputs.digest }}
+          PUSHED_DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          if [ "$SHA_ACTION" = "reuse" ]; then
+            echo "digest=$REUSED_DIGEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "digest=$PUSHED_DIGEST" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify immutable sha image and move only the nightly alias
+        if: steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true'
+        env:
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+          IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
+          PREVIOUS_COMMIT: ${{ inputs.previous_nightly_commit }}
+          PREVIOUS_DIGEST: ${{ inputs.previous_nightly_digest }}
+        run: |
+          python3 scripts/release.py nightly-promote \
+            --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
+            --previous-commit "$PREVIOUS_COMMIT" --previous-digest "$PREVIOUS_DIGEST" \
+            --apply
       - name: Sync Docker Hub repository description
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
         if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'
