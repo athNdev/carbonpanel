@@ -38,6 +38,7 @@ type HostFacts struct {
 	StorageDriver   string
 	StorageFSType   string
 	FTypeEnabled    bool
+	LogDriver       string // empty selects journald; json-file for disposable fixtures
 	XDG_RUNTIME_DIR string
 	RuntimeDirMode  uint32
 
