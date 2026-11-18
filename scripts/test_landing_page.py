@@ -11,6 +11,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 import unittest
 
+from scripts import release
+
 
 class InstallCommandParser(HTMLParser):
     def __init__(self):
@@ -98,10 +100,19 @@ class LandingPageTests(unittest.TestCase):
     def test_indexnow_is_limited_to_homepage_changes_and_has_cooldown(self):
         root = Path(__file__).resolve().parent.parent
         workflow = (root / ".github/workflows/landing.yml").read_text(encoding="utf-8")
-        self.assertIn("landing/index.html)", workflow)
-        self.assertIn("landing/llms.txt)", workflow)
-        self.assertIn("docs/carbon-panel/src/content/docs/*.md", workflow)
-        self.assertIn("docs/design-system/*)", workflow)
+        # URL selection lives in the shared release helper used by the workflow.
+        self.assertIn("python3 scripts/release.py indexable-urls", workflow)
+        before = "a" * 40
+        self.assertEqual(release.indexable_urls("push", before, ["landing/index.html"]),
+                         ["https://carbonpanel.dev/"])
+        self.assertEqual(release.indexable_urls("push", before, ["landing/llms.txt"]),
+                         ["https://carbonpanel.dev/llms.txt"])
+        self.assertEqual(release.indexable_urls("push", before, ["docs/design-system/index.md"]),
+                         ["https://carbonpanel.dev/design-system/"])
+        self.assertIn("https://carbonpanel.dev/docs/getting-started/docker-compose/",
+                      release.indexable_urls("push", before, [
+                          "docs/carbon-panel/src/content/docs/getting-started/docker-compose.mdx"]))
+        self.assertEqual(release.indexable_urls("push", before, ["internal/db/schema.sql"]), [])
         self.assertIn("if: needs.indexable-changes.outputs.urls != '[]'", workflow)
         self.assertIn("actions/cache/restore@", workflow)
         self.assertIn("actions/cache/save@", workflow)

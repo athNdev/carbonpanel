@@ -11,9 +11,24 @@ name: Module Builder
 
 on:
   push:
+    # Staging only. A mod-* tag builds and verifies module images but does not
+    # move `latest` or publish an immutable module version.
     tags:
       - 'mod-*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Module version to stage/publish, e.g. mod-v2.0.6 (required when publishing)'
+        required: false
+        type: string
+      publish:
+        description: 'EXPLICIT PUBLICATION OPT-IN: off (default) builds and verifies only'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
 
 jobs:
   generate-proto:
@@ -42,10 +57,21 @@ jobs:
     name: Build Module Images
     needs: generate-proto
     runs-on: ubuntu-latest
+    # Canonical Docker Hub namespace; one place, no credential values.
+    env:
+      DOCKER_HUB_PREFIX: atharvnaphade/carbonpanel-
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      promote_latest: ${{ steps.promotion.outputs.promote_latest }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Exact tag verification needs the version tag and its target commit.
+          fetch-depth: 0
 
       - name: Download generated Go proto code
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -59,38 +85,121 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Log in to Docker Hub
+      - name: Resolve exact module version, tag and ref
+        id: version
+        env:
+          MODULE_INPUT: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="$MODULE_INPUT"
+          fi
+          python3 scripts/release.py module-version --version "$VERSION"
+
+      - name: Verify the exact version tag for publication
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        env:
+          MODULE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if ! git show-ref --verify --quiet "refs/tags/$MODULE_TAG"; then
+            echo "::error::Module version $MODULE_TAG does not exist"
+            exit 1
+          fi
+          if [ "$(git rev-parse "$MODULE_TAG^{commit}")" != "$(git rev-parse HEAD)" ]; then
+            echo "::error::Module version $MODULE_TAG does not point at the checked-out commit"
+            exit 1
+          fi
+
+      - name: Log in to Docker Hub for explicit publication
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
-      - name: Build and push all modules
+      - name: Build images; publish only the immutable v-prefixed version
+        env:
+          MODULE_VERSION: ${{ steps.version.outputs.version }}
+          MODULE_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#mod-}"
-          else
-            VERSION=""
-          fi
-
+          set -euo pipefail
+          mkdir -p dist
+          : > dist/module-digests.txt
           for dockerfile in docker/Dockerfile.*; do
             name=$(basename "$dockerfile" | sed 's/Dockerfile\.//')
             if [ "$name" != "carbon-panel" ]; then
-              echo "Building atharvnaphade/carbonpanel-$name (linux/amd64,linux/arm64)..."
-              TAGS="--tag atharvnaphade/carbonpanel-$name:latest"
-              if [ -n "$VERSION" ]; then
-                TAGS="$TAGS --tag atharvnaphade/carbonpanel-$name:$VERSION"
+              IMAGE="${DOCKER_HUB_PREFIX}${name}"
+              echo "Building $IMAGE:$MODULE_VERSION (linux/amd64,linux/arm64)..."
+              if [ "$MODULE_PUBLISH" = "true" ]; then
+                # The immutable version is the only tag written here. No :latest.
+                output=$(docker buildx build --push \
+                  --platform linux/amd64,linux/arm64 \
+                  --file "$dockerfile" \
+                  --tag "$IMAGE:$MODULE_VERSION" .)
+                digest=$(printf '%s\n' "$output" | grep -oE 'sha256:[0-9a-f]{64}' | tail -n 1)
+                if [ -z "$digest" ]; then
+                  echo "::error::No digest reported for $IMAGE"
+                  exit 1
+                fi
+                echo "$IMAGE $digest" >> dist/module-digests.txt
+              else
+                docker buildx build \
+                  --platform linux/amd64,linux/arm64 \
+                  --file "$dockerfile" \
+                  --tag "$IMAGE:$MODULE_VERSION" .
+                echo "Verified $IMAGE:$MODULE_VERSION (not published)"
               fi
-
-              docker buildx build \
-                --platform linux/amd64,linux/arm64 \
-                --file "$dockerfile" \
-                $TAGS \
-                --push \
-                .
-
-              echo "Pushed atharvnaphade/carbonpanel-$name"
             fi
           done
 
-          echo "Module builds complete!"
+      - name: Upload verified module digests
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: module-digests
+          path: dist/module-digests.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Decide whether the module latest alias may advance
+        id: promotion
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        env:
+          MODULE_VERSION: ${{ steps.version.outputs.version }}
+        run: python3 scripts/release.py module-promotion --version "mod-$MODULE_VERSION"
+
+  # Separate, serialized alias promotion. Prereleases and undeterminable
+  # version state promote nothing, reported explicitly by module-promotion.
+  promote-module-latest:
+    name: Promote module latest alias
+    needs: build-modules
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && needs.build-modules.outputs.promote_latest == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_HUB_PREFIX: atharvnaphade/carbonpanel-
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+      - name: Download verified module digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: module-digests
+          path: dist
+      - name: Verify immutable tag then promote latest from that digest
+        env:
+          MODULE_VERSION: ${{ needs.build-modules.outputs.version }}
+        run: |
+          set -euo pipefail
+          while read -r IMAGE DIGEST; do
+            [ -n "$IMAGE" ] || continue
+            python3 scripts/release.py verify-reference --reference "$IMAGE:$MODULE_VERSION" --digest "$DIGEST"
+            docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE@$DIGEST"
+            python3 scripts/release.py verify-reference --reference "$IMAGE:latest" --digest "$DIGEST"
+          done < dist/module-digests.txt
