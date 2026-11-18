@@ -11,6 +11,7 @@ code_refs:
   - internal/rpc/services/world.go
   - web/carbon-panel/src/routes/library
   - web/carbon-panel/src/lib/features/world-library
+  - web/carbon-panel/src/lib/features/server-world
 sources:
   - title: World Library identity and clone-on-bind
     resource: ../../docs/adr/0016-world-library-identity-and-binding.md
@@ -43,7 +44,11 @@ live only on owning node storage.
 - Compatibility fields are `detected`, `inferred` or `unknown` with reasons.
   Unknown gates the operation. Unsupported transforms (edition conversion,
   in-place downgrade, arbitrary mod removal, live NBT edits) are disabled with
-  reasons.
+  reasons. A read-only report is valid only for the exact checked tuple;
+  selection or navigation invalidates it and confirmation re-requires it.
+- The server-detail World tab reports unmanaged and unbound states without
+  inventing a level, and reuses these binding gates for pick/swap. See
+  [Library adoption fencing](../decisions/library-adoption-fencing.md).
 - Imports verify the operator-supplied SHA-256 against a whole-archive SHA-256
   in node-local staging; `archive/zip` CRC checks entries, but no per-file
   SHA-256 manifest is verified. Inspection rejects traversal/unsafe paths,

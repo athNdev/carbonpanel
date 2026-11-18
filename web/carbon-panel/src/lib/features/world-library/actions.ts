@@ -30,6 +30,8 @@ export interface CheckCompatibilityInput {
 	revisionId: string;
 	serverId: string;
 	targetMcVersion: string;
+	/** Optional local level context; part of the action identity when supplied. */
+	levelName?: string;
 }
 
 export interface BindWorldInput {
@@ -111,6 +113,7 @@ export interface WorldLibraryActionRequests {
 	createWorldFromConfig(input: CreateWorldInput): Promise<CreateWorldResult>;
 	searchWorldArtifacts(input: SearchArtifactsInput): Promise<ArtifactSearchResult>;
 	getProviderCapabilities(): Promise<ProviderCapability[]>;
+	getRevision(revisionId: string): Promise<WorldRevision | undefined>;
 	listRevisions(entryId: string): Promise<WorldRevision[]>;
 	listBindings(input: ListBindingsInput): Promise<WorldBindingView[]>;
 	listImportJobs(entryId: string): Promise<WorldImportJob[]>;
@@ -189,7 +192,7 @@ export function createWorldLibraryActions(
 			return perform(
 				'checked',
 				'compat',
-				key(input.revisionId, input.serverId, input.targetMcVersion),
+				key(input.revisionId, input.serverId, input.targetMcVersion, input.levelName),
 				() => requests.checkCompatibility(input)
 			);
 		},
@@ -269,6 +272,11 @@ export function createWorldLibraryActions(
 		},
 		getProviderCapabilities() {
 			return perform('capabilities', 'capabilities', '', () => requests.getProviderCapabilities());
+		},
+		getRevision(revisionId: string) {
+			return perform('revision', 'revision', key(revisionId), () =>
+				requests.getRevision(revisionId)
+			);
 		},
 		listRevisions(entryId: string) {
 			return perform('revisions', 'revisions', key(entryId), () => requests.listRevisions(entryId));
