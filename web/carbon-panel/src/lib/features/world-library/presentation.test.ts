@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+	bindingGateReason,
 	classificationPresentation,
 	compatibilityVerdictPresentation,
 	confidencePresentation,
@@ -15,7 +16,8 @@ import {
 	modLoaderLabel,
 	operationOutcomePresentation,
 	shortId,
-	transformStatusPresentation
+	transformStatusPresentation,
+	verdictGatesBinding
 } from './presentation';
 import { ModLoader } from '../../proto/carbonpanel/v1/common_pb';
 
@@ -52,6 +54,37 @@ test('status mappings always carry a text label alongside the tone', () => {
 	}
 	assert.equal(operationOutcomePresentation('unknown').label, 'OUTCOME UNKNOWN');
 	assert.match(operationOutcomePresentation('unknown').hint ?? '', /not retried automatically/);
+});
+
+test('compatibility verdicts are classified by verdict, not by confidence', () => {
+	const expected: Record<string, { label: string; tone: string; gates: boolean }> = {
+		compatible: { label: 'COMPATIBLE', tone: 'green', gates: false },
+		blocked: { label: 'BLOCKED', tone: 'red', gates: true },
+		incompatible: { label: 'INCOMPATIBLE', tone: 'red', gates: true },
+		requires_decision: { label: 'REQUIRES DECISION', tone: 'yellow', gates: true },
+		unknown: { label: 'UNKNOWN', tone: 'gray', gates: true }
+	};
+	for (const [verdict, want] of Object.entries(expected)) {
+		const presentation = compatibilityVerdictPresentation(verdict);
+		assert.equal(presentation.label, want.label, verdict);
+		assert.equal(presentation.tone, want.tone, verdict);
+		assert.equal(verdictGatesBinding(verdict), want.gates, verdict);
+	}
+	assert.equal(compatibilityVerdictPresentation(undefined).label, 'UNKNOWN');
+	assert.equal(verdictGatesBinding(undefined), true);
+	// A real backend verdict must never be mistaken for a confidence value.
+	assert.equal(isUnknownConfidence('compatible'), true);
+	assert.equal(verdictGatesBinding('compatible'), false);
+});
+
+test('binding gate reason follows the verdict and still fails closed on unknown findings', () => {
+	assert.equal(bindingGateReason('compatible', 0), null);
+	assert.match(bindingGateReason('compatible', 1) ?? '', /Unknown findings gate binding/);
+	assert.match(bindingGateReason('blocked', 0) ?? '', /blocked/i);
+	assert.match(bindingGateReason('incompatible', 0) ?? '', /blocked/i);
+	assert.match(bindingGateReason('requires_decision', 0) ?? '', /operator decision/i);
+	assert.match(bindingGateReason('unknown', 0) ?? '', /Unknown findings gate binding/);
+	assert.match(bindingGateReason(undefined, 0) ?? '', /Unknown findings gate binding/);
 });
 
 test('classification badges explain when a control applies', () => {

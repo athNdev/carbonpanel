@@ -64,7 +64,10 @@ test('detail route shows classified findings, gating, binding and explicit recov
 	assert.match(detail, /checkCompatibility/);
 	assert.match(detail, /confidencePresentation/);
 	assert.match(detail, /Unknown findings gate binding/);
-	assert.match(detail, /gatedByUnknown/);
+	assert.match(detail, /bindingGateReason\(report\.overall, unknownFindings\.length\)/);
+	assert.match(detail, /verdictGatesBinding\(report\?\.overall\)/);
+	assert.match(detail, /gatedByVerdict/);
+	assert.doesNotMatch(detail, /isUnknownConfidence\(report\?\.overall\)/);
 	assert.match(detail, /operationOutcomePresentation\(pendingOperation\.outcome\)/);
 	assert.match(detail, /resolveOperation/);
 	assert.match(detail, /No silent retry|not retried automatically|resolve it before trying again/i);

@@ -20,12 +20,14 @@ SPDX-License-Identifier: MPL-2.0
 	} from '$lib/proto/carbonpanel/v1/world_pb';
 	import type { WorldBindingView } from '$lib/features/world-library/actions';
 	import {
+		bindingGateReason,
 		compatibilityVerdictPresentation,
 		confidencePresentation,
 		consistencyPresentation,
 		formatBytes,
 		formatTimestamp,
 		isUnknownConfidence,
+		verdictGatesBinding,
 		modLoaderLabel,
 		operationOutcomePresentation,
 		shortId,
@@ -93,17 +95,23 @@ SPDX-License-Identifier: MPL-2.0
 	let unknownFindings = $derived(
 		report ? report.findings.filter((finding) => isUnknownConfidence(finding.confidence)) : []
 	);
-	let gatedByUnknown = $derived(
-		Boolean(report) && (unknownFindings.length > 0 || isUnknownConfidence(report?.overall))
+	// Verdicts are not confidence values: compatible is the only verdict that
+	// permits binding. A missing verdict or any unknown finding still fails
+	// closed, and a blocked/requires_decision verdict stays gated.
+	let gateReason = $derived(
+		report
+			? bindingGateReason(report.overall, unknownFindings.length)
+			: 'Unknown findings gate binding. The check is read-only; resolve the missing evidence before continuing.'
 	);
-	let incompatible = $derived(report?.overall === 'incompatible');
+	let gatedByVerdict = $derived(
+		Boolean(report) && (unknownFindings.length > 0 || verdictGatesBinding(report?.overall))
+	);
 	let canBind = $derived(
 		Boolean(selectedRevisionId) &&
 			Boolean(compatServerId.trim()) &&
 			Boolean(bindLevelName.trim()) &&
 			Boolean(report) &&
-			!gatedByUnknown &&
-			!incompatible
+			!gatedByVerdict
 	);
 
 	onMount(() => {
@@ -582,11 +590,10 @@ SPDX-License-Identifier: MPL-2.0
 										target {report.targetMcVersion || '—'} · server {report.serverId || '—'}
 									</span>
 								</div>
-								{#if gatedByUnknown}
+								{#if gateReason}
 									<p class="mt-3 flex items-start gap-2 text-xs text-warning-text" role="status">
 										<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
-										Unknown findings gate binding. The check is read-only; resolve the missing evidence
-										before continuing.
+										{gateReason}
 									</p>
 								{/if}
 							</div>

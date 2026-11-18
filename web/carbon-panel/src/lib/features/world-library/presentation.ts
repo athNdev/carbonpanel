@@ -98,11 +98,21 @@ export function operationOutcomePresentation(outcome: string | undefined): World
 export function compatibilityVerdictPresentation(overall: string | undefined): WorldPresentation {
 	switch (overall) {
 		case 'compatible':
-			return { label: 'COMPATIBLE', tone: 'green' };
+			return { label: 'COMPATIBLE', tone: 'green', hint: 'No detected blocker for this target' };
+		case 'blocked':
+			return {
+				label: 'BLOCKED',
+				tone: 'red',
+				hint: 'A required transform is unsupported; binding is disabled'
+			};
 		case 'incompatible':
-			return { label: 'INCOMPATIBLE', tone: 'red' };
+			return { label: 'INCOMPATIBLE', tone: 'red', hint: 'Binding is disabled' };
 		case 'requires_decision':
-			return { label: 'REQUIRES DECISION', tone: 'yellow' };
+			return {
+				label: 'REQUIRES DECISION',
+				tone: 'yellow',
+				hint: 'An operator must review the report before binding'
+			};
 		case 'unknown':
 		default:
 			return {
@@ -110,6 +120,43 @@ export function compatibilityVerdictPresentation(overall: string | undefined): W
 				tone: 'gray',
 				hint: 'Unknown findings gate the operation'
 			};
+	}
+}
+
+/**
+ * Verdicts are not confidence values. `compatible` is the only verdict that
+ * permits binding; every other real verdict (and a missing verdict) fails
+ * closed. Unknown individual findings also gate even when the overall verdict
+ * claims compatibility, so an inconsistent report cannot silently unlock a
+ * destructive operation.
+ */
+export function verdictGatesBinding(overall: string | undefined): boolean {
+	switch (overall) {
+		case 'compatible':
+			return false;
+		default:
+			return true;
+	}
+}
+
+/** The operator-facing reason binding is unavailable, or null when it is not. */
+export function bindingGateReason(
+	overall: string | undefined,
+	unknownFindingCount: number
+): string | null {
+	if (unknownFindingCount > 0 || overall === 'unknown' || overall === undefined) {
+		return 'Unknown findings gate binding. The check is read-only; resolve the missing evidence before continuing.';
+	}
+	switch (overall) {
+		case 'compatible':
+			return null;
+		case 'blocked':
+		case 'incompatible':
+			return 'This change is blocked for the target. Binding is disabled; choose a supported revision or transform.';
+		case 'requires_decision':
+			return 'This change requires an explicit operator decision. Review the report before binding.';
+		default:
+			return 'Unknown findings gate binding. The check is read-only; resolve the missing evidence before continuing.';
 	}
 }
 
