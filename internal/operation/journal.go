@@ -98,6 +98,70 @@ func RunJournaled(ctx context.Context, store Journal, log *logger.Logger, server
 	return finishMutation(ctx, store, log, op.ID, kind, mutate)
 }
 
+// JournalOutcome reports the durable outcome of a journaled mutation. Outcome
+// is "success" or "unknown"; an unknown effect keeps the server lock and is
+// never presented as a retryable failure.
+type JournalOutcome struct {
+	OperationID string
+	Outcome     string
+}
+
+// RunJournaledOutcome is RunJournaled for mutations whose external effect may
+// be uncertain (for example a world swap whose restart could not be observed).
+// When mutate reports uncertain=true with an error, the journal row keeps its
+// active server lock and records an explicit operator-resolution note. It does
+// not advance to failed, so the UI cannot offer a blind retry. A completion or
+// a definite failure follows the same path as RunJournaled.
+func RunJournaledOutcome(ctx context.Context, store Journal, log *logger.Logger, server *db.Server, kind, requestID string, mutate func() (uncertain bool, err error)) (JournalOutcome, error) {
+	if err := ValidateRequestID(requestID); err != nil {
+		return JournalOutcome{}, err
+	}
+	digest := Digest(kind, server)
+	op, reused, err := store.BeginServerOperation(ctx, server.ID, server.NodeID, server.ContainerID, StorageKey(requestID, kind), kind, digest)
+	if err != nil {
+		return JournalOutcome{}, fmt.Errorf("record %s intent: %w", kind, err)
+	}
+	if reused {
+		switch op.Phase {
+		case db.ServerOperationComplete:
+			return JournalOutcome{OperationID: op.ID, Outcome: string(OutcomeSuccess)}, nil
+		case db.ServerOperationFailed:
+			if op.LastError != "" {
+				return JournalOutcome{OperationID: op.ID}, fmt.Errorf("%w: %s", ErrAlreadyFailed, op.LastError)
+			}
+			return JournalOutcome{OperationID: op.ID}, ErrAlreadyFailed
+		case db.ServerOperationPrepared, db.ServerOperationExecuting:
+			return JournalOutcome{OperationID: op.ID}, fmt.Errorf("%w: %s", ErrInProgress, op.ID)
+		default:
+			return JournalOutcome{OperationID: op.ID}, fmt.Errorf("lifecycle operation %s is in phase %s; retry with a new request_id", op.ID, op.Phase)
+		}
+	}
+	if err := store.AdvanceServerOperation(ctx, op.ID, op.Phase, db.ServerOperationExecuting, ""); err != nil {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = store.AdvanceServerOperation(releaseCtx, op.ID, op.Phase, db.ServerOperationFailed, "could not enter executing phase: "+err.Error())
+		return JournalOutcome{OperationID: op.ID}, fmt.Errorf("record %s attempt: %w", kind, err)
+	}
+
+	uncertain, mutateErr := mutate()
+	if mutateErr == nil {
+		if err := finishMutation(ctx, store, log, op.ID, kind, func() error { return nil }); err != nil {
+			return JournalOutcome{OperationID: op.ID, Outcome: string(OutcomeSuccess)}, err
+		}
+		return JournalOutcome{OperationID: op.ID, Outcome: string(OutcomeSuccess)}, nil
+	}
+	if uncertain {
+		noteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		detail := UncertainOutcomeMarker + "; confirm the live world on the node before starting the server. " + mutateErr.Error()
+		if noteErr := store.NoteActiveServerOperation(noteCtx, op.ID, detail); noteErr != nil && log != nil {
+			log.Error("Failed to record uncertain %s operation %s: %v", kind, op.ID, noteErr)
+		}
+		return JournalOutcome{OperationID: op.ID, Outcome: string(OutcomeUnknown)}, mutateErr
+	}
+	return JournalOutcome{OperationID: op.ID}, finishMutation(ctx, store, log, op.ID, kind, func() error { return mutateErr })
+}
+
 func finishMutation(ctx context.Context, store Journal, log *logger.Logger, id, kind string, mutate func() error) error {
 	if mutateErr := mutate(); mutateErr != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

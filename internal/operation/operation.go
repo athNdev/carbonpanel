@@ -165,9 +165,13 @@ func ResumeInterruptedBackups(ctx context.Context, store Store, observer Observe
 
 // keepsWorldLock reports operations whose container state does not prove the
 // world is safe to start. Those locks stay until an operator resolves them.
+// A world-bind swap can leave a retained old level family and a promoted new
+// one on disk. A stopped container does not say which family is live, so a
+// stopped observation must not release this lock: Binder.Recover observes the
+// filesystem and only an operator may settle an ambiguous state.
 func keepsWorldLock(kind string) bool {
 	switch kind {
-	case "delete", "restore", "migrate":
+	case "delete", "restore", "migrate", "world-bind":
 		return true
 	default:
 		return false
@@ -194,6 +198,8 @@ func nextAction(kind string) string {
 		return "delete was interrupted; confirm the container and the world before trying again."
 	case "migrate":
 		return "migration was interrupted; confirm which node holds the world before starting the server."
+	case "world-bind":
+		return "world bind was interrupted; confirm the live level family on the node before starting the server."
 	default:
 		return ""
 	}

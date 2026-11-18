@@ -10,6 +10,8 @@ code_refs:
   - internal/db
   - internal/module/manager.go
   - internal/rpc/services/server.go
+  - internal/worldlib
+  - internal/rpc/services/world.go
   - Makefile
   - docker-compose.yml
   - scripts/snapshot-panel-db.sh
@@ -29,7 +31,7 @@ sources:
     resource: ../../docs/runbook-panel-db-restore.md
   - title: Deployment modes
     resource: ../../docs/deployment-modes.md
-verified: { by: agent:cursor-grok, at: 2026-11-10 }
+verified: { by: agent:opencode-world-library, at: 2026-11-18 }
 review_after: 2027-01-23
 ---
 
@@ -95,6 +97,12 @@ losing a world is not recoverable by rebuilding the controller.
   a download and leaves the container, the world, and the panel row in
   place. Transport-only nodes zip through the injected storage resolver; a node
   with no worker is refused before a controller-local tree is created.
+- World Library revisions are immutable and bound servers receive private
+  clones. A bind or swap keeps the previous level family until verification
+  succeeds, journals intent before mutating, and never auto-retries an
+  uncertain outcome. Rejecting an import or a swap leaves the live world and
+  the controller database unchanged. See
+  [World Library](../architecture/world-library.md).
 
 # Review
 
