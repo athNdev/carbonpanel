@@ -76,7 +76,8 @@ sources:
   deployment date as `lastmod`; utility pages with `noindex` are excluded.
   Website validation rejects missing or incomplete output.
 - Current social cards are rendered from `assets/branding/social-preview.html`
-  with the approved logo, homepage terrain and Plex fonts. The website uses
+  with the approved logo, homepage terrain and Plex fonts. The crop centers
+  the lit doorway and nearby terraces so they read at thumbnail size. The website uses
   1200 by 630 PNGs; GitHub has a separate 1280 by 640 repository PNG and an
   independent upload setting. Regeneration must not alter the approved logo.
 
