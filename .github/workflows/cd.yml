@@ -42,7 +42,10 @@ jobs:
     # Verification runs share a cancellable group; an opted-in publication uses
     # a separate group that routine main builds cannot cancel mid-write.
     concurrency:
-      group: cd-${{ github.event_name == 'workflow_dispatch' && inputs.push && 'publish' || 'verify' }}-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      # Publication is serialized channel-wide, with no SHA, so publishes of
+      # different commits cannot race on the moving :edge alias. It never
+      # cancels an in-flight write. Verification stays per-SHA and cancellable.
+      group: ${{ github.event_name == 'workflow_dispatch' && inputs.push && 'cd-publish-edge' || format('cd-verify-{0}', github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha) }}
       cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.push }}
 
     steps:

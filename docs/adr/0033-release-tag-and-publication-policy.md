@@ -70,7 +70,10 @@ while publication requires an explicit dispatch opt-in (`push=true` /
 `deploy=true`), a read-only `verify-main-ci` check proving exact-commit main
 ancestry and a successful completed push CI run, and a trusted `refs/heads/main`
 ref. An operator checkbox is never CI evidence. Tags, feature refs and blank
-refs are refused and the workflows are not disabled.
+refs are refused and the workflows are not disabled. Verification uses
+per-SHA cancellable concurrency groups; publication uses a fixed channel-wide
+non-cancelling group so different commits serialize on the moving `:edge` and
+Pages destinations without cancelling an in-flight write.
 IndexNow notification is deliberately deferred because changed URLs come from a
 push diff while deployment happens on dispatch. These scoped gates need
 release-auditor review before held product merges are unblocked. Consumers

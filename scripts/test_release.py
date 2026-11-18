@@ -46,7 +46,7 @@ class ReleaseTests(unittest.TestCase):
     def test_cd_concurrency_belongs_to_the_gated_publish_job(self):
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
         self.assertNotRegex(source, r"(?m)^concurrency:")
-        self.assertRegex(source, r"(?m)^    concurrency:\n      group:")
+        self.assertRegex(source, r"(?m)^    concurrency:\n(?:      #.*\n)*      group:")
         self.assertIn("github.event.workflow_run.event == 'push'", source)
         self.assertIn("github.event.workflow_run.conclusion == 'success'", source)
 
@@ -670,7 +670,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_pages_write_permissions_are_deploy_job_only(self):
         source = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
-        self.assertIn("permissions:\n  contents: read\n  actions: read\n\nconcurrency:", source)
+        self.assertIn("permissions:\n  contents: read\n  actions: read", source)
         deploy = source.split("  deploy:\n", 1)[1].split("  indexable-changes:\n", 1)[0]
         self.assertIn("    permissions:\n      contents: read\n"
                       "      pages: write\n      id-token: write", deploy)
@@ -791,11 +791,13 @@ class ReleaseTests(unittest.TestCase):
             if any(token in line for token in ("CI_COMMIT:", "value=sha-",
                                                 "image.revision=", "APP_COMMIT=")):
                 self.assertNotIn("head_sha || github.sha", line)
-        # Verification and opted-in publication use separate concurrency groups.
-        self.assertIn("group: cd-${{ github.event_name == 'workflow_dispatch' "
-                      "&& inputs.push && 'publish' || 'verify' }}", source)
+        # Publication is one fixed, channel-wide, non-cancelling group: two
+        # opted-in publishes of different commits cannot race on :edge.
+        self.assertIn("&& inputs.push && 'cd-publish-edge'", source)
+        self.assertIn("|| format('cd-verify-{0}'", source)
         self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' "
                       "|| !inputs.push }}", source)
+        self.assertIn("&& 'cd-publish-edge' || format('cd-verify-{0}'", source)
         # Pin assertion precedes every side-effecting step.
         self.assertLess(source.index("Assert checked-out HEAD"),
                         source.index("Docker Hub Credentials & Login Check"))
@@ -808,6 +810,20 @@ class ReleaseTests(unittest.TestCase):
             block = source.split("- name: " + step_name + "\n", 1)[1].split("\n      - ", 1)[0]
             self.assertIn("fetch-depth: 0", block)
             self.assertNotIn("ref:", block)
+
+    def test_landing_deploy_group_is_fixed_and_non_cancellable(self):
+        source = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
+        self.assertIn("&& inputs.deploy && 'pages-deploy'", source)
+        self.assertIn("&& 'pages-deploy' || format('pages-verify-{0}'", source)
+        self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' "
+                      "|| !inputs.deploy }}", source)
+        self.assertNotIn("  group: pages\n", source)
+        # An opted-in deployment is still gated by the trusted-CI decision, not
+        # by which concurrency group the run used.
+        self.assertIn("if: needs.build.outputs.publish == 'true'", source)
+        automatic = release.developer_channel_decision(
+            "push", "true", ref=release.TRUSTED_DEVELOPER_REF, ci_verified="true")
+        self.assertFalse(automatic[0])
 
     def test_cd_has_read_only_workflow_permissions(self):
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")

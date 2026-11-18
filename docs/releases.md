@@ -197,10 +197,13 @@ read-only by `verify-main-ci`, including ancestry of `main`) and a trusted
 evidence; tags, feature refs, blank refs, PRs and dry runs are refused regardless
 of any input. The CD job pins the checkout to the verified event SHA (or the CI
 run's head SHA for `workflow_run`), fetches full history for ancestry, asserts the
-actual HEAD matches, and derives tags and provenance from that same SHA. Opted-in
-publication uses a separate concurrency group from routine verification builds.
-The workflows are not disabled — they still build and validate on their normal
-triggers.
+actual HEAD matches, and derives tags and provenance from that same SHA.
+Verification uses per-SHA cancellable concurrency groups, while opted-in
+publication uses a fixed channel-wide, non-cancelling group (`cd-publish-edge`
+and `pages-deploy`) with no SHA. Different commits therefore serialize on the
+moving `:edge`/Pages destinations, and routine builds cannot cancel an
+in-flight publication. The workflows are not disabled — they still build and
+validate on their normal triggers.
 
 IndexNow notification is deliberately deferred under that model:
 `indexable-changes` derives URLs only from a push diff, while deployment now

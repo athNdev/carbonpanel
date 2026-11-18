@@ -42,9 +42,11 @@ permissions:
   contents: read
   actions: read
 
+# Deployments are serialized channel-wide and never cancelled by the routine
+# per-SHA verification builds; alias/artifact writes stay coherent.
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy && 'pages-deploy' || format('pages-verify-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.deploy }}
 
 jobs:
   build:
