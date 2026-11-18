@@ -22,4 +22,5 @@
 - [Server data ownership](server-data-ownership.md) — The panel and the game container share a bind mount but not a uid, so anything the panel writes must be handed to the game container's user. Existing /data matching the game uid sets SKIP_CHOWN so a restart does not recursively chown.
 - [Server lifecycle policy](server-lifecycle.md) — Starts share node admission behind an in-process node gate, and config recreation records canonical container recovery identities.
 - [TCP proxy](proxy.md) — One public TCP port multiplexes Minecraft traffic by inspecting the handshake and routing on hostname.
+- [Unprivileged LXC node artifact lane](node-lxc-artifact.md) — Separate rootfs artifact lane for unprivileged LXC managed nodes; shares the ADR0019 contract and gates on nested-runtime capabilities.
 - [World Library](world-library.md) — Library worlds are immutable content-addressed revisions; servers get private writable clones through journaled, stop-based bindings, never a live folder rename.

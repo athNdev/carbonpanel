@@ -1,0 +1,23 @@
+[Unit]
+Description=Carbon Panel captive node agent (unprivileged LXC guest)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+Delegate=cpu cpuset io memory pids
+ReadOnlyPaths=/
+ReadWritePaths=/var/lib/carbon-node/state /run/carbon-node
+ExecStart=/usr/bin/carbon-node --config /etc/carbon-node/config.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

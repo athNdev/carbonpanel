@@ -1,0 +1,3 @@
+Synthetic fixture rootfs. Contains no credentials, no world data and no
+host-specific paths. Used only for offline artifact qualification; it is not a
+bootable template and has no live import/boot evidence.
