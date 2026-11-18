@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 )
 
 var (
@@ -196,6 +197,58 @@ func (c *ProxyConn) RemoteAddr() net.Addr {
 		return c.remoteAddr
 	}
 	return c.Conn.RemoteAddr()
+}
+
+// ParseTrustedProxyCIDRs parses an operator-supplied list of CIDRs. An invalid
+// entry is an error rather than being silently ignored: a typo must not widen
+// or accidentally narrow the trust boundary.
+func ParseTrustedProxyCIDRs(entries []string) ([]*net.IPNet, error) {
+	var nets []*net.IPNet
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		_, parsed, err := net.ParseCIDR(entry)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted_proxy_cidrs entry %q: %w", entry, err)
+		}
+		nets = append(nets, parsed)
+	}
+	return nets, nil
+}
+
+// peerIsTrustedProxy reports whether the direct peer is in the allowlist.
+func peerIsTrustedProxy(remote net.Addr, cidrs []*net.IPNet) bool {
+	if remote == nil || len(cidrs) == 0 {
+		return false
+	}
+	host := remote.String()
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, network := range cidrs {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// WrapConnWithProxyProtocolIfTrusted only parses an inbound PROXY v2 header
+// when the direct peer is an explicitly trusted proxy. Production ingress must
+// use this variant; the unrestricted helper remains for local fixtures.
+func WrapConnWithProxyProtocolIfTrusted(conn net.Conn, cidrs []*net.IPNet) (net.Conn, *ProxyHeader, error) {
+	if !peerIsTrustedProxy(conn.RemoteAddr(), cidrs) {
+		// Leave the byte stream untouched: a PROXY header from an untrusted
+		// peer is ordinary payload and must reach the protocol parser as-is.
+		return &ProxyConn{Conn: conn, reader: conn, remoteAddr: conn.RemoteAddr()}, nil, nil
+	}
+	return WrapConnWithProxyProtocol(conn)
 }
 
 // WrapConnWithProxyProtocol peeks the incoming connection for PROXY protocol v2 signature.

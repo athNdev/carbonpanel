@@ -28,7 +28,7 @@ const (
 )
 
 // Source that produced a player field. Non-authoritative values always carry
-// an Observation so the console can disclose provenance instead of guessing.
+// a PlayerObservation so the console can disclose provenance instead of guessing.
 type PlayerDataSource int32
 
 const (
@@ -349,7 +349,9 @@ func (PlayerSupportState) EnumDescriptor() ([]byte, []int) {
 }
 
 // Field-level provenance envelope shared by roster, detail and deep data.
-type Observation struct {
+// Named PlayerObservation to avoid colliding with the World Library's
+// cross-feature Observation message in the same proto package.
+type PlayerObservation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Source        PlayerDataSource       `protobuf:"varint,1,opt,name=source,proto3,enum=carbonpanel.v1.PlayerDataSource" json:"source,omitempty"`
 	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
@@ -360,20 +362,20 @@ type Observation struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *Observation) Reset() {
-	*x = Observation{}
+func (x *PlayerObservation) Reset() {
+	*x = PlayerObservation{}
 	mi := &file_carbonpanel_v1_player_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *Observation) String() string {
+func (x *PlayerObservation) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*Observation) ProtoMessage() {}
+func (*PlayerObservation) ProtoMessage() {}
 
-func (x *Observation) ProtoReflect() protoreflect.Message {
+func (x *PlayerObservation) ProtoReflect() protoreflect.Message {
 	mi := &file_carbonpanel_v1_player_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -385,40 +387,40 @@ func (x *Observation) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Observation.ProtoReflect.Descriptor instead.
-func (*Observation) Descriptor() ([]byte, []int) {
+// Deprecated: Use PlayerObservation.ProtoReflect.Descriptor instead.
+func (*PlayerObservation) Descriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Observation) GetSource() PlayerDataSource {
+func (x *PlayerObservation) GetSource() PlayerDataSource {
 	if x != nil {
 		return x.Source
 	}
 	return PlayerDataSource_PLAYER_DATA_SOURCE_UNSPECIFIED
 }
 
-func (x *Observation) GetObservedAt() *timestamppb.Timestamp {
+func (x *PlayerObservation) GetObservedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.ObservedAt
 	}
 	return nil
 }
 
-func (x *Observation) GetConfidence() PlayerConfidence {
+func (x *PlayerObservation) GetConfidence() PlayerConfidence {
 	if x != nil {
 		return x.Confidence
 	}
 	return PlayerConfidence_PLAYER_CONFIDENCE_UNSPECIFIED
 }
 
-func (x *Observation) GetApplicability() string {
+func (x *PlayerObservation) GetApplicability() string {
 	if x != nil {
 		return x.Applicability
 	}
 	return ""
 }
 
-func (x *Observation) GetConflictNote() string {
+func (x *PlayerObservation) GetConflictNote() string {
 	if x != nil {
 		return x.ConflictNote
 	}
@@ -573,14 +575,14 @@ func (x *PlayerAlias) GetSource() PlayerDataSource {
 }
 
 // A roster row. Fields that are not backed by a source stay empty and are
-// described by their Observation, never filled with a plausible default.
+// described by their PlayerObservation, never filled with a plausible default.
 type PlayerSummary struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	Ref                 *PlayerRef             `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
 	ServerId            string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
 	ServerName          string                 `protobuf:"bytes,3,opt,name=server_name,json=serverName,proto3" json:"server_name,omitempty"`
 	Presence            PlayerPresence         `protobuf:"varint,4,opt,name=presence,proto3,enum=carbonpanel.v1.PlayerPresence" json:"presence,omitempty"`
-	PresenceObservation *Observation           `protobuf:"bytes,5,opt,name=presence_observation,json=presenceObservation,proto3" json:"presence_observation,omitempty"`
+	PresenceObservation *PlayerObservation     `protobuf:"bytes,5,opt,name=presence_observation,json=presenceObservation,proto3" json:"presence_observation,omitempty"`
 	Aliases             []*PlayerAlias         `protobuf:"bytes,6,rep,name=aliases,proto3" json:"aliases,omitempty"`
 	Whitelisted         bool                   `protobuf:"varint,7,opt,name=whitelisted,proto3" json:"whitelisted,omitempty"`
 	Operator            bool                   `protobuf:"varint,8,opt,name=operator,proto3" json:"operator,omitempty"`
@@ -651,7 +653,7 @@ func (x *PlayerSummary) GetPresence() PlayerPresence {
 	return PlayerPresence_PLAYER_PRESENCE_UNSPECIFIED
 }
 
-func (x *PlayerSummary) GetPresenceObservation() *Observation {
+func (x *PlayerSummary) GetPresenceObservation() *PlayerObservation {
 	if x != nil {
 		return x.PresenceObservation
 	}
@@ -720,7 +722,7 @@ type PlayerField struct {
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	Unit          string                 `protobuf:"bytes,3,opt,name=unit,proto3" json:"unit,omitempty"`
-	Observation   *Observation           `protobuf:"bytes,4,opt,name=observation,proto3" json:"observation,omitempty"`
+	Observation   *PlayerObservation     `protobuf:"bytes,4,opt,name=observation,proto3" json:"observation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -776,7 +778,7 @@ func (x *PlayerField) GetUnit() string {
 	return ""
 }
 
-func (x *PlayerField) GetObservation() *Observation {
+func (x *PlayerField) GetObservation() *PlayerObservation {
 	if x != nil {
 		return x.Observation
 	}
@@ -879,7 +881,7 @@ type PlayerAccessState struct {
 	Banned        bool                   `protobuf:"varint,5,opt,name=banned,proto3" json:"banned,omitempty"`
 	BanReason     string                 `protobuf:"bytes,6,opt,name=ban_reason,json=banReason,proto3" json:"ban_reason,omitempty"`
 	Mute          bool                   `protobuf:"varint,7,opt,name=mute,proto3" json:"mute,omitempty"`
-	Observation   *Observation           `protobuf:"bytes,8,opt,name=observation,proto3" json:"observation,omitempty"`
+	Observation   *PlayerObservation     `protobuf:"bytes,8,opt,name=observation,proto3" json:"observation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -963,7 +965,7 @@ func (x *PlayerAccessState) GetMute() bool {
 	return false
 }
 
-func (x *PlayerAccessState) GetObservation() *Observation {
+func (x *PlayerAccessState) GetObservation() *PlayerObservation {
 	if x != nil {
 		return x.Observation
 	}
@@ -1138,7 +1140,7 @@ type PlayerSkinAsset struct {
 	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
 	ContentType   string                 `protobuf:"bytes,2,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
 	FromCache     bool                   `protobuf:"varint,3,opt,name=from_cache,json=fromCache,proto3" json:"from_cache,omitempty"`
-	Observation   *Observation           `protobuf:"bytes,4,opt,name=observation,proto3" json:"observation,omitempty"`
+	Observation   *PlayerObservation     `protobuf:"bytes,4,opt,name=observation,proto3" json:"observation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1194,7 +1196,7 @@ func (x *PlayerSkinAsset) GetFromCache() bool {
 	return false
 }
 
-func (x *PlayerSkinAsset) GetObservation() *Observation {
+func (x *PlayerSkinAsset) GetObservation() *PlayerObservation {
 	if x != nil {
 		return x.Observation
 	}
@@ -1208,7 +1210,7 @@ type PlayerDetail struct {
 	Ref                 *PlayerRef                `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
 	Aliases             []*PlayerAlias            `protobuf:"bytes,2,rep,name=aliases,proto3" json:"aliases,omitempty"`
 	Presence            PlayerPresence            `protobuf:"varint,3,opt,name=presence,proto3,enum=carbonpanel.v1.PlayerPresence" json:"presence,omitempty"`
-	PresenceObservation *Observation              `protobuf:"bytes,4,opt,name=presence_observation,json=presenceObservation,proto3" json:"presence_observation,omitempty"`
+	PresenceObservation *PlayerObservation        `protobuf:"bytes,4,opt,name=presence_observation,json=presenceObservation,proto3" json:"presence_observation,omitempty"`
 	PrimaryServerId     string                    `protobuf:"bytes,5,opt,name=primary_server_id,json=primaryServerId,proto3" json:"primary_server_id,omitempty"`
 	FirstSeen           *timestamppb.Timestamp    `protobuf:"bytes,6,opt,name=first_seen,json=firstSeen,proto3" json:"first_seen,omitempty"`
 	LastSeen            *timestamppb.Timestamp    `protobuf:"bytes,7,opt,name=last_seen,json=lastSeen,proto3" json:"last_seen,omitempty"`
@@ -1272,7 +1274,7 @@ func (x *PlayerDetail) GetPresence() PlayerPresence {
 	return PlayerPresence_PLAYER_PRESENCE_UNSPECIFIED
 }
 
-func (x *PlayerDetail) GetPresenceObservation() *Observation {
+func (x *PlayerDetail) GetPresenceObservation() *PlayerObservation {
 	if x != nil {
 		return x.PresenceObservation
 	}
@@ -3298,8 +3300,8 @@ var File_carbonpanel_v1_player_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\n" +
-	"\x1bcarbonpanel/v1/player.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x91\x02\n" +
-	"\vObservation\x128\n" +
+	"\x1bcarbonpanel/v1/player.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x97\x02\n" +
+	"\x11PlayerObservation\x128\n" +
 	"\x06source\x18\x01 \x01(\x0e2 .carbonpanel.v1.PlayerDataSourceR\x06source\x12;\n" +
 	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"observedAt\x12@\n" +
@@ -3319,14 +3321,14 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"observedAt\x12(\n" +
 	"\x10source_server_id\x18\x03 \x01(\tR\x0esourceServerId\x128\n" +
-	"\x06source\x18\x04 \x01(\x0e2 .carbonpanel.v1.PlayerDataSourceR\x06source\"\xaf\x04\n" +
+	"\x06source\x18\x04 \x01(\x0e2 .carbonpanel.v1.PlayerDataSourceR\x06source\"\xb5\x04\n" +
 	"\rPlayerSummary\x12+\n" +
 	"\x03ref\x18\x01 \x01(\v2\x19.carbonpanel.v1.PlayerRefR\x03ref\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x1f\n" +
 	"\vserver_name\x18\x03 \x01(\tR\n" +
 	"serverName\x12:\n" +
-	"\bpresence\x18\x04 \x01(\x0e2\x1e.carbonpanel.v1.PlayerPresenceR\bpresence\x12N\n" +
-	"\x14presence_observation\x18\x05 \x01(\v2\x1b.carbonpanel.v1.ObservationR\x13presenceObservation\x125\n" +
+	"\bpresence\x18\x04 \x01(\x0e2\x1e.carbonpanel.v1.PlayerPresenceR\bpresence\x12T\n" +
+	"\x14presence_observation\x18\x05 \x01(\v2!.carbonpanel.v1.PlayerObservationR\x13presenceObservation\x125\n" +
 	"\aaliases\x18\x06 \x03(\v2\x1b.carbonpanel.v1.PlayerAliasR\aaliases\x12 \n" +
 	"\vwhitelisted\x18\a \x01(\bR\vwhitelisted\x12\x1a\n" +
 	"\boperator\x18\b \x01(\bR\boperator\x12\x16\n" +
@@ -3336,19 +3338,19 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\bskin_ref\x18\v \x01(\tR\askinRef\x12%\n" +
 	"\x0eskin_available\x18\f \x01(\bR\rskinAvailable\x12\x1f\n" +
 	"\vaccess_band\x18\r \x01(\tR\n" +
-	"accessBand\"\x8a\x01\n" +
+	"accessBand\"\x90\x01\n" +
 	"\vPlayerField\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x12\n" +
-	"\x04unit\x18\x03 \x01(\tR\x04unit\x12=\n" +
-	"\vobservation\x18\x04 \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation\"\xf1\x01\n" +
+	"\x04unit\x18\x03 \x01(\tR\x04unit\x12C\n" +
+	"\vobservation\x18\x04 \x01(\v2!.carbonpanel.v1.PlayerObservationR\vobservation\"\xf1\x01\n" +
 	"\rPlayerSession\x12!\n" +
 	"\fidentity_key\x18\x01 \x01(\tR\videntityKey\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x127\n" +
 	"\tjoined_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bjoinedAt\x123\n" +
 	"\aleft_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x06leftAt\x12\x16\n" +
 	"\x06source\x18\x05 \x01(\tR\x06source\x12\x1a\n" +
-	"\bestimate\x18\x06 \x01(\bR\bestimate\"\x93\x02\n" +
+	"\bestimate\x18\x06 \x01(\bR\bestimate\"\x99\x02\n" +
 	"\x11PlayerAccessState\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12 \n" +
 	"\vwhitelisted\x18\x02 \x01(\bR\vwhitelisted\x12\x1a\n" +
@@ -3357,8 +3359,8 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\x06banned\x18\x05 \x01(\bR\x06banned\x12\x1d\n" +
 	"\n" +
 	"ban_reason\x18\x06 \x01(\tR\tbanReason\x12\x12\n" +
-	"\x04mute\x18\a \x01(\bR\x04mute\x12=\n" +
-	"\vobservation\x18\b \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation\"\x84\x02\n" +
+	"\x04mute\x18\a \x01(\bR\x04mute\x12C\n" +
+	"\vobservation\x18\b \x01(\v2!.carbonpanel.v1.PlayerObservationR\vobservation\"\x84\x02\n" +
 	"\x12PlayerHistoryEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1d\n" +
@@ -3376,18 +3378,18 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"capability\x18\x01 \x01(\x0e2 .carbonpanel.v1.PlayerCapabilityR\n" +
 	"capability\x128\n" +
 	"\x05state\x18\x02 \x01(\x0e2\".carbonpanel.v1.PlayerSupportStateR\x05state\x12\x16\n" +
-	"\x06detail\x18\x03 \x01(\tR\x06detail\"\xa6\x01\n" +
+	"\x06detail\x18\x03 \x01(\tR\x06detail\"\xac\x01\n" +
 	"\x0fPlayerSkinAsset\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\fcontent_type\x18\x02 \x01(\tR\vcontentType\x12\x1d\n" +
 	"\n" +
-	"from_cache\x18\x03 \x01(\bR\tfromCache\x12=\n" +
-	"\vobservation\x18\x04 \x01(\v2\x1b.carbonpanel.v1.ObservationR\vobservation\"\xbf\x05\n" +
+	"from_cache\x18\x03 \x01(\bR\tfromCache\x12C\n" +
+	"\vobservation\x18\x04 \x01(\v2!.carbonpanel.v1.PlayerObservationR\vobservation\"\xc5\x05\n" +
 	"\fPlayerDetail\x12+\n" +
 	"\x03ref\x18\x01 \x01(\v2\x19.carbonpanel.v1.PlayerRefR\x03ref\x125\n" +
 	"\aaliases\x18\x02 \x03(\v2\x1b.carbonpanel.v1.PlayerAliasR\aaliases\x12:\n" +
-	"\bpresence\x18\x03 \x01(\x0e2\x1e.carbonpanel.v1.PlayerPresenceR\bpresence\x12N\n" +
-	"\x14presence_observation\x18\x04 \x01(\v2\x1b.carbonpanel.v1.ObservationR\x13presenceObservation\x12*\n" +
+	"\bpresence\x18\x03 \x01(\x0e2\x1e.carbonpanel.v1.PlayerPresenceR\bpresence\x12T\n" +
+	"\x14presence_observation\x18\x04 \x01(\v2!.carbonpanel.v1.PlayerObservationR\x13presenceObservation\x12*\n" +
 	"\x11primary_server_id\x18\x05 \x01(\tR\x0fprimaryServerId\x129\n" +
 	"\n" +
 	"first_seen\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tfirstSeen\x127\n" +
@@ -3617,7 +3619,7 @@ var file_carbonpanel_v1_player_proto_goTypes = []any{
 	(PlayerPresence)(0),                    // 2: carbonpanel.v1.PlayerPresence
 	(PlayerCapability)(0),                  // 3: carbonpanel.v1.PlayerCapability
 	(PlayerSupportState)(0),                // 4: carbonpanel.v1.PlayerSupportState
-	(*Observation)(nil),                    // 5: carbonpanel.v1.Observation
+	(*PlayerObservation)(nil),              // 5: carbonpanel.v1.PlayerObservation
 	(*PlayerRef)(nil),                      // 6: carbonpanel.v1.PlayerRef
 	(*PlayerAlias)(nil),                    // 7: carbonpanel.v1.PlayerAlias
 	(*PlayerSummary)(nil),                  // 8: carbonpanel.v1.PlayerSummary
@@ -3665,28 +3667,28 @@ var file_carbonpanel_v1_player_proto_goTypes = []any{
 	(*timestamppb.Timestamp)(nil),          // 50: google.protobuf.Timestamp
 }
 var file_carbonpanel_v1_player_proto_depIdxs = []int32{
-	0,  // 0: carbonpanel.v1.Observation.source:type_name -> carbonpanel.v1.PlayerDataSource
-	50, // 1: carbonpanel.v1.Observation.observed_at:type_name -> google.protobuf.Timestamp
-	1,  // 2: carbonpanel.v1.Observation.confidence:type_name -> carbonpanel.v1.PlayerConfidence
+	0,  // 0: carbonpanel.v1.PlayerObservation.source:type_name -> carbonpanel.v1.PlayerDataSource
+	50, // 1: carbonpanel.v1.PlayerObservation.observed_at:type_name -> google.protobuf.Timestamp
+	1,  // 2: carbonpanel.v1.PlayerObservation.confidence:type_name -> carbonpanel.v1.PlayerConfidence
 	50, // 3: carbonpanel.v1.PlayerAlias.observed_at:type_name -> google.protobuf.Timestamp
 	0,  // 4: carbonpanel.v1.PlayerAlias.source:type_name -> carbonpanel.v1.PlayerDataSource
 	6,  // 5: carbonpanel.v1.PlayerSummary.ref:type_name -> carbonpanel.v1.PlayerRef
 	2,  // 6: carbonpanel.v1.PlayerSummary.presence:type_name -> carbonpanel.v1.PlayerPresence
-	5,  // 7: carbonpanel.v1.PlayerSummary.presence_observation:type_name -> carbonpanel.v1.Observation
+	5,  // 7: carbonpanel.v1.PlayerSummary.presence_observation:type_name -> carbonpanel.v1.PlayerObservation
 	7,  // 8: carbonpanel.v1.PlayerSummary.aliases:type_name -> carbonpanel.v1.PlayerAlias
 	50, // 9: carbonpanel.v1.PlayerSummary.last_seen:type_name -> google.protobuf.Timestamp
-	5,  // 10: carbonpanel.v1.PlayerField.observation:type_name -> carbonpanel.v1.Observation
+	5,  // 10: carbonpanel.v1.PlayerField.observation:type_name -> carbonpanel.v1.PlayerObservation
 	50, // 11: carbonpanel.v1.PlayerSession.joined_at:type_name -> google.protobuf.Timestamp
 	50, // 12: carbonpanel.v1.PlayerSession.left_at:type_name -> google.protobuf.Timestamp
-	5,  // 13: carbonpanel.v1.PlayerAccessState.observation:type_name -> carbonpanel.v1.Observation
+	5,  // 13: carbonpanel.v1.PlayerAccessState.observation:type_name -> carbonpanel.v1.PlayerObservation
 	50, // 14: carbonpanel.v1.PlayerHistoryEntry.occurred_at:type_name -> google.protobuf.Timestamp
 	3,  // 15: carbonpanel.v1.PlayerCapabilityStatus.capability:type_name -> carbonpanel.v1.PlayerCapability
 	4,  // 16: carbonpanel.v1.PlayerCapabilityStatus.state:type_name -> carbonpanel.v1.PlayerSupportState
-	5,  // 17: carbonpanel.v1.PlayerSkinAsset.observation:type_name -> carbonpanel.v1.Observation
+	5,  // 17: carbonpanel.v1.PlayerSkinAsset.observation:type_name -> carbonpanel.v1.PlayerObservation
 	6,  // 18: carbonpanel.v1.PlayerDetail.ref:type_name -> carbonpanel.v1.PlayerRef
 	7,  // 19: carbonpanel.v1.PlayerDetail.aliases:type_name -> carbonpanel.v1.PlayerAlias
 	2,  // 20: carbonpanel.v1.PlayerDetail.presence:type_name -> carbonpanel.v1.PlayerPresence
-	5,  // 21: carbonpanel.v1.PlayerDetail.presence_observation:type_name -> carbonpanel.v1.Observation
+	5,  // 21: carbonpanel.v1.PlayerDetail.presence_observation:type_name -> carbonpanel.v1.PlayerObservation
 	50, // 22: carbonpanel.v1.PlayerDetail.first_seen:type_name -> google.protobuf.Timestamp
 	50, // 23: carbonpanel.v1.PlayerDetail.last_seen:type_name -> google.protobuf.Timestamp
 	9,  // 24: carbonpanel.v1.PlayerDetail.character:type_name -> carbonpanel.v1.PlayerField

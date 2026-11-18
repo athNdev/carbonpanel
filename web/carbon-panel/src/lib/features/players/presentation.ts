@@ -13,7 +13,11 @@
  * repository's plain Bun runner.
  */
 
-import type { Observation, PlayerField, PlayerSummary } from '$lib/proto/carbonpanel/v1/player_pb';
+import type {
+	PlayerField,
+	PlayerObservation,
+	PlayerSummary
+} from '$lib/proto/carbonpanel/v1/player_pb';
 import {
 	PlayerCapability,
 	PlayerConfidence,
@@ -250,7 +254,9 @@ export interface ProvenanceView {
 	authoritative: boolean;
 }
 
-export function provenanceView(observation: Observation | undefined | null): ProvenanceView | null {
+export function provenanceView(
+	observation: PlayerObservation | undefined | null
+): ProvenanceView | null {
 	if (!observation) return null;
 	return {
 		source: dataSourceLabel(observation.source),

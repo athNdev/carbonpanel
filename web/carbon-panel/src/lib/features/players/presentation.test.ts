@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { create } from '@bufbuild/protobuf';
 import { timestampFromDate } from '@bufbuild/protobuf/wkt';
 import {
-	ObservationSchema,
+	PlayerObservationSchema,
 	PlayerAliasSchema,
 	PlayerCapability,
 	PlayerConfidence,
@@ -247,7 +247,7 @@ test('capability unsupported and decision-pending states render actionable text'
 });
 
 test('provenance renders source, confidence, timestamp and conflict note honestly', () => {
-	const observation = create(ObservationSchema, {
+	const observation = create(PlayerObservationSchema, {
 		source: PlayerDataSource.ON_DISK_NBT,
 		observedAt: timestampFromDate(new Date('2024-06-01T12:00:00Z')),
 		confidence: PlayerConfidence.CONFLICT,
@@ -266,7 +266,7 @@ test('provenance renders source, confidence, timestamp and conflict note honestl
 	const missing = provenanceView(undefined);
 	assert.equal(missing, null);
 	const stale = provenanceView(
-		create(ObservationSchema, { confidence: PlayerConfidence.STALE, source: 0 })
+		create(PlayerObservationSchema, { confidence: PlayerConfidence.STALE, source: 0 })
 	);
 	assert.equal(stale?.observedAt, 'unavailable');
 	assert.equal(stale?.authoritative, false);

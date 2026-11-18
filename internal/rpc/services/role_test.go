@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rbac"
@@ -51,6 +52,82 @@ func connectCode(t *testing.T, err error) connect.Code {
 	connectErr, ok := err.(*connect.Error)
 	require.True(t, ok, "expected connect error, got %T", err)
 	return connectErr.Code()
+}
+
+func TestRoleService_WildcardGrantRequiresCapability(t *testing.T) {
+	svc := setupRoleTestService(t)
+	nonAdmin := auth.WithUser(context.Background(), &auth.AuthenticatedUser{
+		ID: "u-limited", Username: "limited", Roles: []string{"role-manager"},
+	})
+	admin := auth.WithUser(context.Background(), &auth.AuthenticatedUser{
+		ID: "u-admin", Username: "admin", Roles: []string{"admin"},
+	})
+
+	require.NoError(t, svc.enforcer.SetPermissionsForRole("role-manager", []rbac.Permission{
+		{Resource: rbac.ResourceRoles, Action: rbac.ActionCreate, ObjectID: "*"},
+		{Resource: rbac.ResourceRoles, Action: rbac.ActionUpdate, ObjectID: "*"},
+	}))
+
+	// A roles:update grant alone must not allow handing out a wildcard.
+	_, err := svc.UpdatePermissions(nonAdmin, connect.NewRequest(&v1.UpdatePermissionsRequest{
+		RoleName: "operator",
+		Permissions: []*v1.Permission{{Resource: "*", Action: rbac.ActionRead, ObjectId: "*"}},
+	}))
+	require.Equal(t, connect.CodePermissionDenied, connectCode(t, err))
+
+	_, err = svc.UpdatePermissions(nonAdmin, connect.NewRequest(&v1.UpdatePermissionsRequest{
+		RoleName: "operator",
+		Permissions: []*v1.Permission{{Resource: rbac.ResourceServers, Action: "*", ObjectId: "*"}},
+	}))
+	require.Equal(t, connect.CodePermissionDenied, connectCode(t, err))
+
+	// The built-in admin role has the wildcard-match that grants the
+	// capability, so it can still delegate a wildcard intentionally.
+	_, err = svc.UpdatePermissions(admin, connect.NewRequest(&v1.UpdatePermissionsRequest{
+		RoleName: "operator",
+		Permissions: []*v1.Permission{{Resource: rbac.ResourceServers, Action: rbac.ActionRead, ObjectId: "*"}},
+	}))
+	require.NoError(t, err)
+
+	// Assigning built-in admin is likewise not available to roles:create alone.
+	_, err = svc.AssignRole(nonAdmin, connect.NewRequest(&v1.AssignRoleRequest{
+		UserId: "u-limited", RoleName: "admin",
+	}))
+	require.Equal(t, connect.CodePermissionDenied, connectCode(t, err))
+
+	_, err = svc.AssignRole(nonAdmin, connect.NewRequest(&v1.AssignRoleRequest{
+		UserId: "u-limited", RoleName: "user",
+	}))
+	require.NoError(t, err)
+
+	// CreateRole must apply the same ceiling before writing anything: a
+	// roles:create holder cannot create a *:* role and self-assign it.
+	_, err = svc.CreateRole(nonAdmin, connect.NewRequest(&v1.CreateRoleRequest{
+		Name:        "escalated-role",
+		Permissions: []*v1.Permission{{Resource: "*", Action: "*", ObjectId: "*"}},
+	}))
+	require.Equal(t, connect.CodePermissionDenied, connectCode(t, err))
+
+	_, err = svc.CreateRole(nonAdmin, connect.NewRequest(&v1.CreateRoleRequest{
+		Name:        "escalated-default",
+		IsDefault:   true,
+		Permissions: []*v1.Permission{{Resource: rbac.ResourceServers, Action: rbac.ActionRead, ObjectId: "*"}},
+	}))
+	require.Equal(t, connect.CodePermissionDenied, connectCode(t, err))
+
+	listed, err := svc.ListRoles(context.Background(), connect.NewRequest(&v1.ListRolesRequest{}))
+	require.NoError(t, err)
+	for _, role := range listed.Msg.Roles {
+		require.NotEqual(t, "escalated-role", role.Name, "refused role must not be persisted")
+		require.NotEqual(t, "escalated-default", role.Name, "refused default role must not be persisted")
+	}
+
+	// An admin can still deliberately create a wildcard role.
+	_, err = svc.CreateRole(admin, connect.NewRequest(&v1.CreateRoleRequest{
+		Name:        "admin-delegated",
+		Permissions: []*v1.Permission{{Resource: "*", Action: "*", ObjectId: "*"}},
+	}))
+	require.NoError(t, err)
 }
 
 func TestRoleService_CreateGetList(t *testing.T) {

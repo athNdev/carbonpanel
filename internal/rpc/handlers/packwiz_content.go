@@ -282,7 +282,8 @@ func (h *PackwizHandler) handleUploadContent(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "pack not found", http.StatusNotFound)
 		return
 	}
-	serveURL := contentServeURL(r, packID, folder, fileName)
+	trustProxy := h.config != nil && h.config.Server.TrustProxy
+	serveURL := contentServeURL(r, packID, folder, fileName, trustProxy)
 	item, installErr := h.manager.AddContentFile(packID, req.Kind, fileName, packwiz.ContentUploadMetadata{
 		Name:              req.Name,
 		Side:              req.Side,
@@ -387,13 +388,18 @@ func contentVersionFile(kind string, files []modrinth.File) *modrinth.File {
 	return fallback
 }
 
-func contentServeURL(r *http.Request, packID, folder, fileName string) string {
+func contentServeURL(r *http.Request, packID, folder, fileName string, trustProxy bool) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
-		scheme = proto
+	// A client-supplied forwarded proto is only meaningful behind a declared
+	// trusted proxy; otherwise it would inject an arbitrary URL scheme into
+	// generated pack manifests.
+	if trustProxy {
+		if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
+			scheme = proto
+		}
 	}
 	parts := strings.Split(strings.Trim(folder, "/"), "/")
 	for i, part := range parts {

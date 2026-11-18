@@ -1,0 +1,488 @@
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+syntax = "proto3";
+
+package carbonpanel.v1;
+
+import "carbonpanel/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
+
+// World Library control plane. Library revisions are immutable; a bound server
+// always receives a private writable clone. Empty server_id scopes are not
+// wildcard grants: they require an explicit unscoped permission.
+service WorldService {
+  // List library entries. An empty query lists every entry (unscoped grant).
+  rpc ListWorldEntries(ListWorldEntriesRequest) returns (ListWorldEntriesResponse);
+  // Get one library entry by its wld_* id.
+  rpc GetWorldEntry(GetWorldEntryRequest) returns (GetWorldEntryResponse);
+  // List immutable revisions of one library entry.
+  rpc ListRevisions(ListRevisionsRequest) returns (ListRevisionsResponse);
+  // Get one immutable revision and its provenance.
+  rpc GetRevision(GetRevisionRequest) returns (GetRevisionResponse);
+  // List active bindings, optionally filtered by server or revision.
+  rpc ListBindings(ListBindingsRequest) returns (ListBindingsResponse);
+  // Get the active binding for one server and level.
+  rpc GetBinding(GetBindingRequest) returns (GetBindingResponse);
+  // List durable import jobs.
+  rpc ListImportJobs(ListImportJobsRequest) returns (ListImportJobsResponse);
+  // Get one import job with its verification result.
+  rpc GetImportJob(GetImportJobRequest) returns (GetImportJobResponse);
+  // Import a world from an operator-supplied URL or completed upload session.
+  rpc ImportWorld(ImportWorldRequest) returns (ImportWorldResponse);
+  // Produce a read-only detect/infer/unknown compatibility report and dry run.
+  rpc CheckCompatibility(CheckCompatibilityRequest) returns (CheckCompatibilityResponse);
+  // Journal a stop-based bind or swap of a server level to a library revision.
+  rpc BindWorld(BindWorldRequest) returns (BindWorldResponse);
+  // Remove a binding without touching world bytes.
+  rpc UnbindWorld(UnbindWorldRequest) returns (UnbindWorldResponse);
+  // Resolve an uncertain world operation; never auto-retries the mutation.
+  rpc ResolveWorldOperation(ResolveWorldOperationRequest) returns (ResolveWorldOperationResponse);
+  // Get the version-driven capability schema for the world configuration wizard.
+  rpc GetWorldConfigSchema(GetWorldConfigSchemaRequest) returns (GetWorldConfigSchemaResponse);
+  // Preview a configuration draft as a read-only, classified diff.
+  rpc PreviewWorldConfig(PreviewWorldConfigRequest) returns (PreviewWorldConfigResponse);
+  // Create a fresh immutable revision from a validated configuration draft.
+  rpc CreateWorldFromConfig(CreateWorldFromConfigRequest) returns (CreateWorldFromConfigResponse);
+  // Search API-backed content artifacts used by a world workflow (axis a).
+  rpc SearchWorldArtifacts(SearchWorldArtifactsRequest) returns (SearchWorldArtifactsResponse);
+  // Report provider capabilities and discovery boundaries (axis a vs b).
+  rpc GetProviderCapabilities(GetProviderCapabilitiesRequest) returns (GetProviderCapabilitiesResponse);
+}
+
+// Field-level provenance shared with the cross-feature Observation envelope.
+message Observation {
+  // Source of the value: on_disk_nbt, panel_db, rcon, renderer_api or identity_service.
+  string source = 1;
+  // When the underlying fact was observed, not when it was displayed.
+  google.protobuf.Timestamp observed_at = 2;
+  // Edition/version/loader/data version the value applies to.
+  string applicability = 3;
+  // detected, inferred or unknown.
+  string confidence = 4;
+  // Why a value is inferred or unknown, or which source conflicted.
+  string note = 5;
+}
+
+// A logical library identity. Metadata only; never holds world bytes.
+message WorldEntry {
+  string id = 1;
+  string name = 2;
+  string edition = 3;
+  string family = 4;
+  string current_revision_id = 5;
+  // Number of immutable revisions retained for this entry.
+  int32 revision_count = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// An immutable content-addressed world snapshot.
+message WorldRevision {
+  string id = 1;
+  string world_entry_id = 2;
+  // Whole-archive SHA-256; the revision identity.
+  string sha256 = 3;
+  int64 size_bytes = 4;
+  int32 entry_count = 5;
+  string mc_version = 6;
+  string data_version = 7;
+  ModLoader mod_loader = 8;
+  // Platform, project id, file id and canonical URL where applicable.
+  string provenance = 9;
+  string license_attestation = 10;
+  string created_by = 11;
+  google.protobuf.Timestamp created_at = 12;
+  // True when this revision is currently writable-bound anywhere.
+  bool bound = 13;
+}
+
+// The authoritative answer to which world is live at one server level.
+message WorldBinding {
+  string id = 1;
+  string server_id = 2;
+  string level_name = 3;
+  string revision_id = 4;
+  // Node identity and generation that owns the writable clone.
+  string node_id = 5;
+  int64 generation = 6;
+  // verified stopped, verified quiesced or crash-consistent.
+  string consistency = 7;
+  google.protobuf.Timestamp bound_at = 8;
+}
+
+// Durable one-shot import state.
+message WorldImportJob {
+  string id = 1;
+  string world_entry_id = 2;
+  string source_platform = 3;
+  string source_url = 4;
+  string operator = 5;
+  string license_attestation = 6;
+  // pending, downloading, verifying, complete, failed or cancelled.
+  string phase = 7;
+  string result_revision_id = 8;
+  string error = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+// One classified compatibility finding.
+message CompatibilityFinding {
+  // edition, data_version, loader, dimensions, datapacks, plugins or player_identity.
+  string subject = 1;
+  // detected, inferred or unknown.
+  string confidence = 2;
+  string value = 3;
+  string reason = 4;
+  Observation observation = 5;
+}
+
+// One proposed transform in a dry run; unsupported transforms carry a reason.
+message TransformPlan {
+  string name = 1;
+  // supported, requires_decision, blocked or unsupported.
+  string status = 2;
+  string reversibility = 3;
+  string downtime = 4;
+  string reason = 5;
+}
+
+// A read-only compatibility verdict; no transform is applied by this RPC.
+message CompatibilityReport {
+  string revision_id = 1;
+  string server_id = 2;
+  string target_mc_version = 3;
+  string overall = 4;
+  repeated CompatibilityFinding findings = 5;
+  repeated TransformPlan transforms = 6;
+  // Unsupported or destructive actions, each with a human-readable reason.
+  map<string, string> unsupported = 7;
+}
+
+// A control in the version-driven grouped configuration schema.
+message ConfigControl {
+  string key = 1;
+  string label = 2;
+  string group = 3;
+  string description = 4;
+  // creation_only, offline_only, live_command, restart_required or unsafe.
+  string classification = 5;
+  string value_type = 6;
+  repeated string options = 7;
+  string default_value = 8;
+  bool advanced = 9;
+  bool expert = 10;
+  string applies_when = 11;
+}
+
+// A named, validated preset and the draft values it sets.
+message ConfigPreset {
+  string id = 1;
+  string label = 2;
+  string description = 3;
+  map<string, string> values = 4;
+}
+
+// The capability schema for one (edition, MC version, loader, data version).
+message WorldConfigSchema {
+  string edition = 1;
+  string mc_version = 2;
+  ModLoader mod_loader = 3;
+  string data_version = 4;
+  repeated ConfigControl controls = 5;
+  repeated ConfigPreset presets = 6;
+  repeated string conflict_rules = 7;
+  // True when a capability is not verifiable for this target; findings explain why.
+  bool partial = 8;
+  repeated Observation observations = 9;
+}
+
+// One change in a configuration draft diff.
+message ConfigChange {
+  string key = 1;
+  string classification = 2;
+  string before = 3;
+  string after = 4;
+  string applies_when = 5;
+  string reason = 6;
+}
+
+// A read-only diff produced by preview; nothing is mutated.
+message ConfigDraftPreview {
+  repeated ConfigChange changes = 1;
+  repeated string validation_errors = 2;
+  repeated string conflicts = 3;
+  repeated string restart_required = 4;
+  string summary = 5;
+}
+
+// An artifact from an API-backed content provider (axis a); never a world.
+message WorldArtifact {
+  string provider = 1;
+  string project_id = 2;
+  string file_id = 3;
+  string name = 4;
+  string project_type = 5;
+  string mc_version = 6;
+  ModLoader mod_loader = 7;
+  string download_url = 8;
+  string sha256 = 9;
+  string license = 10;
+  string source_url = 11;
+}
+
+// Provider discovery status; axis (b) automation is explicitly not promised.
+message ProviderCapability {
+  string provider = 1;
+  bool api_backed_artifacts = 2;
+  bool prebuilt_world_catalog = 3;
+  string discovery_gate = 4;
+  string note = 5;
+}
+
+// ListWorldEntriesRequest Query for browsing library entries.
+message ListWorldEntriesRequest {
+  // Optional text filter over entry name and provenance.
+  string query = 1;
+  // Optional edition filter, e.g. java or bedrock.
+  string edition = 2;
+  int32 limit = 3;
+}
+
+// ListWorldEntriesResponse Matching library entries.
+message ListWorldEntriesResponse {
+  repeated WorldEntry entries = 1;
+}
+
+// GetWorldEntryRequest Identifies one library entry.
+message GetWorldEntryRequest {
+  string world_entry_id = 1;
+}
+
+// GetWorldEntryResponse The requested library entry.
+message GetWorldEntryResponse {
+  WorldEntry entry = 1;
+}
+
+// ListRevisionsRequest Identifies the entry whose revisions are listed.
+message ListRevisionsRequest {
+  string world_entry_id = 1;
+}
+
+// ListRevisionsResponse Immutable revisions, newest first.
+message ListRevisionsResponse {
+  repeated WorldRevision revisions = 1;
+}
+
+// GetRevisionRequest Identifies one immutable revision.
+message GetRevisionRequest {
+  string revision_id = 1;
+}
+
+// GetRevisionResponse The requested revision and provenance.
+message GetRevisionResponse {
+  WorldRevision revision = 1;
+}
+
+// ListBindingsRequest Optional server and revision filters.
+message ListBindingsRequest {
+  // Empty lists every binding (unscoped grant).
+  string server_id = 1;
+  string revision_id = 2;
+}
+
+// ListBindingsResponse Active bindings matching the filters.
+message ListBindingsResponse {
+  repeated WorldBinding bindings = 1;
+}
+
+// GetBindingRequest Server and level of the binding.
+message GetBindingRequest {
+  string server_id = 1;
+  string level_name = 2;
+}
+
+// GetBindingResponse The active binding, if any.
+message GetBindingResponse {
+  WorldBinding binding = 1;
+}
+
+// ListImportJobsRequest Optional entry filter and result limit.
+message ListImportJobsRequest {
+  string world_entry_id = 1;
+  int32 limit = 2;
+}
+
+// ListImportJobsResponse Recent durable import jobs.
+message ListImportJobsResponse {
+  repeated WorldImportJob jobs = 1;
+}
+
+// GetImportJobRequest Identifies one import job.
+message GetImportJobRequest {
+  string job_id = 1;
+}
+
+// GetImportJobResponse The requested import job.
+message GetImportJobResponse {
+  WorldImportJob job = 1;
+}
+
+// ImportWorldRequest Operator attestation and source for an import.
+message ImportWorldRequest {
+  // url, upload or backup. Generic URL/file import is the supported fallback.
+  string source = 1;
+  string url = 2;
+  // Identifier of an already completed upload session.
+  string upload_id = 3;
+  string display_name = 4;
+  string source_platform = 5;
+  string license_attestation = 6;
+  // Expected whole-archive SHA-256; mismatch refuses the revision.
+  string sha256_checksum = 7;
+  // Idempotency key for the import job.
+  string request_id = 8;
+}
+
+// ImportWorldResponse The import job and resulting immutable revision.
+message ImportWorldResponse {
+  WorldImportJob job = 1;
+  WorldRevision revision = 2;
+}
+
+// CheckCompatibilityRequest Revision and target server or version.
+message CheckCompatibilityRequest {
+  string revision_id = 1;
+  string server_id = 2;
+  string target_mc_version = 3;
+}
+
+// CheckCompatibilityResponse Read-only compatibility and dry-run report.
+message CheckCompatibilityResponse {
+  CompatibilityReport report = 1;
+}
+
+// BindWorldRequest Server level, revision and chosen change window.
+message BindWorldRequest {
+  string server_id = 1;
+  string level_name = 2;
+  string revision_id = 3;
+  // now, next_restart or idle. A running server is always stopped for a swap.
+  string window = 4;
+  string request_id = 5;
+}
+
+// BindWorldResponse Persisted binding and journal outcome.
+message BindWorldResponse {
+  WorldBinding binding = 1;
+  // request_id, journal phase and outcome for the recovery UI.
+  string operation_id = 2;
+  string outcome = 3;
+  string consistency = 4;
+}
+
+// UnbindWorldRequest Server level whose binding is removed.
+message UnbindWorldRequest {
+  string server_id = 1;
+  string level_name = 2;
+  string request_id = 3;
+}
+
+// UnbindWorldResponse Whether a binding was removed.
+message UnbindWorldResponse {
+  bool removed = 1;
+}
+
+// ResolveWorldOperationRequest Operator decision on an uncertain operation.
+message ResolveWorldOperationRequest {
+  string server_id = 1;
+  string operation_id = 2;
+  // recover or rollback; an unknown outcome is never auto-retried.
+  string action = 3;
+  string note = 4;
+}
+
+// ResolveWorldOperationResponse Resolution outcome.
+message ResolveWorldOperationResponse {
+  string outcome = 1;
+}
+
+// GetWorldConfigSchemaRequest Target version tuple for the wizard schema.
+message GetWorldConfigSchemaRequest {
+  string edition = 1;
+  string mc_version = 2;
+  ModLoader mod_loader = 3;
+  string data_version = 4;
+}
+
+// GetWorldConfigSchemaResponse Version-driven grouped controls and presets.
+message GetWorldConfigSchemaResponse {
+  WorldConfigSchema schema = 1;
+}
+
+// PreviewWorldConfigRequest Draft values to validate without applying.
+message PreviewWorldConfigRequest {
+  string edition = 1;
+  string mc_version = 2;
+  ModLoader mod_loader = 3;
+  string data_version = 4;
+  map<string, string> values = 5;
+  string preset = 6;
+}
+
+// PreviewWorldConfigResponse Classified dry-run diff and conflicts.
+message PreviewWorldConfigResponse {
+  ConfigDraftPreview preview = 1;
+}
+
+// CreateWorldFromConfigRequest Validated draft used to create a fresh revision.
+message CreateWorldFromConfigRequest {
+  string name = 1;
+  string edition = 2;
+  string mc_version = 3;
+  ModLoader mod_loader = 4;
+  string data_version = 5;
+  map<string, string> values = 6;
+  string preset = 7;
+  string license_attestation = 8;
+  string request_id = 9;
+}
+
+// CreateWorldFromConfigResponse The new immutable revision and library entry.
+message CreateWorldFromConfigResponse {
+  WorldRevision revision = 1;
+  WorldEntry entry = 2;
+}
+
+// SearchWorldArtifactsRequest Provider, filters and pagination cursor.
+message SearchWorldArtifactsRequest {
+  // modrinth or curseforge. Manual platforms are never searched.
+  string provider = 1;
+  string query = 2;
+  string mc_version = 3;
+  ModLoader mod_loader = 4;
+  // artifact type from the provider taxonomy, e.g. modpack or datapack.
+  string project_type = 5;
+  int32 limit = 6;
+  string cursor = 7;
+}
+
+// SearchWorldArtifactsResponse Axis (a) content artifacts, never prebuilt worlds.
+message SearchWorldArtifactsResponse {
+  repeated WorldArtifact artifacts = 1;
+  string next_cursor = 2;
+  bool rate_limited = 3;
+}
+
+// GetProviderCapabilitiesRequest has no arguments; it reports both support axes.
+message GetProviderCapabilitiesRequest {}
+
+// GetProviderCapabilitiesResponse Per-provider capability and discovery gate.
+message GetProviderCapabilitiesResponse {
+  repeated ProviderCapability providers = 1;
+}

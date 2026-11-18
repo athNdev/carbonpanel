@@ -13,6 +13,11 @@ import (
 	"github.com/athNdev/carbon-panel/internal/db"
 )
 
+// UncertainOutcomeMarker is recorded on a journal row whose external effect
+// could not be observed. It makes Describe return unknown immediately instead
+// of waiting for the stale-execution timeout.
+const UncertainOutcomeMarker = "external effect is uncertain"
+
 // Outcome is what an operator should understand an operation to have done.
 // Unknown is a first-class answer: a mutation whose external effect was not
 // recorded is neither a success nor a failure.
@@ -167,6 +172,12 @@ func classify(op *db.ServerOperation, now time.Time) (Outcome, NextAction, strin
 	case db.ServerOperationPrepared:
 		return OutcomeUnknown, ActionWait, "the intent was recorded but the attempt had not started; the effect did not happen yet"
 	case db.ServerOperationExecuting:
+		// An explicit uncertainty note is a first-class unknown even while the
+		// process is alive: the mutation reached an external effect that was
+		// not observed, and a blind retry could repeat it.
+		if strings.Contains(op.LastError, UncertainOutcomeMarker) {
+			return OutcomeUnknown, ActionResolve, op.LastError
+		}
 		if inFlight(op.UpdatedAt, now) {
 			return OutcomeRunning, ActionWait, "the mutation is still being attempted; wait for it to finish"
 		}

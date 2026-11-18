@@ -198,6 +198,31 @@ func main() {
 	defer store.Close()
 
 	ctx := context.Background()
+
+	// Report legacy deterministic/blank RCON passwords. Existing values are
+	// deliberately not rewritten: a blank password means RCON is disabled in
+	// Minecraft, and rotating a live server's credential silently would break
+	// operators and automation. Operators rotate through server configuration.
+	if servers, listErr := store.ListServers(ctx); listErr == nil {
+		for _, srv := range servers {
+			serverCfg, cfgErr := store.GetServerConfig(ctx, srv.ID)
+			if cfgErr != nil || serverCfg == nil || serverCfg.RCONPassword == nil {
+				continue
+			}
+			if serverCfg.EnableRCON != nil && !*serverCfg.EnableRCON {
+				continue
+			}
+			if !storage.IsWeakRCONPassword(*serverCfg.RCONPassword) {
+				continue
+			}
+			if *serverCfg.RCONPassword == "" {
+				log.Warn("Server %s has an empty RCON password; RCON is disabled by Minecraft. Set a password in server configuration to enable it.", srv.ID)
+			} else {
+				log.Warn("Server %s still uses a predictable default RCON password; set a new password in server configuration.", srv.ID)
+			}
+		}
+	}
+
 	if maintenance {
 		if err := runOperationsCommand(ctx, store, *operationsCommand, *operationID, *operationNote, *serverID, os.Stdout); err != nil {
 			log.Fatal("%v", err)

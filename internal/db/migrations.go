@@ -57,6 +57,10 @@ func allModels() []any {
 		&PlayerSession{},
 		&PlayerAccessState{},
 		&PlayerModerationAction{},
+		&WorldEntry{},
+		&WorldRevision{},
+		&WorldBinding{},
+		&WorldImportJob{},
 	}
 }
 

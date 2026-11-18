@@ -165,7 +165,7 @@ func NewServer(
 
 	// Initialize WebSocket hub
 	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, dockerCli, sender, log)
-	wsHub.SetOriginPolicy(cfg.Server.AllowedOrigins, cfg.Server.TrustProxy)
+	wsHub.SetOriginPolicy(cfg.Server.AllowedOrigins, cfg.Server.TrustProxy, cfg.Server.RequireWSOrigin)
 	go wsHub.Run()
 
 	if clientPool == nil && dockerCli != nil {
@@ -258,6 +258,7 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.UploadServiceName,
 		carbonpanelv1connect.UserServiceName,
 		carbonpanelv1connect.PlayerServiceName,
+		carbonpanelv1connect.WorldServiceName,
 	)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
@@ -324,7 +325,7 @@ func (s *Server) setupHandler() {
 	// Default security headers on every response (MINE-163). Unencrypted
 	// HTTP/2 is negotiated by the caller's http.Server via Protocols, so no
 	// h2c wrapper is needed here (the deprecated h2c.NewHandler was removed).
-	s.handler = securityHeaders(mux)
+	s.handler = securityHeaders(mux, s.config != nil && s.config.Server.TrustProxy)
 }
 
 // SetAdmissionCoordinator supplies the shared in-process admission gate to the
@@ -340,6 +341,7 @@ func (s *Server) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) 
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
+	authService.SetTrustProxy(s.config != nil && s.config.Server.TrustProxy)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.clientPool, s.log)
 	configService.SetStorageResolver(s.storageResolver)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
@@ -402,6 +404,15 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 		filepath.Join(s.config.Storage.DataDir, "player-skin-cache"),
 	)
 	s.playerService = playerService
+
+	// World Library (OSS-347). Its binder takes explicit lifecycle, resolver
+	// and authorization dependencies; a worlds:bind grant never implies a
+	// servers:stop/start grant (checked again in the lifecycle adapter).
+	worldService := services.NewWorldService(s.store, s.config, s.log, s.storageResolver, s.uploadManager, services.WorldLibraryRoot(s.config))
+	worldBinder := services.NewWorldBinder(s.store, s.config, s.log, s.storageResolver, s.sender, serverService, s.enforcer)
+	worldService.SetBinder(worldBinder)
+	worldService.ConfigureProviders()
+	services.RecoverWorldBindings(context.Background(), s.store, worldBinder, s.log)
 
 	// Register service handlers
 	authPath, authHandler := carbonpanelv1connect.NewAuthServiceHandler(authService, opts...)
@@ -472,6 +483,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	playerPath, playerHandler := carbonpanelv1connect.NewPlayerServiceHandler(playerService, opts...)
 	mux.Handle(playerPath, playerHandler)
+
+	worldPath, worldHandler := carbonpanelv1connect.NewWorldServiceHandler(worldService, opts...)
+	mux.Handle(worldPath, worldHandler)
 }
 
 // The HTTP handler for the server

@@ -26,7 +26,8 @@ func TestPackwizHandler_CRUD(t *testing.T) {
 
 	log := logger.New()
 	mgr := packwiz.NewManager(tempDir, log)
-	handler := NewPackwizHandler(mgr, nil, nil, log, nil, nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	handler := NewPackwizHandler(mgr, nil, nil, log, authMgr, policyEnforcer, nil)
 
 	// 1. List Packs (initially empty)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/packwiz/packs", nil)

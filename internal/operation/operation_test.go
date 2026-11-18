@@ -82,6 +82,31 @@ func TestRecoverInterruptedReleasesObservedOperations(t *testing.T) {
 	}
 }
 
+func TestRecoverInterruptedWorldBindKeepsLockWhenStopped(t *testing.T) {
+	store := &fakeStore{ops: []db.ServerOperation{
+		{ID: "op-bind", ServerID: "srv-1", Kind: "world-bind", Phase: db.ServerOperationExecuting},
+	}}
+	// A stopped container is common after a swap: the JVM was stopped before
+	// the family was promoted. It does not prove which family is live.
+	observer := &fakeObserver{observed: map[string]Observed{
+		"srv-1": {Exists: true, Running: false, ContainerID: "abcdef1234567890"},
+	}}
+
+	summary, err := RecoverInterrupted(context.Background(), store, observer, logger.New())
+	if err != nil {
+		t.Fatalf("RecoverInterrupted: %v", err)
+	}
+	if summary.Recovered != 0 || summary.NeedsReview != 1 || len(store.advances) != 0 {
+		t.Fatalf("summary = %+v, advances = %+v; world-bind must keep its lock", summary, store.advances)
+	}
+	if len(store.notes) != 1 || !contains(store.notes[0].detail, "live level family") {
+		t.Fatalf("notes = %+v, want a filesystem resolution note", store.notes)
+	}
+	if !keepsWorldLock("world-bind") || !contains(nextAction("world-bind"), "live level family") {
+		t.Fatal("world-bind must be a lock-keeping kind with an explicit next action")
+	}
+}
+
 func TestRecoverInterruptedBackupNamesTheNextAction(t *testing.T) {
 	store := &fakeStore{ops: []db.ServerOperation{
 		{ID: "op-backup", ServerID: "srv-1", Kind: "backup", Phase: db.ServerOperationExecuting},

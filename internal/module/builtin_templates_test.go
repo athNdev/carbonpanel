@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 )
 
@@ -21,6 +22,52 @@ func TestGeyserBedrockStaysPublic(t *testing.T) {
 	}
 	if port.Protocol != "udp" || port.ContainerPort != 19132 {
 		t.Fatalf("port = %+v", port)
+	}
+}
+
+// The status sidecar's web endpoint has no request authentication. Its
+// published port stays reachable only when the shipped container binds all
+// interfaces; the panel's port proxy dials the container IP, not localhost
+// inside that container. This fixture pins that deployment contract.
+func TestBuiltinStatusPanelPublishesReachablePort(t *testing.T) {
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	if err := InitBuiltinTemplates(store); err != nil {
+		t.Fatal(err)
+	}
+	templates, err := store.ListModuleTemplates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status *storage.ModuleTemplate
+	for _, tpl := range templates {
+		if tpl.ID == "builtin-status-panel" {
+			status = tpl
+			break
+		}
+	}
+	if status == nil {
+		t.Fatal("builtin status panel template missing")
+	}
+
+	var env map[string]string
+	if err := json.Unmarshal([]byte(status.DefaultEnv), &env); err != nil {
+		t.Fatalf("status template DefaultEnv: %v", err)
+	}
+	if env["HOST"] != "0.0.0.0" {
+		t.Errorf("status container HOST = %q, want 0.0.0.0 for published port reachability", env["HOST"])
+	}
+	if env["PORT"] != "{{module.ports.Web.container_port}}" {
+		t.Errorf("status template PORT = %q, want the Web container port placeholder", env["PORT"])
+	}
+	if len(status.Ports) == 0 || status.Ports[0].ContainerPort != 8181 {
+		t.Errorf("status Web port = %+v, want container port 8181", status.Ports)
+	}
+	if status.HealthCheckPort != 8181 {
+		t.Errorf("status health port = %d, want 8181", status.HealthCheckPort)
+	}
+	if !strings.Contains(strings.ToLower(status.Documentation), "no request authentication") {
+		t.Error("status template documentation must state the unauthenticated endpoint contract")
 	}
 }
 

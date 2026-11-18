@@ -24,7 +24,7 @@ func TestSecurityHeaders_DefaultSet(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
-	securityHeaders(next).ServeHTTP(rec, req)
+	securityHeaders(next, false).ServeHTTP(rec, req)
 
 	res := rec.Result()
 	defer res.Body.Close()
@@ -62,18 +62,25 @@ func TestSecurityHeaders_HSTSOnTLS(t *testing.T) {
 
 	// Direct TLS.
 	rec := httptest.NewRecorder()
-	securityHeaders(next).ServeHTTP(rec, newTLSRequest())
+	securityHeaders(next, false).ServeHTTP(rec, newTLSRequest())
 	if got := rec.Result().Header.Get("Strict-Transport-Security"); !strings.HasPrefix(got, "max-age=") {
 		t.Errorf("HSTS missing on TLS request, got %q", got)
 	}
 
-	// Behind a TLS-terminating proxy.
+	// X-Forwarded-Proto from an untrusted client must be ignored.
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	rec = httptest.NewRecorder()
-	securityHeaders(next).ServeHTTP(rec, req)
+	securityHeaders(next, false).ServeHTTP(rec, req)
+	if got := rec.Result().Header.Get("Strict-Transport-Security"); got != "" {
+		t.Errorf("untrusted X-Forwarded-Proto must not set HSTS, got %q", got)
+	}
+
+	// Behind a configured TLS-terminating proxy it is honoured.
+	rec = httptest.NewRecorder()
+	securityHeaders(next, true).ServeHTTP(rec, req)
 	if got := rec.Result().Header.Get("Strict-Transport-Security"); !strings.HasPrefix(got, "max-age=") {
-		t.Errorf("HSTS missing behind TLS-terminating proxy, got %q", got)
+		t.Errorf("HSTS missing behind trusted TLS-terminating proxy, got %q", got)
 	}
 }
 
@@ -85,7 +92,7 @@ func TestSecurityHeaders_NoDuplicatesWhenInnerSets(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
-	securityHeaders(next).ServeHTTP(rec, req)
+	securityHeaders(next, false).ServeHTTP(rec, req)
 
 	if values := rec.Result().Header.Values("X-Frame-Options"); len(values) != 1 {
 		t.Errorf("expected exactly one X-Frame-Options value, got %q", values)
@@ -99,7 +106,7 @@ func TestSecurityHeadersPresent(t *testing.T) {
 		w.WriteHeader(http.StatusTeapot)
 	})
 	rec := httptest.NewRecorder()
-	securityHeaders(inner).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/anything", nil))
+	securityHeaders(inner, false).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/anything", nil))
 
 	if got := rec.Result().StatusCode; got != http.StatusTeapot {
 		t.Fatalf("status=%d: inner handler must still run", got)
@@ -135,7 +142,7 @@ func TestSecurityHeadersOnErrorPaths(t *testing.T) {
 		http.Error(w, "nope", http.StatusUnauthorized)
 	})
 	rec := httptest.NewRecorder()
-	securityHeaders(inner).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws", nil))
+	securityHeaders(inner, false).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ws", nil))
 	if got := rec.Result().Header.Get("Content-Security-Policy"); got == "" {
 		t.Fatal("CSP missing on error response")
 	}

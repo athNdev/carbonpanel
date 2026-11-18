@@ -48,6 +48,10 @@ type AuthService struct {
 	// reverse proxy.
 	userThrottle *auth.LoginThrottle
 	ipThrottle   *auth.LoginThrottle
+
+	// trustProxy is supplied by the composition root from server.trust_proxy.
+	// Forwarded-IP headers are only used for throttle keys when it is true.
+	trustProxy bool
 }
 
 func NewAuthService(store *storage.Store, authManager *auth.Manager, enforcer *rbac.Enforcer, oidcHandler *auth.OIDCHandler, log *logger.Logger) *AuthService {
@@ -60,6 +64,12 @@ func NewAuthService(store *storage.Store, authManager *auth.Manager, enforcer *r
 		userThrottle: auth.NewLoginThrottleWithLimits(5, 5*time.Minute, 15*time.Minute),
 		ipThrottle:   auth.NewLoginThrottleWithLimits(30, 5*time.Minute, 15*time.Minute),
 	}
+}
+
+// SetTrustProxy is called by the composition root so forwarded headers are
+// honoured only for installations that declared a trusted reverse proxy.
+func (s *AuthService) SetTrustProxy(trust bool) {
+	s.trustProxy = trust
 }
 
 func (s *AuthService) GetAuthStatus(ctx context.Context, req *connect.Request[v1.GetAuthStatusRequest]) (*connect.Response[v1.GetAuthStatusResponse], error) {
@@ -88,7 +98,10 @@ func (s *AuthService) Login(ctx context.Context, req *connect.Request[v1.LoginRe
 	}
 
 	// Throttle online password guessing: tight per-username, looser per-IP.
-	ipKey := "ip:" + realClientIP(req.Header(), req.Peer().Addr)
+	// The same trust-aware source is used for the audit trail so a failed
+	// login and its throttle decision can be correlated.
+	auditIP := realClientIP(req.Header(), req.Peer().Addr, s.trustProxy)
+	ipKey := "ip:" + auditIP
 	userKey := "user:" + strings.ToLower(msg.Username)
 	if allowed, retryAfter := s.userThrottle.Allow(userKey); !allowed {
 		return nil, throttledError(retryAfter)
@@ -104,6 +117,16 @@ func (s *AuthService) Login(ctx context.Context, req *connect.Request[v1.LoginRe
 			// single attacker cannot rotate usernames or source ports for free.
 			s.userThrottle.Failure(userKey)
 			s.ipThrottle.Failure(ipKey)
+			// Never log the submitted password; the username and source IP are
+			// enough for incident triage.
+			if aerr := activity.Log(s.store.DB(), activity.Entry{
+				ActorName:  strings.ToLower(msg.Username),
+				IP:         auditIP,
+				Event:      activity.EventAuthLoginFailed,
+				SubjectTyp: "user",
+			}); aerr != nil {
+				s.log.Error("Audit log failed for failed login: %v", aerr)
+			}
 			return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid credentials"))
 		}
 		if errors.Is(err, auth.ErrLocalAuthDisabled) {
@@ -118,7 +141,7 @@ func (s *AuthService) Login(ctx context.Context, req *connect.Request[v1.LoginRe
 
 	// Audit trail (MINE-141): never break login on audit failure.
 	if aerr := activity.Log(s.store.DB(), activity.Entry{
-		ActorID: user.ID, ActorName: user.Username, IP: req.Peer().Addr,
+		ActorID: user.ID, ActorName: user.Username, IP: auditIP,
 		Event: activity.EventAuthLogin, SubjectTyp: "user", SubjectID: user.ID,
 	}); aerr != nil {
 		s.log.Error("Audit log failed for login: %v", aerr)
@@ -140,20 +163,21 @@ func clientIP(peerAddr string) string {
 	return peerAddr
 }
 
-// realClientIP resolves the client address for throttling. When the direct peer
-// is a trusted (loopback or private) proxy it honours X-Forwarded-For /
-// X-Real-IP, otherwise it uses the peer address. A LAN client can therefore
-// spoof the IP key, but the per-username limiter still applies.
-func realClientIP(hdr http.Header, peerAddr string) string {
+// realClientIP resolves the client address for throttling. Forwarded headers
+// are consulted only when the operator declared a trusted proxy (and the peer
+// is loopback or private). The per-username limiter remains independent.
+func realClientIP(hdr http.Header, peerAddr string, trustProxy bool) string {
 	peer := clientIP(peerAddr)
-	if ip := net.ParseIP(peer); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
-		if xff := hdr.Get("X-Forwarded-For"); xff != "" {
-			if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
-				return first
+	if trustProxy {
+		if ip := net.ParseIP(peer); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+			if xff := hdr.Get("X-Forwarded-For"); xff != "" {
+				if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
+					return first
+				}
 			}
-		}
-		if xri := strings.TrimSpace(hdr.Get("X-Real-IP")); xri != "" {
-			return xri
+			if xri := strings.TrimSpace(hdr.Get("X-Real-IP")); xri != "" {
+				return xri
+			}
 		}
 	}
 	return peer
@@ -639,13 +663,29 @@ func (s *AuthService) UseRecoveryKey(ctx context.Context, req *connect.Request[v
 	if req.Msg.RecoveryKey == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("recovery key is required"))
 	}
+	auditIP := realClientIP(req.Header(), req.Peer().Addr, s.trustProxy)
 
 	if err := s.authManager.UseRecoveryKey(ctx, req.Msg.RecoveryKey); err != nil {
 		if errors.Is(err, auth.ErrInvalidRecoveryKey) {
+			if aerr := activity.Log(s.store.DB(), activity.Entry{
+				IP: auditIP, Event: activity.EventAuthDenied,
+				SubjectTyp: "recovery_key", SubjectID: "invalid",
+			}); aerr != nil {
+				s.log.Error("Audit log failed for rejected recovery key: %v", aerr)
+			}
 			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("invalid recovery key"))
 		}
 		s.log.Error("Recovery key reset failed: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("recovery reset failed"))
+	}
+
+	// A successful reset destroys every session, token, invite and user. It is
+	// the highest-consequence unauthenticated operation in the product.
+	if aerr := activity.Log(s.store.DB(), activity.Entry{
+		IP: auditIP, Event: activity.EventAuthRecoveryUsed,
+		SubjectTyp: "recovery_key", SubjectID: "used",
+	}); aerr != nil {
+		s.log.Error("Audit log failed for recovery key use: %v", aerr)
 	}
 
 	return connect.NewResponse(&v1.UseRecoveryKeyResponse{

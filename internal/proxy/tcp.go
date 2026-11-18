@@ -28,8 +28,9 @@ type TCPProxy struct {
 	serverID      string
 	logger        *logger.Logger
 	listenAddr    string
-	proxyProtocol bool
-	running       bool
+	proxyProtocol     bool
+	trustedProxyCIDRs []*net.IPNet
+	running           bool
 	runningMutex  sync.RWMutex
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -42,8 +43,9 @@ func NewTCPProxy(cfg *Config) *TCPProxy {
 		listeners:     cfg.Listeners,
 		logger:        cfg.Logger,
 		listenAddr:    cfg.ListenAddr,
-		proxyProtocol: cfg.ProxyProtocol,
-		ctx:           ctx,
+		proxyProtocol:     cfg.ProxyProtocol,
+		trustedProxyCIDRs: cfg.TrustedProxyCIDRs,
+		ctx:               ctx,
 		cancel:        cancel,
 	}
 }
@@ -178,7 +180,7 @@ func (p *TCPProxy) handleConnection(clientConn net.Conn) {
 	defer clientConn.Close()
 
 	// Parse incoming PROXY protocol v2 header if present from upstream balancers (MINE-16)
-	wrappedConn, pxyHdr, err := WrapConnWithProxyProtocol(clientConn)
+	wrappedConn, pxyHdr, err := WrapConnWithProxyProtocolIfTrusted(clientConn, p.trustedProxyCIDRs)
 	if err != nil {
 		p.logger.Debug("Failed parsing PROXY protocol v2 from %s: %v", clientConn.RemoteAddr(), err)
 		return

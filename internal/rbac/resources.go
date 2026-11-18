@@ -30,6 +30,7 @@ const (
 	ResourceSubusers        = "subusers"
 	ResourceBackups         = "backups"
 	ResourcePlayers         = "players"
+	ResourceWorlds          = "worlds"
 )
 
 // Player actions are deliberately narrow: reading a roster, reading deep
@@ -80,6 +81,13 @@ const (
 	// (which matches "*" actions) has it until an operator explicitly
 	// grants it to another role.
 	ActionManageDockerPrivileged = "manage_docker_privileged"
+
+	// ActionManageWildcard gates granting a wildcard resource or action to a
+	// custom role, and assigning the built-in admin role. It is not tied to an
+	// RPC: the role service checks it against the caller's roles in addition
+	// to the procedure's roles/create or roles/update permission. Only the
+	// built-in admin role (which matches "*" actions) has it by default.
+	ActionManageWildcard = "manage_wildcard"
 )
 
 // ResourceActionEntry pairs a resource with its valid actions.
@@ -106,7 +114,7 @@ var AllResources = []string{
 	ResourceFiles, ResourceTasks, ResourceProxy,
 	ResourceUsers, ResourceRoles, ResourceSettings,
 	ResourceSupport, ResourceUploads, ResourceNodes,
-	ResourceActivity, ResourceSubusers, ResourceBackups, ResourcePlayers,
+	ResourceActivity, ResourceSubusers, ResourceBackups, ResourcePlayers, ResourceWorlds,
 }
 
 // ResourceScopeSource maps each scopeable resource to the resource that
@@ -128,6 +136,7 @@ var ResourceScopeSource = map[string]string{
 	ResourceSubusers:        ResourceServers,
 	ResourceBackups:         ResourceServers,
 	ResourcePlayers:         ResourceServers,
+	ResourceWorlds:          ResourceServers,
 }
 
 // ResourceActionsFromProcedures derives which actions are valid for each

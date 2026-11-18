@@ -19,7 +19,8 @@ import (
 
 func TestModOnlineManager_NotFound(t *testing.T) {
 	log := logger.New()
-	manager := NewModOnlineManager(nil, log, nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	manager := NewModOnlineManager(nil, log, authMgr, policyEnforcer)
 
 	// Invalid path
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/invalid", nil)
@@ -31,7 +32,8 @@ func TestModOnlineManager_NotFound(t *testing.T) {
 
 func TestModOnlineManager_InvalidMethod(t *testing.T) {
 	log := logger.New()
-	manager := NewModOnlineManager(nil, log, nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	manager := NewModOnlineManager(nil, log, authMgr, policyEnforcer)
 
 	// POST to search
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/123/mods/search", bytes.NewReader([]byte("{}")))
@@ -84,7 +86,8 @@ func TestModOnlineManager_CurseForgeKeylessProxyAndCDN(t *testing.T) {
 	}))
 	defer mockCF.Close()
 
-	manager := NewModOnlineManager(nil, log, nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	manager := NewModOnlineManager(nil, log, authMgr, policyEnforcer)
 	manager.httpClient = mockCF.Client()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/servers/123/mods/testmod/versions?platform=curseforge", nil)

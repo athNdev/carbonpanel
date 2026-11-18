@@ -12,7 +12,7 @@ import "google/protobuf/timestamp.proto";
 option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
 
 // Source that produced a player field. Non-authoritative values always carry
-// an Observation so the console can disclose provenance instead of guessing.
+// a PlayerObservation so the console can disclose provenance instead of guessing.
 enum PlayerDataSource {
   PLAYER_DATA_SOURCE_UNSPECIFIED = 0;
   PLAYER_DATA_SOURCE_PRESENCE = 1;
@@ -74,7 +74,9 @@ enum PlayerSupportState {
 }
 
 // Field-level provenance envelope shared by roster, detail and deep data.
-message Observation {
+// Named PlayerObservation to avoid colliding with the World Library's
+// cross-feature Observation message in the same proto package.
+message PlayerObservation {
   PlayerDataSource source = 1;
   google.protobuf.Timestamp observed_at = 2;
   PlayerConfidence confidence = 3;
@@ -101,13 +103,13 @@ message PlayerAlias {
 }
 
 // A roster row. Fields that are not backed by a source stay empty and are
-// described by their Observation, never filled with a plausible default.
+// described by their PlayerObservation, never filled with a plausible default.
 message PlayerSummary {
   PlayerRef ref = 1;
   string server_id = 2;
   string server_name = 3;
   PlayerPresence presence = 4;
-  Observation presence_observation = 5;
+  PlayerObservation presence_observation = 5;
   repeated PlayerAlias aliases = 6;
   bool whitelisted = 7;
   bool operator = 8;
@@ -123,7 +125,7 @@ message PlayerField {
   string name = 1;
   string value = 2;
   string unit = 3;
-  Observation observation = 4;
+  PlayerObservation observation = 4;
 }
 
 // A join/leave record derived from observations or push notifications.
@@ -146,7 +148,7 @@ message PlayerAccessState {
   bool banned = 5;
   string ban_reason = 6;
   bool mute = 7;
-  Observation observation = 8;
+  PlayerObservation observation = 8;
 }
 
 // One moderation or access event in player history.
@@ -173,7 +175,7 @@ message PlayerSkinAsset {
   bytes data = 1;
   string content_type = 2;
   bool from_cache = 3;
-  Observation observation = 4;
+  PlayerObservation observation = 4;
 }
 
 // Grouped player detail. Each group is a list of fields with provenance so the
@@ -182,7 +184,7 @@ message PlayerDetail {
   PlayerRef ref = 1;
   repeated PlayerAlias aliases = 2;
   PlayerPresence presence = 3;
-  Observation presence_observation = 4;
+  PlayerObservation presence_observation = 4;
   string primary_server_id = 5;
   google.protobuf.Timestamp first_seen = 6;
   google.protobuf.Timestamp last_seen = 7;

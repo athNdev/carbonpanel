@@ -31,6 +31,9 @@ server:
   trust_proxy: false
   # Extra browser origins allowed to open the console. Empty keeps same-host only.
   # allowed_origins: ["https://panel.example.com"]
+  # Reject WebSocket upgrades without an Origin header. Keep false for CLI/native
+  # clients; browsers always send Origin, so browser-only installs can enable it.
+  require_ws_origin: false
 
 # Database configuration
 database:
@@ -152,6 +155,9 @@ proxy:
   # Minimum gap between handshakes from one IP on the Gate listen port.
   # Status and login share the budget. 0 disables. Play sessions stay up.
   login_ratelimit_ms: 3000
+  # Only these source ranges may send inbound PROXY protocol v2 headers with a
+  # real player IP. Empty trusts no one; configure your load balancer's CIDR.
+  trusted_proxy_cidrs: []
 
 # Example usage:
 # With proxy enabled and base_url set to "mc.example.com":

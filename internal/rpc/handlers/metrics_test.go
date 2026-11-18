@@ -18,7 +18,8 @@ import (
 )
 
 func TestMetricsHostEmpty(t *testing.T) {
-	h := NewMetricsHandler(nil, nil, nil, nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	h := NewMetricsHandler(nil, nil, authMgr, policyEnforcer, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/metrics/host", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -34,7 +35,8 @@ func TestMetricsHostEmpty(t *testing.T) {
 }
 
 func TestMetricsServerNotFound(t *testing.T) {
-	h := NewMetricsHandler(nil, nil, nil, nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	h := NewMetricsHandler(nil, nil, authMgr, policyEnforcer, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/metrics/servers/nope", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -79,7 +81,8 @@ func (d *dummyHibernationStatsProvider) TotalWoken() uint64 {
 }
 
 func TestMetricsHostPoolAndHibernation(t *testing.T) {
-	h := NewMetricsHandler(nil, nil, nil, nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	h := NewMetricsHandler(nil, nil, authMgr, policyEnforcer, nil)
 	h.SetDockerPool(&dummyPoolStatsProvider{
 		stats: docker.PoolStats{
 			TotalRequests: 10,

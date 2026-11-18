@@ -7,11 +7,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { CarbonTag } from '$lib/components/carbon';
-	import { PlayerConfidence, type Observation } from '$lib/proto/carbonpanel/v1/player_pb';
+	import { PlayerConfidence, type PlayerObservation } from '$lib/proto/carbonpanel/v1/player_pb';
 	import { provenanceView } from './presentation';
 
 	interface Props {
-		observation?: Observation | null;
+		observation?: PlayerObservation | null;
 		/** Optional name of the field this provenance belongs to. */
 		label?: string;
 		compact?: boolean;

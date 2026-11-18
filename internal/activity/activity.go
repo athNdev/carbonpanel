@@ -17,6 +17,10 @@ import (
 // Event names written by the audit trail (MINE-141, SEC-3).
 const (
 	EventAuthLogin                 = "auth.login"
+	EventAuthLoginFailed           = "auth.login_failed"
+	EventAuthDenied                = "auth.denied"
+	EventAuthRecoveryUsed          = "auth.recovery_used"
+	EventAuthTokenRevoked          = "auth.token_revoked"
 	EventAuthLogout                = "auth.logout"
 	EventServerStart               = "server.start"
 	EventServerStop                = "server.stop"

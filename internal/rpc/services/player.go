@@ -150,8 +150,8 @@ func (s *PlayerService) identity(ctx context.Context, key string) (*storage.Play
 	return identity, nil
 }
 
-func observation(src v1.PlayerDataSource, confidence v1.PlayerConfidence, at time.Time, note string) *v1.Observation {
-	o := &v1.Observation{
+func observation(src v1.PlayerDataSource, confidence v1.PlayerConfidence, at time.Time, note string) *v1.PlayerObservation {
+	o := &v1.PlayerObservation{
 		Source:     src,
 		Confidence: confidence,
 	}
@@ -164,7 +164,7 @@ func observation(src v1.PlayerDataSource, confidence v1.PlayerConfidence, at tim
 	return o
 }
 
-func toProtoObservation(src string, confidence string, at time.Time, note string) *v1.Observation {
+func toProtoObservation(src string, confidence string, at time.Time, note string) *v1.PlayerObservation {
 	return observation(playerSourceEnum(src), playerConfidenceEnum(confidence), at, note)
 }
 
@@ -243,7 +243,7 @@ func (s *PlayerService) aliasesFor(ctx context.Context, identityID string) []sto
 	return out
 }
 
-func (s *PlayerService) presenceFor(identity *storage.PlayerIdentity, serverID string) (v1.PlayerPresence, *v1.Observation, time.Time) {
+func (s *PlayerService) presenceFor(identity *storage.PlayerIdentity, serverID string) (v1.PlayerPresence, *v1.PlayerObservation, time.Time) {
 	now := time.Now().UTC()
 	lastSeen := identity.LastSeenAt
 	source := v1.PlayerDataSource_PLAYER_DATA_SOURCE_PRESENCE

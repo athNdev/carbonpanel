@@ -31,13 +31,19 @@ sources:
 | [0012](../../docs/adr/0012-product-transports.md) | Generated product control with tested HTTP compatibility | [RPC contract](../architecture/rpc-contract.md) |
 | [0013](../../docs/adr/0013-bounded-storage-streaming.md) | Bound storage frames and commit staged writes explicitly | [Remote storage transport](../architecture/remote-storage-transport.md), [Backup and restore](../operations/backup-restore.md) |
 | [0014](../../docs/adr/0014-in-process-admission.md) | Serialize same-node starts with an in-process gate, not a lease | [Server lifecycle policy](../architecture/server-lifecycle.md) |
+| [0016](../../docs/adr/0016-world-library-identity-and-binding.md) | Immutable world revisions and clone-on-bind, stop-based journaled bindings | [World Library](../architecture/world-library.md) |
 | [0017](../../docs/adr/0017-player-management-identity-and-capability-gates.md) | Player identity, provenance and capability gates | [Player management](../architecture/player-management.md) |
 | [0023](../../docs/adr/0023-oidc-sso-boundary.md) | Standards-based OIDC with PKCE, nonce and one-time exchange | [RPC contract](../architecture/rpc-contract.md), [SSO identity](../invariants/sso-identity.md) |
 | [0024](../../docs/adr/0024-sso-identity-and-privilege-origin.md) | Issuer+subject identity; no auto-link or implicit admin | [SSO identity](../invariants/sso-identity.md) |
 | [0025](../../docs/adr/0025-sso-entitlement-reconciliation.md) | Source-scoped role reconciliation before session issue | [SSO identity](../invariants/sso-identity.md), [Fail-closed authorization](../invariants/authz-fail-closed.md) |
 | [0026](../../docs/adr/0026-sso-logout-and-provider-limits.md) | Local session invalidation and honest IdP logout limits | [SSO identity](../invariants/sso-identity.md) |
+| [0027](../../docs/adr/0027-fail-closed-http-policy.md) | Fail-closed policy for legacy HTTP adapters | [RPC contract](../architecture/rpc-contract.md) |
+| [0028](../../docs/adr/0028-credential-generation-and-rotation.md) | Credential generation, detection and rotation | [Secrets and endpoints](../invariants/secrets-and-endpoints.md) |
+| [0029](../../docs/adr/0029-trusted-proxy-and-origins.md) | Trusted proxy headers and WebSocket origins | [Runtime model](../architecture/runtime.md) |
+| [0030](../../docs/adr/0030-bounded-content-provenance.md) | Bounded content provenance | [Data safety](../invariants/data-safety.md) |
+| [0031](../../docs/adr/0031-module-sidecar-confinement.md) | Module sidecar confinement parity | [Runtime seams](../architecture/runtime-seams.md) |
+| [0032](../../docs/adr/0032-security-audit-events.md) | Security audit events and redaction | [Fail-closed authorization](../invariants/authz-fail-closed.md) |
 | [0033](../../docs/adr/0033-release-tag-and-publication-policy.md) | One explicit publication boundary and separate immutable version domains | [Release](../workflows/release.md) |
-
 
 # Rule
 
