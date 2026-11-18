@@ -480,7 +480,7 @@ func TestFamilyServerConfirmationAndBounds(t *testing.T) {
 	}
 	for _, n := range negatives {
 		t.Run(n.tool+"/negative", func(t *testing.T) {
-			assertStructuredError(t, callTool(t, f.sessions["serverOps"], n.tool, n.args), n.tool, n.kind)
+			_ = assertStructuredError(t, callTool(t, f.sessions["serverOps"], n.tool, n.args), n.tool, n.kind)
 		})
 	}
 }

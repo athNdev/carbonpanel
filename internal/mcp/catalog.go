@@ -82,10 +82,11 @@ var MountedServices = []string{
 	"ModuleService", "UploadService", "PlayerService", "WorldViewService", "WorldService",
 }
 
-// Exposed tools. The catalog is intentionally identical on every panel build;
-// capability qualification lives in CatalogEntry.Build and is reported only
-// when the controller returns Unimplemented/NotFound.
-var exposedTools = []ToolSpec{
+// firstSliceTools is the original 30-tool slice. It is kept intact as a
+// separately pinned inventory: the coverage drift gate asserts these exact
+// entries, and the integration catalog generator consumes them as the first
+// (highest-precedence) source for the combined exposedTools list.
+var firstSliceTools = []ToolSpec{
 	// Server lifecycle.
 	{Name: "list_servers", Procedure: "/carbonpanel.v1.ServerService/ListServers", Class: ClassSafe, Description: "List Minecraft servers visible to this token. Read-only."},
 	{Name: "get_server", Procedure: "/carbonpanel.v1.ServerService/GetServer", Class: ClassSafe, Description: "Get status and details for one server by exact id. Read-only."},
@@ -133,11 +134,17 @@ var exposedTools = []ToolSpec{
 // stable v1.0.40. Every entry is read-only and maps to a pre-v1.0.40 RPC.
 var SmokeTools = []string{"list_servers", "get_server", "list_files", "get_file", "list_backups"}
 
+// FirstSliceToolSpecs returns the pinned 30-tool first slice. It is the
+// generator's highest-precedence source and never changes with family merges.
+func FirstSliceToolSpecs() []ToolSpec { return firstSliceTools }
+
 // Catalog maps procedure -> declared entry, populated from the generated
-// descriptor table plus the explicit exposure declarations above.
+// descriptor table plus the combined exposure declarations.
 var Catalog map[string]CatalogEntry
 
-// Tools is the stable, ordered list of registered tool declarations.
+// Tools is the combined, generated, ordered list of registered tool
+// declarations. It is produced by internal/mcp/cataloggen from the first slice,
+// the four family descriptor sources and IntegrationToolSpecs.
 var Tools = exposedTools
 
 func init() {

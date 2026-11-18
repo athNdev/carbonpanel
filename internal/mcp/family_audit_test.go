@@ -419,22 +419,32 @@ func TestFamilyAudit(t *testing.T) {
 		listed := liveListedProcedures()
 		reachable := liveReachableTools()
 		fixtures := liveFixtureProcedures(t)
+		// Under full coverage the first-slice gap is closed, so the original
+		// ImportWorld probe is no longer absent. Prove non-vacuity with a
+		// synthetic procedure that is absent from the catalog and fixtures by
+		// construction, while keeping the distinct LISTED/REACHABLE signals.
+		const syntheticProcedure = "/carbonpanel.v1.WorldService/ImportWorldSyntheticGap"
 		synthetic := FamilyAuditOperation{
-			ID:   "rpc:/carbonpanel.v1.WorldService/ImportWorld",
-			Kind: "rpc", Procedure: "/carbonpanel.v1.WorldService/ImportWorld",
+			ID: "rpc:" + syntheticProcedure,
+			Kind: "rpc", Procedure: syntheticProcedure,
 			Support: FamilyAuditSupported,
 		}
 		got := recomputeCoverage(synthetic, listed, reachable, fixtures)
 		if got.Listed && got.Reachable && got.Verified {
 			t.Fatal("synthetic unlisted operation unexpectedly reported as complete")
 		}
-		if !listed["/carbonpanel.v1.WorldService/ImportWorld"] {
-			// ImportWorld is declared in the catalog but has no tool/fixture yet:
-			// that distinction is exactly what the separate counts capture.
-			t.Fatal("expected ImportWorld to be a declared catalog tuple")
+		if listed[syntheticProcedure] || reachable[syntheticProcedure] || fixtures[syntheticProcedure] {
+			t.Fatalf("synthetic gap procedure unexpectedly present: %+v", got)
 		}
-		if got.Reachable || got.Verified {
-			t.Fatalf("ImportWorld must have no tool/fixture in the first slice, got %+v", got)
+		// ImportWorld is now a fully covered operation: assert that the gate
+		// recognizes its completion rather than assuming a first-slice gap.
+		importWorld, ok := FamilyAuditOperationByProcedure("/carbonpanel.v1.WorldService/ImportWorld")
+		if !ok || !importWorld.Supported() {
+			t.Fatal("ImportWorld must remain a supported audited operation")
+		}
+		importCoverage := recomputeCoverage(importWorld, listed, reachable, fixtures)
+		if !importCoverage.Complete() {
+			t.Fatalf("ImportWorld must be complete under full coverage, got %+v", importCoverage)
 		}
 	})
 }

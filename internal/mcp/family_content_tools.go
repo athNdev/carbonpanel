@@ -1477,9 +1477,10 @@ func registerContentTools(s *sdkmcp.Server, cl *ContentClients) {
 			"name": in.Name, "description": in.Description, "mc_version": in.MCVersion, "mod_loader": in.ModLoader,
 		} {
 			max := 128
-			if field == "description" {
+			switch field {
+			case "description":
 				max = 256
-			} else if field == "mc_version" || field == "mod_loader" {
+			case "mc_version", "mod_loader":
 				max = 32
 			}
 			if err := requireText("import_remote_modpack", field, value, max); err != nil {

@@ -74,6 +74,13 @@ type Clients struct {
 	WorldView carbonpanelv1connect.WorldViewServiceClient
 	Backup    carbonpanelv1connect.BackupServiceClient
 	File      carbonpanelv1connect.FileServiceClient
+
+	// httpClient, baseURL and token are retained so NewServer can derive the
+	// family clients from the exact same authenticated connection. No tool
+	// ever sees the token directly and no anonymous fallback is possible.
+	httpClient connect.HTTPClient
+	baseURL    string
+	token      string
 }
 
 // NewClients constructs typed clients with the bearer Authorization
@@ -94,7 +101,34 @@ func NewClients(httpClient connect.HTTPClient, baseURL, token string) (*Clients,
 		WorldView: carbonpanelv1connect.NewWorldViewServiceClient(httpClient, baseURL, opts...),
 		Backup:    carbonpanelv1connect.NewBackupServiceClient(httpClient, baseURL, opts...),
 		File:      carbonpanelv1connect.NewFileServiceClient(httpClient, baseURL, opts...),
+
+		httpClient: httpClient,
+		baseURL:    baseURL,
+		token:      token,
 	}, nil
+}
+
+// familyClients derives the four family hand-off client sets from the same
+// authenticated connection. It is used only by NewServer when mounting the
+// combined catalog; each family keeps its own typed client constructors.
+func (c *Clients) familyClients() (*FamilyServerClients, *ContentClients, *FamilyAdminClients, *FamilyStreamClients, error) {
+	server, err := NewFamilyServerClients(c.httpClient, c.baseURL, c.token)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	content, err := NewContentClients(c.httpClient, c.baseURL, c.token)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	admin, err := NewFamilyAdminClients(c.httpClient, c.baseURL, c.token)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	stream, err := NewFamilyStreamClients(c.httpClient, c.baseURL, c.token)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return server, content, admin, stream, nil
 }
 
 // Verify proves that the controller has a real authentication provider and

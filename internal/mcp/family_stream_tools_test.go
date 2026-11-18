@@ -357,10 +357,16 @@ func TestFamilyStreamTypedEquivalentsAreMountedAndScoped(t *testing.T) {
 			}
 		}
 		if strings.Contains(procedure, "UploadService") {
-			// Upload chunk RPCs are typed equivalents for the byte surface, but
-			// they must stay exclude-class: no raw byte tool is exposed.
-			if entry.Class != ClassExclude {
-				t.Errorf("%s: chunk transport RPC must stay excluded", procedure)
+			// OSS-375 classifies these as SUPPORTED typed equivalents of the
+			// excluded raw byte channel. The integration catalog promotes them
+			// as bounded, confirm-gated RPC tools (base64, 256 KiB frames), not
+			// as raw HTTP/byte-surface tools, so they must be reachable.
+			op, ok := FamilyAuditOperationByProcedure(procedure)
+			if !ok || !op.Supported() {
+				t.Errorf("%s: upload typed equivalent must remain audit-supported", procedure)
+			}
+			if entry.Class == ClassExclude {
+				t.Errorf("%s: audit-supported upload tool must not stay excluded", procedure)
 			}
 		}
 	}
@@ -371,7 +377,11 @@ func TestFamilyStreamNoRawSurfaceTools(t *testing.T) {
 		"/api/", "sessionid", "worldview/map", "oidc", "healthz", "readyz", "/ws", "pack.toml", "raw_url",
 	} {
 		for _, spec := range Tools {
-			haystack := strings.ToLower(spec.Name + " " + spec.Description)
+			// Tool identity is the name and its typed procedure. Descriptions
+			// may cite the documented equivalent flow from the audit matrix
+			// (for example the scoped GET behind init_file_download); that is
+			// documentation, not a raw transport tool.
+			haystack := strings.ToLower(spec.Name + " " + spec.Procedure)
 			if strings.Contains(haystack, strings.ToLower(forbidden)) {
 				t.Errorf("tool %s exposes raw surface fragment %q", spec.Name, forbidden)
 			}

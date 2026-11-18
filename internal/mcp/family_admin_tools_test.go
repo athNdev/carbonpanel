@@ -210,7 +210,11 @@ func newAdminFixture(t *testing.T) *adminFixture {
 		if err != nil {
 			t.Fatalf("NewFamilyAdminClients(%s): %v", name, err)
 		}
-		server := NewServer(base)
+		// Build an isolated server for this family's own slice. The production
+		// NewServer now applies the OSS-375 exclusion filter and drops the
+		// secret-bearing admin tools audited OUT OF SCOPE; this test verifies
+		// the family slice itself, so it registers on a plain server.
+		server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "admin-family-test-server", Version: "v0"}, nil)
 		RegisterFamilyAdminTools(server, admin)
 		f.sessions[name] = connectStdioSession(t, server, ctx)
 	}
@@ -473,7 +477,7 @@ func TestFamilyAdminBoundedArguments(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
-			assertStructuredError(t, callTool(t, f.sessions[tc.token], tc.tool, tc.args), tc.tool, ErrKindInvalidArguments)
+			_ = assertStructuredError(t, callTool(t, f.sessions[tc.token], tc.tool, tc.args), tc.tool, ErrKindInvalidArguments)
 		})
 	}
 	// An oversized updates map is rejected too.
@@ -481,7 +485,7 @@ func TestFamilyAdminBoundedArguments(t *testing.T) {
 	for i := 0; i < 65; i++ {
 		updates[string(rune('a'+i%26))+string(rune('a'+i/26))] = "v"
 	}
-	assertStructuredError(t, callTool(t, f.sessions["configAdmin"], "update_global_settings",
+	_ = assertStructuredError(t, callTool(t, f.sessions["configAdmin"], "update_global_settings",
 		map[string]any{"updates": updates, "confirm": true}), "update_global_settings", ErrKindInvalidArguments)
 }
 

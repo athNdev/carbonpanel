@@ -136,4 +136,8 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("entries=%d services=%d fingerprint=%s\n", len(entries), len(mountedServices), fingerprint)
+	// A single generator owns both the declared descriptor table and the
+	// combined exposed tool list; generation is reproducible from checked-in
+	// source plus the pinned family descriptors.
+	writeIntegrationCatalog(combinedToolSpecs())
 }
