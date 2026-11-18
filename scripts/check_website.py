@@ -17,6 +17,7 @@ class Links(HTMLParser):
         self.not_found = not_found
         self.metas = {}
         self.canonical = None
+        self.noindex = False
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -24,6 +25,12 @@ class Links(HTMLParser):
             key = attrs.get("property") or attrs.get("name")
             if key:
                 self.metas.setdefault(key, []).append(attrs.get("content", ""))
+            if attrs.get("name", "").lower() == "robots":
+                directives = {
+                    item.strip().lower()
+                    for item in attrs.get("content", "").split(",")
+                }
+                self.noindex = "noindex" in directives
         if tag == "link" and attrs.get("rel") == "canonical":
             # Starlight's synthetic 404 has a canonical /404/ URL but is emitted
             # as 404.html. It is not a navigable content route.
@@ -145,6 +152,10 @@ def check_sitemap(root, pages, base, site, errors):
     for page in pages:
         if page.name == "404.html":
             continue
+        parser = Links(not_found=False)
+        parser.feed(page.read_text(encoding="utf-8"))
+        if parser.noindex:
+            continue
         relative = page.relative_to(root).as_posix()
         route = page_route(relative)
         expected.append(site.rstrip("/") + base + route)
@@ -180,7 +191,7 @@ def check(root, base="/", site="https://carbonpanel.dev"):
                 path = path / "index.html"
             if not path.is_file():
                 errors.append(f"{page.relative_to(root)}: missing {link}")
-        if page.name != "404.html":
+        if page.name != "404.html" and not parser.noindex:
             check_social(parser, page, root, base, site, errors)
     check_sitemap(root, pages, base, site, errors)
     if errors:

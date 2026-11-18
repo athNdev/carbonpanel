@@ -13,10 +13,27 @@ import subprocess
 import tarfile
 import tempfile
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_PATHS = ("docs/carbon-panel/src/content/docs", "docker-compose.yml",
                 "config.example.yaml", "oidc", "proto", "buf.yaml", "buf.lock")
+
+
+class SitemapPageMetadata(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.noindex = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "meta":
+            return
+        attrs = dict(attrs)
+        if attrs.get("name", "").lower() != "robots":
+            return
+        directives = {item.strip().lower() for item in attrs.get("content", "").split(",")}
+        if "noindex" in directives:
+            self.noindex = True
 
 
 def build_homepage(root):
@@ -86,6 +103,10 @@ def build_sitemap(output, base, site, lastmod=None):
     sitemap = ET.Element(f"{{{namespace}}}urlset")
     for page in sorted(output.rglob("*.html")):
         if page.name == "404.html":
+            continue
+        metadata = SitemapPageMetadata()
+        metadata.feed(page.read_text(encoding="utf-8"))
+        if metadata.noindex:
             continue
         route = page.relative_to(output).as_posix().removesuffix("index.html")
         url = ET.SubElement(sitemap, f"{{{namespace}}}url")
