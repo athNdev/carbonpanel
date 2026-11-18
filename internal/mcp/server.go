@@ -26,8 +26,10 @@ type ToolOutput struct {
 	Result any        `json:"result,omitempty" jsonschema:"typed Connect response"`
 }
 
-// NewServer builds the MCP server with the full, stable tool catalog. Tools
-// are registered before the first connection so capability inference works.
+// NewServer builds the MCP server with the combined OSS-370 tool catalog:
+// the pinned first slice, every family hand-off and the integration-owned
+// additions. Tools are registered before the first connection so capability
+// inference works.
 func NewServer(clients *Clients) *sdkmcp.Server {
 	if clients == nil {
 		panic("mcp.NewServer: nil clients")
@@ -42,13 +44,16 @@ func NewServer(clients *Clients) *sdkmcp.Server {
 			// Diagnostics go to stderr only: stdout is reserved for JSON-RPC
 			// frames in stdio mode.
 			Logger: slog.New(slog.NewTextHandler(os.Stderr, nil)),
-			Instructions: fmt.Sprintf("FIRST SLICE: %d tools. Inventory coverage is not implemented API coverage. "+
-				"Use the read-only tools first. Mutations require confirm=true. "+
+			Instructions: fmt.Sprintf("COMBINED OSS-370 CATALOG: %d tools, including the pinned %d-tool first slice. "+
+				"Inventory coverage is not implemented API coverage. "+
+				"Use read-only tools first. Mutations require confirm=true. "+
 				"An older controller may return a structured capability_unavailable error; "+
-				"the tool catalog itself never changes between panel builds.", FirstSliceToolCount),
+				"the tool catalog itself never changes between panel builds.", len(exposedTools), FirstSliceToolCount),
 		},
 	)
-	registerTools(s, clients)
+	if err := registerCombinedTools(s, clients); err != nil {
+		panic(fmt.Sprintf("mcp.NewServer: %v", err))
+	}
 	return s
 }
 

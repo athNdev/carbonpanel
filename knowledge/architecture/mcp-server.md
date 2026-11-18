@@ -24,13 +24,18 @@ hand-rolled product HTTP path. An `dp_…` API token is read from
 by a Connect unary interceptor. Missing credentials stop startup rather than
 falling back to anonymous access, session cookies or the no-auth bypass.
 
-This is a FIRST SLICE of 30 tools; inventory coverage is not implemented API
-coverage, and the remaining supported families stay tracked under OSS-370.
-Tools are high-level, bounded workflows: lifecycle with a `confirm=true` gate,
-player lookup, world library/view, backup list and restore, and file browse and
-read. There are no free-form command, node discovery, enrollment, secret,
-WebSocket or write-file tools in this slice. Paths are instance-relative and
-result limits are capped in Go as well as described in the schema.
+The pinned FIRST SLICE of 30 tools remains unchanged, but the gateway now
+mounts the combined OSS-370 catalog: 198 tools covering 201 SUPPORTED operations (9 PENDING)
+operations from the OSS-375 audit matrix. The 30 first-slice declarations are
+the highest-precedence source; family descriptors (server, content, admin),
+stream typed equivalents and integration-owned additions are merged by
+`internal/mcp/cataloggen` into one generated `exposedTools` list. The 58
+excluded operations stay unmounted with exact source reasons and supported
+equivalent flows in `family_audit_matrix.json`; free-form commands, node
+enrollment/TLS dumps, secret bootstrap and third-party egress are never tools.
+Tools are high-level, bounded workflows: mutations carry a `confirm=true` gate,
+paths are instance-relative, and result limits are capped in Go as well as in
+the schema.
 
 Before tools are exposed, `Clients.Verify` checks that the controller has an
 enabled auth provider and that the bearer token resolves to a concrete active
@@ -38,14 +43,33 @@ user. A well-formed token against a no-auth installation is refused, and every
 call uses a bounded HTTP client timeout.
 
 The tool catalog is stable across controller builds. `internal/mcp/catalog.go`
-holds the declared tool tuples and the 25-name mount list mirroring
+holds the pinned first-slice declarations and the 25-name mount list mirroring
 `internal/rpc/server.go registerServices`; `catalog_data.go` is generated from
-proto descriptors and the live RBAC map. The coverage drift test enumerates the
-220 reachable RPCs from that shared list and fails on a missing or extra
-declared tuple, a scope that no longer matches `internal/rbac`, a changed
-descriptor fingerprint, an accidentally mounted `NodeControlService`, or a
-missing `WorldViewService`. gRPC reflection (19 names) and the 24-name RBAC
-parity list are deliberately not sources of truth.
+proto descriptors and the live RBAC map. The single generator also emits
+`integration_catalog.go`, resolving duplicate tools by source precedence so
+`list_files`/`get_file` and similar collisions are never double-registered. The
+coverage drift test still enumerates the 221 reachable RPCs and fails on a
+missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
+a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
+or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and
+REACHABLE from live source, but VERIFIED comes only from executable invocation
+evidence: a real `tools/call` over the SDK stdio wire must reach the typed
+Connect method with exact typed-field assertions on ids, booleans, enums,
+limits, bytes and repeated/map values, observe the real handler status and
+exercise the resource scope (including a denied ungranted dp_ token). Negative
+fixtures prove wrong fields, missing ids, conflicting arguments and out-of-
+range bounds are refused before any typed RPC. Scoped streaming tools are intentionally ABSENT from the live catalog:
+the standalone gateway has no authenticated controller-side transport and must not
+share panel/node storage. The 9 affected operations are PENDING with an exact
+inventory in internal/mcp/integration_pending.go and a committed follow-up plan
+in docs/plans/mcp-controller-side-stream-transport.md. No enabled-but-unusable
+tool is advertised.
+Registration strings, quoted procedure names and substring-of-JSON checks
+never count. The exclusion policy is bound to the server before any tool is
+added, so audited-out tools are never mounted; go-sdk replaces same-name tools
+(last wins), so registration runs in reverse generator priority and a live
+`tools/list` metadata assertion keeps it aligned. gRPC reflection (19 names)
+and the 24-name RBAC parity list are deliberately not sources of truth.
 
 Disposable fixtures connect a real MCP SDK client over the stdio wire format
 to the in-process gateway; its tools call typed clients against `httptest`
