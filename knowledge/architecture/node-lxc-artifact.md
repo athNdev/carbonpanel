@@ -10,8 +10,8 @@ code_refs:
   - packaging/node-lxc/config/provenance.json
   - packaging/node-lxc/tests/test_node_lxc.py
 sources:
-  - title: ADR 0034 unprivileged LXC node artifact
-    resource: ../../docs/adr/0034-unprivileged-lxc-node-artifact.md
+  - title: ADR 0036 unprivileged LXC node template
+    resource: ../../docs/adr/0036-node-lxc-template.md
   - title: Node LXC mode operations
     resource: ../../docs/node-lxc-mode.md
 ---

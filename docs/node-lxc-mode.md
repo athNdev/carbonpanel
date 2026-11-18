@@ -9,7 +9,7 @@ mode and must not be described as equivalent.
 
 The mode's artifact lane lives in
 [`packaging/node-lxc/`](../packaging/node-lxc/README.md), and the decision is
-recorded in [ADR 0034](adr/0034-unprivileged-lxc-node-artifact.md). All material
+recorded in [ADR 0036](adr/0036-node-lxc-template.md). All material
 here is qualified by **offline fixtures only**: no live host was provisioned, no
 global host configuration was changed, no image was imported or booted, and
 nothing was published.

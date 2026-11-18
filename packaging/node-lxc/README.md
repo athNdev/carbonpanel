@@ -21,7 +21,7 @@ rootless captive Docker daemon. That is a materially different isolation and
 host-prerequisite story from the dedicated VM lane, so the mode is documented
 separately in [docs/node-lxc-mode.md](../../docs/node-lxc-mode.md). The
 decision is recorded in
-[ADR 0034](../../docs/adr/0034-unprivileged-lxc-node-artifact.md).
+[ADR 0036](../../docs/adr/0036-node-lxc-template.md).
 
 ## Contents
 

@@ -1,4 +1,4 @@
-# ADR 0034: Unprivileged LXC node rootfs with a nested-runtime capability gate
+# ADR 0036: Unprivileged LXC node template with a nested-runtime capability gate
 
 Status: Accepted (offline-fixture qualified; no live import/boot evidence)
 
