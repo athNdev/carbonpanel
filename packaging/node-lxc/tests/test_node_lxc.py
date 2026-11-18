@@ -21,7 +21,8 @@ ROOT = HERE.parent
 sys.path.insert(0, str(ROOT))
 TOOL = ROOT / "node_lxc_artifact.py"
 FIXTURES = ROOT / "fixtures"
-PROVENANCE = ROOT / "config" / "provenance.json"
+ARTIFACT_PROVENANCE = ROOT / "config" / "provenance.json"
+PROVENANCE = ROOT / "config" / "provenance.fixture.json"
 V1 = "runtime-v1.0.0"
 V2 = "runtime-v2.0.0"
 
@@ -190,6 +191,63 @@ class NodeLxCFixtureTests(unittest.TestCase):
            "--out-dir", str(self.work / "artifact-crlf"), "--provenance", str(PROVENANCE),
            "--version", "runtime-v5.0.0", "--platform", "amd64", "--sign-key", str(self.priv), "--fixture")
         ok("verify", "--artifact-dir", str(self.work / "artifact-crlf"), "--public-key", str(self.pub))
+
+    def _prov_copy(self, mutate) -> Path:
+        prov = json.loads(ARTIFACT_PROVENANCE.read_text())
+        mutate(prov)
+        path = self.work / f"prov-{len(list(self.work.glob('prov-*.json')))}.json"
+        path.write_text(json.dumps(prov, indent=2, sort_keys=True))
+        return path
+
+    def test_06c_artifact_profile_accepts_real_pins(self) -> None:
+        result = ok("validate-provenance", "--provenance", str(ARTIFACT_PROVENANCE),
+                    "--expect-profile", "artifact")
+        self.assertEqual(result["profile"], "artifact")
+        self.assertIs(result["synthetic"], False)
+        self.assertEqual(result["pin_count"], 2)
+        for pin in result["pins"]:
+            self.assertEqual(pin["digest_status"], "verified")
+            self.assertEqual(len(pin["expected_sha256"]), 64)
+            self.assertTrue(pin["image_url"].startswith("https://cloud-images.ubuntu.com/"))
+            self.assertIn("/release-20261017/", pin["image_url"])
+            self.assertEqual(pin["signing_key_fingerprint"], "D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81")
+        fixture = ok("validate-provenance", "--provenance", str(PROVENANCE),
+                     "--expect-profile", "fixture")
+        self.assertIs(fixture["synthetic"], True)
+
+    def test_06d_artifact_profile_refuses_synthetic_and_placeholder_pins(self) -> None:
+        refused("SYNTHETIC_PROVENANCE", "validate-provenance",
+                "--provenance", str(self._prov_copy(lambda d: d.update(synthetic=True))))
+        refused("PLACEHOLDER_DIGEST", "validate-provenance",
+                "--provenance", str(self._prov_copy(
+                    lambda d: d["images"][0].update(expected_sha256="0" * 64))))
+        refused("UNVERIFIED_DIGEST", "validate-provenance",
+                "--provenance", str(self._prov_copy(
+                    lambda d: d["images"][0].update(digest_status="unverified"))))
+        refused("MISSING_SIGNING_EVIDENCE", "validate-provenance",
+                "--provenance", str(self._prov_copy(lambda d: d["images"][0].pop("signature_url"))))
+        refused("INVALID_PROVENANCE_PROFILE", "validate-provenance",
+                "--provenance", str(PROVENANCE), "--expect-profile", "artifact")
+
+    def test_06e_artifact_profile_refuses_moving_urls_and_profile_mixup(self) -> None:
+        refused("MOVING_URL", "validate-provenance",
+                "--provenance", str(self._prov_copy(lambda d: d["images"][0].update(
+                    image_url="https://cloud-images.ubuntu.com/releases/noble/release/"
+                              "ubuntu-24.04-server-cloudimg-amd64-root.tar.xz"))))
+        refused("URL_PROVENANCE_MISMATCH", "validate-provenance",
+                "--provenance", str(self._prov_copy(lambda d: d["images"][0].update(
+                    checksum_url="https://cloud-images.ubuntu.com/releases/noble/release/SHA256SUMS"))))
+        # A build in artifact mode refuses the synthetic fixture profile, and a
+        # fixture build refuses the real artifact profile.
+        refused("INVALID_PROVENANCE_PROFILE", "build",
+                "--source-dir", str(FIXTURES / "rootfs-minimal"),
+                "--out-dir", str(self.work / "artifact-mixup-a"),
+                "--provenance", str(PROVENANCE), "--version", V1, "--platform", "amd64")
+        refused("INVALID_FIXTURE_PROFILE", "build",
+                "--source-dir", str(FIXTURES / "rootfs-minimal"),
+                "--out-dir", str(self.work / "artifact-mixup-b"),
+                "--provenance", str(ARTIFACT_PROVENANCE), "--version", V1,
+                "--platform", "amd64", "--fixture")
 
     # -------------------------------------------------------- capability gate
     def test_07_capability_gate_supported_and_refusals(self) -> None:
