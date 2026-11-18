@@ -25,6 +25,12 @@ defines the minimum deprecation window and explicit content/integration HTTP
 exceptions; [the inventory](../../docs/product-transports.md) identifies active
 families. The rule describes the destination contract, not permission to remove
 live REST consumers without a migration.
+Node read responses are redacted: `dbNodeToProto` leaves `tls_ca_cert`,
+`tls_cert` and `tls_key` empty, and `UpdateNode` treats an empty TLS string as
+unchanged so an editor cannot clear stored credentials by echoing a redacted
+response. The daemon pool reads stored material from the database. See
+[ADR 0018](../../docs/adr/0018-node-response-redaction.md).
+
 Node discovery is the first compatibility migration: both transports use the
 same twelve-second scan and best-effort known-node count. ScanNodes requires
 nodes/read globally; the compatibility route preserves numeric JSON fields and
