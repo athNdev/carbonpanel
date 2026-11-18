@@ -16,6 +16,11 @@ import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
 
+try:  # works for `python scripts/...` and `python -m unittest discover -s scripts`
+    from scripts import node_vm_build as build
+except ImportError:  # pragma: no cover - CLI path
+    import node_vm_build as build
+
 
 class IntegrityError(ValueError):
     pass
@@ -77,6 +82,8 @@ def build_sbom(config, provenance, artifacts, source_date_epoch=None):
             "properties": [
                 {"name": "carbon:digest_status", "value": image["digest_status"]},
                 {"name": "carbon:image_url", "value": image["image_url"]},
+                {"name": "carbon:release_date", "value": image.get("release_date", "unknown")},
+                {"name": "carbon:immutable_pin", "value": str(bool(image.get("immutable"))).lower()},
             ],
         })
 
@@ -153,18 +160,24 @@ def signing_plan(artifact_names, signer_env="CARBON_VM_SIGNING_KEY_ID"):
     }
 
 
-def generate(root=ROOT, out_dir=None):
+def generate(root=ROOT, out_dir=None, profile="fixture"):
     root = Path(root)
     config = json.loads((root / "packaging/node-vm/config/build-config.json").read_text())
     provenance = json.loads(
-        (root / "packaging/node-vm" / config["provenance_file"]).read_text()
+        (root / "packaging/node-vm" / build.provenance_file_for(config, profile)).read_text()
     )
     check_no_signing_secret(config)
+    if profile == "artifact":
+        for image in provenance["images"]:
+            build.verify_artifact_provenance(provenance, image)
     artifacts = {
         "build-config.json": json.dumps(config, sort_keys=True, separators=(",", ":")).encode(),
     }
     checksums = build_checksum_manifest(artifacts)
     sbom = build_sbom(config, provenance, artifacts)
+    sbom["metadata"]["component"]["properties"] = [
+        {"name": "carbon:provenance_profile", "value": profile},
+    ]
     plan = signing_plan(list(artifacts))
     result = {
         "SHA256SUMS": checksums,
@@ -185,8 +198,10 @@ def main(argv=None):
     parser.add_argument("--out-dir")
     parser.add_argument("--verify", action="store_true",
                         help="verify generated checksum manifest against inputs")
+    parser.add_argument("--profile", choices=("artifact", "fixture"), default="fixture",
+                        help="provenance profile for the SBOM")
     args = parser.parse_args(argv)
-    result = generate(args.root, args.out_dir)
+    result = generate(args.root, args.out_dir, args.profile)
     if args.verify:
         config = json.loads((Path(args.root) / "packaging/node-vm/config/build-config.json").read_text())
         artifacts = {"build-config.json": json.dumps(

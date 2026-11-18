@@ -3,24 +3,104 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-package native
+package enroll
 
 import (
 	"bytes"
+	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // All fixtures here use synthetic keys, temp-dir private material and a fixed
 // clock. No secret is printed, committed or stored in a real database.
+
+const fixtureTimeValue = "2026-11-18T12:00:00Z"
+
+func fixtureTime() time.Time {
+	t, _ := time.Parse(time.RFC3339, fixtureTimeValue)
+	return t
+}
+
+func fixtureContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+type testAuthority struct {
+	authority    *EnrollmentAuthority
+	bundle       *NodeBundle
+	enrollmentID string
+	nodeID       string
+}
+
+func newTestAuthority(t *testing.T, topology TLSTopology) *testAuthority {
+	t.Helper()
+	a, err := NewEnrollmentAuthority(topology)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.WithClock(func() time.Time { return fixtureTime() })
+	dir := t.TempDir()
+	bundle, req, err := GenerateNodeBundle(dir, "node-fixture-shared", "fixture-node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operator := Credential{Kind: CredentialOperator}
+	resp, err := a.CreateEnrollment(operator, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &testAuthority{
+		authority:    a,
+		bundle:       bundle,
+		enrollmentID: resp.GetEnrollment().GetEnrollmentId(),
+		nodeID:       bundle.NodeID,
+	}
+}
+
+func (ta *testAuthority) validClaim(t *testing.T) *v1.ClaimEnrollmentRequest {
+	t.Helper()
+	challenge, err := ta.authority.BeginEnrollmentChallenge(&v1.BeginEnrollmentChallengeRequest{EnrollmentId: ta.enrollmentID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	caps := []v1.NodeCapability{
+		v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET,
+		v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS,
+	}
+	claim, err := ta.bundle.BuildClaim(ta.enrollmentID, challenge, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return claim
+}
+
+func otherFixtureKey(t *testing.T) ed25519.PrivateKey {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return priv
+}
 
 func TestEnrollmentValidClaimIssuesPublicCertOnly(t *testing.T) {
 	ta := newTestAuthority(t, TopologyDirectTLS)
@@ -53,7 +133,7 @@ func TestEnrollmentMismatchedApprovedKey(t *testing.T) {
 	claim := ta.validClaim(t)
 	e := ta.authority.enrollments[ta.enrollmentID]
 	other := otherFixtureKey(t)
-	claim.FreshClaimSignature = ed25519.Sign(other, claimContext(
+	claim.FreshClaimSignature = ed25519.Sign(other, ClaimContext(
 		e.NodeID, e.ID, claim.GetChallengeId(), e.Nonce, e.ExpiresAt,
 		claim.GetCapabilities().GetCapabilities(), ta.authority.channelContextLocked()))
 	if _, err := ta.authority.ClaimEnrollment(claim); !errors.Is(err, ErrMismatchedKey) {
@@ -96,7 +176,7 @@ func TestEnrollmentStaleAndReplayedNonce(t *testing.T) {
 	// the single-use nonce check can cause the refusal.
 	e := ta.authority.enrollments[ta.enrollmentID]
 	claim.ChallengeId = "challenge-stale"
-	claim.FreshClaimSignature = ed25519.Sign(ta.bundle.key, claimContext(
+	claim.FreshClaimSignature = ed25519.Sign(ta.bundle.key, ClaimContext(
 		e.NodeID, e.ID, claim.GetChallengeId(), e.Nonce, e.ExpiresAt,
 		claim.GetCapabilities().GetCapabilities(), ta.authority.channelContextLocked()))
 	_ = current
@@ -240,6 +320,47 @@ func TestEnrollmentAtomicRollback(t *testing.T) {
 	}
 }
 
+// MUST-FIX (OSS-385): a failure in certificate issuance must not leave a
+// consumed+active enrollment with no credential. The certificate is issued
+// before any ownership state is written, so a legitimate retry succeeds.
+func TestEnrollmentIssuanceFailureLeavesStateUnchangedAndRetrySucceeds(t *testing.T) {
+	ta := newTestAuthority(t, TopologyDirectTLS)
+	firstClaim := ta.validClaim(t) // establish the server-stored challenge first
+	before := *ta.authority.enrollments[ta.enrollmentID]
+	beforeNonce := append([]byte{}, before.Nonce...)
+	serialBefore := ta.authority.serialCounter
+
+	ta.authority.InjectIssuanceFailure(true)
+	if _, err := ta.authority.ClaimEnrollment(firstClaim); !errors.Is(err, ErrRefused) {
+		t.Fatalf("issuance failure not refused as ErrRefused: %v", err)
+	}
+
+	e := ta.authority.enrollments[ta.enrollmentID]
+	if e.State != before.State || e.NonceUsed != before.NonceUsed ||
+		e.CredentialGeneration != before.CredentialGeneration || e.CertSerial != before.CertSerial ||
+		e.ConsumedAt != nil || len(e.ChannelBinding) != 0 ||
+		ta.authority.serialCounter != serialBefore {
+		t.Fatalf("issuance failure mutated enrollment state: %+v (serialCounter=%d)", e, ta.authority.serialCounter)
+	}
+	if !bytes.Equal(e.Nonce, beforeNonce) || e.ChallengeID != before.ChallengeID {
+		t.Fatal("issuance failure consumed or replaced the challenge nonce")
+	}
+
+	// Legitimate retry with a fresh challenge and a healthy issuer.
+	ta.authority.InjectIssuanceFailure(false)
+	retryClaim := ta.validClaim(t) // begins a new challenge and re-signs
+	resp, err := ta.authority.ClaimEnrollment(retryClaim)
+	if err != nil {
+		t.Fatalf("legitimate retry after issuance failure refused: %v", err)
+	}
+	if resp.GetCertificateSerial() == "" || len(resp.GetEnrolledClientCertificateDer()) == 0 {
+		t.Fatal("retry returned no credential")
+	}
+	if e.State != "active" || !e.NonceUsed || e.CredentialGeneration != 1 || e.CertSerial == "" {
+		t.Fatalf("retry did not commit atomically: %+v", e)
+	}
+}
+
 func TestEnrollmentDurableRotationAcrossRestart(t *testing.T) {
 	ta := newTestAuthority(t, TopologyDirectTLS)
 	resp, err := ta.authority.ClaimEnrollment(ta.validClaim(t))
@@ -282,6 +403,129 @@ func TestCreateEnrollmentRequiresEveryProofField(t *testing.T) {
 	}
 	if _, err := a.CreateEnrollment(Credential{Kind: CredentialBootstrap}, &v1.CreateEnrollmentRequest{NodeId: "n"}); !errors.Is(err, ErrScope) {
 		t.Fatalf("non-operator created an enrollment: %v", err)
+	}
+}
+
+// Ed25519-only is an explicit implementation decision narrowing ADR 0019's
+// "Ed25519 or P-256" allowance. A P-256 CSR must be refused at registration so
+// there is exactly one signing path and one canonical context encoding.
+func TestCreateEnrollmentRefusesP256Key(t *testing.T) {
+	a, err := NewEnrollmentAuthority(TopologyDirectTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject: pkix.Name{CommonName: "p256-node"},
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spki, err := x509.MarshalPKIXPublicKey(key.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp := sha256.Sum256(spki)
+	req := &v1.CreateEnrollmentRequest{
+		NodeId: "p256-node", Ttl: durationpb.New(time.Hour),
+		ApprovedPublicKeySpki: spki, ApprovedKeyFingerprint: fp[:],
+		EnrollmentSecretDigest: make([]byte, 32), EnrollmentSalt: make([]byte, 16),
+		CsrPre: csrDER,
+	}
+	if _, err := a.CreateEnrollment(Credential{Kind: CredentialOperator}, req); !errors.Is(err, ErrMismatchedKey) {
+		t.Fatalf("P-256 approved key was not refused: %v", err)
+	}
+}
+
+// TestSharedBoundaryWiresAllThreeDomains proves AuthorizeBootstrap and
+// AuthorizeNodeOperation are enforced by the production seam, not just called
+// by tests. AuthorizeOperator is enforced by every management path.
+func TestSharedBoundaryWiresAllThreeDomains(t *testing.T) {
+	b, err := NewBoundary(TopologyDirectTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := fixtureContext(t)
+	operator := Credential{Kind: CredentialOperator}
+	bootstrap := Credential{Kind: CredentialBootstrap}
+	node := Credential{Kind: CredentialNode, NodeID: "node", ObjectID: "node",
+		Scopes: []string{"node:heartbeat", "node:report"}}
+
+	// Bootstrap domain is required for both bounded enrollment steps.
+	if _, err := b.BeginEnrollment(ctx, operator, "missing"); !errors.Is(err, ErrScope) {
+		t.Fatalf("operator used the bootstrap challenge step: %v", err)
+	}
+	if _, err := b.ClaimEnrollment(ctx, operator, nil); !errors.Is(err, ErrScope) {
+		t.Fatalf("operator used the bootstrap claim step: %v", err)
+	}
+	if _, err := b.BeginEnrollment(ctx, bootstrap, "missing"); err == nil || errors.Is(err, ErrScope) {
+		t.Fatalf("bootstrap challenge step returned an unexpected result: %v", err)
+	}
+
+	// Operator domain is enforced by CreateEnrollment.
+	if _, err := b.CreateEnrollment(ctx, bootstrap, nil); !errors.Is(err, ErrScope) {
+		t.Fatalf("bootstrap credential created an enrollment: %v", err)
+	}
+	if _, err := b.CreateEnrollment(ctx, operator, nil); !errors.Is(err, ErrMissingProof) {
+		t.Fatalf("operator enrollment did not reach proof validation: %v", err)
+	}
+
+	// Node domain is enforced on every node operation and preflight report.
+	if err := b.AuthorizeNodeOperation(bootstrap, "node", "node:heartbeat"); !errors.Is(err, ErrScope) {
+		t.Fatalf("bootstrap credential used on a node operation: %v", err)
+	}
+	if err := b.AuthorizeNodeOperation(operator, "node", "node:heartbeat"); !errors.Is(err, ErrScope) {
+		t.Fatalf("operator credential used on a node operation: %v", err)
+	}
+	if err := b.AuthorizeNodeOperation(node, "other-node", "node:heartbeat"); !errors.Is(err, ErrScope) {
+		t.Fatalf("cross-node operation accepted: %v", err)
+	}
+	if err := b.AuthorizeNodeOperation(node, "node", "nodes:create"); !errors.Is(err, ErrScope) {
+		t.Fatalf("node used an operator scope: %v", err)
+	}
+	if err := b.AuthorizePreflight(node, "node", []string{"node:report", "nodes:create"}); !errors.Is(err, ErrScope) {
+		t.Fatalf("over-scope preflight accepted: %v", err)
+	}
+}
+
+// TestClaimContextCanonicalEncoding pins the exact bytes documented in ADR
+// 0019 so no lane can reintroduce a client nonce or change the delimiters.
+func TestClaimContextCanonicalEncoding(t *testing.T) {
+	expires := fixtureTime()
+	nonce := []byte{0x01, 0x00, 0x02}
+	channel := []byte{0xaa, 0x00, 0xbb}
+	caps := []v1.NodeCapability{v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET}
+
+	got := ClaimContext("node", "enroll", "challenge", nonce, expires, caps, channel)
+	var want bytes.Buffer
+	want.WriteString("carbon-panel-enroll-v1")
+	want.WriteByte(0)
+	want.WriteString("node")
+	want.WriteByte(0)
+	want.WriteString("enroll")
+	want.WriteByte(0)
+	want.WriteString("challenge")
+	want.WriteByte(0)
+	want.Write(nonce)
+	want.WriteByte(0)
+	want.WriteString(expires.UTC().Format(time.RFC3339Nano))
+	want.WriteByte(0)
+	want.WriteString(v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET.String())
+	want.WriteByte(0)
+	want.Write(channel)
+	if !bytes.Equal(got, want.Bytes()) {
+		t.Fatalf("canonical context changed:\n got %x\nwant %x", got, want.Bytes())
+	}
+	// The nonce is the server-stored challenge value, never a request field.
+	if !bytes.Contains(got, nonce) {
+		t.Fatal("server nonce missing from canonical context")
+	}
+	// A different nonce must produce a different context.
+	if bytes.Equal(got, ClaimContext("node", "enroll", "challenge", []byte{0x09}, expires, caps, channel)) {
+		t.Fatal("canonical context does not bind the server nonce")
 	}
 }
 

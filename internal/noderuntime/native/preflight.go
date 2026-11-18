@@ -8,6 +8,7 @@ package native
 import (
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/noderuntime/enroll"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -16,7 +17,7 @@ import (
 // NegotiateVersion contract; a controller outside the range produces an
 // explicit UPGRADE_REQUIRED outcome rather than a silent downgrade.
 const (
-	ProtocolVersion     int32 = 1
+	ProtocolVersion     int32 = enroll.ProtocolVersion
 	MinSupportedVersion int32 = 1
 	MaxSupportedVersion int32 = 2
 	AgentVersion              = "carbon-node-native/0.1.0"

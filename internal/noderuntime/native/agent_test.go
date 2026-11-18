@@ -7,6 +7,7 @@ package native
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -63,10 +64,29 @@ func TestRunnerComposesSharedContract(t *testing.T) {
 	if _, err := r.Negotiate(ctx, &v1.VersionNegotiation{MinSupportedVersion: 1, MaxSupportedVersion: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.BeginEnrollment(ctx, "missing-enrollment"); err == nil {
+	bootstrap := Credential{Kind: CredentialBootstrap}
+	operator := Credential{Kind: CredentialOperator}
+
+	// The shared boundary enforces the bootstrap domain before either step.
+	if _, err := r.BeginEnrollment(ctx, operator, "missing-enrollment"); !errors.Is(err, ErrScope) {
+		t.Fatalf("operator reached the bootstrap challenge step: %v", err)
+	}
+	if _, err := r.ClaimEnrollment(ctx, operator, nil); !errors.Is(err, ErrScope) {
+		t.Fatalf("operator reached the bootstrap claim step: %v", err)
+	}
+	if _, err := r.BeginEnrollment(ctx, bootstrap, "missing-enrollment"); err == nil {
 		t.Fatal("unknown enrollment returned a challenge")
 	}
-	if _, err := r.ClaimEnrollment(ctx, nil); err == nil {
+	if _, err := r.ClaimEnrollment(ctx, bootstrap, nil); err == nil {
 		t.Fatal("nil claim accepted")
+	}
+
+	// The enrolled-node domain is wired on the same shared boundary.
+	node := Credential{Kind: CredentialNode, ObjectID: "node", Scopes: []string{"node:heartbeat"}}
+	if err := r.AuthorizeNodeOperation(node, "other-node", "node:heartbeat"); !errors.Is(err, ErrScope) {
+		t.Fatalf("cross-node operation accepted: %v", err)
+	}
+	if err := r.AuthorizeNodeOperation(node, "node", "node:heartbeat"); err != nil {
+		t.Fatalf("legitimate node operation refused: %v", err)
 	}
 }

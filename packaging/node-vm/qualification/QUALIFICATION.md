@@ -1,20 +1,33 @@
 # Disposable owned-VM qualification design (fixtures only)
 
-Status: **DESIGN + OFFLINE FIXTURES ONLY.** No live host VM has been created,
-altered, provisioned or deleted by this lane. No global host configuration was
-changed. No live enrollment, daemon, game server, registry push or release was
-run. All evidence below is fixture-based and is reported as such.
+Status: **DESIGN + OFFLINE FIXTURES, plus directly retrieved upstream base-image
+provenance.** No live host VM has been created, altered, provisioned or deleted
+by this lane. No global host configuration was changed. No live enrollment,
+daemon, game server, registry push or release was run. Runtime claims remain
+fixture-based; the base-image pins are real and are reported separately below.
+
+## Real base-image provenance (direct official-source retrieval, 2026-11-18)
+
+The checked-in artifact profile pins immutable dated Ubuntu 24.04 `release-20261017`
+images for amd64 and arm64 with real SHA256 values from the upstream
+GPG-signed `SHA256SUMS`, verified locally against the official Ubuntu image
+signing key. Exact URLs, digests, HTTP statuses, checksum-file SHA256 and GPG
+output are in [`provenance/RETRIEVAL-EVIDENCE.md`](../provenance/RETRIEVAL-EVIDENCE.md).
+Synthetic placeholders are confined to `provenance/base-images.fixture.json`,
+used only by offline tests; artifact mode fails closed on them.
 
 ## Evidence boundary
 
 | Claim | Evidence in this lane | Not claimed here |
 | --- | --- | --- |
+| Base-image pin | Direct GET/HEAD from cloud-images.ubuntu.com + GPG verify of SHA256SUMS (real hashes, immutable dated URLs) | Full image download/rehash; any real QCOW2 build |
 | Seed/build determinism | Offline fixture tests + `node_vm_build.py --check` | Byte-identical QCOW2 across machines |
 | No secret in image/seed/metadata | Static invariants + fixture assertions with synthetic sentinels | Real secret handling on a live VM |
 | Checksum/SBOM generation | Deterministic unit fixtures | Signed/published artifacts |
 | Upgrade/rollback logic | Pure planner fixtures with synthetic bytes | Applied upgrade on a live VM |
 | Persistent volume safety | Copy-only planner fixtures | Real volume import/recovery |
 | First-boot uniqueness | Derived `node_id` fixture for distinct instance-ids | Real VM boot and mTLS enrollment |
+| Shared SIG_CLAIM context | Byte-for-byte golden from shared `ClaimContextRaw` at PR532 `fc998875`; JSON-signed claim refused; server-stored nonce, Ed25519-only | Production mount delegating to the shared Go package; live claim verification |
 | Isolation | Documented model (`docs/isolation.md`) | Effective policy/breakout testing |
 
 ## Qualification scenarios (future, owned disposable VMs only)
