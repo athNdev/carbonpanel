@@ -32,10 +32,12 @@ type fakeSource struct {
 	bans        int
 	pardons     int
 	ops         int
-	allowlist   int
-	failNext    error
-	lastReason  string
-	listPlayers []observedPlayer
+	allowlist           int
+	failNext            error
+	lastReason          string
+	lastWhitelistName   string
+	lastWhitelistRemove bool
+	listPlayers         []observedPlayer
 }
 
 func (f *fakeSource) Source() string { return f.name }
@@ -77,11 +79,13 @@ func (f *fakeSource) SetOperator(context.Context, string, int32, bool) error {
 	f.ops++
 	return nil
 }
-func (f *fakeSource) SetWhitelist(context.Context, string, bool) error {
+func (f *fakeSource) SetWhitelist(_ context.Context, name string, remove bool) error {
 	if err := f.fail(); err != nil {
 		return err
 	}
 	f.allowlist++
+	f.lastWhitelistName = name
+	f.lastWhitelistRemove = remove
 	return nil
 }
 
@@ -97,7 +101,10 @@ func (f *fakeNegotiator) Negotiate(context.Context, *storage.Server, *storage.Se
 	return f.source, f.caps, f.err
 }
 
-type fakeSkin struct{ refreshed int }
+type fakeSkin struct {
+	refreshed int
+	lookup    func(query string) identityLookup
+}
 
 func (f *fakeSkin) Get(context.Context, string, string) (skinAsset, error) {
 	return skinAsset{Data: []byte("png"), ContentType: "image/png", Source: "identity_service", Confidence: "detected", ObservedAt: time.Now().UTC()}, nil
@@ -105,6 +112,12 @@ func (f *fakeSkin) Get(context.Context, string, string) (skinAsset, error) {
 func (f *fakeSkin) Refresh(context.Context, string, string) (skinAsset, error) {
 	f.refreshed++
 	return skinAsset{Data: []byte("png"), ContentType: "image/png", Source: "identity_service", Confidence: "detected"}, nil
+}
+func (f *fakeSkin) Lookup(_ context.Context, query string) (identityLookup, error) {
+	if f.lookup != nil {
+		return f.lookup(query), nil
+	}
+	return identityLookup{Status: "not_found", Note: "no fixture result"}, nil
 }
 func (f *fakeSkin) Close() {}
 

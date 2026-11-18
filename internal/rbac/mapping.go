@@ -273,6 +273,10 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// Server-scoped procedures use "server_id" so SubuserPermissions apply.
 	// The skin lookup carries an optional server_id for the same reason; its
 	// skin_ref is an opaque cache key and never an arbitrary URL.
+	// Exact-identity lookup has no server scope: it resolves an account the
+	// panel has not observed yet. It stays fail-closed behind players:read on
+	// the global "*" scope; no subuser per-server grant implies it.
+	"/carbonpanel.v1.PlayerService/LookupPlayer":            {Resource: ResourcePlayers, Action: ActionRead},
 	"/carbonpanel.v1.PlayerService/ListPlayers":             {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/GetPlayer":               {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerSessions":      {Resource: ResourcePlayers, Action: ActionPresence, ObjectIDField: "server_id"},

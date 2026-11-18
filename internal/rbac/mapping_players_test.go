@@ -11,6 +11,8 @@ import "testing"
 // mapping_test gate proves each is mapped exactly once; this file pins the
 // *meaning* of each mapping so a permissive edit cannot pass unnoticed.
 var playerProcedures = map[string]ProcedurePermission{
+	// Global lookup: no object scope, fail-closed behind players:read on "*".
+	"/carbonpanel.v1.PlayerService/LookupPlayer":           {Resource: ResourcePlayers, Action: ActionRead},
 	"/carbonpanel.v1.PlayerService/ListPlayers":            {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/GetPlayer":              {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerSessions":     {Resource: ResourcePlayers, Action: ActionPresence, ObjectIDField: "server_id"},

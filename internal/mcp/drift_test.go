@@ -111,8 +111,8 @@ func TestCoverageDriftGate(t *testing.T) {
 	if len(MountedServices) != 25 {
 		t.Fatalf("expected 25 mounted services, got %d", len(MountedServices))
 	}
-	if len(mounted) != 220 {
-		t.Fatalf("expected 220 mounted RPCs, got %d", len(mounted))
+	if len(mounted) != 221 {
+		t.Fatalf("expected 221 mounted RPCs, got %d", len(mounted))
 	}
 
 	// Catalog is the declared table after exposure overrides are applied.

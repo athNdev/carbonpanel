@@ -89,8 +89,8 @@ test('PlayerActions confirms with reason, targets and side effects, and gates by
 	assert.match(s, /actionSideEffectNote\(action\)/, 'confirmation explains side effects');
 	assert.match(
 		s,
-		/authStore\.hasPermission\('players', action, serverId\)/,
-		'UI gating uses players permission'
+		/authStore\.hasPermission\('players', permissionActionFor\(action\), serverId\)/,
+		'UI gating maps the UI action to the RBAC action that authorizes the RPC'
 	);
 	assert.match(s, /newRequestId\(\)/, 'every action carries a request id');
 	assert.match(s, /bulkPlayerAction/, 'bulk actions use the typed RPC');
@@ -135,6 +135,61 @@ test('skin reads are scoped to the player server for server-scoped moderators', 
 		'each row passes its own server id, not the (possibly empty) roster scope'
 	);
 	assert.doesNotMatch(roster, /skinRef=\{player\.skinRef\}\s*\n\s*\{serverId\}/);
+});
+
+test('PlayerLookup discloses every unresolved state and never invents an identity', () => {
+	const s = source('PlayerLookup.svelte');
+	assert.match(s, /lookupPlayer\(/, 'uses the exact-identity lookup RPC');
+	assert.match(s, /LookupPlayerRequestSchema/, 'builds the typed request');
+	assert.match(s, /PlayerLookupStatus\.FOUND/, 'handles found');
+	assert.match(s, /PlayerLookupStatus\.NOT_FOUND/, 'handles not found');
+	assert.match(s, /PlayerLookupStatus\.AMBIGUOUS/, 'handles ambiguous');
+	assert.match(s, /PlayerLookupStatus\.UNAVAILABLE/, 'handles unavailable');
+	assert.match(s, /No identity was created/, 'unresolved states state that nothing was invented');
+	assert.match(
+		s,
+		/creates no identity, roster entry or presence claim/,
+		'discloses the read-only contract'
+	);
+	assert.match(s, /no name history is queried or shown/, 'discloses no name history');
+	assert.match(s, /outage or timeout/, 'outage is distinct from authoritative not found');
+	assert.match(s, /mine !== generation/, 'stale provider replies are discarded');
+	assert.match(s, /hasPermission\('players', 'read', '\*'\)/, 'gated by the global read grant');
+	assert.match(s, /aria-live="polite"/, 'status changes are announced');
+	assert.match(s, /onsubmit=/, 'Enter submits the form for keyboard users');
+	assert.doesNotMatch(
+		s,
+		/#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?\b/,
+		'no page-local arbitrary hex colors'
+	);
+});
+
+test('AddAllowlistEntry uses the server-scoped typed path with journal and undo', () => {
+	const s = source('AddAllowlistEntry.svelte');
+	assert.match(s, /playerQuery: value/, 'sends the exact name/UUID typed by the operator');
+	assert.match(s, /serverId/, 'scopes the add to this server');
+	assert.match(
+		s,
+		/SetWhitelistEntryRequestSchema/,
+		'reuses the moderation RPC, not a command path'
+	);
+	assert.match(s, /undoPlayerAction/, 'offers undo through the existing journal');
+	assert.match(
+		s,
+		/hasPermission\('players', 'access:write', serverId\)/,
+		'gated by server-scoped access:write'
+	);
+	assert.match(s, /Bedrock XUID allowlists are not supported yet/, 'edition boundary is disclosed');
+	assert.match(s, /aria-live="polite"/, 'outcomes are announced');
+	assert.doesNotMatch(s, /sendCommand|SendCommandRequestSchema/, 'no legacy command fallback');
+});
+
+test('permissionActionFor maps UI actions to real RBAC actions', async () => {
+	const { permissionActionFor } = await import('./presentation');
+	assert.equal(permissionActionFor('whitelist_add'), 'access:write');
+	assert.equal(permissionActionFor('whitelist_remove'), 'access:write');
+	assert.equal(permissionActionFor('op'), 'moderate:op');
+	assert.equal(permissionActionFor('kick'), 'moderate');
 });
 
 test('capability diagnostics show actionable text instead of fake controls', () => {
