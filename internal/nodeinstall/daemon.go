@@ -6,29 +6,26 @@
 package nodeinstall
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/athNdev/carbon-panel/internal/noderuntime/native"
 )
 
-// INTEGRATION SEAM (OSS-376 / OSS-379 alignment)
-// ------------------------------------------------
-// The native-daemon lane owns the ONE canonical dockerd-options renderer. At
-// the time of writing that renderer had not yet landed on main: the merged
-// PR527 renderer still duplicated options between CLI flags and config.json,
-// rendered rootless as a direct system unit, and rendered rootful as a non-root
-// service with an empty capability bound. We therefore implement the same
-// one-source-of-options rule locally and expose it behind DaemonRenderer.
-//
-// When the native lane publishes its fixed canonical renderer, wire an adapter
-// here with SetDaemonRenderer and DELETE the local option definitions below.
-// No installer caller, CLI verb or fixture should need to change: they all go
-// through RenderDaemon. This file never writes to the host; it renders strings
-// for disposable fixtures and for the caller-owned artifact output directory.
+// INTEGRATION (OSS-376 / OSS-379)
+// --------------------------------
+// The ONE canonical dockerd-options renderer lives in
+// internal/noderuntime/native (DaemonSpec.Options / BuildManifest /
+// CheckOptionParity). The installer no longer declares a dockerd option of its
+// own: CanonicalRenderer adapts that shared source through DaemonRenderer.
+// This removes the old local config path that emitted the invalid combination
+// "bridge": "none" together with "bip". The CLI wires the adapter explicitly
+// with SetDaemonRenderer; it is also the package default. Fixture-only binary
+// overrides are a targeted ExecStart substitution and never alter options.
 
 // DaemonMode is the qualified isolation mode of the private daemon.
 type DaemonMode string
@@ -73,18 +70,16 @@ type DaemonRender struct {
 	InstallHint string `json:"install_hint"`
 }
 
-// DaemonRenderer is the seam. The local implementation is the current single
-// source of daemon options; a shared implementation can replace it without
-// changing any consumer.
+// DaemonRenderer is the reviewed seam. The canonical implementation adapts the
+// shared native renderer; callers never declare options themselves.
 type DaemonRenderer interface {
 	Render(DaemonSpec) (DaemonRender, error)
 }
 
-var daemonRenderer DaemonRenderer = localDaemonRenderer{}
+var daemonRenderer DaemonRenderer = CanonicalRenderer{}
 
-// SetDaemonRenderer replaces the local renderer with the shared canonical
-// renderer once it is available. It is a build-time wiring hook, never driven
-// by untrusted CLI input.
+// SetDaemonRenderer wires a renderer explicitly (used by the CLI at startup).
+// It is a build-time hook, never driven by untrusted CLI input.
 func SetDaemonRenderer(r DaemonRenderer) {
 	if r != nil {
 		daemonRenderer = r
@@ -96,23 +91,77 @@ func RenderDaemon(spec DaemonSpec) (DaemonRender, error) {
 	return daemonRenderer.Render(spec)
 }
 
-// daemonOption is the ONLY definition of a dockerd option. Both the config
-// document and the unit are derived from this list: the unit carries no option
-// flags at all, only --config-file. This is the one-source-of-options rule the
-// PR527 review found missing.
-type daemonOption struct {
-	key   string
-	value any
+// CanonicalRenderer adapts the shared internal/noderuntime/native renderer.
+// It owns no option table: config, unit and parity all come from native.
+type CanonicalRenderer struct{}
+
+// toNative maps the installer's caller-owned path spec onto the shared spec.
+// The installer's RuntimeRoot/StateRoot containment fields have no native
+// equivalent; they are enforced here and by ValidateDaemonPaths.
+func (d DaemonSpec) toNative() native.DaemonSpec {
+	mode := native.ModeRootful
+	xdg := ""
+	if d.Mode == ModeRootless {
+		mode = native.ModeRootless
+		xdg = "/run/user/" + strconv.Itoa(d.RuntimeUID)
+	}
+	return native.DaemonSpec{
+		NodeID:              d.NodeID,
+		Mode:                mode,
+		SocketPath:          d.SocketPath,
+		ConfigPath:          d.ConfigPath,
+		XDG_RUNTIME_DIR:     xdg,
+		DataRoot:            d.DataRoot,
+		ExecRoot:            d.ExecRoot,
+		ContainerdNamespace: d.ContainerdNamespace,
+		BridgeCIDR:          d.BridgeCIDR,
+		PortRange:           d.PortRange,
+		StorageDriver:       d.StorageDriver,
+		LogIdentifier:       "carbon-node-" + d.NodeID,
+	}
 }
 
-// rootfulCapabilities is the explicit, non-empty capability bound a rootful
-// dockerd needs. It deliberately rejects the "User=nonroot + empty bound"
-// rendering from PR527, which cannot start a daemon.
-var rootfulCapabilities = []string{
-	"CAP_SYS_ADMIN", "CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_SYS_RESOURCE",
-	"CAP_SYS_CHROOT", "CAP_DAC_OVERRIDE", "CAP_SETUID", "CAP_SETGID",
-	"CAP_AUDIT_WRITE", "CAP_MKNOD", "CAP_CHOWN", "CAP_FOWNER",
-	"CAP_LINUX_IMMUTABLE",
+// substituteLauncher applies a fixture-only executable override. It changes
+// only the ExecStart binary, never a daemon option, so the canonical config
+// and the one-source-of-options rule stay untouched.
+func substituteLauncher(unit string, spec DaemonSpec) string {
+	if spec.Mode == ModeRootless && spec.RootlessLauncher != "" {
+		return strings.Replace(unit, "/usr/bin/dockerd-rootless.sh --config-file=", spec.RootlessLauncher+" --config-file=", 1)
+	}
+	if spec.Mode == ModeRootful && spec.DaemonBinary != "" {
+		return strings.Replace(unit, "/usr/bin/dockerd --config-file=", spec.DaemonBinary+" --config-file=", 1)
+	}
+	return unit
+}
+
+func installHint(mode DaemonMode, nodeID string) string {
+	if mode == ModeRootless {
+		return fmt.Sprintf("operator-reviewed, not executed: systemctl --user daemon-reload && systemctl --user enable --now carbon-node-%s.service", nodeID)
+	}
+	return fmt.Sprintf("operator-reviewed, not executed: install the rendered unit, then systemctl daemon-reload && systemctl enable --now carbon-node-%s-rootful.service", nodeID)
+}
+
+// Render builds config and unit from the shared canonical source. It fails
+// closed if spec validation, native validation or option parity fails.
+func (CanonicalRenderer) Render(spec DaemonSpec) (DaemonRender, error) {
+	if err := spec.validate(); err != nil {
+		return DaemonRender{}, err
+	}
+	manifest, err := spec.toNative().BuildManifest()
+	if err != nil {
+		return DaemonRender{}, fmt.Errorf("%w: canonical daemon renderer: %v", ErrInvalidInput, err)
+	}
+	for _, c := range native.CheckOptionParity(manifest.ConfigJSON, manifest.Unit) {
+		if !c.Passed {
+			return DaemonRender{}, fmt.Errorf("%w: canonical option parity %s", ErrIntegrity, c.Code)
+		}
+	}
+	return DaemonRender{
+		Mode:        string(spec.Mode),
+		Unit:        substituteLauncher(manifest.Unit, spec),
+		Config:      manifest.ConfigJSON,
+		InstallHint: installHint(spec.Mode, spec.NodeID),
+	}, nil
 }
 
 // sharedDaemonPaths are never allowed as private runtime/state paths. The list
@@ -203,53 +252,6 @@ func (d DaemonSpec) validate() error {
 		}
 	}
 	return nil
-}
-
-// options is the single source of daemon options. Adding an option here adds
-// it to config.json exactly once; the unit never repeats any of these keys.
-func (d DaemonSpec) options() []daemonOption {
-	return []daemonOption{
-		{"hosts", []string{"unix://" + d.SocketPath}},
-		{"data-root", d.DataRoot},
-		{"exec-root", d.ExecRoot},
-		{"containerd-namespace", d.ContainerdNamespace},
-		{"bridge", "none"},
-		{"bip", d.BridgeCIDR},
-		{"storage-driver", d.StorageDriver},
-		{"no-new-privileges", true},
-		{"live-restore", true},
-		{"userland-proxy", false},
-		{"log-driver", "journald"},
-		{"log-opts", map[string]string{"tag": "carbon-node-" + d.NodeID}},
-		{"iptables", true},
-		{"ip6tables", false},
-		{"features", map[string]bool{"containerd-snapshotter": false}},
-	}
-}
-
-func renderConfigFromOptions(opts []daemonOption) (string, error) {
-	var b strings.Builder
-	b.WriteString("{\n")
-	for i, o := range opts {
-		v, err := json.Marshal(o.value)
-		if err != nil {
-			return "", err
-		}
-		k, err := json.Marshal(o.key)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString("  ")
-		b.Write(k)
-		b.WriteString(": ")
-		b.Write(v)
-		if i < len(opts)-1 {
-			b.WriteByte(',')
-		}
-		b.WriteByte('\n')
-	}
-	b.WriteString("}\n")
-	return b.String(), nil
 }
 
 // ValidateDaemonPaths is the filesystem-aware companion to the pure spec
@@ -377,86 +379,4 @@ func checkPathComponent(root, path, kind string) error {
 		}
 	}
 	return nil
-}
-
-type localDaemonRenderer struct{}
-
-func (localDaemonRenderer) Render(spec DaemonSpec) (DaemonRender, error) {
-	if err := spec.validate(); err != nil {
-		return DaemonRender{}, err
-	}
-	config, err := renderConfigFromOptions(spec.options())
-	if err != nil {
-		return DaemonRender{}, err
-	}
-	out := DaemonRender{Mode: string(spec.Mode), Config: config}
-	syslog := "carbon-node-" + spec.NodeID
-	launcher := spec.DaemonBinary
-	if launcher == "" {
-		launcher = "/usr/bin/dockerd"
-	}
-	rootlessLauncher := spec.RootlessLauncher
-	if rootlessLauncher == "" {
-		rootlessLauncher = "/usr/bin/dockerd-rootless.sh"
-	}
-	switch spec.Mode {
-	case ModeRootless:
-		// Per-user systemd service: no User=, user target, rootless launcher,
-		// socket under XDG_RUNTIME_DIR. This replaces the PR527 system unit.
-		out.Unit = fmt.Sprintf(`[Unit]
-Description=Carbon Panel managed node daemon (rootless per-user service)
-After=network-online.target
-
-[Service]
-Type=notify
-Environment=XDG_RUNTIME_DIR=/run/user/%d
-ExecStart=%s --config-file=%s
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-RestrictSUIDSGID=yes
-Delegate=cpu cpuset io memory pids
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=%s
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-`, spec.RuntimeUID, rootlessLauncher, spec.ConfigPath, syslog)
-		out.InstallHint = fmt.Sprintf("operator-reviewed, not executed: systemctl --user daemon-reload && systemctl --user enable --now carbon-node-%s.service", spec.NodeID)
-	case ModeRootful:
-		// Explicit root service with a non-empty capability bound. PR527
-		// rendered User=nonroot with CapabilityBoundingSet= (empty), which
-		// cannot run dockerd; this is the compatible explicit-root form.
-		caps := strings.Join(rootfulCapabilities, " ")
-		out.Unit = fmt.Sprintf(`[Unit]
-Description=Carbon Panel managed node daemon (rootful, explicit capabilities)
-After=network-online.target
-
-[Service]
-Type=notify
-User=root
-Group=root
-ExecStart=%s --config-file=%s
-NoNewPrivileges=yes
-CapabilityBoundingSet=%s
-AmbientCapabilities=%s
-SecureBits=keep-caps
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-Delegate=cpu cpuset io memory pids
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=%s
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-`, launcher, spec.ConfigPath, caps, caps, syslog)
-		out.InstallHint = fmt.Sprintf("operator-reviewed, not executed: install the rendered unit, then systemctl daemon-reload && systemctl enable --now carbon-node-%s-rootful.service", spec.NodeID)
-	}
-	return out, nil
 }

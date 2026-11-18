@@ -161,8 +161,10 @@ note "scenario 2: rootful unit start + restart"
 ROOTFUL_SOCKET="$FIXTURE_ROOT/run/docker.sock"
 write_spec rootful "$ROOTFUL_SOCKET" "$UID_NUM" "$FIXTURE_DAEMON"
 ROOTFUL_RENDER="$(render rootful)"
-echo "$ROOTFUL_RENDER" | grep -q 'User=root' && pass "rootful render: explicit root" || fail "rootful root" "missing User=root"
-echo "$ROOTFUL_RENDER" | grep -q 'CapabilityBoundingSet=CAP_SYS_ADMIN' && pass "rootful render: capability bound" || fail "rootful caps" "empty bound"
+# The canonical rootful unit runs as root by default (no User= override) and
+# carries an ordered, non-empty capability bound that includes CAP_SYS_ADMIN.
+! echo "$ROOTFUL_RENDER" | grep -q '^User=' && pass "rootful render: explicit root (no User= override)" || fail "rootful root" "unexpected User= override"
+echo "$ROOTFUL_RENDER" | grep -q 'CapabilityBoundingSet=.*CAP_SYS_ADMIN' && pass "rootful render: capability bound" || fail "rootful caps" "empty bound"
 export CARBON_FIXTURE_STATE="$OWNED_RUN/state-rootful/heartbeat.log"
 mkdir -p "$(dirname "$CARBON_FIXTURE_STATE")"
 # Install the RENDERED rootful unit into the runtime unit directory (tmpfs),

@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/athNdev/carbon-panel/internal/noderuntime/native"
 )
 
 func rootlessDaemonSpec() DaemonSpec {
@@ -57,8 +59,16 @@ func TestDaemonOptionsSingleSource(t *testing.T) {
 			if err := json.Unmarshal([]byte(rendered.Config), &cfg); err != nil {
 				t.Fatalf("config is not valid JSON: %v", err)
 			}
+			// The canonical source emits bip only. A "bridge": "none" plus
+			// "bip" combination is invalid dockerd config and must never appear.
+			if _, ok := cfg["bridge"]; ok {
+				t.Fatal("canonical config still contains the invalid bridge key")
+			}
+			if strings.Contains(rendered.Config, `"bridge"`) {
+				t.Fatal("canonical config still contains a bridge key")
+			}
 			wantKeys := []string{
-				"hosts", "data-root", "exec-root", "containerd-namespace", "bridge",
+				"hosts", "data-root", "exec-root", "containerd-namespace",
 				"bip", "storage-driver", "no-new-privileges", "live-restore",
 				"userland-proxy", "log-driver", "log-opts", "iptables",
 				"ip6tables", "features",
@@ -70,6 +80,11 @@ func TestDaemonOptionsSingleSource(t *testing.T) {
 				}
 				if _, ok := cfg[key]; !ok {
 					t.Fatalf("config is missing key %q", key)
+				}
+			}
+			for _, c := range native.CheckOptionParity(rendered.Config, rendered.Unit) {
+				if !c.Passed {
+					t.Fatalf("canonical option parity failed: %s", c.Code)
 				}
 			}
 			// Every option lives ONLY in config.json. The unit carries no
@@ -108,7 +123,7 @@ func TestDaemonRootlessPerUserLauncher(t *testing.T) {
 	}
 	unit := rendered.Unit
 	for _, want := range []string{
-		"rootless per-user service",
+		"rootless, per-user",
 		"WantedBy=default.target",
 		"Environment=XDG_RUNTIME_DIR=/run/user/1000",
 		"ExecStart=/usr/bin/dockerd-rootless.sh --config-file=" + spec.ConfigPath,
@@ -139,9 +154,14 @@ func TestDaemonRootfulExplicitCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit := rendered.Unit
-	for _, want := range []string{"User=root", "Group=root", "CapabilityBoundingSet=CAP_", "AmbientCapabilities=CAP_"} {
+	for _, want := range []string{"CapabilityBoundingSet=CAP_", "AmbientCapabilities=CAP_", "WantedBy=multi-user.target"} {
 		if !strings.Contains(unit, want) {
 			t.Fatalf("rootful unit missing %q", want)
+		}
+	}
+	for _, line := range strings.Split(unit, "\n") {
+		if strings.HasPrefix(line, "User=") {
+			t.Fatalf("explicit rootful unit must not override User=: %q", line)
 		}
 	}
 	for _, cap := range []string{"CAP_SYS_ADMIN", "CAP_NET_ADMIN", "CAP_NET_RAW", "CAP_SYS_RESOURCE"} {

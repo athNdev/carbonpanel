@@ -44,8 +44,9 @@ It is also the supported fallback wherever an image format is unqualified.
   options are defined once in `daemon.json`, the unit carries only
   `--config-file` (no duplicated flags), rootless uses a per-user launcher and
   rootful an explicit root service with a non-empty capability bound. The
-  native-daemon lane owns the canonical renderer; `DaemonRenderer`/
-  `SetDaemonRenderer` is the seam to consume it without changing callers.
+  canonical source is `internal/noderuntime/native`; the CLI wires it with
+  `SetDaemonRenderer(CanonicalRenderer{})` and the installer declares no dockerd
+  option locally (no invalid `bridge` + `bip` combination).
 - Offline Go and Python fixtures prove refusal, state transitions and data
   preservation only. No live host import/boot, hypervisor/LXC or production
   enrollment success is claimed.
