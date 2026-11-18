@@ -89,14 +89,14 @@
       .footnote {
         margin: 25px 0 0;
         color: #b8b7b0;
-        font-size: 15px;
+        font-size: 21px;
       }
       .world {
         position: absolute;
-        width: 1080px;
+        width: 1480px;
         aspect-ratio: 3 / 2;
-        right: -192px;
-        top: -108px;
+        right: -230px;
+        top: -262px;
         z-index: -1;
       }
       .world img {
@@ -120,14 +120,17 @@
         );
         opacity: 0.94;
       }
-      .cross {
+      .veil {
         position: absolute;
-        left: 596px;
-        top: 168px;
-        color: #85837b;
-        font:
-          14px "IBM Plex Mono",
-          monospace;
+        inset: 0;
+        z-index: -1;
+        background: linear-gradient(
+          90deg,
+          #141414 8%,
+          #141414f5 33%,
+          #141414a8 44%,
+          transparent 66%
+        );
       }
     </style>
   </head>
@@ -147,11 +150,11 @@
         <h1>Your worlds.<br /><span>Yours to run.</span></h1>
         <p class="footnote">Build a world worth keeping.</p>
       </div>
-      <span class="cross" aria-hidden="true">+</span>
       <div class="world" aria-hidden="true">
         <img src="../../landing/assets/graphite-world.webp" alt="" />
         <div class="entrance"></div>
       </div>
+      <div class="veil" aria-hidden="true"></div>
     </main>
   </body>
 </html>
