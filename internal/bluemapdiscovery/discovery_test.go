@@ -16,6 +16,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 )
 
 // These are owned read-only config fixtures behind a confined node accessor.
@@ -155,6 +156,69 @@ func TestRendererBaseURLUsesInspectedIPFixture(t *testing.T) {
 	}
 }
 
+// Exact shipped legacy tag is adoptable with full provenance; a lookalike is
+// not. Adoption never reconfigures or mutates the existing module.
+func TestLegacyBlueMapAdoptionProvenanceFixture(t *testing.T) {
+	base := func() *docker.ModuleRuntimeIdentity {
+		return &docker.ModuleRuntimeIdentity{
+			ModuleID: "mod-blue-1", ServerID: "srv-blue", NodeID: "default",
+			TemplateID: "builtin-bluemap", Image: bluemapLegacyImageTag,
+			State: "running", OnOwnedNetwork: true, RendererIP: "172.20.0.5",
+			ContainerPorts: []int{8100},
+			Mounts: []docker.ModuleRuntimeMount{{Type: "bind", Source: `/srv/data/srv-blue/actual_world`, Target: "/app/world", ReadOnly: true}},
+		}
+	}
+	module := &storage.Module{ID: "mod-blue-1", ServerID: "srv-blue", NodeID: "default", TemplateID: "builtin-bluemap"}
+	if !identityMatchesRuntime(module, "srv-blue", "default", base()) {
+		t.Fatal("exact shipped legacy :latest image must be adoptable")
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*docker.ModuleRuntimeIdentity)
+	}{
+		{"custom lookalike", func(i *docker.ModuleRuntimeIdentity) { i.Image = "evil/bluemap:latest" }},
+		{"wrong module identity", func(i *docker.ModuleRuntimeIdentity) { i.ModuleID = "mod-other" }},
+		{"privileged", func(i *docker.ModuleRuntimeIdentity) { i.Privileged = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i := base()
+			tc.mutate(i)
+			if identityMatchesRuntime(module, "srv-blue", "default", i) {
+				t.Fatalf("%s must be refused", tc.name)
+			}
+		})
+	}
+
+	full := &worldview.InstalledRenderer{
+		LegacyTag: true, IdentityVerified: true, NetworkVerified: true, MountVerified: true,
+		ReadOnlyWorldMount: true, ModuleID: "mod-blue-1", MapID: "actual_world",
+		WorldName: "actual_world", WorldMatchesServer: true, AcceptDownload: true,
+		Rendered: true, Lifecycle: worldview.ModuleRunning,
+	}
+	if !legacyProvenanceOK(full, "mod-blue-1") {
+		t.Fatal("full provenance must allow legacy adoption")
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*worldview.InstalledRenderer)
+	}{
+		{"wrong network", func(f *worldview.InstalledRenderer) { f.NetworkVerified = false }},
+		{"writable world", func(f *worldview.InstalledRenderer) { f.ReadOnlyWorldMount = false }},
+		{"wrong module", func(f *worldview.InstalledRenderer) { f.ModuleID = "other" }},
+		{"no scoped map", func(f *worldview.InstalledRenderer) { f.MapID = "" }},
+		{"world mismatch", func(f *worldview.InstalledRenderer) { f.WorldMatchesServer = false }},
+		{"no consent", func(f *worldview.InstalledRenderer) { f.AcceptDownload = false }},
+	} {
+		t.Run("provenance/"+tc.name, func(t *testing.T) {
+			f := *full
+			tc.mutate(&f)
+			if legacyProvenanceOK(&f, "mod-blue-1") {
+				t.Fatalf("legacy adoption must be refused for %s", tc.name)
+			}
+		})
+	}
+}
+
 // Managed config is staged, committed atomically, idempotent on retry and
 // rolled back completely on failure. Pre-existing operator config is preserved.
 func TestManagedConfigStagingLifecycleFixture(t *testing.T) {
@@ -227,7 +291,10 @@ func TestRuntimeGatesFixture(t *testing.T) {
 		{"other server", func(i *docker.ModuleRuntimeIdentity) { i.ServerID = "srv-other" }},
 		{"other node", func(i *docker.ModuleRuntimeIdentity) { i.NodeID = "node-other" }},
 		{"other template", func(i *docker.ModuleRuntimeIdentity) { i.TemplateID = "builtin-geyser" }},
-		{"unpinned image", func(i *docker.ModuleRuntimeIdentity) { i.Image = "ghcr.io/bluemap-minecraft/bluemap:latest" }},
+		// New installs pin v5.29, but the exact official legacy :latest image
+		// is accepted for read-only ADOPTION with full provenance.
+		{"custom lookalike image", func(i *docker.ModuleRuntimeIdentity) { i.Image = "myorg/bluemap:latest" }},
+		{"different official tag", func(i *docker.ModuleRuntimeIdentity) { i.Image = "ghcr.io/bluemap-minecraft/bluemap:v5.20" }},
 		{"privileged", func(i *docker.ModuleRuntimeIdentity) { i.Privileged = true }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -156,7 +156,7 @@ func TestBuiltinBlueMapConcurrentInstallIsSingleton(t *testing.T) {
 		Name: "BlueMap", ServerId: "srv-bluemap", TemplateId: blueMapTemplateID,
 		Metadata: map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true", "bluemap_consent_by": "spoofed"},
 	}
-	handled, resp, prepErr, finalize := svc.prepareBuiltinBlueMap(spoof, spoofReq,
+	handled, resp, finalize, prepErr := svc.prepareBuiltinBlueMap(spoof, spoofReq,
 		&storage.Server{ID: "srv-bluemap", NodeID: "default"}, tpl)
 	if finalize != nil {
 		defer func() { _ = finalize(false, "") }()
@@ -278,7 +278,7 @@ func TestBuiltinBlueMapManagedActionIsolatedFromGenericCreate(t *testing.T) {
 		Name: "BlueMap", ServerId: "srv-parity", TemplateId: blueMapTemplateID,
 		Metadata: map[string]string{blueMapManagedSignalKey: "true"},
 	}
-	handled, _, err, finalize := svc.prepareBuiltinBlueMap(ctx, managedNoConsent,
+	handled, _, finalize, err := svc.prepareBuiltinBlueMap(ctx, managedNoConsent,
 		&storage.Server{ID: "srv-parity", NodeID: "default"}, nil)
 	if finalize != nil {
 		defer func() { _ = finalize(false, "") }()
@@ -376,7 +376,7 @@ func TestBuiltinBlueMapRefusalsHaveZeroConfigSideEffects(t *testing.T) {
 			svc := &ModuleService{
 				store: store, enforcer: tc.authorize, storageResolver: nodestorage.NewResolver(nil),
 			}
-			_, _, err, finalize := svc.prepareBuiltinBlueMap(ctx, &v1.CreateModuleRequest{
+			_, _, finalize, err := svc.prepareBuiltinBlueMap(ctx, &v1.CreateModuleRequest{
 				Name: "BlueMap", ServerId: "srv-refusal", TemplateId: blueMapTemplateID,
 				StartImmediately: tc.start,
 				Metadata:         map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"},
@@ -462,7 +462,7 @@ func TestBuiltinBlueMapBackendEligibilityFixture(t *testing.T) {
 			if err := store.SaveServerConfig(ctx, &storage.ServerConfig{ID: id, ServerID: id, Level: strPtrFixture(tc.level)}); err != nil {
 				t.Fatal(err)
 			}
-			handled, _, err, finalize := svc.prepareBuiltinBlueMap(ctx, &v1.CreateModuleRequest{
+			handled, _, finalize, err := svc.prepareBuiltinBlueMap(ctx, &v1.CreateModuleRequest{
 				Name: "BlueMap", ServerId: id, TemplateId: blueMapTemplateID, Metadata: tc.metadata,
 			}, &storage.Server{ID: id, NodeID: tc.nodeID}, tc.template)
 			if finalize != nil {

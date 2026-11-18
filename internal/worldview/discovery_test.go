@@ -216,6 +216,8 @@ func TestDiscoveryHonestStates(t *testing.T) {
 		{"world mismatch", func(f *InstalledRenderer) { f.WorldMatchesServer = false }, v1.RendererState_RENDERER_STATE_ABSENT, "actual world"},
 		{"not rendered", func(f *InstalledRenderer) { f.Rendered = false }, v1.RendererState_RENDERER_STATE_RENDERING, "first render"},
 		{"map not served", func(f *InstalledRenderer) { f.MapID = "missing" }, v1.RendererState_RENDERER_STATE_ABSENT, "does not serve a configured map"},
+		{"legacy verified adoption", func(f *InstalledRenderer) { f.LegacyTag = true; f.ProvenanceVerified = true }, v1.RendererState_RENDERER_STATE_READY, "answered the configured private health probe"},
+		{"legacy unverified", func(f *InstalledRenderer) { f.LegacyTag = true }, v1.RendererState_RENDERER_STATE_ERROR, "provenance could not be established"},
 		{"ready", func(*InstalledRenderer) {}, v1.RendererState_RENDERER_STATE_READY, "answered the configured private health probe"},
 	}
 	for _, tc := range cases {

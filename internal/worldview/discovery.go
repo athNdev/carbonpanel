@@ -51,6 +51,12 @@ type InstalledRenderer struct {
 	NetworkVerified  bool // effective membership on the owned Docker network
 	MountVerified    bool // effective /app/world bind is the actual level folder and read-only
 
+	// LegacyTag marks the previously shipped official :latest image. Such a
+	// module may be adopted read-only only with full runtime provenance; new
+	// installs are always pinned.
+	LegacyTag          bool
+	ProvenanceVerified bool
+
 	// BaseURL is the private renderer location on the owned node-local network,
 	// e.g. http://carbon-panel-module-<module-id>:8100. It is constructed from
 	// panel-owned module identity and the template-declared internal port, never

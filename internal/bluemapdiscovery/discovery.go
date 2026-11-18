@@ -33,8 +33,13 @@ import (
 )
 
 const (
+	// New managed installs ALWAYS pin a specific release.
 	bluemapImageTag = "ghcr.io/bluemap-minecraft/bluemap:v5.29"
-	bluemapWebPort  = 8100
+	// The previously shipped template used :latest. Existing modules with that
+	// exact official repository/tag may be ADOPTED, never reconfigured, but
+	// only with full runtime provenance (see legacyProvenanceOK).
+	bluemapLegacyImageTag = "ghcr.io/bluemap-minecraft/bluemap:latest"
+	bluemapWebPort        = 8100
 )
 
 // Store is the narrow persisted-data seam used by discovery. *storage.Store
@@ -172,6 +177,17 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 		facts.WorldMatchesServer = true
 	}
 	facts.Rendered = tilesExist(accessor, mapID)
+
+	// A legacy :latest module is adopted read-only ONLY with complete runtime
+	// provenance. Never accept a lookalike/custom image or an unverified mount.
+	if identity.Image == bluemapLegacyImageTag {
+		facts.LegacyTag = true
+		facts.ProvenanceVerified = legacyProvenanceOK(facts, chosen.ID)
+		if !facts.ProvenanceVerified {
+			// No HTTP: an unverified legacy container is not this server's renderer.
+			return facts, nil
+		}
+	}
 	facts.WebUp = webUp(ctx, facts.BaseURL)
 	return facts, nil
 }
@@ -212,12 +228,25 @@ func lifecycleFromState(state string) worldview.ModuleLifecycle {
 // identityMatchesRuntime binds panel state to the exact container: module,
 // server, node and template labels plus the pinned, unprivileged image.
 func identityMatchesRuntime(module *storage.Module, serverID, nodeID string, runtime *docker.ModuleRuntimeIdentity) bool {
-	return runtime.ModuleID == module.ID &&
+	imageOK := runtime.Image == bluemapImageTag || runtime.Image == bluemapLegacyImageTag
+	return imageOK &&
+		runtime.ModuleID == module.ID &&
 		runtime.ServerID == serverID &&
 		canonicalNode(runtime.NodeID) == nodeID &&
 		runtime.TemplateID == worldview.BuiltinBlueMapTemplateID &&
-		runtime.Image == bluemapImageTag &&
 		!runtime.Privileged
+}
+
+// legacyProvenanceOK is the strict gate for adopting the previously shipped
+// :latest official image. It requires exact identity, owned network, the real
+// read-only level bind, explicit consent and a scoped map/config for the actual
+// world. A customized or lookalike image, writable mount or missing map fails.
+func legacyProvenanceOK(facts *worldview.InstalledRenderer, expectedModuleID string) bool {
+	return facts != nil && facts.LegacyTag &&
+		facts.IdentityVerified && facts.NetworkVerified && facts.MountVerified &&
+		facts.ReadOnlyWorldMount && facts.ModuleID != "" && facts.ModuleID == expectedModuleID && facts.MapID != "" &&
+		facts.WorldName != "" && facts.WorldMatchesServer &&
+		facts.AcceptDownload && facts.Rendered && facts.Lifecycle == worldview.ModuleRunning
 }
 
 // mountMatches is the pure gate for the effective world bind: the node-side

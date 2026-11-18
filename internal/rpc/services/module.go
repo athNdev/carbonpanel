@@ -602,7 +602,7 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	// OSS-388: the built-in renderer is a server-side singleton. Adoption and
 	// consent/eligibility are decided here, not in the browser. The lock is
 	// held by the winner until the module row is persisted below.
-	handled, adopted, prepErr, finalizeBlueMap := s.prepareBuiltinBlueMap(ctx, msg, server, template)
+	handled, adopted, finalizeBlueMap, prepErr := s.prepareBuiltinBlueMap(ctx, msg, server, template)
 	if handled {
 		return adopted, prepErr
 	}

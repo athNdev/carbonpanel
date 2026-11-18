@@ -48,7 +48,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	msg *v1.CreateModuleRequest,
 	server *storage.Server,
 	template *storage.ModuleTemplate,
-) (handled bool, resp *connect.Response[v1.CreateModuleResponse], err error, finalize func(ok bool, moduleID string) error) {
+) (handled bool, resp *connect.Response[v1.CreateModuleResponse], finalize func(ok bool, moduleID string) error, err error) {
 	if msg == nil || msg.TemplateId != blueMapTemplateID || msg.ServerId == "" ||
 		!strings.EqualFold(strings.TrimSpace(msg.Metadata[blueMapManagedSignalKey]), "true") {
 		return false, nil, nil, nil
@@ -56,9 +56,9 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 
 	s.blueMapInstallMu.Lock()
 	noop := func(bool, string) error { return nil }
-	fail := func(err error) (bool, *connect.Response[v1.CreateModuleResponse], error, func(bool, string) error) {
+	fail := func(err error) (bool, *connect.Response[v1.CreateModuleResponse], func(bool, string) error, error) {
 		s.blueMapInstallMu.Unlock()
-		return true, nil, err, nil
+		return true, nil, nil, err
 	}
 
 	// Singleton per server: idempotent retry/concurrent tabs converge on the
@@ -71,7 +71,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		if module != nil && module.ServerID == msg.ServerId {
 			resp, convErr := s.blueMapResponse(ctx, module)
 			s.blueMapInstallMu.Unlock()
-			return true, resp, convErr, noop
+			return true, resp, noop, convErr
 		}
 	}
 
@@ -225,7 +225,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		})
 		return commitErr
 	}
-	return false, nil, nil, fin
+	return false, nil, fin, nil
 }
 
 func (s *ModuleService) blueMapResponse(ctx context.Context, module *storage.Module) (*connect.Response[v1.CreateModuleResponse], error) {

@@ -94,6 +94,10 @@ func (d *discoveredRenderer) Health(ctx context.Context) (*Health, error) {
 		return discoveredHealth(v1.RendererState_RENDERER_STATE_ABSENT, "detected",
 			"BlueMap world mount does not match this server's actual level folder or is not read-only; reconfigure the target world before viewing"), nil
 	}
+	if f.LegacyTag && !f.ProvenanceVerified {
+		return discoveredHealth(v1.RendererState_RENDERER_STATE_ERROR, "detected",
+			"an existing BlueMap module uses the legacy renderer tag but its identity, mount or world-map provenance could not be established; no config was changed"), nil
+	}
 
 	// A module whose private web endpoint did not answer is unreachable, not
 	// absent: it is installed on this exact server/node.
