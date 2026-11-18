@@ -40,6 +40,13 @@ type SleepController interface {
 	SetRestartPolicy(ctx context.Context, containerID string, policy container.RestartPolicy) error
 }
 
+// AdmissionGate serializes container starts on one node across lifecycle
+// entrypoints. The composition root supplies the same instance-owned gate used
+// by RPC and scheduler starts; a nil gate leaves the historical behaviour.
+type AdmissionGate interface {
+	Acquire(ctx context.Context, nodeID string) (release func(), err error)
+}
+
 // SleepCommander sends in-game console commands (RCON) for graceful shutdown.
 type SleepCommander interface {
 	SendCommand(ctx context.Context, serverID string, command string) (string, error)
@@ -74,6 +81,7 @@ type DeepSleepManager struct {
 	runner             *idleRunner
 	mu                 sync.Mutex
 	wakePreparer       WakePreparer
+	admissionGate      AdmissionGate
 }
 
 // NewDeepSleepManager creates a new DeepSleepManager. commander and refresher
@@ -151,6 +159,16 @@ func (m *DeepSleepManager) SetWakePreparer(preparer WakePreparer) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.wakePreparer = preparer
+}
+
+// SetAdmissionGate installs the shared in-process start gate. WakeServer holds
+// it from before the staged wake preparation through the container start and
+// running-status persistence, so a cold wake cannot admit against an active
+// total another start is about to change.
+func (m *DeepSleepManager) SetAdmissionGate(gate AdmissionGate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.admissionGate = gate
 }
 
 func (m *DeepSleepManager) tryBeginTransition(serverID, op string) bool {
@@ -474,8 +492,17 @@ func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) erro
 	}
 
 	m.mu.Lock()
+	gate := m.admissionGate
 	prepareWake := m.wakePreparer
 	m.mu.Unlock()
+	if gate != nil {
+		release, err := gate.Acquire(ctx, srv.NodeID)
+		if err != nil {
+			return fmt.Errorf("start admission refused for server %s: %w", serverID, err)
+		}
+		defer release()
+	}
+
 	if prepareWake != nil {
 		if err := prepareWake(ctx, srv); err != nil {
 			m.rollbackWake(ctx, serverID)

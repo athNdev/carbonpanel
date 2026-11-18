@@ -16,6 +16,8 @@ sources:
     resource: ../../docs/runbook-sleep-baseline.md
   - title: Deep sleep tier B
     resource: ../../docs/deep-sleep-tier-b.md
+  - title: In-process start admission gate
+    resource: ../../docs/adr/0014-in-process-admission.md
 ---
 
 # Use this when
@@ -34,6 +36,13 @@ A player knock must not start an intentionally stopped server. `WakeServer`
 starts only recorded deep sleep. AutoDeepSleep remaining enabled after an
 operator stop is not a wake license. Freeze wake refuses a non-paused status.
 The reconciler does not recreate a stopped container as a substitute wake.
+
+`WakeServer` holds the shared in-process node admission gate from before the
+wake preparer through `StartContainer` and running-status persistence, so a cold
+wake cannot overcommit a node against another start (ADR 0014). The preparer
+(`PrepareDeepSleepWake`) runs inside that gate and does not acquire it again.
+The wake runs on a bounded background budget; the gate is released inside the
+single `WakeServer` call, never held by an unbounded detached owner.
 
 # Known gap
 

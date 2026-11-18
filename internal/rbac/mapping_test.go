@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package rbac
 
 import (
@@ -25,6 +24,7 @@ var procedureServiceNames = []string{
 	carbonpanelv1connect.FileServiceName,
 	carbonpanelv1connect.MinecraftServiceName,
 	carbonpanelv1connect.ModServiceName,
+	carbonpanelv1connect.ModBrowseServiceName,
 	carbonpanelv1connect.ModpackServiceName,
 	carbonpanelv1connect.ModuleServiceName,
 	carbonpanelv1connect.NodeServiceName,

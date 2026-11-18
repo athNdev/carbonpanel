@@ -95,11 +95,19 @@ type Scheduler struct {
 	// recreateModule replaces a module container after a staged spec change.
 	// Nil means that part of a batch cannot be published.
 	recreateModule func(ctx context.Context, moduleID string) error
+
+	// admission is the shared in-process start gate, injected at composition
+	// root so scheduled and RPC starts contend on the same node key. Nil fails
+	// closed at the acquire helper.
+	admission *serverruntime.AdmissionCoordinator
 }
 
 // Config holds scheduler configuration
 type Config struct {
 	CheckInterval time.Duration // How often to check for due tasks
+
+	// Admission is the shared in-process start gate. Nil fails closed.
+	Admission *serverruntime.AdmissionCoordinator
 	// StorageResolver is the instance-owned node storage resolver shared with
 	// the snapshot engine and backup archive operations.
 	StorageResolver *nodestorage.Resolver
@@ -117,6 +125,13 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 	cfg := DefaultConfig()
 	if len(config) > 0 {
 		cfg = config[0]
+	}
+
+	admission := cfg.Admission
+	if admission == nil {
+		// A scheduler always owns a gate; the composition root replaces it with
+		// the one shared with RPC starts.
+		admission = serverruntime.NewAdmissionCoordinator()
 	}
 
 	var snapEngine *snapshot.Engine
@@ -142,8 +157,17 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 		runningTasks:      make(map[string]bool),
 		cronParser:        cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
 		snapshotEngine:    snapEngine,
+		admission:         admission,
 		storageResolver:   cfg.StorageResolver,
 	}
+}
+
+// SetAdmissionCoordinator supplies the shared in-process start gate after
+// construction. The composition root normally passes it through Config.
+func (s *Scheduler) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.admission = c
 }
 
 // SetSnapshotEngine configures custom snapshot engine
@@ -844,6 +868,11 @@ func (s *Scheduler) executeRestartTask(ctx context.Context, server *storage.Serv
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server has no container")
 	}
+	release, err := s.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	if err := s.checkNodeMemoryCapacity(ctx, server); err != nil {
 		return "", err
 	}
@@ -904,6 +933,11 @@ func (s *Scheduler) executeStartTask(ctx context.Context, server *storage.Server
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server has no container")
 	}
+	release, err := s.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	if err := s.checkNodeMemoryCapacity(ctx, server); err != nil {
 		return "", err
 	}
@@ -948,6 +982,11 @@ func (s *Scheduler) StartServerForBoot(ctx context.Context, server *storage.Serv
 	if server.ContainerID == "" {
 		return fmt.Errorf("server has no container")
 	}
+	release, err := s.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := s.checkNodeMemoryCapacity(ctx, server); err != nil {
 		return err
 	}
@@ -983,6 +1022,21 @@ func (s *Scheduler) StartServerForBoot(ctx context.Context, server *storage.Serv
 		return fmt.Errorf("container started but server state could not be saved: %w", err)
 	}
 	return nil
+}
+
+// acquireNodeAdmission claims the shared per-node gate before a scheduler start
+// capacity check. The caller defers the release at function scope so the gate
+// covers container mutation and status persistence. Cancellation and refusal
+// are plain errors here; RPC callers map their own transport codes.
+func (s *Scheduler) acquireNodeAdmission(ctx context.Context, server *storage.Server) (func(), error) {
+	s.mu.RLock()
+	admission := s.admission
+	s.mu.RUnlock()
+	release, err := admission.Acquire(ctx, server.NodeID)
+	if err != nil {
+		return nil, fmt.Errorf("node %s start admission: %w", server.NodeID, err)
+	}
+	return release, nil
 }
 
 // checkNodeMemoryCapacity protects scheduler-owned starts and restarts (including
