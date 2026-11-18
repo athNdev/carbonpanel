@@ -130,28 +130,37 @@ bootstrap (challenge + one claim only), and enrolled node (per-node scopes and
 object ID). Unsupported TLS topologies are refused with
 `UNSUPPORTED_TLS_TOPOLOGY`; a client header alone is never trusted.
 
-## Verification and limits
+## Verification and qualification limits
+
+### What was actually proven
 
 Go fixtures cover the qualified rootless path, every refusal above, the rootful
-fallback, canonical option parity, mode-correct unit rendering and the full
-enrollment state machine (valid claim, mismatched key, `CSR_PRE`-as-proof,
-stale/replayed nonce, replay, revoked/generation, three-domain scope, topology
-support/refusal, digest-only storage, no secret in responses, atomic rollback
-and durable rotation across a snapshot restart).
+fallback, canonical option parity and mode-correct unit rendering. Enrollment is
+now owned by the shared `internal/noderuntime/enroll` boundary and consumed by
+this lane; its state-machine fixtures live there.
 
-A disposable Linux boot fixture additionally boots the **rendered daemon.json**
-in a pinned `docker:29.3.0-dind` container (no host install, no shared daemon
-change). It asserted: dockerd starts, the private socket exists, a trivial
-container runs, a game port is reachable both as a published port and on the
-private bridge, memory/pids limits apply, and the data root survives a daemon
-restart. Both rendered units pass `systemd-analyze verify`. The boot fixture
-used `json-file` logging only because the disposable container has no journald;
-all other options came from the canonical renderer. Exact output and honest
-limits are in the external audit file
+A disposable Linux boot fixture boots the **contributed daemon.json** in a
+pinned `docker:29.3.0-dind` container. Precisely: it is a **PRIVILEGED nested
+ROOTFUL** boot, with a `json-file` log-driver override because the disposable
+container has no journald. It asserted: dockerd starts, the private socket
+exists, a trivial container runs, a game port is reachable both as a published
+port and on the private bridge, memory/pids limits apply, and the data root
+survives a daemon restart. `systemd-analyze verify` was also run on both
+rendered units — this checks **syntax only**, not that they boot. Exact output
+is in the external audit file
 `security-runtime-plans/node-native-boot-evidence.md`.
+
+### What remains NOT verified (do not claim deployability)
+
+- The **shipped rootless per-user unit** (`dockerd-rootless.sh` under
+  `systemd --user`) has **not** been booted on a clean Linux systemd host. Only
+  its syntax was checked.
+- The **shipped rootful unit** (`dockerd --config-file=...` with the documented
+  capability set) has **not** been booted on a clean Linux systemd host. The
+  dind fixture booted the config directly in a privileged nested container, not
+  via that systemd unit.
+- No live-host install, real-gameplay, release or deployment evidence exists.
 
 All enrollment keys and secrets are synthetic/ephemeral and private files live
 in temp directories. No fixture changes a host, installs a service, writes a
-real credential, publishes an image or deploys anything. The boot fixture is
-disposable container evidence: it is **not** a live-host, production-install,
-real-gameplay or deployment claim.
+real credential, publishes an image or deploys anything.
