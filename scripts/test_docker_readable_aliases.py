@@ -4,6 +4,8 @@
 import io
 import json
 from pathlib import Path
+import re
+import shlex
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -197,6 +199,110 @@ class DockerReadableAliasTests(unittest.TestCase):
         self.assertNotIn("docker buildx build", source)
         self.assertNotIn("--push", source)
         self.assertNotIn("latest", source.split("jobs:")[0])  # no channel trigger
+
+
+    def workflow_commands(self, publish):
+        """Extract the actual python commands from each run: step.
+
+        A tiny deterministic evaluator handles the explicit PUBLISH_ALIASES
+        shell branch; shlex tokenizes the selected command exactly as a shell
+        would. No registry access occurs.
+        """
+        import yaml
+        source = (ROOT / ".github" / "workflows" / "docker-readable-aliases.yml").read_text(
+            encoding="utf-8")
+        document = yaml.safe_load(source)
+        result = {}
+        for step in document["jobs"]["add-aliases"]["steps"]:
+            block = step.get("run", "")
+            if not block.strip() or "python3 scripts/" not in block:
+                continue
+            selected = []
+            taking = True
+            if "if [" in block:
+                taking = False
+                for raw in block.splitlines():
+                    text = raw.strip()
+                    if text.startswith("if ["):
+                        taking = ('= "true"' in text and publish) or (
+                            '= "false"' in text and not publish)
+                    elif text == "else":
+                        taking = not taking
+                    elif text == "fi":
+                        taking = False
+                    elif taking and text.startswith("python3 "):
+                        selected.append(shlex.split(text.rstrip(" \\")))
+            else:
+                for raw in block.splitlines():
+                    text = raw.strip()
+                    if text.startswith("python3 "):
+                        selected.append(shlex.split(text.rstrip(" \\")))
+            result[step["name"]] = selected
+        return result, source
+
+    def test_workflow_validate_input_and_apply_dry_run_follow_the_gate(self):
+        source = (ROOT / ".github" / "workflows" / "docker-readable-aliases.yml").read_text(
+            encoding="utf-8")
+        # A plain scalar ending in backslash folds '\ ' into a literal escaped
+        # space and broke the real backfill run. Forbid it in every run: step.
+        self.assertNotRegex(source, r"(?m)^\s*run:\s+[^\n]*\\\s*$")
+        self.assertNotIn("&& '' || '--dry-run'", source)
+        self.assertIn("PUBLISH_ALIASES: ${{ steps.gate.outputs.publish }}", source)
+
+        for publish in (True, False):
+            commands, _ = self.workflow_commands(publish)
+            validate = commands["Validate the checked-in alias mapping"][0]
+            self.assertEqual(validate[:2], ["python3", "scripts/docker_readable_aliases.py"])
+            self.assertIn("--input", validate)
+            self.assertEqual(validate[validate.index("--input") + 1],
+                             "docs/docker-readable-aliases.json")
+            apply = commands[
+                "Add missing aliases by exact digest (dry run unless confirmed)"][0]
+            self.assertEqual(apply[:2], ["python3", "scripts/docker_readable_aliases.py"])
+            self.assertEqual(apply[2], "apply")
+            self.assertIn("--mapping", apply)
+            if publish:
+                self.assertNotIn("--dry-run", apply)
+            else:
+                self.assertIn("--dry-run", apply)
+
+        # Execute the exact rendered validate command as harmless evidence.
+        commands, _ = self.workflow_commands(True)
+        validate = commands["Validate the checked-in alias mapping"][0]
+        completed = subprocess.run(validate, cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn('"aliases": 19', completed.stdout)
+
+    def test_apply_verifies_each_target_digest_and_preserves_sha_and_channel_refs(self):
+        mapping = self.checked_in()
+        prefix = "atharvnaphade/carbonpanel:"
+        digests = {f"sha-{item['commit_id']}": item["digest"] for item in mapping["aliases"]}
+        alias_digests = {item["final_alias"]: item["digest"] for item in mapping["aliases"]}
+        sha_state = {prefix + tag: present(digest) for tag, digest in digests.items()}
+        channel_state = {prefix + tag: present("sha256:" + "9" * 64)
+                         for tag in aliases.CHANNEL_TAGS}
+        state = {**sha_state, **channel_state}
+        def observe(ref, strict=False):
+            return state.get(ref, ("absent", None))
+        def runner(*args, **kwargs):
+            target = args[args.index("--tag") + 1]
+            state[target] = present(alias_digests[target.rsplit(":", 1)[1]])
+            return subprocess.CompletedProcess(args, 0)
+        aliases.apply_aliases(mapping, observe, runner, True)
+        for item in mapping["aliases"]:
+            state_ref = prefix + item["final_alias"]
+            self.assertEqual(state[state_ref][0], "present")
+            self.assertEqual(state[state_ref][1]["digest"], item["digest"])
+            self.assertTrue(set(FULL_PLATFORMS) <= state[state_ref][1]["platforms"])
+        for ref, observation in {**sha_state, **channel_state}.items():
+            self.assertEqual(state[ref], observation)
+        # Conflict refuses with zero writes even after a successful dry run.
+        conflict_state = dict(state)
+        conflict_state[prefix + mapping["aliases"][0]["final_alias"]] = present(
+            "sha256:" + "e" * 64)
+        with self.assertRaisesRegex(ValueError, "refused"):
+            aliases.apply_aliases(mapping, lambda ref, strict=False: conflict_state.get(
+                ref, ("absent", None)), lambda *a, **k: self.fail("unexpected write"), True)
 
 
 if __name__ == "__main__":
