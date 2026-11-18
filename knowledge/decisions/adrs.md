@@ -32,6 +32,7 @@ sources:
 | [0013](../../docs/adr/0013-bounded-storage-streaming.md) | Bound storage frames and commit staged writes explicitly | [Remote storage transport](../architecture/remote-storage-transport.md), [Backup and restore](../operations/backup-restore.md) |
 | [0014](../../docs/adr/0014-in-process-admission.md) | Serialize same-node starts with an in-process gate, not a lease | [Server lifecycle policy](../architecture/server-lifecycle.md) |
 | [0016](../../docs/adr/0016-world-library-identity-and-binding.md) | Immutable world revisions and clone-on-bind, stop-based journaled bindings | [World Library](../architecture/world-library.md) |
+| [0033](../../docs/adr/0033-release-tag-and-publication-policy.md) | One explicit publication boundary and separate immutable version domains | [Release](../workflows/release.md) |
 
 # Rule
 
