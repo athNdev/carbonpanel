@@ -10,18 +10,51 @@ from scripts import node_vm_build as build
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Two lines from the real, GPG-signed upstream SHA256SUMS (evidence in
+# packaging/node-vm/provenance/RETRIEVAL-EVIDENCE.md). Public data, not a secret.
+PUBLISHED_SUMS = (
+    "04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94 "
+    "*ubuntu-24.04-server-cloudimg-amd64.img\n"
+    "50e24e1fb79e89116e939d90aa7738f7af48c442fa1bc2510131e0b39c50348e "
+    "*ubuntu-24.04-server-cloudimg-arm64.img\n"
+)
+
 
 class BuildFixtureTests(unittest.TestCase):
     def setUp(self):
         self.root, self.pkg, self.config, self.provenance, self.policy, self.upgrade = \
-            build.load_inputs(ROOT)
+            build.load_inputs(ROOT, "fixture")
 
     def test_inputs_load_and_pin_provenance(self):
         self.assertEqual(self.config["cloud_init"]["datasource"], "NoCloud")
         self.assertEqual(self.config["toolchain"]["qemu_img"], "8.2.0")
+        # Offline tests use the explicitly synthetic fixture profile.
+        self.assertEqual(self.provenance["profile"], "fixture")
+        self.assertTrue(self.provenance["synthetic"])
         self.assertEqual(self.provenance["images"][0]["digest_status"], "fixture-placeholder")
         self.assertFalse(self.policy["fork_allowed"])
         self.assertTrue(self.policy["contract_is_shared"])
+
+        # The real artifact profile is immutable, dated and signature-backed.
+        _, _, _, real, _, _ = build.load_inputs(ROOT, "artifact")
+        self.assertEqual(real["profile"], "artifact")
+        self.assertFalse(real["synthetic"])
+        for image in real["images"]:
+            self.assertEqual(image["digest_status"], "verified")
+            self.assertRegex(image["image_url"], r"/release-20261017/")
+            self.assertNotRegex(image["expected_sha256"], r"^(0|1|a|b|f)\1{63}$")
+            self.assertTrue(build.verify_artifact_provenance(real, image))
+            self.assertTrue(build.verify_image_checksum(image, PUBLISHED_SUMS))
+            with self.assertRaises(build.BuildError):
+                build.verify_image_checksum(image, "0" * 64 + " *wrong.img\n")
+        # Artifact mode emits a real-pin plan, but never builds a QCOW2.
+        artifact_plan = build.offline_build(ROOT, None, profile="artifact")["plan"]
+        self.assertEqual(artifact_plan["provenance_profile"], "artifact")
+        self.assertIn("release-20261017", artifact_plan["base_image"]["image_url"])
+        self.assertTrue(artifact_plan["no_qcow2_built"])
+        # Fixture digests must be refused by artifact verification.
+        with self.assertRaises(build.BuildError):
+            build.verify_artifact_provenance(real, self.provenance["images"][0])
 
     def test_base_image_selection(self):
         image = build.base_image(self.provenance, "ubuntu-24.04-amd64")
@@ -87,6 +120,7 @@ class BuildFixtureTests(unittest.TestCase):
             self.assertEqual(manifest["sha256"], result["manifest"]["sha256"])
             self.assertEqual(len(manifest["files"]), 3)
             self.assertTrue(plan["fixture_only"])
+            self.assertEqual(plan["provenance_profile"], "fixture")
             self.assertEqual(plan["base_image"]["digest_status"], "fixture-placeholder")
             self.assertTrue(plan["commands_not_executed"])
             self.assertNotIn("secret", json.dumps(plan).lower())

@@ -25,13 +25,21 @@ offline fixtures, not a published image.
    their limits are documented in `packaging/node-vm/docs/isolation.md`; no
    proven-isolation claim is made.
 
-2. **Pinned, verified provenance.** The base image is pinned by distro, version,
-   arch, URL and an upstream GPG signing-key fingerprint in
-   `packaging/node-vm/provenance/base-images.json`. Checked-in digests are
-   `fixture-placeholder`; the guarded apply boundary must fetch the upstream
-   GPG-signed checksum file, require `digest_status: verified` and refuse any
-   fallback to another image or a host image. Supported platform/version
-   targets are recorded in `packaging/node-vm/MATRIX.md`.
+2. **Pinned, verified provenance.** The base image is pinned to an **immutable
+   dated** upstream release entry, never a moving path: Ubuntu 24.04 LTS
+   `release-20261017` for amd64 and arm64. `packaging/node-vm/provenance/base-images.json`
+   records the exact image URLs, real non-placeholder SHA256 values from the
+   upstream GPG-signed `SHA256SUMS`, the signing key fingerprint
+   `D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81`, and direct-retrieval evidence in
+   `provenance/RETRIEVAL-EVIDENCE.md`. Synthetic placeholder digests are confined
+   to `provenance/base-images.fixture.json` and are valid only in explicit
+   `--profile fixture` offline test mode. Artifact mode calls
+   `verify_artifact_provenance()` and **fails closed** on placeholder/synthetic
+   digests, moving `/release/` or `/current/` URLs, or missing signature
+   evidence. A real build must still download the image and recompute its
+   SHA256 against the signed checksum before the guarded apply boundary acts;
+   no fallback to another image or a host image is permitted. Supported
+   platform/version targets are recorded in `packaging/node-vm/MATRIX.md`.
 
 3. **Deterministic content, honest byte boundary.** Cloud-init seed files,
    checksum manifest, CycloneDX 1.5 SBOM and build plan are produced from pinned
@@ -48,6 +56,19 @@ offline fixtures, not a published image.
    `ClaimEnrollment`; the private key and secret stay in root-only VM-local
    files and never enter the image, seed, SBOM, manifest or build plan. This
    lane defines no RPC and forks no contract.
+
+   SIG_CLAIM follows the **shared** ADR0019/OSS-385 `ClaimContextRaw` encoding
+   (`internal/noderuntime/enroll`, PR532 head `fc998875`): NUL-delimited raw
+   bytes over the server-stored nonce, enrollment `expires_at` in RFC3339Nano,
+   comma-joined proto capability names and the channel context, with no
+   trailing separator, no client nonce and no canonical-JSON step. Signing is
+   Ed25519-only. A golden produced from the shared package is checked in at
+   `packaging/node-vm/qualification/fixtures/claim-context-shared.json`; VM
+   fixtures assert byte-for-byte equality and that a canonical-JSON-signed
+   claim is refused. Guest Python cannot import a Go package, so the VM
+   generator reproduces the single encoder for fixtures only; any production
+   mount must delegate the claim to the shared package rather than add a
+   second encoder.
 
 5. **Data-preserving staged lifecycle.** Upgrades write a checksummed undo
    manifest before promotion and recheck health before completing. Rollback
@@ -73,9 +94,14 @@ offline fixtures, not a published image.
 - `packaging/node-vm/` is a new top-level `packaging` area governed by the
   `node-vm-artifact` architecture concept; build logic stays in
   `scripts/node_vm_*.py` following the existing script/test convention.
-- All fixture inputs are synthetic; no real key, token, endpoint, host path or
-  world data is checked in. `digest_status: fixture-placeholder` is a hard stop
-  for apply, not a permission.
+- Runtime fixture inputs are synthetic; no real key, token, endpoint, host path
+  or world data is checked in. `digest_status: fixture-placeholder` is a hard
+  stop for artifact mode, not a permission. The **base-image digests and URLs
+  are real** (direct official-source retrieval, signature-verified); this is the
+  one non-fixture input and is reported with its own evidence file.
+- No real QCOW2 has been built. The verified hash is the upstream published
+  value; recomputing it over downloaded image bytes remains a future real-build
+  step, as do live VM, host, enrollment and deployment qualification.
 - The shared node-control contract, per-node auth scopes, auth middleware and
   daemon lifecycle are unchanged; this lane only consumes the contract.
 - ADR number 0035 is used under the orchestrator's central allocation. 0014 is
@@ -92,17 +118,37 @@ Suggested index row (for the orchestrator-owned index):
 | [0035](../../docs/adr/0035-node-vm-artifact.md) | Reproducible, secret-free QCOW2/cloud-init node VM artifact with pinned provenance and staged rollback | [Node VM artifact](../architecture/node-vm-artifact.md) |
 ```
 
-## Verification (offline evidence in this commit)
+## Verification (real provenance retrieval + offline evidence)
 
+- **Base-image pin (real, not fixture):** direct HTTPS GET/HEAD to
+  `cloud-images.ubuntu.com` for the immutable `release-20261017` directory;
+  SHA256SUMS retrieved (HTTP 200, 7843 bytes) and its GPG signature verified
+  with gpg 2.4.9 against the official `UEC Image Automatic Signing Key`
+  (fingerprint `D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81`, fetched from the
+  Ubuntu keyserver by the signature's own issuer fingerprint). Both image URLs
+  returned HTTP 200 on HEAD. Exact evidence and limits:
+  `packaging/node-vm/provenance/RETRIEVAL-EVIDENCE.md`.
+- `python scripts/node_vm_build.py --profile artifact --check`: accepted only
+  with the real verified pins; `verify_artifact_provenance()` refuses fixture
+  digests and moving URLs. Fixture mode is used by the offline tests below.
+
+- **Shared claim context (real conformance):** a golden context was generated
+  by running `internal/noderuntime/enroll.ClaimContextRaw` from PR532 head
+  `fc998875` in an owned temporary worktree; the VM first boot reproduces those
+  exact bytes and refuses the previous canonical-JSON form. Golden inputs and
+  bytes are in `packaging/node-vm/qualification/fixtures/claim-context-shared.json`.
+  No shared writer worktree was edited.
 - `python -m py_compile` on all `scripts/node_vm_*.py`, `scripts/test_node_vm_*.py`
   and the guest first-boot module: clean.
-- `python -m unittest discover -s scripts -p 'test_node_vm_*.py'`: 27 tests pass
+- `python -m unittest discover -s scripts -p 'test_node_vm_*.py'`: 30 tests pass
   (identity uniqueness, digest-only bundle, baked-secret refusal, deterministic
-  seed/manifest, CycloneDX SBOM, signing plan, staged upgrade/rollback and
-  copy-only volume safety).
-- `python scripts/node_vm_build.py --check`: deterministic; emitted plan is
-  `fixture_only` with provenance status `fixture-placeholder`.
-- `python scripts/node_vm_integrity.py --verify`: checksum manifest verifies;
+  seed/manifest, CycloneDX SBOM, signing plan, staged upgrade/rollback,
+  copy-only volume safety, byte-exact shared context, JSON refusal and
+  Ed25519-only).
+- `python scripts/node_vm_build.py --profile fixture --check`: deterministic;
+  emitted plan is `fixture_only` with provenance status `fixture-placeholder`.
+- `python scripts/node_vm_integrity.py --profile fixture --verify`: checksum
+  manifest verifies;
   SBOM is CycloneDX 1.5; signing plan has no baked key.
 - `python scripts/node_vm_upgrade.py ...`: staged undo manifest emitted.
 - No command invoked qemu-img, xorriso, virt-customize, a hypervisor, a registry

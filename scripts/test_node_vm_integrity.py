@@ -39,6 +39,13 @@ class IntegrityFixtureTests(unittest.TestCase):
         self.assertIn("qemu_img", names)
         self.assertIn("ubuntu-24.04-amd64", names)
         self.assertIn("agent.pyz", names)
+        # Real pinned provenance appears in the SBOM with immutable dated pins.
+        for component in a["components"]:
+            if component.get("name", "").startswith("ubuntu-24.04-"):
+                props = {p["name"]: p["value"] for p in component["properties"]}
+                self.assertEqual(props["carbon:digest_status"], "verified")
+                self.assertEqual(props["carbon:immutable_pin"], "true")
+                self.assertIn("release-20261017", props["carbon:image_url"])
         blob = json.dumps(a)
         for forbidden in ("PRIVATE KEY", "enrollment_secret", "token", "password"):
             self.assertNotIn(forbidden, blob)
@@ -66,6 +73,8 @@ class IntegrityFixtureTests(unittest.TestCase):
         self.assertEqual(set(result), {"SHA256SUMS", "sbom.cdx.json", "signing-plan.json"})
         sbom = json.loads(result["sbom.cdx.json"])
         self.assertEqual(sbom["bomFormat"], "CycloneDX")
+        props = {p["name"]: p["value"] for p in sbom["metadata"]["component"]["properties"]}
+        self.assertEqual(props["carbon:provenance_profile"], "fixture")
         self.assertIn("build-config.json", result["SHA256SUMS"])
         self.assertFalse(json.loads(result["signing-plan.json"])["execute"])
 

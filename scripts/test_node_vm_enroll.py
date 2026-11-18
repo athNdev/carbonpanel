@@ -13,6 +13,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 ENROLL_PATH = ROOT / "packaging" / "node-vm" / "cloud-init" / "firstboot" / "enroll.py"
+SHARED_GOLDEN = ROOT / "packaging" / "node-vm" / "qualification" / "fixtures" / "claim-context-shared.json"
 
 
 def load_enroll():
@@ -112,16 +113,92 @@ class IdentityTests(unittest.TestCase):
             self.assertNotIn(secret.hex(), bundle_data)
             self.assertEqual(Path(secret_path).read_bytes(), secret)
 
-    def test_claim_context_and_signature(self):
+    def test_shared_golden_context_bytes(self):
+        """Byte-for-byte conformance with shared internal/noderuntime/enroll.
+
+        Golden produced by running enroll.ClaimContextRaw at OSS-385 PR532 head
+        fc998875 in an owned temporary worktree (no shared writer files edited).
+        """
+        fixture = json.loads(SHARED_GOLDEN.read_text())
+        golden = bytes.fromhex(fixture["golden_context_hex"])
+        inputs = fixture["inputs"]
+        ctx = enroll.canonical_context(
+            inputs["node_id"], inputs["enrollment_id"], inputs["challenge_id"],
+            bytes.fromhex(inputs["server_nonce_hex"]), inputs["expires_at"],
+            inputs["canonical_capabilities"], inputs["channel_context"].encode(),
+        )
+        self.assertEqual(ctx, golden)
+        self.assertEqual(fixture["source"]["commit"],
+                         "fc998875e18e92712427f5ecfb4dfd0696c4f723")
+        self.assertEqual(fixture["source"]["function"], "ClaimContextRaw")
+        self.assertEqual(len(fixture["golden_signature_hex"]), 128)
+        fields = ctx.split(b"\x00")
+        self.assertEqual(len(fields), 8)
+        self.assertEqual(fields[0], b"carbon-panel-enroll-v1")
+        self.assertEqual(fields[4], bytes.fromhex("deadbeef"))
+        self.assertEqual(fields[5], b"2026-11-19T12:00:00.12345Z")
+        self.assertEqual(fields[7], b"controller-derived:cn=carbon-panel")
+
+    def test_canonical_json_claim_is_refused(self):
         key = enroll.FakeKeyPair("fixture-key")
-        ctx = enroll.canonical_context("node-1", "enr-1", "ch-1", "nonce-1",
-                                       "2026-01-01T00:00:00Z", ["CAP_A"], "channel-1")
-        self.assertTrue(ctx.startswith(enroll.CONTEXT_PREFIX + b"\x00"))
-        self.assertIn(b'"server_nonce":"nonce-1"', ctx)
-        sig = enroll.sign_claim(key, ctx)
-        self.assertEqual(sig, hashlib.sha256(b"SYNTHETIC-SIG::fixture-key::" + ctx).digest())
+        good = enroll.canonical_context(
+            "node-1", "enr-1", "ch-1", b"server-nonce", "2026-01-01T00:00:00Z",
+            ["NODE_CAPABILITY_PRIVATE_SOCKET"], b"channel",
+        )
+        sig = enroll.sign_claim(key, good)
+        self.assertTrue(enroll.verify_claim(key, good, sig))
+        self.assertNotIn(b'"', good)
+
+        # The previous canonical-JSON encoding is refused, signed or not.
+        old = enroll.SIGNING_DOMAIN + b"\x00" + json.dumps({
+            "node_id": "node-1", "enrollment_id": "enr-1", "challenge_id": "ch-1",
+            "server_nonce": "server-nonce", "expires_at": "2026-01-01T00:00:00Z",
+            "capabilities": ["NODE_CAPABILITY_PRIVATE_SOCKET"],
+            "server_observed_channel_context": "channel",
+        }, sort_keys=True, separators=(",", ":")).encode()
+        with self.assertRaises(ValueError):
+            enroll.sign_claim(key, old)
+        with self.assertRaises(ValueError):
+            enroll.verify_claim(key, old, key.sign(old))
         with self.assertRaises(ValueError):
             enroll.sign_claim(key, b"bad-context")
+
+    def test_claim_from_server_challenge(self):
+        key = enroll.FakeKeyPair("fixture-key")
+        challenge = {
+            "challenge_id": "challenge-enroll-vm-1",
+            "server_nonce": bytes.fromhex("cafebabe"),
+            "expires_at": "2026-11-20T00:00:00Z",
+            "channel_context": b"controller-derived:cn=carbon-panel",
+        }
+        claim = enroll.claim_from_challenge(
+            key, "node-vm-1", "enroll-vm-1", challenge,
+            ["NODE_CAPABILITY_PRIVATE_SOCKET", "NODE_CAPABILITY_DEDICATED_ROOTS"],
+        )
+        expected = enroll.canonical_context(
+            "node-vm-1", "enroll-vm-1", challenge["challenge_id"],
+            challenge["server_nonce"], challenge["expires_at"],
+            claim["capabilities"], challenge["channel_context"],
+        )
+        self.assertEqual(claim["context"], expected)
+        self.assertTrue(enroll.verify_claim(key, expected, claim["fresh_claim_signature"]))
+        self.assertEqual(claim["channel_binding_evidence"], challenge["channel_context"])
+        self.assertNotIn("client_nonce", claim)
+
+    def test_ed25519_only(self):
+        p256 = enroll.FakeKeyPair("p256", algorithm="P-256")
+        policy = json.loads((ROOT / "packaging/node-vm/config/enrollment-policy.json").read_text())
+        with self.assertRaises(ValueError):
+            enroll.build_preregistration_bundle("fixture01", b"s" * 16, b"x" * 32, p256, policy)
+        with self.assertRaises(ValueError):
+            enroll.sign_claim(p256, enroll.SIGNING_DOMAIN + b"\x00node")
+        with self.assertRaises(ValueError):
+            enroll.canonical_context("n", "e", "c", b"n", "2026-01-01T00:00:00Z",
+                                     ["CAP_A"], b"ch")
+        with self.assertRaises(ValueError):
+            enroll.canonical_context("n", "e", "c", b"n", "2026-01-01T00:00:00Z",
+                                     ["NODE_CAPABILITY_DRAIN",
+                                      "NODE_CAPABILITY_PRIVATE_SOCKET"], b"ch")
 
     def test_guest_script_compiles(self):
         compile(ENROLL_PATH.read_text(), str(ENROLL_PATH), "exec")

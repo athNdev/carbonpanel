@@ -1,0 +1,33 @@
+{
+  "fixture": true,
+  "synthetic": true,
+  "purpose": "Byte-level conformance fixture for the SHARED ADR0019/OSS-385 ClaimContextRaw encoding. golden_context_hex was produced by internal/noderuntime/enroll.ClaimContextRaw at PR532 head fc998875, not by a VM-local encoder.",
+  "source": {
+    "package": "internal/noderuntime/enroll",
+    "function": "ClaimContextRaw",
+    "pr": 532,
+    "commit": "fc998875e18e92712427f5ecfb4dfd0696c4f723",
+    "signing_domain": "carbon-panel-enroll-v1",
+    "protocol_version": 1,
+    "curve": "Ed25519"
+  },
+  "inputs": {
+    "node_id": "node-vm-golden",
+    "enrollment_id": "enroll-vm-golden",
+    "challenge_id": "challenge-enroll-vm-golden-1",
+    "server_nonce_hex": "deadbeef",
+    "expires_at": "2026-11-19T12:00:00.12345Z",
+    "canonical_capabilities": [
+      "NODE_CAPABILITY_PRIVATE_SOCKET",
+      "NODE_CAPABILITY_CGROUP_V2"
+    ],
+    "channel_context": "controller-derived:cn=carbon-panel"
+  },
+  "golden_context_hex": "636172626f6e2d70616e656c2d656e726f6c6c2d7631006e6f64652d766d2d676f6c64656e00656e726f6c6c2d766d2d676f6c64656e006368616c6c656e67652d656e726f6c6c2d766d2d676f6c64656e2d3100deadbeef00323032362d31312d31395431323a30303a30302e31323334355a004e4f44455f4341504142494c4954595f505249564154455f534f434b45542c4e4f44455f4341504142494c4954595f4347524f55505f563200636f6e74726f6c6c65722d646572697665643a636e3d636172626f6e2d70616e656c",
+  "golden_signature_hex": "144c48336afcd0935bb09f72b71f05418b644107ee27a6aff856ad0f870bacf10e561caa42fa9e5b6ae226305cb940143d6ff443ba42002d282eb514926f1f08",
+  "signature_key_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "encoding": "domain\\0node_id\\0enrollment_id\\0challenge_id\\0server_nonce_raw\\0expires_at_RFC3339Nano\\0comma_join(capability_names)\\0channel_raw; no trailing separator, no canonical JSON, no client nonce",
+  "expect": {
+    "canonical_json_signature": "refused"
+  }
+}

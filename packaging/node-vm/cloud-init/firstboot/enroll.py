@@ -14,7 +14,16 @@ Security invariants (enforced in code, not just documented):
   * the exported bundle is digest-only and carries an operator-approved public
     key (SPKI + fingerprint) that must be registered out of band;
   * CSR_PRE is registration material only, never a claim proof;
-  * each VM gets a distinct node_id derived from its unique instance-id.
+  * each VM gets a distinct node_id derived from its unique instance-id;
+  * SIG_CLAIM uses the SHARED ADR0019/OSS-385 ClaimContextRaw encoding: NUL-
+    delimited bytes over the SERVER-STORED nonce, enrollment expires_at and
+    canonical proto capability names; Ed25519 only. Canonical JSON is refused.
+
+The canonical byte encoder is reproduced by canonical_context() because guest
+Python cannot import the Go package; byte-for-byte conformance is proven by a
+golden generated from internal/noderuntime/enroll.ClaimContextRaw at PR532 head
+fc998875. A production mount must delegate to the shared package, not add a
+second encoder.
 """
 import argparse
 import base64
@@ -26,8 +35,33 @@ import secrets
 import subprocess
 import sys
 import tempfile
+from datetime import timezone
 
-CONTEXT_PREFIX = b"carbon-panel-enroll-v1"
+# Re-export of the shared ADR 0019 / OSS-385 constants. The VM first boot is a
+# guest-side Python generator (it cannot import the Go package inside a cloud
+# image), so it reproduces the ONE byte-level encoder ClaimContextRaw exactly;
+# byte-for-byte conformance is proven in fixtures against a golden produced by
+# internal/noderuntime/enroll at PR532 head fc998875. Any future production
+# mount must delegate the claim to the shared Go package, not a second encoder.
+SIGNING_DOMAIN = b"carbon-panel-enroll-v1"
+CONTEXT_PREFIX = SIGNING_DOMAIN  # backwards-compatible alias
+PROTOCOL_VERSION = 1
+ED25519 = "Ed25519"
+
+# Proto enum names from node_control.proto, in declaration order. The shared
+# typed ClaimContext converts enums to these names; no other spelling is valid.
+CAPABILITY_NAMES = (
+    "NODE_CAPABILITY_UNSPECIFIED",
+    "NODE_CAPABILITY_ROOTLESS",
+    "NODE_CAPABILITY_PRIVATE_SOCKET",
+    "NODE_CAPABILITY_DEDICATED_ROOTS",
+    "NODE_CAPABILITY_CONTAINERD_NAMESPACE",
+    "NODE_CAPABILITY_CGROUP_V2",
+    "NODE_CAPABILITY_PRIVILEGED_PORT",
+    "NODE_CAPABILITY_STORAGE_WORKER",
+    "NODE_CAPABILITY_DRAIN",
+    "NODE_CAPABILITY_RESTART_REQUIRED",
+)
 FORBIDDEN_BUNDLE_FIELDS = frozenset({
     "enrollment_secret", "secret", "private_key", "privatekey", "token",
     "password", "passphrase", "secret_s", "s",
@@ -35,7 +69,9 @@ FORBIDDEN_BUNDLE_FIELDS = frozenset({
 
 
 class KeyPair:
-    """Minimal interface: DER SubjectPublicKeyInfo, SHA-256 fingerprint, sign()."""
+    """Minimal interface: Ed25519 SPKI, SHA-256 fingerprint, sign()/verify()."""
+
+    algorithm = ED25519
 
     def spki_der(self):
         raise NotImplementedError
@@ -46,18 +82,25 @@ class KeyPair:
     def sign(self, context):
         raise NotImplementedError
 
+    def verify(self, context, signature):
+        raise NotImplementedError
+
 
 class FakeKeyPair(KeyPair):
-    """Deterministic, clearly synthetic key used only by offline fixtures."""
+    """Deterministic, clearly synthetic Ed25519-shaped key for offline fixtures."""
 
-    def __init__(self, label="fixture-key"):
+    def __init__(self, label="fixture-key", algorithm=ED25519):
         self._label = label.encode()
+        self.algorithm = algorithm
 
     def spki_der(self):
         return b"SYNTHETIC-SPKI::" + self._label
 
     def sign(self, context):
         return hashlib.sha256(b"SYNTHETIC-SIG::" + self._label + b"::" + context).digest()
+
+    def verify(self, context, signature):
+        return self.sign(context) == signature
 
 
 class OpenSSLKeyPair(KeyPair):
@@ -96,6 +139,25 @@ class OpenSSLKeyPair(KeyPair):
             )
             return sig.read()
 
+    def verify(self, context, signature):
+        with tempfile.NamedTemporaryFile() as pub, tempfile.NamedTemporaryFile() as ctx, \
+                tempfile.NamedTemporaryFile() as sig:
+            subprocess.run(
+                ["openssl", "pkey", "-pubin", "-inform", "DER", "-in",
+                 str(self._pub_der), "-out", pub.name],
+                check=True, capture_output=True,
+            )
+            ctx.write(context)
+            ctx.flush()
+            sig.write(signature)
+            sig.flush()
+            done = subprocess.run(
+                ["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", pub.name,
+                 "-rawin", "-in", ctx.name, "-sigfile", sig.name],
+                capture_output=True,
+            )
+            return done.returncode == 0
+
 
 def _b64(raw):
     return base64.b64encode(raw).decode("ascii")
@@ -126,32 +188,143 @@ def compute_digest(salt, secret):
     return hashlib.sha256(salt + secret).hexdigest()
 
 
+def _as_bytes(value, name):
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    raise ValueError("%s must be bytes or UTF-8 str" % name)
+
+
+def format_rfc3339_nano(expires_at):
+    """expires_at.UTC().Format(time.RFC3339Nano) as UTF-8 bytes.
+
+    Strings from the controller are already RFC3339Nano; a datetime is rendered
+    in UTC with trailing fractional zeros trimmed, like Go's RFC3339Nano.
+    """
+    if hasattr(expires_at, "tzinfo"):
+        text = expires_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        if "." in text:
+            head, fraction = text.split(".", 1)
+            fraction = fraction.rstrip("0").rstrip("Z")
+            text = head + ("." + fraction if fraction else "") + "Z"
+        return text.encode("ascii")
+    raw = _as_bytes(expires_at, "expires_at")
+    try:
+        raw.decode("ascii")
+    except UnicodeDecodeError:
+        raise ValueError("expires_at must be RFC3339Nano ASCII")
+    if b"T" not in raw or not raw.endswith(b"Z"):
+        raise ValueError("expires_at must be UTC RFC3339Nano ending in Z")
+    return raw
+
+
+def canonical_capability_names(capabilities):
+    """Proto enum names in declaration order; no other spelling is accepted."""
+    if not capabilities:
+        raise ValueError("at least one canonical capability is required")
+    names = list(capabilities)
+    unknown = [name for name in names if name not in CAPABILITY_NAMES]
+    if unknown:
+        raise ValueError("unknown or non-canonical capability names: %s" % unknown)
+    ranks = [CAPABILITY_NAMES.index(name) for name in names]
+    if ranks != sorted(ranks):
+        raise ValueError("capability names must be in proto declaration order")
+    return names
+
+
 def canonical_context(node_id, enrollment_id, challenge_id, server_nonce,
                       expires_at, capabilities, channel_context):
-    """Exact claim context from ADR0019; canonical JSON for stable signing."""
-    payload = {
-        "node_id": node_id,
-        "enrollment_id": enrollment_id,
-        "challenge_id": challenge_id,
-        "server_nonce": server_nonce,
-        "expires_at": expires_at,
+    """ONE byte-level encoder: shared ClaimContextRaw (NUL-delimited, no JSON).
+
+    Exact layout (all separators a single 0x00, no trailing separator):
+
+        "carbon-panel-enroll-v1" 0x00 node_id 0x00 enrollment_id 0x00
+        challenge_id 0x00 server_nonce_raw 0x00 expires_at_RFC3339Nano 0x00
+        comma_join(capability_names) 0x00 server_observed_channel_context_raw
+
+    The nonce is ALWAYS the server-stored challenge nonce; there is no client
+    nonce field. Capabilities are proto enum names in declaration order.
+    """
+    parts = [
+        SIGNING_DOMAIN,
+        _as_bytes(node_id, "node_id"),
+        _as_bytes(enrollment_id, "enrollment_id"),
+        _as_bytes(challenge_id, "challenge_id"),
+        _as_bytes(server_nonce, "server_nonce"),
+        format_rfc3339_nano(expires_at),
+        ",".join(canonical_capability_names(capabilities)).encode("ascii"),
+        _as_bytes(channel_context, "channel_context"),
+    ]
+    if any(b"\x00" in part for part in parts[1:7]):
+        raise ValueError("NUL byte in a delimited claim context field")
+    return b"\x00".join(parts)
+
+
+def claim_from_challenge(keypair, node_id, enrollment_id, challenge,
+                         capabilities, channel_context=None):
+    """Build the challenge-bound fresh SIG_CLAIM for the enrolled VM.
+
+    challenge is the server's BeginEnrollmentChallenge response: it carries the
+    SERVER-STORED nonce, challenge_id and enrollment expires_at. Nothing here
+    invents or accepts a client nonce.
+    """
+    if getattr(keypair, "algorithm", None) != ED25519:
+        raise ValueError("enrollment signing is Ed25519-only")
+    channel = channel_context if channel_context is not None else challenge["channel_context"]
+    context = canonical_context(
+        node_id, enrollment_id, challenge["challenge_id"], challenge["server_nonce"],
+        challenge["expires_at"], capabilities, channel,
+    )
+    return {
+        "challenge_id": challenge["challenge_id"],
+        "context": context,
+        "fresh_claim_signature": sign_claim(keypair, context),
         "capabilities": list(capabilities),
-        "server_observed_channel_context": channel_context,
+        "channel_binding_evidence": _as_bytes(channel, "channel_context"),
+        "protocol_version": PROTOCOL_VERSION,
     }
-    return CONTEXT_PREFIX + b"\x00" + json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-    ).encode("utf-8")
 
 
 def sign_claim(keypair, context):
-    """Fresh post-challenge signature by the operator-approved key only."""
-    if not isinstance(context, bytes) or not context.startswith(CONTEXT_PREFIX + b"\x00"):
-        raise ValueError("claim context is not a canonical carbon-panel-enroll-v1 context")
+    """Fresh post-challenge signature by the operator-approved Ed25519 key only."""
+    if getattr(keypair, "algorithm", None) != ED25519:
+        raise ValueError("enrollment signing is Ed25519-only")
+    if not isinstance(context, bytes):
+        raise ValueError("claim context must be raw bytes")
+    if not context.startswith(SIGNING_DOMAIN + b"\x00"):
+        raise ValueError("claim context is not a carbon-panel-enroll-v1 context")
+    # The old canonical-JSON encoding is explicitly refused; its bytes cannot
+    # verify against the shared ClaimContextRaw encoder.
+    remainder = context[len(SIGNING_DOMAIN) + 1:]
+    if remainder.startswith(b"{") or b'\x00{"' in context or b'"node_id"' in context:
+        raise ValueError("canonical-JSON claim context refused; use shared NUL encoding")
     return keypair.sign(context)
+
+
+def verify_claim(keypair, context, signature):
+    """Verify a fresh SIG_CLAIM over the exact shared context (Ed25519 only)."""
+    if getattr(keypair, "algorithm", None) != ED25519:
+        raise ValueError("enrollment verification is Ed25519-only")
+    expected = canonical_context(*_claim_fields(context))
+    if context != expected:
+        raise ValueError("claim context does not match shared ClaimContextRaw encoding")
+    return bool(keypair.verify(context, signature))
+
+
+def _claim_fields(context):
+    """Parse a NUL-delimited context into canonical_context() arguments."""
+    fields = context.split(b"\x00")
+    if len(fields) != 8 or fields[0] != SIGNING_DOMAIN:
+        raise ValueError("malformed NUL-delimited claim context")
+    return (fields[1], fields[2], fields[3], fields[4], fields[5],
+            fields[6].decode("ascii").split(",") if fields[6] else [], fields[7])
 
 
 def build_preregistration_bundle(node_label, salt, secret, keypair, policy):
     """Build the digest-only exportable bundle. S and the private key never enter it."""
+    if getattr(keypair, "algorithm", None) != ED25519:
+        raise ValueError("enrollment key generation is Ed25519-only")
     digest = compute_digest(salt, secret)
     csr_pre = {
         "node_label": node_label,

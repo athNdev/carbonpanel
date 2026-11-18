@@ -43,7 +43,18 @@
     ],
     "object_id_binding": "node_id equals the enrolled VM node object id; cross-node object ids are denied",
     "three_domains_no_crossing": true,
-    "tls_topology": "controller-derived binding or verified trusted-proxy attestation; plain HTTP and untrusted proxies refused"
+    "tls_topology": "controller-derived binding or verified trusted-proxy attestation; plain HTTP and untrusted proxies refused",
+    "claim_context": {
+      "shared_encoder": "internal/noderuntime/enroll.ClaimContextRaw (ADR0019 / OSS-385 PR532)",
+      "source_commit": "fc998875e18e92712427f5ecfb4dfd0696c4f723",
+      "signing_domain": "carbon-panel-enroll-v1",
+      "curve": "Ed25519-only",
+      "encoding": "NUL-delimited raw bytes: domain, node_id, enrollment_id, challenge_id, server-stored nonce, enrollment expires_at (RFC3339Nano), comma-joined proto capability names, channel context; no trailing separator",
+      "client_nonce": false,
+      "canonical_json": "refused",
+      "conformance_fixture": "qualification/fixtures/claim-context-shared.json",
+      "note": "Guest Python reproduces the single byte-level encoder for fixtures; a production mount must delegate the claim to the shared Go package."
+    }
   },
   "invariants": [
     "No enrollment input (secret, private key, approved SPKI or fingerprint) is written into the QCOW2 image or the cloud-init seed.",

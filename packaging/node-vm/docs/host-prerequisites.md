@@ -47,8 +47,10 @@ preflight on a disposable owned VM.
 
 ## Refusals (fail closed)
 
-- Missing hardware virtualisation, wrong firmware, unpinned base-image digest,
-  missing Python 3/openssl, or an unsupported TLS topology must block
-  qualification with an actionable reason — never silently weaken the setup.
+- Missing hardware virtualisation, wrong firmware, unpinned or placeholder
+  base-image digest, a moving (non-dated) image URL, missing Python 3/openssl,
+  or an unsupported TLS topology must block qualification with an actionable
+  reason — never silently weaken the setup. Use only the immutable dated image
+  URLs and verified hashes in `provenance/base-images.json`.
 - No host Docker socket, public raw Docker API, blanket-privileged DinD or
   broad host mount is an acceptable substitute for any prerequisite above.
