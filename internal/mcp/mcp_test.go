@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +29,61 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
+
+// invocationRecorder captures the typed Connect request each fixture handler
+// actually receives. It is the evidence that a tools/call reached a real
+// generated method with mapped arguments, not merely that a handler was
+// mounted. Recording is opt-in so ordinary fixtures stay cheap.
+type invocationRecord struct {
+	Procedure  string
+	RequestJSON string
+}
+
+type invocationRecorderState struct {
+	mu      sync.Mutex
+	enabled bool
+	records []invocationRecord
+}
+
+var invocationRecorder = &invocationRecorderState{}
+
+func (r *invocationRecorderState) enable() {
+	r.mu.Lock()
+	r.enabled = true
+	r.records = nil
+	r.mu.Unlock()
+}
+
+func (r *invocationRecorderState) disable() {
+	r.mu.Lock()
+	r.enabled = false
+	r.mu.Unlock()
+}
+
+func (r *invocationRecorderState) record(procedure string, msg any) {
+	if m, ok := msg.(proto.Message); ok {
+		raw, err := protojson.Marshal(m)
+		if err != nil {
+			return
+		}
+		r.mu.Lock()
+		if r.enabled {
+			r.records = append(r.records, invocationRecord{Procedure: procedure, RequestJSON: string(raw)})
+		}
+		r.mu.Unlock()
+	}
+}
+
+func (r *invocationRecorderState) snapshot() []invocationRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]invocationRecord, len(r.records))
+	copy(out, r.records)
+	return out
+}
 
 // fixture bundles a real SDK MCP client connected over the stdio wire format
 // to the in-process MCP server, whose tools call typed Connect clients against
@@ -114,7 +169,8 @@ func registerOK[Req, Res any](mux *http.ServeMux, procedure string, ic connect.U
 			}
 		}
 	} else {
-		handler = func(context.Context, *connect.Request[Req]) (*connect.Response[Res], error) {
+		handler = func(_ context.Context, req *connect.Request[Req]) (*connect.Response[Res], error) {
+			invocationRecorder.record(procedure, req.Msg)
 			var zero Res
 			return connect.NewResponse(&zero), nil
 		}
@@ -128,13 +184,15 @@ func registerOK[Req, Res any](mux *http.ServeMux, procedure string, ic connect.U
 func registerAuthHandlers(mux *http.ServeMux, ic connect.UnaryInterceptorFunc, authEnabled bool) {
 	const statusProc = "/carbonpanel.v1.AuthService/GetAuthStatus"
 	mux.Handle(statusProc, connect.NewUnaryHandler(statusProc,
-		func(context.Context, *connect.Request[v1.GetAuthStatusRequest]) (*connect.Response[v1.GetAuthStatusResponse], error) {
+		func(_ context.Context, req *connect.Request[v1.GetAuthStatusRequest]) (*connect.Response[v1.GetAuthStatusResponse], error) {
+			invocationRecorder.record(statusProc, req.Msg)
 			return connect.NewResponse(&v1.GetAuthStatusResponse{LocalAuthEnabled: authEnabled}), nil
 		}, connect.WithInterceptors(ic)))
 
 	const userProc = "/carbonpanel.v1.AuthService/GetCurrentUser"
 	mux.Handle(userProc, connect.NewUnaryHandler(userProc,
-		func(ctx context.Context, _ *connect.Request[v1.GetCurrentUserRequest]) (*connect.Response[v1.GetCurrentUserResponse], error) {
+		func(ctx context.Context, req *connect.Request[v1.GetCurrentUserRequest]) (*connect.Response[v1.GetCurrentUserResponse], error) {
+			invocationRecorder.record(userProc, req.Msg)
 			u := auth.GetUserFromContext(ctx)
 			if u == nil {
 				return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no authenticated user"))
@@ -423,6 +481,9 @@ func newFixture(t *testing.T, olderMode string, authEnabled bool) *fixture {
 	f.tokens["worldReader"] = seedToken(t, store, enforcer, "u-world-reader", "world-reader",
 		append(globalPerms("players", "read"),
 			append(globalPerms("worlds", "read"), globalPerms("world_view", "read")...)...))
+	// noperms is a real, active dp_ token whose role grants nothing. It is
+	// used by executable coverage evidence to prove resource-scope denial.
+	f.tokens["noperms"] = seedToken(t, store, enforcer, "u-noperms", "noperms", nil)
 	f.tokens["invalid"] = "dp_nonexistent_token"
 
 	for name, token := range f.tokens {

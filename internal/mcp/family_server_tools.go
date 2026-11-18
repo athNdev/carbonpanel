@@ -71,6 +71,9 @@ func famSpec(name string) ToolSpec { return famSpecs[name] }
 // addFamilyTool mirrors addTool in tools.go but resolves its ToolSpec from the
 // exported descriptor list. Confirmation is checked before any RPC is sent.
 func addFamilyTool[In any](s *sdkmcp.Server, name string, clients *FamilyServerClients, run func(context.Context, *FamilyServerClients, In) (any, error)) {
+	if !toolAllowedOn(s, name) {
+		return
+	}
 	spec := famSpec(name)
 	sdkmcp.AddTool(s, &sdkmcp.Tool{Name: spec.Name, Description: spec.Description},
 		func(ctx context.Context, _ *sdkmcp.CallToolRequest, in In) (*sdkmcp.CallToolResult, ToolOutput, error) {

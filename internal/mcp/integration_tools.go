@@ -36,7 +36,7 @@ var integrationToolDecisions = []integrationToolDecision{
 	// operation with a typed client; the admin family excluded browser-session
 	// mechanics. This tool uses the API-token interceptor, not a session token.
 	{"/carbonpanel.v1.AuthService/Logout", "auth_service_logout",
-		"Revoke the current API token's authenticated session. Requires confirm=true; no browser cookie is used."},
+		"Request session logout for the presented bearer credential. This does not revoke a dp_ API token: the controller reports success but the token stays valid; revoke tokens out of band. Requires confirm=true."},
 
 	// BackupService: bounded, server-scoped backup lifecycle.
 	{"/carbonpanel.v1.BackupService/CreateBackup", "backup_service_create_backup",

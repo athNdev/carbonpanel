@@ -1047,6 +1047,9 @@ func RegisterFamilyAdminTools(s *sdkmcp.Server, c *FamilyAdminClients) {
 // RPC; all failures are converted to the shared structured ToolError shape.
 func addFamilyAdminTool[In any](s *sdkmcp.Server, c *FamilyAdminClients, name string,
 	run func(context.Context, *FamilyAdminClients, In) (any, error)) {
+	if !toolAllowedOn(s, name) {
+		return
+	}
 	spec := familyAdminSpec(name)
 	sdkmcp.AddTool(s, &sdkmcp.Tool{Name: spec.Name, Description: spec.Description},
 		func(ctx context.Context, _ *sdkmcp.CallToolRequest, in In) (*sdkmcp.CallToolResult, ToolOutput, error) {

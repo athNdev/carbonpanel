@@ -6,9 +6,7 @@
 package mcp
 
 import (
-	"os"
-	"regexp"
-	"strings"
+	"context"
 	"testing"
 )
 
@@ -90,30 +88,66 @@ func TestIntegrationCombinedCatalog(t *testing.T) {
 	}
 }
 
-// TestIntegrationFixtureEvidenceIsMounted proves the VERIFIED signal is not
-// merely derived from a string constant: every supported procedure has a real
-// registerOK handler line behind the production auth interceptor in the
-// combined fixture.
-func TestIntegrationFixtureEvidenceIsMounted(t *testing.T) {
-	src, err := os.ReadFile("mcp_test.go")
+// TestIntegrationLiveToolMetadataMatchesCatalog closes the last-wins gap:
+// go-sdk replaces a tool by name, so the six ConfigService names declared by
+// both the server and admin families must resolve to the SAME spec the
+// generator promoted. This compares the live tools/list metadata (name and
+// description) with the generated catalog, not just the counts.
+func TestIntegrationLiveToolMetadataMatchesCatalog(t *testing.T) {
+	f := newFixture(t, "", true)
+	listed, err := f.sessions["admin"].ListTools(context.Background(), nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ListTools: %v", err)
 	}
-	re := regexp.MustCompile(`registerOK\[[^]]+\]\(mux,\s*"([^"]+)"`)
-	seen := map[string]bool{}
-	for _, m := range re.FindAllStringSubmatch(string(src), -1) {
-		seen[m[1]] = true
+	if len(listed.Tools) != len(exposedTools) {
+		t.Fatalf("live tools/list returned %d tools, generated catalog has %d", len(listed.Tools), len(exposedTools))
 	}
-	for _, op := range FamilyAuditSupportedOperations() {
-		target := op.Procedure
-		if op.Kind != "rpc" {
-			target = op.ComposedBy
+	want := make(map[string]ToolSpec, len(exposedTools))
+	for _, spec := range exposedTools {
+		want[spec.Name] = spec
+	}
+	seen := make(map[string]bool, len(listed.Tools))
+	for _, live := range listed.Tools {
+		spec, ok := want[live.Name]
+		if !ok {
+			t.Errorf("live tool %s is absent from the generated catalog", live.Name)
+			continue
 		}
+		if seen[live.Name] {
+			t.Errorf("live tool %s was mounted more than once", live.Name)
+		}
+		seen[live.Name] = true
+		if live.Description != spec.Description {
+			t.Errorf("live tool %s description diverged from generated catalog:\n live=%q\n want=%q",
+				live.Name, live.Description, spec.Description)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("generated tool %s is not mounted live", name)
+		}
+	}
+}
+
+// TestIntegrationFixtureEvidenceIsMounted proves the VERIFIED signal comes
+// from executable invocation evidence, not a mounted handler string or a
+// quoted procedure. Each supported operation must have reached its typed
+// method with mapped arguments, observed a real outcome/Connect status and
+// exercised its resource scope.
+func TestIntegrationFixtureEvidenceIsMounted(t *testing.T) {
+	evidence := runInvocationEvidence(t)
+	for _, op := range FamilyAuditSupportedOperations() {
+		target := targetProcedure(op)
 		if target == "" {
 			continue
 		}
-		if !seen[target] && !strings.Contains(string(src), `"`+target+`"`) {
-			t.Errorf("%s: no mounted fixture for %s", op.ID, target)
+		ev, ok := evidence[target]
+		if !ok || !ev.Complete() {
+			t.Errorf("%s: no executable invocation evidence for %s: %+v", op.ID, target, ev)
+			continue
+		}
+		if ev.Tool == "" || !ev.Reached || !ev.ArgsMapped || !ev.OutcomeObserved || !ev.ScopeEvidence {
+			t.Errorf("%s: incomplete evidence for %s: %+v", op.ID, target, ev)
 		}
 	}
 }

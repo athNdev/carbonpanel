@@ -111,24 +111,28 @@ func NewClients(httpClient connect.HTTPClient, baseURL, token string) (*Clients,
 // familyClients derives the four family hand-off client sets from the same
 // authenticated connection. It is used only by NewServer when mounting the
 // combined catalog; each family keeps its own typed client constructors.
-func (c *Clients) familyClients() (*FamilyServerClients, *ContentClients, *FamilyAdminClients, *FamilyStreamClients, error) {
+func (c *Clients) familyClients() (*FamilyServerClients, *ContentClients, *FamilyAdminClients, error) {
 	server, err := NewFamilyServerClients(c.httpClient, c.baseURL, c.token)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	content, err := NewContentClients(c.httpClient, c.baseURL, c.token)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	admin, err := NewFamilyAdminClients(c.httpClient, c.baseURL, c.token)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
-	stream, err := NewFamilyStreamClients(c.httpClient, c.baseURL, c.token)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	return server, content, admin, stream, nil
+	return server, content, admin, nil
+}
+
+// streamClients derives the typed streaming client set for the composed
+// upload/download workflows. It is used by the executable streaming evidence
+// harness, not by tool registration: raw byte channels stay out of the tool
+// set, and their bytes are carried by the typed RPC equivalents.
+func (c *Clients) streamClients() (*FamilyStreamClients, error) {
+	return NewFamilyStreamClients(c.httpClient, c.baseURL, c.token)
 }
 
 // Verify proves that the controller has a real authentication provider and

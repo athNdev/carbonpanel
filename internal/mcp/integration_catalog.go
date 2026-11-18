@@ -6,7 +6,7 @@ package mcp
 
 var exposedTools = []ToolSpec{
 	{Name: "assign_role", Procedure: "/carbonpanel.v1.RoleService/AssignRole", Class: Class("review"), Confirm: true, Description: "Assign one role to one user. Confirm-gated authorization mutation."},
-	{Name: "auth_service_logout", Procedure: "/carbonpanel.v1.AuthService/Logout", Class: Class("review"), Confirm: true, Description: "Revoke the current API token's authenticated session. Requires confirm=true; no browser cookie is used."},
+	{Name: "auth_service_logout", Procedure: "/carbonpanel.v1.AuthService/Logout", Class: Class("review"), Confirm: true, Description: "Request session logout for the presented bearer credential. This does not revoke a dp_ API token: the controller reports success but the token stays valid; revoke tokens out of band. Requires confirm=true."},
 	{Name: "backup_service_create_backup", Procedure: "/carbonpanel.v1.BackupService/CreateBackup", Class: Class("review"), Confirm: true, Description: "Create one bounded, server-scoped backup. Requires confirm=true and an exact server id."},
 	{Name: "backup_service_delete_backup", Procedure: "/carbonpanel.v1.BackupService/DeleteBackup", Class: Class("review"), Confirm: true, Description: "Delete one backup by exact id. Destructive: requires confirm=true."},
 	{Name: "backup_service_set_backup_locked", Procedure: "/carbonpanel.v1.BackupService/SetBackupLocked", Class: Class("review"), Confirm: true, Description: "Set or clear the retention lock on one backup by exact id. Requires confirm=true."},

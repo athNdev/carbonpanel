@@ -6,8 +6,6 @@
 package mcp
 
 import (
-	"os"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -65,21 +63,14 @@ func liveReachableTools() map[string]bool {
 // is exercised end to end without a live panel, Docker daemon or world.
 func liveFixtureProcedures(t *testing.T) map[string]bool {
 	t.Helper()
-	src, err := os.ReadFile("mcp_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := make(map[string]bool)
-	re := regexp.MustCompile(`registerOK\[[^]]+\]\(mux,\s*"([^"]+)"`)
-	for _, match := range re.FindAllStringSubmatch(string(src), -1) {
-		out[match[1]] = true
-	}
-	// The two auth probes are mounted directly rather than via registerOK.
-	for _, procedure := range []string{
-		"/carbonpanel.v1.AuthService/GetAuthStatus",
-		"/carbonpanel.v1.AuthService/GetCurrentUser",
-	} {
-		if strings.Contains(string(src), `"`+procedure+`"`) {
+	// VERIFIED is executable invocation evidence: a real tools/call over the
+	// SDK stdio wire that reached the typed method with mapped arguments,
+	// observed the handler outcome/Connect status and exercised resource
+	// scope. Source regexes and quoted procedure strings never count.
+	evidence := runInvocationEvidence(t)
+	out := make(map[string]bool, len(evidence))
+	for procedure, ev := range evidence {
+		if ev.Complete() {
 			out[procedure] = true
 		}
 	}

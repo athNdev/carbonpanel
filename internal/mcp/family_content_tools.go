@@ -354,6 +354,9 @@ func contentFailure(spec ToolSpec, err error) (*sdkmcp.CallToolResult, ToolOutpu
 // exposedTools list.
 func addContentTool[In any](s *sdkmcp.Server, name string, cl *ContentClients,
 	run func(context.Context, *ContentClients, In) (any, error)) {
+	if !toolAllowedOn(s, name) {
+		return
+	}
 	spec := contentSpecFor(name)
 	sdkmcp.AddTool(s, &sdkmcp.Tool{Name: spec.Name, Description: spec.Description},
 		func(ctx context.Context, _ *sdkmcp.CallToolRequest, in In) (*sdkmcp.CallToolResult, ToolOutput, error) {

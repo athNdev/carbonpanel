@@ -51,11 +51,17 @@ proto descriptors and the live RBAC map. The single generator also emits
 coverage drift test still enumerates the 220 reachable RPCs and fails on a
 missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
 a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
-or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED,
-REACHABLE and VERIFIED separately from live source and fails while any
-SUPPORTED operation lacks a typed tool or a scoped fixture. gRPC reflection
-(19 names) and the 24-name RBAC parity list are deliberately not sources of
-truth.
+or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and
+REACHABLE from live source, but VERIFIED comes only from executable invocation
+evidence: a real `tools/call` over the SDK stdio wire must reach the typed
+Connect method with mapped, bounded arguments, observe the real handler status
+and exercise the resource scope (including a denied ungranted dp_ token).
+Registration strings and quoted procedure names never count. The exclusion
+policy is bound to the server before any tool is added, so audited-out tools
+are never mounted; go-sdk replaces same-name tools (last wins), so registration
+runs in reverse generator priority and a live `tools/list` metadata assertion
+keeps it aligned. gRPC reflection (19 names) and the 24-name RBAC parity list
+are deliberately not sources of truth.
 
 Disposable fixtures connect a real MCP SDK client over the stdio wire format
 to the in-process gateway; its tools call typed clients against `httptest`
