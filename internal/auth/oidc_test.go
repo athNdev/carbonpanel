@@ -18,9 +18,10 @@ import (
 func testOIDCHandler(roleClaim string, mapping map[string]string, rejectUnmapped bool) *OIDCHandler {
 	return &OIDCHandler{
 		config: &config.OIDCConfig{
-			RoleClaim:      roleClaim,
-			RoleMapping:    mapping,
-			RejectUnmapped: rejectUnmapped,
+			RoleClaim:          roleClaim,
+			RoleMapping:        mapping,
+			RejectUnmapped:     rejectUnmapped,
+			AllowRawClaimRoles: true, // legacy passthrough semantics for these tests
 		},
 		log: logger.New(),
 	}
