@@ -17,7 +17,7 @@ func qualifiedFacts() HostFacts {
 		OS: "linux", Architecture: "amd64", Distro: "fixture-linux",
 		KernelVersion: "6.8.0-fixture", KernelMajor: 6, KernelMinor: 8,
 		Systemd: true, SystemdUserSession: true, LingerEnabled: true,
-		DedicatedUIDAvailable: true,
+		RootfulServiceQualified: true,
 		UserNamespaces: true, SubUIDAvailable: true, SubGIDAvailable: true,
 		CgroupVersion: "v2", DelegatedControllers: []string{"cpu", "cpuset", "io", "memory", "pids"},
 		StorageDriver: "overlay2", StorageFSType: "ext4", FTypeEnabled: true,
@@ -102,7 +102,7 @@ func TestApplyGatesRootfulFallback(t *testing.T) {
 func TestApplyGatesFailsClosedWithoutQualifiedPath(t *testing.T) {
 	f := qualifiedFacts()
 	f.UserNamespaces = false
-	f.DedicatedUIDAvailable = false
+	f.RootfulServiceQualified = false
 	sel := ApplyGates(f)
 	if sel.Mode != ModeNone {
 		t.Fatalf("expected fail-closed, got %q", sel.Mode)
