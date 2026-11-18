@@ -9,6 +9,7 @@ on:
       - 'docker/Dockerfile.*'
       - 'scripts/proto-generate.mjs'
       - 'scripts/check-toolchain-policy*'
+      - 'scripts/workflow-contract*'
       - '.github/workflows/**'
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - 'docker/Dockerfile.*'
       - 'scripts/proto-generate.mjs'
       - 'scripts/check-toolchain-policy*'
+      - 'scripts/workflow-contract*'
       - '.github/workflows/**'
 permissions:
   contents: read
@@ -32,3 +34,4 @@ jobs:
           bun-version: '1.4.2'
       - run: bun scripts/check-toolchain-policy.mjs
       - run: bun test scripts/check-toolchain-policy.test.mjs
+      - run: bun test scripts/workflow-contract.test.mjs
