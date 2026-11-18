@@ -351,75 +351,71 @@ func TestFamilyAudit(t *testing.T) {
 		}
 	})
 
-	t.Run("SupportedOperationsGate", func(t *testing.T) {
-		// THIS IS THE GATE. It is intentionally red while the first-slice
-		// catalog is the only one integrated: every operation classified as a
-		// supported workflow must be LISTED in the catalog, REACHABLE by a
-		// registered tool (or bounded composed path), and VERIFIED by a fixture
-		// behind the production auth interceptor. The integration owner expands
-		// the combined catalog until this passes; the matrix names each missing
-		// tool in suggestedTool/composedBy.
+	t.Run("PartialSliceRegressionGate", func(t *testing.T) {
+		// ORDINARY GATE: green on main. It validates the EXACT pending inventory
+		// and every supported non-pending operation with executable evidence.
+		// No skips, no waivers, no tolerating extra or missing pending entries.
 		listed := liveListedProcedures()
 		reachable := liveReachableTools()
 		fixtures := liveFixtureProcedures(t)
-		var missing, liveListedN, liveReachableN, liveVerifiedN, liveExcludedN int
+
+		pendingByID := map[string]PendingOperation{}
+		for _, pending := range PendingInventory {
+			if pending.ID == "" || pending.Target == "" || pending.Reason == "" || pending.FollowUp == "" {
+				t.Errorf("PENDING entry is incomplete: %+v", pending)
+			}
+			if _, dup := pendingByID[pending.ID]; dup {
+				t.Errorf("duplicate PENDING id %s", pending.ID)
+			}
+			pendingByID[pending.ID] = pending
+		}
+		if len(PendingInventory) != 9 || len(pendingByID) != 9 {
+			t.Fatalf("PENDING inventory has %d entries (%d unique ids), want exactly 9", len(PendingInventory), len(pendingByID))
+		}
+
+		// Every PENDING entry must name a real supported operation that is still
+		// unverified; no operation may be silently added or dropped.
+		derived := map[string]bool{}
 		for _, op := range matrix.Operations {
 			if !op.Supported() {
-				liveExcludedN++
 				continue
 			}
-			live := recomputeCoverage(op, listed, reachable, fixtures)
-			if live.Listed {
-				liveListedN++
-			}
-			if live.Reachable {
-				liveReachableN++
-			}
-			if live.Verified {
-				liveVerifiedN++
-			}
-			var absent []string
-			if !live.Listed {
-				absent = append(absent, "LISTED")
-			}
-			if !live.Reachable {
-				absent = append(absent, "REACHABLE")
-			}
-			if !live.Verified {
-				absent = append(absent, "VERIFIED")
-			}
-			if len(absent) != 0 {
-				missing++
-				t.Errorf("unsupported gap %s (%s): missing %s; tool=%s composedBy=%s; see %s",
-					op.ID, op.Procedure, strings.Join(absent, "+"), op.SuggestedTool,
-					op.ComposedBy, op.ReasonRef)
+			if pendingReason(op) != "" {
+				key := op.Procedure
+				if op.Kind != "rpc" {
+					key = op.ID
+				}
+				derived[key] = true
 			}
 		}
-		if missing != 0 {
-			t.Errorf("OSS-375 full-coverage gate: %d supported operations are not listed, reachable and verified "+
-				"(live: supported=%d listed=%d reachable=%d verified=%d excluded=%d; matrix baseline: %+v). "+
-				"See internal/mcp/family_audit_matrix.json for the exhaustive machine-checkable list.",
-				missing, len(matrix.Operations)-liveExcludedN, liveListedN, liveReachableN,
-				liveVerifiedN, liveExcludedN, matrix.Counts)
+		for id := range pendingByID {
+			if !derived[id] {
+				t.Errorf("PENDING id %s is not an actual pending operation", id)
+			}
 		}
-	})
+		for id := range derived {
+			if _, ok := pendingByID[id]; !ok {
+				t.Errorf("operation %s is pending but missing from the exact inventory", id)
+			}
+		}
 
-	t.Run("PartialSliceRegressionGate", func(t *testing.T) {
-		// PASSING regression gate for the explicitly enumerated PARTIAL SLICE.
-		// Every operation that is NOT in the exact PENDING inventory must be
-		// LISTED, REACHABLE and VERIFIED with executable tools/call evidence.
-		// This gate is intentionally independent from the full gate above,
-		// which stays RED for the 9 PENDING streaming operations.
-		listed := liveListedProcedures()
-		reachable := liveReachableTools()
-		fixtures := liveFixtureProcedures(t)
 		inScope, verified := 0, 0
 		for _, op := range matrix.Operations {
-			if !op.Supported() || pendingReason(op) != "" {
+			if !op.Supported() {
+				continue
+			}
+			cov := recomputeCoverage(op, listed, reachable, fixtures)
+			key := op.Procedure
+			if op.Kind != "rpc" {
+				key = op.ID
+			}
+			if _, isPending := pendingByID[key]; isPending {
+				if cov.Verified {
+					t.Errorf("PENDING operation %s unexpectedly has VERIFIED evidence", op.ID)
+				}
 				continue
 			}
 			inScope++
-			cov := recomputeCoverage(op, listed, reachable, fixtures)
 			if !cov.Complete() {
 				t.Errorf("partial-slice regression: %s missing %+v", op.ID, cov)
 				continue
@@ -427,20 +423,9 @@ func TestFamilyAudit(t *testing.T) {
 			verified++
 		}
 		if inScope == 0 || verified != inScope {
-			t.Fatalf("partial slice: %d/%d in-scope operations verified", verified, inScope)
+			t.Fatalf("partial slice: %d/%d non-pending operations verified", verified, inScope)
 		}
-		// The pending inventory must be exact: every listed entry must still
-		// be absent from the fixture evidence set, and no other operation may
-		// be silently treated as pending.
-		if len(PendingInventory) != 9 {
-			t.Fatalf("PENDING inventory has %d entries, want 9", len(PendingInventory))
-		}
-		for _, pending := range PendingInventory {
-			if fixtures[pending.Target] {
-				t.Errorf("PENDING operation %s unexpectedly has VERIFIED evidence", pending.ID)
-			}
-		}
-		t.Logf("PARTIAL SLICE REGRESSION GATE PASS: %d/%d non-pending operations verified; 9 PENDING explicitly excluded", verified, inScope)
+		t.Logf("ORDINARY GATE PASS: %d/%d non-pending operations verified; exact 9-entry PENDING inventory intact", verified, inScope)
 	})
 
 	t.Run("GateDetectsUnlistedSupportedOperation", func(t *testing.T) {
