@@ -43,6 +43,7 @@ import {
 	newRequestId,
 	previewTargets,
 	provenanceView,
+	projectServerOptions,
 	serverOptionsFromRoster,
 	supportStateLabel,
 	undoUnavailableReason
@@ -57,6 +58,37 @@ function summary(key: string, name: string, overrides: SummaryOverrides = {}): P
 		...overrides
 	});
 }
+
+test('server filter options are a pure projection of scoped roster rows', () => {
+	// Normal production rows carry serverId. The projection must derive options
+	// without writing state, so repeated calls cannot drive an effect loop.
+	const scoped = [
+		summary('a', 'Alice', { serverId: 'srv-1', serverName: 'Survival' }),
+		summary('b', 'Bob', { serverId: 'srv-2', serverName: 'Creative' }),
+		summary('c', 'Carol', { serverId: 'srv-1', serverName: 'Survival' })
+	];
+	const configured = [{ id: 'srv-3', name: 'Modded' }];
+	const first = projectServerOptions(scoped, configured, '');
+	const second = projectServerOptions(scoped, configured, '');
+	assert.deepEqual(first, second, 'the projection is idempotent for identical scoped inputs');
+	assert.deepEqual(first, [
+		{ id: 'srv-2', name: 'Creative' },
+		{ id: 'srv-3', name: 'Modded' },
+		{ id: 'srv-1', name: 'Survival' }
+	]);
+	assert.equal(scoped.length, 3, 'projection never mutates the roster input');
+
+	// The active scope is always present, even when no row carries it.
+	const scopedOnly = projectServerOptions(
+		[summary('d', 'Dave', { serverId: 'srv-1', serverName: 'Survival' })],
+		[],
+		'srv-9'
+	);
+	assert.deepEqual(scopedOnly, [
+		{ id: 'srv-9', name: 'srv-9' },
+		{ id: 'srv-1', name: 'Survival' }
+	]);
+});
 
 test('roster sorts out-of-order inputs deterministically by name', () => {
 	const players = [summary('z', 'Zara'), summary('a', 'Alice'), summary('m', 'Morgan')];

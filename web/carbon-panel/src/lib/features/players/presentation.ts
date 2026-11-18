@@ -412,6 +412,29 @@ export function serverOptionsFromRoster(
 		.sort((a, b) => compare(a.name.toLowerCase(), b.name.toLowerCase()));
 }
 
+/**
+ * Pure projection of the server-filter options from three independent inputs:
+ * the current roster (which may contain server-scoped rows), the server
+ * inventory supplied by the route, and the active server scope. Keeping this
+ * a pure function means a component derives options without writing state, so
+ * scoped rows cannot trigger an update-depth loop.
+ */
+export function projectServerOptions(
+	players: readonly PlayerSummary[],
+	configured: readonly { id: string; name: string }[],
+	scope: string
+): { id: string; name: string }[] {
+	const byId: Record<string, string> = {};
+	for (const option of serverOptionsFromRoster(players)) byId[option.id] = option.name;
+	for (const option of configured) {
+		if (option.id) byId[option.id] = option.name.trim() || option.id;
+	}
+	if (scope) byId[scope] = byId[scope] || scope;
+	return Object.entries(byId)
+		.map(([id, name]) => ({ id, name }))
+		.sort((a, b) => compare(a.name.toLowerCase(), b.name.toLowerCase()));
+}
+
 // ---------------------------------------------------------------------------
 // Moderation helpers
 // ---------------------------------------------------------------------------

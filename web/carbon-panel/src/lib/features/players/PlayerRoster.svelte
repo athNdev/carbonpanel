@@ -34,6 +34,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		presenceLabel,
 		presenceTagType,
 		provenanceView,
+		projectServerOptions,
 		accessRank,
 		type AccessFilter,
 		type RosterFilter,
@@ -88,7 +89,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	let filter = $state<RosterFilter>(readFilter());
-	let knownServers = $state<Record<string, string>>({});
 	const selected = new SvelteSet<string>();
 	let expanded = $state<string | null>(null);
 	let focusedIndex = $state(-1);
@@ -106,22 +106,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		onError?.(rosterState.error);
 	});
 
-	$effect(() => {
-		const additions: Record<string, string> = {};
-		for (const player of rosterState.players) {
-			if (player.serverId) additions[player.serverId] = player.serverName || player.serverId;
-		}
-		if (Object.keys(additions).length > 0) knownServers = { ...knownServers, ...additions };
-	});
-
-	const options = $derived.by(() => {
-		const byId: Record<string, string> = { ...knownServers };
-		for (const option of serverOptions) if (option.id) byId[option.id] = option.name || option.id;
-		if (serverId) byId[serverId] = byId[serverId] || serverId;
-		return Object.entries(byId)
-			.map(([id, name]) => ({ id, name }))
-			.sort((a, b) => a.name.localeCompare(b.name));
-	});
+	// Pure projection: options are derived, never written from an effect.
+	// An effect that read and rewrote a server-name map caused an update-depth
+	// loop whenever normal roster rows carried a serverId.
+	const options = $derived(projectServerOptions(rosterState.players, serverOptions, serverId));
 
 	const visible = $derived(filterAndSortPlayers(rosterState.players, filter));
 	const hasFilters = $derived(

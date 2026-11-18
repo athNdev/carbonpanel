@@ -23,6 +23,26 @@ test('PlayerProvenance renders source, confidence, timestamp and conflict as tag
 	);
 });
 
+test('PlayerRoster derives server options without an effect write loop', () => {
+	const s = source('PlayerRoster.svelte');
+	assert.match(
+		s,
+		/const options = \$derived\(projectServerOptions\(/,
+		'server options are derived purely from scoped roster rows, inventory and scope'
+	);
+	assert.doesNotMatch(
+		s,
+		/knownServers/,
+		'no effect-owned server map that is read and rewritten in the same cycle'
+	);
+	// Any remaining effect must not assign to a map keyed by server id.
+	assert.doesNotMatch(
+		s,
+		/\$effect\([\s\S]{0,400}(knownServers|serverNames)\s*=/,
+		'no effect writes a server-name map'
+	);
+});
+
 test('PlayerRoster has accessible sortable headers, keyboard map and scoped states', () => {
 	const s = source('PlayerRoster.svelte');
 	assert.match(s, /aria-sort=/, 'sortable headers expose aria-sort');
