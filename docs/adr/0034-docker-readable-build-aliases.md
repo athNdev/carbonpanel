@@ -19,18 +19,18 @@ not a verified image build time.
 ## Decision
 
 Add one immutable alias per distinct source digest, named
-`build-<YYYYMMDDTHHMMSSZ>-<SHORT12>`, where the timestamp is the observed Hub
-`last_updated` truncated to whole UTC seconds and `SHORT12` is the first 12
-hexadecimal characters of the commit encoded in the original sha tag name. The
-`build-` prefix deliberately cannot be read as a semver release or a moving
-channel.
+`build-YYYY-MM-DD-HHMMSS`, using the observed Hub `tag_last_pushed` (fallback
+`last_updated`) truncated to whole UTC seconds. No SHA or commit fragment
+appears in a user-facing name: full commit identity stays in the mapping and
+the retained original `sha-<40hex>` ref. The `build-` prefix and readable
+timestamp cannot be read as a semver release or a moving channel.
 
 Collision handling is deterministic: several sha tags for one digest yield one
-canonical alias (earliest timestamp, tie-break tag name ascending) with the
-other sha refs retained; distinct digests sharing a base alias append the first
-8 hex of the manifest digest to every member, escalating to the full digest if
-needed. The checked-in mapping at `docs/docker-readable-aliases.json` is
-recomputable from its `original_sha_tags` by
+canonical alias (earliest publication time, tie-break tag name ascending) with
+the other sha refs retained; distinct digests sharing a readable base alias get
+stable numeric suffixes (`-2`, `-3`, ...) ordered by manifest digest hex. The
+checked-in mapping at `docs/docker-readable-aliases.json` records each alias and
+is recomputable from its `original_sha_tags` by
 `scripts/docker_readable_aliases.py`.
 
 Aliases are added only by an explicit trusted-main `workflow_dispatch` with

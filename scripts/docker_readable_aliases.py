@@ -21,7 +21,7 @@ from scripts import release
 
 DOCKER_HUB_IMAGE = "atharvnaphade/carbonpanel"
 ALIAS_PREFIX = "build-"
-SHORT_LEN = 12
+SHORT_LEN = 12  # provenance metadata only; never part of a user-facing alias
 DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 SHA_TAG_RE = re.compile(r"sha-([0-9a-f]{40})")
 REQUIRED_PLATFORMS = frozenset({("linux", "amd64"), ("linux", "arm64")})
@@ -46,6 +46,24 @@ def utc_second(value):
     return moment.strftime("%Y%m%dT%H%M%SZ"), moment
 
 
+def publication_timestamp(entry):
+    """Return (datetime, source) using tag_last_pushed when available.
+
+    This is the Hub tag-push/publication time, NOT a verified image build time.
+    Re-pushing a tag can change it. `last_updated` is only a fallback.
+    """
+    value = entry.get("tag_last_pushed") or entry.get("observed_last_updated")
+    source = "tag_last_pushed" if entry.get("tag_last_pushed") else "observed_last_updated"
+    _, moment = utc_second(value)
+    return moment, source
+
+
+def readable_alias(moment, suffix=None):
+    """Pure human-readable UTC alias: build-YYYY-MM-DD-HHMMSS[-N]."""
+    name = moment.strftime("build-%Y-%m-%d-%H%M%S")
+    return name if suffix is None else f"{name}-{suffix}"
+
+
 def commit_from_sha_tag(tag):
     """Extract the 40-hex commit id from a sha-<commit> tag."""
     found = SHA_TAG_RE.fullmatch(tag or "")
@@ -54,11 +72,11 @@ def commit_from_sha_tag(tag):
     return found.group(1)
 
 
-def base_alias(commit, stamp):
-    """build-<YYYYMMDDTHHMMSSZ>-<first 12 hex of commit>."""
-    if not re.fullmatch(r"[0-9a-f]{40}", commit):
-        raise ValueError("commit must be 40 lowercase hex characters")
-    return ALIAS_PREFIX + stamp + "-" + commit[:SHORT_LEN]
+def base_alias(stamp):
+    """Pure readable build-YYYY-MM-DD-HHMMSS from a YYYYMMDDTHHMMSSZ stamp."""
+    if not re.fullmatch(r"\d{8}T\d{6}Z", stamp):
+        raise ValueError("invalid UTC second stamp: " + str(stamp))
+    return f"build-{stamp[0:4]}-{stamp[4:6]}-{stamp[6:8]}-{stamp[9:15]}"
 
 
 def normalize_platforms(platforms):
@@ -89,7 +107,7 @@ def validate_entries(entries):
         digest = entry.get("digest") or entry.get("manifest_list_digest", "")
         if not DIGEST_RE.fullmatch(digest):
             raise ValueError("invalid manifest digest for " + tag)
-        stamp, moment = utc_second(entry.get("observed_last_updated"))
+        publication_timestamp(entry)
         platforms = normalize_platforms(entry.get("platforms", []))
         if not REQUIRED_PLATFORMS <= platforms:
             raise ValueError(tag + " must expose linux/amd64 and linux/arm64")
@@ -100,10 +118,11 @@ def build_alias_map(entries, repository=DOCKER_HUB_IMAGE):
 
     Collision rules:
       1. Several sha tags for one digest produce ONE alias; canonical is the
-         earliest observed timestamp (tie-break: tag name ascending), other
+         earliest publication timestamp (tie-break: tag name ascending), other
          sha tags are retained.
-      2. Distinct digests sharing a base alias get a deterministic suffix from
-         the first 8 hex characters of their manifest digest on every member.
+      2. Distinct digests sharing a readable base alias get stable numeric
+         suffixes (-2, -3, ...) ordered by digest hex; no SHA fragment appears
+         in any user-facing alias.
     """
     validate_entries(entries)
     by_digest = defaultdict(list)
@@ -116,21 +135,24 @@ def build_alias_map(entries, repository=DOCKER_HUB_IMAGE):
     aliases = []
     for digest, group in by_digest.items():
         ordered = sorted(group, key=lambda item: (
-            utc_second(item["observed_last_updated"])[1], item["tag"]))
+            publication_timestamp(item)[0], item["tag"]))
         canonical = ordered[0]
-        stamp, _ = utc_second(canonical["observed_last_updated"])
-        base = base_alias(canonical["commit_id"], stamp)
+        moment, source = publication_timestamp(canonical)
+        base = readable_alias(moment)
         aliases.append({
             "digest": digest,
             "canonical_tag": canonical["tag"],
             "commit_id": canonical["commit_id"],
             "short_sha": canonical["commit_id"][:SHORT_LEN],
             "platforms": sorted(REQUIRED_PLATFORMS),
-            "observed_last_updated": canonical["observed_last_updated"],
-            "second_stamp": stamp,
+            "tag_last_pushed": canonical.get("tag_last_pushed"),
+            "observed_last_updated": canonical.get("observed_last_updated"),
+            "timestamp_source": source,
+            "timestamp_utc": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "retained_sha_tags": sorted(item["tag"] for item in ordered[1:]),
             "base_alias": base,
             "final_alias": base,
+            "collision_rank": 1,
             "suffix_reason": None,
         })
 
@@ -140,30 +162,23 @@ def build_alias_map(entries, repository=DOCKER_HUB_IMAGE):
     for base, group in by_base.items():
         if len(group) < 2:
             continue
-        for alias in group:
-            alias["final_alias"] = base + "-" + alias["digest"].split(":", 1)[1][:8]
-            alias["suffix_reason"] = "same second and short sha across distinct digests"
-        # Deterministic escalation if an 8-hex suffix is insufficient.
-        by_final = defaultdict(list)
-        for alias in group:
-            by_final[alias["final_alias"]].append(alias)
-        for final, colliding in by_final.items():
-            if len(colliding) < 2:
-                continue
-            for alias in colliding:
-                alias["final_alias"] = final + "-" + alias["digest"].split(":", 1)[1]
-                alias["suffix_reason"] = "same second, short sha and 8-hex digest prefix"
+        ordered = sorted(group, key=lambda item: item["digest"])
+        for rank, alias in enumerate(ordered, 1):
+            alias["final_alias"] = base if rank == 1 else f"{base}-{rank}"
+            alias["collision_rank"] = rank
+            alias["suffix_reason"] = "same publication second across distinct digests"
 
-    aliases.sort(key=lambda item: (item["second_stamp"], item["canonical_tag"], item["digest"]))
+    aliases.sort(key=lambda item: (item["timestamp_utc"], item["final_alias"], item["digest"]))
     for index, alias in enumerate(aliases, 1):
         alias["seq"] = index
     return {
         "schema_version": "1.0",
         "repository": repository,
         "alias_scheme": {
-            "pattern": "build-<YYYYMMDDTHHMMSSZ>-<SHORT12>[-<DIGEST8>]",
-            "timestamp_source": "OBSERVED Docker Hub tag last_updated (tag push time), truncated to whole UTC seconds",
-            "short_sha": "first 12 lowercase hex of the commit id in the sha tag name",
+            "pattern": "build-YYYY-MM-DD-HHMMSS[-N]",
+            "timestamp_source": "Hub tag_last_pushed when present, otherwise observed last_updated; this is tag publication time, NOT a verified image build time",
+            "collision_suffix": "stable -2, -3, ... ordered by manifest digest hex when distinct digests share a readable base alias",
+            "provenance": "commit id and short sha stay in the mapping and the retained original sha-<40hex> ref, never in a user-facing alias",
             "immutability": "new alias at the exact existing manifest digest; sha refs and channel aliases are untouched",
         },
         "aliases": aliases,

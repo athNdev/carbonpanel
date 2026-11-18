@@ -2,9 +2,10 @@
   "schema_version": "1.0",
   "repository": "atharvnaphade/carbonpanel",
   "alias_scheme": {
-    "pattern": "build-<YYYYMMDDTHHMMSSZ>-<SHORT12>[-<DIGEST8>]",
-    "timestamp_source": "OBSERVED Docker Hub tag last_updated (tag push time), truncated to whole UTC seconds",
-    "short_sha": "first 12 lowercase hex of the commit id in the sha tag name",
+    "pattern": "build-YYYY-MM-DD-HHMMSS[-N]",
+    "timestamp_source": "Hub tag_last_pushed when present, otherwise observed last_updated; this is tag publication time, NOT a verified image build time",
+    "collision_suffix": "stable -2, -3, ... ordered by manifest digest hex when distinct digests share a readable base alias",
+    "provenance": "commit id and short sha stay in the mapping and the retained original sha-<40hex> ref, never in a user-facing alias",
     "immutability": "new alias at the exact existing manifest digest; sha refs and channel aliases are untouched"
   },
   "aliases": [
@@ -23,11 +24,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-14T02:34:20.061022Z",
       "observed_last_updated": "2026-11-14T02:34:20.061022Z",
-      "second_stamp": "20261114T023420Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-14T02:34:20Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261114T023420Z-12c22ff93d37",
-      "final_alias": "build-20261114T023420Z-12c22ff93d37",
+      "base_alias": "build-2026-11-14-023420",
+      "final_alias": "build-2026-11-14-023420",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 1
     },
@@ -46,11 +50,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-14T02:44:11.796069Z",
       "observed_last_updated": "2026-11-14T02:44:11.796069Z",
-      "second_stamp": "20261114T024411Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-14T02:44:11Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261114T024411Z-4836618be34c",
-      "final_alias": "build-20261114T024411Z-4836618be34c",
+      "base_alias": "build-2026-11-14-024411",
+      "final_alias": "build-2026-11-14-024411",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 2
     },
@@ -69,11 +76,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-14T02:51:35.196217Z",
       "observed_last_updated": "2026-11-14T02:51:35.196217Z",
-      "second_stamp": "20261114T025135Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-14T02:51:35Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261114T025135Z-9b244a0f16d3",
-      "final_alias": "build-20261114T025135Z-9b244a0f16d3",
+      "base_alias": "build-2026-11-14-025135",
+      "final_alias": "build-2026-11-14-025135",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 3
     },
@@ -92,11 +102,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-14T03:00:40.824918Z",
       "observed_last_updated": "2026-11-14T03:00:40.824918Z",
-      "second_stamp": "20261114T030040Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-14T03:00:40Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261114T030040Z-abb049419146",
-      "final_alias": "build-20261114T030040Z-abb049419146",
+      "base_alias": "build-2026-11-14-030040",
+      "final_alias": "build-2026-11-14-030040",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 4
     },
@@ -115,11 +128,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-14T03:24:49.722826Z",
       "observed_last_updated": "2026-11-14T03:24:49.722826Z",
-      "second_stamp": "20261114T032449Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-14T03:24:49Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261114T032449Z-2c5afdc093c1",
-      "final_alias": "build-20261114T032449Z-2c5afdc093c1",
+      "base_alias": "build-2026-11-14-032449",
+      "final_alias": "build-2026-11-14-032449",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 5
     },
@@ -138,11 +154,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-14T03:29:13.344639Z",
       "observed_last_updated": "2026-11-14T03:29:13.344639Z",
-      "second_stamp": "20261114T032913Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-14T03:29:13Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261114T032913Z-66f1f88394d3",
-      "final_alias": "build-20261114T032913Z-66f1f88394d3",
+      "base_alias": "build-2026-11-14-032913",
+      "final_alias": "build-2026-11-14-032913",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 6
     },
@@ -161,11 +180,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-14T03:48:28.196263Z",
       "observed_last_updated": "2026-11-14T03:48:28.196263Z",
-      "second_stamp": "20261114T034828Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-14T03:48:28Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261114T034828Z-5b5c914b18c9",
-      "final_alias": "build-20261114T034828Z-5b5c914b18c9",
+      "base_alias": "build-2026-11-14-034828",
+      "final_alias": "build-2026-11-14-034828",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 7
     },
@@ -184,11 +206,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T07:35:48.922126Z",
       "observed_last_updated": "2026-11-17T07:35:48.922126Z",
-      "second_stamp": "20261117T073548Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T07:35:48Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T073548Z-f88748be6a21",
-      "final_alias": "build-20261117T073548Z-f88748be6a21",
+      "base_alias": "build-2026-11-17-073548",
+      "final_alias": "build-2026-11-17-073548",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 8
     },
@@ -207,11 +232,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T08:32:52.1958Z",
       "observed_last_updated": "2026-11-17T08:32:52.1958Z",
-      "second_stamp": "20261117T083252Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T08:32:52Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T083252Z-d70585d88c25",
-      "final_alias": "build-20261117T083252Z-d70585d88c25",
+      "base_alias": "build-2026-11-17-083252",
+      "final_alias": "build-2026-11-17-083252",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 9
     },
@@ -230,11 +258,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T11:28:44.794878Z",
       "observed_last_updated": "2026-11-17T11:28:44.794878Z",
-      "second_stamp": "20261117T112844Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T11:28:44Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T112844Z-6a2dc9490feb",
-      "final_alias": "build-20261117T112844Z-6a2dc9490feb",
+      "base_alias": "build-2026-11-17-112844",
+      "final_alias": "build-2026-11-17-112844",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 10
     },
@@ -253,11 +284,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T11:34:16.48722Z",
       "observed_last_updated": "2026-11-17T11:34:16.48722Z",
-      "second_stamp": "20261117T113416Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T11:34:16Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T113416Z-ae555ed01b92",
-      "final_alias": "build-20261117T113416Z-ae555ed01b92",
+      "base_alias": "build-2026-11-17-113416",
+      "final_alias": "build-2026-11-17-113416",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 11
     },
@@ -276,11 +310,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T13:31:23.111474Z",
       "observed_last_updated": "2026-11-17T13:31:23.111474Z",
-      "second_stamp": "20261117T133123Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T13:31:23Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T133123Z-cbd1e6de1646",
-      "final_alias": "build-20261117T133123Z-cbd1e6de1646",
+      "base_alias": "build-2026-11-17-133123",
+      "final_alias": "build-2026-11-17-133123",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 12
     },
@@ -299,11 +336,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T14:06:12.647238Z",
       "observed_last_updated": "2026-11-17T14:06:12.647238Z",
-      "second_stamp": "20261117T140612Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T14:06:12Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T140612Z-80d6a7d775ae",
-      "final_alias": "build-20261117T140612Z-80d6a7d775ae",
+      "base_alias": "build-2026-11-17-140612",
+      "final_alias": "build-2026-11-17-140612",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 13
     },
@@ -322,11 +362,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T14:11:47.375923Z",
       "observed_last_updated": "2026-11-17T14:11:47.375923Z",
-      "second_stamp": "20261117T141147Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T14:11:47Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T141147Z-518b64b867d3",
-      "final_alias": "build-20261117T141147Z-518b64b867d3",
+      "base_alias": "build-2026-11-17-141147",
+      "final_alias": "build-2026-11-17-141147",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 14
     },
@@ -345,11 +388,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T14:19:10.168096Z",
       "observed_last_updated": "2026-11-17T14:19:10.168096Z",
-      "second_stamp": "20261117T141910Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T14:19:10Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T141910Z-42f478609a65",
-      "final_alias": "build-20261117T141910Z-42f478609a65",
+      "base_alias": "build-2026-11-17-141910",
+      "final_alias": "build-2026-11-17-141910",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 15
     },
@@ -368,11 +414,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T14:28:57.046663Z",
       "observed_last_updated": "2026-11-17T14:28:57.046663Z",
-      "second_stamp": "20261117T142857Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T14:28:57Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T142857Z-17044f44de53",
-      "final_alias": "build-20261117T142857Z-17044f44de53",
+      "base_alias": "build-2026-11-17-142857",
+      "final_alias": "build-2026-11-17-142857",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 16
     },
@@ -391,11 +440,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-17T23:39:27.693438Z",
       "observed_last_updated": "2026-11-17T23:39:27.693438Z",
-      "second_stamp": "20261117T233927Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-17T23:39:27Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261117T233927Z-b897c3cab354",
-      "final_alias": "build-20261117T233927Z-b897c3cab354",
+      "base_alias": "build-2026-11-17-233927",
+      "final_alias": "build-2026-11-17-233927",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 17
     },
@@ -414,11 +466,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-18T00:05:34.147288Z",
       "observed_last_updated": "2026-11-18T00:05:34.147288Z",
-      "second_stamp": "20261118T000534Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-18T00:05:34Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261118T000534Z-c15b8d7d672d",
-      "final_alias": "build-20261118T000534Z-c15b8d7d672d",
+      "base_alias": "build-2026-11-18-000534",
+      "final_alias": "build-2026-11-18-000534",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 18
     },
@@ -437,11 +492,14 @@
           "arm64"
         ]
       ],
+      "tag_last_pushed": "2026-11-18T07:25:53.400494Z",
       "observed_last_updated": "2026-11-18T07:25:53.400494Z",
-      "second_stamp": "20261118T072553Z",
+      "timestamp_source": "tag_last_pushed",
+      "timestamp_utc": "2026-11-18T07:25:53Z",
       "retained_sha_tags": [],
-      "base_alias": "build-20261118T072553Z-d8597d4e9535",
-      "final_alias": "build-20261118T072553Z-d8597d4e9535",
+      "base_alias": "build-2026-11-18-072553",
+      "final_alias": "build-2026-11-18-072553",
+      "collision_rank": 1,
       "suffix_reason": null,
       "seq": 19
     }
@@ -465,7 +523,7 @@
       ],
       "observed_last_updated": "2026-11-18T07:25:53.400494Z",
       "tag_last_pushed": "2026-11-18T07:25:53.400494Z",
-      "mapping_ref": "build-20261118T072553Z-d8597d4e9535",
+      "mapping_ref": "build-2026-11-18-072553",
       "is_canonical": true
     },
     {
@@ -478,7 +536,7 @@
       ],
       "observed_last_updated": "2026-11-18T00:05:34.147288Z",
       "tag_last_pushed": "2026-11-18T00:05:34.147288Z",
-      "mapping_ref": "build-20261118T000534Z-c15b8d7d672d",
+      "mapping_ref": "build-2026-11-18-000534",
       "is_canonical": true
     },
     {
@@ -491,7 +549,7 @@
       ],
       "observed_last_updated": "2026-11-17T23:39:27.693438Z",
       "tag_last_pushed": "2026-11-17T23:39:27.693438Z",
-      "mapping_ref": "build-20261117T233927Z-b897c3cab354",
+      "mapping_ref": "build-2026-11-17-233927",
       "is_canonical": true
     },
     {
@@ -504,7 +562,7 @@
       ],
       "observed_last_updated": "2026-11-17T14:28:57.046663Z",
       "tag_last_pushed": "2026-11-17T14:28:57.046663Z",
-      "mapping_ref": "build-20261117T142857Z-17044f44de53",
+      "mapping_ref": "build-2026-11-17-142857",
       "is_canonical": true
     },
     {
@@ -517,7 +575,7 @@
       ],
       "observed_last_updated": "2026-11-17T14:19:10.168096Z",
       "tag_last_pushed": "2026-11-17T14:19:10.168096Z",
-      "mapping_ref": "build-20261117T141910Z-42f478609a65",
+      "mapping_ref": "build-2026-11-17-141910",
       "is_canonical": true
     },
     {
@@ -530,7 +588,7 @@
       ],
       "observed_last_updated": "2026-11-17T14:11:47.375923Z",
       "tag_last_pushed": "2026-11-17T14:11:47.375923Z",
-      "mapping_ref": "build-20261117T141147Z-518b64b867d3",
+      "mapping_ref": "build-2026-11-17-141147",
       "is_canonical": true
     },
     {
@@ -543,7 +601,7 @@
       ],
       "observed_last_updated": "2026-11-17T14:06:12.647238Z",
       "tag_last_pushed": "2026-11-17T14:06:12.647238Z",
-      "mapping_ref": "build-20261117T140612Z-80d6a7d775ae",
+      "mapping_ref": "build-2026-11-17-140612",
       "is_canonical": true
     },
     {
@@ -556,7 +614,7 @@
       ],
       "observed_last_updated": "2026-11-17T13:31:23.111474Z",
       "tag_last_pushed": "2026-11-17T13:31:23.111474Z",
-      "mapping_ref": "build-20261117T133123Z-cbd1e6de1646",
+      "mapping_ref": "build-2026-11-17-133123",
       "is_canonical": true
     },
     {
@@ -569,7 +627,7 @@
       ],
       "observed_last_updated": "2026-11-17T11:34:16.48722Z",
       "tag_last_pushed": "2026-11-17T11:34:16.48722Z",
-      "mapping_ref": "build-20261117T113416Z-ae555ed01b92",
+      "mapping_ref": "build-2026-11-17-113416",
       "is_canonical": true
     },
     {
@@ -582,7 +640,7 @@
       ],
       "observed_last_updated": "2026-11-17T11:28:44.794878Z",
       "tag_last_pushed": "2026-11-17T11:28:44.794878Z",
-      "mapping_ref": "build-20261117T112844Z-6a2dc9490feb",
+      "mapping_ref": "build-2026-11-17-112844",
       "is_canonical": true
     },
     {
@@ -595,7 +653,7 @@
       ],
       "observed_last_updated": "2026-11-17T08:32:52.1958Z",
       "tag_last_pushed": "2026-11-17T08:32:52.1958Z",
-      "mapping_ref": "build-20261117T083252Z-d70585d88c25",
+      "mapping_ref": "build-2026-11-17-083252",
       "is_canonical": true
     },
     {
@@ -608,7 +666,7 @@
       ],
       "observed_last_updated": "2026-11-17T07:35:48.922126Z",
       "tag_last_pushed": "2026-11-17T07:35:48.922126Z",
-      "mapping_ref": "build-20261117T073548Z-f88748be6a21",
+      "mapping_ref": "build-2026-11-17-073548",
       "is_canonical": true
     },
     {
@@ -621,7 +679,7 @@
       ],
       "observed_last_updated": "2026-11-14T03:48:28.196263Z",
       "tag_last_pushed": "2026-11-14T03:48:28.196263Z",
-      "mapping_ref": "build-20261114T034828Z-5b5c914b18c9",
+      "mapping_ref": "build-2026-11-14-034828",
       "is_canonical": true
     },
     {
@@ -634,7 +692,7 @@
       ],
       "observed_last_updated": "2026-11-14T03:29:13.344639Z",
       "tag_last_pushed": "2026-11-14T03:29:13.344639Z",
-      "mapping_ref": "build-20261114T032913Z-66f1f88394d3",
+      "mapping_ref": "build-2026-11-14-032913",
       "is_canonical": true
     },
     {
@@ -647,7 +705,7 @@
       ],
       "observed_last_updated": "2026-11-14T03:24:49.722826Z",
       "tag_last_pushed": "2026-11-14T03:24:49.722826Z",
-      "mapping_ref": "build-20261114T032449Z-2c5afdc093c1",
+      "mapping_ref": "build-2026-11-14-032449",
       "is_canonical": true
     },
     {
@@ -660,7 +718,7 @@
       ],
       "observed_last_updated": "2026-11-14T03:00:40.824918Z",
       "tag_last_pushed": "2026-11-14T03:00:40.824918Z",
-      "mapping_ref": "build-20261114T030040Z-abb049419146",
+      "mapping_ref": "build-2026-11-14-030040",
       "is_canonical": true
     },
     {
@@ -673,7 +731,7 @@
       ],
       "observed_last_updated": "2026-11-14T02:51:35.196217Z",
       "tag_last_pushed": "2026-11-14T02:51:35.196217Z",
-      "mapping_ref": "build-20261114T025135Z-9b244a0f16d3",
+      "mapping_ref": "build-2026-11-14-025135",
       "is_canonical": true
     },
     {
@@ -686,7 +744,7 @@
       ],
       "observed_last_updated": "2026-11-14T02:44:11.796069Z",
       "tag_last_pushed": "2026-11-14T02:44:11.796069Z",
-      "mapping_ref": "build-20261114T024411Z-4836618be34c",
+      "mapping_ref": "build-2026-11-14-024411",
       "is_canonical": true
     },
     {
@@ -699,7 +757,7 @@
       ],
       "observed_last_updated": "2026-11-14T02:34:20.061022Z",
       "tag_last_pushed": "2026-11-14T02:34:20.061022Z",
-      "mapping_ref": "build-20261114T023420Z-12c22ff93d37",
+      "mapping_ref": "build-2026-11-14-023420",
       "is_canonical": true
     }
   ],
@@ -709,7 +767,8 @@
     "Observed last_updated for sha-d8597d4e... (07:25:53Z) and the moving \"nightly\" tag (07:26:45Z) share digest sha256:ecc89ba9...; likewise sha-c15b8d7d... and \"edge\" share sha256:4c772558.... The close timestamps are consistent with publication time, not necessarily original compile time.",
     "The Hub images[] list exposes 2 runnable platforms (linux/amd64, linux/arm64). OCI inspection shows an additional attestation manifest (unknown/unknown) that is not a runnable platform and is intentionally excluded.",
     "Commit ids are taken from the tag names (sha-<40hex>); they were not re-verified against a git checkout in this read-only inventory.",
-    "The Hub API \"count\" field was observed to be stale; enumeration used the paginated results array (24 tags, next=null) rather than the count field."
+    "The Hub API \"count\" field was observed to be stale; enumeration used the paginated results array (24 tags, next=null) rather than the count field.",
+    "Aliases are derived from tag_last_pushed (tag push/publication time), not a verified image build time; re-pushing a tag can change it."
   ],
   "untouched_tags": [
     "latest",

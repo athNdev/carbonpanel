@@ -66,7 +66,7 @@ class DockerReadableAliasTests(unittest.TestCase):
         first = result["aliases"][0]
         self.assertEqual(first["canonical_tag"], "sha-" + "2" * 40)
         self.assertEqual(first["retained_sha_tags"], ["sha-" + "1" * 40])
-        self.assertEqual(first["final_alias"], "build-20261118T000001Z-" + "2" * 12)
+        self.assertEqual(first["final_alias"], "build-2026-11-18-000001")
 
     def test_same_second_collision_gets_deterministic_digest_suffix(self):
         entries = [
@@ -75,23 +75,22 @@ class DockerReadableAliasTests(unittest.TestCase):
         ]
         result = aliases.build_alias_map(entries)
         self.assertEqual([item["final_alias"] for item in result["aliases"]], [
-            "build-20261118T000002Z-" + "1" * 12 + "-bbbbbbbb",
-            "build-20261118T000002Z-" + "1" * 12 + "-cccccccc",
+            "build-2026-11-18-000002",
+            "build-2026-11-18-000002-2",
         ])
         self.assertEqual(result["counts"]["same_second_collision_groups"], 1)
+        ranks = sorted(item["collision_rank"] for item in result["aliases"])
+        self.assertEqual(ranks, [1, 2])
 
-    def test_eight_hex_suffix_collision_escalates_to_full_digest(self):
-        prefix = "d" * 8
-        first = "sha256:" + prefix + "1" * 56
-        second = "sha256:" + prefix + "2" * 56
-        entries = [
-            entry("sha-" + "1" * 40, first, "2026-11-18T00:00:03Z"),
-            entry("sha-" + "1" * 40, second, "2026-11-18T00:00:03Z"),
-        ]
-        result = aliases.build_alias_map(entries)
-        suffixes = [item["final_alias"].split("-")[-1] for item in result["aliases"]]
-        self.assertIn(first.split(":", 1)[1], suffixes)
-        self.assertIn(second.split(":", 1)[1], suffixes)
+    def test_tag_last_pushed_is_preferred_and_no_alias_carries_a_sha_fragment(self):
+        raw = entry("sha-" + "1" * 40, "sha256:" + "a" * 64, "2026-11-18T00:00:09Z")
+        raw["tag_last_pushed"] = "2026-11-18T00:00:05Z"
+        result = aliases.build_alias_map([raw])
+        self.assertEqual(result["aliases"][0]["final_alias"], "build-2026-11-18-000005")
+        self.assertEqual(result["aliases"][0]["timestamp_source"], "tag_last_pushed")
+        self.assertNotIn("1" * 12, result["aliases"][0]["final_alias"])
+        for item in self.checked_in()["aliases"]:
+            self.assertRegex(item["final_alias"], r"^build-\d{4}-\d{2}-\d{2}-\d{6}(-\d+)?$")
 
     def test_channel_tags_and_invalid_inputs_are_refused(self):
         for tag in aliases.CHANNEL_TAGS:
