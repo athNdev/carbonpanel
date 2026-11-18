@@ -4,7 +4,7 @@ title: Repository map
 description: Top-level directories and the subsystem each one owns.
 status: stable
 owners: [oss-runtime]
-code_refs: [cmd, internal, pkg, proto, web, docs, docker, scripts, oidc]
+code_refs: [cmd, internal, pkg, proto, web, docs, docker, scripts, oidc, packaging]
 sources:
   - title: Design specification
     resource: ../../DESIGN.md
@@ -26,6 +26,7 @@ sources:
 | `web/carbon-panel` | SvelteKit 2 / Svelte 5 console |
 | `docs` | ADRs, plans, research, runbooks and issue write-ups |
 | `docker`, `scripts`, `oidc` | Deployment assets, developer scripts, OIDC examples |
+| `packaging` | Reproducible deployment artifacts (node VM QCOW2/cloud-init build definitions) |
 
 # Rule
 

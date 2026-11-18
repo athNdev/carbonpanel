@@ -1,0 +1,9 @@
+{
+  "fixture": true,
+  "synthetic": true,
+  "artifact_family": "carbonpanel-node-vm-fixture",
+  "artifact_version": "0.1.0-fixture",
+  "source_date_epoch": "1700000000",
+  "toolchain": {"qemu_img": "8.2.0", "xorriso": "1.5.6", "python": "3.12"},
+  "note": "Offline test config only. No real endpoint, credential or world data."
+}
