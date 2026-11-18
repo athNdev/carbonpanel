@@ -3,11 +3,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-package native
+package enroll
 
-import (
-	"encoding/json"
-)
+import "encoding/json"
 
 // ownedSnapshot is the serialised form of the in-memory enrollment store used
 // by the restart fixture. It contains no plaintext secret: the node-generated

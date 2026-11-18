@@ -72,9 +72,11 @@ artifacts are used: a pre-registration CSR that merely carries the approved
 key, and a **fresh claim signature made after the server issues a challenge**.
 
 1. **(a) Pre-registration bundle, generated on the node:** generate a CSPRNG
-   secret `S` (>= 256 bits), a random salt, and a node key pair `K` (Ed25519 or
-   P-256). Compute `digest = SHA-256(salt || S)`. Produce `CSR_PRE`, signed by
-   `K`, carrying the node label, salt, digest and the SPKI of `K`. The one-time
+   secret `S` (>= 256 bits), a random salt, and a node key pair `K`. The shared
+   implementation is **Ed25519-only** (see "Curve decision" below); P-256 is no
+   longer accepted by the boundary. Compute `digest = SHA-256(salt || S)`.
+   Produce `CSR_PRE`, signed by `K`, carrying the node label, salt, digest and
+   the SPKI of `K`. The one-time
    bundle exported to the node administrator contains `salt`, `digest`,
    `CSR_PRE`, `approved_public_key_spki` (DER SPKI) and
    `approved_key_fingerprint` (SHA-256 of the SPKI). `CSR_PRE` is registration
@@ -116,6 +118,88 @@ key, and a **fresh claim signature made after the server issues a challenge**.
    `enrollment_state = active`, and store only a digest of the issued
    credential. Any failure rolls back completely. Replay, revoked state,
    expired TTL, stale nonce and generation mismatch get distinct refusals.
+
+### Canonical `SIG_CLAIM` context — exact encoding (OSS-385)
+
+The `||` notation above is **not** a bare byte concatenation with ambiguous
+boundaries. It has exactly one encoder, `ClaimContextRaw` in the shared
+`internal/noderuntime/enroll` package; `ClaimContext` is the typed wrapper that
+converts `NodeCapability` enum values to their proto names in declaration order
+and then calls it. No mode lane (host-native, VM or LXC) may implement a second
+encoder. The signed bytes are, in order:
+
+| # | Field | Encoding |
+| --- | --- | --- |
+| 1 | Domain separator | UTF-8 `carbon-panel-enroll-v1`, then one `0x00` |
+| 2 | `node_id` | UTF-8 bytes, then `0x00` |
+| 3 | `enrollment_id` | UTF-8 bytes, then `0x00` |
+| 4 | `challenge_id` | UTF-8 bytes, then `0x00` |
+| 5 | `server_nonce` | raw stored bytes, then `0x00` |
+| 6 | `expires_at` | `expires_at.UTC().Format(time.RFC3339Nano)` UTF-8, then `0x00` |
+| 7 | `canonical_capabilities` | proto enum names joined by ASCII `,` (no spaces), then `0x00` |
+| 8 | `server_observed_channel_context` | raw bytes, **no** trailing separator |
+
+Every separator is a single `0x00` byte; a `0x00` inside a string field would
+be ambiguous, so the fields are constrained as follows: node ID, enrollment ID
+and challenge ID are operator/controller-issued identifiers that never contain
+`0x00`; capability names are fixed proto enum identifiers (no commas); the
+channel context is controller-derived binary and is the final field so its
+bytes need no delimiter. There is no length prefix and no canonical-JSON step.
+
+**Nonce and expiry are distinct and must not be confused.**
+
+- The nonce is **always** the server-stored, single-use value created by
+  `BeginEnrollmentChallenge`. The shared `node_control.proto` has **no client
+  nonce field**: `ClaimEnrollmentRequest.challenge_id` is a reference to the
+  server challenge, and `FreshClaimSignature` is the proof. A lane that accepts
+  a nonce from the request, or signs anything other than the stored nonce, is
+  out of conformance. Both the fixture harness and the production authority
+  call `ClaimContextRaw`, so no second nonce source can be introduced.
+- Field 6 is the **enrollment `expires_at`** — the same value returned in
+  `BeginEnrollmentChallengeResponse.expires_at` and stored on the enrollment
+  row. The challenge nonce has its own **shorter internal TTL** (currently two
+  minutes) which is used only by the server to refuse a stale nonce; that TTL
+  is deliberately **not** part of `SIG_CLAIM`. Signing the shorter nonce TTL
+  would change the context on every challenge and break the binding; signing a
+  client-supplied expiry would let a caller extend the enrollment.
+
+### Curve decision: Ed25519 only
+
+ADR 0019 originally allowed "Ed25519 or P-256". The shared implementation
+narrows this to **Ed25519 only**:
+
+- `GenerateNodeBundle` creates an Ed25519 key and a self-signed CSR.
+  `CreateEnrollment` refuses a CSR whose public key is not Ed25519, and
+  `ClaimEnrollment` type-asserts the approved SPKI to `ed25519.PublicKey`
+  before verifying. There is exactly one signature, verification and
+  certificate-subject path.
+- Adding P-256 (or any second curve) would require a new versioned signing
+  domain, a canonical ECDSA signature encoding, separate fixtures and a new
+  ADR. It is rejected for now because a single curve removes cross-curve
+  context ambiguity and ECDSA nonce-management risk without changing the wire
+  contract. The `SigningDomain` constant pins the scheme version.
+
+### Shared boundary and atomic commit (OSS-385)
+
+`internal/noderuntime/enroll` is the single mode-agnostic production package.
+The host-native lane consumes it through `native.Runner` and a compatibility
+re-export shim; VM and LXC lanes must import the same package rather than
+reimplement enrollment, claim context, issuance or authorization. The shared
+`Boundary` wires all three domains: `CreateEnrollment`/`RevokeCredential`/
+`Rotate` require the operator domain, `BeginEnrollment`/`ClaimEnrollment`
+require the bootstrap phase marker, and `AuthorizeNodeOperation`/
+`AuthorizePreflight` require the enrolled-node domain on the caller's own
+object. The bootstrap marker models the bounded phase, not a wire-authenticated
+principal; the wire RPC remains unauthenticated and rate-limited.
+
+For the MUST-FIX atomicity rule: **issue the client certificate first into a
+local variable; only then commit ownership state in one step.** If issuance
+fails, no nonce is consumed, no state is promoted, the serial counter does not
+advance, and a legitimate retry with a fresh challenge can succeed. The
+`InjectIssuanceFailure` fault seam and the shared fixture plus the RPC seam
+fixture both assert zero state mutation and a successful retry. A failure
+after verification but before any mutation is a separate `InjectPreCommitFailure`
+seam.
 
 **Proto revision required in P1 (in this owned proto only):** add REQUIRED
 `approved_public_key_spki`, `approved_key_fingerprint`,
@@ -224,7 +308,8 @@ in-memory/local DB fixture — no daemon, no host, no real credential, no live
 node. They gate the start of P1 lifecycle work:
 
 1. **Synthetic key, pre-registration CSR and fresh signature:** generate an
-   ephemeral Ed25519/P-256 key; assert `CSR_PRE` is accepted only as registered
+   ephemeral Ed25519 key (P-256 is refused by the shared boundary); assert
+   `CSR_PRE` is accepted only as registered
    material and that a fresh `SIG_CLAIM` by the approved key over node ID,
    enrollment ID, challenge ID/nonce, expiry, capabilities and verified channel
    context is required for a valid claim. Reusing `CSR_PRE` as the claim proof
@@ -256,7 +341,10 @@ node. They gate the start of P1 lifecycle work:
    serial. `GetNode`/`ListNodes` and all enrollment metadata responses contain
    no secret value.
 9. **Atomicity:** inject a failure after verification but before commit and
-   assert neither a node nor a consumed enrollment survives the rollback.
+   assert neither a node nor a consumed enrollment survives the rollback. Also
+   inject a failure in certificate issuance itself and assert zero ownership
+   mutation (state, nonce, generation, serial counter) plus a successful
+   legitimate retry with a fresh challenge.
 10. **Durable rotation:** rotate to `credential_generation + 1`, revoke the old
     certificate serial, close and reopen the owned DB, then assert the new
     generation and revocation still apply and the old serial is still refused.
@@ -269,9 +357,14 @@ salt, pre-registration `csr_pre`, challenge ID and server nonce, fresh claim
 signature and channel-binding evidence, and signed public certificate metadata
 in `ClaimEnrollmentResponse`. `internal/rpc/node_control_enrollment_fixture_test.go`
 is a **test-only** seam implementing the ten harmless fixtures above with
-synthetic keys and fake TLS channels. **No enrollment RPC handler is mounted and
-no production enrollment server exists**; these tests prove refusals and state
-transitions only, never implemented enrollment or deployment success.
+synthetic keys and fake TLS channels. It delegates the canonical context and
+the certificate issuance path to `internal/noderuntime/enroll`, so there is no
+second crypto implementation in the fixture. **No enrollment RPC handler is
+mounted and no production enrollment server exists**; these tests prove
+refusals and state transitions only, never implemented enrollment or deployment
+success. OSS-385 adds the shared mode-agnostic production package with the
+issue-first/commit-once rule, exact-context test and Ed25519-only decision; it
+does not mount a handler or touch a live host.
 
 ### P0 contract verification (shipped; denial and shape only)
 

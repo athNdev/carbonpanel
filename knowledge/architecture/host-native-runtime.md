@@ -33,12 +33,16 @@ fields, RPCs, shared DB columns or auth middleware.
   gates; an unqualified host fails closed with a precise refusal code.
 - A preinstalled/shared Docker daemon is never a fallback. Its presence is
   reported but never used to qualify the mode or route an operation.
-- The enrollment boundary implements the ADR 0019 scheme against shared proto
-  types: node-generated secret, REQUIRED approved key, `CSR_PRE` as material,
-  challenge-bound fresh `SIG_CLAIM`, single-use atomic consume, controller-
-  derived TLS topology support/refusal, a signed public client certificate and
-  three non-crossing authorization domains. No secret is stored or returned in
-  a read response.
+- The enrollment boundary is owned by the mode-agnostic
+  `internal/noderuntime/enroll` package; this lane only consumes it through
+  `native.Runner` and a compatibility re-export shim. No mode-local proof of
+  possession, claim context, certificate policy or authorization check exists.
+  The shared boundary implements the ADR 0019 scheme against shared proto
+  types: node-generated secret, REQUIRED approved Ed25519 key, `CSR_PRE` as
+  material, challenge-bound fresh `SIG_CLAIM` over the server-stored nonce,
+  issue-certificate-first atomic consume, controller-derived TLS topology
+  support/refusal, a signed public client certificate and three non-crossing
+  authorization domains. No secret is stored or returned in a read response.
 - `cmd/carbon-node` is the bounded preflight/doctor runtime caller. It reads an
   injected HostFacts document; it never probes or changes a live host, installs
   a daemon, writes a host unit or mounts a real socket. Fixtures use synthetic
@@ -62,5 +66,6 @@ privilege decision explicit and testable without a live host.
 
 # Read next
 
+- [Shared enrollment boundary](shared-enrollment-boundary.md)
 - [Node control protocol](node-control-protocol.md)
 - [ADR 0019](../../docs/adr/0019-node-control-contract.md)
