@@ -36,8 +36,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import { formatBytes } from '$lib/utils';
-	import { apiFetch } from '$lib/api/fetch';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { createRequestSequence } from '$lib/utils/request-sequence';
+	import type {
+		BrowseModResult as RpcBrowseMod,
+		ModVersion as RpcModVersion,
+		ModDependency as RpcModDependency
+	} from '$lib/proto/carbonpanel/v1/mod_browse_pb';
 
 	interface Props {
 		open: boolean;
@@ -82,6 +87,47 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		key: string;
 		value: string;
 		removable: boolean;
+	}
+
+	// The generated contract uses camelCase and int64 (bigint) fields. Map at
+	// the transport boundary so the dialog's render state stays unchanged.
+	function toSearchMod(r: RpcBrowseMod): SearchMod {
+		return {
+			id: r.id,
+			slug: r.slug,
+			title: r.title,
+			description: r.description,
+			icon_url: r.iconUrl,
+			author: r.author,
+			downloads: Number(r.downloads),
+			categories: r.categories,
+			platform: r.platform,
+			client_side: r.clientSide,
+			server_side: r.serverSide,
+			installed: r.installed
+		};
+	}
+
+	function toModDependency(d: RpcModDependency): ModDependency {
+		return {
+			project_id: d.projectId,
+			version_id: d.versionId,
+			dependency_type: d.dependencyType,
+			title: d.title || undefined
+		};
+	}
+
+	function toModVersion(v: RpcModVersion): ModVersion {
+		return {
+			id: v.id,
+			version_number: v.versionNumber,
+			name: v.name,
+			version_type: v.versionType,
+			file_name: v.fileName,
+			download_url: v.downloadUrl,
+			file_size: Number(v.fileSize),
+			dependencies: v.dependencies.map(toModDependency)
+		};
 	}
 
 	let { open = $bindable(false), server, onInstalled }: Props = $props();
@@ -203,29 +249,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				activeFilters.find((f) => f.key === 'version')?.value ||
 				(filterByVersion ? server.mcVersion || '' : '');
 			const sideVal = activeFilters.find((f) => f.key === 'side')?.value || '';
-			const categoryVal = activeFilters.find((f) => f.key === 'category')?.value || '';
+			// The legacy route ignored a `category` query param; the generated
+			// contract exposes only the filters the shared operation applies.
 
-			const params = new URLSearchParams({
-				query: searchQuery.trim(),
-				platform,
-				loader: loaderVal,
-				mc_version: versionVal,
-				side: sideVal,
-				...(categoryVal ? { category: categoryVal } : {})
-			});
-
-			const res = await apiFetch(`/api/v1/servers/${server.id}/mods/search?${params.toString()}`);
-			if (!res.ok) {
-				const errorText = await res.text();
-				throw new Error(errorText || `HTTP ${res.status}`);
-			}
-			const data = await res.json();
+			const response = await rpcClient.modBrowse.searchMods(
+				{
+					serverId: server.id,
+					query: searchQuery.trim(),
+					platform,
+					loader: loaderVal,
+					mcVersion: versionVal,
+					side: sideVal
+				},
+				silentCallOptions
+			);
 			if (!searchSequence.isCurrent(seq)) return;
-			if (data.error) {
-				searchError = data.error;
-			} else {
-				mods = data.results || [];
-			}
+			mods = response.results.map(toSearchMod);
 		} catch (err) {
 			console.error('Failed to search mods:', err);
 			searchError = `Failed to search mods: ${(err instanceof Error ? err.message : undefined) || 'Please verify server connection.'}`;
@@ -248,23 +287,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			const versionVal =
 				activeFilters.find((f) => f.key === 'version')?.value ||
 				(filterByVersion ? server.mcVersion || '' : '');
-			const params = new URLSearchParams({
-				platform: mod.platform,
-				loader: loaderVal,
-				mc_version: versionVal
-			});
-
 			const modTarget = mod.platform === 'curseforge' && mod.id ? mod.id : mod.slug || mod.id;
-			const res = await apiFetch(
-				`/api/v1/servers/${server.id}/mods/${modTarget}/versions?${params.toString()}`
+			const response = await rpcClient.modBrowse.getModVersions(
+				{
+					serverId: server.id,
+					project: modTarget,
+					platform: mod.platform,
+					loader: loaderVal,
+					mcVersion: versionVal
+				},
+				silentCallOptions
 			);
-			if (!res.ok) {
-				const errorText = await res.text();
-				throw new Error(errorText || `HTTP ${res.status}`);
-			}
-			const data = await res.json();
 			if (!versionsSequence.isCurrent(seq)) return;
-			versions = data.versions || [];
+			versions = response.versions.map(toModVersion);
 			if (versions.length > 0) {
 				selectVersion(versions[0]);
 			}
@@ -311,17 +346,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			if (visited.has(key)) continue;
 			visited.add(key);
 			try {
-				const vParams = new URLSearchParams({
-					platform,
-					loader: loaderVal,
-					mc_version: versionVal
-				});
-				const vRes = await apiFetch(
-					`/api/v1/servers/${server.id}/mods/${depId}/versions?${vParams.toString()}`
+				const response = await rpcClient.modBrowse.getModVersions(
+					{
+						serverId: server.id,
+						project: depId,
+						platform,
+						loader: loaderVal,
+						mcVersion: versionVal
+					},
+					silentCallOptions
 				);
-				if (!vRes.ok) continue;
-				const vData = await vRes.json();
-				const depVersions = vData.versions || [];
+				const depVersions = response.versions.map(toModVersion);
 				if (depVersions.length === 0) continue;
 				const ver = depVersions[0];
 				if (!ver.file_name || !ver.download_url) continue;
@@ -394,22 +429,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			);
 			items.push(...depItems);
 
-			const res = await apiFetch(`/api/v1/servers/${server.id}/mods/install`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ items })
-			});
+			const data = await rpcClient.modBrowse.installMods(
+				{
+					serverId: server.id,
+					items: items.map((item) => ({
+						name: item.name,
+						fileName: item.file_name,
+						downloadUrl: item.download_url
+					}))
+				},
+				silentCallOptions
+			);
 
-			const text = await res.text();
-			let data: { success?: boolean; message?: string; errors?: string[] } | null = null;
-			try {
-				data = JSON.parse(text);
-			} catch {
-				data = null;
-			}
-			if (!res.ok || !data) {
-				throw new Error(text || `HTTP ${res.status}`);
-			}
 			if (data.success) {
 				toast.success(data.message || `Installed ${selectedMod.title}`);
 				selectedMod.installed = true;
@@ -418,7 +449,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				}
 				selectedMod = null;
 			} else {
-				const detail = (data.errors || []).join('; ');
+				const detail = data.errors.join('; ');
 				toast.error(detail ? `${data.message} ${detail}` : data.message || 'Failed to install mod');
 			}
 		} catch (err) {
