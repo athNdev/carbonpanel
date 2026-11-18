@@ -52,8 +52,10 @@ commit with exact successful CI. The shared sha tag is preflighted before any
 build or push by both edge and nightly writers; a verified existing image is
 reused, while a conflict or unknown lookup refuses with zero writes. Reuse
 requires independent pinned-build evidence: exact successful CI for the commit,
-the observed digest matching the recorded digest, both platform manifests and a
-matching OCI revision label on each; a bare expected digest is not evidence.
+the observed digest matching the recorded digest, both platform child manifests
+and a matching `org.opencontainers.image.revision` in each digest-addressed child
+config (descriptor annotations are not evidence); a bare expected digest is not
+evidence.
 Nightly and edge promotion bind the previously promoted commit to the observed
 alias digest through that same evidence before checking ancestry, so a stale
 operator string cannot authorize a move. Buildx writes only the sha reference;

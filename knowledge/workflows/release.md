@@ -104,8 +104,9 @@ resume from the original verified download artifact without rebuilding images.
   or push: strict lookup classification treats only a definitive manifest-unknown
   as absent, and a missing tag with an expected digest refuses. Reuse needs
   independent pinned-build evidence — exact successful CI for the commit, digest
-  match, both platform manifests and matching OCI revision labels on each; a bare
-  expected digest is not evidence. Nightly and edge promotion bind the previous
+  match, both platform child manifests and matching `org.opencontainers.image.revision`
+  in each digest-addressed child config (not descriptor annotations); a bare
+  expected digest is not evidence. Edge uses separate previous binding inputs. Nightly and edge promotion bind the previous
   commit to the observed alias digest through that same evidence before checking
   ancestry. Buildx writes only the sha reference; an explicitly gated digest-based
   step moves edge so it survives sha reuse in either order. Nightly never moves

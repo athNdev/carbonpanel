@@ -196,6 +196,9 @@ def parse_inspect(text):
 # Generic 404/"not found" strings also occur on auth, network and transient
 # failures, so publication paths (strict=True) refuse those as unknown.
 DEFINITIVE_MISSING = ("manifest unknown", "no such manifest", "unknown manifest")
+# Real read-only probe (2026-11-18):
+#   ERROR: docker.io/atharvnaphade/carbonpanel:<tag>: not found
+DEFINITIVE_NOT_FOUND = re.compile(r"(?m)^\s*error:.*:\s*not found\s*$")
 AMBIGUOUS_FAILURE = ("unauthorized", "denied", "forbidden", "connection",
                     "timeout", "temporar", "server error", "unavailable")
 
@@ -206,12 +209,14 @@ def classify_lookup_failure(error, strict=False):
     Non-strict callers keep the historical broad matching; publication paths
     must pass strict=True so only a definitive missing manifest becomes absent.
     """
-    message = ((getattr(error, "stderr", "") or "")
-               + " " + (getattr(error, "output", "") or "")).lower()
+    message = (str(getattr(error, "stderr", "") or "")
+               + " " + str(getattr(error, "output", "") or "")).lower()
     if strict:
         if any(token in message for token in AMBIGUOUS_FAILURE):
             return "unknown"
-        return "absent" if any(token in message for token in DEFINITIVE_MISSING) else "unknown"
+        definitive = (any(token in message for token in DEFINITIVE_MISSING)
+                      or bool(DEFINITIVE_NOT_FOUND.search(message)))
+        return "absent" if definitive else "unknown"
     if any(token in message for token in
            ("not found", "no such", "does not exist", "manifest unknown", "404")):
         return "absent"
@@ -237,51 +242,86 @@ def observe_reference(reference, runner=None, strict=False):
         return "unknown", None
 
 
-def platform_manifest_revisions(reference, runner=None):
-    """Read OCI revision labels from the amd64 and arm64 platform manifests.
+def manifest_platforms(reference, runner=None):
+    """Read the real Buildx index: (index_digest, {(os, arch): child_digest}).
 
-    Returns {(os, arch): revision}. Missing or unreadable labels yield an empty
-    map, so callers fail closed. `runner` is injectable for offline fixtures.
+    `docker buildx imagetools inspect <ref> --format '{{json .Manifest}}'`
+    documents lowercase `manifests[].digest` and `platform`. Attestation
+    descriptors (`unknown/unknown`) are ignored.
     """
     try:
         raw = (runner or inspect_runner)(
             "docker", "buildx", "imagetools", "inspect", reference,
-            "--format", "{{json .}}")
+            "--format", "{{json .Manifest}}")
         document = json.loads(raw)
     except (subprocess.CalledProcessError, OSError, ValueError, TypeError):
-        return {}
-    revisions = {}
-    for item in document.get("Manifests", []):
-        platform = item.get("Platform", {}) or {}
-        key = (platform.get("OS"), platform.get("Architecture"))
-        if key not in REQUIRED_PLATFORMS:
-            continue
-        annotations = item.get("Annotations") or {}
-        revision = (annotations.get("org.opencontainers.image.revision")
-                    or item.get("Revision"))
-        if revision:
-            revisions[key] = revision
-    return revisions
+        return "", {}
+    platforms = {}
+    for item in document.get("manifests", []):
+        platform = item.get("platform") or {}
+        key = (platform.get("os"), platform.get("architecture"))
+        if key in REQUIRED_PLATFORMS and item.get("digest"):
+            platforms[key] = item["digest"]
+    return document.get("digest", ""), platforms
 
 
-def trusted_pinned_evidence(commit, digest, ci_verified, observation, revisions):
-    """Verify independent pinned-build evidence before moving a shared alias.
+def platform_manifest_revisions(reference, runner=None):
+    """Read build-label revisions from BOTH target platform image configs.
 
-    Requires exact-commit CI confirmation, the observed index digest, both
-    target platforms and their OCI revision labels equal to the pinned commit.
+    The index gives exact child digests; each child config is fetched by digest
+    with `--format '{{json .Image}}'` and its `config.Labels` revision checked.
+    Returns {(os, arch): {"digest": child_digest, "revision": label}}.
+    Missing or unreadable data yields an empty/partial map so callers fail closed.
     """
-    if not ci_verified or str(ci_verified).strip().lower() != "true":
-        return False, "exact successful CI for the pinned commit is required"
+    _, platforms = manifest_platforms(reference, runner)
+    result = {}
+    for key, child in platforms.items():
+        try:
+            raw = (runner or inspect_runner)(
+                "docker", "buildx", "imagetools", "inspect",
+                f"{reference}@{child}", "--format", "{{json .Image}}")
+            image = json.loads(raw)
+        except (subprocess.CalledProcessError, OSError, ValueError, TypeError):
+            continue
+        labels = (image.get("config") or {}).get("Labels") or {}
+        revision = (labels.get("org.opencontainers.image.revision")
+                    or labels.get("revision") or "")
+        result[key] = {"digest": child, "revision": revision}
+    return result
+
+
+def verify_sha_identity(commit, digest, observation, revisions):
+    """Source-based identity check without CI: index digest, both platform
+    child digests and their config.Labels revision must match the commit.
+    """
     if not re.fullmatch(r"[0-9a-f]{40}", commit) or not valid_digest(digest):
-        return False, "invalid pinned commit or digest"
+        return False, "invalid commit or digest"
     try:
         verify_tag_digest(observation, digest)
     except ValueError as error:
         return False, "immutable image verification failed: " + str(error)
     for platform in sorted(REQUIRED_PLATFORMS):
-        if revisions.get(platform) != commit:
-            return False, f"OCI revision on {platform[0]}/{platform[1]} does not match the pinned commit"
-    return True, "trusted pinned build evidence verified"
+        value = revisions.get(platform)
+        if not isinstance(value, dict) or not valid_digest(value.get("digest")):
+            return False, f"missing {platform[0]}/{platform[1]} platform manifest digest"
+        if value.get("revision") != commit:
+            return False, f"config revision on {platform[0]}/{platform[1]} does not match the commit"
+    return True, "sha identity verified from platform configs"
+
+
+def trusted_pinned_evidence(commit, digest, ci_verified, observation, revisions,
+                            index_digest=None):
+    """Verify independent pinned-build evidence before moving a shared alias.
+
+    Requires exact-commit CI confirmation, the observed index digest, both
+    target platform child digests and their config.Labels revisions equal to
+    the pinned commit. Descriptor annotations are never treated as evidence.
+    """
+    if not ci_verified or str(ci_verified).strip().lower() != "true":
+        return False, "exact successful CI for the pinned commit is required"
+    if index_digest and index_digest != digest:
+        return False, "index digest from the registry does not match the verified digest"
+    return verify_sha_identity(commit, digest, observation, revisions)
 
 
 def immutable_publication_decision(observations, expected_digest=None, provenance=None):
@@ -609,7 +649,7 @@ def sha_tag_decision(commit, observation, expected_digest=None, evidence=None,
         return "refuse", "", "sha tag already exists; a verified expected digest is required to reuse it"
     if info["digest"] != expected_digest:
         return "refuse", "", "sha tag digest conflicts with the verified expected digest"
-    if evidence is not None and evidence.get("digest") != expected_digest:
+    if evidence and evidence.get("digest") != expected_digest:
         return "refuse", "", "expected digest is not backed by the pinned build evidence"
     ok, reason = trusted_pinned_evidence(
         commit, expected_digest, ci_verified, observation, revisions or {})
@@ -630,13 +670,13 @@ def commit_is_ancestor(older, newer):
 
 
 def nightly_identity_binding(previous_commit, previous_digest, observer=None,
-                             revisions=None, ci_verified=False, evidence=None):
+                             revisions=None):
     """Bind a previous-commit claim to the LIVE sha-<previous_commit> identity.
 
-    Binds to the SAME evidence required for the candidate: exact-commit CI, the
-    observed index digest, both platforms and matching OCI revision labels on
-    both platform manifests. Returns a digest→commit map only for that fully
-    verified identity; otherwise {} so the monotonicity check refuses.
+    Uses independent source evidence for the PREVIOUS image: its own live sha
+    index digest and both platform config revisions. It never reuses the
+    candidate's CI result or evidence digest. Returns a digest→commit map only
+    for the fully verified previous identity; otherwise {} so promotion refuses.
     """
     if not previous_commit or not previous_digest or not valid_digest(previous_digest):
         return {}
@@ -644,10 +684,8 @@ def nightly_identity_binding(previous_commit, previous_digest, observer=None,
         nightly_immutable_reference(previous_commit), strict=True)
     if state != "present" or info["digest"] != previous_digest:
         return {}
-    if evidence is not None and evidence.get("digest") != previous_digest:
-        return {}
-    ok, _ = trusted_pinned_evidence(
-        previous_commit, previous_digest, ci_verified, (state, info), revisions or {})
+    ok, _ = verify_sha_identity(
+        previous_commit, previous_digest, (state, info), revisions or {})
     if not ok:
         return {}
     return {previous_digest: previous_commit}
@@ -670,7 +708,7 @@ def nightly_promotion_decision(commit, digest, immutable_observation,
         return False, "the pinned commit must be a full 40-hex SHA"
     if not valid_digest(digest):
         return False, "missing or invalid verified digest"
-    if evidence is not None and evidence.get("digest") != digest:
+    if evidence and evidence.get("digest") != digest:
         return False, "expected digest is not backed by pinned build evidence"
     ok, reason = trusted_pinned_evidence(
         commit, digest, ci_verified, immutable_observation, revisions or {})
@@ -1134,10 +1172,15 @@ def sha_tag_gate(args):
     reference = nightly_immutable_reference(args.commit)
     observation = observe_reference(reference, strict=True)
     revisions = platform_manifest_revisions(reference)
-    evidence = json_argument(args.pinned_evidence, {})
+    evidence = json_argument(args.pinned_evidence)
     action, digest, reason = sha_tag_decision(
         args.commit, observation, args.expected_digest, evidence,
         revisions, args.ci_verified)
+    if action == "reuse":
+        ok, detail = verify_sha_identity(
+            args.commit, digest, observation, revisions)
+        if not ok:
+            action, reason = "refuse", detail
     values = {"action": action, "digest": digest, "reason": reason,
               "reference": reference,
               "platform_revisions": json.dumps(
@@ -1160,12 +1203,16 @@ def dev_alias_promote(args, alias):
     immutable = observe_reference(reference, strict=True)
     alias_observation = observe_reference(
         f"{DOCKER_HUB_IMAGE}:{alias}", strict=True)
-    previous_revisions = json_argument(args.previous_revisions, {})
-    evidence = json_argument(args.pinned_evidence, {})
+    evidence = json_argument(args.pinned_evidence)
+    # Independent evidence: the previous identity is verified from its OWN
+    # digest-addressed platform configs, never from the candidate's CI result
+    # or the candidate's evidence digest.
+    previous_revisions = {}
+    if args.previous_commit and args.previous_digest:
+        previous_revisions = platform_manifest_revisions(
+            nightly_immutable_reference(args.previous_commit))
     binding = nightly_identity_binding(
-        args.previous_commit, args.previous_digest,
-        revisions=previous_revisions, ci_verified=args.ci_verified,
-        evidence=evidence)
+        args.previous_commit, args.previous_digest, revisions=previous_revisions)
     candidate_revisions = platform_manifest_revisions(reference)
     allowed, reason = nightly_promotion_decision(
         args.commit, args.digest, immutable, alias_observation,
@@ -1372,7 +1419,6 @@ def build_parser():
         promote_cmd.add_argument("--digest", required=True)
         promote_cmd.add_argument("--previous-commit", default="")
         promote_cmd.add_argument("--previous-digest", default="")
-        promote_cmd.add_argument("--previous-revisions", default="")
         promote_cmd.add_argument("--ci-verified", default="")
         promote_cmd.add_argument("--pinned-evidence", default="")
         promote_cmd.add_argument("--apply", action="store_true")

@@ -40,18 +40,23 @@ on:
         required: false
         type: string
         default: ''
+      previous_edge_commit:
+        description: 'Verified commit currently held by edge; separate from the nightly binding'
+        required: false
+        type: string
+        default: ''
+      previous_edge_digest:
+        description: 'Observed digest currently held by edge; must match the live alias and its verified sha reference'
+        required: false
+        type: string
+        default: ''
       expected_sha_digest:
         description: 'Verified digest for the pinned commit sha tag; required only when reusing an existing sha image'
         required: false
         type: string
         default: ''
       pinned_evidence:
-        description: 'Trusted pinned build evidence JSON, e.g. {"digest":"sha256:..."}; required for sha reuse'
-        required: false
-        type: string
-        default: ''
-      previous_revisions:
-        description: 'Verified OCI revision labels JSON for the previously promoted sha image; required when moving over a different digest'
+        description: 'Trusted pinned build evidence JSON, e.g. {"digest":"sha256:..."}; optional corroboration for sha reuse'
         required: false
         type: string
         default: ''
@@ -309,12 +314,14 @@ jobs:
           IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
           CI_VERIFIED: ${{ steps.ci.outputs.verified }}
           PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
-          PREVIOUS_REVISIONS: ${{ inputs.previous_revisions }}
+          PREVIOUS_EDGE_COMMIT: ${{ inputs.previous_edge_commit }}
+          PREVIOUS_EDGE_DIGEST: ${{ inputs.previous_edge_digest }}
         run: |
           python3 scripts/release.py edge-promote \
             --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
             --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" \
-            --previous-revisions "$PREVIOUS_REVISIONS" --apply
+            --previous-commit "$PREVIOUS_EDGE_COMMIT" \
+            --previous-digest "$PREVIOUS_EDGE_DIGEST" --apply
       - name: Verify immutable sha image and move only the nightly alias
         if: steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true'
         env:
@@ -324,13 +331,11 @@ jobs:
           PREVIOUS_DIGEST: ${{ inputs.previous_nightly_digest }}
           CI_VERIFIED: ${{ steps.ci.outputs.verified }}
           PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
-          PREVIOUS_REVISIONS: ${{ inputs.previous_revisions }}
         run: |
           python3 scripts/release.py nightly-promote \
             --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
             --previous-commit "$PREVIOUS_COMMIT" --previous-digest "$PREVIOUS_DIGEST" \
-            --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" \
-            --previous-revisions "$PREVIOUS_REVISIONS" --apply
+            --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" --apply
       - name: Sync Docker Hub repository description
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
         if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'

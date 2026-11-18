@@ -22,6 +22,46 @@ def registry_writes(command):
             if any(token in call.args[0] for token in ("create", "--push", "publish"))]
 
 
+def platform_revisions(commit):
+    """Digest-addressed platform config evidence for offline fixtures."""
+    return {
+        ("linux", "amd64"): {"digest": "sha256:" + "a" * 64, "revision": commit},
+        ("linux", "arm64"): {"digest": "sha256:" + "b" * 64, "revision": commit},
+    }
+
+
+def real_docker_inspect_runner(index_digest, children):
+    """Realistic `imagetools inspect` output: index descriptors have null
+    revision annotations; the revision label lives in each child config.
+    """
+    index = {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "digest": index_digest,
+        "manifests": [
+            {"mediaType": "application/vnd.oci.image.manifest.v1+json",
+             "digest": data["digest"],
+             "annotations": {"org.opencontainers.image.revision": None},
+             "platform": {"architecture": arch, "os": "linux"}}
+            for (_, arch), data in children.items()
+        ],
+    }
+    def runner(*args):
+        reference, fmt = args[4], args[6]
+        if fmt == "{{json .Manifest}}":
+            return json.dumps(index)
+        child = reference.rsplit("@", 1)[1]
+        for (os_name, arch), data in children.items():
+            if data["digest"] == child:
+                return json.dumps({
+                    "architecture": arch, "os": os_name,
+                    "config": {"Labels": {
+                        "org.opencontainers.image.revision": data["revision"]}},
+                })
+        raise AssertionError("unexpected child config request: " + child)
+    return runner
+
+
 def present(digest=None, platforms=None):
     """Registry fixture: a present, fully inspected multi-arch reference."""
     return ("present", {
@@ -916,7 +956,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_sha_tag_gate_reuse_conflict_and_unknown(self):
         commit, digest = "c" * 40, "sha256:" + "d" * 64
-        revisions = {(os_name, arch): commit for os_name, arch in release.REQUIRED_PLATFORMS}
+        revisions = platform_revisions(commit)
         good = dict(expected_digest=digest, evidence={"digest": digest},
                     revisions=revisions, ci_verified="true")
         self.assertEqual(release.sha_tag_decision(commit, ("absent", None))[0], "push")
@@ -926,7 +966,8 @@ class ReleaseTests(unittest.TestCase):
         action, reused, _ = release.sha_tag_decision(commit, present(digest), **good)
         self.assertEqual((action, reused), ("reuse", digest))
         bad_revisions = dict(revisions)
-        bad_revisions[("linux", "arm64")] = "b" * 40
+        bad_revisions[("linux", "arm64")] = {
+            "digest": "sha256:" + "b" * 64, "revision": "b" * 40}
         for label, observation, changes in (
             ("conflicting digest", present("sha256:" + "e" * 64), {}),
             ("missing expected digest", present(digest), {"expected_digest": ""}),
@@ -963,6 +1004,11 @@ class ReleaseTests(unittest.TestCase):
             return runner
         self.assertEqual(release.observe_reference(
             "ref", failure("MANIFEST_UNKNOWN: manifest unknown"), strict=True)[0], "absent")
+        # Exact read-only Buildx probe output for a nonexistent tag (2026-11-18).
+        observed_missing = ("ERROR: docker.io/atharvnaphade/carbonpanel:"
+                            "nightly-policy-nonexistent-probe: not found")
+        self.assertEqual(release.observe_reference(
+            "ref", failure(observed_missing), strict=True)[0], "absent")
         for message in ("HTTP 404 not found", "unauthorized: not found",
                         "connection refused", "temporary server error",
                         "manifest unknown: connection reset"):
@@ -972,33 +1018,29 @@ class ReleaseTests(unittest.TestCase):
 
     def test_nightly_identity_binding_requires_live_sha_evidence(self):
         previous, old_digest = "a" * 40, "sha256:" + "f" * 64
-        revisions = {(os_name, arch): previous for os_name, arch in release.REQUIRED_PLATFORMS}
+        revisions = platform_revisions(previous)
         def observer(ref, strict=False):
             return present(old_digest)
-        common = dict(observer=observer, revisions=revisions, ci_verified="true")
+        common = dict(observer=observer, revisions=revisions)
         self.assertEqual(release.nightly_identity_binding(previous, old_digest, **common),
                          {old_digest: previous})
-        different = {(os_name, arch): "b" * 40 for os_name, arch in release.REQUIRED_PLATFORMS}
+        different = platform_revisions("b" * 40)
         self.assertEqual(release.nightly_identity_binding(
-            previous, old_digest, revisions=different, ci_verified="true",
-            observer=observer), {})
+            previous, old_digest, revisions=different, observer=observer), {})
         self.assertEqual(release.nightly_identity_binding(
-            previous, old_digest, revisions=revisions, ci_verified="false",
-            observer=observer), {})
-        self.assertEqual(release.nightly_identity_binding(
-            previous, old_digest, **{**common, "evidence": {"digest": "sha256:" + "1" * 64}}), {})
+            previous, old_digest, revisions={}, observer=observer), {})
         self.assertEqual(release.nightly_identity_binding(
             previous, "sha256:" + "1" * 64, **common), {})
         self.assertEqual(release.nightly_identity_binding(
             previous, old_digest, observer=lambda ref, strict=False: ("absent", None),
-            revisions=revisions, ci_verified="true"), {})
+            revisions=revisions), {})
         self.assertEqual(release.nightly_identity_binding("", old_digest, **common), {})
 
     def test_nightly_promotion_is_bound_to_observed_identity(self):
         candidate, previous = "c" * 40, "a" * 40
         digest, old_digest = "sha256:" + "d" * 64, "sha256:" + "f" * 64
         immutable = present(digest)
-        revisions = {(os_name, arch): candidate for os_name, arch in release.REQUIRED_PLATFORMS}
+        revisions = platform_revisions(candidate)
         evidence = {"digest": digest}
         base = dict(ci_verified="true", revisions=revisions, evidence=evidence)
         self.assertTrue(release.nightly_promotion_decision(
@@ -1026,7 +1068,8 @@ class ReleaseTests(unittest.TestCase):
             previous_commit=previous, identity_binding=bound,
             ancestor=lambda old, new: True, **base)[0])
         wrong_revisions = dict(revisions)
-        wrong_revisions[("linux", "amd64")] = "b" * 40
+        wrong_revisions[("linux", "amd64")] = {
+            "digest": "sha256:" + "a" * 64, "revision": "b" * 40}
         self.assertFalse(release.nightly_promotion_decision(
             candidate, digest, immutable, ("absent", None),
             ci_verified="true", revisions=wrong_revisions, evidence=evidence)[0])
@@ -1034,7 +1077,7 @@ class ReleaseTests(unittest.TestCase):
     def test_nightly_promote_apply_has_zero_writes_on_refusal_and_is_idempotent(self):
         candidate, previous = "c" * 40, "a" * 40
         digest, old_digest = "sha256:" + "d" * 64, "sha256:" + "f" * 64
-        revisions = {(os_name, arch): candidate for os_name, arch in release.REQUIRED_PLATFORMS}
+        revisions = platform_revisions(candidate)
         def invoke(*extra):
             return ["release.py", "nightly-promote", "--commit", candidate,
                     "--digest", digest, "--previous-commit", previous,
@@ -1129,7 +1172,7 @@ class ReleaseTests(unittest.TestCase):
     def test_edge_and_nightly_survive_both_publication_orders_on_sha_reuse(self):
         commit, digest = "c" * 40, "sha256:" + "d" * 64
         sha_ref = "atharvnaphade/carbonpanel:sha-" + commit
-        revisions = {(os_name, arch): commit for os_name, arch in release.REQUIRED_PLATFORMS}
+        revisions = platform_revisions(commit)
         for order in (("nightly-promote", "edge-promote"),
                       ("edge-promote", "nightly-promote")):
             with self.subTest(order=order):
@@ -1142,17 +1185,27 @@ class ReleaseTests(unittest.TestCase):
                     target = args[args.index("--tag") + 1]
                     state[target.rsplit(":", 1)[1]] = present(digest)
                     return subprocess.CompletedProcess(args, 0)
+                def argv_for(command):
+                    step = ("Promote edge from the verified immutable digest"
+                            if command == "edge-promote"
+                            else "Verify immutable sha image and move only the nightly alias")
+                    substitutions = {
+                        "PINNED_COMMIT": commit, "IMAGE_DIGEST": digest,
+                        "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
+                        "PREVIOUS_COMMIT": "", "PREVIOUS_DIGEST": "",
+                        "PREVIOUS_EDGE_COMMIT": "", "PREVIOUS_EDGE_DIGEST": "",
+                    }
+                    return self.workflow_argv(step, substitutions)
+
                 writes = []
                 for command in order:
-                    argv = ["release.py", command, "--commit", commit, "--digest", digest,
-                            "--ci-verified", "true",
-                            "--pinned-evidence", json.dumps({"digest": digest}), "--apply"]
+                    argv = argv_for(command)
                     with patch.object(release, "observe_reference", side_effect=observe), \
                          patch.object(release, "platform_manifest_revisions",
                                       return_value=revisions), \
                          patch.object(release, "nightly_identity_binding", return_value={}), \
                          patch.object(release.subprocess, "run", side_effect=fake_run) as runner, \
-                         patch("sys.argv", argv):
+                         patch("sys.argv", ["release.py"] + argv):
                         release.main()
                     writes.extend(registry_writes(runner))
                 self.assertEqual(len(writes), 2)
@@ -1160,17 +1213,141 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(state[alias][1]["digest"], digest)
                 # Repeating both commands writes nothing (sha reuse is idempotent).
                 for command in order:
-                    argv = ["release.py", command, "--commit", commit, "--digest", digest,
-                            "--ci-verified", "true",
-                            "--pinned-evidence", json.dumps({"digest": digest}), "--apply"]
+                    argv = argv_for(command)
                     with patch.object(release, "observe_reference", side_effect=observe), \
                          patch.object(release, "platform_manifest_revisions",
                                       return_value=revisions), \
                          patch.object(release, "nightly_identity_binding", return_value={}), \
                          patch.object(release.subprocess, "run") as runner, \
-                         patch("sys.argv", argv):
+                         patch("sys.argv", ["release.py"] + argv):
                         release.main()
                         self.assertEqual(registry_writes(runner), [])
+
+
+    # --- Recorded real Docker inspect shape and workflow CLI arguments -------
+
+    def workflow_argv(self, step_name, substitutions):
+        """Extract the real `python3 scripts/release.py ...` argv from a cd.yml step."""
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        block = source.split("- name: " + step_name + "\n", 1)[1].split("\n      - ", 1)[0]
+        run_block = block.split("run: |\n", 1)[1]
+        command = " ".join(line.strip() for line in run_block.splitlines() if line.strip())
+        command = command.replace(" \\", " ")
+        for variable, value in substitutions.items():
+            command = command.replace("$" + variable, value)
+        return shlex.split(command)[2:]
+
+    def test_recorded_real_docker_config_revision_probe(self):
+        commit = "c15b8d7d672d8d5fb6459a1317890e2b45adbbb1"
+        index_digest = "sha256:ead260ef33c9a9fa8929097e4e50db02243e8889a74efeb95c8fda622862c001"
+        children = {
+            ("linux", "amd64"): {
+                "digest": "sha256:" + "1" * 64, "revision": commit},
+            ("linux", "arm64"): {
+                "digest": "sha256:" + "2" * 64, "revision": commit},
+        }
+        reference = release.nightly_immutable_reference(commit)
+        revisions = release.platform_manifest_revisions(
+            reference, real_docker_inspect_runner(index_digest, children))
+        for platform in release.REQUIRED_PLATFORMS:
+            self.assertEqual(revisions[platform]["revision"], commit)
+        self.assertEqual(revisions[("linux", "amd64")]["digest"], "sha256:" + "1" * 64)
+        self.assertTrue(release.verify_sha_identity(
+            commit, index_digest, present(index_digest), revisions)[0])
+        # Descriptor annotations are null in this recorded shape: they are not evidence.
+        bad = {key: dict(value) for key, value in revisions.items()}
+        bad[("linux", "arm64")]["revision"] = "b" * 40
+        self.assertFalse(release.verify_sha_identity(
+            commit, index_digest, present(index_digest), bad)[0])
+        bad[("linux", "arm64")]["revision"] = None
+        self.assertFalse(release.verify_sha_identity(
+            commit, index_digest, present(index_digest), bad)[0])
+
+    def test_workflow_cli_arguments_move_existing_edge_with_separate_binding(self):
+        commit, old_commit = "c" * 40, "a" * 40
+        digest = "sha256:" + "d" * 64
+        old_digest = "sha256:" + "f" * 64
+        argv = self.workflow_argv(
+            "Promote edge from the verified immutable digest",
+            {"PINNED_COMMIT": commit, "IMAGE_DIGEST": digest,
+             "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
+             "PREVIOUS_EDGE_COMMIT": old_commit,
+             "PREVIOUS_EDGE_DIGEST": old_digest})
+        self.assertEqual(argv[0], "edge-promote")
+        self.assertIn("--previous-commit", argv)
+        self.assertIn(old_commit, argv)
+        self.assertIn(old_digest, argv)
+
+        sha_ref = release.nightly_immutable_reference(commit)
+        previous_ref = release.nightly_immutable_reference(old_commit)
+        children = {
+            ("linux", "amd64"): {"digest": "sha256:" + "1" * 64, "revision": commit},
+            ("linux", "arm64"): {"digest": "sha256:" + "2" * 64, "revision": commit},
+        }
+        previous_children = {
+            ("linux", "amd64"): {"digest": "sha256:" + "3" * 64, "revision": old_commit},
+            ("linux", "arm64"): {"digest": "sha256:" + "4" * 64, "revision": old_commit},
+        }
+        original_revisions = release.platform_manifest_revisions
+        def revisions_for(reference):
+            target = children if reference == sha_ref else (
+                previous_children if reference == previous_ref else {})
+            return original_revisions(
+                reference, real_docker_inspect_runner("sha256:" + "9" * 64, target))
+        state = {"edge": present(old_digest)}
+        def observe(ref, strict=False):
+            if ref == sha_ref:
+                return present(digest)
+            if ref == previous_ref:
+                return present(old_digest)
+            if ref == "atharvnaphade/carbonpanel:edge":
+                return state["edge"]
+            return ("absent", None)
+        def fake_run(args, **kwargs):
+            state["edge"] = present(digest)
+            return subprocess.CompletedProcess(args, 0)
+        with patch.object(release, "observe_reference", side_effect=observe), \
+             patch.object(release, "platform_manifest_revisions", side_effect=revisions_for), \
+             patch.object(release, "commit_is_ancestor", return_value=True), \
+             patch.object(release.subprocess, "run", side_effect=fake_run) as command, \
+             patch("sys.argv", ["release.py"] + argv):
+            release.main()
+            writes = registry_writes(command)
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(state["edge"][1]["digest"], digest)
+
+
+    def test_default_first_update_and_reuse_flows(self):
+        commit, digest = "c" * 40, "sha256:" + "d" * 64
+        revisions = platform_revisions(commit)
+        # FIRST: no evidence and no previous binding; missing alias promotes.
+        argv = self.workflow_argv(
+            "Verify immutable sha image and move only the nightly alias",
+            {"PINNED_COMMIT": commit, "IMAGE_DIGEST": digest,
+             "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
+             "PREVIOUS_COMMIT": "", "PREVIOUS_DIGEST": ""})
+        state = {"nightly": ("absent", None)}
+        def observe(ref, strict=False):
+            if ref == "atharvnaphade/carbonpanel:nightly":
+                return state["nightly"]
+            return present(digest)
+        def fake_run(args, **kwargs):
+            state["nightly"] = present(digest)
+            return subprocess.CompletedProcess(args, 0)
+        with patch.object(release, "observe_reference", side_effect=observe), \
+             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release.subprocess, "run", side_effect=fake_run) as command, \
+             patch("sys.argv", ["release.py"] + argv):
+            release.main()
+            self.assertEqual(len(registry_writes(command)), 1)
+        # REUSE: sha gate with trusted per-platform config evidence returns reuse.
+        with patch.object(release, "observe_reference", return_value=present(digest)), \
+             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", ["release.py", "sha-tag-gate", "--commit", commit,
+                                "--expected-digest", digest, "--ci-verified", "true"]):
+            release.main()
+            self.assertEqual(registry_writes(command), [])
 
 
 if __name__ == "__main__":

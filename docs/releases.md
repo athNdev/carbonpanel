@@ -145,13 +145,17 @@ A present tag is reused only with **trusted pinned build evidence**, not with a
 bare expected digest (which is merely a second copy of the observed digest). The
 evidence requires: a successful completed push CI run for the exact pinned
 commit; the observed index digest matching the digest recorded by that evidence;
-both `linux/amd64` and `linux/arm64` platform manifests; and an OCI revision label
-on **each** of those platform manifests equal to the pinned commit. Any mismatch,
+both `linux/amd64` and `linux/arm64` platform child manifests; and the
+`org.opencontainers.image.revision` label in **each child image config** equal to
+the pinned commit. The child configs are fetched by their exact platform
+digests from the index; descriptor annotations are never evidence. A read-only
+probe of the public `edge` index confirmed the descriptors carry a null revision
+while both digest-addressed configs carry the full commit label. Any mismatch,
 missing label, untrusted CI or unknown lookup refuses with zero buildx pushes and
 zero alias moves. Moving `nightly` (or `edge`) over a different digest binds the
-previous commit to the **observed** alias digest through the same sha-reference
-evidence before the ancestry check; an operator-supplied commit string alone is
-never trusted. Repeating a promotion at the same digest is idempotent.
+previous commit to the **observed** alias digest through that same config-based
+sha evidence before the ancestry check; an operator-supplied commit string alone
+is never trusted. Repeating a promotion at the same digest is idempotent.
 
 Buildx writes only the `sha-<commit>` reference — there is no implicit early
 `edge` or `nightly` move. After the immutable image is verified, `edge` is moved
