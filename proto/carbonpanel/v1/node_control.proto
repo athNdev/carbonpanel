@@ -1,0 +1,348 @@
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+syntax = "proto3";
+
+package carbonpanel.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
+
+// NodeEnrollmentState is the lifecycle of a managed node's one-time enrollment
+// and its issued credential. A legacy Docker endpoint is never an enrolled
+// managed node; it stays in the legacy state until an explicit opt-in migration.
+enum NodeEnrollmentState {
+  NODE_ENROLLMENT_STATE_UNSPECIFIED = 0;
+  NODE_ENROLLMENT_STATE_PENDING = 1;
+  NODE_ENROLLMENT_STATE_ACTIVE = 2;
+  NODE_ENROLLMENT_STATE_EXPIRED = 3;
+  NODE_ENROLLMENT_STATE_REVOKED = 4;
+  NODE_ENROLLMENT_STATE_SUPERSEDED = 5;
+  NODE_ENROLLMENT_STATE_LEGACY = 6;
+}
+
+// NodeTransport identifies the control path for a node. The managed agent is
+// the only transport this contract can route to; a legacy Docker endpoint is
+// deliberately absent so it can never be selected as a fallback.
+enum NodeTransport {
+  NODE_TRANSPORT_UNSPECIFIED = 0;
+  NODE_TRANSPORT_MANAGED_AGENT = 1;
+}
+
+// NodeCapability is a typed feature flag reported by an agent during capability
+// negotiation. Unknown values are ignored and reported, never assumed present.
+enum NodeCapability {
+  NODE_CAPABILITY_UNSPECIFIED = 0;
+  NODE_CAPABILITY_ROOTLESS = 1;
+  NODE_CAPABILITY_PRIVATE_SOCKET = 2;
+  NODE_CAPABILITY_DEDICATED_ROOTS = 3;
+  NODE_CAPABILITY_CONTAINERD_NAMESPACE = 4;
+  NODE_CAPABILITY_CGROUP_V2 = 5;
+  NODE_CAPABILITY_PRIVILEGED_PORT = 6;
+  NODE_CAPABILITY_STORAGE_WORKER = 7;
+  NODE_CAPABILITY_DRAIN = 8;
+  NODE_CAPABILITY_RESTART_REQUIRED = 9;
+}
+
+// NodePreflightStatus is the outcome of a bounded host preflight check.
+enum NodePreflightStatus {
+  NODE_PREFLIGHT_STATUS_UNSPECIFIED = 0;
+  NODE_PREFLIGHT_STATUS_PASSED = 1;
+  NODE_PREFLIGHT_STATUS_FAILED = 2;
+  NODE_PREFLIGHT_STATUS_UNKNOWN = 3;
+}
+
+// NodeOperationPhase is the deduplicated state of a node-control operation.
+// UNCERTAIN blocks automatic retry after an interrupted mutation.
+enum NodeOperationPhase {
+  NODE_OPERATION_PHASE_UNSPECIFIED = 0;
+  NODE_OPERATION_PHASE_ACCEPTED = 1;
+  NODE_OPERATION_PHASE_IN_PROGRESS = 2;
+  NODE_OPERATION_PHASE_SUCCEEDED = 3;
+  NODE_OPERATION_PHASE_FAILED = 4;
+  NODE_OPERATION_PHASE_UNCERTAIN = 5;
+}
+
+// NodeIdentity is the authenticated identity of a managed node. It carries
+// fingerprints and generation counters only, never secret material.
+message NodeIdentity {
+  string node_id = 1;
+  string name = 2;
+  string key_fingerprint = 3;
+  int64 credential_generation = 4;
+  int64 endpoint_generation = 5;
+  string daemon_id = 6;
+  NodeTransport transport = 7;
+}
+
+// NodeCapabilities is the versioned capability snapshot used for negotiation
+// and version-skew handling. The controller refuses an unsupported version and
+// gates operations on capabilities instead of degrading silently.
+message NodeCapabilities {
+  int32 protocol_version = 1;
+  int32 min_supported_version = 2;
+  int32 max_supported_version = 3;
+  string agent_version = 4;
+  string engine_version = 5;
+  string distro = 6;
+  string architecture = 7;
+  string kernel_version = 8;
+  string cgroup_version = 9;
+  string storage_driver = 10;
+  bool systemd = 11;
+  repeated NodeCapability capabilities = 12;
+}
+
+// NodePreflightCheck is one named, redacted preflight result.
+message NodePreflightCheck {
+  string code = 1;
+  NodePreflightStatus status = 2;
+  string message = 3;
+  string remedy = 4;
+}
+
+// NodePreflightReport is the bounded, versioned host preflight result reported
+// before any mutation or enrollment completes.
+message NodePreflightReport {
+  string node_id = 1;
+  NodePreflightStatus status = 2;
+  repeated NodePreflightCheck checks = 3;
+  google.protobuf.Timestamp observed_at = 4;
+  int64 latency_ms = 5;
+}
+
+// NodeHealthReport is the node-reported health observations. It supplements
+// (never replaces) the controller's typed node resolution and Docker ping.
+message NodeHealthReport {
+  string node_id = 1;
+  google.protobuf.Timestamp observed_at = 2;
+  bool reachable = 3;
+  int64 latency_ms = 4;
+  NodeCapabilities capabilities = 5;
+  NodePreflightReport preflight = 6;
+  string daemon_id = 7;
+}
+
+// NodeAuthorizationClaims is the narrow, per-node scope grant issued to a node
+// principal. ObjectID must equal node_id; a broader grant is refused.
+message NodeAuthorizationClaims {
+  string node_id = 1;
+  string object_id = 2;
+  repeated string scopes = 3;
+  int64 credential_generation = 4;
+  google.protobuf.Timestamp issued_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+// OneTimeEnrollment is the non-secret view of a bounded, rotatable enrollment.
+// Plaintext tokens are never part of this message or any response; only a hash
+// fingerprint is recorded and displayed.
+message OneTimeEnrollment {
+  string enrollment_id = 1;
+  string token_fingerprint = 2;
+  string node_label = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp expires_at = 5;
+  NodeEnrollmentState state = 6;
+  repeated NodeCapability required_capabilities = 7;
+  int32 protocol_version = 8;
+}
+
+// OperationEnvelope carries the idempotency and ownership keys for a deduplicated
+// node-control operation. Bounded contexts are explicit: deadline, attempts and
+// capability snapshot travel with the request, never as ambient state.
+message OperationEnvelope {
+  string operation_id = 1;
+  string node_id = 2;
+  int64 endpoint_generation = 3;
+  int64 credential_generation = 4;
+  bytes request_hash = 5;
+  google.protobuf.Timestamp deadline = 6;
+  int32 attempt = 7;
+  NodeCapabilities capability_snapshot = 8;
+  NodeOperationPhase phase = 9;
+}
+
+// OperationResult is the deduplicated outcome of an operation. Replay of the
+// same operation_id returns the recorded result instead of re-executing.
+message OperationResult {
+  string operation_id = 1;
+  NodeOperationPhase phase = 2;
+  string message = 3;
+  google.protobuf.Timestamp completed_at = 4;
+}
+
+// ControlSession describes a bounded, agent-initiated control session. The
+// agent dials the controller; no inbound management port is opened on the node.
+message ControlSession {
+  string session_id = 1;
+  string node_id = 2;
+  google.protobuf.Timestamp deadline = 3;
+  int32 max_in_flight = 4;
+  int32 max_message_bytes = 5;
+  google.protobuf.Duration heartbeat_interval = 6;
+}
+
+// VersionNegotiation is the supported-version range of one endpoint.
+message VersionNegotiation {
+  string agent_version = 1;
+  int32 protocol_version = 2;
+  int32 min_supported_version = 3;
+  int32 max_supported_version = 4;
+}
+
+// NodeControlService is the versioned typed contract for managed nodes. No
+// implementation, agent, daemon lifecycle or enrollment server ships in P0;
+// the service exists so generated clients and servers share one contract.
+// Every procedure requires a mapped permission and a node principal with a
+// per-node claim. The auth interceptor denies unmapped procedures by default.
+service NodeControlService {
+  // CreateEnrollment starts a one-time, TTL-bounded enrollment. The response
+  // carries only metadata; the one-time secret is handled by the P1+ enrollment
+  // server and never stored in this contract's responses.
+  rpc CreateEnrollment(CreateEnrollmentRequest) returns (CreateEnrollmentResponse);
+
+  // ClaimEnrollment consumes a one-time token and reports the agent's identity
+  // material and capability snapshot. The token appears only in this request.
+  rpc ClaimEnrollment(ClaimEnrollmentRequest) returns (ClaimEnrollmentResponse);
+
+  // RevokeCredential revokes the current node credential and requires a new
+  // one-time enrollment; it never silently rebinds a different daemon.
+  rpc RevokeCredential(RevokeCredentialRequest) returns (RevokeCredentialResponse);
+
+  // NegotiateVersion selects a mutually supported protocol version or returns
+  // an explicit UPGRADE_REQUIRED reason.
+  rpc NegotiateVersion(NegotiateVersionRequest) returns (NegotiateVersionResponse);
+
+  // OpenControlSession opens a bounded, agent-initiated session descriptor.
+  rpc OpenControlSession(OpenControlSessionRequest) returns (OpenControlSessionResponse);
+
+  // ReportPreflight submits a versioned host preflight result before mutation.
+  rpc ReportPreflight(ReportPreflightRequest) returns (ReportPreflightResponse);
+
+  // ReportHealth submits a bounded node health observation.
+  rpc ReportHealth(ReportHealthRequest) returns (ReportHealthResponse);
+
+  // AckOperation acknowledges a deduplicated operation outcome.
+  rpc AckOperation(AckOperationRequest) returns (AckOperationResponse);
+
+  // DispatchOperation routes a bounded operation to a managed agent. A node
+  // that is unspecified, non-managed or cannot be resolved is refused with an
+  // unavailable reason; there is no controller-local or legacy-endpoint fallback.
+  rpc DispatchOperation(DispatchOperationRequest) returns (DispatchOperationResponse);
+}
+
+// CreateEnrollmentRequest bounds a new one-time enrollment.
+message CreateEnrollmentRequest {
+  string node_label = 1;
+  google.protobuf.Duration ttl = 2;
+  repeated NodeCapability required_capabilities = 3;
+  int32 protocol_version = 4;
+}
+
+// CreateEnrollmentResponse returns enrollment metadata without secret material.
+message CreateEnrollmentResponse {
+  OneTimeEnrollment enrollment = 1;
+}
+
+// ClaimEnrollmentRequest presents the one-time token and node identity proof.
+message ClaimEnrollmentRequest {
+  string enrollment_id = 1;
+  string enrollment_token = 2;
+  string key_fingerprint = 3;
+  NodeCapabilities capabilities = 4;
+}
+
+// ClaimEnrollmentResponse returns the node identity and narrow claims. It never
+// returns private keys, tokens or other secret material.
+message ClaimEnrollmentResponse {
+  NodeIdentity identity = 1;
+  NodeAuthorizationClaims claims = 2;
+}
+
+// RevokeCredentialRequest identifies the node and the operator confirmation.
+message RevokeCredentialRequest {
+  string node_id = 1;
+  string confirmation_phrase = 2;
+}
+
+// RevokeCredentialResponse reports the resulting enrollment state.
+message RevokeCredentialResponse {
+  string node_id = 1;
+  NodeEnrollmentState state = 2;
+}
+
+// NegotiateVersionRequest reports one endpoint's supported version range.
+message NegotiateVersionRequest {
+  VersionNegotiation endpoint = 1;
+  string node_id = 2;
+}
+
+// NegotiateVersionResponse selects a version or reports why none is supported.
+message NegotiateVersionResponse {
+  bool supported = 1;
+  int32 selected_version = 2;
+  string reason = 3;
+}
+
+// OpenControlSessionRequest requests a bounded agent-initiated session.
+message OpenControlSessionRequest {
+  NodeIdentity identity = 1;
+  NodeCapabilities capabilities = 2;
+}
+
+// OpenControlSessionResponse returns the bounded session descriptor.
+message OpenControlSessionResponse {
+  ControlSession session = 1;
+}
+
+// ReportPreflightRequest carries a versioned preflight result.
+message ReportPreflightRequest {
+  NodePreflightReport report = 1;
+  OperationEnvelope envelope = 2;
+}
+
+// ReportPreflightResponse acknowledges the recorded preflight result.
+message ReportPreflightResponse {
+  OperationResult result = 1;
+}
+
+// ReportHealthRequest carries a bounded health observation.
+message ReportHealthRequest {
+  NodeHealthReport report = 1;
+  OperationEnvelope envelope = 2;
+}
+
+// ReportHealthResponse acknowledges the recorded health observation.
+message ReportHealthResponse {
+  OperationResult result = 1;
+}
+
+// AckOperationRequest reports the final outcome of a deduplicated operation.
+message AckOperationRequest {
+  OperationEnvelope envelope = 1;
+  OperationResult result = 2;
+}
+
+// AckOperationResponse confirms the recorded outcome.
+message AckOperationResponse {
+  OperationResult result = 1;
+}
+
+// DispatchOperationRequest carries a bounded operation addressed to one node.
+message DispatchOperationRequest {
+  OperationEnvelope envelope = 1;
+  NodeIdentity target = 2;
+}
+
+// DispatchOperationResponse is fail-closed: routed is false whenever the
+// managed agent cannot be resolved or authorized. No legacy fallback is used.
+message DispatchOperationResponse {
+  bool routed = 1;
+  string unavailable_reason = 2;
+  OperationResult result = 3;
+}
