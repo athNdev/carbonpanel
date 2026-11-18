@@ -150,6 +150,9 @@ message OneTimeEnrollment {
   NodeEnrollmentState state = 6;
   repeated NodeCapability required_capabilities = 7;
   int32 protocol_version = 8;
+  string node_id = 9;
+  // SHA-256 of the approved public key; public metadata, not a secret.
+  bytes approved_key_fingerprint = 10;
 }
 
 // OperationEnvelope carries the idempotency and ownership keys for a deduplicated
@@ -201,13 +204,19 @@ message VersionNegotiation {
 // Every procedure requires a mapped permission and a node principal with a
 // per-node claim. The auth interceptor denies unmapped procedures by default.
 service NodeControlService {
-  // CreateEnrollment starts a one-time, TTL-bounded enrollment. The response
-  // carries only metadata; the one-time secret is handled by the P1+ enrollment
-  // server and never stored in this contract's responses.
+  // CreateEnrollment starts a one-time, TTL-bounded enrollment. The operator
+  // registers the node-generated secret digest, salt and an approved public key
+  // out of band. The response carries metadata only, never a secret.
   rpc CreateEnrollment(CreateEnrollmentRequest) returns (CreateEnrollmentResponse);
 
-  // ClaimEnrollment consumes a one-time token and reports the agent's identity
-  // material and capability snapshot. The token appears only in this request.
+  // BeginEnrollmentChallenge is a bounded, rate-limited step that gives a node
+  // a single-use server nonce after the operator registered the bundle. It is
+  // unauthenticated by design but carries no secret and grants no access.
+  rpc BeginEnrollmentChallenge(BeginEnrollmentChallengeRequest) returns (BeginEnrollmentChallengeResponse);
+
+  // ClaimEnrollment consumes the single-use challenge and one-time secret, and
+  // verifies a fresh signature by the operator-approved key. The secret appears
+  // only in this request; the response carries a signed public certificate.
   rpc ClaimEnrollment(ClaimEnrollmentRequest) returns (ClaimEnrollmentResponse);
 
   // RevokeCredential revokes the current node credential and requires a new
@@ -236,12 +245,28 @@ service NodeControlService {
   rpc DispatchOperation(DispatchOperationRequest) returns (DispatchOperationResponse);
 }
 
-// CreateEnrollmentRequest bounds a new one-time enrollment.
+// CreateEnrollmentRequest bounds a new one-time enrollment and registers the
+// node-generated proof material. All five proof fields are REQUIRED; a request
+// missing any of them must be refused. No plaintext secret is ever registered.
 message CreateEnrollmentRequest {
   string node_label = 1;
   google.protobuf.Duration ttl = 2;
   repeated NodeCapability required_capabilities = 3;
   int32 protocol_version = 4;
+  // Controller-assigned stable node ID bound into the fresh claim signature.
+  string node_id = 5;
+  // DER SPKI of the operator-approved node public key. Proof must come from
+  // this exact key; a signature from any other key is refused.
+  bytes approved_public_key_spki = 6;
+  // SHA-256 of approved_public_key_spki; also required for preflight checks.
+  bytes approved_key_fingerprint = 7;
+  // SHA-256(salt || node-generated secret), the only registered secret proof.
+  bytes enrollment_secret_digest = 8;
+  // Node-generated salt used with the secret to form the digest.
+  bytes enrollment_salt = 9;
+  // Pre-registration CSR signed by the approved key. Registration material
+  // only; it is not the claim proof.
+  bytes csr_pre = 10;
 }
 
 // CreateEnrollmentResponse returns enrollment metadata without secret material.
@@ -249,19 +274,57 @@ message CreateEnrollmentResponse {
   OneTimeEnrollment enrollment = 1;
 }
 
-// ClaimEnrollmentRequest presents the one-time token and node identity proof.
-message ClaimEnrollmentRequest {
+// BeginEnrollmentChallengeRequest asks for a single-use server nonce. It is
+// keyed by enrollment ID only; no secret or credential is supplied.
+message BeginEnrollmentChallengeRequest {
   string enrollment_id = 1;
-  string enrollment_token = 2;
-  string key_fingerprint = 3;
-  NodeCapabilities capabilities = 4;
 }
 
-// ClaimEnrollmentResponse returns the node identity and narrow claims. It never
-// returns private keys, tokens or other secret material.
+// BeginEnrollmentChallengeResponse carries the server nonce and the public
+// context over which the fresh claim signature must be made. Nothing here is
+// secret; channel_context is derived by the server, not trusted from a client.
+message BeginEnrollmentChallengeResponse {
+  string challenge_id = 1;
+  bytes server_nonce = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  string node_id = 4;
+  string enrollment_id = 5;
+  bytes channel_context = 6;
+}
+
+// ClaimEnrollmentRequest presents the one-time node-generated secret once,
+// the single-use challenge, and a fresh signature by the approved key.
+// key_fingerprint is descriptive metadata only, never an authentication factor.
+message ClaimEnrollmentRequest {
+  string enrollment_id = 1;
+  // The node-generated high-entropy secret S. It appears only in this request
+  // and is never returned or persisted by the controller.
+  string enrollment_token = 2;
+  // Descriptive metadata only; the server uses the registered approved key.
+  string key_fingerprint = 3;
+  NodeCapabilities capabilities = 4;
+  string challenge_id = 5;
+  // Fresh signature over node ID, enrollment ID, challenge ID/nonce, expiry,
+  // capabilities and verified channel context, made by the approved key.
+  bytes fresh_claim_signature = 6;
+  // Client assertion of the channel binding; the server always compares it to
+  // its own derived value or a verified trusted-proxy attestation.
+  bytes channel_binding_evidence = 7;
+}
+
+// ClaimEnrollmentResponse returns the node identity, narrow claims, and a
+// signed PUBLIC client certificate bound to the approved node key. The private
+// key never leaves the node; no secret, token or private key is returned.
 message ClaimEnrollmentResponse {
   NodeIdentity identity = 1;
   NodeAuthorizationClaims claims = 2;
+  // Public X.509 client certificate DER. Possession is proven by mTLS.
+  bytes enrolled_client_certificate_der = 3;
+  string certificate_serial = 4;
+  bytes certificate_fingerprint = 5;
+  google.protobuf.Timestamp certificate_not_after = 6;
+  bytes issuing_ca_digest = 7;
+  int64 credential_generation = 8;
 }
 
 // RevokeCredentialRequest identifies the node and the operator confirmation.

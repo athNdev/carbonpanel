@@ -34,6 +34,10 @@ var nodeControlCalls = []nodeControlCall{
 		_, err := c.CreateEnrollment(ctx, connect.NewRequest(&v1.CreateEnrollmentRequest{}))
 		return err
 	}},
+	{"BeginEnrollmentChallenge", func(ctx context.Context, c carbonpanelv1connect.NodeControlServiceClient) error {
+		_, err := c.BeginEnrollmentChallenge(ctx, connect.NewRequest(&v1.BeginEnrollmentChallengeRequest{}))
+		return err
+	}},
 	{"ClaimEnrollment", func(ctx context.Context, c carbonpanelv1connect.NodeControlServiceClient) error {
 		_, err := c.ClaimEnrollment(ctx, connect.NewRequest(&v1.ClaimEnrollmentRequest{}))
 		return err
@@ -150,12 +154,27 @@ func TestNodeControlRPCsDeniedByDefault(t *testing.T) {
 // rather than trusting hand-written DTOs: no response message may declare a
 // field that holds a token, key, secret or password. Requests may carry a
 // one-time token; responses carry only fingerprints and generation counters.
-func TestNodeControlResponseMessagesCarryNoSecrets(t *testing.T) {
-	forbidden := map[string]bool{
-		"token": true, "enrollment_token": true, "tls_key": true, "private_key": true,
-		"key": true, "secret": true, "password": true, "credential": true,
+// nodeControlResponseFieldCarriesSecret matches secret tokens as substrings so
+// variants such as enrollment_secret_digest are caught, while explicit public
+// metadata suffixes (fingerprint, generation, digest, SPKI, id, serial, DER and
+// expiry) remain allowed. This keeps the guard meaningful without rejecting
+// the legitimate public-key and credential metadata in the contract.
+func nodeControlResponseFieldCarriesSecret(fieldName string) bool {
+	name := strings.ToLower(fieldName)
+	for _, suffix := range []string{"_fingerprint", "_generation", "_digest", "_spki", "_id", "_serial", "_der", "_not_after"} {
+		if strings.HasSuffix(name, suffix) {
+			return false
+		}
 	}
+	for _, token := range []string{"token", "enrollment_secret", "tls_key", "private_key", "secret", "password", "credential", "key"} {
+		if strings.Contains(name, token) {
+			return true
+		}
+	}
+	return false
+}
 
+func TestNodeControlResponseMessagesCarryNoSecrets(t *testing.T) {
 	file := v1.File_carbonpanel_v1_node_control_proto
 	messages := file.Messages()
 	for i := 0; i < messages.Len(); i++ {
@@ -166,15 +185,15 @@ func TestNodeControlResponseMessagesCarryNoSecrets(t *testing.T) {
 		fields := message.Fields()
 		for j := 0; j < fields.Len(); j++ {
 			field := fields.Get(j)
-			if forbidden[string(field.Name())] {
+			if nodeControlResponseFieldCarriesSecret(string(field.Name())) {
 				t.Errorf("%s.%s is a secret field in a response", message.Name(), field.Name())
 			}
-			checkNestedNodeControlFields(t, field.Message(), forbidden)
+			checkNestedNodeControlFields(t, field.Message())
 		}
 	}
 }
 
-func checkNestedNodeControlFields(t *testing.T, message protoreflect.MessageDescriptor, forbidden map[string]bool) {
+func checkNestedNodeControlFields(t *testing.T, message protoreflect.MessageDescriptor) {
 	t.Helper()
 	if message == nil {
 		return
@@ -182,9 +201,9 @@ func checkNestedNodeControlFields(t *testing.T, message protoreflect.MessageDesc
 	fields := message.Fields()
 	for i := 0; i < fields.Len(); i++ {
 		field := fields.Get(i)
-		if forbidden[string(field.Name())] {
+		if nodeControlResponseFieldCarriesSecret(string(field.Name())) {
 			t.Errorf("%s.%s is a secret field nested in a response", message.Name(), field.Name())
 		}
-		checkNestedNodeControlFields(t, field.Message(), forbidden)
+		checkNestedNodeControlFields(t, field.Message())
 	}
 }

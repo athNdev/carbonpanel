@@ -261,6 +261,18 @@ node. They gate the start of P1 lifecycle work:
     certificate serial, close and reopen the owned DB, then assert the new
     generation and revocation still apply and the old serial is still refused.
 
+### P1 contract slice status
+
+The versioned messages and the bounded `BeginEnrollmentChallenge` procedure now
+exist in `node_control.proto`: required approved key SPKI/fingerprint, digest and
+salt, pre-registration `csr_pre`, challenge ID and server nonce, fresh claim
+signature and channel-binding evidence, and signed public certificate metadata
+in `ClaimEnrollmentResponse`. `internal/rpc/node_control_enrollment_fixture_test.go`
+is a **test-only** seam implementing the ten harmless fixtures above with
+synthetic keys and fake TLS channels. **No enrollment RPC handler is mounted and
+no production enrollment server exists**; these tests prove refusals and state
+transitions only, never implemented enrollment or deployment success.
+
 ### P0 contract verification (shipped; denial and shape only)
 
 - `buf lint` and `buf format -d` are clean for the new file;
