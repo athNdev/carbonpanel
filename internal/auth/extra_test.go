@@ -34,7 +34,7 @@ func TestOIDCDisabledHandler(t *testing.T) {
 }
 
 func TestResolveClaimRoles(t *testing.T) {
-	_, h := newTestOIDCHandler(t, &config.OIDCConfig{RoleClaim: "groups"})
+	_, h := newTestOIDCHandler(t, &config.OIDCConfig{RoleClaim: "groups", AllowRawClaimRoles: true})
 
 	if got := h.resolveClaimRoles(map[string]any{}); got != nil {
 		t.Fatalf("missing claim=%v", got)
