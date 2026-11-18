@@ -74,7 +74,29 @@ type proxyHandler struct {
 	deps ProxyDeps
 }
 
+// proxyCachePolicy is panel-owned and overrides every renderer-supplied
+// caching directive. Every response from this path is protected by per-request
+// cookie/Bearer auth and world_view/read, so no shared cache may store it.
+const proxyCachePolicy = "private, no-store, no-cache, must-revalidate, max-age=0"
+
+// setProxyCachePolicy runs BEFORE any authorization decision so success,
+// denial, error and method-rejection paths all carry the same private policy.
+// Renderer cache headers are never relayed; conditional validators are removed
+// so an upstream 304 cannot be turned into a proxy error.
+func setProxyCachePolicy(header http.Header) {
+	for _, name := range []string{
+		"Cache-Control", "Expires", "Pragma", "Surrogate-Control",
+		"CDN-Cache-Control", "Age", "ETag", "Last-Modified", "Vary",
+	} {
+		header.Del(name)
+	}
+	header.Set("Cache-Control", proxyCachePolicy)
+	header.Set("Pragma", "no-cache")
+	header.Set("Expires", "0")
+}
+
 func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	setProxyCachePolicy(w.Header())
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -168,7 +190,9 @@ func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseUR
 		http.Error(w, "invalid renderer asset path", http.StatusForbidden)
 		return
 	}
-	for _, name := range []string{"Accept", "Range", "If-None-Match", "If-Modified-Since"} {
+	// Do not send conditional validators upstream: every asset is private and
+	// must be re-authenticated, so a cached 304 must never be part of this path.
+	for _, name := range []string{"Accept", "Range"} {
 		if v := r.Header.Get(name); v != "" {
 			upstream.Header.Set(name, v)
 		}
@@ -184,6 +208,14 @@ func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseUR
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// A 304 has no body to stream. Since this proxy never sends validators, a
+	// renderer 304 is anomalous; refuse it explicitly rather than falling into
+	// the generic 3xx branch or writing an empty protected asset.
+	if resp.StatusCode == http.StatusNotModified {
+		h.logWarn("worldview proxy: renderer returned an unsolicited 304")
+		http.Error(w, "renderer conditional response refused", http.StatusBadGateway)
+		return
+	}
 	// Defense in depth: never relay a renderer redirect under the panel origin,
 	// even when a custom client was injected without CheckRedirect.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
@@ -203,7 +235,7 @@ func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseUR
 			return
 		}
 	}
-	for _, name := range []string{"Content-Type", "Content-Range", "Accept-Ranges", "ETag", "Cache-Control", "Last-Modified", "Expires"} {
+	for _, name := range []string{"Content-Type", "Content-Range", "Accept-Ranges"} {
 		if v := resp.Header.Get(name); v != "" {
 			w.Header().Set(name, v)
 		}
