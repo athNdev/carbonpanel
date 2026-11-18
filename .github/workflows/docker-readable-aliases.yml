@@ -70,8 +70,7 @@ jobs:
             --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED"
 
       - name: Validate the checked-in alias mapping
-        run: python3 scripts/docker_readable_aliases.py validate \
-          --input docs/docker-readable-aliases.json
+        run: python3 scripts/docker_readable_aliases.py validate --input docs/docker-readable-aliases.json
 
       - name: Sign in to Docker Hub
         if: steps.gate.outputs.publish == 'true'
@@ -82,7 +81,12 @@ jobs:
 
       - name: Add missing aliases by exact digest (dry run unless confirmed)
         env:
-          ALIAS_ARG: ${{ steps.gate.outputs.publish == 'true' && '' || '--dry-run' }}
+          PUBLISH_ALIASES: ${{ steps.gate.outputs.publish }}
+        # Explicit shell branches: no &&/|| empty-string idiom (GitHub treats
+        # '' as falsy, which would force --dry-run even on a confirmed run).
         run: |
-          python3 scripts/docker_readable_aliases.py apply \
-            --mapping docs/docker-readable-aliases.json $ALIAS_ARG
+          if [ "$PUBLISH_ALIASES" = "true" ]; then
+            python3 scripts/docker_readable_aliases.py apply --mapping docs/docker-readable-aliases.json
+          else
+            python3 scripts/docker_readable_aliases.py apply --mapping docs/docker-readable-aliases.json --dry-run
+          fi
