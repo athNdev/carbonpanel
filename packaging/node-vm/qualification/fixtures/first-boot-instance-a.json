@@ -1,0 +1,8 @@
+{
+  "fixture": true,
+  "synthetic": true,
+  "instance_id": "fixture-instance-0001",
+  "node_label": "fixture01",
+  "expected_node_id": "node-24031fb03274b0b47214207802f7d224",
+  "note": "Public metadata only. No secret or key material."
+}
