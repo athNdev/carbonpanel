@@ -31,6 +31,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		Edit,
 		Radio
 	} from '@lucide/svelte';
+	import {
+		buildTlsUpdate,
+		hasTlsReplacementErrors,
+		validateTlsReplacement,
+		type TlsCredentialIntent
+	} from '$lib/utils/node-tls-form';
 	let loading = $state(true);
 	let nodes = $state<Node[]>([]);
 	let pingingNodeId = $state<string | null>(null);
@@ -119,6 +125,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		maxServers: number;
 		enabled: boolean;
 	} | null>(null);
+
+	// Redacted reads never disclose TLS material. The editor keeps the secret
+	// fields empty until the operator explicitly asks to replace credentials;
+	// 'unchanged' omits them from UpdateNode so stored bytes and the endpoint
+	// generation are preserved on a non-secret edit.
+	let tlsReplaceIntent = $state<TlsCredentialIntent>('unchanged');
+	let tlsErrors = $derived(
+		editingNode
+			? validateTlsReplacement(tlsReplaceIntent, editingNode)
+			: { tlsCaCert: '', tlsCert: '', tlsKey: '' }
+	);
 
 	onMount(() => {
 		loadNodes();
@@ -333,6 +350,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function openEditNode(node: Node) {
+		// TLS secrets are redacted on read. Never copy whatever the response
+		// carries into editable state: an empty value means "unchanged", and a
+		// non-empty placeholder is not real credential material either.
+		tlsReplaceIntent = 'unchanged';
 		editingNode = {
 			id: node.id,
 			name: node.name,
@@ -340,9 +361,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			advertisedIp: node.advertisedIp,
 			tlsEnabled: node.tlsEnabled,
 			tlsSkipVerify: node.tlsSkipVerify,
-			tlsCaCert: node.tlsCaCert || '',
-			tlsCert: node.tlsCert || '',
-			tlsKey: node.tlsKey || '',
+			tlsCaCert: '',
+			tlsCert: '',
+			tlsKey: '',
 			maxMemoryMb: Number(node.maxMemoryMb),
 			maxServers: node.maxServers,
 			enabled: node.enabled
@@ -350,6 +371,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		editMemoryText = String(Number(node.maxMemoryMb));
 		editServersText = String(node.maxServers);
 		showEditDialog = true;
+	}
+
+	function cancelTlsReplacement() {
+		tlsReplaceIntent = 'unchanged';
+		if (editingNode) {
+			editingNode.tlsCaCert = '';
+			editingNode.tlsCert = '';
+			editingNode.tlsKey = '';
+		}
 	}
 
 	async function handleUpdateNode() {
@@ -368,6 +398,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			toast.error('Memory and server limits must be whole numbers, or blank for unlimited');
 			return;
 		}
+		if (hasTlsReplacementErrors(tlsErrors)) {
+			toast.error('Provide every TLS credential to replace them, or keep the stored values');
+			return;
+		}
 
 		isSaving = true;
 		try {
@@ -376,11 +410,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				name: editingNode.name.trim(),
 				host: editingNode.host.trim(),
 				advertisedIp: editingNode.advertisedIp.trim(),
-				tlsEnabled: editingNode.tlsEnabled,
-				tlsSkipVerify: editingNode.tlsSkipVerify,
-				tlsCaCert: editingNode.tlsCaCert,
-				tlsCert: editingNode.tlsCert,
-				tlsKey: editingNode.tlsKey,
+				...buildTlsUpdate(editingNode, tlsReplaceIntent),
 				maxMemoryMb: BigInt(maxMemoryMb),
 				maxServers,
 				enabled: editingNode.enabled
@@ -1224,43 +1254,103 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							/>
 						</div>
 
-						<div class="space-y-1">
-							<label for="edit-node-ca-cert" class="text-xs text-[#c6c6c6]"
-								>CA Certificate (PEM)</label
-							>
-							<textarea
-								id="edit-node-ca-cert"
-								placeholder="-----BEGIN CERTIFICATE-----&#10;..."
-								bind:value={editingNode.tlsCaCert}
-								disabled={isSaving}
-								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-							></textarea>
-						</div>
+						<div class="space-y-2 rounded-none border border-[#393939] bg-[#262626] p-3">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<div class="min-w-0 space-y-0.5">
+									<p class="text-xs text-[#c6c6c6]">TLS client credentials</p>
+									<p class="text-xs text-[#8d8d8d]">
+										{#if tlsReplaceIntent === 'unchanged'}
+											Stored on the server and never displayed. Saving without a replacement keeps
+											them.
+										{:else}
+											All three values are required. Replacing overwrites every stored credential.
+										{/if}
+									</p>
+								</div>
+								{#if tlsReplaceIntent === 'unchanged'}
+									<CarbonButton
+										kind="tertiary"
+										size="sm"
+										onclick={() => (tlsReplaceIntent = 'replace')}
+										disabled={isSaving}
+									>
+										Replace TLS credentials
+									</CarbonButton>
+								{:else}
+									<CarbonButton
+										kind="secondary"
+										size="sm"
+										onclick={cancelTlsReplacement}
+										disabled={isSaving}
+									>
+										Cancel replacement
+									</CarbonButton>
+								{/if}
+							</div>
 
-						<div class="space-y-1">
-							<label for="edit-node-cert" class="text-xs text-[#c6c6c6]"
-								>Client Certificate (PEM)</label
-							>
-							<textarea
-								id="edit-node-cert"
-								placeholder="-----BEGIN CERTIFICATE-----&#10;..."
-								bind:value={editingNode.tlsCert}
-								disabled={isSaving}
-								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-							></textarea>
-						</div>
+							{#if tlsReplaceIntent === 'replace'}
+								<div class="space-y-3 border-t border-[#393939] pt-3">
+									<div class="space-y-1">
+										<label for="edit-node-ca-cert" class="text-xs text-[#c6c6c6]"
+											>CA Certificate (PEM)</label
+										>
+										<textarea
+											id="edit-node-ca-cert"
+											placeholder="-----BEGIN CERTIFICATE-----&#10;..."
+											bind:value={editingNode.tlsCaCert}
+											disabled={isSaving}
+											aria-invalid={tlsErrors.tlsCaCert !== ''}
+											aria-describedby={tlsErrors.tlsCaCert ? 'edit-node-ca-cert-error' : undefined}
+											class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+										></textarea>
+										{#if tlsErrors.tlsCaCert}
+											<p id="edit-node-ca-cert-error" role="alert" class="text-xs text-[#da1e28]">
+												{tlsErrors.tlsCaCert}
+											</p>
+										{/if}
+									</div>
 
-						<div class="space-y-1">
-							<label for="edit-node-key" class="text-xs text-[#c6c6c6]"
-								>Client Private Key (PEM)</label
-							>
-							<textarea
-								id="edit-node-key"
-								placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..."
-								bind:value={editingNode.tlsKey}
-								disabled={isSaving}
-								class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
-							></textarea>
+									<div class="space-y-1">
+										<label for="edit-node-cert" class="text-xs text-[#c6c6c6]"
+											>Client Certificate (PEM)</label
+										>
+										<textarea
+											id="edit-node-cert"
+											placeholder="-----BEGIN CERTIFICATE-----&#10;..."
+											bind:value={editingNode.tlsCert}
+											disabled={isSaving}
+											aria-invalid={tlsErrors.tlsCert !== ''}
+											aria-describedby={tlsErrors.tlsCert ? 'edit-node-cert-error' : undefined}
+											class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+										></textarea>
+										{#if tlsErrors.tlsCert}
+											<p id="edit-node-cert-error" role="alert" class="text-xs text-[#da1e28]">
+												{tlsErrors.tlsCert}
+											</p>
+										{/if}
+									</div>
+
+									<div class="space-y-1">
+										<label for="edit-node-key" class="text-xs text-[#c6c6c6]"
+											>Client Private Key (PEM)</label
+										>
+										<textarea
+											id="edit-node-key"
+											placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..."
+											bind:value={editingNode.tlsKey}
+											disabled={isSaving}
+											aria-invalid={tlsErrors.tlsKey !== ''}
+											aria-describedby={tlsErrors.tlsKey ? 'edit-node-key-error' : undefined}
+											class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+										></textarea>
+										{#if tlsErrors.tlsKey}
+											<p id="edit-node-key-error" role="alert" class="text-xs text-[#da1e28]">
+												{tlsErrors.tlsKey}
+											</p>
+										{/if}
+									</div>
+								</div>
+							{/if}
 						</div>
 					</div>
 				{/if}
@@ -1283,7 +1373,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				size="lg"
 				class="w-1/2 justify-center rounded-none"
 				onclick={handleUpdateNode}
-				disabled={isSaving || editMemoryError !== '' || editServersError !== ''}
+				disabled={isSaving ||
+					editMemoryError !== '' ||
+					editServersError !== '' ||
+					hasTlsReplacementErrors(tlsErrors)}
 			>
 				{#if isSaving}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />

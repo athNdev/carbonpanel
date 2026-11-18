@@ -7,11 +7,11 @@
 name: Docker Hub CD
 
 on:
-  # Publish :edge from a push to main only after the "Continuous
-  # Integration" workflow has succeeded for that same commit. Previously this
-  # workflow triggered on the raw push to main, so a commit that failed CI
-  # could still publish a broken :latest image to Docker Hub (DESIGN.md §10.1
-  # finding #6).
+  # An ordinary verified main merge only builds and verifies; it does NOT push
+  # :edge or :sha images. Developer-channel publication requires an explicit
+  # workflow_dispatch with push=true, decided by developer-channel-gate in
+  # scripts/release.py. The workflow is not disabled: CI-completed events still
+  # build the image with push=false (DESIGN.md §10.1 finding #6).
   workflow_run:
     workflows: ["Continuous Integration"]
     types:
@@ -20,10 +20,15 @@ on:
   workflow_dispatch:
     inputs:
       push:
-        description: 'Push to Docker Hub'
+        description: 'EXPLICIT developer-channel opt-in: publish edge/sha images to Docker Hub (off = build and verify only)'
         required: true
         type: boolean
-        default: true
+        default: false
+
+# Least privilege at the workflow level; publication is gated by the opt-in.
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   build-and-push:
@@ -34,24 +39,70 @@ jobs:
     # and failed runs never publish.
     if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success') }}
     # Job-level concurrency is applied only after this job's if condition.
-    # Skipped PR/failed-CI workflow_run events cannot cancel a real publication.
+    # Verification runs share a cancellable group; an opted-in publication uses
+    # a separate group that routine main builds cannot cancel mid-write.
     concurrency:
-      group: cd-${{ github.ref }}
-      cancel-in-progress: true
+      # Publication is serialized channel-wide, with no SHA, so publishes of
+      # different commits cannot race on the moving :edge alias. It never
+      # cancels an in-flight write. Verification stays per-SHA and cancellable.
+      group: ${{ github.event_name == 'workflow_dispatch' && inputs.push && 'cd-publish-edge' || format('cd-verify-{0}', github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha) }}
+      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !inputs.push }}
 
     steps:
-      - name: Checkout code
+      - name: Resolve the pinned verified commit
+        id: pinned
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT_SHA: ${{ github.sha }}
+        run: echo "sha=${RUN_SHA:-$EVENT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the pinned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # workflow_run events must check out the exact commit CI tested, not
-          # the default-branch tip.
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          # Never check out a moving branch tip: the tree must match the SHA
+          # verified by CI and used for tags, labels and provenance.
+          ref: ${{ steps.pinned.outputs.sha }}
+          # Ancestry verification needs main's history for merge-base.
+          fetch-depth: 0
+
+      - name: Assert checked-out HEAD equals the pinned commit
+        env:
+          EXPECTED_SHA: ${{ steps.pinned.outputs.sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED_SHA" ]; then
+            echo "::error::Checked-out HEAD $actual differs from verified commit $EXPECTED_SHA"
+            exit 1
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
+      - name: Verify exact main CI for the dispatch commit
+        id: ci
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT"
+      - name: Decide developer-channel publication (explicit opt-in only)
+        id: channel
+        env:
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_OPT_IN: ${{ inputs.push }}
+          CHANNEL_RUN_EVENT: ${{ github.event.workflow_run.event }}
+          CHANNEL_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+        run: |
+          python3 scripts/release.py developer-channel-gate \
+            --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
+            --run-event "$CHANNEL_RUN_EVENT" --conclusion "$CHANNEL_CONCLUSION" \
+            --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED"
+
       - name: Docker Hub Credentials & Login Check
         id: check-creds
+        if: steps.channel.outputs.publish == 'true'
         env:
           RAW_USER: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           RAW_PASS: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
@@ -147,7 +198,7 @@ jobs:
           tags: |
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
-            type=raw,value=sha-${{ github.event.workflow_run.head_sha || github.sha }}
+            type=raw,value=sha-${{ steps.pinned.outputs.sha }}
           labels: |
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.description=A modern Minecraft server and modpack management panel
@@ -155,7 +206,7 @@ jobs:
             org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
             org.opencontainers.image.licenses=MPL-2.0
             org.opencontainers.image.source=https://github.com/athNdev/carbonpanel
-            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
+            org.opencontainers.image.revision=${{ steps.pinned.outputs.sha }}
           flavor: |
             latest=false
 
@@ -165,17 +216,17 @@ jobs:
           context: .
           file: docker/Dockerfile.carbon-panel
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push) }}
+          push: ${{ steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             APP_VERSION=edge
-            APP_COMMIT=${{ github.event.workflow_run.head_sha || github.sha }}
+            APP_COMMIT=${{ steps.pinned.outputs.sha }}
       - name: Sync Docker Hub repository description
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
-        if: steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push)
+        if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}

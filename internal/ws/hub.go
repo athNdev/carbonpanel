@@ -386,8 +386,9 @@ func (h *Hub) authenticateToken(ctx context.Context, token string) (*auth.Authen
 
 // handshakeToken extracts the pre-upgrade credential from the Authorization
 // header or the cp_session cookie. Session JWTs in the query string are
-// ignored (MINE-185). The OIDC browser redirect /login?token= is the one
-// remaining place a session token appears in a URL; it is not accepted here.
+// ignored (MINE-185). The OIDC callback now returns a one-time exchange code
+// and hands the session token to the SPA via POST, so no session token appears
+// in any URL; query tokens are not accepted here.
 func handshakeToken(r *http.Request) string {
 	return auth.SessionTokenFromRequest(r)
 }
