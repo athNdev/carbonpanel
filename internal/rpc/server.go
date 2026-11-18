@@ -20,6 +20,7 @@ import (
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
 	"github.com/athNdev/carbon-panel/internal/auth"
+	"github.com/athNdev/carbon-panel/internal/bluemapdiscovery"
 	"github.com/athNdev/carbon-panel/internal/command"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
@@ -407,6 +408,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
+	moduleService.SetEnforcer(s.enforcer)
 	moduleService.SetStorageResolver(s.storageResolver)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 	// Player management uses the injected node resolver for read-only deep data
@@ -418,10 +420,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	)
 	s.playerService = playerService
 
-	// World viewing is observation-only. The renderer topology comes from
-	// explicit operator configuration: with no node-local endpoint every world
-	// reports ABSENT instead of probing a guessed port or falling back to a
-	// controller-local renderer.
+	// World viewing is observation-only. Explicit operator endpoints ALWAYS
+	// take precedence. When none is configured, discovery of an installed
+	// builtin-bluemap module uses the private owned network and node-scoped
+	// container metadata (never port probing or a controller-local fallback).
+	// The same resolver backs the same-origin proxy, so a discovered renderer
+	// can only be reached through the authenticated scoped proxy.
 	worldViewConfig := worldview.Config{AllowedHosts: s.config.WorldView.AllowedHosts}
 	for _, ep := range s.config.WorldView.Endpoints {
 		worldViewConfig.Endpoints = append(worldViewConfig.Endpoints, worldview.Endpoint{
@@ -435,9 +439,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 			PlayerFeed: ep.PlayerFeed,
 		})
 	}
-	worldViewResolver := worldview.NewResolver(
+	bluemapDiscovery := bluemapdiscovery.New(s.store, s.clientPool, s.storageResolver,
+		s.config.Docker.NetworkName, s.log)
+	worldViewResolver := worldview.NewResolverWithDiscovery(
 		worldViewConfig,
 		docker.NewLocator(s.clientPool, s.docker, s.store),
+		bluemapDiscovery,
 	)
 	worldViewService := worldview.NewService(worldview.ServiceDeps{
 		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver,

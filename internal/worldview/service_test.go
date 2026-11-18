@@ -32,9 +32,7 @@ type serviceFixture struct {
 // renderer: the tests assert projection/authz/audit behavior only.
 func newServiceFixture(t *testing.T, playerFeed bool) *serviceFixture {
 	t.Helper()
-	renderer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"version":"5.29","last_render":"2026-11-18T10:00:00Z"}`))
-	}))
+	renderer := httptest.NewServer(http.HandlerFunc(serveBlueMapFixture))
 	t.Cleanup(renderer.Close)
 
 	store := newFakeStore()

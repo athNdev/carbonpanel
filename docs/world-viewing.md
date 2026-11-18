@@ -25,11 +25,26 @@ snapshot.
   delete the world or its database. The world view then reports `ABSENT` with an
   onboarding message.
 
-No renderer is discovered by probing ports. The renderer topology is configured
-in `config.yaml` under `world_view` (see `config.example.yaml`) and injected at
-the composition root as `worldview.Config`; the shipped default is empty, so
-every world starts `ABSENT`. An explicit endpoint is required before any map
-becomes available.
+Explicit `world_view.endpoints` in `config.yaml` always take precedence; an
+operator endpoint is the trust decision described in ADR 0015. When no endpoint
+is configured, an installed `builtin-bluemap` module is discovered on a **local
+node** through the private owned network (ADR 0040): the exact server/node/module
+identity and node-scoped container metadata (labels, pinned image, owned-network
+membership and the effective read-only bind of the server's actual level folder)
+must verify before any HTTP request. Module config and tile assets are read only
+through the confined node data accessor. A remote node has no private path and
+stays unavailable until an explicit, allowlisted node-local endpoint is set.
+No renderer is discovered by port probing or host-port bindings.
+
+A web server listening on container port 8100 is not a ready map. READY also
+requires a configured target world matching the server's actual level name, a
+rendered scoped tile and the renderer's own `/settings.json` map list. Missing
+facts are reported honestly as setup/rendering/stopped/unreachable/error with an
+actionable next step. The in-context **Install BlueMap** action uses the existing
+ModuleService create/start RPCs; it is a server-side singleton per server,
+records explicit operator consent (actor and time from the authenticated
+principal and clock), adopts an existing module without mutation, and requires
+`modules/start` in addition to `modules/create` when starting immediately.
 
 ## 2. Endpoint topology and the same-origin proxy
 
