@@ -22,7 +22,7 @@
 #   scripts/install-node.sh <verb> [flags] [--apply]
 #
 # Verbs:
-#   init|bundle|claim|verify|import|backup|recover|upgrade|rollback|status
+#   init|bundle|claim|verify|import|backup|recover|upgrade|rollback|status|render-daemon
 #
 # Flags (all paths are caller-owned; none is a global host path):
 #   --state-dir DIR      guest state directory
@@ -37,6 +37,7 @@
 #   --ttl DURATION       enrollment TTL (default 10m)
 #   --target-os OS       artifact OS override (offline fixtures only)
 #   --target-arch ARCH   artifact arch override (offline fixtures only)
+#   --daemon-spec FILE   disposable daemon spec JSON for render-daemon
 #
 # The shipped artifact provides a compiled binary at
 # $CARBON_NODE_INSTALLER_BIN. Without it this script falls back to
@@ -63,9 +64,10 @@ PROTOCOL_VERSION=""
 TTL=""
 TARGET_OS=""
 TARGET_ARCH=""
+DAEMON_SPEC=""
 
 usage() {
-	sed -n '2,45p' "$0" | sed 's/^# \?//'
+	sed -n '2,46p' "$0" | sed 's/^# \?//'
 }
 
 need_value() {
@@ -137,6 +139,11 @@ while [[ $# -gt 0 ]]; do
 		TARGET_ARCH="$2"
 		shift 2
 		;;
+	--daemon-spec)
+		need_value "$@"
+		DAEMON_SPEC="$2"
+		shift 2
+		;;
 	--apply)
 		APPLY=true
 		shift
@@ -191,9 +198,10 @@ CMD+=("$VERB")
 [[ -n "$TTL" ]] && CMD+=(-ttl "$TTL")
 [[ -n "$TARGET_OS" ]] && CMD+=(-target-os "$TARGET_OS")
 [[ -n "$TARGET_ARCH" ]] && CMD+=(-target-arch "$TARGET_ARCH")
+[[ -n "$DAEMON_SPEC" ]] && CMD+=(-daemon-spec "$DAEMON_SPEC")
 
 case "$VERB" in
-verify | status)
+verify | status | render-daemon)
 	# Read-only: run without --apply.
 	;;
 init | bundle | claim | import | backup | recover | upgrade | rollback)

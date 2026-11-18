@@ -64,7 +64,7 @@ func hashFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
@@ -185,12 +185,12 @@ func copyDirTree(src, dst string) error {
 		}
 		out, err := os.OpenFile(d, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
 		if err != nil {
-			in.Close()
+			_ = in.Close()
 			return err
 		}
 		_, copyErr := io.Copy(out, in)
 		closeErr := out.Close()
-		in.Close()
+		_ = in.Close()
 		if copyErr != nil {
 			return copyErr
 		}

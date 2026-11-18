@@ -38,6 +38,7 @@ type options struct {
 	protocol     int
 	ttl          time.Duration
 	now          string
+	daemonSpec   string
 }
 
 func usage() {
@@ -52,6 +53,7 @@ Flags:
   -public-key FILE  Ed25519 PKIX public key that signs artifacts
   -target-os OS     artifact OS override (offline fixtures only)
   -target-arch ARCH artifact architecture override (offline fixtures only)
+  -daemon-spec FILE disposable daemon spec JSON (render-daemon; read-only)
 
 Verbs:
   init       create/verify the unique first-boot identity (idempotent)
@@ -63,7 +65,8 @@ Verbs:
   recover    verify a backup and copy files back (never deletes)
   upgrade    stage and promote a verified artifact into the inactive slot
   rollback   verify the undo slot and flip back to the previous version
-  status     print redacted install state; finish an interrupted promotion`)
+  status     print redacted install state; finish an interrupted promotion
+  render-daemon render a disposable daemon unit/config from a spec (read-only)`)
 }
 
 func loadPublicKey(path string) (*ed25519.PublicKey, error) {
@@ -118,6 +121,7 @@ func main() {
 	global.IntVar(&o.protocol, "protocol-version", 1, "protocol version")
 	global.DurationVar(&o.ttl, "ttl", 10*time.Minute, "enrollment TTL")
 	global.StringVar(&o.now, "now", "", "RFC3339 now override for offline fixtures")
+	global.StringVar(&o.daemonSpec, "daemon-spec", "", "disposable daemon spec JSON")
 	global.SetOutput(os.Stderr)
 	verb := os.Args[1]
 	verbArgs := os.Args[2:]
@@ -248,6 +252,24 @@ func run(verb string, o options) error {
 			return err
 		}
 		return printJSON(st)
+
+	case "render-daemon":
+		if o.daemonSpec == "" {
+			return fmt.Errorf("%w: -daemon-spec is required", nodeinstall.ErrInvalidInput)
+		}
+		raw, err := os.ReadFile(o.daemonSpec)
+		if err != nil {
+			return err
+		}
+		var spec nodeinstall.DaemonSpec
+		if err := json.Unmarshal(raw, &spec); err != nil {
+			return fmt.Errorf("%w: daemon spec JSON: %v", nodeinstall.ErrInvalidInput, err)
+		}
+		rendered, err := nodeinstall.RenderDaemon(spec)
+		if err != nil {
+			return err
+		}
+		return printJSON(rendered)
 
 	default:
 		usage()

@@ -43,7 +43,9 @@ func makeArtifact(t *testing.T, dir, version, content string) *ArtifactManifest 
 		Schema: "carbon-panel-node-artifact/v1", Name: "carbon-node", Version: version,
 		OS: "linux", Arch: "amd64", Files: map[string]string{name: hex.EncodeToString(sum[:])},
 	}
-	writeJSON(filepath.Join(dir, manifestName), m, 0o644)
+	if err := writeJSON(filepath.Join(dir, manifestName), m, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	return m
 }
 
@@ -305,7 +307,9 @@ func TestVerifyArtifactIntegrityPlatformAndSignature(t *testing.T) {
 	keyPath := filepath.Join(t.TempDir(), "pub.pem")
 	writeTestFile(t, keyPath, string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der2})))
 	m.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(signPriv, canonical))
-	writeJSON(filepath.Join(dir, manifestName), m, 0o644)
+	if err := writeJSON(filepath.Join(dir, manifestName), m, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := VerifyArtifact(dir, "linux", "amd64", &signPub); err != nil {
 		t.Fatalf("signed artifact refused: %v", err)
 	}
@@ -390,7 +394,9 @@ func TestUpgradeRecoversInterruptedPromotion(t *testing.T) {
 	if err := copyDirTree(a2, stageDir(stateDir, target)); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(filepath.Join(stateDir, journalFile), &upgradeJournal{TargetSlot: target, Version: "2.0.0", Phase: "staged"}, 0o644)
+	if err := writeJSON(filepath.Join(stateDir, journalFile), &upgradeJournal{TargetSlot: target, Version: "2.0.0", Phase: "staged"}, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	recovered, err := Status(stateDir)
 	if err != nil {
 		t.Fatalf("recovery failed: %v", err)

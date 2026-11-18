@@ -161,52 +161,55 @@ func BackupVolume(dataDir, backupDir string) (*BackupManifest, error) {
 	if err := os.MkdirAll(tmp, 0o700); err != nil {
 		return nil, err
 	}
+	// Cleanup of the .partial directory is best effort on every error path: the
+	// original failure is the one the caller needs. Ignoring the remove error
+	// is deliberate, so the primary error is never masked by cleanup noise.
 	files, err := walkFiles(src)
 	if err != nil {
-		os.RemoveAll(tmp)
+		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
 	for rel, f := range files {
 		if err := safeRelPath(rel); err != nil {
-			os.RemoveAll(tmp)
+			_ = os.RemoveAll(tmp)
 			return nil, err
 		}
 		target := filepath.Join(tmp, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			os.RemoveAll(tmp)
+			_ = os.RemoveAll(tmp)
 			return nil, err
 		}
 		in, err := os.Open(filepath.Join(src, filepath.FromSlash(rel)))
 		if err != nil {
-			os.RemoveAll(tmp)
+			_ = os.RemoveAll(tmp)
 			return nil, err
 		}
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(f.Mode))
 		if err != nil {
-			in.Close()
-			os.RemoveAll(tmp)
+			_ = in.Close()
+			_ = os.RemoveAll(tmp)
 			return nil, err
 		}
 		_, copyErr := io.Copy(out, in)
 		closeErr := out.Close()
-		in.Close()
+		_ = in.Close()
 		if copyErr != nil || closeErr != nil {
-			os.RemoveAll(tmp)
+			_ = os.RemoveAll(tmp)
 			return nil, fmt.Errorf("backup copy failed: %v %v", copyErr, closeErr)
 		}
 	}
 	m := &BackupManifest{Schema: "carbon-panel-volume-backup/v1", CreatedAt: time.Now().UTC(), SourceDir: src, Files: files}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		os.RemoveAll(tmp)
+		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
 	if err := writeFile(filepath.Join(tmp, backupManifestName), append(b, '\n'), 0o600); err != nil {
-		os.RemoveAll(tmp)
+		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		os.RemoveAll(tmp)
+		_ = os.RemoveAll(tmp)
 		return nil, err
 	}
 	return m, nil
@@ -262,12 +265,12 @@ func RecoverVolume(backupDir, dataDir string) error {
 		}
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(f.Mode))
 		if err != nil {
-			in.Close()
+			_ = in.Close()
 			return err
 		}
 		_, copyErr := io.Copy(out, in)
 		closeErr := out.Close()
-		in.Close()
+		_ = in.Close()
 		if copyErr != nil || closeErr != nil {
 			return fmt.Errorf("recovery copy failed: %v %v", copyErr, closeErr)
 		}

@@ -46,6 +46,7 @@ compiled `cmd/carbon-node-installer` binary (selected with
 | `upgrade` | Stage and promote a verified artifact into the inactive slot | `--state-dir`, `--artifact` |
 | `rollback` | Verify the undo slot and flip back to the previous version | `--state-dir` |
 | `status` | Print redacted install state; finish an interrupted promotion | `--state-dir` |
+| `render-daemon` | Render a disposable daemon unit/config (read-only) | `--daemon-spec` |
 
 Every path is caller-owned. `--target-os`/`--target-arch` exist only so offline
 fixtures on a non-Linux host can verify a Linux artifact; production callers
@@ -67,6 +68,8 @@ directories.
   Ed25519 signature check.
 - `ImportVolume`, `BackupVolume`, `RecoverVolume` — persistent data handling.
 - `Upgrade`, `Rollback`, `Status` — two-slot artifact lifecycle.
+- `RenderDaemon`, `SetDaemonRenderer`, `DaemonRenderer` — in-memory private
+  daemon rendering with a seam for the native lane's canonical renderer.
 
 Sentinel errors (`ErrIntegrity`, `ErrPlatform`, `ErrConsumed`,
 `ErrUnresolvedRecovery`, `ErrSecretLeak`, ...) are stable refusal codes for
@@ -100,6 +103,33 @@ then signs the exact ADR context with the approved key and writes a
 `ClaimEnrollmentRequest`. A second claim is refused (`ErrConsumed`), matching
 the one-time rule. `S` is stored/replayed as a UTF-8 string so the proto `string`
 field stays valid; the digest is computed over those same bytes.
+
+### Private daemon rendering (one source of options)
+
+The installer can render a **disposable** daemon unit and `daemon.json` from a
+caller-supplied spec via `render-daemon` (read-only). It never writes a unit,
+installs a service or starts a process. This closes the three defects found in
+the merged native-daemon baseline (PR527):
+
+- dockerd options are defined **once**, in the option table that generated
+  `daemon.json`; the unit carries only `--config-file` and repeats no option
+  flag, so CLI flags and config can no longer disagree.
+- rootless renders as a **per-user** service (`default.target`,
+  `XDG_RUNTIME_DIR`, `dockerd-rootless.sh`, per-user install hint) rather than a
+  direct system unit.
+- rootful renders as an **explicit root** service with a non-empty
+  `CapabilityBoundingSet`/`AmbientCapabilities`, rather than a non-root service
+  with an empty capability bound that cannot start dockerd.
+
+Every spec is validated fail-closed: global config paths, host sockets, public
+API ports, shared roots/namespaces, rootless without a runtime UID or a socket
+outside `XDG_RUNTIME_DIR`, and unknown modes are all refused. All paths remain
+caller-owned.
+
+The native-daemon lane owns the canonical renderer. Until it lands on main,
+`internal/nodeinstall` provides a local implementation behind the
+`DaemonRenderer` interface and `SetDaemonRenderer` integration seam: wiring the
+shared renderer later requires no change to callers, the CLI or fixtures.
 
 ### Artifact integrity and repeatable upgrade/rollback
 
@@ -139,7 +169,9 @@ python scripts/test_node_installer_fixture.py
 The Go tests cover identity idempotency/uniqueness, secret-free bundle and
 digest/CSR/fingerprint correctness, signature verification and replay refusal,
 artifact integrity/platform/signature checks, two-slot upgrade/rollback with
-data preservation, interrupted-promotion recovery and volume backup/recovery.
+data preservation, interrupted-promotion recovery, volume backup/recovery, and
+daemon rendering (no duplicated options, per-user rootless launcher, explicit
+rootful capabilities and fail-closed spec validation).
 The Python fixture builds the binary once and drives the whole CLI surface in
 a temporary directory, and parses the bash wrapper with a real shell parser
 (`tree-sitter-bash`) plus a dry-run/global-action guard. Both are offline and

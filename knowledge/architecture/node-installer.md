@@ -40,6 +40,12 @@ It is also the supported fallback wherever an image format is unqualified.
   repeatable upgrade/rollback; an interrupted promotion completes from a
   journal or returns `ErrUnresolvedRecovery`, never guessed success. Persistent
   data is not an input to upgrade and is never deleted by recovery.
+- Private-daemon rendering is in-memory, read-only and disposable: daemon
+  options are defined once in `daemon.json`, the unit carries only
+  `--config-file` (no duplicated flags), rootless uses a per-user launcher and
+  rootful an explicit root service with a non-empty capability bound. The
+  native-daemon lane owns the canonical renderer; `DaemonRenderer`/
+  `SetDaemonRenderer` is the seam to consume it without changing callers.
 - Offline Go and Python fixtures prove refusal, state transitions and data
   preservation only. No live host import/boot, hypervisor/LXC or production
   enrollment success is claimed.
@@ -56,6 +62,9 @@ shared and lets an unqualified image fall back to a known-guest path.
   `python scripts/test_node_installer_fixture.py` (offline, synthetic keys only).
 - Confirm no exported function writes outside its supplied directories and no
   generated metadata contains the secret, private key or credential.
+- Confirm `render-daemon` only prints strings, never writes a unit or starts a
+  service, and that its fixtures assert the one-source-of-options, per-user
+  rootless and explicit-rootful-capability rules.
 
 # Read next
 

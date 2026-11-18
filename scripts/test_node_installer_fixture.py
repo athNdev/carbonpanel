@@ -111,6 +111,11 @@ def test_wrapper_syntax_and_guard():
     assert "DRY RUN" in text
     for flag in ("--state-dir", "--data-dir", "--artifact", "--backup-dir"):
         assert flag in text, f"wrapper does not expose {flag}"
+    # render-daemon is read-only and must stay in the no-apply allowlist.
+    assert "verify | status | render-daemon)" in text
+    assert "--daemon-spec" in text
+    for global_path in ("/etc/docker", "/var/lib/docker", "/var/run/docker.sock"):
+        assert global_path not in text, f"wrapper contains a global host path: {global_path}"
 
 
 def main():
@@ -311,6 +316,62 @@ def main():
             assert "integrity" in bad.stderr.lower()
             assert (data / "world" / "level.dat").read_text() == "precious-world"
 
+        def t_daemon_render():
+            def spec(mode, socket, uid):
+                return {
+                    "node_id": "node-daemon-cli",
+                    "mode": mode,
+                    "config_path": "/srv/carbon-node/state/daemon.json",
+                    "socket_path": socket,
+                    "data_root": "/srv/carbon-node/state/docker/data",
+                    "exec_root": "/srv/carbon-node/state/docker/exec",
+                    "containerd_namespace": "carbon-node-cli",
+                    "bridge_cidr": "10.231.0.1/24",
+                    "port_range": "30000-31000",
+                    "storage_driver": "overlay2",
+                    "runtime_uid": uid,
+                }
+
+            for mode, socket, uid in (
+                ("rootless", "/run/user/1000/carbon-node/docker.sock", 1000),
+                ("rootful", "/run/carbon-node/docker.sock", 0),
+            ):
+                specfile = pathlib.Path(tmp) / ("daemon-" + mode + ".json")
+                write(specfile, json.dumps(spec(mode, socket, uid)))
+                rendered = jout(run(binary, "render-daemon", "-daemon-spec", str(specfile)))
+                assert rendered["mode"] == mode
+                unit, config = rendered["unit"], rendered["config"]
+                cfg = json.loads(config)
+                # One source of options: config keys appear exactly once, and
+                # the unit repeats no option flag (only --config-file).
+                assert len(cfg) == len(set(cfg))
+                for key in ("hosts", "data-root", "exec-root", "storage-driver"):
+                    assert config.count('"' + key + '"') == 1, key
+                assert config.count('"no-new-privileges"') == 1
+                assert "--config-file=/srv/carbon-node/state/daemon.json" in unit
+                for flag in ("--host=", "--data-root=", "--storage-driver=", "--bip="):
+                    assert flag not in unit, f"unit duplicates {flag}"
+                assert unit.count("ExecStart=") == 1
+                if mode == "rootless":
+                    assert "WantedBy=default.target" in unit
+                    assert "ExecStart=/usr/bin/dockerd-rootless.sh" in unit
+                    assert "XDG_RUNTIME_DIR=/run/user/1000" in unit
+                    assert "\nUser=" not in unit
+                    assert "systemctl --user" in rendered["install_hint"]
+                else:
+                    assert "User=root" in unit and "Group=root" in unit
+                    assert "CapabilityBoundingSet=CAP_SYS_ADMIN" in unit
+                    assert "AmbientCapabilities=CAP_SYS_ADMIN" in unit
+                    assert "WantedBy=multi-user.target" in unit
+                    assert "CapabilityBoundingSet=\n" not in unit
+            # Specs that target global config or public sockets are refused.
+            bad = spec("rootless", "/run/user/1000/carbon-node/docker.sock", 1000)
+            bad["config_path"] = "/etc/docker/daemon.json"
+            badfile = pathlib.Path(tmp) / "daemon-bad.json"
+            write(badfile, json.dumps(bad))
+            ref = run(binary, "render-daemon", "-daemon-spec", str(badfile), expect=1)
+            assert "caller-owned" in ref.stderr or "global host config" in ref.stderr, ref.stderr
+
         check("wrapper syntax and dry-run guard", test_wrapper_syntax_and_guard)
 
         # Bundle must be built before the claim test consumes the secret.
@@ -321,6 +382,7 @@ def main():
         check("challenge-bound claim and replay refusal", t_claim)
         check("artifact verify / upgrade / rollback", t_artifact_upgrade_rollback)
         check("persistent volume import / backup / recover", t_volume)
+        check("daemon one-source options, per-user rootless, rootful capabilities", t_daemon_render)
 
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
