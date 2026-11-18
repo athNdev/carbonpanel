@@ -193,13 +193,20 @@ prepared here. At the time of this change no image has been pushed to GHCR and
 no MCP Registry entry has been submitted. Do not substitute a locally built or
 preview artifact for the official stable one when it is published.
 
+The implemented catalogue is a **first slice of 30 tools**, not full API
+coverage. Inventory coverage (25 mounted services / 220 RPCs) is not tool
+coverage; supported families still missing remain tracked under **OSS-370**,
+which stays open. Do not infer that every panel RPC has a tool.
+
 A successful client install proves only that the **package is available**. It
 does **not** prove that a tool works against your panel: **server capabilities**
 come from the panel build behind `CARBONPANEL_URL`. The latest stable panel,
 `v1.0.40` (`f88748be6a216b187e675bbb1f110df07e544148`), predates the player,
-world, world-view, mod-browse and node-control RPCs. Current main
-(`d8597d4e953522d2eb2fa6d4764965ae8e58686f`) adds them but is 138 commits
-ahead and is not the stable install path. See the matrix below.
+world and world-view RPCs. The pinned post-stable build
+(`fa23a8d73c181f9907633024d9023aead928324e`) contains them but is not the
+stable install path. See the matrix below. The server requires an
+**authentication-enabled** panel: it refuses legacy no-auth installations and
+uses a real `dp_` API token, never anonymous access.
 
 Copy/paste this into your agent when the official artifact is available:
 
@@ -208,20 +215,23 @@ Connect me to my self-hosted Carbon Panel — an EXISTING install or a NEW one �
 using the OFFICIAL, STABLE, PINNED MCP artifact. Do not build or substitute a
 local/preview image.
 
-0. Decide the panel build first. The default is STABLE (v1.0.40 or later).
-   You MAY start a NEW self-hosted install: follow the normal install docs,
-   create the first admin account, then a dedicated API token. A new install
-   must NOT replace, reconfigure, migrate or delete an existing panel, world
-   or database; if one exists, use it instead. For an EXISTING install, do NOT
-   re-run an installer, recreate containers or change its channel. Do NOT
-   switch any install to nightly automatically: only I, the operator, choose a
-   qualified nightly build as a separate, backed-up change.
+0. Decide the panel build first. The default is STABLE (v1.0.40 or later), and
+   the panel MUST be authentication-enabled: a legacy no-auth installation is
+   refused. You MAY start a NEW self-hosted install: follow the normal
+   install docs, create the first admin account, then a dedicated API token.
+   A new install must NOT replace, reconfigure, migrate or delete an existing
+   panel, world or database; if one exists, use it instead. For an EXISTING
+   install, do NOT re-run an installer, recreate containers or change its
+   channel. Do NOT switch any install to nightly automatically: only I, the
+   operator, choose a qualified nightly build as a separate, backed-up change.
 1. Use the exact official stable MCP artifact version and its immutable
    ghcr.io sha256 digest. Never use :latest, @main, a branch tag or a moving
    minor tag. Pin the version and digest in the client config.
-2. Create a dedicated, expiring, least-privilege Carbon Panel API token and
-   pass it only through the client env CARBONPANEL_TOKEN. Never paste a session
-   token, commit a token, or put one in arguments, stdout or logs.
+2. Create a dedicated, expiring, least-privilege Carbon Panel API token — a real
+   `dp_` token, not a session token or an anonymous/no-auth bypass — and pass it
+   only through the client env CARBONPANEL_TOKEN. Never commit a token or put
+   one in arguments, stdout or logs. Missing or invalid credentials are errors,
+   never an anonymous fallback.
 3. Use a panel URL REACHABLE FROM THE MCP PROCESS. A host-installed MCP binary
    may use http://127.0.0.1:8080. A containerized MCP client on the panel's
    Docker network must use the panel's COMPOSE SERVICE NAME and port (for the
@@ -232,12 +242,14 @@ local/preview image.
    rm -rf on data paths, or any delete/stop/start/recreate command. The MCP
    connection mounts no world, database or backup directory and no Docker
    socket. Confirm worlds and the panel database are intact before and after.
-5. Use the read-only tool set qualified for my panel build. On stable, use
-   list_servers, get_server, get_server_logs, list_server_players, list_nodes
-   and get_node only. If I ask for a PlayerService, WorldService,
-   WorldViewService or ModBrowseService tool, return the structured
-   CAPABILITY_UNAVAILABLE error with the required qualified build; do not
-   report success, guess from your client version, or silently skip the call.
+5. Use the read-only tool set qualified for my panel build. On stable, the
+   verified minimal set is list_servers, get_server, list_files, get_file and
+   list_backups. The catalogue is a first slice of 30 tools, not full API
+   coverage; OSS-370 stays open for supported families still missing. If I ask
+   for PlayerService, WorldService or WorldViewService
+   tools, return the structured CAPABILITY_UNAVAILABLE error with the required
+   qualified build; do not report success, guess from your client version, or
+   silently skip the call.
 6. Check health first: GET /healthz, /readyz and /health/detail on the panel
    from where the MCP process runs. Report healthy, degraded/unavailable and
    unknown separately. A stored Running status alone is not playable evidence.
@@ -261,7 +273,7 @@ loopback reaches a panel published on that host):
       "args": ["stdio"],
       "env": {
         "CARBONPANEL_URL": "http://127.0.0.1:8080",
-        "CARBONPANEL_TOKEN": "<DEDICATED_EXPIRING_API_TOKEN>"
+        "CARBONPANEL_TOKEN": "dp_<DEDICATED_EXPIRING_API_TOKEN>"
       }
     }
   }
@@ -286,7 +298,7 @@ service DNS name and port):
       ],
       "env": {
         "CARBONPANEL_URL": "http://carbon-panel:8080",
-        "CARBONPANEL_TOKEN": "<DEDICATED_EXPIRING_API_TOKEN>"
+        "CARBONPANEL_TOKEN": "dp_<DEDICATED_EXPIRING_API_TOKEN>"
       }
     }
   }
@@ -312,24 +324,29 @@ Linux is fully supported and tested — Windows installations may have issues.
 
 ### Compatibility: package availability is not server capability
 
-| Tool (read-only) | Backing RPC | Stable `v1.0.40` | Pinned main build |
+The catalogue is a **first slice of 30 tools**. It is not the full 220-RPC
+inventory: OSS-370 remains open for supported families still missing. Tool names
+below match the implemented catalogue exactly.
+
+| Tool (read-only) | Backing RPC | Stable `v1.0.40` | Pinned post-stable build |
 | --- | --- | --- | --- |
 | `list_servers` | `ServerService/ListServers` | available | available |
 | `get_server` | `ServerService/GetServer` | available | available |
-| `get_server_logs` | `ServerService/GetServerLogs` | available | available |
-| `list_server_players` | `ServerService/ListServerPlayers` | available | available |
-| `list_nodes` | `NodeService/ListNodes` | available | available |
-| `get_node` | `NodeService/GetNode` | available | available |
+| `list_files` | `FileService/ListFiles` | available | available |
+| `get_file` | `FileService/GetFile` | available | available |
+| `list_backups` | `BackupService/ListBackups` | available | available |
 | `list_players` | `PlayerService/ListPlayers` | **unavailable** | pinned, qualification pending |
+| `get_player` | `PlayerService/GetPlayer` | **unavailable** | pinned, qualification pending |
 | `list_world_entries` | `WorldService/ListWorldEntries` | **unavailable** | pinned, qualification pending |
 | `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | **unavailable** | pinned, qualification pending |
-| `search_mods` | `ModBrowseService/SearchMods` | **unavailable** | pinned, qualification pending |
+| `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | **unavailable** | pinned, qualification pending |
 
-The pinned main candidate is `d8597d4e953522d2eb2fa6d4764965ae8e58686f`;
-"qualification pending" means the build contains the RPC but no smoke evidence
-has been recorded yet. `PlayerService`, `WorldService`, `WorldViewService`,
-`ModBrowseService` and `NodeControlService` are absent from `v1.0.40`. Never
-infer capability from the MCP client version or from a successful install.
+The pinned post-stable candidate is
+`fa23a8d73c181f9907633024d9023aead928324e`; "qualification pending" means the
+build contains the RPC but no smoke evidence has been recorded yet.
+`PlayerService`, `WorldService` and `WorldViewService` are absent from
+`v1.0.40`. Never infer capability from the MCP client version or from a
+successful install.
 
 When an RPC is missing or returns `Unimplemented`, the tool result is an
 honest structured error, not a success or a silent omission:
@@ -337,7 +354,7 @@ honest structured error, not a success or a silent omission:
 ```json
 {"error":{"code":"CAPABILITY_UNAVAILABLE","tool":"list_players",
  "rpc":"carbonpanel.v1.PlayerService/ListPlayers",
- "required_panel_build":"<qualified build>","observed_panel_build":"v1.0.40 (f88748be)",
+ "required_panel_build":"post-v1.0.40+fa23a8d73c181f9907633024d9023aead928324e","observed_panel_build":"v1.0.40 (f88748be)",
  "retryable":false,"guidance":"Upgrade the panel in a separate operator-initiated change."}}
 ```
 

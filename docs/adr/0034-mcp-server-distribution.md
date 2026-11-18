@@ -21,13 +21,16 @@ independent version lines and could imply that a new MCP tool works on an older
 panel build.
 
 That risk is concrete. The latest stable panel build, `v1.0.40`
-(`f88748be6a216b187e675bbb1f110df07e544148`), predates the player, world, world
-view, mod-browse and node-control work. Current main
-(`d8597d4e953522d2eb2fa6d4764965ae8e58686f`) is 138 commits ahead and adds
-`PlayerService`, `WorldService`, `WorldViewService`, `ModBrowseService` and
-`NodeControlService` in the checked-in protos. A client package that installs
-successfully says nothing about which of those RPCs a given panel build
-implements.
+(`f88748be6a216b187e675bbb1f110df07e544148`), predates the player, world and
+world-view work. The pinned post-stable build
+`fa23a8d73c181f9907633024d9023aead928324e` contains those services. A client
+package that installs successfully says nothing about which of those RPCs a
+given panel build implements.
+
+The implemented tool catalogue is a deliberate **first slice of 30 tools**.
+Mounted-service/RPC inventory (25 services / 220 RPCs) is not tool coverage,
+and this ADR must not be read as a claim of full API coverage: OSS-370 remains
+open for supported families still missing.
 
 ## Decision
 
@@ -93,10 +96,13 @@ implements.
 ### Authorization and capability surface
 
 - The MCP server reuses Carbon Panel's fail-closed authorization with a
-  dedicated, expiring, least-privilege API token supplied per client. It does
-  not reuse a browser session token, does not create a new privilege path, and
-  never writes a token to tracked config or stdout. Tool metadata marks secret
-  inputs `isSecret: true`.
+  dedicated, expiring, least-privilege `dp_` API token supplied per client. It
+  requires an authentication-enabled panel and verifies auth state through
+  `AuthService/GetAuthStatus` and token identity; legacy no-auth installations,
+  anonymous access and browser session tokens are refused with a credential
+  error rather than an implicit fallback. It does not create a new privilege
+  path and never writes a token to tracked config or stdout. Tool metadata marks
+  secret inputs `isSecret: true`.
 - Tools are read-only by default. Mutating capability is a separately reviewed
   decision and requires explicit per-action user approval; the documentation
   and smoke procedure exercise read-only calls only. No world, database or
@@ -122,14 +128,16 @@ tool works against a panel. Capability is determined from a tested, pinned
 panel build, not from the MCP client version or from a package being available.
 
 The initial compatibility matrix is carried in the user guide and smoke
-procedure. Read-only tools backed by RPCs present at `v1.0.40`
-(`ServerService.ListServers`, `GetServer`, `GetServerLogs`, `ListServerPlayers`
-and `NodeService.ListNodes`, `GetNode`) form the verified-by-contract minimal
-stable set. Tools backed by `PlayerService`, `WorldService`, `WorldViewService`,
-`ModBrowseService` and `NodeControlService` are unavailable on `v1.0.40`; they
-are qualified only against an explicitly pinned main build and only after smoke
-evidence is recorded for that build. The documentation names the pinned commit
-and marks qualification pending until that evidence exists.
+procedure and matches the implemented first-slice catalogue exactly. The
+verified-by-contract minimal stable set is `list_servers` (`ServerService/ListServers`),
+`get_server` (`ServerService/GetServer`), `list_files` (`FileService/ListFiles`),
+`get_file` (`FileService/GetFile`) and `list_backups` (`BackupService/ListBackups`).
+Tools backed by `PlayerService`, `WorldService` and `WorldViewService` are
+unavailable on `v1.0.40`; they are qualified only against the pinned post-stable
+build `fa23a8d73c181f9907633024d9023aead928324e` and only after smoke evidence
+is recorded for that build. The documentation marks qualification pending until
+that evidence exists. Full API coverage is explicitly out of scope for this
+slice; OSS-370 remains open.
 
 When a tool's RPC is absent or `Unimplemented`, the server returns an honest
 structured capability error (an MCP tool error with a `CAPABILITY_UNAVAILABLE`

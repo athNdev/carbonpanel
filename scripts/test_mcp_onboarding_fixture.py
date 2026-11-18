@@ -143,6 +143,8 @@ class CopyablePromptTests(unittest.TestCase):
             "CAPABILITY_UNAVAILABLE",
             "/healthz", "/readyz", "/health/detail",
             "tools/list", "list_servers", "STABLE", "sha256",
+            "first slice of 30 tools", "OSS-370", "dp_",
+            "authentication-enabled", "list_files", "list_backups",
         ]
         for phrase in required:
             self.assertIn(phrase, prompt, f"copyable prompt is missing: {phrase}")

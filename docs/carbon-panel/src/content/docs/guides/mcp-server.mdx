@@ -21,6 +21,11 @@ Carbon Panel can expose a read-first [Model Context Protocol](https://modelconte
 versioned and owned: it does not move a panel release tag, a Docker Hub panel
 image or a GitHub Release. See [ADR 0034](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md).
 
+The implemented catalogue is a **first slice of 30 tools**, not full API
+coverage. Inventory coverage (25 mounted services / 220 RPCs) is not tool
+coverage; supported families still missing remain tracked under **OSS-370**,
+which stays open.
+
 ## Two different claims: available versus compatible
 
 - **Public package availability** means the official OCI artifact and registry
@@ -35,9 +40,10 @@ that a tool works. Never infer capability from the MCP client version.
 ## Choose the panel build first
 
 The default is your **existing stable install**. The latest stable panel is
-`v1.0.40` (`f88748be6a216b187e675bbb1f110df07e544148`). Current main
-(`d8597d4e953522d2eb2fa6d4764965ae8e58686f`) is 138 commits ahead and adds
-new RPCs, but it is not the stable install path.
+`v1.0.40` (`f88748be6a216b187e675bbb1f110df07e544148`). The pinned post-stable
+build (`fa23a8d73c181f9907633024d9023aead928324e`) adds the new RPCs, but it is
+not the stable install path. The panel must have authentication enabled: legacy
+no-auth installations are refused.
 
 - **New self-hosted install:** you MAY start one by following [Docker Compose](../getting-started/docker-compose/)
   or [prebuilt binaries](../getting-started/prebuilt-binaries/), open
@@ -67,13 +73,22 @@ published. `scripts/validate_mcp_server_json.py` checks the required fields and
 refuses `latest`; the publication workflow injects the verified digest before
 any registry write.
 
+## Authentication is required
+
+The MCP server refuses a legacy no-auth installation. It verifies that
+authentication is enabled (`AuthService/GetAuthStatus`) and uses the token's
+identity for authorization. A missing or invalid credential is an error; there
+is no anonymous fallback and no way to connect to a panel with authentication
+disabled.
+
 ## Create a dedicated token
 
 In the panel, create an API token with the narrowest permissions and a finite
-expiry. Pass it only through `CARBONPANEL_TOKEN` in the client configuration
-(or an environment variable). Do not reuse a browser session token, put a
-token in command arguments, commit it to a repository or write it to stdout.
-The registry metadata marks this variable `isSecret: true`.
+expiry. It must be a real `dp_` token, not a browser session token or an
+anonymous bypass. Pass it only through `CARBONPANEL_TOKEN` in the client
+configuration (or an environment variable). Do not put a token in command
+arguments, commit it to a repository or write it to stdout. The registry
+metadata marks this variable `isSecret: true`.
 
 ## Client configuration
 
@@ -90,7 +105,7 @@ published on that host:
       "args": ["stdio"],
       "env": {
         "CARBONPANEL_URL": "http://127.0.0.1:8080",
-        "CARBONPANEL_TOKEN": "<DEDICATED_EXPIRING_API_TOKEN>"
+        "CARBONPANEL_TOKEN": "dp_<DEDICATED_EXPIRING_API_TOKEN>"
       }
     }
   }
@@ -117,7 +132,7 @@ container, so it must use the panel's Compose service DNS name and port:
       ],
       "env": {
         "CARBONPANEL_URL": "http://carbon-panel:8080",
-        "CARBONPANEL_TOKEN": "<DEDICATED_EXPIRING_API_TOKEN>"
+        "CARBONPANEL_TOKEN": "dp_<DEDICATED_EXPIRING_API_TOKEN>"
       }
     }
   }
@@ -148,40 +163,37 @@ session is the liveness signal.
 
 ## Compatibility matrix
 
-Evidence basis: the RPC list at tag `v1.0.40` (`f88748be…`) and at pinned main
-`d8597d4e…`, read from the checked-in protos. "Qualification pending" means the
-RPC exists in that build but no passing smoke evidence has been recorded for
-it yet.
+Tool names match the implemented **first-slice catalogue of 30 tools** exactly.
+This is not full API coverage; OSS-370 stays open for supported families still
+missing. Evidence basis: the RPC list at tag `v1.0.40` (`f88748be…`) and at the
+pinned post-stable build `fa23a8d73c181f9907633024d9023aead928324e`, read from
+the checked-in protos. "Qualification pending" means the RPC exists in that
+build but no passing smoke evidence has been recorded for it yet.
 
-| MCP tool | Backing RPC | `v1.0.40` | Pinned main build |
+| MCP tool | Backing RPC | `v1.0.40` | Pinned post-stable build |
 | --- | --- | --- | --- |
 | `list_servers` | `ServerService/ListServers` | available | available |
 | `get_server` | `ServerService/GetServer` | available | available |
-| `get_server_logs` | `ServerService/GetServerLogs` | available | available |
-| `list_server_players` | `ServerService/ListServerPlayers` | available | available |
-| `list_nodes` | `NodeService/ListNodes` | available | available |
-| `get_node` | `NodeService/GetNode` | available | available |
+| `list_files` | `FileService/ListFiles` | available | available |
+| `get_file` | `FileService/GetFile` | available | available |
+| `list_backups` | `BackupService/ListBackups` | available | available |
 | `list_players` | `PlayerService/ListPlayers` | **unavailable** | pinned, qualification pending |
 | `get_player` | `PlayerService/GetPlayer` | **unavailable** | pinned, qualification pending |
 | `list_world_entries` | `WorldService/ListWorldEntries` | **unavailable** | pinned, qualification pending |
-| `list_revisions` | `WorldService/ListRevisions` | **unavailable** | pinned, qualification pending |
 | `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | **unavailable** | pinned, qualification pending |
 | `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | **unavailable** | pinned, qualification pending |
-| `search_mods` | `ModBrowseService/SearchMods` | **unavailable** | pinned, qualification pending |
 
-`NodeControlService` is also new after `v1.0.40`; it is a node control-plane
-surface and is not part of the initial read-only MCP tool catalogue. A tool is
-qualified only after its RPC is present in an explicitly pinned build and a
-smoke result for that build is retained. Until then it must be reported as
+A tool is qualified only after its RPC is present in an explicitly pinned build
+and a smoke result for that build is retained. Until then it must be reported as
 unavailable rather than attempted optimistically.
 
 ## Verified minimal smoke on stable
 
-The read-only tools genuinely present in `v1.0.40` are `list_servers`,
-`get_server`, `get_server_logs`, `list_server_players`, `list_nodes` and
-`get_node`. This is a **verified-by-contract** set: the RPCs were read directly
-from the tagged protos. Execution against a real `v1.0.40` fixture is a
-separate gate and has not been performed in this change.
+The verified minimal tool set that works against `v1.0.40` is `list_servers`,
+`get_server`, `list_files`, `get_file` and `list_backups`, matching the core
+lane's stable smoke path. This is a **verified-by-contract** set: the RPCs were
+read directly from the tagged protos. Execution against a real `v1.0.40`
+fixture is a separate gate and has not been performed in this change.
 
 1. Check the panel health endpoints before connecting: `GET /healthz`,
    `GET /readyz` and `GET /health/detail`. Report `healthy`,
@@ -191,9 +203,10 @@ separate gate and has not been performed in this change.
    `tools/list`. The stable tool set above may be listed; listing a main-only
    tool is not proof that it works.
 3. Call `list_servers` and show the unmodified result. Optionally call
-   `get_server` with a server id, then `get_server_logs` with a bounded range.
-4. Call `list_nodes` and `get_node`. No write, restart, delete, prune or
-   config/world/database change is attempted, so no rollback is needed.
+   `get_server` with a server id, then `list_files`/`get_file` (bounded,
+   server-relative) and `list_backups`.
+4. No write, restart, delete, prune or config/world/database change is
+   attempted, so no rollback is needed.
 5. If a tool returns `Unimplemented` or an unavailable-RPC error, stop that
    call and surface the structured capability error below. Do not retry with a
    different MCP client version and do not report the call as successful.
@@ -209,7 +222,7 @@ tool error (`isError: true`) with an honest structured payload:
 ```json
 {"error":{"code":"CAPABILITY_UNAVAILABLE","tool":"list_players",
  "rpc":"carbonpanel.v1.PlayerService/ListPlayers",
- "required_panel_build":"<qualified build>","observed_panel_build":"v1.0.40 (f88748be)",
+ "required_panel_build":"post-v1.0.40+fa23a8d73c181f9907633024d9023aead928324e","observed_panel_build":"v1.0.40 (f88748be)",
  "retryable":false,"guidance":"Upgrade the panel in a separate operator-initiated change."}}
 ```
 

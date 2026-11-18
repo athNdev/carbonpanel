@@ -113,9 +113,10 @@ that matches where the MCP process runs:
    separately; a stored `Running` status is not playable evidence.
 2. Call `tools/list`; retain the tool list.
 3. On stable `v1.0.40` (`f88748be…`) call only the verified-by-contract
-   read-only set: `list_servers`, `get_server`, `get_server_logs`,
-   `list_server_players`, `list_nodes`, `get_node`. Record request/response
-   pairs with timestamps.
+   read-only set matching the core lane's stable smoke path: `list_servers`,
+   `get_server`, `list_files`, `get_file`, `list_backups`. Record request/response
+   pairs with timestamps. This is a first-slice catalogue of 30 tools, not full
+   API coverage; OSS-370 remains open.
 4. Do not call any mutating tool. No rollback is needed. Stop and report if a
    tool requests a write.
 5. Remove the uniquely named container, temp volume, throwaway network and temp
@@ -131,13 +132,16 @@ build and the observed build. A success, an empty omission or a client-version
 guess is a failure. The exact field names are owned by the core implementation
 lane; the semantics are fixed by ADR 0034.
 
-New tools (`PlayerService`, `WorldService`, `WorldViewService`,
-`ModBrowseService`, `NodeControlService`) are qualified only against a pinned
-build that contains them, with retained smoke evidence. The current candidate
-is `d8597d4e953522d2eb2fa6d4764965ae8e58686f`; it is marked "qualification
+New tools (`PlayerService`, `WorldService`, `WorldViewService`) are qualified
+only against the pinned post-stable build that contains them, with retained
+smoke evidence. The current candidate is
+`fa23a8d73c181f9907633024d9023aead928324e`; it is marked "qualification
 pending" until that evidence exists. Switching an existing install to nightly
 is never automatic: only an operator may choose it in a separate, backed-up
-change.
+change. The fixture panel must have authentication enabled and the client must
+use a real `dp_` API token; the core lane refuses legacy no-auth installs and
+verifies `AuthService/GetAuthStatus` plus token identity. No anonymous fallback
+is acceptable.
 
 ## 5. Verify the registry entry itself
 
@@ -169,8 +173,9 @@ Do not announce until this succeeds.
 ## Hard stops
 
 Stop and do not advertise or publish if the artifact is not public and
-immutable; either platform or the ownership label is missing; anonymous pull
-fails; the stdio handshake or stdout hygiene fails; the fixture would need a
+immutable; either platform or the ownership label is missing; the panel has
+authentication disabled or the credential is not a real `dp_` token; anonymous
+pull fails; the stdio handshake or stdout hygiene fails; the fixture would need a
 live controller, shared service, real credentials or any world/database mount;
 a mutating or unauthorized outbound call is observed; the capability error is
 reported as success; cleanup cannot be proven; or the registry listing cannot

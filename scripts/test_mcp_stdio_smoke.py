@@ -29,8 +29,8 @@ import mcp_stdio_smoke  # noqa: E402
 
 MOCK_SERVER = r'''
 import json, os, sys
-read_only = ["list_servers", "get_server", "get_server_logs",
-             "list_server_players", "list_nodes", "get_node"]
+read_only = ["list_servers", "get_server", "list_files",
+             "get_file", "list_backups"]
 if os.environ.get("MCP_FIXTURE_NOISE"):
     print("diagnostic accidentally written to stdout", flush=True)
 for line in sys.stdin:
