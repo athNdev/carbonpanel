@@ -126,6 +126,15 @@ policy; pin an explicit version for upgrades. The image digest in the release
 manifest is the immutable reference for that release. Module images have their
 own publishing workflow.
 
+Readable immutable per-build aliases (`build-YYYY-MM-DD-HHMMSS`, with `-N` only
+for a publication-second collision) are documented separately in
+[Docker readable build aliases](docker-readable-aliases.md). The UTC timestamp is
+the Docker Hub tag-push/publication time, not a verified image build time; no
+commit or SHA fragment appears in the alias. Full commit identity stays in the
+checked-in mapping and the retained original `sha-<40hex>` ref. These aliases are
+additions at existing digests and never move `latest`, a minor tag, `edge`,
+`nightly` or a release tag.
+
 ## Nightly development channel
 
 `nightly` is a development alias, not a release version or a GitHub release. It

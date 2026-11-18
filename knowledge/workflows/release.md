@@ -22,6 +22,8 @@ sources:
     resource: ../../docs/adr/0010-versioned-release-artifacts.md
   - title: Publication boundary and version domains
     resource: ../../docs/adr/0033-release-tag-and-publication-policy.md
+  - title: Verified runtime artifact installation
+    resource: ../../docs/node-runtime/verified-artifacts-install.md
 ---
 
 # Steps
@@ -97,6 +99,14 @@ resume from the original verified download artifact without rebuilding images.
   operator checkbox is never CI evidence. IndexNow notification is deferred
   because URLs come from a push diff while deployment is dispatch-only. A scoped
   publish-boundary opt-in needs release-auditor review before held merges.
+- Human-readable `build-YYYY-MM-DD-HHMMSS` aliases are immutable additions at
+  exact existing digests, not releases or channels, and carry no SHA fragment.
+  They are recomputed from the checked-in mapping by
+  `scripts/docker_readable_aliases.py` using observed Hub tag publication time
+  (`tag_last_pushed`, fallback `last_updated`; a proxy, not build time) and never
+  move `latest`, a minor tag, `edge`, `nightly` or an original `sha-*` ref. Only
+  an explicit trusted-main dispatch may add them, using imagetools create with
+  strict observation and idempotence; see ADR 0039.
 - `nightly` is a development alias, not a release version: it points to the most
   recent qualifying build of a pinned main commit with exact successful CI, and
   reuses the verified `sha-<full-commit>` image rather than adding a date alias.
@@ -116,6 +126,14 @@ resume from the original verified download artifact without rebuilding images.
   `latest` or a minor tag, and no scheduled registry write is enabled. Seeding a
   live nightly is separately authorized; the existing `edge` image is not a fresh
   nightly.
+- Managed node-runtime artifacts are a separate publication lane, not an
+  application release. `runtime-artifacts.yml` is dispatch-only, uses the
+  independent `runtime-vMAJOR.MINOR.PATCH` domain, and requires trusted-main
+  SHA, exact-commit main CI and a bound identity assertion before any write.
+  It produces checksums, a cosign keyless signature and a CycloneDX SBOM for a
+  draft asset release; it never pushes a registry image, publishes an app
+  release or provisions a host. Only formats with real clean import/boot
+  evidence are publishable; see the format decision concept.
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The
