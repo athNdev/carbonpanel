@@ -48,19 +48,44 @@ one at https://mozilla.org/MPL/2.0/.
 	let invitePin = $state('');
 
 	onMount(() => {
-		// Check for OIDC callback token
 		const urlParams = new URLSearchParams(window.location.search);
-		const token = urlParams.get('token');
-		if (token) {
-			authStore.setToken(token);
+
+		// Canonical OIDC error states from the callback. Never render raw IdP text.
+		const oidcError = urlParams.get('error');
+		if (oidcError) {
+			error = oidcErrorMessage(oidcError);
 			window.history.replaceState({}, '', '/login');
-			authStore.validateSession().then((valid) => {
-				if (valid) {
-					goto(resolve('/'));
-				} else {
-					error = 'Session validation failed. Please try again.';
-				}
-			});
+			return;
+		}
+
+		// The callback returns a one-time exchange code. The session token is
+		// fetched with POST and never appears in a URL, Referer or history entry.
+		const exchangeCode = urlParams.get('code');
+		if (exchangeCode) {
+			loading = true;
+			window.history.replaceState({}, '', '/login');
+			fetch('/api/v1/auth/oidc/exchange', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'same-origin',
+				body: JSON.stringify({ code: exchangeCode })
+			})
+				.then(async (resp) => {
+					if (!resp.ok) throw new Error('oidc_degraded');
+					const body = (await resp.json()) as { token?: string };
+					if (!body.token) throw new Error('oidc_degraded');
+					authStore.setToken(body.token);
+					return authStore.validateSession();
+				})
+				.then((valid) => {
+					loading = false;
+					if (valid) goto(resolve('/'));
+					else error = 'Session validation failed. Please try again.';
+				})
+				.catch(() => {
+					loading = false;
+					error = 'SSO sign-in could not be completed. Please try again.';
+				});
 			return;
 		}
 
@@ -206,6 +231,26 @@ one at https://mozilla.org/MPL/2.0/.
 		{ id: 'login', label: 'Login' },
 		{ id: 'register', label: 'Register' }
 	];
+
+	// Canonical, operator-safe messages for OIDC callback errors. Raw IdP error
+	// descriptions and claim values are never rendered.
+	const oidcErrorMessages: Record<string, string> = {
+		invalid_state: 'The sign-in request expired or was already used. Please try again.',
+		expired_login: 'The sign-in request expired. Please try again.',
+		invalid_issuer: 'The identity provider did not match the configured issuer.',
+		access_denied: 'Access was denied by the identity provider.',
+		no_mapped_roles: 'Your account has no mapped Carbon Panel role. Ask an administrator.',
+		membership_check_failed: 'Could not verify your group membership. Please try again.',
+		oidc_degraded: 'SSO is temporarily unavailable. A local administrator can still sign in.',
+		locked_out: 'Too many sign-in attempts. Please wait before retrying.',
+		link_required: 'This identity requires an administrator to link it to an account.',
+		role_conflict: 'A role conflict blocked sign-in. Ask an administrator to review role mapping.',
+		account_disabled: 'This account is disabled.'
+	};
+
+	function oidcErrorMessage(code: string): string {
+		return oidcErrorMessages[code] ?? 'SSO sign-in failed. Please try again.';
+	}
 </script>
 
 <svelte:head>

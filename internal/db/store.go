@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -845,6 +846,24 @@ func (s *Store) GetUserByOIDCSubject(ctx context.Context, subject string) (*User
 	return &user, nil
 }
 
+// GetUserByOIDCIssuerAndSubject resolves the sole valid OIDC identity key.
+// A subject is unique only within an issuer, so lookups must always include
+// both values. Callers must not fall back to a subject-only lookup.
+func (s *Store) GetUserByOIDCIssuerAndSubject(ctx context.Context, issuer, subject string) (*User, error) {
+	if issuer == "" || subject == "" {
+		return nil, fmt.Errorf("issuer and subject are required")
+	}
+	var user User
+	err := s.db.WithContext(ctx).First(&user, "oidc_issuer = ? AND oidc_subject = ?", issuer, subject).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (s *Store) ListUsers(ctx context.Context) ([]*User, error) {
 	var users []*User
 	err := s.db.WithContext(ctx).Order("created_at DESC").Find(&users).Error
@@ -963,6 +982,66 @@ func (s *Store) AssignRole(ctx context.Context, userID, roleName, source string)
 
 func (s *Store) UnassignRole(ctx context.Context, userID, roleName string) error {
 	return s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).Delete(&UserRole{}).Error
+}
+
+// SetUserRolesBySource reconciles a user's role grants for exactly one source
+// in a single transaction. Grants with any other source (local, admin, manual)
+// are never read as "current", deleted, or reattributed. It returns the
+// deterministic added/removed role names so callers can emit audit deltas.
+//
+// This is the source-aware helper required for OIDC entitlement reconciliation:
+// the older UnassignRole has no source filter and must not be used for it.
+func (s *Store) SetUserRolesBySource(ctx context.Context, userID, source string, desired []string) (added, removed []string, err error) {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing []UserRole
+		if err := tx.Where("user_id = ? AND source = ?", userID, source).Find(&existing).Error; err != nil {
+			return err
+		}
+		current := make(map[string]struct{}, len(existing))
+		for _, grant := range existing {
+			current[grant.RoleName] = struct{}{}
+		}
+		want := make(map[string]struct{}, len(desired))
+		for _, name := range desired {
+			if name != "" {
+				want[name] = struct{}{}
+			}
+		}
+		for name := range want {
+			if _, ok := current[name]; ok {
+				continue
+			}
+			grant := &UserRole{ID: uuid.New().String(), UserID: userID, RoleName: name, Source: source}
+			if err := tx.Create(grant).Error; err != nil {
+				return err
+			}
+			added = append(added, name)
+		}
+		for name := range current {
+			if _, ok := want[name]; ok {
+				continue
+			}
+			if err := tx.Where("user_id = ? AND role_name = ? AND source = ?", userID, name, source).Delete(&UserRole{}).Error; err != nil {
+				return err
+			}
+			removed = append(removed, name)
+		}
+		sort.Strings(added)
+		sort.Strings(removed)
+		return nil
+	})
+	return added, removed, err
+}
+
+// GetUserRoleSource returns the recorded source of a user's role grant. It is
+// used to detect provenance conflicts before OIDC reconciliation so that a
+// locally or admin assigned grant is never converted into an OIDC grant.
+func (s *Store) GetUserRoleSource(ctx context.Context, userID, roleName string) (string, error) {
+	var grant UserRole
+	if err := s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).First(&grant).Error; err != nil {
+		return "", err
+	}
+	return grant.Source, nil
 }
 
 func (s *Store) GetUserRoleNames(ctx context.Context, userID string) ([]string, error) {

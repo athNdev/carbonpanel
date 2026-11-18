@@ -116,6 +116,12 @@ auth:
     role_claim: "groups"  # The token claim that contains the user's groups (usually "groups")
     role_mapping: {}  # Mapping to groups if they arent the same name as carbon-panel's (ie: {"my-admins": "admin", "my-users": "user"})
     skip_tls_verify: false  # Skip TLS certificate verification (for self-signed certs)
+    # Optional hardening defaults (do not put real secrets here)
+    allowed_signing_algs: ["RS256", "ES256"]  # Only HS256 if the IdP has no JWKS and you accept shared-secret signing
+    default_roles: []  # Roles for a brand-new SSO identity; never admin
+    absent_claim_policy: "deny"  # deny (revoke OIDC roles) or defaults_only; no keep_previous
+    allow_raw_claim_roles: false  # Opt-in to "claim value equals role name"; privileged names still refused
+    cookie_secure: false  # Set true behind a TLS-terminating proxy; forwarded headers are never trusted as proof of TLS
 
 # Upload configuration
 upload:
