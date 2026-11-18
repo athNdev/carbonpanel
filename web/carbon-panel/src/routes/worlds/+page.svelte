@@ -117,7 +117,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="h-full flex-1 space-y-6 bg-[#161616] font-sans text-[#f4f4f4]">
+<div class="h-full flex-1 space-y-6 bg-background font-sans text-foreground">
 	<CarbonPageHeader
 		title="Worlds"
 		description="View Minecraft worlds through their configured renderer. Maps are observation only."
@@ -142,7 +142,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	</CarbonPageHeader>
 
 	{#if auth.isLoading}
-		<div class="border border-[#393939] bg-[#262626] p-6" role="status">
+		<div class="border border-border bg-card p-6" role="status">
 			<CarbonInlineLoading description="Checking world-view access…" />
 		</div>
 	{:else if !canRead || denied}
@@ -155,7 +155,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{/snippet}
 		</CarbonEmptyState>
 	{:else if !snapshot.hydrated && snapshot.loading}
-		<div class="border border-[#393939] bg-[#262626] p-6" role="status">
+		<div class="border border-border bg-card p-6" role="status">
 			<CarbonInlineLoading description="Loading viewable worlds…" />
 		</div>
 	{:else if snapshot.error}
@@ -177,7 +177,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</CarbonEmptyState>
 	{:else}
 		<div
-			class="flex flex-col items-stretch gap-3 border border-[#393939] bg-[#262626] p-3 sm:flex-row sm:items-end"
+			class="flex flex-col items-stretch gap-3 border border-border bg-card p-3 sm:flex-row sm:items-end"
 		>
 			<div class="min-w-0 flex-1">
 				<CarbonSearch
@@ -228,33 +228,33 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{/snippet}
 				{#each filtered as target (targetHref(target))}
 					{@const view = deriveViewState(target)}
-					<tr class="transition-colors hover:bg-[#353535]">
+					<tr class="transition-colors hover:bg-accent">
 						<td class="min-w-[180px] px-3 py-3">
 							<a
 								href={resolve(
 									`/worlds/${target.serverId}/${encodeWorldKey(target.worldRef)}${target.dimension ? `?dimension=${encodeURIComponent(target.dimension)}` : ''}`
 								)}
-								class="block truncate font-medium text-[#f4f4f4] hover:text-[#78a9ff] hover:underline"
+								class="block truncate font-medium text-foreground hover:text-accent-text hover:underline"
 							>
 								{target.name || target.worldRef?.levelName || 'Untitled world'}
 							</a>
-							<p class="font-mono text-xs break-all text-[#a8a8a8]">
+							<p class="font-mono text-xs break-all text-muted-foreground">
 								{target.worldRef?.levelName ||
 									target.worldRef?.bindingId ||
 									target.worldRef?.snapshotId ||
 									'—'}
 							</p>
 						</td>
-						<td class="px-3 py-3 font-mono text-xs break-all text-[#c6c6c6]">
+						<td class="px-3 py-3 font-mono text-xs break-all text-muted-foreground">
 							{target.serverId}
 						</td>
-						<td class="px-3 py-3 text-xs text-[#c6c6c6]">
+						<td class="px-3 py-3 text-xs text-muted-foreground">
 							{rendererName(target.renderer?.type ?? target.rendererType)}
 						</td>
 						<td class="px-3 py-3">
 							<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
 						</td>
-						<td class="px-3 py-3 font-mono text-xs text-[#a8a8a8]">
+						<td class="px-3 py-3 font-mono text-xs text-muted-foreground">
 							{formatAge(target.freshness?.observedAt ?? target.lastRender)}
 						</td>
 					</tr>

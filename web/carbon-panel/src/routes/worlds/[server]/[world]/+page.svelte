@@ -406,7 +406,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full flex-1 space-y-4 bg-[#161616] font-sans text-[#f4f4f4]">
+<div class="h-full flex-1 space-y-4 bg-background font-sans text-foreground">
 	<CarbonBreadcrumbs
 		items={[
 			{ label: 'Worlds', href: resolve('/worlds') },
@@ -436,7 +436,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	<div class="sr-only" role="status" aria-live="polite">{announcement}</div>
 
 	{#if auth.isLoading}
-		<div class="border border-[#393939] bg-[#262626] p-6" role="status">
+		<div class="border border-border bg-card p-6" role="status">
 			<CarbonInlineLoading description="Checking world-view access…" />
 		</div>
 	{:else if !canRead || denied}
@@ -456,30 +456,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{:else}
 		<div class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
 			<section class="min-w-0 space-y-3" aria-label="Map surface">
-				<div
-					class="flex flex-wrap items-center gap-2 border border-[#393939] bg-[#262626] px-3 py-2"
-				>
+				<div class="flex flex-wrap items-center gap-2 border border-border bg-card px-3 py-2">
 					<span class="mono-label">WORLD</span>
-					<span class="text-xs break-all text-[#c6c6c6]">{worldChip}</span>
+					<span class="text-xs break-all text-muted-foreground">{worldChip}</span>
 					{#if worldRef.kind === WorldRef_Kind.SERVER_LOCAL}
-						<span class="text-xs text-[#8d8d8d]">
+						<span class="text-xs text-muted-foreground">
 							Import to World Library is not available in this build.
 						</span>
 					{:else if worldRef.kind === WorldRef_Kind.LIBRARY_BINDING}
-						<span class="text-xs text-[#8d8d8d]">
+						<span class="text-xs text-muted-foreground">
 							Library navigation is not available in this build.
 						</span>
 					{/if}
 				</div>
 
 				{#if view === 'loading'}
-					<div class="border border-[#393939] bg-[#262626] p-8" role="status">
+					<div class="border border-border bg-card p-8" role="status">
 						<CarbonInlineLoading description="Checking renderer state…" />
 					</div>
 				{:else if view === 'onboarding'}
-					<div class="space-y-3 border border-[#393939] bg-[#262626] p-8">
+					<div class="space-y-3 border border-border bg-card p-8">
 						<h2 class="text-base font-semibold">No map renderer installed</h2>
-						<p class="max-w-xl text-sm text-[#c6c6c6]">
+						<p class="max-w-xl text-sm text-muted-foreground">
 							This world has no renderer yet. BlueMap is the recommended built-in renderer. Install
 							a renderer module for this server to see a map here.
 						</p>
@@ -488,32 +486,32 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								Open modules
 							</CarbonButton>
 						</div>
-						<p class="text-xs text-[#8d8d8d]">
+						<p class="text-xs text-muted-foreground">
 							Setup documentation (docs/world-viewing.md) is not linked in this build yet.
 						</p>
 					</div>
 				{:else if view === 'installing'}
-					<div class="space-y-3 border border-[#393939] bg-[#262626] p-8" role="status">
+					<div class="space-y-3 border border-border bg-card p-8" role="status">
 						<div class="flex items-center gap-2">
 							<LoaderCircle
-								class="h-5 w-5 text-[#78a9ff] {prefersReducedMotion() ? '' : 'animate-spin'}"
+								class="h-5 w-5 text-accent-text {prefersReducedMotion() ? '' : 'animate-spin'}"
 							/>
 							<h2 class="text-base font-semibold">Installing renderer</h2>
 						</div>
-						<p class="text-sm text-[#c6c6c6]">
+						<p class="text-sm text-muted-foreground">
 							The renderer module is being created and started. No map is mounted until it reports
 							ready tiles.
 						</p>
 					</div>
 				{:else if view === 'rendering'}
-					<div class="space-y-3 border border-[#393939] bg-[#262626] p-8" role="status">
+					<div class="space-y-3 border border-border bg-card p-8" role="status">
 						<div class="flex items-center gap-2">
 							<LoaderCircle
-								class="h-5 w-5 text-[#be95ff] {prefersReducedMotion() ? '' : 'animate-spin'}"
+								class="h-5 w-5 text-chart-4 {prefersReducedMotion() ? '' : 'animate-spin'}"
 							/>
 							<h2 class="text-base font-semibold">Rendering map</h2>
 						</div>
-						<p class="text-sm text-[#c6c6c6]">
+						<p class="text-sm text-muted-foreground">
 							The initial render is in progress. The backend does not report a percentage, so none
 							is shown here.
 						</p>
@@ -529,23 +527,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						onretry={retry}
 					/>
 				{:else if view === 'unsupported'}
-					<div class="space-y-3 border border-[#393939] bg-[#262626] p-8">
+					<div class="space-y-3 border border-border bg-card p-8">
 						<div class="flex items-center gap-2">
-							<Ban class="h-5 w-5 text-[#ff8389]" />
+							<Ban class="h-5 w-5 text-destructive-text" />
 							<h2 class="text-base font-semibold">Unsupported renderer</h2>
 						</div>
-						<p class="text-sm text-[#c6c6c6]">
+						<p class="text-sm text-muted-foreground">
 							{rendererName(capabilitiesRenderer)} has no verified adapter capability here. No substitute
 							map is shown.
 						</p>
 					</div>
 				{:else if view === 'stopped'}
-					<div class="space-y-3 border border-[#393939] bg-[#262626] p-8">
+					<div class="space-y-3 border border-border bg-card p-8">
 						<div class="flex items-center gap-2">
-							<AlertTriangle class="h-5 w-5 text-[#f1c21b]" />
+							<AlertTriangle class="h-5 w-5 text-warning" />
 							<h2 class="text-base font-semibold">Renderer stopped</h2>
 						</div>
-						<p class="text-sm text-[#c6c6c6]">
+						<p class="text-sm text-muted-foreground">
 							Live tiles are unavailable. Last observed
 							{formatAge(statusTarget?.freshness?.observedAt ?? statusTarget?.lastRender)}. No live
 							overlay is active.
@@ -554,11 +552,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{:else if view === 'stale' || view === 'ready'}
 					{#if view === 'stale'}
 						<div
-							class="flex flex-wrap items-center gap-2 border border-[#f1c21b]/60 bg-[#423a1b] px-3 py-2 text-xs"
+							class="flex flex-wrap items-center gap-2 border border-warning/60 bg-warning/15 px-3 py-2 text-xs"
 						>
-							<AlertTriangle class="h-4 w-4 shrink-0 text-[#f1c21b]" />
-							<span class="font-semibold text-[#f1c21b]">LAST-KNOWN TILES</span>
-							<span class="text-[#f4f4f4]">
+							<AlertTriangle class="h-4 w-4 shrink-0 text-warning" />
+							<span class="font-semibold text-warning">LAST-KNOWN TILES</span>
+							<span class="text-foreground">
 								Observed {formatAge(
 									statusTarget?.freshness?.observedAt ?? statusTarget?.lastRender
 								)}. Live overlays are disabled.
@@ -567,7 +565,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					{/if}
 					{#if embed.src}
 						<div
-							class="focus-ring relative min-h-[24rem] border border-[#393939] bg-[#262626]"
+							class="focus-ring relative min-h-[24rem] border border-border bg-card"
 							role="region"
 							aria-label="World map, {VIEW_STATE_LABEL[
 								view
@@ -579,15 +577,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								src={embed.src}
 								title="World map for {statusTarget?.name || worldRef?.levelName || 'this world'}"
 								tabindex="0"
-								class="h-[36rem] w-full border-0 bg-[#161616] sm:h-[44rem]"
+								class="h-[36rem] w-full border-0 bg-background sm:h-[44rem]"
 								loading="lazy"
 								sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
 							></iframe>
 						</div>
 					{:else}
-						<div class="space-y-3 border border-[#393939] bg-[#262626] p-8">
+						<div class="space-y-3 border border-border bg-card p-8">
 							<h2 class="text-base font-semibold">Map not available</h2>
-							<p class="text-sm text-[#c6c6c6]">
+							<p class="text-sm text-muted-foreground">
 								{embed.reason || 'No safe map path was returned.'}
 							</p>
 							<CarbonButton kind="secondary" size="sm" onclick={retry}>Retry</CarbonButton>
@@ -597,7 +595,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</section>
 
 			<aside class="min-w-0 space-y-3">
-				<p class="text-xs text-[#8d8d8d]">
+				<p class="text-xs text-muted-foreground">
 					Pan, zoom and coordinate search are provided by the renderer's own map controls.
 					Coordinates in the link are intent for player/admin actions, not a simulated camera.
 				</p>
@@ -623,22 +621,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<span class="text-xs text-foreground">View mode</span>
 								{#each matrix.viewModes() as mode (mode.id)}
 									<div class="flex items-center justify-between gap-2 text-xs">
-										<span class={mode.supported ? 'text-[#f4f4f4]' : 'text-[#8d8d8d]'}
+										<span class={mode.supported ? 'text-foreground' : 'text-muted-foreground'}
 											>{mode.label}</span
 										>
-										<span class={mode.supported ? 'text-[#6fdc8c]' : 'text-[#a8a8a8]'}>
+										<span class={mode.supported ? 'text-success-text' : 'text-muted-foreground'}>
 											{mode.supported ? 'Available' : mode.reason}
 										</span>
 									</div>
 								{/each}
 							</div>
 							{#if matrix.timeWeather().supported}
-								<p class="text-xs text-[#c6c6c6]">
+								<p class="text-xs text-muted-foreground">
 									Time and weather controls are available in the renderer.
 								</p>
 							{/if}
 							{#if matrix.telemetry().supported}
-								<p class="text-xs text-[#c6c6c6]">Telemetry is available in the renderer.</p>
+								<p class="text-xs text-muted-foreground">Telemetry is available in the renderer.</p>
 							{/if}
 						</div>
 					</CarbonAccordionItem>
@@ -655,10 +653,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									<span>Hide player markers</span>
 								</CarbonButton>
 							{:else}
-								<p class="text-xs text-[#8d8d8d]">{matrix.players(canObserve).reason}</p>
+								<p class="text-xs text-muted-foreground">{matrix.players(canObserve).reason}</p>
 							{/if}
 							{#if visibilityNote}
-								<p class="text-xs text-[#6fdc8c]">{visibilityNote}</p>
+								<p class="text-xs text-success-text">{visibilityNote}</p>
 							{/if}
 
 							<CarbonSelect
@@ -680,15 +678,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									<span>Add overlay</span>
 								</CarbonButton>
 							{:else}
-								<p class="text-xs text-[#8d8d8d]">{matrix.overlayEditing(canUpdate).reason}</p>
+								<p class="text-xs text-muted-foreground">
+									{matrix.overlayEditing(canUpdate).reason}
+								</p>
 							{/if}
 
 							{#if overlaysError}
-								<p class="text-xs text-[#ff8389]">
+								<p class="text-xs text-destructive-text">
 									{formatRpcError(overlaysError, 'Overlays could not be loaded.')}
 								</p>
 							{:else if filteredOverlays.length === 0}
-								<p class="text-xs text-[#8d8d8d]">
+								<p class="text-xs text-muted-foreground">
 									No overlays in this layer for the current state.
 								</p>
 							{:else}
@@ -699,7 +699,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										>
 											<div class="min-w-0">
 												<p class="truncate font-medium">{overlayDisplay(overlay).label}</p>
-												<p class="text-[#8d8d8d]">
+												<p class="text-muted-foreground">
 													{overlayKindLabel(overlay.kind)}{overlayDisplay(overlay).coordinates
 														? ` · ${overlayDisplay(overlay).coordinates}`
 														: ''}
@@ -718,7 +718,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									{/each}
 								</CarbonStructuredList>
 							{/if}
-							<p class="text-xs text-[#8d8d8d]">
+							<p class="text-xs text-muted-foreground">
 								Player profile links are not available in this build; marker labels stay opaque.
 							</p>
 						</div>
@@ -730,12 +730,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						bind:open={adminOpen}
 					>
 						<div class="space-y-3">
-							<p class="text-xs text-[#a8a8a8]">
+							<p class="text-xs text-muted-foreground">
 								These actions run console commands on the server. They use servers/command and are
 								never authorised by this map session.
 							</p>
 							{#each adminActionList as action (action.id)}
-								<div class="space-y-1 border-t border-[#393939] pt-2">
+								<div class="space-y-1 border-t border-border pt-2">
 									<CarbonButton
 										kind={action.id === 'pause-autosave' ? 'danger' : 'secondary'}
 										size="sm"
@@ -745,7 +745,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										{action.label}
 									</CarbonButton>
 									{#if !action.allowed}
-										<p class="text-xs text-[#ff8389]">{action.deniedReason}</p>
+										<p class="text-xs text-destructive-text">{action.deniedReason}</p>
 									{/if}
 								</div>
 							{/each}
@@ -794,5 +794,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}}
 />
 {#if adminError}
-	<div class="mt-3 border border-[#da1e28] bg-[#4d2326] p-3 text-xs" role="alert">{adminError}</div>
+	<div class="mt-3 border border-destructive bg-destructive/20 p-3 text-xs" role="alert">
+		{adminError}
+	</div>
 {/if}
