@@ -16,12 +16,13 @@
 package mcp
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
+
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // OperationInvocationEvidence is recorded evidence for one audited operation.
@@ -146,6 +147,18 @@ func targetProcedure(op FamilyAuditOperation) string {
 	return op.Procedure
 }
 
+// streamTransferTargets are the typed procedures whose VERIFIED label also
+// requires the genuine session-consuming scoped streaming transfer evidence.
+var streamTransferTargets = map[string]bool{
+	"/carbonpanel.v1.FileService/SaveUploadedFile":  true,
+	"/carbonpanel.v1.FileService/InitFileDownload": true,
+	"/carbonpanel.v1.FileService/DownloadArchive":  true,
+	"/carbonpanel.v1.FileService/ExportWorld":      true,
+	"/carbonpanel.v1.UploadService/InitUpload":     true,
+	"/carbonpanel.v1.UploadService/UploadChunk":    true,
+	"/carbonpanel.v1.FileService/GetFile":          true,
+}
+
 func runInvocationEvidence(t *testing.T) map[string]OperationInvocationEvidence {
 	t.Helper()
 	invocationEvidenceOnce.Do(func() {
@@ -166,6 +179,11 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 			t.Fatalf("invocation harness: no argument table for tool %s (%s)", spec.Name, spec.Procedure)
 		}
 	}
+
+	// A download/upload surface needs a session-consuming byte transfer, not
+	// only a small-file typed read. Run that evidence first so every target in
+	// streamTransferTargets is VERIFIED only if it passes.
+	streamVerified := runScopedStreamEvidence(t)
 
 	invocationRecorder.enable()
 	defer invocationRecorder.disable()
@@ -205,7 +223,12 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 			t.Errorf("%s: no callable tool for %s", op.ID, target)
 			continue
 		}
-		byProcedure[target] = invokeOne(t, f, op, spec, argsByTool[spec.Name])
+		ev := invokeOne(t, f, op, spec, argsByTool[spec.Name])
+		if streamTransferTargets[target] && !streamVerified {
+			ev.OutcomeObserved = false
+			ev.Detail += "; scoped stream transfer evidence failed"
+		}
+		byProcedure[target] = ev
 	}
 
 	// The logout operation is verified against its REAL behavior for an API
@@ -237,10 +260,10 @@ func invokeOne(t *testing.T, f *fixture, op FamilyAuditOperation, spec ToolSpec,
 	out := callTool(t, f.sessions["admin"], spec.Name, args)
 	assertSuccess(t, out, spec.Name)
 	records := invocationRecorder.snapshot()[before:]
-	reachedJSON := ""
+	var reached protoreflect.Message
 	for _, rec := range records {
 		if rec.Procedure == spec.Procedure {
-			reachedJSON = rec.RequestJSON
+			reached = rec.Msg
 			ev.Reached = true
 			break
 		}
@@ -248,16 +271,20 @@ func invokeOne(t *testing.T, f *fixture, op FamilyAuditOperation, spec ToolSpec,
 	if !ev.Reached {
 		t.Errorf("%s: tools/call(%s) did not reach typed method %s", op.ID, spec.Name, spec.Procedure)
 	}
-	if ev.Reached && argsMapped(reachedJSON, args) {
-		ev.ArgsMapped = true
+	if ev.Reached {
+		// Exact typed-field assertions. No substring or quoted-string fallback.
+		ev.ArgsMapped = t.Run(spec.Name+"/typed-args", func(st *testing.T) {
+			st.Helper()
+			assertTypedFields(st, spec.Name, args, reached)
+		})
 	}
 	if !ev.ArgsMapped {
-		t.Errorf("%s: arguments were not mapped into the typed request: args=%v request=%s", op.ID, args, reachedJSON)
+		t.Errorf("%s: typed argument mapping failed: args=%v request=%s", op.ID, args, invocationRecordJSON(invocationRecord{Procedure: spec.Procedure, Msg: reached}))
 	}
 
 	// (c): the structured success outcome is the real handler result; the
 	// Connect status is observed below on the denial path.
-	if out.Status == "ok" && out.Error == nil && reachedJSON != "" {
+	if out.Status == "ok" && out.Error == nil && ev.Reached {
 		ev.OutcomeObserved = true
 	}
 
@@ -313,72 +340,6 @@ func cloneWithoutConfirm(args map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
-}
-
-// argsMapped checks that each non-confirm argument value actually appears in
-// the typed request the handler received. This proves Go-side argument mapping
-// (ids, limits, bounded text) rather than mere registration.
-func argsMapped(requestJSON string, args map[string]any) bool {
-	// protojson renders enums as their symbolic names (fabric ->
-	// MOD_LOADER_FABRIC) and nested messages with different field order, so
-	// compare every scalar value case-insensitively as a substring of the
-	// request the typed handler actually received.
-	lower := strings.ToLower(requestJSON)
-	for k, v := range args {
-		if k == "confirm" || k == "confirmation" {
-			continue
-		}
-		for _, scalar := range flattenScalars(v) {
-			if !strings.Contains(lower, strings.ToLower(scalar)) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func flattenScalars(v any) []string {
-	switch value := v.(type) {
-	case nil:
-		return nil
-	case string:
-		if value == "" {
-			return nil
-		}
-		return []string{value}
-	case bool:
-		// Bounded booleans may map to proto zero values; not asserted.
-		return nil
-	case float64:
-		if value == 0 {
-			// protojson omits zero-valued fields; the request still mapped it.
-			return nil
-		}
-		return []string{fmt.Sprintf("%v", value)}
-	case int:
-		if value == 0 {
-			return nil
-		}
-		return []string{fmt.Sprintf("%d", value)}
-	case map[string]any:
-		var out []string
-		for _, item := range value {
-			out = append(out, flattenScalars(item)...)
-		}
-		return out
-	case []any:
-		var out []string
-		for _, item := range value {
-			out = append(out, flattenScalars(item)...)
-		}
-		return out
-	default:
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return nil
-		}
-		return []string{string(raw)}
-	}
 }
 
 // TestIntegrationInvocationEvidence makes the harness a first-class test:

@@ -54,14 +54,20 @@ a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
 or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and
 REACHABLE from live source, but VERIFIED comes only from executable invocation
 evidence: a real `tools/call` over the SDK stdio wire must reach the typed
-Connect method with mapped, bounded arguments, observe the real handler status
-and exercise the resource scope (including a denied ungranted dp_ token).
-Registration strings and quoted procedure names never count. The exclusion
-policy is bound to the server before any tool is added, so audited-out tools
-are never mounted; go-sdk replaces same-name tools (last wins), so registration
-runs in reverse generator priority and a live `tools/list` metadata assertion
-keeps it aligned. gRPC reflection (19 names) and the 24-name RBAC parity list
-are deliberately not sources of truth.
+Connect method with exact typed-field assertions on ids, booleans, enums,
+limits, bytes and repeated/map values, observe the real handler status and
+exercise the resource scope (including a denied ungranted dp_ token). Negative
+fixtures prove wrong fields, missing ids, conflicting arguments and out-of-
+range bounds are refused before any typed RPC. Download/upload surfaces also
+require a session-consuming scoped byte transfer through the W17
+`storageworker.StreamingFS` contract with cancellation, cap, expiry and
+cross-scope refusals; raw byte channels stay out of the tool catalog.
+Registration strings, quoted procedure names and substring-of-JSON checks
+never count. The exclusion policy is bound to the server before any tool is
+added, so audited-out tools are never mounted; go-sdk replaces same-name tools
+(last wins), so registration runs in reverse generator priority and a live
+`tools/list` metadata assertion keeps it aligned. gRPC reflection (19 names)
+and the 24-name RBAC parity list are deliberately not sources of truth.
 
 Disposable fixtures connect a real MCP SDK client over the stdio wire format
 to the in-process gateway; its tools call typed clients against `httptest`

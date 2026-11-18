@@ -31,15 +31,15 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// invocationRecorder captures the typed Connect request each fixture handler
-// actually receives. It is the evidence that a tools/call reached a real
-// generated method with mapped arguments, not merely that a handler was
-// mounted. Recording is opt-in so ordinary fixtures stay cheap.
+// invocationRecorder captures a typed clone of the Connect request each
+// fixture handler receives. Exact field assertions read the typed message;
+// no substring-of-JSON check can count as mapping evidence.
 type invocationRecord struct {
-	Procedure  string
-	RequestJSON string
+	Procedure string
+	Msg       protoreflect.Message
 }
 
 type invocationRecorderState struct {
@@ -65,16 +65,26 @@ func (r *invocationRecorderState) disable() {
 
 func (r *invocationRecorderState) record(procedure string, msg any) {
 	if m, ok := msg.(proto.Message); ok {
-		raw, err := protojson.Marshal(m)
-		if err != nil {
-			return
-		}
+		cloned := proto.Clone(m)
 		r.mu.Lock()
 		if r.enabled {
-			r.records = append(r.records, invocationRecord{Procedure: procedure, RequestJSON: string(raw)})
+			r.records = append(r.records, invocationRecord{Procedure: procedure, Msg: cloned.ProtoReflect()})
 		}
 		r.mu.Unlock()
 	}
+}
+
+// invocationRecordJSON is only for human-readable failure diagnostics; it is
+// never used as the mapping assertion itself.
+func invocationRecordJSON(rec invocationRecord) string {
+	if rec.Msg == nil {
+		return ""
+	}
+	b, err := protojson.Marshal(rec.Msg.Interface())
+	if err != nil {
+		return fmt.Sprintf("%v", err)
+	}
+	return string(b)
 }
 
 func (r *invocationRecorderState) snapshot() []invocationRecord {

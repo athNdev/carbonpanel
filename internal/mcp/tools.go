@@ -96,6 +96,18 @@ func worldRef(tool string, in worldviewArgs) (*v1.WorldRef, error) {
 	if err := optionalID(tool, "snapshot_id", in.SnapshotID); err != nil {
 		return nil, err
 	}
+	// A WorldRef names exactly one target. Accepting several at once would let
+	// a caller silently change which world is observed/overlaid, so reject the
+	// conflicting combination before any RPC is sent.
+	set := 0
+	for _, id := range []string{in.LevelName, in.BindingID, in.SnapshotID} {
+		if id != "" {
+			set++
+		}
+	}
+	if set > 1 {
+		return nil, invalidArgument(tool, "world_ref", "level_name, binding_id and snapshot_id are mutually exclusive")
+	}
 	return &v1.WorldRef{
 		Kind:       kind,
 		ServerId:   in.ServerID,

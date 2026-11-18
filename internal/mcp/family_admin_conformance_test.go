@@ -172,7 +172,10 @@ func newConformanceFixture(t *testing.T) *conformanceFixture {
 		if err != nil {
 			t.Fatalf("NewFamilyAdminClients(%s): %v", name, err)
 		}
-		server := NewServer(clients)
+		// Isolated family slice: NewServer applies the OSS-375 exclusion
+		// policy, so it would refuse the secret-bearing admin tools this
+		// conformance suite must verify. Build a plain server instead.
+		server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "admin-conformance-server", Version: "v0"}, nil)
 		RegisterFamilyAdminTools(server, admin)
 		f.clients[name] = clients
 		f.sessions[name] = connectStdioSession(t, server, ctx)
