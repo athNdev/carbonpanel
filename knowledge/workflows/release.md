@@ -22,6 +22,8 @@ sources:
     resource: ../../docs/adr/0010-versioned-release-artifacts.md
   - title: Publication boundary and version domains
     resource: ../../docs/adr/0033-release-tag-and-publication-policy.md
+  - title: Verified runtime artifact installation
+    resource: ../../docs/node-runtime/verified-artifacts-install.md
 ---
 
 # Steps
@@ -116,6 +118,14 @@ resume from the original verified download artifact without rebuilding images.
   `latest` or a minor tag, and no scheduled registry write is enabled. Seeding a
   live nightly is separately authorized; the existing `edge` image is not a fresh
   nightly.
+- Managed node-runtime artifacts are a separate publication lane, not an
+  application release. `runtime-artifacts.yml` is dispatch-only, uses the
+  independent `runtime-vMAJOR.MINOR.PATCH` domain, and requires trusted-main
+  SHA, exact-commit main CI and a bound identity assertion before any write.
+  It produces checksums, a cosign keyless signature and a CycloneDX SBOM for a
+  draft asset release; it never pushes a registry image, publishes an app
+  release or provisions a host. Only formats with real clean import/boot
+  evidence are publishable; see the format decision concept.
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The
