@@ -2,7 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+	adoptionGateReason,
 	bindingGateReason,
+	bindingOutcomeDisposition,
 	classificationPresentation,
 	compatibilityVerdictPresentation,
 	confidencePresentation,
@@ -85,6 +87,43 @@ test('binding gate reason follows the verdict and still fails closed on unknown 
 	assert.match(bindingGateReason('requires_decision', 0) ?? '', /operator decision/i);
 	assert.match(bindingGateReason('unknown', 0) ?? '', /Unknown findings gate binding/);
 	assert.match(bindingGateReason(undefined, 0) ?? '', /Unknown findings gate binding/);
+});
+
+test('binding outcomes keep honest labels and dispositions, never generic success', () => {
+	const expected: Record<string, { label: string; disposition: string }> = {
+		success: { label: 'SUCCESS', disposition: 'applied' },
+		resolved: { label: 'RESOLVED', disposition: 'applied' },
+		unknown: { label: 'OUTCOME UNKNOWN', disposition: 'uncertain' },
+		failed: { label: 'FAILED', disposition: 'failed' },
+		queued: { label: 'QUEUED', disposition: 'in_progress' },
+		prepared: { label: 'PREPARED', disposition: 'in_progress' },
+		running: { label: 'RUNNING', disposition: 'in_progress' },
+		skipped: { label: 'SKIPPED', disposition: 'not_applied' },
+		cancelled: { label: 'CANCELLED', disposition: 'not_applied' },
+		rolled_back: { label: 'ROLLED BACK', disposition: 'not_applied' }
+	};
+	for (const [outcome, want] of Object.entries(expected)) {
+		const presentation = operationOutcomePresentation(outcome);
+		assert.equal(presentation.label, want.label, outcome);
+		assert.equal(bindingOutcomeDisposition(outcome), want.disposition, outcome);
+		assert.ok(presentation.hint && presentation.hint.length > 0, outcome);
+	}
+	assert.equal(bindingOutcomeDisposition('something-new'), 'unknown');
+	assert.match(operationOutcomePresentation('queued').hint ?? '', /not started/);
+	assert.match(operationOutcomePresentation('skipped').hint ?? '', /No mutation/);
+	assert.match(operationOutcomePresentation('failed').hint ?? '', /No applied state/);
+});
+
+test('server-world adoption reuses the compatibility gate and fails closed without a report', () => {
+	assert.match(adoptionGateReason(undefined, 0, false), /read-only compatibility check/);
+	assert.match(adoptionGateReason('compatible', 0, false), /read-only compatibility check/);
+	assert.equal(
+		adoptionGateReason('compatible', 0, true),
+		'This revision is compatible with the target. Review the confirmation before swapping.'
+	);
+	assert.match(adoptionGateReason('compatible', 1, true), /Unknown findings gate binding/);
+	assert.match(adoptionGateReason('blocked', 0, true), /blocked/i);
+	assert.match(adoptionGateReason(undefined, 0, true), /Unknown findings gate binding/);
 });
 
 test('classification badges explain when a control applies', () => {
