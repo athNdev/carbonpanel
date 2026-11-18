@@ -127,8 +127,8 @@ func main() {
 	b.WriteString("const descriptorFingerprint = \"" + fingerprint + "\"\n\n")
 	b.WriteString("var rawCatalogEntries = []CatalogEntry{\n")
 	for _, e := range entries {
-		b.WriteString(fmt.Sprintf("\t{Procedure: %q, Service: %q, Method: %q, Client: %q, Scope: %q, Class: ClassExclude, Build: %s},\n",
-			e.procedure, e.service, e.method, e.client, e.scope, e.build))
+		fmt.Fprintf(&b, "\t{Procedure: %q, Service: %q, Method: %q, Client: %q, Scope: %q, Class: ClassExclude, Build: %s},\n",
+			e.procedure, e.service, e.method, e.client, e.scope, e.build)
 	}
 	b.WriteString("}\n")
 
