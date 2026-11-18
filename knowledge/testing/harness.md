@@ -31,6 +31,13 @@ archive and a copy containing synthetic local state; it also checks required
 controller, worker, protocol and backup-encryption inputs. It never deletes or
 reads a developer's actual local data.
 
+The check asserts that SvelteKit source routes ship in packaged builds while
+saved-world data and credentials do not. The `/worlds` route re-include in
+`.dockerignore` must stay above the general sensitive/persistent exclusions and
+be limited to source extensions, so those later rules still win. Sentinel
+canaries placed inside the route tree (credential, database, nested data)
+verify that ordering; a broad trailing negation that leaks them fails the check.
+
 Tests are ordinary Go package tests. Docker-facing code sits behind seams, for
 example `ContainerFreezer` in `internal/docker`, so a test can substitute a
 deterministic failure instead of a daemon. `internal/db` tests run against a
