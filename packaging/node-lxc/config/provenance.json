@@ -1,0 +1,79 @@
+{
+  "schema": "carbonpanel.node-lxc.provenance/v1",
+  "artifact_family": "carbonpanel-node-lxc-rootfs",
+  "status": "fixture-pinned qualification artifact; production pins and signatures are owned by the isolated publish lane and are not part of this repository",
+  "note": "Upstream refs and sha256 values below are synthetic fixtures for offline qualification. They are NOT live download evidence. A production build must replace them with verified upstream digests and a real detached signature before any format is advertised.",
+  "base": {
+    "name": "debian",
+    "version": "13",
+    "arch": "amd64",
+    "upstream_ref": "fixture://debian-13-lxc-rootfs.tar.zst",
+    "upstream_digest_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "signature_ref": "fixture://debian-13-lxc-rootfs.tar.zst.sig",
+    "signer_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sbom_ref": "fixture://debian-13-lxc-rootfs.cdx.json"
+  },
+  "fixture": {
+    "description": "synthetic unprivileged-LXC rootfs fixture; offline qualification only",
+    "source_dir": "fixtures/rootfs-minimal",
+    "manifest_sha256": "0c1adcb1cb616ff7bfe72d681a06c8f4165781ac771fd307a7afe1f54228afab"
+  },
+  "platform_matrix": {
+    "amd64": {
+      "host": "Proxmox VE 8.x / 9.x on x86_64",
+      "guest": "unprivileged Debian 13 LXC",
+      "nested_runtime": "rootless captive Docker daemon",
+      "minimum_kernel": "5.11",
+      "status": "fixture-only; live import/boot NOT qualified"
+    },
+    "arm64": {
+      "host": "Proxmox VE 9.x on aarch64",
+      "guest": "unprivileged Debian 13 LXC",
+      "nested_runtime": "rootless captive Docker daemon",
+      "minimum_kernel": "5.11",
+      "status": "fixture-only; live import/boot NOT qualified"
+    }
+  },
+  "components": [
+    {
+      "type": "application",
+      "name": "carbon-panel-node-agent",
+      "version": "runtime-v0.0.0-fixture",
+      "purl": "pkg:generic/carbonpanel-node-agent@runtime-v0.0.0-fixture",
+      "license": "MIT",
+      "sha256": "347a645d236d2f2f429fb068819d0abaacef96bb2e28d0a1e595159e1c2f3c43"
+    },
+    {
+      "type": "library",
+      "name": "docker-engine",
+      "version": "27.5.1",
+      "purl": "pkg:generic/docker-engine@27.5.1",
+      "license": "Apache-2.0",
+      "sha256": "1964a1ec43036baedda327d35d39264b44feee5158972b5e4a994b816fb9719d"
+    },
+    {
+      "type": "library",
+      "name": "runc",
+      "version": "1.2.4",
+      "purl": "pkg:generic/runc@1.2.4",
+      "license": "Apache-2.0",
+      "sha256": "94163e851a37a8c687ac55b803a7fd071944a73a6dfb33cc571c2798e7b6492c"
+    },
+    {
+      "type": "library",
+      "name": "fuse-overlayfs",
+      "version": "1.13",
+      "purl": "pkg:generic/fuse-overlayfs@1.13",
+      "license": "GPL-3.0-only",
+      "sha256": "5810c33b95a8b1878d28d8fd7beb199a07862d9c341456ff1c3a019ee009f427"
+    },
+    {
+      "type": "library",
+      "name": "slirp4netns",
+      "version": "1.3.1",
+      "purl": "pkg:generic/slirp4netns@1.3.1",
+      "license": "GPL-2.0-only",
+      "sha256": "1acebb3f1415f9a09e09dd7ea403f1c368815e395967a61cb94da31312365a30"
+    }
+  ]
+}

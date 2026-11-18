@@ -28,6 +28,7 @@ sources:
 | `docs` | ADRs, plans, research, runbooks and issue write-ups |
 | `docker`, `scripts`, `oidc` | Deployment assets, developer scripts, OIDC examples |
 | `packaging` | Reproducible deployment artifacts (node VM QCOW2/cloud-init build definitions) |
+| `packaging/node-lxc` | Unprivileged LXC rootfs artifact lane (see [Node LXC artifact](architecture/node-lxc-artifact.md)) |
 
 # Rule
 
