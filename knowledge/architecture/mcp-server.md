@@ -25,7 +25,7 @@ by a Connect unary interceptor. Missing credentials stop startup rather than
 falling back to anonymous access, session cookies or the no-auth bypass.
 
 The pinned FIRST SLICE of 30 tools remains unchanged, but the gateway now
-mounts the combined OSS-370 catalog: 197 tools covering all 200 SUPPORTED
+mounts the combined OSS-370 catalog: 202 tools covering all 201 SUPPORTED
 operations from the OSS-375 audit matrix. The 30 first-slice declarations are
 the highest-precedence source; family descriptors (server, content, admin),
 stream typed equivalents and integration-owned additions are merged by
@@ -48,7 +48,7 @@ holds the pinned first-slice declarations and the 25-name mount list mirroring
 proto descriptors and the live RBAC map. The single generator also emits
 `integration_catalog.go`, resolving duplicate tools by source precedence so
 `list_files`/`get_file` and similar collisions are never double-registered. The
-coverage drift test still enumerates the 220 reachable RPCs and fails on a
+coverage drift test still enumerates the 221 reachable RPCs and fails on a
 missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
 a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
 or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and

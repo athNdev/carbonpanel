@@ -11,13 +11,13 @@
   },
   "policy": "IN SCOPE = ordinary supported authenticated administration and data management, mapped to a typed ACL-scoped tool or a bounded composed workflow (upload/download/metrics). EXCLUDED = genuine private protocol mechanics, unmounted contracts, unauthenticated bootstrap, credential/secret dumps, free-form command, sensitive-location disclosure, third-party egress, and intentionally operator-only maintenance; each exclusion names a supported equivalent flow where one exists.",
   "counts": {
-    "declared_rpcs": 230,
-    "mounted_reachable": 220,
+    "declared_rpcs": 231,
+    "mounted_reachable": 221,
     "listed_in_tool_catalog": 234,
     "reachable_by_tool_or_composed": 35,
     "verified_by_fixture": 37,
     "excluded_by_reason": 58,
-    "supported_operations": 200,
+    "supported_operations": 201,
     "unmounted_rpcs": 10,
     "non_rpc_surfaces": 28,
     "listed_rpcs": 220,
@@ -28,7 +28,7 @@
     "verified_surfaces": 5,
     "excluded_rpcs": 33,
     "excluded_surfaces": 25,
-    "supported_rpcs": 197,
+    "supported_rpcs": 198,
     "supported_surfaces": 3
   },
   "operations": [
@@ -2995,6 +2995,29 @@
       "suggestedTool": "player_service_undo_player_action",
       "coverage": {
         "listed": true,
+        "reachable": false,
+        "verified": false
+      }
+    },
+    {
+      "id": "rpc:/carbonpanel.v1.PlayerService/LookupPlayer",
+      "kind": "rpc",
+      "procedure": "/carbonpanel.v1.PlayerService/LookupPlayer",
+      "service": "carbonpanel.v1.PlayerService",
+      "method": "LookupPlayer",
+      "client": "NewPlayerServiceClient",
+      "scope": "players/read",
+      "declared": true,
+      "mounted": true,
+      "support": "supported",
+      "class": "safe",
+      "reason": "SUPPORTED OPERATION (OSS-383): read-only exact-identity lookup exposed through a typed, ACL-scoped tool; never persists an identity.",
+      "reasonRef": "proto/carbonpanel/v1/player.proto:226 (rpc declaration); internal/rbac/mapping.go (scope players/read)",
+      "equivalentFlow": "",
+      "composedBy": "",
+      "suggestedTool": "player_service_lookup_player",
+      "coverage": {
+        "listed": false,
         "reachable": false,
         "verified": false
       }

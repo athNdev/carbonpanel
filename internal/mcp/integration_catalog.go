@@ -146,6 +146,7 @@ var exposedTools = []ToolSpec{
 	{Name: "player_service_list_player_access", Procedure: "/carbonpanel.v1.PlayerService/ListPlayerAccess", Class: Class("review"), Confirm: true, Description: "List bounded access records for one exact player identity. Requires confirm=true."},
 	{Name: "player_service_list_player_history", Procedure: "/carbonpanel.v1.PlayerService/ListPlayerHistory", Class: Class("review"), Confirm: true, Description: "List bounded history for one exact player identity. Requires confirm=true and a limit of 1 to 100."},
 	{Name: "player_service_list_player_sessions", Procedure: "/carbonpanel.v1.PlayerService/ListPlayerSessions", Class: Class("review"), Confirm: true, Description: "List bounded sessions for one exact player identity. Requires confirm=true."},
+	{Name: "player_service_lookup_player", Procedure: "/carbonpanel.v1.PlayerService/LookupPlayer", Class: Class("safe"), Confirm: false, Description: "Resolve one previously unseen account by exact UUID or current username. Read-only: FOUND/NOT_FOUND/AMBIGUOUS/UNAVAILABLE are explicit and no identity is persisted."},
 	{Name: "player_service_pardon_player", Procedure: "/carbonpanel.v1.PlayerService/PardonPlayer", Class: Class("review"), Confirm: true, Description: "Pardon one player on one server by exact identity key. Requires confirm=true."},
 	{Name: "player_service_refresh_player_skin", Procedure: "/carbonpanel.v1.PlayerService/RefreshPlayerSkin", Class: Class("review"), Confirm: true, Description: "Refresh the cached skin for one exact player identity. Requires confirm=true."},
 	{Name: "player_service_set_operator", Procedure: "/carbonpanel.v1.PlayerService/SetOperator", Class: Class("review"), Confirm: true, Description: "Grant or remove operator level for one exact player identity. Requires confirm=true; level is 0 to 4."},
@@ -209,9 +210,9 @@ var exposedTools = []ToolSpec{
 }
 
 const (
-	IntegrationDeclaredRPCs = 230
-	IntegrationMountedRPCs = 220
+	IntegrationDeclaredRPCs = 231
+	IntegrationMountedRPCs = 221
 	IntegrationExcludedOps = 58
-	IntegrationSupportedOps = 200
-	IntegrationCombinedTools = 201
+	IntegrationSupportedOps = 201
+	IntegrationCombinedTools = 202
 )

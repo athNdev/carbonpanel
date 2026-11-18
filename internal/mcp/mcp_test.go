@@ -222,6 +222,7 @@ func registerToolHandlers(mux *http.ServeMux, ic connect.UnaryInterceptorFunc, o
 	registerOK[v1.StopServerRequest, v1.StopServerResponse](mux, "/carbonpanel.v1.ServerService/StopServer", ic, olderMode)
 	registerOK[v1.RestartServerRequest, v1.RestartServerResponse](mux, "/carbonpanel.v1.ServerService/RestartServer", ic, olderMode)
 
+	registerOK[v1.LookupPlayerRequest, v1.LookupPlayerResponse](mux, "/carbonpanel.v1.PlayerService/LookupPlayer", ic, olderMode)
 	registerOK[v1.ListPlayersRequest, v1.ListPlayersResponse](mux, "/carbonpanel.v1.PlayerService/ListPlayers", ic, olderMode)
 	registerOK[v1.GetPlayerRequest, v1.GetPlayerResponse](mux, "/carbonpanel.v1.PlayerService/GetPlayer", ic, olderMode)
 	registerOK[v1.ListPlayerCapabilitiesRequest, v1.ListPlayerCapabilitiesResponse](mux, "/carbonpanel.v1.PlayerService/ListPlayerCapabilities", ic, olderMode)

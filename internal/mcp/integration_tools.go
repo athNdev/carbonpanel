@@ -48,6 +48,9 @@ var integrationToolDecisions = []integrationToolDecision{
 
 	// PlayerService: typed moderation/data reads replacing free-form console
 	// commands (the audit's documented equivalent flow for SendCommand).
+	// OSS-383: read-only exact-identity lookup. It never persists an identity.
+	{"/carbonpanel.v1.PlayerService/LookupPlayer", "player_service_lookup_player",
+		"Resolve one previously unseen account by exact UUID or current username. Read-only: FOUND/NOT_FOUND/AMBIGUOUS/UNAVAILABLE are explicit and no identity is persisted."},
 	{"/carbonpanel.v1.PlayerService/BanPlayer", "player_service_ban_player",
 		"Ban one player on one server by exact identity key. Requires confirm=true and a bounded reason."},
 	{"/carbonpanel.v1.PlayerService/BulkPlayerAction", "player_service_bulk_player_action",
@@ -99,11 +102,16 @@ var integrationToolDecisions = []integrationToolDecision{
 func IntegrationToolSpecs() []ToolSpec {
 	out := make([]ToolSpec, 0, len(integrationToolDecisions))
 	for _, d := range integrationToolDecisions {
+		class, confirm := ClassReview, true
+		// OSS-383 LookupPlayer is explicitly read-only and ephemeral.
+		if d.Procedure == "/carbonpanel.v1.PlayerService/LookupPlayer" {
+			class, confirm = ClassSafe, false
+		}
 		out = append(out, ToolSpec{
 			Name:        d.Tool,
 			Procedure:   d.Procedure,
-			Class:       ClassReview,
-			Confirm:     true,
+			Class:       class,
+			Confirm:     confirm,
 			Description: d.Description,
 		})
 	}
@@ -119,6 +127,8 @@ type integrationArgs struct {
 	ServerID           string            `json:"server_id,omitempty" jsonschema:"exact server id, at most 128 characters"`
 	IdentityKey        string            `json:"identity_key,omitempty" jsonschema:"exact player identity key, at most 128 characters"`
 	PlayerName         string            `json:"player_name,omitempty" jsonschema:"player name, at most 128 characters"`
+	Query              string            `json:"query,omitempty" jsonschema:"exact canonical UUID or Minecraft username, 1 to 36 characters"`
+	PlayerQuery        string            `json:"player_query,omitempty" jsonschema:"exact name or UUID for a manual allowlist add, at most 36 characters"`
 	Reason             string            `json:"reason,omitempty" jsonschema:"bounded reason, at most 256 characters"`
 	RequestID          string            `json:"request_id,omitempty" jsonschema:"idempotency key, at most 128 characters"`
 	Kind               string            `json:"kind,omitempty" jsonschema:"closed action kind, at most 32 characters"`
@@ -215,6 +225,15 @@ func runIntegrationTool(ctx context.Context, cl *Clients, procedure string, in i
 			return nil, err
 		}
 		return integrationInvoke(ctx, cl.Backup.SetBackupLocked, v1.SetBackupLockedRequest{Id: in.ID, Locked: in.Locked})
+
+	case "/carbonpanel.v1.PlayerService/LookupPlayer":
+		if err := intID(tool, "query", in.Query); err != nil {
+			return nil, err
+		}
+		if err := intText(tool, "query", in.Query, 36); err != nil {
+			return nil, err
+		}
+		return integrationInvoke(ctx, cl.Player.LookupPlayer, v1.LookupPlayerRequest{Query: in.Query})
 
 	case "/carbonpanel.v1.PlayerService/BanPlayer":
 		if err := intPlayerTarget(tool, in, true); err != nil {
@@ -328,9 +347,12 @@ func runIntegrationTool(ctx context.Context, cl *Clients, procedure string, in i
 		if err := intPlayerTarget(tool, in, true); err != nil {
 			return nil, err
 		}
+		if err := intText(tool, "player_query", in.PlayerQuery, 36); err != nil {
+			return nil, err
+		}
 		return integrationInvoke(ctx, cl.Player.SetWhitelistEntry, v1.SetWhitelistEntryRequest{
 			ServerId: in.ServerID, IdentityKey: in.IdentityKey, PlayerName: in.PlayerName,
-			Remove: in.Remove, RequestId: in.RequestID,
+			Remove: in.Remove, RequestId: in.RequestID, PlayerQuery: in.PlayerQuery,
 		})
 
 	case "/carbonpanel.v1.PlayerService/UndoPlayerAction":
