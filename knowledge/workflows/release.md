@@ -106,7 +106,10 @@ resume from the original verified download artifact without rebuilding images.
   independent pinned-build evidence — exact successful CI for the commit, digest
   match, both platform child manifests and matching `org.opencontainers.image.revision`
   in each digest-addressed child config (not descriptor annotations); a bare
-  expected digest is not evidence. Edge uses separate previous binding inputs. Nightly and edge promotion bind the previous
+  expected digest is not evidence. Every evidence fetch is anchored to the
+  observed digest (`repo@digest`) and the reported index digest must match or
+  publication refuses with zero writes. Not-found classification is scoped to
+  the queried reference. Edge uses separate previous binding inputs. Nightly and edge promotion bind the previous
   commit to the observed alias digest through that same evidence before checking
   ancestry. Buildx writes only the sha reference; an explicitly gated digest-based
   step moves edge so it survives sha reuse in either order. Nightly never moves

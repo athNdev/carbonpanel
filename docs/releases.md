@@ -137,8 +137,10 @@ minor tag, or `edge`; those remain owned by their own explicit gates. The
 
 Both `edge` and `nightly` writers share the `sha-<commit>` tag. Before any build
 or push, the workflow reads that tag with strict lookup classification: only a
-definitive "manifest unknown" is an absent tag; unauthorized, network, transient
-and generic 404-style failures are **unknown** and refuse. An absent tag may be
+definitive "manifest unknown" for the queried reference (including the real
+Buildx `ERROR: docker.io/<repo>:<tag>: not found` shape) is an absent tag;
+unauthorized, network, transient and generic 404-style failures are **unknown**
+and refuse. An absent tag may be
 built, but supplying an expected digest while the tag is missing also refuses.
 
 A present tag is reused only with **trusted pinned build evidence**, not with a
@@ -147,8 +149,12 @@ evidence requires: a successful completed push CI run for the exact pinned
 commit; the observed index digest matching the digest recorded by that evidence;
 both `linux/amd64` and `linux/arm64` platform child manifests; and the
 `org.opencontainers.image.revision` label in **each child image config** equal to
-the pinned commit. The child configs are fetched by their exact platform
-digests from the index; descriptor annotations are never evidence. A read-only
+the pinned commit. Every evidence fetch is anchored to the digest observed at
+the immutable reference: the index is read from `repo@<observed-digest>` and each
+config from `repo@<child-digest>`, never by re-reading the mutable tag. The
+reported index digest must equal the observed digest or the gate refuses with
+zero writes. The child configs are fetched by their exact platform digests from
+the index; descriptor annotations are never evidence. A read-only
 probe of the public `edge` index confirmed the descriptors carry a null revision
 while both digest-addressed configs carry the full commit label. Any mismatch,
 missing label, untrusted CI or unknown lookup refuses with zero buildx pushes and

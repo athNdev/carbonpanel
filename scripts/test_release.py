@@ -985,7 +985,7 @@ class ReleaseTests(unittest.TestCase):
                 self.assertTrue(reason)
         # CLI refusal produces no registry write of any kind.
         with patch.object(release, "observe_reference", return_value=("unknown", None)), \
-             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
              patch.object(release.subprocess, "run") as command, \
              patch("sys.argv", ["release.py", "sha-tag-gate", "--commit", commit,
                                 "--expected-digest", digest, "--ci-verified", "true",
@@ -1007,8 +1007,9 @@ class ReleaseTests(unittest.TestCase):
         # Exact read-only Buildx probe output for a nonexistent tag (2026-11-18).
         observed_missing = ("ERROR: docker.io/atharvnaphade/carbonpanel:"
                             "nightly-policy-nonexistent-probe: not found")
+        probed_ref = "atharvnaphade/carbonpanel:nightly-policy-nonexistent-probe"
         self.assertEqual(release.observe_reference(
-            "ref", failure(observed_missing), strict=True)[0], "absent")
+            probed_ref, failure(observed_missing), strict=True)[0], "absent")
         for message in ("HTTP 404 not found", "unauthorized: not found",
                         "connection refused", "temporary server error",
                         "manifest unknown: connection reset"):
@@ -1086,14 +1087,14 @@ class ReleaseTests(unittest.TestCase):
 
         with patch.object(release, "observe_reference",
                           return_value=("unknown", None)), \
-             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
              patch.object(release.subprocess, "run") as command, \
              patch("sys.argv", invoke("--apply")):
             with self.assertRaisesRegex(ValueError, "refused"):
                 release.main()
             self.assertEqual(registry_writes(command), [])
         with patch.object(release, "nightly_identity_binding", return_value={}), \
-             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
              patch.object(release.subprocess, "run") as command, \
              patch("sys.argv", invoke("--apply")):
             with self.assertRaisesRegex(ValueError, "refused"):
@@ -1101,7 +1102,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(registry_writes(command), [])
         # First promotion writes only the nightly alias, then re-verifies it.
         with patch.object(release, "nightly_identity_binding", return_value={}), \
-             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
              patch.object(release, "observe_reference", side_effect=[
                  present(digest), ("absent", None), present(digest)]), \
              patch.object(release.subprocess, "run") as command, \
@@ -1110,7 +1111,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(len(registry_writes(command)), 1)
         # Rerun with the same digest is idempotent: no alias move.
         with patch.object(release, "nightly_identity_binding", return_value={}), \
-             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
              patch.object(release, "observe_reference", side_effect=[
                  present(digest), present(digest)]), \
              patch.object(release.subprocess, "run") as command, \
@@ -1202,7 +1203,7 @@ class ReleaseTests(unittest.TestCase):
                     argv = argv_for(command)
                     with patch.object(release, "observe_reference", side_effect=observe), \
                          patch.object(release, "platform_manifest_revisions",
-                                      return_value=revisions), \
+                                      return_value=(digest, revisions)), \
                          patch.object(release, "nightly_identity_binding", return_value={}), \
                          patch.object(release.subprocess, "run", side_effect=fake_run) as runner, \
                          patch("sys.argv", ["release.py"] + argv):
@@ -1216,7 +1217,7 @@ class ReleaseTests(unittest.TestCase):
                     argv = argv_for(command)
                     with patch.object(release, "observe_reference", side_effect=observe), \
                          patch.object(release, "platform_manifest_revisions",
-                                      return_value=revisions), \
+                                      return_value=(digest, revisions)), \
                          patch.object(release, "nightly_identity_binding", return_value={}), \
                          patch.object(release.subprocess, "run") as runner, \
                          patch("sys.argv", ["release.py"] + argv):
@@ -1247,8 +1248,9 @@ class ReleaseTests(unittest.TestCase):
                 "digest": "sha256:" + "2" * 64, "revision": commit},
         }
         reference = release.nightly_immutable_reference(commit)
-        revisions = release.platform_manifest_revisions(
+        reported_index, revisions = release.platform_manifest_revisions(
             reference, real_docker_inspect_runner(index_digest, children))
+        self.assertEqual(reported_index, index_digest)
         for platform in release.REQUIRED_PLATFORMS:
             self.assertEqual(revisions[platform]["revision"], commit)
         self.assertEqual(revisions[("linux", "amd64")]["digest"], "sha256:" + "1" * 64)
@@ -1289,11 +1291,12 @@ class ReleaseTests(unittest.TestCase):
             ("linux", "arm64"): {"digest": "sha256:" + "4" * 64, "revision": old_commit},
         }
         original_revisions = release.platform_manifest_revisions
-        def revisions_for(reference):
+        def revisions_for(reference, anchor_digest=None):
             target = children if reference == sha_ref else (
                 previous_children if reference == previous_ref else {})
+            expected = digest if reference == sha_ref else old_digest
             return original_revisions(
-                reference, real_docker_inspect_runner("sha256:" + "9" * 64, target))
+                reference, real_docker_inspect_runner(expected, target))
         state = {"edge": present(old_digest)}
         def observe(ref, strict=False):
             if ref == sha_ref:
@@ -1335,18 +1338,56 @@ class ReleaseTests(unittest.TestCase):
             state["nightly"] = present(digest)
             return subprocess.CompletedProcess(args, 0)
         with patch.object(release, "observe_reference", side_effect=observe), \
-             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
              patch.object(release.subprocess, "run", side_effect=fake_run) as command, \
              patch("sys.argv", ["release.py"] + argv):
             release.main()
             self.assertEqual(len(registry_writes(command)), 1)
         # REUSE: sha gate with trusted per-platform config evidence returns reuse.
         with patch.object(release, "observe_reference", return_value=present(digest)), \
-             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
+             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
              patch.object(release.subprocess, "run") as command, \
              patch("sys.argv", ["release.py", "sha-tag-gate", "--commit", commit,
                                 "--expected-digest", digest, "--ci-verified", "true"]):
             release.main()
+            self.assertEqual(registry_writes(command), [])
+
+
+    def test_external_retag_and_anchored_index_mismatch(self):
+        commit, digest = "c" * 40, "sha256:" + "d" * 64
+        retag = "sha256:" + "e" * 64
+        sha_ref = release.nightly_immutable_reference(commit)
+        children = platform_revisions(commit)
+        def anchored_runner(index_for_anchored):
+            def runner(*args):
+                reference, fmt = args[4], args[6]
+                base_index = digest if reference == f"{sha_ref}@{digest}" else retag
+                if fmt == "{{json .Manifest}}":
+                    return real_docker_inspect_runner(
+                        index_for_anchored or base_index, children)(*args)
+                return real_docker_inspect_runner(base_index, children)(*args)
+            return runner
+
+        # The mutable tag now resolves to `retag`, but evidence is fetched from
+        # the previously observed digest, so the original image is still used.
+        with patch.object(release, "observe_reference", return_value=present(digest)), \
+             patch("sys.argv", ["release.py", "sha-tag-gate", "--commit", commit,
+                                "--expected-digest", digest, "--ci-verified", "true"]):
+            with patch.object(release, "inspect_runner", anchored_runner(None)):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    release.main()
+                self.assertEqual(json.loads(out.getvalue())["action"], "reuse")
+
+        # An anchored index that disagrees with the observed digest refuses with
+        # zero registry writes.
+        with patch.object(release, "observe_reference", return_value=present(digest)), \
+             patch.object(release, "inspect_runner", anchored_runner(retag)), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", ["release.py", "sha-tag-gate", "--commit", commit,
+                                "--expected-digest", digest, "--ci-verified", "true"]):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                release.main()
             self.assertEqual(registry_writes(command), [])
 
 
