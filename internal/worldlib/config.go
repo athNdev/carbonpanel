@@ -60,22 +60,21 @@ type ConfigChange struct {
 
 // DraftPreview never mutates anything; it is the dry run shown before apply.
 type DraftPreview struct {
-	Changes         []ConfigChange
+	Changes          []ConfigChange
 	ValidationErrors []string
-	Conflicts       []string
-	RestartRequired []string
-	Summary         string
+	Conflicts        []string
+	RestartRequired  []string
+	Summary          string
 }
 
 // gamerule catalog. Names changed from camelCase to snake_case in 1.21; the
 // schema selects the correct spelling for the target version instead of
 // showing a universal list.
 type gamerule struct {
-	camel  string
-	snake  string
-	kind   string
-	note   string
-	since  string
+	camel string
+	snake string
+	kind  string
+	note  string
 }
 
 var gamerules = []gamerule{
@@ -132,9 +131,28 @@ func modernLevelTypes(version string) (bool, bool) {
 	return major > 1 || (major == 1 && minor >= 16), true
 }
 
-// BuildSchema derives the visible controls from a version tuple. Unknown
-// versions produce a partial schema with explicit unknown observations; they
-// never produce a universal list of guessed options.
+// loaderFamily classifies the target loader so the wizard can show loader-
+// specific controls without inventing capabilities for another family.
+func loaderFamily(loader string) string {
+	switch strings.ToLower(strings.TrimSpace(loader)) {
+	case "", "vanilla", "mod_loader_vanilla", "unspecified", "mod_loader_unspecified":
+		return "vanilla"
+	case "forge", "fabric", "quilt", "neoforge", "mod_loader_forge", "mod_loader_fabric",
+		"mod_loader_quilt", "mod_loader_neoforge":
+		return "modded"
+	case "paper", "spigot", "bukkit", "purpur", "folia", "sponge", "sponge_vanilla",
+		"sponge_forge", "mod_loader_paper", "mod_loader_spigot", "mod_loader_bukkit",
+		"mod_loader_purpur", "mod_loader_folia":
+		return "plugin"
+	default:
+		return "unknown"
+	}
+}
+
+// BuildSchema derives the visible controls from the full version tuple:
+// edition, MC version, loader and data version. Unknown dimensions produce a
+// partial schema with explicit unknown observations; they never produce a
+// universal list of guessed options.
 func BuildSchema(edition, mcVersion, loader, dataVersion string) *ConfigSchema {
 	s := &ConfigSchema{
 		Edition:     edition,
@@ -155,6 +173,29 @@ func BuildSchema(edition, mcVersion, loader, dataVersion string) *ConfigSchema {
 			Note:          "No target Minecraft version supplied; version-sensitive controls are hidden.",
 		})
 	}
+	javaEdition := edition == "" || strings.EqualFold(strings.TrimSpace(edition), "java")
+	if !javaEdition {
+		s.Partial = true
+		s.Observations = append(s.Observations, Observation{
+			Source: "panel_db", Confidence: Unknown, Applicability: edition,
+			Note: "Only Java world generation is verifiable; Bedrock and unknown editions hide the Java worldgen controls.",
+		})
+	}
+	family := loaderFamily(loader)
+	if family == "unknown" {
+		s.Partial = true
+		s.Observations = append(s.Observations, Observation{
+			Source: "panel_db", Confidence: Unknown, Applicability: loader,
+			Note: "Loader family is unknown; loader-specific controls are hidden rather than guessed.",
+		})
+	}
+	if dataVersion == "" {
+		s.Partial = true
+		s.Observations = append(s.Observations, Observation{
+			Source: "minecraft_catalog", Confidence: Unknown, Applicability: mcVersion,
+			Note: "Target data version is unknown; advanced NBT controls are hidden.",
+		})
+	}
 
 	add := func(c ConfigControl) { s.Controls = append(s.Controls, c) }
 	add(ConfigControl{Key: "level-name", Label: "Level folder", Group: "Identity", Description: "Folder name for the world family.",
@@ -167,7 +208,7 @@ func BuildSchema(edition, mcVersion, loader, dataVersion string) *ConfigSchema {
 		Classification: ClassCreationOnly, ValueType: "enum", Options: []string{"survival", "creative", "adventure", "spectator"}, DefaultValue: "survival", AppliesWhen: "at creation; live change uses a command"})
 
 	modern, known := modernLevelTypes(mcVersion)
-	if known {
+	if javaEdition && known {
 		options := levelTypesLegacy
 		if modern {
 			options = levelTypesModern
@@ -180,14 +221,16 @@ func BuildSchema(edition, mcVersion, loader, dataVersion string) *ConfigSchema {
 			Applicability: mcVersion, Note: "World type names are not verifiable for this version; the control is hidden."})
 	}
 
-	add(ConfigControl{Key: "generator-settings", Label: "Generator settings", Group: "Seed & type", Description: "Superflat layer preset or generator JSON.",
-		Classification: ClassCreationOnly, ValueType: "string", Advanced: true, AppliesWhen: "only at creation"})
-	add(ConfigControl{Key: "generate-structures", Label: "Generate structures", Group: "Seed & type", Description: "Whether structures generate in new chunks.",
-		Classification: ClassCreationOnly + ":" + ClassLiveCommand, ValueType: "bool", DefaultValue: "true",
-		AppliesWhen: "creation value; live command affects only ungenerated chunks"})
+	if javaEdition {
+		add(ConfigControl{Key: "generator-settings", Label: "Generator settings", Group: "Seed & type", Description: "Superflat layer preset or generator JSON.",
+			Classification: ClassCreationOnly, ValueType: "string", Advanced: true, AppliesWhen: "only at creation"})
+		add(ConfigControl{Key: "generate-structures", Label: "Generate structures", Group: "Seed & type", Description: "Whether structures generate in new chunks.",
+			Classification: ClassCreationOnly + ":" + ClassLiveCommand, ValueType: "bool", DefaultValue: "true",
+			AppliesWhen: "creation value; live command affects only ungenerated chunks"})
+	}
 
 	snake, knownRules := snakeGamerules(mcVersion)
-	if knownRules {
+	if javaEdition && knownRules {
 		for _, rule := range gamerules {
 			key := rule.camel
 			if snake {
@@ -208,11 +251,28 @@ func BuildSchema(edition, mcVersion, loader, dataVersion string) *ConfigSchema {
 		Classification: ClassRestartNeeded, ValueType: "int", DefaultValue: "16", Advanced: true, AppliesWhen: "next restart"})
 	add(ConfigControl{Key: "region-file-compression", Label: "Region file compression", Group: "Advanced", Description: "Image environment for region compression.",
 		Classification: ClassRestartNeeded, ValueType: "enum", Options: []string{"DEFLATE", "NONE"}, DefaultValue: "DEFLATE", Advanced: true, AppliesWhen: "next restart"})
-	add(ConfigControl{Key: "datapack-path", Label: "Datapack archive", Group: "Datapacks", Description: "Datapack to stage for the next world generation.",
-		Classification: ClassOfflineOnly, ValueType: "string", Advanced: true, AppliesWhen: "staged for next restart"})
-	add(ConfigControl{Key: "level-dat-raw", Label: "Advanced NBT", Group: "Expert", Description: "Expert-only type-preserving level.dat edit with a dry-run diff.",
-		Classification: ClassUnsafe, ValueType: "json", Expert: true, AppliesWhen: "disabled: offline NBT edit requires an explicit guard"})
+	switch family {
+	case "modded":
+		add(ConfigControl{Key: "mod-loader-profile", Label: "Mod loader profile", Group: "Loader", Description: "Loader and mod IDs are server metadata; they are never auto-swapped.",
+			Classification: ClassRestartNeeded, ValueType: "string", Advanced: true, AppliesWhen: "next restart; report-only, no automatic mod changes"})
+	case "plugin":
+		add(ConfigControl{Key: "plugin-world-flags", Label: "Plugin world flags", Group: "Plugins", Description: "Plugin-specific world state needs a bridge; without one it is unknown.",
+			Classification: ClassUnsafe, ValueType: "json", Advanced: true, AppliesWhen: "disabled: no verified plugin bridge"})
+	}
+	if javaEdition {
+		add(ConfigControl{Key: "datapack-path", Label: "Datapack archive", Group: "Datapacks", Description: "Datapack to stage for the next world generation.",
+			Classification: ClassOfflineOnly, ValueType: "string", Advanced: true, AppliesWhen: "staged for next restart"})
+	}
+	if javaEdition && dataVersion != "" {
+		add(ConfigControl{Key: "target-data-version", Label: "Target data version", Group: "Identity", Description: "Data version used for compatibility checks; upgrades only on a clone.",
+			Classification: ClassCreationOnly, ValueType: "int", DefaultValue: dataVersion, AppliesWhen: "only at creation"})
+		add(ConfigControl{Key: "level-dat-raw", Label: "Advanced NBT", Group: "Expert", Description: "Expert-only type-preserving level.dat edit with a dry-run diff.",
+			Classification: ClassUnsafe, ValueType: "json", Expert: true, AppliesWhen: "disabled: offline NBT edit requires an explicit guard"})
+	}
 
+	if !javaEdition {
+		return s
+	}
 	s.Presets = []ConfigPreset{
 		{ID: "survival", Label: "Survival default", Description: "Standard overworld with structures and normal difficulty.",
 			Values: map[string]string{"difficulty": "normal", "gamemode": "survival", "generate-structures": "true"}},

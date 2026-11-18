@@ -98,6 +98,47 @@ func TestPresetConflictIsReported(t *testing.T) {
 	}
 }
 
+func TestSchemaGatesOnEditionLoaderAndDataVersion(t *testing.T) {
+	bedrock := BuildSchema("bedrock", "1.21.4", "VANILLA", "3953")
+	if !bedrock.Partial {
+		t.Fatal("non-Java edition must be partial")
+	}
+	for _, c := range bedrock.Controls {
+		if c.Key == "level-type" || strings.HasPrefix(c.Key, "gamerule.") {
+			t.Fatalf("Bedrock schema must not expose Java control %q", c.Key)
+		}
+	}
+	modded := BuildSchema("java", "1.21.4", "FABRIC", "3953")
+	plugin := BuildSchema("java", "1.21.4", "PAPER", "3953")
+	if !hasControl(modded, "mod-loader-profile") || hasControl(modded, "plugin-world-flags") {
+		t.Fatal("modded loader controls are wrong")
+	}
+	if !hasControl(plugin, "plugin-world-flags") || hasControl(plugin, "mod-loader-profile") {
+		t.Fatal("plugin loader controls are wrong")
+	}
+	unknownLoader := BuildSchema("java", "1.21.4", "some-future-loader", "3953")
+	if !unknownLoader.Partial || hasControl(unknownLoader, "plugin-world-flags") {
+		t.Fatal("unknown loader must be partial with no guessed controls")
+	}
+	noDV := BuildSchema("java", "1.21.4", "VANILLA", "")
+	if hasControl(noDV, "level-dat-raw") || hasControl(noDV, "target-data-version") {
+		t.Fatal("unknown data version must hide data-version-specific controls")
+	}
+	withDV := BuildSchema("java", "1.21.4", "VANILLA", "3953")
+	if !hasControl(withDV, "target-data-version") {
+		t.Fatal("known data version must expose the target control")
+	}
+}
+
+func hasControl(s *ConfigSchema, key string) bool {
+	for _, c := range s.Controls {
+		if c.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
 func TestUnsupportedReasonsAreExplicit(t *testing.T) {
 	for _, key := range []string{"edition_conversion", "in_place_downgrade", "arbitrary_mod_removal", "live_nbt_edit", "shared_writable", "world_catalog_auto"} {
 		reason, ok := UnsupportedReason(key)

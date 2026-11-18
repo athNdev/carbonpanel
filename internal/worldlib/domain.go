@@ -39,11 +39,11 @@ const (
 
 // Setting classifications for the version-driven configuration schema.
 const (
-	ClassCreationOnly   = "creation_only"
-	ClassOfflineOnly    = "offline_only"
-	ClassLiveCommand    = "live_command"
-	ClassRestartNeeded  = "restart_required"
-	ClassUnsafe         = "unsafe"
+	ClassCreationOnly  = "creation_only"
+	ClassOfflineOnly   = "offline_only"
+	ClassLiveCommand   = "live_command"
+	ClassRestartNeeded = "restart_required"
+	ClassUnsafe        = "unsafe"
 )
 
 // Support axes. Axis (b) automation is intentionally not claimed.
@@ -101,6 +101,7 @@ var (
 	ErrTwoWriters         = errors.New("two writable bindings to one revision are not supported")
 	ErrStaleGeneration    = errors.New("world binding owner is stale")
 	ErrUncertainOutcome   = errors.New("world operation outcome is uncertain; resolve it before retrying")
+	ErrDiskBudget         = errors.New("node disk budget preflight failed")
 	ErrCredentialBoundary = errors.New("credential may only be sent to the authorized API origin")
 )
 
@@ -108,12 +109,12 @@ var (
 // disabled transform. These must never be presented as best-effort features.
 func UnsupportedReason(name string) (string, bool) {
 	reasons := map[string]string{
-		"edition_conversion":  "Java and Bedrock world formats are not interchangeable.",
-		"in_place_downgrade":  "Downgrading a world destroys data; clone and back up first, or restore an older immutable revision.",
+		"edition_conversion":    "Java and Bedrock world formats are not interchangeable.",
+		"in_place_downgrade":    "Downgrading a world destroys data; clone and back up first, or restore an older immutable revision.",
 		"arbitrary_mod_removal": "Removing mods cannot be done losslessly; use the moderated mod installation paths.",
-		"live_nbt_edit":       "Editing level.dat or region files while the server runs corrupts the world.",
-		"shared_writable":     "A shared writable world requires a supported shared-state backend and its own decision; clone on bind instead.",
-		"world_catalog_auto":  "No documented, license-compatible prebuilt-world discovery route exists; import manually.",
+		"live_nbt_edit":         "Editing level.dat or region files while the server runs corrupts the world.",
+		"shared_writable":       "A shared writable world requires a supported shared-state backend and its own decision; clone on bind instead.",
+		"world_catalog_auto":    "No documented, license-compatible prebuilt-world discovery route exists; import manually.",
 	}
 	reason, ok := reasons[name]
 	return reason, ok

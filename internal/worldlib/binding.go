@@ -20,6 +20,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/snapshot"
+	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -121,6 +122,9 @@ type BindRequest struct {
 	Generation    int64
 	Operator      string
 	AcceptUnknown bool
+	// Previous is the binding captured under the admission lock before a swap.
+	// It is set by Binder, never by RPC callers.
+	Previous *storage.WorldBinding
 }
 
 // BindResult reports the persisted binding and the journal outcome.
@@ -140,6 +144,11 @@ type Binder struct {
 	lifecycle   Lifecycle
 	admission   *KeyedAdmission
 	libraryRoot string
+	compat      *Engine
+	// FreeBytes reports node free bytes. It is required for remote transport
+	// nodes, whose filesystem cannot be measured from the controller. Local and
+	// shared-storage nodes fall back to files.GetFreeDiskSpace(dataRoot).
+	FreeBytes func(ctx context.Context, nodeID, dataRoot string) (int64, error)
 }
 
 // NewBinder constructs a binder. A nil resolver is legal for local-only nodes
@@ -148,8 +157,13 @@ func NewBinder(store *storage.Store, log *logger.Logger, resolver *nodestorage.R
 	return &Binder{
 		store: store, log: log, resolver: resolver, sender: sender,
 		lifecycle: lifecycle, admission: NewKeyedAdmission(), libraryRoot: libraryRoot,
+		compat: NewEngine(),
 	}
 }
+
+// SetCompatibility installs the dry-run engine used by bind preflight. Passing
+// nil disables compatibility gating; explicit callers must do so deliberately.
+func (b *Binder) SetCompatibility(engine *Engine) { b.compat = engine }
 
 // Bind executes a bind or swap. No live bytes are touched before admission,
 // strict node resolution and cancellation checks have all succeeded.
@@ -171,6 +185,20 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	if err != nil {
 		return nil, err
 	}
+	if req.NodeID == "" {
+		req.NodeID = server.NodeID
+	}
+	generation, err := b.resolveGeneration(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+	if req.Generation <= 0 {
+		req.Generation = generation
+	}
+	if req.Generation != generation {
+		return nil, fmt.Errorf("%w: request generation %d does not match node generation %d",
+			ErrStaleGeneration, req.Generation, generation)
+	}
 	revision, err := b.store.GetWorldRevision(ctx, req.RevisionID)
 	if err != nil {
 		return nil, err
@@ -180,7 +208,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	}
 	if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
 		if existing.RevisionID == req.RevisionID {
-			return &BindResult{Binding: existing, Outcome: "success", Consistency: existing.Consistency}, nil
+			return &BindResult{Binding: existing, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
 		}
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -206,7 +234,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRemoteUnavailable, err)
 	}
-	defer acc.Close()
+	defer func() { _ = acc.Close() }()
 
 	if b.lifecycle != nil {
 		running, err := b.lifecycle.IsRunning(ctx, req.ServerID)
@@ -218,25 +246,137 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		}
 	}
 
-	var result *BindResult
-	err = operation.RunJournaled(ctx, b.store, b.log, server, "world-bind", req.RequestID, func() error {
-		out, err := b.publish(ctx, acc, server, req, revision)
-		if err != nil {
-			return err
+	// Compatibility and disk-budget preflight happen before the journal and
+	// before any byte is written. Dry-run never mutates a world.
+	if err := b.preflight(ctx, server, revision, req); err != nil {
+		return nil, err
+	}
+
+	// Capture the binding again under the admission lock so a concurrent swap
+	// cannot be overwritten by a stale read from the first preflight check.
+	if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
+		if existing.RevisionID == req.RevisionID {
+			return &BindResult{Binding: existing, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
 		}
-		result = out
-		return nil
-	})
+		if !existing.MatchesOwner(req.NodeID, req.Generation) {
+			return nil, fmt.Errorf("%w: existing binding belongs to another node generation", ErrStaleGeneration)
+		}
+		req.Previous = existing
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	var result *BindResult
+	journal, err := operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-bind", req.RequestID,
+		func() (bool, error) {
+			out, err := b.publish(ctx, acc, server, req, revision)
+			if out != nil {
+				result = out
+			}
+			if err != nil {
+				return errors.Is(err, ErrUncertainOutcome), err
+			}
+			return false, nil
+		})
 	if err != nil {
 		if errors.Is(err, operation.ErrInProgress) {
 			return nil, fmt.Errorf("%w: another world operation is active", ErrUncertainOutcome)
 		}
+		if errors.Is(err, ErrUncertainOutcome) {
+			// Report the unknown outcome rather than a retryable failure. The
+			// journal row keeps its lock and carries the resolution note.
+			outcome := &BindResult{Outcome: journal.Outcome, OperationID: journal.OperationID}
+			if result != nil {
+				outcome.Binding = result.Binding
+				outcome.Consistency = result.Consistency
+			}
+			return outcome, err
+		}
 		return nil, err
 	}
 	if result == nil {
-		return nil, fmt.Errorf("%w: journal replay did not return a binding", ErrUncertainOutcome)
+		// A replayed request_id that already completed does not re-run mutate.
+		// Report the binding that the first attempt made rather than an
+		// uncertainty the operator would have to resolve.
+		if journal.Outcome == string(operation.OutcomeSuccess) {
+			if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
+				return &BindResult{Binding: existing, Outcome: string(operation.OutcomeSuccess),
+					OperationID: journal.OperationID, Consistency: existing.Consistency}, nil
+			}
+		}
+		return &BindResult{Outcome: string(operation.OutcomeUnknown), OperationID: journal.OperationID},
+			fmt.Errorf("%w: journal replay did not return a binding", ErrUncertainOutcome)
 	}
+	result.OperationID = journal.OperationID
 	return result, nil
+}
+
+// resolveGeneration reads the owning node's endpoint generation from the
+// control-plane database. Legacy single-node deployments with no Node row use
+// generation 1, matching the implicit default in the Node model.
+func (b *Binder) resolveGeneration(ctx context.Context, server *storage.Server) (int64, error) {
+	if server == nil {
+		return 0, fmt.Errorf("%w: no server", ErrStaleGeneration)
+	}
+	node, err := b.store.GetNode(ctx, server.NodeID)
+	if err == nil && node.EndpointGeneration > 0 {
+		return node.EndpointGeneration, nil
+	}
+	if nodestorage.IsLegacyLocalNodeID(server.NodeID) {
+		return 1, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("%w: node %q: %v", ErrStaleGeneration, server.NodeID, err)
+	}
+	return 0, fmt.Errorf("%w: node %q has no endpoint generation", ErrStaleGeneration, server.NodeID)
+}
+
+// preflight runs the compatibility dry run and a fail-closed disk budget check
+// before any external mutation. Unknown compatibility findings are surfaced in
+// the report; only blocked or unsupported transforms stop the bind.
+func (b *Binder) preflight(ctx context.Context, server *storage.Server, revision *storage.WorldRevision, req BindRequest) error {
+	if b.compat != nil {
+		report, err := b.compat.Check(ctx, revision.StoragePath, Target{
+			ServerID: req.ServerID, MCVersion: server.MCVersion, Edition: "java",
+			ModLoader: string(server.ModLoader), DataVersion: revision.DataVersion, NodeID: req.NodeID,
+		})
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrUnknownVersion, err)
+		}
+		transforms, err := b.compat.DryRun(ctx, report)
+		if err != nil {
+			return fmt.Errorf("compatibility dry run: %w", err)
+		}
+		// DryRun also lists explicitly unsupported capabilities as informational
+		// entries. Only a transform that this target actually proposes and
+		// blocks (cross-edition change, in-place downgrade) stops a bind.
+		for _, transform := range transforms {
+			if transform.Status == "blocked" {
+				return fmt.Errorf("%w: %s: %s", ErrUnsupported, transform.Name, transform.Reason)
+			}
+		}
+		if report.Overall == "blocked" {
+			return fmt.Errorf("%w: compatibility report for revision %s is blocked", ErrUnsupported, revision.ID)
+		}
+	}
+	const headroom = int64(256 << 20)
+	required := revision.SizeBytes*3 + headroom
+	var free int64
+	var err error
+	if b.FreeBytes != nil {
+		free, err = b.FreeBytes(ctx, req.NodeID, server.DataPath)
+	} else if nodestorage.IsLegacyLocalNodeID(server.NodeID) {
+		free, err = files.GetFreeDiskSpace(server.DataPath)
+	} else {
+		return fmt.Errorf("%w: node %q free bytes are not measurable from the controller; inject a FreeBytes probe", ErrDiskBudget, req.NodeID)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: node %q free bytes unavailable: %v", ErrDiskBudget, req.NodeID, err)
+	}
+	if free < required {
+		return fmt.Errorf("%w: need %d bytes (archive, clone, undo and headroom), node has %d", ErrDiskBudget, required, free)
+	}
+	return nil
 }
 
 func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *storage.Server, req BindRequest, revision *storage.WorldRevision) (*BindResult, error) {
@@ -247,27 +387,26 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		if err != nil {
 			return nil, err
 		}
-		if wasRunning {
-			if err := b.lifecycle.StopServer(ctx, req.ServerID); err != nil {
-				return nil, fmt.Errorf("stop before world swap: %w", err)
-			}
+	}
+
+	// Quiesce BEFORE stopping the server: save-off/save-all flush need a live
+	// JVM. Resuming saves while it is still running avoids leaving a stopped
+	// server with saves off, and the flush is already on disk when we stop.
+	consistency := snapshot.ConsistencyVerifiedStopped
+	if wasRunning && b.sender != nil {
+		resume, level := snapshot.QuiesceWorld(ctx, b.sender, b.log, server)
+		consistency = level
+		if err := resume(); err != nil && b.log != nil {
+			b.log.Warn("world bind: save-on before stop failed: %v", err)
+		}
+	}
+	if wasRunning && b.lifecycle != nil {
+		if err := b.lifecycle.StopServer(ctx, req.ServerID); err != nil {
+			return nil, fmt.Errorf("stop before world swap: %w", err)
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-
-	consistency := snapshot.ConsistencyVerifiedStopped
-	resume := func() error { return nil }
-	if wasRunning && b.sender != nil {
-		resume, consistency = snapshot.QuiesceWorld(ctx, b.sender, b.log, server)
-		defer func() {
-			if err := resume(); err != nil {
-				if b.log != nil {
-					b.log.Warn("world bind: save-on failed: %v", err)
-				}
-			}
-		}()
 	}
 
 	// Stage on the owning node through its accessor. For remote nodes this is
@@ -302,19 +441,21 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		return nil, fmt.Errorf("%w: archive has no level.dat family", ErrArchiveRejected)
 	}
 
-	bindingID := "wlb_" + uuid.NewString()
-	binding := &storage.WorldBinding{
-		ID: bindingID, ServerID: req.ServerID, LevelName: req.LevelName,
+	next := &storage.WorldBinding{
+		ID: "wlb_" + uuid.NewString(), ServerID: req.ServerID, LevelName: req.LevelName,
 		RevisionID: req.RevisionID, NodeID: req.NodeID, Generation: req.Generation,
 		Consistency: string(consistency), BoundAt: time.Now().UTC(),
 	}
 	if req.Generation <= 0 || req.NodeID == "" {
 		return nil, fmt.Errorf("%w: node generation must be known before publish", ErrStaleGeneration)
 	}
-	if err := b.store.CreateWorldBinding(ctx, binding); err != nil {
+	// One transaction swaps the binding row, so there is no window where the
+	// (server_id, level_name) unique index blocks the new revision.
+	if err := b.store.SwapWorldBinding(ctx, req.Previous, next); err != nil {
 		_ = acc.RemoveAll(stageRoot)
 		return nil, err
 	}
+	binding := next
 
 	// Atomic family publish: move each live folder aside, promote the staged
 	// folder, and roll back if any promotion fails. The old tree is retained
@@ -327,23 +468,28 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		}
 		_ = acc.RemoveAll(oldRoot)
 		_ = acc.RemoveAll(stageRoot)
+		// A failed publish restores the previous binding, not "no binding".
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if req.Previous != nil {
+			_ = b.store.SwapWorldBinding(restoreCtx, next, req.Previous)
+		} else {
+			_ = b.store.DeleteWorldBinding(restoreCtx, next.ID)
+		}
 	}
 	for _, family := range families {
 		if _, statErr := acc.Stat(family); statErr == nil {
 			if err := acc.MkdirAll(oldRoot); err != nil {
-				_ = b.store.DeleteWorldBinding(ctx, bindingID)
 				rollback()
 				return nil, err
 			}
 			if err := acc.Rename(family, path.Join(oldRoot, family)); err != nil {
-				_ = b.store.DeleteWorldBinding(ctx, bindingID)
 				rollback()
 				return nil, err
 			}
 			movedOld = append(movedOld, family)
 		}
 		if err := acc.Rename(path.Join(stageRoot, family), family); err != nil {
-			_ = b.store.DeleteWorldBinding(ctx, bindingID)
 			rollback()
 			return nil, err
 		}
@@ -351,7 +497,6 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	}
 
 	if err := verifyFamilies(acc, families); err != nil {
-		_ = b.store.DeleteWorldBinding(ctx, bindingID)
 		rollback()
 		return nil, err
 	}
@@ -360,7 +505,8 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	// Keep the old tree until the restart and verification have been observed.
 	if wasRunning && b.lifecycle != nil {
 		if err := b.lifecycle.StartServer(ctx, req.ServerID); err != nil {
-			return nil, fmt.Errorf("%w: restart after swap failed; recovery tree at %s: %v", ErrUncertainOutcome, oldRoot, err)
+			return &BindResult{Binding: binding, Outcome: string(operation.OutcomeUnknown), Consistency: string(consistency)},
+				fmt.Errorf("%w: restart after swap failed; recovery tree at %s: %v", ErrUncertainOutcome, oldRoot, err)
 		}
 	}
 
@@ -374,21 +520,45 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	return &BindResult{Binding: binding, Outcome: "success", Consistency: string(consistency)}, nil
 }
 
-// Unbind removes the binding row but never deletes world bytes.
+// Unbind removes the binding row but never deletes world bytes. Admission is
+// taken before the row is read, and the row is deleted only inside a journaled
+// operation, so a replayed request_id cannot interleave with a bind.
 func (b *Binder) Unbind(ctx context.Context, serverID, level, requestID string) (bool, error) {
+	if requestID == "" {
+		requestID = "world-unbind-" + uuid.NewString()
+	}
+	server, err := b.store.GetServer(ctx, serverID)
+	if err != nil {
+		return false, err
+	}
+	releaseServer, err := b.admission.Acquire(ctx, "server:"+serverID)
+	if err != nil {
+		return false, err
+	}
+	defer releaseServer()
 	binding, err := b.store.GetWorldBinding(ctx, serverID, level)
 	if err != nil {
 		return false, err
 	}
-	release, err := b.admission.Acquire(ctx, "server:"+serverID, "revision:"+binding.RevisionID)
+	releaseRevision, err := b.admission.Acquire(ctx, "revision:"+binding.RevisionID)
 	if err != nil {
 		return false, err
 	}
-	defer release()
-	if err := b.store.DeleteWorldBinding(ctx, binding.ID); err != nil {
+	defer releaseRevision()
+
+	removed := false
+	_, err = operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-unbind", requestID,
+		func() (bool, error) {
+			if err := b.store.DeleteWorldBinding(ctx, binding.ID); err != nil {
+				return false, err
+			}
+			removed = true
+			return false, nil
+		})
+	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return removed, nil
 }
 
 // Recover observes real node state after an interrupted bind. It restores a
@@ -410,7 +580,7 @@ func (b *Binder) Recover(ctx context.Context, serverID, dataRoot, nodeID string,
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrRemoteUnavailable, err)
 	}
-	defer acc.Close()
+	defer func() { _ = acc.Close() }()
 
 	entries, err := acc.ReadDir(".world-library")
 	if err != nil {
@@ -484,7 +654,7 @@ func copyLocalArchiveToAccessor(ctx context.Context, acc nodestorage.Accessor, l
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 	info, err := src.Stat()
 	if err != nil {
 		return err
@@ -529,4 +699,3 @@ func verifyFamilies(acc nodestorage.Accessor, families []string) error {
 	}
 	return nil
 }
-

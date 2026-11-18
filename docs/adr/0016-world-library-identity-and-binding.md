@@ -1,4 +1,4 @@
-# ADR 0014: World Library identity, immutable revisions and clone-on-bind
+# ADR 0016: World Library identity, immutable revisions and clone-on-bind
 
 Status: accepted
 
@@ -77,9 +77,13 @@ on cross-origin redirects using the indexer policy.
 - No hot swap, no shared writable reference and no cross-process atomicity.
   Admission and keyed locks are single-controller/process-local; a second
   controller is outside the guarantee and must be documented as such.
-- Imports must verify platform hash, archive manifest and whole-archive SHA-256
-  in node-local staging before publication; archive extraction rejects
-  traversal, links, nested bombs, oversized entries and executable payloads.
+- Imports verify the operator-supplied SHA-256 against a whole-archive SHA-256
+  computed in node-local staging before publication; `archive/zip` also checks
+  each entry's CRC. There is no per-file SHA-256 manifest verification.
+  Inspection rejects traversal and unsafe paths, symlink/special and encrypted
+  entries, nesting deeper than two levels, and size/entry/manifest caps.
+  Executable and plugin payloads (`.jar`, `.dll`, `.so`, `.mcfunction`, loader
+  descriptors) are only detected and reported; they are never installed or run.
 - `world_quota_mb` remains advisory panel admission and is never reported as an
   enforced `WorldDiskEnforced` quota.
 - Until the exactly-one-event gate (ADR 0011 / D7) is closed, the operation

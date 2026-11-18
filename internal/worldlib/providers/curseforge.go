@@ -51,14 +51,14 @@ type curseforgeFilesResponse struct {
 }
 
 type curseforgeFile struct {
-	ID           int               `json:"id"`
-	ModID        int               `json:"modId"`
-	DisplayName  string            `json:"displayName"`
-	FileName     string            `json:"fileName"`
-	IsAvailable  bool              `json:"isAvailable"`
-	ReleaseType  int               `json:"releaseType"`
-	Hashes       []curseforgeHash  `json:"hashes"`
-	GameVersions []string          `json:"gameVersions"`
+	ID           int              `json:"id"`
+	ModID        int              `json:"modId"`
+	DisplayName  string           `json:"displayName"`
+	FileName     string           `json:"fileName"`
+	IsAvailable  bool             `json:"isAvailable"`
+	ReleaseType  int              `json:"releaseType"`
+	Hashes       []curseforgeHash `json:"hashes"`
+	GameVersions []string         `json:"gameVersions"`
 }
 
 type curseforgeHash struct {
@@ -283,7 +283,7 @@ func (c *CurseForge) FetchDownloadURL(ctx context.Context, rawURL string) (strin
 	if err != nil {
 		return "", fmt.Errorf("download request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", statusError(ProviderCurseForge, resp)
 	}

@@ -33,15 +33,15 @@ import (
 // Report verdicts and transform statuses (kept as plain strings so the RPC
 // layer can map them to the generated proto without this package importing it).
 const (
-	VerdictCompatible      = "compatible"
+	VerdictCompatible       = "compatible"
 	VerdictRequiresDecision = "requires_decision"
 	VerdictBlocked          = "blocked"
 	VerdictUnknown          = "unknown"
 
-	StatusSupported         = "supported"
-	StatusRequiresDecision  = "requires_decision"
-	StatusBlocked           = "blocked"
-	StatusUnsupported       = "unsupported"
+	StatusSupported        = "supported"
+	StatusRequiresDecision = "requires_decision"
+	StatusBlocked          = "blocked"
+	StatusUnsupported      = "unsupported"
 )
 
 // Target is the server side of a compatibility check. Every field is
@@ -59,10 +59,10 @@ type Target struct {
 
 // Finding is one classified compatibility observation.
 type Finding struct {
-	Subject    string
-	Confidence string
-	Value      string
-	Reason     string
+	Subject     string
+	Confidence  string
+	Value       string
+	Reason      string
 	Observation Observation
 }
 
@@ -610,14 +610,14 @@ func inspectLoader(w *worldFS, target Target, applicability string, now time.Tim
 	for _, n := range w.names() {
 		base := strings.ToLower(path.Base(n))
 		var candidate string
-		switch {
-		case base == "quilt.mod.json":
+		switch base {
+		case "quilt.mod.json":
 			candidate = "quilt"
-		case base == "fabric.mod.json":
+		case "fabric.mod.json":
 			candidate = "fabric"
-		case base == "neoforge.mods.toml", base == "neoforge.mods.json":
+		case "neoforge.mods.toml", "neoforge.mods.json":
 			candidate = "neoforge"
-		case base == "mods.toml", base == "mcmod.info":
+		case "mods.toml", "mcmod.info":
 			candidate = "forge"
 		default:
 			continue
@@ -927,14 +927,14 @@ func inspectServerMetadata(target Target, now time.Time) ([]Finding, bool) {
 // analysis collects non-protocol flags gathered during inspection. It is
 // local to one Check call so the report itself stays a plain data struct.
 type analysis struct {
-	crossEdition       bool
-	marketplace        bool
-	downgrade          bool
-	cloneBackup        bool
-	versionDecision    bool
-	loaderMismatch     bool
-	identityMismatch   bool
-	packWarning        bool
+	crossEdition     bool
+	marketplace      bool
+	downgrade        bool
+	cloneBackup      bool
+	versionDecision  bool
+	loaderMismatch   bool
+	identityMismatch bool
+	packWarning      bool
 }
 
 func (a *analysis) merge(b analysis) {

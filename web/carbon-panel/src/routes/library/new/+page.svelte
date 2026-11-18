@@ -294,7 +294,7 @@ SPDX-License-Identifier: MPL-2.0
 			{/if}
 
 			{#if schema?.partial}
-				<div class="border-yellow border bg-card p-3 text-xs text-warning-text" role="status">
+				<div class="border border-warning bg-card p-3 text-xs text-warning-text" role="status">
 					<div class="flex items-start gap-2">
 						<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
 						<div>
@@ -525,7 +525,7 @@ SPDX-License-Identifier: MPL-2.0
 					{/if}
 					{#if preview.restartRequired.length > 0}
 						<div
-							class="border-yellow border bg-background p-3 text-xs text-warning-text"
+							class="border border-warning bg-background p-3 text-xs text-warning-text"
 							role="status"
 						>
 							<span class="mono-label-strong">Restart required</span>

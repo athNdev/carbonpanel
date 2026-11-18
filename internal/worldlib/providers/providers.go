@@ -27,10 +27,10 @@ import (
 
 // Provider identifiers. Manual platforms are never passed to Search.
 const (
-	ProviderModrinth         = "modrinth"
-	ProviderCurseForge       = "curseforge"
-	ProviderPlanetMinecraft  = "planet_minecraft"
-	ProviderMinecraftMaps    = "minecraftmaps"
+	ProviderModrinth           = "modrinth"
+	ProviderCurseForge         = "curseforge"
+	ProviderPlanetMinecraft    = "planet_minecraft"
+	ProviderMinecraftMaps      = "minecraftmaps"
 	ProviderBedrockMarketplace = "bedrock_marketplace"
 
 	// DiscoveryGateD11 is the decision that gates prebuilt-world automation.
@@ -73,11 +73,11 @@ type Artifact struct {
 // Capability describes what a provider actually supports. PrebuiltWorldCatalog
 // is false for every provider in this implementation.
 type Capability struct {
-	Provider            string
-	APIBackedArtifacts  bool
+	Provider             string
+	APIBackedArtifacts   bool
 	PrebuiltWorldCatalog bool
-	DiscoveryGate       string
-	Note                string
+	DiscoveryGate        string
+	Note                 string
 }
 
 // Searcher is implemented by the API-backed providers.
@@ -144,39 +144,39 @@ func Capabilities() []Capability {
 	manualNote := "Manual platform: no API-backed artifact search and no verified prebuilt-world catalog. Import manually; discovery gated by D11."
 	return []Capability{
 		{
-			Provider:            ProviderModrinth,
-			APIBackedArtifacts:  true,
+			Provider:             ProviderModrinth,
+			APIBackedArtifacts:   true,
 			PrebuiltWorldCatalog: false,
-			DiscoveryGate:       DiscoveryGateD11,
-			Note:                axisNote + " Modrinth documents no 'world' project type; no world category is requested or claimed.",
+			DiscoveryGate:        DiscoveryGateD11,
+			Note:                 axisNote + " Modrinth documents no 'world' project type; no world category is requested or claimed.",
 		},
 		{
-			Provider:            ProviderCurseForge,
-			APIBackedArtifacts:  true,
+			Provider:             ProviderCurseForge,
+			APIBackedArtifacts:   true,
 			PrebuiltWorldCatalog: false,
-			DiscoveryGate:       DiscoveryGateD11,
-			Note:                axisNote + " CurseForge categories (including any world class) are discovered at runtime; class ids are not assumed.",
+			DiscoveryGate:        DiscoveryGateD11,
+			Note:                 axisNote + " CurseForge categories (including any world class) are discovered at runtime; class ids are not assumed.",
 		},
 		{
-			Provider:            ProviderPlanetMinecraft,
-			APIBackedArtifacts:  false,
+			Provider:             ProviderPlanetMinecraft,
+			APIBackedArtifacts:   false,
 			PrebuiltWorldCatalog: false,
-			DiscoveryGate:       DiscoveryGateD11,
-			Note:                manualNote,
+			DiscoveryGate:        DiscoveryGateD11,
+			Note:                 manualNote,
 		},
 		{
-			Provider:            ProviderMinecraftMaps,
-			APIBackedArtifacts:  false,
+			Provider:             ProviderMinecraftMaps,
+			APIBackedArtifacts:   false,
 			PrebuiltWorldCatalog: false,
-			DiscoveryGate:       DiscoveryGateD11,
-			Note:                manualNote,
+			DiscoveryGate:        DiscoveryGateD11,
+			Note:                 manualNote,
 		},
 		{
-			Provider:            ProviderBedrockMarketplace,
-			APIBackedArtifacts:  false,
+			Provider:             ProviderBedrockMarketplace,
+			APIBackedArtifacts:   false,
 			PrebuiltWorldCatalog: false,
-			DiscoveryGate:       DiscoveryGateD11,
-			Note:                manualNote,
+			DiscoveryGate:        DiscoveryGateD11,
+			Note:                 manualNote,
 		},
 	}
 }
@@ -393,7 +393,7 @@ func getJSON(ctx context.Context, client *http.Client, userAgent, provider, rawU
 	if err != nil {
 		return fmt.Errorf("provider request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return statusError(provider, resp)
@@ -439,8 +439,9 @@ func isHexSHA256(s string) bool {
 	if len(s) != 64 {
 		return false
 	}
+	const hexDigits = "0123456789abcdefABCDEF"
 	for _, r := range s {
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+		if !strings.ContainsRune(hexDigits, r) {
 			return false
 		}
 	}

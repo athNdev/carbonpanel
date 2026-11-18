@@ -5,6 +5,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sort"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -12,6 +14,19 @@ import (
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
+
+const worldProcedurePrefix = "/carbonpanel.v1.WorldService/"
+
+func worldProcedures() []string {
+	var paths []string
+	for procedure := range rbac.ProcedurePermissions {
+		if strings.HasPrefix(procedure, worldProcedurePrefix) {
+			paths = append(paths, procedure)
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
 
 func registerWorldBindHandler(mux *http.ServeMux, srv *Server) {
 	const procedure = "/carbonpanel.v1.WorldService/BindWorld"
@@ -41,6 +56,58 @@ func callWorldBind(t *testing.T, ts *httptest.Server, bearer, serverID string) *
 		return connErr
 	}
 	return nil
+}
+
+// TestEveryWorldProcedureIsFailClosed enumerates every generated WorldService
+// procedure from the RBAC map. A reader with only a server-scoped grant cannot
+// call any of them: unscoped procedures fall back to "*" and mutations require
+// a different action. This is the negative coverage for all 18 RPCs.
+func TestEveryWorldProcedureIsFailClosed(t *testing.T) {
+	paths := worldProcedures()
+	if len(paths) != 18 {
+		t.Fatalf("WorldService procedure count = %d, want 18: %v", len(paths), paths)
+	}
+	srv, ts := buildHarness(t, false, false, nil, false)
+	mux := ts.Config.Handler.(*http.ServeMux)
+	for _, procedure := range paths {
+		registerEcho(mux, srv, procedure)
+	}
+	bearer := seedScopedToken(t, srv.store, srv.enforcer, "scoped-world-reader", []rbac.Permission{
+		{Resource: rbac.ResourceWorlds, Action: rbac.ActionRead, ObjectID: "srv-mine"},
+	})
+	for _, procedure := range paths {
+		err := callEcho(t, ts, procedure, bearer)
+		if err == nil || err.Code() != connect.CodePermissionDenied {
+			t.Errorf("%s was not denied for a narrowly scoped reader: %v", procedure, err)
+		}
+	}
+}
+
+// TestWorldReadProceduresAllowUnscopedReadGrant pins the positive path: a
+// worlds:read grant on "*" permits reads, but never a mutation.
+func TestWorldReadProceduresAllowUnscopedReadGrant(t *testing.T) {
+	paths := worldProcedures()
+	srv, ts := buildHarness(t, false, false, nil, false)
+	mux := ts.Config.Handler.(*http.ServeMux)
+	for _, procedure := range paths {
+		registerEcho(mux, srv, procedure)
+	}
+	bearer := seedScopedToken(t, srv.store, srv.enforcer, "unscoped-world-reader", []rbac.Permission{
+		{Resource: rbac.ResourceWorlds, Action: rbac.ActionRead, ObjectID: "*"},
+	})
+	for _, procedure := range paths {
+		err := callEcho(t, ts, procedure, bearer)
+		wantDenied := rbac.ProcedurePermissions[procedure].Action != rbac.ActionRead
+		if wantDenied {
+			if err == nil || err.Code() != connect.CodePermissionDenied {
+				t.Errorf("mutation %s was allowed by a read-only grant", procedure)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("read procedure %s was denied by a read grant: %v", procedure, err)
+		}
+	}
 }
 
 // TestWorldBindIsFailClosed pins the new worlds resource: a subuser grant for

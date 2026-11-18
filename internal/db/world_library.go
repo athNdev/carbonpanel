@@ -34,7 +34,7 @@ type WorldEntry struct {
 type WorldRevision struct {
 	ID                 string    `gorm:"primaryKey;size:96" json:"id"`
 	WorldEntryID       string    `gorm:"index;not null;size:64" json:"world_entry_id"`
-	SHA256             string    `gorm:"not null;size:64" json:"sha256"`
+	SHA256             string    `gorm:"not null;size:64;uniqueIndex:idx_world_revision_sha256" json:"sha256"`
 	SizeBytes          int64     `json:"size_bytes"`
 	EntryCount         int32     `json:"entry_count"`
 	MCVersion          string    `gorm:"size:64" json:"mc_version"`
@@ -230,6 +230,61 @@ func (s *Store) ListWorldBindings(ctx context.Context, serverID, revisionID stri
 	var bindings []WorldBinding
 	err := q.Order("bound_at DESC").Find(&bindings).Error
 	return bindings, err
+}
+
+// SwapWorldBinding atomically replaces a server level's binding with a new
+// revision. The row is changed in one transaction so the unique indexes on
+// (server_id, level_name) and revision_id are enforced without a window in
+// which no binding exists. A previous revision that is bound elsewhere is
+// refused with ErrWorldRevisionBound; a previous row that changed concurrently
+// is refused with ErrWorldBindingStale.
+func (s *Store) SwapWorldBinding(ctx context.Context, previous, next *WorldBinding) error {
+	if next == nil || next.ServerID == "" || next.LevelName == "" || next.RevisionID == "" {
+		return errors.New("world binding requires a server, level and revision")
+	}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var other WorldBinding
+		lookup := tx.Where("revision_id = ?", next.RevisionID)
+		if previous != nil {
+			lookup = lookup.Where("id <> ?", previous.ID)
+		}
+		if err := lookup.Select("id").First(&other).Error; err == nil {
+			return ErrWorldRevisionBound
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if previous == nil {
+			return tx.Create(next).Error
+		}
+		var current WorldBinding
+		if err := tx.Where("id = ? AND server_id = ? AND level_name = ? AND revision_id = ?",
+			previous.ID, previous.ServerID, previous.LevelName, previous.RevisionID).First(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrWorldBindingStale
+			}
+			return err
+		}
+		updates := map[string]any{
+			"revision_id": next.RevisionID,
+			"node_id":     next.NodeID,
+			"generation":  next.Generation,
+			"consistency": next.Consistency,
+			"bound_at":    next.BoundAt,
+		}
+		result := tx.Model(&WorldBinding{}).Where("id = ?", previous.ID).Updates(updates)
+		if result.Error != nil {
+			if isUniqueViolation(result.Error) {
+				return ErrWorldRevisionBound
+			}
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrWorldBindingStale
+		}
+		next.ID = previous.ID
+		return nil
+	})
+	return err
 }
 
 // DeleteWorldBinding removes a binding row. It never touches world bytes.

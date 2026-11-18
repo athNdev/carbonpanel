@@ -148,7 +148,7 @@ SPDX-License-Identifier: MPL-2.0
 			</p>
 		</div>
 		<p
-			class="border-yellow flex items-start gap-2 border bg-background p-3 text-xs text-warning-text"
+			class="flex items-start gap-2 border border-warning bg-background p-3 text-xs text-warning-text"
 		>
 			<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
 			<span>
@@ -429,7 +429,8 @@ SPDX-License-Identifier: MPL-2.0
 				{:else}
 					<p class="mt-2 text-xs text-muted-foreground">
 						Downloading and verification are in progress. A revision is published only after the
-						archive passes whole-archive SHA-256 and manifest checks.
+						archive passes structural safety inspection, CRC checks and whole-archive SHA-256
+						verification.
 					</p>
 				{/if}
 				{#if importedEntryId}

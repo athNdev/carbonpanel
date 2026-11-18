@@ -25,9 +25,9 @@ import (
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/internal/worldlib/providers"
 	"github.com/athNdev/carbon-panel/pkg/logger"
-	"github.com/athNdev/carbon-panel/pkg/upload"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
+	"github.com/athNdev/carbon-panel/pkg/upload"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -46,10 +46,10 @@ type WorldService struct {
 	uploads     *upload.Manager
 	libraryRoot string
 
-	importer  *worldlib.LocalImporter
-	compat    *worldlib.Engine
-	binder    *worldlib.Binder
-	modrinth  providers.Searcher
+	importer   *worldlib.LocalImporter
+	compat     *worldlib.Engine
+	binder     *worldlib.Binder
+	modrinth   providers.Searcher
 	curseforge providers.Searcher
 }
 
@@ -302,19 +302,39 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 	if err != nil {
 		return nil, notFoundOrInternal(err, "server not found")
 	}
-	generation := nodeGeneration(ctx, server.NodeID)
+	generation, err := s.nodeGenerationForServer(ctx, server)
+	if err != nil {
+		return nil, worldError(err)
+	}
 	result, err := s.binder.Bind(ctx, worldlib.BindRequest{
 		ServerID: msg.GetServerId(), LevelName: msg.GetLevelName(), RevisionID: msg.GetRevisionId(),
 		Window: msg.GetWindow(), RequestID: msg.GetRequestId(), NodeID: server.NodeID,
 		Generation: generation, Operator: operatorName(ctx),
 	})
 	if err != nil {
+		if errors.Is(err, worldlib.ErrUncertainOutcome) && result != nil {
+			// Report the unknown outcome instead of a retryable error. The
+			// journal keeps the server lock and carries the resolution note;
+			// the UI shows its recovery panel rather than a blind retry.
+			out := &v1.BindWorldResponse{
+				OperationId: result.OperationID, Outcome: result.Outcome,
+				Consistency: result.Consistency,
+			}
+			if result.Binding != nil {
+				out.Binding = bindingProto(*result.Binding)
+			}
+			return connect.NewResponse(out), nil
+		}
 		return nil, worldError(err)
 	}
-	return connect.NewResponse(&v1.BindWorldResponse{
-		Binding: bindingProto(*result.Binding), OperationId: result.OperationID,
-		Outcome: result.Outcome, Consistency: result.Consistency,
-	}), nil
+	out := &v1.BindWorldResponse{
+		OperationId: result.OperationID, Outcome: result.Outcome,
+		Consistency: result.Consistency,
+	}
+	if result.Binding != nil {
+		out.Binding = bindingProto(*result.Binding)
+	}
+	return connect.NewResponse(out), nil
 }
 
 // UnbindWorld removes a binding row; it never deletes world bytes.
@@ -400,6 +420,12 @@ func (s *WorldService) CreateWorldFromConfig(ctx context.Context, req *connect.R
 	if requestID == "" {
 		requestID = "world-create-" + entryID
 	}
+	provenance, err := storage.EncodeWorldProvenance(storage.WorldProvenance{
+		Platform: "panel", Operator: operatorName(ctx), FileID: requestID,
+	})
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("provenance could not be encoded"))
+	}
 	if existing, err := s.store.GetWorldRevision(ctx, revisionID); err == nil {
 		return connect.NewResponse(&v1.CreateWorldFromConfigResponse{Revision: s.revisionProto(ctx, *existing)}), nil
 	} else if !isRecordNotFound(err) {
@@ -417,7 +443,7 @@ func (s *WorldService) CreateWorldFromConfig(ctx context.Context, req *connect.R
 	revision := &storage.WorldRevision{
 		ID: revisionID, WorldEntryID: entryID, SHA256: sha, SizeBytes: int64(len(archive)),
 		EntryCount: 3, MCVersion: msg.GetMcVersion(), DataVersion: msg.GetDataVersion(),
-		ModLoader: msg.GetModLoader().String(), Provenance: `{"platform":"panel","operator":"` + operatorName(ctx) + `"}`,
+		ModLoader: msg.GetModLoader().String(), Provenance: provenance,
 		LicenseAttestation: msg.GetLicenseAttestation(), CreatedBy: operatorName(ctx),
 		NodeID: "", StoragePath: archivePath,
 	}
@@ -482,7 +508,7 @@ func worldEntryProto(e storage.WorldEntry) *v1.WorldEntry {
 	return &v1.WorldEntry{
 		Id: e.ID, Name: e.Name, Edition: e.Edition, Family: e.Family,
 		CurrentRevisionId: e.CurrentRevisionID,
-		CreatedAt: timestamppb.New(e.CreatedAt), UpdatedAt: timestamppb.New(e.UpdatedAt),
+		CreatedAt:         timestamppb.New(e.CreatedAt), UpdatedAt: timestamppb.New(e.UpdatedAt),
 	}
 }
 
@@ -566,7 +592,10 @@ func worldError(err error) error {
 	switch {
 	case errors.Is(err, worldlib.ErrRemoteUnavailable), errors.Is(err, nodestorage.ErrUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
-	case errors.Is(err, worldlib.ErrTwoWriters), errors.Is(err, worldlib.ErrStaleGeneration), errors.Is(err, worldlib.ErrUncertainOutcome):
+	case errors.Is(err, worldlib.ErrTwoWriters), errors.Is(err, worldlib.ErrStaleGeneration),
+		errors.Is(err, worldlib.ErrUncertainOutcome), errors.Is(err, worldlib.ErrDiskBudget),
+		errors.Is(err, storage.ErrWorldRevisionBound), errors.Is(err, storage.ErrWorldBindingStale),
+		errors.Is(err, storage.ErrWorldRevisionImmutable):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
 	case errors.Is(err, worldlib.ErrUnknownVersion), errors.Is(err, worldlib.ErrUnsupported):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
@@ -600,13 +629,23 @@ func isRecordNotFound(err error) bool {
 	return errors.Is(err, gorm.ErrRecordNotFound)
 }
 
-// nodeGeneration is supplied by the composition root through context for now;
-// it defaults to zero so binding fails closed until a real generation is set.
-func nodeGeneration(ctx context.Context, nodeID string) int64 {
-	if generation, ok := ctx.Value(worldNodeGenerationKey{}).(int64); ok {
-		return generation
+// nodeGenerationForServer reads the real endpoint generation from the owning
+// node row. Legacy single-node deployments without a Node row use generation 1,
+// matching the implicit Node.EndpointGeneration default. Unknown generations
+// fail closed instead of silently binding against a stale daemon endpoint.
+func (s *WorldService) nodeGenerationForServer(ctx context.Context, server *storage.Server) (int64, error) {
+	if server == nil {
+		return 0, fmt.Errorf("world binding: server is missing")
 	}
-	return 0
+	node, err := s.store.GetNode(ctx, server.NodeID)
+	if err == nil && node.EndpointGeneration > 0 {
+		return node.EndpointGeneration, nil
+	}
+	if nodestorage.IsLegacyLocalNodeID(server.NodeID) {
+		return 1, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("%w: node %q: %v", worldlib.ErrStaleGeneration, server.NodeID, err)
+	}
+	return 0, fmt.Errorf("%w: node %q has no endpoint generation", worldlib.ErrStaleGeneration, server.NodeID)
 }
-
-type worldNodeGenerationKey struct{}

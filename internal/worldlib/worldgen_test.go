@@ -29,7 +29,9 @@ func TestFreshWorldArchiveContainsReadableLevelData(t *testing.T) {
 				t.Fatal(err)
 			}
 			level, err = io.ReadAll(rc)
-			rc.Close()
+			if closeErr := rc.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

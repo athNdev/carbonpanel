@@ -13,7 +13,7 @@ code_refs:
   - web/carbon-panel/src/lib/features/world-library
 sources:
   - title: World Library identity and clone-on-bind
-    resource: ../../docs/adr/0014-world-library-identity-and-binding.md
+    resource: ../../docs/adr/0016-world-library-identity-and-binding.md
 ---
 
 # Shape
@@ -44,10 +44,13 @@ live only on owning node storage.
   Unknown gates the operation. Unsupported transforms (edition conversion,
   in-place downgrade, arbitrary mod removal, live NBT edits) are disabled with
   reasons.
-- Imports verify platform hash, archive manifest and whole-archive SHA-256 in
-  node-local staging before publication. Extraction rejects traversal, links,
-  nested bombs, oversized entries and executable/plugin payloads without
-  changing container privileges.
+- Imports verify the operator-supplied SHA-256 against a whole-archive SHA-256
+  in node-local staging; `archive/zip` CRC checks entries, but no per-file
+  SHA-256 manifest is verified. Inspection rejects traversal/unsafe paths,
+  symlink, special and encrypted entries, nesting deeper than two levels, and
+  size/entry/manifest caps. Executable/plugin payloads (`.jar`, `.dll`, `.so`,
+  `.mcfunction`) are only detected and reported, never installed or run.
+  Container privileges are unchanged.
 - Platform support has two axes: API-backed artifact support (Modrinth,
   CurseForge content artifacts) and experimental/manual prebuilt-world import.
   A modpack or datapack is not a prebuilt world. CurseForge `x-api-key` goes
@@ -58,7 +61,7 @@ live only on owning node storage.
 
 # Read next
 
-- [World Library ADR](../../docs/adr/0014-world-library-identity-and-binding.md)
+- [World Library ADR](../../docs/adr/0016-world-library-identity-and-binding.md)
 - [Operation journal](operation-journal.md)
 - [Node resolution](node-resolution.md)
 - [Data safety](../invariants/data-safety.md)

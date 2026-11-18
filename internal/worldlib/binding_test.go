@@ -11,16 +11,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
-	"github.com/athNdev/carbon-panel/internal/config"
+	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
 type fakeLifecycle struct {
-	running bool
-	stops   int
-	starts  int
+	running   bool
+	stops     int
+	starts    int
 	failStart bool
 }
 
@@ -245,7 +246,95 @@ func TestRecoverRestoresRetainedFamilyAndRefusesAmbiguity(t *testing.T) {
 	}
 }
 
-func TestConcurrentSameNodeBindsHaveOneWinner(t *testing.T) {
+func TestBindSwapReplacesBindingAtomically(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	_ = os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755)
+	_ = os.MkdirAll(libraryRoot, 0o755)
+	server := seedWorldServer(t, store, dataRoot)
+	makeRev := func(sha string) *storage.WorldRevision {
+		archive, err := WriteFreshWorldArchive(map[string]string{"level-name": "world"}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		archivePath := filepath.Join(libraryRoot, sha[:8]+".zip")
+		if err := os.WriteFile(archivePath, archive, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return seedRevision(t, store, "wld_swap", archivePath, sha)
+	}
+	first := makeRev("1111111111111111111111111111111111111111111111111111111111111111")
+	second := makeRev("2222222222222222222222222222222222222222222222222222222222222222")
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+	base := BindRequest{ServerID: server.ID, LevelName: "world", NodeID: "local", Generation: 1}
+	one, err := binder.Bind(ctx, BindRequest{
+		ServerID: base.ServerID, LevelName: base.LevelName, RevisionID: first.ID,
+		NodeID: base.NodeID, Generation: base.Generation, RequestID: "swap-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := binder.Bind(ctx, BindRequest{
+		ServerID: base.ServerID, LevelName: base.LevelName, RevisionID: second.ID,
+		NodeID: base.NodeID, Generation: base.Generation, RequestID: "swap-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if two.Binding.ID != one.Binding.ID {
+		t.Fatalf("swap replaced row id %s with %s; want an in-place update", one.Binding.ID, two.Binding.ID)
+	}
+	bindings, err := store.ListWorldBindings(ctx, server.ID, "")
+	if err != nil || len(bindings) != 1 || bindings[0].RevisionID != second.ID {
+		t.Fatalf("bindings = %+v, %v; want one row on the second revision", bindings, err)
+	}
+}
+
+func TestBindReportsUnknownOutcomeAndKeepsLock(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	_ = os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755)
+	_ = os.MkdirAll(libraryRoot, 0o755)
+	archive, err := WriteFreshWorldArchive(map[string]string{"level-name": "world"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(libraryRoot, "rev.zip")
+	if err := os.WriteFile(archivePath, archive, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := seedWorldServer(t, store, dataRoot)
+	rev := seedRevision(t, store, "wld_unknown", archivePath, "3333333333333333333333333333333333333333333333333333333333333333")
+	// The server was running and the restart after the swap could not be
+	// observed. That is an uncertain external effect, not a failed retry.
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil,
+		&fakeLifecycle{running: true, failStart: true}, libraryRoot)
+	result, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "unknown-1",
+	})
+	if !errors.Is(err, ErrUncertainOutcome) {
+		t.Fatalf("want ErrUncertainOutcome, got %v", err)
+	}
+	if result == nil || result.Outcome != string(operation.OutcomeUnknown) || result.OperationID == "" {
+		t.Fatalf("result = %+v, want an unknown outcome with an operation id", result)
+	}
+	active, err := store.ListActiveServerOperations(ctx)
+	if err != nil || len(active) != 1 || active[0].ID != result.OperationID {
+		t.Fatalf("active = %+v, %v; uncertain operation must keep its lock", active, err)
+	}
+	if !strings.Contains(active[0].LastError, operation.UncertainOutcomeMarker) {
+		t.Fatalf("LastError = %q, want the uncertainty marker", active[0].LastError)
+	}
+}
+
+func TestConcurrentSameNodeBindsSerializeAndSwap(t *testing.T) {
 	ctx := context.Background()
 	store := newWorldTestStore(t)
 	root := t.TempDir()
@@ -286,14 +375,30 @@ func TestConcurrentSameNodeBindsHaveOneWinner(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
-	wins := 0
 	for _, err := range results {
-		if err == nil {
-			wins++
+		if err != nil {
+			t.Fatalf("concurrent bind/swap must serialize cleanly, got %v", err)
 		}
 	}
-	if wins != 1 {
-		t.Fatalf("expected exactly one winner, got %d (errors: %v)", wins, results)
+	// The admission gate serializes the two mutations; the second is a valid
+	// swap of the binding created by the first. Exactly one row survives and
+	// it points at one of the requested revisions - there is no overcommit and
+	// no unique-index collision on (server_id, level_name).
+	bindings, err := store.ListWorldBindings(ctx, server.ID, "")
+	if err != nil || len(bindings) != 1 {
+		t.Fatalf("bindings = %+v, %v; want exactly one", bindings, err)
+	}
+	if bindings[0].RevisionID != r1.ID && bindings[0].RevisionID != r2.ID {
+		t.Fatalf("binding points to unexpected revision %q", bindings[0].RevisionID)
+	}
+	ops, err := store.ListRecentServerOperations(ctx, server.ID, 10)
+	if err != nil || len(ops) != 2 {
+		t.Fatalf("operations = %+v, %v; want two journal rows", ops, err)
+	}
+	for _, op := range ops {
+		if op.ActiveServer != nil {
+			t.Fatalf("operation %s still holds a lock after success", op.ID)
+		}
 	}
 }
 
