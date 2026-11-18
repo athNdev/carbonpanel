@@ -17,7 +17,8 @@ import (
 func TestGenerateRCONPasswordIsRandomAndStrong(t *testing.T) {
 	seen := make(map[string]bool)
 	for i := 0; i < 8; i++ {
-		password := GenerateRCONPassword()
+		password, err := GenerateRCONPassword()
+		require.NoError(t, err)
 		raw, err := hex.DecodeString(password)
 		require.NoError(t, err)
 		require.Len(t, raw, rconPasswordBytes)

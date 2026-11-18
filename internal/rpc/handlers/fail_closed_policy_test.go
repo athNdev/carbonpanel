@@ -107,6 +107,18 @@ func TestLegacyAdaptersEnforceObjectScope(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, rec.Code)
 	})
 
+	t.Run("staged config mutations do not reveal record existence to unauthorized callers", func(t *testing.T) {
+		store := setupTestStore(t)
+		manager, enforcer := testScopedPolicy(t, rbac.ResourceServerConfig, rbac.ActionCreate, "srv-owned")
+		h := NewStagedConfigHandler(store, logger.New(), manager, enforcer)
+
+		// The caller has no grant for srv-other, so an unknown staged ID under
+		// that server must be refused before any existence lookup.
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/v1/staged-config/srv-other/staged/does-not-exist/apply", nil))
+		require.Equal(t, http.StatusForbidden, rec.Code)
+	})
+
 	t.Run("staged config list uses the server in the path", func(t *testing.T) {
 		store := setupTestStore(t)
 		manager, enforcer := testScopedPolicy(t, rbac.ResourceServerConfig, rbac.ActionRead, "srv-owned")

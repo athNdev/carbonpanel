@@ -8,21 +8,22 @@ package db
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strings"
 )
 
 const rconPasswordBytes = 24
 
-// GenerateRCONPassword returns a high-entropy password for a new server.
-// A failure of the system CSPRNG is fatal for credential generation: fall back
-// to a different entropy source is not acceptable here, so the caller receives
-// a clearly non-secret placeholder that the preflight flags as weak.
-func GenerateRCONPassword() string {
+// GenerateRCONPassword returns a high-entropy password for a new server. A
+// CSPRNG failure is returned as an error, never as a predictable string: a
+// sentinel stored as a credential would be a known password. Callers must fail
+// closed (blank rcon.password disables RCON in Minecraft).
+func GenerateRCONPassword() (string, error) {
 	buf := make([]byte, rconPasswordBytes)
 	if _, err := rand.Read(buf); err != nil {
-		return "CARBONPANEL_CSPRNG_UNAVAILABLE"
+		return "", fmt.Errorf("generate RCON password: %w", err)
 	}
-	return hex.EncodeToString(buf)
+	return hex.EncodeToString(buf), nil
 }
 
 // IsWeakRCONPassword reports a persisted value that cannot be treated as a

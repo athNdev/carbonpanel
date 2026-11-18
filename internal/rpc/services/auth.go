@@ -98,7 +98,10 @@ func (s *AuthService) Login(ctx context.Context, req *connect.Request[v1.LoginRe
 	}
 
 	// Throttle online password guessing: tight per-username, looser per-IP.
-	ipKey := "ip:" + realClientIP(req.Header(), req.Peer().Addr, s.trustProxy)
+	// The same trust-aware source is used for the audit trail so a failed
+	// login and its throttle decision can be correlated.
+	auditIP := realClientIP(req.Header(), req.Peer().Addr, s.trustProxy)
+	ipKey := "ip:" + auditIP
 	userKey := "user:" + strings.ToLower(msg.Username)
 	if allowed, retryAfter := s.userThrottle.Allow(userKey); !allowed {
 		return nil, throttledError(retryAfter)
@@ -118,7 +121,7 @@ func (s *AuthService) Login(ctx context.Context, req *connect.Request[v1.LoginRe
 			// enough for incident triage.
 			if aerr := activity.Log(s.store.DB(), activity.Entry{
 				ActorName:  strings.ToLower(msg.Username),
-				IP:         clientIP(req.Peer().Addr),
+				IP:         auditIP,
 				Event:      activity.EventAuthLoginFailed,
 				SubjectTyp: "user",
 			}); aerr != nil {
@@ -138,7 +141,7 @@ func (s *AuthService) Login(ctx context.Context, req *connect.Request[v1.LoginRe
 
 	// Audit trail (MINE-141): never break login on audit failure.
 	if aerr := activity.Log(s.store.DB(), activity.Entry{
-		ActorID: user.ID, ActorName: user.Username, IP: req.Peer().Addr,
+		ActorID: user.ID, ActorName: user.Username, IP: auditIP,
 		Event: activity.EventAuthLogin, SubjectTyp: "user", SubjectID: user.ID,
 	}); aerr != nil {
 		s.log.Error("Audit log failed for login: %v", aerr)
@@ -660,11 +663,12 @@ func (s *AuthService) UseRecoveryKey(ctx context.Context, req *connect.Request[v
 	if req.Msg.RecoveryKey == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("recovery key is required"))
 	}
+	auditIP := realClientIP(req.Header(), req.Peer().Addr, s.trustProxy)
 
 	if err := s.authManager.UseRecoveryKey(ctx, req.Msg.RecoveryKey); err != nil {
 		if errors.Is(err, auth.ErrInvalidRecoveryKey) {
 			if aerr := activity.Log(s.store.DB(), activity.Entry{
-				IP: clientIP(req.Peer().Addr), Event: activity.EventAuthDenied,
+				IP: auditIP, Event: activity.EventAuthDenied,
 				SubjectTyp: "recovery_key", SubjectID: "invalid",
 			}); aerr != nil {
 				s.log.Error("Audit log failed for rejected recovery key: %v", aerr)
@@ -678,7 +682,7 @@ func (s *AuthService) UseRecoveryKey(ctx context.Context, req *connect.Request[v
 	// A successful reset destroys every session, token, invite and user. It is
 	// the highest-consequence unauthenticated operation in the product.
 	if aerr := activity.Log(s.store.DB(), activity.Entry{
-		IP: clientIP(req.Peer().Addr), Event: activity.EventAuthRecoveryUsed,
+		IP: auditIP, Event: activity.EventAuthRecoveryUsed,
 		SubjectTyp: "recovery_key", SubjectID: "used",
 	}); aerr != nil {
 		s.log.Error("Audit log failed for recovery key use: %v", aerr)

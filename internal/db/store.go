@@ -319,7 +319,12 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 	// the deterministic CARBONPANEL_* value are detected at startup and can be
 	// rotated through normal server configuration; they are never silently
 	// rewritten here.
-	rconPassword := GenerateRCONPassword()
+	rconPassword, rconErr := GenerateRCONPassword()
+	if rconErr != nil {
+		// Fail closed: a blank rcon.password disables RCON in Minecraft.
+		// Never persist a predictable fallback as a credential.
+		rconPassword = ""
+	}
 
 	config := &ServerConfig{
 		ID:              serverID + "-config",

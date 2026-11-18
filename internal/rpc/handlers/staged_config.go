@@ -81,20 +81,29 @@ func (h *StagedConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		action = rbac.ActionCreate
 	}
 
-	// Mutations by staged ID must be authorized against the record's real
-	// owner, not the server ID supplied in the URL.
+	// Authorize against the path server first, before any staged-ID lookup.
+	// Otherwise an unauthorized caller could distinguish "missing record"
+	// (404) from "forbidden" (403) and enumerate staged IDs.
+	if err := requireRequestObject(r, h.authManager, h.enforcer, rbac.ResourceServerConfig, action, serverID); err != nil {
+		writePolicyError(w, err)
+		return
+	}
+
+	// Mutations by staged ID must also be authorized against the record's real
+	// owner, not only the server ID supplied in the URL.
 	if len(parts) >= 3 {
 		ownerID, ok := h.stagedServerID(r.Context(), parts[2])
 		if !ok {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		if !strings.EqualFold(ownerID, serverID) {
+			if err := requireRequestObject(r, h.authManager, h.enforcer, rbac.ResourceServerConfig, action, ownerID); err != nil {
+				writePolicyError(w, err)
+				return
+			}
+		}
 		serverID = ownerID
-	}
-
-	if err := requireRequestObject(r, h.authManager, h.enforcer, rbac.ResourceServerConfig, action, serverID); err != nil {
-		writePolicyError(w, err)
-		return
 	}
 
 	switch {

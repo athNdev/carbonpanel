@@ -15,8 +15,8 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/athNdev/carbon-panel/internal/auth"
+	"github.com/google/uuid"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -82,6 +82,18 @@ func (s *RoleService) CreateRole(ctx context.Context, req *connect.Request[v1.Cr
 
 	if msg.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("role name is required"))
+	}
+
+	// Reject before any store write. Otherwise a roles:create holder could
+	// create a *:* role and assign it to themselves, bypassing the checks on
+	// UpdatePermissions and AssignRole.
+	if permissionsContainWildcard(protoPermsToRbac(msg.Permissions)) && !s.canManageWildcards(ctx) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("creating a role with wildcard permissions requires roles/manage_wildcard"))
+	}
+	// Default roles are granted to every new user, so creating one is also a
+	// privilege decision and must not be available to roles:create alone.
+	if msg.IsDefault && !s.canManageWildcards(ctx) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("creating a default role requires roles/manage_wildcard"))
 	}
 
 	role := &storage.Role{
@@ -337,6 +349,18 @@ func (s *RoleService) canManageWildcards(ctx context.Context) bool {
 	return err == nil && allowed
 }
 
+// permissionsContainWildcard reports a grant that is equivalent to every
+// permission. Shared by create and update so neither path can bypass the
+// explicit capability check.
+func permissionsContainWildcard(perms []rbac.Permission) bool {
+	for _, perm := range perms {
+		if perm.Resource == "*" || perm.Action == "*" {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *RoleService) UpdatePermissions(ctx context.Context, req *connect.Request[v1.UpdatePermissionsRequest]) (*connect.Response[v1.UpdatePermissionsResponse], error) {
 	msg := req.Msg
 
@@ -348,13 +372,8 @@ func (s *RoleService) UpdatePermissions(ctx context.Context, req *connect.Reques
 
 	// A wildcard resource or action in a custom role is equivalent to granting
 	// every permission. Require the explicit, non-default capability.
-	for _, perm := range perms {
-		if perm.Resource == "*" || perm.Action == "*" {
-			if !s.canManageWildcards(ctx) {
-				return nil, connect.NewError(connect.CodePermissionDenied, errors.New("granting wildcard permissions requires roles/manage_wildcard"))
-			}
-			break
-		}
+	if permissionsContainWildcard(perms) && !s.canManageWildcards(ctx) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("granting wildcard permissions requires roles/manage_wildcard"))
 	}
 
 	if err := s.enforcer.SetPermissionsForRole(msg.RoleName, perms); err != nil {

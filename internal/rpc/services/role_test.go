@@ -99,6 +99,35 @@ func TestRoleService_WildcardGrantRequiresCapability(t *testing.T) {
 		UserId: "u-limited", RoleName: "user",
 	}))
 	require.NoError(t, err)
+
+	// CreateRole must apply the same ceiling before writing anything: a
+	// roles:create holder cannot create a *:* role and self-assign it.
+	_, err = svc.CreateRole(nonAdmin, connect.NewRequest(&v1.CreateRoleRequest{
+		Name:        "escalated-role",
+		Permissions: []*v1.Permission{{Resource: "*", Action: "*", ObjectId: "*"}},
+	}))
+	require.Equal(t, connect.CodePermissionDenied, connectCode(t, err))
+
+	_, err = svc.CreateRole(nonAdmin, connect.NewRequest(&v1.CreateRoleRequest{
+		Name:        "escalated-default",
+		IsDefault:   true,
+		Permissions: []*v1.Permission{{Resource: rbac.ResourceServers, Action: rbac.ActionRead, ObjectId: "*"}},
+	}))
+	require.Equal(t, connect.CodePermissionDenied, connectCode(t, err))
+
+	listed, err := svc.ListRoles(context.Background(), connect.NewRequest(&v1.ListRolesRequest{}))
+	require.NoError(t, err)
+	for _, role := range listed.Msg.Roles {
+		require.NotEqual(t, "escalated-role", role.Name, "refused role must not be persisted")
+		require.NotEqual(t, "escalated-default", role.Name, "refused default role must not be persisted")
+	}
+
+	// An admin can still deliberately create a wildcard role.
+	_, err = svc.CreateRole(admin, connect.NewRequest(&v1.CreateRoleRequest{
+		Name:        "admin-delegated",
+		Permissions: []*v1.Permission{{Resource: "*", Action: "*", ObjectId: "*"}},
+	}))
+	require.NoError(t, err)
 }
 
 func TestRoleService_CreateGetList(t *testing.T) {

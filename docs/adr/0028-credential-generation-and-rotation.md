@@ -32,6 +32,14 @@ four are verified, `backupcrypt.ResolveKey` stays opt-in (empty key = plaintext)
 and existing archives are never re-encrypted silently. An unrecoverable-backup
 risk blocks the default change.
 
-Not implemented here (owned by Track A through the B-00 contracts): first-admin
-claim atomicity across the local and OIDC paths, recovery-key audit hook and
-API-token revocation on password change.
+Recovery-key auditing **is implemented here**, directly against the immutable
+activity log in `AuthService.UseRecoveryKey`: successful use emits
+`auth.recovery_used` and an invalid key emits `auth.denied`, with source IP but
+never the key value. This is an event write, **not** a new cross-track hook; no
+B-local `BootstrapAudit`/`SessionValidator` interface was created. The orchestrator
+should relay this concrete event contract to Track A so any later consolidation
+uses these names instead of inventing a parallel one.
+
+Still owned by Track A through the B-00 contracts and not implemented here:
+first-admin claim atomicity across the local and OIDC paths, and API-token
+revocation on password change.
