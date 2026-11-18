@@ -103,6 +103,21 @@ jobs:
           set -euo pipefail
           test "$PINNED_REF" = 'refs/heads/main'
           test "$CI_VERIFIED" = 'true' || { echo "::error::exact main CI not verified" >&2; exit 1; }
+      - name: Assert MCP generated artifacts are reproducible
+        run: bash scripts/mcp-generated-artifacts-check.sh
+      - name: STRICT full-coverage publication gate (must stay green to publish)
+        id: fullcoverage
+        continue-on-error: true
+        run: bash scripts/mcp-full-coverage-gate.sh
+      - name: Block publication while the full-coverage gate is RED
+        env:
+          FULL_COVERAGE: ${{ steps.fullcoverage.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$FULL_COVERAGE" != 'success' ]; then
+            echo "::error::STRICT MCP full-coverage gate is RED; GHCR and MCP registry writes are BLOCKED" >&2
+            exit 1
+          fi
       - name: Validate manifest structure, static ownership and version pinning
         run: |
           python3 scripts/validate_mcp_server_json.py --file docker/mcp.server.json
