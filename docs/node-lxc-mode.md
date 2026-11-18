@@ -9,10 +9,10 @@ mode and must not be described as equivalent.
 
 The mode's artifact lane lives in
 [`packaging/node-lxc/`](../packaging/node-lxc/README.md), and the decision is
-recorded in [ADR 0036](adr/0036-node-lxc-template.md). All material
-here is qualified by **offline fixtures only**: no live host was provisioned, no
-global host configuration was changed, no image was imported or booted, and
-nothing was published.
+recorded in [ADR 0036](adr/0036-node-lxc-template.md). Upstream pins are real
+and signed (see below), but runtime behavior is qualified by **offline fixtures
+only**: no live host was provisioned, no global host configuration was changed,
+no image was imported or booted, and nothing was published.
 
 ## Isolation boundary — why this is not the VM mode
 
@@ -55,10 +55,18 @@ degradation: `PRIVILEGED_LXC_REFUSED`, `NOT_UNPRIVILEGED_LXC`, `KERNEL_TOO_OLD`,
 `HOST_DOCKER_DATA_VISIBLE`. A guest that fails the gate must fall back to the
 portable Linux guest installer from the sibling installer lane.
 
-The supported platform/version matrix is pinned in
-[`packaging/node-lxc/config/provenance.json`](../packaging/node-lxc/config/provenance.json).
-Its upstream refs and sha256 values are synthetic fixtures; live import/boot
-evidence (milestone M5) is required before any format is advertised.
+The supported platform/version matrix and **real upstream pins** are in
+[`packaging/node-lxc/config/provenance.json`](../packaging/node-lxc/config/provenance.json):
+immutable, dated Ubuntu 24.04 root tarballs from the official Canonical Cloud
+Images release `20261017`, with SHA-256 values read from a GPG-signed
+`SHA256SUMS` and locally verified. Exact URLs, dates, checksum-file and
+signature hashes, key fingerprint and retrieval method are recorded in
+[retrieval evidence](../packaging/node-lxc/qualification/RETRIEVAL-EVIDENCE.md).
+Synthetic values exist only in the explicitly marked
+[`provenance.fixture.json`](../packaging/node-lxc/config/provenance.fixture.json),
+which artifact builds refuse. Live import/boot evidence (milestone M5) is still
+required before any format is advertised, and is
+[externally blocked here](#real-blocker--guest-boot-not-qualified).
 
 ## Shared control contract — no fork
 
@@ -107,16 +115,29 @@ staged slots and only activates a slot after the candidate passes full
 verification; an invalid or unsigned candidate is refused before any state
 change, and rollback switches only to a verified previous slot.
 
+## Real blocker — guest boot not qualified
+
+The host available to this lane has **no `/dev/kvm`** and **no LXC tooling**
+(`lxc`, `lxc-create`, `lxc-copy`, `pct`), without privileged access to install
+them. A real Ubuntu 24.04 LXC rootfs therefore cannot be imported and booted
+here. This is an external qualification blocker, not a code defect and not a
+pass. No live import/boot, no nested daemon start inside a real guest, no
+effective kernel-enforcement observation and no gameplay evidence is claimed.
+The capability gate and fixtures prove refusals and state transitions only.
+See [qualification status](../packaging/node-lxc/qualification/QUALIFICATION.md).
+
 ## Verification evidence and limits
 
 Offline fixture qualification at the recorded head covers: signed build and
 verification, unsigned/tampered/wrong-key/secret refusals, provenance and
-platform gates, supported and seven unsupported capability snapshots, unique
+platform gates, real-pin acceptance plus synthetic/placeholder/moving-URL
+refusals, supported and seven unsupported capability snapshots, unique
 first-boot identity with a verified `CSR_PRE` signature and no secret in
 metadata, volume import/backup/restore with tamper refusal, and staged
-upgrade/rollback with state preserved on refusal. See
-[`packaging/node-lxc/README.md`](../packaging/node-lxc/README.md) and the
-external mode report for exact commands and results.
+upgrade/rollback with state preserved on refusal. Upstream pins themselves were
+verified against a GPG-signed dated `SHA256SUMS`; that is pin evidence, not boot
+evidence. See [`packaging/node-lxc/README.md`](../packaging/node-lxc/README.md)
+and the external mode report for exact commands and results.
 
 These fixtures prove refusal and state-transition behavior only. They do **not**
 claim live container import/boot, effective kernel enforcement, gameplay

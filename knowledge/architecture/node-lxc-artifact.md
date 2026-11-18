@@ -8,6 +8,8 @@ code_refs:
   - packaging/node-lxc
   - packaging/node-lxc/node_lxc_artifact.py
   - packaging/node-lxc/config/provenance.json
+  - packaging/node-lxc/config/provenance.fixture.json
+  - packaging/node-lxc/qualification/QUALIFICATION.md
   - packaging/node-lxc/tests/test_node_lxc.py
 sources:
   - title: ADR 0036 unprivileged LXC node template
@@ -29,13 +31,21 @@ credential type, TLS stack or publication workflow.
 - A read-only nested-runtime capability gate refuses unsupported hosts with
   exact reason codes and never changes global host configuration. Refused hosts
   use the portable Linux guest installer.
-- Artifacts bind pinned provenance, a platform/version matrix, `SHA256SUMS`, an
-  operator detached signature and a CycloneDX SBOM. Verification fails closed.
+- The artifact profile (`config/provenance.json`) pins real, immutable, dated
+  Ubuntu 24.04 root tarballs with SHA-256 values from a GPG-signed
+  `SHA256SUMS`; retrieval evidence is in `qualification/`. Synthetic pins exist
+  only in `config/provenance.fixture.json`. Artifact mode refuses synthetic
+  profiles, placeholder/unverified digests, missing signature evidence and
+  moving URLs. Artifacts also bind a platform/version matrix, `SHA256SUMS`, an
+  operator detached signature and a CycloneDX SBOM; verification fails closed.
 - First-boot identity and the ADR0019 digest-only enrollment bundle are created
   on the persistent volume; no secret, private key or credential appears in the
   template or provisioning metadata.
 - Persistent worlds and identity are imported, backed up and restored with
   integrity checks and data-preserving refusals. Upgrade/rollback uses verified
   staged slots.
-- Only disposable offline fixture qualification is claimed; live import/boot,
-  effective enforcement and gameplay compatibility are not.
+- Runtime behavior is qualified only by disposable offline fixtures. Real guest
+  boot is externally blocked on the authoring host (no `/dev/kvm`, no LXC
+  tooling); live import/boot, effective kernel enforcement and gameplay
+  compatibility are not claimed. Pin verification is evidence about upstream
+  bytes, not boot evidence.

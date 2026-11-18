@@ -415,6 +415,135 @@ def verification_refusal(code: str, info: dict[str, Any]) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# provenance profiles: real artifact pins vs explicitly synthetic fixtures
+# --------------------------------------------------------------------------- #
+ARTIFACT_PROFILE = "artifact"
+FIXTURE_PROFILE = "fixture"
+IMMUTABLE_URL_RE = re.compile(r"^https://cloud-images\.ubuntu\.com/(?:[^/]+/)+release-(\d{8})/")
+OPENPGP_FPR_RE = re.compile(r"^[0-9A-Fa-f]{40}$")
+MOVING_URL_MARKERS = ("/release/", "fixture://", "example.com", "latest", "placeholder")
+
+
+def is_placeholder_digest(value: Any) -> bool:
+    if not isinstance(value, str) or not SHA256_RE.match(value):
+        return True
+    if len(set(value)) == 1:  # all zeros / all repeated characters
+        return True
+    lowered = value.lower()
+    return any(token in lowered for token in ("deadbeef", "cafebabe", "0123456789abcdef")) and len(set(value)) < 8
+
+
+def validate_artifact_provenance(prov: dict[str, Any]) -> int | None:
+    """Fail closed unless every upstream pin is real, immutable, dated and signed."""
+    if prov.get("profile") != ARTIFACT_PROFILE:
+        return refuse("INVALID_PROVENANCE_PROFILE", "artifact build requires profile=artifact")
+    if prov.get("synthetic") is not False:
+        return refuse("SYNTHETIC_PROVENANCE", "artifact build refuses a synthetic provenance profile")
+    if prov.get("schema_version") != 2:
+        return refuse("UNSUPPORTED_PROVENANCE_VERSION", "artifact provenance must be schema_version 2")
+    images = prov.get("images")
+    if not isinstance(images, list) or not images:
+        return refuse("NO_PINNED_IMAGES", "artifact provenance has no pinned images")
+    evidence = prov.get("retrieval_evidence", {})
+    method = str(evidence.get("method", "")).lower()
+    if not evidence or "direct" not in method or "gpg" not in method:
+        return refuse("MISSING_RETRIEVAL_EVIDENCE", "direct retrieval and gpg verification evidence are required")
+
+    for image in images:
+        if not isinstance(image, dict):
+            return refuse("INVALID_IMAGE_PIN", "image pin must be an object")
+        ref = str(image.get("ref", "unknown"))
+        if image.get("digest_status") != "verified":
+            return refuse("UNVERIFIED_DIGEST", f"{ref}: digest_status must be 'verified'", image=ref)
+        if is_placeholder_digest(image.get("expected_sha256")):
+            return refuse("PLACEHOLDER_DIGEST", f"{ref}: expected_sha256 is a placeholder", image=ref)
+        if image.get("immutable") is not True:
+            return refuse("MUTABLE_IMAGE_URL", f"{ref}: pin must be immutable", image=ref)
+        url = str(image.get("image_url", ""))
+        match = IMMUTABLE_URL_RE.match(url)
+        if not match or any(marker in url.lower() for marker in MOVING_URL_MARKERS):
+            return refuse("MOVING_URL", f"{ref}: image_url must be an immutable dated primary-source URL", image=ref, url=url)
+        dated = match.group(1)
+        if str(image.get("release_date", "")).replace("-", "") != dated:
+            return refuse("DATE_MISMATCH", f"{ref}: release_date does not match the dated URL", image=ref)
+        checksum_url = str(image.get("checksum_url", ""))
+        signature_url = str(image.get("signature_url", ""))
+        prefix = url.rsplit("/", 1)[0]
+        if ((checksum_url and not checksum_url.startswith(prefix + "/")) or
+                (signature_url and not signature_url.startswith(prefix + "/"))):
+            return refuse("URL_PROVENANCE_MISMATCH", f"{ref}: checksum/signature must come from the same dated release", image=ref)
+        if any(marker in checksum_url.lower() or marker in signature_url.lower() for marker in MOVING_URL_MARKERS):
+            return refuse("MOVING_URL", f"{ref}: checksum/signature URL is moving or synthetic", image=ref)
+        for field in ("image_url", "checksum_url", "signature_url",
+                      "checksum_file_sha256", "signature_file_sha256", "signing_key_fingerprint"):
+            if not image.get(field):
+                return refuse("MISSING_SIGNING_EVIDENCE", f"{ref}: {field} is required", image=ref)
+        for field in ("checksum_file_sha256", "signature_file_sha256"):
+            err = check_sha256(image.get(field), f"{ref}.{field}")
+            if err is not None:
+                return err
+        if not OPENPGP_FPR_RE.match(str(image.get("signing_key_fingerprint", ""))):
+            return refuse("MISSING_SIGNING_EVIDENCE", f"{ref}: signing_key_fingerprint is invalid", image=ref)
+        if not image.get("signature_made") or not image.get("signing_key_name") or not image.get("signing_key_source"):
+            return refuse("MISSING_SIGNING_EVIDENCE", f"{ref}: signature metadata is incomplete", image=ref)
+    return None
+
+
+def validate_fixture_provenance(prov: dict[str, Any]) -> int | None:
+    if prov.get("profile") != FIXTURE_PROFILE or prov.get("synthetic") is not True:
+        return refuse("INVALID_FIXTURE_PROFILE", "fixture build requires profile=fixture and synthetic=true")
+    err = check_sha256(prov.get("fixture", {}).get("manifest_sha256"), "fixture.manifest_sha256")
+    return err
+
+
+def provenance_pin_summary(prov: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "profile": prov.get("profile"),
+        "synthetic": prov.get("synthetic"),
+        "verified_on": prov.get("verified_on"),
+        "pins": [
+            {
+                "ref": i.get("ref"),
+                "arch": i.get("arch"),
+                "image_url": i.get("image_url"),
+                "expected_sha256": i.get("expected_sha256"),
+                "checksum_url": i.get("checksum_url"),
+                "signature_url": i.get("signature_url"),
+                "signing_key_fingerprint": i.get("signing_key_fingerprint"),
+                "digest_status": i.get("digest_status"),
+            }
+            for i in prov.get("images", [])
+        ],
+    }
+
+
+def cmd_validate_provenance(args: argparse.Namespace) -> int:
+    path = Path(args.provenance)
+    if not path.is_file():
+        return refuse("MISSING_PROVENANCE", f"provenance file not found: {path}")
+    try:
+        prov = read_json(path)
+    except (ValueError, OSError):
+        return refuse("INVALID_PROVENANCE", "provenance is not valid JSON")
+    if prov.get("schema") != PROVENANCE_SCHEMA:
+        return refuse("INVALID_PROVENANCE", "unsupported provenance schema")
+    expected = args.expect_profile
+    if expected == ARTIFACT_PROFILE:
+        rc = validate_artifact_provenance(prov)
+        if rc is not None:
+            return rc
+        return ok(pin_count=len(prov["images"]), **provenance_pin_summary(prov))
+    if expected == FIXTURE_PROFILE:
+        rc = validate_fixture_provenance(prov)
+        if rc is not None:
+            return rc
+        return ok(profile=FIXTURE_PROFILE, synthetic=True,
+                  manifest_sha256=prov["fixture"]["manifest_sha256"],
+                  note="synthetic fixture profile; not an artifact claim")
+    return refuse("UNKNOWN_PROFILE", f"unknown expected profile: {expected}")
+
+
+# --------------------------------------------------------------------------- #
 # build
 # --------------------------------------------------------------------------- #
 def cmd_build(args: argparse.Namespace) -> int:
@@ -424,9 +553,20 @@ def cmd_build(args: argparse.Namespace) -> int:
     prov_path = Path(args.provenance)
     if not prov_path.is_file():
         return refuse("MISSING_PROVENANCE", f"provenance file not found: {prov_path}")
-    prov = read_json(prov_path)
+    try:
+        prov = read_json(prov_path)
+    except (ValueError, OSError):
+        return refuse("INVALID_PROVENANCE", "provenance is not valid JSON")
     if prov.get("schema") != PROVENANCE_SCHEMA:
         return refuse("INVALID_PROVENANCE", "unsupported provenance schema")
+    if args.fixture:
+        rc = validate_fixture_provenance(prov)
+        if rc is not None:
+            return rc
+    else:
+        rc = validate_artifact_provenance(prov)
+        if rc is not None:
+            return rc
     if args.platform not in prov.get("platform_matrix", {}):
         return refuse("UNSUPPORTED_PLATFORM", f"{args.platform} is not in the supported platform matrix")
 
@@ -445,25 +585,23 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     if args.fixture:
         expected = prov.get("fixture", {}).get("manifest_sha256")
-        err = check_sha256(expected, "fixture.manifest_sha256")
-        if err is not None:
-            return err
         if computed != expected:
             return refuse("PROVENANCE_DIGEST_MISMATCH", "fixture rootfs digest does not match pinned provenance",
                           expected=expected, computed=computed)
         mode = "offline-fixture"
         base_ref = prov["fixture"].get("description", "synthetic fixture rootfs")
     else:
+        pinned = next((i for i in prov["images"] if i.get("arch") == args.platform), None)
+        if pinned is None:
+            return refuse("UNSUPPORTED_PLATFORM", f"no real pinned image for platform {args.platform}")
         tarball = Path(args.base_tarball) if args.base_tarball else None
         if tarball is None or not tarball.is_file():
             return refuse("MISSING_BASE_TARBALL", "production build requires --base-tarball")
-        err = check_sha256(prov["base"].get("upstream_digest_sha256"), "base.upstream_digest_sha256")
-        if err is not None:
-            return err
-        if sha256_file(tarball) != prov["base"]["upstream_digest_sha256"]:
-            return refuse("UPSTREAM_DIGEST_MISMATCH", "base tarball does not match pinned upstream digest")
+        if canonical_file_digest(tarball) != pinned["expected_sha256"]:
+            return refuse("UPSTREAM_DIGEST_MISMATCH", "base tarball does not match the signed upstream pin",
+                          expected=pinned["expected_sha256"])
         mode = "pinned-upstream"
-        base_ref = prov["base"]["upstream_ref"]
+        base_ref = pinned["image_url"]
 
     source_findings = scan_secrets(source)
     if source_findings:
@@ -932,6 +1070,11 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--fixture", action="store_true")
     b.add_argument("--force", action="store_true")
     b.set_defaults(func=cmd_build)
+
+    vp = sub.add_parser("validate-provenance")
+    vp.add_argument("--provenance", default=str(Path(__file__).parent / "config" / "provenance.json"))
+    vp.add_argument("--expect-profile", choices=(ARTIFACT_PROFILE, FIXTURE_PROFILE), default=ARTIFACT_PROFILE)
+    vp.set_defaults(func=cmd_validate_provenance)
 
     v = sub.add_parser("verify")
     v.add_argument("--artifact-dir", required=True)
