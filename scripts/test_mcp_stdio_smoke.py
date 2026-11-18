@@ -46,6 +46,10 @@ for line in sys.stdin:
     elif method == "tools/list":
         out = {"jsonrpc":"2.0","id":msg.get("id"),"result":{
             "tools":[{"name":name,"description":"fixture read-only tool"} for name in read_only]}}
+    elif method == "tools/call":
+        out = {"jsonrpc":"2.0","id":msg.get("id"),"result":{
+            "content":[{"type":"text","text":"fixture read-only call ok"}],
+            "isError":False}}
     else:
         continue
     print(json.dumps(out, separators=(",", ":")), flush=True)
@@ -78,12 +82,24 @@ class StdioSmokeDriverTests(unittest.TestCase):
         report = mcp_stdio_smoke.run_smoke(command, env, expect_tool="list_servers")
         self.assertEqual(report.get("status"), "failed")
 
+    def test_scoped_readonly_tool_call(self):
+        command, env = fixture_command()
+        report = mcp_stdio_smoke.run_smoke(
+            command, env, expect_tool="list_servers",
+            call_tool="list_servers", tool_arguments={})
+        self.assertEqual(report.get("status"), "ok", report)
+        self.assertEqual(report["tool_call"]["name"], "list_servers")
+        self.assertFalse(report["tool_call"]["isError"])
+        self.assertIn("read-only call ok", " ".join(report["tool_call"]["content_preview"]))
+
 
 def evidence_payload() -> dict[str, Any]:
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(StdioSmokeDriverTests)
     result = unittest.TextTestRunner(verbosity=0).run(suite)
     command, _env = fixture_command()
-    report = mcp_stdio_smoke.run_smoke(command, dict(os.environ), expect_tool="list_servers")
+    report = mcp_stdio_smoke.run_smoke(
+        command, dict(os.environ), expect_tool="list_servers",
+        call_tool="list_servers", tool_arguments={})
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "fixture": "owned in-process mock stdio MCP server; no product binary, image or panel",

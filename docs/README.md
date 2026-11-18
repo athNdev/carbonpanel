@@ -22,6 +22,12 @@ selected in [website-source.json](website-source.json). Website presentation
 changes have a separate lifecycle. See [website publishing](website-publishing.md)
 for the source pin, snapshot isolation and publication checks.
 
+The new MCP guide is authored in the Starlight tree but its sidebar and home-page
+cards are deliberately **not** registered yet: the pinned source does not
+contain the page, so adding the slug breaks the website build. Registration must
+follow a separate, reviewed advance of the source pin. The guide is reachable in
+the repository and from the root README until then.
+
 ## Cloud product policy
 
 Carbon Cloud owns managed-hosting terminology and commercial decisions in its

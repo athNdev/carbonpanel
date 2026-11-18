@@ -78,23 +78,35 @@ If this fails with `unauthorized`, the GHCR package needs its visibility set
 and propagated. Record that as **package visibility pending**; do not claim a
 registry listing or an announcement from a package push.
 
-## 3. Verify the scoped artifact with a real stdio handshake
+## 3. Verify the scoped artifact with a real stdio handshake and read-only call
+
+The image entrypoint is the canonical `cmd/carbonpanel-mcp` binary. Its build
+metadata is injected with the **real** main-package variables at core head
+`7e6b1216`: `-X main.version -X main.commit -X main.buildDate`; the binary's
+`-version` flag prints them. The same values are OCI config labels checked in
+section 1.
 
 Run the pinned image by digest with no world/database mount, no Docker socket,
-a temporary filesystem only, throwaway network and placeholder credentials.
-Drive a real initialize + `tools/list` exchange and assert stdout is JSON-RPC
-only:
+a temporary filesystem only, throwaway network and a scoped fixture token.
+`--mock-controller` starts an owned disposable Connect controller that answers
+the auth-readiness calls, and `--call-tool list_servers` performs one real
+read-only tool invocation over stdio:
 
 ```bash
 python3 scripts/mcp_stdio_smoke.py --expect-tool list_servers \
+  --call-tool list_servers --mock-controller \
   --evidence mcp-stdio-smoke.json -- \
-  docker run -i --rm -e CARBONPANEL_URL -e CARBONPANEL_TOKEN \
+  docker run -i --rm -e CARBONPANEL_URL -e CARBONPANEL_API_TOKEN \
+  -e CARBONPANEL_TOKEN -e CARBONPANEL_MCP_TRANSPORT \
   ghcr.io/athndev/carbonpanel-mcp@sha256:<MANIFEST_DIGEST>
 ```
 
-Retain the JSON report: command, resolved tool names, exit code, stderr byte
-count. This verifies the artifact starts and speaks MCP; it does not prove a
-tool works against a panel.
+Retain the JSON report: command, resolved tool names, the `tool_call` result,
+fixture requests, exit code and stderr byte count. A successful install or
+`tools/list` alone is not enough; the scoped call must return
+`isError: false`. A host-installed binary can use
+`python3 scripts/test_mcp_real_binary.py --binary <PATH>` for the same check.
+Neither command contacts a live or shared panel.
 
 ## 4. Read-only smoke on a disposable fixture
 
@@ -195,10 +207,16 @@ environment because no Docker daemon is available. Do not upgrade that to a
 claim of container smoke.
 
 The stdio smoke driver was exercised against a separate disposable mock MCP
-server (initialize, `tools/list`, clean EOF, stdout-noise rejection, missing
-capability rejection). Evidence:
+server (initialize, `tools/list`, one scoped read-only call, clean EOF,
+stdout-noise rejection, missing-capability rejection). Evidence:
 `C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/mcp-plans/mcp-dist-stdio-smoke-evidence.json`.
-This validates the **driver and procedure only**: no product MCP binary exists
-in this worktree, no image was built or pushed, and no live panel was
-contacted. The real image smoke in section 3 runs only after the core lane
-ships `cmd/carbon-panel-mcp` and an authorized publication provides a digest.
+
+The **actual compiled `cmd/carbonpanel-mcp` binary** from core head `7e6b1216`
+was then driven against an owned Connect mock on `127.0.0.1`: auth readiness
+(`GetAuthStatus` + `GetCurrentUser`), `tools/list`, and one real `list_servers`
+call returning `isError: false`. Evidence:
+`C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/mcp-plans/mcp-dist-real-binary-scoped-smoke.json`.
+No image was built or pushed, no live panel was contacted and no real credential
+was used. The **merged container entrypoint** is still untested here: no Docker
+daemon is available, and an authorized publication must provide a digest before
+the by-digest image smoke in section 3 can run.

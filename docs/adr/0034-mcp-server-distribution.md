@@ -49,7 +49,11 @@ open for supported families still missing.
   repository id (`1369132627`) is recorded in `server.json`.
 - The image is multi-arch `linux/amd64` + `linux/arm64`, built from the pinned
   toolchain in `toolchain-versions.json` with `GOTOOLCHAIN=local` and
-  `CGO_ENABLED=0`. It runs as a non-root user, contains no world, database,
+  `CGO_ENABLED=0`. The canonical command is `cmd/carbonpanel-mcp`; build
+  metadata is injected into the real main-package variables
+  `main.version`, `main.commit`, `main.buildDate` (verified at core head
+  `7e6b1216`, printed by the binary's `-version` flag) and duplicated in OCI
+  config labels. It runs as a non-root user, contains no world, database,
   backup or other persisted data, and receives no Docker socket. Liveness is the
   stdio session itself: the process serves JSON-RPC on stdin/stdout, writes no
   diagnostics to stdout, and exits on EOF. There is no HTTP healthcheck port.

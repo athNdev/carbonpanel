@@ -5,9 +5,11 @@
 #
 # MCP stdio server image. Built for linux/amd64 and linux/arm64 by
 # .github/workflows/mcp-dist.yml using Buildx; platforms are a build flag, not
-# a Dockerfile instruction. The binary path is supplied by the core
-# implementation lane (cmd/carbon-panel-mcp). This file packages it; it does
-# not implement the server.
+# a Dockerfile instruction. The canonical command is cmd/carbonpanel-mcp,
+# owned by the core lane. This file packages it; it does not implement it.
+# The -X targets below are the REAL package-main variables at core head
+# 7e6b1216 (version, commit, buildDate), verified from source; the binary's
+# -version flag prints them. The same values are also OCI labels below.
 
 ARG GO_IMAGE=golang:1.26.11-alpine
 ARG ALPINE_IMAGE=alpine:3.24.4
@@ -44,15 +46,17 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG MCP_ARTIFACT_VERSION
 ARG MCP_ARTIFACT_COMMIT
+ARG MCP_ARTIFACT_BUILDDATE=unknown
 ENV CGO_ENABLED=0
 RUN go build -trimpath \
-      -ldflags="-s -w -X main.mcpArtifactVersion=${MCP_ARTIFACT_VERSION} -X main.mcpArtifactCommit=${MCP_ARTIFACT_COMMIT}" \
-      -o /out/carbon-panel-mcp ./cmd/carbon-panel-mcp
+      -ldflags="-s -w -X main.version=${MCP_ARTIFACT_VERSION} -X main.commit=${MCP_ARTIFACT_COMMIT} -X main.buildDate=${MCP_ARTIFACT_BUILDDATE}" \
+      -o /out/carbonpanel-mcp ./cmd/carbonpanel-mcp
 
 FROM ${ALPINE_IMAGE} AS runtime
 
 ARG MCP_ARTIFACT_VERSION
 ARG MCP_ARTIFACT_COMMIT
+ARG MCP_ARTIFACT_BUILDDATE=unknown
 
 # Ownership label must equal the official registry server.json "name" on every
 # platform image. Do not change one without the other.
@@ -61,6 +65,7 @@ LABEL io.modelcontextprotocol.server.name="io.github.athNdev/carbon-panel" \
       org.opencontainers.image.description="Read-first stdio MCP access to Carbon Panel Minecraft server management." \
       org.opencontainers.image.version="${MCP_ARTIFACT_VERSION}" \
       org.opencontainers.image.revision="${MCP_ARTIFACT_COMMIT}" \
+      org.opencontainers.image.created="${MCP_ARTIFACT_BUILDDATE}" \
       org.opencontainers.image.source="https://github.com/athNdev/carbonpanel" \
       org.opencontainers.image.documentation="https://carbonpanel.dev/docs/guides/mcp-server/" \
       org.opencontainers.image.licenses="MPL-2.0"
@@ -69,7 +74,7 @@ RUN apk add --no-cache ca-certificates \
  && addgroup -S mcp \
  && adduser -S -G mcp mcp
 
-COPY --from=builder /out/carbon-panel-mcp /usr/local/bin/carbon-panel-mcp
+COPY --from=builder /out/carbonpanel-mcp /usr/local/bin/carbonpanel-mcp
 
 # The stdio session is the liveness signal: JSON-RPC on stdin/stdout, all
 # diagnostics on stderr, clean exit on stdin EOF. There is deliberately no
@@ -77,5 +82,5 @@ COPY --from=builder /out/carbon-panel-mcp /usr/local/bin/carbon-panel-mcp
 USER mcp
 WORKDIR /home/mcp
 ENV CARBONPANEL_MCP_TRANSPORT=stdio
-ENTRYPOINT ["/usr/local/bin/carbon-panel-mcp"]
+ENTRYPOINT ["/usr/local/bin/carbonpanel-mcp"]
 STOPSIGNAL SIGTERM

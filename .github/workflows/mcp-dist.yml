@@ -86,6 +86,9 @@ jobs:
             echo "::error::HEAD $actual differs from pinned $EXPECTED_SHA" >&2
             exit 1
           fi
+      - name: Resolve reproducible build date from the pinned commit
+        id: meta
+        run: echo "build_date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
       - name: Verify exact main CI for the pinned commit
         id: ci
         env:
@@ -103,7 +106,7 @@ jobs:
       - name: Validate manifest structure, static ownership and version pinning
         run: |
           python3 scripts/validate_mcp_server_json.py --file docker/mcp.server.json
-          python3 -m unittest scripts.test_validate_mcp_server_json scripts.test_mcp_onboarding_fixture scripts.test_mcp_stdio_smoke
+          python3 -m unittest scripts.test_validate_mcp_server_json scripts.test_mcp_onboarding_fixture scripts.test_mcp_stdio_smoke scripts.test_mcp_ghcr_preflight
       - name: Assert pinned version is not a moving alias
         env:
           MCP_VERSION: ${{ inputs.version }}
@@ -124,6 +127,7 @@ jobs:
           build-args: |
             MCP_ARTIFACT_VERSION=${{ inputs.version }}
             MCP_ARTIFACT_COMMIT=${{ steps.pinned.outputs.sha }}
+            MCP_ARTIFACT_BUILDDATE=${{ steps.meta.outputs.build_date }}
 
   publish-image:
     name: Publish immutable GHCR image after trusted-main gate
@@ -137,6 +141,7 @@ jobs:
     outputs:
       digest: ${{ steps.resolved.outputs.digest }}
       action: ${{ steps.preflight.outputs.action }}
+      identity: ${{ steps.identity.outputs.verified }}
       anonymous_pull: ${{ steps.anon.outputs.ok }}
       stdio_smoke: ${{ steps.stdio.outputs.ok }}
     steps:
@@ -161,6 +166,9 @@ jobs:
           set -euo pipefail
           actual=$(git rev-parse HEAD)
           test "$actual" = "$EXPECTED_SHA" || { echo "::error::HEAD mismatch before push: $actual" >&2; exit 1; }
+      - name: Resolve reproducible build date from the pinned commit
+        id: meta
+        run: echo "build_date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
       - name: Verify exact main CI for the pinned commit
         id: ci
         env:
@@ -183,31 +191,14 @@ jobs:
           test "$ALLOWED" = 'true' || { echo "::error::trusted-main publication gate refused" >&2; exit 1; }
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - name: Preflight immutable tag existence and digest
+      - name: Strict immutable-tag preflight (shared release.py observation)
         id: preflight
         env:
           MCP_VERSION: ${{ inputs.version }}
           EXPECTED_DIGEST: ${{ inputs.expected_digest }}
-        run: |
-          set -euo pipefail
-          ref="${GHCR_IMAGE}:${MCP_VERSION}"
-          set +e
-          observed=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>&1)
-          status=$?
-          set -e
-          if [ "$status" -eq 0 ]; then
-            if [ -z "$EXPECTED_DIGEST" ] || [ "$observed" != "$EXPECTED_DIGEST" ]; then
-              echo "::error::immutable tag $ref already exists with digest $observed; choose a new version" >&2
-              exit 1
-            fi
-            echo "action=resume" >> "$GITHUB_OUTPUT"
-            echo "digest=$observed" >> "$GITHUB_OUTPUT"
-          elif printf '%s' "$observed" | grep -Eqi 'not found|no such|manifest unknown|unknown manifest'; then
-            echo "action=publish" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::unknown registry state for $ref: $observed" >&2
-            exit 1
-          fi
+        run: >-
+          python3 scripts/mcp_ghcr_preflight.py --image "$GHCR_IMAGE"
+          --version "$MCP_VERSION" --expected-digest "$EXPECTED_DIGEST"
       - name: Sign in to GHCR only for a new push
         if: steps.preflight.outputs.action == 'publish'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -228,6 +219,7 @@ jobs:
           build-args: |
             MCP_ARTIFACT_VERSION=${{ inputs.version }}
             MCP_ARTIFACT_COMMIT=${{ steps.pinned.outputs.sha }}
+            MCP_ARTIFACT_BUILDDATE=${{ steps.meta.outputs.build_date }}
       - name: Resolve the verified digest
         id: resolved
         env:
@@ -238,6 +230,17 @@ jobs:
           digest="${PUSH_DIGEST:-$RESUME_DIGEST}"
           case "$digest" in sha256:*) ;; *) echo "::error::missing verified digest" >&2; exit 1 ;; esac
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Verify pinned revision/version/labels on BOTH platform configs by digest
+        id: identity
+        env:
+          IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+          MCP_VERSION: ${{ inputs.version }}
+        run: >-
+          python3 scripts/mcp_ghcr_identity.py --image "$GHCR_IMAGE"
+          --digest "$IMAGE_DIGEST" --revision "$PINNED_COMMIT"
+          --version "$MCP_VERSION" --expected-name "$MCP_SERVER_NAME"
 
       - name: Verify manifest list, both platforms and per-platform ownership labels by digest
         env:
@@ -275,9 +278,11 @@ jobs:
           set -euo pipefail
           anon="$RUNNER_TEMP/mcp-anon-docker"
           python3 scripts/mcp_stdio_smoke.py --expect-tool list_servers \
+            --call-tool list_servers --mock-controller \
             --evidence mcp-stdio-smoke.json -- \
             docker --config "$anon" run -i --rm \
-            -e CARBONPANEL_URL -e CARBONPANEL_TOKEN -e CARBONPANEL_MCP_TRANSPORT \
+            -e CARBONPANEL_URL -e CARBONPANEL_TOKEN -e CARBONPANEL_API_TOKEN \
+            -e CARBONPANEL_MCP_TRANSPORT \
             "${GHCR_IMAGE}@${IMAGE_DIGEST}"
           echo "ok=true" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -301,10 +306,12 @@ jobs:
         env:
           ANON: ${{ needs.publish-image.outputs.anonymous_pull }}
           SMOKE: ${{ needs.publish-image.outputs.stdio_smoke }}
+          IDENTITY: ${{ needs.publish-image.outputs.identity }}
           DIGEST: ${{ needs.publish-image.outputs.digest }}
         run: |
           set -euo pipefail
           test "$ANON" = 'true' && test "$SMOKE" = 'true'
+          test "$IDENTITY" = 'true' || { echo "::error::pinned identity unverified" >&2; exit 1; }
           case "$DIGEST" in sha256:*) ;; *) echo "::error::no verified image digest" >&2; exit 1 ;; esac
       - name: Checkout the pinned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

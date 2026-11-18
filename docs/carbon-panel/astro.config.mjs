@@ -70,10 +70,6 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Automation',
-							items: [{ label: 'AI assistant (MCP)', slug: 'guides/mcp-server' }],
-						},
-						{
 							label: 'OIDC',
 							items: [
 								{ label: 'Keycloak', slug: 'guides/oidc/keycloak' },

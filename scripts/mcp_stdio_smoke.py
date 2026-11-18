@@ -20,6 +20,7 @@ import queue
 import subprocess
 import sys
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +37,8 @@ def _stderr_reader(stream: Any, chunks: list[str]) -> None:
 
 
 def run_smoke(command: list[str], env: dict[str, str], expect_tool: str,
-              timeout: float = 20.0) -> dict[str, Any]:
+              timeout: float = 20.0, call_tool: str = "",
+              tool_arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     if not command:
         raise ValueError("a command is required")
 
@@ -75,7 +77,8 @@ def run_smoke(command: list[str], env: dict[str, str], expect_tool: str,
             if message.get("id") == request_id:
                 return message
 
-    report: dict[str, Any] = {"command": command, "expect_tool": expect_tool}
+    report: dict[str, Any] = {"command": command, "expect_tool": expect_tool,
+                              "call_tool": call_tool}
     try:
         send({
             "jsonrpc": "2.0",
@@ -105,6 +108,34 @@ def run_smoke(command: list[str], env: dict[str, str], expect_tool: str,
         report["tool_names"] = names
         if expect_tool and expect_tool not in names:
             raise RuntimeError(f"expected tool {expect_tool!r} missing from tools/list: {names}")
+
+        if call_tool:
+            if call_tool not in names:
+                raise RuntimeError(f"call tool {call_tool!r} missing from tools/list")
+            send({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": call_tool, "arguments": tool_arguments or {}},
+            })
+            called = response(3)
+            result = called.get("result", {})
+            if "error" in called:
+                raise RuntimeError(f"tools/call returned JSON-RPC error: {called['error']}")
+            is_error = result.get("isError") is True
+            content = result.get("content")
+            summary = []
+            if isinstance(content, list):
+                for item in content[:3]:
+                    if isinstance(item, dict) and isinstance(item.get("text"), str):
+                        summary.append(item["text"][:400])
+            report["tool_call"] = {
+                "name": call_tool,
+                "isError": is_error,
+                "content_preview": summary,
+            }
+            if is_error:
+                raise RuntimeError(f"read-only tool {call_tool!r} returned an error result")
 
         process.stdin.close()
         code = process.wait(timeout=timeout)
@@ -139,9 +170,13 @@ def run_smoke(command: list[str], env: dict[str, str], expect_tool: str,
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expect-tool", default="")
+    parser.add_argument("--call-tool", default="", help="read-only tool to invoke after tools/list")
+    parser.add_argument("--tool-arguments", default="{}", help="JSON object of tool arguments")
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--url", default="http://127.0.0.1:1")
-    parser.add_argument("--token", default="stdio-smoke-placeholder")
+    parser.add_argument("--token", default="dp_stdio-smoke-fixture")
+    parser.add_argument("--mock-controller", action="store_true",
+                        help="start an owned disposable Connect mock for auth readiness")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = args.command[1:] if args.command and args.command[0] == "--" else args.command
@@ -149,10 +184,28 @@ def main(argv: list[str] | None = None) -> int:
     env = dict(os.environ)
     env["CARBONPANEL_URL"] = args.url
     env["CARBONPANEL_TOKEN"] = args.token
+    env["CARBONPANEL_API_TOKEN"] = args.token
     env["CARBONPANEL_MCP_TRANSPORT"] = "stdio"
 
+    if args.mock_controller:
+        from mcp_mock_controller import OwnedController
+
+        fixture = OwnedController()
+    else:
+        fixture = nullcontext()
+
     try:
-        report = run_smoke(command, env, args.expect_tool)
+        arguments = json.loads(args.tool_arguments)
+        if not isinstance(arguments, dict):
+            raise ValueError("--tool-arguments must be a JSON object")
+        with fixture as controller:
+            if controller is not None:
+                env["CARBONPANEL_URL"] = controller.url
+            report = run_smoke(command, env, args.expect_tool,
+                               call_tool=args.call_tool, tool_arguments=arguments)
+            if controller is not None:
+                report["fixture_requests"] = controller.requests
+                report["fixture_cleanup"] = "owned mock shut down"
     except (ValueError, subprocess.SubprocessError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
