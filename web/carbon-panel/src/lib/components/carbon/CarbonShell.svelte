@@ -162,10 +162,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	interface NavItem {
+		// Explicit destination contract. Players and World Library are owned by
+		// sibling epics and are linked here so all three surfaces are reachable
+		// after integration; their route files are not on this branch yet.
 		href:
 			| '/'
 			| '/servers'
 			| '/servers/new'
+			| '/players'
+			| '/worlds'
+			| '/library'
 			| '/modpacks/studio'
 			| '/modpacks'
 			| '/modules'
@@ -190,6 +196,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			icon: 'M4 6h16v3H4V6zm0 5h16v3H4v-3zm0 5h16v3H4v-3z'
 		},
 		{ href: '/servers/new', label: 'Create Server', icon: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z' },
+		{
+			href: '/players',
+			label: 'Players',
+			icon: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z'
+		},
+		{
+			href: '/worlds',
+			label: 'World View',
+			icon: 'M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z'
+		},
+		{
+			href: '/library',
+			label: 'World Library',
+			icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z'
+		},
 		{
 			href: '/modpacks/studio',
 			label: 'Modpack Studio',
@@ -369,8 +390,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<nav class="motion-stagger flex flex-col py-2" aria-label="Main Navigation">
 				{#each navItems as item (item.href)}
 					{#if item.href !== '/settings' || showSettingsNav}
+						<!-- resolve() is typed from this app's generated routes; the sibling-epic
+						     destinations are explicit NavItem hrefs but their route files land
+						     in separate PRs. The cast is scoped to this single call. -->
 						<a
-							href={resolve(item.href)}
+							href={resolve(item.href as '/')}
 							onclick={closeMobileNav}
 							class="relative flex items-center gap-3 py-2.5 font-sans text-sm transition-colors {sideNavExpanded
 								? 'px-3.5'

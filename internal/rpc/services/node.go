@@ -71,14 +71,16 @@ func dbNodeToProto(node *storage.Node) *v1.Node {
 		lastHeartbeat = timestamppb.New(*node.LastHeartbeat)
 	}
 
+	// Node TLS material is secret and is deliberately not copied into the
+	// UI-bound proto shape. The fields stay declared for wire compatibility but
+	// serialize empty; the Docker client pool reads the stored values from the
+	// database directly, so server-side daemon auth is unchanged.
+	// See docs/adr/0018-node-response-redaction.md.
 	return &v1.Node{
 		Id:                    node.ID,
 		Name:                  node.Name,
 		Host:                  node.Host,
 		AdvertisedIp:          node.AdvertisedIP,
-		TlsCaCert:             node.TLSCACert,
-		TlsCert:               node.TLSCert,
-		TlsKey:                node.TLSKey,
 		TlsEnabled:            node.TLSEnabled,
 		TlsSkipVerify:         node.TLSSkipVerify,
 		MaxMemoryMb:           node.MaxMemoryMB,
@@ -249,15 +251,20 @@ func (s *NodeService) UpdateNode(ctx context.Context, req *connect.Request[v1.Up
 	if msg.AdvertisedIp != nil {
 		node.AdvertisedIP = *msg.AdvertisedIp
 	}
-	if msg.TlsCaCert != nil && *msg.TlsCaCert != node.TLSCACert {
+	// Empty TLS strings mean "unchanged", not "clear". Read responses are
+	// redacted, so an edit form that echoes the response back sends empty cert
+	// and key fields; treating those as a clear would silently destroy stored
+	// credentials and invalidate every cached pool client. A non-empty value is
+	// required to replace credentials. See docs/adr/0018-node-response-redaction.md.
+	if msg.TlsCaCert != nil && *msg.TlsCaCert != "" && *msg.TlsCaCert != node.TLSCACert {
 		node.TLSCACert = *msg.TlsCaCert
 		hostOrTLSChanged = true
 	}
-	if msg.TlsCert != nil && *msg.TlsCert != node.TLSCert {
+	if msg.TlsCert != nil && *msg.TlsCert != "" && *msg.TlsCert != node.TLSCert {
 		node.TLSCert = *msg.TlsCert
 		hostOrTLSChanged = true
 	}
-	if msg.TlsKey != nil && *msg.TlsKey != node.TLSKey {
+	if msg.TlsKey != nil && *msg.TlsKey != "" && *msg.TlsKey != node.TLSKey {
 		node.TLSKey = *msg.TlsKey
 		hostOrTLSChanged = true
 	}

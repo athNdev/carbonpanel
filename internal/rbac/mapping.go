@@ -290,6 +290,19 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.PlayerService/BulkPlayerAction":        {Resource: ResourcePlayers, Action: ActionBulk, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/UndoPlayerAction":        {Resource: ResourcePlayers, Action: ActionModerate, ObjectIDField: "server_id"},
 
+	// ── WorldViewService (OSS-354/355/357) ──────────────────────────
+	// World viewing is observation-only. ListWorldViewTargets is global and
+	// filtered per server in the service; every other procedure is scoped to a
+	// concrete server_id. Map reads never imply player observation or overlay
+	// edits: those actions are mapped separately and are admin-only by default.
+	"/carbonpanel.v1.WorldViewService/ListWorldViewTargets": {Resource: ResourceWorldView, Action: ActionRead},
+	"/carbonpanel.v1.WorldViewService/GetWorldViewStatus":    {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/GetWorldViewSession":   {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/ListCapabilities":      {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/ListMapOverlays":       {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/SetMapOverlay":         {Resource: ResourceWorldView, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldViewService/SetPlayerVisibility":   {Resource: ResourceWorldView, Action: ActionObservePlayers, ObjectIDField: "server_id"},
+
 	// ── WorldService ────────────────────────────────────────────────
 	// Library metadata is not server-scoped. Listing bindings and every
 	// mutation that changes a server level use "server_id" so subuser grants

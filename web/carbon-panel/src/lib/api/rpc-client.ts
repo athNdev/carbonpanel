@@ -46,6 +46,7 @@ import { DatapackService } from '$lib/proto/carbonpanel/v1/datapack_pb';
 import { BlueprintService } from '$lib/proto/carbonpanel/v1/blueprint_pb';
 import { PlayerService } from '$lib/proto/carbonpanel/v1/player_pb';
 import { WorldService } from '$lib/proto/carbonpanel/v1/world_pb';
+import { WorldViewService } from '$lib/proto/carbonpanel/v1/worldview_pb';
 
 // Header to mark requests as silent / no loader
 const SILENT_HEADER = 'X-Silent-Request';
@@ -162,6 +163,7 @@ export class RpcClient {
 	public readonly blueprint: Client<typeof BlueprintService>;
 	public readonly player: Client<typeof PlayerService>;
 	public readonly world: Client<typeof WorldService>;
+	public readonly worldView: Client<typeof WorldViewService>;
 
 	constructor() {
 		this.activity = createClient(ActivityService, transport);
@@ -187,6 +189,7 @@ export class RpcClient {
 		this.blueprint = createClient(BlueprintService, transport);
 		this.player = createClient(PlayerService, transport);
 		this.world = createClient(WorldService, transport);
+		this.worldView = createClient(WorldViewService, transport);
 	}
 }
 

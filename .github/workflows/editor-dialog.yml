@@ -39,9 +39,13 @@ jobs:
     name: File editor in Chromium
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/carbonpanel-editor-browsers
     steps:
+      # runner.temp is only available in step context, not job-level env.
+      # Derive the owned browser cache from RUNNER_TEMP and export it to every
+      # subsequent step; no global browser install and no GC override.
+      - name: Configure private browser cache
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/carbonpanel-editor-browsers" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:

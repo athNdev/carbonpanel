@@ -1,0 +1,211 @@
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+syntax = "proto3";
+
+package carbonpanel.v1;
+
+import "carbonpanel/v1/world.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
+
+// WorldRef is the single tagged reference used by world viewing to identify a
+// world. It intentionally never treats a folder name as an identity:
+// LIBRARY_BINDING points at a World Library binding, SERVER_LOCAL resolves
+// through the server's configured level name, and STATIC_IMPORT is a read-only
+// historical tile snapshot.
+message WorldRef {
+  // Kind names the authority that owns the referenced world.
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_LIBRARY_BINDING = 1;
+    KIND_SERVER_LOCAL = 2;
+    KIND_STATIC_IMPORT = 3;
+  }
+  Kind kind = 1;
+  string server_id = 2;
+  string level_name = 3;
+  string binding_id = 4;
+  string snapshot_id = 5;
+}
+
+// The shared Observation provenance envelope lives in world.proto. This
+// service uses it for freshness and visibility disclosures; unknown or stale
+// values are disclosed rather than replaced by a plausible-looking zero.
+
+// RendererType identifies the renderer adapter used for a world view.
+enum RendererType {
+  RENDERER_TYPE_UNSPECIFIED = 0;
+  RENDERER_TYPE_BLUEMAP = 1;
+  RENDERER_TYPE_SQUAREMAP = 2;
+  RENDERER_TYPE_DYNMAP = 3;
+  RENDERER_TYPE_STATIC = 4;
+}
+
+// RendererState is the honest lifecycle state of a renderer for one world.
+enum RendererState {
+  RENDERER_STATE_UNSPECIFIED = 0;
+  RENDERER_STATE_ABSENT = 1;      // no renderer installed - onboarding
+  RENDERER_STATE_INSTALLING = 2;  // module being created/started
+  RENDERER_STATE_RENDERING = 3;   // initial/full render in progress
+  RENDERER_STATE_READY = 4;       // tiles fresh and reachable
+  RENDERER_STATE_STALE = 5;       // last-known tiles, renderer or server stopped
+  RENDERER_STATE_STOPPED = 6;     // renderer stopped, no live overlay
+  RENDERER_STATE_ERROR = 7;       // renderer failed/unreachable, diagnostics available
+  RENDERER_STATE_UNSUPPORTED = 8; // renderer type has no verified adapter capability
+}
+
+// RendererDescriptor lists only capabilities verified against the renderer's
+// own API/adapter. Missing capabilities are hidden or shown as unsupported in
+// the console; they are never silently substituted.
+message RendererDescriptor {
+  RendererType type = 1;
+  string version = 2;
+  repeated string capabilities = 3; // map.2d, map.3d, dimensions, markers, players, time_weather, telemetry, static
+  string web_base_path = 4; // same-origin reverse-proxy prefix, never an external URL
+}
+
+// WorldViewTarget is a read-only projection: it never owns world identity.
+message WorldViewTarget {
+  string server_id = 1;
+  WorldRef world_ref = 2;
+  string name = 3;
+  string dimension = 4;
+  RendererType renderer_type = 5;
+  RendererState renderer_state = 6;
+  google.protobuf.Timestamp last_render = 7;
+  RendererDescriptor renderer = 8;
+  Observation freshness = 9;
+  string node_id = 10;
+  string error = 11;
+}
+
+// MapOverlay is a panel-owned POI, waypoint, marker or region for a world.
+message MapOverlay {
+  string id = 1;
+  string server_id = 2;
+  WorldRef world_ref = 3;
+  string dimension = 4;
+  string kind = 5; // marker | poi | waypoint | region
+  double x = 6;
+  double z = 7;
+  string label = 8;
+  string style = 9;
+  string owner = 10;
+  bool sensitive = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+// The WorldViewService is observation-only. Administrative actions (teleport,
+// world/region control) deliberately remain on the existing ServerService,
+// ConfigService and FileService RPCs with their own authorization and audit.
+service WorldViewService {
+  // Global, RBAC-filtered inventory of viewable worlds.
+  rpc ListWorldViewTargets(ListWorldViewTargetsRequest) returns (ListWorldViewTargetsResponse);
+  // Pollable status for one world (baseline push-free freshness channel).
+  rpc GetWorldViewStatus(GetWorldViewStatusRequest) returns (GetWorldViewStatusResponse);
+  // Issues an opaque, short-lived, per-user session key for the same-origin
+  // map proxy. No token is placed in a URL; the browser's cp_session cookie
+  // authenticates each proxied asset request.
+  rpc GetWorldViewSession(GetWorldViewSessionRequest) returns (GetWorldViewSessionResponse);
+  // Capability matrix for the selected renderer, used to gate visible controls.
+  rpc ListCapabilities(ListCapabilitiesRequest) returns (ListCapabilitiesResponse);
+  // Lists panel-owned overlays for one world and dimension.
+  rpc ListMapOverlays(ListMapOverlaysRequest) returns (ListMapOverlaysResponse);
+  // Creates or updates an overlay; requires the world_view/update permission.
+  rpc SetMapOverlay(SetMapOverlayRequest) returns (SetMapOverlayResponse);
+  // Opt-in, audited disclosure of sensitive player locations.
+  rpc SetPlayerVisibility(SetPlayerVisibilityRequest) returns (SetPlayerVisibilityResponse);
+}
+
+// ListWorldViewTargetsRequest asks for every world the caller may read.
+message ListWorldViewTargetsRequest {}
+
+// ListWorldViewTargetsResponse carries the RBAC-filtered world inventory.
+message ListWorldViewTargetsResponse {
+  repeated WorldViewTarget targets = 1;
+}
+
+// GetWorldViewStatusRequest asks for the status of one server-local world.
+message GetWorldViewStatusRequest {
+  string server_id = 1;
+  WorldRef world_ref = 2;
+}
+
+// GetWorldViewStatusResponse returns the current target projection.
+message GetWorldViewStatusResponse {
+  WorldViewTarget target = 1;
+}
+
+// GetWorldViewSessionRequest asks for a same-origin map proxy session.
+message GetWorldViewSessionRequest {
+  string server_id = 1;
+  WorldRef world_ref = 2;
+}
+
+// GetWorldViewSessionResponse carries an opaque key and honest readiness state.
+message GetWorldViewSessionResponse {
+  // Same-origin path prefix; append the renderer asset path. Empty when the
+  // renderer is unavailable or the caller lacks world_view/read.
+  string proxy_path = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  RendererState state = 3;
+  string reason = 4;
+}
+
+// ListCapabilitiesRequest asks which features a renderer actually supports.
+message ListCapabilitiesRequest {
+  string server_id = 1;
+}
+
+// Capability is a single gated renderer feature with a human-readable detail.
+message Capability {
+  string name = 1;
+  bool supported = 2;
+  string detail = 3;
+}
+
+// ListCapabilitiesResponse returns the renderer's verified capability matrix.
+message ListCapabilitiesResponse {
+  RendererType renderer_type = 1;
+  repeated Capability capabilities = 2;
+}
+
+// ListMapOverlaysRequest selects overlays for one world and dimension.
+message ListMapOverlaysRequest {
+  string server_id = 1;
+  WorldRef world_ref = 2;
+  string dimension = 3;
+}
+
+// ListMapOverlaysResponse carries the visible overlays.
+message ListMapOverlaysResponse {
+  repeated MapOverlay overlays = 1;
+}
+
+// SetMapOverlayRequest carries the overlay to create or update.
+message SetMapOverlayRequest {
+  string server_id = 1;
+  MapOverlay overlay = 2;
+}
+
+// SetMapOverlayResponse confirms the stored overlay.
+message SetMapOverlayResponse {
+  MapOverlay overlay = 1;
+}
+
+// SetPlayerVisibilityRequest opts sensitive player positions in or out.
+message SetPlayerVisibilityRequest {
+  string server_id = 1;
+  WorldRef world_ref = 2;
+  bool visible = 3;
+}
+
+// SetPlayerVisibilityResponse reports the applied opt-in and its provenance.
+message SetPlayerVisibilityResponse {
+  bool visible = 1;
+  Observation observation = 2;
+}

@@ -138,6 +138,10 @@ resume from the original verified download artifact without rebuilding images.
   prove Svelte initialization, props timing or Monaco cleanup behavior.
   The same workflow builds a production editor fixture and checks both Monaco
   consumers plus HTTP serving of the emitted worker bundles.
+  That workflow derives its owned browser cache from `RUNNER_TEMP` in a step
+  and exports it through `GITHUB_ENV`; `runner` is not an available context in
+  job-level `env`, which makes the whole workflow fail before any job is
+  scheduled. `scripts/workflow-contract.test.mjs` guards this rule.
 - Showcase review stacks use a marked per-session data directory and a matching
   container label before teardown. The selected port is inside that directory.
 - The same browser workflow verifies a real local WebSocket reconnect and
