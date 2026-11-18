@@ -55,6 +55,26 @@ published port. Deployments that run `cmd/status` outside that module must set
 `HOST` deliberately. Restrict the published port to trusted networks and never
 treat the status endpoints as an authenticated API.
 
+## Geyser / Bedrock UDP binding
+
+The `cmd/geyser` entrypoint generates `bedrock.address: 127.0.0.1` when
+`BEDROCK_ADDRESS` is unset. A standalone entrypoint therefore listens only on
+loopback until an operator opts in to a wider bind by setting `BEDROCK_ADDRESS`
+explicitly (for example `0.0.0.0` or a private interface address). An explicit
+wildcard bind prints a warning; the published UDP port must still be restricted
+to trusted networks.
+
+The built-in Geyser module keeps an explicit `BEDROCK_ADDRESS=0.0.0.0` in its
+default environment. That is intentional: the panel's UDP port proxy dials the
+container IP, so a loopback-only listener inside the container would be
+unreachable. Module instances created before this change already carry that
+explicit value, so their behavior is unchanged. Only direct entrypoint runs that
+relied on the old implicit `0.0.0.0` default need a migration: set
+`BEDROCK_ADDRESS=0.0.0.0` (or a specific interface address) in the container
+environment, or accept loopback-only exposure. Existing generated
+`/data/config.yml` files are never rewritten unless `OVERWRITE_CONFIG=true`, so
+changing the default does not silently rewrite a running Geyser configuration.
+
 ## Not shipped
 
 | Mode | Status |

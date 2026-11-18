@@ -55,12 +55,18 @@ func main() {
 		Refusal      string                 `json:"refusal,omitempty"`
 		Checks       []native.Check         `json:"checks"`
 		Capabilities []string               `json:"capabilities"`
+		UnitKind     string                 `json:"unit_kind,omitempty"`
+		Launcher     string                 `json:"launcher,omitempty"`
 		Report       interface{}            `json:"preflight"`
 	}{
 		NodeID:  plan.NodeID,
 		Mode:    string(plan.Selection.Mode),
 		Refusal: plan.Refusal,
 		Checks:  plan.Selection.Checks,
+	}
+	if plan.Selection.Mode != native.ModeNone {
+		out.UnitKind = plan.Daemon.UnitKind()
+		out.Launcher = plan.Daemon.Launcher()
 	}
 	for _, c := range plan.Capabilities.GetCapabilities() {
 		out.Capabilities = append(out.Capabilities, c.String())
@@ -73,26 +79,29 @@ func main() {
 	}
 	fmt.Println(string(encoded))
 
-	if *unitOut != "" {
-		unit, err := plan.Daemon.RenderUnit("/run/carbon-node/daemon.json")
+	if *unitOut != "" || *configOut != "" {
+		manifest, err := plan.Daemon.BuildManifest()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "render unit:", err)
+			fmt.Fprintln(os.Stderr, "render manifest:", err)
 			os.Exit(2)
 		}
-		if err := os.WriteFile(*unitOut, []byte(unit), 0o600); err != nil {
-			fmt.Fprintln(os.Stderr, "write unit:", err)
-			os.Exit(2)
+		for _, c := range native.CheckOptionParity(manifest.ConfigJSON, manifest.Unit) {
+			if !c.Passed {
+				fmt.Fprintln(os.Stderr, "option parity:", c.Code, c.Message)
+				os.Exit(2)
+			}
 		}
-	}
-	if *configOut != "" {
-		config, err := plan.Daemon.RenderConfig()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "render config:", err)
-			os.Exit(2)
+		if *unitOut != "" {
+			if err := os.WriteFile(*unitOut, []byte(manifest.Unit), 0o600); err != nil {
+				fmt.Fprintln(os.Stderr, "write unit:", err)
+				os.Exit(2)
+			}
 		}
-		if err := os.WriteFile(*configOut, []byte(config), 0o600); err != nil {
-			fmt.Fprintln(os.Stderr, "write config:", err)
-			os.Exit(2)
+		if *configOut != "" {
+			if err := os.WriteFile(*configOut, []byte(manifest.ConfigJSON), 0o600); err != nil {
+				fmt.Fprintln(os.Stderr, "write config:", err)
+				os.Exit(2)
+			}
 		}
 	}
 

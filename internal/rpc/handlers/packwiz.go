@@ -103,10 +103,14 @@ func (h *PackwizHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		action = rbac.ActionCreate
 	}
-	if err := requireRequestObject(r, h.authManager, h.enforcer, rbac.ResourceModpacks, action, "*"); err != nil {
+	user, err := requireRequestObjectUser(r, h.authManager, h.enforcer, rbac.ResourceModpacks, action, "*")
+	if err != nil {
 		writePolicyError(w, err)
 		return
 	}
+	// Upload-consuming routes need the same identity to enforce session
+	// ownership; the request context is the only path to those subhandlers.
+	r = r.WithContext(auth.WithUser(r.Context(), user))
 
 	// Route /api/v1/packwiz/packs...
 	if len(parts) == 1 && parts[0] == "packs" {

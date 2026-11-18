@@ -25,6 +25,42 @@ func TestGeyserBedrockStaysPublic(t *testing.T) {
 	}
 }
 
+// The standalone Geyser entrypoint now defaults to a loopback bind. The
+// shipped module keeps its explicit wide bind because the panel's UDP proxy
+// dials the container IP, so legitimate Bedrock clients must keep working.
+func TestBuiltinGeyserOptsInToContainerWideBind(t *testing.T) {
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	if err := InitBuiltinTemplates(store); err != nil {
+		t.Fatal(err)
+	}
+	templates, err := store.ListModuleTemplates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var geyser *storage.ModuleTemplate
+	for _, tpl := range templates {
+		if tpl.ID == "builtin-geyser" {
+			geyser = tpl
+			break
+		}
+	}
+	if geyser == nil {
+		t.Fatal("builtin geyser template missing")
+	}
+
+	var env map[string]string
+	if err := json.Unmarshal([]byte(geyser.DefaultEnv), &env); err != nil {
+		t.Fatalf("geyser template DefaultEnv: %v", err)
+	}
+	if env["BEDROCK_ADDRESS"] != "0.0.0.0" {
+		t.Errorf("geyser BEDROCK_ADDRESS = %q, want explicit 0.0.0.0 for UDP proxy reachability", env["BEDROCK_ADDRESS"])
+	}
+	if !strings.Contains(strings.ToLower(geyser.Documentation), "all interfaces") {
+		t.Error("geyser template documentation must state why the container-wide bind is explicit")
+	}
+}
+
 // The status sidecar's web endpoint has no request authentication. Its
 // published port stays reachable only when the shipped container binds all
 // interfaces; the panel's port proxy dials the container IP, not localhost

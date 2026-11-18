@@ -51,8 +51,17 @@ func writePolicyError(w http.ResponseWriter, err error) {
 // claim. Legacy adapters and their generated RPC counterparts must agree on
 // the permission/resource mapping (ADR 0012).
 func requireRequestObject(r *http.Request, authManager *auth.Manager, enforcer *rbac.Enforcer, resource, action, objectID string) error {
+	_, err := requireRequestObjectUser(r, authManager, enforcer, resource, action, objectID)
+	return err
+}
+
+// requireRequestObjectUser is the same fail-closed policy check but also
+// returns the authenticated principal. Handlers that bind an operation to a
+// resource owner (for example an upload session) need that identity; the
+// object ID still comes from the request, never from a client-supplied scope.
+func requireRequestObjectUser(r *http.Request, authManager *auth.Manager, enforcer *rbac.Enforcer, resource, action, objectID string) (*auth.AuthenticatedUser, error) {
 	if authManager == nil {
-		return errUnauthorized
+		return nil, errUnauthorized
 	}
 	authHeader := r.Header.Get("Authorization")
 	if strings.TrimSpace(authHeader) == "" {
@@ -62,16 +71,16 @@ func requireRequestObject(r *http.Request, authManager *auth.Manager, enforcer *
 	}
 	user, err := authManager.AuthenticateFromHeader(r.Context(), authHeader)
 	if err != nil {
-		return errUnauthorized
+		return nil, errUnauthorized
 	}
 	if enforcer == nil {
-		return errForbidden
+		return nil, errForbidden
 	}
 	allowed, rbacErr := enforcer.Enforce(user.Roles, resource, action, objectID)
 	if rbacErr != nil || !allowed {
-		return errForbidden
+		return nil, errForbidden
 	}
-	return nil
+	return user, nil
 }
 
 // requireGlobalObject authenticates the caller (even in explicit no-auth mode)

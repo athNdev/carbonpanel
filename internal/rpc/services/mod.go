@@ -299,9 +299,15 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	// Get temp file path and original filename from upload manager
-	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
+	// Get temp file path and original filename from upload manager. Ownership
+	// is enforced here as well: knowing a session ID is not enough to import
+	// another user's upload.
+	ownerID := uploadOwnerID(ctx)
+	tempPath, originalFilename, err := s.uploadManager.GetTempPathFor(msg.UploadSessionId, ownerID)
 	if err != nil {
+		if denied := ownerMismatchError(err); denied != nil {
+			return nil, denied
+		}
 		s.log.Error("Failed to get upload session: %v", err)
 		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "error": "upload session not found or not completed"})
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found or not completed"))
@@ -318,7 +324,7 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	// metadata (Forge/NeoForge) is left to the runtime.
 	if side, sideErr := minecraft.InspectModSide(tempPath); sideErr == nil && side == minecraft.SideClient {
 		_ = os.Remove(tempPath)
-		_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+		_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, uploadOwnerID(ctx))
 		s.auditMod(ctx, peerIP, activity.EventModInstall, msg.ServerId, map[string]any{"method": "upload", "file": originalFilename, "error": "client-only mod rejected"})
 		return nil, connect.NewError(
 			connect.CodeInvalidArgument,
@@ -367,7 +373,7 @@ func (s *ModService) ImportUploadedMod(ctx context.Context, req *connect.Request
 	}
 
 	// Cleanup the upload session
-	s.uploadManager.CleanupSession(msg.UploadSessionId)
+	_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 
 	// Get file info for the response
 	info, err := os.Stat(modPath)
@@ -426,7 +432,7 @@ func (s *ModService) stageUploadedMod(ctx context.Context, msg *v1.ImportUploade
 		return nil, stageContentError(err)
 	}
 	_ = os.Remove(tempPath)
-	_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+	_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, uploadOwnerID(ctx))
 
 	displayName := msg.DisplayName
 	if displayName == "" {

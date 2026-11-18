@@ -82,7 +82,11 @@ port:
 - Voice chat, map viewers and similar TCP/UDP services use the server's
   **Additional Ports** section.
 - UDP services such as Geyser are forwarded by the module's UDP proxy rather
-  than by hostname routing.
+  than by hostname routing. The shipped Geyser module sets
+  `BEDROCK_ADDRESS=0.0.0.0` explicitly so that proxy can reach the container's
+  listener. A standalone Geyser entrypoint without that setting defaults to a
+  loopback bind; direct-exposure setups must set `BEDROCK_ADDRESS` themselves.
+  Keep the published UDP port restricted to trusted networks.
 
 ## Troubleshooting
 
