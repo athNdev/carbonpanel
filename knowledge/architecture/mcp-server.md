@@ -61,7 +61,13 @@ fixtures prove wrong fields, missing ids, conflicting arguments and out-of-
 range bounds are refused before any typed RPC. Download/upload surfaces also
 require a session-consuming scoped byte transfer through the W17
 `storageworker.StreamingFS` contract with cancellation, cap, expiry and
-cross-scope refusals; raw byte channels stay out of the tool catalog.
+cross-scope refusals; raw byte channels stay out of the tool catalog. The
+commit step uses the AUTHORIZED PRODUCTION UPLOAD PATH (typed InitUpload,
+UploadChunk and server-scoped SaveUploadedFile RPCs behind the real auth
+interceptor), never a direct helper write: a read-only or revoked principal is
+refused with zero controller writes. Frames come from the owned session and do
+not re-read the whole file with unary GetFile. The mounted scoped tools are
+constructed by the production NewServer path, not a fixture-only seam.
 Registration strings, quoted procedure names and substring-of-JSON checks
 never count. The exclusion policy is bound to the server before any tool is
 added, so audited-out tools are never mounted; go-sdk replaces same-name tools

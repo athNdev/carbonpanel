@@ -125,18 +125,5 @@ func TestIntegrationScopedStreamTransfer(t *testing.T) {
 	}
 }
 
-// runScopedStreamEvidence is called by the unified evidence harness so a
-// VERIFIED label on the download surface requires a real session-consuming
-// transfer with all five safety outcomes, not only a small-file GetFile call.
-func runScopedStreamEvidence(t *testing.T) bool {
-	t.Helper()
-	verified := false
-	t.Run("scoped-stream-transfer-evidence", func(st *testing.T) {
-		TestIntegrationScopedStreamTransfer(st)
-		verified = !st.Failed()
-	})
-	return verified
-}
-
 // Compile-time guard that the shared stream contract is the W17 one.
 var _ storageworker.StreamingFS = (nodestorage.Accessor)(nil)

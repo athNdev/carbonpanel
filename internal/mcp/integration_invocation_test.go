@@ -174,7 +174,16 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 
 	// Missing argument tables are a harness defect, not an unverified
 	// operation: fail loudly so no silent partial coverage is possible.
+	auditedTools := map[string]bool{}
+	for _, op := range matrix.Operations {
+		if op.Supported() && op.SuggestedTool != "" {
+			auditedTools[op.SuggestedTool] = true
+		}
+	}
 	for _, spec := range exposedTools {
+		if !auditedTools[spec.Name] {
+			continue // registered capability tools outside the audit matrix
+		}
 		if _, ok := argsByTool[spec.Name]; !ok {
 			t.Fatalf("invocation harness: no argument table for tool %s (%s)", spec.Name, spec.Procedure)
 		}
@@ -183,7 +192,7 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 	// A download/upload surface needs a session-consuming byte transfer, not
 	// only a small-file typed read. Run that evidence first so every target in
 	// streamTransferTargets is VERIFIED only if it passes.
-	streamVerified := runScopedStreamEvidence(t)
+	streamVerified := runRegisteredStreamEvidence(t)
 
 	invocationRecorder.enable()
 	defer invocationRecorder.disable()

@@ -7,6 +7,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -74,6 +76,7 @@ type Clients struct {
 	WorldView carbonpanelv1connect.WorldViewServiceClient
 	Backup    carbonpanelv1connect.BackupServiceClient
 	File      carbonpanelv1connect.FileServiceClient
+	Upload    carbonpanelv1connect.UploadServiceClient
 
 	// httpClient, baseURL and token are retained so NewServer can derive the
 	// family clients from the exact same authenticated connection. No tool
@@ -81,6 +84,18 @@ type Clients struct {
 	httpClient connect.HTTPClient
 	baseURL    string
 	token      string
+
+	// owner is derived from the authenticated dp_ token, never from a tool
+	// argument. transfer is the optional W17 scoped streaming filesystem.
+	owner    string
+	transfer *StreamTransfer
+}
+
+// SetStreamTransfer injects the shared W17 streaming filesystem. Called by
+// composition roots that own node storage; MCP-only deployments leave it nil
+// and the scoped tools return a structured capability error.
+func (c *Clients) SetStreamTransfer(transfer *StreamTransfer) {
+	c.transfer = transfer
 }
 
 // NewClients constructs typed clients with the bearer Authorization
@@ -101,10 +116,12 @@ func NewClients(httpClient connect.HTTPClient, baseURL, token string) (*Clients,
 		WorldView: carbonpanelv1connect.NewWorldViewServiceClient(httpClient, baseURL, opts...),
 		Backup:    carbonpanelv1connect.NewBackupServiceClient(httpClient, baseURL, opts...),
 		File:      carbonpanelv1connect.NewFileServiceClient(httpClient, baseURL, opts...),
+		Upload:    carbonpanelv1connect.NewUploadServiceClient(httpClient, baseURL, opts...),
 
 		httpClient: httpClient,
 		baseURL:    baseURL,
 		token:      token,
+		owner:      tokenOwner(token),
 	}, nil
 }
 
@@ -160,6 +177,14 @@ func (c *Clients) Verify(ctx context.Context) error {
 		return fmt.Errorf("API token does not identify an active non-anonymous user")
 	}
 	return nil
+}
+
+// tokenOwner derives a stable principal identifier from the authenticated
+// credential itself. It is the only identity source for scoped stream
+// sessions: no tool argument can supply or override it.
+func tokenOwner(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func bearerInterceptor(token string) connect.UnaryInterceptorFunc {

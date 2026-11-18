@@ -42,6 +42,7 @@ func registerCombinedTools(s *sdkmcp.Server, c *Clients) error {
 	}
 
 	RegisterIntegrationTools(s, c)
+	RegisterStreamingTools(s, c)
 	RegisterFamilyAdminTools(s, adminFam)
 	registerContentTools(s, contentFam)
 	RegisterFamilyServerTools(s, serverFam)

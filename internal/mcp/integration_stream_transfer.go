@@ -114,6 +114,29 @@ func (t *StreamTransfer) OpenWithSize(ctx context.Context, owner, serverID, rel 
 	return handle, nil
 }
 
+// Frames returns the bytes accumulated through ReadChunk and the cumulative
+// SHA-256. The caller must send them through an authorized production write
+// path; this helper never writes to the controller.
+func (t *StreamTransfer) Frames(owner, handle string) ([]byte, string, error) {
+	s, err := t.session(owner, "", handle)
+	if err != nil {
+		return nil, "", err
+	}
+	return s.data, hex.EncodeToString(s.hash.Sum(nil)), nil
+}
+
+// Lookup returns a scoped session by its opaque handle. owner is always the
+// authenticated principal derived from the caller's token, never a tool arg.
+func (t *StreamTransfer) Lookup(owner, handle string) (*streamSession, error) {
+	return t.session(owner, "", handle)
+}
+
+// ServerID is exposed for tool handlers to pass the bound server to typed RPCs.
+func (s *streamSession) ServerID() string { return s.serverID }
+
+// Path is the bound server-relative source path.
+func (s *streamSession) Path() string { return s.path }
+
 func (t *StreamTransfer) session(owner, serverID, handle string) (*streamSession, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -121,7 +144,7 @@ func (t *StreamTransfer) session(owner, serverID, handle string) (*streamSession
 	if !ok {
 		return nil, ErrStreamNotFound
 	}
-	if s.owner != owner || s.serverID != serverID {
+	if s.owner != owner || (serverID != "" && s.serverID != serverID) {
 		return nil, ErrStreamCrossScope
 	}
 	if s.canceled {

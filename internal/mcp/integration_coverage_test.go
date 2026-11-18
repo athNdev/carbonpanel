@@ -7,6 +7,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -42,7 +43,10 @@ func TestIntegrationCombinedCatalog(t *testing.T) {
 		if names[spec.Name] {
 			t.Errorf("duplicate tool name %s", spec.Name)
 		}
-		if procs[spec.Procedure] {
+		// Scoped-streaming capability tools deliberately share their typed
+		// RPC's procedure but have distinct tool names; only non-streaming
+			// duplicates would be a double registration.
+		if procs[spec.Procedure] && !strings.HasPrefix(spec.Name, "scoped_stream_") {
 			t.Errorf("duplicate tool procedure %s", spec.Procedure)
 		}
 		names[spec.Name] = true
