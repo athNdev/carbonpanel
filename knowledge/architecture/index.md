@@ -5,6 +5,7 @@
 ## Concepts
 
 - [Module system](module-system.md) — Modules, hooks, packwiz and indexers deliver server content and modpacks.
+- [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.

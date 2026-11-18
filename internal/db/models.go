@@ -961,6 +961,26 @@ const (
 	NodeStatusError   NodeStatus = "error"
 )
 
+// NodeTransport values record which control path owns a node. Legacy Docker
+// endpoint nodes are never routable through the versioned node-control contract
+// until an operator explicitly migrates them.
+const (
+	NodeTransportLegacy       = "legacy"
+	NodeTransportManagedAgent = "managed_agent"
+)
+
+// NodeEnrollmentState values mirror NodeEnrollmentState in the versioned
+// node_control.proto contract. They describe credential lifecycle, not task
+// state, and never contain secret material.
+const (
+	NodeEnrollmentStateLegacy     = "legacy"
+	NodeEnrollmentStatePending    = "pending"
+	NodeEnrollmentStateActive     = "active"
+	NodeEnrollmentStateExpired    = "expired"
+	NodeEnrollmentStateRevoked    = "revoked"
+	NodeEnrollmentStateSuperseded = "superseded"
+)
+
 // Node represents a remote or local Docker daemon host
 type Node struct {
 	ID            string     `json:"id" gorm:"primaryKey"`
@@ -989,7 +1009,22 @@ type Node struct {
 	EndpointGeneration int64 `json:"endpoint_generation" gorm:"column:endpoint_generation;default:1"`
 	// DaemonID is the Docker daemon id accepted for this endpoint. Empty until
 	// the first successful observation. A different id is not accepted silently.
-	DaemonID      string     `json:"daemon_id,omitempty" gorm:"column:daemon_id"`
+	DaemonID string `json:"daemon_id,omitempty" gorm:"column:daemon_id"`
+
+	// Managed node control contract ownership (ADR 0019). These columns are
+	// metadata only: fingerprints, generations and a versioned capability
+	// snapshot. No token, key or other secret material is persisted here.
+	Transport            string     `json:"transport" gorm:"column:transport;default:'legacy'"`
+	EnrollmentState      string     `json:"enrollment_state" gorm:"column:enrollment_state;default:'legacy'"`
+	EnrollmentID         string     `json:"enrollment_id,omitempty" gorm:"column:enrollment_id;default:''"`
+	EnrollmentExpiresAt  *time.Time `json:"enrollment_expires_at,omitempty" gorm:"column:enrollment_expires_at"`
+	ProtocolVersion      int32      `json:"protocol_version" gorm:"column:protocol_version;default:0"`
+	CapabilitiesJSON     string     `json:"capabilities_json,omitempty" gorm:"column:capabilities_json;type:text;default:''"`
+	CapabilityOwner      string     `json:"capability_owner,omitempty" gorm:"column:capability_owner;default:''"`
+	CredentialGeneration int64      `json:"credential_generation" gorm:"column:credential_generation;default:0"`
+	KeyFingerprint       string     `json:"key_fingerprint,omitempty" gorm:"column:key_fingerprint;default:''"`
+	TokenFingerprint     string     `json:"token_fingerprint,omitempty" gorm:"column:token_fingerprint;default:''"`
+
 	LastHeartbeat *time.Time `json:"last_heartbeat" gorm:"column:last_heartbeat"`
 	CreatedAt     time.Time  `json:"created_at" gorm:"autoCreateTime"`
 	UpdatedAt     time.Time  `json:"updated_at" gorm:"autoUpdateTime"`

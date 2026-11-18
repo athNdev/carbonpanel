@@ -1406,7 +1406,15 @@ func (s *Store) CreateNode(ctx context.Context, node *Node) error {
 	if node.EndpointGeneration == 0 {
 		node.EndpointGeneration = 1
 	}
-	err := s.db.WithContext(ctx).Select("ID", "Name", "Host", "AdvertisedIP", "TLSCACert", "TLSCert", "TLSKey", "TLSEnabled", "TLSSkipVerify", "MaxMemoryMB", "MaxServers", "Enabled", "Status", "IsLocal", "StorageRoot", "ControllerStorageRoot", "EndpointGeneration", "DaemonID", "LastHeartbeat", "CreatedAt", "UpdatedAt").Create(node).Error
+	// New nodes are legacy endpoints until an operator opts into a managed
+	// agent. Never auto-enroll or infer a transport from a host string.
+	if node.Transport == "" {
+		node.Transport = NodeTransportLegacy
+	}
+	if node.EnrollmentState == "" {
+		node.EnrollmentState = NodeEnrollmentStateLegacy
+	}
+	err := s.db.WithContext(ctx).Select("ID", "Name", "Host", "AdvertisedIP", "TLSCACert", "TLSCert", "TLSKey", "TLSEnabled", "TLSSkipVerify", "MaxMemoryMB", "MaxServers", "Enabled", "Status", "IsLocal", "StorageRoot", "ControllerStorageRoot", "EndpointGeneration", "DaemonID", "Transport", "EnrollmentState", "EnrollmentID", "EnrollmentExpiresAt", "ProtocolVersion", "CapabilitiesJSON", "CapabilityOwner", "CredentialGeneration", "KeyFingerprint", "TokenFingerprint", "LastHeartbeat", "CreatedAt", "UpdatedAt").Create(node).Error
 	if err != nil {
 		return fmt.Errorf("failed to create node: %w", err)
 	}

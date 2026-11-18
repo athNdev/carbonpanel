@@ -185,7 +185,80 @@ func migrations() []*gormigrate.Migration {
 				return nil
 			},
 		},
+		{
+			ID: nodeControlContractMigrationID,
+			Migrate: func(tx *gorm.DB) error {
+				return applyNodeControlContractColumns(tx)
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return rollbackNodeControlContractColumns(tx)
+			},
+		},
 	}
+}
+
+const nodeControlContractMigrationID = "20261118_001_node_control_contract"
+
+// nodeControlContractColumns are metadata for the versioned node-control
+// contract (ADR 0019). No column stores a token, key or other secret: only
+// fingerprints, generations, a version and a versioned capability snapshot.
+var nodeControlContractColumns = []struct {
+	name string
+	ddl  string
+}{
+	{"transport", "TEXT NOT NULL DEFAULT 'legacy'"},
+	{"enrollment_state", "TEXT NOT NULL DEFAULT 'legacy'"},
+	{"enrollment_id", "TEXT NOT NULL DEFAULT ''"},
+	{"enrollment_expires_at", "DATETIME"},
+	{"protocol_version", "INTEGER NOT NULL DEFAULT 0"},
+	{"capabilities_json", "TEXT NOT NULL DEFAULT ''"},
+	{"capability_owner", "TEXT NOT NULL DEFAULT ''"},
+	{"credential_generation", "INTEGER NOT NULL DEFAULT 0"},
+	{"key_fingerprint", "TEXT NOT NULL DEFAULT ''"},
+	{"token_fingerprint", "TEXT NOT NULL DEFAULT ''"},
+}
+
+// applyNodeControlContractColumns is idempotent: AutoMigrate may already have
+// created the columns from the Node model, in which case only the legacy-state
+// backfill is needed. Existing rows stay legacy; no node is auto-enrolled.
+func applyNodeControlContractColumns(tx *gorm.DB) error {
+	for _, column := range nodeControlContractColumns {
+		if tx.Migrator().HasColumn(&Node{}, column.name) {
+			continue
+		}
+		if err := tx.Exec("ALTER TABLE nodes ADD COLUMN " + column.name + " " + column.ddl).Error; err != nil {
+			return fmt.Errorf("add node control column %s: %w", column.name, err)
+		}
+	}
+	backfills := map[string]string{
+		"transport":        NodeTransportLegacy,
+		"enrollment_state": NodeEnrollmentStateLegacy,
+	}
+	for column, value := range backfills {
+		if err := tx.Exec("UPDATE nodes SET "+column+" = ? WHERE "+column+" IS NULL OR "+column+" = ''",
+			value).Error; err != nil {
+			return fmt.Errorf("backfill node control column %s: %w", column, err)
+		}
+	}
+	return nil
+}
+
+// rollbackNodeControlContractColumns removes only the columns this migration
+// added. It never touches worlds, backups, server rows or other node data.
+func rollbackNodeControlContractColumns(tx *gorm.DB) error {
+	// Use native ALTER TABLE DROP COLUMN rather than GORM's SQLite rebuild:
+	// the rebuild derives its schema from the current Node model and would
+	// re-add the other contract columns on every iteration. Column names are
+	// compile-time constants from nodeControlContractColumns.
+	for _, column := range nodeControlContractColumns {
+		if !tx.Migrator().HasColumn(&Node{}, column.name) {
+			continue
+		}
+		if err := tx.Exec("ALTER TABLE nodes DROP COLUMN " + column.name).Error; err != nil {
+			return fmt.Errorf("drop node control column %s: %w", column.name, err)
+		}
+	}
+	return nil
 }
 
 // isInMemorySQLitePath reports whether path addresses an in-memory SQLite
