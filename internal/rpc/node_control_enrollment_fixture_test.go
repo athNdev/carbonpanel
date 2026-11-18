@@ -35,7 +35,77 @@ import (
 var (
 	errFixtureRefused  = errors.New("fixture enrollment refused")
 	errFixtureTopology = errors.New("UNSUPPORTED_TLS_TOPOLOGY")
+	errFixtureScope    = errors.New("fixture authorization scope refused")
 )
+
+// fixtureCredential models the three ADR 0019 authorization domains. Only a
+// node credential can call node operations, only an operator credential can
+// manage enrollments, and a bootstrap secret is never a credential at all.
+type fixtureCredentialKind int
+
+const (
+	fixtureCredentialBootstrap fixtureCredentialKind = iota
+	fixtureCredentialNode
+	fixtureCredentialOperator
+)
+
+type fixtureCredential struct {
+	kind     fixtureCredentialKind
+	nodeID   string
+	serial   string
+	scopes   []string
+	objectID string
+}
+
+func fixtureHasScope(scopes []string, wanted string) bool {
+	for _, scope := range scopes {
+		if scope == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *fixtureHarness) authorizeNodeOperation(credential fixtureCredential, objectID, requiredScope string) error {
+	if credential.kind != fixtureCredentialNode {
+		return errFixtureScope
+	}
+	if credential.objectID != objectID || !fixtureHasScope(credential.scopes, requiredScope) {
+		return errFixtureScope
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.revokedSerials[credential.serial] {
+		return errFixtureRefused
+	}
+	return nil
+}
+
+func (h *fixtureHarness) authorizePreflight(credential fixtureCredential, objectID string, reportedScopes []string) error {
+	if err := h.authorizeNodeOperation(credential, objectID, "node:report"); err != nil {
+		return err
+	}
+	for _, scope := range reportedScopes {
+		if !fixtureHasScope(credential.scopes, scope) {
+			return errFixtureScope
+		}
+	}
+	return nil
+}
+
+func (h *fixtureHarness) authorizeOperatorAction(credential fixtureCredential) error {
+	if credential.kind != fixtureCredentialOperator {
+		return errFixtureScope
+	}
+	return nil
+}
+
+func (h *fixtureHarness) authorizeBootstrapUse(credential fixtureCredential) error {
+	if credential.kind != fixtureCredentialBootstrap {
+		return errFixtureScope
+	}
+	return nil
+}
 
 type fixtureTopology int
 
@@ -379,6 +449,15 @@ func TestNodeControlEnrollmentFixtures(t *testing.T) {
 		if len(claim.Signature) != ed25519.SignatureSize {
 			t.Fatal("fixture did not produce a fresh Ed25519 signature")
 		}
+		// CSR_PRE is registration material only: submitting the CSR's own
+		// signature as the claim proof must be refused.
+		claim.Signature = append([]byte{}, csr.Signature...)
+		if _, err := h.claim(claim); err == nil {
+			t.Fatal("CSR_PRE signature was accepted as a fresh claim proof")
+		}
+		if h.enrollments[enrollmentID].State != "pending" {
+			t.Fatal("CSR_PRE-as-proof attempt mutated enrollment state")
+		}
 	})
 
 	t.Run("valid claim", func(t *testing.T) {
@@ -399,10 +478,15 @@ func TestNodeControlEnrollmentFixtures(t *testing.T) {
 	t.Run("mismatched approved key", func(t *testing.T) {
 		h := newFixtureHarness()
 		h.register(t, enrollmentID, nodeID, key, secret, time.Hour, capabilities)
+		// Same secret, same canonical context, same nonce — only the signing
+		// key differs. This isolates the approved-key binding requirement.
 		claim := fixtureValidClaim(t, h, enrollmentID, secret, key, capabilities)
-		claim.Signature = ed25519.Sign(otherKey, []byte("forged"))
+		enrollment := h.enrollments[enrollmentID]
+		claim.Signature = ed25519.Sign(otherKey, fixtureClaimContext(
+			enrollment.NodeID, enrollment.ID, claim.ChallengeID, claim.Nonce,
+			enrollment.ExpiresAt, capabilities, h.channelContext))
 		if _, err := h.claim(claim); err == nil {
-			t.Fatal("signature from a non-approved key was accepted")
+			t.Fatal("signature over the canonical context from a non-approved key was accepted")
 		}
 		if h.enrollments[enrollmentID].State != "pending" {
 			t.Fatal("refused claim mutated enrollment state")
@@ -416,8 +500,15 @@ func TestNodeControlEnrollmentFixtures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// A fresh, correct claim is built, then re-signed over the stale nonce
+		// with the approved key. Signature verification therefore succeeds and
+		// only the single-use nonce check can cause the refusal.
 		claim := fixtureValidClaim(t, h, enrollmentID, secret, key, capabilities)
+		enrollment := h.enrollments[enrollmentID]
 		claim.Nonce = staleNonce
+		claim.Signature = ed25519.Sign(key, fixtureClaimContext(
+			enrollment.NodeID, enrollment.ID, claim.ChallengeID, staleNonce,
+			enrollment.ExpiresAt, capabilities, h.channelContext))
 		if _, err := h.claim(claim); err == nil {
 			t.Fatal("superseded nonce was accepted")
 		}
@@ -456,25 +547,64 @@ func TestNodeControlEnrollmentFixtures(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// A bootstrap secret is not an enrolled credential and cannot manage
-		// enrollments; a node cert cannot act outside its own object.
-		if !strings.Contains(result.Serial, enrollmentID) {
-			t.Fatal("issued certificate serial not bound to the enrollment")
+		nodeCredential := fixtureCredential{
+			kind: fixtureCredentialNode, nodeID: nodeID, serial: result.Serial,
+			objectID: nodeID, scopes: []string{"node:heartbeat", "node:report"},
 		}
-		if h.enrollments[enrollmentID].NodeID != nodeID {
-			t.Fatal("enrolled node object mismatch")
+		bootstrapCredential := fixtureCredential{kind: fixtureCredentialBootstrap, nodeID: nodeID}
+		operatorCredential := fixtureCredential{kind: fixtureCredentialOperator}
+
+		// Positive controls prove the seam can allow each legitimate domain.
+		if err := h.authorizeNodeOperation(nodeCredential, nodeID, "node:heartbeat"); err != nil {
+			t.Fatalf("legitimate node operation refused: %v", err)
 		}
+		if err := h.authorizePreflight(nodeCredential, nodeID, []string{"node:report"}); err != nil {
+			t.Fatalf("legitimate preflight refused: %v", err)
+		}
+		if err := h.authorizeOperatorAction(operatorCredential); err != nil {
+			t.Fatalf("legitimate operator action refused: %v", err)
+		}
+		if err := h.authorizeBootstrapUse(bootstrapCredential); err != nil {
+			t.Fatalf("legitimate bootstrap use refused: %v", err)
+		}
+
+		// (a) bootstrap secret used on a node-operation RPC.
+		if err := h.authorizeNodeOperation(bootstrapCredential, nodeID, "node:heartbeat"); !errors.Is(err, errFixtureScope) {
+			t.Fatalf("bootstrap credential was not refused on a node operation: %v", err)
+		}
+		// (b) enrolled certificate used on CreateEnrollment/Revoke.
+		if err := h.authorizeOperatorAction(nodeCredential); !errors.Is(err, errFixtureScope) {
+			t.Fatalf("node credential was not refused on operator enrollment management: %v", err)
+		}
+		// (c) cross-node object_id.
+		if err := h.authorizeNodeOperation(nodeCredential, "node-other", "node:heartbeat"); !errors.Is(err, errFixtureScope) {
+			t.Fatalf("cross-node object ID was not refused: %v", err)
+		}
+		// (d) over-scope preflight report.
+		if err := h.authorizePreflight(nodeCredential, nodeID, []string{"node:report", "nodes:create"}); !errors.Is(err, errFixtureScope) {
+			t.Fatalf("over-scope preflight report was not refused: %v", err)
+		}
+	})
+
+	t.Run("unsupported TLS topology", func(t *testing.T) {
 		const topologyEnrollmentID = "enroll-fixture-topology"
+		h := newFixtureHarness()
 		h.register(t, topologyEnrollmentID, "node-fixture-topology", key, secret, time.Hour, capabilities)
 		h.topology = fixtureUnsupported
 		if _, err := h.claim(fixtureValidClaim(t, h, topologyEnrollmentID, secret, key, capabilities)); !errors.Is(err, errFixtureTopology) {
 			t.Fatalf("unsupported topology not refused: %v", err)
 		}
-		h.register(t, "enroll-fixture-proxy", "node-fixture-proxy", key, secret, time.Hour, capabilities)
+		const proxyEnrollmentID = "enroll-fixture-proxy"
+		h.register(t, proxyEnrollmentID, "node-fixture-proxy", key, secret, time.Hour, capabilities)
 		h.topology = fixtureTrustedProxy
 		h.proxyAttested = false
-		if _, err := h.claim(fixtureValidClaim(t, h, "enroll-fixture-proxy", secret, key, capabilities)); !errors.Is(err, errFixtureTopology) {
+		if _, err := h.claim(fixtureValidClaim(t, h, proxyEnrollmentID, secret, key, capabilities)); !errors.Is(err, errFixtureTopology) {
 			t.Fatalf("unattested trusted proxy not refused: %v", err)
+		}
+		h.register(t, "enroll-fixture-proxy-ok", "node-fixture-proxy-ok", key, secret, time.Hour, capabilities)
+		h.proxyAttested = true
+		if _, err := h.claim(fixtureValidClaim(t, h, "enroll-fixture-proxy-ok", secret, key, capabilities)); err != nil {
+			t.Fatalf("attested trusted proxy was refused: %v", err)
 		}
 	})
 
