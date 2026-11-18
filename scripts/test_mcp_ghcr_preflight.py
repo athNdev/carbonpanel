@@ -61,18 +61,44 @@ class StrictObservationTests(unittest.TestCase):
         original = release.observe_reference
         try:
             release.observe_reference = lambda ref, strict=False: ("absent", None)
-            self.assertEqual(preflight.decide(IMAGE, VERSION, "")["action"], "publish")
-            self.assertEqual(preflight.decide(IMAGE, VERSION, DIGEST)["action"], "refuse")
+            self.assertEqual(preflight.decide(IMAGE, VERSION, "", "present")["action"], "publish")
+            self.assertEqual(preflight.decide(IMAGE, VERSION, DIGEST, "present")["action"], "refuse")
 
             release.observe_reference = lambda ref, strict=False: ("present", {"digest": DIGEST})
-            self.assertEqual(preflight.decide(IMAGE, VERSION, "")["action"], "refuse")
-            self.assertEqual(preflight.decide(IMAGE, VERSION, DIGEST)["action"], "resume")
-            self.assertEqual(preflight.decide(IMAGE, VERSION, OTHER)["action"], "refuse")
+            self.assertEqual(preflight.decide(IMAGE, VERSION, "", "present")["action"], "refuse")
+            self.assertEqual(preflight.decide(IMAGE, VERSION, DIGEST, "present")["action"], "resume")
+            self.assertEqual(preflight.decide(IMAGE, VERSION, OTHER, "present")["action"], "refuse")
 
             release.observe_reference = lambda ref, strict=False: ("unknown", None)
-            self.assertEqual(preflight.decide(IMAGE, VERSION, "")["action"], "refuse")
+            self.assertEqual(preflight.decide(IMAGE, VERSION, "", "present")["action"], "refuse")
         finally:
             release.observe_reference = original
+
+    def test_definitive_package_absence_and_ambiguous_states(self):
+        # First tag: authoritative 404 Package not found means publish is safe;
+        # a requested resume digest cannot exist and must refuse.
+        published = preflight.decide(IMAGE, VERSION, "", "absent")
+        self.assertEqual(published["action"], "publish")
+        self.assertEqual(preflight.decide(IMAGE, VERSION, DIGEST, "absent")["action"], "refuse")
+        unknown = preflight.decide(IMAGE, VERSION, "", "unknown")
+        self.assertEqual(unknown["action"], "refuse")
+        self.assertIn("unknown", unknown["reason"])
+
+    def test_package_state_parser_uses_definitive_404(self):
+        original = preflight.subprocess.run
+        try:
+            class Result:
+                stdout = ("HTTP/2.0 404 Not Found\n\n"
+                          '{"message":"Package not found.","status":"404"}')
+            preflight.subprocess.run = lambda *a, **k: Result()
+            self.assertEqual(preflight.github_package_state(IMAGE),
+                             ("absent", "definitive 404 Package not found from GitHub Packages API"))
+            Result.stdout = "HTTP/2.0 403 Forbidden\n\n"
+            self.assertEqual(preflight.github_package_state(IMAGE)[0], "unknown")
+            Result.stdout = "HTTP/2.0 200 OK\n\n[]"
+            self.assertEqual(preflight.github_package_state(IMAGE)[0], "present")
+        finally:
+            preflight.subprocess.run = original
 
 
 class AnchoredIdentityTests(unittest.TestCase):

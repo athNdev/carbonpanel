@@ -25,7 +25,7 @@ Check locally before any remote step:
 
 ```bash
 python3 scripts/validate_mcp_server_json.py --file docker/mcp.server.json
-python3 -m unittest scripts.test_validate_mcp_server_json scripts.test_mcp_onboarding_fixture scripts.test_mcp_stdio_smoke
+python3 -m unittest scripts.test_validate_mcp_server_json scripts.test_mcp_onboarding_fixture scripts.test_mcp_stdio_smoke scripts.test_mcp_ghcr_preflight
 ```
 
 The validator refuses `latest`, version ranges, a non-OCI package, a missing
@@ -63,6 +63,28 @@ done
 
 Both lines must print `io.github.athNdev/carbon-panel`.
 
+### First-tag observation: authoritative read is required
+
+A registry manifest lookup alone cannot prove that an uncreated GHCR package
+is absent. Read-only probes on 2026-11-18 observed these response shapes for
+`ghcr.io/athndev/carbonpanel-mcp:v0.1.0` (no package was created):
+
+| Read | Response | Classification |
+| --- | --- | --- |
+| Anonymous `GET /v2/.../manifests/v0.1.0` | `401 UNAUTHORIZED` (`{"errors":[{"code":"UNAUTHORIZED","message":"authentication required"}]}`) | ambiguous — refuse |
+| Authenticated (GitHub token) manifest GET | `403`, empty body | ambiguous — refuse |
+| Anonymous GHCR pull-token manifest GET | `403`, empty body | ambiguous — refuse |
+| Authenticated `GET /users/athNdev/packages/container/carbonpanel-mcp/versions` | `404 {"message":"Package not found.","status":"404"}` | **definitive absence** |
+
+`scripts/mcp_ghcr_preflight.py` therefore first calls the authenticated GitHub
+Packages API: a definitive `404 Package not found.` is the only accepted proof
+of first-tag absence; `200` means the package exists and the strict
+`release.py` `observe_reference(strict=True)` classification is used for the
+tag/digest. Any 401/403/5xx, empty or unrecognised response is `unknown` and
+refuses. A requested resume digest against an absent package refuses; it never
+falls back to a new push. These probes were read-only and created no package or
+tag.
+
 ## 2. Verify package visibility separately from any registry listing
 
 A successful authenticated push is not evidence that the image is publicly
@@ -86,27 +108,41 @@ metadata is injected with the **real** main-package variables at core head
 `-version` flag prints them. The same values are OCI config labels checked in
 section 1.
 
-Run the pinned image by digest with no world/database mount, no Docker socket,
-a temporary filesystem only, throwaway network and a scoped fixture token.
-`--mock-controller` starts an owned disposable Connect controller that answers
-the auth-readiness calls, and `--call-tool list_servers` performs one real
-read-only tool invocation over stdio:
+The packaged container must be tested as a container. A host Python mock bound
+to runner loopback is **not** reachable from a default-bridge MCP container, so
+the fixture and the MCP image share one per-run isolated Docker network and the
+MCP container uses the fixture's service DNS name (`panel-fixture:8080`). The
+mock image is CI-only, built from `docker/Dockerfile.mcp-mock`, never published
+and given no credentials or data.
 
 ```bash
+network="mcp-smoke-${GITHUB_RUN_ID}"
+fixture="mcp-fixture-${GITHUB_RUN_ID}"
+docker network create "$network"
+docker build -f docker/Dockerfile.mcp-mock -t "mcp-smoke-fixture:${GITHUB_RUN_ID}" .
+docker run -d --name "$fixture" --network "$network" \
+  --network-alias panel-fixture "mcp-smoke-fixture:${GITHUB_RUN_ID}"
+# wait for GET /ready on 127.0.0.1:8080 inside the fixture container, then:
 python3 scripts/mcp_stdio_smoke.py --expect-tool list_servers \
-  --call-tool list_servers --mock-controller \
+  --call-tool list_servers --url http://panel-fixture:8080 \
   --evidence mcp-stdio-smoke.json -- \
-  docker run -i --rm -e CARBONPANEL_URL -e CARBONPANEL_API_TOKEN \
-  -e CARBONPANEL_TOKEN -e CARBONPANEL_MCP_TRANSPORT \
+  docker run -i --rm --network "$network" \
+  -e CARBONPANEL_URL -e CARBONPANEL_TOKEN -e CARBONPANEL_API_TOKEN \
+  -e CARBONPANEL_MCP_TRANSPORT \
   ghcr.io/athndev/carbonpanel-mcp@sha256:<MANIFEST_DIGEST>
+docker logs "$fixture" > mcp-container-fixture.log 2>&1
+# assert the log names GetAuthStatus, GetCurrentUser and ListServers
+docker rm -f "$fixture"; docker network rm "$network"
 ```
 
-Retain the JSON report: command, resolved tool names, the `tool_call` result,
-fixture requests, exit code and stderr byte count. A successful install or
-`tools/list` alone is not enough; the scoped call must return
-`isError: false`. A host-installed binary can use
-`python3 scripts/test_mcp_real_binary.py --binary <PATH>` for the same check.
-Neither command contacts a live or shared panel.
+`docker logs` lines naming all three procedures are the evidence that the
+packaged container actually reached the scoped read-only fixture by service
+DNS. Retain the smoke JSON (tool list, `tool_call` with `isError: false`, exit
+code, stderr bytes), the fixture log and a JSON record of the network/container
+names and image digest. A host-installed binary can use
+`python3 scripts/test_mcp_real_binary.py --binary <PATH>` for a separate
+host-side check; it does not substitute for the packaged-container path.
+Neither fixture contacts a live or shared panel.
 
 ## 4. Read-only smoke on a disposable fixture
 
@@ -217,6 +253,12 @@ was then driven against an owned Connect mock on `127.0.0.1`: auth readiness
 call returning `isError: false`. Evidence:
 `C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/mcp-plans/mcp-dist-real-binary-scoped-smoke.json`.
 No image was built or pushed, no live panel was contacted and no real credential
-was used. The **merged container entrypoint** is still untested here: no Docker
-daemon is available, and an authorized publication must provide a digest before
-the by-digest image smoke in section 3 can run.
+was used. The **packaged container entrypoint on the isolated fixture network**
+(section 3) is unexecuted in this authoring environment: no Docker daemon is
+available here. It is implemented as a CI step and must pass on an authorized
+dispatch before any registry listing or advertisement. Do not substitute the
+host-binary evidence for that container proof.
+
+The read-only GHCR first-tag probes are recorded in
+`C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/mcp-plans/mcp-ghcr-first-tag-probe.json`.
+They created no package, tag or release.

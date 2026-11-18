@@ -196,6 +196,7 @@ jobs:
         env:
           MCP_VERSION: ${{ inputs.version }}
           EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+          GH_TOKEN: ${{ github.token }}
         run: >-
           python3 scripts/mcp_ghcr_preflight.py --image "$GHCR_IMAGE"
           --version "$MCP_VERSION" --expected-digest "$EXPECTED_DIGEST"
@@ -270,25 +271,50 @@ jobs:
           mkdir -p "$anon"
           docker --config "$anon" pull -q "${GHCR_IMAGE}@${IMAGE_DIGEST}"
           echo "ok=true" >> "$GITHUB_OUTPUT"
-      - name: Verify the scoped artifact with a real stdio handshake
+      - name: Verify the packaged container on an isolated fixture network
         id: stdio
         env:
           IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
         run: |
           set -euo pipefail
           anon="$RUNNER_TEMP/mcp-anon-docker"
+          network="mcp-smoke-${GITHUB_RUN_ID}"
+          fixture="mcp-fixture-${GITHUB_RUN_ID}"
+          mock_image="mcp-smoke-fixture:${GITHUB_RUN_ID}"
+          trap 'docker rm -f "$fixture" >/dev/null 2>&1 || true; docker network rm "$network" >/dev/null 2>&1 || true' EXIT
+          docker network create "$network"
+          docker build -f docker/Dockerfile.mcp-mock -t "$mock_image" .
+          docker run -d --name "$fixture" --network "$network" \
+            --network-alias panel-fixture "$mock_image"
+          ready=0
+          for i in $(seq 1 30); do
+            if docker exec "$fixture" python -c \
+              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)" \
+              >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = '1' || { echo "::error::fixture never became ready" >&2; exit 1; }
           python3 scripts/mcp_stdio_smoke.py --expect-tool list_servers \
-            --call-tool list_servers --mock-controller \
+            --call-tool list_servers --url http://panel-fixture:8080 \
             --evidence mcp-stdio-smoke.json -- \
-            docker --config "$anon" run -i --rm \
+            docker --config "$anon" run -i --rm --network "$network" \
             -e CARBONPANEL_URL -e CARBONPANEL_TOKEN -e CARBONPANEL_API_TOKEN \
             -e CARBONPANEL_MCP_TRANSPORT \
             "${GHCR_IMAGE}@${IMAGE_DIGEST}"
+          docker logs "$fixture" > mcp-container-fixture.log 2>&1
+          grep -q 'GetAuthStatus' mcp-container-fixture.log
+          grep -q 'GetCurrentUser' mcp-container-fixture.log
+          grep -q 'ListServers' mcp-container-fixture.log
+          printf '{"network":"%s","fixture_container":"%s","image":"%s","fixture_log":"mcp-container-fixture.log","proof":"packaged container reached the scoped read-only fixture by service DNS on an isolated network"}\n' \
+            "$network" "$fixture" "${GHCR_IMAGE}@${IMAGE_DIGEST}" > mcp-container-fixture.json
           echo "ok=true" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mcp-stdio-smoke
-          path: mcp-stdio-smoke.json
+          path: |
+            mcp-stdio-smoke.json
+            mcp-container-fixture.log
+            mcp-container-fixture.json
           if-no-files-found: error
 
   publish-registry:
