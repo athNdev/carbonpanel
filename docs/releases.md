@@ -188,10 +188,19 @@ trusted publish gate. The authoritative gate is `publication_allowed()` together
 with a successful `ci.yml` run for the exact published commit.
 
 Main `edge` publication and website/Pages effects belong to `cd.yml` and the
-site workflows and are unchanged here. Tag staging alone does not clear or waive
-those automatically verified-main effects. A scoped publish-boundary opt-in for
-those developer channels must be reviewed with the release auditor before any
-held product merge is unblocked; until that review, product merges stay held.
+site workflows. An ordinary main merge now only builds and verifies: Docker Hub
+`edge`/`sha-*` publication requires `workflow_dispatch` with `push=true`, and
+Pages deployment requires `workflow_dispatch` with `deploy=true`. Both gates
+also require `ci_verified=true` and a trusted `refs/heads/main` dispatch ref;
+tags, feature refs, blank refs, PRs and dry runs are refused. The workflows are
+not disabled — they still build and validate on their normal triggers.
+
+IndexNow notification is deliberately deferred under that model:
+`indexable-changes` derives URLs only from a push diff, while deployment now
+occurs only on a dispatch, so a dispatch deploy produces no URLs and sends no
+notification. This is a documented deferral, not a failed notification; a dry-run
+fixture covers it. These scoped gates still need release-auditor review before
+held product merges are unblocked; until that review, product merges stay held.
 
 ## Recover a staged release
 

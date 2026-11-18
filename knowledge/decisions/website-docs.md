@@ -26,6 +26,13 @@ sources:
 
 - The homepage and documentation share one artifact. Only the website deployment
   workflow publishes Pages; docs validation must not replace the root homepage.
+- An ordinary main merge only builds and validates the combined site. Pages
+  deployment requires `workflow_dispatch` with `deploy=true`, `ci_verified=true`
+  and a trusted `refs/heads/main` ref. Build and indexing jobs stay read-only;
+  `pages: write` and `id-token: write` belong only to the deploy job. IndexNow
+  notification is deliberately deferred: changed URLs come from a push diff
+  while deploy is dispatch-only, so no notification is sent. See
+  [release operations](../workflows/release.md).
 - Website CI pins the same Bun version as the frontend CI so frozen installs
   can read the application's checked-in lockfile format.
 - The source-build guide installs frontend dependencies with the frozen lockfile

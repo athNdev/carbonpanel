@@ -7,11 +7,11 @@
 name: Docker Hub CD
 
 on:
-  # Publish :edge from a push to main only after the "Continuous
-  # Integration" workflow has succeeded for that same commit. Previously this
-  # workflow triggered on the raw push to main, so a commit that failed CI
-  # could still publish a broken :latest image to Docker Hub (DESIGN.md §10.1
-  # finding #6).
+  # An ordinary verified main merge only builds and verifies; it does NOT push
+  # :edge or :sha images. Developer-channel publication requires an explicit
+  # workflow_dispatch with push=true, decided by developer-channel-gate in
+  # scripts/release.py. The workflow is not disabled: CI-completed events still
+  # build the image with push=false (DESIGN.md §10.1 finding #6).
   workflow_run:
     workflows: ["Continuous Integration"]
     types:
@@ -20,10 +20,15 @@ on:
   workflow_dispatch:
     inputs:
       push:
-        description: 'Push to Docker Hub'
+        description: 'EXPLICIT developer-channel opt-in: publish edge/sha images to Docker Hub (off = build and verify only)'
         required: true
         type: boolean
-        default: true
+        default: false
+      ci_verified:
+        description: 'Confirm main CI is green for the revision being published'
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build-and-push:
@@ -50,8 +55,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
+      - name: Decide developer-channel publication (explicit opt-in only)
+        id: channel
+        env:
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_OPT_IN: ${{ inputs.push }}
+          CHANNEL_RUN_EVENT: ${{ github.event.workflow_run.event }}
+          CHANNEL_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_CI_VERIFIED: ${{ inputs.ci_verified }}
+        run: |
+          python3 scripts/release.py developer-channel-gate \
+            --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
+            --run-event "$CHANNEL_RUN_EVENT" --conclusion "$CHANNEL_CONCLUSION" \
+            --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED"
+
       - name: Docker Hub Credentials & Login Check
         id: check-creds
+        if: steps.channel.outputs.publish == 'true'
         env:
           RAW_USER: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           RAW_PASS: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
@@ -165,7 +186,7 @@ jobs:
           context: .
           file: docker/Dockerfile.carbon-panel
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push) }}
+          push: ${{ steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -175,7 +196,7 @@ jobs:
             APP_COMMIT=${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Sync Docker Hub repository description
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
-        if: steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push)
+        if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}

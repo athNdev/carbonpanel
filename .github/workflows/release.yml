@@ -381,10 +381,67 @@ jobs:
           short-description: Self-hosted Minecraft server and modpack management with Docker.
           enable-url-completion: true
 
-  # ALIAS PROMOTION ONLY. One alias per serialized step, each re-verified.
+  # DURABLE RELEASE RECORD. This completes BEFORE any moving alias is promoted,
+  # so an interruption cannot leave a newer alias with no recorded provenance.
+  publish:
+    name: Publish complete GitHub release
+    needs: [plan, publish-immutable]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: verified-release-downloads
+          path: dist/release
+      - name: Record the verified image digest and final checksums
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: python3 scripts/release.py finalize --output dist/release --digest "$IMAGE_DIGEST"
+      - name: Decide the durable release record action
+        id: record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        # A matching published release means retry only needs alias promotion;
+        # an absent record is published here. Any conflict or unknown state
+        # refuses, so no asset is re-uploaded or overwritten.
+        run: |
+          python3 scripts/release.py release-record \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --digest "$IMAGE_DIGEST"
+      - name: Upload assets to a draft, then publish
+        if: steps.record.outputs.action == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+        run: python3 scripts/release.py publish --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --output dist/release
+      - name: Verify an existing durable record (alias-only retry)
+        if: steps.record.outputs.action == 'verified'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          python3 scripts/release.py verify-release-record \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --digest "$IMAGE_DIGEST"
+
+  # ALIAS PROMOTION LAST. Each alias is re-verified against the durable record
+  # and the actual registry alias digest before any move.
   promote-aliases:
     name: Promote moving aliases from the verified digest
-    needs: [plan, publish-immutable]
+    needs: [plan, publish-immutable, publish]
     if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -410,53 +467,47 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+      - name: Re-verify the durable release record before any alias move
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          python3 scripts/release.py verify-release-record \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --digest "$IMAGE_DIGEST"
       - name: Decide which aliases may advance
         id: promotion
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
         # An undeterminable channel promotes nothing and records why, rather
         # than guessing or silently moving a mutable alias.
-        run: python3 scripts/release.py alias-promotion --version "$RELEASE_VERSION" --digest "$IMAGE_DIGEST"
+        run: |
+          python3 scripts/release.py alias-promotion \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --digest "$IMAGE_DIGEST"
       - name: Promote minor channel alias
         if: steps.promotion.outputs.minor != ''
-        env:
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-          ALIAS: ${{ steps.promotion.outputs.minor }}
-        run: python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" --alias "$ALIAS" --digest "$IMAGE_DIGEST"
-      - name: Promote latest channel alias
-        if: steps.promotion.outputs.latest == 'true'
-        env:
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-        run: python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" --alias latest --digest "$IMAGE_DIGEST"
-
-  publish:
-    name: Publish complete GitHub release
-    needs: [plan, publish-immutable, promote-aliases]
-    if: needs.plan.outputs.publish == 'true'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.plan.outputs.commit }}
-          fetch-depth: 0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: verified-release-downloads
-          path: dist/release
-      - name: Record the verified image digest and final checksums
-        env:
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-        run: python3 scripts/release.py finalize --output dist/release --digest "$IMAGE_DIGEST"
-      - name: Upload assets to a draft, then publish
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-        run: python3 scripts/release.py publish --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --output dist/release
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          ALIAS: ${{ steps.promotion.outputs.minor }}
+        run: |
+          python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --alias "$ALIAS" --digest "$IMAGE_DIGEST"
+      - name: Promote latest channel alias
+        if: steps.promotion.outputs.latest == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --alias latest --digest "$IMAGE_DIGEST"

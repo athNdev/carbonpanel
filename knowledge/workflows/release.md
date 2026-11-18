@@ -80,8 +80,14 @@ resume from the original verified download artifact without rebuilding images.
   release manifest whose version, commit, revision and digest all match;
   unknown or mismatched provenance refuses. Module images use the same split and
   the exact `mod-vMAJOR.MINOR.PATCH` ref; build uses `git show-ref --verify`,
-  never a glob existence check. Main `edge` and Pages effects stay unchanged; a
-  scoped publish-boundary opt-in needs release-auditor review before held merges.
+  never a glob existence check. The durable release record completes before any
+  alias moves; each move re-checks the actual registry alias digest against
+  durable digest-to-version evidence and refuses on uncertainty. Main `edge` and
+  Pages effects use the same gate: an ordinary verified merge builds and
+  validates only; publication requires a trusted `refs/heads/main` dispatch with
+  the channel opt-in and `ci_verified=true`. IndexNow notification is deferred
+  because URLs come from a push diff while deployment is dispatch-only. A scoped
+  publish-boundary opt-in needs release-auditor review before held merges.
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The

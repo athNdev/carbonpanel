@@ -338,6 +338,8 @@ def release_provenance(tag, commit, expected_digest, releases_json=None):
             for item in page:
                 if item.get("tag_name") != tag:
                     continue
+                if item.get("draft"):
+                    return False, "release is still a draft; not a durable record", None
                 assets = {asset["name"]: asset for asset in item.get("assets", [])}
                 manifest_asset = assets.get("release-manifest.json")
                 if not manifest_asset:
@@ -360,6 +362,85 @@ def release_provenance(tag, commit, expected_digest, releases_json=None):
         return False, "release provenance unavailable; fail closed", None
 
 
+def durable_release_records(releases_json=None):
+    """Map verified published image digests to their release versions. Used to
+    interpret an observed alias digest; an empty map means unknown, so an alias
+    move must refuse rather than guess.
+    """
+    try:
+        data = (releases_json if releases_json is not None else json.loads(
+            github("api", "--paginate", "--slurp",
+                   "/repos/{owner}/{repo}/releases?per_page=100")))
+        records = {}
+        for page in data:
+            for item in page:
+                if item.get("draft") or item.get("prerelease"):
+                    continue
+                assets = {asset["name"]: asset for asset in item.get("assets", [])}
+                manifest_asset = assets.get("release-manifest.json")
+                if not manifest_asset:
+                    continue
+                raw = github("api", "/repos/{owner}/{repo}/releases/assets/"
+                             + str(manifest_asset["id"]),
+                             "-H", "Accept: application/octet-stream")
+                manifest = json.loads(raw)
+                digest = manifest.get("image_digest")
+                tag = item.get("tag_name", "")
+                if valid_digest(digest) and SEMVER.fullmatch(tag):
+                    records[digest] = tag
+        return records
+    except (subprocess.CalledProcessError, ValueError, TypeError, AttributeError, KeyError):
+        return {}
+
+
+def release_record_decision(tag, commit, digest, releases_json=None):
+    """Decide how to reach a durable release record before any alias moves.
+    Returns (action, reason) with action publish / verified / refuse.
+    """
+    try:
+        data = (releases_json if releases_json is not None else json.loads(
+            github("api", "--paginate", "--slurp",
+                   "/repos/{owner}/{repo}/releases?per_page=100")))
+        found = any(item.get("tag_name") == tag for page in data for item in page)
+        if not found:
+            return "publish", "no release record for this version"
+        ok, reason, _ = release_provenance(tag, commit, digest, data)
+        return ("verified", reason) if ok else ("refuse", reason)
+    except (subprocess.CalledProcessError, ValueError, TypeError, AttributeError, KeyError):
+        return "refuse", "release record state is unknown"
+
+
+def alias_move_decision(candidate, candidate_digest, observations, digest_versions):
+    """Fail-closed check before moving a moving alias.
+
+    observations: {registry: (state, info)} of the current alias in each
+    registry. digest_versions: digest→version from durable release records.
+    Equal registry refs alone do not authorize a move, and an unknown version
+    for an observed digest refuses instead of relying on release history alone.
+    """
+    tag = version(candidate)
+    if "-" in tag:
+        return False, "prereleases do not move stable aliases"
+    if not valid_digest(candidate_digest):
+        return False, "missing or invalid verified digest"
+    for name, (state, info) in observations.items():
+        if state == "unknown":
+            return False, f"{name} alias state is unknown"
+        if state == "absent":
+            continue
+        if not REQUIRED_PLATFORMS <= info["platforms"]:
+            return False, f"{name} alias lacks both Linux architectures"
+        current = info["digest"]
+        if current == candidate_digest:
+            continue  # already at the verified image; idempotent, no overwrite
+        previous = digest_versions.get(current)
+        if not previous:
+            return False, f"{name} alias digest has no durable version provenance"
+        if semver_key(tag) < semver_key(previous):
+            return False, f"would move {name} alias backwards from {previous}"
+    return True, "alias may advance from the verified digest"
+
+
 def resume_provenance(tag, commit, expected_digest, releases_json=None):
     """RESUME needs the exact tag identity plus verified release provenance,
     not merely equal tag digests and matching platform counts."""
@@ -372,6 +453,42 @@ def resume_provenance(tag, commit, expected_digest, releases_json=None):
     except subprocess.CalledProcessError:
         return False, "version tag identity cannot be determined"
     return release_provenance(tag, commit, expected_digest, releases_json)[:2]
+
+
+TRUSTED_DEVELOPER_REF = "refs/heads/main"
+
+
+def developer_channel_decision(event_name, opt_in=False, run_event="", conclusion="",
+                               ref="", ci_verified=False):
+    """Decide whether a developer-channel side effect may occur.
+
+    An ordinary verified main merge builds and verifies only. Publishing the
+    Docker Hub `edge`/`sha-*` images or deploying Pages requires an explicit
+    operator opt-in on workflow_dispatch FROM THE TRUSTED DEFAULT BRANCH with
+    confirmation that main CI is green. Tags, feature/blank refs, PRs, dry runs
+    and failed or non-push CI events never publish.
+    """
+    if not ref or ref.startswith("refs/tags/"):
+        return False, "a trusted branch ref is required; tags and blank refs stage only"
+    if event_name == "workflow_dispatch":
+        if ref != TRUSTED_DEVELOPER_REF:
+            return False, "developer-channel opt-in is only valid on the default branch"
+        if str(opt_in).strip().lower() != "true":
+            return False, "dispatch without opt-in is a dry run"
+        if str(ci_verified).strip().lower() != "true":
+            return False, "green main CI must be confirmed before developer publication"
+        return True, "explicit trusted-branch opt-in with confirmed CI"
+    if event_name == "workflow_run":
+        if ref != TRUSTED_DEVELOPER_REF:
+            return False, "non-default-branch CI stages only"
+        if run_event == "push" and conclusion == "success":
+            return False, "verified main merge stages only; publication needs an explicit opt-in"
+        return False, "workflow_run from a non-push or failed CI stages only"
+    if event_name == "push":
+        return False, "branch push stages only"
+    if event_name == "pull_request":
+        return False, "pull requests stage only"
+    return False, f"{event_name} stages only"
 
 
 def github(*args):
@@ -652,6 +769,11 @@ def alias_promotion(args):
     """Decide which moving aliases, if any, may be promoted from a verified digest."""
     tag = version(args.version)
     allowed, reason = alias_promotion_decision(tag, published_stable_versions())
+    # A durable release record must exist before any alias can move.
+    if allowed:
+        verified, detail, _ = release_provenance(tag, args.commit, args.digest)
+        if not verified:
+            allowed, reason = None, "durable release record unavailable: " + detail
     plain = tag[1:]
     minor = ".".join(plain.split("-", 1)[0].split(".")[:2])
     values = {"minor": minor if allowed else "", "latest": "true" if allowed else "false",
@@ -661,23 +783,73 @@ def alias_promotion(args):
 
 
 def promote_alias(args):
-    """Move one moving alias to an already-verified digest, then re-verify it."""
+    """Move one moving alias to an already-verified digest, then re-verify it.
+
+    The durable release record is checked first, then the actual alias digest in
+    every registry. Unknown state or an untraceable current digest refuses;
+    an alias already at the verified digest is left untouched (no overwrite).
+    """
     tag = version(args.version)
     if not valid_digest(args.digest):
         raise ValueError("Missing or invalid verified digest")
     minor = ".".join(tag[1:].split("-", 1)[0].split(".")[:2])
     if args.alias not in (minor, "latest"):
         raise ValueError("Unsupported moving alias: " + args.alias)
-    allowed, reason = alias_promotion_decision(tag, published_stable_versions())
+    verified, detail, _ = release_provenance(tag, args.commit, args.digest)
+    if not verified:
+        raise ValueError("Durable release record refused alias promotion: " + detail)
+    refs = {"docker_hub": f"{DOCKER_HUB_IMAGE}:{args.alias}",
+            "ghcr": f"ghcr.io/{ghcr_repository()}:{args.alias}"}
+    observations = {name: observe_reference(ref) for name, ref in refs.items()}
+    if any(state == "unknown" for state, _ in observations.values()):
+        raise ValueError("Alias promotion refused: registry alias state is unknown")
+    allowed, reason = alias_move_decision(
+        tag, args.digest, observations, durable_release_records())
     if not allowed:
         raise ValueError("Alias promotion refused: " + reason)
-    for ref in (f"{DOCKER_HUB_IMAGE}:{args.alias}",
-                f"ghcr.io/{ghcr_repository()}:{args.alias}"):
+    for name, ref in refs.items():
+        state, info = observations[name]
+        if state == "present" and info["digest"] == args.digest:
+            continue  # idempotent retry: no re-upload and no overwrite
         source = ref.rsplit(":", 1)[0] + "@" + args.digest
         subprocess.run(["docker", "buildx", "imagetools", "create", "--tag", ref, source],
                        check=True, cwd=ROOT)
         verify_tag_digest(observe_reference(ref), args.digest)
-    print(json.dumps({"alias": args.alias, "digest": args.digest, "promoted": True}, indent=2))
+    print(json.dumps({"alias": args.alias, "digest": args.digest,
+                      "moved": True, "reason": reason}, indent=2))
+
+
+def developer_channel_gate(args):
+    """Emit the single publish decision used by cd.yml and landing.yml."""
+    publish, reason = developer_channel_decision(
+        args.event, args.opt_in, args.run_event, args.conclusion, args.ref, args.ci_verified)
+    values = {"publish": str(publish).lower(), "reason": reason}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return publish
+
+
+def release_record(args):
+    """Decide whether a durable release record exists before alias promotion."""
+    action, reason = release_record_decision(
+        version(args.version), args.commit, args.digest)
+    values = {"action": action, "reason": reason}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if action == "refuse":
+        raise ValueError("Release record refused: " + reason)
+    return action
+
+
+def verify_release_record(args):
+    """Re-verify the durable record immediately before moving an alias."""
+    ok, reason, _ = release_provenance(
+        version(args.version), args.commit, args.digest)
+    values = {"verified": str(ok).lower(), "reason": reason}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Durable release record verification failed: " + reason)
 
 
 def verify_reference(args):
@@ -790,11 +962,26 @@ def main():
     immutable_verify.add_argument("--digest", required=True)
     alias_planner = commands.add_parser("alias-promotion")
     alias_planner.add_argument("--version", required=True)
+    alias_planner.add_argument("--commit", required=True)
     alias_planner.add_argument("--digest", required=True)
     alias_mover = commands.add_parser("promote-alias")
     alias_mover.add_argument("--version", required=True)
+    alias_mover.add_argument("--commit", required=True)
     alias_mover.add_argument("--alias", required=True)
     alias_mover.add_argument("--digest", required=True)
+    record_checker = commands.add_parser("release-record")
+    for name in ("version", "commit", "digest"):
+        record_checker.add_argument("--" + name, required=True)
+    record_verifier = commands.add_parser("verify-release-record")
+    for name in ("version", "commit", "digest"):
+        record_verifier.add_argument("--" + name, required=True)
+    developer_gate = commands.add_parser("developer-channel-gate")
+    developer_gate.add_argument("--event", required=True)
+    developer_gate.add_argument("--opt-in", default="")
+    developer_gate.add_argument("--run-event", default="")
+    developer_gate.add_argument("--conclusion", default="")
+    developer_gate.add_argument("--ref", default="")
+    developer_gate.add_argument("--ci-verified", default="")
     module_resolver = commands.add_parser("module-version")
     module_resolver.add_argument("--version", required=True)
     module_planner = commands.add_parser("module-promotion")

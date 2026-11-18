@@ -14,6 +14,12 @@ from unittest.mock import patch
 from scripts import release
 
 
+def registry_writes(command):
+    """Only calls that would mutate a registry or publish a release."""
+    return [call for call in command.call_args_list
+            if any(token in call.args[0] for token in ("create", "--push", "publish"))]
+
+
 def present(digest=None, platforms=None):
     """Registry fixture: a present, fully inspected multi-arch reference."""
     return ("present", {
@@ -403,10 +409,12 @@ class ReleaseTests(unittest.TestCase):
     def test_alias_promotion_outputs_actionable_step_values(self):
         digest = "sha256:" + "a" * 64
         def run_case(candidate, published):
-            with patch.object(release, "published_stable_versions", return_value=published):
+            with patch.object(release, "published_stable_versions", return_value=published), \
+                 patch.object(release, "release_provenance", return_value=(True, "verified", None)):
                 out = io.StringIO()
                 with redirect_stdout(out):
-                    release.alias_promotion(argparse.Namespace(version=candidate, digest=digest))
+                    release.alias_promotion(argparse.Namespace(
+                        version=candidate, commit="b" * 40, digest=digest))
                 return json.loads(out.getvalue())
 
         forward = run_case("v3.1.0", ["v3.0.0", "v3.0.5"])
@@ -420,23 +428,92 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(unavailable["latest"], "false")
         self.assertIn("unavailable", unavailable["reason"])
 
-    def test_promote_alias_is_serialized_and_preflighted(self):
+    def test_promote_alias_preflights_record_registries_and_avoids_overwrite(self):
         digest = "sha256:" + "a" * 64
+        other = "sha256:" + "d" * 64
+        def call(alias="latest"):
+            return argparse.Namespace(version="v3.1.0", commit="b" * 40,
+                                      alias=alias, digest=digest)
+
         with patch.object(release.subprocess, "run") as command, \
+             patch.object(release, "release_provenance", return_value=(True, "verified", None)), \
+             patch.object(release, "observe_reference", side_effect=[
+                 ("absent", None), ("absent", None), present(digest), present(digest)]), \
+             patch.object(release, "durable_release_records", return_value={}):
+            release.promote_alias(call())
+            writes = registry_writes(command)
+            self.assertEqual(len(writes), 2)  # both registries, each re-verified
+            for item in writes:
+                self.assertIn("imagetools", item.args[0])
+                self.assertIn("create", item.args[0])
+
+        # Interruption then retry: alias already at the verified digest => no overwrite.
+        with patch.object(release.subprocess, "run") as command, \
+             patch.object(release, "release_provenance", return_value=(True, "verified", None)), \
              patch.object(release, "observe_reference", return_value=present(digest)), \
-             patch.object(release, "published_stable_versions", return_value=["v3.0.0"]):
-            release.promote_alias(argparse.Namespace(
-                version="v3.1.0", alias="latest", digest=digest))
-            self.assertEqual(command.call_count, 2)  # both registries, re-verified each time
-            for call in command.call_args_list:
-                self.assertIn("imagetools", call.args[0])
-                self.assertIn("create", call.args[0])
+             patch.object(release, "durable_release_records", return_value={}):
+            release.promote_alias(call())
+            self.assertEqual(registry_writes(command), [])  # no overwrite on retry
+
+        # Lagging/unknown registry state refuses any move.
         with patch.object(release.subprocess, "run") as command, \
-             patch.object(release, "published_stable_versions", return_value=["v3.2.0"]):
-            with self.assertRaisesRegex(ValueError, "older"):
+             patch.object(release, "release_provenance", return_value=(True, "verified", None)), \
+             patch.object(release, "observe_reference", return_value=("unknown", None)):
+            with self.assertRaisesRegex(ValueError, "unknown"):
+                release.promote_alias(call())
+            self.assertEqual(registry_writes(command), [])
+
+        # An older dispatch cannot move an alias whose digest proves a newer version.
+        with patch.object(release.subprocess, "run") as command, \
+             patch.object(release, "release_provenance", return_value=(True, "verified", None)), \
+             patch.object(release, "observe_reference", return_value=present(other)), \
+             patch.object(release, "durable_release_records",
+                          return_value={other: "v3.2.0"}):
+            with self.assertRaisesRegex(ValueError, "backwards"):
                 release.promote_alias(argparse.Namespace(
-                    version="v3.0.0", alias="latest", digest=digest))
-            command.assert_not_called()
+                    version="v3.0.0", commit="b" * 40, alias="latest", digest="sha256:" + "e" * 64))
+            self.assertEqual(registry_writes(command), [])
+
+        # An untraceable alias digest is uncertainty: refuse, do not guess.
+        with patch.object(release.subprocess, "run") as command, \
+             patch.object(release, "release_provenance", return_value=(True, "verified", None)), \
+             patch.object(release, "observe_reference", return_value=present(other)), \
+             patch.object(release, "durable_release_records", return_value={}):
+            with self.assertRaisesRegex(ValueError, "provenance"):
+                release.promote_alias(call())
+            self.assertEqual(registry_writes(command), [])
+
+        # No durable release record => no alias move at all.
+        with patch.object(release.subprocess, "run") as command, \
+             patch.object(release, "release_provenance", return_value=(False, "no manifest", None)):
+            with self.assertRaisesRegex(ValueError, "Durable release record"):
+                release.promote_alias(call())
+            self.assertEqual(registry_writes(command), [])
+
+    def test_release_record_decision_and_cli(self):
+        digest = "sha256:" + "a" * 64
+        commit = "b" * 40
+        good = {"version": "v3.1.0", "commit": commit, "image_digest": digest}
+        absent = []
+        published = [[{"tag_name": "v3.1.0", "draft": False,
+                       "assets": [{"name": "release-manifest.json", "id": 9}]}]]
+        draft = [[{"tag_name": "v3.1.0", "draft": True,
+                   "assets": [{"name": "release-manifest.json", "id": 9}]}]]
+        self.assertEqual(release.release_record_decision("v3.1.0", commit, digest, absent)[0], "publish")
+        with patch.object(release, "github", return_value=json.dumps(good)):
+            self.assertEqual(release.release_record_decision(
+                "v3.1.0", commit, digest, published)[0], "verified")
+            self.assertEqual(release.release_record_decision(
+                "v3.1.0", commit, digest, draft)[0], "refuse")
+        with patch.object(release, "github", side_effect=subprocess.CalledProcessError(1, ["gh"])):
+            self.assertEqual(release.release_record_decision(
+                "v3.1.0", commit, digest)[0], "refuse")
+        out = io.StringIO()
+        with patch.object(release, "release_record_decision", return_value=("verified", "ok")), \
+             redirect_stdout(out):
+            self.assertEqual(release.release_record(argparse.Namespace(
+                version="v3.1.0", commit=commit, digest=digest)), "verified")
+        self.assertEqual(json.loads(out.getvalue())["action"], "verified")
 
     def test_module_version_and_promotion_outputs(self):
         out = io.StringIO()
@@ -474,8 +551,11 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("  promote-aliases:\n", source)
         self.assertIn("if: steps.promotion.outputs.minor != ''", source)
         self.assertIn("if: steps.promotion.outputs.latest == 'true'", source)
-        self.assertIn("needs: [plan, publish-immutable, promote-aliases]", source)
+        self.assertIn("needs: [plan, publish-immutable, publish]", source)
+        self.assertIn("python3 scripts/release.py release-record", source)
         self.assertIn("--immutable-only", source)
+        # Durable release record completes before alias promotion.
+        self.assertLess(source.index("  publish:\n"), source.index("  promote-aliases:\n"))
         self.assertNotIn("github.event_name == 'push'", source)
         self.assertNotIn("type=raw,value=latest", source)
 
@@ -526,18 +606,79 @@ class ReleaseTests(unittest.TestCase):
             modules_src.count("github.event_name == 'workflow_dispatch' && inputs.publish"), 4)
         self.assertIn("needs.build-modules.outputs.promote_latest == 'true'", modules_src)
 
-    def test_developer_channel_side_effects_remain_out_of_scope(self):
-        # cd.yml still publishes :edge for verified main; landing.yml still
-        # deploys Pages. No scoped opt-in was added here, so the gate stays open.
+    def test_developer_channel_decision_requires_trusted_ref_and_ci_evidence(self):
+        trusted = release.TRUSTED_DEVELOPER_REF
+        cases = [
+            ("dispatch trusted main with both opt-ins", "workflow_dispatch", "true", trusted, True, True),
+            ("dispatch without channel opt-in", "workflow_dispatch", "false", trusted, True, False),
+            ("dispatch without CI confirmation", "workflow_dispatch", "true", trusted, False, False),
+            ("dispatch from feature ref", "workflow_dispatch", "true", "refs/heads/feature/x", True, False),
+            ("dispatch with blank ref", "workflow_dispatch", "true", "", True, False),
+            ("dispatch from tag ref", "workflow_dispatch", "true", "refs/tags/v3.0.0", True, False),
+        ]
+        for label, event, opt_in, ref, ci, expected in cases:
+            with self.subTest(case=label):
+                allowed, _ = release.developer_channel_decision(
+                    event, opt_in, ref=ref, ci_verified=ci)
+                self.assertEqual(allowed, expected)
+        # Ordinary main CI, PRs, branch pushes and tag pushes never publish.
+        for event, run_event, conclusion, ref in (
+            ("workflow_run", "push", "success", trusted),
+            ("workflow_run", "pull_request", "success", trusted),
+            ("workflow_run", "push", "failure", trusted),
+            ("push", "", "", "refs/heads/main"),
+            ("push", "", "", "refs/tags/v3.0.0"),
+            ("pull_request", "", "", trusted),
+        ):
+            with self.subTest(event=event, ref=ref):
+                allowed, _ = release.developer_channel_decision(
+                    event, "true", run_event, conclusion, ref, "true")
+                self.assertFalse(allowed)
+
+    def test_developer_channel_gate_cli_emits_actionable_outputs(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            allowed = release.developer_channel_gate(argparse.Namespace(
+                event="workflow_dispatch", opt_in="true", run_event="",
+                conclusion="", ref=release.TRUSTED_DEVELOPER_REF,
+                ci_verified="true"))
+        self.assertTrue(allowed)
+        self.assertEqual(json.loads(out.getvalue())["publish"], "true")
+
+    def test_developer_channel_gate_is_wired_without_disabling_workflows(self):
         cd = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
         landing = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
+        for source, input_name in ((cd, "inputs.push"), (landing, "inputs.deploy")):
+            self.assertIn("python3 scripts/release.py developer-channel-gate", source)
+            self.assertIn("--ci-verified \"$CHANNEL_CI_VERIFIED\"", source)
+            self.assertIn("CHANNEL_OPT_IN: ${{ " + input_name + " }}", source)
         self.assertIn("  workflow_run:", cd)
-        self.assertIn("type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}", cd)
-        self.assertIn("name: Deploy Website to GitHub Pages", landing)
-        self.assertNotIn("publication_allowed", cd + landing)
+        self.assertIn("push: ${{ steps.channel.outputs.publish == 'true'", cd)
+        self.assertIn("if: needs.build.outputs.publish == 'true'", landing)
+        # Workflows remain active: build/validate steps are still present.
+        self.assertIn("name: Build and validate the combined website", landing)
+        self.assertIn("name: Assemble and verify both architectures locally", 
+                      (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8"))
         docs = (release.ROOT / "docs/releases.md").read_text(encoding="utf-8")
-        self.assertIn("release auditor", docs)
         self.assertIn("product merges stay held", docs)
+
+    def test_pages_write_permissions_are_deploy_job_only(self):
+        source = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read\n\nconcurrency:", source)
+        deploy = source.split("  deploy:\n", 1)[1].split("  indexable-changes:\n", 1)[0]
+        self.assertIn("    permissions:\n      contents: read\n"
+                      "      pages: write\n      id-token: write", deploy)
+        for job in ("build:", "indexable-changes:", "notify-indexnow:"):
+            block = source.split("  " + job, 1)[1]
+            block = block.split("\n  ", 1)[0]
+            self.assertNotIn("pages: write", block)
+            self.assertNotIn("id-token: write", block)
+
+    def test_indexnow_deferral_is_documented(self):
+        landing = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
+        self.assertIn("Deliberate deferral: indexable-changes", landing)
+        docs = (release.ROOT / "docs/releases.md").read_text(encoding="utf-8")
+        self.assertIn("IndexNow notification is deliberately deferred", docs)
 
     def test_staged_tag_scope_is_documented_honestly(self):
         source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")

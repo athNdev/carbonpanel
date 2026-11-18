@@ -34,9 +34,13 @@ promotion and are dropped only after a documented migration window. Publication
 is phased: a read-only preflight classifies each registry reference as absent,
 present or unknown; a conflict, unknown error or partial state refuses. Only the
 immutable full-version tag is pushed first, then its tag→digest mapping and both
-Linux architectures are verified in every intended registry. Only after that
+Linux architectures are verified in every intended registry. The durable
+release record (draft/asset verification and published release) completes before
+any alias moves, so an interruption cannot leave a newer alias unrecorded; a
+retry reuses that record without re-upload or overwrite. Only after that
 verification do separate, serialized steps promote aliases from the verified
-digest. Alias promotion is monotonic against published stable SemVer (no moving
+digest, additionally checking each registry's actual alias digest against
+durable digest-to-version evidence. Alias promotion is monotonic against published stable SemVer (no moving
 backwards, no promotion from older versions), and prereleases promote nothing.
 If a channel's ordering or immutability cannot be established, its automated
 alias promotion is omitted with a recorded reason instead of guessed.
@@ -60,10 +64,13 @@ Publishing now requires a deliberate dispatch with `publish=true`, so an acciden
 tag push or a green CI run cannot publish. Staging a tag only means "no write";
 a tag can target an old commit and a tag-triggered run reflects that target's
 history, so the dispatch revision is never the trusted gate — the Python
-boundary plus exact-commit main CI are. This preserves existing main `:edge`
-and Pages behavior: those channels are unchanged and are not used as a bypass
-around the versioned publication boundary. Tag staging does not clear their
-automatically verified-main effects; a scoped publish-boundary opt-in needs
+boundary plus exact-commit main CI are. Main `:edge` and Pages channels now use
+the same boundary: an ordinary verified main merge builds and verifies only,
+while publication requires an explicit dispatch opt-in (`push=true` /
+`deploy=true`), `ci_verified=true` and a trusted `refs/heads/main` ref. Tags,
+feature refs and blank refs are refused and the workflows are not disabled.
+IndexNow notification is deliberately deferred because changed URLs come from a
+push diff while deployment happens on dispatch. These scoped gates need
 release-auditor review before held product merges are unblocked. Consumers
 relying on a moving alias must accept that it changes under explicit promotion;
 pinned versions and digests remain the reproducible reference. The reserved

@@ -5,6 +5,8 @@
 
 
 # One Pages artifact: homepage at the custom domain root, pinned docs at /docs/.
+# An ordinary main merge builds and validates the site but does not deploy it;
+# deployment requires workflow_dispatch with deploy=true.
 
 name: Deploy Website to GitHub Pages
 
@@ -27,11 +29,22 @@ on:
       - 'scripts/check_website.py'
       - '.github/workflows/landing.yml'
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'EXPLICIT Pages deployment opt-in: publish the built site (off = build and validate only)'
+        required: true
+        default: false
+        type: boolean
+      ci_verified:
+        description: 'Confirm main CI is green for the revision being deployed'
+        required: true
+        default: false
+        type: boolean
 
+# Least privilege: build/indexing jobs are read-only; Pages write and OIDC
+# token permissions belong only to the job that actually deploys.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -40,11 +53,27 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # A normal main merge builds and validates only. Publishing Pages needs an
+    # explicit dispatch opt-in; the workflow itself stays active.
+    outputs:
+      publish: ${{ steps.channel.outputs.publish }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Decide Pages publication (explicit opt-in only)
+        id: channel
+        env:
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_OPT_IN: ${{ inputs.deploy }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_CI_VERIFIED: ${{ inputs.ci_verified }}
+        run: |
+          python3 scripts/release.py developer-channel-gate \
+            --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
+            --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED"
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -74,7 +103,12 @@ jobs:
 
   deploy:
     needs: build
+    if: needs.build.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -139,6 +173,10 @@ jobs:
 
           printf 'urls<<EOF\n%s\nEOF\n' "$urls" >> "$GITHUB_OUTPUT"
 
+  # Deliberate deferral: indexable-changes derives URLs only from a push diff,
+  # but deploy now runs only on an explicit dispatch. A dispatch deploy yields
+  # no URLs, so no IndexNow notification is sent. Documented in docs/releases.md
+  # and covered by a dry-run fixture; no notification is attempted here.
   notify-indexnow:
     needs: [deploy, indexable-changes]
     if: needs.indexable-changes.outputs.urls != '[]'
