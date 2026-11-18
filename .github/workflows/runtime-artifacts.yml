@@ -1,0 +1,222 @@
+# SPDX-License-Identifier: MPL-2.0
+# Isolated publication lane for VERIFIED managed-node runtime artifacts
+# (OSS-380). It owns the independent runtime-v* version domain reserved by
+# ADR 0033 and can never publish a Carbon Panel application or module release.
+# No automatic event can write: the only trigger is an explicit dispatch whose
+# SHA, exact-commit main CI and bound identity are verified before any write.
+# This implementation lane never dispatches it; no registry push, release or
+# host provisioning occurs here.
+name: Runtime artifact publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact:
+        description: Verified runtime artifact (portable installer is the fallback for unqualified formats)
+        required: true
+        type: choice
+        options:
+          - qcow2
+          - lxc-rootfs
+          - installer
+      version:
+        description: Independent version, runtime-vMAJOR.MINOR.PATCH (never a v* app release)
+        required: true
+        type: string
+      trusted_sha:
+        description: Full 40-hex main commit that produced this artifact
+        required: true
+        type: string
+      identity_assertion:
+        description: Identity assertion bound to version, commit, artifact and project owner
+        required: true
+        type: string
+      publish:
+        description: Publish verified records to a DRAFT release (false = stage and verify only)
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-artifacts-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Verify dispatch before any write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+      reason: ${{ steps.gate.outputs.reason }}
+    steps:
+      - name: Checkout with history for ancestry check
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Stage identity assertion in runner temp (never in the repo)
+        env:
+          ASSERTION: ${{ inputs.identity_assertion }}
+        run: printf '%s\n' "$ASSERTION" > "$RUNNER_TEMP/runtime-identity.txt"
+      - name: Verify exact-commit main CI for the trusted SHA
+        id: ci
+        env:
+          SHA: ${{ inputs.trusted_sha }}
+        run: python3 scripts/runtime_artifacts.py verify-main-ci --commit "$SHA"
+      - name: Verify the identity assertion is bound to this dispatch
+        id: identity
+        env:
+          VERSION: ${{ inputs.version }}
+          ARTIFACT: ${{ inputs.artifact }}
+          COMMIT: ${{ inputs.trusted_sha }}
+        run: >-
+          python3 scripts/runtime_artifacts.py verify-identity
+          --assertion-file "$RUNNER_TEMP/runtime-identity.txt"
+          --version "$VERSION" --artifact "$ARTIFACT" --commit "$COMMIT"
+      - name: Single publication gate
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PUBLISH: ${{ inputs.publish }}
+          VERSION: ${{ inputs.version }}
+          ARTIFACT: ${{ inputs.artifact }}
+          COMMIT: ${{ inputs.trusted_sha }}
+          CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+        run: >-
+          python3 scripts/runtime_artifacts.py gate
+          --event "$EVENT" --ref "$REF" --publish-input "$PUBLISH"
+          --version "$VERSION" --artifact "$ARTIFACT" --trusted-sha "$COMMIT"
+          --ci-verified "$CI_VERIFIED"
+          --assertion-file "$RUNNER_TEMP/runtime-identity.txt"
+      - name: Refuse to continue when the gate did not allow a write
+        if: steps.gate.outputs.allowed != 'true'
+        env:
+          REASON: ${{ steps.gate.outputs.reason }}
+        run: |
+          echo "Runtime artifact publication refused: $REASON"
+          exit 1
+
+  publish:
+    name: Stage and conditionally publish verified records
+    needs: gate
+    if: needs.gate.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout the exact trusted commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.trusted_sha }}
+          fetch-depth: 0
+      - name: Install cosign (pinned)
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+        with:
+          cosign-release: v2.4.3
+      - name: Stage identity assertion in runner temp (never in the repo)
+        env:
+          ASSERTION: ${{ inputs.identity_assertion }}
+        run: printf '%s\n' "$ASSERTION" > "$RUNNER_TEMP/runtime-identity.txt"
+      - name: Resolve the allowlisted build entry point
+        id: meta
+        env:
+          ARTIFACT: ${{ inputs.artifact }}
+        run: |
+          build_script=$(python3 scripts/runtime_artifacts.py build-script --artifact "$ARTIFACT")
+          echo "build_script=$build_script" >> "$GITHUB_OUTPUT"
+      - name: Build the verified artifact (build script owned by the artifact lane)
+        env:
+          BUILD_SCRIPT: ${{ steps.meta.outputs.build_script }}
+          VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.trusted_sha }}
+        run: bash "$BUILD_SCRIPT" --version "$VERSION" --commit "$COMMIT" --output dist/runtime
+      - name: Generate deterministic checksum manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 scripts/runtime_artifacts.py assert-no-app-release --version "$VERSION" --artifact "${{ inputs.artifact }}"
+          python3 scripts/runtime_artifacts.py checksums --dir dist/runtime --output dist/runtime/SHA256SUMS
+      - name: Generate deterministic CycloneDX SBOM
+        env:
+          VERSION: ${{ inputs.version }}
+          ARTIFACT: ${{ inputs.artifact }}
+          COMMIT: ${{ inputs.trusted_sha }}
+        run: >-
+          python3 scripts/runtime_artifacts.py sbom
+          --dir dist/runtime --version "$VERSION" --artifact "$ARTIFACT"
+          --commit "$COMMIT" --output dist/runtime/sbom.cdx.json
+      - name: Keyless-sign the checksum manifest
+        run: >-
+          cosign sign-blob --yes --output-signature dist/runtime/signature.sig
+          --bundle dist/runtime/signature.bundle dist/runtime/SHA256SUMS
+      - name: Write the signature provenance record
+        env:
+          VERSION: ${{ inputs.version }}
+          ARTIFACT: ${{ inputs.artifact }}
+          COMMIT: ${{ inputs.trusted_sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from scripts import runtime_artifacts as ra
+
+          version = os.environ["VERSION"]
+          artifact = os.environ["ARTIFACT"]
+          commit = os.environ["COMMIT"]
+          identity = ra.parse_identity_assertion(
+              Path(os.environ["RUNNER_TEMP"], "runtime-identity.txt").read_text(encoding="utf-8"))
+          manifest = Path("dist/runtime/SHA256SUMS").read_text(encoding="utf-8")
+          signature = Path("dist/runtime/signature.sig").read_text(encoding="utf-8")
+          record = ra.signature_binding(version, artifact, commit, manifest,
+                                        identity["publisher"], signature.strip())
+          Path("dist/runtime/signature.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+      - name: Verify the staged bundle before any publication
+        env:
+          VERSION: ${{ inputs.version }}
+          ARTIFACT: ${{ inputs.artifact }}
+          COMMIT: ${{ inputs.trusted_sha }}
+        run: >-
+          python3 scripts/runtime_artifacts.py verify-bundle
+          --dir dist/runtime --version "$VERSION" --artifact "$ARTIFACT"
+          --commit "$COMMIT"
+          --assertion-file "$RUNNER_TEMP/runtime-identity.txt"
+      - name: Compose an accurate release note (no live-test claim before verification)
+        env:
+          VERSION: ${{ inputs.version }}
+          ARTIFACT: ${{ inputs.artifact }}
+          COMMIT: ${{ inputs.trusted_sha }}
+        run: |
+          {
+            echo "Carbon Panel managed node runtime artifacts $VERSION"
+            echo
+            echo "Artifact: $ARTIFACT"
+            echo "Source commit: $COMMIT (exact-commit main CI verified at dispatch)"
+            echo
+            echo "This is an independently versioned runtime artifact publication"
+            echo "(ADR 0033). It is NOT a Carbon Panel application or module release."
+            echo "Verify SHA256SUMS, the cosign keyless signature and sbom.cdx.json"
+            echo "before use. See docs/node-runtime/verified-artifacts-install.md."
+          } > "$RUNNER_TEMP/release-notes.md"
+      - name: Publish verified records to a DRAFT release
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 scripts/runtime_artifacts.py assert-no-app-release --version "$VERSION" --artifact "${{ inputs.artifact }}"
+          gh release create "$VERSION" --draft \
+            --title "Carbon Panel runtime artifacts $VERSION" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            dist/runtime/*
