@@ -11,6 +11,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,16 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/athNdev/carbon-panel/pkg/upload"
 )
+
+// requestUploadOwnerID returns the authenticated principal attached by the
+// shared policy check. Handlers that consume an upload session use it to bind
+// the session to its creator.
+func requestUploadOwnerID(r *http.Request) string {
+	if user := auth.GetUserFromContext(r.Context()); user != nil {
+		return user.ID
+	}
+	return ""
+}
 
 type uploadStreamResponse struct {
 	SessionID     string `json:"session_id"`
@@ -56,14 +67,18 @@ func NewUploadStreamHandler(uploadManager *upload.Manager, authManager *auth.Man
 		// Authenticate and authorize through the shared fail-closed policy.
 		// A missing enforcer must never turn a streaming upload into an
 		// unauthenticated write endpoint.
-		if err := requireRequestObject(r, authManager, enforcer, rbac.ResourceUploads, rbac.ActionCreate, "*"); err != nil {
+		user, err := requireRequestObjectUser(r, authManager, enforcer, rbac.ResourceUploads, rbac.ActionCreate, "*")
+		if err != nil {
 			writePolicyError(w, err)
 			return
+		}
+		ownerID := ""
+		if user != nil {
+			ownerID = user.ID
 		}
 
 		// Parse resume offset
 		offset := int64(0)
-		var err error
 		if offsetStr := r.Header.Get("X-Upload-Offset"); offsetStr != "" {
 			offset, err = strconv.ParseInt(offsetStr, 10, 64)
 			if err != nil || offset < 0 {
@@ -82,8 +97,12 @@ func NewUploadStreamHandler(uploadManager *upload.Manager, authManager *auth.Man
 		}
 
 		// Stream request body into the upload session file
-		bytesWritten, completed, err := uploadManager.WriteStream(sessionID, r.Body, offset)
+		bytesWritten, completed, err := uploadManager.WriteStreamFor(sessionID, ownerID, r.Body, offset)
 		if err != nil {
+			if errors.Is(err, upload.ErrOwnerMismatch) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
 			log.Error("Stream upload error for session %s: %v", sessionID, err)
 			resp := uploadStreamResponse{
 				SessionID:     sessionID,

@@ -32,6 +32,7 @@ var (
 	ErrChunkTooLarge    = errors.New("chunk exceeds declared chunk size")
 	ErrUploadOverflow   = errors.New("chunk would exceed declared total size")
 	ErrInvalidOffset    = errors.New("invalid upload offset")
+	ErrOwnerMismatch    = errors.New("upload session owner mismatch")
 )
 
 // Session represents an active upload session
@@ -46,9 +47,12 @@ type Session struct {
 	TempPath       string
 	ExpiresAt      time.Time
 	Completed      bool
-	mu             sync.Mutex
-	streamMu       sync.Mutex
-	file           *os.File
+	// OwnerUserID binds a session created with a real user context to that
+	// user. An empty value marks a legacy or internal unowned session.
+	OwnerUserID string
+	mu          sync.Mutex
+	streamMu    sync.Mutex
+	file        *os.File
 }
 
 // Manager handles upload sessions
@@ -84,8 +88,15 @@ func NewManager(tempDir string, sessionTTL time.Duration, maxUploadSize int64, l
 	return m
 }
 
-// InitSession creates a new upload session
+// InitSession creates a new unowned upload session. Callers with a real user
+// context must use InitSessionFor so the session is bound to that user.
 func (m *Manager) InitSession(filename string, totalSize int64, chunkSize int32) (*Session, error) {
+	return m.InitSessionFor(filename, totalSize, chunkSize, "")
+}
+
+// InitSessionFor creates an upload session owned by ownerUserID. An empty
+// owner keeps the legacy unowned behavior for internal and test callers.
+func (m *Manager) InitSessionFor(filename string, totalSize int64, chunkSize int32, ownerUserID string) (*Session, error) {
 	// Validate chunk size first: InitSession must not rely on an upstream
 	// caller having checked it (a non-positive size would divide by zero below).
 	if chunkSize <= 0 {
@@ -136,6 +147,7 @@ func (m *Manager) InitSession(filename string, totalSize int64, chunkSize int32)
 		TempPath:       tempPath,
 		ExpiresAt:      time.Now().Add(m.sessionTTL),
 		Completed:      false,
+		OwnerUserID:    ownerUserID,
 		file:           file,
 	}
 
@@ -148,14 +160,27 @@ func (m *Manager) InitSession(filename string, totalSize int64, chunkSize int32)
 	return session, nil
 }
 
-// GetSession retrieves a session by ID
+// GetSession retrieves an unowned session by ID.
 func (m *Manager) GetSession(id string) (*Session, error) {
+	return m.getSession(id, "")
+}
+
+// GetSessionFor retrieves a session by ID and enforces its owner binding.
+func (m *Manager) GetSessionFor(id, ownerUserID string) (*Session, error) {
+	return m.getSession(id, ownerUserID)
+}
+
+func (m *Manager) getSession(id, ownerUserID string) (*Session, error) {
 	m.mu.RLock()
 	session, exists := m.sessions[id]
 	m.mu.RUnlock()
 
 	if !exists {
 		return nil, ErrSessionNotFound
+	}
+
+	if session.OwnerUserID != "" && session.OwnerUserID != ownerUserID {
+		return nil, ErrOwnerMismatch
 	}
 
 	if time.Now().After(session.ExpiresAt) {
@@ -166,9 +191,18 @@ func (m *Manager) GetSession(id string) (*Session, error) {
 	return session, nil
 }
 
-// WriteChunk writes a chunk to the session's temp file
+// WriteChunk writes a chunk to an unowned session's temp file.
 func (m *Manager) WriteChunk(sessionID string, chunkIndex int32, data []byte) (completed bool, err error) {
-	session, err := m.GetSession(sessionID)
+	return m.writeChunk(sessionID, "", chunkIndex, data)
+}
+
+// WriteChunkFor writes a chunk after enforcing the session's owner binding.
+func (m *Manager) WriteChunkFor(sessionID, ownerUserID string, chunkIndex int32, data []byte) (completed bool, err error) {
+	return m.writeChunk(sessionID, ownerUserID, chunkIndex, data)
+}
+
+func (m *Manager) writeChunk(sessionID, ownerUserID string, chunkIndex int32, data []byte) (completed bool, err error) {
+	session, err := m.getSession(sessionID, ownerUserID)
 	if err != nil {
 		return false, err
 	}
@@ -236,9 +270,18 @@ func (m *Manager) WriteChunk(sessionID string, chunkIndex int32, data []byte) (c
 	return session.Completed, nil
 }
 
-// Writes data from a reader to the session file starting at the given offset
+// WriteStream writes data from a reader to an unowned session at the offset.
 func (m *Manager) WriteStream(sessionID string, r io.Reader, offset int64) (bytesWritten int64, completed bool, err error) {
-	session, err := m.GetSession(sessionID)
+	return m.writeStream(sessionID, "", r, offset)
+}
+
+// WriteStreamFor writes a stream after enforcing the session's owner binding.
+func (m *Manager) WriteStreamFor(sessionID, ownerUserID string, r io.Reader, offset int64) (bytesWritten int64, completed bool, err error) {
+	return m.writeStream(sessionID, ownerUserID, r, offset)
+}
+
+func (m *Manager) writeStream(sessionID, ownerUserID string, r io.Reader, offset int64) (bytesWritten int64, completed bool, err error) {
+	session, err := m.getSession(sessionID, ownerUserID)
 	if err != nil {
 		return 0, false, err
 	}
@@ -312,9 +355,18 @@ func (m *Manager) WriteStream(sessionID string, r io.Reader, offset int64) (byte
 	return pos - offset, session.Completed, nil
 }
 
-// GetMissingChunks returns the list of chunk indices that haven't been received
+// GetMissingChunks returns missing chunk indices for an unowned session.
 func (m *Manager) GetMissingChunks(sessionID string) ([]int32, error) {
-	session, err := m.GetSession(sessionID)
+	return m.getMissingChunks(sessionID, "")
+}
+
+// GetMissingChunksFor returns missing chunk indices after enforcing ownership.
+func (m *Manager) GetMissingChunksFor(sessionID, ownerUserID string) ([]int32, error) {
+	return m.getMissingChunks(sessionID, ownerUserID)
+}
+
+func (m *Manager) getMissingChunks(sessionID, ownerUserID string) ([]int32, error) {
+	session, err := m.getSession(sessionID, ownerUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -332,9 +384,18 @@ func (m *Manager) GetMissingChunks(sessionID string) ([]int32, error) {
 	return missing, nil
 }
 
-// GetTempPath returns the temp file path for a completed session
+// GetTempPath returns the temp path for a completed unowned session.
 func (m *Manager) GetTempPath(sessionID string) (string, string, error) {
-	session, err := m.GetSession(sessionID)
+	return m.getTempPath(sessionID, "")
+}
+
+// GetTempPathFor returns the temp path after enforcing the owner binding.
+func (m *Manager) GetTempPathFor(sessionID, ownerUserID string) (string, string, error) {
+	return m.getTempPath(sessionID, ownerUserID)
+}
+
+func (m *Manager) getTempPath(sessionID, ownerUserID string) (string, string, error) {
+	session, err := m.getSession(sessionID, ownerUserID)
 	if err != nil {
 		return "", "", err
 	}
@@ -349,9 +410,18 @@ func (m *Manager) GetTempPath(sessionID string) (string, string, error) {
 	return session.TempPath, session.Filename, nil
 }
 
-// GetSessionStatus returns the status of a session
+// GetSessionStatus returns the status of an unowned session.
 func (m *Manager) GetSessionStatus(sessionID string) (bytesReceived int64, totalBytes int64, chunksReceived int32, totalChunks int32, completed bool, tempPath string, err error) {
-	session, err := m.GetSession(sessionID)
+	return m.getSessionStatus(sessionID, "")
+}
+
+// GetSessionStatusFor returns the status after enforcing the owner binding.
+func (m *Manager) GetSessionStatusFor(sessionID, ownerUserID string) (bytesReceived int64, totalBytes int64, chunksReceived int32, totalChunks int32, completed bool, tempPath string, err error) {
+	return m.getSessionStatus(sessionID, ownerUserID)
+}
+
+func (m *Manager) getSessionStatus(sessionID, ownerUserID string) (bytesReceived int64, totalBytes int64, chunksReceived int32, totalChunks int32, completed bool, tempPath string, err error) {
+	session, err := m.getSession(sessionID, ownerUserID)
 	if err != nil {
 		return 0, 0, 0, 0, false, "", err
 	}
@@ -367,18 +437,29 @@ func (m *Manager) GetSessionStatus(sessionID string) (bytesReceived int64, total
 	return session.BytesReceived, session.TotalSize, int32(len(session.ReceivedChunks)), session.TotalChunks, session.Completed, tempPathResult, nil
 }
 
-// Cancel cancels an upload session and cleans up
+// Cancel cancels an unowned upload session and cleans up.
 func (m *Manager) Cancel(sessionID string) error {
+	return m.cancel(sessionID, "")
+}
+
+// CancelFor cancels a session after enforcing its owner binding.
+func (m *Manager) CancelFor(sessionID, ownerUserID string) error {
+	return m.cancel(sessionID, ownerUserID)
+}
+
+func (m *Manager) cancel(sessionID, ownerUserID string) error {
 	m.mu.Lock()
 	session, exists := m.sessions[sessionID]
-	if exists {
-		delete(m.sessions, sessionID)
-	}
-	m.mu.Unlock()
-
 	if !exists {
+		m.mu.Unlock()
 		return ErrSessionNotFound
 	}
+	if session.OwnerUserID != "" && session.OwnerUserID != ownerUserID {
+		m.mu.Unlock()
+		return ErrOwnerMismatch
+	}
+	delete(m.sessions, sessionID)
+	m.mu.Unlock()
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
@@ -423,6 +504,14 @@ func (m *Manager) CleanupSession(sessionID string) error {
 	// Note: Don't remove temp file here - it should be moved by the caller
 	m.log.Info("Upload session cleaned up: %s", sessionID)
 	return nil
+}
+
+// CleanupSessionFor removes a session after enforcing its owner binding.
+func (m *Manager) CleanupSessionFor(sessionID, ownerUserID string) error {
+	if _, err := m.getSession(sessionID, ownerUserID); err != nil {
+		return err
+	}
+	return m.CleanupSession(sessionID)
 }
 
 // Stop stops the manager and cleans up all sessions

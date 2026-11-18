@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/config"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/packwiz"
+	"github.com/athNdev/carbon-panel/pkg/upload"
 )
 
 // handleSearchContent searches Modrinth for one content kind. The pack supplies
@@ -253,14 +255,19 @@ func (h *PackwizHandler) handleUploadContent(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	tempPath, originalFilename, err := h.uploadManager.GetTempPath(req.UploadSessionID)
+	ownerID := requestUploadOwnerID(r)
+	tempPath, originalFilename, err := h.uploadManager.GetTempPathFor(req.UploadSessionID, ownerID)
 	if err != nil {
+		if errors.Is(err, upload.ErrOwnerMismatch) {
+			http.Error(w, "upload session belongs to another user", http.StatusForbidden)
+			return
+		}
 		http.Error(w, "upload session not found or not completed", http.StatusNotFound)
 		return
 	}
 	cleanup := func() {
 		_ = os.Remove(tempPath)
-		_ = h.uploadManager.CleanupSession(req.UploadSessionID)
+		_ = h.uploadManager.CleanupSessionFor(req.UploadSessionID, ownerID)
 	}
 
 	fileName := strings.TrimSpace(req.FileName)
