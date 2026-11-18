@@ -200,7 +200,7 @@ func (c *Cache) getProfile(ctx context.Context, uuid string) (profilePayload, in
 	if err != nil {
 		return profilePayload{}, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return profilePayload{}, resp.StatusCode, nil
 	}
@@ -224,7 +224,7 @@ func (c *Cache) getTexture(ctx context.Context, textureURL string) ([]byte, int,
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, resp.StatusCode, nil
 	}

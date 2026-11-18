@@ -247,12 +247,6 @@ func tagFloat(name string, v float32) []byte {
 	return nbtTagBytes(nbtFloat, name, p)
 }
 
-func tagDouble(name string, v float64) []byte {
-	p := make([]byte, 8)
-	binary.BigEndian.PutUint64(p, math.Float64bits(v))
-	return nbtTagBytes(nbtDouble, name, p)
-}
-
 func nbtStringTag(name, val string) []byte {
 	return nbtTagBytes(nbtString, name, nameBytes(val))
 }

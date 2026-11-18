@@ -47,11 +47,11 @@ func (s *playerFixtureService) GetPlayerSkin(context.Context, *connect.Request[v
 // that merely hides a button cannot accidentally authorize the RPC.
 func TestPlayerProceduresFailClosed(t *testing.T) {
 	for _, fixture := range []struct {
-		name          string
-		noAuth, anon  bool
-		grant         []rbac.Permission
-		nilEnforcer   bool
-		code          connect.Code
+		name         string
+		noAuth, anon bool
+		grant        []rbac.Permission
+		nilEnforcer  bool
+		code         connect.Code
 	}{
 		{name: "missing credentials", code: connect.CodeUnauthenticated},
 		{name: "anonymous without players grant", anon: true, code: connect.CodePermissionDenied},
@@ -139,6 +139,9 @@ func TestPlayerElevationRequiresDistinctScope(t *testing.T) {
 				allowed, err = enforcer.Enforce([]string{"anonymous"}, rbac.ResourcePlayers, tc.action, "srv-1")
 				if err != nil {
 					t.Fatal(err)
+				}
+				if !allowed {
+					t.Fatalf("seeded %s grant did not take effect", tc.action)
 				}
 			}
 			opAllowed, err := enforcer.Enforce([]string{"anonymous"}, rbac.ResourcePlayers, rbac.ActionModerateOp, "srv-1")

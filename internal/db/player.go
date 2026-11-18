@@ -123,17 +123,15 @@ func playerKey() string { return "pl_" + strings.ReplaceAll(uuid.NewString(), "-
 // creating one when needed. Online UUIDs are authoritative; offline UUIDs are
 // kept distinct and never merged by name alone.
 func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xuid, floodgateUUID string, offline bool) (*PlayerIdentity, error) {
-	key := strings.TrimSpace(primaryUUID)
-	if key == "" {
-		key = strings.TrimSpace(xuid)
-	}
+	uuidValue := strings.TrimSpace(primaryUUID)
+	xuidValue := strings.TrimSpace(xuid)
 	var identity PlayerIdentity
 	q := s.db.WithContext(ctx)
 	switch {
-	case strings.TrimSpace(primaryUUID) != "":
-		q = q.Where("primary_uuid = ?", strings.TrimSpace(primaryUUID))
-	case strings.TrimSpace(xuid) != "":
-		q = q.Where("xuid = ?", strings.TrimSpace(xuid))
+	case uuidValue != "":
+		q = q.Where("primary_uuid = ?", uuidValue)
+	case xuidValue != "":
+		q = q.Where("xuid = ?", xuidValue)
 	default:
 		return nil, errors.New("player identity requires a uuid or xuid")
 	}

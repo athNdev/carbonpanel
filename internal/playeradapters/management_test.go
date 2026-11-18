@@ -61,7 +61,7 @@ func newManagementFixture(t *testing.T, secret string, respond fixtureResponder,
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func(closer func() error) { _ = closer() }(conn.Close)
 		fixture.mu.Lock()
 		fixture.connections++
 		fixture.subprotos = append(fixture.subprotos, conn.Subprotocol())
@@ -287,7 +287,7 @@ func TestManagementAdapterAuthFailure(t *testing.T) {
 	wrongSecretInfo := fixtureServerInfo(fixture.url)
 	wrongSecretInfo.ManagementSecret = "wrong-secret-value"
 	m := newManagementAdapter(wrongSecretInfo)
-	defer m.Close()
+	defer func(closer func() error) { _ = closer() }(m.Close)
 	_, err := m.List(ctx)
 	if err == nil {
 		t.Fatal("expected auth failure")
@@ -307,7 +307,7 @@ func TestManagementAdapterConnectFailure(t *testing.T) {
 		t.Fatalf("negotiation should be configuration-only: %v / %+v", err, caps)
 	}
 	m := adapter.(*ManagementAdapter)
-	defer m.Close()
+	defer func(closer func() error) { _ = closer() }(m.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -326,7 +326,7 @@ func TestManagementAdapterRPCAndSecretRedaction(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	m := newManagementAdapter(fixtureServerInfo(fixture.url))
-	defer m.Close()
+	defer func(closer func() error) { _ = closer() }(m.Close)
 
 	_, err := m.List(ctx)
 	if err == nil || !strings.Contains(err.Error(), "denied for token") {
@@ -358,7 +358,7 @@ func TestManagementAdapterNotificationRaceAndSource(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	m := newManagementAdapter(fixtureServerInfo(fixture.url))
-	defer m.Close()
+	defer func(closer func() error) { _ = closer() }(m.Close)
 
 	before := time.Now().UTC().Add(-time.Second)
 	if roster, at, source := m.Snapshot(); len(roster) != 0 || !at.IsZero() || source != "" {
@@ -414,7 +414,7 @@ func TestManagementAdapterReconnectGenerationGuard(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	m := newManagementAdapter(fixtureServerInfo(fixture.url))
-	defer m.Close()
+	defer func(closer func() error) { _ = closer() }(m.Close)
 
 	if _, err := m.List(ctx); err != nil {
 		t.Fatalf("first List: %v", err)
@@ -516,7 +516,7 @@ func TestManagementAdapterCallerContextTimeout(t *testing.T) {
 		return map[string]any{"players": []map[string]any{}}, nil
 	}, nil)
 	m := newManagementAdapter(fixtureServerInfo(fixture.url))
-	defer m.Close()
+	defer func(closer func() error) { _ = closer() }(m.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
@@ -533,7 +533,7 @@ func TestManagementAdapterBoundedFrame(t *testing.T) {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(strings.Repeat("x", managementMaxFrameBytes+1)))
 	})
 	m := newManagementAdapter(fixtureServerInfo(fixture.url))
-	defer m.Close()
+	defer func(closer func() error) { _ = closer() }(m.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -555,7 +555,7 @@ func TestManagementAdapterBoundedFrame(t *testing.T) {
 
 func TestManagementAdapterRejectsInjectionBeforeRPC(t *testing.T) {
 	m := newManagementAdapter(fixtureServerInfo("ws://127.0.0.1:1"))
-	defer m.Close()
+	defer func(closer func() error) { _ = closer() }(m.Close)
 	ctx := context.Background()
 	bad := []func() error{
 		func() error { return m.Kick(ctx, "Steve\nstop", "x") },

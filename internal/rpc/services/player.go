@@ -246,7 +246,7 @@ func (s *PlayerService) aliasesFor(ctx context.Context, identityID string) []sto
 func (s *PlayerService) presenceFor(identity *storage.PlayerIdentity, serverID string) (v1.PlayerPresence, *v1.Observation, time.Time) {
 	now := time.Now().UTC()
 	lastSeen := identity.LastSeenAt
-	var source v1.PlayerDataSource = v1.PlayerDataSource_PLAYER_DATA_SOURCE_PRESENCE
+	source := v1.PlayerDataSource_PLAYER_DATA_SOURCE_PRESENCE
 	confidence := v1.PlayerConfidence_PLAYER_CONFIDENCE_STALE
 	presence := v1.PlayerPresence_PLAYER_PRESENCE_UNOBSERVED
 
@@ -1068,9 +1068,10 @@ func (s *PlayerService) BulkPlayerAction(ctx context.Context, req *connect.Reque
 		replay := make([]*v1.PlayerActionResult, 0, len(msg.IdentityKeys))
 		for _, key := range msg.IdentityKeys {
 			message := "bulk action already in progress"
-			if row.Phase == storage.PlayerActionComplete {
+			switch row.Phase {
+			case storage.PlayerActionComplete:
 				message = "bulk action already completed"
-			} else if row.Phase == storage.PlayerActionFailed {
+			case storage.PlayerActionFailed:
 				message = "bulk action previously failed; retry with a new request id"
 			}
 			replay = append(replay, &v1.PlayerActionResult{IdentityKey: key, Success: row.Phase == storage.PlayerActionComplete, Message: message})
