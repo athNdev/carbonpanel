@@ -271,10 +271,13 @@ func (s *Server) setupHandler() {
 	mux.HandleFunc("/readyz", handlers.NewHealthHandler(s.startedAt, s.dbReady))
 	mux.HandleFunc("/health/detail", handlers.NewLayeredHealthHandler(s.healthSnapshot))
 
-	// Register OIDC HTTP handlers
+	// Register OIDC HTTP handlers. These are deliberately plain HTTP routes,
+	// not Connect RPCs: the callback is IdP-driven and the exchange hands the
+	// SPA its session token without ever putting it in a URL.
 	if s.oidcHandler != nil && s.oidcHandler.IsEnabled() {
 		mux.HandleFunc("/api/v1/auth/oidc/login", s.oidcHandler.HandleLogin)
 		mux.HandleFunc("/api/v1/auth/oidc/callback", s.oidcHandler.HandleCallback)
+		mux.HandleFunc("/api/v1/auth/oidc/exchange", s.oidcHandler.HandleExchange)
 	}
 
 	// Streaming file upload endpoint

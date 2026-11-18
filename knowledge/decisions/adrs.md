@@ -32,6 +32,11 @@ sources:
 | [0013](../../docs/adr/0013-bounded-storage-streaming.md) | Bound storage frames and commit staged writes explicitly | [Remote storage transport](../architecture/remote-storage-transport.md), [Backup and restore](../operations/backup-restore.md) |
 | [0014](../../docs/adr/0014-in-process-admission.md) | Serialize same-node starts with an in-process gate, not a lease | [Server lifecycle policy](../architecture/server-lifecycle.md) |
 | [0017](../../docs/adr/0017-player-management-identity-and-capability-gates.md) | Player identity, provenance and capability gates | [Player management](../architecture/player-management.md) |
+| [0023](../../docs/adr/0023-oidc-sso-boundary.md) | Standards-based OIDC with PKCE, nonce and one-time exchange | [RPC contract](../architecture/rpc-contract.md), [SSO identity](../invariants/sso-identity.md) |
+| [0024](../../docs/adr/0024-sso-identity-and-privilege-origin.md) | Issuer+subject identity; no auto-link or implicit admin | [SSO identity](../invariants/sso-identity.md) |
+| [0025](../../docs/adr/0025-sso-entitlement-reconciliation.md) | Source-scoped role reconciliation before session issue | [SSO identity](../invariants/sso-identity.md), [Fail-closed authorization](../invariants/authz-fail-closed.md) |
+| [0026](../../docs/adr/0026-sso-logout-and-provider-limits.md) | Local session invalidation and honest IdP logout limits | [SSO identity](../invariants/sso-identity.md) |
+| [0033](../../docs/adr/0033-release-tag-and-publication-policy.md) | One explicit publication boundary and separate immutable version domains | [Release](../workflows/release.md) |
 
 
 # Rule
