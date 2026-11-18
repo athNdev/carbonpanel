@@ -101,12 +101,21 @@ resume from the original verified download artifact without rebuilding images.
   recent qualifying build of a pinned main commit with exact successful CI, and
   reuses the verified `sha-<full-commit>` image rather than adding a date alias.
   Both edge and nightly writers preflight that shared sha tag before any build
-  or push: reuse a verified digest, or refuse with zero writes on conflict or an
-  unknown lookup. Nightly promotion binds the previous commit to the observed
-  alias digest through a verified sha reference before checking ancestry; a bare
-  operator string is never trusted. Nightly never moves `latest`, a minor tag or
-  `edge`, and no scheduled registry write is enabled. Seeding a live nightly is
-  separately authorized; the existing `edge` image is not a fresh nightly.
+  or push: strict lookup classification treats only a definitive manifest-unknown
+  as absent, and a missing tag with an expected digest refuses. Reuse needs
+  independent pinned-build evidence — exact successful CI for the commit, digest
+  match, both platform child manifests and matching `org.opencontainers.image.revision`
+  in each digest-addressed child config (not descriptor annotations); a bare
+  expected digest is not evidence. Every evidence fetch is anchored to the
+  observed digest (`repo@digest`) and the reported index digest must match or
+  publication refuses with zero writes. Not-found classification is scoped to
+  the queried reference. Edge uses separate previous binding inputs. Nightly and edge promotion bind the previous
+  commit to the observed alias digest through that same evidence before checking
+  ancestry. Buildx writes only the sha reference; an explicitly gated digest-based
+  step moves edge so it survives sha reuse in either order. Nightly never moves
+  `latest` or a minor tag, and no scheduled registry write is enabled. Seeding a
+  live nightly is separately authorized; the existing `edge` image is not a fresh
+  nightly.
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The
