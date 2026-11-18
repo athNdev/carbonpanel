@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { onMount } from 'svelte';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { NodeStatus, type Node } from '$lib/proto/carbonpanel/v1/node_pb';
+	import { parseCapacity } from '$lib/utils/node-capacity';
 	import { toast } from 'svelte-sonner';
 	import {
 		CarbonButton,
@@ -81,14 +82,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let newNodeServersText = $state('0');
 	let editMemoryText = $state('0');
 	let editServersText = $state('0');
-
-	function parseCapacity(raw: string): number | null {
-		const trimmed = raw.trim();
-		if (trimmed === '') return 0;
-		if (!/^\d+$/.test(trimmed)) return null;
-		const value = Number(trimmed);
-		return Number.isSafeInteger(value) ? value : null;
-	}
 
 	let newMemoryError = $derived(
 		parseCapacity(newNodeMemoryText) === null
