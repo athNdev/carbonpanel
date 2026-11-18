@@ -15,7 +15,7 @@ code_refs:
   - internal/rbac/mapping.go
 sources:
   - title: Player identity, provenance and capability gates
-    resource: ../../docs/adr/0014-player-management-identity-and-capability-gates.md
+    resource: ../../docs/adr/0017-player-management-identity-and-capability-gates.md
   - title: Add an RPC
     resource: ../workflows/add-rpc.md
 ---

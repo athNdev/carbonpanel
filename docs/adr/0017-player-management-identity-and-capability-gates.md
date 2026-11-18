@@ -1,4 +1,4 @@
-# ADR 0014: Player identity, provenance and capability gates
+# ADR 0017: Player identity, provenance and capability gates
 
 Status: Proposed
 

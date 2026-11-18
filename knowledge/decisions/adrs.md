@@ -30,7 +30,7 @@ sources:
 | [0011](../../docs/adr/0011-server-runtime-admission.md) | Share server lifecycle policy | [Server lifecycle policy](../architecture/server-lifecycle.md) |
 | [0012](../../docs/adr/0012-product-transports.md) | Generated product control with tested HTTP compatibility | [RPC contract](../architecture/rpc-contract.md) |
 | [0013](../../docs/adr/0013-bounded-storage-streaming.md) | Bound storage frames and commit staged writes explicitly | [Remote storage transport](../architecture/remote-storage-transport.md), [Backup and restore](../operations/backup-restore.md) |
-| [0014](../../docs/adr/0014-player-management-identity-and-capability-gates.md) | Player identity, provenance and capability gates | [Player management](../architecture/player-management.md) |
+| [0017](../../docs/adr/0017-player-management-identity-and-capability-gates.md) | Player identity, provenance and capability gates | [Player management](../architecture/player-management.md) |
 
 
 # Rule
