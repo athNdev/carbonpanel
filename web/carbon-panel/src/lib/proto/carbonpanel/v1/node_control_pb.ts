@@ -22,7 +22,7 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_node_control: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'CiFjYXJib25wYW5lbC92MS9ub2RlX2NvbnRyb2wucHJvdG8SDmNhcmJvbnBhbmVsLnYxIscBCgxOb2RlSWRlbnRpdHkSDwoHbm9kZV9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhcKD2tleV9maW5nZXJwcmludBgDIAEoCRIdChVjcmVkZW50aWFsX2dlbmVyYXRpb24YBCABKAMSGwoTZW5kcG9pbnRfZ2VuZXJhdGlvbhgFIAEoAxIRCglkYWVtb25faWQYBiABKAkSMAoJdHJhbnNwb3J0GAcgASgOMh0uY2FyYm9ucGFuZWwudjEuTm9kZVRyYW5zcG9ydCLOAgoQTm9kZUNhcGFiaWxpdGllcxIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgFEh0KFW1pbl9zdXBwb3J0ZWRfdmVyc2lvbhgCIAEoBRIdChVtYXhfc3VwcG9ydGVkX3ZlcnNpb24YAyABKAUSFQoNYWdlbnRfdmVyc2lvbhgEIAEoCRIWCg5lbmdpbmVfdmVyc2lvbhgFIAEoCRIOCgZkaXN0cm8YBiABKAkSFAoMYXJjaGl0ZWN0dXJlGAcgASgJEhYKDmtlcm5lbF92ZXJzaW9uGAggASgJEhYKDmNncm91cF92ZXJzaW9uGAkgASgJEhYKDnN0b3JhZ2VfZHJpdmVyGAogASgJEg8KB3N5c3RlbWQYCyABKAgSNAoMY2FwYWJpbGl0aWVzGAwgAygOMh4uY2FyYm9ucGFuZWwudjEuTm9kZUNhcGFiaWxpdHkieAoSTm9kZVByZWZsaWdodENoZWNrEgwKBGNvZGUYASABKAkSMwoGc3RhdHVzGAIgASgOMiMuY2FyYm9ucGFuZWwudjEuTm9kZVByZWZsaWdodFN0YXR1cxIPCgdtZXNzYWdlGAMgASgJEg4KBnJlbWVkeRgEIAEoCSLUAQoTTm9kZVByZWZsaWdodFJlcG9ydBIPCgdub2RlX2lkGAEgASgJEjMKBnN0YXR1cxgCIAEoDjIjLmNhcmJvbnBhbmVsLnYxLk5vZGVQcmVmbGlnaHRTdGF0dXMSMgoGY2hlY2tzGAMgAygLMiIuY2FyYm9ucGFuZWwudjEuTm9kZVByZWZsaWdodENoZWNrEi8KC29ic2VydmVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpsYXRlbmN5X21zGAUgASgDIv4BChBOb2RlSGVhbHRoUmVwb3J0Eg8KB25vZGVfaWQYASABKAkSLwoLb2JzZXJ2ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhEKCXJlYWNoYWJsZRgDIAEoCBISCgpsYXRlbmN5X21zGAQgASgDEjYKDGNhcGFiaWxpdGllcxgFIAEoCzIgLmNhcmJvbnBhbmVsLnYxLk5vZGVDYXBhYmlsaXRpZXMSNgoJcHJlZmxpZ2h0GAYgASgLMiMuY2FyYm9ucGFuZWwudjEuTm9kZVByZWZsaWdodFJlcG9ydBIRCglkYWVtb25faWQYByABKAkiywEKF05vZGVBdXRob3JpemF0aW9uQ2xhaW1zEg8KB25vZGVfaWQYASABKAkSEQoJb2JqZWN0X2lkGAIgASgJEg4KBnNjb3BlcxgDIAMoCRIdChVjcmVkZW50aWFsX2dlbmVyYXRpb24YBCABKAMSLQoJaXNzdWVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpleHBpcmVzX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCLGAgoRT25lVGltZUVucm9sbG1lbnQSFQoNZW5yb2xsbWVudF9pZBgBIAEoCRIZChF0b2tlbl9maW5nZXJwcmludBgCIAEoCRISCgpub2RlX2xhYmVsGAMgASgJEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmV4cGlyZXNfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjIKBXN0YXRlGAYgASgOMiMuY2FyYm9ucGFuZWwudjEuTm9kZUVucm9sbG1lbnRTdGF0ZRI9ChVyZXF1aXJlZF9jYXBhYmlsaXRpZXMYByADKA4yHi5jYXJib25wYW5lbC52MS5Ob2RlQ2FwYWJpbGl0eRIYChBwcm90b2NvbF92ZXJzaW9uGAggASgFIr0CChFPcGVyYXRpb25FbnZlbG9wZRIUCgxvcGVyYXRpb25faWQYASABKAkSDwoHbm9kZV9pZBgCIAEoCRIbChNlbmRwb2ludF9nZW5lcmF0aW9uGAMgASgDEh0KFWNyZWRlbnRpYWxfZ2VuZXJhdGlvbhgEIAEoAxIUCgxyZXF1ZXN0X2hhc2gYBSABKAwSLAoIZGVhZGxpbmUYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB2F0dGVtcHQYByABKAUSPQoTY2FwYWJpbGl0eV9zbmFwc2hvdBgIIAEoCzIgLmNhcmJvbnBhbmVsLnYxLk5vZGVDYXBhYmlsaXRpZXMSMQoFcGhhc2UYCSABKA4yIi5jYXJib25wYW5lbC52MS5Ob2RlT3BlcmF0aW9uUGhhc2UinQEKD09wZXJhdGlvblJlc3VsdBIUCgxvcGVyYXRpb25faWQYASABKAkSMQoFcGhhc2UYAiABKA4yIi5jYXJib25wYW5lbC52MS5Ob2RlT3BlcmF0aW9uUGhhc2USDwoHbWVzc2FnZRgDIAEoCRIwCgxjb21wbGV0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIswBCg5Db250cm9sU2Vzc2lvbhISCgpzZXNzaW9uX2lkGAEgASgJEg8KB25vZGVfaWQYAiABKAkSLAoIZGVhZGxpbmUYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDW1heF9pbl9mbGlnaHQYBCABKAUSGQoRbWF4X21lc3NhZ2VfYnl0ZXMYBSABKAUSNQoSaGVhcnRiZWF0X2ludGVydmFsGAYgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIoMBChJWZXJzaW9uTmVnb3RpYXRpb24SFQoNYWdlbnRfdmVyc2lvbhgBIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAIgASgFEh0KFW1pbl9zdXBwb3J0ZWRfdmVyc2lvbhgDIAEoBRIdChVtYXhfc3VwcG9ydGVkX3ZlcnNpb24YBCABKAUirgEKF0NyZWF0ZUVucm9sbG1lbnRSZXF1ZXN0EhIKCm5vZGVfbGFiZWwYASABKAkSJgoDdHRsGAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEj0KFXJlcXVpcmVkX2NhcGFiaWxpdGllcxgDIAMoDjIeLmNhcmJvbnBhbmVsLnYxLk5vZGVDYXBhYmlsaXR5EhgKEHByb3RvY29sX3ZlcnNpb24YBCABKAUiUQoYQ3JlYXRlRW5yb2xsbWVudFJlc3BvbnNlEjUKCmVucm9sbG1lbnQYASABKAsyIS5jYXJib25wYW5lbC52MS5PbmVUaW1lRW5yb2xsbWVudCKaAQoWQ2xhaW1FbnJvbGxtZW50UmVxdWVzdBIVCg1lbnJvbGxtZW50X2lkGAEgASgJEhgKEGVucm9sbG1lbnRfdG9rZW4YAiABKAkSFwoPa2V5X2ZpbmdlcnByaW50GAMgASgJEjYKDGNhcGFiaWxpdGllcxgEIAEoCzIgLmNhcmJvbnBhbmVsLnYxLk5vZGVDYXBhYmlsaXRpZXMiggEKF0NsYWltRW5yb2xsbWVudFJlc3BvbnNlEi4KCGlkZW50aXR5GAEgASgLMhwuY2FyYm9ucGFuZWwudjEuTm9kZUlkZW50aXR5EjcKBmNsYWltcxgCIAEoCzInLmNhcmJvbnBhbmVsLnYxLk5vZGVBdXRob3JpemF0aW9uQ2xhaW1zIkcKF1Jldm9rZUNyZWRlbnRpYWxSZXF1ZXN0Eg8KB25vZGVfaWQYASABKAkSGwoTY29uZmlybWF0aW9uX3BocmFzZRgCIAEoCSJfChhSZXZva2VDcmVkZW50aWFsUmVzcG9uc2USDwoHbm9kZV9pZBgBIAEoCRIyCgVzdGF0ZRgCIAEoDjIjLmNhcmJvbnBhbmVsLnYxLk5vZGVFbnJvbGxtZW50U3RhdGUiYAoXTmVnb3RpYXRlVmVyc2lvblJlcXVlc3QSNAoIZW5kcG9pbnQYASABKAsyIi5jYXJib25wYW5lbC52MS5WZXJzaW9uTmVnb3RpYXRpb24SDwoHbm9kZV9pZBgCIAEoCSJXChhOZWdvdGlhdGVWZXJzaW9uUmVzcG9uc2USEQoJc3VwcG9ydGVkGAEgASgIEhgKEHNlbGVjdGVkX3ZlcnNpb24YAiABKAUSDgoGcmVhc29uGAMgASgJIoMBChlPcGVuQ29udHJvbFNlc3Npb25SZXF1ZXN0Ei4KCGlkZW50aXR5GAEgASgLMhwuY2FyYm9ucGFuZWwudjEuTm9kZUlkZW50aXR5EjYKDGNhcGFiaWxpdGllcxgCIAEoCzIgLmNhcmJvbnBhbmVsLnYxLk5vZGVDYXBhYmlsaXRpZXMiTQoaT3BlbkNvbnRyb2xTZXNzaW9uUmVzcG9uc2USLwoHc2Vzc2lvbhgBIAEoCzIeLmNhcmJvbnBhbmVsLnYxLkNvbnRyb2xTZXNzaW9uIoIBChZSZXBvcnRQcmVmbGlnaHRSZXF1ZXN0EjMKBnJlcG9ydBgBIAEoCzIjLmNhcmJvbnBhbmVsLnYxLk5vZGVQcmVmbGlnaHRSZXBvcnQSMwoIZW52ZWxvcGUYAiABKAsyIS5jYXJib25wYW5lbC52MS5PcGVyYXRpb25FbnZlbG9wZSJKChdSZXBvcnRQcmVmbGlnaHRSZXNwb25zZRIvCgZyZXN1bHQYASABKAsyHy5jYXJib25wYW5lbC52MS5PcGVyYXRpb25SZXN1bHQifAoTUmVwb3J0SGVhbHRoUmVxdWVzdBIwCgZyZXBvcnQYASABKAsyIC5jYXJib25wYW5lbC52MS5Ob2RlSGVhbHRoUmVwb3J0EjMKCGVudmVsb3BlGAIgASgLMiEuY2FyYm9ucGFuZWwudjEuT3BlcmF0aW9uRW52ZWxvcGUiRwoUUmVwb3J0SGVhbHRoUmVzcG9uc2USLwoGcmVzdWx0GAEgASgLMh8uY2FyYm9ucGFuZWwudjEuT3BlcmF0aW9uUmVzdWx0InsKE0Fja09wZXJhdGlvblJlcXVlc3QSMwoIZW52ZWxvcGUYASABKAsyIS5jYXJib25wYW5lbC52MS5PcGVyYXRpb25FbnZlbG9wZRIvCgZyZXN1bHQYAiABKAsyHy5jYXJib25wYW5lbC52MS5PcGVyYXRpb25SZXN1bHQiRwoUQWNrT3BlcmF0aW9uUmVzcG9uc2USLwoGcmVzdWx0GAEgASgLMh8uY2FyYm9ucGFuZWwudjEuT3BlcmF0aW9uUmVzdWx0In0KGERpc3BhdGNoT3BlcmF0aW9uUmVxdWVzdBIzCghlbnZlbG9wZRgBIAEoCzIhLmNhcmJvbnBhbmVsLnYxLk9wZXJhdGlvbkVudmVsb3BlEiwKBnRhcmdldBgCIAEoCzIcLmNhcmJvbnBhbmVsLnYxLk5vZGVJZGVudGl0eSJ4ChlEaXNwYXRjaE9wZXJhdGlvblJlc3BvbnNlEg4KBnJvdXRlZBgBIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YAiABKAkSLwoGcmVzdWx0GAMgASgLMh8uY2FyYm9ucGFuZWwudjEuT3BlcmF0aW9uUmVzdWx0Ko8CChNOb2RlRW5yb2xsbWVudFN0YXRlEiUKIU5PREVfRU5ST0xMTUVOVF9TVEFURV9VTlNQRUNJRklFRBAAEiEKHU5PREVfRU5ST0xMTUVOVF9TVEFURV9QRU5ESU5HEAESIAocTk9ERV9FTlJPTExNRU5UX1NUQVRFX0FDVElWRRACEiEKHU5PREVfRU5ST0xMTUVOVF9TVEFURV9FWFBJUkVEEAMSIQodTk9ERV9FTlJPTExNRU5UX1NUQVRFX1JFVk9LRUQQBBIkCiBOT0RFX0VOUk9MTE1FTlRfU1RBVEVfU1VQRVJTRURFRBAFEiAKHE5PREVfRU5ST0xMTUVOVF9TVEFURV9MRUdBQ1kQBipRCg1Ob2RlVHJhbnNwb3J0Eh4KGk5PREVfVFJBTlNQT1JUX1VOU1BFQ0lGSUVEEAASIAocTk9ERV9UUkFOU1BPUlRfTUFOQUdFRF9BR0VOVBABKusCCg5Ob2RlQ2FwYWJpbGl0eRIfChtOT0RFX0NBUEFCSUxJVFlfVU5TUEVDSUZJRUQQABIcChhOT0RFX0NBUEFCSUxJVFlfUk9PVExFU1MQARIiCh5OT0RFX0NBUEFCSUxJVFlfUFJJVkFURV9TT0NLRVQQAhIjCh9OT0RFX0NBUEFCSUxJVFlfREVESUNBVEVEX1JPT1RTEAMSKAokTk9ERV9DQVBBQklMSVRZX0NPTlRBSU5FUkRfTkFNRVNQQUNFEAQSHQoZTk9ERV9DQVBBQklMSVRZX0NHUk9VUF9WMhAFEiMKH05PREVfQ0FQQUJJTElUWV9QUklWSUxFR0VEX1BPUlQQBhIiCh5OT0RFX0NBUEFCSUxJVFlfU1RPUkFHRV9XT1JLRVIQBxIZChVOT0RFX0NBUEFCSUxJVFlfRFJBSU4QCBIkCiBOT0RFX0NBUEFCSUxJVFlfUkVTVEFSVF9SRVFVSVJFRBAJKqMBChNOb2RlUHJlZmxpZ2h0U3RhdHVzEiUKIU5PREVfUFJFRkxJR0hUX1NUQVRVU19VTlNQRUNJRklFRBAAEiAKHE5PREVfUFJFRkxJR0hUX1NUQVRVU19QQVNTRUQQARIgChxOT0RFX1BSRUZMSUdIVF9TVEFUVVNfRkFJTEVEEAISIQodTk9ERV9QUkVGTElHSFRfU1RBVFVTX1VOS05PV04QAyrsAQoSTm9kZU9wZXJhdGlvblBoYXNlEiQKIE5PREVfT1BFUkFUSU9OX1BIQVNFX1VOU1BFQ0lGSUVEEAASIQodTk9ERV9PUEVSQVRJT05fUEhBU0VfQUNDRVBURUQQARIkCiBOT0RFX09QRVJBVElPTl9QSEFTRV9JTl9QUk9HUkVTUxACEiIKHk5PREVfT1BFUkFUSU9OX1BIQVNFX1NVQ0NFRURFRBADEh8KG05PREVfT1BFUkFUSU9OX1BIQVNFX0ZBSUxFRBAEEiIKHk5PREVfT1BFUkFUSU9OX1BIQVNFX1VOQ0VSVEFJThAFMp4HChJOb2RlQ29udHJvbFNlcnZpY2USZQoQQ3JlYXRlRW5yb2xsbWVudBInLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZUVucm9sbG1lbnRSZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuQ3JlYXRlRW5yb2xsbWVudFJlc3BvbnNlEmIKD0NsYWltRW5yb2xsbWVudBImLmNhcmJvbnBhbmVsLnYxLkNsYWltRW5yb2xsbWVudFJlcXVlc3QaJy5jYXJib25wYW5lbC52MS5DbGFpbUVucm9sbG1lbnRSZXNwb25zZRJlChBSZXZva2VDcmVkZW50aWFsEicuY2FyYm9ucGFuZWwudjEuUmV2b2tlQ3JlZGVudGlhbFJlcXVlc3QaKC5jYXJib25wYW5lbC52MS5SZXZva2VDcmVkZW50aWFsUmVzcG9uc2USZQoQTmVnb3RpYXRlVmVyc2lvbhInLmNhcmJvbnBhbmVsLnYxLk5lZ290aWF0ZVZlcnNpb25SZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuTmVnb3RpYXRlVmVyc2lvblJlc3BvbnNlEmsKEk9wZW5Db250cm9sU2Vzc2lvbhIpLmNhcmJvbnBhbmVsLnYxLk9wZW5Db250cm9sU2Vzc2lvblJlcXVlc3QaKi5jYXJib25wYW5lbC52MS5PcGVuQ29udHJvbFNlc3Npb25SZXNwb25zZRJiCg9SZXBvcnRQcmVmbGlnaHQSJi5jYXJib25wYW5lbC52MS5SZXBvcnRQcmVmbGlnaHRSZXF1ZXN0GicuY2FyYm9ucGFuZWwudjEuUmVwb3J0UHJlZmxpZ2h0UmVzcG9uc2USWQoMUmVwb3J0SGVhbHRoEiMuY2FyYm9ucGFuZWwudjEuUmVwb3J0SGVhbHRoUmVxdWVzdBokLmNhcmJvbnBhbmVsLnYxLlJlcG9ydEhlYWx0aFJlc3BvbnNlElkKDEFja09wZXJhdGlvbhIjLmNhcmJvbnBhbmVsLnYxLkFja09wZXJhdGlvblJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5BY2tPcGVyYXRpb25SZXNwb25zZRJoChFEaXNwYXRjaE9wZXJhdGlvbhIoLmNhcmJvbnBhbmVsLnYxLkRpc3BhdGNoT3BlcmF0aW9uUmVxdWVzdBopLmNhcmJvbnBhbmVsLnYxLkRpc3BhdGNoT3BlcmF0aW9uUmVzcG9uc2VCSFpGZ2l0aHViLmNvbS9hdGhOZGV2L2NhcmJvbi1wYW5lbC9wa2cvcHJvdG8vY2FyYm9ucGFuZWwvdjE7Y2FyYm9ucGFuZWx2MWIGcHJvdG8z',
+		'CiFjYXJib25wYW5lbC92MS9ub2RlX2NvbnRyb2wucHJvdG8SDmNhcmJvbnBhbmVsLnYxIscBCgxOb2RlSWRlbnRpdHkSDwoHbm9kZV9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhcKD2tleV9maW5nZXJwcmludBgDIAEoCRIdChVjcmVkZW50aWFsX2dlbmVyYXRpb24YBCABKAMSGwoTZW5kcG9pbnRfZ2VuZXJhdGlvbhgFIAEoAxIRCglkYWVtb25faWQYBiABKAkSMAoJdHJhbnNwb3J0GAcgASgOMh0uY2FyYm9ucGFuZWwudjEuTm9kZVRyYW5zcG9ydCLOAgoQTm9kZUNhcGFiaWxpdGllcxIYChBwcm90b2NvbF92ZXJzaW9uGAEgASgFEh0KFW1pbl9zdXBwb3J0ZWRfdmVyc2lvbhgCIAEoBRIdChVtYXhfc3VwcG9ydGVkX3ZlcnNpb24YAyABKAUSFQoNYWdlbnRfdmVyc2lvbhgEIAEoCRIWCg5lbmdpbmVfdmVyc2lvbhgFIAEoCRIOCgZkaXN0cm8YBiABKAkSFAoMYXJjaGl0ZWN0dXJlGAcgASgJEhYKDmtlcm5lbF92ZXJzaW9uGAggASgJEhYKDmNncm91cF92ZXJzaW9uGAkgASgJEhYKDnN0b3JhZ2VfZHJpdmVyGAogASgJEg8KB3N5c3RlbWQYCyABKAgSNAoMY2FwYWJpbGl0aWVzGAwgAygOMh4uY2FyYm9ucGFuZWwudjEuTm9kZUNhcGFiaWxpdHkieAoSTm9kZVByZWZsaWdodENoZWNrEgwKBGNvZGUYASABKAkSMwoGc3RhdHVzGAIgASgOMiMuY2FyYm9ucGFuZWwudjEuTm9kZVByZWZsaWdodFN0YXR1cxIPCgdtZXNzYWdlGAMgASgJEg4KBnJlbWVkeRgEIAEoCSLUAQoTTm9kZVByZWZsaWdodFJlcG9ydBIPCgdub2RlX2lkGAEgASgJEjMKBnN0YXR1cxgCIAEoDjIjLmNhcmJvbnBhbmVsLnYxLk5vZGVQcmVmbGlnaHRTdGF0dXMSMgoGY2hlY2tzGAMgAygLMiIuY2FyYm9ucGFuZWwudjEuTm9kZVByZWZsaWdodENoZWNrEi8KC29ic2VydmVkX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBISCgpsYXRlbmN5X21zGAUgASgDIv4BChBOb2RlSGVhbHRoUmVwb3J0Eg8KB25vZGVfaWQYASABKAkSLwoLb2JzZXJ2ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhEKCXJlYWNoYWJsZRgDIAEoCBISCgpsYXRlbmN5X21zGAQgASgDEjYKDGNhcGFiaWxpdGllcxgFIAEoCzIgLmNhcmJvbnBhbmVsLnYxLk5vZGVDYXBhYmlsaXRpZXMSNgoJcHJlZmxpZ2h0GAYgASgLMiMuY2FyYm9ucGFuZWwudjEuTm9kZVByZWZsaWdodFJlcG9ydBIRCglkYWVtb25faWQYByABKAkiywEKF05vZGVBdXRob3JpemF0aW9uQ2xhaW1zEg8KB25vZGVfaWQYASABKAkSEQoJb2JqZWN0X2lkGAIgASgJEg4KBnNjb3BlcxgDIAMoCRIdChVjcmVkZW50aWFsX2dlbmVyYXRpb24YBCABKAMSLQoJaXNzdWVkX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpleHBpcmVzX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCL5AgoRT25lVGltZUVucm9sbG1lbnQSFQoNZW5yb2xsbWVudF9pZBgBIAEoCRIZChF0b2tlbl9maW5nZXJwcmludBgCIAEoCRISCgpub2RlX2xhYmVsGAMgASgJEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCmV4cGlyZXNfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjIKBXN0YXRlGAYgASgOMiMuY2FyYm9ucGFuZWwudjEuTm9kZUVucm9sbG1lbnRTdGF0ZRI9ChVyZXF1aXJlZF9jYXBhYmlsaXRpZXMYByADKA4yHi5jYXJib25wYW5lbC52MS5Ob2RlQ2FwYWJpbGl0eRIYChBwcm90b2NvbF92ZXJzaW9uGAggASgFEg8KB25vZGVfaWQYCSABKAkSIAoYYXBwcm92ZWRfa2V5X2ZpbmdlcnByaW50GAogASgMIr0CChFPcGVyYXRpb25FbnZlbG9wZRIUCgxvcGVyYXRpb25faWQYASABKAkSDwoHbm9kZV9pZBgCIAEoCRIbChNlbmRwb2ludF9nZW5lcmF0aW9uGAMgASgDEh0KFWNyZWRlbnRpYWxfZ2VuZXJhdGlvbhgEIAEoAxIUCgxyZXF1ZXN0X2hhc2gYBSABKAwSLAoIZGVhZGxpbmUYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg8KB2F0dGVtcHQYByABKAUSPQoTY2FwYWJpbGl0eV9zbmFwc2hvdBgIIAEoCzIgLmNhcmJvbnBhbmVsLnYxLk5vZGVDYXBhYmlsaXRpZXMSMQoFcGhhc2UYCSABKA4yIi5jYXJib25wYW5lbC52MS5Ob2RlT3BlcmF0aW9uUGhhc2UinQEKD09wZXJhdGlvblJlc3VsdBIUCgxvcGVyYXRpb25faWQYASABKAkSMQoFcGhhc2UYAiABKA4yIi5jYXJib25wYW5lbC52MS5Ob2RlT3BlcmF0aW9uUGhhc2USDwoHbWVzc2FnZRgDIAEoCRIwCgxjb21wbGV0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIswBCg5Db250cm9sU2Vzc2lvbhISCgpzZXNzaW9uX2lkGAEgASgJEg8KB25vZGVfaWQYAiABKAkSLAoIZGVhZGxpbmUYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhUKDW1heF9pbl9mbGlnaHQYBCABKAUSGQoRbWF4X21lc3NhZ2VfYnl0ZXMYBSABKAUSNQoSaGVhcnRiZWF0X2ludGVydmFsGAYgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIoMBChJWZXJzaW9uTmVnb3RpYXRpb24SFQoNYWdlbnRfdmVyc2lvbhgBIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAIgASgFEh0KFW1pbl9zdXBwb3J0ZWRfdmVyc2lvbhgDIAEoBRIdChVtYXhfc3VwcG9ydGVkX3ZlcnNpb24YBCABKAUizwIKF0NyZWF0ZUVucm9sbG1lbnRSZXF1ZXN0EhIKCm5vZGVfbGFiZWwYASABKAkSJgoDdHRsGAIgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uEj0KFXJlcXVpcmVkX2NhcGFiaWxpdGllcxgDIAMoDjIeLmNhcmJvbnBhbmVsLnYxLk5vZGVDYXBhYmlsaXR5EhgKEHByb3RvY29sX3ZlcnNpb24YBCABKAUSDwoHbm9kZV9pZBgFIAEoCRIgChhhcHByb3ZlZF9wdWJsaWNfa2V5X3Nwa2kYBiABKAwSIAoYYXBwcm92ZWRfa2V5X2ZpbmdlcnByaW50GAcgASgMEiAKGGVucm9sbG1lbnRfc2VjcmV0X2RpZ2VzdBgIIAEoDBIXCg9lbnJvbGxtZW50X3NhbHQYCSABKAwSDwoHY3NyX3ByZRgKIAEoDCJRChhDcmVhdGVFbnJvbGxtZW50UmVzcG9uc2USNQoKZW5yb2xsbWVudBgBIAEoCzIhLmNhcmJvbnBhbmVsLnYxLk9uZVRpbWVFbnJvbGxtZW50IjgKH0JlZ2luRW5yb2xsbWVudENoYWxsZW5nZVJlcXVlc3QSFQoNZW5yb2xsbWVudF9pZBgBIAEoCSK/AQogQmVnaW5FbnJvbGxtZW50Q2hhbGxlbmdlUmVzcG9uc2USFAoMY2hhbGxlbmdlX2lkGAEgASgJEhQKDHNlcnZlcl9ub25jZRgCIAEoDBIuCgpleHBpcmVzX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIPCgdub2RlX2lkGAQgASgJEhUKDWVucm9sbG1lbnRfaWQYBSABKAkSFwoPY2hhbm5lbF9jb250ZXh0GAYgASgMIvEBChZDbGFpbUVucm9sbG1lbnRSZXF1ZXN0EhUKDWVucm9sbG1lbnRfaWQYASABKAkSGAoQZW5yb2xsbWVudF90b2tlbhgCIAEoCRIXCg9rZXlfZmluZ2VycHJpbnQYAyABKAkSNgoMY2FwYWJpbGl0aWVzGAQgASgLMiAuY2FyYm9ucGFuZWwudjEuTm9kZUNhcGFiaWxpdGllcxIUCgxjaGFsbGVuZ2VfaWQYBSABKAkSHQoVZnJlc2hfY2xhaW1fc2lnbmF0dXJlGAYgASgMEiAKGGNoYW5uZWxfYmluZGluZ19ldmlkZW5jZRgHIAEoDCLdAgoXQ2xhaW1FbnJvbGxtZW50UmVzcG9uc2USLgoIaWRlbnRpdHkYASABKAsyHC5jYXJib25wYW5lbC52MS5Ob2RlSWRlbnRpdHkSNwoGY2xhaW1zGAIgASgLMicuY2FyYm9ucGFuZWwudjEuTm9kZUF1dGhvcml6YXRpb25DbGFpbXMSJwofZW5yb2xsZWRfY2xpZW50X2NlcnRpZmljYXRlX2RlchgDIAEoDBIaChJjZXJ0aWZpY2F0ZV9zZXJpYWwYBCABKAkSHwoXY2VydGlmaWNhdGVfZmluZ2VycHJpbnQYBSABKAwSOQoVY2VydGlmaWNhdGVfbm90X2FmdGVyGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIZChFpc3N1aW5nX2NhX2RpZ2VzdBgHIAEoDBIdChVjcmVkZW50aWFsX2dlbmVyYXRpb24YCCABKAMiRwoXUmV2b2tlQ3JlZGVudGlhbFJlcXVlc3QSDwoHbm9kZV9pZBgBIAEoCRIbChNjb25maXJtYXRpb25fcGhyYXNlGAIgASgJIl8KGFJldm9rZUNyZWRlbnRpYWxSZXNwb25zZRIPCgdub2RlX2lkGAEgASgJEjIKBXN0YXRlGAIgASgOMiMuY2FyYm9ucGFuZWwudjEuTm9kZUVucm9sbG1lbnRTdGF0ZSJgChdOZWdvdGlhdGVWZXJzaW9uUmVxdWVzdBI0CghlbmRwb2ludBgBIAEoCzIiLmNhcmJvbnBhbmVsLnYxLlZlcnNpb25OZWdvdGlhdGlvbhIPCgdub2RlX2lkGAIgASgJIlcKGE5lZ290aWF0ZVZlcnNpb25SZXNwb25zZRIRCglzdXBwb3J0ZWQYASABKAgSGAoQc2VsZWN0ZWRfdmVyc2lvbhgCIAEoBRIOCgZyZWFzb24YAyABKAkigwEKGU9wZW5Db250cm9sU2Vzc2lvblJlcXVlc3QSLgoIaWRlbnRpdHkYASABKAsyHC5jYXJib25wYW5lbC52MS5Ob2RlSWRlbnRpdHkSNgoMY2FwYWJpbGl0aWVzGAIgASgLMiAuY2FyYm9ucGFuZWwudjEuTm9kZUNhcGFiaWxpdGllcyJNChpPcGVuQ29udHJvbFNlc3Npb25SZXNwb25zZRIvCgdzZXNzaW9uGAEgASgLMh4uY2FyYm9ucGFuZWwudjEuQ29udHJvbFNlc3Npb24iggEKFlJlcG9ydFByZWZsaWdodFJlcXVlc3QSMwoGcmVwb3J0GAEgASgLMiMuY2FyYm9ucGFuZWwudjEuTm9kZVByZWZsaWdodFJlcG9ydBIzCghlbnZlbG9wZRgCIAEoCzIhLmNhcmJvbnBhbmVsLnYxLk9wZXJhdGlvbkVudmVsb3BlIkoKF1JlcG9ydFByZWZsaWdodFJlc3BvbnNlEi8KBnJlc3VsdBgBIAEoCzIfLmNhcmJvbnBhbmVsLnYxLk9wZXJhdGlvblJlc3VsdCJ8ChNSZXBvcnRIZWFsdGhSZXF1ZXN0EjAKBnJlcG9ydBgBIAEoCzIgLmNhcmJvbnBhbmVsLnYxLk5vZGVIZWFsdGhSZXBvcnQSMwoIZW52ZWxvcGUYAiABKAsyIS5jYXJib25wYW5lbC52MS5PcGVyYXRpb25FbnZlbG9wZSJHChRSZXBvcnRIZWFsdGhSZXNwb25zZRIvCgZyZXN1bHQYASABKAsyHy5jYXJib25wYW5lbC52MS5PcGVyYXRpb25SZXN1bHQiewoTQWNrT3BlcmF0aW9uUmVxdWVzdBIzCghlbnZlbG9wZRgBIAEoCzIhLmNhcmJvbnBhbmVsLnYxLk9wZXJhdGlvbkVudmVsb3BlEi8KBnJlc3VsdBgCIAEoCzIfLmNhcmJvbnBhbmVsLnYxLk9wZXJhdGlvblJlc3VsdCJHChRBY2tPcGVyYXRpb25SZXNwb25zZRIvCgZyZXN1bHQYASABKAsyHy5jYXJib25wYW5lbC52MS5PcGVyYXRpb25SZXN1bHQifQoYRGlzcGF0Y2hPcGVyYXRpb25SZXF1ZXN0EjMKCGVudmVsb3BlGAEgASgLMiEuY2FyYm9ucGFuZWwudjEuT3BlcmF0aW9uRW52ZWxvcGUSLAoGdGFyZ2V0GAIgASgLMhwuY2FyYm9ucGFuZWwudjEuTm9kZUlkZW50aXR5IngKGURpc3BhdGNoT3BlcmF0aW9uUmVzcG9uc2USDgoGcm91dGVkGAEgASgIEhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRIvCgZyZXN1bHQYAyABKAsyHy5jYXJib25wYW5lbC52MS5PcGVyYXRpb25SZXN1bHQqjwIKE05vZGVFbnJvbGxtZW50U3RhdGUSJQohTk9ERV9FTlJPTExNRU5UX1NUQVRFX1VOU1BFQ0lGSUVEEAASIQodTk9ERV9FTlJPTExNRU5UX1NUQVRFX1BFTkRJTkcQARIgChxOT0RFX0VOUk9MTE1FTlRfU1RBVEVfQUNUSVZFEAISIQodTk9ERV9FTlJPTExNRU5UX1NUQVRFX0VYUElSRUQQAxIhCh1OT0RFX0VOUk9MTE1FTlRfU1RBVEVfUkVWT0tFRBAEEiQKIE5PREVfRU5ST0xMTUVOVF9TVEFURV9TVVBFUlNFREVEEAUSIAocTk9ERV9FTlJPTExNRU5UX1NUQVRFX0xFR0FDWRAGKlEKDU5vZGVUcmFuc3BvcnQSHgoaTk9ERV9UUkFOU1BPUlRfVU5TUEVDSUZJRUQQABIgChxOT0RFX1RSQU5TUE9SVF9NQU5BR0VEX0FHRU5UEAEq6wIKDk5vZGVDYXBhYmlsaXR5Eh8KG05PREVfQ0FQQUJJTElUWV9VTlNQRUNJRklFRBAAEhwKGE5PREVfQ0FQQUJJTElUWV9ST09UTEVTUxABEiIKHk5PREVfQ0FQQUJJTElUWV9QUklWQVRFX1NPQ0tFVBACEiMKH05PREVfQ0FQQUJJTElUWV9ERURJQ0FURURfUk9PVFMQAxIoCiROT0RFX0NBUEFCSUxJVFlfQ09OVEFJTkVSRF9OQU1FU1BBQ0UQBBIdChlOT0RFX0NBUEFCSUxJVFlfQ0dST1VQX1YyEAUSIwofTk9ERV9DQVBBQklMSVRZX1BSSVZJTEVHRURfUE9SVBAGEiIKHk5PREVfQ0FQQUJJTElUWV9TVE9SQUdFX1dPUktFUhAHEhkKFU5PREVfQ0FQQUJJTElUWV9EUkFJThAIEiQKIE5PREVfQ0FQQUJJTElUWV9SRVNUQVJUX1JFUVVJUkVEEAkqowEKE05vZGVQcmVmbGlnaHRTdGF0dXMSJQohTk9ERV9QUkVGTElHSFRfU1RBVFVTX1VOU1BFQ0lGSUVEEAASIAocTk9ERV9QUkVGTElHSFRfU1RBVFVTX1BBU1NFRBABEiAKHE5PREVfUFJFRkxJR0hUX1NUQVRVU19GQUlMRUQQAhIhCh1OT0RFX1BSRUZMSUdIVF9TVEFUVVNfVU5LTk9XThADKuwBChJOb2RlT3BlcmF0aW9uUGhhc2USJAogTk9ERV9PUEVSQVRJT05fUEhBU0VfVU5TUEVDSUZJRUQQABIhCh1OT0RFX09QRVJBVElPTl9QSEFTRV9BQ0NFUFRFRBABEiQKIE5PREVfT1BFUkFUSU9OX1BIQVNFX0lOX1BST0dSRVNTEAISIgoeTk9ERV9PUEVSQVRJT05fUEhBU0VfU1VDQ0VFREVEEAMSHwobTk9ERV9PUEVSQVRJT05fUEhBU0VfRkFJTEVEEAQSIgoeTk9ERV9PUEVSQVRJT05fUEhBU0VfVU5DRVJUQUlOEAUynQgKEk5vZGVDb250cm9sU2VydmljZRJlChBDcmVhdGVFbnJvbGxtZW50EicuY2FyYm9ucGFuZWwudjEuQ3JlYXRlRW5yb2xsbWVudFJlcXVlc3QaKC5jYXJib25wYW5lbC52MS5DcmVhdGVFbnJvbGxtZW50UmVzcG9uc2USfQoYQmVnaW5FbnJvbGxtZW50Q2hhbGxlbmdlEi8uY2FyYm9ucGFuZWwudjEuQmVnaW5FbnJvbGxtZW50Q2hhbGxlbmdlUmVxdWVzdBowLmNhcmJvbnBhbmVsLnYxLkJlZ2luRW5yb2xsbWVudENoYWxsZW5nZVJlc3BvbnNlEmIKD0NsYWltRW5yb2xsbWVudBImLmNhcmJvbnBhbmVsLnYxLkNsYWltRW5yb2xsbWVudFJlcXVlc3QaJy5jYXJib25wYW5lbC52MS5DbGFpbUVucm9sbG1lbnRSZXNwb25zZRJlChBSZXZva2VDcmVkZW50aWFsEicuY2FyYm9ucGFuZWwudjEuUmV2b2tlQ3JlZGVudGlhbFJlcXVlc3QaKC5jYXJib25wYW5lbC52MS5SZXZva2VDcmVkZW50aWFsUmVzcG9uc2USZQoQTmVnb3RpYXRlVmVyc2lvbhInLmNhcmJvbnBhbmVsLnYxLk5lZ290aWF0ZVZlcnNpb25SZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuTmVnb3RpYXRlVmVyc2lvblJlc3BvbnNlEmsKEk9wZW5Db250cm9sU2Vzc2lvbhIpLmNhcmJvbnBhbmVsLnYxLk9wZW5Db250cm9sU2Vzc2lvblJlcXVlc3QaKi5jYXJib25wYW5lbC52MS5PcGVuQ29udHJvbFNlc3Npb25SZXNwb25zZRJiCg9SZXBvcnRQcmVmbGlnaHQSJi5jYXJib25wYW5lbC52MS5SZXBvcnRQcmVmbGlnaHRSZXF1ZXN0GicuY2FyYm9ucGFuZWwudjEuUmVwb3J0UHJlZmxpZ2h0UmVzcG9uc2USWQoMUmVwb3J0SGVhbHRoEiMuY2FyYm9ucGFuZWwudjEuUmVwb3J0SGVhbHRoUmVxdWVzdBokLmNhcmJvbnBhbmVsLnYxLlJlcG9ydEhlYWx0aFJlc3BvbnNlElkKDEFja09wZXJhdGlvbhIjLmNhcmJvbnBhbmVsLnYxLkFja09wZXJhdGlvblJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5BY2tPcGVyYXRpb25SZXNwb25zZRJoChFEaXNwYXRjaE9wZXJhdGlvbhIoLmNhcmJvbnBhbmVsLnYxLkRpc3BhdGNoT3BlcmF0aW9uUmVxdWVzdBopLmNhcmJvbnBhbmVsLnYxLkRpc3BhdGNoT3BlcmF0aW9uUmVzcG9uc2VCSFpGZ2l0aHViLmNvbS9hdGhOZGV2L2NhcmJvbi1wYW5lbC9wa2cvcHJvdG8vY2FyYm9ucGFuZWwvdjE7Y2FyYm9ucGFuZWx2MWIGcHJvdG8z',
 		[file_google_protobuf_duration, file_google_protobuf_timestamp]
 	);
 
@@ -374,6 +374,18 @@ export type OneTimeEnrollment = Message<'carbonpanel.v1.OneTimeEnrollment'> & {
 	 * @generated from field: int32 protocol_version = 8;
 	 */
 	protocolVersion: number;
+
+	/**
+	 * @generated from field: string node_id = 9;
+	 */
+	nodeId: string;
+
+	/**
+	 * SHA-256 of the approved public key; public metadata, not a secret.
+	 *
+	 * @generated from field: bytes approved_key_fingerprint = 10;
+	 */
+	approvedKeyFingerprint: Uint8Array;
 };
 
 /**
@@ -564,7 +576,9 @@ export const VersionNegotiationSchema: GenMessage<VersionNegotiation> =
 	messageDesc(file_carbonpanel_v1_node_control, 10);
 
 /**
- * CreateEnrollmentRequest bounds a new one-time enrollment.
+ * CreateEnrollmentRequest bounds a new one-time enrollment and registers the
+ * node-generated proof material. All five proof fields are REQUIRED; a request
+ * missing any of them must be refused. No plaintext secret is ever registered.
  *
  * @generated from message carbonpanel.v1.CreateEnrollmentRequest
  */
@@ -588,6 +602,50 @@ export type CreateEnrollmentRequest = Message<'carbonpanel.v1.CreateEnrollmentRe
 	 * @generated from field: int32 protocol_version = 4;
 	 */
 	protocolVersion: number;
+
+	/**
+	 * Controller-assigned stable node ID bound into the fresh claim signature.
+	 *
+	 * @generated from field: string node_id = 5;
+	 */
+	nodeId: string;
+
+	/**
+	 * DER SPKI of the operator-approved node public key. Proof must come from
+	 * this exact key; a signature from any other key is refused.
+	 *
+	 * @generated from field: bytes approved_public_key_spki = 6;
+	 */
+	approvedPublicKeySpki: Uint8Array;
+
+	/**
+	 * SHA-256 of approved_public_key_spki; also required for preflight checks.
+	 *
+	 * @generated from field: bytes approved_key_fingerprint = 7;
+	 */
+	approvedKeyFingerprint: Uint8Array;
+
+	/**
+	 * SHA-256(salt || node-generated secret), the only registered secret proof.
+	 *
+	 * @generated from field: bytes enrollment_secret_digest = 8;
+	 */
+	enrollmentSecretDigest: Uint8Array;
+
+	/**
+	 * Node-generated salt used with the secret to form the digest.
+	 *
+	 * @generated from field: bytes enrollment_salt = 9;
+	 */
+	enrollmentSalt: Uint8Array;
+
+	/**
+	 * Pre-registration CSR signed by the approved key. Registration material
+	 * only; it is not the claim proof.
+	 *
+	 * @generated from field: bytes csr_pre = 10;
+	 */
+	csrPre: Uint8Array;
 };
 
 /**
@@ -619,7 +677,79 @@ export const CreateEnrollmentResponseSchema: GenMessage<CreateEnrollmentResponse
 	messageDesc(file_carbonpanel_v1_node_control, 12);
 
 /**
- * ClaimEnrollmentRequest presents the one-time token and node identity proof.
+ * BeginEnrollmentChallengeRequest asks for a single-use server nonce. It is
+ * keyed by enrollment ID only; no secret or credential is supplied.
+ *
+ * @generated from message carbonpanel.v1.BeginEnrollmentChallengeRequest
+ */
+export type BeginEnrollmentChallengeRequest =
+	Message<'carbonpanel.v1.BeginEnrollmentChallengeRequest'> & {
+		/**
+		 * @generated from field: string enrollment_id = 1;
+		 */
+		enrollmentId: string;
+	};
+
+/**
+ * Describes the message carbonpanel.v1.BeginEnrollmentChallengeRequest.
+ * Use `create(BeginEnrollmentChallengeRequestSchema)` to create a new message.
+ */
+export const BeginEnrollmentChallengeRequestSchema: GenMessage<BeginEnrollmentChallengeRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_node_control, 13);
+
+/**
+ * BeginEnrollmentChallengeResponse carries the server nonce and the public
+ * context over which the fresh claim signature must be made. Nothing here is
+ * secret; channel_context is derived by the server, not trusted from a client.
+ *
+ * @generated from message carbonpanel.v1.BeginEnrollmentChallengeResponse
+ */
+export type BeginEnrollmentChallengeResponse =
+	Message<'carbonpanel.v1.BeginEnrollmentChallengeResponse'> & {
+		/**
+		 * @generated from field: string challenge_id = 1;
+		 */
+		challengeId: string;
+
+		/**
+		 * @generated from field: bytes server_nonce = 2;
+		 */
+		serverNonce: Uint8Array;
+
+		/**
+		 * @generated from field: google.protobuf.Timestamp expires_at = 3;
+		 */
+		expiresAt?: Timestamp | undefined;
+
+		/**
+		 * @generated from field: string node_id = 4;
+		 */
+		nodeId: string;
+
+		/**
+		 * @generated from field: string enrollment_id = 5;
+		 */
+		enrollmentId: string;
+
+		/**
+		 * @generated from field: bytes channel_context = 6;
+		 */
+		channelContext: Uint8Array;
+	};
+
+/**
+ * Describes the message carbonpanel.v1.BeginEnrollmentChallengeResponse.
+ * Use `create(BeginEnrollmentChallengeResponseSchema)` to create a new message.
+ */
+export const BeginEnrollmentChallengeResponseSchema: GenMessage<BeginEnrollmentChallengeResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_node_control, 14);
+
+/**
+ * ClaimEnrollmentRequest presents the one-time node-generated secret once,
+ * the single-use challenge, and a fresh signature by the approved key.
+ * key_fingerprint is descriptive metadata only, never an authentication factor.
  *
  * @generated from message carbonpanel.v1.ClaimEnrollmentRequest
  */
@@ -630,11 +760,16 @@ export type ClaimEnrollmentRequest = Message<'carbonpanel.v1.ClaimEnrollmentRequ
 	enrollmentId: string;
 
 	/**
+	 * The node-generated high-entropy secret S. It appears only in this request
+	 * and is never returned or persisted by the controller.
+	 *
 	 * @generated from field: string enrollment_token = 2;
 	 */
 	enrollmentToken: string;
 
 	/**
+	 * Descriptive metadata only; the server uses the registered approved key.
+	 *
 	 * @generated from field: string key_fingerprint = 3;
 	 */
 	keyFingerprint: string;
@@ -643,6 +778,27 @@ export type ClaimEnrollmentRequest = Message<'carbonpanel.v1.ClaimEnrollmentRequ
 	 * @generated from field: carbonpanel.v1.NodeCapabilities capabilities = 4;
 	 */
 	capabilities?: NodeCapabilities | undefined;
+
+	/**
+	 * @generated from field: string challenge_id = 5;
+	 */
+	challengeId: string;
+
+	/**
+	 * Fresh signature over node ID, enrollment ID, challenge ID/nonce, expiry,
+	 * capabilities and verified channel context, made by the approved key.
+	 *
+	 * @generated from field: bytes fresh_claim_signature = 6;
+	 */
+	freshClaimSignature: Uint8Array;
+
+	/**
+	 * Client assertion of the channel binding; the server always compares it to
+	 * its own derived value or a verified trusted-proxy attestation.
+	 *
+	 * @generated from field: bytes channel_binding_evidence = 7;
+	 */
+	channelBindingEvidence: Uint8Array;
 };
 
 /**
@@ -651,11 +807,12 @@ export type ClaimEnrollmentRequest = Message<'carbonpanel.v1.ClaimEnrollmentRequ
  */
 export const ClaimEnrollmentRequestSchema: GenMessage<ClaimEnrollmentRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 13);
+	messageDesc(file_carbonpanel_v1_node_control, 15);
 
 /**
- * ClaimEnrollmentResponse returns the node identity and narrow claims. It never
- * returns private keys, tokens or other secret material.
+ * ClaimEnrollmentResponse returns the node identity, narrow claims, and a
+ * signed PUBLIC client certificate bound to the approved node key. The private
+ * key never leaves the node; no secret, token or private key is returned.
  *
  * @generated from message carbonpanel.v1.ClaimEnrollmentResponse
  */
@@ -669,6 +826,38 @@ export type ClaimEnrollmentResponse = Message<'carbonpanel.v1.ClaimEnrollmentRes
 	 * @generated from field: carbonpanel.v1.NodeAuthorizationClaims claims = 2;
 	 */
 	claims?: NodeAuthorizationClaims | undefined;
+
+	/**
+	 * Public X.509 client certificate DER. Possession is proven by mTLS.
+	 *
+	 * @generated from field: bytes enrolled_client_certificate_der = 3;
+	 */
+	enrolledClientCertificateDer: Uint8Array;
+
+	/**
+	 * @generated from field: string certificate_serial = 4;
+	 */
+	certificateSerial: string;
+
+	/**
+	 * @generated from field: bytes certificate_fingerprint = 5;
+	 */
+	certificateFingerprint: Uint8Array;
+
+	/**
+	 * @generated from field: google.protobuf.Timestamp certificate_not_after = 6;
+	 */
+	certificateNotAfter?: Timestamp | undefined;
+
+	/**
+	 * @generated from field: bytes issuing_ca_digest = 7;
+	 */
+	issuingCaDigest: Uint8Array;
+
+	/**
+	 * @generated from field: int64 credential_generation = 8;
+	 */
+	credentialGeneration: bigint;
 };
 
 /**
@@ -677,7 +866,7 @@ export type ClaimEnrollmentResponse = Message<'carbonpanel.v1.ClaimEnrollmentRes
  */
 export const ClaimEnrollmentResponseSchema: GenMessage<ClaimEnrollmentResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 14);
+	messageDesc(file_carbonpanel_v1_node_control, 16);
 
 /**
  * RevokeCredentialRequest identifies the node and the operator confirmation.
@@ -702,7 +891,7 @@ export type RevokeCredentialRequest = Message<'carbonpanel.v1.RevokeCredentialRe
  */
 export const RevokeCredentialRequestSchema: GenMessage<RevokeCredentialRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 15);
+	messageDesc(file_carbonpanel_v1_node_control, 17);
 
 /**
  * RevokeCredentialResponse reports the resulting enrollment state.
@@ -727,7 +916,7 @@ export type RevokeCredentialResponse = Message<'carbonpanel.v1.RevokeCredentialR
  */
 export const RevokeCredentialResponseSchema: GenMessage<RevokeCredentialResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 16);
+	messageDesc(file_carbonpanel_v1_node_control, 18);
 
 /**
  * NegotiateVersionRequest reports one endpoint's supported version range.
@@ -752,7 +941,7 @@ export type NegotiateVersionRequest = Message<'carbonpanel.v1.NegotiateVersionRe
  */
 export const NegotiateVersionRequestSchema: GenMessage<NegotiateVersionRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 17);
+	messageDesc(file_carbonpanel_v1_node_control, 19);
 
 /**
  * NegotiateVersionResponse selects a version or reports why none is supported.
@@ -782,7 +971,7 @@ export type NegotiateVersionResponse = Message<'carbonpanel.v1.NegotiateVersionR
  */
 export const NegotiateVersionResponseSchema: GenMessage<NegotiateVersionResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 18);
+	messageDesc(file_carbonpanel_v1_node_control, 20);
 
 /**
  * OpenControlSessionRequest requests a bounded agent-initiated session.
@@ -807,7 +996,7 @@ export type OpenControlSessionRequest = Message<'carbonpanel.v1.OpenControlSessi
  */
 export const OpenControlSessionRequestSchema: GenMessage<OpenControlSessionRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 19);
+	messageDesc(file_carbonpanel_v1_node_control, 21);
 
 /**
  * OpenControlSessionResponse returns the bounded session descriptor.
@@ -827,7 +1016,7 @@ export type OpenControlSessionResponse = Message<'carbonpanel.v1.OpenControlSess
  */
 export const OpenControlSessionResponseSchema: GenMessage<OpenControlSessionResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 20);
+	messageDesc(file_carbonpanel_v1_node_control, 22);
 
 /**
  * ReportPreflightRequest carries a versioned preflight result.
@@ -852,7 +1041,7 @@ export type ReportPreflightRequest = Message<'carbonpanel.v1.ReportPreflightRequ
  */
 export const ReportPreflightRequestSchema: GenMessage<ReportPreflightRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 21);
+	messageDesc(file_carbonpanel_v1_node_control, 23);
 
 /**
  * ReportPreflightResponse acknowledges the recorded preflight result.
@@ -872,7 +1061,7 @@ export type ReportPreflightResponse = Message<'carbonpanel.v1.ReportPreflightRes
  */
 export const ReportPreflightResponseSchema: GenMessage<ReportPreflightResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 22);
+	messageDesc(file_carbonpanel_v1_node_control, 24);
 
 /**
  * ReportHealthRequest carries a bounded health observation.
@@ -897,7 +1086,7 @@ export type ReportHealthRequest = Message<'carbonpanel.v1.ReportHealthRequest'> 
  */
 export const ReportHealthRequestSchema: GenMessage<ReportHealthRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 23);
+	messageDesc(file_carbonpanel_v1_node_control, 25);
 
 /**
  * ReportHealthResponse acknowledges the recorded health observation.
@@ -917,7 +1106,7 @@ export type ReportHealthResponse = Message<'carbonpanel.v1.ReportHealthResponse'
  */
 export const ReportHealthResponseSchema: GenMessage<ReportHealthResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 24);
+	messageDesc(file_carbonpanel_v1_node_control, 26);
 
 /**
  * AckOperationRequest reports the final outcome of a deduplicated operation.
@@ -942,7 +1131,7 @@ export type AckOperationRequest = Message<'carbonpanel.v1.AckOperationRequest'> 
  */
 export const AckOperationRequestSchema: GenMessage<AckOperationRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 25);
+	messageDesc(file_carbonpanel_v1_node_control, 27);
 
 /**
  * AckOperationResponse confirms the recorded outcome.
@@ -962,7 +1151,7 @@ export type AckOperationResponse = Message<'carbonpanel.v1.AckOperationResponse'
  */
 export const AckOperationResponseSchema: GenMessage<AckOperationResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 26);
+	messageDesc(file_carbonpanel_v1_node_control, 28);
 
 /**
  * DispatchOperationRequest carries a bounded operation addressed to one node.
@@ -987,7 +1176,7 @@ export type DispatchOperationRequest = Message<'carbonpanel.v1.DispatchOperation
  */
 export const DispatchOperationRequestSchema: GenMessage<DispatchOperationRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 27);
+	messageDesc(file_carbonpanel_v1_node_control, 29);
 
 /**
  * DispatchOperationResponse is fail-closed: routed is false whenever the
@@ -1018,7 +1207,7 @@ export type DispatchOperationResponse = Message<'carbonpanel.v1.DispatchOperatio
  */
 export const DispatchOperationResponseSchema: GenMessage<DispatchOperationResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_node_control, 28);
+	messageDesc(file_carbonpanel_v1_node_control, 30);
 
 /**
  * NodeEnrollmentState is the lifecycle of a managed node's one-time enrollment
@@ -1252,9 +1441,9 @@ export const NodeOperationPhaseSchema: GenEnum<NodeOperationPhase> =
  */
 export const NodeControlService: GenService<{
 	/**
-	 * CreateEnrollment starts a one-time, TTL-bounded enrollment. The response
-	 * carries only metadata; the one-time secret is handled by the P1+ enrollment
-	 * server and never stored in this contract's responses.
+	 * CreateEnrollment starts a one-time, TTL-bounded enrollment. The operator
+	 * registers the node-generated secret digest, salt and an approved public key
+	 * out of band. The response carries metadata only, never a secret.
 	 *
 	 * @generated from rpc carbonpanel.v1.NodeControlService.CreateEnrollment
 	 */
@@ -1264,8 +1453,21 @@ export const NodeControlService: GenService<{
 		output: typeof CreateEnrollmentResponseSchema;
 	};
 	/**
-	 * ClaimEnrollment consumes a one-time token and reports the agent's identity
-	 * material and capability snapshot. The token appears only in this request.
+	 * BeginEnrollmentChallenge is a bounded, rate-limited step that gives a node
+	 * a single-use server nonce after the operator registered the bundle. It is
+	 * unauthenticated by design but carries no secret and grants no access.
+	 *
+	 * @generated from rpc carbonpanel.v1.NodeControlService.BeginEnrollmentChallenge
+	 */
+	beginEnrollmentChallenge: {
+		methodKind: 'unary';
+		input: typeof BeginEnrollmentChallengeRequestSchema;
+		output: typeof BeginEnrollmentChallengeResponseSchema;
+	};
+	/**
+	 * ClaimEnrollment consumes the single-use challenge and one-time secret, and
+	 * verifies a fresh signature by the operator-approved key. The secret appears
+	 * only in this request; the response carries a signed public certificate.
 	 *
 	 * @generated from rpc carbonpanel.v1.NodeControlService.ClaimEnrollment
 	 */

@@ -895,8 +895,11 @@ type OneTimeEnrollment struct {
 	State                NodeEnrollmentState    `protobuf:"varint,6,opt,name=state,proto3,enum=carbonpanel.v1.NodeEnrollmentState" json:"state,omitempty"`
 	RequiredCapabilities []NodeCapability       `protobuf:"varint,7,rep,packed,name=required_capabilities,json=requiredCapabilities,proto3,enum=carbonpanel.v1.NodeCapability" json:"required_capabilities,omitempty"`
 	ProtocolVersion      int32                  `protobuf:"varint,8,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	NodeId               string                 `protobuf:"bytes,9,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// SHA-256 of the approved public key; public metadata, not a secret.
+	ApprovedKeyFingerprint []byte `protobuf:"bytes,10,opt,name=approved_key_fingerprint,json=approvedKeyFingerprint,proto3" json:"approved_key_fingerprint,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *OneTimeEnrollment) Reset() {
@@ -983,6 +986,20 @@ func (x *OneTimeEnrollment) GetProtocolVersion() int32 {
 		return x.ProtocolVersion
 	}
 	return 0
+}
+
+func (x *OneTimeEnrollment) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *OneTimeEnrollment) GetApprovedKeyFingerprint() []byte {
+	if x != nil {
+		return x.ApprovedKeyFingerprint
+	}
+	return nil
 }
 
 // OperationEnvelope carries the idempotency and ownership keys for a deduplicated
@@ -1321,15 +1338,31 @@ func (x *VersionNegotiation) GetMaxSupportedVersion() int32 {
 	return 0
 }
 
-// CreateEnrollmentRequest bounds a new one-time enrollment.
+// CreateEnrollmentRequest bounds a new one-time enrollment and registers the
+// node-generated proof material. All five proof fields are REQUIRED; a request
+// missing any of them must be refused. No plaintext secret is ever registered.
 type CreateEnrollmentRequest struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	NodeLabel            string                 `protobuf:"bytes,1,opt,name=node_label,json=nodeLabel,proto3" json:"node_label,omitempty"`
 	Ttl                  *durationpb.Duration   `protobuf:"bytes,2,opt,name=ttl,proto3" json:"ttl,omitempty"`
 	RequiredCapabilities []NodeCapability       `protobuf:"varint,3,rep,packed,name=required_capabilities,json=requiredCapabilities,proto3,enum=carbonpanel.v1.NodeCapability" json:"required_capabilities,omitempty"`
 	ProtocolVersion      int32                  `protobuf:"varint,4,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Controller-assigned stable node ID bound into the fresh claim signature.
+	NodeId string `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// DER SPKI of the operator-approved node public key. Proof must come from
+	// this exact key; a signature from any other key is refused.
+	ApprovedPublicKeySpki []byte `protobuf:"bytes,6,opt,name=approved_public_key_spki,json=approvedPublicKeySpki,proto3" json:"approved_public_key_spki,omitempty"`
+	// SHA-256 of approved_public_key_spki; also required for preflight checks.
+	ApprovedKeyFingerprint []byte `protobuf:"bytes,7,opt,name=approved_key_fingerprint,json=approvedKeyFingerprint,proto3" json:"approved_key_fingerprint,omitempty"`
+	// SHA-256(salt || node-generated secret), the only registered secret proof.
+	EnrollmentSecretDigest []byte `protobuf:"bytes,8,opt,name=enrollment_secret_digest,json=enrollmentSecretDigest,proto3" json:"enrollment_secret_digest,omitempty"`
+	// Node-generated salt used with the secret to form the digest.
+	EnrollmentSalt []byte `protobuf:"bytes,9,opt,name=enrollment_salt,json=enrollmentSalt,proto3" json:"enrollment_salt,omitempty"`
+	// Pre-registration CSR signed by the approved key. Registration material
+	// only; it is not the claim proof.
+	CsrPre        []byte `protobuf:"bytes,10,opt,name=csr_pre,json=csrPre,proto3" json:"csr_pre,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateEnrollmentRequest) Reset() {
@@ -1390,6 +1423,48 @@ func (x *CreateEnrollmentRequest) GetProtocolVersion() int32 {
 	return 0
 }
 
+func (x *CreateEnrollmentRequest) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *CreateEnrollmentRequest) GetApprovedPublicKeySpki() []byte {
+	if x != nil {
+		return x.ApprovedPublicKeySpki
+	}
+	return nil
+}
+
+func (x *CreateEnrollmentRequest) GetApprovedKeyFingerprint() []byte {
+	if x != nil {
+		return x.ApprovedKeyFingerprint
+	}
+	return nil
+}
+
+func (x *CreateEnrollmentRequest) GetEnrollmentSecretDigest() []byte {
+	if x != nil {
+		return x.EnrollmentSecretDigest
+	}
+	return nil
+}
+
+func (x *CreateEnrollmentRequest) GetEnrollmentSalt() []byte {
+	if x != nil {
+		return x.EnrollmentSalt
+	}
+	return nil
+}
+
+func (x *CreateEnrollmentRequest) GetCsrPre() []byte {
+	if x != nil {
+		return x.CsrPre
+	}
+	return nil
+}
+
 // CreateEnrollmentResponse returns enrollment metadata without secret material.
 type CreateEnrollmentResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1435,20 +1510,165 @@ func (x *CreateEnrollmentResponse) GetEnrollment() *OneTimeEnrollment {
 	return nil
 }
 
-// ClaimEnrollmentRequest presents the one-time token and node identity proof.
+// BeginEnrollmentChallengeRequest asks for a single-use server nonce. It is
+// keyed by enrollment ID only; no secret or credential is supplied.
+type BeginEnrollmentChallengeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EnrollmentId  string                 `protobuf:"bytes,1,opt,name=enrollment_id,json=enrollmentId,proto3" json:"enrollment_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BeginEnrollmentChallengeRequest) Reset() {
+	*x = BeginEnrollmentChallengeRequest{}
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BeginEnrollmentChallengeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BeginEnrollmentChallengeRequest) ProtoMessage() {}
+
+func (x *BeginEnrollmentChallengeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BeginEnrollmentChallengeRequest.ProtoReflect.Descriptor instead.
+func (*BeginEnrollmentChallengeRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *BeginEnrollmentChallengeRequest) GetEnrollmentId() string {
+	if x != nil {
+		return x.EnrollmentId
+	}
+	return ""
+}
+
+// BeginEnrollmentChallengeResponse carries the server nonce and the public
+// context over which the fresh claim signature must be made. Nothing here is
+// secret; channel_context is derived by the server, not trusted from a client.
+type BeginEnrollmentChallengeResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ChallengeId    string                 `protobuf:"bytes,1,opt,name=challenge_id,json=challengeId,proto3" json:"challenge_id,omitempty"`
+	ServerNonce    []byte                 `protobuf:"bytes,2,opt,name=server_nonce,json=serverNonce,proto3" json:"server_nonce,omitempty"`
+	ExpiresAt      *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	NodeId         string                 `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	EnrollmentId   string                 `protobuf:"bytes,5,opt,name=enrollment_id,json=enrollmentId,proto3" json:"enrollment_id,omitempty"`
+	ChannelContext []byte                 `protobuf:"bytes,6,opt,name=channel_context,json=channelContext,proto3" json:"channel_context,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *BeginEnrollmentChallengeResponse) Reset() {
+	*x = BeginEnrollmentChallengeResponse{}
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BeginEnrollmentChallengeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BeginEnrollmentChallengeResponse) ProtoMessage() {}
+
+func (x *BeginEnrollmentChallengeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BeginEnrollmentChallengeResponse.ProtoReflect.Descriptor instead.
+func (*BeginEnrollmentChallengeResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *BeginEnrollmentChallengeResponse) GetChallengeId() string {
+	if x != nil {
+		return x.ChallengeId
+	}
+	return ""
+}
+
+func (x *BeginEnrollmentChallengeResponse) GetServerNonce() []byte {
+	if x != nil {
+		return x.ServerNonce
+	}
+	return nil
+}
+
+func (x *BeginEnrollmentChallengeResponse) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
+func (x *BeginEnrollmentChallengeResponse) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *BeginEnrollmentChallengeResponse) GetEnrollmentId() string {
+	if x != nil {
+		return x.EnrollmentId
+	}
+	return ""
+}
+
+func (x *BeginEnrollmentChallengeResponse) GetChannelContext() []byte {
+	if x != nil {
+		return x.ChannelContext
+	}
+	return nil
+}
+
+// ClaimEnrollmentRequest presents the one-time node-generated secret once,
+// the single-use challenge, and a fresh signature by the approved key.
+// key_fingerprint is descriptive metadata only, never an authentication factor.
 type ClaimEnrollmentRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	EnrollmentId    string                 `protobuf:"bytes,1,opt,name=enrollment_id,json=enrollmentId,proto3" json:"enrollment_id,omitempty"`
-	EnrollmentToken string                 `protobuf:"bytes,2,opt,name=enrollment_token,json=enrollmentToken,proto3" json:"enrollment_token,omitempty"`
-	KeyFingerprint  string                 `protobuf:"bytes,3,opt,name=key_fingerprint,json=keyFingerprint,proto3" json:"key_fingerprint,omitempty"`
-	Capabilities    *NodeCapabilities      `protobuf:"bytes,4,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	EnrollmentId string                 `protobuf:"bytes,1,opt,name=enrollment_id,json=enrollmentId,proto3" json:"enrollment_id,omitempty"`
+	// The node-generated high-entropy secret S. It appears only in this request
+	// and is never returned or persisted by the controller.
+	EnrollmentToken string `protobuf:"bytes,2,opt,name=enrollment_token,json=enrollmentToken,proto3" json:"enrollment_token,omitempty"`
+	// Descriptive metadata only; the server uses the registered approved key.
+	KeyFingerprint string            `protobuf:"bytes,3,opt,name=key_fingerprint,json=keyFingerprint,proto3" json:"key_fingerprint,omitempty"`
+	Capabilities   *NodeCapabilities `protobuf:"bytes,4,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
+	ChallengeId    string            `protobuf:"bytes,5,opt,name=challenge_id,json=challengeId,proto3" json:"challenge_id,omitempty"`
+	// Fresh signature over node ID, enrollment ID, challenge ID/nonce, expiry,
+	// capabilities and verified channel context, made by the approved key.
+	FreshClaimSignature []byte `protobuf:"bytes,6,opt,name=fresh_claim_signature,json=freshClaimSignature,proto3" json:"fresh_claim_signature,omitempty"`
+	// Client assertion of the channel binding; the server always compares it to
+	// its own derived value or a verified trusted-proxy attestation.
+	ChannelBindingEvidence []byte `protobuf:"bytes,7,opt,name=channel_binding_evidence,json=channelBindingEvidence,proto3" json:"channel_binding_evidence,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ClaimEnrollmentRequest) Reset() {
 	*x = ClaimEnrollmentRequest{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1460,7 +1680,7 @@ func (x *ClaimEnrollmentRequest) String() string {
 func (*ClaimEnrollmentRequest) ProtoMessage() {}
 
 func (x *ClaimEnrollmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1473,7 +1693,7 @@ func (x *ClaimEnrollmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimEnrollmentRequest.ProtoReflect.Descriptor instead.
 func (*ClaimEnrollmentRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{13}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ClaimEnrollmentRequest) GetEnrollmentId() string {
@@ -1504,19 +1724,48 @@ func (x *ClaimEnrollmentRequest) GetCapabilities() *NodeCapabilities {
 	return nil
 }
 
-// ClaimEnrollmentResponse returns the node identity and narrow claims. It never
-// returns private keys, tokens or other secret material.
+func (x *ClaimEnrollmentRequest) GetChallengeId() string {
+	if x != nil {
+		return x.ChallengeId
+	}
+	return ""
+}
+
+func (x *ClaimEnrollmentRequest) GetFreshClaimSignature() []byte {
+	if x != nil {
+		return x.FreshClaimSignature
+	}
+	return nil
+}
+
+func (x *ClaimEnrollmentRequest) GetChannelBindingEvidence() []byte {
+	if x != nil {
+		return x.ChannelBindingEvidence
+	}
+	return nil
+}
+
+// ClaimEnrollmentResponse returns the node identity, narrow claims, and a
+// signed PUBLIC client certificate bound to the approved node key. The private
+// key never leaves the node; no secret, token or private key is returned.
 type ClaimEnrollmentResponse struct {
-	state         protoimpl.MessageState   `protogen:"open.v1"`
-	Identity      *NodeIdentity            `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
-	Claims        *NodeAuthorizationClaims `protobuf:"bytes,2,opt,name=claims,proto3" json:"claims,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state    protoimpl.MessageState   `protogen:"open.v1"`
+	Identity *NodeIdentity            `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
+	Claims   *NodeAuthorizationClaims `protobuf:"bytes,2,opt,name=claims,proto3" json:"claims,omitempty"`
+	// Public X.509 client certificate DER. Possession is proven by mTLS.
+	EnrolledClientCertificateDer []byte                 `protobuf:"bytes,3,opt,name=enrolled_client_certificate_der,json=enrolledClientCertificateDer,proto3" json:"enrolled_client_certificate_der,omitempty"`
+	CertificateSerial            string                 `protobuf:"bytes,4,opt,name=certificate_serial,json=certificateSerial,proto3" json:"certificate_serial,omitempty"`
+	CertificateFingerprint       []byte                 `protobuf:"bytes,5,opt,name=certificate_fingerprint,json=certificateFingerprint,proto3" json:"certificate_fingerprint,omitempty"`
+	CertificateNotAfter          *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=certificate_not_after,json=certificateNotAfter,proto3" json:"certificate_not_after,omitempty"`
+	IssuingCaDigest              []byte                 `protobuf:"bytes,7,opt,name=issuing_ca_digest,json=issuingCaDigest,proto3" json:"issuing_ca_digest,omitempty"`
+	CredentialGeneration         int64                  `protobuf:"varint,8,opt,name=credential_generation,json=credentialGeneration,proto3" json:"credential_generation,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *ClaimEnrollmentResponse) Reset() {
 	*x = ClaimEnrollmentResponse{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1528,7 +1777,7 @@ func (x *ClaimEnrollmentResponse) String() string {
 func (*ClaimEnrollmentResponse) ProtoMessage() {}
 
 func (x *ClaimEnrollmentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1541,7 +1790,7 @@ func (x *ClaimEnrollmentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimEnrollmentResponse.ProtoReflect.Descriptor instead.
 func (*ClaimEnrollmentResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{14}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ClaimEnrollmentResponse) GetIdentity() *NodeIdentity {
@@ -1558,6 +1807,48 @@ func (x *ClaimEnrollmentResponse) GetClaims() *NodeAuthorizationClaims {
 	return nil
 }
 
+func (x *ClaimEnrollmentResponse) GetEnrolledClientCertificateDer() []byte {
+	if x != nil {
+		return x.EnrolledClientCertificateDer
+	}
+	return nil
+}
+
+func (x *ClaimEnrollmentResponse) GetCertificateSerial() string {
+	if x != nil {
+		return x.CertificateSerial
+	}
+	return ""
+}
+
+func (x *ClaimEnrollmentResponse) GetCertificateFingerprint() []byte {
+	if x != nil {
+		return x.CertificateFingerprint
+	}
+	return nil
+}
+
+func (x *ClaimEnrollmentResponse) GetCertificateNotAfter() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CertificateNotAfter
+	}
+	return nil
+}
+
+func (x *ClaimEnrollmentResponse) GetIssuingCaDigest() []byte {
+	if x != nil {
+		return x.IssuingCaDigest
+	}
+	return nil
+}
+
+func (x *ClaimEnrollmentResponse) GetCredentialGeneration() int64 {
+	if x != nil {
+		return x.CredentialGeneration
+	}
+	return 0
+}
+
 // RevokeCredentialRequest identifies the node and the operator confirmation.
 type RevokeCredentialRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
@@ -1569,7 +1860,7 @@ type RevokeCredentialRequest struct {
 
 func (x *RevokeCredentialRequest) Reset() {
 	*x = RevokeCredentialRequest{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1581,7 +1872,7 @@ func (x *RevokeCredentialRequest) String() string {
 func (*RevokeCredentialRequest) ProtoMessage() {}
 
 func (x *RevokeCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1594,7 +1885,7 @@ func (x *RevokeCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeCredentialRequest.ProtoReflect.Descriptor instead.
 func (*RevokeCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{15}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *RevokeCredentialRequest) GetNodeId() string {
@@ -1622,7 +1913,7 @@ type RevokeCredentialResponse struct {
 
 func (x *RevokeCredentialResponse) Reset() {
 	*x = RevokeCredentialResponse{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[16]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1634,7 +1925,7 @@ func (x *RevokeCredentialResponse) String() string {
 func (*RevokeCredentialResponse) ProtoMessage() {}
 
 func (x *RevokeCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[16]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1647,7 +1938,7 @@ func (x *RevokeCredentialResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeCredentialResponse.ProtoReflect.Descriptor instead.
 func (*RevokeCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{16}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *RevokeCredentialResponse) GetNodeId() string {
@@ -1675,7 +1966,7 @@ type NegotiateVersionRequest struct {
 
 func (x *NegotiateVersionRequest) Reset() {
 	*x = NegotiateVersionRequest{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[17]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1687,7 +1978,7 @@ func (x *NegotiateVersionRequest) String() string {
 func (*NegotiateVersionRequest) ProtoMessage() {}
 
 func (x *NegotiateVersionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[17]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1700,7 +1991,7 @@ func (x *NegotiateVersionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NegotiateVersionRequest.ProtoReflect.Descriptor instead.
 func (*NegotiateVersionRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{17}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *NegotiateVersionRequest) GetEndpoint() *VersionNegotiation {
@@ -1729,7 +2020,7 @@ type NegotiateVersionResponse struct {
 
 func (x *NegotiateVersionResponse) Reset() {
 	*x = NegotiateVersionResponse{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[18]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1741,7 +2032,7 @@ func (x *NegotiateVersionResponse) String() string {
 func (*NegotiateVersionResponse) ProtoMessage() {}
 
 func (x *NegotiateVersionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[18]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1754,7 +2045,7 @@ func (x *NegotiateVersionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NegotiateVersionResponse.ProtoReflect.Descriptor instead.
 func (*NegotiateVersionResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{18}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *NegotiateVersionResponse) GetSupported() bool {
@@ -1789,7 +2080,7 @@ type OpenControlSessionRequest struct {
 
 func (x *OpenControlSessionRequest) Reset() {
 	*x = OpenControlSessionRequest{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[19]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1801,7 +2092,7 @@ func (x *OpenControlSessionRequest) String() string {
 func (*OpenControlSessionRequest) ProtoMessage() {}
 
 func (x *OpenControlSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[19]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1814,7 +2105,7 @@ func (x *OpenControlSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenControlSessionRequest.ProtoReflect.Descriptor instead.
 func (*OpenControlSessionRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{19}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *OpenControlSessionRequest) GetIdentity() *NodeIdentity {
@@ -1841,7 +2132,7 @@ type OpenControlSessionResponse struct {
 
 func (x *OpenControlSessionResponse) Reset() {
 	*x = OpenControlSessionResponse{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[20]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1853,7 +2144,7 @@ func (x *OpenControlSessionResponse) String() string {
 func (*OpenControlSessionResponse) ProtoMessage() {}
 
 func (x *OpenControlSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[20]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1866,7 +2157,7 @@ func (x *OpenControlSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenControlSessionResponse.ProtoReflect.Descriptor instead.
 func (*OpenControlSessionResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{20}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *OpenControlSessionResponse) GetSession() *ControlSession {
@@ -1887,7 +2178,7 @@ type ReportPreflightRequest struct {
 
 func (x *ReportPreflightRequest) Reset() {
 	*x = ReportPreflightRequest{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[21]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1899,7 +2190,7 @@ func (x *ReportPreflightRequest) String() string {
 func (*ReportPreflightRequest) ProtoMessage() {}
 
 func (x *ReportPreflightRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[21]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1912,7 +2203,7 @@ func (x *ReportPreflightRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPreflightRequest.ProtoReflect.Descriptor instead.
 func (*ReportPreflightRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{21}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ReportPreflightRequest) GetReport() *NodePreflightReport {
@@ -1939,7 +2230,7 @@ type ReportPreflightResponse struct {
 
 func (x *ReportPreflightResponse) Reset() {
 	*x = ReportPreflightResponse{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[22]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1951,7 +2242,7 @@ func (x *ReportPreflightResponse) String() string {
 func (*ReportPreflightResponse) ProtoMessage() {}
 
 func (x *ReportPreflightResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[22]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1964,7 +2255,7 @@ func (x *ReportPreflightResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportPreflightResponse.ProtoReflect.Descriptor instead.
 func (*ReportPreflightResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{22}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ReportPreflightResponse) GetResult() *OperationResult {
@@ -1985,7 +2276,7 @@ type ReportHealthRequest struct {
 
 func (x *ReportHealthRequest) Reset() {
 	*x = ReportHealthRequest{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[23]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1997,7 +2288,7 @@ func (x *ReportHealthRequest) String() string {
 func (*ReportHealthRequest) ProtoMessage() {}
 
 func (x *ReportHealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[23]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2010,7 +2301,7 @@ func (x *ReportHealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportHealthRequest.ProtoReflect.Descriptor instead.
 func (*ReportHealthRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{23}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ReportHealthRequest) GetReport() *NodeHealthReport {
@@ -2037,7 +2328,7 @@ type ReportHealthResponse struct {
 
 func (x *ReportHealthResponse) Reset() {
 	*x = ReportHealthResponse{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[24]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2049,7 +2340,7 @@ func (x *ReportHealthResponse) String() string {
 func (*ReportHealthResponse) ProtoMessage() {}
 
 func (x *ReportHealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[24]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2062,7 +2353,7 @@ func (x *ReportHealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportHealthResponse.ProtoReflect.Descriptor instead.
 func (*ReportHealthResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{24}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ReportHealthResponse) GetResult() *OperationResult {
@@ -2083,7 +2374,7 @@ type AckOperationRequest struct {
 
 func (x *AckOperationRequest) Reset() {
 	*x = AckOperationRequest{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[25]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2095,7 +2386,7 @@ func (x *AckOperationRequest) String() string {
 func (*AckOperationRequest) ProtoMessage() {}
 
 func (x *AckOperationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[25]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2108,7 +2399,7 @@ func (x *AckOperationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckOperationRequest.ProtoReflect.Descriptor instead.
 func (*AckOperationRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{25}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *AckOperationRequest) GetEnvelope() *OperationEnvelope {
@@ -2135,7 +2426,7 @@ type AckOperationResponse struct {
 
 func (x *AckOperationResponse) Reset() {
 	*x = AckOperationResponse{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2147,7 +2438,7 @@ func (x *AckOperationResponse) String() string {
 func (*AckOperationResponse) ProtoMessage() {}
 
 func (x *AckOperationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2160,7 +2451,7 @@ func (x *AckOperationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AckOperationResponse.ProtoReflect.Descriptor instead.
 func (*AckOperationResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{26}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *AckOperationResponse) GetResult() *OperationResult {
@@ -2181,7 +2472,7 @@ type DispatchOperationRequest struct {
 
 func (x *DispatchOperationRequest) Reset() {
 	*x = DispatchOperationRequest{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[27]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2193,7 +2484,7 @@ func (x *DispatchOperationRequest) String() string {
 func (*DispatchOperationRequest) ProtoMessage() {}
 
 func (x *DispatchOperationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[27]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2206,7 +2497,7 @@ func (x *DispatchOperationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchOperationRequest.ProtoReflect.Descriptor instead.
 func (*DispatchOperationRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{27}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DispatchOperationRequest) GetEnvelope() *OperationEnvelope {
@@ -2236,7 +2527,7 @@ type DispatchOperationResponse struct {
 
 func (x *DispatchOperationResponse) Reset() {
 	*x = DispatchOperationResponse{}
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[28]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2248,7 +2539,7 @@ func (x *DispatchOperationResponse) String() string {
 func (*DispatchOperationResponse) ProtoMessage() {}
 
 func (x *DispatchOperationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[28]
+	mi := &file_carbonpanel_v1_node_control_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2261,7 +2552,7 @@ func (x *DispatchOperationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DispatchOperationResponse.ProtoReflect.Descriptor instead.
 func (*DispatchOperationResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{28}
+	return file_carbonpanel_v1_node_control_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *DispatchOperationResponse) GetRouted() bool {
@@ -2342,7 +2633,7 @@ const file_carbonpanel_v1_node_control_proto_rawDesc = "" +
 	"\x15credential_generation\x18\x04 \x01(\x03R\x14credentialGeneration\x127\n" +
 	"\tissued_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bissuedAt\x129\n" +
 	"\n" +
-	"expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\xb5\x03\n" +
+	"expires_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"\x88\x04\n" +
 	"\x11OneTimeEnrollment\x12#\n" +
 	"\renrollment_id\x18\x01 \x01(\tR\fenrollmentId\x12+\n" +
 	"\x11token_fingerprint\x18\x02 \x01(\tR\x10tokenFingerprint\x12\x1d\n" +
@@ -2354,7 +2645,10 @@ const file_carbonpanel_v1_node_control_proto_rawDesc = "" +
 	"expires_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x129\n" +
 	"\x05state\x18\x06 \x01(\x0e2#.carbonpanel.v1.NodeEnrollmentStateR\x05state\x12S\n" +
 	"\x15required_capabilities\x18\a \x03(\x0e2\x1e.carbonpanel.v1.NodeCapabilityR\x14requiredCapabilities\x12)\n" +
-	"\x10protocol_version\x18\b \x01(\x05R\x0fprotocolVersion\"\xb7\x03\n" +
+	"\x10protocol_version\x18\b \x01(\x05R\x0fprotocolVersion\x12\x17\n" +
+	"\anode_id\x18\t \x01(\tR\x06nodeId\x128\n" +
+	"\x18approved_key_fingerprint\x18\n" +
+	" \x01(\fR\x16approvedKeyFingerprint\"\xb7\x03\n" +
 	"\x11OperationEnvelope\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12/\n" +
@@ -2382,25 +2676,51 @@ const file_carbonpanel_v1_node_control_proto_rawDesc = "" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\x05R\x0fprotocolVersion\x122\n" +
 	"\x15min_supported_version\x18\x03 \x01(\x05R\x13minSupportedVersion\x122\n" +
-	"\x15max_supported_version\x18\x04 \x01(\x05R\x13maxSupportedVersion\"\xe5\x01\n" +
+	"\x15max_supported_version\x18\x04 \x01(\x05R\x13maxSupportedVersion\"\xed\x03\n" +
 	"\x17CreateEnrollmentRequest\x12\x1d\n" +
 	"\n" +
 	"node_label\x18\x01 \x01(\tR\tnodeLabel\x12+\n" +
 	"\x03ttl\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x03ttl\x12S\n" +
 	"\x15required_capabilities\x18\x03 \x03(\x0e2\x1e.carbonpanel.v1.NodeCapabilityR\x14requiredCapabilities\x12)\n" +
-	"\x10protocol_version\x18\x04 \x01(\x05R\x0fprotocolVersion\"]\n" +
+	"\x10protocol_version\x18\x04 \x01(\x05R\x0fprotocolVersion\x12\x17\n" +
+	"\anode_id\x18\x05 \x01(\tR\x06nodeId\x127\n" +
+	"\x18approved_public_key_spki\x18\x06 \x01(\fR\x15approvedPublicKeySpki\x128\n" +
+	"\x18approved_key_fingerprint\x18\a \x01(\fR\x16approvedKeyFingerprint\x128\n" +
+	"\x18enrollment_secret_digest\x18\b \x01(\fR\x16enrollmentSecretDigest\x12'\n" +
+	"\x0fenrollment_salt\x18\t \x01(\fR\x0eenrollmentSalt\x12\x17\n" +
+	"\acsr_pre\x18\n" +
+	" \x01(\fR\x06csrPre\"]\n" +
 	"\x18CreateEnrollmentResponse\x12A\n" +
 	"\n" +
 	"enrollment\x18\x01 \x01(\v2!.carbonpanel.v1.OneTimeEnrollmentR\n" +
-	"enrollment\"\xd7\x01\n" +
+	"enrollment\"F\n" +
+	"\x1fBeginEnrollmentChallengeRequest\x12#\n" +
+	"\renrollment_id\x18\x01 \x01(\tR\fenrollmentId\"\x8a\x02\n" +
+	" BeginEnrollmentChallengeResponse\x12!\n" +
+	"\fchallenge_id\x18\x01 \x01(\tR\vchallengeId\x12!\n" +
+	"\fserver_nonce\x18\x02 \x01(\fR\vserverNonce\x129\n" +
+	"\n" +
+	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12\x17\n" +
+	"\anode_id\x18\x04 \x01(\tR\x06nodeId\x12#\n" +
+	"\renrollment_id\x18\x05 \x01(\tR\fenrollmentId\x12'\n" +
+	"\x0fchannel_context\x18\x06 \x01(\fR\x0echannelContext\"\xe8\x02\n" +
 	"\x16ClaimEnrollmentRequest\x12#\n" +
 	"\renrollment_id\x18\x01 \x01(\tR\fenrollmentId\x12)\n" +
 	"\x10enrollment_token\x18\x02 \x01(\tR\x0fenrollmentToken\x12'\n" +
 	"\x0fkey_fingerprint\x18\x03 \x01(\tR\x0ekeyFingerprint\x12D\n" +
-	"\fcapabilities\x18\x04 \x01(\v2 .carbonpanel.v1.NodeCapabilitiesR\fcapabilities\"\x94\x01\n" +
+	"\fcapabilities\x18\x04 \x01(\v2 .carbonpanel.v1.NodeCapabilitiesR\fcapabilities\x12!\n" +
+	"\fchallenge_id\x18\x05 \x01(\tR\vchallengeId\x122\n" +
+	"\x15fresh_claim_signature\x18\x06 \x01(\fR\x13freshClaimSignature\x128\n" +
+	"\x18channel_binding_evidence\x18\a \x01(\fR\x16channelBindingEvidence\"\xf4\x03\n" +
 	"\x17ClaimEnrollmentResponse\x128\n" +
 	"\bidentity\x18\x01 \x01(\v2\x1c.carbonpanel.v1.NodeIdentityR\bidentity\x12?\n" +
-	"\x06claims\x18\x02 \x01(\v2'.carbonpanel.v1.NodeAuthorizationClaimsR\x06claims\"c\n" +
+	"\x06claims\x18\x02 \x01(\v2'.carbonpanel.v1.NodeAuthorizationClaimsR\x06claims\x12E\n" +
+	"\x1fenrolled_client_certificate_der\x18\x03 \x01(\fR\x1cenrolledClientCertificateDer\x12-\n" +
+	"\x12certificate_serial\x18\x04 \x01(\tR\x11certificateSerial\x127\n" +
+	"\x17certificate_fingerprint\x18\x05 \x01(\fR\x16certificateFingerprint\x12N\n" +
+	"\x15certificate_not_after\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x13certificateNotAfter\x12*\n" +
+	"\x11issuing_ca_digest\x18\a \x01(\fR\x0fissuingCaDigest\x123\n" +
+	"\x15credential_generation\x18\b \x01(\x03R\x14credentialGeneration\"c\n" +
 	"\x17RevokeCredentialRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12/\n" +
 	"\x13confirmation_phrase\x18\x02 \x01(\tR\x12confirmationPhrase\"n\n" +
@@ -2474,9 +2794,10 @@ const file_carbonpanel_v1_node_control_proto_rawDesc = "" +
 	" NODE_OPERATION_PHASE_IN_PROGRESS\x10\x02\x12\"\n" +
 	"\x1eNODE_OPERATION_PHASE_SUCCEEDED\x10\x03\x12\x1f\n" +
 	"\x1bNODE_OPERATION_PHASE_FAILED\x10\x04\x12\"\n" +
-	"\x1eNODE_OPERATION_PHASE_UNCERTAIN\x10\x052\x9e\a\n" +
+	"\x1eNODE_OPERATION_PHASE_UNCERTAIN\x10\x052\x9d\b\n" +
 	"\x12NodeControlService\x12e\n" +
-	"\x10CreateEnrollment\x12'.carbonpanel.v1.CreateEnrollmentRequest\x1a(.carbonpanel.v1.CreateEnrollmentResponse\x12b\n" +
+	"\x10CreateEnrollment\x12'.carbonpanel.v1.CreateEnrollmentRequest\x1a(.carbonpanel.v1.CreateEnrollmentResponse\x12}\n" +
+	"\x18BeginEnrollmentChallenge\x12/.carbonpanel.v1.BeginEnrollmentChallengeRequest\x1a0.carbonpanel.v1.BeginEnrollmentChallengeResponse\x12b\n" +
 	"\x0fClaimEnrollment\x12&.carbonpanel.v1.ClaimEnrollmentRequest\x1a'.carbonpanel.v1.ClaimEnrollmentResponse\x12e\n" +
 	"\x10RevokeCredential\x12'.carbonpanel.v1.RevokeCredentialRequest\x1a(.carbonpanel.v1.RevokeCredentialResponse\x12e\n" +
 	"\x10NegotiateVersion\x12'.carbonpanel.v1.NegotiateVersionRequest\x1a(.carbonpanel.v1.NegotiateVersionResponse\x12k\n" +
@@ -2499,44 +2820,46 @@ func file_carbonpanel_v1_node_control_proto_rawDescGZIP() []byte {
 }
 
 var file_carbonpanel_v1_node_control_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_carbonpanel_v1_node_control_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
+var file_carbonpanel_v1_node_control_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_carbonpanel_v1_node_control_proto_goTypes = []any{
-	(NodeEnrollmentState)(0),           // 0: carbonpanel.v1.NodeEnrollmentState
-	(NodeTransport)(0),                 // 1: carbonpanel.v1.NodeTransport
-	(NodeCapability)(0),                // 2: carbonpanel.v1.NodeCapability
-	(NodePreflightStatus)(0),           // 3: carbonpanel.v1.NodePreflightStatus
-	(NodeOperationPhase)(0),            // 4: carbonpanel.v1.NodeOperationPhase
-	(*NodeIdentity)(nil),               // 5: carbonpanel.v1.NodeIdentity
-	(*NodeCapabilities)(nil),           // 6: carbonpanel.v1.NodeCapabilities
-	(*NodePreflightCheck)(nil),         // 7: carbonpanel.v1.NodePreflightCheck
-	(*NodePreflightReport)(nil),        // 8: carbonpanel.v1.NodePreflightReport
-	(*NodeHealthReport)(nil),           // 9: carbonpanel.v1.NodeHealthReport
-	(*NodeAuthorizationClaims)(nil),    // 10: carbonpanel.v1.NodeAuthorizationClaims
-	(*OneTimeEnrollment)(nil),          // 11: carbonpanel.v1.OneTimeEnrollment
-	(*OperationEnvelope)(nil),          // 12: carbonpanel.v1.OperationEnvelope
-	(*OperationResult)(nil),            // 13: carbonpanel.v1.OperationResult
-	(*ControlSession)(nil),             // 14: carbonpanel.v1.ControlSession
-	(*VersionNegotiation)(nil),         // 15: carbonpanel.v1.VersionNegotiation
-	(*CreateEnrollmentRequest)(nil),    // 16: carbonpanel.v1.CreateEnrollmentRequest
-	(*CreateEnrollmentResponse)(nil),   // 17: carbonpanel.v1.CreateEnrollmentResponse
-	(*ClaimEnrollmentRequest)(nil),     // 18: carbonpanel.v1.ClaimEnrollmentRequest
-	(*ClaimEnrollmentResponse)(nil),    // 19: carbonpanel.v1.ClaimEnrollmentResponse
-	(*RevokeCredentialRequest)(nil),    // 20: carbonpanel.v1.RevokeCredentialRequest
-	(*RevokeCredentialResponse)(nil),   // 21: carbonpanel.v1.RevokeCredentialResponse
-	(*NegotiateVersionRequest)(nil),    // 22: carbonpanel.v1.NegotiateVersionRequest
-	(*NegotiateVersionResponse)(nil),   // 23: carbonpanel.v1.NegotiateVersionResponse
-	(*OpenControlSessionRequest)(nil),  // 24: carbonpanel.v1.OpenControlSessionRequest
-	(*OpenControlSessionResponse)(nil), // 25: carbonpanel.v1.OpenControlSessionResponse
-	(*ReportPreflightRequest)(nil),     // 26: carbonpanel.v1.ReportPreflightRequest
-	(*ReportPreflightResponse)(nil),    // 27: carbonpanel.v1.ReportPreflightResponse
-	(*ReportHealthRequest)(nil),        // 28: carbonpanel.v1.ReportHealthRequest
-	(*ReportHealthResponse)(nil),       // 29: carbonpanel.v1.ReportHealthResponse
-	(*AckOperationRequest)(nil),        // 30: carbonpanel.v1.AckOperationRequest
-	(*AckOperationResponse)(nil),       // 31: carbonpanel.v1.AckOperationResponse
-	(*DispatchOperationRequest)(nil),   // 32: carbonpanel.v1.DispatchOperationRequest
-	(*DispatchOperationResponse)(nil),  // 33: carbonpanel.v1.DispatchOperationResponse
-	(*timestamppb.Timestamp)(nil),      // 34: google.protobuf.Timestamp
-	(*durationpb.Duration)(nil),        // 35: google.protobuf.Duration
+	(NodeEnrollmentState)(0),                 // 0: carbonpanel.v1.NodeEnrollmentState
+	(NodeTransport)(0),                       // 1: carbonpanel.v1.NodeTransport
+	(NodeCapability)(0),                      // 2: carbonpanel.v1.NodeCapability
+	(NodePreflightStatus)(0),                 // 3: carbonpanel.v1.NodePreflightStatus
+	(NodeOperationPhase)(0),                  // 4: carbonpanel.v1.NodeOperationPhase
+	(*NodeIdentity)(nil),                     // 5: carbonpanel.v1.NodeIdentity
+	(*NodeCapabilities)(nil),                 // 6: carbonpanel.v1.NodeCapabilities
+	(*NodePreflightCheck)(nil),               // 7: carbonpanel.v1.NodePreflightCheck
+	(*NodePreflightReport)(nil),              // 8: carbonpanel.v1.NodePreflightReport
+	(*NodeHealthReport)(nil),                 // 9: carbonpanel.v1.NodeHealthReport
+	(*NodeAuthorizationClaims)(nil),          // 10: carbonpanel.v1.NodeAuthorizationClaims
+	(*OneTimeEnrollment)(nil),                // 11: carbonpanel.v1.OneTimeEnrollment
+	(*OperationEnvelope)(nil),                // 12: carbonpanel.v1.OperationEnvelope
+	(*OperationResult)(nil),                  // 13: carbonpanel.v1.OperationResult
+	(*ControlSession)(nil),                   // 14: carbonpanel.v1.ControlSession
+	(*VersionNegotiation)(nil),               // 15: carbonpanel.v1.VersionNegotiation
+	(*CreateEnrollmentRequest)(nil),          // 16: carbonpanel.v1.CreateEnrollmentRequest
+	(*CreateEnrollmentResponse)(nil),         // 17: carbonpanel.v1.CreateEnrollmentResponse
+	(*BeginEnrollmentChallengeRequest)(nil),  // 18: carbonpanel.v1.BeginEnrollmentChallengeRequest
+	(*BeginEnrollmentChallengeResponse)(nil), // 19: carbonpanel.v1.BeginEnrollmentChallengeResponse
+	(*ClaimEnrollmentRequest)(nil),           // 20: carbonpanel.v1.ClaimEnrollmentRequest
+	(*ClaimEnrollmentResponse)(nil),          // 21: carbonpanel.v1.ClaimEnrollmentResponse
+	(*RevokeCredentialRequest)(nil),          // 22: carbonpanel.v1.RevokeCredentialRequest
+	(*RevokeCredentialResponse)(nil),         // 23: carbonpanel.v1.RevokeCredentialResponse
+	(*NegotiateVersionRequest)(nil),          // 24: carbonpanel.v1.NegotiateVersionRequest
+	(*NegotiateVersionResponse)(nil),         // 25: carbonpanel.v1.NegotiateVersionResponse
+	(*OpenControlSessionRequest)(nil),        // 26: carbonpanel.v1.OpenControlSessionRequest
+	(*OpenControlSessionResponse)(nil),       // 27: carbonpanel.v1.OpenControlSessionResponse
+	(*ReportPreflightRequest)(nil),           // 28: carbonpanel.v1.ReportPreflightRequest
+	(*ReportPreflightResponse)(nil),          // 29: carbonpanel.v1.ReportPreflightResponse
+	(*ReportHealthRequest)(nil),              // 30: carbonpanel.v1.ReportHealthRequest
+	(*ReportHealthResponse)(nil),             // 31: carbonpanel.v1.ReportHealthResponse
+	(*AckOperationRequest)(nil),              // 32: carbonpanel.v1.AckOperationRequest
+	(*AckOperationResponse)(nil),             // 33: carbonpanel.v1.AckOperationResponse
+	(*DispatchOperationRequest)(nil),         // 34: carbonpanel.v1.DispatchOperationRequest
+	(*DispatchOperationResponse)(nil),        // 35: carbonpanel.v1.DispatchOperationResponse
+	(*timestamppb.Timestamp)(nil),            // 36: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),              // 37: google.protobuf.Duration
 }
 var file_carbonpanel_v1_node_control_proto_depIdxs = []int32{
 	1,  // 0: carbonpanel.v1.NodeIdentity.transport:type_name -> carbonpanel.v1.NodeTransport
@@ -2544,69 +2867,73 @@ var file_carbonpanel_v1_node_control_proto_depIdxs = []int32{
 	3,  // 2: carbonpanel.v1.NodePreflightCheck.status:type_name -> carbonpanel.v1.NodePreflightStatus
 	3,  // 3: carbonpanel.v1.NodePreflightReport.status:type_name -> carbonpanel.v1.NodePreflightStatus
 	7,  // 4: carbonpanel.v1.NodePreflightReport.checks:type_name -> carbonpanel.v1.NodePreflightCheck
-	34, // 5: carbonpanel.v1.NodePreflightReport.observed_at:type_name -> google.protobuf.Timestamp
-	34, // 6: carbonpanel.v1.NodeHealthReport.observed_at:type_name -> google.protobuf.Timestamp
+	36, // 5: carbonpanel.v1.NodePreflightReport.observed_at:type_name -> google.protobuf.Timestamp
+	36, // 6: carbonpanel.v1.NodeHealthReport.observed_at:type_name -> google.protobuf.Timestamp
 	6,  // 7: carbonpanel.v1.NodeHealthReport.capabilities:type_name -> carbonpanel.v1.NodeCapabilities
 	8,  // 8: carbonpanel.v1.NodeHealthReport.preflight:type_name -> carbonpanel.v1.NodePreflightReport
-	34, // 9: carbonpanel.v1.NodeAuthorizationClaims.issued_at:type_name -> google.protobuf.Timestamp
-	34, // 10: carbonpanel.v1.NodeAuthorizationClaims.expires_at:type_name -> google.protobuf.Timestamp
-	34, // 11: carbonpanel.v1.OneTimeEnrollment.created_at:type_name -> google.protobuf.Timestamp
-	34, // 12: carbonpanel.v1.OneTimeEnrollment.expires_at:type_name -> google.protobuf.Timestamp
+	36, // 9: carbonpanel.v1.NodeAuthorizationClaims.issued_at:type_name -> google.protobuf.Timestamp
+	36, // 10: carbonpanel.v1.NodeAuthorizationClaims.expires_at:type_name -> google.protobuf.Timestamp
+	36, // 11: carbonpanel.v1.OneTimeEnrollment.created_at:type_name -> google.protobuf.Timestamp
+	36, // 12: carbonpanel.v1.OneTimeEnrollment.expires_at:type_name -> google.protobuf.Timestamp
 	0,  // 13: carbonpanel.v1.OneTimeEnrollment.state:type_name -> carbonpanel.v1.NodeEnrollmentState
 	2,  // 14: carbonpanel.v1.OneTimeEnrollment.required_capabilities:type_name -> carbonpanel.v1.NodeCapability
-	34, // 15: carbonpanel.v1.OperationEnvelope.deadline:type_name -> google.protobuf.Timestamp
+	36, // 15: carbonpanel.v1.OperationEnvelope.deadline:type_name -> google.protobuf.Timestamp
 	6,  // 16: carbonpanel.v1.OperationEnvelope.capability_snapshot:type_name -> carbonpanel.v1.NodeCapabilities
 	4,  // 17: carbonpanel.v1.OperationEnvelope.phase:type_name -> carbonpanel.v1.NodeOperationPhase
 	4,  // 18: carbonpanel.v1.OperationResult.phase:type_name -> carbonpanel.v1.NodeOperationPhase
-	34, // 19: carbonpanel.v1.OperationResult.completed_at:type_name -> google.protobuf.Timestamp
-	34, // 20: carbonpanel.v1.ControlSession.deadline:type_name -> google.protobuf.Timestamp
-	35, // 21: carbonpanel.v1.ControlSession.heartbeat_interval:type_name -> google.protobuf.Duration
-	35, // 22: carbonpanel.v1.CreateEnrollmentRequest.ttl:type_name -> google.protobuf.Duration
+	36, // 19: carbonpanel.v1.OperationResult.completed_at:type_name -> google.protobuf.Timestamp
+	36, // 20: carbonpanel.v1.ControlSession.deadline:type_name -> google.protobuf.Timestamp
+	37, // 21: carbonpanel.v1.ControlSession.heartbeat_interval:type_name -> google.protobuf.Duration
+	37, // 22: carbonpanel.v1.CreateEnrollmentRequest.ttl:type_name -> google.protobuf.Duration
 	2,  // 23: carbonpanel.v1.CreateEnrollmentRequest.required_capabilities:type_name -> carbonpanel.v1.NodeCapability
 	11, // 24: carbonpanel.v1.CreateEnrollmentResponse.enrollment:type_name -> carbonpanel.v1.OneTimeEnrollment
-	6,  // 25: carbonpanel.v1.ClaimEnrollmentRequest.capabilities:type_name -> carbonpanel.v1.NodeCapabilities
-	5,  // 26: carbonpanel.v1.ClaimEnrollmentResponse.identity:type_name -> carbonpanel.v1.NodeIdentity
-	10, // 27: carbonpanel.v1.ClaimEnrollmentResponse.claims:type_name -> carbonpanel.v1.NodeAuthorizationClaims
-	0,  // 28: carbonpanel.v1.RevokeCredentialResponse.state:type_name -> carbonpanel.v1.NodeEnrollmentState
-	15, // 29: carbonpanel.v1.NegotiateVersionRequest.endpoint:type_name -> carbonpanel.v1.VersionNegotiation
-	5,  // 30: carbonpanel.v1.OpenControlSessionRequest.identity:type_name -> carbonpanel.v1.NodeIdentity
-	6,  // 31: carbonpanel.v1.OpenControlSessionRequest.capabilities:type_name -> carbonpanel.v1.NodeCapabilities
-	14, // 32: carbonpanel.v1.OpenControlSessionResponse.session:type_name -> carbonpanel.v1.ControlSession
-	8,  // 33: carbonpanel.v1.ReportPreflightRequest.report:type_name -> carbonpanel.v1.NodePreflightReport
-	12, // 34: carbonpanel.v1.ReportPreflightRequest.envelope:type_name -> carbonpanel.v1.OperationEnvelope
-	13, // 35: carbonpanel.v1.ReportPreflightResponse.result:type_name -> carbonpanel.v1.OperationResult
-	9,  // 36: carbonpanel.v1.ReportHealthRequest.report:type_name -> carbonpanel.v1.NodeHealthReport
-	12, // 37: carbonpanel.v1.ReportHealthRequest.envelope:type_name -> carbonpanel.v1.OperationEnvelope
-	13, // 38: carbonpanel.v1.ReportHealthResponse.result:type_name -> carbonpanel.v1.OperationResult
-	12, // 39: carbonpanel.v1.AckOperationRequest.envelope:type_name -> carbonpanel.v1.OperationEnvelope
-	13, // 40: carbonpanel.v1.AckOperationRequest.result:type_name -> carbonpanel.v1.OperationResult
-	13, // 41: carbonpanel.v1.AckOperationResponse.result:type_name -> carbonpanel.v1.OperationResult
-	12, // 42: carbonpanel.v1.DispatchOperationRequest.envelope:type_name -> carbonpanel.v1.OperationEnvelope
-	5,  // 43: carbonpanel.v1.DispatchOperationRequest.target:type_name -> carbonpanel.v1.NodeIdentity
-	13, // 44: carbonpanel.v1.DispatchOperationResponse.result:type_name -> carbonpanel.v1.OperationResult
-	16, // 45: carbonpanel.v1.NodeControlService.CreateEnrollment:input_type -> carbonpanel.v1.CreateEnrollmentRequest
-	18, // 46: carbonpanel.v1.NodeControlService.ClaimEnrollment:input_type -> carbonpanel.v1.ClaimEnrollmentRequest
-	20, // 47: carbonpanel.v1.NodeControlService.RevokeCredential:input_type -> carbonpanel.v1.RevokeCredentialRequest
-	22, // 48: carbonpanel.v1.NodeControlService.NegotiateVersion:input_type -> carbonpanel.v1.NegotiateVersionRequest
-	24, // 49: carbonpanel.v1.NodeControlService.OpenControlSession:input_type -> carbonpanel.v1.OpenControlSessionRequest
-	26, // 50: carbonpanel.v1.NodeControlService.ReportPreflight:input_type -> carbonpanel.v1.ReportPreflightRequest
-	28, // 51: carbonpanel.v1.NodeControlService.ReportHealth:input_type -> carbonpanel.v1.ReportHealthRequest
-	30, // 52: carbonpanel.v1.NodeControlService.AckOperation:input_type -> carbonpanel.v1.AckOperationRequest
-	32, // 53: carbonpanel.v1.NodeControlService.DispatchOperation:input_type -> carbonpanel.v1.DispatchOperationRequest
-	17, // 54: carbonpanel.v1.NodeControlService.CreateEnrollment:output_type -> carbonpanel.v1.CreateEnrollmentResponse
-	19, // 55: carbonpanel.v1.NodeControlService.ClaimEnrollment:output_type -> carbonpanel.v1.ClaimEnrollmentResponse
-	21, // 56: carbonpanel.v1.NodeControlService.RevokeCredential:output_type -> carbonpanel.v1.RevokeCredentialResponse
-	23, // 57: carbonpanel.v1.NodeControlService.NegotiateVersion:output_type -> carbonpanel.v1.NegotiateVersionResponse
-	25, // 58: carbonpanel.v1.NodeControlService.OpenControlSession:output_type -> carbonpanel.v1.OpenControlSessionResponse
-	27, // 59: carbonpanel.v1.NodeControlService.ReportPreflight:output_type -> carbonpanel.v1.ReportPreflightResponse
-	29, // 60: carbonpanel.v1.NodeControlService.ReportHealth:output_type -> carbonpanel.v1.ReportHealthResponse
-	31, // 61: carbonpanel.v1.NodeControlService.AckOperation:output_type -> carbonpanel.v1.AckOperationResponse
-	33, // 62: carbonpanel.v1.NodeControlService.DispatchOperation:output_type -> carbonpanel.v1.DispatchOperationResponse
-	54, // [54:63] is the sub-list for method output_type
-	45, // [45:54] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	36, // 25: carbonpanel.v1.BeginEnrollmentChallengeResponse.expires_at:type_name -> google.protobuf.Timestamp
+	6,  // 26: carbonpanel.v1.ClaimEnrollmentRequest.capabilities:type_name -> carbonpanel.v1.NodeCapabilities
+	5,  // 27: carbonpanel.v1.ClaimEnrollmentResponse.identity:type_name -> carbonpanel.v1.NodeIdentity
+	10, // 28: carbonpanel.v1.ClaimEnrollmentResponse.claims:type_name -> carbonpanel.v1.NodeAuthorizationClaims
+	36, // 29: carbonpanel.v1.ClaimEnrollmentResponse.certificate_not_after:type_name -> google.protobuf.Timestamp
+	0,  // 30: carbonpanel.v1.RevokeCredentialResponse.state:type_name -> carbonpanel.v1.NodeEnrollmentState
+	15, // 31: carbonpanel.v1.NegotiateVersionRequest.endpoint:type_name -> carbonpanel.v1.VersionNegotiation
+	5,  // 32: carbonpanel.v1.OpenControlSessionRequest.identity:type_name -> carbonpanel.v1.NodeIdentity
+	6,  // 33: carbonpanel.v1.OpenControlSessionRequest.capabilities:type_name -> carbonpanel.v1.NodeCapabilities
+	14, // 34: carbonpanel.v1.OpenControlSessionResponse.session:type_name -> carbonpanel.v1.ControlSession
+	8,  // 35: carbonpanel.v1.ReportPreflightRequest.report:type_name -> carbonpanel.v1.NodePreflightReport
+	12, // 36: carbonpanel.v1.ReportPreflightRequest.envelope:type_name -> carbonpanel.v1.OperationEnvelope
+	13, // 37: carbonpanel.v1.ReportPreflightResponse.result:type_name -> carbonpanel.v1.OperationResult
+	9,  // 38: carbonpanel.v1.ReportHealthRequest.report:type_name -> carbonpanel.v1.NodeHealthReport
+	12, // 39: carbonpanel.v1.ReportHealthRequest.envelope:type_name -> carbonpanel.v1.OperationEnvelope
+	13, // 40: carbonpanel.v1.ReportHealthResponse.result:type_name -> carbonpanel.v1.OperationResult
+	12, // 41: carbonpanel.v1.AckOperationRequest.envelope:type_name -> carbonpanel.v1.OperationEnvelope
+	13, // 42: carbonpanel.v1.AckOperationRequest.result:type_name -> carbonpanel.v1.OperationResult
+	13, // 43: carbonpanel.v1.AckOperationResponse.result:type_name -> carbonpanel.v1.OperationResult
+	12, // 44: carbonpanel.v1.DispatchOperationRequest.envelope:type_name -> carbonpanel.v1.OperationEnvelope
+	5,  // 45: carbonpanel.v1.DispatchOperationRequest.target:type_name -> carbonpanel.v1.NodeIdentity
+	13, // 46: carbonpanel.v1.DispatchOperationResponse.result:type_name -> carbonpanel.v1.OperationResult
+	16, // 47: carbonpanel.v1.NodeControlService.CreateEnrollment:input_type -> carbonpanel.v1.CreateEnrollmentRequest
+	18, // 48: carbonpanel.v1.NodeControlService.BeginEnrollmentChallenge:input_type -> carbonpanel.v1.BeginEnrollmentChallengeRequest
+	20, // 49: carbonpanel.v1.NodeControlService.ClaimEnrollment:input_type -> carbonpanel.v1.ClaimEnrollmentRequest
+	22, // 50: carbonpanel.v1.NodeControlService.RevokeCredential:input_type -> carbonpanel.v1.RevokeCredentialRequest
+	24, // 51: carbonpanel.v1.NodeControlService.NegotiateVersion:input_type -> carbonpanel.v1.NegotiateVersionRequest
+	26, // 52: carbonpanel.v1.NodeControlService.OpenControlSession:input_type -> carbonpanel.v1.OpenControlSessionRequest
+	28, // 53: carbonpanel.v1.NodeControlService.ReportPreflight:input_type -> carbonpanel.v1.ReportPreflightRequest
+	30, // 54: carbonpanel.v1.NodeControlService.ReportHealth:input_type -> carbonpanel.v1.ReportHealthRequest
+	32, // 55: carbonpanel.v1.NodeControlService.AckOperation:input_type -> carbonpanel.v1.AckOperationRequest
+	34, // 56: carbonpanel.v1.NodeControlService.DispatchOperation:input_type -> carbonpanel.v1.DispatchOperationRequest
+	17, // 57: carbonpanel.v1.NodeControlService.CreateEnrollment:output_type -> carbonpanel.v1.CreateEnrollmentResponse
+	19, // 58: carbonpanel.v1.NodeControlService.BeginEnrollmentChallenge:output_type -> carbonpanel.v1.BeginEnrollmentChallengeResponse
+	21, // 59: carbonpanel.v1.NodeControlService.ClaimEnrollment:output_type -> carbonpanel.v1.ClaimEnrollmentResponse
+	23, // 60: carbonpanel.v1.NodeControlService.RevokeCredential:output_type -> carbonpanel.v1.RevokeCredentialResponse
+	25, // 61: carbonpanel.v1.NodeControlService.NegotiateVersion:output_type -> carbonpanel.v1.NegotiateVersionResponse
+	27, // 62: carbonpanel.v1.NodeControlService.OpenControlSession:output_type -> carbonpanel.v1.OpenControlSessionResponse
+	29, // 63: carbonpanel.v1.NodeControlService.ReportPreflight:output_type -> carbonpanel.v1.ReportPreflightResponse
+	31, // 64: carbonpanel.v1.NodeControlService.ReportHealth:output_type -> carbonpanel.v1.ReportHealthResponse
+	33, // 65: carbonpanel.v1.NodeControlService.AckOperation:output_type -> carbonpanel.v1.AckOperationResponse
+	35, // 66: carbonpanel.v1.NodeControlService.DispatchOperation:output_type -> carbonpanel.v1.DispatchOperationResponse
+	57, // [57:67] is the sub-list for method output_type
+	47, // [47:57] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_node_control_proto_init() }
@@ -2620,7 +2947,7 @@ func file_carbonpanel_v1_node_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_node_control_proto_rawDesc), len(file_carbonpanel_v1_node_control_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   29,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

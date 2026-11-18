@@ -41,6 +41,9 @@ const (
 	// NodeControlServiceCreateEnrollmentProcedure is the fully-qualified name of the
 	// NodeControlService's CreateEnrollment RPC.
 	NodeControlServiceCreateEnrollmentProcedure = "/carbonpanel.v1.NodeControlService/CreateEnrollment"
+	// NodeControlServiceBeginEnrollmentChallengeProcedure is the fully-qualified name of the
+	// NodeControlService's BeginEnrollmentChallenge RPC.
+	NodeControlServiceBeginEnrollmentChallengeProcedure = "/carbonpanel.v1.NodeControlService/BeginEnrollmentChallenge"
 	// NodeControlServiceClaimEnrollmentProcedure is the fully-qualified name of the
 	// NodeControlService's ClaimEnrollment RPC.
 	NodeControlServiceClaimEnrollmentProcedure = "/carbonpanel.v1.NodeControlService/ClaimEnrollment"
@@ -69,12 +72,17 @@ const (
 
 // NodeControlServiceClient is a client for the carbonpanel.v1.NodeControlService service.
 type NodeControlServiceClient interface {
-	// CreateEnrollment starts a one-time, TTL-bounded enrollment. The response
-	// carries only metadata; the one-time secret is handled by the P1+ enrollment
-	// server and never stored in this contract's responses.
+	// CreateEnrollment starts a one-time, TTL-bounded enrollment. The operator
+	// registers the node-generated secret digest, salt and an approved public key
+	// out of band. The response carries metadata only, never a secret.
 	CreateEnrollment(context.Context, *connect.Request[v1.CreateEnrollmentRequest]) (*connect.Response[v1.CreateEnrollmentResponse], error)
-	// ClaimEnrollment consumes a one-time token and reports the agent's identity
-	// material and capability snapshot. The token appears only in this request.
+	// BeginEnrollmentChallenge is a bounded, rate-limited step that gives a node
+	// a single-use server nonce after the operator registered the bundle. It is
+	// unauthenticated by design but carries no secret and grants no access.
+	BeginEnrollmentChallenge(context.Context, *connect.Request[v1.BeginEnrollmentChallengeRequest]) (*connect.Response[v1.BeginEnrollmentChallengeResponse], error)
+	// ClaimEnrollment consumes the single-use challenge and one-time secret, and
+	// verifies a fresh signature by the operator-approved key. The secret appears
+	// only in this request; the response carries a signed public certificate.
 	ClaimEnrollment(context.Context, *connect.Request[v1.ClaimEnrollmentRequest]) (*connect.Response[v1.ClaimEnrollmentResponse], error)
 	// RevokeCredential revokes the current node credential and requires a new
 	// one-time enrollment; it never silently rebinds a different daemon.
@@ -111,6 +119,12 @@ func NewNodeControlServiceClient(httpClient connect.HTTPClient, baseURL string, 
 			httpClient,
 			baseURL+NodeControlServiceCreateEnrollmentProcedure,
 			connect.WithSchema(nodeControlServiceMethods.ByName("CreateEnrollment")),
+			connect.WithClientOptions(opts...),
+		),
+		beginEnrollmentChallenge: connect.NewClient[v1.BeginEnrollmentChallengeRequest, v1.BeginEnrollmentChallengeResponse](
+			httpClient,
+			baseURL+NodeControlServiceBeginEnrollmentChallengeProcedure,
+			connect.WithSchema(nodeControlServiceMethods.ByName("BeginEnrollmentChallenge")),
 			connect.WithClientOptions(opts...),
 		),
 		claimEnrollment: connect.NewClient[v1.ClaimEnrollmentRequest, v1.ClaimEnrollmentResponse](
@@ -166,20 +180,26 @@ func NewNodeControlServiceClient(httpClient connect.HTTPClient, baseURL string, 
 
 // nodeControlServiceClient implements NodeControlServiceClient.
 type nodeControlServiceClient struct {
-	createEnrollment   *connect.Client[v1.CreateEnrollmentRequest, v1.CreateEnrollmentResponse]
-	claimEnrollment    *connect.Client[v1.ClaimEnrollmentRequest, v1.ClaimEnrollmentResponse]
-	revokeCredential   *connect.Client[v1.RevokeCredentialRequest, v1.RevokeCredentialResponse]
-	negotiateVersion   *connect.Client[v1.NegotiateVersionRequest, v1.NegotiateVersionResponse]
-	openControlSession *connect.Client[v1.OpenControlSessionRequest, v1.OpenControlSessionResponse]
-	reportPreflight    *connect.Client[v1.ReportPreflightRequest, v1.ReportPreflightResponse]
-	reportHealth       *connect.Client[v1.ReportHealthRequest, v1.ReportHealthResponse]
-	ackOperation       *connect.Client[v1.AckOperationRequest, v1.AckOperationResponse]
-	dispatchOperation  *connect.Client[v1.DispatchOperationRequest, v1.DispatchOperationResponse]
+	createEnrollment         *connect.Client[v1.CreateEnrollmentRequest, v1.CreateEnrollmentResponse]
+	beginEnrollmentChallenge *connect.Client[v1.BeginEnrollmentChallengeRequest, v1.BeginEnrollmentChallengeResponse]
+	claimEnrollment          *connect.Client[v1.ClaimEnrollmentRequest, v1.ClaimEnrollmentResponse]
+	revokeCredential         *connect.Client[v1.RevokeCredentialRequest, v1.RevokeCredentialResponse]
+	negotiateVersion         *connect.Client[v1.NegotiateVersionRequest, v1.NegotiateVersionResponse]
+	openControlSession       *connect.Client[v1.OpenControlSessionRequest, v1.OpenControlSessionResponse]
+	reportPreflight          *connect.Client[v1.ReportPreflightRequest, v1.ReportPreflightResponse]
+	reportHealth             *connect.Client[v1.ReportHealthRequest, v1.ReportHealthResponse]
+	ackOperation             *connect.Client[v1.AckOperationRequest, v1.AckOperationResponse]
+	dispatchOperation        *connect.Client[v1.DispatchOperationRequest, v1.DispatchOperationResponse]
 }
 
 // CreateEnrollment calls carbonpanel.v1.NodeControlService.CreateEnrollment.
 func (c *nodeControlServiceClient) CreateEnrollment(ctx context.Context, req *connect.Request[v1.CreateEnrollmentRequest]) (*connect.Response[v1.CreateEnrollmentResponse], error) {
 	return c.createEnrollment.CallUnary(ctx, req)
+}
+
+// BeginEnrollmentChallenge calls carbonpanel.v1.NodeControlService.BeginEnrollmentChallenge.
+func (c *nodeControlServiceClient) BeginEnrollmentChallenge(ctx context.Context, req *connect.Request[v1.BeginEnrollmentChallengeRequest]) (*connect.Response[v1.BeginEnrollmentChallengeResponse], error) {
+	return c.beginEnrollmentChallenge.CallUnary(ctx, req)
 }
 
 // ClaimEnrollment calls carbonpanel.v1.NodeControlService.ClaimEnrollment.
@@ -224,12 +244,17 @@ func (c *nodeControlServiceClient) DispatchOperation(ctx context.Context, req *c
 
 // NodeControlServiceHandler is an implementation of the carbonpanel.v1.NodeControlService service.
 type NodeControlServiceHandler interface {
-	// CreateEnrollment starts a one-time, TTL-bounded enrollment. The response
-	// carries only metadata; the one-time secret is handled by the P1+ enrollment
-	// server and never stored in this contract's responses.
+	// CreateEnrollment starts a one-time, TTL-bounded enrollment. The operator
+	// registers the node-generated secret digest, salt and an approved public key
+	// out of band. The response carries metadata only, never a secret.
 	CreateEnrollment(context.Context, *connect.Request[v1.CreateEnrollmentRequest]) (*connect.Response[v1.CreateEnrollmentResponse], error)
-	// ClaimEnrollment consumes a one-time token and reports the agent's identity
-	// material and capability snapshot. The token appears only in this request.
+	// BeginEnrollmentChallenge is a bounded, rate-limited step that gives a node
+	// a single-use server nonce after the operator registered the bundle. It is
+	// unauthenticated by design but carries no secret and grants no access.
+	BeginEnrollmentChallenge(context.Context, *connect.Request[v1.BeginEnrollmentChallengeRequest]) (*connect.Response[v1.BeginEnrollmentChallengeResponse], error)
+	// ClaimEnrollment consumes the single-use challenge and one-time secret, and
+	// verifies a fresh signature by the operator-approved key. The secret appears
+	// only in this request; the response carries a signed public certificate.
 	ClaimEnrollment(context.Context, *connect.Request[v1.ClaimEnrollmentRequest]) (*connect.Response[v1.ClaimEnrollmentResponse], error)
 	// RevokeCredential revokes the current node credential and requires a new
 	// one-time enrollment; it never silently rebinds a different daemon.
@@ -262,6 +287,12 @@ func NewNodeControlServiceHandler(svc NodeControlServiceHandler, opts ...connect
 		NodeControlServiceCreateEnrollmentProcedure,
 		svc.CreateEnrollment,
 		connect.WithSchema(nodeControlServiceMethods.ByName("CreateEnrollment")),
+		connect.WithHandlerOptions(opts...),
+	)
+	nodeControlServiceBeginEnrollmentChallengeHandler := connect.NewUnaryHandler(
+		NodeControlServiceBeginEnrollmentChallengeProcedure,
+		svc.BeginEnrollmentChallenge,
+		connect.WithSchema(nodeControlServiceMethods.ByName("BeginEnrollmentChallenge")),
 		connect.WithHandlerOptions(opts...),
 	)
 	nodeControlServiceClaimEnrollmentHandler := connect.NewUnaryHandler(
@@ -316,6 +347,8 @@ func NewNodeControlServiceHandler(svc NodeControlServiceHandler, opts ...connect
 		switch r.URL.Path {
 		case NodeControlServiceCreateEnrollmentProcedure:
 			nodeControlServiceCreateEnrollmentHandler.ServeHTTP(w, r)
+		case NodeControlServiceBeginEnrollmentChallengeProcedure:
+			nodeControlServiceBeginEnrollmentChallengeHandler.ServeHTTP(w, r)
 		case NodeControlServiceClaimEnrollmentProcedure:
 			nodeControlServiceClaimEnrollmentHandler.ServeHTTP(w, r)
 		case NodeControlServiceRevokeCredentialProcedure:
@@ -343,6 +376,10 @@ type UnimplementedNodeControlServiceHandler struct{}
 
 func (UnimplementedNodeControlServiceHandler) CreateEnrollment(context.Context, *connect.Request[v1.CreateEnrollmentRequest]) (*connect.Response[v1.CreateEnrollmentResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.NodeControlService.CreateEnrollment is not implemented"))
+}
+
+func (UnimplementedNodeControlServiceHandler) BeginEnrollmentChallenge(context.Context, *connect.Request[v1.BeginEnrollmentChallengeRequest]) (*connect.Response[v1.BeginEnrollmentChallengeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.NodeControlService.BeginEnrollmentChallenge is not implemented"))
 }
 
 func (UnimplementedNodeControlServiceHandler) ClaimEnrollment(context.Context, *connect.Request[v1.ClaimEnrollmentRequest]) (*connect.Response[v1.ClaimEnrollmentResponse], error) {

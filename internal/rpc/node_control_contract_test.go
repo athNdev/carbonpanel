@@ -34,6 +34,10 @@ var nodeControlCalls = []nodeControlCall{
 		_, err := c.CreateEnrollment(ctx, connect.NewRequest(&v1.CreateEnrollmentRequest{}))
 		return err
 	}},
+	{"BeginEnrollmentChallenge", func(ctx context.Context, c carbonpanelv1connect.NodeControlServiceClient) error {
+		_, err := c.BeginEnrollmentChallenge(ctx, connect.NewRequest(&v1.BeginEnrollmentChallengeRequest{}))
+		return err
+	}},
 	{"ClaimEnrollment", func(ctx context.Context, c carbonpanelv1connect.NodeControlServiceClient) error {
 		_, err := c.ClaimEnrollment(ctx, connect.NewRequest(&v1.ClaimEnrollmentRequest{}))
 		return err
@@ -152,8 +156,9 @@ func TestNodeControlRPCsDeniedByDefault(t *testing.T) {
 // one-time token; responses carry only fingerprints and generation counters.
 func TestNodeControlResponseMessagesCarryNoSecrets(t *testing.T) {
 	forbidden := map[string]bool{
-		"token": true, "enrollment_token": true, "tls_key": true, "private_key": true,
-		"key": true, "secret": true, "password": true, "credential": true,
+		"token": true, "enrollment_token": true, "enrollment_secret": true,
+		"tls_key": true, "private_key": true, "key": true, "secret": true,
+		"password": true, "credential": true,
 	}
 
 	file := v1.File_carbonpanel_v1_node_control_proto

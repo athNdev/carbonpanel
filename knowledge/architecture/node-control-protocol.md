@@ -82,6 +82,10 @@ host.
   for reproducible Go/TS output. Only Track C regenerates from this proto.
 - `go test ./internal/rpc -run TestNodeControl` and
   `go test ./internal/db -run TestNodeControlContract`.
+- The P1 contract fields and bounded challenge procedure are present in the
+  proto; `node_control_enrollment_fixture_test.go` is a **test-only** seam, not
+  an enrollment server. No enrollment RPC handler is mounted and no deployment
+  or live-node success may be claimed from these fixtures.
 - Before any node-control RPC is mounted in implementation, the harmless P1
   enrollment fixtures in ADR 0019 must pass: synthetic key/`CSR_PRE` and fresh
   signature, valid claim, mismatched approved key, stale/replayed nonce,
