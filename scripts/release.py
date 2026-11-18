@@ -192,24 +192,96 @@ def parse_inspect(text):
     return {"digest": found.group(1), "platforms": platforms}
 
 
-def observe_reference(reference, runner=None):
-    """Return (state, info) with state 'absent', 'present' or 'unknown'.
-    A missing tag is distinct from an unclassified registry failure."""
+# Only an unambiguous registry "manifest unknown" is a definitive absence.
+# Generic 404/"not found" strings also occur on auth, network and transient
+# failures, so publication paths (strict=True) refuse those as unknown.
+DEFINITIVE_MISSING = ("manifest unknown", "no such manifest", "unknown manifest")
+AMBIGUOUS_FAILURE = ("unauthorized", "denied", "forbidden", "connection",
+                    "timeout", "temporar", "server error", "unavailable")
+
+
+def classify_lookup_failure(error, strict=False):
+    """Classify a failed image lookup as 'absent' or 'unknown'.
+
+    Non-strict callers keep the historical broad matching; publication paths
+    must pass strict=True so only a definitive missing manifest becomes absent.
+    """
+    message = ((getattr(error, "stderr", "") or "")
+               + " " + (getattr(error, "output", "") or "")).lower()
+    if strict:
+        if any(token in message for token in AMBIGUOUS_FAILURE):
+            return "unknown"
+        return "absent" if any(token in message for token in DEFINITIVE_MISSING) else "unknown"
+    if any(token in message for token in
+           ("not found", "no such", "does not exist", "manifest unknown", "404")):
+        return "absent"
+    return "unknown"
+
+
+def observe_reference(reference, runner=None, strict=False):
+    """Return (state, info): 'absent', 'present' or 'unknown'.
+
+    Publication paths pass strict=True; an ambiguous lookup is unknown and
+    fails closed rather than being treated as a missing tag.
+    """
     try:
         text = (runner or inspect_runner)(
             "docker", "buildx", "imagetools", "inspect", reference)
     except subprocess.CalledProcessError as error:
-        message = ((error.stderr or "") + " " + (error.output or "")).lower()
-        if any(token in message for token in
-               ("not found", "no such", "does not exist", "manifest unknown", "404")):
-            return "absent", None
-        return "unknown", None
-    except OSError:
-        return "unknown", None
+        return classify_lookup_failure(error, strict), None
+    except OSError as error:
+        return classify_lookup_failure(error, strict), None
     try:
         return "present", parse_inspect(text)
     except RegistryError:
         return "unknown", None
+
+
+def platform_manifest_revisions(reference, runner=None):
+    """Read OCI revision labels from the amd64 and arm64 platform manifests.
+
+    Returns {(os, arch): revision}. Missing or unreadable labels yield an empty
+    map, so callers fail closed. `runner` is injectable for offline fixtures.
+    """
+    try:
+        raw = (runner or inspect_runner)(
+            "docker", "buildx", "imagetools", "inspect", reference,
+            "--format", "{{json .}}")
+        document = json.loads(raw)
+    except (subprocess.CalledProcessError, OSError, ValueError, TypeError):
+        return {}
+    revisions = {}
+    for item in document.get("Manifests", []):
+        platform = item.get("Platform", {}) or {}
+        key = (platform.get("OS"), platform.get("Architecture"))
+        if key not in REQUIRED_PLATFORMS:
+            continue
+        annotations = item.get("Annotations") or {}
+        revision = (annotations.get("org.opencontainers.image.revision")
+                    or item.get("Revision"))
+        if revision:
+            revisions[key] = revision
+    return revisions
+
+
+def trusted_pinned_evidence(commit, digest, ci_verified, observation, revisions):
+    """Verify independent pinned-build evidence before moving a shared alias.
+
+    Requires exact-commit CI confirmation, the observed index digest, both
+    target platforms and their OCI revision labels equal to the pinned commit.
+    """
+    if not ci_verified or str(ci_verified).strip().lower() != "true":
+        return False, "exact successful CI for the pinned commit is required"
+    if not re.fullmatch(r"[0-9a-f]{40}", commit) or not valid_digest(digest):
+        return False, "invalid pinned commit or digest"
+    try:
+        verify_tag_digest(observation, digest)
+    except ValueError as error:
+        return False, "immutable image verification failed: " + str(error)
+    for platform in sorted(REQUIRED_PLATFORMS):
+        if revisions.get(platform) != commit:
+            return False, f"OCI revision on {platform[0]}/{platform[1]} does not match the pinned commit"
+    return True, "trusted pinned build evidence verified"
 
 
 def immutable_publication_decision(observations, expected_digest=None, provenance=None):
@@ -513,13 +585,16 @@ def nightly_immutable_reference(commit):
     return f"{DOCKER_HUB_IMAGE}:sha-{commit}"
 
 
-def sha_tag_decision(commit, observation, expected_digest=None):
+def sha_tag_decision(commit, observation, expected_digest=None, evidence=None,
+                     revisions=None, ci_verified=False):
     """Pre-write gate for the SHARED sha-<commit> immutable identity.
 
     Both edge and nightly writers share this tag. A present tag is reused only
-    when its observed digest and platforms are verified against the operator's
-    expected digest for this pinned commit. A conflict or an unknown lookup
-    refuses with zero writes; an absent tag may be built and pushed.
+    when its digest, both platforms and the OCI revision on both platform
+    manifests match independently trusted pinned-build evidence for the exact
+    commit. A bare expected digest (a second copy of the observed digest) is not
+    evidence. Conflicts and unknown lookups refuse with zero writes; an absent
+    tag may be built only when no expected digest was supplied.
     """
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         return "refuse", "", "the pinned commit must be a full 40-hex SHA"
@@ -527,14 +602,20 @@ def sha_tag_decision(commit, observation, expected_digest=None):
     if state == "unknown":
         return "refuse", "", "sha tag lookup is unknown; refusing before any write"
     if state == "absent":
+        if expected_digest:
+            return "refuse", "", "an expected digest was supplied but the sha tag is missing"
         return "push", "", "sha tag is absent; a new immutable image may be built"
     if not expected_digest or not valid_digest(expected_digest):
         return "refuse", "", "sha tag already exists; a verified expected digest is required to reuse it"
     if info["digest"] != expected_digest:
         return "refuse", "", "sha tag digest conflicts with the verified expected digest"
-    if not REQUIRED_PLATFORMS <= info["platforms"]:
-        return "refuse", "", "sha tag lacks both Linux architectures"
-    return "reuse", info["digest"], "sha tag is already verified; reuse it without another push"
+    if evidence is not None and evidence.get("digest") != expected_digest:
+        return "refuse", "", "expected digest is not backed by the pinned build evidence"
+    ok, reason = trusted_pinned_evidence(
+        commit, expected_digest, ci_verified, observation, revisions or {})
+    if not ok:
+        return "refuse", "", reason
+    return "reuse", info["digest"], "sha tag is verified by pinned build evidence; reuse it"
 
 
 def commit_is_ancestor(older, newer):
@@ -548,27 +629,34 @@ def commit_is_ancestor(older, newer):
         return False
 
 
-def nightly_identity_binding(previous_commit, previous_digest, observer=None):
-    """Bind a previous-commit claim to the LIVE sha-<previous_commit> digest.
+def nightly_identity_binding(previous_commit, previous_digest, observer=None,
+                             revisions=None, ci_verified=False, evidence=None):
+    """Bind a previous-commit claim to the LIVE sha-<previous_commit> identity.
 
-    The operator's string alone is never trusted: the previous sha tag must be
-    observed with that exact digest and both platforms. Returns a digest→commit
-    map used by the monotonicity check, or {} when untraceable.
+    Binds to the SAME evidence required for the candidate: exact-commit CI, the
+    observed index digest, both platforms and matching OCI revision labels on
+    both platform manifests. Returns a digest→commit map only for that fully
+    verified identity; otherwise {} so the monotonicity check refuses.
     """
     if not previous_commit or not previous_digest or not valid_digest(previous_digest):
         return {}
     state, info = (observer or observe_reference)(
-        nightly_immutable_reference(previous_commit))
+        nightly_immutable_reference(previous_commit), strict=True)
     if state != "present" or info["digest"] != previous_digest:
         return {}
-    if not REQUIRED_PLATFORMS <= info["platforms"]:
+    if evidence is not None and evidence.get("digest") != previous_digest:
+        return {}
+    ok, _ = trusted_pinned_evidence(
+        previous_commit, previous_digest, ci_verified, (state, info), revisions or {})
+    if not ok:
         return {}
     return {previous_digest: previous_commit}
 
 
 def nightly_promotion_decision(commit, digest, immutable_observation,
                                alias_observation, previous_commit=None, ancestor=None,
-                               identity_binding=None):
+                               identity_binding=None, ci_verified=False,
+                               revisions=None, evidence=None):
     """Fail-closed check before moving the nightly alias.
 
     The immutable sha-<commit> image must already be verified (digest + both
@@ -582,10 +670,12 @@ def nightly_promotion_decision(commit, digest, immutable_observation,
         return False, "the pinned commit must be a full 40-hex SHA"
     if not valid_digest(digest):
         return False, "missing or invalid verified digest"
-    try:
-        verify_tag_digest(immutable_observation, digest)
-    except ValueError as error:
-        return False, "immutable sha image failed verification: " + str(error)
+    if evidence is not None and evidence.get("digest") != digest:
+        return False, "expected digest is not backed by pinned build evidence"
+    ok, reason = trusted_pinned_evidence(
+        commit, digest, ci_verified, immutable_observation, revisions or {})
+    if not ok:
+        return False, reason
     state, info = alias_observation
     if state == "unknown":
         return False, "nightly alias state is unknown"
@@ -1029,13 +1119,30 @@ def nightly_gate(args):
     return allowed
 
 
+def json_argument(value, default=None):
+    """Parse an optional JSON workflow input; empty means the default."""
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except (ValueError, TypeError) as error:
+        raise ValueError("Invalid JSON workflow input") from error
+
+
 def sha_tag_gate(args):
     """Read-only pre-write gate for the shared sha-<commit> image identity."""
-    observation = observe_reference(nightly_immutable_reference(args.commit))
+    reference = nightly_immutable_reference(args.commit)
+    observation = observe_reference(reference, strict=True)
+    revisions = platform_manifest_revisions(reference)
+    evidence = json_argument(args.pinned_evidence, {})
     action, digest, reason = sha_tag_decision(
-        args.commit, observation, args.expected_digest)
+        args.commit, observation, args.expected_digest, evidence,
+        revisions, args.ci_verified)
     values = {"action": action, "digest": digest, "reason": reason,
-              "reference": nightly_immutable_reference(args.commit)}
+              "reference": reference,
+              "platform_revisions": json.dumps(
+                  {f"{os_}/{arch}": value for (os_, arch), value in revisions.items()},
+                  sort_keys=True)}
     print(json.dumps(values, indent=2))
     write_output(values)
     if action == "refuse":
@@ -1043,38 +1150,56 @@ def sha_tag_gate(args):
     return action
 
 
-def nightly_promote(args):
-    """Verify the immutable image, decide, and optionally move the nightly alias.
+def dev_alias_promote(args, alias):
+    """Shared, digest-based promotion of a development alias (edge or nightly).
 
-    Without --apply this is a read-only dry run. With --apply it writes only the
-    nightly alias from an already verified digest and re-checks tag→digest.
+    Both aliases reuse the verified sha-<commit> image and the same pinned-build
+    evidence. Without --apply this is a read-only dry run.
     """
-    immutable = observe_reference(nightly_immutable_reference(args.commit))
-    alias = observe_reference(f"{DOCKER_HUB_IMAGE}:{NIGHTLY_ALIAS}")
+    reference = nightly_immutable_reference(args.commit)
+    immutable = observe_reference(reference, strict=True)
+    alias_observation = observe_reference(
+        f"{DOCKER_HUB_IMAGE}:{alias}", strict=True)
+    previous_revisions = json_argument(args.previous_revisions, {})
+    evidence = json_argument(args.pinned_evidence, {})
     binding = nightly_identity_binding(
-        args.previous_commit, args.previous_digest)
+        args.previous_commit, args.previous_digest,
+        revisions=previous_revisions, ci_verified=args.ci_verified,
+        evidence=evidence)
+    candidate_revisions = platform_manifest_revisions(reference)
     allowed, reason = nightly_promotion_decision(
-        args.commit, args.digest, immutable, alias, args.previous_commit,
-        identity_binding=binding)
-    values = {"allowed": str(allowed).lower(), "reason": reason,
+        args.commit, args.digest, immutable, alias_observation,
+        args.previous_commit, identity_binding=binding,
+        ci_verified=args.ci_verified, revisions=candidate_revisions,
+        evidence=evidence)
+    values = {"alias": alias, "allowed": str(allowed).lower(), "reason": reason,
               "digest": args.digest, "immutable_state": immutable[0],
-              "alias_state": alias[0],
+              "alias_state": alias_observation[0],
               "identity_bound": str(bool(binding)).lower()}
     print(json.dumps(values, indent=2))
     write_output(values)
     if not allowed:
-        raise ValueError("Nightly promotion refused: " + reason)
+        raise ValueError(f"{alias} promotion refused: " + reason)
     if args.apply:
-        if alias[0] == "present" and alias[1]["digest"] == args.digest:
-            print("nightly already verified; no overwrite")
+        if alias_observation[0] == "present" and alias_observation[1]["digest"] == args.digest:
+            print(f"{alias} already verified; no overwrite")
             return True
-        reference = f"{DOCKER_HUB_IMAGE}:{NIGHTLY_ALIAS}"
+        target = f"{DOCKER_HUB_IMAGE}:{alias}"
         source = f"{DOCKER_HUB_IMAGE}@{args.digest}"
         subprocess.run(["docker", "buildx", "imagetools", "create",
-                        "--tag", reference, source], check=True, cwd=ROOT)
-        verify_tag_digest(observe_reference(reference), args.digest)
-        print("nightly promoted and verified")
+                        "--tag", target, source], check=True, cwd=ROOT)
+        verify_tag_digest(observe_reference(target, strict=True), args.digest)
+        print(f"{alias} promoted and verified")
     return True
+
+
+def nightly_promote(args):
+    return dev_alias_promote(args, NIGHTLY_ALIAS)
+
+
+def edge_promote(args):
+    """Explicitly promote edge from the verified immutable digest."""
+    return dev_alias_promote(args, "edge")
 
 
 def release_record(args):
@@ -1239,12 +1364,18 @@ def build_parser():
     sha_gate_cmd = commands.add_parser("sha-tag-gate")
     sha_gate_cmd.add_argument("--commit", required=True)
     sha_gate_cmd.add_argument("--expected-digest", default="")
-    nightly_promote_cmd = commands.add_parser("nightly-promote")
-    nightly_promote_cmd.add_argument("--commit", required=True)
-    nightly_promote_cmd.add_argument("--digest", required=True)
-    nightly_promote_cmd.add_argument("--previous-commit", default="")
-    nightly_promote_cmd.add_argument("--previous-digest", default="")
-    nightly_promote_cmd.add_argument("--apply", action="store_true")
+    sha_gate_cmd.add_argument("--ci-verified", default="")
+    sha_gate_cmd.add_argument("--pinned-evidence", default="")
+    for command_name in ("nightly-promote", "edge-promote"):
+        promote_cmd = commands.add_parser(command_name)
+        promote_cmd.add_argument("--commit", required=True)
+        promote_cmd.add_argument("--digest", required=True)
+        promote_cmd.add_argument("--previous-commit", default="")
+        promote_cmd.add_argument("--previous-digest", default="")
+        promote_cmd.add_argument("--previous-revisions", default="")
+        promote_cmd.add_argument("--ci-verified", default="")
+        promote_cmd.add_argument("--pinned-evidence", default="")
+        promote_cmd.add_argument("--apply", action="store_true")
     module_resolver = commands.add_parser("module-version")
     module_resolver.add_argument("--version", required=True)
     ci_checker = commands.add_parser("verify-main-ci")

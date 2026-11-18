@@ -129,25 +129,36 @@ own publishing workflow.
 ## Nightly development channel
 
 `nightly` is a development alias, not a release version or a GitHub release. It
-points to the most recent **qualifying** nightly build of a pinned main commit:
-the commit must have exact successful CI, and its `sha-<full-commit>` image must
-be verified for digest, both Linux platforms (`linux/amd64`, `linux/arm64`) and
-commit provenance before the alias moves. The immutable identity is the existing
-`sha-<full-commit>` tag; no date alias or second digest is created for a nightly.
-A nightly never moves `latest`, a stable minor tag, or `edge` — those remain owned
-by their existing policies. The `nightly` alias is Docker Hub only, matching the
-development-channel surface; no GHCR nightly tag is created by this policy.
+points to the most recent **qualifying** nightly build of a pinned main commit.
+The immutable identity is the existing `sha-<full-commit>` tag; no date alias or
+second digest is created for a nightly. A nightly never moves `latest`, a stable
+minor tag, or `edge`; those remain owned by their own explicit gates. The
+`nightly` alias is Docker Hub only; no GHCR nightly tag is created by this policy.
 
-Both `edge` and `nightly` writers share the `sha-<commit>` tag. Before any
-build or push, the workflow reads that tag: an absent tag may be built; a present
-tag is reused only when its observed digest matches a verified expected digest
-and both platforms are present; a conflict or an unresolvable lookup refuses with
-zero buildx pushes and zero alias moves. Moving `nightly` over a different digest
-additionally requires the observed alias digest to be bound to a verified
-`sha-<previous-commit>` reference; an operator-supplied commit string alone is
-never trusted. Repeating a promotion at the same digest is idempotent and writes
-nothing. All publication uses one fixed, non-cancellable channel concurrency
-group, while verification builds stay per-SHA and cancellable.
+Both `edge` and `nightly` writers share the `sha-<commit>` tag. Before any build
+or push, the workflow reads that tag with strict lookup classification: only a
+definitive "manifest unknown" is an absent tag; unauthorized, network, transient
+and generic 404-style failures are **unknown** and refuse. An absent tag may be
+built, but supplying an expected digest while the tag is missing also refuses.
+
+A present tag is reused only with **trusted pinned build evidence**, not with a
+bare expected digest (which is merely a second copy of the observed digest). The
+evidence requires: a successful completed push CI run for the exact pinned
+commit; the observed index digest matching the digest recorded by that evidence;
+both `linux/amd64` and `linux/arm64` platform manifests; and an OCI revision label
+on **each** of those platform manifests equal to the pinned commit. Any mismatch,
+missing label, untrusted CI or unknown lookup refuses with zero buildx pushes and
+zero alias moves. Moving `nightly` (or `edge`) over a different digest binds the
+previous commit to the **observed** alias digest through the same sha-reference
+evidence before the ancestry check; an operator-supplied commit string alone is
+never trusted. Repeating a promotion at the same digest is idempotent.
+
+Buildx writes only the `sha-<commit>` reference — there is no implicit early
+`edge` or `nightly` move. After the immutable image is verified, `edge` is moved
+by an explicitly gated, digest-based step (so it survives a sha reuse in either
+publication order), and `nightly` by its own gated step. All publication uses one
+fixed, non-cancellable channel concurrency group; verification builds stay
+per-SHA and cancellable.
 
 There is no scheduled registry write and no infrastructure setting to enable:
 the nightly opt-in is a manual `workflow_dispatch` with `nightly=true` from

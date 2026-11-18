@@ -695,8 +695,9 @@ class ReleaseTests(unittest.TestCase):
 
     def test_cd_edge_behavior_is_preserved(self):
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
-        self.assertIn("type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' "
-                      "&& steps.channel.outputs.publish == 'true' }}", source)
+        self.assertIn("python3 scripts/release.py edge-promote", source)
+        self.assertIn("if: steps.channel.outputs.publish == 'true'", source)
+        self.assertNotIn("type=raw,value=edge", source)  # no implicit early edge move
         self.assertIn("github.event.workflow_run.conclusion == 'success'", source)
 
     def test_canonical_registry_names_are_consistent(self):
@@ -915,83 +916,141 @@ class ReleaseTests(unittest.TestCase):
 
     def test_sha_tag_gate_reuse_conflict_and_unknown(self):
         commit, digest = "c" * 40, "sha256:" + "d" * 64
+        revisions = {(os_name, arch): commit for os_name, arch in release.REQUIRED_PLATFORMS}
+        good = dict(expected_digest=digest, evidence={"digest": digest},
+                    revisions=revisions, ci_verified="true")
         self.assertEqual(release.sha_tag_decision(commit, ("absent", None))[0], "push")
-        action, reused, _ = release.sha_tag_decision(
-            commit, present(digest), digest)
+        # An expected digest with a missing tag refuses, as stable releases do.
+        self.assertEqual(release.sha_tag_decision(
+            commit, ("absent", None), expected_digest=digest)[0], "refuse")
+        action, reused, _ = release.sha_tag_decision(commit, present(digest), **good)
         self.assertEqual((action, reused), ("reuse", digest))
-        for label, observation, expected in (
-            ("conflicting digest", present("sha256:" + "e" * 64), digest),
-            ("missing expected digest", present(digest), ""),
-            ("incomplete platforms", present(digest, {("linux", "amd64")}), digest),
-            ("unknown lookup", ("unknown", None), digest),
+        bad_revisions = dict(revisions)
+        bad_revisions[("linux", "arm64")] = "b" * 40
+        for label, observation, changes in (
+            ("conflicting digest", present("sha256:" + "e" * 64), {}),
+            ("missing expected digest", present(digest), {"expected_digest": ""}),
+            ("incomplete platforms", present(digest, {("linux", "amd64")}), {}),
+            ("unknown lookup", ("unknown", None), {}),
+            ("missing CI evidence", present(digest), {"ci_verified": "false"}),
+            ("platform revision mismatch", present(digest), {"revisions": bad_revisions}),
+            ("untrusted evidence digest", present(digest),
+             {"evidence": {"digest": "sha256:" + "9" * 64}}),
         ):
             with self.subTest(case=label):
                 action, _, reason = release.sha_tag_decision(
-                    commit, observation, expected)
+                    commit, observation, **{**good, **changes})
                 self.assertEqual(action, "refuse")
                 self.assertTrue(reason)
         # CLI refusal produces no registry write of any kind.
         with patch.object(release, "observe_reference", return_value=("unknown", None)), \
+             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
              patch.object(release.subprocess, "run") as command, \
              patch("sys.argv", ["release.py", "sha-tag-gate", "--commit", commit,
-                                "--expected-digest", digest]):
+                                "--expected-digest", digest, "--ci-verified", "true",
+                                "--pinned-evidence", json.dumps({"digest": digest})]):
             with self.assertRaisesRegex(ValueError, "refused"):
                 release.main()
             self.assertEqual(registry_writes(command), [])
 
+    def test_observe_reference_strict_classification_for_publication_paths(self):
+        def failure(message):
+            error = subprocess.CalledProcessError(1, ["docker"])
+            error.stderr = message
+            error.output = ""
+            def runner(*args):
+                raise error
+            return runner
+        self.assertEqual(release.observe_reference(
+            "ref", failure("MANIFEST_UNKNOWN: manifest unknown"), strict=True)[0], "absent")
+        for message in ("HTTP 404 not found", "unauthorized: not found",
+                        "connection refused", "temporary server error",
+                        "manifest unknown: connection reset"):
+            with self.subTest(message=message):
+                self.assertEqual(release.observe_reference(
+                    "ref", failure(message), strict=True)[0], "unknown")
+
     def test_nightly_identity_binding_requires_live_sha_evidence(self):
         previous, old_digest = "a" * 40, "sha256:" + "f" * 64
-        observer = lambda ref: present(old_digest)
+        revisions = {(os_name, arch): previous for os_name, arch in release.REQUIRED_PLATFORMS}
+        def observer(ref, strict=False):
+            return present(old_digest)
+        common = dict(observer=observer, revisions=revisions, ci_verified="true")
+        self.assertEqual(release.nightly_identity_binding(previous, old_digest, **common),
+                         {old_digest: previous})
+        different = {(os_name, arch): "b" * 40 for os_name, arch in release.REQUIRED_PLATFORMS}
         self.assertEqual(release.nightly_identity_binding(
-            previous, old_digest, observer), {old_digest: previous})
+            previous, old_digest, revisions=different, ci_verified="true",
+            observer=observer), {})
         self.assertEqual(release.nightly_identity_binding(
-            previous, "sha256:" + "1" * 64, observer), {})
+            previous, old_digest, revisions=revisions, ci_verified="false",
+            observer=observer), {})
         self.assertEqual(release.nightly_identity_binding(
-            previous, old_digest, lambda ref: ("absent", None)), {})
-        self.assertEqual(release.nightly_identity_binding("", old_digest, observer), {})
+            previous, old_digest, **{**common, "evidence": {"digest": "sha256:" + "1" * 64}}), {})
+        self.assertEqual(release.nightly_identity_binding(
+            previous, "sha256:" + "1" * 64, **common), {})
+        self.assertEqual(release.nightly_identity_binding(
+            previous, old_digest, observer=lambda ref, strict=False: ("absent", None),
+            revisions=revisions, ci_verified="true"), {})
+        self.assertEqual(release.nightly_identity_binding("", old_digest, **common), {})
 
     def test_nightly_promotion_is_bound_to_observed_identity(self):
         candidate, previous = "c" * 40, "a" * 40
         digest, old_digest = "sha256:" + "d" * 64, "sha256:" + "f" * 64
         immutable = present(digest)
+        revisions = {(os_name, arch): candidate for os_name, arch in release.REQUIRED_PLATFORMS}
+        evidence = {"digest": digest}
+        base = dict(ci_verified="true", revisions=revisions, evidence=evidence)
         self.assertTrue(release.nightly_promotion_decision(
-            candidate, digest, immutable, ("absent", None))[0])
+            candidate, digest, immutable, ("absent", None), **base)[0])
         self.assertIn("no move", release.nightly_promotion_decision(
-            candidate, digest, immutable, present(digest))[1])
+            candidate, digest, immutable, present(digest), **base)[1])
         self.assertFalse(release.nightly_promotion_decision(
-            candidate, digest, immutable, present(old_digest))[0])
+            candidate, digest, immutable, present(old_digest), **base)[0])
+        self.assertFalse(release.nightly_promotion_decision(
+            candidate, digest, immutable, ("absent", None),
+            **{**base, "ci_verified": "false"})[0])
+        self.assertFalse(release.nightly_promotion_decision(
+            candidate, digest, immutable, ("absent", None),
+            **{**base, "evidence": {"digest": "sha256:" + "9" * 64}})[0])
         bound = {old_digest: previous}
         self.assertFalse(release.nightly_promotion_decision(
             candidate, digest, immutable, present(old_digest),
-            previous_commit="b" * 40, identity_binding=bound)[0])
+            previous_commit="b" * 40, identity_binding=bound, **base)[0])
         self.assertFalse(release.nightly_promotion_decision(
             candidate, digest, immutable, present(old_digest),
             previous_commit=previous, identity_binding=bound,
-            ancestor=lambda old, new: False)[0])
+            ancestor=lambda old, new: False, **base)[0])
         self.assertTrue(release.nightly_promotion_decision(
             candidate, digest, immutable, present(old_digest),
             previous_commit=previous, identity_binding=bound,
-            ancestor=lambda old, new: True)[0])
+            ancestor=lambda old, new: True, **base)[0])
+        wrong_revisions = dict(revisions)
+        wrong_revisions[("linux", "amd64")] = "b" * 40
         self.assertFalse(release.nightly_promotion_decision(
-            candidate, digest, present(digest, {("linux", "arm64")}),
-            ("absent", None))[0])
+            candidate, digest, immutable, ("absent", None),
+            ci_verified="true", revisions=wrong_revisions, evidence=evidence)[0])
 
     def test_nightly_promote_apply_has_zero_writes_on_refusal_and_is_idempotent(self):
         candidate, previous = "c" * 40, "a" * 40
         digest, old_digest = "sha256:" + "d" * 64, "sha256:" + "f" * 64
+        revisions = {(os_name, arch): candidate for os_name, arch in release.REQUIRED_PLATFORMS}
         def invoke(*extra):
             return ["release.py", "nightly-promote", "--commit", candidate,
                     "--digest", digest, "--previous-commit", previous,
-                    "--previous-digest", old_digest, *extra]
+                    "--previous-digest", old_digest, "--ci-verified", "true",
+                    "--pinned-evidence", json.dumps({"digest": digest}), *extra]
 
         with patch.object(release, "observe_reference",
                           return_value=("unknown", None)), \
+             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
              patch.object(release.subprocess, "run") as command, \
              patch("sys.argv", invoke("--apply")):
             with self.assertRaisesRegex(ValueError, "refused"):
                 release.main()
             self.assertEqual(registry_writes(command), [])
         with patch.object(release, "nightly_identity_binding", return_value={}), \
+             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
              patch.object(release.subprocess, "run") as command, \
              patch("sys.argv", invoke("--apply")):
             with self.assertRaisesRegex(ValueError, "refused"):
@@ -999,6 +1058,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(registry_writes(command), [])
         # First promotion writes only the nightly alias, then re-verifies it.
         with patch.object(release, "nightly_identity_binding", return_value={}), \
+             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
              patch.object(release, "observe_reference", side_effect=[
                  present(digest), ("absent", None), present(digest)]), \
              patch.object(release.subprocess, "run") as command, \
@@ -1007,6 +1067,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(len(registry_writes(command)), 1)
         # Rerun with the same digest is idempotent: no alias move.
         with patch.object(release, "nightly_identity_binding", return_value={}), \
+             patch.object(release, "platform_manifest_revisions", return_value=revisions), \
              patch.object(release, "observe_reference", side_effect=[
                  present(digest), present(digest)]), \
              patch.object(release.subprocess, "run") as command, \
@@ -1020,10 +1081,10 @@ class ReleaseTests(unittest.TestCase):
                          ["3.0.0", "3.0", "latest"])
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
         self.assertNotIn("type=raw,value=latest", source)
-        self.assertIn("value=edge,enable=${{ github.ref == 'refs/heads/main' "
-                      "&& steps.channel.outputs.publish == 'true' }}", source)
+        self.assertIn("edge-promote", source)
         self.assertNotIn("value=nightly,enable", source)  # alias moved after verification
         self.assertIn("nightly-promote", source)
+        self.assertNotIn("type=raw,value=edge", source)
 
     def test_nightly_workflow_wiring_and_verification_only_paths(self):
         import yaml
@@ -1038,11 +1099,20 @@ class ReleaseTests(unittest.TestCase):
         names = [step.get("name", "") for step in doc["jobs"]["build-and-push"]["steps"]]
         sha_gate = next(i for i, name in enumerate(names) if "Preflight shared sha tag" in name)
         build = next(i for i, name in enumerate(names) if name.startswith("Build (and optionally push)"))
+        edge_promote = next(i for i, name in enumerate(names)
+                            if "Promote edge from the verified" in name)
         promote = next(i for i, name in enumerate(names) if "move only the nightly alias" in name)
+        resolved = next(i for i, name in enumerate(names)
+                        if name.startswith("Resolve the verified immutable digest"))
         self.assertLess(sha_gate, build)
-        self.assertLess(build, promote)
+        self.assertLess(build, resolved)
+        self.assertLess(resolved, edge_promote)
+        self.assertLess(resolved, promote)
+        self.assertNotIn("type=raw,value=edge", source)
         self.assertIn("steps.sha_gate.outputs.action", source)
         self.assertIn("--previous-digest \"$PREVIOUS_DIGEST\"", source)
+        self.assertIn("--ci-verified \"$CI_VERIFIED\"", source)
+        self.assertIn("--pinned-evidence \"$PINNED_EVIDENCE\"", source)
         for path in (".github/workflows/release.yml", ".github/workflows/modules.yml"):
             self.assertTrue(yaml.safe_load(
                 (release.ROOT / path).read_text(encoding="utf-8"))["jobs"])
@@ -1054,6 +1124,53 @@ class ReleaseTests(unittest.TestCase):
              redirect_stdout(out):
             release.main()
         self.assertEqual(json.loads(out.getvalue())["publish"], "false")
+
+
+    def test_edge_and_nightly_survive_both_publication_orders_on_sha_reuse(self):
+        commit, digest = "c" * 40, "sha256:" + "d" * 64
+        sha_ref = "atharvnaphade/carbonpanel:sha-" + commit
+        revisions = {(os_name, arch): commit for os_name, arch in release.REQUIRED_PLATFORMS}
+        for order in (("nightly-promote", "edge-promote"),
+                      ("edge-promote", "nightly-promote")):
+            with self.subTest(order=order):
+                state = {"edge": ("absent", None), "nightly": ("absent", None)}
+                def observe(ref, strict=False):
+                    if ref == sha_ref:
+                        return present(digest)
+                    return state[ref.rsplit(":", 1)[1]]
+                def fake_run(args, **kwargs):
+                    target = args[args.index("--tag") + 1]
+                    state[target.rsplit(":", 1)[1]] = present(digest)
+                    return subprocess.CompletedProcess(args, 0)
+                writes = []
+                for command in order:
+                    argv = ["release.py", command, "--commit", commit, "--digest", digest,
+                            "--ci-verified", "true",
+                            "--pinned-evidence", json.dumps({"digest": digest}), "--apply"]
+                    with patch.object(release, "observe_reference", side_effect=observe), \
+                         patch.object(release, "platform_manifest_revisions",
+                                      return_value=revisions), \
+                         patch.object(release, "nightly_identity_binding", return_value={}), \
+                         patch.object(release.subprocess, "run", side_effect=fake_run) as runner, \
+                         patch("sys.argv", argv):
+                        release.main()
+                    writes.extend(registry_writes(runner))
+                self.assertEqual(len(writes), 2)
+                for alias in ("edge", "nightly"):
+                    self.assertEqual(state[alias][1]["digest"], digest)
+                # Repeating both commands writes nothing (sha reuse is idempotent).
+                for command in order:
+                    argv = ["release.py", command, "--commit", commit, "--digest", digest,
+                            "--ci-verified", "true",
+                            "--pinned-evidence", json.dumps({"digest": digest}), "--apply"]
+                    with patch.object(release, "observe_reference", side_effect=observe), \
+                         patch.object(release, "platform_manifest_revisions",
+                                      return_value=revisions), \
+                         patch.object(release, "nightly_identity_binding", return_value={}), \
+                         patch.object(release.subprocess, "run") as runner, \
+                         patch("sys.argv", argv):
+                        release.main()
+                        self.assertEqual(registry_writes(runner), [])
 
 
 if __name__ == "__main__":

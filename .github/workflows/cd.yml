@@ -45,6 +45,16 @@ on:
         required: false
         type: string
         default: ''
+      pinned_evidence:
+        description: 'Trusted pinned build evidence JSON, e.g. {"digest":"sha256:..."}; required for sha reuse'
+        required: false
+        type: string
+        default: ''
+      previous_revisions:
+        description: 'Verified OCI revision labels JSON for the previously promoted sha image; required when moving over a different digest'
+        required: false
+        type: string
+        default: ''
 
 # Least privilege at the workflow level; publication is gated by the opt-in.
 permissions:
@@ -143,11 +153,14 @@ jobs:
         env:
           PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
           EXPECTED_DIGEST: ${{ inputs.expected_sha_digest }}
-        # Reuse a verified existing sha image; a conflict or unknown lookup
-        # fails here with zero buildx pushes and zero alias moves.
+          CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
+        # Reuse a verified existing sha image only with trusted pinned evidence;
+        # conflict, unknown lookup or missing digest fails here with zero writes.
         run: |
           python3 scripts/release.py sha-tag-gate \
-            --commit "$PINNED_COMMIT" --expected-digest "$EXPECTED_DIGEST"
+            --commit "$PINNED_COMMIT" --expected-digest "$EXPECTED_DIGEST" \
+            --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE"
 
       - name: Docker Hub Credentials & Login Check
         id: check-creds
@@ -244,9 +257,9 @@ jobs:
         with:
           images: |
             atharvnaphade/carbonpanel
+          # Buildx writes ONLY the immutable sha reference; edge and nightly are
+          # promoted later from the verified digest by explicit gated steps.
           tags: |
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' && steps.channel.outputs.publish == 'true' }}
-            type=ref,event=branch,enable=${{ github.ref != 'refs/heads/main' }}
             type=raw,value=sha-${{ steps.pinned.outputs.sha }}
           labels: |
             org.opencontainers.image.title=Carbon Panel
@@ -289,6 +302,19 @@ jobs:
           else
             echo "digest=$PUSHED_DIGEST" >> "$GITHUB_OUTPUT"
           fi
+      - name: Promote edge from the verified immutable digest
+        if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true'
+        env:
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+          IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
+          CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
+          PREVIOUS_REVISIONS: ${{ inputs.previous_revisions }}
+        run: |
+          python3 scripts/release.py edge-promote \
+            --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
+            --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" \
+            --previous-revisions "$PREVIOUS_REVISIONS" --apply
       - name: Verify immutable sha image and move only the nightly alias
         if: steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true'
         env:
@@ -296,11 +322,15 @@ jobs:
           IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
           PREVIOUS_COMMIT: ${{ inputs.previous_nightly_commit }}
           PREVIOUS_DIGEST: ${{ inputs.previous_nightly_digest }}
+          CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
+          PREVIOUS_REVISIONS: ${{ inputs.previous_revisions }}
         run: |
           python3 scripts/release.py nightly-promote \
             --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
             --previous-commit "$PREVIOUS_COMMIT" --previous-digest "$PREVIOUS_DIGEST" \
-            --apply
+            --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" \
+            --previous-revisions "$PREVIOUS_REVISIONS" --apply
       - name: Sync Docker Hub repository description
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
         if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'

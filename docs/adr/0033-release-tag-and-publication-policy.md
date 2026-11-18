@@ -50,11 +50,16 @@ The development channel adds one explicit alias, `nightly`, and no new immutable
 reference: it reuses the verified `sha-<full-commit>` image of a pinned main
 commit with exact successful CI. The shared sha tag is preflighted before any
 build or push by both edge and nightly writers; a verified existing image is
-reused, while a conflict or unknown lookup refuses with zero writes. Nightly
-promotion binds the previously promoted commit to the observed alias digest via
-a verified sha reference before checking ancestry, so a stale operator string
-cannot authorize a move. Nightly never moves `latest`, a minor tag or `edge`,
-and all publication is serialized on the colliding destinations. Seeding a live
+reused, while a conflict or unknown lookup refuses with zero writes. Reuse
+requires independent pinned-build evidence: exact successful CI for the commit,
+the observed digest matching the recorded digest, both platform manifests and a
+matching OCI revision label on each; a bare expected digest is not evidence.
+Nightly and edge promotion bind the previously promoted commit to the observed
+alias digest through that same evidence before checking ancestry, so a stale
+operator string cannot authorize a move. Buildx writes only the sha reference;
+edge is moved by an explicitly gated digest-based step so it survives sha reuse
+in either publication order. Nightly never moves `latest` or a minor tag, and
+all publication is serialized on the colliding destinations. Seeding a live
 nightly remains a separate authorization; no scheduled write is enabled.
 Deployments that need reproducible rollbacks pin the full version or digest.
 
