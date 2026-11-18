@@ -19,7 +19,7 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_player: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChtjYXJib25wYW5lbC92MS9wbGF5ZXIucHJvdG8SDmNhcmJvbnBhbmVsLnYxItoBChFQbGF5ZXJPYnNlcnZhdGlvbhIwCgZzb3VyY2UYASABKA4yIC5jYXJib25wYW5lbC52MS5QbGF5ZXJEYXRhU291cmNlEi8KC29ic2VydmVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0Cgpjb25maWRlbmNlGAMgASgOMiAuY2FyYm9ucGFuZWwudjEuUGxheWVyQ29uZmlkZW5jZRIVCg1hcHBsaWNhYmlsaXR5GAQgASgJEhUKDWNvbmZsaWN0X25vdGUYBSABKAkiYQoJUGxheWVyUmVmEhQKDGlkZW50aXR5X2tleRgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHV1aWQYAyABKAkSDAoEeHVpZBgEIAEoCRIUCgxvZmZsaW5lX3V1aWQYBSABKAgimAEKC1BsYXllckFsaWFzEgwKBG5hbWUYASABKAkSLwoLb2JzZXJ2ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhgKEHNvdXJjZV9zZXJ2ZXJfaWQYAyABKAkSMAoGc291cmNlGAQgASgOMiAuY2FyYm9ucGFuZWwudjEuUGxheWVyRGF0YVNvdXJjZSKlAwoNUGxheWVyU3VtbWFyeRImCgNyZWYYASABKAsyGS5jYXJib25wYW5lbC52MS5QbGF5ZXJSZWYSEQoJc2VydmVyX2lkGAIgASgJEhMKC3NlcnZlcl9uYW1lGAMgASgJEjAKCHByZXNlbmNlGAQgASgOMh4uY2FyYm9ucGFuZWwudjEuUGxheWVyUHJlc2VuY2USPwoUcHJlc2VuY2Vfb2JzZXJ2YXRpb24YBSABKAsyIS5jYXJib25wYW5lbC52MS5QbGF5ZXJPYnNlcnZhdGlvbhIsCgdhbGlhc2VzGAYgAygLMhsuY2FyYm9ucGFuZWwudjEuUGxheWVyQWxpYXMSEwoLd2hpdGVsaXN0ZWQYByABKAgSEAoIb3BlcmF0b3IYCCABKAgSDgoGYmFubmVkGAkgASgIEi0KCWxhc3Rfc2VlbhgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIc2tpbl9yZWYYCyABKAkSFgoOc2tpbl9hdmFpbGFibGUYDCABKAgSEwoLYWNjZXNzX2JhbmQYDSABKAkicAoLUGxheWVyRmllbGQSDAoEbmFtZRgBIAEoCRINCgV2YWx1ZRgCIAEoCRIMCgR1bml0GAMgASgJEjYKC29ic2VydmF0aW9uGAQgASgLMiEuY2FyYm9ucGFuZWwudjEuUGxheWVyT2JzZXJ2YXRpb24itgEKDVBsYXllclNlc3Npb24SFAoMaWRlbnRpdHlfa2V5GAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRItCglqb2luZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEisKB2xlZnRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBnNvdXJjZRgFIAEoCRIQCghlc3RpbWF0ZRgGIAEoCCLJAQoRUGxheWVyQWNjZXNzU3RhdGUSEQoJc2VydmVyX2lkGAEgASgJEhMKC3doaXRlbGlzdGVkGAIgASgIEhAKCG9wZXJhdG9yGAMgASgIEhAKCG9wX2xldmVsGAQgASgFEg4KBmJhbm5lZBgFIAEoCBISCgpiYW5fcmVhc29uGAYgASgJEgwKBG11dGUYByABKAgSNgoLb2JzZXJ2YXRpb24YCCABKAsyIS5jYXJib25wYW5lbC52MS5QbGF5ZXJPYnNlcnZhdGlvbiK8AQoSUGxheWVySGlzdG9yeUVudHJ5EgoKAmlkGAEgASgJEg4KBmFjdGlvbhgCIAEoCRISCgphY3Rvcl9uYW1lGAMgASgJEhEKCXNlcnZlcl9pZBgEIAEoCRIOCgZyZWFzb24YBSABKAkSLwoLb2NjdXJyZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCnJlcXVlc3RfaWQYByABKAkSDgoGdW5kb25lGAggASgIIpEBChZQbGF5ZXJDYXBhYmlsaXR5U3RhdHVzEjQKCmNhcGFiaWxpdHkYASABKA4yIC5jYXJib25wYW5lbC52MS5QbGF5ZXJDYXBhYmlsaXR5EjEKBXN0YXRlGAIgASgOMiIuY2FyYm9ucGFuZWwudjEuUGxheWVyU3VwcG9ydFN0YXRlEg4KBmRldGFpbBgDIAEoCSKBAQoPUGxheWVyU2tpbkFzc2V0EgwKBGRhdGEYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJEhIKCmZyb21fY2FjaGUYAyABKAgSNgoLb2JzZXJ2YXRpb24YBCABKAsyIS5jYXJib25wYW5lbC52MS5QbGF5ZXJPYnNlcnZhdGlvbiK2BAoMUGxheWVyRGV0YWlsEiYKA3JlZhgBIAEoCzIZLmNhcmJvbnBhbmVsLnYxLlBsYXllclJlZhIsCgdhbGlhc2VzGAIgAygLMhsuY2FyYm9ucGFuZWwudjEuUGxheWVyQWxpYXMSMAoIcHJlc2VuY2UYAyABKA4yHi5jYXJib25wYW5lbC52MS5QbGF5ZXJQcmVzZW5jZRI/ChRwcmVzZW5jZV9vYnNlcnZhdGlvbhgEIAEoCzIhLmNhcmJvbnBhbmVsLnYxLlBsYXllck9ic2VydmF0aW9uEhkKEXByaW1hcnlfc2VydmVyX2lkGAUgASgJEi4KCmZpcnN0X3NlZW4YBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCWxhc3Rfc2VlbhgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoJY2hhcmFjdGVyGAggAygLMhsuY2FyYm9ucGFuZWwudjEuUGxheWVyRmllbGQSLQoIcHJvZ3Jlc3MYCSADKAsyGy5jYXJib25wYW5lbC52MS5QbGF5ZXJGaWVsZBIrCgZhY2Nlc3MYCiADKAsyGy5jYXJib25wYW5lbC52MS5QbGF5ZXJGaWVsZBI8CgxjYXBhYmlsaXRpZXMYCyADKAsyJi5jYXJib25wYW5lbC52MS5QbGF5ZXJDYXBhYmlsaXR5U3RhdHVzEhkKEW5hbWVfaGlzdG9yeV9ub3RlGAwgASgJIowBChJQbGF5ZXJBY3Rpb25SZXN1bHQSFAoMaWRlbnRpdHlfa2V5GAEgASgJEg8KB3N1Y2Nlc3MYAiABKAgSDwoHbWVzc2FnZRgDIAEoCRISCgplcnJvcl9jb2RlGAQgASgJEhYKDnVuZG9fc3VwcG9ydGVkGAUgASgIEhIKCnVuZG9fdG9rZW4YBiABKAkinAEKEkxpc3RQbGF5ZXJzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDQoFcXVlcnkYAiABKAkSFAoMc3RhdGVfZmlsdGVyGAMgASgJEhUKDWFjY2Vzc19maWx0ZXIYBCABKAkSDwoHc29ydF9ieRgFIAEoCRIXCg9zb3J0X2Rlc2NlbmRpbmcYBiABKAgSDQoFbGltaXQYByABKAUiXAoTTGlzdFBsYXllcnNSZXNwb25zZRIuCgdwbGF5ZXJzGAEgAygLMh0uY2FyYm9ucGFuZWwudjEuUGxheWVyU3VtbWFyeRIVCg1zb3VyY2VfZGV0YWlsGAIgASgJIjsKEEdldFBsYXllclJlcXVlc3QSFAoMaWRlbnRpdHlfa2V5GAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCSJBChFHZXRQbGF5ZXJSZXNwb25zZRIsCgZkZXRhaWwYASABKAsyHC5jYXJib25wYW5lbC52MS5QbGF5ZXJEZXRhaWwiRAoZTGlzdFBsYXllclNlc3Npb25zUmVxdWVzdBIUCgxpZGVudGl0eV9rZXkYASABKAkSEQoJc2VydmVyX2lkGAIgASgJIk0KGkxpc3RQbGF5ZXJTZXNzaW9uc1Jlc3BvbnNlEi8KCHNlc3Npb25zGAEgAygLMh0uY2FyYm9ucGFuZWwudjEuUGxheWVyU2Vzc2lvbiJCChdMaXN0UGxheWVyQWNjZXNzUmVxdWVzdBIUCgxpZGVudGl0eV9rZXkYASABKAkSEQoJc2VydmVyX2lkGAIgASgJIk0KGExpc3RQbGF5ZXJBY2Nlc3NSZXNwb25zZRIxCgZzdGF0ZXMYASADKAsyIS5jYXJib25wYW5lbC52MS5QbGF5ZXJBY2Nlc3NTdGF0ZSJSChhMaXN0UGxheWVySGlzdG9yeVJlcXVlc3QSFAoMaWRlbnRpdHlfa2V5GAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRINCgVsaW1pdBgDIAEoBSJQChlMaXN0UGxheWVySGlzdG9yeVJlc3BvbnNlEjMKB2VudHJpZXMYASADKAsyIi5jYXJib25wYW5lbC52MS5QbGF5ZXJIaXN0b3J5RW50cnkiMgodTGlzdFBsYXllckNhcGFiaWxpdGllc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIl4KHkxpc3RQbGF5ZXJDYXBhYmlsaXRpZXNSZXNwb25zZRI8CgxjYXBhYmlsaXRpZXMYASADKAsyJi5jYXJib25wYW5lbC52MS5QbGF5ZXJDYXBhYmlsaXR5U3RhdHVzIl8KFEdldFBsYXllclNraW5SZXF1ZXN0EhQKDGlkZW50aXR5X2tleRgBIAEoCRIQCghza2luX3JlZhgCIAEoCRIMCgRraW5kGAMgASgJEhEKCXNlcnZlcl9pZBgEIAEoCSJHChVHZXRQbGF5ZXJTa2luUmVzcG9uc2USLgoFYXNzZXQYASABKAsyHy5jYXJib25wYW5lbC52MS5QbGF5ZXJTa2luQXNzZXQiQwoYUmVmcmVzaFBsYXllclNraW5SZXF1ZXN0EhQKDGlkZW50aXR5X2tleRgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkiSwoZUmVmcmVzaFBsYXllclNraW5SZXNwb25zZRIuCgVhc3NldBgBIAEoCzIfLmNhcmJvbnBhbmVsLnYxLlBsYXllclNraW5Bc3NldCJRChhHZXRQbGF5ZXJEZWVwRGF0YVJlcXVlc3QSFAoMaWRlbnRpdHlfa2V5GAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgRraW5kGAMgASgJIl8KGUdldFBsYXllckRlZXBEYXRhUmVzcG9uc2USKwoGZmllbGRzGAEgAygLMhsuY2FyYm9ucGFuZWwudjEuUGxheWVyRmllbGQSFQoNc25hcHNob3Rfbm90ZRgCIAEoCSJ1ChFLaWNrUGxheWVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSFAoMaWRlbnRpdHlfa2V5GAIgASgJEhMKC3BsYXllcl9uYW1lGAMgASgJEg4KBnJlYXNvbhgEIAEoCRISCgpyZXF1ZXN0X2lkGAUgASgJInQKEEJhblBsYXllclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhQKDGlkZW50aXR5X2tleRgCIAEoCRITCgtwbGF5ZXJfbmFtZRgDIAEoCRIOCgZyZWFzb24YBCABKAkSEgoKcmVxdWVzdF9pZBgFIAEoCSJnChNQYXJkb25QbGF5ZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxpZGVudGl0eV9rZXkYAiABKAkSEwoLcGxheWVyX25hbWUYAyABKAkSEgoKcmVxdWVzdF9pZBgEIAEoCSKFAQoSU2V0T3BlcmF0b3JSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxpZGVudGl0eV9rZXkYAiABKAkSEwoLcGxheWVyX25hbWUYAyABKAkSDgoGcmVtb3ZlGAQgASgIEg0KBWxldmVsGAUgASgFEhIKCnJlcXVlc3RfaWQYBiABKAkifAoYU2V0V2hpdGVsaXN0RW50cnlSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxpZGVudGl0eV9rZXkYAiABKAkSEwoLcGxheWVyX25hbWUYAyABKAkSDgoGcmVtb3ZlGAQgASgIEhIKCnJlcXVlc3RfaWQYBSABKAkidQoXQnVsa1BsYXllckFjdGlvblJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBGtpbmQYAiABKAkSFQoNaWRlbnRpdHlfa2V5cxgDIAMoCRIOCgZyZWFzb24YBCABKAkSEgoKcmVxdWVzdF9pZBgFIAEoCSJUChdVbmRvUGxheWVyQWN0aW9uUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEgoKdW5kb190b2tlbhgCIAEoCRISCgpyZXF1ZXN0X2lkGAMgASgJIpEBChNQbGF5ZXJBY3Rpb25PdXRjb21lEjMKB3Jlc3VsdHMYASADKAsyIi5jYXJib25wYW5lbC52MS5QbGF5ZXJBY3Rpb25SZXN1bHQSEgoKcmVxdWVzdF9pZBgCIAEoCRISCgpqb3VybmFsX2lkGAMgASgJEh0KFXJlcXVpcmVzX2NvbmZpcm1hdGlvbhgEIAEoCCJKChJLaWNrUGxheWVyUmVzcG9uc2USNAoHb3V0Y29tZRgBIAEoCzIjLmNhcmJvbnBhbmVsLnYxLlBsYXllckFjdGlvbk91dGNvbWUiSQoRQmFuUGxheWVyUmVzcG9uc2USNAoHb3V0Y29tZRgBIAEoCzIjLmNhcmJvbnBhbmVsLnYxLlBsYXllckFjdGlvbk91dGNvbWUiTAoUUGFyZG9uUGxheWVyUmVzcG9uc2USNAoHb3V0Y29tZRgBIAEoCzIjLmNhcmJvbnBhbmVsLnYxLlBsYXllckFjdGlvbk91dGNvbWUiSwoTU2V0T3BlcmF0b3JSZXNwb25zZRI0CgdvdXRjb21lGAEgASgLMiMuY2FyYm9ucGFuZWwudjEuUGxheWVyQWN0aW9uT3V0Y29tZSJRChlTZXRXaGl0ZWxpc3RFbnRyeVJlc3BvbnNlEjQKB291dGNvbWUYASABKAsyIy5jYXJib25wYW5lbC52MS5QbGF5ZXJBY3Rpb25PdXRjb21lIlAKGEJ1bGtQbGF5ZXJBY3Rpb25SZXNwb25zZRI0CgdvdXRjb21lGAEgASgLMiMuY2FyYm9ucGFuZWwudjEuUGxheWVyQWN0aW9uT3V0Y29tZSJQChhVbmRvUGxheWVyQWN0aW9uUmVzcG9uc2USNAoHb3V0Y29tZRgBIAEoCzIjLmNhcmJvbnBhbmVsLnYxLlBsYXllckFjdGlvbk91dGNvbWUq7wIKEFBsYXllckRhdGFTb3VyY2USIgoeUExBWUVSX0RBVEFfU09VUkNFX1VOU1BFQ0lGSUVEEAASHwobUExBWUVSX0RBVEFfU09VUkNFX1BSRVNFTkNFEAESKgomUExBWUVSX0RBVEFfU09VUkNFX01BTkFHRU1FTlRfUFJPVE9DT0wQAhIbChdQTEFZRVJfREFUQV9TT1VSQ0VfUkNPThADEhsKF1BMQVlFUl9EQVRBX1NPVVJDRV9FWEVDEAQSIgoeUExBWUVSX0RBVEFfU09VUkNFX09OX0RJU0tfTkJUEAUSIwofUExBWUVSX0RBVEFfU09VUkNFX09OX0RJU0tfSlNPThAGEicKI1BMQVlFUl9EQVRBX1NPVVJDRV9JREVOVElUWV9TRVJWSUNFEAcSHwobUExBWUVSX0RBVEFfU09VUkNFX1BBTkVMX0RCEAgSHQoZUExBWUVSX0RBVEFfU09VUkNFX0JSSURHRRAJKtEBChBQbGF5ZXJDb25maWRlbmNlEiEKHVBMQVlFUl9DT05GSURFTkNFX1VOU1BFQ0lGSUVEEAASHgoaUExBWUVSX0NPTkZJREVOQ0VfREVURUNURUQQARIeChpQTEFZRVJfQ09ORklERU5DRV9JTkZFUlJFRBACEh0KGVBMQVlFUl9DT05GSURFTkNFX1VOS05PV04QAxIbChdQTEFZRVJfQ09ORklERU5DRV9TVEFMRRAEEh4KGlBMQVlFUl9DT05GSURFTkNFX0NPTkZMSUNUEAUqrQEKDlBsYXllclByZXNlbmNlEh8KG1BMQVlFUl9QUkVTRU5DRV9VTlNQRUNJRklFRBAAEhoKFlBMQVlFUl9QUkVTRU5DRV9PTkxJTkUQARIbChdQTEFZRVJfUFJFU0VOQ0VfT0ZGTElORRACEiEKHVBMQVlFUl9QUkVTRU5DRV9SRUNFTlRMWV9TRUVOEAMSHgoaUExBWUVSX1BSRVNFTkNFX1VOT0JTRVJWRUQQBCqAAwoQUGxheWVyQ2FwYWJpbGl0eRIhCh1QTEFZRVJfQ0FQQUJJTElUWV9VTlNQRUNJRklFRBAAEikKJVBMQVlFUl9DQVBBQklMSVRZX01BTkFHRU1FTlRfUFJPVE9DT0wQARIfChtQTEFZRVJfQ0FQQUJJTElUWV9SQ09OX0VYRUMQAhIiCh5QTEFZRVJfQ0FQQUJJTElUWV9PTl9ESVNLX1JFQUQQAxIgChxQTEFZRVJfQ0FQQUJJTElUWV9TS0lOX1BST1hZEAQSIwofUExBWUVSX0NBUEFCSUxJVFlfQlJJREdFX1ZJVEFMUxAFEiYKIlBMQVlFUl9DQVBBQklMSVRZX0JSSURHRV9JTlZFTlRPUlkQBhIjCh9QTEFZRVJfQ0FQQUJJTElUWV9CUklER0VfR1JPVVBTEAcSIQodUExBWUVSX0NBUEFCSUxJVFlfQlJJREdFX01VVEUQCBIiCh5QTEFZRVJfQ0FQQUJJTElUWV9CRURST0NLX1hVSUQQCSr0AQoSUGxheWVyU3VwcG9ydFN0YXRlEiQKIFBMQVlFUl9TVVBQT1JUX1NUQVRFX1VOU1BFQ0lGSUVEEAASIgoeUExBWUVSX1NVUFBPUlRfU1RBVEVfU1VQUE9SVEVEEAESIQodUExBWUVSX1NVUFBPUlRfU1RBVEVfREVHUkFERUQQAhIkCiBQTEFZRVJfU1VQUE9SVF9TVEFURV9VTlNVUFBPUlRFRBADEikKJVBMQVlFUl9TVVBQT1JUX1NUQVRFX0RFQ0lTSU9OX1BFTkRJTkcQBBIgChxQTEFZRVJfU1VQUE9SVF9TVEFURV9VTktOT1dOEAUytAwKDVBsYXllclNlcnZpY2USVgoLTGlzdFBsYXllcnMSIi5jYXJib25wYW5lbC52MS5MaXN0UGxheWVyc1JlcXVlc3QaIy5jYXJib25wYW5lbC52MS5MaXN0UGxheWVyc1Jlc3BvbnNlElAKCUdldFBsYXllchIgLmNhcmJvbnBhbmVsLnYxLkdldFBsYXllclJlcXVlc3QaIS5jYXJib25wYW5lbC52MS5HZXRQbGF5ZXJSZXNwb25zZRJrChJMaXN0UGxheWVyU2Vzc2lvbnMSKS5jYXJib25wYW5lbC52MS5MaXN0UGxheWVyU2Vzc2lvbnNSZXF1ZXN0GiouY2FyYm9ucGFuZWwudjEuTGlzdFBsYXllclNlc3Npb25zUmVzcG9uc2USZQoQTGlzdFBsYXllckFjY2VzcxInLmNhcmJvbnBhbmVsLnYxLkxpc3RQbGF5ZXJBY2Nlc3NSZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuTGlzdFBsYXllckFjY2Vzc1Jlc3BvbnNlEmgKEUxpc3RQbGF5ZXJIaXN0b3J5EiguY2FyYm9ucGFuZWwudjEuTGlzdFBsYXllckhpc3RvcnlSZXF1ZXN0GikuY2FyYm9ucGFuZWwudjEuTGlzdFBsYXllckhpc3RvcnlSZXNwb25zZRJ3ChZMaXN0UGxheWVyQ2FwYWJpbGl0aWVzEi0uY2FyYm9ucGFuZWwudjEuTGlzdFBsYXllckNhcGFiaWxpdGllc1JlcXVlc3QaLi5jYXJib25wYW5lbC52MS5MaXN0UGxheWVyQ2FwYWJpbGl0aWVzUmVzcG9uc2USXAoNR2V0UGxheWVyU2tpbhIkLmNhcmJvbnBhbmVsLnYxLkdldFBsYXllclNraW5SZXF1ZXN0GiUuY2FyYm9ucGFuZWwudjEuR2V0UGxheWVyU2tpblJlc3BvbnNlEmgKEVJlZnJlc2hQbGF5ZXJTa2luEiguY2FyYm9ucGFuZWwudjEuUmVmcmVzaFBsYXllclNraW5SZXF1ZXN0GikuY2FyYm9ucGFuZWwudjEuUmVmcmVzaFBsYXllclNraW5SZXNwb25zZRJoChFHZXRQbGF5ZXJEZWVwRGF0YRIoLmNhcmJvbnBhbmVsLnYxLkdldFBsYXllckRlZXBEYXRhUmVxdWVzdBopLmNhcmJvbnBhbmVsLnYxLkdldFBsYXllckRlZXBEYXRhUmVzcG9uc2USUwoKS2lja1BsYXllchIhLmNhcmJvbnBhbmVsLnYxLktpY2tQbGF5ZXJSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuS2lja1BsYXllclJlc3BvbnNlElAKCUJhblBsYXllchIgLmNhcmJvbnBhbmVsLnYxLkJhblBsYXllclJlcXVlc3QaIS5jYXJib25wYW5lbC52MS5CYW5QbGF5ZXJSZXNwb25zZRJZCgxQYXJkb25QbGF5ZXISIy5jYXJib25wYW5lbC52MS5QYXJkb25QbGF5ZXJSZXF1ZXN0GiQuY2FyYm9ucGFuZWwudjEuUGFyZG9uUGxheWVyUmVzcG9uc2USVgoLU2V0T3BlcmF0b3ISIi5jYXJib25wYW5lbC52MS5TZXRPcGVyYXRvclJlcXVlc3QaIy5jYXJib25wYW5lbC52MS5TZXRPcGVyYXRvclJlc3BvbnNlEmgKEVNldFdoaXRlbGlzdEVudHJ5EiguY2FyYm9ucGFuZWwudjEuU2V0V2hpdGVsaXN0RW50cnlSZXF1ZXN0GikuY2FyYm9ucGFuZWwudjEuU2V0V2hpdGVsaXN0RW50cnlSZXNwb25zZRJlChBCdWxrUGxheWVyQWN0aW9uEicuY2FyYm9ucGFuZWwudjEuQnVsa1BsYXllckFjdGlvblJlcXVlc3QaKC5jYXJib25wYW5lbC52MS5CdWxrUGxheWVyQWN0aW9uUmVzcG9uc2USZQoQVW5kb1BsYXllckFjdGlvbhInLmNhcmJvbnBhbmVsLnYxLlVuZG9QbGF5ZXJBY3Rpb25SZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuVW5kb1BsYXllckFjdGlvblJlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw',
+		'ChtjYXJib25wYW5lbC92MS9wbGF5ZXIucHJvdG8SDmNhcmJvbnBhbmVsLnYxItoBChFQbGF5ZXJPYnNlcnZhdGlvbhIwCgZzb3VyY2UYASABKA4yIC5jYXJib25wYW5lbC52MS5QbGF5ZXJEYXRhU291cmNlEi8KC29ic2VydmVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0Cgpjb25maWRlbmNlGAMgASgOMiAuY2FyYm9ucGFuZWwudjEuUGxheWVyQ29uZmlkZW5jZRIVCg1hcHBsaWNhYmlsaXR5GAQgASgJEhUKDWNvbmZsaWN0X25vdGUYBSABKAkiYQoJUGxheWVyUmVmEhQKDGlkZW50aXR5X2tleRgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHV1aWQYAyABKAkSDAoEeHVpZBgEIAEoCRIUCgxvZmZsaW5lX3V1aWQYBSABKAgimAEKC1BsYXllckFsaWFzEgwKBG5hbWUYASABKAkSLwoLb2JzZXJ2ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhgKEHNvdXJjZV9zZXJ2ZXJfaWQYAyABKAkSMAoGc291cmNlGAQgASgOMiAuY2FyYm9ucGFuZWwudjEuUGxheWVyRGF0YVNvdXJjZSKlAwoNUGxheWVyU3VtbWFyeRImCgNyZWYYASABKAsyGS5jYXJib25wYW5lbC52MS5QbGF5ZXJSZWYSEQoJc2VydmVyX2lkGAIgASgJEhMKC3NlcnZlcl9uYW1lGAMgASgJEjAKCHByZXNlbmNlGAQgASgOMh4uY2FyYm9ucGFuZWwudjEuUGxheWVyUHJlc2VuY2USPwoUcHJlc2VuY2Vfb2JzZXJ2YXRpb24YBSABKAsyIS5jYXJib25wYW5lbC52MS5QbGF5ZXJPYnNlcnZhdGlvbhIsCgdhbGlhc2VzGAYgAygLMhsuY2FyYm9ucGFuZWwudjEuUGxheWVyQWxpYXMSEwoLd2hpdGVsaXN0ZWQYByABKAgSEAoIb3BlcmF0b3IYCCABKAgSDgoGYmFubmVkGAkgASgIEi0KCWxhc3Rfc2VlbhgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIc2tpbl9yZWYYCyABKAkSFgoOc2tpbl9hdmFpbGFibGUYDCABKAgSEwoLYWNjZXNzX2JhbmQYDSABKAkicAoLUGxheWVyRmllbGQSDAoEbmFtZRgBIAEoCRINCgV2YWx1ZRgCIAEoCRIMCgR1bml0GAMgASgJEjYKC29ic2VydmF0aW9uGAQgASgLMiEuY2FyYm9ucGFuZWwudjEuUGxheWVyT2JzZXJ2YXRpb24itgEKDVBsYXllclNlc3Npb24SFAoMaWRlbnRpdHlfa2V5GAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRItCglqb2luZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEisKB2xlZnRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBnNvdXJjZRgFIAEoCRIQCghlc3RpbWF0ZRgGIAEoCCLJAQoRUGxheWVyQWNjZXNzU3RhdGUSEQoJc2VydmVyX2lkGAEgASgJEhMKC3doaXRlbGlzdGVkGAIgASgIEhAKCG9wZXJhdG9yGAMgASgIEhAKCG9wX2xldmVsGAQgASgFEg4KBmJhbm5lZBgFIAEoCBISCgpiYW5fcmVhc29uGAYgASgJEgwKBG11dGUYByABKAgSNgoLb2JzZXJ2YXRpb24YCCABKAsyIS5jYXJib25wYW5lbC52MS5QbGF5ZXJPYnNlcnZhdGlvbiK8AQoSUGxheWVySGlzdG9yeUVudHJ5EgoKAmlkGAEgASgJEg4KBmFjdGlvbhgCIAEoCRISCgphY3Rvcl9uYW1lGAMgASgJEhEKCXNlcnZlcl9pZBgEIAEoCRIOCgZyZWFzb24YBSABKAkSLwoLb2NjdXJyZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCnJlcXVlc3RfaWQYByABKAkSDgoGdW5kb25lGAggASgIIpEBChZQbGF5ZXJDYXBhYmlsaXR5U3RhdHVzEjQKCmNhcGFiaWxpdHkYASABKA4yIC5jYXJib25wYW5lbC52MS5QbGF5ZXJDYXBhYmlsaXR5EjEKBXN0YXRlGAIgASgOMiIuY2FyYm9ucGFuZWwudjEuUGxheWVyU3VwcG9ydFN0YXRlEg4KBmRldGFpbBgDIAEoCSKBAQoPUGxheWVyU2tpbkFzc2V0EgwKBGRhdGEYASABKAwSFAoMY29udGVudF90eXBlGAIgASgJEhIKCmZyb21fY2FjaGUYAyABKAgSNgoLb2JzZXJ2YXRpb24YBCABKAsyIS5jYXJib25wYW5lbC52MS5QbGF5ZXJPYnNlcnZhdGlvbiK2BAoMUGxheWVyRGV0YWlsEiYKA3JlZhgBIAEoCzIZLmNhcmJvbnBhbmVsLnYxLlBsYXllclJlZhIsCgdhbGlhc2VzGAIgAygLMhsuY2FyYm9ucGFuZWwudjEuUGxheWVyQWxpYXMSMAoIcHJlc2VuY2UYAyABKA4yHi5jYXJib25wYW5lbC52MS5QbGF5ZXJQcmVzZW5jZRI/ChRwcmVzZW5jZV9vYnNlcnZhdGlvbhgEIAEoCzIhLmNhcmJvbnBhbmVsLnYxLlBsYXllck9ic2VydmF0aW9uEhkKEXByaW1hcnlfc2VydmVyX2lkGAUgASgJEi4KCmZpcnN0X3NlZW4YBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi0KCWxhc3Rfc2VlbhgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoJY2hhcmFjdGVyGAggAygLMhsuY2FyYm9ucGFuZWwudjEuUGxheWVyRmllbGQSLQoIcHJvZ3Jlc3MYCSADKAsyGy5jYXJib25wYW5lbC52MS5QbGF5ZXJGaWVsZBIrCgZhY2Nlc3MYCiADKAsyGy5jYXJib25wYW5lbC52MS5QbGF5ZXJGaWVsZBI8CgxjYXBhYmlsaXRpZXMYCyADKAsyJi5jYXJib25wYW5lbC52MS5QbGF5ZXJDYXBhYmlsaXR5U3RhdHVzEhkKEW5hbWVfaGlzdG9yeV9ub3RlGAwgASgJIowBChJQbGF5ZXJBY3Rpb25SZXN1bHQSFAoMaWRlbnRpdHlfa2V5GAEgASgJEg8KB3N1Y2Nlc3MYAiABKAgSDwoHbWVzc2FnZRgDIAEoCRISCgplcnJvcl9jb2RlGAQgASgJEhYKDnVuZG9fc3VwcG9ydGVkGAUgASgIEhIKCnVuZG9fdG9rZW4YBiABKAkiJAoTTG9va3VwUGxheWVyUmVxdWVzdBINCgVxdWVyeRgBIAEoCSKsAQoUTG9va3VwUGxheWVyUmVzcG9uc2USMgoGc3RhdHVzGAEgASgOMiIuY2FyYm9ucGFuZWwudjEuUGxheWVyTG9va3VwU3RhdHVzEgwKBG5hbWUYAiABKAkSDAoEdXVpZBgDIAEoCRI2CgtvYnNlcnZhdGlvbhgEIAEoCzIhLmNhcmJvbnBhbmVsLnYxLlBsYXllck9ic2VydmF0aW9uEgwKBG5vdGUYBSABKAkinAEKEkxpc3RQbGF5ZXJzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDQoFcXVlcnkYAiABKAkSFAoMc3RhdGVfZmlsdGVyGAMgASgJEhUKDWFjY2Vzc19maWx0ZXIYBCABKAkSDwoHc29ydF9ieRgFIAEoCRIXCg9zb3J0X2Rlc2NlbmRpbmcYBiABKAgSDQoFbGltaXQYByABKAUiXAoTTGlzdFBsYXllcnNSZXNwb25zZRIuCgdwbGF5ZXJzGAEgAygLMh0uY2FyYm9ucGFuZWwudjEuUGxheWVyU3VtbWFyeRIVCg1zb3VyY2VfZGV0YWlsGAIgASgJIjsKEEdldFBsYXllclJlcXVlc3QSFAoMaWRlbnRpdHlfa2V5GAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCSJBChFHZXRQbGF5ZXJSZXNwb25zZRIsCgZkZXRhaWwYASABKAsyHC5jYXJib25wYW5lbC52MS5QbGF5ZXJEZXRhaWwiRAoZTGlzdFBsYXllclNlc3Npb25zUmVxdWVzdBIUCgxpZGVudGl0eV9rZXkYASABKAkSEQoJc2VydmVyX2lkGAIgASgJIk0KGkxpc3RQbGF5ZXJTZXNzaW9uc1Jlc3BvbnNlEi8KCHNlc3Npb25zGAEgAygLMh0uY2FyYm9ucGFuZWwudjEuUGxheWVyU2Vzc2lvbiJCChdMaXN0UGxheWVyQWNjZXNzUmVxdWVzdBIUCgxpZGVudGl0eV9rZXkYASABKAkSEQoJc2VydmVyX2lkGAIgASgJIk0KGExpc3RQbGF5ZXJBY2Nlc3NSZXNwb25zZRIxCgZzdGF0ZXMYASADKAsyIS5jYXJib25wYW5lbC52MS5QbGF5ZXJBY2Nlc3NTdGF0ZSJSChhMaXN0UGxheWVySGlzdG9yeVJlcXVlc3QSFAoMaWRlbnRpdHlfa2V5GAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRINCgVsaW1pdBgDIAEoBSJQChlMaXN0UGxheWVySGlzdG9yeVJlc3BvbnNlEjMKB2VudHJpZXMYASADKAsyIi5jYXJib25wYW5lbC52MS5QbGF5ZXJIaXN0b3J5RW50cnkiMgodTGlzdFBsYXllckNhcGFiaWxpdGllc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJIl4KHkxpc3RQbGF5ZXJDYXBhYmlsaXRpZXNSZXNwb25zZRI8CgxjYXBhYmlsaXRpZXMYASADKAsyJi5jYXJib25wYW5lbC52MS5QbGF5ZXJDYXBhYmlsaXR5U3RhdHVzIl8KFEdldFBsYXllclNraW5SZXF1ZXN0EhQKDGlkZW50aXR5X2tleRgBIAEoCRIQCghza2luX3JlZhgCIAEoCRIMCgRraW5kGAMgASgJEhEKCXNlcnZlcl9pZBgEIAEoCSJHChVHZXRQbGF5ZXJTa2luUmVzcG9uc2USLgoFYXNzZXQYASABKAsyHy5jYXJib25wYW5lbC52MS5QbGF5ZXJTa2luQXNzZXQiQwoYUmVmcmVzaFBsYXllclNraW5SZXF1ZXN0EhQKDGlkZW50aXR5X2tleRgBIAEoCRIRCglzZXJ2ZXJfaWQYAiABKAkiSwoZUmVmcmVzaFBsYXllclNraW5SZXNwb25zZRIuCgVhc3NldBgBIAEoCzIfLmNhcmJvbnBhbmVsLnYxLlBsYXllclNraW5Bc3NldCJRChhHZXRQbGF5ZXJEZWVwRGF0YVJlcXVlc3QSFAoMaWRlbnRpdHlfa2V5GAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIMCgRraW5kGAMgASgJIl8KGUdldFBsYXllckRlZXBEYXRhUmVzcG9uc2USKwoGZmllbGRzGAEgAygLMhsuY2FyYm9ucGFuZWwudjEuUGxheWVyRmllbGQSFQoNc25hcHNob3Rfbm90ZRgCIAEoCSJ1ChFLaWNrUGxheWVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSFAoMaWRlbnRpdHlfa2V5GAIgASgJEhMKC3BsYXllcl9uYW1lGAMgASgJEg4KBnJlYXNvbhgEIAEoCRISCgpyZXF1ZXN0X2lkGAUgASgJInQKEEJhblBsYXllclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhQKDGlkZW50aXR5X2tleRgCIAEoCRITCgtwbGF5ZXJfbmFtZRgDIAEoCRIOCgZyZWFzb24YBCABKAkSEgoKcmVxdWVzdF9pZBgFIAEoCSJnChNQYXJkb25QbGF5ZXJSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxpZGVudGl0eV9rZXkYAiABKAkSEwoLcGxheWVyX25hbWUYAyABKAkSEgoKcmVxdWVzdF9pZBgEIAEoCSKFAQoSU2V0T3BlcmF0b3JSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIUCgxpZGVudGl0eV9rZXkYAiABKAkSEwoLcGxheWVyX25hbWUYAyABKAkSDgoGcmVtb3ZlGAQgASgIEg0KBWxldmVsGAUgASgFEhIKCnJlcXVlc3RfaWQYBiABKAkikgEKGFNldFdoaXRlbGlzdEVudHJ5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSFAoMaWRlbnRpdHlfa2V5GAIgASgJEhMKC3BsYXllcl9uYW1lGAMgASgJEg4KBnJlbW92ZRgEIAEoCBISCgpyZXF1ZXN0X2lkGAUgASgJEhQKDHBsYXllcl9xdWVyeRgGIAEoCSJ1ChdCdWxrUGxheWVyQWN0aW9uUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDAoEa2luZBgCIAEoCRIVCg1pZGVudGl0eV9rZXlzGAMgAygJEg4KBnJlYXNvbhgEIAEoCRISCgpyZXF1ZXN0X2lkGAUgASgJIlQKF1VuZG9QbGF5ZXJBY3Rpb25SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRISCgp1bmRvX3Rva2VuGAIgASgJEhIKCnJlcXVlc3RfaWQYAyABKAkikQEKE1BsYXllckFjdGlvbk91dGNvbWUSMwoHcmVzdWx0cxgBIAMoCzIiLmNhcmJvbnBhbmVsLnYxLlBsYXllckFjdGlvblJlc3VsdBISCgpyZXF1ZXN0X2lkGAIgASgJEhIKCmpvdXJuYWxfaWQYAyABKAkSHQoVcmVxdWlyZXNfY29uZmlybWF0aW9uGAQgASgIIkoKEktpY2tQbGF5ZXJSZXNwb25zZRI0CgdvdXRjb21lGAEgASgLMiMuY2FyYm9ucGFuZWwudjEuUGxheWVyQWN0aW9uT3V0Y29tZSJJChFCYW5QbGF5ZXJSZXNwb25zZRI0CgdvdXRjb21lGAEgASgLMiMuY2FyYm9ucGFuZWwudjEuUGxheWVyQWN0aW9uT3V0Y29tZSJMChRQYXJkb25QbGF5ZXJSZXNwb25zZRI0CgdvdXRjb21lGAEgASgLMiMuY2FyYm9ucGFuZWwudjEuUGxheWVyQWN0aW9uT3V0Y29tZSJLChNTZXRPcGVyYXRvclJlc3BvbnNlEjQKB291dGNvbWUYASABKAsyIy5jYXJib25wYW5lbC52MS5QbGF5ZXJBY3Rpb25PdXRjb21lIlEKGVNldFdoaXRlbGlzdEVudHJ5UmVzcG9uc2USNAoHb3V0Y29tZRgBIAEoCzIjLmNhcmJvbnBhbmVsLnYxLlBsYXllckFjdGlvbk91dGNvbWUiUAoYQnVsa1BsYXllckFjdGlvblJlc3BvbnNlEjQKB291dGNvbWUYASABKAsyIy5jYXJib25wYW5lbC52MS5QbGF5ZXJBY3Rpb25PdXRjb21lIlAKGFVuZG9QbGF5ZXJBY3Rpb25SZXNwb25zZRI0CgdvdXRjb21lGAEgASgLMiMuY2FyYm9ucGFuZWwudjEuUGxheWVyQWN0aW9uT3V0Y29tZSrvAgoQUGxheWVyRGF0YVNvdXJjZRIiCh5QTEFZRVJfREFUQV9TT1VSQ0VfVU5TUEVDSUZJRUQQABIfChtQTEFZRVJfREFUQV9TT1VSQ0VfUFJFU0VOQ0UQARIqCiZQTEFZRVJfREFUQV9TT1VSQ0VfTUFOQUdFTUVOVF9QUk9UT0NPTBACEhsKF1BMQVlFUl9EQVRBX1NPVVJDRV9SQ09OEAMSGwoXUExBWUVSX0RBVEFfU09VUkNFX0VYRUMQBBIiCh5QTEFZRVJfREFUQV9TT1VSQ0VfT05fRElTS19OQlQQBRIjCh9QTEFZRVJfREFUQV9TT1VSQ0VfT05fRElTS19KU09OEAYSJwojUExBWUVSX0RBVEFfU09VUkNFX0lERU5USVRZX1NFUlZJQ0UQBxIfChtQTEFZRVJfREFUQV9TT1VSQ0VfUEFORUxfREIQCBIdChlQTEFZRVJfREFUQV9TT1VSQ0VfQlJJREdFEAkq0QEKEFBsYXllckNvbmZpZGVuY2USIQodUExBWUVSX0NPTkZJREVOQ0VfVU5TUEVDSUZJRUQQABIeChpQTEFZRVJfQ09ORklERU5DRV9ERVRFQ1RFRBABEh4KGlBMQVlFUl9DT05GSURFTkNFX0lORkVSUkVEEAISHQoZUExBWUVSX0NPTkZJREVOQ0VfVU5LTk9XThADEhsKF1BMQVlFUl9DT05GSURFTkNFX1NUQUxFEAQSHgoaUExBWUVSX0NPTkZJREVOQ0VfQ09ORkxJQ1QQBSqtAQoOUGxheWVyUHJlc2VuY2USHwobUExBWUVSX1BSRVNFTkNFX1VOU1BFQ0lGSUVEEAASGgoWUExBWUVSX1BSRVNFTkNFX09OTElORRABEhsKF1BMQVlFUl9QUkVTRU5DRV9PRkZMSU5FEAISIQodUExBWUVSX1BSRVNFTkNFX1JFQ0VOVExZX1NFRU4QAxIeChpQTEFZRVJfUFJFU0VOQ0VfVU5PQlNFUlZFRBAEKoADChBQbGF5ZXJDYXBhYmlsaXR5EiEKHVBMQVlFUl9DQVBBQklMSVRZX1VOU1BFQ0lGSUVEEAASKQolUExBWUVSX0NBUEFCSUxJVFlfTUFOQUdFTUVOVF9QUk9UT0NPTBABEh8KG1BMQVlFUl9DQVBBQklMSVRZX1JDT05fRVhFQxACEiIKHlBMQVlFUl9DQVBBQklMSVRZX09OX0RJU0tfUkVBRBADEiAKHFBMQVlFUl9DQVBBQklMSVRZX1NLSU5fUFJPWFkQBBIjCh9QTEFZRVJfQ0FQQUJJTElUWV9CUklER0VfVklUQUxTEAUSJgoiUExBWUVSX0NBUEFCSUxJVFlfQlJJREdFX0lOVkVOVE9SWRAGEiMKH1BMQVlFUl9DQVBBQklMSVRZX0JSSURHRV9HUk9VUFMQBxIhCh1QTEFZRVJfQ0FQQUJJTElUWV9CUklER0VfTVVURRAIEiIKHlBMQVlFUl9DQVBBQklMSVRZX0JFRFJPQ0tfWFVJRBAJKvQBChJQbGF5ZXJTdXBwb3J0U3RhdGUSJAogUExBWUVSX1NVUFBPUlRfU1RBVEVfVU5TUEVDSUZJRUQQABIiCh5QTEFZRVJfU1VQUE9SVF9TVEFURV9TVVBQT1JURUQQARIhCh1QTEFZRVJfU1VQUE9SVF9TVEFURV9ERUdSQURFRBACEiQKIFBMQVlFUl9TVVBQT1JUX1NUQVRFX1VOU1VQUE9SVEVEEAMSKQolUExBWUVSX1NVUFBPUlRfU1RBVEVfREVDSVNJT05fUEVORElORxAEEiAKHFBMQVlFUl9TVVBQT1JUX1NUQVRFX1VOS05PV04QBSrIAQoSUGxheWVyTG9va3VwU3RhdHVzEiQKIFBMQVlFUl9MT09LVVBfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHgoaUExBWUVSX0xPT0tVUF9TVEFUVVNfRk9VTkQQARIiCh5QTEFZRVJfTE9PS1VQX1NUQVRVU19OT1RfRk9VTkQQAhIiCh5QTEFZRVJfTE9PS1VQX1NUQVRVU19BTUJJR1VPVVMQAxIkCiBQTEFZRVJfTE9PS1VQX1NUQVRVU19VTkFWQUlMQUJMRRAEMo8NCg1QbGF5ZXJTZXJ2aWNlElkKDExvb2t1cFBsYXllchIjLmNhcmJvbnBhbmVsLnYxLkxvb2t1cFBsYXllclJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5Mb29rdXBQbGF5ZXJSZXNwb25zZRJWCgtMaXN0UGxheWVycxIiLmNhcmJvbnBhbmVsLnYxLkxpc3RQbGF5ZXJzUmVxdWVzdBojLmNhcmJvbnBhbmVsLnYxLkxpc3RQbGF5ZXJzUmVzcG9uc2USUAoJR2V0UGxheWVyEiAuY2FyYm9ucGFuZWwudjEuR2V0UGxheWVyUmVxdWVzdBohLmNhcmJvbnBhbmVsLnYxLkdldFBsYXllclJlc3BvbnNlEmsKEkxpc3RQbGF5ZXJTZXNzaW9ucxIpLmNhcmJvbnBhbmVsLnYxLkxpc3RQbGF5ZXJTZXNzaW9uc1JlcXVlc3QaKi5jYXJib25wYW5lbC52MS5MaXN0UGxheWVyU2Vzc2lvbnNSZXNwb25zZRJlChBMaXN0UGxheWVyQWNjZXNzEicuY2FyYm9ucGFuZWwudjEuTGlzdFBsYXllckFjY2Vzc1JlcXVlc3QaKC5jYXJib25wYW5lbC52MS5MaXN0UGxheWVyQWNjZXNzUmVzcG9uc2USaAoRTGlzdFBsYXllckhpc3RvcnkSKC5jYXJib25wYW5lbC52MS5MaXN0UGxheWVySGlzdG9yeVJlcXVlc3QaKS5jYXJib25wYW5lbC52MS5MaXN0UGxheWVySGlzdG9yeVJlc3BvbnNlEncKFkxpc3RQbGF5ZXJDYXBhYmlsaXRpZXMSLS5jYXJib25wYW5lbC52MS5MaXN0UGxheWVyQ2FwYWJpbGl0aWVzUmVxdWVzdBouLmNhcmJvbnBhbmVsLnYxLkxpc3RQbGF5ZXJDYXBhYmlsaXRpZXNSZXNwb25zZRJcCg1HZXRQbGF5ZXJTa2luEiQuY2FyYm9ucGFuZWwudjEuR2V0UGxheWVyU2tpblJlcXVlc3QaJS5jYXJib25wYW5lbC52MS5HZXRQbGF5ZXJTa2luUmVzcG9uc2USaAoRUmVmcmVzaFBsYXllclNraW4SKC5jYXJib25wYW5lbC52MS5SZWZyZXNoUGxheWVyU2tpblJlcXVlc3QaKS5jYXJib25wYW5lbC52MS5SZWZyZXNoUGxheWVyU2tpblJlc3BvbnNlEmgKEUdldFBsYXllckRlZXBEYXRhEiguY2FyYm9ucGFuZWwudjEuR2V0UGxheWVyRGVlcERhdGFSZXF1ZXN0GikuY2FyYm9ucGFuZWwudjEuR2V0UGxheWVyRGVlcERhdGFSZXNwb25zZRJTCgpLaWNrUGxheWVyEiEuY2FyYm9ucGFuZWwudjEuS2lja1BsYXllclJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5LaWNrUGxheWVyUmVzcG9uc2USUAoJQmFuUGxheWVyEiAuY2FyYm9ucGFuZWwudjEuQmFuUGxheWVyUmVxdWVzdBohLmNhcmJvbnBhbmVsLnYxLkJhblBsYXllclJlc3BvbnNlElkKDFBhcmRvblBsYXllchIjLmNhcmJvbnBhbmVsLnYxLlBhcmRvblBsYXllclJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5QYXJkb25QbGF5ZXJSZXNwb25zZRJWCgtTZXRPcGVyYXRvchIiLmNhcmJvbnBhbmVsLnYxLlNldE9wZXJhdG9yUmVxdWVzdBojLmNhcmJvbnBhbmVsLnYxLlNldE9wZXJhdG9yUmVzcG9uc2USaAoRU2V0V2hpdGVsaXN0RW50cnkSKC5jYXJib25wYW5lbC52MS5TZXRXaGl0ZWxpc3RFbnRyeVJlcXVlc3QaKS5jYXJib25wYW5lbC52MS5TZXRXaGl0ZWxpc3RFbnRyeVJlc3BvbnNlEmUKEEJ1bGtQbGF5ZXJBY3Rpb24SJy5jYXJib25wYW5lbC52MS5CdWxrUGxheWVyQWN0aW9uUmVxdWVzdBooLmNhcmJvbnBhbmVsLnYxLkJ1bGtQbGF5ZXJBY3Rpb25SZXNwb25zZRJlChBVbmRvUGxheWVyQWN0aW9uEicuY2FyYm9ucGFuZWwudjEuVW5kb1BsYXllckFjdGlvblJlcXVlc3QaKC5jYXJib25wYW5lbC52MS5VbmRvUGxheWVyQWN0aW9uUmVzcG9uc2VCSFpGZ2l0aHViLmNvbS9hdGhOZGV2L2NhcmJvbi1wYW5lbC9wa2cvcHJvdG8vY2FyYm9ucGFuZWwvdjE7Y2FyYm9ucGFuZWx2MWIGcHJvdG8z',
 		[file_google_protobuf_timestamp]
 	);
 
@@ -601,6 +601,73 @@ export const PlayerActionResultSchema: GenMessage<PlayerActionResult> =
 	messageDesc(file_carbonpanel_v1_player, 11);
 
 /**
+ * Lookup request. query is trimmed; it must be an exact canonical UUID (with
+ * or without dashes) or an exact Minecraft username (1-16 ASCII name chars).
+ * No partial, fuzzy or name-history matching is performed.
+ *
+ * @generated from message carbonpanel.v1.LookupPlayerRequest
+ */
+export type LookupPlayerRequest = Message<'carbonpanel.v1.LookupPlayerRequest'> & {
+	/**
+	 * @generated from field: string query = 1;
+	 */
+	query: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.LookupPlayerRequest.
+ * Use `create(LookupPlayerRequestSchema)` to create a new message.
+ */
+export const LookupPlayerRequestSchema: GenMessage<LookupPlayerRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_player, 12);
+
+/**
+ * Lookup response. This is an EPHEMERAL public result: a lookup is read-only
+ * and never creates an identity, session, access row, roster entry or audit
+ * row. Only a separate authorized mutation (for example a per-server allowlist
+ * add) may persist an identity through its own journal. A FOUND result carries
+ * the provider's current name/UUID and provenance; other statuses carry an
+ * explicit note and never a partially invented identity.
+ *
+ * @generated from message carbonpanel.v1.LookupPlayerResponse
+ */
+export type LookupPlayerResponse = Message<'carbonpanel.v1.LookupPlayerResponse'> & {
+	/**
+	 * @generated from field: carbonpanel.v1.PlayerLookupStatus status = 1;
+	 */
+	status: PlayerLookupStatus;
+
+	/**
+	 * @generated from field: string name = 2;
+	 */
+	name: string;
+
+	/**
+	 * @generated from field: string uuid = 3;
+	 */
+	uuid: string;
+
+	/**
+	 * @generated from field: carbonpanel.v1.PlayerObservation observation = 4;
+	 */
+	observation?: PlayerObservation | undefined;
+
+	/**
+	 * @generated from field: string note = 5;
+	 */
+	note: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.LookupPlayerResponse.
+ * Use `create(LookupPlayerResponseSchema)` to create a new message.
+ */
+export const LookupPlayerResponseSchema: GenMessage<LookupPlayerResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_player, 13);
+
+/**
  * Roster request. An empty server_id means a cross-server search.
  *
  * @generated from message carbonpanel.v1.ListPlayersRequest
@@ -648,7 +715,7 @@ export type ListPlayersRequest = Message<'carbonpanel.v1.ListPlayersRequest'> & 
  */
 export const ListPlayersRequestSchema: GenMessage<ListPlayersRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 12);
+	messageDesc(file_carbonpanel_v1_player, 14);
 
 /**
  * Roster response.
@@ -673,7 +740,7 @@ export type ListPlayersResponse = Message<'carbonpanel.v1.ListPlayersResponse'> 
  */
 export const ListPlayersResponseSchema: GenMessage<ListPlayersResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 13);
+	messageDesc(file_carbonpanel_v1_player, 15);
 
 /**
  * Detail request.
@@ -698,7 +765,7 @@ export type GetPlayerRequest = Message<'carbonpanel.v1.GetPlayerRequest'> & {
  */
 export const GetPlayerRequestSchema: GenMessage<GetPlayerRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 14);
+	messageDesc(file_carbonpanel_v1_player, 16);
 
 /**
  * Detail response.
@@ -718,7 +785,7 @@ export type GetPlayerResponse = Message<'carbonpanel.v1.GetPlayerResponse'> & {
  */
 export const GetPlayerResponseSchema: GenMessage<GetPlayerResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 15);
+	messageDesc(file_carbonpanel_v1_player, 17);
 
 /**
  * Session list request.
@@ -743,7 +810,7 @@ export type ListPlayerSessionsRequest = Message<'carbonpanel.v1.ListPlayerSessio
  */
 export const ListPlayerSessionsRequestSchema: GenMessage<ListPlayerSessionsRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 16);
+	messageDesc(file_carbonpanel_v1_player, 18);
 
 /**
  * Session list response.
@@ -763,7 +830,7 @@ export type ListPlayerSessionsResponse = Message<'carbonpanel.v1.ListPlayerSessi
  */
 export const ListPlayerSessionsResponseSchema: GenMessage<ListPlayerSessionsResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 17);
+	messageDesc(file_carbonpanel_v1_player, 19);
 
 /**
  * Access list request. server_id scopes the read to a server so subuser
@@ -789,7 +856,7 @@ export type ListPlayerAccessRequest = Message<'carbonpanel.v1.ListPlayerAccessRe
  */
 export const ListPlayerAccessRequestSchema: GenMessage<ListPlayerAccessRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 18);
+	messageDesc(file_carbonpanel_v1_player, 20);
 
 /**
  * Access list response.
@@ -809,7 +876,7 @@ export type ListPlayerAccessResponse = Message<'carbonpanel.v1.ListPlayerAccessR
  */
 export const ListPlayerAccessResponseSchema: GenMessage<ListPlayerAccessResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 19);
+	messageDesc(file_carbonpanel_v1_player, 21);
 
 /**
  * History list request.
@@ -839,7 +906,7 @@ export type ListPlayerHistoryRequest = Message<'carbonpanel.v1.ListPlayerHistory
  */
 export const ListPlayerHistoryRequestSchema: GenMessage<ListPlayerHistoryRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 20);
+	messageDesc(file_carbonpanel_v1_player, 22);
 
 /**
  * History list response.
@@ -859,7 +926,7 @@ export type ListPlayerHistoryResponse = Message<'carbonpanel.v1.ListPlayerHistor
  */
 export const ListPlayerHistoryResponseSchema: GenMessage<ListPlayerHistoryResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 21);
+	messageDesc(file_carbonpanel_v1_player, 23);
 
 /**
  * Capability list request.
@@ -880,7 +947,7 @@ export type ListPlayerCapabilitiesRequest =
  */
 export const ListPlayerCapabilitiesRequestSchema: GenMessage<ListPlayerCapabilitiesRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 22);
+	messageDesc(file_carbonpanel_v1_player, 24);
 
 /**
  * Capability list response.
@@ -901,7 +968,7 @@ export type ListPlayerCapabilitiesResponse =
  */
 export const ListPlayerCapabilitiesResponseSchema: GenMessage<ListPlayerCapabilitiesResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 23);
+	messageDesc(file_carbonpanel_v1_player, 25);
 
 /**
  * Skin request. skin_ref is an opaque cache key, never an arbitrary URL.
@@ -938,7 +1005,7 @@ export type GetPlayerSkinRequest = Message<'carbonpanel.v1.GetPlayerSkinRequest'
  */
 export const GetPlayerSkinRequestSchema: GenMessage<GetPlayerSkinRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 24);
+	messageDesc(file_carbonpanel_v1_player, 26);
 
 /**
  * Skin response.
@@ -958,7 +1025,7 @@ export type GetPlayerSkinResponse = Message<'carbonpanel.v1.GetPlayerSkinRespons
  */
 export const GetPlayerSkinResponseSchema: GenMessage<GetPlayerSkinResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 25);
+	messageDesc(file_carbonpanel_v1_player, 27);
 
 /**
  * Skin refresh request.
@@ -983,7 +1050,7 @@ export type RefreshPlayerSkinRequest = Message<'carbonpanel.v1.RefreshPlayerSkin
  */
 export const RefreshPlayerSkinRequestSchema: GenMessage<RefreshPlayerSkinRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 26);
+	messageDesc(file_carbonpanel_v1_player, 28);
 
 /**
  * Skin refresh response.
@@ -1003,7 +1070,7 @@ export type RefreshPlayerSkinResponse = Message<'carbonpanel.v1.RefreshPlayerSki
  */
 export const RefreshPlayerSkinResponseSchema: GenMessage<RefreshPlayerSkinResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 27);
+	messageDesc(file_carbonpanel_v1_player, 29);
 
 /**
  * Deep data request. kind is one of stats, advancements, character.
@@ -1033,7 +1100,7 @@ export type GetPlayerDeepDataRequest = Message<'carbonpanel.v1.GetPlayerDeepData
  */
 export const GetPlayerDeepDataRequestSchema: GenMessage<GetPlayerDeepDataRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 28);
+	messageDesc(file_carbonpanel_v1_player, 30);
 
 /**
  * Deep data response. All values are read-only snapshots with provenance.
@@ -1058,7 +1125,7 @@ export type GetPlayerDeepDataResponse = Message<'carbonpanel.v1.GetPlayerDeepDat
  */
 export const GetPlayerDeepDataResponseSchema: GenMessage<GetPlayerDeepDataResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 29);
+	messageDesc(file_carbonpanel_v1_player, 31);
 
 /**
  * Kick request.
@@ -1098,7 +1165,7 @@ export type KickPlayerRequest = Message<'carbonpanel.v1.KickPlayerRequest'> & {
  */
 export const KickPlayerRequestSchema: GenMessage<KickPlayerRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 30);
+	messageDesc(file_carbonpanel_v1_player, 32);
 
 /**
  * Ban request.
@@ -1138,7 +1205,7 @@ export type BanPlayerRequest = Message<'carbonpanel.v1.BanPlayerRequest'> & {
  */
 export const BanPlayerRequestSchema: GenMessage<BanPlayerRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 31);
+	messageDesc(file_carbonpanel_v1_player, 33);
 
 /**
  * Pardon request.
@@ -1173,7 +1240,7 @@ export type PardonPlayerRequest = Message<'carbonpanel.v1.PardonPlayerRequest'> 
  */
 export const PardonPlayerRequestSchema: GenMessage<PardonPlayerRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 32);
+	messageDesc(file_carbonpanel_v1_player, 34);
 
 /**
  * Operator request. remove deletes the entry instead of granting it.
@@ -1218,10 +1285,13 @@ export type SetOperatorRequest = Message<'carbonpanel.v1.SetOperatorRequest'> & 
  */
 export const SetOperatorRequestSchema: GenMessage<SetOperatorRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 33);
+	messageDesc(file_carbonpanel_v1_player, 35);
 
 /**
  * Allowlist request. remove deletes the entry instead of adding it.
+ * player_query is the exact name or UUID the operator typed for a manual add
+ * before the account has ever played; identity_key may be empty in that case.
+ * The service still resolves and journals a real identity when one exists.
  *
  * @generated from message carbonpanel.v1.SetWhitelistEntryRequest
  */
@@ -1250,6 +1320,11 @@ export type SetWhitelistEntryRequest = Message<'carbonpanel.v1.SetWhitelistEntry
 	 * @generated from field: string request_id = 5;
 	 */
 	requestId: string;
+
+	/**
+	 * @generated from field: string player_query = 6;
+	 */
+	playerQuery: string;
 };
 
 /**
@@ -1258,7 +1333,7 @@ export type SetWhitelistEntryRequest = Message<'carbonpanel.v1.SetWhitelistEntry
  */
 export const SetWhitelistEntryRequestSchema: GenMessage<SetWhitelistEntryRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 34);
+	messageDesc(file_carbonpanel_v1_player, 36);
 
 /**
  * Bulk action request. kind is one of kick, ban, pardon, deop, allowlist_add,
@@ -1299,7 +1374,7 @@ export type BulkPlayerActionRequest = Message<'carbonpanel.v1.BulkPlayerActionRe
  */
 export const BulkPlayerActionRequestSchema: GenMessage<BulkPlayerActionRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 35);
+	messageDesc(file_carbonpanel_v1_player, 37);
 
 /**
  * Undo request.
@@ -1329,7 +1404,7 @@ export type UndoPlayerActionRequest = Message<'carbonpanel.v1.UndoPlayerActionRe
  */
 export const UndoPlayerActionRequestSchema: GenMessage<UndoPlayerActionRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 36);
+	messageDesc(file_carbonpanel_v1_player, 38);
 
 /**
  * Common action outcome embedded in every typed action response.
@@ -1364,7 +1439,7 @@ export type PlayerActionOutcome = Message<'carbonpanel.v1.PlayerActionOutcome'> 
  */
 export const PlayerActionOutcomeSchema: GenMessage<PlayerActionOutcome> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 37);
+	messageDesc(file_carbonpanel_v1_player, 39);
 
 /**
  * Kick response.
@@ -1384,7 +1459,7 @@ export type KickPlayerResponse = Message<'carbonpanel.v1.KickPlayerResponse'> & 
  */
 export const KickPlayerResponseSchema: GenMessage<KickPlayerResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 38);
+	messageDesc(file_carbonpanel_v1_player, 40);
 
 /**
  * Ban response.
@@ -1404,7 +1479,7 @@ export type BanPlayerResponse = Message<'carbonpanel.v1.BanPlayerResponse'> & {
  */
 export const BanPlayerResponseSchema: GenMessage<BanPlayerResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 39);
+	messageDesc(file_carbonpanel_v1_player, 41);
 
 /**
  * Pardon response.
@@ -1424,7 +1499,7 @@ export type PardonPlayerResponse = Message<'carbonpanel.v1.PardonPlayerResponse'
  */
 export const PardonPlayerResponseSchema: GenMessage<PardonPlayerResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 40);
+	messageDesc(file_carbonpanel_v1_player, 42);
 
 /**
  * Operator response.
@@ -1444,7 +1519,7 @@ export type SetOperatorResponse = Message<'carbonpanel.v1.SetOperatorResponse'> 
  */
 export const SetOperatorResponseSchema: GenMessage<SetOperatorResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 41);
+	messageDesc(file_carbonpanel_v1_player, 43);
 
 /**
  * Allowlist response.
@@ -1464,7 +1539,7 @@ export type SetWhitelistEntryResponse = Message<'carbonpanel.v1.SetWhitelistEntr
  */
 export const SetWhitelistEntryResponseSchema: GenMessage<SetWhitelistEntryResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 42);
+	messageDesc(file_carbonpanel_v1_player, 44);
 
 /**
  * Bulk action response.
@@ -1484,7 +1559,7 @@ export type BulkPlayerActionResponse = Message<'carbonpanel.v1.BulkPlayerActionR
  */
 export const BulkPlayerActionResponseSchema: GenMessage<BulkPlayerActionResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 43);
+	messageDesc(file_carbonpanel_v1_player, 45);
 
 /**
  * Undo response.
@@ -1504,7 +1579,7 @@ export type UndoPlayerActionResponse = Message<'carbonpanel.v1.UndoPlayerActionR
  */
 export const UndoPlayerActionResponseSchema: GenMessage<UndoPlayerActionResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_player, 44);
+	messageDesc(file_carbonpanel_v1_player, 46);
 
 /**
  * Source that produced a player field. Non-authoritative values always carry
@@ -1767,6 +1842,49 @@ export const PlayerSupportStateSchema: GenEnum<PlayerSupportState> =
 	enumDesc(file_carbonpanel_v1_player, 4);
 
 /**
+ * Outcome of an exact-identity lookup for a player the panel has not observed.
+ * Every non-FOUND value is an explicit state: the console never fills a name,
+ * UUID or identity key from a guess. AMBIGUOUS means the query cannot be pinned
+ * to exactly one identity; UNAVAILABLE means the identity provider could not
+ * answer definitively and the lookup must be retried later.
+ *
+ * @generated from enum carbonpanel.v1.PlayerLookupStatus
+ */
+export enum PlayerLookupStatus {
+	/**
+	 * @generated from enum value: PLAYER_LOOKUP_STATUS_UNSPECIFIED = 0;
+	 */
+	UNSPECIFIED = 0,
+
+	/**
+	 * @generated from enum value: PLAYER_LOOKUP_STATUS_FOUND = 1;
+	 */
+	FOUND = 1,
+
+	/**
+	 * @generated from enum value: PLAYER_LOOKUP_STATUS_NOT_FOUND = 2;
+	 */
+	NOT_FOUND = 2,
+
+	/**
+	 * @generated from enum value: PLAYER_LOOKUP_STATUS_AMBIGUOUS = 3;
+	 */
+	AMBIGUOUS = 3,
+
+	/**
+	 * @generated from enum value: PLAYER_LOOKUP_STATUS_UNAVAILABLE = 4;
+	 */
+	UNAVAILABLE = 4
+}
+
+/**
+ * Describes the enum carbonpanel.v1.PlayerLookupStatus.
+ */
+export const PlayerLookupStatusSchema: GenEnum<PlayerLookupStatus> =
+	/*@__PURE__*/
+	enumDesc(file_carbonpanel_v1_player, 5);
+
+/**
  * Player-facing service. All procedures are denied until explicitly mapped to
  * a players:* permission; server-scoped procedures use server_id so subuser
  * grants apply. Arbitrary commands stay on the existing command path.
@@ -1774,6 +1892,17 @@ export const PlayerSupportStateSchema: GenEnum<PlayerSupportState> =
  * @generated from service carbonpanel.v1.PlayerService
  */
 export const PlayerService: GenService<{
+	/**
+	 * Look up a previously unseen account by exact UUID or username using a
+	 * legitimate identity-provider capability. No name history is queried.
+	 *
+	 * @generated from rpc carbonpanel.v1.PlayerService.LookupPlayer
+	 */
+	lookupPlayer: {
+		methodKind: 'unary';
+		input: typeof LookupPlayerRequestSchema;
+		output: typeof LookupPlayerResponseSchema;
+	};
 	/**
 	 * List a searchable, filterable and sortable player roster.
 	 *

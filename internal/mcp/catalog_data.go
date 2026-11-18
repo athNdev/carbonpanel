@@ -4,7 +4,7 @@
 
 package mcp
 
-const descriptorFingerprint = "202c7152b9f81f8c1b6b3c0fcafcda05dec7a49b45a2d6a80fccbef13e2ae9ea"
+const descriptorFingerprint = "14b539d9cc5f3b7a495625ae5483379c9a10375398368c9490f9f9f7dc124574"
 
 var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.ActivityService/ListActivityLogs", Service: "carbonpanel.v1.ActivityService", Method: "ListActivityLogs", Client: "NewActivityServiceClient", Scope: "activity/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
@@ -131,6 +131,7 @@ var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.PlayerService/ListPlayerHistory", Service: "carbonpanel.v1.PlayerService", Method: "ListPlayerHistory", Client: "NewPlayerServiceClient", Scope: "players/history:read[server_id]", Class: ClassExclude, Build: PanelBuildPostStable},
 	{Procedure: "/carbonpanel.v1.PlayerService/ListPlayerSessions", Service: "carbonpanel.v1.PlayerService", Method: "ListPlayerSessions", Client: "NewPlayerServiceClient", Scope: "players/presence[server_id]", Class: ClassExclude, Build: PanelBuildPostStable},
 	{Procedure: "/carbonpanel.v1.PlayerService/ListPlayers", Service: "carbonpanel.v1.PlayerService", Method: "ListPlayers", Client: "NewPlayerServiceClient", Scope: "players/read[server_id]", Class: ClassExclude, Build: PanelBuildPostStable},
+	{Procedure: "/carbonpanel.v1.PlayerService/LookupPlayer", Service: "carbonpanel.v1.PlayerService", Method: "LookupPlayer", Client: "NewPlayerServiceClient", Scope: "players/read", Class: ClassExclude, Build: PanelBuildPostStable},
 	{Procedure: "/carbonpanel.v1.PlayerService/PardonPlayer", Service: "carbonpanel.v1.PlayerService", Method: "PardonPlayer", Client: "NewPlayerServiceClient", Scope: "players/moderate[server_id]", Class: ClassExclude, Build: PanelBuildPostStable},
 	{Procedure: "/carbonpanel.v1.PlayerService/RefreshPlayerSkin", Service: "carbonpanel.v1.PlayerService", Method: "RefreshPlayerSkin", Client: "NewPlayerServiceClient", Scope: "players/skin:refresh[server_id]", Class: ClassExclude, Build: PanelBuildPostStable},
 	{Procedure: "/carbonpanel.v1.PlayerService/SetOperator", Service: "carbonpanel.v1.PlayerService", Method: "SetOperator", Client: "NewPlayerServiceClient", Scope: "players/moderate:op[server_id]", Class: ClassExclude, Build: PanelBuildPostStable},

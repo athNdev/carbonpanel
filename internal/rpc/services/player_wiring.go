@@ -246,6 +246,17 @@ func (s skinShim) Refresh(ctx context.Context, uuid, kind string) (skinAsset, er
 	return convertSkin(asset), err
 }
 
+func (s skinShim) Lookup(ctx context.Context, query string) (identityLookup, error) {
+	result, err := s.cache.Lookup(ctx, query)
+	return identityLookup{
+		Status: string(result.Status),
+		UUID:   result.UUID,
+		Name:   result.Name,
+		Note:   result.Note,
+		Source: result.Source,
+	}, err
+}
+
 func (s skinShim) Close() { s.cache.Close() }
 
 func convertSkin(asset playerskin.Asset) skinAsset {
@@ -288,6 +299,7 @@ func NewConfiguredPlayerService(
 	service := NewPlayerService(store, log, collector)
 	negotiator := newNegotiatorShim(cfg, sender)
 	service.SetSourceNegotiator(negotiator)
+	service.SetEdition(globalString(cfg, "player_edition"))
 	service.SetSkinProvider(skinShim{cache: playerskin.NewCache(skinDir, 12*time.Hour, nil)})
 	service.SetDeepDataReader(deepShim{reader: playerdata.NewReader(store, resolver)})
 	return service

@@ -348,6 +348,66 @@ func (PlayerSupportState) EnumDescriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{4}
 }
 
+// Outcome of an exact-identity lookup for a player the panel has not observed.
+// Every non-FOUND value is an explicit state: the console never fills a name,
+// UUID or identity key from a guess. AMBIGUOUS means the query cannot be pinned
+// to exactly one identity; UNAVAILABLE means the identity provider could not
+// answer definitively and the lookup must be retried later.
+type PlayerLookupStatus int32
+
+const (
+	PlayerLookupStatus_PLAYER_LOOKUP_STATUS_UNSPECIFIED PlayerLookupStatus = 0
+	PlayerLookupStatus_PLAYER_LOOKUP_STATUS_FOUND       PlayerLookupStatus = 1
+	PlayerLookupStatus_PLAYER_LOOKUP_STATUS_NOT_FOUND   PlayerLookupStatus = 2
+	PlayerLookupStatus_PLAYER_LOOKUP_STATUS_AMBIGUOUS   PlayerLookupStatus = 3
+	PlayerLookupStatus_PLAYER_LOOKUP_STATUS_UNAVAILABLE PlayerLookupStatus = 4
+)
+
+// Enum value maps for PlayerLookupStatus.
+var (
+	PlayerLookupStatus_name = map[int32]string{
+		0: "PLAYER_LOOKUP_STATUS_UNSPECIFIED",
+		1: "PLAYER_LOOKUP_STATUS_FOUND",
+		2: "PLAYER_LOOKUP_STATUS_NOT_FOUND",
+		3: "PLAYER_LOOKUP_STATUS_AMBIGUOUS",
+		4: "PLAYER_LOOKUP_STATUS_UNAVAILABLE",
+	}
+	PlayerLookupStatus_value = map[string]int32{
+		"PLAYER_LOOKUP_STATUS_UNSPECIFIED": 0,
+		"PLAYER_LOOKUP_STATUS_FOUND":       1,
+		"PLAYER_LOOKUP_STATUS_NOT_FOUND":   2,
+		"PLAYER_LOOKUP_STATUS_AMBIGUOUS":   3,
+		"PLAYER_LOOKUP_STATUS_UNAVAILABLE": 4,
+	}
+)
+
+func (x PlayerLookupStatus) Enum() *PlayerLookupStatus {
+	p := new(PlayerLookupStatus)
+	*p = x
+	return p
+}
+
+func (x PlayerLookupStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PlayerLookupStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_carbonpanel_v1_player_proto_enumTypes[5].Descriptor()
+}
+
+func (PlayerLookupStatus) Type() protoreflect.EnumType {
+	return &file_carbonpanel_v1_player_proto_enumTypes[5]
+}
+
+func (x PlayerLookupStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PlayerLookupStatus.Descriptor instead.
+func (PlayerLookupStatus) EnumDescriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{5}
+}
+
 // Field-level provenance envelope shared by roster, detail and deep data.
 // Named PlayerObservation to avoid colliding with the World Library's
 // cross-feature Observation message in the same proto package.
@@ -1423,6 +1483,135 @@ func (x *PlayerActionResult) GetUndoToken() string {
 	return ""
 }
 
+// Lookup request. query is trimmed; it must be an exact canonical UUID (with
+// or without dashes) or an exact Minecraft username (1-16 ASCII name chars).
+// No partial, fuzzy or name-history matching is performed.
+type LookupPlayerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LookupPlayerRequest) Reset() {
+	*x = LookupPlayerRequest{}
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LookupPlayerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LookupPlayerRequest) ProtoMessage() {}
+
+func (x *LookupPlayerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LookupPlayerRequest.ProtoReflect.Descriptor instead.
+func (*LookupPlayerRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *LookupPlayerRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+// Lookup response. This is an EPHEMERAL public result: a lookup is read-only
+// and never creates an identity, session, access row, roster entry or audit
+// row. Only a separate authorized mutation (for example a per-server allowlist
+// add) may persist an identity through its own journal. A FOUND result carries
+// the provider's current name/UUID and provenance; other statuses carry an
+// explicit note and never a partially invented identity.
+type LookupPlayerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        PlayerLookupStatus     `protobuf:"varint,1,opt,name=status,proto3,enum=carbonpanel.v1.PlayerLookupStatus" json:"status,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Uuid          string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	Observation   *PlayerObservation     `protobuf:"bytes,4,opt,name=observation,proto3" json:"observation,omitempty"`
+	Note          string                 `protobuf:"bytes,5,opt,name=note,proto3" json:"note,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LookupPlayerResponse) Reset() {
+	*x = LookupPlayerResponse{}
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LookupPlayerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LookupPlayerResponse) ProtoMessage() {}
+
+func (x *LookupPlayerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LookupPlayerResponse.ProtoReflect.Descriptor instead.
+func (*LookupPlayerResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *LookupPlayerResponse) GetStatus() PlayerLookupStatus {
+	if x != nil {
+		return x.Status
+	}
+	return PlayerLookupStatus_PLAYER_LOOKUP_STATUS_UNSPECIFIED
+}
+
+func (x *LookupPlayerResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *LookupPlayerResponse) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *LookupPlayerResponse) GetObservation() *PlayerObservation {
+	if x != nil {
+		return x.Observation
+	}
+	return nil
+}
+
+func (x *LookupPlayerResponse) GetNote() string {
+	if x != nil {
+		return x.Note
+	}
+	return ""
+}
+
 // Roster request. An empty server_id means a cross-server search.
 type ListPlayersRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -1439,7 +1628,7 @@ type ListPlayersRequest struct {
 
 func (x *ListPlayersRequest) Reset() {
 	*x = ListPlayersRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1451,7 +1640,7 @@ func (x *ListPlayersRequest) String() string {
 func (*ListPlayersRequest) ProtoMessage() {}
 
 func (x *ListPlayersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1464,7 +1653,7 @@ func (x *ListPlayersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayersRequest.ProtoReflect.Descriptor instead.
 func (*ListPlayersRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{12}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListPlayersRequest) GetServerId() string {
@@ -1527,7 +1716,7 @@ type ListPlayersResponse struct {
 
 func (x *ListPlayersResponse) Reset() {
 	*x = ListPlayersResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1539,7 +1728,7 @@ func (x *ListPlayersResponse) String() string {
 func (*ListPlayersResponse) ProtoMessage() {}
 
 func (x *ListPlayersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1552,7 +1741,7 @@ func (x *ListPlayersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayersResponse.ProtoReflect.Descriptor instead.
 func (*ListPlayersResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{13}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ListPlayersResponse) GetPlayers() []*PlayerSummary {
@@ -1580,7 +1769,7 @@ type GetPlayerRequest struct {
 
 func (x *GetPlayerRequest) Reset() {
 	*x = GetPlayerRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1592,7 +1781,7 @@ func (x *GetPlayerRequest) String() string {
 func (*GetPlayerRequest) ProtoMessage() {}
 
 func (x *GetPlayerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1605,7 +1794,7 @@ func (x *GetPlayerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPlayerRequest.ProtoReflect.Descriptor instead.
 func (*GetPlayerRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{14}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetPlayerRequest) GetIdentityKey() string {
@@ -1632,7 +1821,7 @@ type GetPlayerResponse struct {
 
 func (x *GetPlayerResponse) Reset() {
 	*x = GetPlayerResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1644,7 +1833,7 @@ func (x *GetPlayerResponse) String() string {
 func (*GetPlayerResponse) ProtoMessage() {}
 
 func (x *GetPlayerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1657,7 +1846,7 @@ func (x *GetPlayerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPlayerResponse.ProtoReflect.Descriptor instead.
 func (*GetPlayerResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{15}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *GetPlayerResponse) GetDetail() *PlayerDetail {
@@ -1678,7 +1867,7 @@ type ListPlayerSessionsRequest struct {
 
 func (x *ListPlayerSessionsRequest) Reset() {
 	*x = ListPlayerSessionsRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[16]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1690,7 +1879,7 @@ func (x *ListPlayerSessionsRequest) String() string {
 func (*ListPlayerSessionsRequest) ProtoMessage() {}
 
 func (x *ListPlayerSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[16]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1703,7 +1892,7 @@ func (x *ListPlayerSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayerSessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListPlayerSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{16}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListPlayerSessionsRequest) GetIdentityKey() string {
@@ -1730,7 +1919,7 @@ type ListPlayerSessionsResponse struct {
 
 func (x *ListPlayerSessionsResponse) Reset() {
 	*x = ListPlayerSessionsResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[17]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1742,7 +1931,7 @@ func (x *ListPlayerSessionsResponse) String() string {
 func (*ListPlayerSessionsResponse) ProtoMessage() {}
 
 func (x *ListPlayerSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[17]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1755,7 +1944,7 @@ func (x *ListPlayerSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayerSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListPlayerSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{17}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListPlayerSessionsResponse) GetSessions() []*PlayerSession {
@@ -1777,7 +1966,7 @@ type ListPlayerAccessRequest struct {
 
 func (x *ListPlayerAccessRequest) Reset() {
 	*x = ListPlayerAccessRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[18]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1789,7 +1978,7 @@ func (x *ListPlayerAccessRequest) String() string {
 func (*ListPlayerAccessRequest) ProtoMessage() {}
 
 func (x *ListPlayerAccessRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[18]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1802,7 +1991,7 @@ func (x *ListPlayerAccessRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayerAccessRequest.ProtoReflect.Descriptor instead.
 func (*ListPlayerAccessRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{18}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListPlayerAccessRequest) GetIdentityKey() string {
@@ -1829,7 +2018,7 @@ type ListPlayerAccessResponse struct {
 
 func (x *ListPlayerAccessResponse) Reset() {
 	*x = ListPlayerAccessResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[19]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1841,7 +2030,7 @@ func (x *ListPlayerAccessResponse) String() string {
 func (*ListPlayerAccessResponse) ProtoMessage() {}
 
 func (x *ListPlayerAccessResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[19]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1854,7 +2043,7 @@ func (x *ListPlayerAccessResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayerAccessResponse.ProtoReflect.Descriptor instead.
 func (*ListPlayerAccessResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{19}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListPlayerAccessResponse) GetStates() []*PlayerAccessState {
@@ -1876,7 +2065,7 @@ type ListPlayerHistoryRequest struct {
 
 func (x *ListPlayerHistoryRequest) Reset() {
 	*x = ListPlayerHistoryRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[20]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1888,7 +2077,7 @@ func (x *ListPlayerHistoryRequest) String() string {
 func (*ListPlayerHistoryRequest) ProtoMessage() {}
 
 func (x *ListPlayerHistoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[20]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1901,7 +2090,7 @@ func (x *ListPlayerHistoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayerHistoryRequest.ProtoReflect.Descriptor instead.
 func (*ListPlayerHistoryRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{20}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ListPlayerHistoryRequest) GetIdentityKey() string {
@@ -1935,7 +2124,7 @@ type ListPlayerHistoryResponse struct {
 
 func (x *ListPlayerHistoryResponse) Reset() {
 	*x = ListPlayerHistoryResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[21]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1947,7 +2136,7 @@ func (x *ListPlayerHistoryResponse) String() string {
 func (*ListPlayerHistoryResponse) ProtoMessage() {}
 
 func (x *ListPlayerHistoryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[21]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1960,7 +2149,7 @@ func (x *ListPlayerHistoryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayerHistoryResponse.ProtoReflect.Descriptor instead.
 func (*ListPlayerHistoryResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{21}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListPlayerHistoryResponse) GetEntries() []*PlayerHistoryEntry {
@@ -1980,7 +2169,7 @@ type ListPlayerCapabilitiesRequest struct {
 
 func (x *ListPlayerCapabilitiesRequest) Reset() {
 	*x = ListPlayerCapabilitiesRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[22]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1992,7 +2181,7 @@ func (x *ListPlayerCapabilitiesRequest) String() string {
 func (*ListPlayerCapabilitiesRequest) ProtoMessage() {}
 
 func (x *ListPlayerCapabilitiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[22]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2005,7 +2194,7 @@ func (x *ListPlayerCapabilitiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayerCapabilitiesRequest.ProtoReflect.Descriptor instead.
 func (*ListPlayerCapabilitiesRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{22}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ListPlayerCapabilitiesRequest) GetServerId() string {
@@ -2025,7 +2214,7 @@ type ListPlayerCapabilitiesResponse struct {
 
 func (x *ListPlayerCapabilitiesResponse) Reset() {
 	*x = ListPlayerCapabilitiesResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[23]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2037,7 +2226,7 @@ func (x *ListPlayerCapabilitiesResponse) String() string {
 func (*ListPlayerCapabilitiesResponse) ProtoMessage() {}
 
 func (x *ListPlayerCapabilitiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[23]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2050,7 +2239,7 @@ func (x *ListPlayerCapabilitiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPlayerCapabilitiesResponse.ProtoReflect.Descriptor instead.
 func (*ListPlayerCapabilitiesResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{23}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ListPlayerCapabilitiesResponse) GetCapabilities() []*PlayerCapabilityStatus {
@@ -2075,7 +2264,7 @@ type GetPlayerSkinRequest struct {
 
 func (x *GetPlayerSkinRequest) Reset() {
 	*x = GetPlayerSkinRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[24]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2087,7 +2276,7 @@ func (x *GetPlayerSkinRequest) String() string {
 func (*GetPlayerSkinRequest) ProtoMessage() {}
 
 func (x *GetPlayerSkinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[24]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2100,7 +2289,7 @@ func (x *GetPlayerSkinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPlayerSkinRequest.ProtoReflect.Descriptor instead.
 func (*GetPlayerSkinRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{24}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *GetPlayerSkinRequest) GetIdentityKey() string {
@@ -2141,7 +2330,7 @@ type GetPlayerSkinResponse struct {
 
 func (x *GetPlayerSkinResponse) Reset() {
 	*x = GetPlayerSkinResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[25]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2153,7 +2342,7 @@ func (x *GetPlayerSkinResponse) String() string {
 func (*GetPlayerSkinResponse) ProtoMessage() {}
 
 func (x *GetPlayerSkinResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[25]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2166,7 +2355,7 @@ func (x *GetPlayerSkinResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPlayerSkinResponse.ProtoReflect.Descriptor instead.
 func (*GetPlayerSkinResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{25}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *GetPlayerSkinResponse) GetAsset() *PlayerSkinAsset {
@@ -2187,7 +2376,7 @@ type RefreshPlayerSkinRequest struct {
 
 func (x *RefreshPlayerSkinRequest) Reset() {
 	*x = RefreshPlayerSkinRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2199,7 +2388,7 @@ func (x *RefreshPlayerSkinRequest) String() string {
 func (*RefreshPlayerSkinRequest) ProtoMessage() {}
 
 func (x *RefreshPlayerSkinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2212,7 +2401,7 @@ func (x *RefreshPlayerSkinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshPlayerSkinRequest.ProtoReflect.Descriptor instead.
 func (*RefreshPlayerSkinRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{26}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RefreshPlayerSkinRequest) GetIdentityKey() string {
@@ -2239,7 +2428,7 @@ type RefreshPlayerSkinResponse struct {
 
 func (x *RefreshPlayerSkinResponse) Reset() {
 	*x = RefreshPlayerSkinResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[27]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2251,7 +2440,7 @@ func (x *RefreshPlayerSkinResponse) String() string {
 func (*RefreshPlayerSkinResponse) ProtoMessage() {}
 
 func (x *RefreshPlayerSkinResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[27]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2264,7 +2453,7 @@ func (x *RefreshPlayerSkinResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshPlayerSkinResponse.ProtoReflect.Descriptor instead.
 func (*RefreshPlayerSkinResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{27}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *RefreshPlayerSkinResponse) GetAsset() *PlayerSkinAsset {
@@ -2286,7 +2475,7 @@ type GetPlayerDeepDataRequest struct {
 
 func (x *GetPlayerDeepDataRequest) Reset() {
 	*x = GetPlayerDeepDataRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[28]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2298,7 +2487,7 @@ func (x *GetPlayerDeepDataRequest) String() string {
 func (*GetPlayerDeepDataRequest) ProtoMessage() {}
 
 func (x *GetPlayerDeepDataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[28]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2311,7 +2500,7 @@ func (x *GetPlayerDeepDataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPlayerDeepDataRequest.ProtoReflect.Descriptor instead.
 func (*GetPlayerDeepDataRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{28}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetPlayerDeepDataRequest) GetIdentityKey() string {
@@ -2346,7 +2535,7 @@ type GetPlayerDeepDataResponse struct {
 
 func (x *GetPlayerDeepDataResponse) Reset() {
 	*x = GetPlayerDeepDataResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[29]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2358,7 +2547,7 @@ func (x *GetPlayerDeepDataResponse) String() string {
 func (*GetPlayerDeepDataResponse) ProtoMessage() {}
 
 func (x *GetPlayerDeepDataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[29]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2371,7 +2560,7 @@ func (x *GetPlayerDeepDataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPlayerDeepDataResponse.ProtoReflect.Descriptor instead.
 func (*GetPlayerDeepDataResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{29}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *GetPlayerDeepDataResponse) GetFields() []*PlayerField {
@@ -2402,7 +2591,7 @@ type KickPlayerRequest struct {
 
 func (x *KickPlayerRequest) Reset() {
 	*x = KickPlayerRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[30]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2414,7 +2603,7 @@ func (x *KickPlayerRequest) String() string {
 func (*KickPlayerRequest) ProtoMessage() {}
 
 func (x *KickPlayerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[30]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2427,7 +2616,7 @@ func (x *KickPlayerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KickPlayerRequest.ProtoReflect.Descriptor instead.
 func (*KickPlayerRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{30}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *KickPlayerRequest) GetServerId() string {
@@ -2479,7 +2668,7 @@ type BanPlayerRequest struct {
 
 func (x *BanPlayerRequest) Reset() {
 	*x = BanPlayerRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[31]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2491,7 +2680,7 @@ func (x *BanPlayerRequest) String() string {
 func (*BanPlayerRequest) ProtoMessage() {}
 
 func (x *BanPlayerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[31]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2504,7 +2693,7 @@ func (x *BanPlayerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BanPlayerRequest.ProtoReflect.Descriptor instead.
 func (*BanPlayerRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{31}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *BanPlayerRequest) GetServerId() string {
@@ -2555,7 +2744,7 @@ type PardonPlayerRequest struct {
 
 func (x *PardonPlayerRequest) Reset() {
 	*x = PardonPlayerRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[32]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2567,7 +2756,7 @@ func (x *PardonPlayerRequest) String() string {
 func (*PardonPlayerRequest) ProtoMessage() {}
 
 func (x *PardonPlayerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[32]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2580,7 +2769,7 @@ func (x *PardonPlayerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PardonPlayerRequest.ProtoReflect.Descriptor instead.
 func (*PardonPlayerRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{32}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *PardonPlayerRequest) GetServerId() string {
@@ -2626,7 +2815,7 @@ type SetOperatorRequest struct {
 
 func (x *SetOperatorRequest) Reset() {
 	*x = SetOperatorRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[33]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2638,7 +2827,7 @@ func (x *SetOperatorRequest) String() string {
 func (*SetOperatorRequest) ProtoMessage() {}
 
 func (x *SetOperatorRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[33]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2651,7 +2840,7 @@ func (x *SetOperatorRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetOperatorRequest.ProtoReflect.Descriptor instead.
 func (*SetOperatorRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{33}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SetOperatorRequest) GetServerId() string {
@@ -2697,6 +2886,9 @@ func (x *SetOperatorRequest) GetRequestId() string {
 }
 
 // Allowlist request. remove deletes the entry instead of adding it.
+// player_query is the exact name or UUID the operator typed for a manual add
+// before the account has ever played; identity_key may be empty in that case.
+// The service still resolves and journals a real identity when one exists.
 type SetWhitelistEntryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -2704,13 +2896,14 @@ type SetWhitelistEntryRequest struct {
 	PlayerName    string                 `protobuf:"bytes,3,opt,name=player_name,json=playerName,proto3" json:"player_name,omitempty"`
 	Remove        bool                   `protobuf:"varint,4,opt,name=remove,proto3" json:"remove,omitempty"`
 	RequestId     string                 `protobuf:"bytes,5,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	PlayerQuery   string                 `protobuf:"bytes,6,opt,name=player_query,json=playerQuery,proto3" json:"player_query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SetWhitelistEntryRequest) Reset() {
 	*x = SetWhitelistEntryRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[34]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2722,7 +2915,7 @@ func (x *SetWhitelistEntryRequest) String() string {
 func (*SetWhitelistEntryRequest) ProtoMessage() {}
 
 func (x *SetWhitelistEntryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[34]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2735,7 +2928,7 @@ func (x *SetWhitelistEntryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWhitelistEntryRequest.ProtoReflect.Descriptor instead.
 func (*SetWhitelistEntryRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{34}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SetWhitelistEntryRequest) GetServerId() string {
@@ -2773,6 +2966,13 @@ func (x *SetWhitelistEntryRequest) GetRequestId() string {
 	return ""
 }
 
+func (x *SetWhitelistEntryRequest) GetPlayerQuery() string {
+	if x != nil {
+		return x.PlayerQuery
+	}
+	return ""
+}
+
 // Bulk action request. kind is one of kick, ban, pardon, deop, allowlist_add,
 // allowlist_remove. Target count is bounded by the service.
 type BulkPlayerActionRequest struct {
@@ -2788,7 +2988,7 @@ type BulkPlayerActionRequest struct {
 
 func (x *BulkPlayerActionRequest) Reset() {
 	*x = BulkPlayerActionRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[35]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2800,7 +3000,7 @@ func (x *BulkPlayerActionRequest) String() string {
 func (*BulkPlayerActionRequest) ProtoMessage() {}
 
 func (x *BulkPlayerActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[35]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2813,7 +3013,7 @@ func (x *BulkPlayerActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BulkPlayerActionRequest.ProtoReflect.Descriptor instead.
 func (*BulkPlayerActionRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{35}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *BulkPlayerActionRequest) GetServerId() string {
@@ -2863,7 +3063,7 @@ type UndoPlayerActionRequest struct {
 
 func (x *UndoPlayerActionRequest) Reset() {
 	*x = UndoPlayerActionRequest{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[36]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2875,7 +3075,7 @@ func (x *UndoPlayerActionRequest) String() string {
 func (*UndoPlayerActionRequest) ProtoMessage() {}
 
 func (x *UndoPlayerActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[36]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2888,7 +3088,7 @@ func (x *UndoPlayerActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UndoPlayerActionRequest.ProtoReflect.Descriptor instead.
 func (*UndoPlayerActionRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{36}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *UndoPlayerActionRequest) GetServerId() string {
@@ -2925,7 +3125,7 @@ type PlayerActionOutcome struct {
 
 func (x *PlayerActionOutcome) Reset() {
 	*x = PlayerActionOutcome{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[37]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2937,7 +3137,7 @@ func (x *PlayerActionOutcome) String() string {
 func (*PlayerActionOutcome) ProtoMessage() {}
 
 func (x *PlayerActionOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[37]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2950,7 +3150,7 @@ func (x *PlayerActionOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlayerActionOutcome.ProtoReflect.Descriptor instead.
 func (*PlayerActionOutcome) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{37}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *PlayerActionOutcome) GetResults() []*PlayerActionResult {
@@ -2991,7 +3191,7 @@ type KickPlayerResponse struct {
 
 func (x *KickPlayerResponse) Reset() {
 	*x = KickPlayerResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[38]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3003,7 +3203,7 @@ func (x *KickPlayerResponse) String() string {
 func (*KickPlayerResponse) ProtoMessage() {}
 
 func (x *KickPlayerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[38]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3016,7 +3216,7 @@ func (x *KickPlayerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KickPlayerResponse.ProtoReflect.Descriptor instead.
 func (*KickPlayerResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{38}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *KickPlayerResponse) GetOutcome() *PlayerActionOutcome {
@@ -3036,7 +3236,7 @@ type BanPlayerResponse struct {
 
 func (x *BanPlayerResponse) Reset() {
 	*x = BanPlayerResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[39]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3048,7 +3248,7 @@ func (x *BanPlayerResponse) String() string {
 func (*BanPlayerResponse) ProtoMessage() {}
 
 func (x *BanPlayerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[39]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3061,7 +3261,7 @@ func (x *BanPlayerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BanPlayerResponse.ProtoReflect.Descriptor instead.
 func (*BanPlayerResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{39}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *BanPlayerResponse) GetOutcome() *PlayerActionOutcome {
@@ -3081,7 +3281,7 @@ type PardonPlayerResponse struct {
 
 func (x *PardonPlayerResponse) Reset() {
 	*x = PardonPlayerResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[40]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3093,7 +3293,7 @@ func (x *PardonPlayerResponse) String() string {
 func (*PardonPlayerResponse) ProtoMessage() {}
 
 func (x *PardonPlayerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[40]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3106,7 +3306,7 @@ func (x *PardonPlayerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PardonPlayerResponse.ProtoReflect.Descriptor instead.
 func (*PardonPlayerResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{40}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *PardonPlayerResponse) GetOutcome() *PlayerActionOutcome {
@@ -3126,7 +3326,7 @@ type SetOperatorResponse struct {
 
 func (x *SetOperatorResponse) Reset() {
 	*x = SetOperatorResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[41]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3138,7 +3338,7 @@ func (x *SetOperatorResponse) String() string {
 func (*SetOperatorResponse) ProtoMessage() {}
 
 func (x *SetOperatorResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[41]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3151,7 +3351,7 @@ func (x *SetOperatorResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetOperatorResponse.ProtoReflect.Descriptor instead.
 func (*SetOperatorResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{41}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *SetOperatorResponse) GetOutcome() *PlayerActionOutcome {
@@ -3171,7 +3371,7 @@ type SetWhitelistEntryResponse struct {
 
 func (x *SetWhitelistEntryResponse) Reset() {
 	*x = SetWhitelistEntryResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[42]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3183,7 +3383,7 @@ func (x *SetWhitelistEntryResponse) String() string {
 func (*SetWhitelistEntryResponse) ProtoMessage() {}
 
 func (x *SetWhitelistEntryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[42]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3196,7 +3396,7 @@ func (x *SetWhitelistEntryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetWhitelistEntryResponse.ProtoReflect.Descriptor instead.
 func (*SetWhitelistEntryResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{42}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *SetWhitelistEntryResponse) GetOutcome() *PlayerActionOutcome {
@@ -3216,7 +3416,7 @@ type BulkPlayerActionResponse struct {
 
 func (x *BulkPlayerActionResponse) Reset() {
 	*x = BulkPlayerActionResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[43]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3228,7 +3428,7 @@ func (x *BulkPlayerActionResponse) String() string {
 func (*BulkPlayerActionResponse) ProtoMessage() {}
 
 func (x *BulkPlayerActionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[43]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3241,7 +3441,7 @@ func (x *BulkPlayerActionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BulkPlayerActionResponse.ProtoReflect.Descriptor instead.
 func (*BulkPlayerActionResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{43}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *BulkPlayerActionResponse) GetOutcome() *PlayerActionOutcome {
@@ -3261,7 +3461,7 @@ type UndoPlayerActionResponse struct {
 
 func (x *UndoPlayerActionResponse) Reset() {
 	*x = UndoPlayerActionResponse{}
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[44]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3273,7 +3473,7 @@ func (x *UndoPlayerActionResponse) String() string {
 func (*UndoPlayerActionResponse) ProtoMessage() {}
 
 func (x *UndoPlayerActionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_player_proto_msgTypes[44]
+	mi := &file_carbonpanel_v1_player_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3286,7 +3486,7 @@ func (x *UndoPlayerActionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UndoPlayerActionResponse.ProtoReflect.Descriptor instead.
 func (*UndoPlayerActionResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{44}
+	return file_carbonpanel_v1_player_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *UndoPlayerActionResponse) GetOutcome() *PlayerActionOutcome {
@@ -3408,7 +3608,15 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"error_code\x18\x04 \x01(\tR\terrorCode\x12%\n" +
 	"\x0eundo_supported\x18\x05 \x01(\bR\rundoSupported\x12\x1d\n" +
 	"\n" +
-	"undo_token\x18\x06 \x01(\tR\tundoToken\"\xe7\x01\n" +
+	"undo_token\x18\x06 \x01(\tR\tundoToken\"+\n" +
+	"\x13LookupPlayerRequest\x12\x14\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\"\xd3\x01\n" +
+	"\x14LookupPlayerResponse\x12:\n" +
+	"\x06status\x18\x01 \x01(\x0e2\".carbonpanel.v1.PlayerLookupStatusR\x06status\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
+	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12C\n" +
+	"\vobservation\x18\x04 \x01(\v2!.carbonpanel.v1.PlayerObservationR\vobservation\x12\x12\n" +
+	"\x04note\x18\x05 \x01(\tR\x04note\"\xe7\x01\n" +
 	"\x12ListPlayersRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
@@ -3495,7 +3703,7 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\x06remove\x18\x04 \x01(\bR\x06remove\x12\x14\n" +
 	"\x05level\x18\x05 \x01(\x05R\x05level\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x06 \x01(\tR\trequestId\"\xb2\x01\n" +
+	"request_id\x18\x06 \x01(\tR\trequestId\"\xd5\x01\n" +
 	"\x18SetWhitelistEntryRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12!\n" +
 	"\fidentity_key\x18\x02 \x01(\tR\videntityKey\x12\x1f\n" +
@@ -3503,7 +3711,8 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"playerName\x12\x16\n" +
 	"\x06remove\x18\x04 \x01(\bR\x06remove\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x05 \x01(\tR\trequestId\"\xa6\x01\n" +
+	"request_id\x18\x05 \x01(\tR\trequestId\x12!\n" +
+	"\fplayer_query\x18\x06 \x01(\tR\vplayerQuery\"\xa6\x01\n" +
 	"\x17BulkPlayerActionRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12#\n" +
@@ -3579,8 +3788,15 @@ const file_carbonpanel_v1_player_proto_rawDesc = "" +
 	"\x1dPLAYER_SUPPORT_STATE_DEGRADED\x10\x02\x12$\n" +
 	" PLAYER_SUPPORT_STATE_UNSUPPORTED\x10\x03\x12)\n" +
 	"%PLAYER_SUPPORT_STATE_DECISION_PENDING\x10\x04\x12 \n" +
-	"\x1cPLAYER_SUPPORT_STATE_UNKNOWN\x10\x052\xb4\f\n" +
-	"\rPlayerService\x12V\n" +
+	"\x1cPLAYER_SUPPORT_STATE_UNKNOWN\x10\x05*\xc8\x01\n" +
+	"\x12PlayerLookupStatus\x12$\n" +
+	" PLAYER_LOOKUP_STATUS_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aPLAYER_LOOKUP_STATUS_FOUND\x10\x01\x12\"\n" +
+	"\x1ePLAYER_LOOKUP_STATUS_NOT_FOUND\x10\x02\x12\"\n" +
+	"\x1ePLAYER_LOOKUP_STATUS_AMBIGUOUS\x10\x03\x12$\n" +
+	" PLAYER_LOOKUP_STATUS_UNAVAILABLE\x10\x042\x8f\r\n" +
+	"\rPlayerService\x12Y\n" +
+	"\fLookupPlayer\x12#.carbonpanel.v1.LookupPlayerRequest\x1a$.carbonpanel.v1.LookupPlayerResponse\x12V\n" +
 	"\vListPlayers\x12\".carbonpanel.v1.ListPlayersRequest\x1a#.carbonpanel.v1.ListPlayersResponse\x12P\n" +
 	"\tGetPlayer\x12 .carbonpanel.v1.GetPlayerRequest\x1a!.carbonpanel.v1.GetPlayerResponse\x12k\n" +
 	"\x12ListPlayerSessions\x12).carbonpanel.v1.ListPlayerSessionsRequest\x1a*.carbonpanel.v1.ListPlayerSessionsResponse\x12e\n" +
@@ -3611,144 +3827,151 @@ func file_carbonpanel_v1_player_proto_rawDescGZIP() []byte {
 	return file_carbonpanel_v1_player_proto_rawDescData
 }
 
-var file_carbonpanel_v1_player_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_carbonpanel_v1_player_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_carbonpanel_v1_player_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_carbonpanel_v1_player_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
 var file_carbonpanel_v1_player_proto_goTypes = []any{
 	(PlayerDataSource)(0),                  // 0: carbonpanel.v1.PlayerDataSource
 	(PlayerConfidence)(0),                  // 1: carbonpanel.v1.PlayerConfidence
 	(PlayerPresence)(0),                    // 2: carbonpanel.v1.PlayerPresence
 	(PlayerCapability)(0),                  // 3: carbonpanel.v1.PlayerCapability
 	(PlayerSupportState)(0),                // 4: carbonpanel.v1.PlayerSupportState
-	(*PlayerObservation)(nil),              // 5: carbonpanel.v1.PlayerObservation
-	(*PlayerRef)(nil),                      // 6: carbonpanel.v1.PlayerRef
-	(*PlayerAlias)(nil),                    // 7: carbonpanel.v1.PlayerAlias
-	(*PlayerSummary)(nil),                  // 8: carbonpanel.v1.PlayerSummary
-	(*PlayerField)(nil),                    // 9: carbonpanel.v1.PlayerField
-	(*PlayerSession)(nil),                  // 10: carbonpanel.v1.PlayerSession
-	(*PlayerAccessState)(nil),              // 11: carbonpanel.v1.PlayerAccessState
-	(*PlayerHistoryEntry)(nil),             // 12: carbonpanel.v1.PlayerHistoryEntry
-	(*PlayerCapabilityStatus)(nil),         // 13: carbonpanel.v1.PlayerCapabilityStatus
-	(*PlayerSkinAsset)(nil),                // 14: carbonpanel.v1.PlayerSkinAsset
-	(*PlayerDetail)(nil),                   // 15: carbonpanel.v1.PlayerDetail
-	(*PlayerActionResult)(nil),             // 16: carbonpanel.v1.PlayerActionResult
-	(*ListPlayersRequest)(nil),             // 17: carbonpanel.v1.ListPlayersRequest
-	(*ListPlayersResponse)(nil),            // 18: carbonpanel.v1.ListPlayersResponse
-	(*GetPlayerRequest)(nil),               // 19: carbonpanel.v1.GetPlayerRequest
-	(*GetPlayerResponse)(nil),              // 20: carbonpanel.v1.GetPlayerResponse
-	(*ListPlayerSessionsRequest)(nil),      // 21: carbonpanel.v1.ListPlayerSessionsRequest
-	(*ListPlayerSessionsResponse)(nil),     // 22: carbonpanel.v1.ListPlayerSessionsResponse
-	(*ListPlayerAccessRequest)(nil),        // 23: carbonpanel.v1.ListPlayerAccessRequest
-	(*ListPlayerAccessResponse)(nil),       // 24: carbonpanel.v1.ListPlayerAccessResponse
-	(*ListPlayerHistoryRequest)(nil),       // 25: carbonpanel.v1.ListPlayerHistoryRequest
-	(*ListPlayerHistoryResponse)(nil),      // 26: carbonpanel.v1.ListPlayerHistoryResponse
-	(*ListPlayerCapabilitiesRequest)(nil),  // 27: carbonpanel.v1.ListPlayerCapabilitiesRequest
-	(*ListPlayerCapabilitiesResponse)(nil), // 28: carbonpanel.v1.ListPlayerCapabilitiesResponse
-	(*GetPlayerSkinRequest)(nil),           // 29: carbonpanel.v1.GetPlayerSkinRequest
-	(*GetPlayerSkinResponse)(nil),          // 30: carbonpanel.v1.GetPlayerSkinResponse
-	(*RefreshPlayerSkinRequest)(nil),       // 31: carbonpanel.v1.RefreshPlayerSkinRequest
-	(*RefreshPlayerSkinResponse)(nil),      // 32: carbonpanel.v1.RefreshPlayerSkinResponse
-	(*GetPlayerDeepDataRequest)(nil),       // 33: carbonpanel.v1.GetPlayerDeepDataRequest
-	(*GetPlayerDeepDataResponse)(nil),      // 34: carbonpanel.v1.GetPlayerDeepDataResponse
-	(*KickPlayerRequest)(nil),              // 35: carbonpanel.v1.KickPlayerRequest
-	(*BanPlayerRequest)(nil),               // 36: carbonpanel.v1.BanPlayerRequest
-	(*PardonPlayerRequest)(nil),            // 37: carbonpanel.v1.PardonPlayerRequest
-	(*SetOperatorRequest)(nil),             // 38: carbonpanel.v1.SetOperatorRequest
-	(*SetWhitelistEntryRequest)(nil),       // 39: carbonpanel.v1.SetWhitelistEntryRequest
-	(*BulkPlayerActionRequest)(nil),        // 40: carbonpanel.v1.BulkPlayerActionRequest
-	(*UndoPlayerActionRequest)(nil),        // 41: carbonpanel.v1.UndoPlayerActionRequest
-	(*PlayerActionOutcome)(nil),            // 42: carbonpanel.v1.PlayerActionOutcome
-	(*KickPlayerResponse)(nil),             // 43: carbonpanel.v1.KickPlayerResponse
-	(*BanPlayerResponse)(nil),              // 44: carbonpanel.v1.BanPlayerResponse
-	(*PardonPlayerResponse)(nil),           // 45: carbonpanel.v1.PardonPlayerResponse
-	(*SetOperatorResponse)(nil),            // 46: carbonpanel.v1.SetOperatorResponse
-	(*SetWhitelistEntryResponse)(nil),      // 47: carbonpanel.v1.SetWhitelistEntryResponse
-	(*BulkPlayerActionResponse)(nil),       // 48: carbonpanel.v1.BulkPlayerActionResponse
-	(*UndoPlayerActionResponse)(nil),       // 49: carbonpanel.v1.UndoPlayerActionResponse
-	(*timestamppb.Timestamp)(nil),          // 50: google.protobuf.Timestamp
+	(PlayerLookupStatus)(0),                // 5: carbonpanel.v1.PlayerLookupStatus
+	(*PlayerObservation)(nil),              // 6: carbonpanel.v1.PlayerObservation
+	(*PlayerRef)(nil),                      // 7: carbonpanel.v1.PlayerRef
+	(*PlayerAlias)(nil),                    // 8: carbonpanel.v1.PlayerAlias
+	(*PlayerSummary)(nil),                  // 9: carbonpanel.v1.PlayerSummary
+	(*PlayerField)(nil),                    // 10: carbonpanel.v1.PlayerField
+	(*PlayerSession)(nil),                  // 11: carbonpanel.v1.PlayerSession
+	(*PlayerAccessState)(nil),              // 12: carbonpanel.v1.PlayerAccessState
+	(*PlayerHistoryEntry)(nil),             // 13: carbonpanel.v1.PlayerHistoryEntry
+	(*PlayerCapabilityStatus)(nil),         // 14: carbonpanel.v1.PlayerCapabilityStatus
+	(*PlayerSkinAsset)(nil),                // 15: carbonpanel.v1.PlayerSkinAsset
+	(*PlayerDetail)(nil),                   // 16: carbonpanel.v1.PlayerDetail
+	(*PlayerActionResult)(nil),             // 17: carbonpanel.v1.PlayerActionResult
+	(*LookupPlayerRequest)(nil),            // 18: carbonpanel.v1.LookupPlayerRequest
+	(*LookupPlayerResponse)(nil),           // 19: carbonpanel.v1.LookupPlayerResponse
+	(*ListPlayersRequest)(nil),             // 20: carbonpanel.v1.ListPlayersRequest
+	(*ListPlayersResponse)(nil),            // 21: carbonpanel.v1.ListPlayersResponse
+	(*GetPlayerRequest)(nil),               // 22: carbonpanel.v1.GetPlayerRequest
+	(*GetPlayerResponse)(nil),              // 23: carbonpanel.v1.GetPlayerResponse
+	(*ListPlayerSessionsRequest)(nil),      // 24: carbonpanel.v1.ListPlayerSessionsRequest
+	(*ListPlayerSessionsResponse)(nil),     // 25: carbonpanel.v1.ListPlayerSessionsResponse
+	(*ListPlayerAccessRequest)(nil),        // 26: carbonpanel.v1.ListPlayerAccessRequest
+	(*ListPlayerAccessResponse)(nil),       // 27: carbonpanel.v1.ListPlayerAccessResponse
+	(*ListPlayerHistoryRequest)(nil),       // 28: carbonpanel.v1.ListPlayerHistoryRequest
+	(*ListPlayerHistoryResponse)(nil),      // 29: carbonpanel.v1.ListPlayerHistoryResponse
+	(*ListPlayerCapabilitiesRequest)(nil),  // 30: carbonpanel.v1.ListPlayerCapabilitiesRequest
+	(*ListPlayerCapabilitiesResponse)(nil), // 31: carbonpanel.v1.ListPlayerCapabilitiesResponse
+	(*GetPlayerSkinRequest)(nil),           // 32: carbonpanel.v1.GetPlayerSkinRequest
+	(*GetPlayerSkinResponse)(nil),          // 33: carbonpanel.v1.GetPlayerSkinResponse
+	(*RefreshPlayerSkinRequest)(nil),       // 34: carbonpanel.v1.RefreshPlayerSkinRequest
+	(*RefreshPlayerSkinResponse)(nil),      // 35: carbonpanel.v1.RefreshPlayerSkinResponse
+	(*GetPlayerDeepDataRequest)(nil),       // 36: carbonpanel.v1.GetPlayerDeepDataRequest
+	(*GetPlayerDeepDataResponse)(nil),      // 37: carbonpanel.v1.GetPlayerDeepDataResponse
+	(*KickPlayerRequest)(nil),              // 38: carbonpanel.v1.KickPlayerRequest
+	(*BanPlayerRequest)(nil),               // 39: carbonpanel.v1.BanPlayerRequest
+	(*PardonPlayerRequest)(nil),            // 40: carbonpanel.v1.PardonPlayerRequest
+	(*SetOperatorRequest)(nil),             // 41: carbonpanel.v1.SetOperatorRequest
+	(*SetWhitelistEntryRequest)(nil),       // 42: carbonpanel.v1.SetWhitelistEntryRequest
+	(*BulkPlayerActionRequest)(nil),        // 43: carbonpanel.v1.BulkPlayerActionRequest
+	(*UndoPlayerActionRequest)(nil),        // 44: carbonpanel.v1.UndoPlayerActionRequest
+	(*PlayerActionOutcome)(nil),            // 45: carbonpanel.v1.PlayerActionOutcome
+	(*KickPlayerResponse)(nil),             // 46: carbonpanel.v1.KickPlayerResponse
+	(*BanPlayerResponse)(nil),              // 47: carbonpanel.v1.BanPlayerResponse
+	(*PardonPlayerResponse)(nil),           // 48: carbonpanel.v1.PardonPlayerResponse
+	(*SetOperatorResponse)(nil),            // 49: carbonpanel.v1.SetOperatorResponse
+	(*SetWhitelistEntryResponse)(nil),      // 50: carbonpanel.v1.SetWhitelistEntryResponse
+	(*BulkPlayerActionResponse)(nil),       // 51: carbonpanel.v1.BulkPlayerActionResponse
+	(*UndoPlayerActionResponse)(nil),       // 52: carbonpanel.v1.UndoPlayerActionResponse
+	(*timestamppb.Timestamp)(nil),          // 53: google.protobuf.Timestamp
 }
 var file_carbonpanel_v1_player_proto_depIdxs = []int32{
 	0,  // 0: carbonpanel.v1.PlayerObservation.source:type_name -> carbonpanel.v1.PlayerDataSource
-	50, // 1: carbonpanel.v1.PlayerObservation.observed_at:type_name -> google.protobuf.Timestamp
+	53, // 1: carbonpanel.v1.PlayerObservation.observed_at:type_name -> google.protobuf.Timestamp
 	1,  // 2: carbonpanel.v1.PlayerObservation.confidence:type_name -> carbonpanel.v1.PlayerConfidence
-	50, // 3: carbonpanel.v1.PlayerAlias.observed_at:type_name -> google.protobuf.Timestamp
+	53, // 3: carbonpanel.v1.PlayerAlias.observed_at:type_name -> google.protobuf.Timestamp
 	0,  // 4: carbonpanel.v1.PlayerAlias.source:type_name -> carbonpanel.v1.PlayerDataSource
-	6,  // 5: carbonpanel.v1.PlayerSummary.ref:type_name -> carbonpanel.v1.PlayerRef
+	7,  // 5: carbonpanel.v1.PlayerSummary.ref:type_name -> carbonpanel.v1.PlayerRef
 	2,  // 6: carbonpanel.v1.PlayerSummary.presence:type_name -> carbonpanel.v1.PlayerPresence
-	5,  // 7: carbonpanel.v1.PlayerSummary.presence_observation:type_name -> carbonpanel.v1.PlayerObservation
-	7,  // 8: carbonpanel.v1.PlayerSummary.aliases:type_name -> carbonpanel.v1.PlayerAlias
-	50, // 9: carbonpanel.v1.PlayerSummary.last_seen:type_name -> google.protobuf.Timestamp
-	5,  // 10: carbonpanel.v1.PlayerField.observation:type_name -> carbonpanel.v1.PlayerObservation
-	50, // 11: carbonpanel.v1.PlayerSession.joined_at:type_name -> google.protobuf.Timestamp
-	50, // 12: carbonpanel.v1.PlayerSession.left_at:type_name -> google.protobuf.Timestamp
-	5,  // 13: carbonpanel.v1.PlayerAccessState.observation:type_name -> carbonpanel.v1.PlayerObservation
-	50, // 14: carbonpanel.v1.PlayerHistoryEntry.occurred_at:type_name -> google.protobuf.Timestamp
+	6,  // 7: carbonpanel.v1.PlayerSummary.presence_observation:type_name -> carbonpanel.v1.PlayerObservation
+	8,  // 8: carbonpanel.v1.PlayerSummary.aliases:type_name -> carbonpanel.v1.PlayerAlias
+	53, // 9: carbonpanel.v1.PlayerSummary.last_seen:type_name -> google.protobuf.Timestamp
+	6,  // 10: carbonpanel.v1.PlayerField.observation:type_name -> carbonpanel.v1.PlayerObservation
+	53, // 11: carbonpanel.v1.PlayerSession.joined_at:type_name -> google.protobuf.Timestamp
+	53, // 12: carbonpanel.v1.PlayerSession.left_at:type_name -> google.protobuf.Timestamp
+	6,  // 13: carbonpanel.v1.PlayerAccessState.observation:type_name -> carbonpanel.v1.PlayerObservation
+	53, // 14: carbonpanel.v1.PlayerHistoryEntry.occurred_at:type_name -> google.protobuf.Timestamp
 	3,  // 15: carbonpanel.v1.PlayerCapabilityStatus.capability:type_name -> carbonpanel.v1.PlayerCapability
 	4,  // 16: carbonpanel.v1.PlayerCapabilityStatus.state:type_name -> carbonpanel.v1.PlayerSupportState
-	5,  // 17: carbonpanel.v1.PlayerSkinAsset.observation:type_name -> carbonpanel.v1.PlayerObservation
-	6,  // 18: carbonpanel.v1.PlayerDetail.ref:type_name -> carbonpanel.v1.PlayerRef
-	7,  // 19: carbonpanel.v1.PlayerDetail.aliases:type_name -> carbonpanel.v1.PlayerAlias
+	6,  // 17: carbonpanel.v1.PlayerSkinAsset.observation:type_name -> carbonpanel.v1.PlayerObservation
+	7,  // 18: carbonpanel.v1.PlayerDetail.ref:type_name -> carbonpanel.v1.PlayerRef
+	8,  // 19: carbonpanel.v1.PlayerDetail.aliases:type_name -> carbonpanel.v1.PlayerAlias
 	2,  // 20: carbonpanel.v1.PlayerDetail.presence:type_name -> carbonpanel.v1.PlayerPresence
-	5,  // 21: carbonpanel.v1.PlayerDetail.presence_observation:type_name -> carbonpanel.v1.PlayerObservation
-	50, // 22: carbonpanel.v1.PlayerDetail.first_seen:type_name -> google.protobuf.Timestamp
-	50, // 23: carbonpanel.v1.PlayerDetail.last_seen:type_name -> google.protobuf.Timestamp
-	9,  // 24: carbonpanel.v1.PlayerDetail.character:type_name -> carbonpanel.v1.PlayerField
-	9,  // 25: carbonpanel.v1.PlayerDetail.progress:type_name -> carbonpanel.v1.PlayerField
-	9,  // 26: carbonpanel.v1.PlayerDetail.access:type_name -> carbonpanel.v1.PlayerField
-	13, // 27: carbonpanel.v1.PlayerDetail.capabilities:type_name -> carbonpanel.v1.PlayerCapabilityStatus
-	8,  // 28: carbonpanel.v1.ListPlayersResponse.players:type_name -> carbonpanel.v1.PlayerSummary
-	15, // 29: carbonpanel.v1.GetPlayerResponse.detail:type_name -> carbonpanel.v1.PlayerDetail
-	10, // 30: carbonpanel.v1.ListPlayerSessionsResponse.sessions:type_name -> carbonpanel.v1.PlayerSession
-	11, // 31: carbonpanel.v1.ListPlayerAccessResponse.states:type_name -> carbonpanel.v1.PlayerAccessState
-	12, // 32: carbonpanel.v1.ListPlayerHistoryResponse.entries:type_name -> carbonpanel.v1.PlayerHistoryEntry
-	13, // 33: carbonpanel.v1.ListPlayerCapabilitiesResponse.capabilities:type_name -> carbonpanel.v1.PlayerCapabilityStatus
-	14, // 34: carbonpanel.v1.GetPlayerSkinResponse.asset:type_name -> carbonpanel.v1.PlayerSkinAsset
-	14, // 35: carbonpanel.v1.RefreshPlayerSkinResponse.asset:type_name -> carbonpanel.v1.PlayerSkinAsset
-	9,  // 36: carbonpanel.v1.GetPlayerDeepDataResponse.fields:type_name -> carbonpanel.v1.PlayerField
-	16, // 37: carbonpanel.v1.PlayerActionOutcome.results:type_name -> carbonpanel.v1.PlayerActionResult
-	42, // 38: carbonpanel.v1.KickPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	42, // 39: carbonpanel.v1.BanPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	42, // 40: carbonpanel.v1.PardonPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	42, // 41: carbonpanel.v1.SetOperatorResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	42, // 42: carbonpanel.v1.SetWhitelistEntryResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	42, // 43: carbonpanel.v1.BulkPlayerActionResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	42, // 44: carbonpanel.v1.UndoPlayerActionResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
-	17, // 45: carbonpanel.v1.PlayerService.ListPlayers:input_type -> carbonpanel.v1.ListPlayersRequest
-	19, // 46: carbonpanel.v1.PlayerService.GetPlayer:input_type -> carbonpanel.v1.GetPlayerRequest
-	21, // 47: carbonpanel.v1.PlayerService.ListPlayerSessions:input_type -> carbonpanel.v1.ListPlayerSessionsRequest
-	23, // 48: carbonpanel.v1.PlayerService.ListPlayerAccess:input_type -> carbonpanel.v1.ListPlayerAccessRequest
-	25, // 49: carbonpanel.v1.PlayerService.ListPlayerHistory:input_type -> carbonpanel.v1.ListPlayerHistoryRequest
-	27, // 50: carbonpanel.v1.PlayerService.ListPlayerCapabilities:input_type -> carbonpanel.v1.ListPlayerCapabilitiesRequest
-	29, // 51: carbonpanel.v1.PlayerService.GetPlayerSkin:input_type -> carbonpanel.v1.GetPlayerSkinRequest
-	31, // 52: carbonpanel.v1.PlayerService.RefreshPlayerSkin:input_type -> carbonpanel.v1.RefreshPlayerSkinRequest
-	33, // 53: carbonpanel.v1.PlayerService.GetPlayerDeepData:input_type -> carbonpanel.v1.GetPlayerDeepDataRequest
-	35, // 54: carbonpanel.v1.PlayerService.KickPlayer:input_type -> carbonpanel.v1.KickPlayerRequest
-	36, // 55: carbonpanel.v1.PlayerService.BanPlayer:input_type -> carbonpanel.v1.BanPlayerRequest
-	37, // 56: carbonpanel.v1.PlayerService.PardonPlayer:input_type -> carbonpanel.v1.PardonPlayerRequest
-	38, // 57: carbonpanel.v1.PlayerService.SetOperator:input_type -> carbonpanel.v1.SetOperatorRequest
-	39, // 58: carbonpanel.v1.PlayerService.SetWhitelistEntry:input_type -> carbonpanel.v1.SetWhitelistEntryRequest
-	40, // 59: carbonpanel.v1.PlayerService.BulkPlayerAction:input_type -> carbonpanel.v1.BulkPlayerActionRequest
-	41, // 60: carbonpanel.v1.PlayerService.UndoPlayerAction:input_type -> carbonpanel.v1.UndoPlayerActionRequest
-	18, // 61: carbonpanel.v1.PlayerService.ListPlayers:output_type -> carbonpanel.v1.ListPlayersResponse
-	20, // 62: carbonpanel.v1.PlayerService.GetPlayer:output_type -> carbonpanel.v1.GetPlayerResponse
-	22, // 63: carbonpanel.v1.PlayerService.ListPlayerSessions:output_type -> carbonpanel.v1.ListPlayerSessionsResponse
-	24, // 64: carbonpanel.v1.PlayerService.ListPlayerAccess:output_type -> carbonpanel.v1.ListPlayerAccessResponse
-	26, // 65: carbonpanel.v1.PlayerService.ListPlayerHistory:output_type -> carbonpanel.v1.ListPlayerHistoryResponse
-	28, // 66: carbonpanel.v1.PlayerService.ListPlayerCapabilities:output_type -> carbonpanel.v1.ListPlayerCapabilitiesResponse
-	30, // 67: carbonpanel.v1.PlayerService.GetPlayerSkin:output_type -> carbonpanel.v1.GetPlayerSkinResponse
-	32, // 68: carbonpanel.v1.PlayerService.RefreshPlayerSkin:output_type -> carbonpanel.v1.RefreshPlayerSkinResponse
-	34, // 69: carbonpanel.v1.PlayerService.GetPlayerDeepData:output_type -> carbonpanel.v1.GetPlayerDeepDataResponse
-	43, // 70: carbonpanel.v1.PlayerService.KickPlayer:output_type -> carbonpanel.v1.KickPlayerResponse
-	44, // 71: carbonpanel.v1.PlayerService.BanPlayer:output_type -> carbonpanel.v1.BanPlayerResponse
-	45, // 72: carbonpanel.v1.PlayerService.PardonPlayer:output_type -> carbonpanel.v1.PardonPlayerResponse
-	46, // 73: carbonpanel.v1.PlayerService.SetOperator:output_type -> carbonpanel.v1.SetOperatorResponse
-	47, // 74: carbonpanel.v1.PlayerService.SetWhitelistEntry:output_type -> carbonpanel.v1.SetWhitelistEntryResponse
-	48, // 75: carbonpanel.v1.PlayerService.BulkPlayerAction:output_type -> carbonpanel.v1.BulkPlayerActionResponse
-	49, // 76: carbonpanel.v1.PlayerService.UndoPlayerAction:output_type -> carbonpanel.v1.UndoPlayerActionResponse
-	61, // [61:77] is the sub-list for method output_type
-	45, // [45:61] is the sub-list for method input_type
-	45, // [45:45] is the sub-list for extension type_name
-	45, // [45:45] is the sub-list for extension extendee
-	0,  // [0:45] is the sub-list for field type_name
+	6,  // 21: carbonpanel.v1.PlayerDetail.presence_observation:type_name -> carbonpanel.v1.PlayerObservation
+	53, // 22: carbonpanel.v1.PlayerDetail.first_seen:type_name -> google.protobuf.Timestamp
+	53, // 23: carbonpanel.v1.PlayerDetail.last_seen:type_name -> google.protobuf.Timestamp
+	10, // 24: carbonpanel.v1.PlayerDetail.character:type_name -> carbonpanel.v1.PlayerField
+	10, // 25: carbonpanel.v1.PlayerDetail.progress:type_name -> carbonpanel.v1.PlayerField
+	10, // 26: carbonpanel.v1.PlayerDetail.access:type_name -> carbonpanel.v1.PlayerField
+	14, // 27: carbonpanel.v1.PlayerDetail.capabilities:type_name -> carbonpanel.v1.PlayerCapabilityStatus
+	5,  // 28: carbonpanel.v1.LookupPlayerResponse.status:type_name -> carbonpanel.v1.PlayerLookupStatus
+	6,  // 29: carbonpanel.v1.LookupPlayerResponse.observation:type_name -> carbonpanel.v1.PlayerObservation
+	9,  // 30: carbonpanel.v1.ListPlayersResponse.players:type_name -> carbonpanel.v1.PlayerSummary
+	16, // 31: carbonpanel.v1.GetPlayerResponse.detail:type_name -> carbonpanel.v1.PlayerDetail
+	11, // 32: carbonpanel.v1.ListPlayerSessionsResponse.sessions:type_name -> carbonpanel.v1.PlayerSession
+	12, // 33: carbonpanel.v1.ListPlayerAccessResponse.states:type_name -> carbonpanel.v1.PlayerAccessState
+	13, // 34: carbonpanel.v1.ListPlayerHistoryResponse.entries:type_name -> carbonpanel.v1.PlayerHistoryEntry
+	14, // 35: carbonpanel.v1.ListPlayerCapabilitiesResponse.capabilities:type_name -> carbonpanel.v1.PlayerCapabilityStatus
+	15, // 36: carbonpanel.v1.GetPlayerSkinResponse.asset:type_name -> carbonpanel.v1.PlayerSkinAsset
+	15, // 37: carbonpanel.v1.RefreshPlayerSkinResponse.asset:type_name -> carbonpanel.v1.PlayerSkinAsset
+	10, // 38: carbonpanel.v1.GetPlayerDeepDataResponse.fields:type_name -> carbonpanel.v1.PlayerField
+	17, // 39: carbonpanel.v1.PlayerActionOutcome.results:type_name -> carbonpanel.v1.PlayerActionResult
+	45, // 40: carbonpanel.v1.KickPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 41: carbonpanel.v1.BanPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 42: carbonpanel.v1.PardonPlayerResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 43: carbonpanel.v1.SetOperatorResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 44: carbonpanel.v1.SetWhitelistEntryResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 45: carbonpanel.v1.BulkPlayerActionResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	45, // 46: carbonpanel.v1.UndoPlayerActionResponse.outcome:type_name -> carbonpanel.v1.PlayerActionOutcome
+	18, // 47: carbonpanel.v1.PlayerService.LookupPlayer:input_type -> carbonpanel.v1.LookupPlayerRequest
+	20, // 48: carbonpanel.v1.PlayerService.ListPlayers:input_type -> carbonpanel.v1.ListPlayersRequest
+	22, // 49: carbonpanel.v1.PlayerService.GetPlayer:input_type -> carbonpanel.v1.GetPlayerRequest
+	24, // 50: carbonpanel.v1.PlayerService.ListPlayerSessions:input_type -> carbonpanel.v1.ListPlayerSessionsRequest
+	26, // 51: carbonpanel.v1.PlayerService.ListPlayerAccess:input_type -> carbonpanel.v1.ListPlayerAccessRequest
+	28, // 52: carbonpanel.v1.PlayerService.ListPlayerHistory:input_type -> carbonpanel.v1.ListPlayerHistoryRequest
+	30, // 53: carbonpanel.v1.PlayerService.ListPlayerCapabilities:input_type -> carbonpanel.v1.ListPlayerCapabilitiesRequest
+	32, // 54: carbonpanel.v1.PlayerService.GetPlayerSkin:input_type -> carbonpanel.v1.GetPlayerSkinRequest
+	34, // 55: carbonpanel.v1.PlayerService.RefreshPlayerSkin:input_type -> carbonpanel.v1.RefreshPlayerSkinRequest
+	36, // 56: carbonpanel.v1.PlayerService.GetPlayerDeepData:input_type -> carbonpanel.v1.GetPlayerDeepDataRequest
+	38, // 57: carbonpanel.v1.PlayerService.KickPlayer:input_type -> carbonpanel.v1.KickPlayerRequest
+	39, // 58: carbonpanel.v1.PlayerService.BanPlayer:input_type -> carbonpanel.v1.BanPlayerRequest
+	40, // 59: carbonpanel.v1.PlayerService.PardonPlayer:input_type -> carbonpanel.v1.PardonPlayerRequest
+	41, // 60: carbonpanel.v1.PlayerService.SetOperator:input_type -> carbonpanel.v1.SetOperatorRequest
+	42, // 61: carbonpanel.v1.PlayerService.SetWhitelistEntry:input_type -> carbonpanel.v1.SetWhitelistEntryRequest
+	43, // 62: carbonpanel.v1.PlayerService.BulkPlayerAction:input_type -> carbonpanel.v1.BulkPlayerActionRequest
+	44, // 63: carbonpanel.v1.PlayerService.UndoPlayerAction:input_type -> carbonpanel.v1.UndoPlayerActionRequest
+	19, // 64: carbonpanel.v1.PlayerService.LookupPlayer:output_type -> carbonpanel.v1.LookupPlayerResponse
+	21, // 65: carbonpanel.v1.PlayerService.ListPlayers:output_type -> carbonpanel.v1.ListPlayersResponse
+	23, // 66: carbonpanel.v1.PlayerService.GetPlayer:output_type -> carbonpanel.v1.GetPlayerResponse
+	25, // 67: carbonpanel.v1.PlayerService.ListPlayerSessions:output_type -> carbonpanel.v1.ListPlayerSessionsResponse
+	27, // 68: carbonpanel.v1.PlayerService.ListPlayerAccess:output_type -> carbonpanel.v1.ListPlayerAccessResponse
+	29, // 69: carbonpanel.v1.PlayerService.ListPlayerHistory:output_type -> carbonpanel.v1.ListPlayerHistoryResponse
+	31, // 70: carbonpanel.v1.PlayerService.ListPlayerCapabilities:output_type -> carbonpanel.v1.ListPlayerCapabilitiesResponse
+	33, // 71: carbonpanel.v1.PlayerService.GetPlayerSkin:output_type -> carbonpanel.v1.GetPlayerSkinResponse
+	35, // 72: carbonpanel.v1.PlayerService.RefreshPlayerSkin:output_type -> carbonpanel.v1.RefreshPlayerSkinResponse
+	37, // 73: carbonpanel.v1.PlayerService.GetPlayerDeepData:output_type -> carbonpanel.v1.GetPlayerDeepDataResponse
+	46, // 74: carbonpanel.v1.PlayerService.KickPlayer:output_type -> carbonpanel.v1.KickPlayerResponse
+	47, // 75: carbonpanel.v1.PlayerService.BanPlayer:output_type -> carbonpanel.v1.BanPlayerResponse
+	48, // 76: carbonpanel.v1.PlayerService.PardonPlayer:output_type -> carbonpanel.v1.PardonPlayerResponse
+	49, // 77: carbonpanel.v1.PlayerService.SetOperator:output_type -> carbonpanel.v1.SetOperatorResponse
+	50, // 78: carbonpanel.v1.PlayerService.SetWhitelistEntry:output_type -> carbonpanel.v1.SetWhitelistEntryResponse
+	51, // 79: carbonpanel.v1.PlayerService.BulkPlayerAction:output_type -> carbonpanel.v1.BulkPlayerActionResponse
+	52, // 80: carbonpanel.v1.PlayerService.UndoPlayerAction:output_type -> carbonpanel.v1.UndoPlayerActionResponse
+	64, // [64:81] is the sub-list for method output_type
+	47, // [47:64] is the sub-list for method input_type
+	47, // [47:47] is the sub-list for extension type_name
+	47, // [47:47] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_player_proto_init() }
@@ -3761,8 +3984,8 @@ func file_carbonpanel_v1_player_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_player_proto_rawDesc), len(file_carbonpanel_v1_player_proto_rawDesc)),
-			NumEnums:      5,
-			NumMessages:   45,
+			NumEnums:      6,
+			NumMessages:   47,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
