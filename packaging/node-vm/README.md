@@ -59,6 +59,17 @@ for out-of-band operator registration under the SHARED ADR0019
 node-control RPC. The bootstrap scopes are limited to
 `BeginEnrollmentChallenge` and `ClaimEnrollment`.
 
+`SIG_CLAIM` uses the **shared** ADR0019/OSS-385 `ClaimContextRaw` byte encoding:
+NUL-delimited `carbon-panel-enroll-v1`, node/enrollment/challenge IDs, the
+**server-stored** nonce, enrollment `expires_at` (RFC3339Nano), comma-joined
+proto capability names and the channel context, with no trailing separator. It
+is Ed25519-only; canonical-JSON contexts are refused. Byte-for-byte conformance
+is checked against a golden produced by `internal/noderuntime/enroll` at PR532
+head `fc998875` (`qualification/fixtures/claim-context-shared.json`). The guest
+Python module reproduces the encoder because a cloud image cannot import the Go
+package; any future production mount must delegate the claim to the shared
+package rather than add a second encoder.
+
 ## Build / verify (offline only)
 
 ```sh

@@ -57,6 +57,19 @@ offline fixtures, not a published image.
    files and never enter the image, seed, SBOM, manifest or build plan. This
    lane defines no RPC and forks no contract.
 
+   SIG_CLAIM follows the **shared** ADR0019/OSS-385 `ClaimContextRaw` encoding
+   (`internal/noderuntime/enroll`, PR532 head `fc998875`): NUL-delimited raw
+   bytes over the server-stored nonce, enrollment `expires_at` in RFC3339Nano,
+   comma-joined proto capability names and the channel context, with no
+   trailing separator, no client nonce and no canonical-JSON step. Signing is
+   Ed25519-only. A golden produced from the shared package is checked in at
+   `packaging/node-vm/qualification/fixtures/claim-context-shared.json`; VM
+   fixtures assert byte-for-byte equality and that a canonical-JSON-signed
+   claim is refused. Guest Python cannot import a Go package, so the VM
+   generator reproduces the single encoder for fixtures only; any production
+   mount must delegate the claim to the shared package rather than add a
+   second encoder.
+
 5. **Data-preserving staged lifecycle.** Upgrades write a checksummed undo
    manifest before promotion and recheck health before completing. Rollback
    restores only after the undo manifest verifies, keeps the current artifact
@@ -119,12 +132,19 @@ Suggested index row (for the orchestrator-owned index):
   with the real verified pins; `verify_artifact_provenance()` refuses fixture
   digests and moving URLs. Fixture mode is used by the offline tests below.
 
+- **Shared claim context (real conformance):** a golden context was generated
+  by running `internal/noderuntime/enroll.ClaimContextRaw` from PR532 head
+  `fc998875` in an owned temporary worktree; the VM first boot reproduces those
+  exact bytes and refuses the previous canonical-JSON form. Golden inputs and
+  bytes are in `packaging/node-vm/qualification/fixtures/claim-context-shared.json`.
+  No shared writer worktree was edited.
 - `python -m py_compile` on all `scripts/node_vm_*.py`, `scripts/test_node_vm_*.py`
   and the guest first-boot module: clean.
-- `python -m unittest discover -s scripts -p 'test_node_vm_*.py'`: 27 tests pass
+- `python -m unittest discover -s scripts -p 'test_node_vm_*.py'`: 30 tests pass
   (identity uniqueness, digest-only bundle, baked-secret refusal, deterministic
-  seed/manifest, CycloneDX SBOM, signing plan, staged upgrade/rollback and
-  copy-only volume safety).
+  seed/manifest, CycloneDX SBOM, signing plan, staged upgrade/rollback,
+  copy-only volume safety, byte-exact shared context, JSON refusal and
+  Ed25519-only).
 - `python scripts/node_vm_build.py --profile fixture --check`: deterministic;
   emitted plan is `fixture_only` with provenance status `fixture-placeholder`.
 - `python scripts/node_vm_integrity.py --profile fixture --verify`: checksum

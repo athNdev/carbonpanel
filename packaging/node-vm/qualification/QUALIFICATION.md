@@ -27,6 +27,7 @@ used only by offline tests; artifact mode fails closed on them.
 | Upgrade/rollback logic | Pure planner fixtures with synthetic bytes | Applied upgrade on a live VM |
 | Persistent volume safety | Copy-only planner fixtures | Real volume import/recovery |
 | First-boot uniqueness | Derived `node_id` fixture for distinct instance-ids | Real VM boot and mTLS enrollment |
+| Shared SIG_CLAIM context | Byte-for-byte golden from shared `ClaimContextRaw` at PR532 `fc998875`; JSON-signed claim refused; server-stored nonce, Ed25519-only | Production mount delegating to the shared Go package; live claim verification |
 | Isolation | Documented model (`docs/isolation.md`) | Effective policy/breakout testing |
 
 ## Qualification scenarios (future, owned disposable VMs only)

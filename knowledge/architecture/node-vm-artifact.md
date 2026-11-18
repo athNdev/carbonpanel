@@ -45,10 +45,15 @@ config change, no registry push and no release.
   byte-identical rebuilds. Raw QCOW2 bytes are verified by checksum, not claimed
   byte-reproducible across unpinned qemu-img versions.
 - **No enrollment input is baked into the image, cloud-init seed or provisioning
-  metadata.** First boot generates the secret, salt and keypair locally and
-  exports only a digest-only bundle under the **SHARED** ADR0019 contract. This
-  lane does not define, fork or mount a node-control RPC; bootstrap scopes are
-  limited to `BeginEnrollmentChallenge` and `ClaimEnrollment`. See
+  metadata.** First boot generates the secret, salt and Ed25519 keypair locally
+  and exports only a digest-only bundle under the **SHARED** ADR0019 contract.
+  This lane does not define, fork or mount a node-control RPC; bootstrap scopes
+  are limited to `BeginEnrollmentChallenge` and `ClaimEnrollment`. SIG_CLAIM
+  uses the shared `ClaimContextRaw` NUL-delimited byte encoding (server-stored
+  nonce, enrollment expiry, proto capability names, channel context; Ed25519
+  only; canonical JSON refused), proven byte-for-byte against a golden from
+  PR532 `fc998875`. Guest Python mirrors the encoder for fixtures only; a
+  production mount must delegate to the shared package. See
   [node control protocol](node-control-protocol.md).
 - Upgrades are staged: write and verify a checksummed undo manifest before
   promotion, recheck health before completion. Rollback restores only a
