@@ -492,6 +492,121 @@ def developer_channel_decision(event_name, opt_in=False, run_event="", conclusio
     return False, f"{event_name} stages only"
 
 
+NIGHTLY_ALIAS = "nightly"
+
+
+def nightly_channel_decision(event_name, opt_in=False, run_event="", conclusion="",
+                             ref="", ci_verified=False):
+    """Nightly writes require an explicit trusted-main dispatch opt-in and a
+    read-only exact-commit main CI verification. Every automatic event — main
+    push, CI workflow_run, PR, schedule, tag — stages only.
+    """
+    allowed, reason = developer_channel_decision(
+        event_name, opt_in, run_event, conclusion, ref, ci_verified)
+    if not allowed:
+        return False, "nightly " + reason
+    return True, "nightly opt-in with verified exact main CI"
+
+
+def nightly_immutable_reference(commit):
+    """Nightly reuses the existing per-commit immutable image identity."""
+    return f"{DOCKER_HUB_IMAGE}:sha-{commit}"
+
+
+def sha_tag_decision(commit, observation, expected_digest=None):
+    """Pre-write gate for the SHARED sha-<commit> immutable identity.
+
+    Both edge and nightly writers share this tag. A present tag is reused only
+    when its observed digest and platforms are verified against the operator's
+    expected digest for this pinned commit. A conflict or an unknown lookup
+    refuses with zero writes; an absent tag may be built and pushed.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return "refuse", "", "the pinned commit must be a full 40-hex SHA"
+    state, info = observation
+    if state == "unknown":
+        return "refuse", "", "sha tag lookup is unknown; refusing before any write"
+    if state == "absent":
+        return "push", "", "sha tag is absent; a new immutable image may be built"
+    if not expected_digest or not valid_digest(expected_digest):
+        return "refuse", "", "sha tag already exists; a verified expected digest is required to reuse it"
+    if info["digest"] != expected_digest:
+        return "refuse", "", "sha tag digest conflicts with the verified expected digest"
+    if not REQUIRED_PLATFORMS <= info["platforms"]:
+        return "refuse", "", "sha tag lacks both Linux architectures"
+    return "reuse", info["digest"], "sha tag is already verified; reuse it without another push"
+
+
+def commit_is_ancestor(older, newer):
+    """Read-only local git ancestry check for the previously promoted commit."""
+    try:
+        subprocess.run(["git", "merge-base", "--is-ancestor", older, newer],
+                       check=True, cwd=ROOT, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+        return True
+    except (subprocess.CalledProcessError, OSError):
+        return False
+
+
+def nightly_identity_binding(previous_commit, previous_digest, observer=None):
+    """Bind a previous-commit claim to the LIVE sha-<previous_commit> digest.
+
+    The operator's string alone is never trusted: the previous sha tag must be
+    observed with that exact digest and both platforms. Returns a digest→commit
+    map used by the monotonicity check, or {} when untraceable.
+    """
+    if not previous_commit or not previous_digest or not valid_digest(previous_digest):
+        return {}
+    state, info = (observer or observe_reference)(
+        nightly_immutable_reference(previous_commit))
+    if state != "present" or info["digest"] != previous_digest:
+        return {}
+    if not REQUIRED_PLATFORMS <= info["platforms"]:
+        return {}
+    return {previous_digest: previous_commit}
+
+
+def nightly_promotion_decision(commit, digest, immutable_observation,
+                               alias_observation, previous_commit=None, ancestor=None,
+                               identity_binding=None):
+    """Fail-closed check before moving the nightly alias.
+
+    The immutable sha-<commit> image must already be verified (digest + both
+    platforms). An alias already at that digest is idempotent. Moving over a
+    different digest needs the observed alias digest bound to a verified sha
+    reference (identity_binding) that agrees with the operator's previous
+    commit and is an ancestor of the candidate. An unbound/stale identity
+    refuses; the operator string is never trusted on its own.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return False, "the pinned commit must be a full 40-hex SHA"
+    if not valid_digest(digest):
+        return False, "missing or invalid verified digest"
+    try:
+        verify_tag_digest(immutable_observation, digest)
+    except ValueError as error:
+        return False, "immutable sha image failed verification: " + str(error)
+    state, info = alias_observation
+    if state == "unknown":
+        return False, "nightly alias state is unknown"
+    if state == "present":
+        if info["digest"] == digest:
+            return True, "nightly already at the verified digest; no move"
+        if not REQUIRED_PLATFORMS <= info["platforms"]:
+            return False, "nightly alias lacks both Linux architectures"
+        bound = (identity_binding or {}).get(info["digest"])
+        if not bound:
+            return False, "nightly alias digest has no verified sha identity binding"
+        if previous_commit and bound != previous_commit:
+            return False, "operator previous commit does not match the observed nightly identity"
+        if bound == commit:
+            return False, "digest conflict for the same pinned commit"
+        checker = ancestor or commit_is_ancestor
+        if not checker(bound, commit):
+            return False, "nightly would move backwards or from an unrelated commit"
+    return True, "nightly may move to the verified digest"
+
+
 def exact_main_ci_verified(commit, runs_json=None):
     """Read-only: the exact commit must be an ancestor of main AND have a
     successful, completed push CI run for that SHA. No operator checkbox can
@@ -902,6 +1017,66 @@ def indexable_urls_cli(args):
     return urls
 
 
+def nightly_gate(args):
+    """Emit the single nightly publication decision used by cd.yml."""
+    allowed, reason = nightly_channel_decision(
+        args.event, args.opt_in, args.run_event, args.conclusion,
+        args.ref, args.ci_verified)
+    values = {"publish": str(allowed).lower(), "reason": reason,
+              "immutable_ref": nightly_immutable_reference(args.commit)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return allowed
+
+
+def sha_tag_gate(args):
+    """Read-only pre-write gate for the shared sha-<commit> image identity."""
+    observation = observe_reference(nightly_immutable_reference(args.commit))
+    action, digest, reason = sha_tag_decision(
+        args.commit, observation, args.expected_digest)
+    values = {"action": action, "digest": digest, "reason": reason,
+              "reference": nightly_immutable_reference(args.commit)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if action == "refuse":
+        raise ValueError("Shared sha tag gate refused: " + reason)
+    return action
+
+
+def nightly_promote(args):
+    """Verify the immutable image, decide, and optionally move the nightly alias.
+
+    Without --apply this is a read-only dry run. With --apply it writes only the
+    nightly alias from an already verified digest and re-checks tag→digest.
+    """
+    immutable = observe_reference(nightly_immutable_reference(args.commit))
+    alias = observe_reference(f"{DOCKER_HUB_IMAGE}:{NIGHTLY_ALIAS}")
+    binding = nightly_identity_binding(
+        args.previous_commit, args.previous_digest)
+    allowed, reason = nightly_promotion_decision(
+        args.commit, args.digest, immutable, alias, args.previous_commit,
+        identity_binding=binding)
+    values = {"allowed": str(allowed).lower(), "reason": reason,
+              "digest": args.digest, "immutable_state": immutable[0],
+              "alias_state": alias[0],
+              "identity_bound": str(bool(binding)).lower()}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not allowed:
+        raise ValueError("Nightly promotion refused: " + reason)
+    if args.apply:
+        if alias[0] == "present" and alias[1]["digest"] == args.digest:
+            print("nightly already verified; no overwrite")
+            return True
+        reference = f"{DOCKER_HUB_IMAGE}:{NIGHTLY_ALIAS}"
+        source = f"{DOCKER_HUB_IMAGE}@{args.digest}"
+        subprocess.run(["docker", "buildx", "imagetools", "create",
+                        "--tag", reference, source], check=True, cwd=ROOT)
+        verify_tag_digest(observe_reference(reference), args.digest)
+        print("nightly promoted and verified")
+    return True
+
+
 def release_record(args):
     """Decide whether a durable release record exists before alias promotion."""
     action, reason = release_record_decision(
@@ -1056,6 +1231,20 @@ def build_parser():
     developer_gate.add_argument("--conclusion", default="")
     developer_gate.add_argument("--ref", default="")
     developer_gate.add_argument("--ci-verified", default="")
+    nightly_gate_cmd = commands.add_parser("nightly-gate")
+    for name in ("event", "commit", "ref"):
+        nightly_gate_cmd.add_argument("--" + name, required=True)
+    for name in ("opt-in", "run-event", "conclusion", "ci-verified"):
+        nightly_gate_cmd.add_argument("--" + name, default="")
+    sha_gate_cmd = commands.add_parser("sha-tag-gate")
+    sha_gate_cmd.add_argument("--commit", required=True)
+    sha_gate_cmd.add_argument("--expected-digest", default="")
+    nightly_promote_cmd = commands.add_parser("nightly-promote")
+    nightly_promote_cmd.add_argument("--commit", required=True)
+    nightly_promote_cmd.add_argument("--digest", required=True)
+    nightly_promote_cmd.add_argument("--previous-commit", default="")
+    nightly_promote_cmd.add_argument("--previous-digest", default="")
+    nightly_promote_cmd.add_argument("--apply", action="store_true")
     module_resolver = commands.add_parser("module-version")
     module_resolver.add_argument("--version", required=True)
     ci_checker = commands.add_parser("verify-main-ci")

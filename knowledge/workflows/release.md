@@ -97,6 +97,16 @@ resume from the original verified download artifact without rebuilding images.
   operator checkbox is never CI evidence. IndexNow notification is deferred
   because URLs come from a push diff while deployment is dispatch-only. A scoped
   publish-boundary opt-in needs release-auditor review before held merges.
+- `nightly` is a development alias, not a release version: it points to the most
+  recent qualifying build of a pinned main commit with exact successful CI, and
+  reuses the verified `sha-<full-commit>` image rather than adding a date alias.
+  Both edge and nightly writers preflight that shared sha tag before any build
+  or push: reuse a verified digest, or refuse with zero writes on conflict or an
+  unknown lookup. Nightly promotion binds the previous commit to the observed
+  alias digest through a verified sha reference before checking ancestry; a bare
+  operator string is never trusted. Nightly never moves `latest`, a minor tag or
+  `edge`, and no scheduled registry write is enabled. Seeding a live nightly is
+  separately authorized; the existing `edge` image is not a fresh nightly.
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The
