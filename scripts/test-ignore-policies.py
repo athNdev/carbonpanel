@@ -15,6 +15,20 @@ ROOT = Path(__file__).resolve().parent.parent
 EXCLUDED = (
     "data/world/level.dat", "nested/Data/world.dat", "backups/server.zip", "Backups/server.zip",
     "worlds/world/level.dat", "Worlds/world/level.dat", "servers/server/level.dat",
+    # Saved-world data must stay out of the build context even though the
+    # SvelteKit /worlds source route is explicitly re-included (OSS-381).
+    "data/worlds/level.dat", "data/servers/srv1/worlds/world/level.dat",
+    "backups/snapshot/worlds/world/level.dat", "Backups/snapshot/Worlds/world/level.dat",
+    "tmp/stage/worlds/world/level.dat", "nested/worlds/world/level.dat", "nested/Worlds/world/level.dat",
+    # OSS-381 sentinels: sensitive/persistent files placed INSIDE the /worlds
+    # source route tree must still be excluded. They guard the ordering of the
+    # route re-include block above the general exclusions in .dockerignore.
+    "web/carbon-panel/src/routes/worlds/.env",
+    "web/carbon-panel/src/routes/worlds/route.db",
+    "web/carbon-panel/src/routes/worlds/[server]/[world]/token.key",
+    "web/carbon-panel/src/routes/worlds/data/worlds/level.dat",
+    "web/carbon-panel/src/routes/worlds/backups/snapshot.zip",
+    "web/carbon-panel/src/routes/worlds/tmp/stage.dat",
     ".env", ".env.local", "private.env", "secrets/token.key", "secrets/tls.pem",
     "secrets/client.p12", "secrets/client.pfx", "nested/.mcp.json",
     ".mcp.local.json", ".cline/mcp.json", "nested/.cline/mcp.json", ".cursor/mcp.json", "nested/.cursor/mcp.json",
@@ -31,6 +45,9 @@ INCLUDED = (
     "cmd/carbon-storage/main.go", "proto/carbonpanel/v1/backup.proto",
     "pkg/proto/carbonpanel/v1/backup.pb.go", "web/carbon-panel/package.json",
     "web/carbon-panel/build/.gitkeep", "web/carbon-panel/src/routes/servers/+page.svelte",
+    # OSS-381: the /worlds source route must ship in packaged builds.
+    "web/carbon-panel/src/routes/worlds/+page.svelte",
+    "web/carbon-panel/src/routes/worlds/[server]/[world]/+page.svelte",
 )
 
 
@@ -95,7 +112,9 @@ def check_docker_context(directory):
     for required in ("internal/backupcrypt/encrypt.go", "cmd/carbon-storage/main.go",
                      "cmd/carbon-panel/main.go", "proto/carbonpanel/v1/backup.proto",
                      "pkg/proto/carbonpanel/v1/backup.pb.go", "config.example.yaml",
-                     "web/carbon-panel/package.json", "scripts/web-build.sh", ".env.example"):
+                     "web/carbon-panel/package.json", "scripts/web-build.sh", ".env.example",
+                     "web/carbon-panel/src/routes/worlds/+page.svelte",
+                     "web/carbon-panel/src/routes/worlds/[server]/[world]/+page.svelte"):
         if required not in outputs[0]:
             raise AssertionError(f"Required source missing from Docker context: {required}")
     print(f"PASS: clean and cluttered Docker contexts match ({len(outputs[0])} files)")

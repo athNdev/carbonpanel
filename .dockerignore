@@ -1,6 +1,18 @@
 # SPDX-License-Identifier: MIT AND MPL-2.0
 # Inherited DiscoPanel material remains subject to the MIT License in LICENSE.
 
+# Persisted Minecraft world data is never a build input. The SvelteKit /worlds
+# source route is source, not world data: re-include ONLY its source files.
+# This block must stay ABOVE the general sensitive/persistent exclusions below,
+# so those later rules still win for anything nested under the route tree.
+worlds
+**/worlds
+Worlds
+**/Worlds
+!web/carbon-panel/src/routes/worlds
+!web/carbon-panel/src/routes/worlds/**/*.svelte
+!web/carbon-panel/src/routes/worlds/**/*.ts
+
 # Never send local state, credentials, or checkout metadata to builders.
 .git
 **/.git
@@ -80,10 +92,6 @@ backups
 **/backups
 Backups
 **/Backups
-worlds
-**/worlds
-Worlds
-**/Worlds
 /servers
 sandbox
 **/sandbox
