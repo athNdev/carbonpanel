@@ -97,6 +97,13 @@ resume from the original verified download artifact without rebuilding images.
   operator checkbox is never CI evidence. IndexNow notification is deferred
   because URLs come from a push diff while deployment is dispatch-only. A scoped
   publish-boundary opt-in needs release-auditor review before held merges.
+- Human-readable `build-<UTC>-<short-commit>` aliases are immutable additions at
+  exact existing digests, not releases or channels. They are recomputed from the
+  checked-in mapping by `scripts/docker_readable_aliases.py` using observed Hub
+  tag publication time (a proxy, not build time) and never move `latest`, a
+  minor tag, `edge`, `nightly` or an original `sha-*` ref. Only an explicit
+  trusted-main dispatch may add them, using imagetools create with strict
+  observation and idempotence; see ADR 0034.
 - `nightly` is a development alias, not a release version: it points to the most
   recent qualifying build of a pinned main commit with exact successful CI, and
   reuses the verified `sha-<full-commit>` image rather than adding a date alias.

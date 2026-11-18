@@ -126,6 +126,11 @@ policy; pin an explicit version for upgrades. The image digest in the release
 manifest is the immutable reference for that release. Module images have their
 own publishing workflow.
 
+Readable immutable per-build aliases (`build-<UTC timestamp>-<short commit>`)
+are documented separately in [Docker readable build aliases](docker-readable-aliases.md).
+They are additions at existing digests and never move `latest`, a minor tag,
+`edge`, `nightly` or a release tag.
+
 ## Nightly development channel
 
 `nightly` is a development alias, not a release version or a GitHub release. It
