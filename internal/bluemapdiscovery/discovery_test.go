@@ -10,11 +10,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/hostmount"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/worldview"
 )
@@ -156,6 +158,44 @@ func TestRendererBaseURLUsesInspectedIPFixture(t *testing.T) {
 	}
 }
 
+// The daemon-host bind source differs from the controller-visible DataPath in
+// containerized deployments. Both sides are compared in host coordinates via
+// the hostmount mapping; equal-fold fallback is not used on Linux.
+func TestWorldMountUsesDaemonHostCoordinatesFixture(t *testing.T) {
+	mapping := hostmount.Mapping{
+		ContainerDir: "/app/data", HostDir: "/srv/host/carbon-data",
+		Translated: true, Origin: "fixture",
+	}
+	hostmount.Configure(mapping)
+	defer hostmount.Configure(hostmount.Mapping{}) // restore global state
+
+	controllerData := "/app/data/servers/srv-a"
+	hostLevel := "/srv/host/carbon-data/servers/srv-a/actual_world"
+	expected := hostmount.Translate(filepath.Join(controllerData, "actual_world"))
+	if expected != hostLevel {
+		t.Fatalf("expected host source = %q, want %q", expected, hostLevel)
+	}
+	identity := &docker.ModuleRuntimeIdentity{
+		ContainerPorts: []int{8100},
+		Mounts: []docker.ModuleRuntimeMount{
+			{Type: "bind", Source: hostLevel, Target: "/app/world", ReadOnly: true},
+		},
+	}
+	if !mountMatches(identity, expected) {
+		t.Fatal("translated daemon-host source must match the observed bind")
+	}
+	for _, wrong := range []string{
+		filepath.Join(controllerData, "actual_world"), // controller path, not host path
+		"/srv/host/carbon-data/servers/srv-b/actual_world",
+		"/srv/HOST/carbon-data/servers/srv-a/actual_world",
+	} {
+		identity.Mounts[0].Source = wrong
+		if runtime.GOOS != "windows" && mountMatches(identity, expected) {
+			t.Fatalf("wrong host path %q must be refused", wrong)
+		}
+	}
+}
+
 // Exact shipped legacy tag is adoptable with full provenance; a lookalike is
 // not. Adoption never reconfigures or mutates the existing module.
 func TestLegacyBlueMapAdoptionProvenanceFixture(t *testing.T) {
@@ -165,7 +205,7 @@ func TestLegacyBlueMapAdoptionProvenanceFixture(t *testing.T) {
 			TemplateID: "builtin-bluemap", Image: bluemapLegacyImageTag,
 			State: "running", OnOwnedNetwork: true, RendererIP: "172.20.0.5",
 			ContainerPorts: []int{8100},
-			Mounts: []docker.ModuleRuntimeMount{{Type: "bind", Source: `/srv/data/srv-blue/actual_world`, Target: "/app/world", ReadOnly: true}},
+			Mounts:         []docker.ModuleRuntimeMount{{Type: "bind", Source: `/srv/data/srv-blue/actual_world`, Target: "/app/world", ReadOnly: true}},
 		}
 	}
 	module := &storage.Module{ID: "mod-blue-1", ServerID: "srv-blue", NodeID: "default", TemplateID: "builtin-bluemap"}

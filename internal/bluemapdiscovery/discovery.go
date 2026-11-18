@@ -20,7 +20,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +30,7 @@ import (
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/hostmount"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/worldview"
 )
@@ -147,7 +150,10 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 
 	// The requested canonical world is the server's actual level folder. A
 	// non-default folder is mounted at /app/world; compare the real bind source.
-	expectedWorldSource := filepath.Join(server.DataPath, levelName)
+	// Both sides must be in DAEMON HOST coordinates. The observed bind source
+	// comes from the node-scoped container inspect; the expected path is the
+	// controller-visible data path mapped through the existing hostmount seam.
+	expectedWorldSource := hostmount.Translate(filepath.Join(server.DataPath, levelName))
 	mount, hasWorldMount := identity.ModuleWorldMount()
 	if hasWorldMount && levelName != "" {
 		facts.ReadOnlyWorldMount = mount.ReadOnly
@@ -273,12 +279,14 @@ func containsPort(ports []int, want int) bool {
 }
 
 func samePath(a, b string) bool {
-	ca, cb := filepath.Clean(a), filepath.Clean(b)
+	ca := path.Clean(filepath.ToSlash(filepath.Clean(a)))
+	cb := path.Clean(filepath.ToSlash(filepath.Clean(b)))
 	if ca == cb {
 		return true
 	}
-	// Windows path comparison is case-insensitive for the same volume.
-	return strings.EqualFold(ca, cb)
+	// Case-insensitive comparison is only valid on Windows. On Linux a
+	// case-folded fallback would accept a different daemon-host path.
+	return runtime.GOOS == "windows" && strings.EqualFold(ca, cb)
 }
 
 // readAcceptDownload observes the explicit acknowledgement in core.conf via

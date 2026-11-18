@@ -19,6 +19,7 @@ import (
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/hostmount"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
@@ -303,7 +304,9 @@ func ManagedVolumes(server *storage.Server, level string) (string, error) {
 	if server == nil || server.DataPath == "" || !plainComponent(level) {
 		return "", ErrManagedUnsupported
 	}
-	data := strings.TrimRight(strings.ReplaceAll(server.DataPath, `\`, "/"), "/")
+	// Bind sources are interpreted by the daemon in HOST coordinates. Map the
+	// controller-visible data root through the existing hostmount seam first.
+	data := strings.TrimRight(strings.ReplaceAll(hostmount.Translate(server.DataPath), `\`, "/"), "/")
 	base := data + "/modules/bluemap"
 	vols := []docker.ModuleVolumeMount{
 		{Source: base + "/config", Target: "/app/config", CreateDir: true},
