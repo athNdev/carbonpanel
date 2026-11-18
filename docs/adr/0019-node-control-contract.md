@@ -163,6 +163,15 @@ bytes need no delimiter. There is no length prefix and no canonical-JSON step.
   would change the context on every challenge and break the binding; signing a
   client-supplied expiry would let a caller extend the enrollment.
 
+**Known fixture divergence (route to the VM lane).** The checked-in VM
+first-boot fixture `packaging/node-vm/cloud-init/firstboot/enroll.py` still
+builds its context with canonical JSON (`CONTEXT_PREFIX + 0x00 + json.dumps`)
+instead of the table above. It uses the server nonce, not a client nonce, so it
+does not reintroduce that specific flaw, but its bytes will not verify against
+this package. That lane must switch to the exact NUL-delimited encoding before
+any production mount; this OSS-385 change deliberately does not edit the VM
+lane. No conformance or interoperability with that fixture is claimed here.
+
 ### Curve decision: Ed25519 only
 
 ADR 0019 originally allowed "Ed25519 or P-256". The shared implementation
