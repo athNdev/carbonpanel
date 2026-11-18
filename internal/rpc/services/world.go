@@ -220,8 +220,11 @@ func (s *WorldService) ImportWorld(ctx context.Context, req *connect.Request[v1.
 		if msg.GetUploadId() == "" || s.uploads == nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("upload session is unavailable"))
 		}
-		tempPath, _, pathErr := s.uploads.GetTempPath(msg.GetUploadId())
+		tempPath, _, pathErr := s.uploads.GetTempPathFor(msg.GetUploadId(), uploadOwnerID(ctx))
 		if pathErr != nil {
+			if denied := ownerMismatchError(pathErr); denied != nil {
+				return nil, denied
+			}
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found"))
 		}
 		result, err = s.importer.ImportLocal(ctx, importReq, tempPath)

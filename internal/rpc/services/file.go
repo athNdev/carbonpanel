@@ -389,9 +389,14 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	// Get temp file path and original filename from upload manager
-	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
+	// Get temp file path and original filename from upload manager. The
+	// session owner must match the caller: a session ID is not a capability.
+	ownerID := uploadOwnerID(ctx)
+	tempPath, originalFilename, err := s.uploadManager.GetTempPathFor(msg.UploadSessionId, ownerID)
 	if err != nil {
+		if denied := ownerMismatchError(err); denied != nil {
+			return nil, denied
+		}
 		s.log.Error("Failed to get upload session: %v", err)
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found or not completed"))
 	}
@@ -452,7 +457,7 @@ func (s *FileService) SaveUploadedFile(ctx context.Context, req *connect.Request
 	s.adoptServerOwnership(root, destFilePath, false)
 
 	// Cleanup the upload session
-	s.uploadManager.CleanupSession(msg.UploadSessionId)
+	_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 
 	return connect.NewResponse(&v1.SaveUploadedFileResponse{
 		Message: "File uploaded successfully",

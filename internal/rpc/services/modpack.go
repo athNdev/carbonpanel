@@ -506,9 +506,14 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("upload_session_id is required"))
 	}
 
-	// Get temp file path and original filename from upload manager
-	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
+	// Get temp file path and original filename from upload manager. The
+	// upload session is bound to its creator, not to the session ID alone.
+	ownerID := uploadOwnerID(ctx)
+	tempPath, originalFilename, err := s.uploadManager.GetTempPathFor(msg.UploadSessionId, ownerID)
 	if err != nil {
+		if denied := ownerMismatchError(err); denied != nil {
+			return nil, denied
+		}
 		s.log.Error("Failed to get upload session %s: %v", msg.UploadSessionId, err)
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("upload session not found or not completed"))
 	}
@@ -521,7 +526,7 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 				s.log.Error("Failed to remove temp file %s: %v", tempPath, err)
 			}
 		}
-		s.uploadManager.Cancel(msg.UploadSessionId)
+		_ = s.uploadManager.CancelFor(msg.UploadSessionId, ownerID)
 		if modpackID != "" {
 			if err := s.store.DeleteIndexedModpack(ctx, modpackID); err != nil {
 				s.log.Error("Failed to cleanup modpack %s from database: %v", modpackID, err)
@@ -672,7 +677,7 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 	}
 
 	// Cleanup the upload session
-	s.uploadManager.CleanupSession(msg.UploadSessionId)
+	_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 
 	// Create a file entry for the uploaded modpack
 	dbFile := &storage.IndexedModpackFile{
