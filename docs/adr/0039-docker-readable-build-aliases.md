@@ -1,6 +1,11 @@
-# ADR 0034: Retroactive human-readable immutable Docker build aliases
+# ADR 0039: Retroactive human-readable immutable Docker build aliases
 
 Status: Accepted
+
+ADR number allocation: 0034 is reserved for MCP server distribution; 0035-0038
+are reserved for node VM, node LXC, portable installer and host-native daemon.
+This decision uses 0039. The orchestrator owns the `knowledge/decisions/adrs.md`
+index row.
 
 ## Context
 

@@ -104,7 +104,7 @@ resume from the original verified download artifact without rebuilding images.
   (`tag_last_pushed`, fallback `last_updated`; a proxy, not build time) and never
   move `latest`, a minor tag, `edge`, `nightly` or an original `sha-*` ref. Only
   an explicit trusted-main dispatch may add them, using imagetools create with
-  strict observation and idempotence; see ADR 0034.
+  strict observation and idempotence; see ADR 0039.
 - `nightly` is a development alias, not a release version: it points to the most
   recent qualifying build of a pinned main commit with exact successful CI, and
   reuses the verified `sha-<full-commit>` image rather than adding a date alias.
