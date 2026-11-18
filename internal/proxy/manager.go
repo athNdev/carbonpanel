@@ -41,6 +41,7 @@ type Manager struct {
 	valkeySync       *ValkeySyncManager
 	serverHostnames  map[string]string
 	listeners        ListenerFactory
+	trustedProxyCIDRs []*net.IPNet
 }
 
 // DockerInspector is the subset of the Docker client used for container IP
@@ -66,6 +67,12 @@ func NewManagerWithListeners(store *db.Store, cfg *config.Config, logger *logger
 		networkName:     cfg.Docker.NetworkName,
 		serverHostnames: make(map[string]string),
 		listeners:       listeners,
+	}
+	trusted, err := ParseTrustedProxyCIDRs(cfg.Proxy.TrustedProxyCIDRs)
+	if err != nil {
+		logger.Error("Invalid proxy.trusted_proxy_cidrs: %v; no inbound PROXY header will be trusted", err)
+	} else {
+		m.trustedProxyCIDRs = trusted
 	}
 	m.directKnocks.SetKnockBindHost(cfg.Proxy.BindHost)
 	m.directKnocks.listen = listeners.listenTCP
@@ -241,12 +248,13 @@ func (m *Manager) Start() error {
 			Listeners:        m.listeners,
 			ListenAddr:       listenAddr,
 			Logger:           m.logger,
-			ProxyProtocol:    listener.ProxyProtocol,
-			WakeHandler:      m.wakeHandler,
-			ActivityHandler:  m.activityHandler,
-			SleepWakeHandler: m.sleepWakeHandler,
-			AcceptsTransfers: m.acceptsTransfers(),
-			LoginRateLimit:   m.loginRateLimit(),
+			ProxyProtocol:     listener.ProxyProtocol,
+			TrustedProxyCIDRs: m.trustedProxyCIDRs,
+			WakeHandler:       m.wakeHandler,
+			ActivityHandler:   m.activityHandler,
+			SleepWakeHandler:  m.sleepWakeHandler,
+			AcceptsTransfers:  m.acceptsTransfers(),
+			LoginRateLimit:    m.loginRateLimit(),
 		})
 
 		m.proxies[listener.Port] = proxy
@@ -709,10 +717,11 @@ func (m *Manager) AddListener(listener *db.ProxyListener) error {
 		Listeners:        m.listeners,
 		ListenAddr:       listenAddr,
 		Logger:           m.logger,
-		ProxyProtocol:    listener.ProxyProtocol,
-		WakeHandler:      m.wakeHandler,
-		ActivityHandler:  m.activityHandler,
-		SleepWakeHandler: m.sleepWakeHandler,
+		ProxyProtocol:     listener.ProxyProtocol,
+		TrustedProxyCIDRs: m.trustedProxyCIDRs,
+		WakeHandler:       m.wakeHandler,
+		ActivityHandler:   m.activityHandler,
+		SleepWakeHandler:  m.sleepWakeHandler,
 		AcceptsTransfers: m.acceptsTransfers(),
 		LoginRateLimit:   m.loginRateLimit(),
 	})

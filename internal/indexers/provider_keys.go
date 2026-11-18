@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -99,8 +98,10 @@ func validateCurseForgeKey(ctx context.Context, apiKey string) ProviderKeyValida
 	case http.StatusForbidden, http.StatusUnauthorized:
 		return ProviderKeyValidation{Message: "CurseForge rejected API key (403 Forbidden). Please verify your key at https://console.curseforge.com/#/api-keys."}
 	default:
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
-		return ProviderKeyValidation{Message: fmt.Sprintf("CurseForge returned status %d: %s", res.StatusCode, string(body))}
+		// Do not reflect upstream response text to the console. Provider
+		// errors can contain echoed credentials, internal URLs or other
+		// operator-sensitive detail; return a typed status instead.
+		return ProviderKeyValidation{Message: fmt.Sprintf("CurseForge returned unexpected status %d", res.StatusCode)}
 	}
 }
 

@@ -161,7 +161,7 @@ func NewServer(
 
 	// Initialize WebSocket hub
 	wsHub := ws.NewHub(logStreamer, authManager, enforcer, store, dockerCli, sender, log)
-	wsHub.SetOriginPolicy(cfg.Server.AllowedOrigins, cfg.Server.TrustProxy)
+	wsHub.SetOriginPolicy(cfg.Server.AllowedOrigins, cfg.Server.TrustProxy, cfg.Server.RequireWSOrigin)
 	go wsHub.Run()
 
 	if clientPool == nil && dockerCli != nil {
@@ -316,7 +316,7 @@ func (s *Server) setupHandler() {
 	// Default security headers on every response (MINE-163). Unencrypted
 	// HTTP/2 is negotiated by the caller's http.Server via Protocols, so no
 	// h2c wrapper is needed here (the deprecated h2c.NewHandler was removed).
-	s.handler = securityHeaders(mux)
+	s.handler = securityHeaders(mux, s.config != nil && s.config.Server.TrustProxy)
 }
 
 // SetAdmissionCoordinator supplies the shared in-process admission gate to the
@@ -332,6 +332,7 @@ func (s *Server) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) 
 func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
+	authService.SetTrustProxy(s.config != nil && s.config.Server.TrustProxy)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.clientPool, s.log)
 	configService.SetStorageResolver(s.storageResolver)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)

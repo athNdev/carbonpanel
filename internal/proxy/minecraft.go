@@ -30,6 +30,7 @@ type MinecraftProxy struct {
 	logger            *logger.Logger
 	listenAddr        string
 	proxyProtocol     bool
+	trustedProxyCIDRs []*net.IPNet
 	wakeHandler       WakeHandler
 	activityHandler   ActivityHandler
 	sleepWakeHandler  WakeHandler
@@ -63,6 +64,7 @@ func NewMinecraftProxy(cfg *Config) *MinecraftProxy {
 		logger:            log,
 		listenAddr:        cfg.ListenAddr,
 		proxyProtocol:     cfg.ProxyProtocol,
+		trustedProxyCIDRs: cfg.TrustedProxyCIDRs,
 		wakeHandler:       cfg.WakeHandler,
 		activityHandler:   cfg.ActivityHandler,
 		sleepWakeHandler:  cfg.SleepWakeHandler,
@@ -252,7 +254,7 @@ func (p *MinecraftProxy) handleConnection(clientConn net.Conn) {
 	clientConn.SetReadDeadline(time.Now().Add(10 * time.Second))
 
 	// Detect and parse PROXY protocol v2 header from upstream load balancers (MINE-16)
-	wrappedConn, pxyHdr, err := WrapConnWithProxyProtocol(clientConn)
+	wrappedConn, pxyHdr, err := WrapConnWithProxyProtocolIfTrusted(clientConn, p.trustedProxyCIDRs)
 	if err != nil {
 		p.logger.Debug("Failed to parse PROXY protocol v2 from %s: %v", clientConn.RemoteAddr(), err)
 		return

@@ -12,9 +12,11 @@ package services
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -323,6 +325,18 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(resp), nil
 }
 
+// canManageWildcards is an additional payload-conditional check on top of the
+// procedure's roles/create or roles/update permission. A custom role holding
+// roles:update must not be able to grant itself unrestricted access.
+func (s *RoleService) canManageWildcards(ctx context.Context) bool {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil || s.enforcer == nil {
+		return false
+	}
+	allowed, err := s.enforcer.Enforce(user.Roles, rbac.ResourceRoles, rbac.ActionManageWildcard, "*")
+	return err == nil && allowed
+}
+
 func (s *RoleService) UpdatePermissions(ctx context.Context, req *connect.Request[v1.UpdatePermissionsRequest]) (*connect.Response[v1.UpdatePermissionsResponse], error) {
 	msg := req.Msg
 
@@ -331,6 +345,17 @@ func (s *RoleService) UpdatePermissions(ctx context.Context, req *connect.Reques
 	}
 
 	perms := protoPermsToRbac(msg.Permissions)
+
+	// A wildcard resource or action in a custom role is equivalent to granting
+	// every permission. Require the explicit, non-default capability.
+	for _, perm := range perms {
+		if perm.Resource == "*" || perm.Action == "*" {
+			if !s.canManageWildcards(ctx) {
+				return nil, connect.NewError(connect.CodePermissionDenied, errors.New("granting wildcard permissions requires roles/manage_wildcard"))
+			}
+			break
+		}
+	}
 
 	if err := s.enforcer.SetPermissionsForRole(msg.RoleName, perms); err != nil {
 		s.log.Error("Failed to update permissions for role %s: %v", msg.RoleName, err)
@@ -347,6 +372,13 @@ func (s *RoleService) AssignRole(ctx context.Context, req *connect.Request[v1.As
 
 	if msg.UserId == "" || msg.RoleName == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("user ID and role name are required"))
+	}
+
+	// Assigning the built-in admin role from a roles:create grant would make
+	// that grant an admin escalation. The first-admin bootstrap uses a
+	// different, public path; here only the explicit capability permits it.
+	if strings.EqualFold(msg.RoleName, "admin") && !s.canManageWildcards(ctx) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("assigning the admin role requires roles/manage_wildcard"))
 	}
 
 	if err := s.store.AssignRole(ctx, msg.UserId, msg.RoleName, "local"); err != nil {

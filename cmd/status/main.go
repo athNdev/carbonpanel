@@ -49,6 +49,9 @@ func main() {
 	}
 
 	apiURL := env("CARBONPANEL_URL", "http://host.docker.internal:8080")
+	// The status endpoints have no request authentication. Bind to loopback
+	// unless the operator deliberately exposes the sidecar.
+	host := env("HOST", "127.0.0.1")
 	port := envInt("PORT", 8181)
 	poll := envDuration("POLL_INTERVAL", 10*time.Second)
 
@@ -89,8 +92,8 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	fmt.Printf("Listening :%d\n", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
+	fmt.Printf("Listening on %s:%d (endpoints are unauthenticated)\n", host, port)
+	if err := http.ListenAndServe(fmt.Sprintf("%s:%d", host, port), nil); err != nil {
 		log.Fatal(err)
 	}
 }
