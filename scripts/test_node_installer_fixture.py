@@ -347,7 +347,9 @@ def main():
                 # One source of options: config keys appear exactly once, and
                 # the unit repeats no option flag (only --config-file).
                 assert len(cfg) == len(set(cfg))
-                for key in ("hosts", "data-root", "exec-root", "storage-driver"):
+                assert "bridge" not in cfg, "canonical config must not emit bridge=none with bip"
+                assert '"bridge"' not in config
+                for key in ("hosts", "data-root", "exec-root", "storage-driver", "bip"):
                     assert config.count('"' + key + '"') == 1, key
                 assert config.count('"no-new-privileges"') == 1
                 assert "--config-file=/srv/carbon-node/state/daemon.json" in unit
@@ -361,9 +363,12 @@ def main():
                     assert "\nUser=" not in unit
                     assert "systemctl --user" in rendered["install_hint"]
                 else:
-                    assert "User=root" in unit and "Group=root" in unit
-                    assert "CapabilityBoundingSet=CAP_SYS_ADMIN" in unit
-                    assert "AmbientCapabilities=CAP_SYS_ADMIN" in unit
+                    # Canonical explicit-root unit runs as root by default and
+                    # carries an ordered, non-empty capability bound.
+                    assert "\nUser=" not in unit
+                    assert "CapabilityBoundingSet=" in unit
+                    assert "CAP_SYS_ADMIN" in unit and "CAP_NET_ADMIN" in unit
+                    assert "AmbientCapabilities=" in unit
                     assert "WantedBy=multi-user.target" in unit
                     assert "CapabilityBoundingSet=\n" not in unit
             # Specs that target global config or public sockets are refused.

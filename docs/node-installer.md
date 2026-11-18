@@ -68,8 +68,9 @@ directories.
   Ed25519 signature check.
 - `ImportVolume`, `BackupVolume`, `RecoverVolume` — persistent data handling.
 - `Upgrade`, `Rollback`, `Status` — two-slot artifact lifecycle.
-- `RenderDaemon`, `SetDaemonRenderer`, `DaemonRenderer` — in-memory private
-  daemon rendering with a seam for the native lane's canonical renderer.
+- `RenderDaemon`, `SetDaemonRenderer`, `DaemonRenderer`, `CanonicalRenderer`,
+  `ValidateDaemonPaths` — in-memory private daemon rendering via the shared
+  canonical source, with fail-closed caller-owned path validation.
 
 Sentinel errors (`ErrIntegrity`, `ErrPlatform`, `ErrConsumed`,
 `ErrUnresolvedRecovery`, `ErrSecretLeak`, ...) are stable refusal codes for
@@ -111,9 +112,11 @@ caller-supplied spec via `render-daemon` (read-only). It never writes a unit,
 installs a service or starts a process. This closes the three defects found in
 the merged native-daemon baseline (PR527):
 
-- dockerd options are defined **once**, in the option table that generated
-  `daemon.json`; the unit carries only `--config-file` and repeats no option
-  flag, so CLI flags and config can no longer disagree.
+- dockerd options are defined **once**, in the shared canonical
+  `native.DaemonSpec.Options`; the unit carries only `--config-file` and repeats
+  no option flag, so CLI flags and config can no longer disagree. The old local
+  config path that emitted `bridge: none` together with `bip` was removed: the
+  canonical source emits `bip` only.
 - rootless renders as a **per-user** service (`default.target`,
   `XDG_RUNTIME_DIR`, `dockerd-rootless.sh`, per-user install hint) rather than a
   direct system unit.
@@ -126,10 +129,13 @@ API ports, shared roots/namespaces, rootless without a runtime UID or a socket
 outside `XDG_RUNTIME_DIR`, and unknown modes are all refused. All paths remain
 caller-owned.
 
-The native-daemon lane owns the canonical renderer. Until it lands on main,
-`internal/nodeinstall` provides a local implementation behind the
-`DaemonRenderer` interface and `SetDaemonRenderer` integration seam: wiring the
-shared renderer later requires no change to callers, the CLI or fixtures.
+The canonical renderer now lives on main in
+`internal/noderuntime/native` (`BuildManifest`, `CheckOptionParity`). The
+installer CLI wires it explicitly at startup with
+`SetDaemonRenderer(nodeinstall.CanonicalRenderer{})`; that adapter only maps
+caller-owned paths onto `native.DaemonSpec` and applies a fixture-only executable
+override. It declares no dockerd option of its own. Fail-closed path validation
+(`ValidateDaemonPaths`) remains in the installer and runs before rendering.
 
 ### Artifact integrity and repeatable upgrade/rollback
 

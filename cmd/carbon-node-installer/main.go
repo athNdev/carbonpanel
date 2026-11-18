@@ -102,6 +102,10 @@ func printJSON(v any) error {
 }
 
 func main() {
+	// Explicit reviewed seam: every render goes through the shared canonical
+	// daemon-options renderer (internal/noderuntime/native). No installer-local
+	// option table is used, so daemon.json cannot carry bridge=none with bip.
+	nodeinstall.SetDaemonRenderer(nodeinstall.CanonicalRenderer{})
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
