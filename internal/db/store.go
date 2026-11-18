@@ -316,10 +316,15 @@ func (s *Store) CreateDefaultServerConfig(serverID string) *ServerConfig {
 	stringPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
 
-	// Start with basic defaults
-	rconPassword := "CARBONPANEL_default"
-	if serverID != "" && len(serverID) >= 8 {
-		rconPassword = fmt.Sprintf("CARBONPANEL_%s", serverID[:8])
+	// Each new server gets its own high-entropy RCON password. Older rows with
+	// the deterministic CARBONPANEL_* value are detected at startup and can be
+	// rotated through normal server configuration; they are never silently
+	// rewritten here.
+	rconPassword, rconErr := GenerateRCONPassword()
+	if rconErr != nil {
+		// Fail closed: a blank rcon.password disables RCON in Minecraft.
+		// Never persist a predictable fallback as a credential.
+		rconPassword = ""
 	}
 
 	config := &ServerConfig{

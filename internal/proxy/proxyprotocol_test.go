@@ -126,6 +126,55 @@ func TestWrapConnWithProxyProtocol_WithHeader(t *testing.T) {
 	}
 }
 
+func TestWrapConnWithProxyProtocolIfTrusted(t *testing.T) {
+	srcAddr := &net.TCPAddr{IP: net.ParseIP("198.51.100.42"), Port: 34567}
+	dstAddr := &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 25565}
+
+	newConn := func() *dummyConn {
+		buf := new(bytes.Buffer)
+		_ = WriteProxyV2Header(buf, srcAddr, dstAddr)
+		buf.WriteString("hello minecraft payload")
+		return &dummyConn{
+			readBuf:  buf,
+			writeBuf: new(bytes.Buffer),
+			remote:   &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 12345},
+		}
+	}
+
+	cidrs, err := ParseTrustedProxyCIDRs([]string{"10.0.0.0/8"})
+	if err != nil {
+		t.Fatalf("ParseTrustedProxyCIDRs: %v", err)
+	}
+
+	// Trusted source: the header is consumed and the real client IP is used.
+	wrapped, hdr, err := WrapConnWithProxyProtocolIfTrusted(newConn(), cidrs)
+	if err != nil || hdr == nil {
+		t.Fatalf("trusted proxy header not parsed: hdr=%v err=%v", hdr, err)
+	}
+	if got := wrapped.RemoteAddr().String(); got != "198.51.100.42:34567" {
+		t.Errorf("trusted remote = %q", got)
+	}
+
+	// Untrusted source: the header must be left in the byte stream untouched
+	// and the peer address retained, so a client cannot spoof its source.
+	untrusted, hdr, err := WrapConnWithProxyProtocolIfTrusted(newConn(), nil)
+	if err != nil || hdr != nil {
+		t.Fatalf("untrusted PROXY header must be ignored: hdr=%v err=%v", hdr, err)
+	}
+	if got := untrusted.RemoteAddr().String(); got != "10.0.0.1:12345" {
+		t.Errorf("untrusted remote = %q", got)
+	}
+	payload := make([]byte, 12)
+	n, _ := untrusted.Read(payload)
+	if !bytes.Equal(payload[:n], ProxyV2Signature) {
+		t.Errorf("PROXY signature should remain in the stream for an untrusted peer, got %q", payload[:n])
+	}
+
+	if _, err := ParseTrustedProxyCIDRs([]string{"not-a-cidr"}); err == nil {
+		t.Fatal("invalid CIDR must be rejected")
+	}
+}
+
 func TestWrapConnWithProxyProtocol_WithoutHeader(t *testing.T) {
 	buf := bytes.NewBufferString("regular minecraft handshake bytes")
 	dummy := &dummyConn{

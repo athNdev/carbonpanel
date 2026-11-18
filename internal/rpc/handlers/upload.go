@@ -53,24 +53,17 @@ func NewUploadStreamHandler(uploadManager *upload.Manager, authManager *auth.Man
 			return
 		}
 
-		// Authenticate using the shared auth logic
-		user, err := authManager.AuthenticateFromHeader(r.Context(), r.Header.Get("Authorization"))
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		// Authenticate and authorize through the shared fail-closed policy.
+		// A missing enforcer must never turn a streaming upload into an
+		// unauthenticated write endpoint.
+		if err := requireRequestObject(r, authManager, enforcer, rbac.ResourceUploads, rbac.ActionCreate, "*"); err != nil {
+			writePolicyError(w, err)
 			return
-		}
-
-		// Check RBAC permission (uploads:create)
-		if enforcer != nil {
-			allowed, rbacErr := enforcer.Enforce(user.Roles, rbac.ResourceUploads, rbac.ActionCreate, "*")
-			if rbacErr != nil || !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
 		}
 
 		// Parse resume offset
 		offset := int64(0)
+		var err error
 		if offsetStr := r.Header.Get("X-Upload-Offset"); offsetStr != "" {
 			offset, err = strconv.ParseInt(offsetStr, 10, 64)
 			if err != nil || offset < 0 {

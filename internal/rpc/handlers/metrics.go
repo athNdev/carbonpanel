@@ -69,19 +69,10 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func (h *MetricsHandler) authorize(r *http.Request) bool {
-	if h.authManager == nil || !h.authManager.IsAnyAuthEnabled() {
-		return true
-	}
-	user, err := h.authManager.AuthenticateFromHeader(r.Context(), r.Header.Get("Authorization"))
-	if err != nil {
-		return false
-	}
-	if h.enforcer == nil {
-		return true
-	}
-	allowed, err := h.enforcer.Enforce(user.Roles, rbac.ResourceServers, rbac.ActionRead, "*")
-	return err == nil && allowed
+// authorize delegates to the shared fail-closed policy helper. A missing
+// enforcer or a provider-disabled installation no longer exposes metrics.
+func (h *MetricsHandler) authorize(r *http.Request, objectID string) bool {
+	return requireRequestObject(r, h.authManager, h.enforcer, rbac.ResourceServers, rbac.ActionRead, objectID) == nil
 }
 
 func esc(s string) string {
@@ -178,7 +169,7 @@ func (h *MetricsHandler) serveHost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !h.authorize(r) {
+	if !h.authorize(r, "*") {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -191,13 +182,13 @@ func (h *MetricsHandler) serveServer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if !h.authorize(r) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/v2/metrics/servers/")
 	if id == "" {
 		http.Error(w, "missing server id", http.StatusBadRequest)
+		return
+	}
+	if !h.authorize(r, id) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	all, servers := h.snapshot()

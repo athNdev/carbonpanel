@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -46,30 +47,22 @@ func NewStagedConfigHandler(store *storage.Store, log *logger.Logger, authManage
 	}
 }
 
-func (h *StagedConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.authManager != nil && h.authManager.IsAnyAuthEnabled() {
-		authHeader := ""
-		if token := auth.SessionTokenFromRequest(r); token != "" {
-			authHeader = "Bearer " + token
-		}
-		user, err := h.authManager.AuthenticateFromHeader(r.Context(), authHeader)
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if h.enforcer != nil {
-			action := rbac.ActionRead
-			if r.Method != http.MethodGet {
-				action = rbac.ActionCreate
-			}
-			allowed, rbacErr := h.enforcer.Enforce(user.Roles, rbac.ResourceServerConfig, action, "*")
-			if rbacErr != nil || !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
-		}
+// stagedServerID resolves the owning server of a staged change. Apply,
+// rollback and discard routes carry a staged ID, so authorizing the server ID
+// from the path alone would let a caller with access to server A act on a
+// staged change belonging to server B.
+func (h *StagedConfigHandler) stagedServerID(ctx context.Context, stagedID string) (string, bool) {
+	if h.store == nil || stagedID == "" {
+		return "", false
 	}
+	change, err := h.store.GetStagedConfigChange(ctx, stagedID)
+	if err != nil || change == nil || change.ServerID == "" {
+		return "", false
+	}
+	return change.ServerID, true
+}
 
+func (h *StagedConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
 		http.Error(w, "store not initialized", http.StatusInternalServerError)
 		return
@@ -83,6 +76,35 @@ func (h *StagedConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	serverID := parts[0]
+	action := rbac.ActionRead
+	if r.Method != http.MethodGet {
+		action = rbac.ActionCreate
+	}
+
+	// Authorize against the path server first, before any staged-ID lookup.
+	// Otherwise an unauthorized caller could distinguish "missing record"
+	// (404) from "forbidden" (403) and enumerate staged IDs.
+	if err := requireRequestObject(r, h.authManager, h.enforcer, rbac.ResourceServerConfig, action, serverID); err != nil {
+		writePolicyError(w, err)
+		return
+	}
+
+	// Mutations by staged ID must also be authorized against the record's real
+	// owner, not only the server ID supplied in the URL.
+	if len(parts) >= 3 {
+		ownerID, ok := h.stagedServerID(r.Context(), parts[2])
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if !strings.EqualFold(ownerID, serverID) {
+			if err := requireRequestObject(r, h.authManager, h.enforcer, rbac.ResourceServerConfig, action, ownerID); err != nil {
+				writePolicyError(w, err)
+				return
+			}
+		}
+		serverID = ownerID
+	}
 
 	switch {
 	case len(parts) == 2 && r.Method == http.MethodGet:

@@ -68,6 +68,12 @@ const (
 	// ActionAdmin is the full world_view administration action. It is granted
 	// only to the built-in admin role (via its "*" match); no RPC maps to it.
 	ActionAdmin = "admin"
+	// ActionManageWildcard gates granting a wildcard resource or action to a
+	// custom role, and assigning the built-in admin role. It is not tied to an
+	// RPC: the role service checks it against the caller's roles in addition
+	// to the procedure's roles/create or roles/update permission. Only the
+	// built-in admin role (which matches "*" actions) has it by default.
+	ActionManageWildcard = "manage_wildcard"
 )
 
 // ResourceActionEntry pairs a resource with its valid actions.

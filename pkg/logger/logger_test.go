@@ -163,6 +163,21 @@ func TestSanitizeLogMessage(t *testing.T) {
 			input:    "Using api_key=ak_live_123456789 for external service",
 			expected: "Using api_key=******** for external service",
 		},
+		{
+			name:     "Bearer token",
+			input:    "Authorization: Bearer dp_abc.def-123 sent to upstream",
+			expected: "Authorization: Bearer ******** sent to upstream",
+		},
+		{
+			name:     "x-api-key header",
+			input:    "request header x-api-key: ak_live_123456789",
+			expected: "request header x-api-key: ********",
+		},
+		{
+			name:     "token query value",
+			input:    "callback token=eyJhbGciOiJIUzI1NiJ9.abc",
+			expected: "callback token=********",
+		},
 	}
 
 	for _, tt := range tests {

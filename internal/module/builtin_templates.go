@@ -159,12 +159,13 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultEnv: `{
 				"CARBONPANEL_URL": "http://host.docker.internal:{{config.server.port}}",
 				"POLL_INTERVAL": "10s",
-				"PORT": "{{module.ports.Web.container_port}}"
+				"PORT": "{{module.ports.Web.container_port}}",
+				"HOST": "0.0.0.0"
 			}`,
 			DefaultVolumes:  `[]`,
 			HealthCheckPath: "/health",
 			HealthCheckPort: 8181,
-			Documentation:   "Displays a real-time status dashboard for the attached Minecraft server. Fetches status via the Carbon Panel API including player count, TPS, CPU/memory usage, and server configuration. Automatically refreshes every 10 seconds.",
+			Documentation:   "Displays a real-time status dashboard for the attached Minecraft server. Fetches status via the Carbon Panel API including player count, TPS, CPU/memory usage, and server configuration. Automatically refreshes every 10 seconds. The published web endpoint has no request authentication; it binds 0.0.0.0 inside the container so the panel's port proxy can reach it. Restrict exposure to trusted networks.",
 			DefaultMemory:   512,
 		},
 	}

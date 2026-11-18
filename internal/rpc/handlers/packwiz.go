@@ -96,28 +96,16 @@ func (h *PackwizHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auth check for studio management routes
-	if h.authManager != nil && h.authManager.IsAnyAuthEnabled() {
-		authHeader := ""
-		if token := auth.SessionTokenFromRequest(r); token != "" {
-			authHeader = "Bearer " + token
-		}
-		user, err := h.authManager.AuthenticateFromHeader(r.Context(), authHeader)
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if h.enforcer != nil {
-			action := rbac.ActionRead
-			if r.Method != http.MethodGet {
-				action = rbac.ActionCreate
-			}
-			allowed, rbacErr := h.enforcer.Enforce(user.Roles, rbac.ResourceModpacks, action, "*")
-			if rbacErr != nil || !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
-		}
+	// Auth check for studio management routes. Pack IDs are global objects in
+	// the generated RPC mapping, so keep the global object here for parity
+	// (ADR 0012), but fail closed on missing dependencies.
+	action := rbac.ActionRead
+	if r.Method != http.MethodGet {
+		action = rbac.ActionCreate
+	}
+	if err := requireRequestObject(r, h.authManager, h.enforcer, rbac.ResourceModpacks, action, "*"); err != nil {
+		writePolicyError(w, err)
+		return
 	}
 
 	// Route /api/v1/packwiz/packs...

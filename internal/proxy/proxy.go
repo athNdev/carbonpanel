@@ -10,6 +10,7 @@ package proxy
 
 import (
 	"context"
+	"net"
 	"time"
 
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -57,6 +58,9 @@ type Config struct {
 	ListenAddr       string // Address to listen on (e.g., ":25565" or ":8080")
 	Logger           *logger.Logger
 	ProxyProtocol    bool            // Whether PROXY protocol v2 support is enabled on this listener
+	// TrustedProxyCIDRs is the parsed allowlist of sources whose inbound PROXY
+	// v2 headers are accepted. Empty means no inbound header is honoured.
+	TrustedProxyCIDRs []*net.IPNet
 	WakeHandler      WakeHandler     // Callback to unpause hibernated container upon player connect (MINE-18)
 	ActivityHandler  ActivityHandler // Callback to reset idle tracking upon login intent (MINE-120)
 	SleepWakeHandler WakeHandler     // Callback to boot a deeply-asleep container upon login intent (MINE-121)

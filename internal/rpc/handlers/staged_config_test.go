@@ -58,7 +58,8 @@ func TestStagedConfigHandler_Lifecycle(t *testing.T) {
 	cfg.MOTD = &motd
 	require.NoError(t, store.SaveServerConfig(ctx, cfg))
 
-	h := NewStagedConfigHandler(store, logger.New(), nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	h := NewStagedConfigHandler(store, logger.New(), authMgr, policyEnforcer)
 
 	// 1. List - initially empty
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/staged-config/"+serverID+"/staged", nil)

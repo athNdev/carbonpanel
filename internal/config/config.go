@@ -119,6 +119,10 @@ type ServerConfig struct {
 	UserAgent      string   `mapstructure:"user_agent" json:"user_agent"`
 	TrustProxy     bool     `mapstructure:"trust_proxy" json:"trust_proxy"`
 	AllowedOrigins []string `mapstructure:"allowed_origins" json:"allowed_origins"`
+	// RequireWSOrigin rejects WebSocket upgrades without an Origin header.
+	// Default false preserves CLI/native clients; browser clients always send
+	// Origin, so operators serving only browsers can turn this on.
+	RequireWSOrigin bool `mapstructure:"require_ws_origin" json:"require_ws_origin"`
 }
 
 type DockerConfig struct {
@@ -207,6 +211,9 @@ type ProxyConfig struct {
 	AcceptsTransfers *bool `mapstructure:"accepts_transfers" json:"accepts_transfers"`
 	// LoginRateLimitMS is the per-IP gap between Gate handshakes. 0 disables.
 	LoginRateLimitMS int `mapstructure:"login_ratelimit_ms" json:"login_ratelimit_ms"`
+	// TrustedProxyCIDRs are the only sources allowed to send inbound PROXY
+	// protocol v2 headers. Empty means no inbound header is trusted.
+	TrustedProxyCIDRs []string `mapstructure:"trusted_proxy_cidrs" json:"trusted_proxy_cidrs"`
 }
 
 type ModuleConfig struct {
