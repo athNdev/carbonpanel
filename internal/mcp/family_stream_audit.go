@@ -106,8 +106,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		},
 		Sources: []string{
 			"internal/rpc/server.go:291:mux.Handle(\"/api/v1/upload/\"",
-			"internal/rpc/handlers/upload.go:59:rbac.ResourceUploads, rbac.ActionCreate",
-			"internal/rpc/handlers/upload.go:105:Deliberately NOT returning the server-local temp path",
+			"internal/rpc/handlers/upload.go:70:rbac.ResourceUploads, rbac.ActionCreate",
+			"internal/rpc/handlers/upload.go:124:Deliberately NOT returning the server-local temp path",
 		},
 	},
 	{

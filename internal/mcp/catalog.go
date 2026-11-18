@@ -150,11 +150,20 @@ var Tools = exposedTools
 func init() {
 	Catalog = make(map[string]CatalogEntry, len(rawCatalogEntries))
 	exposed := make(map[string]ToolSpec, len(exposedTools))
+	// Keep the FIRST spec for a procedure. Scoped capability tools deliberately
+	// share their typed RPC's procedure but must not replace the canonical
+	// catalog tool declaration.
 	for _, spec := range exposedTools {
-		exposed[spec.Procedure] = spec
+		if _, seen := exposed[spec.Procedure]; !seen {
+			exposed[spec.Procedure] = spec
+		}
 	}
 	for _, e := range rawCatalogEntries {
-		if spec, ok := exposed[e.Procedure]; ok {
+		// Several registered capability tools can share one audited procedure
+		// (for example the scoped stream tools). The canonical first-slice tool
+		// is generated first, so keep the first match and never let a later
+		// capability tool overwrite the catalog's declared tool name.
+		if spec, ok := exposed[e.Procedure]; ok && e.Tool == "" {
 			e.Tool = spec.Name
 			e.Class = spec.Class
 			e.Confirm = spec.Confirm
