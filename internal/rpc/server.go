@@ -11,7 +11,6 @@ package rpc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -553,82 +552,11 @@ func (s *Server) loggingInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-// Creates a Connect interceptor for authentication and authorization
+// Creates a Connect interceptor for authentication and authorization.
+// The implementation lives in NewAuthInterceptor so disposable fixtures can
+// mount generated handlers behind the same fail-closed authorization path.
 func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			procedure := req.Spec().Procedure
-
-			// Public procedures - no auth required
-			if rbac.PublicProcedures[procedure] {
-				return next(ctx, req)
-			}
-
-			// Authenticate via shared auth logic
-			user, err := s.authManager.AuthenticateFromHeader(ctx, req.Header().Get("Authorization"))
-			if err != nil {
-				s.log.Debug("Auth: Token validation failed for %s: %v", procedure, err)
-				return nil, connect.NewError(connect.CodeUnauthenticated, err)
-			}
-
-			// Set user in context
-			ctx = auth.WithUser(ctx, user)
-
-			// Authenticated-only procedures (no specific resource permission needed)
-			if rbac.AuthenticatedOnlyProcedures[procedure] {
-				return next(ctx, req)
-			}
-
-			// Check resource permission. Every procedure reaching this point
-			// must be explicitly covered by rbac.ProcedurePermissions - any
-			// procedure that is not public, not authenticated-only, and not
-			// in ProcedurePermissions is DENIED by default (fail closed).
-			// This also applies if the RBAC enforcer itself failed to
-			// initialize: previously a nil enforcer silently skipped the
-			// permission check entirely (fail open), which is equally
-			// unsafe.
-			perm, ok := rbac.ProcedurePermissions[procedure]
-			if !ok {
-				s.log.Warn("RBAC: denying request for unmapped procedure %s (no public/authenticated-only/permission entry)", procedure)
-				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("procedure %s has no permission mapping and is denied by default", procedure))
-			}
-
-			if s.enforcer == nil {
-				s.log.Error("RBAC: denying request for %s because the RBAC enforcer is unavailable", procedure)
-				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("rbac enforcer unavailable"))
-			}
-
-			objectID := "*"
-			if perm.ObjectIDField != "" {
-				objectID = extractObjectID(req, perm.ObjectIDField)
-			}
-			allowed, err := s.enforcer.Enforce(user.Roles, perm.Resource, perm.Action, objectID)
-			if err != nil {
-				s.log.Error("RBAC enforcement error: %v", err)
-				return nil, connect.NewError(connect.CodeInternal, err)
-			}
-			if !allowed {
-				// Subuser grant fallback (MINE-139): a per-server grant can
-				// allow server-scoped procedures the caller's roles deny.
-				// Grants never apply to management procedures (SubuserService
-				// itself) — only admins manage grants via role "*" match.
-				if perm.Resource != rbac.ResourceSubusers && perm.ObjectIDField == "server_id" && s.store != nil {
-					want := perm.Resource + "." + perm.Action
-					for _, p := range s.store.SubuserPermissions(ctx, objectID, user.ID) {
-						if p == want {
-							allowed = true
-							break
-						}
-					}
-				}
-			}
-			if !allowed {
-				return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("insufficient permissions for %s/%s", perm.Resource, perm.Action))
-			}
-
-			return next(ctx, req)
-		}
-	}
+	return NewAuthInterceptor(s.authManager, s.enforcer, s.store, s.log)
 }
 
 // Shutdown releases the server's background components.

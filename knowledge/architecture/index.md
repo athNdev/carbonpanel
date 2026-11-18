@@ -5,6 +5,7 @@
 ## Concepts
 
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
+- [MCP tool gateway](mcp-server.md) — A stdio gateway exposes bounded, fail-closed operator workflows through generated Connect clients and a shared coverage drift gate.
 - [Module system](module-system.md) — Modules, hooks, packwiz and indexers deliver server content and modpacks.
 - [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
