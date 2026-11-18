@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { create } from '@bufbuild/protobuf';
 	import { User } from '@lucide/svelte';
 	import { rpcClient } from '$lib/api/rpc-client';
+	import { CarbonButton } from '$lib/components/carbon';
 	import {
 		GetPlayerSkinRequestSchema,
 		RefreshPlayerSkinRequestSchema
@@ -158,14 +159,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/if}
 	</div>
 	{#if refreshable && identityKey && serverId}
-		<button
-			type="button"
-			class="focus-ring rounded-none px-2 py-1 font-sans text-xs text-accent-text hover:bg-accent disabled:opacity-50"
+		<CarbonButton
+			kind="tertiary"
+			size="sm"
 			aria-label="Refresh skin for {name}"
+			loading={refreshing}
 			disabled={refreshing}
 			onclick={refresh}
 		>
-			{refreshing ? 'Refreshing…' : 'Refresh skin'}
-		</button>
+			Refresh skin
+		</CarbonButton>
 	{/if}
 </div>

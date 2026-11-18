@@ -75,7 +75,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	const isBulk = $derived(targets.length > 1);
 	const undoable = $derived(results.filter((result) => canUndoResult(result)));
 
-	async function singleResult(target: PlayerActionTarget, requestId: string): Promise<PlayerActionResult> {
+	async function singleResult(
+		target: PlayerActionTarget,
+		requestId: string
+	): Promise<PlayerActionResult> {
 		let outcome;
 		switch (action) {
 			case 'kick':
@@ -171,8 +174,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				).outcome;
 				break;
 		}
-		const reported = outcome?.results?.find((r) => r.identityKey === target.identityKey) ??
-			outcome?.results?.[0];
+		const reported =
+			outcome?.results?.find((r) => r.identityKey === target.identityKey) ?? outcome?.results?.[0];
 		return (
 			reported ??
 			create(PlayerActionResultSchema, {
@@ -205,24 +208,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					})
 				);
 				results = response.outcome?.results ?? [];
-				outcomeTrace = [
-					response.outcome?.requestId && `request ${response.outcome.requestId}`,
-					response.outcome?.journalId && `journal ${response.outcome.journalId}`
-				]
-					.filter(Boolean)
-					.join(' · ');
+				outcomeTrace = 'Per-player results.';
 			} else {
 				const collected: PlayerActionResult[] = [];
 				for (const target of targets) collected.push(await singleResult(target, requestId));
 				results = collected;
-				outcomeTrace = `request ${requestId}`;
+				outcomeTrace = 'Per-player results.';
 			}
 			const failed = results.filter((r) => !r.success);
 			if (failed.length === 0) toast.success(`${actionLabel(action)} completed`);
 			else toast.error(`${actionLabel(action)}: ${failed.length} target(s) failed`);
 			await onDone?.();
 		} catch (error) {
-			errorMessage = formatRpcError(error, `Could not ${actionLabel(action).toLowerCase()} player(s).`);
+			errorMessage = formatRpcError(
+				error,
+				`Could not ${actionLabel(action).toLowerCase()} player(s).`
+			);
 			toast.error(errorMessage);
 		} finally {
 			busy = false;
@@ -272,8 +273,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <div class="space-y-2 font-sans">
 	{#if !canAct}
 		<p class="text-xs text-warning-text" role="note">
-			You do not have the players:{action} permission on this server. The backend remains
-			authoritative if another control reaches it.
+			You can't {actionLabel(action).toLowerCase()} players on this server.
 		</p>
 	{/if}
 
@@ -294,7 +294,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	<CarbonConfirm
 		bind:open
-		title="{actionLabel(action)} {isBulk ? `${targets.length} players` : targets[0]?.name ?? 'player'}?"
+		title="{actionLabel(action)} {isBulk
+			? `${targets.length} players`
+			: (targets[0]?.name ?? 'player')}?"
 		message={actionSideEffectNote(action)}
 		confirmLabel={actionLabel(action)}
 		danger={actionIsDestructive(action)}
@@ -315,8 +317,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					disabled={busy}
 				/>
 				<p class="text-xs text-muted-foreground">
-					The panel records a request id and the server records a journal entry. The backend
-					re-checks authorization and reports per-target outcomes.
+					{actionSideEffectNote(action)}
 				</p>
 				{#if !canAct}
 					<p class="text-xs text-warning-text" role="note">
@@ -329,7 +330,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	<div aria-live="polite" class="space-y-2">
 		{#if errorMessage}
-			<CarbonTag type="red" size="sm">{errorMessage}</CarbonTag>
+			<p class="text-xs text-destructive-text" role="alert">{errorMessage}</p>
 		{/if}
 
 		{#if results.length > 0}
@@ -363,7 +364,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</CarbonButton>
 				{:else}
 					<span class="text-xs text-muted-foreground" role="note">
-						Undo unavailable: {undoUnavailableReason(action)}
+						Automatic undo isn't available here. {undoUnavailableReason(action)}
 					</span>
 				{/if}
 				{#if undoMessage}

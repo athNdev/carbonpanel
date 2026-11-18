@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
+	import { SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
 	import { ChevronDown, ChevronRight, RefreshCw } from '@lucide/svelte';
 	import {
 		CarbonButton,
@@ -88,7 +89,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	let filter = $state<RosterFilter>(readFilter());
 	let knownServers = $state<Record<string, string>>({});
-	let selected = $state<Set<string>>(new Set());
+	const selected = new SvelteSet<string>();
 	let expanded = $state<string | null>(null);
 	let focusedIndex = $state(-1);
 	let toolbarEl = $state<HTMLDivElement | null>(null);
@@ -114,10 +115,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	const options = $derived.by(() => {
-		const map = new Map<string, string>(Object.entries(knownServers));
-		for (const option of serverOptions) if (option.id) map.set(option.id, option.name || option.id);
-		if (serverId) map.set(serverId, map.get(serverId) || serverId);
-		return [...map.entries()]
+		const byId: Record<string, string> = { ...knownServers };
+		for (const option of serverOptions) if (option.id) byId[option.id] = option.name || option.id;
+		if (serverId) byId[serverId] = byId[serverId] || serverId;
+		return Object.entries(byId)
 			.map(([id, name]) => ({ id, name }))
 			.sort((a, b) => a.name.localeCompare(b.name));
 	});
@@ -144,7 +145,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	function writeUrl(patch: Partial<RosterFilter>, push: boolean) {
 		filter = { ...filter, ...patch };
 		if (!syncUrl || typeof window === 'undefined') return;
-		const params = new URLSearchParams(page.url.searchParams);
+		const params = new SvelteURLSearchParams(page.url.searchParams);
 		const set = (key: string, value: string) => {
 			if (value) params.set(key, value);
 			else params.delete(key);
@@ -155,8 +156,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		set('access', filter.accessFilter === 'all' ? '' : filter.accessFilter);
 		set('sort', filter.sortBy === 'name' ? '' : filter.sortBy);
 		set('dir', filter.sortDescending ? 'desc' : '');
-		const url = `${page.url.pathname}?${params.toString()}`;
+		const query = params.toString();
+		const url = `${resolve('/players')}?${query}`;
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- URL is resolve('/players') plus an encoded query string
 		if (push) void goto(url, { replaceState: false, noScroll: true, keepFocus: true });
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- URL is resolve('/players') plus an encoded query string
 		else replaceState(url, page.state);
 	}
 
@@ -172,7 +176,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			},
 			true
 		);
-		selected = new Set();
+		selected.clear();
 		focusedIndex = -1;
 	}
 
@@ -196,22 +200,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function toggleSelected(player: PlayerSummary) {
-		const next = new Set(selected);
 		const key = keyOf(player);
-		if (next.has(key)) next.delete(key);
-		else next.add(key);
-		selected = next;
+		if (selected.has(key)) selected.delete(key);
+		else selected.add(key);
 	}
 
 	function toggleAll() {
 		const keys = visible.map(keyOf);
 		const allSelected = keys.length > 0 && keys.every((key) => selected.has(key));
-		selected = allSelected ? new Set() : new Set(keys);
+		selected.clear();
+		if (!allSelected) for (const key of keys) selected.add(key);
 	}
 
 	function moveFocus(delta: number) {
 		if (visible.length === 0) return;
-		focusedIndex = ((focusedIndex + delta) % visible.length + visible.length) % visible.length;
+		focusedIndex = (((focusedIndex + delta) % visible.length) + visible.length) % visible.length;
 		listEl?.querySelector<HTMLElement>(`[data-player-row="${focusedIndex}"]`)?.scrollIntoView({
 			block: 'nearest'
 		});
@@ -243,7 +246,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 		if (typing) return;
 		if (event.key === 'Escape') {
-			selected = new Set();
+			selected.clear();
 			expanded = null;
 			return;
 		}
@@ -328,10 +331,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								label="Server"
 								value={filter.serverId}
 								onchange={(event) =>
-									writeUrl(
-										{ serverId: (event.currentTarget as HTMLSelectElement).value },
-										true
-									)}
+									writeUrl({ serverId: (event.currentTarget as HTMLSelectElement).value }, true)}
 								class="w-full sm:w-40"
 							>
 								<option value="">All servers</option>
@@ -346,8 +346,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							onchange={(event) =>
 								writeUrl(
 									{
-										stateFilter: (event.currentTarget as HTMLSelectElement)
-											.value as StateFilter
+										stateFilter: (event.currentTarget as HTMLSelectElement).value as StateFilter
 									},
 									true
 								)}
@@ -365,8 +364,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							onchange={(event) =>
 								writeUrl(
 									{
-										accessFilter: (event.currentTarget as HTMLSelectElement)
-											.value as AccessFilter
+										accessFilter: (event.currentTarget as HTMLSelectElement).value as AccessFilter
 									},
 									true
 								)}
@@ -377,7 +375,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<option value="whitelisted">Allowlisted</option>
 							<option value="banned">Banned</option>
 						</CarbonSelect>
-						<CarbonButton kind="secondary" size="sm" onclick={refresh} disabled={rosterState.loading}>
+						<CarbonButton
+							kind="secondary"
+							size="sm"
+							onclick={refresh}
+							disabled={rosterState.loading}
+						>
 							<RefreshCw class="h-3.5 w-3.5" />
 							<span>Refresh</span>
 						</CarbonButton>
@@ -390,34 +393,61 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<input
 								type="checkbox"
 								aria-label="Select all visible players"
-								checked={visible.length > 0 &&
-									visible.every((p) => selected.has(keyOf(p)))}
+								checked={visible.length > 0 && visible.every((p) => selected.has(keyOf(p)))}
 								onchange={toggleAll}
 							/>
 						</th>
-						<th
-							scope="col"
-							class="px-3 py-2"
-							aria-sort={ariaSort('name')}
-						>
-							<button type="button" class="cursor-pointer hover:underline" onclick={() => sortByColumn('name')}>
-								Player {ariaSort('name') === 'none' ? '' : ariaSort('name') === 'ascending' ? '↑' : '↓'}
+						<th scope="col" class="px-3 py-2" aria-sort={ariaSort('name')}>
+							<button
+								type="button"
+								class="cursor-pointer hover:underline"
+								onclick={() => sortByColumn('name')}
+							>
+								Player {ariaSort('name') === 'none'
+									? ''
+									: ariaSort('name') === 'ascending'
+										? '↑'
+										: '↓'}
 							</button>
 						</th>
 						<th scope="col" class="px-3 py-2" aria-sort={ariaSort('server')}>
-							<button type="button" class="cursor-pointer hover:underline" onclick={() => sortByColumn('server')}>
-								Server {ariaSort('server') === 'none' ? '' : ariaSort('server') === 'ascending' ? '↑' : '↓'}
+							<button
+								type="button"
+								class="cursor-pointer hover:underline"
+								onclick={() => sortByColumn('server')}
+							>
+								Server {ariaSort('server') === 'none'
+									? ''
+									: ariaSort('server') === 'ascending'
+										? '↑'
+										: '↓'}
 							</button>
 						</th>
 						<th scope="col" class="px-3 py-2" aria-sort={ariaSort('presence')}>
-							<button type="button" class="cursor-pointer hover:underline" onclick={() => sortByColumn('presence')}>
-								Presence {ariaSort('presence') === 'none' ? '' : ariaSort('presence') === 'ascending' ? '↑' : '↓'}
+							<button
+								type="button"
+								class="cursor-pointer hover:underline"
+								onclick={() => sortByColumn('presence')}
+							>
+								Presence {ariaSort('presence') === 'none'
+									? ''
+									: ariaSort('presence') === 'ascending'
+										? '↑'
+										: '↓'}
 							</button>
 						</th>
 						<th scope="col" class="px-3 py-2">Access</th>
 						<th scope="col" class="px-3 py-2" aria-sort={ariaSort('lastSeen')}>
-							<button type="button" class="cursor-pointer hover:underline" onclick={() => sortByColumn('lastSeen')}>
-								Last seen {ariaSort('lastSeen') === 'none' ? '' : ariaSort('lastSeen') === 'ascending' ? '↑' : '↓'}
+							<button
+								type="button"
+								class="cursor-pointer hover:underline"
+								onclick={() => sortByColumn('lastSeen')}
+							>
+								Last seen {ariaSort('lastSeen') === 'none'
+									? ''
+									: ariaSort('lastSeen') === 'ascending'
+										? '↑'
+										: '↓'}
 							</button>
 						</th>
 						<th scope="col" class="px-3 py-2">Actions</th>
@@ -451,7 +481,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									>
 										{player.ref?.name || key}
 									</button>
-									<span class="block truncate font-mono text-[0.6875rem] text-muted-foreground" title={key}>
+									<span class="block truncate font-mono text-xs text-muted-foreground" title={key}>
 										{key}
 									</span>
 								</div>
@@ -471,7 +501,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 							{#if expanded === key}
 								<div class="mt-2 max-w-md space-y-2 border-l border-border pl-3">
-									<PlayerProvenance observation={player.presenceObservation} label="Presence" compact />
+									<PlayerProvenance
+										observation={player.presenceObservation}
+										label="Presence"
+										compact
+									/>
 									{#if player.aliases.length > 0}
 										<p class="text-xs text-muted-foreground">
 											Observed aliases:
@@ -494,7 +528,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								{presenceLabel(player.presence)}
 							</CarbonTag>
 							{#if provenanceView(player.presenceObservation) && !provenanceView(player.presenceObservation)?.authoritative}
-								<span class="ml-1 text-xs text-warning-text" title="Non-authoritative presence">*</span>
+								<span class="ml-1 text-xs text-warning-text" title="Non-authoritative presence"
+									>*</span
+								>
 							{/if}
 						</td>
 						<td class="px-3 py-2">
@@ -509,7 +545,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									<CarbonTag type="red" size="sm">Banned</CarbonTag>
 								{/if}
 								{#if !player.operator && !player.whitelisted && !player.banned}
-									<span class="text-xs text-muted-foreground">{player.accessBand || 'Unrestricted'}</span>
+									<span class="text-xs text-muted-foreground"
+										>{player.accessBand || 'Unrestricted'}</span
+									>
 								{/if}
 							</div>
 						</td>
@@ -549,23 +587,56 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</CarbonDataTable>
 
 			{#if bulkTargets.length > 0}
-				<div class="flex flex-col gap-2 border border-border bg-card p-3 sm:flex-row sm:items-center">
+				<div
+					class="flex flex-col gap-2 border border-border bg-card p-3 sm:flex-row sm:items-center"
+				>
 					<div class="min-w-0 flex-1">
 						<p class="mono-label-accent">{bulkTargets.length} players selected</p>
 						<p class="truncate font-mono text-xs text-foreground">
-							{bulkTargets.map((t) => t.name).slice(0, 5).join(', ')}{bulkTargets.length > 5
-								? ` +${bulkTargets.length - 5} more`
-								: ''}
+							{bulkTargets
+								.map((t) => t.name)
+								.slice(0, 5)
+								.join(', ')}{bulkTargets.length > 5 ? ` +${bulkTargets.length - 5} more` : ''}
 						</p>
 					</div>
 					<div class="flex flex-wrap gap-2">
-						<PlayerActions serverId={serverId || filter.serverId} targets={bulkTargets} action="kick" onDone={refresh} />
-						<PlayerActions serverId={serverId || filter.serverId} targets={bulkTargets} action="ban" onDone={refresh} />
-						<PlayerActions serverId={serverId || filter.serverId} targets={bulkTargets} action="pardon" onDone={refresh} />
-						<PlayerActions serverId={serverId || filter.serverId} targets={bulkTargets} action="deop" onDone={refresh} />
-						<PlayerActions serverId={serverId || filter.serverId} targets={bulkTargets} action="whitelist_add" onDone={refresh} />
-						<PlayerActions serverId={serverId || filter.serverId} targets={bulkTargets} action="whitelist_remove" onDone={refresh} />
-						<CarbonButton kind="tertiary" size="sm" onclick={() => (selected = new Set())}>
+						<PlayerActions
+							serverId={serverId || filter.serverId}
+							targets={bulkTargets}
+							action="kick"
+							onDone={refresh}
+						/>
+						<PlayerActions
+							serverId={serverId || filter.serverId}
+							targets={bulkTargets}
+							action="ban"
+							onDone={refresh}
+						/>
+						<PlayerActions
+							serverId={serverId || filter.serverId}
+							targets={bulkTargets}
+							action="pardon"
+							onDone={refresh}
+						/>
+						<PlayerActions
+							serverId={serverId || filter.serverId}
+							targets={bulkTargets}
+							action="deop"
+							onDone={refresh}
+						/>
+						<PlayerActions
+							serverId={serverId || filter.serverId}
+							targets={bulkTargets}
+							action="whitelist_add"
+							onDone={refresh}
+						/>
+						<PlayerActions
+							serverId={serverId || filter.serverId}
+							targets={bulkTargets}
+							action="whitelist_remove"
+							onDone={refresh}
+						/>
+						<CarbonButton kind="tertiary" size="sm" onclick={() => selected.clear()}>
 							Clear selection
 						</CarbonButton>
 					</div>

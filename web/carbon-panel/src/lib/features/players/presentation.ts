@@ -220,13 +220,11 @@ export function capabilityDetail(
 			case PlayerCapability.BRIDGE_INVENTORY:
 			case PlayerCapability.BRIDGE_GROUPS:
 			case PlayerCapability.BRIDGE_MUTE:
-				return 'Optional bridge requires a verified Paper/Fabric/NeoForge artifact and licence review — not shipped.';
 			case PlayerCapability.BEDROCK_XUID:
-				return 'Bedrock identity mapping is not available without a verified Bedrock transport — not shipped.';
 			case PlayerCapability.SKIN_PROXY:
-				return 'Skin rendering is limited to the panel’s same-origin cache; no third-party requests are made.';
+				return "This feature isn't available on this server.";
 			default:
-				return 'This capability is not available on this server. No control is shown because the backend does not report it as supported.';
+				return "This feature isn't available on this server.";
 		}
 	}
 	return 'No additional detail reported by the server.';
@@ -461,7 +459,9 @@ export function actionLabel(action: PlayerActionKind): string {
 }
 
 export function actionIsDestructive(action: PlayerActionKind): boolean {
-	return action === 'kick' || action === 'ban' || action === 'deop' || action === 'whitelist_remove';
+	return (
+		action === 'kick' || action === 'ban' || action === 'deop' || action === 'whitelist_remove'
+	);
 }
 
 export function actionSideEffectNote(action: PlayerActionKind): string {
@@ -487,19 +487,19 @@ export function actionSideEffectNote(action: PlayerActionKind): string {
 export function undoUnavailableReason(action: PlayerActionKind): string {
 	switch (action) {
 		case 'kick':
-			return 'kick cannot be undone — player already left';
+			return 'A kick cannot be reversed — the player has already left.';
 		case 'ban':
-			return 'ban has no automatic undo — use Pardon to reverse it';
+			return 'Pardon reverses a ban.';
 		case 'pardon':
-			return 'pardon has no undo token — the ban entry is already gone';
+			return 'Ban the player again to reverse a pardon.';
 		case 'op':
-			return 'operator grant has no undo token — use Remove operator to reverse it';
+			return 'Remove operator reverses an operator grant.';
 		case 'deop':
-			return 'operator removal has no undo token — re-grant operator to reverse it';
+			return 'Grant operator again to reverse a removal.';
 		case 'whitelist_add':
-			return 'allowlist add has no undo token — use Remove from allowlist to reverse it';
+			return 'Remove from allowlist reverses this change.';
 		case 'whitelist_remove':
-			return 'allowlist removal has no undo token — use Add to allowlist to reverse it';
+			return 'Add to allowlist reverses this change.';
 	}
 }
 
@@ -524,6 +524,7 @@ export function previewTargets(
 /** Correlation id for an action; falls back when crypto.randomUUID is missing. */
 export function newRequestId(): string {
 	const cryptoObject = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
-	if (cryptoObject && typeof cryptoObject.randomUUID === 'function') return cryptoObject.randomUUID();
+	if (cryptoObject && typeof cryptoObject.randomUUID === 'function')
+		return cryptoObject.randomUUID();
 	return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }

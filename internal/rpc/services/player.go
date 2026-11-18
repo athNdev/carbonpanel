@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -96,10 +97,25 @@ type PlayerService struct {
 	negotiator sourceNegotiator
 	skins      skinProvider
 	deep       deepProvider
+
+	// Ingestion is a bounded refresh, not network I/O on every keystroke.
+	ingestMu   sync.Mutex
+	lastIngest map[string]time.Time
 }
 
 func NewPlayerService(store *storage.Store, log *logger.Logger, collector *metrics.Collector) *PlayerService {
-	return &PlayerService{store: store, log: log, metrics: collector}
+	return &PlayerService{store: store, log: log, metrics: collector, lastIngest: make(map[string]time.Time)}
+}
+
+func (s *PlayerService) shouldIngest(serverID string) bool {
+	s.ingestMu.Lock()
+	defer s.ingestMu.Unlock()
+	now := time.Now().UTC()
+	if now.Sub(s.lastIngest[serverID]) < 15*time.Second {
+		return false
+	}
+	s.lastIngest[serverID] = now
+	return true
 }
 
 func (s *PlayerService) SetSourceNegotiator(n sourceNegotiator) { s.negotiator = n }
@@ -287,6 +303,9 @@ func (s *PlayerService) ingestRoster(ctx context.Context, serverID string) {
 		if err := ctx.Err(); err != nil {
 			return
 		}
+		if !s.shouldIngest(id) {
+			continue
+		}
 		var observed []observedPlayer
 		hasObservation := false
 		sourceName := "metrics"
@@ -335,14 +354,8 @@ func (s *PlayerService) ingestRoster(ctx context.Context, serverID string) {
 				s.log.Debug("Player ingestion failed for %s on %s: %v", player.Name, id, err)
 				continue
 			}
-			open, err := s.store.HasOpenPlayerSession(ctx, identity.ID, id)
-			if err != nil {
-				continue
-			}
-			if !open {
-				if _, err := s.store.StartPlayerSession(ctx, identity.ID, id, sourceName, time.Now().UTC()); err != nil {
-					s.log.Debug("Could not start player session for %s: %v", identity.ID, err)
-				}
+			if _, err := s.store.EnsureOpenPlayerSession(ctx, identity.ID, id, sourceName, time.Now().UTC()); err != nil {
+				s.log.Debug("Could not start player session for %s: %v", identity.ID, err)
 			}
 		}
 		stale, err := s.store.OpenPlayerSessions(ctx, id)

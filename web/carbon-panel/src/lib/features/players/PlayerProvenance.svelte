@@ -39,13 +39,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 {#if view}
 	<div
 		class="flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-xs text-muted-foreground {compact
-			? 'py-0.5'
-			: 'py-1'}"
+			? 'py-1'
+			: 'py-2'}"
 	>
 		{#if label}
 			<span class="mono-label-accent">{label}</span>
 		{/if}
-		<CarbonTag type={confidenceTag(observation?.confidence ?? PlayerConfidence.UNSPECIFIED)} size="sm">
+		<CarbonTag
+			type={confidenceTag(observation?.confidence ?? PlayerConfidence.UNSPECIFIED)}
+			size="sm"
+		>
 			{view.source}
 		</CarbonTag>
 		<CarbonTag size="sm" type={view.authoritative ? 'gray' : 'yellow'}>

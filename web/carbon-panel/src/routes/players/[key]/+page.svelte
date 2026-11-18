@@ -10,6 +10,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { create } from '@bufbuild/protobuf';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import {
 		CarbonBreadcrumbs,
 		CarbonButton,
@@ -162,7 +163,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			capabilities = response.capabilities ?? [];
 		} catch (error) {
 			if (generation !== detailGeneration) return;
-			sectionError = { ...sectionError, diagnostics: formatRpcError(error, 'Capabilities unavailable.') };
+			sectionError = {
+				...sectionError,
+				diagnostics: formatRpcError(error, 'Capabilities unavailable.')
+			};
 		}
 	}
 
@@ -223,7 +227,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				default:
 					break;
 			}
-			if (generation === sectionGenerations[tab]) loadedSections = { ...loadedSections, [tab]: true };
+			if (generation === sectionGenerations[tab])
+				loadedSections = { ...loadedSections, [tab]: true };
 		} catch (error) {
 			if (generation === sectionGenerations[tab])
 				sectionError = {
@@ -248,11 +253,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	function setTab(id: string) {
-		const params = new URLSearchParams(page.url.searchParams);
+		const params = new SvelteURLSearchParams(page.url.searchParams);
 		if (id === 'overview') params.delete('tab');
 		else params.set('tab', id);
 		activeTab = id as TabId;
-		void goto(`${page.url.pathname}?${params.toString()}`, {
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- URL is a resolve()d player route plus an encoded query string
+		void goto(`${resolve('/players/[key]', { key })}?${params.toString()}`, {
 			replaceState: false,
 			noScroll: true,
 			keepFocus: true
@@ -271,7 +277,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
 			<div class="min-w-0">
 				<p class="mono-label">{field.name}</p>
-				<p class="break-words font-mono text-xs text-foreground">{fieldValue(field)}</p>
+				<p class="font-mono text-xs break-words text-foreground">{fieldValue(field)}</p>
 			</div>
 			<PlayerProvenance observation={field.observation} label={field.name} compact />
 		</div>
@@ -282,10 +288,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <div class="h-full flex-1 space-y-4 font-sans">
 	<CarbonBreadcrumbs
-		items={[
-			{ label: 'Players', href: resolve('/players') },
-			{ label: displayName }
-		]}
+		items={[{ label: 'Players', href: resolve('/players') }, { label: displayName }]}
 	/>
 
 	<CarbonPageHeader
@@ -341,11 +344,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 							<div>
 								<p class="mono-label">UUID</p>
-								<p class="break-all font-mono text-xs text-foreground">{detail.ref?.uuid || '—'}</p>
+								<p class="font-mono text-xs break-all text-foreground">{detail.ref?.uuid || '—'}</p>
 							</div>
 							<div>
 								<p class="mono-label">XUID</p>
-								<p class="break-all font-mono text-xs text-foreground">{detail.ref?.xuid || 'unavailable'}</p>
+								<p class="font-mono text-xs break-all text-foreground">
+									{detail.ref?.xuid || 'unavailable'}
+								</p>
 							</div>
 							<div>
 								<p class="mono-label">Offline UUID</p>
@@ -445,9 +450,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							{#each sessions as session (session.identityKey + session.serverId + (session.joinedAt?.seconds ?? '0'))}
 								<tr>
 									<td class="px-3 py-2 font-mono text-xs">{session.serverId || '—'}</td>
-									<td class="px-3 py-2 font-mono text-xs">{formatTimestamp(session.joinedAt, 'unavailable')}</td>
-									<td class="px-3 py-2 font-mono text-xs">{formatTimestamp(session.leftAt, 'unavailable')}</td>
-									<td class="px-3 py-2 text-xs text-muted-foreground">{session.source || 'unavailable'}</td>
+									<td class="px-3 py-2 font-mono text-xs"
+										>{formatTimestamp(session.joinedAt, 'unavailable')}</td
+									>
+									<td class="px-3 py-2 font-mono text-xs"
+										>{formatTimestamp(session.leftAt, 'unavailable')}</td
+									>
+									<td class="px-3 py-2 text-xs text-muted-foreground"
+										>{session.source || 'unavailable'}</td
+									>
 									<td class="px-3 py-2 text-xs">{session.estimate ? 'Yes' : 'No'}</td>
 								</tr>
 							{:else}
@@ -472,16 +483,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<CarbonStructuredList>
 							{#snippet header()}
 								<p class="mono-label-strong">
-									{activeTab === 'character' ? 'Character' : 'Progress'} — read-only on-disk snapshot
+									{activeTab === 'character'
+										? 'Character — read-only snapshot'
+										: 'Progress — read-only snapshot'}
 								</p>
 							{/snippet}
-							{@render fieldRows(deepFields.length > 0 ? deepFields : activeTab === 'character' ? detail.character : detail.progress)}
+							{@render fieldRows(
+								deepFields.length > 0
+									? deepFields
+									: activeTab === 'character'
+										? detail.character
+										: detail.progress
+							)}
 						</CarbonStructuredList>
 						<p class="text-xs text-muted-foreground" role="note">
-							{deepNote || 'These values are read-only snapshots from the server disk. They are not live files and cannot be edited here.'}
+							These values are read-only and cannot be edited here.
+							{#if deepNote}{deepNote}{/if}
 						</p>
 					{:else if activeTab === 'access'}
-						<CarbonDataTable title="Observed access" description="Per-server access facts with provenance.">
+						<CarbonDataTable
+							title="Observed access"
+							description="Per-server access facts with provenance."
+						>
 							{#snippet header()}
 								<tr>
 									<th scope="col" class="px-3 py-2">Server</th>
@@ -501,11 +524,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									<td class="px-3 py-2 font-mono text-xs">{state.opLevel}</td>
 									<td class="px-3 py-2 text-xs">
 										<CarbonTag type={state.banned ? 'red' : 'gray'} size="sm">
-											{state.banned ? `Banned${state.banReason ? `: ${state.banReason}` : ''}` : 'Not banned'}
+											{state.banned
+												? `Banned${state.banReason ? `: ${state.banReason}` : ''}`
+												: 'Not banned'}
 										</CarbonTag>
 									</td>
 									<td class="px-3 py-2 text-xs">{state.mute ? 'Muted' : 'Not muted'}</td>
-									<td class="px-3 py-2"><PlayerProvenance observation={state.observation} compact /></td>
+									<td class="px-3 py-2"
+										><PlayerProvenance observation={state.observation} compact /></td
+									>
 								</tr>
 							{:else}
 								<tr>
@@ -531,9 +558,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									serverId={primaryServerId}
 									targets={[{ identityKey: key, name: displayName }]}
 									action={detail.access.some(
-										(f) =>
-											f.name === 'operator' &&
-											(f.value === 'yes' || f.value === 'true')
+										(f) => f.name === 'operator' && (f.value === 'yes' || f.value === 'true')
 									)
 										? 'deop'
 										: 'op'}
@@ -541,24 +566,29 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 						{/if}
 					{:else if activeTab === 'history'}
-						<CarbonDataTable title="Moderation history" description="Audited events for this identity.">
+						<CarbonDataTable
+							title="Moderation history"
+							description="Audited events for this identity."
+						>
 							{#snippet header()}
 								<tr>
 									<th scope="col" class="px-3 py-2">When</th>
 									<th scope="col" class="px-3 py-2">Action</th>
 									<th scope="col" class="px-3 py-2">Actor</th>
 									<th scope="col" class="px-3 py-2">Reason</th>
-									<th scope="col" class="px-3 py-2">Request</th>
+									<th scope="col" class="px-3 py-2">Status</th>
 									<th scope="col" class="px-3 py-2">Undone</th>
 								</tr>
 							{/snippet}
 							{#each history as entry (entry.id)}
 								<tr>
-									<td class="px-3 py-2 font-mono text-xs">{formatTimestamp(entry.occurredAt, 'unavailable')}</td>
+									<td class="px-3 py-2 font-mono text-xs"
+										>{formatTimestamp(entry.occurredAt, 'unavailable')}</td
+									>
 									<td class="px-3 py-2 text-xs">{entry.action}</td>
 									<td class="px-3 py-2 text-xs">{entry.actorName || '—'}</td>
 									<td class="px-3 py-2 text-xs text-muted-foreground">{entry.reason || '—'}</td>
-									<td class="break-all px-3 py-2 font-mono text-xs">{entry.requestId || '—'}</td>
+									<td class="px-3 py-2 text-xs">{entry.requestId ? 'Recorded' : '—'}</td>
 									<td class="px-3 py-2 text-xs">{entry.undone ? 'Yes' : 'No'}</td>
 								</tr>
 							{:else}
@@ -580,19 +610,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										<p class="text-xs font-semibold text-foreground">
 											{capabilityLabel(capability.capability)}
 										</p>
-										<CarbonTag
-											type={supportStateTagType(capability.state)}
-											size="sm"
-										>
+										<CarbonTag type={supportStateTagType(capability.state)} size="sm">
 											{supportStateLabel(capability.state)}
 										</CarbonTag>
 									</div>
 									<p class="text-xs text-muted-foreground" role="note">
-										{capabilityDetail(
-											capability.capability,
-											capability.state,
-											capability.detail
-										)}
+										{capabilityDetail(capability.capability, capability.state, capability.detail)}
 									</p>
 								</div>
 							{:else}
@@ -602,8 +625,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							{/each}
 						</CarbonStructuredList>
 						<p class="text-xs text-muted-foreground" role="note">
-							Unsupported and decision-pending capabilities are described honestly. No control is
-							shown for a feature the server does not report as supported.
+							Actions are shown only when your permissions allow them. Features that are not
+							available here are described above.
 						</p>
 						{#if capabilities.some((c) => c.state === PlayerSupportState.UNSUPPORTED || c.state === PlayerSupportState.DECISION_PENDING)}
 							<CarbonButton kind="tertiary" size="sm" onclick={() => setTab('access')}>

@@ -48,11 +48,7 @@ import {
 	undoUnavailableReason
 } from './presentation';
 
-function summary(
-	key: string,
-	name: string,
-	overrides: SummaryOverrides = {}
-): PlayerSummary {
+function summary(key: string, name: string, overrides: SummaryOverrides = {}): PlayerSummary {
 	return create(PlayerSummarySchema, {
 		ref: create(PlayerRefSchema, { identityKey: key, name }),
 		serverId: 'survival',
@@ -63,11 +59,7 @@ function summary(
 }
 
 test('roster sorts out-of-order inputs deterministically by name', () => {
-	const players = [
-		summary('z', 'Zara'),
-		summary('a', 'Alice'),
-		summary('m', 'Morgan')
-	];
+	const players = [summary('z', 'Zara'), summary('a', 'Alice'), summary('m', 'Morgan')];
 	const ascending = filterAndSortPlayers(players, {
 		...DEFAULT_ROSTER_FILTER,
 		sortBy: 'name'
@@ -109,11 +101,20 @@ test('roster search spans name, uuid, alias and server, case-insensitively', () 
 		...DEFAULT_ROSTER_FILTER,
 		query: '  ALI '
 	});
-	assert.deepEqual(byName.map((p) => p.ref?.name), ['Alice']);
+	assert.deepEqual(
+		byName.map((p) => p.ref?.name),
+		['Alice']
+	);
 	const byUuid = filterAndSortPlayers(players, { ...DEFAULT_ROSTER_FILTER, query: 'uuid-alice' });
-	assert.deepEqual(byUuid.map((p) => p.ref?.name), ['Alice']);
+	assert.deepEqual(
+		byUuid.map((p) => p.ref?.name),
+		['Alice']
+	);
 	const byServer = filterAndSortPlayers(players, { ...DEFAULT_ROSTER_FILTER, query: 'creative' });
-	assert.deepEqual(byServer.map((p) => p.ref?.name), ['Carol']);
+	assert.deepEqual(
+		byServer.map((p) => p.ref?.name),
+		['Carol']
+	);
 });
 
 test('roster state and access filters combine with server scope', () => {
@@ -181,11 +182,11 @@ test('server options are distinct and labelled, falling back to the id', () => {
 test('capability unsupported and decision-pending states render actionable text', () => {
 	assert.match(
 		capabilityDetail(PlayerCapability.BRIDGE_VITALS, PlayerSupportState.UNSUPPORTED, ''),
-		/verified Paper\/Fabric\/NeoForge artifact and licence review — not shipped/
+		/This feature isn't available on this server\./
 	);
 	assert.match(
 		capabilityDetail(PlayerCapability.BEDROCK_XUID, PlayerSupportState.DECISION_PENDING, ''),
-		/Bedrock transport/
+		/This feature isn't available on this server\./
 	);
 	// Backend-provided detail is authoritative text and wins.
 	assert.equal(
@@ -237,10 +238,7 @@ test('action confirm metadata, side effects and bulk kinds are explicit', () => 
 	assert.equal(bulkKindFor('kick'), 'kick');
 	assert.equal(bulkKindFor('whitelist_add'), 'allowlist_add');
 	assert.equal(bulkKindFor('op'), null, 'operator grant has no bulk kind');
-	assert.match(
-		undoUnavailableReason('kick'),
-		/kick cannot be undone — player already left/
-	);
+	assert.match(undoUnavailableReason('kick'), /A kick cannot be reversed/);
 });
 
 test('undo is enabled only with both a supported flag and a token', () => {

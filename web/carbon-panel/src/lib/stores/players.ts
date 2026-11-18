@@ -10,7 +10,7 @@
  */
 
 import { rpcClient } from '$lib/api/rpc-client';
-import { createPlayersStore, type PlayersState } from '$lib/features/players/roster-store';
+import { createPlayersStore } from '$lib/features/players/roster-store';
 
 export {
 	createPlayersStore,

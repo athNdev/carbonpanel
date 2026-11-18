@@ -49,18 +49,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	{#snippet toolbar()}
 		<p class="px-4 py-2 text-xs text-muted-foreground">
-			Moderation uses typed player RPCs with reason, request id and per-target results. Arbitrary
-			console commands are no longer issued for these actions.
+			Select players to kick, ban or manage access. Actions are recorded in the audit history.
 		</p>
 	{/snippet}
 
 	<div class="min-h-0 flex-1 overflow-auto p-4">
 		{#if loadError}
-			<CarbonErrorState
-				title="Could not load players"
-				message={loadError}
-				onretry={loadPlayers}
-			/>
+			<CarbonErrorState title="Could not load players" message={loadError} onretry={loadPlayers} />
 		{:else if mounted}
 			{#key rosterGeneration}
 				<PlayerRoster

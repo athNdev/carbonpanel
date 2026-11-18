@@ -146,6 +146,11 @@ func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xui
 		if err := s.db.WithContext(ctx).Model(&identity).Updates(updates).Error; err != nil {
 			return nil, err
 		}
+		if name != "" {
+			if err := s.RecordAlias(ctx, identity.ID, name, "", "structured", time.Now().UTC()); err != nil {
+				return nil, err
+			}
+		}
 		return &identity, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -164,6 +169,11 @@ func (s *Store) EnsurePlayerIdentity(ctx context.Context, primaryUUID, name, xui
 	}
 	if err := s.db.WithContext(ctx).Create(&identity).Error; err != nil {
 		return nil, err
+	}
+	if name != "" {
+		if err := s.RecordAlias(ctx, identity.ID, name, "", "structured", now); err != nil {
+			return nil, err
+		}
 	}
 	return &identity, nil
 }
@@ -192,6 +202,26 @@ func (s *Store) EnsureOfflinePlayerIdentity(ctx context.Context, name, serverID,
 		return nil, err
 	}
 	return identity, nil
+}
+
+// EnsureOpenPlayerSession inserts an open session only when none exists. The
+// NOT EXISTS clause runs inside the INSERT, so concurrent roster loads cannot
+// both observe "no session" and create two open rows.
+func (s *Store) EnsureOpenPlayerSession(ctx context.Context, identityID, serverID, source string, joinedAt time.Time) (bool, error) {
+	if identityID == "" || serverID == "" {
+		return false, errors.New("player session requires identity and server")
+	}
+	result := s.db.WithContext(ctx).Exec(`
+		INSERT INTO player_sessions (id, identity_id, server_id, joined_at, source, estimate)
+		SELECT ?, ?, ?, ?, ?, 0
+		WHERE NOT EXISTS (
+			SELECT 1 FROM player_sessions
+			WHERE identity_id = ? AND server_id = ? AND left_at IS NULL
+		)`, uuid.NewString(), identityID, serverID, joinedAt.UTC(), source, identityID, serverID)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
 }
 
 // HasOpenPlayerSession reports whether an identity is currently observed as

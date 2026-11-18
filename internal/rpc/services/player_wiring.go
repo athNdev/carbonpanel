@@ -7,6 +7,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -26,35 +27,29 @@ import (
 // concrete adapter packages. Keeping the translation here means neither the
 // service nor the adapters depend on each other's package shape.
 
-type adapterShim struct {
-	playeradapters.Adapter
-}
-
-func (a adapterShim) List(ctx context.Context) ([]observedPlayer, error) {
-	listed, err := a.Adapter.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]observedPlayer, 0, len(listed))
-	for _, p := range listed {
-		out = append(out, observedPlayer{Name: p.Name, UUID: p.UUID})
-	}
-	return out, nil
+// adapterEntry owns one adapter per server with a reference count. A retired
+// entry is closed only after its in-flight calls finish, so a roster load can
+// never tear down a moderation adapter that is mid-mutation.
+type adapterEntry struct {
+	adapter playeradapters.Adapter
+	closer  interface{ Close() }
+	info    playeradapters.ServerInfo
+	caps    capabilityInfo
+	refs    int
+	retired bool
 }
 
 // negotiatorShim builds adapter inputs from controller configuration. It never
 // writes controller state into a world and never logs secrets.
 type negotiatorShim struct {
-	cfg    *config.Config
-	sender *command.Sender
-	mu     sync.Mutex
-	// One owned reader per server: re-negotiating replaces the previous
-	// reader instead of growing an unbounded slice for the process lifetime.
-	closers map[string]interface{ Close() }
+	cfg     *config.Config
+	sender  *command.Sender
+	mu      sync.Mutex
+	entries map[string]*adapterEntry
 }
 
 func newNegotiatorShim(cfg *config.Config, sender *command.Sender) *negotiatorShim {
-	return &negotiatorShim{cfg: cfg, sender: sender, closers: make(map[string]interface{ Close() })}
+	return &negotiatorShim{cfg: cfg, sender: sender, entries: make(map[string]*adapterEntry)}
 }
 
 func globalString(cfg *config.Config, key string) string {
@@ -108,36 +103,135 @@ func (n *negotiatorShim) Negotiate(ctx context.Context, server *storage.Server, 
 			return sender.SendCommand(ctx, server.ID, command)
 		}
 	}
-	adapter, caps, err := playeradapters.Negotiate(ctx, info, exec)
-	if closer, ok := adapter.(interface{ Close() }); ok {
-		n.mu.Lock()
-		if previous := n.closers[server.ID]; previous != nil {
-			previous.Close()
+	n.mu.Lock()
+	entry := n.entries[server.ID]
+	if entry != nil && entry.info != info {
+		entry.retired = true
+		if entry.refs == 0 {
+			closeAdapterEntry(entry)
+			delete(n.entries, server.ID)
 		}
-		if n.closers == nil {
-			n.closers = make(map[string]interface{ Close() })
-		}
-		n.closers[server.ID] = closer
-		n.mu.Unlock()
+		entry = nil
 	}
+	if entry == nil {
+		adapter, caps, err := playeradapters.Negotiate(ctx, info, exec)
+		if err != nil {
+			n.mu.Unlock()
+			return nil, toCapabilityInfo(caps), err
+		}
+		var closer interface{ Close() }
+		if candidate, ok := adapter.(interface{ Close() }); ok {
+			closer = candidate
+		}
+		entry = &adapterEntry{adapter: adapter, closer: closer, info: info, caps: toCapabilityInfo(caps)}
+		n.entries[server.ID] = entry
+	}
+	caps := entry.caps
+	n.mu.Unlock()
+	return &refCountedSource{shim: n, serverID: server.ID, caps: caps}, caps, nil
+}
+
+func toCapabilityInfo(caps playeradapters.CapabilitySet) capabilityInfo {
 	unsupported := make([]unsupportedInfo, 0, len(caps.Unsupported))
 	for _, item := range caps.Unsupported {
 		unsupported = append(unsupported, unsupportedInfo{Name: item.Name, Reason: item.Reason})
 	}
-	return adapterShim{adapter}, capabilityInfo{
+	return capabilityInfo{
 		Management: caps.Management, RCON: caps.RCON, Exec: caps.Exec,
 		ChosenSource: caps.ChosenSource, Detail: caps.Detail, Unsupported: unsupported,
-	}, err
+	}
+}
+
+func closeAdapterEntry(entry *adapterEntry) {
+	if entry.closer != nil {
+		entry.closer.Close()
+	}
+}
+
+func (n *negotiatorShim) release(serverID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	entry := n.entries[serverID]
+	if entry == nil {
+		return
+	}
+	entry.refs--
+	if entry.retired && entry.refs <= 0 {
+		closeAdapterEntry(entry)
+		delete(n.entries, serverID)
+	}
+}
+
+// refCountedSource acquires the current adapter for the duration of one call.
+// Each method releases after it finishes, so re-negotiation can never close an
+// adapter that is still in flight.
+type refCountedSource struct {
+	shim     *negotiatorShim
+	serverID string
+	caps     capabilityInfo
+}
+
+func (r *refCountedSource) Source() string { return r.caps.ChosenSource }
+
+func (r *refCountedSource) with(fn func(playeradapters.Adapter) error) error {
+	r.shim.mu.Lock()
+	entry := r.shim.entries[r.serverID]
+	if entry == nil || entry.retired {
+		r.shim.mu.Unlock()
+		return fmt.Errorf("player adapter for %s is no longer active", r.serverID)
+	}
+	entry.refs++
+	adapter := entry.adapter
+	r.shim.mu.Unlock()
+	defer r.shim.release(r.serverID)
+	return fn(adapter)
+}
+
+func (r *refCountedSource) List(ctx context.Context) ([]observedPlayer, error) {
+	var out []observedPlayer
+	err := r.with(func(adapter playeradapters.Adapter) error {
+		listed, listErr := adapter.List(ctx)
+		if listErr != nil {
+			return listErr
+		}
+		out = make([]observedPlayer, 0, len(listed))
+		for _, p := range listed {
+			out = append(out, observedPlayer{Name: p.Name, UUID: p.UUID})
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (r *refCountedSource) Kick(ctx context.Context, name, reason string) error {
+	return r.with(func(a playeradapters.Adapter) error { return a.Kick(ctx, name, reason) })
+}
+func (r *refCountedSource) Ban(ctx context.Context, name, reason string) error {
+	return r.with(func(a playeradapters.Adapter) error { return a.Ban(ctx, name, reason) })
+}
+func (r *refCountedSource) Pardon(ctx context.Context, name string) error {
+	return r.with(func(a playeradapters.Adapter) error { return a.Pardon(ctx, name) })
+}
+func (r *refCountedSource) SetOperator(ctx context.Context, name string, level int32, remove bool) error {
+	return r.with(func(a playeradapters.Adapter) error { return a.SetOperator(ctx, name, level, remove) })
+}
+func (r *refCountedSource) SetWhitelist(ctx context.Context, name string, remove bool) error {
+	return r.with(func(a playeradapters.Adapter) error { return a.SetWhitelist(ctx, name, remove) })
 }
 
 // Close stops any management-protocol background reader this process owns.
+// Calls in flight keep their adapter alive until they release it.
 func (n *negotiatorShim) Close() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	for _, closer := range n.closers {
-		closer.Close()
+	for id, entry := range n.entries {
+		if entry.refs == 0 {
+			closeAdapterEntry(entry)
+			delete(n.entries, id)
+		} else {
+			entry.retired = true
+		}
 	}
-	n.closers = make(map[string]interface{ Close() })
 }
 
 type skinShim struct{ cache *playerskin.Cache }
