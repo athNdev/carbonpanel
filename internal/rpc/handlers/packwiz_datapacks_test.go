@@ -66,7 +66,8 @@ func newDatapackHarness(t *testing.T, artifactBody []byte, filename string) (*Pa
 
 	um := upload.NewManager(t.TempDir(), time.Minute, 10<<20, logger.New())
 	t.Cleanup(um.Stop)
-	return NewPackwizHandler(mgr, nil, um, logger.New(), nil, nil, &config.Config{}), "p1"
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	return NewPackwizHandler(mgr, nil, um, logger.New(), authMgr, policyEnforcer, &config.Config{}), "p1"
 }
 
 func TestHandleAddDatapackInstallsArchive(t *testing.T) {

@@ -54,6 +54,52 @@ func TestRunJournaledReplaysCompletedRequest(t *testing.T) {
 	}
 }
 
+func TestRunJournaledOutcomeKeepsLockOnUncertainEffect(t *testing.T) {
+	store := openJournalStore(t)
+	server := &db.Server{ID: "srv", NodeID: "node", ContainerID: "cont"}
+	outcome, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-uncertain",
+		func() (bool, error) { return true, errors.New("restart not observed") })
+	if err == nil || !strings.Contains(err.Error(), "restart not observed") {
+		t.Fatalf("want the original uncertainty, got %v", err)
+	}
+	if outcome.Outcome != string(OutcomeUnknown) || outcome.OperationID == "" {
+		t.Fatalf("outcome = %+v, want unknown with an operation id", outcome)
+	}
+	active, err := store.ListActiveServerOperations(context.Background())
+	if err != nil || len(active) != 1 {
+		t.Fatalf("active = %+v, %v; uncertain operation must keep its lock", active, err)
+	}
+	if active[0].Phase != db.ServerOperationExecuting {
+		t.Fatalf("phase = %q, want executing", active[0].Phase)
+	}
+	if !strings.Contains(active[0].LastError, "confirm the live world") {
+		t.Fatalf("LastError = %q, want an explicit operator note", active[0].LastError)
+	}
+	view := DescribeAt(&active[0], time.Now())
+	if view.Outcome != OutcomeUnknown || view.NextAction != ActionResolve || !view.HoldsLock {
+		t.Fatalf("view = %+v, want immediate unknown with resolve action and held lock", view)
+	}
+	// A replayed request id must not start a second attempt.
+	if _, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-uncertain",
+		func() (bool, error) { t.Fatal("must not retry"); return false, nil }); !errors.Is(err, ErrInProgress) {
+		t.Fatalf("replay error = %v, want ErrInProgress", err)
+	}
+}
+
+func TestRunJournaledOutcomeDefiniteFailureReleasesLock(t *testing.T) {
+	store := openJournalStore(t)
+	server := &db.Server{ID: "srv", NodeID: "node", ContainerID: "cont"}
+	_, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-failed",
+		func() (bool, error) { return false, errors.New("archive rejected") })
+	if err == nil {
+		t.Fatal("want the failure")
+	}
+	active, err := store.ListActiveServerOperations(context.Background())
+	if err != nil || len(active) != 0 {
+		t.Fatalf("active = %+v, %v; definite failure must release the lock", active, err)
+	}
+}
+
 func TestRunJournaledDoesNotReplayFailedRequest(t *testing.T) {
 	store := openJournalStore(t)
 	server := &db.Server{ID: "srv", NodeID: "node", ContainerID: "cont"}

@@ -13,10 +13,11 @@ import (
 
 func TestRealClientIP(t *testing.T) {
 	tests := []struct {
-		name     string
-		headers  map[string]string
-		peerAddr string
-		want     string
+		name       string
+		headers    map[string]string
+		peerAddr   string
+		trustProxy bool
+		want       string
 	}{
 		{
 			name:     "direct public peer ignores forwarded headers",
@@ -25,16 +26,24 @@ func TestRealClientIP(t *testing.T) {
 			want:     "198.51.100.7",
 		},
 		{
-			name:     "trusted loopback proxy honours X-Forwarded-For first hop",
-			headers:  map[string]string{"X-Forwarded-For": "203.0.113.9, 10.0.0.5"},
-			peerAddr: "127.0.0.1:40000",
-			want:     "203.0.113.9",
+			name:       "configured loopback proxy honours X-Forwarded-For first hop",
+			headers:    map[string]string{"X-Forwarded-For": "203.0.113.9, 10.0.0.5"},
+			peerAddr:   "127.0.0.1:40000",
+			trustProxy: true,
+			want:       "203.0.113.9",
 		},
 		{
-			name:     "trusted private proxy honours X-Real-IP when no XFF",
-			headers:  map[string]string{"X-Real-IP": "203.0.113.11"},
-			peerAddr: "10.0.0.5:40000",
-			want:     "203.0.113.11",
+			name:       "configured private proxy honours X-Real-IP when no XFF",
+			headers:    map[string]string{"X-Real-IP": "203.0.113.11"},
+			peerAddr:   "10.0.0.5:40000",
+			trustProxy: true,
+			want:       "203.0.113.11",
+		},
+		{
+			name:     "loopback peer without trust_proxy ignores forwarded headers",
+			headers:  map[string]string{"X-Forwarded-For": "203.0.113.9"},
+			peerAddr: "127.0.0.1:40000",
+			want:     "127.0.0.1",
 		},
 		{
 			name:     "loopback peer without forwarded headers",
@@ -56,7 +65,7 @@ func TestRealClientIP(t *testing.T) {
 			for k, v := range tc.headers {
 				hdr.Set(k, v)
 			}
-			if got := realClientIP(hdr, tc.peerAddr); got != tc.want {
+			if got := realClientIP(hdr, tc.peerAddr, tc.trustProxy); got != tc.want {
 				t.Errorf("realClientIP(%v, %q) = %q, want %q", tc.headers, tc.peerAddr, got, tc.want)
 			}
 		})

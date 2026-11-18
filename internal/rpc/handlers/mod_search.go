@@ -184,27 +184,6 @@ func NewModOnlineManager(store *storage.Store, log *logger.Logger, authManager *
 }
 
 func (m *ModOnlineManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Auth check if enabled
-	if m.authManager != nil && m.authManager.IsAnyAuthEnabled() {
-		authHeader := r.Header.Get("Authorization")
-		user, err := m.authManager.AuthenticateFromHeader(r.Context(), authHeader)
-		if err != nil {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if m.enforcer != nil {
-			action := rbac.ActionRead
-			if r.Method == http.MethodPost {
-				action = rbac.ActionCreate
-			}
-			allowed, rbacErr := m.enforcer.Enforce(user.Roles, rbac.ResourceMods, action, "*")
-			if rbacErr != nil || !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
-		}
-	}
-
 	// Path parsing: /api/v1/servers/{id}/mods/...
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/servers/")
 	parts := strings.Split(path, "/")
@@ -215,6 +194,22 @@ func (m *ModOnlineManager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	serverID := parts[0]
 	action := parts[2]
+
+	// Authorize on the server in the path. The global catalog uses the
+	// sentinel "none" and is checked against the global object. A missing
+	// enforcer or auth manager now denies instead of defaulting to allow.
+	objectID := serverID
+	if serverID == "none" || serverID == "" {
+		objectID = "*"
+	}
+	rbacAction := rbac.ActionRead
+	if r.Method == http.MethodPost {
+		rbacAction = rbac.ActionCreate
+	}
+	if err := requireRequestObject(r, m.authManager, m.enforcer, rbac.ResourceMods, rbacAction, objectID); err != nil {
+		writePolicyError(w, err)
+		return
+	}
 
 	if m.store == nil {
 		http.Error(w, "store not initialized", http.StatusInternalServerError)

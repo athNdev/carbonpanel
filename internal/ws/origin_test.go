@@ -162,7 +162,10 @@ func TestCheckOriginAllowlist(t *testing.T) {
 	}
 	req.Header.Del("Origin")
 	if !checkOrigin(req, policy) {
-		t.Fatal("empty origin must stay allowed")
+		t.Fatal("empty origin stays allowed by default for CLI clients")
+	}
+	if checkOrigin(req, originPolicy{allow: policy.allow, requireOrigin: true}) {
+		t.Fatal("empty origin must be rejected when require_ws_origin is set")
 	}
 }
 

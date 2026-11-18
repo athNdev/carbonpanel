@@ -25,7 +25,8 @@ func TestPackwizHandler_ContentRoutes(t *testing.T) {
 
 	log := logger.New()
 	mgr := packwiz.NewManager(dir, log)
-	handler := NewPackwizHandler(mgr, nil, nil, log, nil, nil, nil)
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	handler := NewPackwizHandler(mgr, nil, nil, log, authMgr, policyEnforcer, nil)
 
 	pack := packwiz.Pack{ID: "p", Name: "Content Pack", MCVersion: "1.21.1", ModLoader: "fabric"}
 	body, _ := json.Marshal(pack)

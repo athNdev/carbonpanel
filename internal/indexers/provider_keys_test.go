@@ -49,7 +49,7 @@ func TestValidateProviderKeyCurseForgeSoftResults(t *testing.T) {
 		{name: "keyless community proxy", categories: http.StatusOK, searchOK: true, search: http.StatusForbidden, wantValid: true, wantMessage: "CurseForge API key accepted, but Overwolf restricts direct mod search (403). Carbon Panel will automatically use the keyless community proxy for mod searches!"},
 		{name: "plain valid", categories: http.StatusOK, searchOK: true, search: http.StatusInternalServerError, wantValid: true, wantMessage: "Connected successfully! CurseForge API key is valid."},
 		{name: "search request failure stays valid", categories: http.StatusOK, searchOK: false, wantValid: true, wantMessage: "Connected successfully! CurseForge API key is valid."},
-		{name: "other status", categories: http.StatusTeapot, wantMessage: "CurseForge returned status 418: "},
+		{name: "other status", categories: http.StatusTeapot, wantMessage: "CurseForge returned unexpected status 418"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

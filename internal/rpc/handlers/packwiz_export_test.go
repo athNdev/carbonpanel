@@ -28,7 +28,8 @@ func newExportHandler(t *testing.T) (*PackwizHandler, string) {
 	t.Cleanup(func() { _ = os.RemoveAll(tempDir) })
 	log := logger.New()
 	mgr := packwiz.NewManager(tempDir, log)
-	return NewPackwizHandler(mgr, nil, nil, log, nil, nil, nil), tempDir
+	authMgr, policyEnforcer := testNoAuthPolicy(t)
+	return NewPackwizHandler(mgr, nil, nil, log, authMgr, policyEnforcer, nil), tempDir
 }
 
 func seedHandlerPack(t *testing.T, h *PackwizHandler) {

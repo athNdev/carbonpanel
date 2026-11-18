@@ -52,6 +52,10 @@ func allModels() []any {
 		&ServerOperation{},
 		&ServerDisposition{},
 		&IdempotencyKey{},
+		&WorldEntry{},
+		&WorldRevision{},
+		&WorldBinding{},
+		&WorldImportJob{},
 	}
 }
 
