@@ -35,6 +35,21 @@ const (
 	EventModInstall                = "mod.install"
 	EventModUpdate                 = "mod.update"
 	EventModRemove                 = "mod.remove"
+
+	// Player management actions (OSS-345). Each typed moderation action, its
+	// undo and each bulk job carries a request id linking it to the player
+	// action journal. Subject type is "player" and subject id is the opaque
+	// pl_* identity key; properties carry reason, target count and outcome.
+	EventPlayerKick           = "player.kick"
+	EventPlayerBan            = "player.ban"
+	EventPlayerPardon         = "player.pardon"
+	EventPlayerOp             = "player.op"
+	EventPlayerDeop           = "player.deop"
+	EventPlayerWhitelistAdd   = "player.whitelist.add"
+	EventPlayerWhitelistRemove = "player.whitelist.remove"
+	EventPlayerBulk           = "player.bulk"
+	EventPlayerUndo           = "player.undo"
+	EventPlayerSkinRefresh    = "player.skin.refresh"
 )
 
 // Entry is a single audit record.

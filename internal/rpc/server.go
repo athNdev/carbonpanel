@@ -89,6 +89,10 @@ type Server struct {
 	// registerServices, so it may be nil on a server that never registered.
 	operationService *services.OperationService
 
+	// playerService owns the skin cache janitor and any management-protocol
+	// WebSocket reader; it is stopped with the controller.
+	playerService *services.PlayerService
+
 	// worldViewProxy is the authenticated same-origin renderer proxy. It is
 	// created in registerServices and mounted before the frontend catch-all
 	// in setupHandler.
@@ -259,6 +263,7 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.TaskServiceName,
 		carbonpanelv1connect.UploadServiceName,
 		carbonpanelv1connect.UserServiceName,
+		carbonpanelv1connect.PlayerServiceName,
 		carbonpanelv1connect.WorldServiceName,
 		carbonpanelv1connect.WorldViewServiceName,
 	)
@@ -405,6 +410,14 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
 	moduleService.SetStorageResolver(s.storageResolver)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
+	// Player management uses the injected node resolver for read-only deep data
+	// and the node-scoped command sender for the exec fallback. The skin cache
+	// lives under the configured data directory, never a workstation path.
+	playerService := services.NewConfiguredPlayerService(
+		s.store, s.config, s.sender, s.storageResolver, s.metricsCollector, s.log,
+		filepath.Join(s.config.Storage.DataDir, "player-skin-cache"),
+	)
+	s.playerService = playerService
 
 	// World viewing is observation-only. The renderer topology comes from
 	// explicit operator configuration: with no node-local endpoint every world
@@ -511,6 +524,9 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	uploadPath, uploadHandler := carbonpanelv1connect.NewUploadServiceHandler(uploadService, opts...)
 	mux.Handle(uploadPath, uploadHandler)
+
+	playerPath, playerHandler := carbonpanelv1connect.NewPlayerServiceHandler(playerService, opts...)
+	mux.Handle(playerPath, playerHandler)
 
 	worldViewPath, worldViewHandler := carbonpanelv1connect.NewWorldViewServiceHandler(worldViewService, opts...)
 	mux.Handle(worldViewPath, worldViewHandler)
@@ -624,6 +640,9 @@ func (s *Server) authInterceptor() connect.UnaryInterceptorFunc {
 func (s *Server) Shutdown() {
 	if s.wsHub != nil {
 		s.wsHub.Stop()
+	}
+	if s.playerService != nil {
+		s.playerService.Stop()
 	}
 }
 

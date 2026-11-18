@@ -29,8 +29,29 @@ const (
 	ResourceActivity        = "activity"
 	ResourceSubusers        = "subusers"
 	ResourceBackups         = "backups"
+	ResourcePlayers         = "players"
 	ResourceWorldView       = "world_view"
 	ResourceWorlds          = "worlds"
+)
+
+// Player actions are deliberately narrow: reading a roster, reading deep
+// inventory data, moderating, elevating to operator and bulk actions are
+// separate grants. Every players procedure is fail-closed until mapped.
+const (
+	ActionPresence          = "presence"
+	ActionInventory         = "inventory"
+	ActionProgress          = "progress"
+	ActionAccessRead        = "access:read"
+	ActionAccessWrite       = "access:write"
+	ActionModerate          = "moderate"
+	ActionModerateOp        = "moderate:op"
+	ActionModerateElevated  = "moderate:elevated"
+	ActionBulk              = "bulk"
+	ActionSkinRefresh       = "skin:refresh"
+	ActionHistoryRead       = "history:read"
+	ActionCharacterSet      = "character:set"
+	ActionInventoryWrite    = "inventory:write"
+	ActionMessage           = "message"
 )
 
 // Action constants
@@ -87,6 +108,11 @@ type ResourceActionEntry struct {
 var AllActions = []string{
 	ActionRead, ActionCreate, ActionUpdate, ActionDelete,
 	ActionStart, ActionStop, ActionRestart, ActionCommand,
+	ActionPresence, ActionInventory, ActionProgress,
+	ActionAccessRead, ActionAccessWrite, ActionModerate,
+	ActionModerateOp, ActionModerateElevated, ActionBulk,
+	ActionSkinRefresh, ActionHistoryRead, ActionCharacterSet,
+	ActionInventoryWrite, ActionMessage,
 	ActionObservePlayers, ActionAdmin,
 }
 
@@ -98,7 +124,7 @@ var AllResources = []string{
 	ResourceUsers, ResourceRoles, ResourceSettings,
 	ResourceSupport, ResourceUploads, ResourceNodes,
 	ResourceActivity, ResourceSubusers, ResourceBackups,
-	ResourceWorldView, ResourceWorlds,
+	ResourcePlayers, ResourceWorldView, ResourceWorlds,
 }
 
 // ResourceScopeSource maps each scopeable resource to the resource that
@@ -119,6 +145,7 @@ var ResourceScopeSource = map[string]string{
 	ResourceActivity:        ResourceServers,
 	ResourceSubusers:        ResourceServers,
 	ResourceBackups:         ResourceServers,
+	ResourcePlayers:         ResourceServers,
 	ResourceWorldView:       ResourceServers,
 	ResourceWorlds:          ResourceServers,
 }

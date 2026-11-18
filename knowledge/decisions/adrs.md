@@ -33,6 +33,7 @@ sources:
 | [0014](../../docs/adr/0014-in-process-admission.md) | Serialize same-node starts with an in-process gate, not a lease | [Server lifecycle policy](../architecture/server-lifecycle.md) |
 | [0015](../../docs/adr/0015-world-viewing-renderer-proxy.md) | Observe worlds through an authenticated same-origin renderer proxy | [World viewing](../architecture/world-viewing.md), [RPC contract](../architecture/rpc-contract.md) |
 | [0016](../../docs/adr/0016-world-library-identity-and-binding.md) | Immutable world revisions and clone-on-bind, stop-based journaled bindings | [World Library](../architecture/world-library.md) |
+| [0017](../../docs/adr/0017-player-management-identity-and-capability-gates.md) | Player identity, provenance and capability gates | [Player management](../architecture/player-management.md) |
 | [0018](../../docs/adr/0018-node-response-redaction.md) | Redact node TLS material from read responses; empty TLS edits mean unchanged | [RPC contract](../architecture/rpc-contract.md), [Secrets and endpoints](../invariants/secrets-and-endpoints.md) |
 | [0019](../../docs/adr/0019-node-control-contract.md) | Versioned typed node-control contract with redacted responses and fail-closed routing | [Node control protocol](../architecture/node-control-protocol.md), [RPC contract](../architecture/rpc-contract.md) |
 | [0023](../../docs/adr/0023-oidc-sso-boundary.md) | Standards-based OIDC with PKCE, nonce and one-time exchange | [RPC contract](../architecture/rpc-contract.md), [SSO identity](../invariants/sso-identity.md) |

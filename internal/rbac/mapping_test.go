@@ -41,6 +41,7 @@ var procedureServiceNames = []string{
 	carbonpanelv1connect.DatapackServiceName,
 	carbonpanelv1connect.OperationServiceName,
 	carbonpanelv1connect.SubuserServiceName,
+	carbonpanelv1connect.PlayerServiceName,
 	carbonpanelv1connect.WorldServiceName,
 }
 

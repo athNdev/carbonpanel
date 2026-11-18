@@ -6,159 +6,64 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { create } from '@bufbuild/protobuf';
-	import { rpcClient } from '$lib/api/rpc-client';
-	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
-	import { ListServerPlayersRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
-	import { SendCommandRequestSchema } from '$lib/proto/carbonpanel/v1/server_pb';
-	import { GetFileRequestSchema } from '$lib/proto/carbonpanel/v1/file_pb';
-	import { toast } from 'svelte-sonner';
-	import { CarbonButton, CarbonErrorState } from '$lib/components/carbon';
+	import { resolve } from '$app/paths';
+	import { CarbonButton, CarbonErrorState, CarbonTag } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import PlayerRoster from '$lib/features/players/PlayerRoster.svelte';
+	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
-	let players = $state<string[]>([]);
-	let onlineCount = $state(0);
-	let banned = $state<string[]>([]);
-	let loading = $state(false);
+	// Preserve the tab contract: the server-detail host decides when this working
+	// pane is visible. Mounting the roster only while active avoids firing the
+	// cross-server-capable list RPC for a hidden tab.
+	const mounted = $derived(active);
+
+	// This tab owns its failed-load state and retry, while the shared roster
+	// still owns the distinction between an empty result and a failed request.
 	let loadError = $state<string | null>(null);
-	let search = $state('');
-	let acting = $state<string | null>(null);
+	let rosterGeneration = $state(0);
 
-	const filtered = $derived(players.filter((p) => p.toLowerCase().includes(search.toLowerCase())));
-
-	async function loadPlayers() {
-		loading = true;
+	function loadPlayers() {
 		loadError = null;
-		try {
-			const request = create(ListServerPlayersRequestSchema, { serverId: server.id });
-			const response = await rpcClient.server.listServerPlayers(request);
-			players = response.players;
-			onlineCount = response.onlineCount;
-		} catch (error) {
-			loadError = error instanceof Error ? error.message : 'Failed to load players';
-			toast.error(
-				'Failed to load players: ' + (error instanceof Error ? error.message : 'Unknown error')
-			);
-		} finally {
-			loading = false;
-		}
+		rosterGeneration += 1;
 	}
-
-	async function loadBanned() {
-		try {
-			const request = create(GetFileRequestSchema, {
-				serverId: server.id,
-				path: 'banned-players.json'
-			});
-			const response = await rpcClient.file.getFile(request);
-			const text = new TextDecoder().decode(response.content as Uint8Array);
-			const list = JSON.parse(text);
-			banned = Array.isArray(list) ? list.map((b) => b.name ?? b.uuid ?? String(b)) : [];
-		} catch {
-			banned = [];
-		}
-	}
-
-	async function runPlayerCommand(player: string, cmd: string) {
-		acting = `${cmd}:${player}`;
-		try {
-			const request = create(SendCommandRequestSchema, {
-				id: server.id,
-				command: `${cmd} ${player}`
-			});
-			const response = await rpcClient.server.sendCommand(request);
-			if (response.success) {
-				toast.success(`Sent: ${cmd} ${player}`);
-				await loadPlayers();
-			} else {
-				toast.error(response.error || `Failed: ${cmd} ${player}`);
-			}
-		} catch (error) {
-			toast.error(
-				`Failed: ${cmd} ${player}: ` + (error instanceof Error ? error.message : 'Unknown error')
-			);
-		} finally {
-			acting = null;
-		}
-	}
-
-	$effect(() => {
-		if (active) {
-			loadPlayers();
-			loadBanned();
-		}
-	});
 </script>
 
 <ServerTabPanel
 	title="Players"
-	description="Live roster with moderation actions (console commands)"
+	description="Server-scoped roster with typed moderation actions and an audit trail"
 >
 	{#snippet chip()}
-		{#if onlineCount > 0}
-			<span class="font-mono text-xs text-[#a8a8a8]">{onlineCount} online</span>
-		{/if}
+		<CarbonTag type="blue" size="sm">SERVER · {server.name || server.id}</CarbonTag>
 	{/snippet}
 	{#snippet actions()}
-		<CarbonButton kind="secondary" size="sm" onclick={loadPlayers} disabled={loading}>
-			{loading ? 'Loading…' : 'Refresh'}
+		<CarbonButton
+			kind="tertiary"
+			size="sm"
+			href={resolve('/players')}
+			aria-label="Open the cross-server player roster"
+		>
+			All players
 		</CarbonButton>
 	{/snippet}
 	{#snippet toolbar()}
-		<div class="px-4 py-2">
-			<input
-				type="text"
-				placeholder="Search players…"
-				aria-label="Search players"
-				bind:value={search}
-				onkeydown={(e) => e.key === 'Escape' && (search = '')}
-				class="h-8 w-full max-w-xs rounded-none border border-[#393939] bg-[#161616] px-3 text-xs text-[#f4f4f4]"
-			/>
-		</div>
+		<p class="px-4 py-2 text-xs text-muted-foreground">
+			Select players to kick, ban or manage access. Actions are recorded in the audit history.
+		</p>
 	{/snippet}
 
-	<div class="min-h-0 flex-1 overflow-auto px-6 pb-6">
-		{#if loadError && players.length === 0}
-			<CarbonErrorState title="Failed to load players" message={loadError} onretry={loadPlayers} />
-		{:else if filtered.length === 0}
-			<p class="py-8 text-center font-mono text-xs text-[#a8a8a8]">
-				{loading ? 'Loading players…' : 'No players online.'}
-			</p>
-		{:else}
-			<table class="w-full text-xs" aria-label="Online players">
-				<thead>
-					<tr class="border-b border-[#393939] text-left text-[#a8a8a8]">
-						<th scope="col" class="py-2 pr-4 font-medium">Player</th>
-						<th scope="col" class="py-2 font-medium">Actions</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each filtered as player (player)}
-						<tr class="border-b border-[#262626] font-mono text-[#f4f4f4]">
-							<td class="max-w-[180px] truncate py-2 pr-4" title={player}>{player}</td>
-							<td class="flex flex-wrap gap-2 py-2">
-								{#each [['kick', 'Kick'], ['ban', 'Ban'], ['op', 'Op'], ['deop', 'Deop']] as [cmd, label] (cmd)}
-									<button
-										type="button"
-										class="h-7 rounded-none bg-[#393939] px-3 text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
-										disabled={acting !== null}
-										onclick={() => runPlayerCommand(player, cmd)}
-									>
-										{acting === `${cmd}:${player}` ? '…' : label}
-									</button>
-								{/each}
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		{/if}
-
-		{#if banned.length > 0}
-			<h4 class="mt-6 mb-2 text-sm font-semibold text-[#f4f4f4]">Banned ({banned.length})</h4>
-			<p class="font-mono text-xs text-[#a8a8a8]">{banned.join(', ')}</p>
+	<div class="min-h-0 flex-1 overflow-auto p-4">
+		{#if loadError}
+			<CarbonErrorState title="Could not load players" message={loadError} onretry={loadPlayers} />
+		{:else if mounted}
+			{#key rosterGeneration}
+				<PlayerRoster
+					serverId={server.id}
+					hideErrorState={true}
+					onError={(message) => (loadError = message)}
+				/>
+			{/key}
 		{/if}
 	</div>
 </ServerTabPanel>
