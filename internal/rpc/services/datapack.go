@@ -264,6 +264,11 @@ func (s *DatapackService) InstallDatapack(ctx context.Context, req *connect.Requ
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create datapacks directory: %w", err))
 		}
 		destPath = filepath.Join(datapacksDir, filename)
+		// The filename validator rejects separators, but a symlinked
+		// datapacks directory must not redirect the write outside the world.
+		if !files.WithinReal(datapacksDir, destPath) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("datapack destination escapes the server data directory"))
+		}
 	}
 	defer removeDownload()
 
@@ -398,6 +403,9 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 	}
 
 	destPath := filepath.Join(datapacksDir, filename)
+	if !files.WithinReal(datapacksDir, destPath) {
+		return fail(connect.NewError(connect.CodeInvalidArgument, errors.New("datapack destination escapes the server data directory")))
+	}
 	if err := os.Rename(tempPath, destPath); err != nil {
 		if copyErr := files.CopyFile(tempPath, destPath); copyErr != nil {
 			return fail(connect.NewError(connect.CodeInternal, errors.New("failed to save datapack")))

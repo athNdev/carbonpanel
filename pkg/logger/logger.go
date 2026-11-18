@@ -23,13 +23,17 @@ import (
 
 var (
 	rconURIPattern = regexp.MustCompile(`(?i)(rcon://(?:[^:@/]+:)?)([^@/]+)@`)
-	secretKVPattern = regexp.MustCompile(`(?i)(password|secret|jwt_secret|api_key|client_secret)(["']?\s*[:=]\s*["']?)([^"',\s\\]+)`)
+	secretKVPattern = regexp.MustCompile(`(?i)(password|passwd|secret|jwt_secret|api_key|api[-_]token|client_secret|access[-_]token|refresh[-_]token|x-api-key|x-auth-token|token)(["']?\s*[:=]\s*["']?)([^"',\s\\]+)`)
+	bearerPattern   = regexp.MustCompile(`(?i)(Bearer\s+)([A-Za-z0-9._~+/=-]+)`)
 )
 
-// SanitizeLogMessage scrubs sensitive passwords and tokens from log messages (SEC-4)
+// SanitizeLogMessage scrubs sensitive passwords, header values and tokens
+// from log messages (SEC-4). Keep this in sync with the narrower redactor used
+// by the operation journal so a credential cannot leak through either path.
 func SanitizeLogMessage(msg string) string {
 	msg = rconURIPattern.ReplaceAllString(msg, "${1}********@")
 	msg = secretKVPattern.ReplaceAllString(msg, "${1}${2}********")
+	msg = bearerPattern.ReplaceAllString(msg, "${1}********")
 	return msg
 }
 

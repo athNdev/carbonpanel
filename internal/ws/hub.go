@@ -44,6 +44,14 @@ const (
 
 	// Maximum message size allowed from peer
 	maxMessageSize = 512 * 1024 // 512KB
+
+	// Console commands are forwarded to RCON/exec; bound them so a single
+	// socket cannot send an arbitrarily large command line.
+	maxConsoleCommandBytes = 4096
+
+	// Bound the tail requested by a log subscription. Unbounded tails make a
+	// single subscriber able to force large in-memory reads.
+	maxLogTail = 5000
 )
 
 // controlSendTimeout bounds how long a control message waits for room in a
@@ -183,8 +191,12 @@ func (h *Hub) SetCheckOrigin(check func(r *http.Request) bool) {
 // SetOriginPolicy sets the browser origins that may open a console socket.
 // An empty allowlist keeps same-host checks. X-Forwarded-Host is ignored
 // unless trustProxy is set. A missing Origin header stays allowed for CLI clients.
-func (h *Hub) SetOriginPolicy(allow []string, trustProxy bool) {
-	policy := originPolicy{allow: append([]string(nil), allow...), trustProxy: trustProxy}
+func (h *Hub) SetOriginPolicy(allow []string, trustProxy, requireOrigin bool) {
+	policy := originPolicy{
+		allow:         append([]string(nil), allow...),
+		trustProxy:    trustProxy,
+		requireOrigin: requireOrigin,
+	}
 	h.upgrader.CheckOrigin = func(r *http.Request) bool {
 		return checkOrigin(r, policy)
 	}
@@ -504,18 +516,67 @@ func (c *Client) handleMessage(data []byte) {
 // the same policy as the pre-upgrade handshake check.
 func (c *Client) handleAuth(msg *v1.AuthMessage) {
 	if msg == nil {
-		c.sendAuthFail("missing auth message")
+		c.revokeSocketIdentity("missing auth message")
 		return
 	}
 
 	user, err := c.hub.authenticateToken(context.Background(), msg.Token)
 	if err != nil {
-		c.sendAuthFail(err.Error())
+		c.revokeSocketIdentity(err.Error())
 		return
 	}
 	c.user = user
 	c.authenticated = true
 	c.sendAuthOk()
+}
+
+// revokeSocketIdentity clears a failed re-authentication. Keeping the previous
+// identity would leave a stale privileged socket after a bad AUTH message.
+// Existing log subscriptions are torn down as well so they cannot keep
+// streaming server data to a socket that is no longer authenticated.
+func (c *Client) revokeSocketIdentity(reason string) {
+	c.user = nil
+	c.authenticated = false
+	c.dropAllSubscriptions()
+	c.sendAuthFail(reason)
+}
+
+func (c *Client) dropAllSubscriptions() {
+	if c.hub == nil || c.hub.logStreamer == nil {
+		c.subscriptionsMu.Lock()
+		c.subscriptions = nil
+		c.subscriptionsMu.Unlock()
+		return
+	}
+	c.subscriptionsMu.Lock()
+	for serverID, sub := range c.subscriptions {
+		c.hub.logStreamer.Unsubscribe(sub.containerID, sub.ch)
+		delete(c.subscriptions, serverID)
+	}
+	c.subscriptionsMu.Unlock()
+}
+
+// authorizeServerAction mirrors the Connect interceptor's object-scoped check,
+// including the subuser grant fallback. WebSocket actions must not be more
+// permissive than the RPC equivalent for the same server.
+func (h *Hub) authorizeServerAction(user *auth.AuthenticatedUser, resource, action, serverID string) bool {
+	if h.enforcer == nil || user == nil {
+		return false
+	}
+	allowed, err := h.enforcer.Enforce(user.Roles, resource, action, serverID)
+	if err == nil && allowed {
+		return true
+	}
+	if h.store == nil || resource == rbac.ResourceSubusers {
+		return false
+	}
+	want := resource + "." + action
+	for _, grant := range h.store.SubuserPermissions(context.Background(), serverID, user.ID) {
+		if grant == want {
+			return true
+		}
+	}
+	return false
 }
 
 // handleSubscribe subscribes to server logs
@@ -530,13 +591,9 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 		return
 	}
 
-	// Check permission. Fail closed when the enforcer is unavailable rather
-	// than skipping the check (the RPC interceptor denies in the same case).
-	if c.hub.enforcer == nil || c.user == nil {
-		c.sendError("permission denied")
-		return
-	}
-	if allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionRead, msg.ServerId); err != nil || !allowed {
+	// Check permission, including subuser grants, with the same rule the RPC
+	// interceptor uses. Fail closed when the enforcer is unavailable.
+	if !c.hub.authorizeServerAction(c.user, rbac.ResourceServers, rbac.ActionRead, msg.ServerId) {
 		c.sendError("permission denied")
 		return
 	}
@@ -552,6 +609,9 @@ func (c *Client) handleSubscribe(msg *v1.SubscribeMessage) {
 	tail := int(msg.Tail)
 	if tail <= 0 {
 		tail = 500
+	}
+	if tail > maxLogTail {
+		tail = maxLogTail
 	}
 
 	// If server has no container yet (just created, never started),
@@ -650,13 +710,13 @@ func (c *Client) handleCommand(msg *v1.CommandMessage) {
 		silent = *msg.Silent
 	}
 
-	// Check command permission. Fail closed when the enforcer is unavailable.
-	if c.hub.enforcer == nil || c.user == nil {
+	// Check command permission with RPC parity, including subuser grants.
+	if !c.hub.authorizeServerAction(c.user, rbac.ResourceServers, rbac.ActionCommand, msg.ServerId) {
 		c.sendCommandResult(msg.ServerId, false, "", "permission denied")
 		return
 	}
-	if allowed, err := c.hub.enforcer.Enforce(c.user.Roles, rbac.ResourceServers, rbac.ActionCommand, msg.ServerId); err != nil || !allowed {
-		c.sendCommandResult(msg.ServerId, false, "", "permission denied")
+	if len(msg.Command) > maxConsoleCommandBytes {
+		c.sendCommandResult(msg.ServerId, false, "", "command too long")
 		return
 	}
 
@@ -901,8 +961,9 @@ func (c *Client) sendPong() {
 
 // originPolicy is the WebSocket browser-origin rule (MINE-208).
 type originPolicy struct {
-	allow      []string
-	trustProxy bool
+	allow         []string
+	trustProxy    bool
+	requireOrigin bool
 }
 
 // checkOrigin verifies that the request Origin matches the request Host,
@@ -911,7 +972,9 @@ type originPolicy struct {
 func checkOrigin(r *http.Request, policy originPolicy) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
-		return true // Non-browser clients (CLI, curl, native tests) don't send Origin
+		// Non-browser clients (CLI, curl, native tests) omit Origin. Operators
+		// serving only browsers can require it via server.require_ws_origin.
+		return !policy.requireOrigin
 	}
 
 	u, err := url.Parse(origin)

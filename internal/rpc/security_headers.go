@@ -30,27 +30,31 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"object-src 'none'"
 
 // securityHeaders wraps h with the panel's default HTTP response headers
-// (MINE-163, research P2-14):
+// (MINE-163, research P2-14). trustProxy must come from configuration: an
+// untrusted client must not be able to make a plaintext response carry HSTS
+// by sending X-Forwarded-Proto: https.
 //
 //   - Content-Security-Policy (see above for the SPA rationale)
 //   - X-Frame-Options: SAMEORIGIN (belt-and-braces next to
 //     frame-ancestors for older clients)
 //   - X-Content-Type-Options: nosniff
 //   - Referrer-Policy: strict-origin-when-cross-origin
-//   - Strict-Transport-Security on TLS requests only (plaintext
-//     responses must not carry it)
+//   - Strict-Transport-Security on TLS requests only, or on requests from a
+//     configured trusted proxy that reports HTTPS (plaintext responses must
+//     not carry it)
 //
 // Headers are set (not added) so inner handlers cannot stack duplicates,
 // and the middleware never touches upgrade bodies — it only stamps the
 // response header map before delegating.
-func securityHeaders(h http.Handler) http.Handler {
+func securityHeaders(h http.Handler, trustProxy bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header := w.Header()
 		header.Set("Content-Security-Policy", contentSecurityPolicy)
 		header.Set("X-Frame-Options", "SAMEORIGIN")
 		header.Set("X-Content-Type-Options", "nosniff")
 		header.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		forwardedHTTPS := trustProxy && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+		if r.TLS != nil || forwardedHTTPS {
 			header.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		h.ServeHTTP(w, r)

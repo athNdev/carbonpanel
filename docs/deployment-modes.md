@@ -45,6 +45,16 @@ That copies the snapshot onto `carbon-panel.db` and drops WAL sidecars. It does
 not prune Docker volumes and does not delete world or backups directories.
 See `docs/runbook-panel-db-restore.md`.
 
+## Status sidecar module
+
+The built-in Status Panel module runs `cmd/status`, whose `/`, `/api/status`
+and `/health` endpoints have **no request authentication**. The controller
+itself defaults `HOST=127.0.0.1`; the shipped module template explicitly sets
+`HOST=0.0.0.0` inside its container so the panel's port proxy can reach the
+published port. Deployments that run `cmd/status` outside that module must set
+`HOST` deliberately. Restrict the published port to trusted networks and never
+treat the status endpoints as an authenticated API.
+
 ## Not shipped
 
 | Mode | Status |

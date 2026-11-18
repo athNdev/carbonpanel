@@ -49,7 +49,8 @@ func TestEnforceMatrix(t *testing.T) {
 
 func TestEnforceAnonymousSeed(t *testing.T) {
 	// SeedDefaultPolicies seeds the anonymous role the same either way; the
-	// anonymous role only matters when the panel enables anonymous access.
+	// anonymous role only matters when the panel enables anonymous access (the
+	// auth layer refuses to mint that identity when it is disabled).
 	for _, anon := range []bool{false, true} {
 		e := newTestEnforcer(t, anon)
 		mustEnforce(t, e, []string{"anonymous"}, ResourceServers, ActionRead, "srv-1", true)
