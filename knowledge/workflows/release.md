@@ -85,8 +85,14 @@ resume from the original verified download artifact without rebuilding images.
   durable digest-to-version evidence and refuses on uncertainty. Main `edge` and
   Pages effects use the same gate: an ordinary verified merge builds and
   validates only; publication requires a trusted `refs/heads/main` dispatch with
-  the channel opt-in and a read-only exact-commit main-CI check (`verify-main-ci`);
-  an operator checkbox is never CI evidence. IndexNow notification is deferred
+  the channel opt-in and a read-only exact-commit main-CI check (`verify-main-ci`)
+  for a PINNED commit. Manual dispatch checks out the event SHA and workflow_run
+  checks out the CI run's head SHA; full history is fetched for ancestry and a
+  step asserts the actual HEAD equals that SHA before any side-effecting step.
+  Tags, labels and provenance use the same SHA, never a moving branch tip.
+  Verification and opted-in publication use separate concurrency groups so
+  routine main builds cannot cancel an image push mid-write. An operator
+  checkbox is never CI evidence. IndexNow notification is deferred
   because URLs come from a push diff while deployment is dispatch-only. A scoped
   publish-boundary opt-in needs release-auditor review before held merges.
 - A release note must describe shipped behavior, not planned behavior.

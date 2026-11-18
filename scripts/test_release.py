@@ -773,6 +773,42 @@ class ReleaseTests(unittest.TestCase):
             release.main()
         self.assertEqual(json.loads(out.getvalue()), ["https://carbonpanel.dev/docs/"])
 
+    def test_cd_checkout_is_pinned_and_publication_concurrency_is_isolated(self):
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        self.assertIn("id: pinned", source)
+        self.assertIn("RUN_SHA: ${{ github.event.workflow_run.head_sha }}", source)
+        self.assertIn("EVENT_SHA: ${{ github.sha }}", source)
+        self.assertIn("ref: ${{ steps.pinned.outputs.sha }}", source)
+        self.assertIn("fetch-depth: 0", source)
+        self.assertIn("Assert checked-out HEAD equals the pinned commit", source)
+        self.assertIn("CI_COMMIT: ${{ steps.pinned.outputs.sha }}", source)
+        self.assertIn("value=sha-${{ steps.pinned.outputs.sha }}", source)
+        self.assertIn("image.revision=${{ steps.pinned.outputs.sha }}", source)
+        self.assertIn("APP_COMMIT=${{ steps.pinned.outputs.sha }}", source)
+        # No branch-tip substitution anywhere in the pinned checkout path.
+        self.assertNotIn("ref: ${{ github.ref }}", source)
+        for line in source.splitlines():
+            if any(token in line for token in ("CI_COMMIT:", "value=sha-",
+                                                "image.revision=", "APP_COMMIT=")):
+                self.assertNotIn("head_sha || github.sha", line)
+        # Verification and opted-in publication use separate concurrency groups.
+        self.assertIn("group: cd-${{ github.event_name == 'workflow_dispatch' "
+                      "&& inputs.push && 'publish' || 'verify' }}", source)
+        self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' "
+                      "|| !inputs.push }}", source)
+        # Pin assertion precedes every side-effecting step.
+        self.assertLess(source.index("Assert checked-out HEAD"),
+                        source.index("Docker Hub Credentials & Login Check"))
+        self.assertLess(source.index("Assert checked-out HEAD"),
+                        source.index("name: Build and Push Docker Image"))
+
+    def test_landing_checkout_uses_event_commit_implicitly(self):
+        source = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
+        for step_name in ("Checkout", "Checkout history"):
+            block = source.split("- name: " + step_name + "\n", 1)[1].split("\n      - ", 1)[0]
+            self.assertIn("fetch-depth: 0", block)
+            self.assertNotIn("ref:", block)
+
     def test_cd_has_read_only_workflow_permissions(self):
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
         self.assertIn("permissions:\n  contents: read\n  actions: read", source)

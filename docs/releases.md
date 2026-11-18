@@ -195,8 +195,12 @@ also require a real successful push CI run for the exact dispatch commit (verifi
 read-only by `verify-main-ci`, including ancestry of `main`) and a trusted
 `refs/heads/main` dispatch ref. An operator checkbox is never treated as CI
 evidence; tags, feature refs, blank refs, PRs and dry runs are refused regardless
-of any input. The workflows are not disabled — they still build and validate on
-their normal triggers.
+of any input. The CD job pins the checkout to the verified event SHA (or the CI
+run's head SHA for `workflow_run`), fetches full history for ancestry, asserts the
+actual HEAD matches, and derives tags and provenance from that same SHA. Opted-in
+publication uses a separate concurrency group from routine verification builds.
+The workflows are not disabled — they still build and validate on their normal
+triggers.
 
 IndexNow notification is deliberately deferred under that model:
 `indexable-changes` derives URLs only from a push diff, while deployment now
