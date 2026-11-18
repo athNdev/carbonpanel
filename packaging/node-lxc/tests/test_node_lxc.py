@@ -165,6 +165,32 @@ class NodeLxCFixtureTests(unittest.TestCase):
                 "--out-dir", str(self.work / "artifact-badplat"), "--provenance", str(PROVENANCE),
                 "--version", V1, "--platform", "riscv64", "--fixture")
 
+    def test_06b_line_ending_independent_digest(self) -> None:
+        """A CRLF checkout must produce the same pinned digest as an LF source."""
+        from node_lxc_artifact import canonical_file_digest, canonical_files, digest_of_files
+        lf = self.work / "digest-lf"
+        crlf = self.work / "digest-crlf"
+        for root in (lf, crlf):
+            if root.exists():
+                shutil.rmtree(root)
+            shutil.copytree(FIXTURES / "rootfs-minimal", root)
+        # Normalize the source to LF first, then make an explicit CRLF variant,
+        # so the comparison is genuinely LF vs CRLF regardless of checkout policy.
+        for root in (lf, crlf):
+            for p in root.rglob("*"):
+                if p.is_file():
+                    data = p.read_bytes().replace(b"\r\n", b"\n")
+                    p.write_bytes(data)
+        sample = crlf / "etc" / "os-release"
+        sample.write_bytes(sample.read_bytes().replace(b"\n", b"\r\n"))
+        self.assertEqual(canonical_file_digest(sample), canonical_file_digest(lf / "etc" / "os-release"))
+        self.assertEqual(digest_of_files(canonical_files(crlf)), digest_of_files(canonical_files(lf)))
+        # The CRLF tree still builds against the same pin.
+        ok("build", "--source-dir", str(crlf),
+           "--out-dir", str(self.work / "artifact-crlf"), "--provenance", str(PROVENANCE),
+           "--version", "runtime-v5.0.0", "--platform", "amd64", "--sign-key", str(self.priv), "--fixture")
+        ok("verify", "--artifact-dir", str(self.work / "artifact-crlf"), "--public-key", str(self.pub))
+
     # -------------------------------------------------------- capability gate
     def test_07_capability_gate_supported_and_refusals(self) -> None:
         ok("capability-gate", "--capability-file", str(FIXTURES / "capability-supported.json"))

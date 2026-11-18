@@ -77,6 +77,43 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def canonical_bytes(path: Path) -> bytes:
+    """Return LF-normalized bytes of a file (see canonical_file_digest)."""
+    data = path.read_bytes()
+    return data.replace(b"\r\n", b"\n")
+
+
+def canonical_file_info(path: Path) -> tuple[str, int]:
+    """Line-ending-independent (sha256, size): normalize CRLF to LF across chunks.
+
+    Both the digest and the recorded size must be platform independent. A
+    fixture authored with LF on Linux and checked out with CRLF on Windows must
+    produce an identical canonical map; raw st_size would otherwise differ.
+    """
+    h = hashlib.sha256()
+    size = 0
+    pending_cr = False
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            if pending_cr:
+                chunk = b"\r" + chunk
+                pending_cr = False
+            if chunk.endswith(b"\r"):
+                pending_cr = True
+                chunk = chunk[:-1]
+            normalized = chunk.replace(b"\r\n", b"\n")
+            h.update(normalized)
+            size += len(normalized)
+    if pending_cr:
+        h.update(b"\r")
+        size += 1
+    return h.hexdigest(), size
+
+
+def canonical_file_digest(path: Path) -> str:
+    return canonical_file_info(path)[0]
+
+
 def iter_files(root: Path) -> list[Path]:
     """Deterministic regular-file list. Refuse symlinks (no path escape in an artifact)."""
     found: list[Path] = []
@@ -98,10 +135,11 @@ def canonical_files(root: Path) -> dict[str, dict[str, str]]:
     for p in iter_files(root):
         rel = p.relative_to(root).as_posix()
         st = p.stat()
+        digest, size = canonical_file_info(p)
         files[rel] = {
-            "sha256": sha256_file(p),
+            "sha256": digest,
             "mode": format(st.st_mode & 0o7777, "04o"),
-            "size": str(st.st_size),
+            "size": str(size),
         }
     return files
 
@@ -229,18 +267,23 @@ def write_integrity_bundle(out: Path, payload_root: Path, version: str, sign_key
     sums = []
     for rel in sorted(files):
         sums.append(f"{files[rel]['sha256']}  {rel}")
-    sums.append(f"{sha256_file(out / 'manifest.json')}  manifest.json")
+    sums.append(f"{canonical_file_digest(out / 'manifest.json')}  manifest.json")
     write_text(out / "SHA256SUMS", "\n".join(sums) + "\n")
     signed = False
     if sign_key is not None:
+        # Sign the canonical (LF-normalized) manifest bytes so a Windows build
+        # verifies identically on Linux and vice versa.
+        canonical_manifest = out / "manifest.canonical.tmp"
+        canonical_manifest.write_bytes(canonical_bytes(out / "manifest.json"))
         sig = out / "signature.bin"
-        err = openssl_sign(sign_key, out / "manifest.json", sig)
+        err = openssl_sign(sign_key, canonical_manifest, sig)
+        canonical_manifest.unlink(missing_ok=True)
         if err:
             raise RuntimeError(f"signing failed: {err}")
         write_json(out / "signature.json", {
             "algorithm": "RSA-SHA256",
             "signature_b64": base64.b64encode(sig.read_bytes()).decode(),
-            "signed_manifest_sha256": sha256_file(out / "manifest.json"),
+            "signed_manifest_sha256": canonical_file_digest(out / "manifest.json"),
             "key_ref": "operator-supplied; not embedded in artifact",
         })
         sig.unlink()
@@ -266,10 +309,12 @@ def check_sha256sums(root: Path) -> str | None:
         return "SHA256SUMS.empty"
     for rel, digest in expected.items():
         # File lines are payload-relative (rootfs/...); manifest.json is at the bundle root.
+        # Use the same line-ending-independent digest that produced SHA256SUMS so
+        # verification is reproducible across Windows and Linux checkouts.
         p = root / rel if rel == "manifest.json" else root / "rootfs" / rel
         if not p.is_file():
             return f"missing:{rel}"
-        if sha256_file(p) != digest:
+        if canonical_file_digest(p) != digest:
             return f"checksum-mismatch:{rel}"
     return None
 
@@ -329,12 +374,15 @@ def verify_bundle(root: Path, public_key: Path | None, require_signature: bool =
         if public_key is None or not public_key.is_file():
             return "MISSING_PUBLIC_KEY", {}
         sig = read_json(root / "signature.json")
-        if sha256_file(manifest_path) != sig.get("signed_manifest_sha256"):
+        if canonical_file_digest(manifest_path) != sig.get("signed_manifest_sha256"):
             return "SIGNATURE_STALE", {}
+        canonical_manifest = root / "manifest.verify.tmp"
+        canonical_manifest.write_bytes(canonical_bytes(manifest_path))
         binary = root / "signature.verify.tmp"
         binary.write_bytes(base64.b64decode(sig.get("signature_b64", ""), validate=True))
-        valid = openssl_verify(public_key, manifest_path, binary)
+        valid = openssl_verify(public_key, canonical_manifest, binary)
         binary.unlink(missing_ok=True)
+        canonical_manifest.unlink(missing_ok=True)
         if not valid:
             return "SIGNATURE_INVALID", {}
         if sig.get("algorithm") != "RSA-SHA256":

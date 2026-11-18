@@ -43,6 +43,9 @@ decision is recorded in
 - **Pinned provenance.** A build accepts a source tree only when its canonical
   digest equals the pinned `fixture.manifest_sha256`. Production builds instead
   require `--base-tarball` whose sha256 matches `base.upstream_digest_sha256`.
+  Canonical digests and sizes normalize CRLF to LF, so the pin is identical on a
+  Linux (LF) and Windows (CRLF) checkout; the same normalization covers
+  `SHA256SUMS` and the detached signature.
 - **Supported platform/version matrix.** `--platform` must be present in
   `platform_matrix`; versions use the reserved `runtime-vMAJOR.MINOR.PATCH`
   domain from ADR 0033 and are checked explicitly.
