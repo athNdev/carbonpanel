@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: MPL-2.0
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# MCP stdio server image. Built for linux/amd64 and linux/arm64 by
+# .github/workflows/mcp-dist.yml using Buildx; platforms are a build flag, not
+# a Dockerfile instruction. The binary path is supplied by the core
+# implementation lane (cmd/carbon-panel-mcp). This file packages it; it does
+# not implement the server.
+
+ARG GO_IMAGE=golang:1.26.11-alpine
+ARG ALPINE_IMAGE=alpine:3.24.4
+ARG MCP_ARTIFACT_VERSION=v0.1.0
+ARG MCP_ARTIFACT_COMMIT=unknown
+
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS builder
+
+# Reproducible build from the pinned toolchain; never download a newer toolchain.
+ENV GOTOOLCHAIN=local
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN for i in 1 2 3 4 5; do go mod download && exit 0; echo "go mod download failed (attempt $i), retrying"; sleep $((i*5)); done; exit 1
+
+COPY . .
+
+# Fail closed if persisted user data ever enters the build context. The
+# repository .dockerignore excludes these patterns; this is a second boundary.
+RUN set -eu; \
+    list=$(mktemp); \
+    find . -type f \( -name '*.db' -o -name '*.db-shm' -o -name '*.db-wal' \
+      -o -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.sqlite-wal' \
+      -o -name '*.mcworld' -o -name '*.mcpack' -o -name 'level.dat' \) \
+      -print > "$list" 2>/dev/null || true; \
+    if [ -s "$list" ]; then \
+      sed 's/^/refusing persisted data in build context: /' "$list"; \
+      rm -f "$list"; \
+      exit 1; \
+    fi; \
+    rm -f "$list"
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG MCP_ARTIFACT_VERSION
+ARG MCP_ARTIFACT_COMMIT
+ENV CGO_ENABLED=0
+RUN go build -trimpath \
+      -ldflags="-s -w -X main.mcpArtifactVersion=${MCP_ARTIFACT_VERSION} -X main.mcpArtifactCommit=${MCP_ARTIFACT_COMMIT}" \
+      -o /out/carbon-panel-mcp ./cmd/carbon-panel-mcp
+
+FROM ${ALPINE_IMAGE} AS runtime
+
+ARG MCP_ARTIFACT_VERSION
+ARG MCP_ARTIFACT_COMMIT
+
+# Ownership label must equal the official registry server.json "name" on every
+# platform image. Do not change one without the other.
+LABEL io.modelcontextprotocol.server.name="io.github.athNdev/carbon-panel" \
+      org.opencontainers.image.title="Carbon Panel MCP Server" \
+      org.opencontainers.image.description="Read-first stdio MCP access to Carbon Panel Minecraft server management." \
+      org.opencontainers.image.version="${MCP_ARTIFACT_VERSION}" \
+      org.opencontainers.image.revision="${MCP_ARTIFACT_COMMIT}" \
+      org.opencontainers.image.source="https://github.com/athNdev/carbonpanel" \
+      org.opencontainers.image.documentation="https://carbonpanel.dev/docs/guides/mcp-server/" \
+      org.opencontainers.image.licenses="MPL-2.0"
+
+RUN apk add --no-cache ca-certificates \
+ && addgroup -S mcp \
+ && adduser -S -G mcp mcp
+
+COPY --from=builder /out/carbon-panel-mcp /usr/local/bin/carbon-panel-mcp
+
+# The stdio session is the liveness signal: JSON-RPC on stdin/stdout, all
+# diagnostics on stderr, clean exit on stdin EOF. There is deliberately no
+# HEALTHCHECK and no listening port; a health probe would corrupt stdout.
+USER mcp
+WORKDIR /home/mcp
+ENV CARBONPANEL_MCP_TRANSPORT=stdio
+ENTRYPOINT ["/usr/local/bin/carbon-panel-mcp"]
+STOPSIGNAL SIGTERM

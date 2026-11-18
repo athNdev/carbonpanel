@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.athNdev/carbon-panel",
+  "title": "Carbon Panel MCP",
+  "description": "Read-first stdio MCP server for self-hosted Carbon Panel Minecraft management.",
+  "version": "v0.1.0",
+  "repository": {
+    "url": "https://github.com/athNdev/carbonpanel",
+    "source": "github",
+    "id": "1369132627"
+  },
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/athndev/carbonpanel-mcp:v0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "registryBaseUrl": "https://ghcr.io",
+      "version": "v0.1.0",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        { "type": "named", "name": "-i", "value": "" },
+        { "type": "named", "name": "--rm", "value": "" }
+      ],
+      "environmentVariables": [
+        {
+          "name": "CARBONPANEL_URL",
+          "description": "URL of an existing self-hosted Carbon Panel controller.",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "CARBONPANEL_TOKEN",
+          "description": "Dedicated expiring least-privilege Carbon Panel API token.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

@@ -3,6 +3,7 @@
 | Need | Authoritative source |
 | --- | --- |
 | Install, configure or use the panel | [User guides](carbon-panel/src/content/docs/index.mdx), authored in the Starlight content tree |
+| Connect an AI assistant / MCP server | [MCP server guide](carbon-panel/src/content/docs/guides/mcp-server.mdx), [distribution smoke](runbook-mcp-smoke.md) and [ADR 0034](adr/0034-mcp-server-distribution.md) |
 | Operate or recover an installation | [Deployment modes](deployment-modes.md), [server operations](runbook-server-operations.md), [panel database recovery](runbook-panel-db-restore.md), and other `runbook-*.md` files |
 | Develop and verify a change | [Contributor guide](../AGENTS.md), [development commands](development.md), and [verification](../knowledge/testing/verification.md) |
 | Understand accepted architecture | [ADR register](../knowledge/decisions/adrs.md) and the records in `adr/` |

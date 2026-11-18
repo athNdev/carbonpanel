@@ -1,0 +1,154 @@
+<!--
+SPDX-License-Identifier: MPL-2.0
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+
+# ADR 0034: Independent MCP artifact distribution and build-bound capabilities
+
+Status: Accepted (preparation only — no image push, registry submission or GitHub release has been performed).
+
+## Context
+
+Carbon Panel manages persistent Minecraft worlds and a controller database. The
+existing release machinery ([ADR 0010](0010-versioned-release-artifacts.md),
+[ADR 0033](0033-release-tag-and-publication-policy.md)) owns panel versions,
+`latest`/minor aliases and Docker Hub / GHCR panel images. An assistant-facing
+MCP server is a different artifact with a different owner, support boundary and
+publication channel. Reusing the panel release workflow would couple two
+independent version lines and could imply that a new MCP tool works on an older
+panel build.
+
+That risk is concrete. The latest stable panel build, `v1.0.40`
+(`f88748be6a216b187e675bbb1f110df07e544148`), predates the player, world, world
+view, mod-browse and node-control work. Current main
+(`d8597d4e953522d2eb2fa6d4764965ae8e58686f`) is 138 commits ahead and adds
+`PlayerService`, `WorldService`, `WorldViewService`, `ModBrowseService` and
+`NodeControlService` in the checked-in protos. A client package that installs
+successfully says nothing about which of those RPCs a given panel build
+implements.
+
+## Decision
+
+### Artifact and ownership
+
+- The MCP server is a separately versioned, separately owned artifact. Its
+  version line belongs to the MCP distribution lane, not to panel releases. It
+  never moves panel `latest`, panel minor tags or any Docker Hub panel tag, and
+  it is not published as a Carbon Panel GitHub Release. [ADR 0033](0033-release-tag-and-publication-policy.md)
+  remains authoritative for the panel publication boundary.
+- The official distribution is a public OCI image on GHCR plus one official MCP
+  Registry listing. The OCI image carries
+  `io.modelcontextprotocol.server.name=io.github.athNdev/carbon-panel` on every
+  platform image; that value is exactly the registry `server.json` `name`.
+  `github.com/athNdev/carbonpanel` is the canonical repository and its stable
+  repository id (`1369132627`) is recorded in `server.json`.
+- The image is multi-arch `linux/amd64` + `linux/arm64`, built from the pinned
+  toolchain in `toolchain-versions.json` with `GOTOOLCHAIN=local` and
+  `CGO_ENABLED=0`. It runs as a non-root user, contains no world, database,
+  backup or other persisted data, and receives no Docker socket. Liveness is the
+  stdio session itself: the process serves JSON-RPC on stdin/stdout, writes no
+  diagnostics to stdout, and exits on EOF. There is no HTTP healthcheck port.
+- Publication is dispatch-only. `.github/workflows/mcp-dist.yml` has no `push`,
+  `pull_request`, `schedule` or `workflow_run` trigger. An ordinary main merge
+  never publishes. Registry publication, if later authorized, requires a second
+  explicit opt-in, `id-token: write`, and a cosign-verified pinned
+  `mcp-publisher` (v1.8.1); `latest`, branch tags and moving aliases are refused
+  by the local validator. This slice prepares those artifacts and a smoke
+  procedure only.
+- Static ownership values are approved constants, not operator inputs: the
+  registry `name` and the OCI `io.modelcontextprotocol.server.name` label are
+  both `io.github.athNdev/carbon-panel`, and `repository.id` is `1369132627`.
+  Both `linux/amd64` and `linux/arm64` are verified by manifest-list digest and
+  each child image's **config** label; index annotations alone are not evidence.
+- Announcement is limited to the root README, the published user guide and the
+  registry entry. Discussions are disabled; no GitHub Discussion or GitHub
+  release is part of this decision. The website source pin is advanced by the
+  normal website publication process, not by this change.
+
+### Publication gates
+
+- No operator revision input authorizes a write. Every write job resolves the
+  trusted pinned commit from the `refs/heads/main` dispatch SHA, checks out that
+  exact SHA with full history, asserts `git rev-parse HEAD` equals it, and
+  requires `scripts/release.py verify-main-ci` plus the shared
+  `developer-channel-gate` to allow publication. Tags, feature refs and blank
+  refs stage only. This is the same trusted-main pattern as `cd.yml`.
+- The immutable version tag is checked before any push. An existing tag refuses
+  a new write unless the operator supplies a verified identical digest, in
+  which case the existing digest is reused with **no destructive move**. No
+  alias is promoted and no existing tag is overwritten.
+- The published image is verified by **anonymous pull** (package visibility is
+  a separate claim from a successful authenticated push) and by a **real stdio
+  handshake** (`scripts/mcp_stdio_smoke.py`: initialize, `tools/list`, stdout
+  hygiene, clean EOF) before any registry advertisement. The MCP Registry entry
+  is verified by its own read-only GET after publication; a package push is
+  never described as a registry listing.
+- The stdio MCP process must use a panel URL reachable from itself: a
+  host-installed binary may use host loopback, while a container on the panel's
+  Compose network must use the panel service DNS name and port. `localhost`
+  inside the MCP container is never a fallback.
+
+### Authorization and capability surface
+
+- The MCP server reuses Carbon Panel's fail-closed authorization with a
+  dedicated, expiring, least-privilege API token supplied per client. It does
+  not reuse a browser session token, does not create a new privilege path, and
+  never writes a token to tracked config or stdout. Tool metadata marks secret
+  inputs `isSecret: true`.
+- Tools are read-only by default. Mutating capability is a separately reviewed
+  decision and requires explicit per-action user approval; the documentation
+  and smoke procedure exercise read-only calls only. No world, database or
+  config write is a side effect of connecting a client.
+- Data preservation is inherited from
+  `knowledge/invariants/data-safety.md`: connecting, smoke-testing or
+  upgrading the MCP artifact must never run `docker compose down -v`, prune
+  volumes, delete worlds/databases or restart shared services. Switching an
+  existing install from stable to nightly is never automatic; only an operator
+  may choose a qualified panel build as a separate, backed-up change.
+
+### Two distinct compatibility concepts
+
+1. **Public package availability** means the official OCI artifact and registry
+   entry exist, are immutable and install. It is evidence about the client
+   artifact only.
+2. **Compatible server capabilities** means the panel build behind
+   `CARBONPANEL_URL` actually implements the RPC backing a tool. It is evidence
+   about the server build only.
+
+A successful install, `tools/list`, or client handshake is **not** proof that a
+tool works against a panel. Capability is determined from a tested, pinned
+panel build, not from the MCP client version or from a package being available.
+
+The initial compatibility matrix is carried in the user guide and smoke
+procedure. Read-only tools backed by RPCs present at `v1.0.40`
+(`ServerService.ListServers`, `GetServer`, `GetServerLogs`, `ListServerPlayers`
+and `NodeService.ListNodes`, `GetNode`) form the verified-by-contract minimal
+stable set. Tools backed by `PlayerService`, `WorldService`, `WorldViewService`,
+`ModBrowseService` and `NodeControlService` are unavailable on `v1.0.40`; they
+are qualified only against an explicitly pinned main build and only after smoke
+evidence is recorded for that build. The documentation names the pinned commit
+and marks qualification pending until that evidence exists.
+
+When a tool's RPC is absent or `Unimplemented`, the server returns an honest
+structured capability error (an MCP tool error with a `CAPABILITY_UNAVAILABLE`
+code, the tool/RPC names, the pinned build required and the observed panel
+build). It never reports success, never silently omits the tool from a result
+that implied it worked, and never guesses from the client version. The exact
+error payload is owned by the core implementation lane and must match the shape
+documented in the guide; this ADR fixes the semantic requirement, not a final
+wire field list.
+
+## Consequences
+
+Two version lines and two distribution channels must be tracked: panel
+releases under [ADR 0010](0010-versioned-release-artifacts.md) / [ADR 0033](0033-release-tag-and-publication-policy.md),
+and MCP artifacts under this ADR. Documentation must always show both the
+pinned MCP artifact version/digest and the panel build a tool was qualified
+against. A green CI run or an installed client is not evidence that a tool
+works on a user's panel; the smoke procedure retains the digest, platform list,
+image id, tool list and capability responses as evidence. The first real digest
+and the first tested qualification build replace the documented placeholders
+before public announcement. Until then this ADR and the associated docs
+describe preparation, not shipped behavior.
