@@ -27,18 +27,30 @@ and dispatch outcomes are defined for the agent path.
 - Identity and responses carry fingerprints, generations and metadata only. No
   token, private key or TLS secret appears in a response message.
 - Enrollment is one-time, TTL-bounded and **digest-only** on the controller.
-  The node generates its own high-entropy secret and key pair, registers only a
-  salt plus digest out of band through an operator, and proves possession with
-  a signed CSR over the exact enrollment context. A caller-declared key
-  fingerprint or a captured bootstrap token is never proof of identity.
-- Claim is an atomic compare-and-consume in one transaction, bound to a bounded
-  session and the TLS channel; replay, revoked state, expired TTL and
-  generation mismatch are refused. The controller never emits or stores a
+  The node generates its own high-entropy secret `S`, salt and key pair; `S`
+  stays on the node and is sent only once in the claim. The operator registers
+  a REQUIRED approved public key (SPKI + fingerprint), salt and digest out of
+  band. The pre-registration CSR `CSR_PRE` is material only; proof of possession
+  is a **fresh** signature by the approved key after a bounded, unauthenticated
+  `BeginEnrollmentChallenge` issues a single-use server nonce. A signature from
+  any other key, a caller-declared fingerprint or a captured token is refused.
+- Claim is an atomic compare-and-consume in one transaction over the exact
+  context (node ID, enrollment ID, challenge ID/nonce, expiry, capabilities,
+  verified channel context); replay, revoked state, expired TTL, stale nonce
+  and generation mismatch are refused. The controller never emits or stores a
   plaintext enrollment secret.
+- The enrolled credential is a **signed public client certificate** bound to
+  the approved node key and used with mTLS; the private key never leaves the
+  node, and no read response carries a secret. Channel binding must be derived
+  by the controller or verified from a configured trusted TLS terminator;
+  client-supplied headers/assertions alone are never trusted and unsupported
+  topologies are refused with `UNSUPPORTED_TLS_TOPOLOGY`.
 - Three authorization domains never cross: operator provisioning
-  (`nodes:create`/`nodes:update`), one-time bootstrap (`ClaimEnrollment` only),
-  and enrolled node (per-node scopes on its own object). A bootstrap secret is
-  not a node credential; an operator cannot act as a node.
+  (`nodes:create`/`nodes:update`), one-time bootstrap
+  (`BeginEnrollmentChallenge` + one `ClaimEnrollment`), and enrolled node
+  (mTLS certificate with per-node scopes on its own object). A bootstrap secret
+  is not a node credential; an operator cannot act as a node. Rotation and
+  revocation are durable across restart.
 - Existing and new nodes stay `legacy` and unenrolled until an operator
   explicitly opts in. No success evidence may be claimed from an unimplemented
   stub; P0/P1 fixtures prove denial, contract shape and the enrollment state
@@ -71,10 +83,13 @@ host.
 - `go test ./internal/rpc -run TestNodeControl` and
   `go test ./internal/db -run TestNodeControlContract`.
 - Before any node-control RPC is mounted in implementation, the harmless P1
-  enrollment fixtures in ADR 0019 must pass: synthetic key/CSR, valid claim,
-  replay refusal, revoked/generation-mismatch refusal, wrong-scope refusal,
-  digest-only storage and no secret in read responses. They use synthetic keys,
-  fake TLS channels and owned in-memory/local DB fixtures only.
+  enrollment fixtures in ADR 0019 must pass: synthetic key/`CSR_PRE` and fresh
+  signature, valid claim, mismatched approved key, stale/replayed nonce,
+  replay refusal, revoked/generation-mismatch refusal, wrong-scope and
+  preflight-scope refusal, unsupported-topology refusal, digest-only storage,
+  no secret in read responses, atomicity and durable rotation across restart.
+  They use synthetic keys, fake TLS channels and owned in-memory/local DB
+  fixtures only.
 - Review new RPCs against `knowledge/workflows/add-rpc.md`: no mapping means
   denied, and no handler should be reachable in the negative fixture.
 
