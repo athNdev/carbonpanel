@@ -121,7 +121,29 @@ Default grants: `user` gets `world_view/read` only; `anonymous` gets nothing;
 `observe_players`, `update` and `admin` are admin-only (admin matches `*`).
 Unmapped procedures and a nil enforcer are denied by the RPC interceptor.
 
-## 6. Evidence limits
+## 6. Explicit limitations and deferred surfaces
+
+- **Renderer-owned camera:** pan, zoom and coordinate search are provided by
+  the renderer's own controls inside the same-origin embed. No renderer camera
+  API has been verified, so the panel deliberately exposes no simulated
+  pan/zoom buttons or coordinate "go" action. Coordinates in a URL are intent
+  for player/admin deep links, not a claimed map camera.
+- **Static snapshots:** a `static` renderer honestly reports `STALE` with its
+  source and confidence, but no tile proxy is implemented for imported snapshot
+  files. It therefore exposes freshness information without an iframe rather
+  than a blank or broken map.
+- **Subuser discovery:** `ListWorldViewTargets` is a global listing and requires
+  an unscoped `world_view/read` grant (object `*`). A server-scoped subuser can
+  still open a granted world by deep link and use every scoped RPC and the
+  proxy, but cannot enumerate the picker. This is deliberate anti-enumeration;
+  a scoped picker would need an explicit `server_id` filter with service-side
+  enforcement.
+- **Sibling epics:** the shell links to `/players` and `/library`, which are
+  owned by the player-management and World Library epics. The world-viewing PR
+  is a cumulative draft and is expected to be integrated with those routes;
+  it does not stub or imitate them.
+
+## 7. Evidence limits
 
 All tests in this change use local `httptest` renderer fixtures and in-memory
 fakes; test names are marked `Fixture`. They verify authorization, scoping,

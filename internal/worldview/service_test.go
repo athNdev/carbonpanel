@@ -122,7 +122,7 @@ func TestTargetErrorsDoNotLeakEndpointFixture(t *testing.T) {
 	store := newFakeStore()
 	store.addServer("srv-a", "default")
 	service := NewService(ServiceDeps{
-		Store: store,
+		Store:      store,
 		Authorizer: &fakeEnforcer{allow: func([]string, string, string, string) (bool, error) { return true, nil }},
 		Resolver: NewResolver(Config{Endpoints: []Endpoint{{
 			NodeID: "default", Kind: RendererBlueMap, Host: "10.9.8.7", Port: 12345,
@@ -171,6 +171,25 @@ func TestGetWorldViewSessionFixture(t *testing.T) {
 	if unready.Msg.GetProxyPath() != "" || unready.Msg.GetReason() == "" ||
 		unready.Msg.GetState() != v1.RendererState_RENDERER_STATE_ABSENT {
 		t.Fatalf("unready session = %+v", unready.Msg)
+	}
+
+	// A static snapshot is honestly STALE but has no reachable tile proxy: it
+	// must keep the stale state and freshness without offering a blank iframe.
+	staticService := NewService(ServiceDeps{
+		Store: ready.store, Authorizer: &fakeEnforcer{allow: func([]string, string, string, string) (bool, error) { return true, nil }},
+		Resolver: NewResolver(Config{Endpoints: []Endpoint{{
+			NodeID: "default", Kind: RendererStatic, Host: "127.0.0.1", Port: 8100,
+		}}}, &fakeLocator{local: map[string]bool{"default": true}}),
+	})
+	staticResp, err := staticService.GetWorldViewSession(svcCtx("user-a", "user"), connect.NewRequest(&v1.GetWorldViewSessionRequest{
+		ServerId: "srv-a", WorldRef: fixtureRef("srv-a", "custom_world"),
+	}))
+	if err != nil {
+		t.Fatalf("static session: %v", err)
+	}
+	if staticResp.Msg.GetProxyPath() != "" || staticResp.Msg.GetState() != v1.RendererState_RENDERER_STATE_STALE ||
+		staticResp.Msg.GetReason() == "" {
+		t.Fatalf("static stale session = %+v", staticResp.Msg)
 	}
 }
 

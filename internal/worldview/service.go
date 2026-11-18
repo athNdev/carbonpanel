@@ -44,13 +44,13 @@ type Store interface {
 
 // ServiceDeps are the dependencies of the WorldViewService.
 type ServiceDeps struct {
-	Store     Store
+	Store      Store
 	Authorizer Authorizer
-	Resolver  *Resolver
-	Sessions  *SessionRegistry
-	Overlays  *OverlayStore
-	Auditor   AuditLogger
-	Log       Logger
+	Resolver   *Resolver
+	Sessions   *SessionRegistry
+	Overlays   *OverlayStore
+	Auditor    AuditLogger
+	Log        Logger
 }
 
 // Service implements the generated WorldViewServiceHandler. It is observation
@@ -123,24 +123,39 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
 	}
 	target := s.targetFor(ctx, server, ref)
-	if target.GetRendererState() != v1.RendererState_RENDERER_STATE_READY {
+	state := target.GetRendererState()
+	// A STALE renderer is still reachable (its health probe succeeded): its
+	// last-known tiles can be served, so the workspace must receive a session
+	// for the honest last-good view promised by ADR 0015. STOPPED/ERROR/ABSENT
+	// never get a key because there is no reachable renderer to serve assets.
+	// A static snapshot has no reachable tile proxy: keep its honest STALE
+	// state but do not offer an iframe that could never load.
+	staticWithoutProxy := state == v1.RendererState_RENDERER_STATE_STALE &&
+		target.GetRendererType() == v1.RendererType_RENDERER_TYPE_STATIC
+	if (state != v1.RendererState_RENDERER_STATE_READY && state != v1.RendererState_RENDERER_STATE_STALE) || staticWithoutProxy {
 		reason := target.GetError()
 		if reason == "" {
 			reason = "renderer is not ready; no map session was issued"
 		}
-		return connect.NewResponse(&v1.GetWorldViewSessionResponse{
-			State: target.GetRendererState(), Reason: reason,
-		}), nil
+		if staticWithoutProxy {
+			reason = "offline tile snapshot has no map proxy; last-known freshness only"
+		}
+		return connect.NewResponse(&v1.GetWorldViewSessionResponse{State: state, Reason: reason}), nil
 	}
 
 	key, expires := s.deps.Sessions.Issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL)
 	if key == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("could not issue a map session key"))
 	}
+	reason := ""
+	if state == v1.RendererState_RENDERER_STATE_STALE {
+		reason = "last-known tiles; the renderer reports a stale render"
+	}
 	return connect.NewResponse(&v1.GetWorldViewSessionResponse{
 		ProxyPath: ProxyPrefix + key + "/",
 		ExpiresAt: timestamppb.New(expires),
-		State:     v1.RendererState_RENDERER_STATE_READY,
+		State:     state,
+		Reason:    reason,
 	}), nil
 }
 
@@ -222,6 +237,9 @@ func (s *Service) SetMapOverlay(ctx context.Context, req *connect.Request[v1.Set
 		"overlay_id": stored.Id, "world_key": worldKey(stored.WorldRef),
 		"dimension": stored.Dimension, "kind": stored.Kind, "sensitive": stored.Sensitive,
 	})
+	// Fail closed: an unaudited mutation must never happen. The audit write
+	// precedes the in-memory mutation, and Set cannot fail for a validated
+	// overlay (the only error is a nil entry, already rejected above).
 	if err := s.audit(activity.Entry{
 		ActorID: user.ID, ActorName: user.Username,
 		Event: auditEventOverlaySet, SubjectTyp: auditSubjectTypeServer, SubjectID: serverID,
@@ -327,11 +345,11 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 	}
 
 	target := &v1.WorldViewTarget{
-		ServerId:     server.ID,
-		WorldRef:     ref,
-		Name:         server.Name,
-		NodeId:       nodeID,
-		RendererType: v1.RendererType_RENDERER_TYPE_UNSPECIFIED,
+		ServerId:      server.ID,
+		WorldRef:      ref,
+		Name:          server.Name,
+		NodeId:        nodeID,
+		RendererType:  v1.RendererType_RENDERER_TYPE_UNSPECIFIED,
 		RendererState: v1.RendererState_RENDERER_STATE_ABSENT,
 		Renderer: &v1.RendererDescriptor{
 			Type:        v1.RendererType_RENDERER_TYPE_UNSPECIFIED,

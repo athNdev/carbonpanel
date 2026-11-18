@@ -16,12 +16,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		AlertTriangle,
 		ArrowLeft,
 		Ban,
-		Crosshair,
 		LoaderCircle,
 		Lock,
 		MapPin,
-		Minus,
-		Plus,
 		RefreshCw,
 		Users
 	} from '@lucide/svelte';
@@ -32,7 +29,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		CarbonButton,
 		CarbonSelect,
 		CarbonTextInput,
-		CarbonSearch,
 		CarbonInlineLoading,
 		CarbonEmptyState,
 		CarbonErrorState,
@@ -131,30 +127,25 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let playerVisible = $state(false);
 	let visibilityNote = $state('');
 
-	let searchWrap = $state<HTMLDivElement | null>(null);
-	let coordInput = $state('');
 	let controlsOpen = $state(true);
 	let overlayControlsOpen = $state(false);
 	let adminOpen = $state(false);
 
-	// Query-backed camera and selection state. Back/forward restores these
-	// through SvelteKit shallow routing without a page reload.
+	// URL-backed selection state (deep-link intent, not a renderer camera).
+	// Pan/zoom are renderer-owned and are not simulated here: no renderer API
+	// for camera control has been verified, so this surface exposes no inert
+	// pan/zoom controls. Back/forward restores the selection without a reload.
 	let dimension = $derived(
 		page.url.searchParams.get('dimension') || statusTarget?.dimension || 'overworld'
 	);
 	let x = $derived(parseNumber(page.url.searchParams.get('x')) ?? 0);
 	let z = $derived(parseNumber(page.url.searchParams.get('z')) ?? 0);
-	let zoom = $derived(clampZoom(parseNumber(page.url.searchParams.get('zoom')) ?? 1));
 	let layer = $derived(page.url.searchParams.get('layer') || 'all');
 
 	function parseNumber(value: string | null): number | null {
 		if (value === null || value.trim() === '') return null;
 		const parsed = Number(value);
 		return Number.isFinite(parsed) ? parsed : null;
-	}
-
-	function clampZoom(value: number): number {
-		return Math.min(8, Math.max(0.25, value));
 	}
 
 	function writeQuery(patch: Record<string, string | null>, mode: 'push' | 'replace' = 'push') {
@@ -272,75 +263,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let filteredOverlays = $derived(
 		layer === 'all' ? visibleOverlays : visibleOverlays.filter((overlay) => overlay.kind === layer)
 	);
+	// Announce state transitions only. Freezing the age out of the live region
+	// avoids repeating a changing staleness string on each 5-second poll.
 	let announcement = $derived(
-		!worldRef
-			? 'This world link is invalid.'
-			: `Map state: ${VIEW_STATE_LABEL[view]}${view === 'stale' || view === 'stopped' ? `. Tiles last observed ${formatAge(statusTarget?.freshness?.observedAt ?? statusTarget?.lastRender)}.` : ''}`
+		!worldRef ? 'This world link is invalid.' : `Map state: ${VIEW_STATE_LABEL[view]}`
 	);
 
-	function isTypingTarget(target: EventTarget | null): boolean {
-		const element = target as HTMLElement | null;
-		if (!element) return false;
-		const tag = element.tagName?.toLowerCase();
-		return tag === 'input' || tag === 'textarea' || tag === 'select' || element.isContentEditable;
-	}
-
-	function pan(dx: number, dz: number) {
-		writeQuery({ x: String(Math.round(x + dx)), z: String(Math.round(z + dz)) });
-	}
-
-	function setZoom(next: number) {
-		writeQuery({ zoom: String(clampZoom(next)) });
-	}
-
 	function handleMapKeydown(event: KeyboardEvent) {
-		if (isTypingTarget(event.target)) return;
-		const step = event.shiftKey ? 128 : 32;
-		switch (event.key) {
-			case 'ArrowLeft':
-				event.preventDefault();
-				pan(-step, 0);
-				break;
-			case 'ArrowRight':
-				event.preventDefault();
-				pan(step, 0);
-				break;
-			case 'ArrowUp':
-				event.preventDefault();
-				pan(0, -step);
-				break;
-			case 'ArrowDown':
-				event.preventDefault();
-				pan(0, step);
-				break;
-			case '+':
-			case '=':
-				event.preventDefault();
-				setZoom(zoom * 1.25);
-				break;
-			case '-':
-			case '_':
-				event.preventDefault();
-				setZoom(zoom / 1.25);
-				break;
-			case '/':
-				event.preventDefault();
-				searchWrap?.querySelector('input')?.focus();
-				break;
-			case 'Escape':
-				overlayControlsOpen = false;
-				adminOpen = false;
-				break;
+		if (event.key === 'Escape') {
+			overlayControlsOpen = false;
+			adminOpen = false;
 		}
-	}
-
-	function submitCoordinates() {
-		const match = coordInput.trim().match(/^(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)$/);
-		if (!match) {
-			toast.error('Enter coordinates as X, Z (for example 120, -64).');
-			return;
-		}
-		writeQuery({ x: match[1], z: match[2] });
 	}
 
 	// Opt-in player visibility is audited by the backend and hidden by default.
@@ -472,15 +405,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	});
 </script>
-
-<svelte:window
-	onkeydown={(event) => {
-		if (event.key === '/' && !isTypingTarget(event.target)) {
-			event.preventDefault();
-			searchWrap?.querySelector('input')?.focus();
-		}
-	}}
-/>
 
 <div class="h-full flex-1 space-y-4 bg-[#161616] font-sans text-[#f4f4f4]">
 	<CarbonBreadcrumbs
@@ -645,14 +569,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<div
 							class="focus-ring relative min-h-[24rem] border border-[#393939] bg-[#262626]"
 							role="region"
-							aria-label="World map, {VIEW_STATE_LABEL[view].toLowerCase()}"
+							aria-label="World map, {VIEW_STATE_LABEL[
+								view
+							].toLowerCase()}. Map navigation is provided by the renderer; tab into the map to use its controls."
 							tabindex="0"
 							onkeydown={handleMapKeydown}
 						>
 							<iframe
 								src={embed.src}
 								title="World map for {statusTarget?.name || worldRef?.levelName || 'this world'}"
-								tabindex="-1"
+								tabindex="0"
 								class="h-[36rem] w-full border-0 bg-[#161616] sm:h-[44rem]"
 								loading="lazy"
 								sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
@@ -671,64 +597,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</section>
 
 			<aside class="min-w-0 space-y-3">
-				<div bind:this={searchWrap}>
-					<CarbonSearch
-						bind:value={coordInput}
-						placeholder="Go to X, Z"
-						aria-label="Go to map coordinates"
-						size="sm"
-						disabled={!matrix.coordinateSearch().supported}
-						onkeydown={(event) => {
-							if (event.key === 'Enter') submitCoordinates();
-						}}
-					/>
-				</div>
-				{#if !matrix.coordinateSearch().supported}
-					<p class="text-xs text-[#8d8d8d]">{matrix.coordinateSearch().reason}</p>
-				{/if}
-				<div class="flex flex-wrap gap-2">
-					<CarbonButton
-						kind="secondary"
-						size="sm"
-						iconOnly
-						aria-label="Zoom out"
-						onclick={() => setZoom(zoom / 1.25)}
-					>
-						<Minus class="h-4 w-4" />
-					</CarbonButton>
-					<CarbonButton
-						kind="secondary"
-						size="sm"
-						iconOnly
-						aria-label="Zoom in"
-						onclick={() => setZoom(zoom * 1.25)}
-					>
-						<Plus class="h-4 w-4" />
-					</CarbonButton>
-					<CarbonButton
-						kind="secondary"
-						size="sm"
-						iconOnly
-						aria-label="Recentre on origin"
-						onclick={() => writeQuery({ x: '0', z: '0' })}
-					>
-						<Crosshair class="h-4 w-4" />
-					</CarbonButton>
-					<span class="self-center font-mono text-xs text-[#a8a8a8]">
-						{Math.round(x)}, {Math.round(z)} · {zoom.toFixed(2)}×
-					</span>
-				</div>
+				<p class="text-xs text-[#8d8d8d]">
+					Pan, zoom and coordinate search are provided by the renderer's own map controls.
+					Coordinates in the link are intent for player/admin actions, not a simulated camera.
+				</p>
 
 				<CarbonAccordion>
 					<CarbonAccordionItem title="View controls" bind:open={controlsOpen}>
 						<div class="space-y-3">
 							<CarbonSelect
-								label="Dimension"
+								label="Overlay dimension"
 								value={dimension}
 								disabled={!matrix.dimensions().supported}
 								onchange={(event) =>
 									writeQuery({ dimension: (event.currentTarget as HTMLSelectElement).value })}
-								helperText={matrix.dimensions().supported ? '' : matrix.dimensions().reason}
+								helperText={matrix.dimensions().supported
+									? 'Filters panel-owned overlays only.'
+									: matrix.dimensions().reason}
 							>
 								<option value="overworld">Overworld</option>
 								<option value="nether">Nether</option>

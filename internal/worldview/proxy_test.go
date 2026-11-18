@@ -46,8 +46,8 @@ func newLocalProxyFixture(t *testing.T, body string, status int) *proxyFixture {
 	store.addServer("srv-b", "remote-1")
 	store.addServer("srv-r", "remote-1")
 	users := &fakeAuth{users: map[string]*auth.AuthenticatedUser{
-		"tok-a": {ID: "user-a", Username: "alice", Roles: []string{"user"}},
-		"tok-b": {ID: "user-b", Username: "bob", Roles: []string{"user"}},
+		"tok-a":     {ID: "user-a", Username: "alice", Roles: []string{"user"}},
+		"tok-b":     {ID: "user-b", Username: "bob", Roles: []string{"user"}},
 		"tok-guest": {ID: "guest", Username: "guest", Roles: []string{"guest"}},
 	}}
 	enforcer := &fakeEnforcer{allow: func(roles []string, resource, action, objectID string) (bool, error) {
@@ -281,5 +281,62 @@ func TestProxyHeadAndCancellationFixture(t *testing.T) {
 	f.handler.ServeHTTP(rec, req)
 	if rec.Code == http.StatusOK {
 		t.Fatal("cancelled request completed with 200")
+	}
+}
+
+// TestProxyRendererRedirectIsNotFollowedFixture proves a renderer 3xx cannot
+// turn an allowlisted node-local address into an external/controller-local
+// request under the panel origin. Fixture only: no real renderer or container.
+func TestProxyRendererRedirectIsNotFollowedFixture(t *testing.T) {
+	externalHits := 0
+	external := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		externalHits++
+		_, _ = io.WriteString(w, "external-secret")
+	}))
+	defer external.Close()
+
+	renderer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, external.URL+"/secret", http.StatusFound)
+	}))
+	defer renderer.Close()
+
+	store := newFakeStore()
+	store.addServer("srv-a", "default")
+	users := &fakeAuth{users: map[string]*auth.AuthenticatedUser{
+		"tok-a": {ID: "user-a", Username: "alice", Roles: []string{"user"}},
+	}}
+	enforcer := &fakeEnforcer{allow: func(roles []string, resource, action, objectID string) (bool, error) {
+		return resource == rbac.ResourceWorldView && action == rbac.ActionRead && objectID == "srv-a", nil
+	}}
+	resolver := NewResolver(
+		Config{Endpoints: []Endpoint{endpointForFixture(t, renderer.URL, "", RendererBlueMap)}},
+		&fakeLocator{local: map[string]bool{"default": true}},
+	)
+	sessions := NewSessionRegistry()
+	key, _ := sessions.Issue("srv-a", "world=srv-a%2Flevel", "user-a", time.Minute)
+	handler := NewProxyHandler(ProxyDeps{
+		Auth: users, Authorizer: enforcer, Subusers: store, Servers: store,
+		Resolver: resolver, Sessions: sessions,
+		Client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: refuseRedirects},
+	})
+
+	rec := callProxy(handler, key, "tok-a", http.MethodGet)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("redirecting renderer: got %d, want 502", rec.Code)
+	}
+	if externalHits != 0 {
+		t.Fatalf("redirect target was contacted %d times", externalHits)
+	}
+	if strings.Contains(rec.Body.String(), "external-secret") {
+		t.Fatal("external renderer body was relayed under the panel origin")
+	}
+}
+
+func TestProxyClientRefusesAllRedirectsUnit(t *testing.T) {
+	if err := newProxyClient().CheckRedirect(&http.Request{}, nil); err == nil {
+		t.Fatal("production proxy client follows redirects")
+	}
+	if err := newHealthClient().CheckRedirect(&http.Request{}, nil); err == nil {
+		t.Fatal("renderer health client follows redirects")
 	}
 }

@@ -25,8 +25,21 @@ type HTTPDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-func newHealthClient() *http.Client { return &http.Client{Timeout: 3 * time.Second} }
-func newProxyClient() *http.Client  { return &http.Client{Timeout: 20 * time.Second} }
+// refuseRedirects keeps the node allowlist and same-origin guarantee intact: a
+// renderer 3xx must never turn an allowlisted node-local request into a request
+// to an external or controller-local address (SSRF), nor inject foreign content
+// under the panel origin. Do returns an error, which callers report as
+// unavailable/bad gateway without following the redirect.
+func refuseRedirects(_ *http.Request, _ []*http.Request) error {
+	return fmt.Errorf("worldview: renderer redirects are not followed")
+}
+
+func newHealthClient() *http.Client {
+	return &http.Client{Timeout: 3 * time.Second, CheckRedirect: refuseRedirects}
+}
+func newProxyClient() *http.Client {
+	return &http.Client{Timeout: 20 * time.Second, CheckRedirect: refuseRedirects}
+}
 
 // Health is the adapter's honesty envelope. A zero/unknown value is kept as
 // unknown; nothing here is back-filled with a plausible-looking timestamp.
@@ -126,7 +139,9 @@ func (a *httpRenderer) Descriptor() *v1.RendererDescriptor {
 	}
 }
 
-func (a *httpRenderer) Capabilities() []*v1.Capability { return capabilitiesFor(a.ep.Kind, a.ep.PlayerFeed) }
+func (a *httpRenderer) Capabilities() []*v1.Capability {
+	return capabilitiesFor(a.ep.Kind, a.ep.PlayerFeed)
+}
 
 func (a *httpRenderer) Health(ctx context.Context) (*Health, error) {
 	path := a.ep.HealthPath

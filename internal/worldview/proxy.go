@@ -184,6 +184,12 @@ func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseUR
 		return
 	}
 	defer resp.Body.Close()
+	// Defense in depth: never relay a renderer redirect under the panel origin,
+	// even when a custom client was injected without CheckRedirect.
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		http.Error(w, "renderer redirect refused", http.StatusBadGateway)
+		return
+	}
 	if resp.StatusCode == http.StatusSwitchingProtocols {
 		http.Error(w, "renderer upgrade refused", http.StatusBadGateway)
 		return
