@@ -1,8 +1,16 @@
 # SPDX-License-Identifier: MPL-2.0
 name: Carbon Panel Release
+# A pushed v* tag only stages, builds and verifies. Publication is a separate,
+# explicit operator action: workflow_dispatch with publish=true. The decision is
+# enforced by scripts/release.py publication_allowed(); no automatic event can
+# write to a registry or a GitHub release. Staging a tag does not assert that its
+# target commit is current main: tags can point at old commits and a workflow
+# reflects that target's history. The trusted publish gate is the Python
+# boundary plus exact-commit main CI, never the dispatch revision input alone.
 
 on:
   push:
+    # Staging-only trigger. See the comment above and publication_allowed().
     tags: ['v*']
   pull_request:
     paths:
@@ -22,13 +30,17 @@ on:
         required: true
         type: string
       revision:
-        description: 'Commit or branch to build; publishing requires successful main CI'
+        description: 'Commit or branch to stage; publishing still requires exact-commit main CI'
         default: main
         type: string
       publish:
-        description: 'Publish the versioned image and GitHub release (off = build and verify only)'
+        description: 'EXPLICIT PUBLICATION OPT-IN: off (default) builds and verifies only'
         default: false
         type: boolean
+      expected_digest:
+        description: 'Optional verified sha256 digest to resume an identical immutable version; blank publishes new'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -48,7 +60,9 @@ jobs:
       epoch: ${{ steps.plan.outputs.epoch }}
       date: ${{ steps.plan.outputs.date }}
       prerelease: ${{ steps.plan.outputs.prerelease }}
+      channel: ${{ steps.plan.outputs.channel }}
       publish: ${{ steps.plan.outputs.publish }}
+      publication_reason: ${{ steps.plan.outputs.publication_reason }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,11 +75,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || format('v0.0.0-verify.{0}', github.run_number) }}
-          RELEASE_PUBLISH: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_PUBLISH: ${{ inputs.publish }}
+        # The Python gate is authoritative: automatic events and rehearsals can
+        # only ever produce publish=false here, regardless of workflow inputs.
         run: |
-          args=(--version "$RELEASE_VERSION")
-          if [ "$RELEASE_PUBLISH" = true ]; then args+=(--publish); fi
-          python3 scripts/release.py plan "${args[@]}"
+          python3 scripts/release.py plan --version "$RELEASE_VERSION" \
+            --event "$RELEASE_EVENT" --publish-input "$RELEASE_PUBLISH"
 
   frontend:
     name: Build versioned UI and API schema
@@ -186,16 +202,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # BUILD/VERIFY ONLY. This job has no registry credentials and never pushes.
   image:
-    name: Assemble release and matching Docker image
+    name: Stage verified downloads and OCI image inputs
     needs: [plan, frontend, binaries]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: write
       actions: read
-    outputs:
-      digest: ${{ steps.image.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -215,40 +229,14 @@ jobs:
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
         run: python3 scripts/release.py collect --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --source dist/downloads --output dist/release
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - name: Sign in to Docker Hub for publication
-        if: needs.plan.outputs.publish == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-      - name: Sign in to the linked GitHub container registry
-        if: needs.plan.outputs.publish == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        id: meta
-        with:
-          images: |
-            atharvnaphade/carbonpanel
-            ghcr.io/${{ github.repository }}
-          flavor: latest=false
-          tags: |
-            type=semver,pattern={{version}},value=${{ needs.plan.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.plan.outputs.version }},enable=${{ needs.plan.outputs.prerelease == 'false' }}
-            type=raw,value=latest,enable=${{ needs.plan.outputs.prerelease == 'false' }}
-      - name: Assemble both architectures from the tested release binaries
-        id: image
+      - name: Assemble and verify both architectures locally (no registry write)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: dist/image
           file: docker/Dockerfile.release
           platforms: linux/amd64,linux/arm64
-          push: ${{ needs.plan.outputs.publish == 'true' }}
-          outputs: ${{ needs.plan.outputs.publish != 'true' && 'type=oci,dest=dist/image.oci.tar' || '' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          push: false
+          outputs: type=oci,dest=dist/image.oci.tar
           labels: |
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.version=${{ needs.plan.outputs.version }}
@@ -260,39 +248,194 @@ jobs:
           build-args: APP_VERSION=${{ needs.plan.outputs.version }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
-      - name: Sync Docker Hub repository description
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
-        if: needs.plan.outputs.publish == 'true'
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-          repository: atharvnaphade/carbonpanel
-          short-description: Self-hosted Minecraft server and modpack management with Docker.
-          enable-url-completion: true
-      - name: Confirm both architectures are available in both registries
-        if: needs.plan.outputs.publish == 'true'
-        env:
-          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
-          GITHUB_IMAGE: ghcr.io/${{ github.repository }}
-        run: |
-          docker buildx imagetools inspect "atharvnaphade/carbonpanel@$IMAGE_DIGEST" --raw > dist/image-manifest.json
-          python3 scripts/release.py verify-image --manifest dist/image-manifest.json
-          docker buildx imagetools inspect "${GITHUB_IMAGE,,}@$IMAGE_DIGEST" --raw > dist/github-image-manifest.json
-          python3 scripts/release.py verify-image --manifest dist/github-image-manifest.json
-      - name: Record image digest and final download checksums
-        env:
-          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
-        run: python3 scripts/release.py finalize --output dist/release --digest "$IMAGE_DIGEST"
+      - name: Check final download checksums (digest added after immutable publication)
+        run: python3 scripts/release.py finalize --output dist/release
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: verified-release-downloads
           path: dist/release/*
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-image-context
+          path: dist/image
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  # IMMUTABLE VERSION PUBLICATION ONLY. No moving alias is written here.
+  publish-immutable:
+    name: Publish immutable version tag after fail-closed preflight
+    needs: [plan, image]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    # One canonical destination per registry; kept in sync with scripts/release.py
+    # and docs/releases.md. No credential value is ever stored here.
+    env:
+      DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
+      GHCR_IMAGE: ghcr.io/${{ github.repository }}
+    outputs:
+      digest: ${{ steps.resolved.outputs.digest }}
+      verified: ${{ steps.verify.outputs.verified }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-image-context
+          path: .
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Fail closed without registry credentials
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+        run: python3 scripts/release.py preflight
+      - name: Sign in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+      - name: Sign in to the linked GitHub container registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Preflight exact immutable version in every registry
+        id: preflight
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+        # Read-only. Conflicting digests, unknown registry errors, partial
+        # publication states and unverified commit/version provenance all fail
+        # here before any write. An identical digest alone is not enough.
+        run: |
+          python3 scripts/release.py preflight-immutable \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --expected-digest "$EXPECTED_DIGEST"
+      - name: Resolve the sole immutable tag reference
+        id: immutable_tag
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
+          {
+            echo 'tags<<EOF'
+            echo "$DOCKER_HUB_IMAGE:$TAG"
+            echo "${GHCR_IMAGE,,}:$TAG"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: Push the immutable version tag only
+        id: push
+        if: steps.preflight.outputs.action == 'publish'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: dist/image
+          file: docker/Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.immutable_tag.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=Carbon Panel
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
+            org.opencontainers.image.url=https://carbonpanel.dev/
+            org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
+            org.opencontainers.image.licenses=MPL-2.0
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          build-args: APP_VERSION=${{ needs.plan.outputs.version }}
+          cache-from: type=gha,scope=release-image
+          cache-to: type=gha,mode=max,scope=release-image
+      - name: Resolve the verified digest (resume uses the operator-supplied digest)
+        id: resolved
+        env:
+          PREFLIGHT_ACTION: ${{ steps.preflight.outputs.action }}
+          PUSH_DIGEST: ${{ steps.push.outputs.digest }}
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+        run: |
+          if [ "$PREFLIGHT_ACTION" = "resume" ]; then
+            echo "digest=$EXPECTED_DIGEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "digest=$PUSH_DIGEST" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify tag→digest and both architectures in both registries
+        id: verify
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
+        run: python3 scripts/release.py verify-immutable --version "$RELEASE_VERSION" --digest "$IMAGE_DIGEST"
+      - name: Sync Docker Hub repository description
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.DOCKER_HUB_IMAGE }}
+          short-description: Self-hosted Minecraft server and modpack management with Docker.
+          enable-url-completion: true
+
+  # ALIAS PROMOTION ONLY. One alias per serialized step, each re-verified.
+  promote-aliases:
+    name: Promote moving aliases from the verified digest
+    needs: [plan, publish-immutable]
+    if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    env:
+      DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
+      GHCR_IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Sign in to Docker Hub
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+      - name: Sign in to the linked GitHub container registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Decide which aliases may advance
+        id: promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        # An undeterminable channel promotes nothing and records why, rather
+        # than guessing or silently moving a mutable alias.
+        run: python3 scripts/release.py alias-promotion --version "$RELEASE_VERSION" --digest "$IMAGE_DIGEST"
+      - name: Promote minor channel alias
+        if: steps.promotion.outputs.minor != ''
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          ALIAS: ${{ steps.promotion.outputs.minor }}
+        run: python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" --alias "$ALIAS" --digest "$IMAGE_DIGEST"
+      - name: Promote latest channel alias
+        if: steps.promotion.outputs.latest == 'true'
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" --alias latest --digest "$IMAGE_DIGEST"
 
   publish:
     name: Publish complete GitHub release
-    needs: [plan, image]
+    needs: [plan, publish-immutable, promote-aliases]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -307,6 +450,10 @@ jobs:
         with:
           name: verified-release-downloads
           path: dist/release
+      - name: Record the verified image digest and final checksums
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: python3 scripts/release.py finalize --output dist/release --digest "$IMAGE_DIGEST"
       - name: Upload assets to a draft, then publish
         env:
           GH_TOKEN: ${{ github.token }}

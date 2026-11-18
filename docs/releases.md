@@ -1,19 +1,53 @@
 # Releases and versioning
 
-Carbon Panel uses Semantic Versioning with a `v` prefix: `vMAJOR.MINOR.PATCH`.
-Current builds are alpha prereleases, starting with `v3.0.0-alpha.1`.
-Earlier beta tags are retained as historical versions. Alpha releases are for
-early testing and are not promoted to stable releases for visibility.
+Carbon Panel uses Semantic Versioning 2.0.0 with a `v` prefix on Git tags:
+`vMAJOR.MINOR.PATCH`. Current builds are alpha prereleases, starting with
+`v3.0.0-alpha.1`. Earlier beta tags are retained as historical versions. Alpha
+releases are for early testing and are not promoted to stable releases for
+visibility.
 
 - **Patch:** compatible fixes and maintenance.
 - **Minor:** compatible new features.
 - **Major:** incompatible operator or API changes that require migration.
 - **Prerelease:** append `-alpha.N`, `-beta.N` or `-rc.N`; increment N for each published build.
 
-A tag identifies one source commit. Published releases and their assets are not
-overwritten. Correct a bad release with a new version. The tag is the release
-version; `web/carbon-panel/package.json` is a private workspace package, not a
-second release-version counter.
+Before changing a version convention, evaluate the public API — the Connect-RPC
+contracts, the HTTP compatibility surface, CLI flags, the configuration schema
+and documented operator behavior — against SemVer. `1.0.0` already defines that
+API; existing published versions and Go module endpoints are never renumbered,
+retargeted or unpublished. A tag identifies one source commit. Published
+releases and their assets are not overwritten. Correct a bad release with a new
+version. The tag is the release version; `web/carbon-panel/package.json` is a
+private workspace package, not a second release-version counter.
+
+## Version domains and promotion
+
+Each artifact family owns a separate version domain. A published version is
+immutable: its Git tag, release assets and image manifest are never moved.
+`scripts/release.py` is the single source of truth for these rules and verifies
+them in `scripts/test_release.py`.
+
+| Domain | Tag/naming | Immutable identity | Moving aliases |
+| --- | --- | --- | --- |
+| Panel release | `vMAJOR.MINOR.PATCH` | Full version, `release-manifest.json` and its `image_digest` | `MAJOR.MINOR`, `latest` |
+| Panel prerelease | `vMAJOR.MINOR.PATCH-<id>.N` | Full prerelease version | None |
+| Module image | `mod-vMAJOR.MINOR.PATCH` | `mod-` version tag | `latest` |
+| Managed node runtime (reserved) | `runtime-vMAJOR.MINOR.PATCH` | Full version and digest; no workflow yet | `MAJOR.MINOR` only on explicit promotion |
+| Development build | no version tag | Per-commit `sha-<commit>` and OCI revision label | `edge` |
+
+Prereleases keep their full immutable version and never move `latest` or a
+stable minor tag. A stable release publishes its immutable full version first,
+then its documented moving aliases. Tag names are derived in that promotion
+order by `scripts/release.py image-tags`; the GitHub release is exposed only
+after both registries serve a complete multi-architecture index.
+
+Moving aliases (`latest`, `MAJOR.MINOR`, module `latest`) are conveniences, not
+reproducible references. Consumers that need reproducible rollbacks pin the full
+version or the `sha256:` digest in `release-manifest.json`. Before dropping or
+retargeting an established alias, announce a migration window and leave the old
+alias in place for that window. Do not invent aliases or move them on a
+speculative classification. The managed node-runtime naming is reserved for a
+future artifact; no workflow or registry destination exists for it today.
 
 ## Downloads
 
@@ -68,12 +102,21 @@ and `ghcr.io/athndev/carbonpanel` in GitHub Packages. Both references use the
 same multi-architecture image digest and tested Linux downloads. The manifest
 records both references. Development `edge` images remain on Docker Hub.
 
+The Docker Hub repository name and the GHCR name are normalized in one place:
+`atharvnaphade/carbonpanel` and the lowercased GitHub owner/name,
+`ghcr.io/athndev/carbonpanel`. The tool derives GHCR from `GITHUB_REPOSITORY`;
+the GitHub owner spelling is never treated as a Docker Hub namespace. No
+credential value appears in workflows, docs or fixtures. Docker Hub uses a
+personal access token in repository secrets; GHCR uses the workflow's
+short-lived `GITHUB_TOKEN` with package-write permission.
+
 | Tag | Meaning |
 | --- | --- |
-| `3.0.0-alpha.1` | The exact prerelease, built from its tested Linux downloads |
-| `3.0.0`, `3.0` | An exact stable release and its moving minor-release channel |
-| `latest` | Stable releases only under this release workflow |
-| `edge`, `sha-…` | Development builds from CI-verified main commits |
+| `3.0.0-alpha.1` | The exact prerelease; never moves a stable alias |
+| `3.0.0` | The exact stable release, immutable |
+| `3.0` | Moving minor channel, promoted only with a stable `3.0.x` release |
+| `latest` | Moving stable channel, promoted only with a stable release |
+| `edge`, `sha-…` | Development builds from CI-verified main commits; not versions |
 
 Prereleases never move `latest` or the stable minor tag. Main builds move `edge`.
 An older `latest` image may predate this channel policy; pin an explicit
@@ -103,10 +146,20 @@ Releases link; they remain correctly marked as prereleases.
    `verified-release-downloads` artifact. Run the workflow again with the same
    version and commit, enabling **publish** to publish it.
 
-Alternatively, push an annotated SemVer tag at a main commit whose CI has
-succeeded. A `v*` tag starts the same guarded publishing pipeline. The main CD
-workflow does not also publish tags. Publication refuses invalid versions,
-unverified commits, moved tags and already-published versions.
+Pushing a `v*` tag — like a branch push, a pull request, a CI run, a documentation
+tag or a rehearsal tag — only stages, builds and verifies. It never writes to a
+registry or a GitHub release. The publication decision is made by
+`publication_allowed()` in `scripts/release.py` and requires an explicit
+`workflow_dispatch` with **publish** on. Before a requested publication, a
+fail-closed preflight confirms that Docker Hub and GHCR credentials are present;
+staging and rehearsals neither need nor read them.
+
+Publication refuses invalid versions, verification/test namespaces, unverified
+or stale commits, moved tags, already-published versions and a second,
+conflicting image digest for the same version. Module images use the same
+boundary: a `mod-*` tag push builds without pushing, and publication requires an
+explicit dispatch with the module version. Main CD keeps ownership of `edge`
+and `sha-<commit>` development images.
 
 The frontend and API schema are generated once with pinned tools. The checked-in
 Go and TypeScript RPC sources are the same sources verified by main CI; schema
@@ -123,6 +176,22 @@ upload and verify its complete local asset set, and publish it with generated
 pull-request notes. A failure before publication leaves no public partial
 GitHub release. Retrying an unpublished draft is supported; published versions
 require a new tag. GitHub release publication does not send a Discord message.
+
+## Scope of staged-tag safety and pending channel opt-in
+
+Staging a tag guarantees no registry or release write, but it says nothing about
+how current the target is. A `v*` or `mod-*` tag can point at **old commits**; a
+tag-triggered workflow checks out that tag's target and reflects that commit's
+history and configuration. A green staging run is not proof that current `main`
+was verified, and the dispatch `revision` input is a convenience, never the
+trusted publish gate. The authoritative gate is `publication_allowed()` together
+with a successful `ci.yml` run for the exact published commit.
+
+Main `edge` publication and website/Pages effects belong to `cd.yml` and the
+site workflows and are unchanged here. Tag staging alone does not clear or waive
+those automatically verified-main effects. A scoped publish-boundary opt-in for
+those developer channels must be reviewed with the release auditor before any
+held product merge is unblocked; until that review, product merges stay held.
 
 ## Recover a staged release
 
@@ -143,3 +212,11 @@ local checksums and GitHub's uploaded asset digests before exposing the release.
 It resolves drafts by their stable release ID; GitHub's by-tag REST endpoint
 does not return unpublished drafts. Existing public releases remain immutable
 under the tool's policy and require a new version for further changes.
+
+A **resume** is stricter than an identical tag digest. The operator must supply
+the verified `sha256:` image digest, and the exact Git tag must resolve to the
+intended source commit. The tool then reads the existing release's
+`release-manifest.json` asset and requires its version, source commit, revision
+and image digest to match the requested release. Equal registry digests and
+platform counts alone are never sufficient; unknown or mismatched provenance
+refuses before any alias moves.

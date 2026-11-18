@@ -36,13 +36,342 @@ def run(*args, **kwargs):
     return subprocess.check_output(args, text=True, **kwargs).strip()
 
 
+def write_output(values):
+    """Emit step outputs only when running inside Actions."""
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.writelines(f"{key}={value}\n" for key, value in values.items())
+
+
 def archive_name(tag, goos, goarch):
     return f"carbon-panel_{version(tag)}_{goos}_{goarch}" + (".zip" if goos == "windows" else ".tar.gz")
 
 
+DOCKER_HUB_IMAGE = "atharvnaphade/carbonpanel"
+VERIFY_TAG = re.compile(r"v0\.0\.0-verify\.\d+")
+MODULE_TAG = re.compile(
+    r"mod-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?")
+# Rehearsal, test and documentation namespaces are never publishable versions.
+RESERVED_PRERELEASE = frozenset(
+    {"verify", "verification", "test", "testing", "dryrun", "dry-run", "docs", "doc"})
+
+
+def ghcr_repository(repository=None):
+    """GHCR namespace is the lowercased GitHub owner/repo. It is never a Docker
+    Hub namespace mapping and never contains a credential."""
+    return (repository or os.environ.get("GITHUB_REPOSITORY", "athNdev/carbonpanel")).lower()
+
+
 def github_image(tag, repository=None):
-    repository = repository or os.environ.get("GITHUB_REPOSITORY", "athNdev/carbonpanel")
-    return "ghcr.io/" + repository.lower() + ":" + version(tag)[1:]
+    return "ghcr.io/" + ghcr_repository(repository) + ":" + version(tag)[1:]
+
+
+def module_version(value):
+    """Modules use a separate version domain: mod-vMAJOR.MINOR.PATCH."""
+    match = MODULE_TAG.fullmatch(value)
+    if not match or any(part.isdigit() and len(part) > 1 and part[0] == "0"
+                        for part in (match[4] or "").split(".")):
+        raise ValueError("Use mod-vMAJOR.MINOR.PATCH for module image versions")
+    return value
+
+
+def is_verification_tag(tag):
+    """True for the reserved rehearsal/test namespaces, which never publish."""
+    if VERIFY_TAG.fullmatch(tag):
+        return True
+    match = SEMVER.fullmatch(tag)
+    return bool(match and match[4] and
+                any(part.lower() in RESERVED_PRERELEASE for part in match[4].split(".")))
+
+
+def ref_channel(ref_name, ref_type="tag"):
+    """Classify a ref into its durable release domain."""
+    if ref_type != "tag":
+        return "development"
+    if ref_name.startswith("mod-"):
+        return "module"
+    if ref_name.startswith("docs"):
+        return "documentation"
+    if is_verification_tag(ref_name):
+        return "verification"
+    if ref_name.startswith("v"):
+        return "prerelease" if "-" in ref_name else "stable"
+    return "other"
+
+
+def publication_allowed(event_name, publish_requested, version_value):
+    """The single auditable publication boundary.
+
+    Only an explicit operator `workflow_dispatch` that requests publication may
+    write to a registry or GitHub release. Branch pushes, tag pushes, pull
+    requests, workflow_run and every other automatic event only stage, build and
+    verify. A version/tag ref is therefore always safe to stage.
+    """
+    if event_name != "workflow_dispatch":
+        return False, f"{event_name} events stage only; publication needs an explicit workflow_dispatch"
+    if str(publish_requested).strip().lower() != "true":
+        return False, "publication needs publish=true on workflow_dispatch"
+    if is_verification_tag(version_value):
+        return False, "verification and test tags are never published"
+    if SEMVER.fullmatch(version_value) is None:
+        return False, "only SemVer panel versions publish from this workflow"
+    return True, "explicit workflow_dispatch publish opt-in"
+
+
+def promotion_plan(version_value):
+    """Ordered tag destinations. The immutable full version always precedes a
+    moving alias; prereleases publish no stable alias at all.
+    """
+    tag = version(version_value)
+    plain = tag[1:]
+    prerelease = "-" in tag
+    plan = [{"tag": plain, "mutable": False,
+             "channel": "prerelease" if prerelease else "stable", "step": 1}]
+    if not prerelease:
+        major_minor = ".".join(plain.split("-", 1)[0].split(".")[:2])
+        plan.append({"tag": major_minor, "mutable": True, "channel": "stable", "step": 2})
+        plan.append({"tag": "latest", "mutable": True, "channel": "stable", "step": 3})
+    return plan
+
+
+def module_promotion_plan(value):
+    """Module images have their own immutable version domain; `latest` is a
+    documented moving alias that moves only under explicit promotion."""
+    plain = module_version(value)[len("mod-"):]
+    return [{"tag": plain, "mutable": False, "channel": "module", "step": 1},
+            {"tag": "latest", "mutable": True, "channel": "module", "step": 2}]
+
+
+def missing_publish_credentials(environ, registries=("docker_hub", "ghcr")):
+    """Presence-only credential check; secret values are never read into output."""
+    missing = []
+    if "docker_hub" in registries:
+        user = bool(environ.get("DOCKER_HUB_USERNAME") or environ.get("DOCKERHUB_USERNAME"))
+        token = bool(environ.get("DOCKER_HUB_PASSWORD") or environ.get("DOCKERHUB_TOKEN"))
+        if not (user and token):
+            missing.append("docker_hub")
+    if "ghcr" in registries and not environ.get("GITHUB_TOKEN"):
+        missing.append("ghcr")
+    return sorted(missing)
+
+
+# --- Registry publication state machine ------------------------------------
+# The workflow never guesses registry state. Every observation is classified as
+# absent, present or unknown, and any unknown/conflicting/mixed state refuses.
+
+REQUIRED_PLATFORMS = frozenset({("linux", "amd64"), ("linux", "arm64")})
+IMMUTABLE_PUBLISH = "publish"
+IMMUTABLE_RESUME = "resume"
+IMMUTABLE_REFUSE = "refuse"
+
+
+class RegistryError(Exception):
+    """Registry state could not be determined; publication must refuse."""
+
+
+def valid_digest(value):
+    return bool(value and re.fullmatch(r"sha256:[0-9a-f]{64}", value))
+
+
+def inspect_runner(*args):
+    result = subprocess.run(args, text=True, capture_output=True, cwd=ROOT)
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, args,
+                                            output=result.stdout, stderr=result.stderr)
+    return result.stdout
+
+
+def parse_inspect(text):
+    """Parse `docker buildx imagetools inspect` output into a digest/platform set."""
+    found = re.search(r"(?m)^Digest:\s+(sha256:[0-9a-f]{64})\s*$", text)
+    if not found:
+        raise RegistryError("Image inspect output has no digest")
+    platforms = {("linux", arch) for arch in re.findall(
+        r"(?m)^\s+Platform:\s+linux/(amd64|arm64)\b", text)}
+    return {"digest": found.group(1), "platforms": platforms}
+
+
+def observe_reference(reference, runner=None):
+    """Return (state, info) with state 'absent', 'present' or 'unknown'.
+    A missing tag is distinct from an unclassified registry failure."""
+    try:
+        text = (runner or inspect_runner)(
+            "docker", "buildx", "imagetools", "inspect", reference)
+    except subprocess.CalledProcessError as error:
+        message = ((error.stderr or "") + " " + (error.output or "")).lower()
+        if any(token in message for token in
+               ("not found", "no such", "does not exist", "manifest unknown", "404")):
+            return "absent", None
+        return "unknown", None
+    except OSError:
+        return "unknown", None
+    try:
+        return "present", parse_inspect(text)
+    except RegistryError:
+        return "unknown", None
+
+
+def immutable_publication_decision(observations, expected_digest=None, provenance=None):
+    """Decide the immutable-version action across every intended registry.
+
+    observations: {registry: (state, info)} from observe_reference().
+    expected_digest: operator-supplied verified digest for an identical resume.
+    provenance: (ok, reason) from resume_provenance for the exact commit/version.
+    Returns (action, reason). Unknown errors, conflicts, mixed states and
+    unverified provenance all refuse.
+    """
+    states = {state for state, _ in observations.values()}
+    if "unknown" in states:
+        return IMMUTABLE_REFUSE, "registry state is unknown; refusing"
+    if states == {"absent"}:
+        if expected_digest:
+            return IMMUTABLE_REFUSE, "no registry has the expected digest; cannot resume"
+        return IMMUTABLE_PUBLISH, "immutable version is absent in every registry"
+    if states != {"present"}:
+        return IMMUTABLE_REFUSE, "partial publication state; operator intervention required"
+    if not valid_digest(expected_digest):
+        return IMMUTABLE_REFUSE, "version tag already exists; supply a verified digest to resume"
+    if not provenance or not provenance[0]:
+        detail = provenance[1] if provenance else "not supplied"
+        return IMMUTABLE_REFUSE, "resume requires verified provenance: " + detail
+    for name, (_, info) in observations.items():
+        if info["digest"] != expected_digest:
+            return IMMUTABLE_REFUSE, f"{name} digest differs from the expected digest"
+        if not REQUIRED_PLATFORMS <= info["platforms"]:
+            return IMMUTABLE_REFUSE, f"{name} lacks both Linux architectures"
+    return IMMUTABLE_RESUME, "identical verified digest in every registry; resume"
+
+
+def verify_tag_digest(observation, expected_digest):
+    """Verify the expected tag→digest mapping and both architectures."""
+    state, info = observation
+    if state != "present":
+        raise ValueError("Version tag is absent after publication")
+    if not valid_digest(expected_digest):
+        raise ValueError("Missing or invalid expected digest")
+    if info["digest"] != expected_digest:
+        raise ValueError("Version tag digest differs from the published image")
+    if not REQUIRED_PLATFORMS <= info["platforms"]:
+        raise ValueError("Version tag lacks both Linux architectures")
+    return True
+
+
+def semver_key(tag):
+    """Full SemVer precedence key, including prerelease ordering."""
+    match = SEMVER.fullmatch(version(tag))
+    core = tuple(int(match.group(index)) for index in (1, 2, 3))
+    prerelease = match.group(4)
+    if prerelease is None:
+        return core + (1, ())
+    identifiers = tuple((0, int(part), "") if part.isdigit() else (1, 0, part)
+                        for part in prerelease.split("."))
+    return core + (0, identifiers)
+
+
+def highest_stable(versions):
+    stable = [value for value in versions if "-" not in value]
+    return max(stable, key=semver_key) if stable else None
+
+
+def alias_promotion_decision(candidate, published_versions):
+    """Moving aliases advance only to a version not older than the highest
+    published stable version. Prereleases promote nothing; an unavailable
+    published state omits automated promotion instead of guessing.
+    """
+    tag = version(candidate)
+    if "-" in tag:
+        return None, "prereleases do not move stable aliases"
+    if published_versions is None:
+        return None, "published version state is unavailable; skip automated alias promotion"
+    current = highest_stable(published_versions)
+    if current and semver_key(tag) < semver_key(current):
+        return None, f"{tag} is older than published {current}; alias promotion refused"
+    return True, f"{tag} is not older than published {current or 'none'}"
+
+
+def published_stable_versions(releases_json=None):
+    """Stable SemVer release tags, or None when the state cannot be established."""
+    try:
+        data = (releases_json if releases_json is not None else json.loads(
+            github("api", "--paginate", "--slurp",
+                   "/repos/{owner}/{repo}/releases?per_page=100")))
+        tags = []
+        for page in data:
+            for release in page:
+                if release.get("draft") or release.get("prerelease"):
+                    continue
+                try:
+                    tags.append(version(release.get("tag_name", "")))
+                except ValueError:
+                    continue
+        return tags
+    except (subprocess.CalledProcessError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def published_module_versions(tags=None):
+    """Validated module versions, or None when the state cannot be established."""
+    try:
+        tags = tags if tags is not None else run("git", "tag", "--list", "mod-v*").splitlines()
+        versions = []
+        for tag in tags:
+            try:
+                versions.append(module_version(tag))
+            except ValueError:
+                continue
+        return versions
+    except subprocess.CalledProcessError:
+        return None
+
+
+def release_provenance(tag, commit, expected_digest, releases_json=None):
+    """Prove from a verified release manifest that an existing image digest is
+    the build of this exact version and source commit. Returns (ok, reason,
+    manifest). Unknown or mismatched provenance always fails closed.
+    """
+    try:
+        data = (releases_json if releases_json is not None else json.loads(
+            github("api", "--paginate", "--slurp",
+                   "/repos/{owner}/{repo}/releases?per_page=100")))
+        for page in data:
+            for item in page:
+                if item.get("tag_name") != tag:
+                    continue
+                assets = {asset["name"]: asset for asset in item.get("assets", [])}
+                manifest_asset = assets.get("release-manifest.json")
+                if not manifest_asset:
+                    return False, "release has no release-manifest.json asset", None
+                raw = github("api", "/repos/{owner}/{repo}/releases/assets/"
+                             + str(manifest_asset["id"]),
+                             "-H", "Accept: application/octet-stream")
+                manifest = json.loads(raw)
+                if manifest.get("version") != tag:
+                    return False, "release manifest version mismatch", manifest
+                if manifest.get("commit") != commit:
+                    return False, "release manifest source commit mismatch", manifest
+                if manifest.get("revision", commit) != commit:
+                    return False, "release manifest revision mismatch", manifest
+                if manifest.get("image_digest") != expected_digest:
+                    return False, "release manifest image digest mismatch", manifest
+                return True, "verified release provenance", manifest
+        return False, "no release provenance for this version", None
+    except (subprocess.CalledProcessError, ValueError, TypeError, AttributeError, KeyError):
+        return False, "release provenance unavailable; fail closed", None
+
+
+def resume_provenance(tag, commit, expected_digest, releases_json=None):
+    """RESUME needs the exact tag identity plus verified release provenance,
+    not merely equal tag digests and matching platform counts."""
+    if not valid_digest(expected_digest):
+        return False, "a verified expected digest is required to resume"
+    try:
+        local = run("git", "tag", "--list", tag)
+        if local and run("git", "rev-parse", f"{tag}^{{commit}}") != commit:
+            return False, "version tag points at a different commit"
+    except subprocess.CalledProcessError:
+        return False, "version tag identity cannot be determined"
+    return release_provenance(tag, commit, expected_digest, releases_json)[:2]
 
 
 def github(*args):
@@ -57,7 +386,12 @@ def get_release(tag):
 
 
 def guard_publishing(tag, commit):
-    subprocess.run(["git", "merge-base", "--is-ancestor", commit, "origin/main"], check=True)
+    if SEMVER.fullmatch(tag) is None or is_verification_tag(tag):
+        raise ValueError("Only immutable SemVer panel versions can be published")
+    try:
+        subprocess.run(["git", "merge-base", "--is-ancestor", commit, "origin/main"], check=True)
+    except subprocess.CalledProcessError as error:
+        raise ValueError("Publishing requires an exact main-ancestor commit") from error
     runs = json.loads(github("run", "list", "--workflow", "ci.yml", "--event", "push",
                               "--branch", "main", "--commit", commit,
                               "--json", "status,conclusion", "--limit", "1"))
@@ -76,15 +410,15 @@ def plan(args):
     tag = version(args.version)
     commit = run("git", "rev-parse", "HEAD")
     epoch = int(run("git", "show", "-s", "--format=%ct", "HEAD"))
-    if args.publish:
+    allowed, reason = publication_allowed(args.event, args.publish_input, tag)
+    if allowed:
         guard_publishing(tag, commit)
     values = {"version": tag, "commit": commit, "epoch": str(epoch),
               "date": datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "prerelease": str("-" in tag).lower(), "publish": str(args.publish).lower()}
+              "prerelease": str("-" in tag).lower(), "channel": ref_channel(tag),
+              "publish": str(allowed).lower(), "publication_reason": reason}
     print(json.dumps(values, indent=2))
-    if os.environ.get("GITHUB_OUTPUT"):
-        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-            output.writelines(f"{key}={value}\n" for key, value in values.items())
+    write_output(values)
 
 
 def write_archive(destination, members, epoch):
@@ -217,6 +551,9 @@ def finalize(args):
     if args.digest:
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", args.digest):
             raise ValueError("Missing or invalid image digest")
+        previous = manifest.get("image_digest")
+        if previous and previous != args.digest:
+            raise ValueError("A different image digest is already recorded for this version")
         manifest["image_digest"] = args.digest
         path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     checksums = "".join(f"{sha256(file)}  {file.name}\n" for file in sorted(output.iterdir())
@@ -231,6 +568,150 @@ def verify_image(args):
     platforms.discard(("unknown", "unknown"))  # BuildKit provenance descriptors
     if platforms != {("linux", "amd64"), ("linux", "arm64")}:
         raise ValueError(f"Published image must contain both Linux architectures: {platforms}")
+
+
+def preflight(args):
+    """Fail closed when a publication is requested without registry access.
+    Reports presence only; no secret value is ever read or printed."""
+    registries = (tuple(r.strip() for r in args.registries.split(","))
+                  if args.registries else ("docker_hub", "ghcr"))
+    missing = missing_publish_credentials(os.environ, registries)
+    print(json.dumps({"registries": list(registries), "missing": missing}))
+    if missing:
+        raise ValueError("Missing publish credentials for: " + ", ".join(missing))
+
+
+def verify_registries(args):
+    """Both registries must serve a complete multi-arch index. A partial result
+    is a hard failure so no GitHub release can be exposed half-published."""
+    results = {}
+    for name, path in (("docker_hub", args.docker_manifest), ("ghcr", args.github_manifest)):
+        verify_image(argparse.Namespace(manifest=path))
+        results[name] = "verified"
+    print(json.dumps(results, indent=2))
+    return results
+
+
+def image_tags(args):
+    """Emit tag names for display/staging only. Promotion order is NOT enforced
+    by this list; the publish jobs push the immutable tag before any alias."""
+    plan = (module_promotion_plan(args.version) if args.module
+            else promotion_plan(args.version))
+    if args.immutable_only:
+        plan = plan[:1]
+    for step in plan:
+        print(step["tag"])
+    return plan
+
+
+def immutable_references(tag):
+    """Both registries' immutable full-version references for a panel tag."""
+    return {"docker_hub": f"{DOCKER_HUB_IMAGE}:{tag[1:]}", "ghcr": github_image(tag)}
+
+
+def preflight_immutable(args):
+    """Read-only preflight of the immutable version tag in every registry."""
+    tag = version(args.version)
+    if args.expected_digest and not valid_digest(args.expected_digest):
+        raise ValueError("Invalid expected digest")
+    observations = {name: observe_reference(ref)
+                    for name, ref in immutable_references(tag).items()}
+    provenance = (resume_provenance(tag, args.commit, args.expected_digest)
+                  if args.commit else None)
+    action, reason = immutable_publication_decision(
+        observations, args.expected_digest, provenance)
+    summary = {name: {"state": state, "digest": info["digest"] if info else ""}
+               for name, (state, info) in observations.items()}
+    values = {"action": action, "reason": reason,
+              "observations": json.dumps(summary, sort_keys=True)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if action == IMMUTABLE_REFUSE:
+        raise ValueError("Refusing immutable publication: " + reason)
+    return action
+
+
+def verify_immutable(args):
+    """Verify expected tag→digest and both architectures in every registry."""
+    tag = version(args.version)
+    results = {}
+    for name, ref in immutable_references(tag).items():
+        observation = observe_reference(ref)
+        verify_tag_digest(observation, args.digest)
+        results[name] = {
+            "digest": observation[1]["digest"],
+            "platforms": sorted(f"{os_}/{arch}" for os_, arch in observation[1]["platforms"]),
+        }
+    values = {"verified": "true", "digest": args.digest,
+              "registries": json.dumps(results, sort_keys=True)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+
+
+def alias_promotion(args):
+    """Decide which moving aliases, if any, may be promoted from a verified digest."""
+    tag = version(args.version)
+    allowed, reason = alias_promotion_decision(tag, published_stable_versions())
+    plain = tag[1:]
+    minor = ".".join(plain.split("-", 1)[0].split(".")[:2])
+    values = {"minor": minor if allowed else "", "latest": "true" if allowed else "false",
+              "reason": reason, "digest": args.digest}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+
+
+def promote_alias(args):
+    """Move one moving alias to an already-verified digest, then re-verify it."""
+    tag = version(args.version)
+    if not valid_digest(args.digest):
+        raise ValueError("Missing or invalid verified digest")
+    minor = ".".join(tag[1:].split("-", 1)[0].split(".")[:2])
+    if args.alias not in (minor, "latest"):
+        raise ValueError("Unsupported moving alias: " + args.alias)
+    allowed, reason = alias_promotion_decision(tag, published_stable_versions())
+    if not allowed:
+        raise ValueError("Alias promotion refused: " + reason)
+    for ref in (f"{DOCKER_HUB_IMAGE}:{args.alias}",
+                f"ghcr.io/{ghcr_repository()}:{args.alias}"):
+        source = ref.rsplit(":", 1)[0] + "@" + args.digest
+        subprocess.run(["docker", "buildx", "imagetools", "create", "--tag", ref, source],
+                       check=True, cwd=ROOT)
+        verify_tag_digest(observe_reference(ref), args.digest)
+    print(json.dumps({"alias": args.alias, "digest": args.digest, "promoted": True}, indent=2))
+
+
+def verify_reference(args):
+    """Verify a single registry reference→digest mapping and both arches."""
+    observation = observe_reference(args.reference)
+    verify_tag_digest(observation, args.digest)
+    print(json.dumps({"reference": args.reference, "digest": args.digest,
+                      "verified": True}, indent=2))
+
+
+def module_version_info(args):
+    """Share exact validated module SemVer and ref format with the workflow."""
+    tag = module_version(args.version)
+    plain = tag[len("mod-"):]
+    prerelease = "-" in plain
+    values = {"version": plain, "tag": tag, "ref": "refs/tags/" + tag,
+              "prerelease": str(prerelease).lower(), "alias": "" if prerelease else "latest"}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+
+
+def module_promotion(args):
+    """Decide whether the module `latest` alias may move from a verified digest."""
+    tag = module_version(args.version)
+    published = (published_module_versions(args.published.split())
+                 if args.published is not None else published_module_versions())
+    if published is not None:
+        published = [value[len("mod-"):] for value in published]
+    plain = tag[len("mod-"):]
+    allowed, reason = alias_promotion_decision(plain, published)
+    values = {"version": plain, "promote_latest": "true" if allowed else "false",
+              "reason": reason, "digest": args.digest}
+    print(json.dumps(values, indent=2))
+    write_output(values)
 
 
 def publish(args):
@@ -278,7 +759,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     planner = commands.add_parser("plan")
     planner.add_argument("--version", required=True)
-    planner.add_argument("--publish", action="store_true")
+    planner.add_argument("--event", required=True)
+    planner.add_argument("--publish-input", default="false")
     builder = commands.add_parser("package")
     for name in ("version", "goos", "goarch", "epoch", "output"):
         builder.add_argument("--" + name, required=True)
@@ -290,6 +772,38 @@ def main():
     finisher.add_argument("--digest")
     image_checker = commands.add_parser("verify-image")
     image_checker.add_argument("--manifest", required=True)
+    registry_checker = commands.add_parser("verify-registries")
+    registry_checker.add_argument("--docker-manifest", required=True)
+    registry_checker.add_argument("--github-manifest", required=True)
+    preflight_cmd = commands.add_parser("preflight")
+    preflight_cmd.add_argument("--registries")
+    image_tagger = commands.add_parser("image-tags")
+    image_tagger.add_argument("--version", required=True)
+    image_tagger.add_argument("--module", action="store_true")
+    image_tagger.add_argument("--immutable-only", action="store_true")
+    immutable_preflight = commands.add_parser("preflight-immutable")
+    immutable_preflight.add_argument("--version", required=True)
+    immutable_preflight.add_argument("--commit", required=True)
+    immutable_preflight.add_argument("--expected-digest")
+    immutable_verify = commands.add_parser("verify-immutable")
+    immutable_verify.add_argument("--version", required=True)
+    immutable_verify.add_argument("--digest", required=True)
+    alias_planner = commands.add_parser("alias-promotion")
+    alias_planner.add_argument("--version", required=True)
+    alias_planner.add_argument("--digest", required=True)
+    alias_mover = commands.add_parser("promote-alias")
+    alias_mover.add_argument("--version", required=True)
+    alias_mover.add_argument("--alias", required=True)
+    alias_mover.add_argument("--digest", required=True)
+    module_resolver = commands.add_parser("module-version")
+    module_resolver.add_argument("--version", required=True)
+    module_planner = commands.add_parser("module-promotion")
+    module_planner.add_argument("--version", required=True)
+    module_planner.add_argument("--digest", default="")
+    module_planner.add_argument("--published")
+    reference_verifier = commands.add_parser("verify-reference")
+    reference_verifier.add_argument("--reference", required=True)
+    reference_verifier.add_argument("--digest", required=True)
     publisher = commands.add_parser("publish")
     for name in ("version", "commit", "output"):
         publisher.add_argument("--" + name, required=True)
