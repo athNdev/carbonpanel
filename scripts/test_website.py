@@ -140,6 +140,8 @@ class WebsiteTests(unittest.TestCase):
             docs = output / "docs" / "guide"
             docs.mkdir(parents=True)
             (docs / "index.html").write_text("guide", encoding="utf-8")
+            (output / "embed.html").write_text(
+                '<meta name="robots" content="noindex, follow">', encoding="utf-8")
             (output / "404.html").write_text("not found", encoding="utf-8")
 
             build_sitemap(output, "/", "https://carbonpanel.dev", "2026-11-13")
@@ -148,6 +150,7 @@ class WebsiteTests(unittest.TestCase):
             self.assertIn("<loc>https://carbonpanel.dev/</loc>", sitemap)
             self.assertIn("<loc>https://carbonpanel.dev/docs/guide/</loc>", sitemap)
             self.assertNotIn("404.html", sitemap)
+            self.assertNotIn("embed.html", sitemap)
             self.assertEqual(sitemap.count("<lastmod>2026-11-13</lastmod>"), 2)
 
     def test_a_page_without_social_metadata_fails_the_website_check(self):
