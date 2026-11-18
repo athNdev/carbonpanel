@@ -154,7 +154,7 @@ func TestGetWorldViewSessionFixture(t *testing.T) {
 	if !strings.HasPrefix(got.GetProxyPath(), ProxyPrefix) || strings.Contains(got.GetProxyPath(), "://") {
 		t.Fatalf("proxy_path = %q, want same-origin path only", got.GetProxyPath())
 	}
-	if got.GetExpiresAt().AsTime().Sub(time.Now()) < 4*time.Minute || got.GetState() != v1.RendererState_RENDERER_STATE_READY {
+	if time.Until(got.GetExpiresAt().AsTime()) < 4*time.Minute || got.GetState() != v1.RendererState_RENDERER_STATE_READY {
 		t.Fatalf("session = %+v", got)
 	}
 

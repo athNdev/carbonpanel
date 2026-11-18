@@ -161,7 +161,7 @@ func (a *httpRenderer) Health(ctx context.Context) (*Health, error) {
 			Confidence: "unknown", Detail: "renderer endpoint did not answer the health probe",
 		}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	h := &Health{
 		State: v1.RendererState_RENDERER_STATE_ERROR, Source: "renderer.http." + string(a.ep.Kind),
 		Confidence: "stale", Detail: fmt.Sprintf("renderer probe returned HTTP %d", resp.StatusCode),

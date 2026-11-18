@@ -183,7 +183,7 @@ func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseUR
 		http.Error(w, "renderer unavailable", http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// Defense in depth: never relay a renderer redirect under the panel origin,
 	// even when a custom client was injected without CheckRedirect.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {

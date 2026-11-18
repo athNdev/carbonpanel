@@ -332,6 +332,22 @@ func TestProxyRendererRedirectIsNotFollowedFixture(t *testing.T) {
 	}
 }
 
+// TestProxySubuserGrantFixture checks the per-server grant fallback: a role
+// without world_view/read can still use a granted server's same-origin map.
+// Fixture only; no live renderer or panel auth is involved.
+func TestProxySubuserGrantFixture(t *testing.T) {
+	f := newLocalProxyFixture(t, "tile-bytes", http.StatusOK)
+	f.store.grant("guest", "srv-a", "world_view.read")
+	key, _ := f.sessions.Issue("srv-a", "world=srv-a%2Flevel", "guest", time.Minute)
+	rec := callProxy(f.handler, key, "tok-guest", http.MethodGet)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subuser-granted proxy: got %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if f.doer.hits() == 0 {
+		t.Fatal("granted proxy did not contact the renderer")
+	}
+}
+
 func TestProxyClientRefusesAllRedirectsUnit(t *testing.T) {
 	if err := newProxyClient().CheckRedirect(&http.Request{}, nil); err == nil {
 		t.Fatal("production proxy client follows redirects")
