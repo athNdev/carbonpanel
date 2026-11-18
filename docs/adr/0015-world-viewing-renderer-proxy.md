@@ -61,7 +61,10 @@ as displayed on that date, not measured performance or latency results.
    in the console as unsupported or unavailable; they are never silently
    substituted with a lookalike control. Live player positions require the
    separate, opt-in `world_view/observe_players` permission and are never
-   stored in the panel database by default.
+   stored in the panel database by default. The console toggle is UI consent,
+   not a second authorization factor: the backend gates on the permission, so
+   a direct RPC caller holding it can set the flag without clicking the UI.
+   The audit event records that call and does not prove dialog confirmation.
 
 5. **Observation and administration are separate.** `WorldViewService` is
    read-only apart from panel-owned overlays and the opt-in visibility flag.
@@ -75,6 +78,29 @@ as displayed on that date, not measured performance or latency results.
    tiles with their real age; "live" is never presented as instantaneous and
    no latency number is claimed without measurement in a real container.
 
+## Iframe trust boundary
+
+The map embed is a **same-origin** iframe: its content is served from the
+panel's own origin through the authenticated proxy, never from a renderer
+origin. The embed uses `sandbox="allow-scripts allow-same-origin allow-forms
+allow-popups"`. `allow-scripts` together with `allow-same-origin` means the
+renderer's scripts share the panel origin and are therefore **trusted code**,
+not untrusted third-party content: the sandbox does not isolate a hostile
+frame from the console. `allow-popups` is retained only because renderer web
+apps may open their own auxiliary windows; it should be removed if a renderer
+does not need it.
+
+The residual risk is therefore concentrated in configuration, not in the
+browser: an operator who points `world_view.endpoints` at a renderer the panel
+can reach has granted that renderer same-origin script execution. This is
+acceptable only because endpoints are operator-owned, node-local, validated
+(loopback on local nodes; explicitly allowlisted node-local hosts on remote
+nodes), cannot be set by an unauthenticated user, and are never discovered by
+probing ports. A compromised renderer container, a hostile allowlisted host,
+or a renderer that serves attacker-controlled scripts remains a same-origin
+compromise; do not expose the proxy to untrusted renderer content and do not
+broaden container privileges to make a renderer work.
+
 ## Consequences
 
 - A renderer sidecar is an additional per-server resource consumer; W15
@@ -87,9 +113,11 @@ as displayed on that date, not measured performance or latency results.
   streaming rules from ADR 0013 apply where tiles traverse world storage.
 - GPL renderers are imported as static tile *data* only, never linked code;
   legal review is still required before bundling such output.
-- `WorldRef` and `Observation` are shared contracts with the player and
-  library epics; ADR 0014 (shared product identity) remains the integration
-  owner and this ADR keeps its local shapes wire-compatible.
+- `WorldRef` and `Observation` are shared contracts with the player and World
+  Library epics. The separate cross-feature integration gate (tracked in Jira
+  OSS-365 and the integrated roadmap) owns the final shared identity/provenance
+  decision; this ADR keeps its local shapes wire-compatible with that contract.
+  ADR 0014 on this branch governs in-process admission, not product identity.
 
 ## Verification and evidence limits
 

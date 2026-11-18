@@ -162,10 +162,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	interface NavItem {
-		// Destinations owned by sibling epics (Players, World Library) are not
-		// in the generated route union on this branch. `resolve` accepts any
-		// pathname at runtime; resolveNav narrows at the single type boundary.
-		href: string;
+		// Explicit destination contract. Players and World Library are owned by
+		// sibling epics and are linked here so all three surfaces are reachable
+		// after integration; their route files are not on this branch yet.
+		href:
+			| '/'
+			| '/servers'
+			| '/servers/new'
+			| '/players'
+			| '/worlds'
+			| '/library'
+			| '/modpacks/studio'
+			| '/modpacks'
+			| '/modules'
+			| '/settings'
+			| '/docs/api'
+			| '/changelog';
 		label: string;
 		icon: string;
 		badge?: boolean;
@@ -378,6 +390,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<nav class="motion-stagger flex flex-col py-2" aria-label="Main Navigation">
 				{#each navItems as item (item.href)}
 					{#if item.href !== '/settings' || showSettingsNav}
+						<!-- resolve() is typed from this app's generated routes; the sibling-epic
+						     destinations are explicit NavItem hrefs but their route files land
+						     in separate PRs. The cast is scoped to this single call. -->
 						<a
 							href={resolve(item.href as '/')}
 							onclick={closeMobileNav}

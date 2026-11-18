@@ -64,7 +64,25 @@ only upgrade route), bounded at 8 MiB per asset, fixed-size streaming buffer,
 client timeout, hop-by-hop and renderer-defined headers stripped,
 `X-Content-Type-Options: nosniff` set. CSP is unchanged; no new security
 headers or CORS allowances are added. Renderer origins and ports never leave
-the server.
+the server. Renderer redirects are never followed: a 3xx from a renderer is
+returned as a 502, so an allowlisted node-local endpoint cannot be turned into
+an external or controller-local request under the panel origin.
+
+### Iframe trust assumption and residual risk
+
+The embed is same-origin and carries
+`sandbox="allow-scripts allow-same-origin allow-forms allow-popups"`. The
+combination of `allow-scripts` and `allow-same-origin` means renderer scripts
+**share the panel origin**: the sandbox does not isolate a hostile renderer
+from the console. Treat any configured renderer as trusted code. The residual
+risk sits in operator configuration — a compromised renderer container or a
+malicious allowlisted remote-node host can execute same-origin script. Endpoints
+are therefore operator-owned, fail-closed, validated as loopback on local nodes
+or explicitly allowlisted node-local hosts on remote nodes, never guessed by
+port probing, and cannot be supplied by an authenticated or anonymous user.
+Do not point a renderer at untrusted content and do not relax container
+privileges to make one work. Remove `allow-popups` for a renderer that does not
+need it.
 
 ## 3. Capability matrix
 
@@ -82,11 +100,19 @@ unsupported — no lookalike control is substituted.
 | `telemetry` | no | no | no | no |
 | `static` | no | no | no | yes |
 
-Live player positions additionally require `world_view/observe_players` and are
-audited as `world_view.observe_players`. Panel overlays require
-`world_view/update` and are audited as `world_view.overlay.set`. Sensitive
-overlays are hidden from readers without `world_view/observe_players`. Player
-locations are not persisted to the panel database by this service.
+Live player positions additionally require `world_view/observe_players`. The
+console toggle is **UI consent**: it is hidden by default, requires that
+permission, and calls the audited `SetPlayerVisibility` RPC which writes a
+`world_view.observe_players` activity event. The security boundary is the
+permission check, not the click: a direct RPC caller that already holds
+`world_view/observe_players` can set the flag without having used the UI, and
+the audit event records the call rather than proving a user saw or confirmed a
+dialog. Do not treat the UI toggle as a second authorization factor.
+
+Panel overlays require `world_view/update` and are audited as
+`world_view.overlay.set`. Sensitive overlays are hidden from readers without
+`world_view/observe_players`. Player locations are not persisted to the panel
+database by this service.
 
 ## 4. Administration stays on existing RPCs
 
