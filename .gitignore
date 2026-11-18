@@ -8,6 +8,8 @@ backups/
 Backups/
 worlds/
 Worlds/
+# The top-level world-viewing route is source, not persistent world data.
+!web/carbon-panel/src/routes/worlds/
 /servers/
 sandbox/
 *.db

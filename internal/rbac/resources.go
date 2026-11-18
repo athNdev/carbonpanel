@@ -29,6 +29,7 @@ const (
 	ResourceActivity        = "activity"
 	ResourceSubusers        = "subusers"
 	ResourceBackups         = "backups"
+	ResourceWorldView       = "world_view"
 	ResourceWorlds          = "worlds"
 )
 
@@ -61,6 +62,13 @@ const (
 	// grants it to another role.
 	ActionManageDockerPrivileged = "manage_docker_privileged"
 
+	// ActionObservePlayers gates the opt-in, audited disclosure of live player
+	// positions in the world view. It is deliberately distinct from ActionRead
+	// so a map reader does not silently become a player tracker.
+	ActionObservePlayers = "observe_players"
+	// ActionAdmin is the full world_view administration action. It is granted
+	// only to the built-in admin role (via its "*" match); no RPC maps to it.
+	ActionAdmin = "admin"
 	// ActionManageWildcard gates granting a wildcard resource or action to a
 	// custom role, and assigning the built-in admin role. It is not tied to an
 	// RPC: the role service checks it against the caller's roles in addition
@@ -79,6 +87,7 @@ type ResourceActionEntry struct {
 var AllActions = []string{
 	ActionRead, ActionCreate, ActionUpdate, ActionDelete,
 	ActionStart, ActionStop, ActionRestart, ActionCommand,
+	ActionObservePlayers, ActionAdmin,
 }
 
 // AllResources in display order.
@@ -88,7 +97,8 @@ var AllResources = []string{
 	ResourceFiles, ResourceTasks, ResourceProxy,
 	ResourceUsers, ResourceRoles, ResourceSettings,
 	ResourceSupport, ResourceUploads, ResourceNodes,
-	ResourceActivity, ResourceSubusers, ResourceBackups, ResourceWorlds,
+	ResourceActivity, ResourceSubusers, ResourceBackups,
+	ResourceWorldView, ResourceWorlds,
 }
 
 // ResourceScopeSource maps each scopeable resource to the resource that
@@ -109,6 +119,7 @@ var ResourceScopeSource = map[string]string{
 	ResourceActivity:        ResourceServers,
 	ResourceSubusers:        ResourceServers,
 	ResourceBackups:         ResourceServers,
+	ResourceWorldView:       ResourceServers,
 	ResourceWorlds:          ResourceServers,
 }
 

@@ -343,6 +343,30 @@ minecraft:
     existingWhitelistFile: "SYNC_FILE_MERGE_LIST"
     enforceWhitelist: false
 
+# First-class world viewing (ADR 0015).
+# Empty by default: every world reports ABSENT/onboarding rather than probing a
+# guessed renderer port. The panel proxies renderer assets on its own origin;
+# never publish a renderer port publicly or widen container privileges.
+# world_view:
+#   allowed_hosts: []  # node-local hosts permitted for REMOTE nodes only
+#   endpoints:
+#     # Local node: host must be 127.0.0.1 or ::1 (sidecar, loopback only).
+#     - node_id: ""
+#       server_id: ""
+#       kind: "bluemap"          # bluemap | squaremap | dynmap | static
+#       host: "127.0.0.1"
+#       port: 8100
+#       base_path: "/"
+#       health_path: "/"
+#       player_feed: false       # opt-in; only then is the players capability advertised
+#     # Remote node: host must be in allowed_hosts and be local to that node.
+#     - node_id: "node-2"
+#       server_id: ""
+#       kind: "bluemap"
+#       host: "node-2.internal"
+#       port: 8100
+#       base_path: "/"
+
 # Logging configuration
 logging:
   enabled: true
