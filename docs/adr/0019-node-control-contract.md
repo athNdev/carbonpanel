@@ -306,7 +306,17 @@ Legacy nodes remain a separate existing option and migration is opt-in. LXC
 support is conditional on a verified nested-runtime capability gate (user
 namespaces, seccomp/AppArmor, cgroup v2 delegation, device nesting); no global
 host configuration is changed to qualify a host, and unsupported hosts refuse
-with an exact reason. Artifact publication is independently versioned and
-isolated from Carbon Panel releases. No secret is baked into an image or
-provisioning metadata. This addendum is documentation only — no live host or
+with an exact reason.
+
+Every baseline artifact — QCOW2 VM, LXC rootfs and portable installer — MUST
+carry pinned upstream base-image provenance, a supported platform/version
+matrix, published checksums, signing and an SBOM. Each artifact MUST generate a
+UNIQUE FIRST-BOOT IDENTITY and enroll through the scoped bootstrap flow above;
+it MUST NOT contain a pre-provisioned shared credential. Persistent volume
+import, backup and recovery MUST be documented and tested, and artifact
+UPGRADE and ROLLBACK MUST be exercised with offline fixtures before a format is
+advertised. No secret is baked into an image or provisioning metadata.
+
+Artifact publication is independently versioned and isolated from Carbon Panel
+releases. This addendum is documentation only — no live host, VM deployment or
 production rollout is authorized by it.
