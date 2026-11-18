@@ -265,6 +265,12 @@ func run(verb string, o options) error {
 		if err := json.Unmarshal(raw, &spec); err != nil {
 			return fmt.Errorf("%w: daemon spec JSON: %v", nodeinstall.ErrInvalidInput, err)
 		}
+		// Fail closed before rendering: no symlink escape, shared daemon path,
+		// traversal, world-writable parent or daemon collision is accepted.
+		// This check is read-only and uses only the paths in the spec.
+		if err := nodeinstall.ValidateDaemonPaths(spec); err != nil {
+			return err
+		}
 		rendered, err := nodeinstall.RenderDaemon(spec)
 		if err != nil {
 			return err

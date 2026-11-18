@@ -330,6 +330,8 @@ def main():
                     "port_range": "30000-31000",
                     "storage_driver": "overlay2",
                     "runtime_uid": uid,
+                    "runtime_root": "/run/user/1000/carbon-node" if mode == "rootless" else "/run/carbon-node",
+                    "state_root": "/srv/carbon-node/state",
                 }
 
             for mode, socket, uid in (
@@ -370,7 +372,20 @@ def main():
             badfile = pathlib.Path(tmp) / "daemon-bad.json"
             write(badfile, json.dumps(bad))
             ref = run(binary, "render-daemon", "-daemon-spec", str(badfile), expect=1)
-            assert "caller-owned" in ref.stderr or "global host config" in ref.stderr, ref.stderr
+            assert "caller-owned" in ref.stderr or "unsafe" in ref.stderr, ref.stderr
+            # Shared daemon paths and traversal are refused before rendering.
+            for field, value in (
+                ("socket_path", "/var/run/docker.sock"),
+                ("data_root", "/var/lib/docker/data"),
+                ("state_root", "/srv/carbon-node/../docker"),
+                ("runtime_root", "/etc/docker"),
+            ):
+                bad2 = spec("rootless", "/run/user/1000/carbon-node/docker.sock", 1000)
+                bad2[field] = value
+                f = pathlib.Path(tmp) / ("daemon-refuse-" + field)
+                write(f, json.dumps(bad2))
+                out = run(binary, "render-daemon", "-daemon-spec", str(f), expect=1)
+                assert "refused" in out.stderr.lower() or "unsafe" in out.stderr.lower() or "invalid input" in out.stderr.lower(), out.stderr
 
         check("wrapper syntax and dry-run guard", test_wrapper_syntax_and_guard)
 

@@ -8,6 +8,11 @@ package nodeinstall
 import (
 	"encoding/json"
 	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -25,6 +30,8 @@ func rootlessDaemonSpec() DaemonSpec {
 		PortRange:           "30000-31000",
 		StorageDriver:       "overlay2",
 		RuntimeUID:          1000,
+		RuntimeRoot:         "/run/user/1000/carbon-node",
+		StateRoot:           "/srv/carbon-node/state",
 	}
 }
 
@@ -32,6 +39,7 @@ func rootfulDaemonSpec() DaemonSpec {
 	d := rootlessDaemonSpec()
 	d.Mode = ModeRootful
 	d.SocketPath = "/run/carbon-node/docker.sock"
+	d.RuntimeRoot = "/run/carbon-node"
 	d.RuntimeUID = 0
 	return d
 }
@@ -164,6 +172,12 @@ func TestDaemonRenderRefusals(t *testing.T) {
 		{"rootless without uid", func(d *DaemonSpec) { d.RuntimeUID = 0 }},
 		{"rootless socket outside user runtime", func(d *DaemonSpec) { d.SocketPath = "/run/carbon-node/docker.sock" }},
 		{"unknown mode", func(d *DaemonSpec) { d.Mode = "sidecar" }},
+		{"shared host socket", func(d *DaemonSpec) { d.SocketPath = "/var/run/docker.sock" }},
+		{"shared containerd root", func(d *DaemonSpec) { d.DataRoot = "/var/lib/containerd/data" }},
+		{"traversal in state root", func(d *DaemonSpec) { d.StateRoot = "/srv/carbon-node/../docker" }},
+		{"overlapping roots", func(d *DaemonSpec) { d.RuntimeRoot = d.StateRoot }},
+		{"socket outside runtime root", func(d *DaemonSpec) { d.SocketPath = "/run/carbon-node/docker.sock" }},
+		{"config outside state root", func(d *DaemonSpec) { d.ConfigPath = "/srv/other/daemon.json" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,6 +192,141 @@ func TestDaemonRenderRefusals(t *testing.T) {
 			}
 		})
 	}
+}
+
+// rootlessFixtureRuntime derives a caller-owned temporary runtime root from
+// the ACTUAL environment instead of hardcoding UID 1000. Production requires a
+// rootless socket under /run/user/<uid>/; the uid must come from the running
+// caller, which differs between developer hosts and CI runners. The temporary
+// subdirectory is created inside that user runtime dir and removed by cleanup.
+// If the platform has no usable user runtime dir, ok is false and the caller
+// uses rootful mode so the defensive cases still run entirely inside t.TempDir.
+func rootlessFixtureRuntime(t *testing.T) (runtimeRoot string, uid int, ok bool) {
+	t.Helper()
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return "", -1, false
+	}
+	uid = os.Getuid()
+	if uid <= 0 {
+		// Rootless requires a non-root caller; a root runner cannot provide a
+		// valid per-user runtime identity. Fall back to rootful temp paths.
+		return "", uid, false
+	}
+	base := "/run/user/" + strconv.Itoa(uid)
+	info, err := os.Stat(base)
+	if err != nil || !info.IsDir() {
+		return "", uid, false
+	}
+	dir, err := os.MkdirTemp(base, "carbon-installer-path-fixture-*")
+	if err != nil {
+		return "", uid, false
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir, uid, true
+}
+
+// tempSpec builds a spec whose state paths are inside a disposable temp
+// directory and whose rootless runtime root is derived from the caller's real
+// environment. The production containment/refusal rules are never relaxed.
+func tempSpec(t *testing.T, root string) DaemonSpec {
+	t.Helper()
+	runtimeRoot, uid, ok := rootlessFixtureRuntime(t)
+	mode := ModeRootless
+	if !ok {
+		// No user runtime dir available: use rootful mode so every path stays
+		// inside the caller-owned temp tree and no system path is touched.
+		mode = ModeRootful
+		runtimeRoot = filepath.Join(root, "run")
+		uid = 0
+	}
+	return DaemonSpec{
+		NodeID: "node-path-fixture", Mode: mode,
+		RuntimeRoot: runtimeRoot, StateRoot: filepath.Join(root, "state"),
+		ConfigPath:          filepath.Join(root, "state", "daemon.json"),
+		SocketPath:          filepath.Join(runtimeRoot, "docker.sock"),
+		DataRoot:            filepath.Join(root, "state", "data"),
+		ExecRoot:            filepath.Join(root, "state", "exec"),
+		ContainerdNamespace: "carbon-node-fixture", BridgeCIDR: "10.231.0.1/24",
+		PortRange: "30000-31000", StorageDriver: "vfs", RuntimeUID: uid,
+	}
+}
+
+// TestDaemonDefensivePathRefusals proves fail-closed behaviour against unsafe
+// filesystem layouts using TEMPORARY paths only: no privileged write, no real
+// daemon path, no host config mutation.
+func TestDaemonDefensivePathRefusals(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX containment roots are required; this fixture runs on the owned Linux systemd fixture")
+	}
+	base := t.TempDir()
+	good := tempSpec(t, base)
+	for _, dir := range []string{good.RuntimeRoot, good.StateRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ValidateDaemonPaths(good); err != nil {
+		t.Fatalf("clean temp spec refused: %v", err)
+	}
+
+	t.Run("symlink escape outside owned root", func(t *testing.T) {
+		root := t.TempDir()
+		spec := tempSpec(t, root)
+		for _, dir := range []string{spec.RuntimeRoot, spec.StateRoot} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		outside := t.TempDir()
+		link := filepath.Join(spec.StateRoot, "data-link")
+		if err := os.Symlink(outside, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		spec.DataRoot = filepath.Join(link, "data")
+		if err := ValidateDaemonPaths(spec); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("symlink escape accepted: %v", err)
+		}
+	})
+
+	t.Run("existing socket collision", func(t *testing.T) {
+		root := t.TempDir()
+		spec := tempSpec(t, root)
+		for _, dir := range []string{spec.RuntimeRoot, spec.StateRoot} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ln, err := net.Listen("unix", spec.SocketPath)
+		if err != nil {
+			t.Skipf("unix sockets unavailable: %v", err)
+		}
+		defer func() { _ = ln.Close() }()
+		if err := ValidateDaemonPaths(spec); !errors.Is(err, ErrAlreadyExists) {
+			t.Fatalf("socket collision accepted: %v", err)
+		}
+	})
+
+	t.Run("world-writable parent", func(t *testing.T) {
+		root := t.TempDir()
+		spec := tempSpec(t, root)
+		for _, dir := range []string{spec.RuntimeRoot, spec.StateRoot} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The guard inspects the parents of components that exist. Create the
+		// data root so the world-writable state root is actually on the path.
+		if err := os.MkdirAll(spec.DataRoot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(spec.StateRoot, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = os.Chmod(spec.StateRoot, 0o755) }()
+		if err := ValidateDaemonPaths(spec); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("world-writable parent accepted: %v", err)
+		}
+	})
 }
 
 // fakeRenderer proves the integration seam is real: the shared canonical

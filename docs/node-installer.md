@@ -177,6 +177,34 @@ a temporary directory, and parses the bash wrapper with a real shell parser
 (`tree-sitter-bash`) plus a dry-run/global-action guard. Both are offline and
 use only synthetic keys and fixture files — no daemon, host or real credential.
 
+### Linux systemd qualification fixture
+
+`scripts/qualify-node-installer-systemd.sh` runs **inside an owned Linux
+systemd environment** (PID 1 = systemd). It renders both modes, installs the
+rendered rootless unit in the user unit directory and the rendered rootful unit
+in the runtime unit directory (`/run/systemd/system`, never `/etc`), then
+records real `systemctl` status, `ExecMainStatus`, heartbeat logs and a second
+boot record after `restart`. It also resets the rootless `XDG_RUNTIME_DIR`,
+verifies state survives and the unit restarts, checks canonical/distinct/owned/
+contained roots with `realpath`/`stat`, and exercises six fail-closed refusals
+(shared socket/data/containerd roots, traversal, world-writable parent and a
+symlink escape) using temporary paths only.
+
+`ValidateDaemonPaths` is the read-only path guard called by `render-daemon`
+before any rendering: it rejects shared daemon paths, traversal, overlapping or
+escaping roots, world-writable ancestors, symlinks outside the owned roots and
+collisions with an existing daemon. `RuntimeRoot`/`StateRoot` are required in
+every spec.
+
+**Fixture-only accommodations (honest limits):** a no-op daemon script replaces
+the real dockerd binary (only the `ExecStart` executable differs); the fixture
+copies change `Type=notify` to `simple` and add `ReadWritePaths` so the no-op
+daemon can write a heartbeat. The rootless unit is structurally per-user but
+runs in the existing user manager with a non-root *path* UID because the owned
+fixture has no non-root account. Evidence covers a service **restart**, not a
+full OS reboot; no real Docker engine, storage driver, container network or
+live host was started or changed.
+
 > Evidence boundary: these are M3 disposable fixtures. They prove refusal,
 > state-machine and data-preservation behavior only. No live host import/boot,
 > no real hypervisor/LXC, no production enrollment handler and no artifact

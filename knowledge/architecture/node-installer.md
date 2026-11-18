@@ -65,6 +65,10 @@ shared and lets an unqualified image fall back to a known-guest path.
 - Confirm `render-daemon` only prints strings, never writes a unit or starts a
   service, and that its fixtures assert the one-source-of-options, per-user
   rootless and explicit-rootful-capability rules.
+- The owned Linux systemd fixture (`scripts/qualify-node-installer-systemd.sh`)
+  records real start/restart, XDG reset, canonical roots and temporary-path
+  refusals. It is fixture-only: a no-op daemon stands in for dockerd and no
+  full OS reboot or live host provisioning is claimed.
 
 # Read next
 
