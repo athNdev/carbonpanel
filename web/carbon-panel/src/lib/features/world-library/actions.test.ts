@@ -18,6 +18,7 @@ function fixture(bindOutcome = 'applied') {
 	const calls = {
 		bind: 0,
 		resolve: 0,
+		compat: 0,
 		import: 0,
 		preview: 0,
 		create: 0,
@@ -36,6 +37,7 @@ function fixture(bindOutcome = 'applied') {
 			};
 		},
 		async checkCompatibility() {
+			calls.compat++;
 			return undefined;
 		},
 		async bindWorld() {
@@ -70,6 +72,9 @@ function fixture(bindOutcome = 'applied') {
 		},
 		async getProviderCapabilities() {
 			return [];
+		},
+		async getRevision() {
+			return undefined;
 		},
 		async listRevisions() {
 			return [];
@@ -108,6 +113,16 @@ test('bind is deduplicated by request id and a stale generation is superseded', 
 	const outcome = await first;
 	assert.deepEqual(outcome, { kind: 'superseded' });
 	assert.equal(calls.bind, 1);
+});
+
+test('compatibility dedup includes the target level so a level change gets a fresh check', async () => {
+	const { actions, calls } = fixture();
+	const target = { revisionId: 'rev-1', serverId: 'srv-1', targetMcVersion: '1.21.1' };
+	const first = actions.checkCompatibility({ ...target, levelName: 'world' });
+	assert.equal(actions.checkCompatibility({ ...target, levelName: 'world' }), first);
+	assert.notEqual(actions.checkCompatibility({ ...target, levelName: 'survival' }), first);
+	await Promise.all([first, actions.checkCompatibility({ ...target, levelName: 'survival' })]);
+	assert.equal(calls.compat, 2);
 });
 
 test('an uncertain bind outcome is reported and never auto-retried', async () => {

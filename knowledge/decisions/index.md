@@ -12,6 +12,7 @@
 - [Geyser safe bind default](geyser-safe-bind.md) — A standalone Geyser entrypoint defaults to a loopback Bedrock bind; an explicit BEDROCK_ADDRESS is the opt-in to wider exposure.
 - [Homepage UI fragments](homepage-fragments.md) — Render real panel feature components as isolated, browser-local homepage examples.
 - [Instance owned proxy test sockets](test-listeners.md) — Proxy tests inject instance-owned socket factories and reject non-loopback binds before reaching the operating system.
+- [Library adoption fencing](library-adoption-fencing.md) — Compatibility approval is tuple-bound, binding outcomes keep their reported label, and an unmanaged target is never guessed from a folder name.
 - [MCP capability qualification](mcp-capability-qualification.md) — A stable MCP tool catalog reports old-controller RPC gaps as structured capability errors instead of hiding tools or switching channels.
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.

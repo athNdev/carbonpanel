@@ -7,6 +7,7 @@ import {
 	CheckCompatibilityRequestSchema,
 	CreateWorldFromConfigRequestSchema,
 	GetProviderCapabilitiesRequestSchema,
+	GetRevisionRequestSchema,
 	GetWorldConfigSchemaRequestSchema,
 	GetWorldEntryRequestSchema,
 	ImportWorldRequestSchema,
@@ -166,6 +167,12 @@ const requests: WorldLibraryActionRequests = {
 			create(GetProviderCapabilitiesRequestSchema, {})
 		);
 		return response.providers;
+	},
+	async getRevision(revisionId) {
+		const response = await rpcClient.world.getRevision(
+			create(GetRevisionRequestSchema, { revisionId })
+		);
+		return response.revision;
 	},
 	async listRevisions(entryId) {
 		const response = await rpcClient.world.listRevisions(
