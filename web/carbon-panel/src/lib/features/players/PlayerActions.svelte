@@ -36,6 +36,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		bulkKindFor,
 		canUndoResult,
 		newRequestId,
+		permissionActionFor,
 		previewTargets,
 		undoUnavailableReason,
 		type PlayerActionKind
@@ -68,11 +69,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	// The backend remains authoritative; this only hides controls the operator
 	// cannot use.
 	const authState = $derived($authStore);
+	const isBulk = $derived(targets.length > 1);
 	const canAct = $derived.by(() => {
 		void authState;
-		return authStore.hasPermission('players', action, serverId);
+		if (isBulk) return authStore.hasPermission('players', 'bulk', serverId);
+		return authStore.hasPermission('players', permissionActionFor(action), serverId);
 	});
-	const isBulk = $derived(targets.length > 1);
 	const undoable = $derived(results.filter((result) => canUndoResult(result)));
 
 	async function singleResult(

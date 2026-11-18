@@ -73,6 +73,19 @@ enum PlayerSupportState {
   PLAYER_SUPPORT_STATE_UNKNOWN = 5;
 }
 
+// Outcome of an exact-identity lookup for a player the panel has not observed.
+// Every non-FOUND value is an explicit state: the console never fills a name,
+// UUID or identity key from a guess. AMBIGUOUS means the query cannot be pinned
+// to exactly one identity; UNAVAILABLE means the identity provider could not
+// answer definitively and the lookup must be retried later.
+enum PlayerLookupStatus {
+  PLAYER_LOOKUP_STATUS_UNSPECIFIED = 0;
+  PLAYER_LOOKUP_STATUS_FOUND = 1;
+  PLAYER_LOOKUP_STATUS_NOT_FOUND = 2;
+  PLAYER_LOOKUP_STATUS_AMBIGUOUS = 3;
+  PLAYER_LOOKUP_STATUS_UNAVAILABLE = 4;
+}
+
 // Field-level provenance envelope shared by roster, detail and deep data.
 // Named PlayerObservation to avoid colliding with the World Library's
 // cross-feature Observation message in the same proto package.
@@ -210,6 +223,9 @@ message PlayerActionResult {
 // a players:* permission; server-scoped procedures use server_id so subuser
 // grants apply. Arbitrary commands stay on the existing command path.
 service PlayerService {
+  // Look up a previously unseen account by exact UUID or username using a
+  // legitimate identity-provider capability. No name history is queried.
+  rpc LookupPlayer(LookupPlayerRequest) returns (LookupPlayerResponse);
   // List a searchable, filterable and sortable player roster.
   rpc ListPlayers(ListPlayersRequest) returns (ListPlayersResponse);
   // Get grouped detail for one opaque player identity.
@@ -242,6 +258,27 @@ service PlayerService {
   rpc BulkPlayerAction(BulkPlayerActionRequest) returns (BulkPlayerActionResponse);
   // Undo a reversible action using its recorded prior value.
   rpc UndoPlayerAction(UndoPlayerActionRequest) returns (UndoPlayerActionResponse);
+}
+
+// Lookup request. query is trimmed; it must be an exact canonical UUID (with
+// or without dashes) or an exact Minecraft username (1-16 ASCII name chars).
+// No partial, fuzzy or name-history matching is performed.
+message LookupPlayerRequest {
+  string query = 1;
+}
+
+// Lookup response. This is an EPHEMERAL public result: a lookup is read-only
+// and never creates an identity, session, access row, roster entry or audit
+// row. Only a separate authorized mutation (for example a per-server allowlist
+// add) may persist an identity through its own journal. A FOUND result carries
+// the provider's current name/UUID and provenance; other statuses carry an
+// explicit note and never a partially invented identity.
+message LookupPlayerResponse {
+  PlayerLookupStatus status = 1;
+  string name = 2;
+  string uuid = 3;
+  PlayerObservation observation = 4;
+  string note = 5;
 }
 
 // Roster request. An empty server_id means a cross-server search.
@@ -393,12 +430,16 @@ message SetOperatorRequest {
 }
 
 // Allowlist request. remove deletes the entry instead of adding it.
+// player_query is the exact name or UUID the operator typed for a manual add
+// before the account has ever played; identity_key may be empty in that case.
+// The service still resolves and journals a real identity when one exists.
 message SetWhitelistEntryRequest {
   string server_id = 1;
   string identity_key = 2;
   string player_name = 3;
   bool remove = 4;
   string request_id = 5;
+  string player_query = 6;
 }
 
 // Bulk action request. kind is one of kick, ban, pardon, deop, allowlist_add,

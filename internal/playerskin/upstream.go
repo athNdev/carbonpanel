@@ -25,6 +25,11 @@ import (
 // turn the proxy into an open URL fetcher.
 const (
 	profileBaseURLConst    = "https://sessionserver.mojang.com/session/minecraft/profile/"
+	// nameBaseURL is the verified first-party Minecraft Services name -> profile
+	// endpoint. It resolves an exact current username to its online UUID; it is
+	// NOT a name-history service (Mojang removed public name history on
+	// 2022-09-13). Verified 200 with canonical {id,name} shape on 2026-11-18.
+	nameBaseURLConst       = "https://api.minecraftservices.com/minecraft/profile/lookup/name/"
 	textureBaseURLConst    = "https://textures.minecraft.net/texture/"
 	pinnedTextureHostConst = "textures.minecraft.net"
 
@@ -37,6 +42,7 @@ const (
 
 var (
 	profileBaseURL    = profileBaseURLConst
+	nameBaseURL       = nameBaseURLConst
 	textureBaseURL    = textureBaseURLConst
 	pinnedTextureHost = pinnedTextureHostConst
 
@@ -56,6 +62,8 @@ var (
 // profilePayload accepts both the real Mojang shape (a base64 "textures"
 // property) and a direct "textures" object used by simple fixtures.
 type profilePayload struct {
+	Name       string            `json:"name"`
+	ID         string            `json:"id"`
 	Textures   textureSet        `json:"textures"`
 	Properties []profileProperty `json:"properties"`
 }

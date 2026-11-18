@@ -482,6 +482,22 @@ const BULK_KINDS: Partial<Record<PlayerActionKind, string>> = {
 	whitelist_remove: 'allowlist_remove'
 };
 
+/** Map a UI action kind to the RBAC action that actually authorizes its RPC. */
+export function permissionActionFor(action: PlayerActionKind): string {
+	switch (action) {
+		case 'kick':
+		case 'ban':
+		case 'pardon':
+			return 'moderate';
+		case 'op':
+		case 'deop':
+			return 'moderate:op';
+		case 'whitelist_add':
+		case 'whitelist_remove':
+			return 'access:write';
+	}
+}
+
 export function bulkKindFor(action: PlayerActionKind): string | null {
 	return BULK_KINDS[action] ?? null;
 }

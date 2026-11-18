@@ -278,6 +278,33 @@ func (s *Store) ListPlayerIdentities(ctx context.Context, serverID, query string
 	return out, err
 }
 
+// FindPlayerIdentitiesByExact returns identities whose primary UUID or current
+// name exactly matches the supplied values. It is used by exact-identity lookup
+// to detect a unique local observation or a genuine name collision; it is never
+// a fuzzy search. Both values are trimmed; an empty value is ignored.
+func (s *Store) FindPlayerIdentitiesByExact(ctx context.Context, uuid, name string) ([]PlayerIdentity, error) {
+	uuid = strings.TrimSpace(uuid)
+	name = strings.TrimSpace(name)
+	if uuid == "" && name == "" {
+		return nil, nil
+	}
+	q := s.db.WithContext(ctx).Model(&PlayerIdentity{})
+	var conditions []string
+	var args []any
+	if uuid != "" {
+		conditions = append(conditions, "primary_uuid = ?")
+		args = append(args, uuid)
+	}
+	if name != "" {
+		conditions = append(conditions, "lower(current_name) = lower(?)")
+		args = append(args, name)
+	}
+	q = q.Where(strings.Join(conditions, " OR "), args...)
+	var out []PlayerIdentity
+	err := q.Order("last_seen_at DESC").Limit(50).Find(&out).Error
+	return out, err
+}
+
 // RecordAlias stores an observed name with its source; repeats are idempotent.
 func (s *Store) RecordAlias(ctx context.Context, identityID, name, serverID, source string, observedAt time.Time) error {
 	if identityID == "" || strings.TrimSpace(name) == "" {

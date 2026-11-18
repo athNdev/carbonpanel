@@ -39,14 +39,25 @@ identity parity are decision-gated: they are reported as decision-pending or
 unsupported with an actionable explanation, never shipped as implied vanilla
 capabilities.
 
-# Skins and deep data
+# Skins, identity lookup and deep data
 
 `internal/playerskin` fetches signed textures server-side, caches them
 same-origin with bounded TTL/size and renders a 2D face. It accepts only
 canonical UUIDs and pinned texture hashes; arbitrary URLs and cross-host
-redirects are refused. `internal/playerdata` reads `stats`, `advancements` and
-`playerdata` snapshots through the injected node resolver with caller contexts
-and bounded reads; live NBT is never edited.
+redirects are refused. The same bounded provider transport resolves an exact
+UUID (session-server profile) or current username (Minecraft Services name
+lookup). `LookupPlayer` is read-only: its ephemeral result never persists an
+identity, session, access row, roster entry or presence claim. Authoritative
+negatives are `NOT_FOUND`; outages and timeouts are `UNAVAILABLE`; unpinnable
+queries are `AMBIGUOUS`. No name-history service is queried. A manual
+per-server allowlist add is a separate authorized mutation that reuses typed
+moderation (`players:access:write` on `server_id`), journal, audit and undo;
+it persists only the identity the mutation needs. Java name/UUID entries use
+the negotiated Java adapter; Bedrock Gamertag/XUID entries need an adapter
+proving Bedrock support and are otherwise refused with a capability error.
+`internal/playerdata` reads `stats`, `advancements` and `playerdata` snapshots
+through the injected node resolver with caller contexts and bounded reads;
+live NBT is never edited.
 
 # Authorization and audit
 

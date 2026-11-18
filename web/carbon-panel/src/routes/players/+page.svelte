@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { onMount } from 'svelte';
 	import { CarbonPageHeader, CarbonTag } from '$lib/components/carbon';
 	import PlayerRoster from '$lib/features/players/PlayerRoster.svelte';
+	import PlayerLookup from '$lib/features/players/PlayerLookup.svelte';
 	import { serversStore } from '$lib/stores/servers';
 
 	const serverOptions = $derived(
@@ -30,5 +31,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/snippet}
 	</CarbonPageHeader>
 
+	<PlayerLookup />
 	<PlayerRoster syncUrl={true} {serverOptions} />
 </div>
