@@ -5,6 +5,8 @@ from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
+import re
+import shlex
 import subprocess
 import tarfile
 import tempfile
@@ -652,6 +654,10 @@ class ReleaseTests(unittest.TestCase):
             self.assertIn("python3 scripts/release.py developer-channel-gate", source)
             self.assertIn("--ci-verified \"$CHANNEL_CI_VERIFIED\"", source)
             self.assertIn("CHANNEL_OPT_IN: ${{ " + input_name + " }}", source)
+            self.assertIn("python3 scripts/release.py verify-main-ci", source)
+            self.assertIn("CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}", source)
+            self.assertIn("if: github.event_name == 'workflow_dispatch'", source)
+            self.assertNotIn("ci_verified:", source)
         self.assertIn("  workflow_run:", cd)
         self.assertIn("push: ${{ steps.channel.outputs.publish == 'true'", cd)
         self.assertIn("if: needs.build.outputs.publish == 'true'", landing)
@@ -664,7 +670,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_pages_write_permissions_are_deploy_job_only(self):
         source = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
-        self.assertIn("permissions:\n  contents: read\n\nconcurrency:", source)
+        self.assertIn("permissions:\n  contents: read\n  actions: read\n\nconcurrency:", source)
         deploy = source.split("  deploy:\n", 1)[1].split("  indexable-changes:\n", 1)[0]
         self.assertIn("    permissions:\n      contents: read\n"
                       "      pages: write\n      id-token: write", deploy)
@@ -699,6 +705,135 @@ class ReleaseTests(unittest.TestCase):
         docs = (release.ROOT / "docs/releases.md").read_text(encoding="utf-8")
         self.assertIn("atharvnaphade/carbonpanel", docs)
         self.assertIn("ghcr.io/athndev/carbonpanel", docs)
+
+
+    # --- End-to-end CLI dispatch and workflow argument fixtures --------------
+
+    def test_module_version_cli_dispatch_end_to_end(self):
+        for value, expected_version, expected_alias in (
+            ("mod-v2.0.6", "v2.0.6", "latest"),
+            ("mod-v3.0.0-beta.1", "v3.0.0-beta.1", ""),
+        ):
+            with self.subTest(value=value):
+                out = io.StringIO()
+                with patch("sys.argv", ["release.py", "module-version",
+                                        "--version", value]), redirect_stdout(out):
+                    release.main()  # real argparse dispatch, not the handler
+                values = json.loads(out.getvalue())
+                self.assertEqual(values["version"], expected_version)
+                self.assertEqual(values["tag"], value)
+                self.assertEqual(values["ref"], "refs/tags/" + value)
+                self.assertEqual(values["alias"], expected_alias)
+        with patch("sys.argv", ["release.py", "module-version",
+                                "--version", "v2.0.6"]):
+            with self.assertRaises(ValueError):
+                release.main()
+
+    def test_modules_workflow_job_args_parse(self):
+        source = (release.ROOT / ".github/workflows/modules.yml").read_text(encoding="utf-8")
+        commands = re.findall(r"python3 scripts/release\.py ([a-z-]+) (.*)", source)
+        self.assertTrue(commands)
+        substitutions = {
+            "$VERSION": "v2.0.6", "$MODULE_VERSION": "v2.0.6",
+            "$MODULE_INPUT": "mod-v2.0.6", "$DIGEST": "sha256:" + "a" * 64,
+            "$IMAGE": "atharvnaphade/carbonpanel-geyser",
+            "$MODULE_TAG": "mod-v2.0.6",
+            "$GITHUB_REF_NAME": "mod-v2.0.6",
+        }
+        parser = release.build_parser()
+        seen = set()
+        for command, raw_args in commands:
+            with self.subTest(command=command):
+                args = raw_args.strip().rstrip("\\").strip()
+                for variable, value in substitutions.items():
+                    args = args.replace("${" + variable[1:] + "}", value) \
+                               .replace(variable, value)
+                parsed = parser.parse_args([command] + shlex.split(args))
+                self.assertEqual(parsed.command, command)
+                seen.add(command)
+        self.assertIn("module-version", seen)
+
+    def test_indexnow_deferral_dry_run_cli(self):
+        # Dispatch deploy: no push diff, therefore no URLs and no notification.
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "indexable-urls",
+                                "--event", "workflow_dispatch",
+                                "--before", "", "--paths", "landing/index.html"]), \
+             redirect_stdout(out):
+            release.main()
+        self.assertEqual(json.loads(out.getvalue()), [])
+        landing = (release.ROOT / ".github/workflows/landing.yml").read_text(encoding="utf-8")
+        self.assertIn("needs.indexable-changes.outputs.urls != '[]'", landing)
+        # A real push diff still produces URLs through the same shared helper.
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "indexable-urls",
+                                "--event", "push", "--before", "a" * 40,
+                                "--paths", "docs/carbon-panel/src/content/docs/index.mdx"]), \
+             redirect_stdout(out):
+            release.main()
+        self.assertEqual(json.loads(out.getvalue()), ["https://carbonpanel.dev/docs/"])
+
+    def test_cd_has_read_only_workflow_permissions(self):
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        self.assertIn("permissions:\n  contents: read\n  actions: read", source)
+        self.assertIn("push: ${{ steps.channel.outputs.publish == 'true'", source)
+
+
+    # --- Exact main CI evidence for opt-in developer writes ------------------
+
+    def test_exact_main_ci_verification_requires_ancestry_and_success(self):
+        commit = "a" * 40
+        success = [{"conclusion": "success", "status": "completed"}]
+        with patch.object(release.subprocess, "run"), \
+             patch.object(release, "github", return_value=json.dumps(success)):
+            self.assertEqual(release.exact_main_ci_verified(commit),
+                             (True, "exact main CI verified"))
+        # Stale/wrong commit: not an ancestor of main.
+        with patch.object(release.subprocess, "run",
+                          side_effect=subprocess.CalledProcessError(1, ["git"])):
+            ok, reason = release.exact_main_ci_verified(commit)
+            self.assertFalse(ok)
+            self.assertIn("ancestor", reason)
+        # Ancestor, but CI for this exact SHA is absent/failed/incomplete.
+        for runs in ([], [{"conclusion": "failure", "status": "completed"}],
+                     [{"conclusion": "success", "status": "in_progress"}]):
+            with self.subTest(runs=runs), patch.object(release.subprocess, "run"), \
+                 patch.object(release, "github", return_value=json.dumps(runs)):
+                ok, reason = release.exact_main_ci_verified(commit)
+                self.assertFalse(ok)
+                self.assertIn("successful completed push CI", reason)
+        # API unavailable fails closed.
+        with patch.object(release.subprocess, "run"), \
+             patch.object(release, "github",
+                          side_effect=subprocess.CalledProcessError(1, ["gh"])):
+            ok, reason = release.exact_main_ci_verified(commit)
+            self.assertFalse(ok)
+            self.assertIn("unavailable", reason)
+        # Empty/invalid commit cannot be verified.
+        for value in ("", "main", "not-a-sha"):
+            with self.subTest(value=value):
+                self.assertFalse(release.exact_main_ci_verified(value)[0])
+
+    def test_verify_main_ci_cli_end_to_end_and_checkbox_cannot_substitute(self):
+        commit = "b" * 40
+        out = io.StringIO()
+        with patch.object(release.subprocess, "run"), \
+             patch.object(release, "github", return_value=json.dumps(
+                 [{"conclusion": "success", "status": "completed"}])), \
+             patch("sys.argv", ["release.py", "verify-main-ci", "--commit", commit]), \
+             redirect_stdout(out):
+            release.main()
+        values = json.loads(out.getvalue())
+        self.assertEqual((values["verified"], values["commit"]), ("true", commit))
+        # A checkbox opt-in alone never authorizes an opt-in write: the decision
+        # still requires the verified output from the CI check.
+        for verified in ("", "false"):
+            with self.subTest(verified=verified):
+                allowed, reason = release.developer_channel_decision(
+                    "workflow_dispatch", "true",
+                    ref=release.TRUSTED_DEVELOPER_REF, ci_verified=verified)
+                self.assertFalse(allowed)
+                self.assertNotIn("opt-in", reason)
 
 
 if __name__ == "__main__":

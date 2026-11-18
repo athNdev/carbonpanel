@@ -35,16 +35,12 @@ on:
         required: true
         default: false
         type: boolean
-      ci_verified:
-        description: 'Confirm main CI is green for the revision being deployed'
-        required: true
-        default: false
-        type: boolean
 
 # Least privilege: build/indexing jobs are read-only; Pages write and OIDC
 # token permissions belong only to the job that actually deploys.
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: pages
@@ -63,13 +59,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify exact main CI for the dispatch commit
+        id: ci
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ github.sha }}
+        run: python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT"
       - name: Decide Pages publication (explicit opt-in only)
         id: channel
         env:
           CHANNEL_EVENT: ${{ github.event_name }}
           CHANNEL_OPT_IN: ${{ inputs.deploy }}
           CHANNEL_REF: ${{ github.ref }}
-          CHANNEL_CI_VERIFIED: ${{ inputs.ci_verified }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
         run: |
           python3 scripts/release.py developer-channel-gate \
             --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
@@ -132,45 +135,14 @@ jobs:
         env:
           BEFORE_SHA: ${{ github.event.before }}
         run: |
-          urls='[]'
-          add_url() {
-            urls=$(jq --arg url "$1" '. + [$url] | unique' <<<"$urls")
-          }
-
-          if [ "$GITHUB_EVENT_NAME" != "push" ] ||
-             [ -z "$BEFORE_SHA" ] ||
-             [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            printf 'urls<<EOF\n%s\nEOF\n' "$urls" >> "$GITHUB_OUTPUT"
-            exit 0
+          paths=""
+          if [ "$GITHUB_EVENT_NAME" = "push" ] &&
+             [ -n "$BEFORE_SHA" ] &&
+             [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            paths=$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")
           fi
-
-          while IFS= read -r path; do
-            case "$path" in
-              landing/index.html)
-                add_url 'https://carbonpanel.dev/'
-                ;;
-              landing/llms.txt)
-                add_url 'https://carbonpanel.dev/llms.txt'
-                ;;
-              docs/design-system/*)
-                add_url 'https://carbonpanel.dev/design-system/'
-                ;;
-              docs/carbon-panel/src/content/docs/*.md|docs/carbon-panel/src/content/docs/*.mdx)
-                route="${path#docs/carbon-panel/src/content/docs/}"
-                route="${route%.md}"
-                route="${route%.mdx}"
-                if [ "$route" = "index" ]; then
-                  route=''
-                elif [[ "$route" == */index ]]; then
-                  route="${route%/index}"
-                fi
-                url="https://carbonpanel.dev/docs/"
-                [ -z "$route" ] || url="${url}${route}/"
-                add_url "$url"
-                ;;
-            esac
-          done < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")
-
+          urls=$(python3 scripts/release.py indexable-urls \
+            --event "$GITHUB_EVENT_NAME" --before "$BEFORE_SHA" --paths "$paths")
           printf 'urls<<EOF\n%s\nEOF\n' "$urls" >> "$GITHUB_OUTPUT"
 
   # Deliberate deferral: indexable-changes derives URLs only from a push diff,

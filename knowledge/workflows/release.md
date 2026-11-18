@@ -85,7 +85,8 @@ resume from the original verified download artifact without rebuilding images.
   durable digest-to-version evidence and refuses on uncertainty. Main `edge` and
   Pages effects use the same gate: an ordinary verified merge builds and
   validates only; publication requires a trusted `refs/heads/main` dispatch with
-  the channel opt-in and `ci_verified=true`. IndexNow notification is deferred
+  the channel opt-in and a read-only exact-commit main-CI check (`verify-main-ci`);
+  an operator checkbox is never CI evidence. IndexNow notification is deferred
   because URLs come from a push diff while deployment is dispatch-only. A scoped
   publish-boundary opt-in needs release-auditor review before held merges.
 - A release note must describe shipped behavior, not planned behavior.

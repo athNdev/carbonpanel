@@ -67,8 +67,10 @@ history, so the dispatch revision is never the trusted gate — the Python
 boundary plus exact-commit main CI are. Main `:edge` and Pages channels now use
 the same boundary: an ordinary verified main merge builds and verifies only,
 while publication requires an explicit dispatch opt-in (`push=true` /
-`deploy=true`), `ci_verified=true` and a trusted `refs/heads/main` ref. Tags,
-feature refs and blank refs are refused and the workflows are not disabled.
+`deploy=true`), a read-only `verify-main-ci` check proving exact-commit main
+ancestry and a successful completed push CI run, and a trusted `refs/heads/main`
+ref. An operator checkbox is never CI evidence. Tags, feature refs and blank
+refs are refused and the workflows are not disabled.
 IndexNow notification is deliberately deferred because changed URLs come from a
 push diff while deployment happens on dispatch. These scoped gates need
 release-auditor review before held product merges are unblocked. Consumers

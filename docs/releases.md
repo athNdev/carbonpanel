@@ -191,9 +191,12 @@ Main `edge` publication and website/Pages effects belong to `cd.yml` and the
 site workflows. An ordinary main merge now only builds and verifies: Docker Hub
 `edge`/`sha-*` publication requires `workflow_dispatch` with `push=true`, and
 Pages deployment requires `workflow_dispatch` with `deploy=true`. Both gates
-also require `ci_verified=true` and a trusted `refs/heads/main` dispatch ref;
-tags, feature refs, blank refs, PRs and dry runs are refused. The workflows are
-not disabled — they still build and validate on their normal triggers.
+also require a real successful push CI run for the exact dispatch commit (verified
+read-only by `verify-main-ci`, including ancestry of `main`) and a trusted
+`refs/heads/main` dispatch ref. An operator checkbox is never treated as CI
+evidence; tags, feature refs, blank refs, PRs and dry runs are refused regardless
+of any input. The workflows are not disabled — they still build and validate on
+their normal triggers.
 
 IndexNow notification is deliberately deferred under that model:
 `indexable-changes` derives URLs only from a push diff, while deployment now

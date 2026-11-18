@@ -464,9 +464,10 @@ def developer_channel_decision(event_name, opt_in=False, run_event="", conclusio
 
     An ordinary verified main merge builds and verifies only. Publishing the
     Docker Hub `edge`/`sha-*` images or deploying Pages requires an explicit
-    operator opt-in on workflow_dispatch FROM THE TRUSTED DEFAULT BRANCH with
-    confirmation that main CI is green. Tags, feature/blank refs, PRs, dry runs
-    and failed or non-push CI events never publish.
+    operator opt-in on workflow_dispatch FROM THE TRUSTED DEFAULT BRANCH, and
+    `ci_verified` must come from exact_main_ci_verified() for the checked-out
+    commit, never from a checkbox. Tags, feature/blank refs, PRs, dry runs and
+    failed or non-push CI events never publish regardless of any input.
     """
     if not ref or ref.startswith("refs/tags/"):
         return False, "a trusted branch ref is required; tags and blank refs stage only"
@@ -489,6 +490,61 @@ def developer_channel_decision(event_name, opt_in=False, run_event="", conclusio
     if event_name == "pull_request":
         return False, "pull requests stage only"
     return False, f"{event_name} stages only"
+
+
+def exact_main_ci_verified(commit, runs_json=None):
+    """Read-only: the exact commit must be an ancestor of main AND have a
+    successful, completed push CI run for that SHA. No operator checkbox can
+    substitute for this check.
+    """
+    if not commit or not re.fullmatch(r"[0-9a-f]{7,40}", commit):
+        return False, "missing or invalid commit"
+    try:
+        subprocess.run(["git", "merge-base", "--is-ancestor", commit, "origin/main"],
+                       check=True, cwd=ROOT, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        return False, "commit is not an ancestor of main"
+    except OSError:
+        return False, "git unavailable; cannot verify commit ancestry"
+    try:
+        runs = (runs_json if runs_json is not None else json.loads(github(
+            "run", "list", "--workflow", "ci.yml", "--event", "push",
+            "--branch", "main", "--commit", commit,
+            "--json", "status,conclusion", "--limit", "1")))
+    except (subprocess.CalledProcessError, ValueError, TypeError):
+        return False, "CI API unavailable; fail closed"
+    if not runs or runs[0] != {"conclusion": "success", "status": "completed"}:
+        return False, "no successful completed push CI for this exact commit"
+    return True, "exact main CI verified"
+
+
+def indexable_urls(event_name, before_sha="", changed_paths=()):
+    """Dry-run model of landing.yml's indexable-changes step.
+
+    Only a real push diff yields URLs. A dispatch deploy has no before SHA and
+    therefore yields none, so the deferred IndexNow job has nothing to notify.
+    """
+    if event_name != "push" or not before_sha or set(before_sha) == {"0"}:
+        return []
+    found = set()
+    docs_prefix = "docs/carbon-panel/src/content/docs/"
+    for path in changed_paths:
+        if path == "landing/index.html":
+            found.add("https://carbonpanel.dev/")
+        elif path == "landing/llms.txt":
+            found.add("https://carbonpanel.dev/llms.txt")
+        elif path.startswith("docs/design-system/"):
+            found.add("https://carbonpanel.dev/design-system/")
+        elif path.startswith(docs_prefix) and path.endswith((".md", ".mdx")):
+            route = path[len(docs_prefix):].rsplit(".", 1)[0]
+            if route == "index":
+                route = ""
+            elif route.endswith("/index"):
+                route = route[:-len("/index")]
+            base = "https://carbonpanel.dev/docs/"
+            found.add(base if not route else base + route + "/")
+    return sorted(found)
 
 
 def github(*args):
@@ -829,6 +885,23 @@ def developer_channel_gate(args):
     return publish
 
 
+def verify_main_ci(args):
+    """Emit the read-only exact-main-CI decision used by opt-in writes."""
+    verified, reason = exact_main_ci_verified(args.commit)
+    values = {"verified": str(verified).lower(), "reason": reason,
+              "commit": args.commit}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return verified
+
+
+def indexable_urls_cli(args):
+    """Emit JSON URLs for the deferred IndexNow dry-run fixture and workflow."""
+    urls = indexable_urls(args.event, args.before, args.paths.splitlines())
+    print(json.dumps(urls, separators=(",", ":")))
+    return urls
+
+
 def release_record(args):
     """Decide whether a durable release record exists before alias promotion."""
     action, reason = release_record_decision(
@@ -926,7 +999,8 @@ def publish(args):
     github("release", "edit", tag, "--draft=false", f"--prerelease={str('-' in tag).lower()}", f"--latest={str('-' not in tag).lower()}")
 
 
-def main():
+def build_parser():
+    """Parser exposed so workflow job arguments can be fixture-parsed."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     planner = commands.add_parser("plan")
@@ -984,6 +1058,12 @@ def main():
     developer_gate.add_argument("--ci-verified", default="")
     module_resolver = commands.add_parser("module-version")
     module_resolver.add_argument("--version", required=True)
+    ci_checker = commands.add_parser("verify-main-ci")
+    ci_checker.add_argument("--commit", required=True)
+    indexable = commands.add_parser("indexable-urls")
+    indexable.add_argument("--event", required=True)
+    indexable.add_argument("--before", default="")
+    indexable.add_argument("--paths", default="")
     module_planner = commands.add_parser("module-promotion")
     module_planner.add_argument("--version", required=True)
     module_planner.add_argument("--digest", default="")
@@ -994,8 +1074,20 @@ def main():
     publisher = commands.add_parser("publish")
     for name in ("version", "commit", "output"):
         publisher.add_argument("--" + name, required=True)
-    args = parser.parse_args()
-    globals()[args.command.replace("-", "_")](args)
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+    # module-version is a CLI display command; the bare module_version() helper
+    # validates a string and must never be used as its handler.
+    handlers = {"module-version": module_version_info,
+                "indexable-urls": indexable_urls_cli}
+    handler = handlers.get(args.command,
+                           globals().get(args.command.replace("-", "_")))
+    if handler is None:
+        raise ValueError("Unknown release command: " + args.command)
+    handler(args)
 
 
 if __name__ == "__main__":

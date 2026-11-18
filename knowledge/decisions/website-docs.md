@@ -27,8 +27,8 @@ sources:
 - The homepage and documentation share one artifact. Only the website deployment
   workflow publishes Pages; docs validation must not replace the root homepage.
 - An ordinary main merge only builds and validates the combined site. Pages
-  deployment requires `workflow_dispatch` with `deploy=true`, `ci_verified=true`
-  and a trusted `refs/heads/main` ref. Build and indexing jobs stay read-only;
+  deployment requires `workflow_dispatch` with `deploy=true`, a read-only
+  exact-commit main-CI verification and a trusted `refs/heads/main` ref. Build and indexing jobs stay read-only;
   `pages: write` and `id-token: write` belong only to the deploy job. IndexNow
   notification is deliberately deferred: changed URLs come from a push diff
   while deploy is dispatch-only, so no notification is sent. See

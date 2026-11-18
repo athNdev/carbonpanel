@@ -24,11 +24,11 @@ on:
         required: true
         type: boolean
         default: false
-      ci_verified:
-        description: 'Confirm main CI is green for the revision being published'
-        required: true
-        type: boolean
-        default: false
+
+# Least privilege at the workflow level; publication is gated by the opt-in.
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   build-and-push:
@@ -55,6 +55,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
+      - name: Verify exact main CI for the dispatch commit
+        id: ci
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ github.sha }}
+        run: python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT"
       - name: Decide developer-channel publication (explicit opt-in only)
         id: channel
         env:
@@ -63,7 +70,7 @@ jobs:
           CHANNEL_RUN_EVENT: ${{ github.event.workflow_run.event }}
           CHANNEL_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           CHANNEL_REF: ${{ github.ref }}
-          CHANNEL_CI_VERIFIED: ${{ inputs.ci_verified }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
         run: |
           python3 scripts/release.py developer-channel-gate \
             --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
