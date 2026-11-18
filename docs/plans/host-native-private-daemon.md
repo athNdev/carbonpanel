@@ -153,16 +153,41 @@ rendered units — this checks **syntax only**, not that they boot. Exact output
 is in the external audit file
 `security-runtime-plans/node-native-boot-evidence.md`.
 
+### Real-defect fixes from exact-unit qualification (2026-11-19)
+
+Booting the EXACT shipped units with a real dockerd 29.1.3 on a clean disposable
+Ubuntu 24.04 / systemd 255 fixture exposed and led to fixes for three real
+defects:
+
+1. **Private pidfile.** The canonical daemon.json now emits a `pidfile` under
+   the owned runtime root (no-clobber validation), and the rootful unit carries
+   a matching `PIDFile=` directive. A second dockerd no longer collides on
+   `/var/run/docker.pid`.
+2. **Default container capabilities.** The rootful capability set now includes
+   `CAP_FSETID`, `CAP_KILL`, `CAP_NET_BIND_SERVICE` and `CAP_SETFCAP` alongside
+   the daemon capabilities, in both `CapabilityBoundingSet` and
+   `AmbientCapabilities`. Default-capability containers now start; the prior
+   set failed with `unable to apply caps: operation not permitted`.
+3. **Rootless notify.** The rootless per-user unit now has `NotifyAccess=all`,
+   so the READY signal from the child dockerd under rootlesskit is accepted by
+   `Type=notify` instead of leaving the unit stuck in `activating/start`.
+
+`CheckOptionParity` and `CheckUnitContract` assert these properties in Go
+fixtures; they are contract checks, not boot proof.
+
 ### What remains NOT verified (do not claim deployability)
 
-- The **shipped rootless per-user unit** (`dockerd-rootless.sh` under
-  `systemd --user`) has **not** been booted on a clean Linux systemd host. Only
-  its syntax was checked.
-- The **shipped rootful unit** (`dockerd --config-file=...` with the documented
-  capability set) has **not** been booted on a clean Linux systemd host. The
-  dind fixture booted the config directly in a privileged nested container, not
-  via that systemd unit.
-- No live-host install, real-gameplay, release or deployment evidence exists.
+- **Rootless active/success on a clean systemd host**: the `NotifyAccess=all`
+  fix is present and its unit contract/syntax verified, but a real rootless boot
+  to `active/success` was **not** completed in the latest fixture: nested
+  user-namespace iptables cannot create the bridge NAT chain on the WSL2
+  fixture kernel (`can't initialize iptables table 'nat': Permission denied`).
+  This is a fixture environment limitation, not a claim that the unit works.
+- **Live-host install, real-gameplay, release or deployment** evidence does not
+  exist. The re-qualification was fixture-only.
+
+Exact rootful re-qualification output and limits are in the external audit file
+`security-runtime-plans/node-runtime-requalification-20261119.md`.
 
 All enrollment keys and secrets are synthetic/ephemeral and private files live
 in temp directories. No fixture changes a host, installs a service, writes a

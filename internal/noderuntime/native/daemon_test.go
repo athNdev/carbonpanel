@@ -17,6 +17,7 @@ func privateSpec() DaemonSpec {
 		SocketPath:          "/run/user/1000/carbon-node/docker.sock",
 		ConfigPath:          "/run/user/1000/carbon-node/daemon.json",
 		XDG_RUNTIME_DIR:     "/run/user/1000/carbon-node",
+		Pidfile:             "/run/user/1000/carbon-node/docker.pid",
 		DataRoot:            "/var/lib/carbon-node/docker",
 		ExecRoot:            "/run/carbon-node/docker",
 		ContainerdNamespace: "carbon-node-1",
@@ -32,6 +33,7 @@ func rootfulSpec() DaemonSpec {
 	d.Mode = ModeRootful
 	d.SocketPath = "/run/carbon-node/docker.sock"
 	d.ConfigPath = "/etc/carbon-panel/daemon.json"
+	d.Pidfile = "/run/carbon-node/docker.pid"
 	d.ServiceUID = ""
 	return d
 }
@@ -56,6 +58,9 @@ func TestDaemonSpecRefusals(t *testing.T) {
 		{"rootful user override", func(d *DaemonSpec) { d.Mode = ModeRootful; d.ServiceUID = "carbon-node" }, "DAEMON_ROOTFUL_NO_USER"},
 		{"rootless unsafe runtime dir", func(d *DaemonSpec) { d.XDG_RUNTIME_DIR = "/tmp/carbon" }, "DAEMON_ROOTLESS_RUNTIME_DIR"},
 		{"missing config path", func(d *DaemonSpec) { d.ConfigPath = "" }, "DAEMON_CONFIG_PATH"},
+		{"shared default pidfile", func(d *DaemonSpec) { d.Pidfile = "/var/run/docker.pid" }, "OPTIONS_PRIVATE_PIDFILE"},
+		{"pidfile clobbers socket", func(d *DaemonSpec) { d.Pidfile = d.SocketPath }, "DAEMON_PIDFILE_NO_CLOBBER"},
+		{"pidfile outside runtime root", func(d *DaemonSpec) { d.Pidfile = "/var/lib/docker.pid" }, "DAEMON_PIDFILE_NO_CLOBBER"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
