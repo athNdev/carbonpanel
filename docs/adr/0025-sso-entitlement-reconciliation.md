@@ -25,3 +25,12 @@ Reconciliation precedes session issuance in the same request. If role loss or
 deprovisioning removes a privileged role, every existing session for that user
 is invalidated and the newly issued session carries only the reconciled roles.
 A reconciliation or verification failure creates no session.
+
+Role reconciliation and session issuance are adjacent but separate database
+operations, not one transaction. The security boundary after that split is
+`auth.Manager.ValidateSession`: on **every** authenticated request it re-reads
+the user's current roles from the database and returns them in the
+`AuthenticatedUser`, so a JWT minted just before a role change cannot carry
+stale privilege into a later request. The embedded JWT roles are advisory;
+authorization uses the freshly persisted set. This is why the narrow TOCTOU
+between reconciliation and session creation does not grant durable access.

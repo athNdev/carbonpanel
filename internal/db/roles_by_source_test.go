@@ -14,7 +14,7 @@ import (
 func TestSetUserRolesBySourcePreservesOtherSources(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if err := store.DB().Create(&User{ID: "u1", Username: "alice", AuthProvider: "oidc", IsActive: true}).Error; err != nil {
 		t.Fatalf("seed: %v", err)
@@ -48,7 +48,7 @@ func TestSetUserRolesBySourcePreservesOtherSources(t *testing.T) {
 func TestSetUserRolesBySourceIdempotentAndEmpty(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if err := store.DB().Create(&User{ID: "u2", Username: "bob", AuthProvider: "oidc", IsActive: true}).Error; err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestSetUserRolesBySourceIdempotentAndEmpty(t *testing.T) {
 func TestGetUserRoleSourceMissing(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if _, err := store.GetUserRoleSource(ctx, "ghost", "admin"); err == nil {
 		t.Fatal("missing grant must return an error")
 	}

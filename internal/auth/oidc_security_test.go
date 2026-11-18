@@ -223,6 +223,14 @@ type fullOIDCFixture struct {
 	lastCodeVerifier string
 	lastClientID     string
 	lastClientSecret string
+
+	// Mutable fixture controls for harmless failure/rollover scenarios.
+	claimsOverride map[string]any
+	signingKey     *rsa.PrivateKey
+	signingKID     string
+	jwksKey        *rsa.PrivateKey
+	jwksKID        string
+	extraBody      string
 }
 
 func newFullOIDCFixture(t *testing.T) (*fullOIDCFixture, *httptest.Server) {
@@ -231,7 +239,11 @@ func newFullOIDCFixture(t *testing.T) (*fullOIDCFixture, *httptest.Server) {
 	if err != nil {
 		t.Fatalf("rsa key: %v", err)
 	}
-	f := &fullOIDCFixture{key: key, keyID: "fixture-key"}
+	f := &fullOIDCFixture{
+		key: key, keyID: "fixture-key",
+		signingKey: key, signingKID: "fixture-key",
+		jwksKey: key, jwksKID: "fixture-key",
+	}
 	var srv *httptest.Server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
@@ -253,9 +265,16 @@ func newFullOIDCFixture(t *testing.T) (*fullOIDCFixture, *httptest.Server) {
 			"exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Unix(),
 			"nonce": f.nonce, "groups": []string{"user"},
 		}
+		for key, value := range f.claimsOverride {
+			if value == nil {
+				delete(claims, key)
+			} else {
+				claims[key] = value
+			}
+		}
 		tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-		tok.Header["kid"] = f.keyID
-		raw, err := tok.SignedString(f.key)
+		tok.Header["kid"] = f.signingKID
+		raw, err := tok.SignedString(f.signingKey)
 		if err != nil {
 			http.Error(w, "sign failed", http.StatusInternalServerError)
 			return
@@ -269,14 +288,18 @@ func newFullOIDCFixture(t *testing.T) (*fullOIDCFixture, *httptest.Server) {
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
-			"kty": "RSA", "kid": f.keyID, "use": "sig", "alg": "RS256",
-			"n": base64.RawURLEncoding.EncodeToString(f.key.PublicKey.N.Bytes()),
-			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(f.key.PublicKey.E)).Bytes()),
+			"kty": "RSA", "kid": f.jwksKID, "use": "sig", "alg": "RS256",
+			"n": base64.RawURLEncoding.EncodeToString(f.jwksKey.N.Bytes()),
+			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(f.jwksKey.PublicKey.E)).Bytes()),
 		}}})
 	})
 	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"sub":"fixture-subject"}`))
+	})
+	mux.HandleFunc("/extra", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(f.extraBody))
 	})
 	srv = httptest.NewServer(mux)
 	f.issuer = srv.URL
@@ -365,6 +388,147 @@ func TestOIDCFullCallbackPKCENonceReplayAndExchange(t *testing.T) {
 	h.HandleExchange(replayEx, exchangeReq(exchangeCode, remote))
 	if replayEx.Code != http.StatusBadRequest {
 		t.Fatalf("exchange replay status=%d", replayEx.Code)
+	}
+}
+
+// oidcCallbackWithFixture drives one harmless login+callback against a local
+// OIDC fixture and returns the callback redirect Location for assertions.
+func oidcCallbackWithFixture(t *testing.T, configure func(*fullOIDCFixture), after func(*testing.T, *db.Store, string)) string {
+	t.Helper()
+	f, srv := newFullOIDCFixture(t)
+	defer srv.Close()
+	if configure != nil {
+		configure(f)
+	}
+	m, store := newTestManager(t, testAuthConfig())
+	cfg := &config.OIDCConfig{
+		Enabled: true, IssuerURI: f.issuer, ClientID: "carbon-panel", ClientSecret: "fixture-secret",
+		RedirectURL: f.issuer + "/api/v1/auth/oidc/callback",
+		RoleClaim:   "groups", RoleMapping: map[string]string{"user": "user", "admin": "admin"},
+		AbsentClaimPolicy: "deny",
+	}
+	if f.extraBody != "" {
+		cfg.ExtraClaimsURL = f.issuer + "/extra"
+		cfg.ExtraClaimsName = "groups"
+	}
+	h, err := NewOIDCHandler(m, store, cfg, logger.New())
+	if err != nil {
+		t.Fatalf("NewOIDCHandler: %v", err)
+	}
+	const remote = "192.0.2.77:12345"
+	loginRec := httptest.NewRecorder()
+	loginReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/login", nil)
+	loginReq.RemoteAddr = remote
+	h.HandleLogin(loginRec, loginReq)
+	authURL, err := url.Parse(loginRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("auth URL: %v", err)
+	}
+	state := authURL.Query().Get("state")
+	f.nonce = authURL.Query().Get("nonce")
+
+	cbRec := httptest.NewRecorder()
+	cbReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/callback?code=fixture-code&state="+url.QueryEscape(state), nil)
+	cbReq.RemoteAddr = remote
+	cbReq.AddCookie(&http.Cookie{Name: oidcStateCookie, Value: state})
+	h.HandleCallback(cbRec, cbReq)
+	if after != nil {
+		after(t, store, f.issuer)
+	}
+	return cbRec.Header().Get("Location")
+}
+
+func TestOIDCBadTokenRefusals(t *testing.T) {
+	tests := []struct {
+		name      string
+		configure func(*fullOIDCFixture)
+		wantError string
+	}{
+		{"invalid issuer", func(f *fullOIDCFixture) { f.claimsOverride = map[string]any{"iss": "https://evil.example"} }, "access_denied"},
+		{"wrong audience", func(f *fullOIDCFixture) { f.claimsOverride = map[string]any{"aud": "other-client"} }, "access_denied"},
+		{"wrong nonce", func(f *fullOIDCFixture) { f.claimsOverride = map[string]any{"nonce": "wrong-nonce"} }, "access_denied"},
+		{"missing nonce", func(f *fullOIDCFixture) { f.claimsOverride = map[string]any{"nonce": nil} }, "access_denied"},
+		{"expired token", func(f *fullOIDCFixture) {
+			f.claimsOverride = map[string]any{"exp": time.Now().Add(-time.Hour).Unix()}
+		}, "access_denied"},
+		{"signature failure", func(f *fullOIDCFixture) {
+			other, err := rsa.GenerateKey(rand.Reader, 2048)
+			if err != nil {
+				t.Fatalf("other key: %v", err)
+			}
+			f.signingKey = other
+		}, "access_denied"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			loc := oidcCallbackWithFixture(t, tc.configure, nil)
+			u, err := url.Parse(loc)
+			if err != nil {
+				t.Fatalf("callback redirect: %v", err)
+			}
+			if got := u.Query().Get("error"); got != tc.wantError {
+				t.Fatalf("error=%q want %q (location %s)", got, tc.wantError, loc)
+			}
+		})
+	}
+}
+
+func TestOIDCJWKSRolloverSucceeds(t *testing.T) {
+	loc := oidcCallbackWithFixture(t, func(f *fullOIDCFixture) {
+		rotated, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatalf("rotated key: %v", err)
+		}
+		f.signingKey, f.signingKID = rotated, "rotated-key"
+		f.jwksKey, f.jwksKID = rotated, "rotated-key"
+	}, nil)
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("callback redirect: %v", err)
+	}
+	if u.Query().Get("error") != "" || u.Query().Get("code") == "" {
+		t.Fatalf("rollover should still sign in: %s", loc)
+	}
+}
+
+func TestOIDCExtraClaimsCannotElevateRoles(t *testing.T) {
+	loc := oidcCallbackWithFixture(t, func(f *fullOIDCFixture) {
+		// The extra-claims endpoint tries to replace the role claim with admin.
+		f.extraBody = `["admin"]`
+	}, func(t *testing.T, store *db.Store, issuer string) {
+		user, err := store.GetUserByOIDCIssuerAndSubject(context.Background(), issuer, "fixture-subject")
+		if err != nil {
+			t.Fatalf("user lookup: %v", err)
+		}
+		roles, err := store.GetUserRoleNames(context.Background(), user.ID)
+		if err != nil {
+			t.Fatalf("roles: %v", err)
+		}
+		for _, role := range roles {
+			if isPrivilegedRole(role) {
+				t.Fatalf("extra claims elevated privileges: roles=%v", roles)
+			}
+		}
+		if len(roles) != 1 || roles[0] != "user" {
+			t.Fatalf("roles=%v", roles)
+		}
+	})
+	u, err := url.Parse(loc)
+	if err != nil || u.Query().Get("error") != "" {
+		t.Fatalf("callback should succeed: %s err=%v", loc, err)
+	}
+}
+
+func TestFetchExtraClaimsBoundsResponseBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", maxExtraClaimsBody+1)))
+	}))
+	defer srv.Close()
+	h := testOIDCHandler("", nil, false)
+	h.config.ExtraClaimsURL = srv.URL
+	h.httpClient = srv.Client()
+	if _, err := h.fetchExtraClaims(context.Background(), "tok"); err == nil {
+		t.Fatal("oversized extra-claims response must be refused")
 	}
 }
 

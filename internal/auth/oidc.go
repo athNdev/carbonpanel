@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -40,8 +39,9 @@ import (
 var ErrLinkRequired = errors.New("oidc identity requires explicit local admin linking")
 
 const (
-	oidcStateCookie = "oidc_state"
-	oidcSource      = "oidc"
+	oidcStateCookie    = "oidc_state"
+	oidcSource         = "oidc"
+	maxExtraClaimsBody = 1 << 20 // 1 MiB; bounded even if the operator URL misbehaves
 )
 
 // privilegedRoleNames are never granted from a raw claim value. Only an
@@ -479,7 +479,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 			writeCanonicalError(w, r, "membership_check_failed")
 			return
 		}
-		maps.Copy(claims, extra)
+		mergeExtraClaims(claims, extra, h.config.RoleClaim)
 	}
 
 	if h.config.RequiredClaim != "" && len(h.config.RequiredValues) > 0 && !h.checkRequiredClaim(claims) {
@@ -763,16 +763,19 @@ func (h *OIDCHandler) fetchExtraClaims(ctx context.Context, accessToken string) 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, body)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxExtraClaimsBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if len(body) >= maxExtraClaimsBody {
+		return nil, fmt.Errorf("response exceeds %d bytes", maxExtraClaimsBody)
 	}
 
 	if !gjson.ValidBytes(body) {
@@ -817,6 +820,29 @@ func gjsonToAny(r gjson.Result) any {
 		return out
 	}
 	return r.Value()
+}
+
+// mergeExtraClaims enriches claims without ever overwriting a verified value.
+// Identity claims and the configured role-claim key are protected outright, so
+// a configured extra_claims_url cannot impersonate a subject or elevate roles
+// even when the IdP omitted the role claim. The source map is never mutated.
+func mergeExtraClaims(claims, extra map[string]any, roleClaim string) {
+	protected := map[string]struct{}{
+		"sub": {}, "iss": {}, "aud": {}, "exp": {}, "iat": {}, "nbf": {},
+		"nonce": {}, "jti": {}, "email": {}, "preferred_username": {}, "name": {},
+	}
+	if roleClaim != "" {
+		protected[roleClaim] = struct{}{}
+	}
+	for key, value := range extra {
+		if _, blocked := protected[key]; blocked {
+			continue
+		}
+		if _, exists := claims[key]; exists {
+			continue
+		}
+		claims[key] = value
+	}
 }
 
 func (h *OIDCHandler) checkRequiredClaim(claims map[string]any) bool {
