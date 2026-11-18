@@ -20,6 +20,8 @@ sources:
     resource: ../../docs/releases.md
   - title: Release artifact decision
     resource: ../../docs/adr/0010-versioned-release-artifacts.md
+  - title: Publication boundary and version domains
+    resource: ../../docs/adr/0033-release-tag-and-publication-policy.md
 ---
 
 # Steps
@@ -29,8 +31,10 @@ sources:
 3. Build the frontend with `bash scripts/web-build.sh`.
 4. Let CI build the backend, Windows compile target, frontend checks, proto
    lint and images.
-5. Tag only after CI is green. Do not merge or deploy from an agent session;
-   that is the supervisor's decision.
+5. Tag only after CI is green. A tag stages, builds and verifies; it does not
+   publish. Publication is a separate operator action: run Carbon Panel Release
+   with `publish=true`, or dispatch Module Builder for module images. Do not
+   merge or deploy from an agent session; that is the supervisor's decision.
 
 The release workflow supports a build-only rehearsal. Publishing requires a
 SemVer version, a main-ancestor commit with successful exact-commit main CI,
@@ -55,6 +59,44 @@ resume from the original verified download artifact without rebuilding images.
 
 # Rules
 
+- Publication is an explicit opt-in enforced by `publication_allowed()` in
+  `scripts/release.py`. Branch pushes, tag pushes, PRs, CI, documentation and
+  rehearsal tags only stage, build and verify; no registry or release write.
+  `workflow_dispatch` with `publish=true` is the only panel publication path.
+  Staging a tag makes no claim about its target's age: tags can point at old
+  commits and tag-triggered runs reflect that history. The dispatch revision is
+  a convenience, not the trusted gate; the Python boundary plus exact-commit
+  main CI are authoritative.
+- Publication is phased. A read-only preflight classifies each registry
+  reference as absent, present or unknown; conflicts, unknown errors and partial
+  states refuse. The immutable full-version tag is pushed and verified
+  (tag→digest plus both Linux architectures in both registries) before any
+  alias moves. Aliases are promoted in separate, serialized, re-verified steps,
+  monotonically against published stable SemVer: no moving backwards, no
+  promotion from older versions, no `latest` from prereleases. An alias whose
+  ordering or immutability cannot be established is omitted with a recorded
+  reason rather than guessed. RESUME requires more than identical tag digests:
+  an operator-supplied verified digest, exact tag-to-commit identity and a
+  release manifest whose version, commit, revision and digest all match;
+  unknown or mismatched provenance refuses. Module images use the same split and
+  the exact `mod-vMAJOR.MINOR.PATCH` ref; build uses `git show-ref --verify`,
+  never a glob existence check. The durable release record completes before any
+  alias moves; each move re-checks the actual registry alias digest against
+  durable digest-to-version evidence and refuses on uncertainty. Main `edge` and
+  Pages effects use the same gate: an ordinary verified merge builds and
+  validates only; publication requires a trusted `refs/heads/main` dispatch with
+  the channel opt-in and a read-only exact-commit main-CI check (`verify-main-ci`)
+  for a PINNED commit. Manual dispatch checks out the event SHA and workflow_run
+  checks out the CI run's head SHA; full history is fetched for ancestry and a
+  step asserts the actual HEAD equals that SHA before any side-effecting step.
+  Tags, labels and provenance use the same SHA, never a moving branch tip.
+  Verification uses per-SHA cancellable concurrency groups; opted-in
+  publication uses a fixed channel-wide non-cancelling group (`cd-publish-edge`
+  / `pages-deploy`) with no SHA, so publishes of different commits serialize on
+  the moving alias and routine builds cannot cancel an in-flight write. An
+  operator checkbox is never CI evidence. IndexNow notification is deferred
+  because URLs come from a push diff while deployment is dispatch-only. A scoped
+  publish-boundary opt-in needs release-auditor review before held merges.
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The

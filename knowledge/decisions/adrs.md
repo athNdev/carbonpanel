@@ -32,6 +32,7 @@ sources:
 | [0013](../../docs/adr/0013-bounded-storage-streaming.md) | Bound storage frames and commit staged writes explicitly | [Remote storage transport](../architecture/remote-storage-transport.md), [Backup and restore](../operations/backup-restore.md) |
 | [0014](../../docs/adr/0014-in-process-admission.md) | Serialize same-node starts with an in-process gate, not a lease | [Server lifecycle policy](../architecture/server-lifecycle.md) |
 | [0015](../../docs/adr/0015-world-viewing-renderer-proxy.md) | Observe worlds through an authenticated same-origin renderer proxy | [World viewing](../architecture/world-viewing.md), [RPC contract](../architecture/rpc-contract.md) |
+| [0033](../../docs/adr/0033-release-tag-and-publication-policy.md) | One explicit publication boundary and separate immutable version domains | [Release](../workflows/release.md) |
 
 
 # Rule
