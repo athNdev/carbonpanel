@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -193,19 +194,60 @@ func TestDaemonRenderRefusals(t *testing.T) {
 	}
 }
 
-// tempSpec builds a spec entirely inside a disposable temp directory. No real
-// system path is ever touched, so every defensive case is safe on any host.
+// rootlessFixtureRuntime derives a caller-owned temporary runtime root from
+// the ACTUAL environment instead of hardcoding UID 1000. Production requires a
+// rootless socket under /run/user/<uid>/; the uid must come from the running
+// caller, which differs between developer hosts and CI runners. The temporary
+// subdirectory is created inside that user runtime dir and removed by cleanup.
+// If the platform has no usable user runtime dir, ok is false and the caller
+// uses rootful mode so the defensive cases still run entirely inside t.TempDir.
+func rootlessFixtureRuntime(t *testing.T) (runtimeRoot string, uid int, ok bool) {
+	t.Helper()
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return "", -1, false
+	}
+	uid = os.Getuid()
+	if uid <= 0 {
+		// Rootless requires a non-root caller; a root runner cannot provide a
+		// valid per-user runtime identity. Fall back to rootful temp paths.
+		return "", uid, false
+	}
+	base := "/run/user/" + strconv.Itoa(uid)
+	info, err := os.Stat(base)
+	if err != nil || !info.IsDir() {
+		return "", uid, false
+	}
+	dir, err := os.MkdirTemp(base, "carbon-installer-path-fixture-*")
+	if err != nil {
+		return "", uid, false
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir, uid, true
+}
+
+// tempSpec builds a spec whose state paths are inside a disposable temp
+// directory and whose rootless runtime root is derived from the caller's real
+// environment. The production containment/refusal rules are never relaxed.
 func tempSpec(t *testing.T, root string) DaemonSpec {
 	t.Helper()
+	runtimeRoot, uid, ok := rootlessFixtureRuntime(t)
+	mode := ModeRootless
+	if !ok {
+		// No user runtime dir available: use rootful mode so every path stays
+		// inside the caller-owned temp tree and no system path is touched.
+		mode = ModeRootful
+		runtimeRoot = filepath.Join(root, "run")
+		uid = 0
+	}
 	return DaemonSpec{
-		NodeID: "node-path-fixture", Mode: ModeRootless,
-		RuntimeRoot: filepath.Join(root, "run"), StateRoot: filepath.Join(root, "state"),
+		NodeID: "node-path-fixture", Mode: mode,
+		RuntimeRoot: runtimeRoot, StateRoot: filepath.Join(root, "state"),
 		ConfigPath:          filepath.Join(root, "state", "daemon.json"),
-		SocketPath:          filepath.Join(root, "run", "docker.sock"),
+		SocketPath:          filepath.Join(runtimeRoot, "docker.sock"),
 		DataRoot:            filepath.Join(root, "state", "data"),
 		ExecRoot:            filepath.Join(root, "state", "exec"),
 		ContainerdNamespace: "carbon-node-fixture", BridgeCIDR: "10.231.0.1/24",
-		PortRange: "30000-31000", StorageDriver: "vfs", RuntimeUID: 1000,
+		PortRange: "30000-31000", StorageDriver: "vfs", RuntimeUID: uid,
 	}
 }
 
@@ -271,6 +313,11 @@ func TestDaemonDefensivePathRefusals(t *testing.T) {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				t.Fatal(err)
 			}
+		}
+		// The guard inspects the parents of components that exist. Create the
+		// data root so the world-writable state root is actually on the path.
+		if err := os.MkdirAll(spec.DataRoot, 0o755); err != nil {
+			t.Fatal(err)
 		}
 		if err := os.Chmod(spec.StateRoot, 0o777); err != nil {
 			t.Fatal(err)
