@@ -46,7 +46,9 @@ import {
 	projectServerOptions,
 	serverOptionsFromRoster,
 	supportStateLabel,
-	undoUnavailableReason
+	tabFields,
+	undoUnavailableReason,
+	withTabFields
 } from './presentation';
 
 function summary(key: string, name: string, overrides: SummaryOverrides = {}): PlayerSummary {
@@ -58,6 +60,21 @@ function summary(key: string, name: string, overrides: SummaryOverrides = {}): P
 		...overrides
 	});
 }
+
+test('Character and Progress deep fields are stored per tab', () => {
+	// Regression: a single shared array let Progress overwrite Character, and
+	// returning to Character skipped the reload and showed Progress fields.
+	const character = [{ name: 'Game mode', value: 'survival' }];
+	const progress = [{ name: 'Blocks mined', value: '1204' }];
+	let state: Record<string, { name: string; value: string }[]> = {};
+	state = withTabFields(state, 'character', character);
+	assert.deepEqual(tabFields(state, 'character'), character);
+	state = withTabFields(state, 'progress', progress);
+	assert.deepEqual(tabFields(state, 'progress'), progress);
+	// Revisiting Character must still render its own fields without a reload.
+	assert.deepEqual(tabFields(state, 'character'), character);
+	assert.equal(state.character, character, 'stored field arrays are never mutated');
+});
 
 test('server filter options are a pure projection of scoped roster rows', () => {
 	// Normal production rows carry serverId. The projection must derive options

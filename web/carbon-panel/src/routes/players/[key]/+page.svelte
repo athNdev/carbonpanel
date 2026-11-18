@@ -52,6 +52,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		nameHistoryNote,
 		presenceLabel,
 		presenceTagType,
+		tabFields,
+		withTabFields,
 		supportStateLabel,
 		supportStateTagType
 	} from '$lib/features/players/presentation';
@@ -80,8 +82,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let sessions = $state<PlayerSession[]>([]);
 	let accessStates = $state<PlayerAccessState[]>([]);
 	let history = $state<PlayerHistoryEntry[]>([]);
-	let deepFields = $state<PlayerField[]>([]);
-	let deepNote = $state('');
+	// Character and Progress are separate sections backed by different kinds of
+	// read-only data. They must not share one field array: returning to a tab
+	// skips its reload, so its fields have to survive the other tab's load.
+	let deepFieldsByTab = $state<Record<string, PlayerField[]>>({});
+	let deepNoteByTab = $state<Record<string, string>>({});
 	let skinRef = $state('');
 
 	let sectionLoading = $state<Record<string, boolean>>({});
@@ -92,13 +97,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	const primaryServerId = $derived(serverParam || detail?.primaryServerId || '');
 	const displayName = $derived(detail?.ref?.name || key);
+	const activeDeepFields = $derived(tabFields(deepFieldsByTab, activeTab));
+	const activeDeepNote = $derived(deepNoteByTab[activeTab] ?? '');
 
 	function resetSections() {
 		sessions = [];
 		accessStates = [];
 		history = [];
-		deepFields = [];
-		deepNote = '';
+		deepFieldsByTab = {};
+		deepNoteByTab = {};
 		capabilities = [];
 		skinRef = '';
 		sectionLoading = {};
@@ -219,8 +226,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						})
 					);
 					if (generation === sectionGenerations[tab]) {
-						deepFields = response.fields ?? [];
-						deepNote = response.snapshotNote ?? '';
+						deepFieldsByTab = withTabFields(deepFieldsByTab, tab, response.fields ?? []);
+						deepNoteByTab = { ...deepNoteByTab, [tab]: response.snapshotNote ?? '' };
 					}
 					break;
 				}
@@ -489,8 +496,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								</p>
 							{/snippet}
 							{@render fieldRows(
-								deepFields.length > 0
-									? deepFields
+								activeDeepFields.length > 0
+									? activeDeepFields
 									: activeTab === 'character'
 										? detail.character
 										: detail.progress
@@ -498,7 +505,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</CarbonStructuredList>
 						<p class="text-xs text-muted-foreground" role="note">
 							These values are read-only and cannot be edited here.
-							{#if deepNote}{deepNote}{/if}
+							{#if activeDeepNote}{activeDeepNote}{/if}
 						</p>
 					{:else if activeTab === 'access'}
 						<CarbonDataTable

@@ -23,6 +23,21 @@ test('PlayerProvenance renders source, confidence, timestamp and conflict as tag
 	);
 });
 
+test('player detail keeps Character and Progress deep fields in separate state', () => {
+	const s = readFileSync(
+		new URL('../../../routes/players/[key]/+page.svelte', import.meta.url),
+		'utf8'
+	);
+	assert.match(s, /deepFieldsByTab/, 'deep fields are keyed by tab');
+	assert.match(s, /withTabFields\(deepFieldsByTab, tab/, 'each section writes its own tab key');
+	assert.match(s, /tabFields\(deepFieldsByTab, activeTab\)/, 'render reads the active tab fields');
+	assert.doesNotMatch(
+		s,
+		/\bdeepFields\s*=/,
+		'no shared deepFields array that one tab can overwrite for another'
+	);
+});
+
 test('PlayerRoster derives server options without an effect write loop', () => {
 	const s = source('PlayerRoster.svelte');
 	assert.match(

@@ -413,6 +413,24 @@ export function serverOptionsFromRoster(
 }
 
 /**
+ * Tab-scoped field storage. Character and Progress retrieve different kinds of
+ * read-only data; a shared field array lets the second tab overwrite the first
+ * while its section is skipped on return. Storing by tab keeps each section's
+ * snapshot stable.
+ */
+export function withTabFields<T>(
+	state: Record<string, T[]>,
+	tab: string,
+	fields: T[]
+): Record<string, T[]> {
+	return { ...state, [tab]: fields };
+}
+
+export function tabFields<T>(state: Record<string, T[]>, tab: string): T[] {
+	return state[tab] ?? [];
+}
+
+/**
  * Pure projection of the server-filter options from three independent inputs:
  * the current roster (which may contain server-scoped rows), the server
  * inventory supplied by the route, and the active server scope. Keeping this
