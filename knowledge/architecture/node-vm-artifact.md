@@ -30,11 +30,16 @@ config change, no registry push and no release.
 - One owned VM per node. Each VM has a unique instance-id, domain UUID and MAC;
   identities are never shared. The boundary is a separate kernel, not a proven
   isolation claim ([isolation](../../packaging/node-vm/docs/isolation.md)).
-- Base images are pinned by version, arch, URL and upstream GPG key. Checked-in
-  digests are `fixture-placeholder` and are a hard stop for apply until an
-  operator records a `verified` digest from the signed upstream checksum file.
-  No fallback to a host or other image. The target matrix is
-  `packaging/node-vm/MATRIX.md`.
+- Base images are pinned to **immutable dated** Ubuntu 24.04 `release-20261017`
+  URLs (amd64/arm64) with **real verified SHA256** values from the upstream
+  GPG-signed `SHA256SUMS` and the official signing key fingerprint
+  `D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81`; retrieval evidence is in
+  `packaging/node-vm/provenance/RETRIEVAL-EVIDENCE.md`. Synthetic placeholders
+  exist only in `base-images.fixture.json` for explicit fixture-mode tests.
+  Artifact mode fails closed on placeholder/synthetic digests, moving
+  `/release/` or `/current/` URLs, or missing signature evidence; a real build
+  must still download and rehash the image. No host or other-image fallback.
+  The target matrix is `packaging/node-vm/MATRIX.md`.
 - Seed files, checksum manifest, CycloneDX 1.5 SBOM and build plan are
   deterministic from pinned inputs and `SOURCE_DATE_EPOCH`; `--check` asserts
   byte-identical rebuilds. Raw QCOW2 bytes are verified by checksum, not claimed
@@ -53,10 +58,11 @@ config change, no registry push and no release.
 - Signing is an operator action on an owned host with the key identity supplied
   via environment. No private key, passphrase or token is in the build config
   or any artifact. ADR 0010/0033 publication gates are unchanged.
-- Fixtures are synthetic. Offline tests prove determinism, refusal and planner
-  semantics only; no live VM, enrollment, daemon or deployment success is
-  claimed. Disposable owned-VM acceptance is designed in
-  `packaging/node-vm/qualification/QUALIFICATION.md`.
+- Runtime fixtures are synthetic and offline tests prove determinism, refusal
+  and planner semantics only. The base-image pin is real and signature-backed,
+  but no image bytes were downloaded and no QCOW2 was built; no live VM,
+  enrollment, daemon or deployment success is claimed. Disposable owned-VM
+  acceptance is designed in `packaging/node-vm/qualification/QUALIFICATION.md`.
 
 # Why
 
@@ -70,10 +76,11 @@ the shared node-control contract without duplicating it.
 - `python -m py_compile scripts/node_vm_*.py scripts/test_node_vm_*.py
   packaging/node-vm/cloud-init/firstboot/enroll.py`
 - `python -m unittest discover -s scripts -p 'test_node_vm_*.py'` (offline,
-  synthetic keys only)
-- `python scripts/node_vm_build.py --check` (deterministic, fixture-only plan)
-- `python scripts/node_vm_integrity.py --verify` (checksum + CycloneDX SBOM +
-  key-free signing plan)
+  synthetic keys; fixture provenance profile)
+- `python scripts/node_vm_build.py --profile artifact --check` (real dated pins;
+  refuses placeholder digests) and `--profile fixture --check` (offline plan)
+- `python scripts/node_vm_integrity.py --profile fixture --verify` (checksum +
+  CycloneDX SBOM + key-free signing plan)
 - `python scripts/node_vm_upgrade.py --from-revision A --to-revision B
   --batch-id ID` (staged undo plan)
 - Never substitute a real key, endpoint or world path for a fixture value, and
