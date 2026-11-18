@@ -16,12 +16,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"math/big"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/noderuntime/enroll"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -148,6 +148,17 @@ type fixtureHarness struct {
 	failBeforeCommit bool
 	challengeCounter int
 	now              func() time.Time
+	ca               *enroll.EnrollmentAuthority
+}
+
+// newFixtureCA builds an owned synthetic CA. Key generation only fails on a
+// CSPRNG failure, which is unrecoverable for a fixture process.
+func newFixtureCA() *enroll.EnrollmentAuthority {
+	a, err := enroll.NewEnrollmentAuthority(enroll.TopologyDirectTLS)
+	if err != nil {
+		panic("fixture CA unavailable: " + err.Error())
+	}
+	return a
 }
 
 func newFixtureHarness() *fixtureHarness {
@@ -157,6 +168,7 @@ func newFixtureHarness() *fixtureHarness {
 		channelContext: []byte("server-derived-channel-context"),
 		topology:       fixtureDirectTLS,
 		now:            func() time.Time { return time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC) },
+		ca:             newFixtureCA(),
 	}
 }
 
@@ -198,24 +210,12 @@ func fixtureApprovedSPKI(t *testing.T, key ed25519.PrivateKey) ([]byte, []byte) 
 	return spki, fp[:]
 }
 
-// fixtureClaimContext is the exact canonical context the fresh signature must
-// cover: "carbon-panel-enroll-v1" plus node ID, enrollment ID, challenge ID,
-// server nonce, expiry, capabilities and the verified channel context.
+// fixtureClaimContext delegates to the ONE canonical encoder in the shared
+// production package. The fixture has no second delimiter/encoding path: its
+// capability names are already canonical strings, so ClaimContextRaw is used
+// directly. There is deliberately no client nonce parameter anywhere.
 func fixtureClaimContext(nodeID, enrollmentID, challengeID string, nonce []byte, expiresAt time.Time, capabilities []string, channel []byte) []byte {
-	var b bytes.Buffer
-	b.WriteString("carbon-panel-enroll-v1\x00")
-	for _, part := range []string{nodeID, enrollmentID, challengeID} {
-		b.WriteString(part)
-		b.WriteByte(0)
-	}
-	b.Write(nonce)
-	b.WriteByte(0)
-	b.WriteString(expiresAt.UTC().Format(time.RFC3339Nano))
-	b.WriteByte(0)
-	b.WriteString(strings.Join(capabilities, ","))
-	b.WriteByte(0)
-	b.Write(channel)
-	return b.Bytes()
+	return enroll.ClaimContextRaw(nodeID, enrollmentID, challengeID, nonce, expiresAt, capabilities, channel)
 }
 
 func (h *fixtureHarness) register(t *testing.T, id, nodeID string, key ed25519.PrivateKey, secret string, ttl time.Duration, capabilities []string) {
@@ -334,29 +334,22 @@ func (h *fixtureHarness) claim(req fixtureClaim) (fixtureClaimResult, error) {
 	if h.failBeforeCommit {
 		return fixtureClaimResult{}, errFixtureRefused
 	}
-	// Atomic promotion and issuance.
-	enrollment.NonceUsed = true
-	enrollment.State = "active"
-	now := h.now()
-	enrollment.ConsumedAt = &now
-	enrollment.ChannelBinding = append([]byte{}, h.channelContext...)
-	enrollment.CredentialGeneration = 1
+	// ISSUE FIRST, COMMIT SECOND — mirror the shared production boundary. A
+	// failed issuance must leave zero ownership mutation so a retry can succeed.
 	serial := "fixture-serial-" + enrollment.ID
-	enrollment.CertSerial = serial
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(int64(len(serial) + 1)),
-		Subject:               pkix.Name{CommonName: enrollment.NodeID},
-		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(24 * time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, approvedKey, deterministicFixtureKey("fixture-ca:"+enrollment.NodeID))
+	der, err := h.ca.IssueClientCertificate(enrollment.NodeID, int64(len(serial)+1), publicKey)
 	if err != nil {
 		return fixtureClaimResult{}, errFixtureRefused
 	}
+
+	// Single commit: every ownership field flips together.
+	now := h.now()
+	enrollment.NonceUsed = true
+	enrollment.State = "active"
+	enrollment.ConsumedAt = &now
+	enrollment.ChannelBinding = append([]byte{}, h.channelContext...)
+	enrollment.CredentialGeneration = 1
+	enrollment.CertSerial = serial
 	fp := sha256.Sum256(der)
 	return fixtureClaimResult{CertificateDER: der, Serial: serial, Fingerprint: fp[:], Generation: 1}, nil
 }
@@ -649,6 +642,41 @@ func TestNodeControlEnrollmentFixtures(t *testing.T) {
 		}
 		if h.enrollments[enrollmentID].State != "pending" || h.enrollments[enrollmentID].NonceUsed {
 			t.Fatal("partial state survived an aborted claim")
+		}
+	})
+
+	// OSS-385 MUST-FIX: issuance is the last fallible step before commit. An
+	// injected issuance failure must leave zero state mutation, and a retry
+	// with a fresh challenge must then succeed.
+	t.Run("issuance failure leaves no partial state and retry succeeds", func(t *testing.T) {
+		h := newFixtureHarness()
+		h.register(t, enrollmentID, nodeID, key, secret, time.Hour, capabilities)
+		firstClaim := fixtureValidClaim(t, h, enrollmentID, secret, key, capabilities)
+		before := *h.enrollments[enrollmentID]
+		beforeNonce := append([]byte{}, before.Nonce...)
+
+		h.ca.InjectIssuanceFailure(true)
+		if _, err := h.claim(firstClaim); err == nil {
+			t.Fatal("injected issuance failure did not refuse the claim")
+		}
+		e := h.enrollments[enrollmentID]
+		if e.State != before.State || e.NonceUsed != before.NonceUsed ||
+			e.CredentialGeneration != before.CredentialGeneration || e.CertSerial != before.CertSerial ||
+			e.ConsumedAt != nil || len(e.ChannelBinding) != 0 ||
+			!bytes.Equal(e.Nonce, beforeNonce) || e.ChallengeID != before.ChallengeID {
+			t.Fatalf("issuance failure mutated fixture state: %+v", e)
+		}
+
+		h.ca.InjectIssuanceFailure(false)
+		result, err := h.claim(fixtureValidClaim(t, h, enrollmentID, secret, key, capabilities))
+		if err != nil {
+			t.Fatalf("legitimate retry after issuance failure refused: %v", err)
+		}
+		if result.Generation != 1 || result.Serial == "" || len(result.CertificateDER) == 0 {
+			t.Fatalf("retry returned no credential: %+v", result)
+		}
+		if e.State != "active" || !e.NonceUsed || e.CertSerial == "" {
+			t.Fatalf("retry did not commit atomically: %+v", e)
 		}
 	})
 

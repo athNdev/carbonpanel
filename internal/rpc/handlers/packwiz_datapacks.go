@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/pkg/upload"
 	"github.com/athNdev/carbon-panel/pkg/utils"
 )
 
@@ -111,8 +113,13 @@ func (h *PackwizHandler) handleUploadDatapack(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	tempPath, originalFilename, err := h.uploadManager.GetTempPath(req.UploadSessionID)
+	ownerID := requestUploadOwnerID(r)
+	tempPath, originalFilename, err := h.uploadManager.GetTempPathFor(req.UploadSessionID, ownerID)
 	if err != nil {
+		if errors.Is(err, upload.ErrOwnerMismatch) {
+			http.Error(w, "upload session belongs to another user", http.StatusForbidden)
+			return
+		}
 		http.Error(w, "upload session not found or not completed", http.StatusNotFound)
 		return
 	}
@@ -123,21 +130,21 @@ func (h *PackwizHandler) handleUploadDatapack(w http.ResponseWriter, r *http.Req
 	}
 	if err := minecraft.ValidateDatapackFilename(name); err != nil {
 		_ = os.Remove(tempPath)
-		_ = h.uploadManager.CleanupSession(req.UploadSessionID)
+		_ = h.uploadManager.CleanupSessionFor(req.UploadSessionID, ownerID)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	f, err := os.Open(tempPath)
 	if err != nil {
-		_ = h.uploadManager.CleanupSession(req.UploadSessionID)
+		_ = h.uploadManager.CleanupSessionFor(req.UploadSessionID, ownerID)
 		http.Error(w, "uploaded file unavailable", http.StatusInternalServerError)
 		return
 	}
 	installErr := h.manager.AddDatapackFile(packID, name, f)
 	_ = f.Close()
 	_ = os.Remove(tempPath)
-	_ = h.uploadManager.CleanupSession(req.UploadSessionID)
+	_ = h.uploadManager.CleanupSessionFor(req.UploadSessionID, ownerID)
 	if installErr != nil {
 		// Most failures come from the uploaded archive itself (invalid name or
 		// not a real datapack), so surface them as bad requests.

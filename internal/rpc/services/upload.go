@@ -14,6 +14,7 @@ import (
 	"errors"
 
 	"connectrpc.com/connect"
+	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -29,6 +30,23 @@ type UploadService struct {
 	manager *upload.Manager
 	cfg     *config.Config
 	log     *logger.Logger
+}
+
+// uploadOwnerID returns the authenticated principal when the caller has a real
+// user context. Internal callers without one keep the legacy unowned behavior;
+// production RPCs are authenticated by the interceptor before reaching here.
+func uploadOwnerID(ctx context.Context) string {
+	if user := auth.GetUserFromContext(ctx); user != nil {
+		return user.ID
+	}
+	return ""
+}
+
+func ownerMismatchError(err error) *connect.Error {
+	if errors.Is(err, upload.ErrOwnerMismatch) {
+		return connect.NewError(connect.CodePermissionDenied, errors.New("upload session belongs to another user"))
+	}
+	return nil
 }
 
 // NewUploadService creates a new upload service
@@ -61,7 +79,7 @@ func (s *UploadService) InitUpload(ctx context.Context, req *connect.Request[v1.
 		chunkSize = int32(s.cfg.Upload.DefaultChunkSize) // Set to server default
 	}
 
-	session, err := s.manager.InitSession(msg.Filename, msg.TotalSize, chunkSize)
+	session, err := s.manager.InitSessionFor(msg.Filename, msg.TotalSize, chunkSize, uploadOwnerID(ctx))
 	if err != nil {
 		if errors.Is(err, upload.ErrFileTooLarge) {
 			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("file exceeds maximum allowed size"))
@@ -84,8 +102,12 @@ func (s *UploadService) GetUploadStatus(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("session_id is required"))
 	}
 
-	bytesReceived, totalBytes, chunksReceived, totalChunks, completed, tempPath, err := s.manager.GetSessionStatus(msg.SessionId)
+	ownerID := uploadOwnerID(ctx)
+	bytesReceived, totalBytes, chunksReceived, totalChunks, completed, tempPath, err := s.manager.GetSessionStatusFor(msg.SessionId, ownerID)
 	if err != nil {
+		if denied := ownerMismatchError(err); denied != nil {
+			return nil, denied
+		}
 		if errors.Is(err, upload.ErrSessionNotFound) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found"))
 		}
@@ -96,7 +118,7 @@ func (s *UploadService) GetUploadStatus(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to get upload status"))
 	}
 
-	missing, err := s.manager.GetMissingChunks(msg.SessionId)
+	missing, err := s.manager.GetMissingChunksFor(msg.SessionId, ownerID)
 	if err != nil {
 		missing = nil // Ignore error for missing chunks
 	}
@@ -125,8 +147,12 @@ func (s *UploadService) UploadChunk(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("chunk data is required"))
 	}
 
-	completed, err := s.manager.WriteChunk(msg.SessionId, msg.ChunkIndex, msg.Data)
+	ownerID := uploadOwnerID(ctx)
+	completed, err := s.manager.WriteChunkFor(msg.SessionId, ownerID, msg.ChunkIndex, msg.Data)
 	if err != nil {
+		if denied := ownerMismatchError(err); denied != nil {
+			return nil, denied
+		}
 		if errors.Is(err, upload.ErrSessionNotFound) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found"))
 		}
@@ -144,7 +170,7 @@ func (s *UploadService) UploadChunk(ctx context.Context, req *connect.Request[v1
 	}
 
 	// Get updated session status
-	bytesReceived, _, chunksReceived, _, _, tempPath, _ := s.manager.GetSessionStatus(msg.SessionId)
+	bytesReceived, _, chunksReceived, _, _, tempPath, _ := s.manager.GetSessionStatusFor(msg.SessionId, ownerID)
 
 	return connect.NewResponse(&v1.UploadChunkResponse{
 		SessionId:      msg.SessionId,
@@ -163,8 +189,11 @@ func (s *UploadService) CancelUpload(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("session_id is required"))
 	}
 
-	err := s.manager.Cancel(msg.SessionId)
+	err := s.manager.CancelFor(msg.SessionId, uploadOwnerID(ctx))
 	if err != nil {
+		if denied := ownerMismatchError(err); denied != nil {
+			return nil, denied
+		}
 		if errors.Is(err, upload.ErrSessionNotFound) {
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found"))
 		}

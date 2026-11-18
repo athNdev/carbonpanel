@@ -52,7 +52,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				{"source": "{{server.data_path}}/modules/geyser", "target": "/data", "read_only": false},
 				{"source": "{{server.data_path}}/plugins", "target": "/java-plugins", "read_only": false, "create_dir": true}
 			]`,
-			Documentation:   "Geyser translates Bedrock packets to Java packets. Default auth is floodgate, so a Bedrock client cannot join as an arbitrary Java name. The entrypoint installs the pinned Floodgate Spigot jar into plugins/ when that directory is mounted, and both sides share plugins/floodgate/key.pem. Offline auth is refused unless GEYSER_ALLOW_OFFLINE_AUTH=1, which is only appropriate when the Java server itself is offline-mode behind Velocity.",
+			Documentation:   "Geyser translates Bedrock packets to Java packets. Default auth is floodgate, so a Bedrock client cannot join as an arbitrary Java name. The entrypoint installs the pinned Floodgate Spigot jar into plugins/ when that directory is mounted, and both sides share plugins/floodgate/key.pem. Offline auth is refused unless GEYSER_ALLOW_OFFLINE_AUTH=1, which is only appropriate when the Java server itself is offline-mode behind Velocity. This module sets BEDROCK_ADDRESS=0.0.0.0 explicitly to listen on all interfaces inside its container so the panel's UDP port proxy can reach it; a standalone Geyser entrypoint without that setting binds loopback. Restrict the published UDP port to trusted networks.",
 			HealthCheckPort: 19132,
 			DefaultMemory:   1024,
 		},

@@ -4,13 +4,17 @@
 
 ## Concepts
 
+- [Host-native private daemon mode](host-native-runtime.md) — Mode-specific Linux runtime that owns a private Docker socket, roots and network; it consumes the shared node-control contract and never falls back to a host engine.
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
+- [MCP tool gateway](mcp-server.md) — A stdio gateway exposes bounded, fail-closed operator workflows through generated Connect clients and a shared coverage drift gate.
 - [Module system](module-system.md) — Modules, hooks, packwiz and indexers deliver server content and modpacks.
 - [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
+- [Node VM artifact](node-vm-artifact.md) — Reproducible, secret-free QCOW2/cloud-init node VM builds with pinned provenance, scoped first-boot enrollment and staged rollback; fixture-only, not published.
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.
 - [Player management](player-management.md) — Player identity, provenance, moderation and capability gates for the PlayerService surface.
+- [Portable node installer](node-installer.md) — One guest-side Linux installer shared by the host-native, VM and LXC managed modes; it owns only caller-named directories and produces ADR 0019 enrollment material.
 - [Remote storage transport](remote-storage-transport.md) — JSON accessor worker and Docker attach path for nodes without shared controller storage.
 - [RPC contract](rpc-contract.md) — Proto definitions are the single API contract for the backend, console and CLI.
 - [Runtime lifecycle and world-data seams](runtime-seams.md) — Locator, lifecycle handle, idle-power module, route PlanFor and worldstore are the five stable architecture seams.
@@ -18,5 +22,7 @@
 - [Scheduler](scheduler.md) — Cron and lifecycle tasks run in the controller and surface progress over the WebSocket hub.
 - [Server data ownership](server-data-ownership.md) — The panel and the game container share a bind mount but not a uid, so anything the panel writes must be handed to the game container's user. Existing /data matching the game uid sets SKIP_CHOWN so a restart does not recursively chown.
 - [Server lifecycle policy](server-lifecycle.md) — Starts share node admission behind an in-process node gate, and config recreation records canonical container recovery identities.
+- [Shared enrollment boundary](shared-enrollment-boundary.md) — One mode-agnostic production package owns managed-node enrollment, canonical claim signing, issuance and the three authorization domains.
 - [TCP proxy](proxy.md) — One public TCP port multiplexes Minecraft traffic by inspecting the handshake and routing on hostname.
+- [Unprivileged LXC node artifact lane](node-lxc-artifact.md) — Separate rootfs artifact lane for unprivileged LXC managed nodes; shares the ADR0019 contract and gates on nested-runtime capabilities.
 - [World Library](world-library.md) — Library worlds are immutable content-addressed revisions; servers get private writable clones through journaled, stop-based bindings, never a live folder rename.

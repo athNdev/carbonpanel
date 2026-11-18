@@ -75,3 +75,9 @@
 
 - query: How does the frontend server inventory reject stale reads after deletion or logout?
   expect: decisions/server-inventory
+
+- query: Where is the shared enrollment boundary and how does it avoid partial consume?
+  expect: architecture/shared-enrollment-boundary
+
+- query: What exact bytes does SIG_CLAIM sign for node enrollment?
+  expect: architecture/shared-enrollment-boundary

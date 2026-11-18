@@ -339,15 +339,19 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
+	ownerID := uploadOwnerID(ctx)
+	tempPath, originalFilename, err := s.uploadManager.GetTempPathFor(msg.UploadSessionId, ownerID)
 	if err != nil {
+		if denied := ownerMismatchError(err); denied != nil {
+			return nil, denied
+		}
 		s.log.Error("Failed to get upload session: %v", err)
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found or not completed"))
 	}
 	// Failures after this point own the temp file and the session.
 	fail := func(err error) (*connect.Response[v1.UploadDatapackResponse], error) {
 		_ = os.Remove(tempPath)
-		_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+		_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 		return nil, err
 	}
 
@@ -384,7 +388,7 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 			Size:        int64(len(data)),
 		}, tempPath, server.MCVersion)
 		_ = os.Remove(tempPath)
-		_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+		_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 		s.log.Info("Staged datapack %s for server %s", filename, server.ID)
 		return connect.NewResponse(&v1.UploadDatapackResponse{
 			Datapack: pack,
@@ -412,7 +416,7 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 		}
 		_ = os.Remove(tempPath)
 	}
-	_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+	_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 
 	info, err := os.Stat(destPath)
 	if err != nil {

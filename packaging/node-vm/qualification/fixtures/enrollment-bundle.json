@@ -1,0 +1,18 @@
+{
+  "fixture": true,
+  "synthetic": true,
+  "note": "Digest-only registration bundle. SYNTHETIC values; never a real secret, key, token or endpoint.",
+  "node_label": "fixture01",
+  "enrollment_salt": "U1lOVEhFVElDLVNBTFQtT05MWS0=",
+  "enrollment_secret_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "approved_public_key_spki": "U1lOVEhFVElDLVNQ-server-id-ONLY",
+  "approved_key_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "csr_pre": "U1lOVEhFVElDLUNTUl9QUkVfTUFURVJJQUwtT05MWS0=",
+  "csr_pre_signature": "U1lOVEhFVElDLVNJR05BVFVSRS1PTkxZ",
+  "node_id": "node-24031fb03274b0b47214207802f7d224",
+  "bootstrap_scopes": ["BeginEnrollmentChallenge", "ClaimEnrollment"],
+  "object_id_binding": "node_id equals the enrolled VM node object id; cross-node object ids are denied",
+  "contract_ref": "ADR0019 / proto/carbonpanel/v1/node_control.proto",
+  "contract_is_shared": true,
+  "fork_allowed": false
+}

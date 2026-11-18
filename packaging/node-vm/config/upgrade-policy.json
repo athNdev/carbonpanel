@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "staging_root": ".carbon-vm",
+  "upgrade_dir_template": ".carbon-vm/upgrade/<artifact_revision>",
+  "undo_dir_template": ".carbon-vm/undo/<batch_id>",
+  "preserve_paths": [
+    "/var/lib/carbon-node",
+    "/var/lib/carbon-node/docker",
+    "/srv/carbon/worlds",
+    "/var/backups/carbon",
+    "/var/lib/carbon-panel"
+  ],
+  "never_delete_paths": [
+    "/srv/carbon/worlds",
+    "/var/backups/carbon",
+    "/var/lib/carbon-panel/carbon-panel.db",
+    "/var/lib/carbon-node/docker"
+  ],
+  "require_undo_manifest_before_promotion": true,
+  "verify_undo_before_rollback": true,
+  "refuse_retry_on_uncertain": true,
+  "audit": {
+    "required": true,
+    "fields": ["batch_id", "from_revision", "to_revision", "actor", "timestamp", "file_sha256", "outcome"],
+    "no_secret_values": true
+  },
+  "rollback": {
+    "restore_only_if_undo_verified": true,
+    "preserve_new_artifact_for_forensics": true,
+    "no_volume_delete": true
+  }
+}
