@@ -1,0 +1,17 @@
+{
+  "fixture": true,
+  "synthetic": true,
+  "from_revision": "0.1.0-fixture",
+  "to_revision": "0.2.0-fixture",
+  "batch_id": "fixture-batch-0001",
+  "old_artifact_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "expected_steps": [
+    "preflight", "stage", "verify", "undo", "promote", "health", "audit"
+  ],
+  "refusal_cases": [
+    "undo manifest hash mismatch blocks rollback",
+    "retry after UNCERTAIN is refused",
+    "preserved world/backup/DB paths are never deleted"
+  ],
+  "note": "Pure-planner fixture. No live artifact or VM."
+}

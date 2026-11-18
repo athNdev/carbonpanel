@@ -1,0 +1,8 @@
+{
+  "fixture": true,
+  "synthetic": true,
+  "instance_id": "fixture-instance-0002",
+  "node_label": "fixture02",
+  "expected_node_id": "node-bf72c1a4fee3ee9368e8c55df18bf639",
+  "note": "Public metadata only. Distinct instance-id must yield a distinct node_id."
+}

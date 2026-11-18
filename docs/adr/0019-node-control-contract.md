@@ -285,3 +285,38 @@ transitions only, never implemented enrollment or deployment success.
   verifies legacy backfill plus preservation of the existing node row.
 - Touched-package `go test`/`go vet` and frontend `bun check`/`test`/`lint`
   are required before merge.
+
+## Two first-class managed deployment modes (2026-11-18 addendum)
+
+The node-control contract and runtime behavior are SHARED by two deployment
+modes, and neither changes the enrollment proof-of-possession rules above:
+
+1. **Host-native private daemon (OSS-376).** A node agent manages a dedicated
+   daemon process with a private socket, private data directory and private
+   network. Rootless is used where qualified; a preinstalled shared Docker
+   daemon is never a fallback.
+2. **Dedicated Linux VM (OSS-377–380).** The same agent and managed daemon run
+   in a VM with a separate kernel, disk, network and node identity. Baseline
+   artifacts are reproducible QCOW2/cloud-init for Proxmox VE and KVM/libvirt,
+   a separately documented unprivileged LXC/Proxmox rootfs template, and one
+   portable Linux installer shared by all modes. Hyper-V VHDX and other home
+   formats require real clean import/boot evidence before support is claimed.
+
+Legacy nodes remain a separate existing option and migration is opt-in. LXC
+support is conditional on a verified nested-runtime capability gate (user
+namespaces, seccomp/AppArmor, cgroup v2 delegation, device nesting); no global
+host configuration is changed to qualify a host, and unsupported hosts refuse
+with an exact reason.
+
+Every baseline artifact — QCOW2 VM, LXC rootfs and portable installer — MUST
+carry pinned upstream base-image provenance, a supported platform/version
+matrix, published checksums, signing and an SBOM. Each artifact MUST generate a
+UNIQUE FIRST-BOOT IDENTITY and enroll through the scoped bootstrap flow above;
+it MUST NOT contain a pre-provisioned shared credential. Persistent volume
+import, backup and recovery MUST be documented and tested, and artifact
+UPGRADE and ROLLBACK MUST be exercised with offline fixtures before a format is
+advertised. No secret is baked into an image or provisioning metadata.
+
+Artifact publication is independently versioned and isolated from Carbon Panel
+releases. This addendum is documentation only — no live host, VM deployment or
+production rollout is authorized by it.

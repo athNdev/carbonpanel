@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "purpose": "Pinned upstream base-image provenance for the node VM QCOW2 build. Digests are fixture placeholders; --apply refuses them until an operator records upstream-verified SHA256 values.",
+  "digest_status_values": ["verified", "fixture-placeholder"],
+  "images": [
+    {
+      "ref": "ubuntu-24.04-amd64",
+      "distro": "ubuntu",
+      "version": "24.04 LTS (Noble)",
+      "arch": "amd64",
+      "image_url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+      "checksum_url": "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS",
+      "signature_url": "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS.gpg",
+      "signing_key_fingerprint": "790BC7277767219C42C86F933B4FE6CC1B33A5E8",
+      "release_date": "2024-04-25",
+      "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "digest_status": "fixture-placeholder"
+    },
+    {
+      "ref": "ubuntu-24.04-arm64",
+      "distro": "ubuntu",
+      "version": "24.04 LTS (Noble)",
+      "arch": "arm64",
+      "image_url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img",
+      "checksum_url": "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS",
+      "signature_url": "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS.gpg",
+      "signing_key_fingerprint": "790BC7277767219C42C86F933B4FE6CC1B33A5E8",
+      "release_date": "2024-04-25",
+      "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "digest_status": "fixture-placeholder"
+    }
+  ],
+  "verification_rule": "In --apply mode, download checksum_url, verify its GPG signature against signing_key_fingerprint, then require the resolved image SHA256 to equal expected_sha256 with digest_status=verified. No silent fallback to another image or to a host image.",
+  "fixture_rule": "In --offline mode, fixture placeholders are accepted for planning only and every emitted plan is labeled fixture-provenance."
+}

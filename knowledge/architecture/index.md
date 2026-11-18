@@ -4,11 +4,13 @@
 
 ## Concepts
 
+- [Host-native private daemon mode](host-native-runtime.md) — Mode-specific Linux runtime that owns a private Docker socket, roots and network; it consumes the shared node-control contract and never falls back to a host engine.
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
 - [MCP tool gateway](mcp-server.md) — A stdio gateway exposes bounded, fail-closed operator workflows through generated Connect clients and a shared coverage drift gate.
 - [Module system](module-system.md) — Modules, hooks, packwiz and indexers deliver server content and modpacks.
 - [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
+- [Node VM artifact](node-vm-artifact.md) — Reproducible, secret-free QCOW2/cloud-init node VM builds with pinned provenance, scoped first-boot enrollment and staged rollback; fixture-only, not published.
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.
 - [Player management](player-management.md) — Player identity, provenance, moderation and capability gates for the PlayerService surface.

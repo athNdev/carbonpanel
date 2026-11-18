@@ -1,0 +1,7 @@
+runtime-artifact-identity-v1
+version: runtime-v0.1.0
+commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+artifact: installer
+owner: athndev
+publisher: release-bot
+statement: Assertion bound to a different commit.

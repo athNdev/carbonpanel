@@ -20,6 +20,7 @@
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review stack data ownership](review-data-ownership.md) — Review stack cleanup requires a scoped session path, matching marker and matching container label.
+- [Runtime artifact format support](runtime-artifact-formats.md) — Publish only disk formats with real clean import/boot evidence; the portable installer is the supported fallback.
 - [Server work temp is on the data volume](server-work-temp.md) — Modpack downloads, extracts, and native libraries use /data/.tmp, not the 64 MiB noexec /tmp tmpfs.
 - [Shared lazy editor runtime](editor-runtime.md) — Both Monaco views share a cached lazy bootstrap while owning their editor models and pending-load lifetime.
 - [Shared provider request adapters](provider-adapters.md) — Modrinth and CurseForge request construction is shared while browse and Packwiz retain their presentation and version-selection policies.

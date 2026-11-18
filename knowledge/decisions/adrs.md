@@ -47,6 +47,8 @@ sources:
 | [0031](../../docs/adr/0031-module-sidecar-confinement.md) | Module sidecar confinement parity | [Runtime seams](../architecture/runtime-seams.md) |
 | [0032](../../docs/adr/0032-security-audit-events.md) | Security audit events and redaction | [Fail-closed authorization](../invariants/authz-fail-closed.md) |
 | [0033](../../docs/adr/0033-release-tag-and-publication-policy.md) | One explicit publication boundary and separate immutable version domains | [Release](../workflows/release.md) |
+| [0034](../../docs/adr/0034-mcp-server-distribution.md) | Independent MCP artifact distribution with build-bound capabilities and auth-enabled installs | [Release](../workflows/release.md), [Fail-closed authorization](../invariants/authz-fail-closed.md) |
+| [0039](../../docs/adr/0039-docker-readable-build-aliases.md) | Pure readable UTC aliases for immutable Docker builds with tag-push provenance | [Release](../workflows/release.md) |
 
 # Rule
 

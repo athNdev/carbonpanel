@@ -1,0 +1,7 @@
+runtime-artifact-identity-v1
+version: runtime-v0.1.0
+commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+artifact: installer
+owner: athndev
+publisher: release-bot
+statement: Dispatched by the release operator for the verified installer bundle.

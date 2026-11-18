@@ -1,0 +1,7 @@
+runtime-artifact-identity-v1
+version: runtime-v0.1.0
+commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+artifact: installer
+owner: some-other-owner
+publisher: release-bot
+statement: Assertion claims a foreign project owner.
