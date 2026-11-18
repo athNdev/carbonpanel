@@ -66,6 +66,21 @@ type OIDCConfig struct {
 	ExtraClaimsName string            `mapstructure:"extra_claims_name" json:"extra_claims_name"`
 	RequiredClaim   string            `mapstructure:"required_claim" json:"required_claim"`
 	RequiredValues  []string          `mapstructure:"required_values" json:"required_values"`
+
+	// AllowedSigningAlgs is a local allowlist for ID token signatures. Empty
+	// means RS256+ES256; HS256 requires an explicit operator entry because
+	// authentik uses it with the client secret and publishes no JWKS.
+	AllowedSigningAlgs []string `mapstructure:"allowed_signing_algs" json:"allowed_signing_algs"`
+	// DefaultRoles are granted to a brand-new OIDC identity. Never admin.
+	DefaultRoles []string `mapstructure:"default_roles" json:"default_roles"`
+	// AbsentClaimPolicy is deny or defaults_only. There is no keep_previous.
+	AbsentClaimPolicy string `mapstructure:"absent_claim_policy" json:"absent_claim_policy"`
+	// AllowRawClaimRoles opts into "claim value equals role name" behaviour.
+	// Privileged role names are still refused without an explicit mapping.
+	AllowRawClaimRoles bool `mapstructure:"allow_raw_claim_roles" json:"allow_raw_claim_roles"`
+	// CookieSecure forces Secure on auth cookies behind a TLS-terminating
+	// proxy. Forwarded headers are never trusted as proof of TLS.
+	CookieSecure bool `mapstructure:"cookie_secure" json:"cookie_secure"`
 }
 
 type LocalConfig struct {
@@ -103,10 +118,10 @@ type DockerConfig struct {
 }
 
 type StorageConfig struct {
-	DataDir               string                 `mapstructure:"data_dir" json:"data_dir"`
-	BackupDir             string                 `mapstructure:"backup_dir" json:"backup_dir"`
-	TempDir               string                 `mapstructure:"temp_dir" json:"temp_dir"`
-	MaxUploadSize         int64                  `mapstructure:"max_upload_size" json:"max_upload_size"`
+	DataDir       string `mapstructure:"data_dir" json:"data_dir"`
+	BackupDir     string `mapstructure:"backup_dir" json:"backup_dir"`
+	TempDir       string `mapstructure:"temp_dir" json:"temp_dir"`
+	MaxUploadSize int64  `mapstructure:"max_upload_size" json:"max_upload_size"`
 	// ContainerWritableMB caps the container writable layer with the daemon
 	// storage-opt size option. It applies only when the container root
 	// filesystem is writable, because a read-only root cannot grow. It never
@@ -117,7 +132,7 @@ type StorageConfig struct {
 	// metrics collector's WorldSize) meet or exceed this many mebibytes.
 	// 0 disables admission. This is panel fail-closed admission, not an
 	// xfs/project or volume quota, and it is not the writable-layer cap.
-	WorldQuotaMB int64 `mapstructure:"world_quota_mb" json:"world_quota_mb"`
+	WorldQuotaMB          int64                  `mapstructure:"world_quota_mb" json:"world_quota_mb"`
 	MaxSnapshots          int                    `mapstructure:"max_snapshots" json:"max_snapshots"`
 	SnapshotRetentionDays int                    `mapstructure:"snapshot_retention_days" json:"snapshot_retention_days"`
 	BackupEncryption      BackupEncryptionConfig `mapstructure:"backup_encryption" json:"backup_encryption"`
@@ -357,6 +372,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.oidc.extra_claims_name", "")
 	v.SetDefault("auth.oidc.required_claim", "")
 	v.SetDefault("auth.oidc.required_values", []string{})
+	v.SetDefault("auth.oidc.allowed_signing_algs", []string{"RS256", "ES256"})
+	v.SetDefault("auth.oidc.default_roles", []string{})
+	v.SetDefault("auth.oidc.absent_claim_policy", "deny")
+	v.SetDefault("auth.oidc.allow_raw_claim_roles", false)
+	v.SetDefault("auth.oidc.cookie_secure", false)
 	v.SetDefault("auth.local.enabled", true)
 	v.SetDefault("auth.local.allow_registration", false)
 	v.SetDefault("auth.allow_no_auth", false)
@@ -369,6 +389,17 @@ func setDefaults(v *viper.Viper) {
 }
 
 // Validate performs semantic and boundary validation of the configuration (CFG-1).
+// privilegedRoleNames mirrors the auth-package guard so configuration cannot
+// silently grant a brand-new SSO identity a privileged role via default_roles.
+var privilegedRoleNames = map[string]struct{}{
+	"admin": {}, "owner": {}, "root": {}, "superadmin": {}, "system": {},
+}
+
+func isPrivilegedRoleName(role string) bool {
+	_, ok := privilegedRoleNames[strings.ToLower(role)]
+	return ok
+}
+
 func (c *Config) Validate() error {
 	return validateConfig(c)
 }
@@ -462,6 +493,21 @@ func validateConfig(cfg *Config) error {
 		}
 		if strings.TrimSpace(cfg.Auth.OIDC.ClientID) == "" {
 			return fmt.Errorf("oidc client ID cannot be empty when oidc is enabled")
+		}
+		if policy := cfg.Auth.OIDC.AbsentClaimPolicy; policy != "" && policy != "deny" && policy != "defaults_only" {
+			return fmt.Errorf("oidc absent_claim_policy must be deny or defaults_only, got %q", policy)
+		}
+		for _, role := range cfg.Auth.OIDC.DefaultRoles {
+			if isPrivilegedRoleName(role) {
+				return fmt.Errorf("oidc default_roles may not contain privileged role %q; use an explicit reviewed role_mapping", role)
+			}
+		}
+		for _, alg := range cfg.Auth.OIDC.AllowedSigningAlgs {
+			switch alg {
+			case "RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "HS256":
+			default:
+				return fmt.Errorf("unsupported oidc signing algorithm %q", alg)
+			}
 		}
 	}
 

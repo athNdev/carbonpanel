@@ -10,4 +10,5 @@
 - [Fail-closed authorization](authz-fail-closed.md) — Unmapped RPCs and resource scopes are denied; a usable RPC needs an explicit permission mapping and a negative test.
 - [Recorded architecture seams](architecture-seams.md) — The Locator, lifecycle handle, idle-power, PlanFor and worldstore seams stay named in DESIGN.md with live package paths.
 - [Secrets and endpoints](secrets-and-endpoints.md) — Credentials, tokens, private endpoints and workstation paths never enter tracked source or the knowledge base.
+- [SSO identity and entitlement origin](sso-identity.md) — OIDC identity is issuer plus subject; no auto-link or implicit privilege, and OIDC roles are reconciled transactionally before session issue.
 - [Staged server updates](staged-updates.md) — Staging a config, mod, datapack, file, modpack, or module edit records the open batch and does not restart the server or write the live tree.
