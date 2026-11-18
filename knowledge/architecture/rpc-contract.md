@@ -28,8 +28,10 @@ live REST consumers without a migration.
 Node read responses are redacted: `dbNodeToProto` leaves `tls_ca_cert`,
 `tls_cert` and `tls_key` empty, and `UpdateNode` treats an empty TLS string as
 unchanged so an editor cannot clear stored credentials by echoing a redacted
-response. The daemon pool reads stored material from the database. See
-[ADR 0018](../../docs/adr/0018-node-response-redaction.md).
+response. Clearing stored credentials is a separate named, confirmed,
+`nodes:update`-authorized action with an audit entry, not an empty-field edit;
+ordinary edits never clear. The daemon pool reads stored material from the
+database. See [ADR 0018](../../docs/adr/0018-node-response-redaction.md).
 
 Node discovery is the first compatibility migration: both transports use the
 same twelve-second scan and best-effort known-node count. ScanNodes requires
