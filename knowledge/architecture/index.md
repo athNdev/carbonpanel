@@ -4,6 +4,7 @@
 
 ## Concepts
 
+- [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
 - [Module system](module-system.md) — Modules, hooks, packwiz and indexers deliver server content and modpacks.
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
@@ -16,4 +17,4 @@
 - [Server data ownership](server-data-ownership.md) — The panel and the game container share a bind mount but not a uid, so anything the panel writes must be handed to the game container's user. Existing /data matching the game uid sets SKIP_CHOWN so a restart does not recursively chown.
 - [Server lifecycle policy](server-lifecycle.md) — Starts share node admission behind an in-process node gate, and config recreation records canonical container recovery identities.
 - [TCP proxy](proxy.md) — One public TCP port multiplexes Minecraft traffic by inspecting the handshake and routing on hostname.
-- [World viewing](world-viewing.md) — First-class world maps are an observation-only surface behind an authenticated same-origin renderer proxy.
+- [World Library](world-library.md) — Library worlds are immutable content-addressed revisions; servers get private writable clones through journaled, stop-based bindings, never a live folder rename.

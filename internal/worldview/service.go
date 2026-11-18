@@ -282,7 +282,7 @@ func (s *Service) SetPlayerVisibility(ctx context.Context, req *connect.Request[
 			Source: observationSourcePanel, ObservedAt: timestamppb.New(time.Now().UTC()),
 			Applicability: "panel-only player visibility flag",
 			Confidence:    "unknown",
-			ConflictNote:  "this flag is not a verified renderer observation; live positions require an explicitly configured player bridge feed",
+			Note:          "this flag is not a verified renderer observation; live positions require an explicitly configured player bridge feed",
 		},
 	}), nil
 }
@@ -357,8 +357,8 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 		},
 		Freshness: &v1.Observation{
 			Source: observationSourceResolver, Applicability: "renderer endpoint configuration",
-			Confidence:   "unknown",
-			ConflictNote: "no renderer endpoint is configured for this server/node; install and configure a renderer before viewing maps",
+			Confidence: "unknown",
+			Note:       "no renderer endpoint is configured for this server/node; install and configure a renderer before viewing maps",
 		},
 	}
 
@@ -381,7 +381,7 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 				reason = "no renderer endpoint is configured for this server/node; install and configure a renderer"
 			}
 			target.Error = reason
-			target.Freshness.ConflictNote = reason
+			target.Freshness.Note = reason
 		}
 		return target
 	}
@@ -398,14 +398,14 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 		target.RendererState = v1.RendererState_RENDERER_STATE_ERROR
 		target.Error = "renderer health probe returned no observation"
 		target.Freshness.Confidence = "unknown"
-		target.Freshness.ConflictNote = target.Error
+		target.Freshness.Note = target.Error
 		return target
 	}
 	target.RendererState = h.State
 	target.LastRender = h.LastRender
 	target.Freshness = &v1.Observation{
 		Source: h.Source, ObservedAt: timestamppb.New(time.Now().UTC()),
-		Applicability: "renderer health probe", Confidence: h.Confidence, ConflictNote: h.Detail,
+		Applicability: "renderer health probe", Confidence: h.Confidence, Note: h.Detail,
 	}
 	if h.State == v1.RendererState_RENDERER_STATE_ERROR || h.State == v1.RendererState_RENDERER_STATE_UNSUPPORTED {
 		target.Error = h.Detail

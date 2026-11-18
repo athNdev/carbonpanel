@@ -9,6 +9,8 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from '@bufbuild/protobuf/codegenv2';
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from '@bufbuild/protobuf/codegenv2';
+import type { Observation } from './world_pb';
+import { file_carbonpanel_v1_world } from './world_pb';
 import type { Timestamp } from '@bufbuild/protobuf/wkt';
 import { file_google_protobuf_timestamp } from '@bufbuild/protobuf/wkt';
 import type { Message } from '@bufbuild/protobuf';
@@ -19,8 +21,8 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_worldview: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'Ch5jYXJib25wYW5lbC92MS93b3JsZHZpZXcucHJvdG8SDmNhcmJvbnBhbmVsLnYxIu4BCghXb3JsZFJlZhIrCgRraW5kGAEgASgOMh0uY2FyYm9ucGFuZWwudjEuV29ybGRSZWYuS2luZBIRCglzZXJ2ZXJfaWQYAiABKAkSEgoKbGV2ZWxfbmFtZRgDIAEoCRISCgpiaW5kaW5nX2lkGAQgASgJEhMKC3NuYXBzaG90X2lkGAUgASgJImUKBEtpbmQSFAoQS0lORF9VTlNQRUNJRklFRBAAEhgKFEtJTkRfTElCUkFSWV9CSU5ESU5HEAESFQoRS0lORF9TRVJWRVJfTE9DQUwQAhIWChJLSU5EX1NUQVRJQ19JTVBPUlQQAyKQAQoLT2JzZXJ2YXRpb24SDgoGc291cmNlGAEgASgJEi8KC29ic2VydmVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1hcHBsaWNhYmlsaXR5GAMgASgJEhIKCmNvbmZpZGVuY2UYBCABKAkSFQoNY29uZmxpY3Rfbm90ZRgFIAEoCSJ+ChJSZW5kZXJlckRlc2NyaXB0b3ISKgoEdHlwZRgBIAEoDjIcLmNhcmJvbnBhbmVsLnYxLlJlbmRlcmVyVHlwZRIPCgd2ZXJzaW9uGAIgASgJEhQKDGNhcGFiaWxpdGllcxgDIAMoCRIVCg13ZWJfYmFzZV9wYXRoGAQgASgJIpUDCg9Xb3JsZFZpZXdUYXJnZXQSEQoJc2VydmVyX2lkGAEgASgJEisKCXdvcmxkX3JlZhgCIAEoCzIYLmNhcmJvbnBhbmVsLnYxLldvcmxkUmVmEgwKBG5hbWUYAyABKAkSEQoJZGltZW5zaW9uGAQgASgJEjMKDXJlbmRlcmVyX3R5cGUYBSABKA4yHC5jYXJib25wYW5lbC52MS5SZW5kZXJlclR5cGUSNQoOcmVuZGVyZXJfc3RhdGUYBiABKA4yHS5jYXJib25wYW5lbC52MS5SZW5kZXJlclN0YXRlEi8KC2xhc3RfcmVuZGVyGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0CghyZW5kZXJlchgIIAEoCzIiLmNhcmJvbnBhbmVsLnYxLlJlbmRlcmVyRGVzY3JpcHRvchIuCglmcmVzaG5lc3MYCSABKAsyGy5jYXJib25wYW5lbC52MS5PYnNlcnZhdGlvbhIPCgdub2RlX2lkGAogASgJEg0KBWVycm9yGAsgASgJIv8BCgpNYXBPdmVybGF5EgoKAmlkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIrCgl3b3JsZF9yZWYYAyABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZhIRCglkaW1lbnNpb24YBCABKAkSDAoEa2luZBgFIAEoCRIJCgF4GAYgASgBEgkKAXoYByABKAESDQoFbGFiZWwYCCABKAkSDQoFc3R5bGUYCSABKAkSDQoFb3duZXIYCiABKAkSEQoJc2Vuc2l0aXZlGAsgASgIEi4KCnVwZGF0ZWRfYXQYDCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIh0KG0xpc3RXb3JsZFZpZXdUYXJnZXRzUmVxdWVzdCJQChxMaXN0V29ybGRWaWV3VGFyZ2V0c1Jlc3BvbnNlEjAKB3RhcmdldHMYASADKAsyHy5jYXJib25wYW5lbC52MS5Xb3JsZFZpZXdUYXJnZXQiWwoZR2V0V29ybGRWaWV3U3RhdHVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoJd29ybGRfcmVmGAIgASgLMhguY2FyYm9ucGFuZWwudjEuV29ybGRSZWYiTQoaR2V0V29ybGRWaWV3U3RhdHVzUmVzcG9uc2USLwoGdGFyZ2V0GAEgASgLMh8uY2FyYm9ucGFuZWwudjEuV29ybGRWaWV3VGFyZ2V0IlwKGkdldFdvcmxkVmlld1Nlc3Npb25SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIrCgl3b3JsZF9yZWYYAiABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZiKfAQobR2V0V29ybGRWaWV3U2Vzc2lvblJlc3BvbnNlEhIKCnByb3h5X3BhdGgYASABKAkSLgoKZXhwaXJlc19hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoFc3RhdGUYAyABKA4yHS5jYXJib25wYW5lbC52MS5SZW5kZXJlclN0YXRlEg4KBnJlYXNvbhgEIAEoCSIsChdMaXN0Q2FwYWJpbGl0aWVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPQoKQ2FwYWJpbGl0eRIMCgRuYW1lGAEgASgJEhEKCXN1cHBvcnRlZBgCIAEoCBIOCgZkZXRhaWwYAyABKAkigQEKGExpc3RDYXBhYmlsaXRpZXNSZXNwb25zZRIzCg1yZW5kZXJlcl90eXBlGAEgASgOMhwuY2FyYm9ucGFuZWwudjEuUmVuZGVyZXJUeXBlEjAKDGNhcGFiaWxpdGllcxgCIAMoCzIaLmNhcmJvbnBhbmVsLnYxLkNhcGFiaWxpdHkiawoWTGlzdE1hcE92ZXJsYXlzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoJd29ybGRfcmVmGAIgASgLMhguY2FyYm9ucGFuZWwudjEuV29ybGRSZWYSEQoJZGltZW5zaW9uGAMgASgJIkcKF0xpc3RNYXBPdmVybGF5c1Jlc3BvbnNlEiwKCG92ZXJsYXlzGAEgAygLMhouY2FyYm9ucGFuZWwudjEuTWFwT3ZlcmxheSJWChRTZXRNYXBPdmVybGF5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoHb3ZlcmxheRgCIAEoCzIaLmNhcmJvbnBhbmVsLnYxLk1hcE92ZXJsYXkiRAoVU2V0TWFwT3ZlcmxheVJlc3BvbnNlEisKB292ZXJsYXkYASABKAsyGi5jYXJib25wYW5lbC52MS5NYXBPdmVybGF5Im0KGlNldFBsYXllclZpc2liaWxpdHlSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIrCgl3b3JsZF9yZWYYAiABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZhIPCgd2aXNpYmxlGAMgASgIImAKG1NldFBsYXllclZpc2liaWxpdHlSZXNwb25zZRIPCgd2aXNpYmxlGAEgASgIEjAKC29ic2VydmF0aW9uGAIgASgLMhsuY2FyYm9ucGFuZWwudjEuT2JzZXJ2YXRpb24qmQEKDFJlbmRlcmVyVHlwZRIdChlSRU5ERVJFUl9UWVBFX1VOU1BFQ0lGSUVEEAASGQoVUkVOREVSRVJfVFlQRV9CTFVFTUFQEAESGwoXUkVOREVSRVJfVFlQRV9TUVVBUkVNQVAQAhIYChRSRU5ERVJFUl9UWVBFX0RZTk1BUBADEhgKFFJFTkRFUkVSX1RZUEVfU1RBVElDEAQqkQIKDVJlbmRlcmVyU3RhdGUSHgoaUkVOREVSRVJfU1RBVEVfVU5TUEVDSUZJRUQQABIZChVSRU5ERVJFUl9TVEFURV9BQlNFTlQQARIdChlSRU5ERVJFUl9TVEFURV9JTlNUQUxMSU5HEAISHAoYUkVOREVSRVJfU1RBVEVfUkVOREVSSU5HEAMSGAoUUkVOREVSRVJfU1RBVEVfUkVBRFkQBBIYChRSRU5ERVJFUl9TVEFURV9TVEFMRRAFEhoKFlJFTkRFUkVSX1NUQVRFX1NUT1BQRUQQBhIYChRSRU5ERVJFUl9TVEFURV9FUlJPUhAHEh4KGlJFTkRFUkVSX1NUQVRFX1VOU1VQUE9SVEVEEAgy+wUKEFdvcmxkVmlld1NlcnZpY2UScQoUTGlzdFdvcmxkVmlld1RhcmdldHMSKy5jYXJib25wYW5lbC52MS5MaXN0V29ybGRWaWV3VGFyZ2V0c1JlcXVlc3QaLC5jYXJib25wYW5lbC52MS5MaXN0V29ybGRWaWV3VGFyZ2V0c1Jlc3BvbnNlEmsKEkdldFdvcmxkVmlld1N0YXR1cxIpLmNhcmJvbnBhbmVsLnYxLkdldFdvcmxkVmlld1N0YXR1c1JlcXVlc3QaKi5jYXJib25wYW5lbC52MS5HZXRXb3JsZFZpZXdTdGF0dXNSZXNwb25zZRJuChNHZXRXb3JsZFZpZXdTZXNzaW9uEiouY2FyYm9ucGFuZWwudjEuR2V0V29ybGRWaWV3U2Vzc2lvblJlcXVlc3QaKy5jYXJib25wYW5lbC52MS5HZXRXb3JsZFZpZXdTZXNzaW9uUmVzcG9uc2USZQoQTGlzdENhcGFiaWxpdGllcxInLmNhcmJvbnBhbmVsLnYxLkxpc3RDYXBhYmlsaXRpZXNSZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuTGlzdENhcGFiaWxpdGllc1Jlc3BvbnNlEmIKD0xpc3RNYXBPdmVybGF5cxImLmNhcmJvbnBhbmVsLnYxLkxpc3RNYXBPdmVybGF5c1JlcXVlc3QaJy5jYXJib25wYW5lbC52MS5MaXN0TWFwT3ZlcmxheXNSZXNwb25zZRJcCg1TZXRNYXBPdmVybGF5EiQuY2FyYm9ucGFuZWwudjEuU2V0TWFwT3ZlcmxheVJlcXVlc3QaJS5jYXJib25wYW5lbC52MS5TZXRNYXBPdmVybGF5UmVzcG9uc2USbgoTU2V0UGxheWVyVmlzaWJpbGl0eRIqLmNhcmJvbnBhbmVsLnYxLlNldFBsYXllclZpc2liaWxpdHlSZXF1ZXN0GisuY2FyYm9ucGFuZWwudjEuU2V0UGxheWVyVmlzaWJpbGl0eVJlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw',
-		[file_google_protobuf_timestamp]
+		'Ch5jYXJib25wYW5lbC92MS93b3JsZHZpZXcucHJvdG8SDmNhcmJvbnBhbmVsLnYxIu4BCghXb3JsZFJlZhIrCgRraW5kGAEgASgOMh0uY2FyYm9ucGFuZWwudjEuV29ybGRSZWYuS2luZBIRCglzZXJ2ZXJfaWQYAiABKAkSEgoKbGV2ZWxfbmFtZRgDIAEoCRISCgpiaW5kaW5nX2lkGAQgASgJEhMKC3NuYXBzaG90X2lkGAUgASgJImUKBEtpbmQSFAoQS0lORF9VTlNQRUNJRklFRBAAEhgKFEtJTkRfTElCUkFSWV9CSU5ESU5HEAESFQoRS0lORF9TRVJWRVJfTE9DQUwQAhIWChJLSU5EX1NUQVRJQ19JTVBPUlQQAyJ+ChJSZW5kZXJlckRlc2NyaXB0b3ISKgoEdHlwZRgBIAEoDjIcLmNhcmJvbnBhbmVsLnYxLlJlbmRlcmVyVHlwZRIPCgd2ZXJzaW9uGAIgASgJEhQKDGNhcGFiaWxpdGllcxgDIAMoCRIVCg13ZWJfYmFzZV9wYXRoGAQgASgJIpUDCg9Xb3JsZFZpZXdUYXJnZXQSEQoJc2VydmVyX2lkGAEgASgJEisKCXdvcmxkX3JlZhgCIAEoCzIYLmNhcmJvbnBhbmVsLnYxLldvcmxkUmVmEgwKBG5hbWUYAyABKAkSEQoJZGltZW5zaW9uGAQgASgJEjMKDXJlbmRlcmVyX3R5cGUYBSABKA4yHC5jYXJib25wYW5lbC52MS5SZW5kZXJlclR5cGUSNQoOcmVuZGVyZXJfc3RhdGUYBiABKA4yHS5jYXJib25wYW5lbC52MS5SZW5kZXJlclN0YXRlEi8KC2xhc3RfcmVuZGVyGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0CghyZW5kZXJlchgIIAEoCzIiLmNhcmJvbnBhbmVsLnYxLlJlbmRlcmVyRGVzY3JpcHRvchIuCglmcmVzaG5lc3MYCSABKAsyGy5jYXJib25wYW5lbC52MS5PYnNlcnZhdGlvbhIPCgdub2RlX2lkGAogASgJEg0KBWVycm9yGAsgASgJIv8BCgpNYXBPdmVybGF5EgoKAmlkGAEgASgJEhEKCXNlcnZlcl9pZBgCIAEoCRIrCgl3b3JsZF9yZWYYAyABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZhIRCglkaW1lbnNpb24YBCABKAkSDAoEa2luZBgFIAEoCRIJCgF4GAYgASgBEgkKAXoYByABKAESDQoFbGFiZWwYCCABKAkSDQoFc3R5bGUYCSABKAkSDQoFb3duZXIYCiABKAkSEQoJc2Vuc2l0aXZlGAsgASgIEi4KCnVwZGF0ZWRfYXQYDCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIh0KG0xpc3RXb3JsZFZpZXdUYXJnZXRzUmVxdWVzdCJQChxMaXN0V29ybGRWaWV3VGFyZ2V0c1Jlc3BvbnNlEjAKB3RhcmdldHMYASADKAsyHy5jYXJib25wYW5lbC52MS5Xb3JsZFZpZXdUYXJnZXQiWwoZR2V0V29ybGRWaWV3U3RhdHVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoJd29ybGRfcmVmGAIgASgLMhguY2FyYm9ucGFuZWwudjEuV29ybGRSZWYiTQoaR2V0V29ybGRWaWV3U3RhdHVzUmVzcG9uc2USLwoGdGFyZ2V0GAEgASgLMh8uY2FyYm9ucGFuZWwudjEuV29ybGRWaWV3VGFyZ2V0IlwKGkdldFdvcmxkVmlld1Nlc3Npb25SZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIrCgl3b3JsZF9yZWYYAiABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZiKfAQobR2V0V29ybGRWaWV3U2Vzc2lvblJlc3BvbnNlEhIKCnByb3h5X3BhdGgYASABKAkSLgoKZXhwaXJlc19hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoFc3RhdGUYAyABKA4yHS5jYXJib25wYW5lbC52MS5SZW5kZXJlclN0YXRlEg4KBnJlYXNvbhgEIAEoCSIsChdMaXN0Q2FwYWJpbGl0aWVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkiPQoKQ2FwYWJpbGl0eRIMCgRuYW1lGAEgASgJEhEKCXN1cHBvcnRlZBgCIAEoCBIOCgZkZXRhaWwYAyABKAkigQEKGExpc3RDYXBhYmlsaXRpZXNSZXNwb25zZRIzCg1yZW5kZXJlcl90eXBlGAEgASgOMhwuY2FyYm9ucGFuZWwudjEuUmVuZGVyZXJUeXBlEjAKDGNhcGFiaWxpdGllcxgCIAMoCzIaLmNhcmJvbnBhbmVsLnYxLkNhcGFiaWxpdHkiawoWTGlzdE1hcE92ZXJsYXlzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoJd29ybGRfcmVmGAIgASgLMhguY2FyYm9ucGFuZWwudjEuV29ybGRSZWYSEQoJZGltZW5zaW9uGAMgASgJIkcKF0xpc3RNYXBPdmVybGF5c1Jlc3BvbnNlEiwKCG92ZXJsYXlzGAEgAygLMhouY2FyYm9ucGFuZWwudjEuTWFwT3ZlcmxheSJWChRTZXRNYXBPdmVybGF5UmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSKwoHb3ZlcmxheRgCIAEoCzIaLmNhcmJvbnBhbmVsLnYxLk1hcE92ZXJsYXkiRAoVU2V0TWFwT3ZlcmxheVJlc3BvbnNlEisKB292ZXJsYXkYASABKAsyGi5jYXJib25wYW5lbC52MS5NYXBPdmVybGF5Im0KGlNldFBsYXllclZpc2liaWxpdHlSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIrCgl3b3JsZF9yZWYYAiABKAsyGC5jYXJib25wYW5lbC52MS5Xb3JsZFJlZhIPCgd2aXNpYmxlGAMgASgIImAKG1NldFBsYXllclZpc2liaWxpdHlSZXNwb25zZRIPCgd2aXNpYmxlGAEgASgIEjAKC29ic2VydmF0aW9uGAIgASgLMhsuY2FyYm9ucGFuZWwudjEuT2JzZXJ2YXRpb24qmQEKDFJlbmRlcmVyVHlwZRIdChlSRU5ERVJFUl9UWVBFX1VOU1BFQ0lGSUVEEAASGQoVUkVOREVSRVJfVFlQRV9CTFVFTUFQEAESGwoXUkVOREVSRVJfVFlQRV9TUVVBUkVNQVAQAhIYChRSRU5ERVJFUl9UWVBFX0RZTk1BUBADEhgKFFJFTkRFUkVSX1RZUEVfU1RBVElDEAQqkQIKDVJlbmRlcmVyU3RhdGUSHgoaUkVOREVSRVJfU1RBVEVfVU5TUEVDSUZJRUQQABIZChVSRU5ERVJFUl9TVEFURV9BQlNFTlQQARIdChlSRU5ERVJFUl9TVEFURV9JTlNUQUxMSU5HEAISHAoYUkVOREVSRVJfU1RBVEVfUkVOREVSSU5HEAMSGAoUUkVOREVSRVJfU1RBVEVfUkVBRFkQBBIYChRSRU5ERVJFUl9TVEFURV9TVEFMRRAFEhoKFlJFTkRFUkVSX1NUQVRFX1NUT1BQRUQQBhIYChRSRU5ERVJFUl9TVEFURV9FUlJPUhAHEh4KGlJFTkRFUkVSX1NUQVRFX1VOU1VQUE9SVEVEEAgy+wUKEFdvcmxkVmlld1NlcnZpY2UScQoUTGlzdFdvcmxkVmlld1RhcmdldHMSKy5jYXJib25wYW5lbC52MS5MaXN0V29ybGRWaWV3VGFyZ2V0c1JlcXVlc3QaLC5jYXJib25wYW5lbC52MS5MaXN0V29ybGRWaWV3VGFyZ2V0c1Jlc3BvbnNlEmsKEkdldFdvcmxkVmlld1N0YXR1cxIpLmNhcmJvbnBhbmVsLnYxLkdldFdvcmxkVmlld1N0YXR1c1JlcXVlc3QaKi5jYXJib25wYW5lbC52MS5HZXRXb3JsZFZpZXdTdGF0dXNSZXNwb25zZRJuChNHZXRXb3JsZFZpZXdTZXNzaW9uEiouY2FyYm9ucGFuZWwudjEuR2V0V29ybGRWaWV3U2Vzc2lvblJlcXVlc3QaKy5jYXJib25wYW5lbC52MS5HZXRXb3JsZFZpZXdTZXNzaW9uUmVzcG9uc2USZQoQTGlzdENhcGFiaWxpdGllcxInLmNhcmJvbnBhbmVsLnYxLkxpc3RDYXBhYmlsaXRpZXNSZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuTGlzdENhcGFiaWxpdGllc1Jlc3BvbnNlEmIKD0xpc3RNYXBPdmVybGF5cxImLmNhcmJvbnBhbmVsLnYxLkxpc3RNYXBPdmVybGF5c1JlcXVlc3QaJy5jYXJib25wYW5lbC52MS5MaXN0TWFwT3ZlcmxheXNSZXNwb25zZRJcCg1TZXRNYXBPdmVybGF5EiQuY2FyYm9ucGFuZWwudjEuU2V0TWFwT3ZlcmxheVJlcXVlc3QaJS5jYXJib25wYW5lbC52MS5TZXRNYXBPdmVybGF5UmVzcG9uc2USbgoTU2V0UGxheWVyVmlzaWJpbGl0eRIqLmNhcmJvbnBhbmVsLnYxLlNldFBsYXllclZpc2liaWxpdHlSZXF1ZXN0GisuY2FyYm9ucGFuZWwudjEuU2V0UGxheWVyVmlzaWJpbGl0eVJlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw',
+		[file_carbonpanel_v1_world, file_google_protobuf_timestamp]
 	);
 
 /**
@@ -102,49 +104,6 @@ export const WorldRef_KindSchema: GenEnum<WorldRef_Kind> =
 	enumDesc(file_carbonpanel_v1_worldview, 0, 0);
 
 /**
- * Observation is the shared provenance envelope. Unknown or stale values are
- * disclosed rather than replaced by a plausible-looking zero.
- *
- * @generated from message carbonpanel.v1.Observation
- */
-export type Observation = Message<'carbonpanel.v1.Observation'> & {
-	/**
-	 * @generated from field: string source = 1;
-	 */
-	source: string;
-
-	/**
-	 * @generated from field: google.protobuf.Timestamp observed_at = 2;
-	 */
-	observedAt?: Timestamp | undefined;
-
-	/**
-	 * @generated from field: string applicability = 3;
-	 */
-	applicability: string;
-
-	/**
-	 * detected | inferred | unknown | stale | conflict
-	 *
-	 * @generated from field: string confidence = 4;
-	 */
-	confidence: string;
-
-	/**
-	 * @generated from field: string conflict_note = 5;
-	 */
-	conflictNote: string;
-};
-
-/**
- * Describes the message carbonpanel.v1.Observation.
- * Use `create(ObservationSchema)` to create a new message.
- */
-export const ObservationSchema: GenMessage<Observation> =
-	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 1);
-
-/**
  * RendererDescriptor lists only capabilities verified against the renderer's
  * own API/adapter. Missing capabilities are hidden or shown as unsupported in
  * the console; they are never silently substituted.
@@ -183,7 +142,7 @@ export type RendererDescriptor = Message<'carbonpanel.v1.RendererDescriptor'> & 
  */
 export const RendererDescriptorSchema: GenMessage<RendererDescriptor> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 2);
+	messageDesc(file_carbonpanel_v1_worldview, 1);
 
 /**
  * WorldViewTarget is a read-only projection: it never owns world identity.
@@ -253,7 +212,7 @@ export type WorldViewTarget = Message<'carbonpanel.v1.WorldViewTarget'> & {
  */
 export const WorldViewTargetSchema: GenMessage<WorldViewTarget> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 3);
+	messageDesc(file_carbonpanel_v1_worldview, 2);
 
 /**
  * MapOverlay is a panel-owned POI, waypoint, marker or region for a world.
@@ -330,7 +289,7 @@ export type MapOverlay = Message<'carbonpanel.v1.MapOverlay'> & {
  */
 export const MapOverlaySchema: GenMessage<MapOverlay> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 4);
+	messageDesc(file_carbonpanel_v1_worldview, 3);
 
 /**
  * ListWorldViewTargetsRequest asks for every world the caller may read.
@@ -346,7 +305,7 @@ export type ListWorldViewTargetsRequest =
  */
 export const ListWorldViewTargetsRequestSchema: GenMessage<ListWorldViewTargetsRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 5);
+	messageDesc(file_carbonpanel_v1_worldview, 4);
 
 /**
  * ListWorldViewTargetsResponse carries the RBAC-filtered world inventory.
@@ -367,7 +326,7 @@ export type ListWorldViewTargetsResponse =
  */
 export const ListWorldViewTargetsResponseSchema: GenMessage<ListWorldViewTargetsResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 6);
+	messageDesc(file_carbonpanel_v1_worldview, 5);
 
 /**
  * GetWorldViewStatusRequest asks for the status of one server-local world.
@@ -392,7 +351,7 @@ export type GetWorldViewStatusRequest = Message<'carbonpanel.v1.GetWorldViewStat
  */
 export const GetWorldViewStatusRequestSchema: GenMessage<GetWorldViewStatusRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 7);
+	messageDesc(file_carbonpanel_v1_worldview, 6);
 
 /**
  * GetWorldViewStatusResponse returns the current target projection.
@@ -412,7 +371,7 @@ export type GetWorldViewStatusResponse = Message<'carbonpanel.v1.GetWorldViewSta
  */
 export const GetWorldViewStatusResponseSchema: GenMessage<GetWorldViewStatusResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 8);
+	messageDesc(file_carbonpanel_v1_worldview, 7);
 
 /**
  * GetWorldViewSessionRequest asks for a same-origin map proxy session.
@@ -437,7 +396,7 @@ export type GetWorldViewSessionRequest = Message<'carbonpanel.v1.GetWorldViewSes
  */
 export const GetWorldViewSessionRequestSchema: GenMessage<GetWorldViewSessionRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 9);
+	messageDesc(file_carbonpanel_v1_worldview, 8);
 
 /**
  * GetWorldViewSessionResponse carries an opaque key and honest readiness state.
@@ -475,7 +434,7 @@ export type GetWorldViewSessionResponse = Message<'carbonpanel.v1.GetWorldViewSe
  */
 export const GetWorldViewSessionResponseSchema: GenMessage<GetWorldViewSessionResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 10);
+	messageDesc(file_carbonpanel_v1_worldview, 9);
 
 /**
  * ListCapabilitiesRequest asks which features a renderer actually supports.
@@ -495,7 +454,7 @@ export type ListCapabilitiesRequest = Message<'carbonpanel.v1.ListCapabilitiesRe
  */
 export const ListCapabilitiesRequestSchema: GenMessage<ListCapabilitiesRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 11);
+	messageDesc(file_carbonpanel_v1_worldview, 10);
 
 /**
  * Capability is a single gated renderer feature with a human-readable detail.
@@ -525,7 +484,7 @@ export type Capability = Message<'carbonpanel.v1.Capability'> & {
  */
 export const CapabilitySchema: GenMessage<Capability> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 12);
+	messageDesc(file_carbonpanel_v1_worldview, 11);
 
 /**
  * ListCapabilitiesResponse returns the renderer's verified capability matrix.
@@ -550,7 +509,7 @@ export type ListCapabilitiesResponse = Message<'carbonpanel.v1.ListCapabilitiesR
  */
 export const ListCapabilitiesResponseSchema: GenMessage<ListCapabilitiesResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 13);
+	messageDesc(file_carbonpanel_v1_worldview, 12);
 
 /**
  * ListMapOverlaysRequest selects overlays for one world and dimension.
@@ -580,7 +539,7 @@ export type ListMapOverlaysRequest = Message<'carbonpanel.v1.ListMapOverlaysRequ
  */
 export const ListMapOverlaysRequestSchema: GenMessage<ListMapOverlaysRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 14);
+	messageDesc(file_carbonpanel_v1_worldview, 13);
 
 /**
  * ListMapOverlaysResponse carries the visible overlays.
@@ -600,7 +559,7 @@ export type ListMapOverlaysResponse = Message<'carbonpanel.v1.ListMapOverlaysRes
  */
 export const ListMapOverlaysResponseSchema: GenMessage<ListMapOverlaysResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 15);
+	messageDesc(file_carbonpanel_v1_worldview, 14);
 
 /**
  * SetMapOverlayRequest carries the overlay to create or update.
@@ -625,7 +584,7 @@ export type SetMapOverlayRequest = Message<'carbonpanel.v1.SetMapOverlayRequest'
  */
 export const SetMapOverlayRequestSchema: GenMessage<SetMapOverlayRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 16);
+	messageDesc(file_carbonpanel_v1_worldview, 15);
 
 /**
  * SetMapOverlayResponse confirms the stored overlay.
@@ -645,7 +604,7 @@ export type SetMapOverlayResponse = Message<'carbonpanel.v1.SetMapOverlayRespons
  */
 export const SetMapOverlayResponseSchema: GenMessage<SetMapOverlayResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 17);
+	messageDesc(file_carbonpanel_v1_worldview, 16);
 
 /**
  * SetPlayerVisibilityRequest opts sensitive player positions in or out.
@@ -675,7 +634,7 @@ export type SetPlayerVisibilityRequest = Message<'carbonpanel.v1.SetPlayerVisibi
  */
 export const SetPlayerVisibilityRequestSchema: GenMessage<SetPlayerVisibilityRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 18);
+	messageDesc(file_carbonpanel_v1_worldview, 17);
 
 /**
  * SetPlayerVisibilityResponse reports the applied opt-in and its provenance.
@@ -700,7 +659,7 @@ export type SetPlayerVisibilityResponse = Message<'carbonpanel.v1.SetPlayerVisib
  */
 export const SetPlayerVisibilityResponseSchema: GenMessage<SetPlayerVisibilityResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_worldview, 19);
+	messageDesc(file_carbonpanel_v1_worldview, 18);
 
 /**
  * RendererType identifies the renderer adapter used for a world view.

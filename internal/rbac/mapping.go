@@ -281,4 +281,27 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.WorldViewService/ListMapOverlays":       {Resource: ResourceWorldView, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.WorldViewService/SetMapOverlay":         {Resource: ResourceWorldView, Action: ActionUpdate, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.WorldViewService/SetPlayerVisibility":   {Resource: ResourceWorldView, Action: ActionObservePlayers, ObjectIDField: "server_id"},
+
+	// ── WorldService ────────────────────────────────────────────────
+	// Library metadata is not server-scoped. Listing bindings and every
+	// mutation that changes a server level use "server_id" so subuser grants
+	// and the fail-closed interceptor apply to the server being changed.
+	"/carbonpanel.v1.WorldService/ListWorldEntries":        {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/GetWorldEntry":           {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/ListRevisions":           {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/GetRevision":             {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/ListBindings":            {Resource: ResourceWorlds, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldService/GetBinding":              {Resource: ResourceWorlds, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldService/ListImportJobs":          {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/GetImportJob":            {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/ImportWorld":             {Resource: ResourceWorlds, Action: ActionCreate},
+	"/carbonpanel.v1.WorldService/CheckCompatibility":      {Resource: ResourceWorlds, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldService/BindWorld":               {Resource: ResourceWorlds, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldService/UnbindWorld":             {Resource: ResourceWorlds, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldService/ResolveWorldOperation":   {Resource: ResourceWorlds, Action: ActionUpdate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.WorldService/GetWorldConfigSchema":    {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/PreviewWorldConfig":      {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/CreateWorldFromConfig":   {Resource: ResourceWorlds, Action: ActionCreate},
+	"/carbonpanel.v1.WorldService/SearchWorldArtifacts":    {Resource: ResourceWorlds, Action: ActionRead},
+	"/carbonpanel.v1.WorldService/GetProviderCapabilities": {Resource: ResourceWorlds, Action: ActionRead},
 }

@@ -285,84 +285,6 @@ func (x *WorldRef) GetSnapshotId() string {
 	return ""
 }
 
-// Observation is the shared provenance envelope. Unknown or stale values are
-// disclosed rather than replaced by a plausible-looking zero.
-type Observation struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Source        string                 `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
-	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
-	Applicability string                 `protobuf:"bytes,3,opt,name=applicability,proto3" json:"applicability,omitempty"`
-	Confidence    string                 `protobuf:"bytes,4,opt,name=confidence,proto3" json:"confidence,omitempty"` // detected | inferred | unknown | stale | conflict
-	ConflictNote  string                 `protobuf:"bytes,5,opt,name=conflict_note,json=conflictNote,proto3" json:"conflict_note,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Observation) Reset() {
-	*x = Observation{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Observation) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Observation) ProtoMessage() {}
-
-func (x *Observation) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Observation.ProtoReflect.Descriptor instead.
-func (*Observation) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *Observation) GetSource() string {
-	if x != nil {
-		return x.Source
-	}
-	return ""
-}
-
-func (x *Observation) GetObservedAt() *timestamppb.Timestamp {
-	if x != nil {
-		return x.ObservedAt
-	}
-	return nil
-}
-
-func (x *Observation) GetApplicability() string {
-	if x != nil {
-		return x.Applicability
-	}
-	return ""
-}
-
-func (x *Observation) GetConfidence() string {
-	if x != nil {
-		return x.Confidence
-	}
-	return ""
-}
-
-func (x *Observation) GetConflictNote() string {
-	if x != nil {
-		return x.ConflictNote
-	}
-	return ""
-}
-
 // RendererDescriptor lists only capabilities verified against the renderer's
 // own API/adapter. Missing capabilities are hidden or shown as unsupported in
 // the console; they are never silently substituted.
@@ -378,7 +300,7 @@ type RendererDescriptor struct {
 
 func (x *RendererDescriptor) Reset() {
 	*x = RendererDescriptor{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -390,7 +312,7 @@ func (x *RendererDescriptor) String() string {
 func (*RendererDescriptor) ProtoMessage() {}
 
 func (x *RendererDescriptor) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -403,7 +325,7 @@ func (x *RendererDescriptor) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RendererDescriptor.ProtoReflect.Descriptor instead.
 func (*RendererDescriptor) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{2}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RendererDescriptor) GetType() RendererType {
@@ -454,7 +376,7 @@ type WorldViewTarget struct {
 
 func (x *WorldViewTarget) Reset() {
 	*x = WorldViewTarget{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -466,7 +388,7 @@ func (x *WorldViewTarget) String() string {
 func (*WorldViewTarget) ProtoMessage() {}
 
 func (x *WorldViewTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -479,7 +401,7 @@ func (x *WorldViewTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorldViewTarget.ProtoReflect.Descriptor instead.
 func (*WorldViewTarget) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{3}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *WorldViewTarget) GetServerId() string {
@@ -580,7 +502,7 @@ type MapOverlay struct {
 
 func (x *MapOverlay) Reset() {
 	*x = MapOverlay{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -592,7 +514,7 @@ func (x *MapOverlay) String() string {
 func (*MapOverlay) ProtoMessage() {}
 
 func (x *MapOverlay) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -605,7 +527,7 @@ func (x *MapOverlay) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MapOverlay.ProtoReflect.Descriptor instead.
 func (*MapOverlay) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{4}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *MapOverlay) GetId() string {
@@ -701,7 +623,7 @@ type ListWorldViewTargetsRequest struct {
 
 func (x *ListWorldViewTargetsRequest) Reset() {
 	*x = ListWorldViewTargetsRequest{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -713,7 +635,7 @@ func (x *ListWorldViewTargetsRequest) String() string {
 func (*ListWorldViewTargetsRequest) ProtoMessage() {}
 
 func (x *ListWorldViewTargetsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -726,7 +648,7 @@ func (x *ListWorldViewTargetsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorldViewTargetsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorldViewTargetsRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{5}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{4}
 }
 
 // ListWorldViewTargetsResponse carries the RBAC-filtered world inventory.
@@ -739,7 +661,7 @@ type ListWorldViewTargetsResponse struct {
 
 func (x *ListWorldViewTargetsResponse) Reset() {
 	*x = ListWorldViewTargetsResponse{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -751,7 +673,7 @@ func (x *ListWorldViewTargetsResponse) String() string {
 func (*ListWorldViewTargetsResponse) ProtoMessage() {}
 
 func (x *ListWorldViewTargetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -764,7 +686,7 @@ func (x *ListWorldViewTargetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorldViewTargetsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorldViewTargetsResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{6}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListWorldViewTargetsResponse) GetTargets() []*WorldViewTarget {
@@ -785,7 +707,7 @@ type GetWorldViewStatusRequest struct {
 
 func (x *GetWorldViewStatusRequest) Reset() {
 	*x = GetWorldViewStatusRequest{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -797,7 +719,7 @@ func (x *GetWorldViewStatusRequest) String() string {
 func (*GetWorldViewStatusRequest) ProtoMessage() {}
 
 func (x *GetWorldViewStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -810,7 +732,7 @@ func (x *GetWorldViewStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorldViewStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetWorldViewStatusRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{7}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GetWorldViewStatusRequest) GetServerId() string {
@@ -837,7 +759,7 @@ type GetWorldViewStatusResponse struct {
 
 func (x *GetWorldViewStatusResponse) Reset() {
 	*x = GetWorldViewStatusResponse{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -849,7 +771,7 @@ func (x *GetWorldViewStatusResponse) String() string {
 func (*GetWorldViewStatusResponse) ProtoMessage() {}
 
 func (x *GetWorldViewStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -862,7 +784,7 @@ func (x *GetWorldViewStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorldViewStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetWorldViewStatusResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{8}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GetWorldViewStatusResponse) GetTarget() *WorldViewTarget {
@@ -883,7 +805,7 @@ type GetWorldViewSessionRequest struct {
 
 func (x *GetWorldViewSessionRequest) Reset() {
 	*x = GetWorldViewSessionRequest{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -895,7 +817,7 @@ func (x *GetWorldViewSessionRequest) String() string {
 func (*GetWorldViewSessionRequest) ProtoMessage() {}
 
 func (x *GetWorldViewSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -908,7 +830,7 @@ func (x *GetWorldViewSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorldViewSessionRequest.ProtoReflect.Descriptor instead.
 func (*GetWorldViewSessionRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{9}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetWorldViewSessionRequest) GetServerId() string {
@@ -940,7 +862,7 @@ type GetWorldViewSessionResponse struct {
 
 func (x *GetWorldViewSessionResponse) Reset() {
 	*x = GetWorldViewSessionResponse{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[10]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -952,7 +874,7 @@ func (x *GetWorldViewSessionResponse) String() string {
 func (*GetWorldViewSessionResponse) ProtoMessage() {}
 
 func (x *GetWorldViewSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[10]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -965,7 +887,7 @@ func (x *GetWorldViewSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorldViewSessionResponse.ProtoReflect.Descriptor instead.
 func (*GetWorldViewSessionResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{10}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetWorldViewSessionResponse) GetProxyPath() string {
@@ -1006,7 +928,7 @@ type ListCapabilitiesRequest struct {
 
 func (x *ListCapabilitiesRequest) Reset() {
 	*x = ListCapabilitiesRequest{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[11]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1018,7 +940,7 @@ func (x *ListCapabilitiesRequest) String() string {
 func (*ListCapabilitiesRequest) ProtoMessage() {}
 
 func (x *ListCapabilitiesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[11]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1031,7 +953,7 @@ func (x *ListCapabilitiesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCapabilitiesRequest.ProtoReflect.Descriptor instead.
 func (*ListCapabilitiesRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{11}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListCapabilitiesRequest) GetServerId() string {
@@ -1053,7 +975,7 @@ type Capability struct {
 
 func (x *Capability) Reset() {
 	*x = Capability{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1065,7 +987,7 @@ func (x *Capability) String() string {
 func (*Capability) ProtoMessage() {}
 
 func (x *Capability) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1078,7 +1000,7 @@ func (x *Capability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Capability.ProtoReflect.Descriptor instead.
 func (*Capability) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{12}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Capability) GetName() string {
@@ -1113,7 +1035,7 @@ type ListCapabilitiesResponse struct {
 
 func (x *ListCapabilitiesResponse) Reset() {
 	*x = ListCapabilitiesResponse{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1125,7 +1047,7 @@ func (x *ListCapabilitiesResponse) String() string {
 func (*ListCapabilitiesResponse) ProtoMessage() {}
 
 func (x *ListCapabilitiesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1138,7 +1060,7 @@ func (x *ListCapabilitiesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCapabilitiesResponse.ProtoReflect.Descriptor instead.
 func (*ListCapabilitiesResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{13}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ListCapabilitiesResponse) GetRendererType() RendererType {
@@ -1167,7 +1089,7 @@ type ListMapOverlaysRequest struct {
 
 func (x *ListMapOverlaysRequest) Reset() {
 	*x = ListMapOverlaysRequest{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1179,7 +1101,7 @@ func (x *ListMapOverlaysRequest) String() string {
 func (*ListMapOverlaysRequest) ProtoMessage() {}
 
 func (x *ListMapOverlaysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1192,7 +1114,7 @@ func (x *ListMapOverlaysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMapOverlaysRequest.ProtoReflect.Descriptor instead.
 func (*ListMapOverlaysRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{14}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ListMapOverlaysRequest) GetServerId() string {
@@ -1226,7 +1148,7 @@ type ListMapOverlaysResponse struct {
 
 func (x *ListMapOverlaysResponse) Reset() {
 	*x = ListMapOverlaysResponse{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1238,7 +1160,7 @@ func (x *ListMapOverlaysResponse) String() string {
 func (*ListMapOverlaysResponse) ProtoMessage() {}
 
 func (x *ListMapOverlaysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1251,7 +1173,7 @@ func (x *ListMapOverlaysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMapOverlaysResponse.ProtoReflect.Descriptor instead.
 func (*ListMapOverlaysResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{15}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ListMapOverlaysResponse) GetOverlays() []*MapOverlay {
@@ -1272,7 +1194,7 @@ type SetMapOverlayRequest struct {
 
 func (x *SetMapOverlayRequest) Reset() {
 	*x = SetMapOverlayRequest{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[16]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1284,7 +1206,7 @@ func (x *SetMapOverlayRequest) String() string {
 func (*SetMapOverlayRequest) ProtoMessage() {}
 
 func (x *SetMapOverlayRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[16]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1297,7 +1219,7 @@ func (x *SetMapOverlayRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetMapOverlayRequest.ProtoReflect.Descriptor instead.
 func (*SetMapOverlayRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{16}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SetMapOverlayRequest) GetServerId() string {
@@ -1324,7 +1246,7 @@ type SetMapOverlayResponse struct {
 
 func (x *SetMapOverlayResponse) Reset() {
 	*x = SetMapOverlayResponse{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[17]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1336,7 +1258,7 @@ func (x *SetMapOverlayResponse) String() string {
 func (*SetMapOverlayResponse) ProtoMessage() {}
 
 func (x *SetMapOverlayResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[17]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1349,7 +1271,7 @@ func (x *SetMapOverlayResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetMapOverlayResponse.ProtoReflect.Descriptor instead.
 func (*SetMapOverlayResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{17}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SetMapOverlayResponse) GetOverlay() *MapOverlay {
@@ -1371,7 +1293,7 @@ type SetPlayerVisibilityRequest struct {
 
 func (x *SetPlayerVisibilityRequest) Reset() {
 	*x = SetPlayerVisibilityRequest{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[18]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1383,7 +1305,7 @@ func (x *SetPlayerVisibilityRequest) String() string {
 func (*SetPlayerVisibilityRequest) ProtoMessage() {}
 
 func (x *SetPlayerVisibilityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[18]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1396,7 +1318,7 @@ func (x *SetPlayerVisibilityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPlayerVisibilityRequest.ProtoReflect.Descriptor instead.
 func (*SetPlayerVisibilityRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{18}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SetPlayerVisibilityRequest) GetServerId() string {
@@ -1431,7 +1353,7 @@ type SetPlayerVisibilityResponse struct {
 
 func (x *SetPlayerVisibilityResponse) Reset() {
 	*x = SetPlayerVisibilityResponse{}
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[19]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1443,7 +1365,7 @@ func (x *SetPlayerVisibilityResponse) String() string {
 func (*SetPlayerVisibilityResponse) ProtoMessage() {}
 
 func (x *SetPlayerVisibilityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[19]
+	mi := &file_carbonpanel_v1_worldview_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1456,7 +1378,7 @@ func (x *SetPlayerVisibilityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPlayerVisibilityResponse.ProtoReflect.Descriptor instead.
 func (*SetPlayerVisibilityResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{19}
+	return file_carbonpanel_v1_worldview_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *SetPlayerVisibilityResponse) GetVisible() bool {
@@ -1477,7 +1399,7 @@ var File_carbonpanel_v1_worldview_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_worldview_proto_rawDesc = "" +
 	"\n" +
-	"\x1ecarbonpanel/v1/worldview.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa0\x02\n" +
+	"\x1ecarbonpanel/v1/worldview.proto\x12\x0ecarbonpanel.v1\x1a\x1acarbonpanel/v1/world.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa0\x02\n" +
 	"\bWorldRef\x121\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.carbonpanel.v1.WorldRef.KindR\x04kind\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x1d\n" +
@@ -1491,16 +1413,7 @@ const file_carbonpanel_v1_worldview_proto_rawDesc = "" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14KIND_LIBRARY_BINDING\x10\x01\x12\x15\n" +
 	"\x11KIND_SERVER_LOCAL\x10\x02\x12\x16\n" +
-	"\x12KIND_STATIC_IMPORT\x10\x03\"\xcd\x01\n" +
-	"\vObservation\x12\x16\n" +
-	"\x06source\x18\x01 \x01(\tR\x06source\x12;\n" +
-	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"observedAt\x12$\n" +
-	"\rapplicability\x18\x03 \x01(\tR\rapplicability\x12\x1e\n" +
-	"\n" +
-	"confidence\x18\x04 \x01(\tR\n" +
-	"confidence\x12#\n" +
-	"\rconflict_note\x18\x05 \x01(\tR\fconflictNote\"\xa8\x01\n" +
+	"\x12KIND_STATIC_IMPORT\x10\x03\"\xa8\x01\n" +
 	"\x12RendererDescriptor\x120\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x1c.carbonpanel.v1.RendererTypeR\x04type\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\"\n" +
@@ -1620,78 +1533,77 @@ func file_carbonpanel_v1_worldview_proto_rawDescGZIP() []byte {
 }
 
 var file_carbonpanel_v1_worldview_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_carbonpanel_v1_worldview_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_carbonpanel_v1_worldview_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_carbonpanel_v1_worldview_proto_goTypes = []any{
 	(RendererType)(0),                    // 0: carbonpanel.v1.RendererType
 	(RendererState)(0),                   // 1: carbonpanel.v1.RendererState
 	(WorldRef_Kind)(0),                   // 2: carbonpanel.v1.WorldRef.Kind
 	(*WorldRef)(nil),                     // 3: carbonpanel.v1.WorldRef
-	(*Observation)(nil),                  // 4: carbonpanel.v1.Observation
-	(*RendererDescriptor)(nil),           // 5: carbonpanel.v1.RendererDescriptor
-	(*WorldViewTarget)(nil),              // 6: carbonpanel.v1.WorldViewTarget
-	(*MapOverlay)(nil),                   // 7: carbonpanel.v1.MapOverlay
-	(*ListWorldViewTargetsRequest)(nil),  // 8: carbonpanel.v1.ListWorldViewTargetsRequest
-	(*ListWorldViewTargetsResponse)(nil), // 9: carbonpanel.v1.ListWorldViewTargetsResponse
-	(*GetWorldViewStatusRequest)(nil),    // 10: carbonpanel.v1.GetWorldViewStatusRequest
-	(*GetWorldViewStatusResponse)(nil),   // 11: carbonpanel.v1.GetWorldViewStatusResponse
-	(*GetWorldViewSessionRequest)(nil),   // 12: carbonpanel.v1.GetWorldViewSessionRequest
-	(*GetWorldViewSessionResponse)(nil),  // 13: carbonpanel.v1.GetWorldViewSessionResponse
-	(*ListCapabilitiesRequest)(nil),      // 14: carbonpanel.v1.ListCapabilitiesRequest
-	(*Capability)(nil),                   // 15: carbonpanel.v1.Capability
-	(*ListCapabilitiesResponse)(nil),     // 16: carbonpanel.v1.ListCapabilitiesResponse
-	(*ListMapOverlaysRequest)(nil),       // 17: carbonpanel.v1.ListMapOverlaysRequest
-	(*ListMapOverlaysResponse)(nil),      // 18: carbonpanel.v1.ListMapOverlaysResponse
-	(*SetMapOverlayRequest)(nil),         // 19: carbonpanel.v1.SetMapOverlayRequest
-	(*SetMapOverlayResponse)(nil),        // 20: carbonpanel.v1.SetMapOverlayResponse
-	(*SetPlayerVisibilityRequest)(nil),   // 21: carbonpanel.v1.SetPlayerVisibilityRequest
-	(*SetPlayerVisibilityResponse)(nil),  // 22: carbonpanel.v1.SetPlayerVisibilityResponse
-	(*timestamppb.Timestamp)(nil),        // 23: google.protobuf.Timestamp
+	(*RendererDescriptor)(nil),           // 4: carbonpanel.v1.RendererDescriptor
+	(*WorldViewTarget)(nil),              // 5: carbonpanel.v1.WorldViewTarget
+	(*MapOverlay)(nil),                   // 6: carbonpanel.v1.MapOverlay
+	(*ListWorldViewTargetsRequest)(nil),  // 7: carbonpanel.v1.ListWorldViewTargetsRequest
+	(*ListWorldViewTargetsResponse)(nil), // 8: carbonpanel.v1.ListWorldViewTargetsResponse
+	(*GetWorldViewStatusRequest)(nil),    // 9: carbonpanel.v1.GetWorldViewStatusRequest
+	(*GetWorldViewStatusResponse)(nil),   // 10: carbonpanel.v1.GetWorldViewStatusResponse
+	(*GetWorldViewSessionRequest)(nil),   // 11: carbonpanel.v1.GetWorldViewSessionRequest
+	(*GetWorldViewSessionResponse)(nil),  // 12: carbonpanel.v1.GetWorldViewSessionResponse
+	(*ListCapabilitiesRequest)(nil),      // 13: carbonpanel.v1.ListCapabilitiesRequest
+	(*Capability)(nil),                   // 14: carbonpanel.v1.Capability
+	(*ListCapabilitiesResponse)(nil),     // 15: carbonpanel.v1.ListCapabilitiesResponse
+	(*ListMapOverlaysRequest)(nil),       // 16: carbonpanel.v1.ListMapOverlaysRequest
+	(*ListMapOverlaysResponse)(nil),      // 17: carbonpanel.v1.ListMapOverlaysResponse
+	(*SetMapOverlayRequest)(nil),         // 18: carbonpanel.v1.SetMapOverlayRequest
+	(*SetMapOverlayResponse)(nil),        // 19: carbonpanel.v1.SetMapOverlayResponse
+	(*SetPlayerVisibilityRequest)(nil),   // 20: carbonpanel.v1.SetPlayerVisibilityRequest
+	(*SetPlayerVisibilityResponse)(nil),  // 21: carbonpanel.v1.SetPlayerVisibilityResponse
+	(*timestamppb.Timestamp)(nil),        // 22: google.protobuf.Timestamp
+	(*Observation)(nil),                  // 23: carbonpanel.v1.Observation
 }
 var file_carbonpanel_v1_worldview_proto_depIdxs = []int32{
 	2,  // 0: carbonpanel.v1.WorldRef.kind:type_name -> carbonpanel.v1.WorldRef.Kind
-	23, // 1: carbonpanel.v1.Observation.observed_at:type_name -> google.protobuf.Timestamp
-	0,  // 2: carbonpanel.v1.RendererDescriptor.type:type_name -> carbonpanel.v1.RendererType
-	3,  // 3: carbonpanel.v1.WorldViewTarget.world_ref:type_name -> carbonpanel.v1.WorldRef
-	0,  // 4: carbonpanel.v1.WorldViewTarget.renderer_type:type_name -> carbonpanel.v1.RendererType
-	1,  // 5: carbonpanel.v1.WorldViewTarget.renderer_state:type_name -> carbonpanel.v1.RendererState
-	23, // 6: carbonpanel.v1.WorldViewTarget.last_render:type_name -> google.protobuf.Timestamp
-	5,  // 7: carbonpanel.v1.WorldViewTarget.renderer:type_name -> carbonpanel.v1.RendererDescriptor
-	4,  // 8: carbonpanel.v1.WorldViewTarget.freshness:type_name -> carbonpanel.v1.Observation
-	3,  // 9: carbonpanel.v1.MapOverlay.world_ref:type_name -> carbonpanel.v1.WorldRef
-	23, // 10: carbonpanel.v1.MapOverlay.updated_at:type_name -> google.protobuf.Timestamp
-	6,  // 11: carbonpanel.v1.ListWorldViewTargetsResponse.targets:type_name -> carbonpanel.v1.WorldViewTarget
-	3,  // 12: carbonpanel.v1.GetWorldViewStatusRequest.world_ref:type_name -> carbonpanel.v1.WorldRef
-	6,  // 13: carbonpanel.v1.GetWorldViewStatusResponse.target:type_name -> carbonpanel.v1.WorldViewTarget
-	3,  // 14: carbonpanel.v1.GetWorldViewSessionRequest.world_ref:type_name -> carbonpanel.v1.WorldRef
-	23, // 15: carbonpanel.v1.GetWorldViewSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 16: carbonpanel.v1.GetWorldViewSessionResponse.state:type_name -> carbonpanel.v1.RendererState
-	0,  // 17: carbonpanel.v1.ListCapabilitiesResponse.renderer_type:type_name -> carbonpanel.v1.RendererType
-	15, // 18: carbonpanel.v1.ListCapabilitiesResponse.capabilities:type_name -> carbonpanel.v1.Capability
-	3,  // 19: carbonpanel.v1.ListMapOverlaysRequest.world_ref:type_name -> carbonpanel.v1.WorldRef
-	7,  // 20: carbonpanel.v1.ListMapOverlaysResponse.overlays:type_name -> carbonpanel.v1.MapOverlay
-	7,  // 21: carbonpanel.v1.SetMapOverlayRequest.overlay:type_name -> carbonpanel.v1.MapOverlay
-	7,  // 22: carbonpanel.v1.SetMapOverlayResponse.overlay:type_name -> carbonpanel.v1.MapOverlay
-	3,  // 23: carbonpanel.v1.SetPlayerVisibilityRequest.world_ref:type_name -> carbonpanel.v1.WorldRef
-	4,  // 24: carbonpanel.v1.SetPlayerVisibilityResponse.observation:type_name -> carbonpanel.v1.Observation
-	8,  // 25: carbonpanel.v1.WorldViewService.ListWorldViewTargets:input_type -> carbonpanel.v1.ListWorldViewTargetsRequest
-	10, // 26: carbonpanel.v1.WorldViewService.GetWorldViewStatus:input_type -> carbonpanel.v1.GetWorldViewStatusRequest
-	12, // 27: carbonpanel.v1.WorldViewService.GetWorldViewSession:input_type -> carbonpanel.v1.GetWorldViewSessionRequest
-	14, // 28: carbonpanel.v1.WorldViewService.ListCapabilities:input_type -> carbonpanel.v1.ListCapabilitiesRequest
-	17, // 29: carbonpanel.v1.WorldViewService.ListMapOverlays:input_type -> carbonpanel.v1.ListMapOverlaysRequest
-	19, // 30: carbonpanel.v1.WorldViewService.SetMapOverlay:input_type -> carbonpanel.v1.SetMapOverlayRequest
-	21, // 31: carbonpanel.v1.WorldViewService.SetPlayerVisibility:input_type -> carbonpanel.v1.SetPlayerVisibilityRequest
-	9,  // 32: carbonpanel.v1.WorldViewService.ListWorldViewTargets:output_type -> carbonpanel.v1.ListWorldViewTargetsResponse
-	11, // 33: carbonpanel.v1.WorldViewService.GetWorldViewStatus:output_type -> carbonpanel.v1.GetWorldViewStatusResponse
-	13, // 34: carbonpanel.v1.WorldViewService.GetWorldViewSession:output_type -> carbonpanel.v1.GetWorldViewSessionResponse
-	16, // 35: carbonpanel.v1.WorldViewService.ListCapabilities:output_type -> carbonpanel.v1.ListCapabilitiesResponse
-	18, // 36: carbonpanel.v1.WorldViewService.ListMapOverlays:output_type -> carbonpanel.v1.ListMapOverlaysResponse
-	20, // 37: carbonpanel.v1.WorldViewService.SetMapOverlay:output_type -> carbonpanel.v1.SetMapOverlayResponse
-	22, // 38: carbonpanel.v1.WorldViewService.SetPlayerVisibility:output_type -> carbonpanel.v1.SetPlayerVisibilityResponse
-	32, // [32:39] is the sub-list for method output_type
-	25, // [25:32] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	0,  // 1: carbonpanel.v1.RendererDescriptor.type:type_name -> carbonpanel.v1.RendererType
+	3,  // 2: carbonpanel.v1.WorldViewTarget.world_ref:type_name -> carbonpanel.v1.WorldRef
+	0,  // 3: carbonpanel.v1.WorldViewTarget.renderer_type:type_name -> carbonpanel.v1.RendererType
+	1,  // 4: carbonpanel.v1.WorldViewTarget.renderer_state:type_name -> carbonpanel.v1.RendererState
+	22, // 5: carbonpanel.v1.WorldViewTarget.last_render:type_name -> google.protobuf.Timestamp
+	4,  // 6: carbonpanel.v1.WorldViewTarget.renderer:type_name -> carbonpanel.v1.RendererDescriptor
+	23, // 7: carbonpanel.v1.WorldViewTarget.freshness:type_name -> carbonpanel.v1.Observation
+	3,  // 8: carbonpanel.v1.MapOverlay.world_ref:type_name -> carbonpanel.v1.WorldRef
+	22, // 9: carbonpanel.v1.MapOverlay.updated_at:type_name -> google.protobuf.Timestamp
+	5,  // 10: carbonpanel.v1.ListWorldViewTargetsResponse.targets:type_name -> carbonpanel.v1.WorldViewTarget
+	3,  // 11: carbonpanel.v1.GetWorldViewStatusRequest.world_ref:type_name -> carbonpanel.v1.WorldRef
+	5,  // 12: carbonpanel.v1.GetWorldViewStatusResponse.target:type_name -> carbonpanel.v1.WorldViewTarget
+	3,  // 13: carbonpanel.v1.GetWorldViewSessionRequest.world_ref:type_name -> carbonpanel.v1.WorldRef
+	22, // 14: carbonpanel.v1.GetWorldViewSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 15: carbonpanel.v1.GetWorldViewSessionResponse.state:type_name -> carbonpanel.v1.RendererState
+	0,  // 16: carbonpanel.v1.ListCapabilitiesResponse.renderer_type:type_name -> carbonpanel.v1.RendererType
+	14, // 17: carbonpanel.v1.ListCapabilitiesResponse.capabilities:type_name -> carbonpanel.v1.Capability
+	3,  // 18: carbonpanel.v1.ListMapOverlaysRequest.world_ref:type_name -> carbonpanel.v1.WorldRef
+	6,  // 19: carbonpanel.v1.ListMapOverlaysResponse.overlays:type_name -> carbonpanel.v1.MapOverlay
+	6,  // 20: carbonpanel.v1.SetMapOverlayRequest.overlay:type_name -> carbonpanel.v1.MapOverlay
+	6,  // 21: carbonpanel.v1.SetMapOverlayResponse.overlay:type_name -> carbonpanel.v1.MapOverlay
+	3,  // 22: carbonpanel.v1.SetPlayerVisibilityRequest.world_ref:type_name -> carbonpanel.v1.WorldRef
+	23, // 23: carbonpanel.v1.SetPlayerVisibilityResponse.observation:type_name -> carbonpanel.v1.Observation
+	7,  // 24: carbonpanel.v1.WorldViewService.ListWorldViewTargets:input_type -> carbonpanel.v1.ListWorldViewTargetsRequest
+	9,  // 25: carbonpanel.v1.WorldViewService.GetWorldViewStatus:input_type -> carbonpanel.v1.GetWorldViewStatusRequest
+	11, // 26: carbonpanel.v1.WorldViewService.GetWorldViewSession:input_type -> carbonpanel.v1.GetWorldViewSessionRequest
+	13, // 27: carbonpanel.v1.WorldViewService.ListCapabilities:input_type -> carbonpanel.v1.ListCapabilitiesRequest
+	16, // 28: carbonpanel.v1.WorldViewService.ListMapOverlays:input_type -> carbonpanel.v1.ListMapOverlaysRequest
+	18, // 29: carbonpanel.v1.WorldViewService.SetMapOverlay:input_type -> carbonpanel.v1.SetMapOverlayRequest
+	20, // 30: carbonpanel.v1.WorldViewService.SetPlayerVisibility:input_type -> carbonpanel.v1.SetPlayerVisibilityRequest
+	8,  // 31: carbonpanel.v1.WorldViewService.ListWorldViewTargets:output_type -> carbonpanel.v1.ListWorldViewTargetsResponse
+	10, // 32: carbonpanel.v1.WorldViewService.GetWorldViewStatus:output_type -> carbonpanel.v1.GetWorldViewStatusResponse
+	12, // 33: carbonpanel.v1.WorldViewService.GetWorldViewSession:output_type -> carbonpanel.v1.GetWorldViewSessionResponse
+	15, // 34: carbonpanel.v1.WorldViewService.ListCapabilities:output_type -> carbonpanel.v1.ListCapabilitiesResponse
+	17, // 35: carbonpanel.v1.WorldViewService.ListMapOverlays:output_type -> carbonpanel.v1.ListMapOverlaysResponse
+	19, // 36: carbonpanel.v1.WorldViewService.SetMapOverlay:output_type -> carbonpanel.v1.SetMapOverlayResponse
+	21, // 37: carbonpanel.v1.WorldViewService.SetPlayerVisibility:output_type -> carbonpanel.v1.SetPlayerVisibilityResponse
+	31, // [31:38] is the sub-list for method output_type
+	24, // [24:31] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_worldview_proto_init() }
@@ -1699,13 +1611,14 @@ func file_carbonpanel_v1_worldview_proto_init() {
 	if File_carbonpanel_v1_worldview_proto != nil {
 		return
 	}
+	file_carbonpanel_v1_world_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_worldview_proto_rawDesc), len(file_carbonpanel_v1_worldview_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   20,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

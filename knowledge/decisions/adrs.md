@@ -32,6 +32,8 @@ sources:
 | [0013](../../docs/adr/0013-bounded-storage-streaming.md) | Bound storage frames and commit staged writes explicitly | [Remote storage transport](../architecture/remote-storage-transport.md), [Backup and restore](../operations/backup-restore.md) |
 | [0014](../../docs/adr/0014-in-process-admission.md) | Serialize same-node starts with an in-process gate, not a lease | [Server lifecycle policy](../architecture/server-lifecycle.md) |
 | [0015](../../docs/adr/0015-world-viewing-renderer-proxy.md) | Observe worlds through an authenticated same-origin renderer proxy | [World viewing](../architecture/world-viewing.md), [RPC contract](../architecture/rpc-contract.md) |
+| [0016](../../docs/adr/0016-world-library-identity-and-binding.md) | Immutable world revisions and clone-on-bind, stop-based journaled bindings | [World Library](../architecture/world-library.md) |
+| [0018](../../docs/adr/0018-node-response-redaction.md) | Redact node TLS material from read responses; empty TLS edits mean unchanged | [RPC contract](../architecture/rpc-contract.md), [Secrets and endpoints](../invariants/secrets-and-endpoints.md) |
 | [0023](../../docs/adr/0023-oidc-sso-boundary.md) | Standards-based OIDC with PKCE, nonce and one-time exchange | [RPC contract](../architecture/rpc-contract.md), [SSO identity](../invariants/sso-identity.md) |
 | [0024](../../docs/adr/0024-sso-identity-and-privilege-origin.md) | Issuer+subject identity; no auto-link or implicit admin | [SSO identity](../invariants/sso-identity.md) |
 | [0025](../../docs/adr/0025-sso-entitlement-reconciliation.md) | Source-scoped role reconciliation before session issue | [SSO identity](../invariants/sso-identity.md), [Fail-closed authorization](../invariants/authz-fail-closed.md) |
@@ -43,7 +45,6 @@ sources:
 | [0031](../../docs/adr/0031-module-sidecar-confinement.md) | Module sidecar confinement parity | [Runtime seams](../architecture/runtime-seams.md) |
 | [0032](../../docs/adr/0032-security-audit-events.md) | Security audit events and redaction | [Fail-closed authorization](../invariants/authz-fail-closed.md) |
 | [0033](../../docs/adr/0033-release-tag-and-publication-policy.md) | One explicit publication boundary and separate immutable version domains | [Release](../workflows/release.md) |
-
 
 # Rule
 

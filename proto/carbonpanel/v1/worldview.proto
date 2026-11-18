@@ -7,6 +7,7 @@ syntax = "proto3";
 
 package carbonpanel.v1;
 
+import "carbonpanel/v1/world.proto";
 import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
@@ -31,15 +32,9 @@ message WorldRef {
   string snapshot_id = 5;
 }
 
-// Observation is the shared provenance envelope. Unknown or stale values are
-// disclosed rather than replaced by a plausible-looking zero.
-message Observation {
-  string source = 1;
-  google.protobuf.Timestamp observed_at = 2;
-  string applicability = 3;
-  string confidence = 4; // detected | inferred | unknown | stale | conflict
-  string conflict_note = 5;
-}
+// The shared Observation provenance envelope lives in world.proto. This
+// service uses it for freshness and visibility disclosures; unknown or stale
+// values are disclosed rather than replaced by a plausible-looking zero.
 
 // RendererType identifies the renderer adapter used for a world view.
 enum RendererType {

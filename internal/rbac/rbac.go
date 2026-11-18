@@ -120,6 +120,7 @@ func DefaultRolePolicies() map[string][][]string {
 			// World maps are readable, but player observation, overlay edits
 			// and world_view/admin stay admin-only (the admin role matches "*").
 			{"user", ResourceWorldView, ActionRead, "*"},
+			{"user", ResourceWorlds, ActionRead, "*"},
 		},
 		"anonymous": {
 			{"anonymous", ResourceServers, ActionRead, "*"},

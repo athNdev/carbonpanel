@@ -134,7 +134,7 @@ func TestTargetErrorsDoNotLeakEndpointFixture(t *testing.T) {
 	}
 	target := resp.Msg.GetTargets()[0]
 	for _, leaked := range []string{"10.9.8.7", "12345", "http://"} {
-		if strings.Contains(target.GetError(), leaked) || strings.Contains(target.GetFreshness().GetConflictNote(), leaked) {
+		if strings.Contains(target.GetError(), leaked) || strings.Contains(target.GetFreshness().GetNote(), leaked) {
 			t.Fatalf("target leaked %q: %+v", leaked, target)
 		}
 	}
