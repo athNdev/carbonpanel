@@ -179,12 +179,197 @@ Create a server, wait for it to become ready, and configure the address players
 will use to connect. Keep world data and the panel database when updating or
 recreating containers.
 
+## AI assistant integration (MCP)
+
+Carbon Panel can expose a read-first MCP stdio server to an AI assistant. The
+MCP artifact is **separately versioned and separately owned** from Carbon Panel
+releases: its version does not move the panel's `latest` tag, its minor tags or
+any Docker Hub panel image, and it is not a GitHub Release. The user guide is
+[MCP server](docs/carbon-panel/src/content/docs/guides/mcp-server.mdx); the
+smoke and evidence procedure is [MCP distribution smoke](docs/runbook-mcp-smoke.md).
+
+**Publication status:** the artifacts, manifest, workflow and procedure are
+prepared here. At the time of this change no image has been pushed to GHCR and
+no MCP Registry entry has been submitted. Do not substitute a locally built or
+preview artifact for the official stable one when it is published.
+
+The implemented catalogue is a **first slice of 30 tools**, not full API
+coverage. Inventory coverage (25 mounted services / 220 RPCs) is not tool
+coverage; supported families still missing remain tracked under **OSS-370**,
+which stays open. Do not infer that every panel RPC has a tool.
+
+A successful client install proves only that the **package is available**. It
+does **not** prove that a tool works against your panel: **server capabilities**
+come from the panel build behind `CARBONPANEL_URL`. The latest stable panel,
+`v1.0.40` (`f88748be6a216b187e675bbb1f110df07e544148`), predates the player,
+world and world-view RPCs. The pinned post-stable build
+(`fa23a8d73c181f9907633024d9023aead928324e`) contains them but is not the
+stable install path. See the matrix below. The server requires an
+**authentication-enabled** panel: it refuses legacy no-auth installations and
+uses a real `dp_` API token, never anonymous access.
+
+Copy/paste this into your agent when the official artifact is available:
+
+```text
+Connect me to my self-hosted Carbon Panel — an EXISTING install or a NEW one —
+using the OFFICIAL, STABLE, PINNED MCP artifact. Do not build or substitute a
+local/preview image.
+
+0. Decide the panel build first. The default is STABLE (v1.0.40 or later), and
+   the panel MUST be authentication-enabled: a legacy no-auth installation is
+   refused. You MAY start a NEW self-hosted install: follow the normal
+   install docs, create the first admin account, then a dedicated API token.
+   A new install must NOT replace, reconfigure, migrate or delete an existing
+   panel, world or database; if one exists, use it instead. For an EXISTING
+   install, do NOT re-run an installer, recreate containers or change its
+   channel. Do NOT switch any install to nightly automatically: only I, the
+   operator, choose a qualified nightly build as a separate, backed-up change.
+1. Use the exact official stable MCP artifact version and its immutable
+   ghcr.io sha256 digest. Never use :latest, @main, a branch tag or a moving
+   minor tag. Pin the version and digest in the client config.
+2. Create a dedicated, expiring, least-privilege Carbon Panel API token — a real
+   `dp_` token, not a session token or an anonymous/no-auth bypass — and pass it
+   only through the client env CARBONPANEL_TOKEN. Never commit a token or put
+   one in arguments, stdout or logs. Missing or invalid credentials are errors,
+   never an anonymous fallback.
+3. Use a panel URL REACHABLE FROM THE MCP PROCESS. A host-installed MCP binary
+   may use http://127.0.0.1:8080. A containerized MCP client on the panel's
+   Docker network must use the panel's COMPOSE SERVICE NAME and port (for the
+   shipped Compose file, http://carbon-panel:8080) — `localhost` inside the
+   MCP container is the MCP container itself and must never be used as a
+   fallback. No host-network assumption or published-port guess is allowed.
+4. Preserve my data. Do not run docker compose down -v, docker system prune,
+   rm -rf on data paths, or any delete/stop/start/recreate command. The MCP
+   connection mounts no world, database or backup directory and no Docker
+   socket. Confirm worlds and the panel database are intact before and after.
+5. Use the read-only tool set qualified for my panel build. On stable, the
+   verified minimal set is list_servers, get_server, list_files, get_file and
+   list_backups. The catalogue is a first slice of 30 tools, not full API
+   coverage; OSS-370 stays open for supported families still missing. If I ask
+   for PlayerService, WorldService or WorldViewService
+   tools, return the structured CAPABILITY_UNAVAILABLE error with the required
+   qualified build; do not report success, guess from your client version, or
+   silently skip the call.
+6. Check health first: GET /healthz, /readyz and /health/detail on the panel
+   from where the MCP process runs. Report healthy, degraded/unavailable and
+   unknown separately. A stored Running status alone is not playable evidence.
+7. Demonstrate read-only behaviour: call tools/list, then list_servers, and
+   show the result. Stop and report if any tool asks for a write. Verify logs
+   go to stderr and stdout contains only JSON-RPC.
+```
+
+Two distinct connection cases — pick the one that matches where the MCP
+process runs. `<...>` placeholders must be replaced with the published stable
+version and real digest.
+
+**(a) Host-installed MCP binary** (the binary runs on the Docker host, so
+loopback reaches a panel published on that host):
+
+```json
+{
+  "mcpServers": {
+    "carbon-panel": {
+      "command": "<PATH_TO_MCP_BINARY>",
+      "args": ["stdio"],
+      "env": {
+        "CARBONPANEL_URL": "http://127.0.0.1:8080",
+        "CARBONPANEL_TOKEN": "dp_<DEDICATED_EXPIRING_API_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+**(b) Compose-deployed MCP container** (the MCP process is in a separate
+container attached to the panel's Compose network, so it must use the panel's
+service DNS name and port):
+
+```json
+{
+  "mcpServers": {
+    "carbon-panel": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "--network", "<COMPOSE_NETWORK>",
+        "-e", "CARBONPANEL_URL",
+        "-e", "CARBONPANEL_TOKEN",
+        "ghcr.io/athndev/carbonpanel-mcp:<STABLE_VERSION>@sha256:<64_HEX_DIGEST>"
+      ],
+      "env": {
+        "CARBONPANEL_URL": "http://carbon-panel:8080",
+        "CARBONPANEL_TOKEN": "dp_<DEDICATED_EXPIRING_API_TOKEN>"
+      }
+    }
+  }
+}
+```
+
+For case (a), use the official stable binary release and verify its published
+checksum; do not use a locally built, preview or `latest` binary. For case (b),
+get `<COMPOSE_NETWORK>` from `docker compose config`; the service name is
+`carbon-panel` in the shipped [docker-compose.yml](docker-compose.yml). Never
+use `localhost` or `127.0.0.1` as a fallback inside the MCP container: that
+address is the MCP container itself, not the panel. The shipped Compose file
+uses host networking by default, so a host-installed binary can use case (a);
+a separate container still needs an explicitly shared network and DNS. No
+Docker socket is mounted in either case.
+
+OS notes: on **Windows** use Docker Desktop with WSL2 and
+`%APPDATA%\Claude\claude_desktop_config.json` (double backslashes in any host
+path); on **macOS** use `~/Library/Application Support/Claude/claude_desktop_config.json`
+and the `arm64` or `amd64` image matching your Mac; on **Linux** use
+`~/.config/Claude/claude_desktop_config.json` and keep it `chmod 600`. Only
+Linux is fully supported and tested — Windows installations may have issues.
+
+### Compatibility: package availability is not server capability
+
+The catalogue is a **first slice of 30 tools**. It is not the full 220-RPC
+inventory: OSS-370 remains open for supported families still missing. Tool names
+below match the implemented catalogue exactly.
+
+| Tool (read-only) | Backing RPC | Stable `v1.0.40` | Pinned post-stable build |
+| --- | --- | --- | --- |
+| `list_servers` | `ServerService/ListServers` | available | available |
+| `get_server` | `ServerService/GetServer` | available | available |
+| `list_files` | `FileService/ListFiles` | available | available |
+| `get_file` | `FileService/GetFile` | available | available |
+| `list_backups` | `BackupService/ListBackups` | available | available |
+| `list_players` | `PlayerService/ListPlayers` | **unavailable** | pinned, qualification pending |
+| `get_player` | `PlayerService/GetPlayer` | **unavailable** | pinned, qualification pending |
+| `list_world_entries` | `WorldService/ListWorldEntries` | **unavailable** | pinned, qualification pending |
+| `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | **unavailable** | pinned, qualification pending |
+| `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | **unavailable** | pinned, qualification pending |
+
+The pinned post-stable candidate is
+`fa23a8d73c181f9907633024d9023aead928324e`; "qualification pending" means the
+build contains the RPC but no smoke evidence has been recorded yet.
+`PlayerService`, `WorldService` and `WorldViewService` are absent from
+`v1.0.40`. Never infer capability from the MCP client version or from a
+successful install.
+
+When an RPC is missing or returns `Unimplemented`, the tool result is an
+honest structured error, not a success or a silent omission:
+
+```json
+{"error":{"code":"CAPABILITY_UNAVAILABLE","tool":"list_players",
+ "rpc":"carbonpanel.v1.PlayerService/ListPlayers",
+ "required_panel_build":"post-v1.0.40+fa23a8d73c181f9907633024d9023aead928324e","observed_panel_build":"v1.0.40 (f88748be)",
+ "retryable":false,"guidance":"Upgrade the panel in a separate operator-initiated change."}}
+```
+
+The final error field names are owned by the core implementation lane; the
+`CAPABILITY_UNAVAILABLE` semantic and `isError: true` behaviour are required.
+Verification to date is fixture/proto based: no image has been pushed, no
+registry entry exists, and no live fresh-install smoke has been run.
+
 ## Documentation and help
 
 | You want to...               | Start here                                                                                                       |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Understand the panel         | [Introduction](https://carbonpanel.dev/docs/introduction/)                                                       |
 | Install it                   | [Docker Compose](https://carbonpanel.dev/docs/getting-started/docker-compose/)                                   |
+| Connect an AI assistant      | [MCP server guide](docs/carbon-panel/src/content/docs/guides/mcp-server.mdx) (build-bound tool compatibility)     |
 | Configure it                 | [Configuration](https://carbonpanel.dev/docs/configuration/) and [config.example.yaml](config.example.yaml)      |
 | Back up a server             | [Server backups](https://carbonpanel.dev/docs/guides/backups/)                                                   |
 | Configure sign-in            | [OIDC guides](https://carbonpanel.dev/docs/guides/oidc/keycloak/)                                                |
