@@ -79,10 +79,13 @@ fixtures without journald.
 - Game ports >= 1024, or an explicit `CAP_NET_BIND_SERVICE` grant. No silent
   privileged-port grant is performed.
 
-### Dedicated rootful (explicit compatibility path)
+### Explicit rootful (compatibility path)
 
 - All universal isolation invariants above.
-- systemd and a dedicated, non-login service UID (no Docker group, no shell).
+- systemd and **explicit operator qualification** for a root-managed service
+  (`RootfulServiceQualified` in `HostFacts`). The unit runs as **root** with no
+  `User=` override and the capability set dockerd needs; a dedicated non-login
+  UID is **not** required and is in fact refused (`DAEMON_ROOTFUL_NO_USER`).
 - A hardened unit; never the host socket, never blanket `--privileged`.
 
 ## Compatibility gate matrix
@@ -101,7 +104,7 @@ fixtures without journald.
 | `STORAGE_DRIVER_UNSUPPORTED` | no qualified rootless driver | rootless disqualified | Use qualified driver/kernel. |
 | `ROOTLESS_RUNTIME_DIR_UNSAFE` | runtime dir missing, world-accessible or under `/tmp` | rootless disqualified | Use a private 0700 directory outside `/tmp`. |
 | `PRIVILEGED_PORT_UNSUPPORTED` | `ip_unprivileged_port_start > 1024` | capability withheld | Use ports >=1024 or grant explicitly. |
-| `ROOTFUL_PREREQ_UNMET` | no systemd or no dedicated UID | fail closed | Provide prerequisites; never fall back to host Docker. |
+| `ROOTFUL_PREREQ_UNMET` | no systemd or no explicit rootful qualification | fail closed | Require systemd plus explicit operator qualification for a root-managed service with the dockerd capability set; never fall back to host Docker. |
 | `UNSUPPORTED_TLS_TOPOLOGY` | plain HTTP, unknown/unattested proxy | enrollment refused | Direct TLS, L4 pass-through, or attested trusted proxy only. |
 | `DAEMON_ROOTLESS_LAUNCHER` | rootless unit invokes dockerd directly or uses a system unit | render refused | Use dockerd-rootless.sh in a per-user unit. |
 | `DAEMON_ROOTFUL_NO_USER` | rootful unit sets a non-root `User=` | render refused | Run the dedicated unit as root with the documented capability set. |

@@ -228,7 +228,7 @@ func (d DaemonSpec) BuildManifest() (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	unit, err := d.RenderUnit(d.ConfigPath)
+	unit, err := d.RenderUnit()
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -301,8 +301,9 @@ WantedBy=multi-user.target
 `))
 
 // RenderUnit renders the mode-correct unit into memory. Nothing is written to
-// a host. The ExecStart line references only --config-file: one source.
-func (d DaemonSpec) RenderUnit(_ string) (string, error) {
+// a host. The config path comes from d.ConfigPath and the ExecStart line
+// references only --config-file: one source of daemon options.
+func (d DaemonSpec) RenderUnit() (string, error) {
 	if code := d.ValidateOrRefuse(); code != "" {
 		return "", fmt.Errorf("refused %s: daemon spec violates private-isolation invariants", code)
 	}

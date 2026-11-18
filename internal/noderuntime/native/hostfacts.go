@@ -27,7 +27,12 @@ type HostFacts struct {
 	Systemd            bool
 	SystemdUserSession bool
 	LingerEnabled      bool
-	DedicatedUIDAvailable bool
+	// RootfulServiceQualified records that the operator explicitly opted into
+	// the rootful compatibility path and that a root-managed systemd service
+	// can be installed. The unit runs as root (no User= override); it does NOT
+	// require a dedicated non-login UID. Without this explicit qualification
+	// the rootful path fails closed.
+	RootfulServiceQualified bool
 
 	UserNamespaces      bool
 	SubUIDAvailable     bool
@@ -192,14 +197,17 @@ func ApplyGates(f HostFacts) Selection {
 		return s
 	}
 
-	// Dedicated rootful compatibility path: explicit, hardened, never silent.
-	if !f.Systemd || !f.DedicatedUIDAvailable {
-		add(Check{Code: CodeRootfulPrereqUnmet, Message: "dedicated rootful prerequisites are unmet", Remedy: "Requires systemd and a dedicated non-login service UID; do not fall back to a preinstalled engine."})
+	// Explicit rootful compatibility path: a root-managed systemd service,
+	// never silent and never a fallback to a preinstalled engine. The service
+	// runs as root with the documented capability set; a dedicated non-login
+	// UID is NOT required (and a User= override is refused by DaemonSpec).
+	if !f.Systemd || !f.RootfulServiceQualified {
+		add(Check{Code: CodeRootfulPrereqUnmet, Message: "explicit rootful prerequisites are unmet", Remedy: "Requires systemd and explicit operator qualification for a root-managed service with the capability set dockerd needs; do not fall back to a preinstalled engine."})
 		s.Reasons = failedChecks(s.Checks)
 		return s
 	}
 	s.Mode = ModeRootful
-	add(Check{Code: "ROOTFUL_COMPAT_PATH", Passed: true, Message: "hardened dedicated rootful service selected because rootless prerequisites are unmet", Remedy: "Apply the hardened unit; no blanket privileges and no shared socket."})
+	add(Check{Code: "ROOTFUL_COMPAT_PATH", Passed: true, Message: "explicit rootful service selected because rootless prerequisites are unmet", Remedy: "Apply the hardened root unit; no blanket privileges, no User= override and no shared socket."})
 	return s
 }
 

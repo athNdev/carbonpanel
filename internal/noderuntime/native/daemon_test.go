@@ -64,7 +64,7 @@ func TestDaemonSpecRefusals(t *testing.T) {
 			if code := d.ValidateOrRefuse(); code != tc.want {
 				t.Fatalf("expected %s, got %q", tc.want, code)
 			}
-			if _, err := d.RenderUnit(d.ConfigPath); err == nil {
+			if _, err := d.RenderUnit(); err == nil {
 				t.Fatal("unsafe spec produced a systemd unit")
 			}
 		})
@@ -75,7 +75,7 @@ func TestDaemonSpecRefusals(t *testing.T) {
 // --config-file and the config must not carry a conflicting bridge option.
 func TestSingleSourceOfDaemonOptions(t *testing.T) {
 	for _, d := range []DaemonSpec{privateSpec(), rootfulSpec()} {
-		unit, err := d.RenderUnit(d.ConfigPath)
+		unit, err := d.RenderUnit()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +110,7 @@ func TestSingleSourceOfDaemonOptions(t *testing.T) {
 // dockerd-rootless.sh launcher, not a direct system dockerd unit.
 func TestRootlessUnitIsPerUserLauncher(t *testing.T) {
 	d := privateSpec()
-	unit, err := d.RenderUnit(d.ConfigPath)
+	unit, err := d.RenderUnit()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestRootlessUnitIsPerUserLauncher(t *testing.T) {
 // hardening that does not break it; no empty CapabilityBoundingSet.
 func TestRootfulUnitIsExplicitCompatibleService(t *testing.T) {
 	d := rootfulSpec()
-	unit, err := d.RenderUnit(d.ConfigPath)
+	unit, err := d.RenderUnit()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestRootfulUnitIsExplicitCompatibleService(t *testing.T) {
 // Parity fixture: a duplicate config key, or an extra CLI flag, is refused.
 func TestOptionParityDetectsDuplicatesAndExtraFlags(t *testing.T) {
 	d := privateSpec()
-	unit, err := d.RenderUnit(d.ConfigPath)
+	unit, err := d.RenderUnit()
 	if err != nil {
 		t.Fatal(err)
 	}
