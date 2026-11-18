@@ -42,7 +42,8 @@ func registerCombinedTools(s *sdkmcp.Server, c *Clients) error {
 	}
 
 	RegisterIntegrationTools(s, c)
-	RegisterStreamingTools(s, c)
+	// Scoped stream tools are intentionally NOT advertised: the standalone
+	// gateway has no authenticated controller-side transport (path B hold).
 	RegisterFamilyAdminTools(s, adminFam)
 	registerContentTools(s, contentFam)
 	RegisterFamilyServerTools(s, serverFam)

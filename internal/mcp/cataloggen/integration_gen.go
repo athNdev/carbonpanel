@@ -108,17 +108,9 @@ func combinedToolSpecs() []combinedSpec {
 		byProc[s.Procedure] = s
 		out = append(out, s)
 	}
-	// Registered scoped-streaming entry points carry the same audited
-	// procedures as their typed RPC equivalents but distinct tool names; they
-	// are appended after dedup so a second tool name with an existing
-	// procedure is intentional, not a double registration of one tool.
-	for _, s := range specsFrom("integration_stream", mcp.StreamToolSpecs()) {
-		if _, dup := byName[s.Name]; dup {
-			continue
-		}
-		byName[s.Name] = s
-		out = append(out, s)
-	}
+	// Scoped streaming tools are NOT generated: no authenticated
+	// controller-side transport exists for the standalone gateway. See
+	// integration_pending.go for the exact PENDING inventory.
 	// Stable final order is by tool name, which is what MCP clients display.
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

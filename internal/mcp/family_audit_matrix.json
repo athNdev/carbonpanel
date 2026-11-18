@@ -15,7 +15,7 @@
     "mounted_reachable": 221,
     "listed_in_tool_catalog": 234,
     "reachable_by_tool_or_composed": 35,
-    "verified_by_fixture": 37,
+    "verified_by_fixture": 35,
     "excluded_by_reason": 58,
     "supported_operations": 201,
     "unmounted_rpcs": 10,
@@ -24,8 +24,8 @@
     "listed_surfaces": 14,
     "reachable_rpcs": 30,
     "reachable_surfaces": 5,
-    "verified_rpcs": 32,
-    "verified_surfaces": 5,
+    "verified_rpcs": 31,
+    "verified_surfaces": 4,
     "excluded_rpcs": 33,
     "excluded_surfaces": 25,
     "supported_rpcs": 198,
@@ -1156,7 +1156,7 @@
       "coverage": {
         "listed": true,
         "reachable": true,
-        "verified": true
+        "verified": false
       }
     },
     {
@@ -5618,7 +5618,7 @@
       "coverage": {
         "listed": true,
         "reachable": true,
-        "verified": true
+        "verified": false
       }
     },
     {

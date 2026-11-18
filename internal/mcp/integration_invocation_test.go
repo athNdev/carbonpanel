@@ -148,16 +148,32 @@ func targetProcedure(op FamilyAuditOperation) string {
 	return op.Procedure
 }
 
-// streamTransferTargets are the typed procedures whose VERIFIED label also
-// requires the genuine session-consuming scoped streaming transfer evidence.
-var streamTransferTargets = map[string]bool{
-	"/carbonpanel.v1.FileService/SaveUploadedFile":  true,
-	"/carbonpanel.v1.FileService/InitFileDownload": true,
-	"/carbonpanel.v1.FileService/DownloadArchive":  true,
-	"/carbonpanel.v1.FileService/ExportWorld":      true,
-	"/carbonpanel.v1.UploadService/InitUpload":     true,
-	"/carbonpanel.v1.UploadService/UploadChunk":    true,
-	"/carbonpanel.v1.FileService/GetFile":          true,
+// pendingOperations are SUPPORTED operations with no production
+// authorization/transport path in the standalone MCP gateway. They are listed
+// and reachable but deliberately NOT VERIFIED until a real controller-side
+// authenticated transport exists (see integration_pending.go).
+var pendingOperations = map[string]string{
+	"/carbonpanel.v1.FileService/DownloadArchive":  "no authenticated controller-side streaming transport",
+	"/carbonpanel.v1.FileService/ExportWorld":      "no authenticated controller-side streaming transport",
+	"/carbonpanel.v1.FileService/GetFile":          "bounded small-file read only; no session-consuming large transfer",
+	"/carbonpanel.v1.FileService/InitFileDownload": "no authenticated controller-side streaming transport",
+	"/carbonpanel.v1.FileService/SaveUploadedFile": "no gate-owned authorized upload/commit transport",
+	"/carbonpanel.v1.UploadService/InitUpload":     "no gate-owned authorized upload/commit transport",
+	"/carbonpanel.v1.UploadService/UploadChunk":    "no gate-owned authorized upload/commit transport",
+}
+
+func pendingReason(op FamilyAuditOperation) string {
+	target := targetProcedure(op)
+	if op.Kind == "rpc" {
+		if reason, ok := pendingOperations[target]; ok {
+			return reason
+		}
+	}
+	if op.Kind != "rpc" && (target == "/carbonpanel.v1.FileService/GetFile" ||
+		target == "/carbonpanel.v1.FileService/SaveUploadedFile") {
+		return "no authenticated controller-side streaming transport"
+	}
+	return ""
 }
 
 func runInvocationEvidence(t *testing.T) map[string]OperationInvocationEvidence {
@@ -189,11 +205,6 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 			t.Fatalf("invocation harness: no argument table for tool %s (%s)", spec.Name, spec.Procedure)
 		}
 	}
-
-	// A download/upload surface needs a session-consuming byte transfer, not
-	// only a small-file typed read. Run that evidence first so every target in
-	// streamTransferTargets is VERIFIED only if it passes.
-	streamVerified := runRegisteredStreamEvidence(t)
 
 	invocationRecorder.enable()
 	defer invocationRecorder.disable()
@@ -234,9 +245,9 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 			continue
 		}
 		ev := invokeOne(t, f, op, spec, argsByTool[spec.Name])
-		if streamTransferTargets[target] && !streamVerified {
+		if reason := pendingReason(op); reason != "" {
 			ev.OutcomeObserved = false
-			ev.Detail += "; scoped stream transfer evidence failed"
+			ev.Detail = "PENDING: " + reason
 		}
 		byProcedure[target] = ev
 	}
@@ -361,7 +372,7 @@ func TestIntegrationInvocationEvidence(t *testing.T) {
 	var byFamilyOut []string
 	byFamily := map[string][2]int{}
 	for _, op := range matrix.Operations {
-		if !op.Supported() {
+		if !op.Supported() || pendingReason(op) != "" {
 			continue
 		}
 		target := targetProcedure(op)
