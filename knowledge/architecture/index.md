@@ -4,6 +4,7 @@
 
 ## Concepts
 
+- [Host-native private daemon mode](host-native-runtime.md) — Mode-specific Linux runtime that owns a private Docker socket, roots and network; it consumes the shared node-control contract and never falls back to a host engine.
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
 - [Module system](module-system.md) — Modules, hooks, packwiz and indexers deliver server content and modpacks.
 - [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
