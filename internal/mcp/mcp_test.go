@@ -457,12 +457,12 @@ func TestBoundedBackendTimeout(t *testing.T) {
 
 func TestConfirmationGateAndBoundedArguments(t *testing.T) {
 	f := newFixture(t, "", true)
-	assertStructuredError(t, callTool(t, f.sessions["admin"], "restart_server",
+	_ = assertStructuredError(t, callTool(t, f.sessions["admin"], "restart_server",
 		map[string]any{"id": "srv-1"}), "restart_server", ErrKindConfirmationRequired)
 	assertSuccess(t, callTool(t, f.sessions["admin"], "restart_server",
 		map[string]any{"id": "srv-1", "confirm": true, "request_id": "req-1"}), "restart_server")
-	assertStructuredError(t, callTool(t, f.sessions["admin"], "list_players",
+	_ = assertStructuredError(t, callTool(t, f.sessions["admin"], "list_players",
 		map[string]any{"server_id": "srv-1", "limit": 5000}), "list_players", ErrKindInvalidArguments)
-	assertStructuredError(t, callTool(t, f.sessions["admin"], "get_file",
+	_ = assertStructuredError(t, callTool(t, f.sessions["admin"], "get_file",
 		map[string]any{"server_id": "srv-1", "path": "../secrets"}), "get_file", ErrKindInvalidArguments)
 }

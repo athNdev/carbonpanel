@@ -93,7 +93,7 @@ func TestRealStdioBinaryToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect to stdio binary: %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	tools, err := session.ListTools(ctx, nil)
 	if err != nil {

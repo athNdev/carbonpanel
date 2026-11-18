@@ -22,8 +22,6 @@ var toolSpecs = func() map[string]ToolSpec {
 	return m
 }()
 
-func specFor(name string) ToolSpec { return toolSpecs[name] }
-
 // addTool binds a typed tool handler. Confirmation is checked before the RPC
 // is attempted, and every failure is converted to a structured ToolError.
 func addTool[In any](s *sdkmcp.Server, name string, clients *Clients, run func(context.Context, *Clients, In) (any, error)) {
