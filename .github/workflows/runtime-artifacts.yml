@@ -177,8 +177,12 @@ jobs:
               Path(os.environ["RUNNER_TEMP"], "runtime-identity.txt").read_text(encoding="utf-8"))
           manifest = Path("dist/runtime/SHA256SUMS").read_text(encoding="utf-8")
           signature = Path("dist/runtime/signature.sig").read_text(encoding="utf-8")
+          # The certificate identity is the trusted OIDC workflow ref, NOT the
+          # operator's free-form publisher label (which is informational only).
+          oidc_identity = ra.expected_certificate_identity()
           record = ra.signature_binding(version, artifact, commit, manifest,
-                                        identity["publisher"], signature.strip())
+                                        oidc_identity, signature.strip(),
+                                        publisher_label=identity["publisher"])
           Path("dist/runtime/signature.json").write_text(
               json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           PY

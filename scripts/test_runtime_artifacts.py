@@ -212,18 +212,39 @@ class IntegrityRecordTests(unittest.TestCase):
             self.assertFalse(ra.validate_sbom_document(
                 doc, "runtime-v0.3.0", "qcow2", SHA)[0])
 
+    def test_certificate_identity_is_the_workflow_ref(self):
+        identity = ra.expected_certificate_identity("athNdev/carbonpanel")
+        self.assertEqual(
+            identity,
+            "https://github.com/athndev/carbonpanel/.github/workflows/"
+            "runtime-artifacts.yml@refs/heads/main")
+        self.assertEqual(ra.OIDC_ISSUER, "https://token.actions.githubusercontent.com")
+        with self.assertRaises(ValueError):
+            ra.expected_certificate_identity("athNdev/carbonpanel", "refs/heads/feature")
+
     def test_signature_binding_fails_closed(self):
         manifest = "abc  file.bin\n"
-        identity = {"publisher": "release-bot"}
+        oidc = ra.expected_certificate_identity()
         doc = ra.signature_binding(VERSION, ARTIFACT, SHA, manifest,
-                                   "release-bot", "c2lnbmF0dXJl")
-        self.assertTrue(ra.verify_signature_binding(doc, manifest, identity)[0])
+                                   oidc, "c2lnbmF0dXJl", publisher_label="release-bot")
+        self.assertEqual(doc["signer_identity"], oidc)
+        self.assertEqual(doc["publisher_label"], "release-bot")
+        self.assertTrue(ra.verify_signature_binding(doc, manifest, oidc)[0])
         self.assertFalse(ra.verify_signature_binding(
-            doc, "changed  file.bin\n", identity)[0])
+            doc, "changed  file.bin\n", oidc)[0])
+        # The operator's free-form publisher label is NOT a certificate identity.
         self.assertFalse(ra.verify_signature_binding(
-            doc, manifest, {"publisher": "someone-else"})[0])
+            doc, manifest, "release-bot")[0])
+        # A label cannot be used to construct a binding record either.
+        with self.assertRaises(ValueError):
+            ra.signature_binding(VERSION, ARTIFACT, SHA, manifest,
+                                 "release-bot", "c2lnbmF0dXJl")
+        # A wrong (but well-formed) workflow ref refuses.
+        self.assertFalse(ra.verify_signature_binding(
+            doc, manifest,
+            "https://github.com/other/repo/.github/workflows/runtime-artifacts.yml@refs/heads/main")[0])
         empty = dict(doc, signature="")
-        self.assertFalse(ra.verify_signature_binding(empty, manifest, identity)[0])
+        self.assertFalse(ra.verify_signature_binding(empty, manifest, oidc)[0])
 
     def test_full_bundle_precondition_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -234,17 +255,37 @@ class IntegrityRecordTests(unittest.TestCase):
             (root / "SHA256SUMS").write_text(manifest, encoding="utf-8")
             doc = ra.build_sbom(VERSION, "qcow2", SHA, files, root=root)
             (root / "sbom.cdx.json").write_text(ra.sbom_json(doc), encoding="utf-8")
+            oidc = ra.expected_certificate_identity()
             sig = ra.signature_binding(VERSION, "qcow2", SHA, manifest,
-                                       "release-bot", "c2lnbmF0dXJl")
+                                       oidc, "c2lnbmF0dXJl", publisher_label="release-bot")
             (root / "signature.json").write_text(
                 json.dumps(sig), encoding="utf-8")
-            identity = {"publisher": "release-bot"}
-            ok, problems = ra.verify_bundle(root, VERSION, "qcow2", SHA, identity)
+            # A complete cosign bundle also contains these records before
+            # verify-bundle runs; they are integrity records, not artifacts.
+            (root / "signature.sig").write_bytes(b"c2lnbmF0dXJl")
+            (root / "signature.bundle").write_bytes(b'{"mediaType":"application/vnd.dev.sigstore.bundle"}')
+            ok, problems = ra.verify_bundle(root, VERSION, "qcow2", SHA)
             self.assertTrue(ok, problems)
             (root / "disk.qcow2").write_bytes(b"tampered")
-            ok, problems = ra.verify_bundle(root, VERSION, "qcow2", SHA, identity)
+            ok, problems = ra.verify_bundle(root, VERSION, "qcow2", SHA)
             self.assertFalse(ok)
             self.assertTrue(any("mismatch" in p for p in problems))
+
+    def test_integrity_records_are_not_checksummed_or_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "disk.qcow2").write_bytes(b"image-bytes")
+            files = [root / "disk.qcow2"]
+            for record in ra.INTEGRITY_RECORDS:
+                (root / record).write_bytes(b"record")
+            manifest = ra.checksum_manifest(files, root=root)
+            (root / "SHA256SUMS").write_text(manifest, encoding="utf-8")
+            ok, problems = ra.verify_checksum_manifest(manifest, root)
+            self.assertTrue(ok, problems)
+            self.assertNotIn("disk.qcow2", ra.INTEGRITY_RECORDS)
+            for record in ("signature.sig", "signature.bundle"):
+                self.assertIn(record, ra.INTEGRITY_RECORDS)
+                self.assertNotIn(record, manifest)
 
     def test_no_host_paths_or_credentials_in_fixtures(self):
         for fixture_file in FIXTURES.glob("*"):

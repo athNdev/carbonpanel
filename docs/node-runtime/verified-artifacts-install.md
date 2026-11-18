@@ -76,21 +76,41 @@ python3 scripts/runtime_artifacts.py assert-no-app-release --version "$VERSION" 
 # 2. Check file integrity (run in the directory containing the assets).
 sha256sum -c SHA256SUMS
 
-# 3. Verify the keyless signature. Use the signer identity recorded in
-#    signature.json and the GitHub Actions OIDC issuer.
+# 3. Verify the keyless signature. The certificate identity is the GitHub
+#    Actions WORKFLOW REF, not any operator label. For this repository it is
+#    the exact value below (derived from trusted repo + trusted main ref):
+CERT_IDENTITY="https://github.com/athndev/carbonpanel/.github/workflows/runtime-artifacts.yml@refs/heads/main"
+OIDC_ISSUER="https://token.actions.githubusercontent.com"
 cosign verify-blob \
   --bundle signature.bundle \
-  --certificate-identity "$(python3 -c 'import json;print(json.load(open("signature.json"))["signer_identity"])')" \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "$CERT_IDENTITY" \
+  --certificate-oidc-issuer "$OIDC_ISSUER" \
   SHA256SUMS
+
+#    Optional corroboration of the GitHub-specific OIDC claims:
+#      --certificate-github-workflow-repository athNdev/carbonpanel
+#      --certificate-github-workflow-ref refs/heads/main
 
 # 4. Inspect the SBOM and confirm it names the same version and source commit.
 python3 -m json.tool sbom.cdx.json | head -40
 ```
 
+The identity string above is the one cosign documents for GitHub Actions
+keyless signing (`https://github.com/ORG/REPO/.github/workflows/WORKFLOW@refs/heads/main`,
+per the sigstore/cosign README) and matches the `workflow_ref` OIDC claim
+described in GitHub's OpenID Connect reference. The `publisher` field in the
+identity assertion is **operator metadata only**; it is stored in
+`signature.json` as `publisher_label` and is deliberately **not** a certificate
+identity. Do not pass `publisher_label` to `--certificate-identity`: it cannot
+verify a genuine artifact. `signature.json`'s `signer_identity` field holds the
+same canonical workflow-ref identity shown above and can be cross-checked, but
+the value you pass to cosign should be the documented constant.
+
 If any step fails, or the assets are not attached to a draft release under the
-exact `runtime-v...` tag, **do not use them**. The Python checks alone are
-integrity preconditions, not a substitute for the cosign cryptographic check.
+exact `runtime-v...` tag, **do not use them**. Cryptographic verification is
+this consumer-side `cosign verify-blob` step; the Python checks and
+`verify-bundle` are only offline integrity/binding preconditions, not a substitute
+for it.
 
 ## Accurate announcement (publish only after verification)
 
