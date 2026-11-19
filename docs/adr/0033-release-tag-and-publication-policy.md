@@ -91,6 +91,14 @@ is deliberately stronger than equal tag digests: it requires an operator-supplie
 verified digest, an exact tag-to-commit identity, and a release manifest whose
 version, commit, revision and digest all match; unknown or mismatched provenance
 refuses.
+GitHub `latest` selection uses the same product-only verified stable ordering
+as registry alias promotion: prereleases never promote, an older maintenance
+release does not displace a newer verified stable, and an undeterminable state
+leaves `latest` unchanged. The three writing jobs share one global,
+non-cancelling `carbonpanel-product-publish` concurrency group so different
+versions cannot race on `latest` or the moving aliases; build-only rehearsals
+and ordinary CI are not serialized.
+
 Docker Hub is `atharvnaphade/carbonpanel`; GHCR is the lowercased GitHub
 repository name, `ghcr.io/athndev/carbonpanel`.
 

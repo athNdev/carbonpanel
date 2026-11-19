@@ -1857,5 +1857,43 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("APP_VERSION: ${{ needs.plan.outputs.version }}", source)
 
 
+    def test_release_workflow_serializes_full_publication_with_one_global_group(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        import re as _re
+
+        def job_block(name):
+            match = _re.search(rf"(?ms)^  {_re.escape(name)}:\n(.*?)(?=^  [a-zA-Z][\w-]*:\n|\Z)", source)
+            self.assertIsNotNone(match, f"missing job {name}")
+            return match.group(1)
+
+        # (c) workflow-level version-keyed concurrency is gone: build-only runs
+        # are not serialized, and cancel-in-progress never cancels a writer.
+        self.assertNotRegex(source, r"(?m)^concurrency:")
+        # (a) every explicit publication writing job shares ONE global group.
+        group = ("    concurrency:\n"
+                 "      group: carbonpanel-product-publish\n"
+                 "      cancel-in-progress: false")
+        writers = ("publish-immutable", "publish", "promote-aliases")
+        for name in writers:
+            with self.subTest(writer=name):
+                self.assertIn(group, job_block(name))
+                self.assertIn("needs.plan.outputs.publish == 'true'", job_block(name))
+        self.assertEqual(source.count("group: carbonpanel-product-publish"), len(writers))
+        # (b) build-only/rehearsal paths never acquire the publishing group.
+        for name in ("plan", "frontend", "source-image", "binaries", "image"):
+            with self.subTest(build_only=name):
+                block = job_block(name)
+                self.assertNotIn("carbonpanel-product-publish", block)
+                self.assertNotRegex(block, r"(?m)^    concurrency:")
+        # (d) alias promotion still re-preflights with LIVE state inside the
+        # serialized job; no decision is cached from the plan step.
+        promotion = job_block("promote-aliases")
+        for step in ("Re-verify the durable release record before any alias move",
+                     "Decide which aliases may advance",
+                     "verify-release-record", "alias-promotion", "promote-alias"):
+            self.assertIn(step, promotion)
+        self.assertNotIn("github.event_name == 'push'", source)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -81,6 +81,10 @@ resume from the original verified download artifact without rebuilding images.
   and the current 1.0 rollback line (not a permanent ban on 1.0.x maintenance).
   The planned `carbonpanel-v1.0.40` alias is historical-only and refused as a
   new release candidate before registry preflight.
+  The three publication writing jobs share one global non-cancelling
+  `carbonpanel-product-publish` concurrency group; build-only rehearsals and
+  ordinary CI are not serialized. GitHub `latest` follows the same product-only
+  verified stable ordering as registry aliases.
   Staging a tag makes no claim about its target's age: tags can point at old
   commits and tag-triggered runs reflect that history. The dispatch revision is
   a convenience, not the trusted gate; the Python boundary plus exact-commit
