@@ -37,7 +37,9 @@ sources:
   `docs/version-index.json` is shared by the banner, version switcher, direct
   URL validation and Pages metadata. Every entry is validated against the
   catalog peel and the real Git tag; a disagreement fails closed before
-  packaging. See ADR 0045.
+  packaging. See ADR 0045. The same bytes are published at `/version-index.json`
+  and `/docs/version-index.json`; a missing or drifted docs mirror fails the
+  website check and the published-route liveness gate.
 - Stable docs default to `/docs/`; immutable per-version routes
   `/docs/versions/<display-version>/` are built from exact peeled commits for
   `1.0.40` (stable), `3.0.0-alpha.1` (GHCR-only legacy preview) and `1.0.39`

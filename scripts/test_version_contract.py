@@ -265,7 +265,10 @@ class VersionContractTests(unittest.TestCase):
         index = vc.version_index(self.contract, self.catalog, ROOT)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "version-index.json").write_text(vc.render_index(index), encoding="utf-8")
+            shared = vc.render_index(index)
+            (root / "version-index.json").write_text(shared, encoding="utf-8")
+            (root / "docs").mkdir(parents=True, exist_ok=True)
+            (root / "docs" / "version-index.json").write_text(shared, encoding="utf-8")
             for version in index["versions"]:
                 for route in (version["route"], version["immutable_route"]):
                     target = root / route.strip("/")
@@ -301,6 +304,23 @@ class VersionContractTests(unittest.TestCase):
             errors = []
             check_channels(stale, errors)
             self.assertTrue(any("stale nightly revision" in item for item in errors))
+            # Restore the pin, then prove the documented /docs/ index URL is
+            # fail-closed: a missing or drifted copy is not a valid publication.
+            pinned.write_text(json.dumps({"revision": index["stable"]["commit"],
+                                         "source_commit": index["stable"]["commit"]}),
+                              encoding="utf-8")
+            errors = []
+            check_versions(root, index, errors)
+            self.assertEqual(errors, [])
+            docs_index = root / "docs" / "version-index.json"
+            docs_index.unlink()
+            errors = []
+            check_versions(root, index, errors)
+            self.assertTrue(any("docs/version-index.json: missing" in item for item in errors))
+            docs_index.write_text("{}", encoding="utf-8")
+            errors = []
+            check_versions(root, index, errors)
+            self.assertTrue(any("docs/version-index.json: disagrees" in item for item in errors))
 
 
 if __name__ == "__main__":
