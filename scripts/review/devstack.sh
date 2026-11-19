@@ -485,11 +485,14 @@ overlay_csp_safe_webapp() {
 		echo "review BlueMap CSP-safe bundle digest drift; refusing map capture" >&2
 		return 1
 	}
-	cp "${fixture}/index.html" "${web}/index.html"
-	cp -R "${fixture}/assets/." "${web}/assets/"
-	cp -R "${fixture}/lang/." "${web}/lang/"
+	# BlueMap owns the mounted web root inside its container. Copy through
+	# docker cp (not the host filesystem) so the runner does not need write
+	# permission on container-owned files; only the owned sidecar is touched.
+	docker cp "${fixture}/index.html" "${NAME}-bluemap:/app/web/index.html" >/dev/null || return 1
+	docker cp "${fixture}/assets/." "${NAME}-bluemap:/app/web/assets/" >/dev/null || return 1
+	docker cp "${fixture}/lang/." "${NAME}-bluemap:/app/web/lang/" >/dev/null || return 1
 	local digest
-	digest="$(sha256sum "${web}/assets/index-BA9KJ4pi.js" | cut -d' ' -f1)"
+	digest="$(docker exec "${NAME}-bluemap" sha256sum /app/web/assets/index-BA9KJ4pi.js 2>/dev/null | cut -d' ' -f1)"
 	echo "review BlueMap served webapp bundle: ${digest}" >&2
 	[ "${digest}" = "ba940f930de0642acfd2ca8b0eda6aa0914ce02fcf673cee18262b3dd5217da3" ]
 }
