@@ -700,7 +700,7 @@ one at https://mozilla.org/MPL/2.0/.
 <style>
 	.custom-scrollbar {
 		scrollbar-width: thin;
-		scrollbar-color: #393939 transparent;
+		scrollbar-color: var(--secondary) transparent;
 	}
 
 	.custom-scrollbar::-webkit-scrollbar {
@@ -730,7 +730,9 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	.log-line[data-type='command'] {
-		color: var(--accent-text);
+		/* tag-blue-text is the darker blue in light theme, so it also clears AA
+		 * when the row is hovered over the accent surface. */
+		color: var(--tag-blue-text);
 		font-weight: 500;
 	}
 

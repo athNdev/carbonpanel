@@ -27,6 +27,10 @@ test('the stale banner is dismissible per error and offers a retry', () => {
 	);
 	assert.ok(source.includes('onclick={() => (dismissedStaleError = snapshot.error)}'));
 	assert.ok(source.includes('onclick={retryTargets}'), 'the banner and header must share retry');
+	assert.ok(
+		source.includes('onretry={retryTargets}'),
+		'the cold-load error state must use the same retry path'
+	);
 });
 
 test('the refresh retry path is single-sourced', () => {
