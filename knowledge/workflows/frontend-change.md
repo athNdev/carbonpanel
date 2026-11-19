@@ -147,6 +147,11 @@ outranks an explicit theme; do not 'simplify' it back to `:root`.
   hydrates it on boot, the dialog and toast host consume its stores, and code
   editors take their initial theme from it and follow live changes through an
   already-loaded runtime (never bootstrapping Monaco for a preference change).
-  See `display-preferences.test.ts`.
+  See `display-preferences.test.ts`. Per-feature token migrations extend the
+  new-debt ratchet in that test one surface at a time; a listed file must have
+  zero six-digit hex. Purposeful status colors become semantic tokens
+  (`--destructive-text`, `--success-text`, `--accent-text`), not raw hex. The
+  ratchet is not a whole-panel claim, and Cloud's content-pinned token snapshot
+  is not edited by a Panel token migration.
 
 See [ADR 0009](../../docs/adr/0009-shared-design-system.md).
