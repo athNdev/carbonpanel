@@ -113,6 +113,12 @@ list_count() {
 	node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s)[process.argv[1]]??[];if(!Array.isArray(v))throw Error("invalid list");console.log(v.length)}catch(e){console.error("invalid review fixture response");process.exitCode=1}})' "$1"
 }
 
+# json_path reads a dot-separated path (numeric segments index arrays) from a
+# Connect JSON response. An absent value prints nothing rather than "undefined".
+json_path() {
+	node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{let v=JSON.parse(s);for(const k of process.argv[1].split("."))v=v?.[k];if(v===undefined||v===null)return;console.log(typeof v==="object"?JSON.stringify(v):String(v))}catch(e){}})' "$1"
+}
+
 # seed makes a fresh stack usable: the first admin account, a local Docker node
 # and a stopped starter server. Every step is safe to repeat.
 seed() {
@@ -174,6 +180,76 @@ seed() {
 	esac
 
 	seed_showcase_pack "${token}"
+	seed_showcase_world_library "${token}" "${server_id}"
+	if wait_for_server_running "${token}"; then
+		seed_showcase_player "${token}" "${server_id}"
+	else
+		echo "review server did not reach RUNNING; skipping player allowlist fixture" >&2
+	fi
+}
+
+# Seed a real World Library entry, revision and compatibility report through
+# production RPCs. Create-from-config stores only generated metadata and empty
+# folders; the compatibility verdict is honestly "unknown" until a real world
+# with region files is imported, so no compatibility is invented here.
+seed_showcase_world_library() {
+	local token="$1" server_id="$2" response entry_id revision_id
+	response="$(rpc /carbonpanel.v1.WorldService/ListWorldEntries '{}' "${token}" 2>/dev/null || true)"
+	entry_id="$(printf '%s' "${response}" | json_path 'entries.0.id')"
+	if [ -z "${entry_id}" ]; then
+		response="$(rpc /carbonpanel.v1.WorldService/CreateWorldFromConfig \
+			'{"name":"Review Fresh World","edition":"java","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","dataVersion":"3953","values":{"level-name":"world"},"preset":"survival","licenseAttestation":"isolated review fixture","requestId":"review-bootstrap-world"}' \
+			"${token}" 2>/dev/null)" || response=""
+		entry_id="$(printf '%s' "${response}" | json_path 'entry.id')"
+		revision_id="$(printf '%s' "${response}" | json_path 'revision.id')"
+	fi
+	if [ -z "${entry_id}" ]; then
+		echo "could not seed the review world library entry" >&2
+		return 0
+	fi
+	if [ -z "${revision_id}" ]; then
+		response="$(rpc /carbonpanel.v1.WorldService/ListRevisions \
+			"{\"worldEntryId\":\"${entry_id}\"}" "${token}" 2>/dev/null || true)"
+		revision_id="$(printf '%s' "${response}" | json_path 'revisions.0.id')"
+	fi
+	if [ -z "${revision_id}" ] || [ -z "${server_id}" ]; then
+		echo "could not resolve the review world revision for compatibility" >&2
+		return 0
+	fi
+	rpc /carbonpanel.v1.WorldService/CheckCompatibility \
+		"{\"revisionId\":\"${revision_id}\",\"serverId\":\"${server_id}\",\"targetMcVersion\":\"1.21.1\"}" \
+		"${token}" >/dev/null 2>&1 ||
+		echo "could not seed a review compatibility report" >&2
+}
+
+wait_for_server_running() {
+	local token="$1" deadline=$((SECONDS + 180)) status response
+	while ((SECONDS < deadline)); do
+		response="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null || true)"
+		status="$(printf '%s' "${response}" | json_path 'servers.0.status')"
+		case "${status}" in
+			SERVER_STATUS_RUNNING|3) return 0 ;;
+		esac
+		sleep 2
+	done
+	return 1
+}
+
+# Add one offline identity to the cross-server roster by manual allowlist add.
+# The add goes through the real first-party identity provider; only an
+# authoritative NOT_FOUND for this reserved fixture name yields an offline
+# identity. If the provider is unavailable the add is skipped with a warning:
+# player captures are best-effort and never borrow a real player's profile.
+seed_showcase_player() {
+	local token="$1" server_id="$2" count payload response
+	response="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null || true)"
+	count="$(printf '%s' "${response}" | list_count players || printf '0')"
+	if [ "${count}" -gt 0 ]; then
+		return 0
+	fi
+	payload="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-allowlist-fixture",playerQuery:"ReviewFixture"}))')"
+	rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" >/dev/null 2>&1 ||
+		echo "could not seed the review allowlist identity (identity provider may be unavailable)" >&2
 }
 
 # seed_showcase_pack creates a small fabric pack with real mods so studio and
