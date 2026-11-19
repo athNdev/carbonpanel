@@ -6,14 +6,13 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +26,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
@@ -41,6 +39,7 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 	"github.com/athNdev/carbon-panel/pkg/upload"
 	"github.com/athNdev/carbon-panel/pkg/utils"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -738,6 +737,29 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 
 var maxRemoteModpackSize int64 = 2 * 1024 * 1024 * 1024 // 2GB limit to prevent disk exhaustion
 
+// safeRemoteDownloadError keeps the useful part of a transport failure without
+// reflecting the request URL. *url.Error keeps the whole URL in its message,
+// including sensitive query values; its innermost cause is usually the dial
+// or timeout detail. If even that still carries a URL, drop it entirely.
+func safeRemoteDownloadError(err error) string {
+	if err == nil {
+		return ""
+	}
+	cause := err
+	for {
+		next := errors.Unwrap(cause)
+		if next == nil {
+			break
+		}
+		cause = next
+	}
+	text := cause.Error()
+	if strings.Contains(text, "://") {
+		return "<redacted-url-error>"
+	}
+	return text
+}
+
 // ImportRemoteModpack imports a modpack from a remote URL (e.g. GitHub release, CDN, static host)
 func (s *ModpackService) ImportRemoteModpack(ctx context.Context, req *connect.Request[v1.ImportRemoteModpackRequest]) (*connect.Response[v1.ImportRemoteModpackResponse], error) {
 	msg := req.Msg
@@ -747,19 +769,28 @@ func (s *ModpackService) ImportRemoteModpack(ctx context.Context, req *connect.R
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("url is required"))
 	}
 
-	// Enforce SSRF validation (MINE-12): validate URL, scheme, and DNS resolution
-	parsedURL, err := utils.ValidateURL(rawURL, msg.GetAllowPrivateNetwork())
+	// Remote modpack import is a controller-scoped archive fetch: there is no
+	// destination server/node whose named identity could authorise RFC1918
+	// egress. ADR 0043 requires archive traffic to use a named policy, so the
+	// caller-supplied allow_private_network override (also deliberately not
+	// exposed through MCP) can no longer unlock private targets on its own.
+	// Loopback and link-local stay blocked for every class in production;
+	// Go test fixtures opt in explicitly with DISCO_ALLOW_LOOPBACK_TEST=1.
+	redactedURL := utils.RedactURL(rawURL)
+	archivePolicy := utils.ArchiveEgressPolicy(false, "")
+	parsedURL, err := utils.ValidateURLForEgress(rawURL, archivePolicy)
 	if err != nil {
-		s.log.Warn("SSRF check blocked remote modpack URL %s: %v", rawURL, err)
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("SSRF guard blocked URL: %w", err))
+		s.log.Warn("archive egress policy blocked remote modpack URL %s: %v", redactedURL, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("archive egress policy blocked URL %s: %w", redactedURL, err))
 	}
 
-	s.log.Info("Starting remote modpack download from URL: %s", rawURL)
+	s.log.Info("Starting remote modpack download from URL: %s", redactedURL)
 
-	// Create hardened HTTP client with SSRF guards at connect & redirect time
-	client := utils.NewSafeHTTPClient(10*time.Minute, msg.GetAllowPrivateNetwork())
+	// One policy object guards the initial request, dial time and redirects.
+	client := utils.NewSafeHTTPClientForEgress(10*time.Minute, archivePolicy)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create request: %w", err))
 	}
@@ -776,8 +807,13 @@ func (s *ModpackService) ImportRemoteModpack(ctx context.Context, req *connect.R
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		s.log.Error("Failed to download modpack from %s: %v", rawURL, err)
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("failed to download modpack: %w", err))
+		// net/http's *url.Error embeds the full request URL, including any
+		// token/signature query values. Log only the innermost cause and drop
+		// anything that still carries a URL, so a failed download cannot
+		// reflect a secret into the log (ADR 0043).
+		s.log.Error("Failed to download modpack from %s: %v", redactedURL, safeRemoteDownloadError(err))
+		return nil, connect.NewError(connect.CodeUnavailable,
+			fmt.Errorf("failed to download modpack from %s", redactedURL))
 	}
 	defer resp.Body.Close()
 
@@ -795,7 +831,6 @@ func (s *ModpackService) ImportRemoteModpack(ctx context.Context, req *connect.R
 		tempFile.Close()
 		os.Remove(tempPath)
 	}()
-
 
 	hasher := sha256.New()
 	written, err := io.Copy(io.MultiWriter(tempFile, hasher), io.LimitReader(resp.Body, maxRemoteModpackSize+1))
@@ -989,7 +1024,7 @@ func (s *ModpackService) ImportRemoteModpack(ctx context.Context, req *connect.R
 
 	_ = s.store.UpsertIndexedModpackFile(ctx, dbFile)
 
-	s.log.Info("Successfully imported remote modpack '%s' (id: %s) from %s", packName, modpackID, rawURL)
+	s.log.Info("Successfully imported remote modpack '%s' (id: %s) from %s", packName, modpackID, redactedURL)
 
 	javaVersionInt, _ := strconv.Atoi(dbModpack.JavaVersion)
 	protoModpack := &v1.IndexedModpack{

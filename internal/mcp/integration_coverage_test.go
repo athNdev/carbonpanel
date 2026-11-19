@@ -37,14 +37,14 @@ func isCapabilityTool(name string) bool {
 // artifact; LISTED/REACHABLE/VERIFIED are recomputed from live source.
 func TestIntegrationCombinedCatalog(t *testing.T) {
 	matrix := FamilyAudit()
-	if matrix.Counts.DeclaredRPCs != IntegrationDeclaredRPCs || IntegrationDeclaredRPCs != 245 {
-		t.Fatalf("declared RPCs: matrix=%d generated=%d want 245", matrix.Counts.DeclaredRPCs, IntegrationDeclaredRPCs)
+	if matrix.Counts.DeclaredRPCs != IntegrationDeclaredRPCs || IntegrationDeclaredRPCs != 250 {
+		t.Fatalf("declared RPCs: matrix=%d generated=%d want 250", matrix.Counts.DeclaredRPCs, IntegrationDeclaredRPCs)
 	}
-	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 235 {
-		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 235", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
+	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 240 {
+		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 240", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
 	}
-	if matrix.Counts.ExcludedByReason != IntegrationExcludedOps || IntegrationExcludedOps != 72 {
-		t.Fatalf("excluded ops: matrix=%d generated=%d want 72", matrix.Counts.ExcludedByReason, IntegrationExcludedOps)
+	if matrix.Counts.ExcludedByReason != IntegrationExcludedOps || IntegrationExcludedOps != 77 {
+		t.Fatalf("excluded ops: matrix=%d generated=%d want 77", matrix.Counts.ExcludedByReason, IntegrationExcludedOps)
 	}
 	if IntegrationSupportedOps != 201 {
 		t.Fatalf("supported ops: got %d want 201", IntegrationSupportedOps)

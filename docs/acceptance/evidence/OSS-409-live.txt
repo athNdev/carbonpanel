@@ -1,0 +1,24 @@
+OSS-409 public documentation rollout — observed evidence (2026-11-19 UTC)
+
+Authorized opt-in dispatch: workflow_dispatch deploy=true on refs/heads/main.
+Deploy workflow: Deploy Website to GitHub Pages (.github/workflows/landing.yml)
+Deploy run: 44522728666 — https://github.com/athNdev/carbonpanel/actions/runs/44522728666
+Exact-commit CI gate: ci.yml run 44517658883, success on 69ddb46d596aea8ed117a3dba6a1f63521572664.
+PR #575 merged at dbbd22e25ee55f8bc0624eeb45801765819fa6db; PR head 67374fbafcba7a0f5fb3c11b291e79628398bc7b.
+The deployed commit 69ddb46d… is a recorded trusted descendant of that PR merge.
+GitHub Pages deployment 7912890948, artifact github-pages id 14529710143,
+artifact digest sha256:27a7880af9344f44d9600565fb031123dc552c5db189761382ba3aff7679592a.
+
+Live URL checks (verify_oss409.py, oss409-post-run44522728666.json):
+  https://carbonpanel.dev/docs/source.json            200  PASS
+  https://carbonpanel.dev/docs/                       200  PASS (stable 1.0.40 default, switcher)
+  https://carbonpanel.dev/version-index.json          200  PASS (authoritative root path, schema v2)
+  https://carbonpanel.dev/docs/versions/              200  PASS
+  https://carbonpanel.dev/docs/versions/1.0.40/       200  PASS
+  https://carbonpanel.dev/docs/versions/1.0.39/       200  PASS
+  https://carbonpanel.dev/docs/versions/3.0.0-alpha.1/ 200 PASS
+  https://carbonpanel.dev/docs/version-index.json     404  documented path absent; owner declared root path authoritative
+
+Recorded /version-index.json SHA-256: 468b85491476510be6518b40ed6539c48c5c4f134114d5b1145667f8c87eaac3
+No second dispatch, retag, release or registry write was performed by this lane.
+This is an audit record, not a claim that a scheduled job prevents a Jira Done transition.

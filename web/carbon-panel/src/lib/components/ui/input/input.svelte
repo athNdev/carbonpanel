@@ -34,8 +34,8 @@ one at https://mozilla.org/MPL/2.0/.
 		bind:this={ref}
 		data-slot="input"
 		class={cn(
-			'flex h-10 w-full min-w-0 rounded-none border border-[#525252] bg-[#262626] px-3 py-2 text-sm text-[#f4f4f4] shadow-none transition-colors outline-none placeholder:text-[#6f6f6f] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#0f62fe] disabled:cursor-not-allowed disabled:border-[#393939] disabled:bg-[#161616] disabled:opacity-40',
-			'aria-invalid:border-[#da1e28] aria-invalid:focus-visible:outline-[#da1e28]',
+			'flex h-[var(--carbon-control-md)] w-full min-w-0 rounded-none border border-border bg-card px-3 py-2 text-sm text-foreground shadow-none transition-colors outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:border-border disabled:bg-background disabled:opacity-40',
+			'aria-invalid:border-destructive aria-invalid:focus-visible:outline-[var(--destructive)]',
 			className
 		)}
 		type="file"
@@ -48,8 +48,8 @@ one at https://mozilla.org/MPL/2.0/.
 		bind:this={ref}
 		data-slot="input"
 		class={cn(
-			'flex h-10 w-full min-w-0 rounded-none border border-[#525252] bg-[#262626] px-3 py-2 text-sm text-[#f4f4f4] shadow-none transition-colors outline-none placeholder:text-[#6f6f6f] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#0f62fe] disabled:cursor-not-allowed disabled:border-[#393939] disabled:bg-[#161616] disabled:opacity-40',
-			'aria-invalid:border-[#da1e28] aria-invalid:focus-visible:outline-[#da1e28]',
+			'flex h-[var(--carbon-control-md)] w-full min-w-0 rounded-none border border-border bg-card px-3 py-2 text-sm text-foreground shadow-none transition-colors outline-none placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:border-border disabled:bg-background disabled:opacity-40',
+			'aria-invalid:border-destructive aria-invalid:focus-visible:outline-[var(--destructive)]',
 			className
 		)}
 		{type}

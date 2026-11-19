@@ -183,6 +183,17 @@ async function main() {
         case "wait":
           await page.waitForTimeout(spec.wait);
           break;
+        case "assertNoFailedTileResponses": {
+          const failedTiles = failedResponses.filter((line) =>
+            /\/api\/v1\/worldview\/map\//.test(line),
+          );
+          if (failedTiles.length) {
+            throw new Error(
+              `rendered map asset requests failed: ${failedTiles.slice(0, 5).join("; ")}`,
+            );
+          }
+          break;
+        }
         case "assertImageLoaded": {
           // A semantic readiness check for a real rendered preview: the image
           // must be visible AND decoded with non-zero intrinsic size. No fixed
@@ -459,6 +470,7 @@ async function main() {
         "assertVisible",
         "assertFrameVisible",
         "assertImageLoaded",
+        "assertNoFailedTileResponses",
         "assertHidden",
         "assertText",
         "assertNoScrollbar",

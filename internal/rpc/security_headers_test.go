@@ -135,6 +135,29 @@ func TestSecurityHeadersPresent(t *testing.T) {
 	}
 }
 
+// TestSecurityHeadersCSPUnchanged pins the exact panel CSP. BlueMap's
+// vue-i18n runtime template compilation is made CSP-compatible by the pinned
+// JIT webapp build (ADR 0048), never by widening this policy. An unexpected
+// edit here is a security regression and fails the suite.
+func TestSecurityHeadersCSPUnchanged(t *testing.T) {
+	const want = "default-src 'self'; " +
+		"script-src 'self' 'unsafe-inline'; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data: https:; " +
+		"font-src 'self' data:; " +
+		"connect-src 'self' ws: wss:; " +
+		"frame-ancestors 'self'; " +
+		"base-uri 'self'; " +
+		"form-action 'self'; " +
+		"object-src 'none'"
+	if contentSecurityPolicy != want {
+		t.Fatalf("panel CSP changed:\n got %q\nwant %q", contentSecurityPolicy, want)
+	}
+	if strings.Contains(contentSecurityPolicy, "unsafe-eval") {
+		t.Fatal("panel CSP must never allow unsafe-eval")
+	}
+}
+
 func TestSecurityHeadersOnErrorPaths(t *testing.T) {
 	// Headers must be stamped before the inner handler runs, so even
 	// early 4xx/5xx responses carry them.

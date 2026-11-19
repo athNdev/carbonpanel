@@ -28,7 +28,7 @@ one at https://mozilla.org/MPL/2.0/.
 	{value}
 	data-slot="select-item"
 	class={cn(
-		"relative flex w-full cursor-pointer items-center gap-2 rounded-none py-2 pr-8 pl-3 text-sm text-[#f4f4f4] outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-[#353535] data-[highlighted]:text-white [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+		"relative flex w-full cursor-pointer items-center gap-2 rounded-none py-2 pr-8 pl-3 text-sm text-foreground outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-secondary data-[highlighted]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
 		className
 	)}
 	{...restProps}

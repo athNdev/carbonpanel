@@ -98,9 +98,9 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 
 	const itemClass =
-		'flex items-center gap-2 w-full px-3 py-1.5 text-left font-sans text-xs text-[#f4f4f4] cursor-pointer rounded-none hover:bg-[#353535] hover:text-white transition-colors';
+		'flex items-center gap-2 w-full px-3 py-1.5 text-left font-sans text-xs text-foreground cursor-pointer rounded-none hover:bg-secondary hover:text-foreground transition-colors';
 	const dangerClass =
-		'flex items-center gap-2 w-full px-3 py-1.5 text-left font-sans text-xs text-[#ff8389] cursor-pointer rounded-none hover:bg-[#da1e28]/20 transition-colors';
+		'flex items-center gap-2 w-full px-3 py-1.5 text-left font-sans text-xs text-destructive-text cursor-pointer rounded-none hover:bg-destructive/20 transition-colors';
 </script>
 
 <svelte:window
@@ -121,7 +121,7 @@ one at https://mozilla.org/MPL/2.0/.
 	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div
-			class="fixed z-50 min-w-[180px] rounded-none border border-[#393939] bg-[#161616] py-1 text-[#f4f4f4] shadow-lg"
+			class="fixed z-50 min-w-[180px] rounded-none border border-border bg-background py-1 text-foreground shadow-lg"
 			style={menuStyle}
 			onclick={(e) => e.stopPropagation()}
 		>
@@ -154,7 +154,7 @@ one at https://mozilla.org/MPL/2.0/.
 				Download{hasSelection && selectedCount > 1 ? ` (${selectedCount})` : ''}
 			</button>
 
-			<div class="mx-2 my-1 border-t border-[#393939]"></div>
+			<div class="mx-2 my-1 border-t border-border"></div>
 
 			{#if file?.isDir}
 				<button class={itemClass} onclick={() => handleAction(onNewFile)}>
@@ -169,7 +169,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<Upload class="h-3.5 w-3.5" />
 					Upload Here
 				</button>
-				<div class="mx-2 my-1 border-t border-[#393939]"></div>
+				<div class="mx-2 my-1 border-t border-border"></div>
 			{/if}
 
 			<button class={itemClass} onclick={() => handleAction(onCompress)}>
@@ -184,7 +184,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</button>
 			{/if}
 
-			<div class="mx-2 my-1 border-t border-[#393939]"></div>
+			<div class="mx-2 my-1 border-t border-border"></div>
 
 			<button class={dangerClass} onclick={() => handleAction(onDelete)}>
 				<Trash2 class="h-3.5 w-3.5" />

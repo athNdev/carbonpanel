@@ -4,8 +4,19 @@
 
 ## Concepts
 
+- [Acceptance evidence and closure](acceptance-evidence.md) — How an OSS work item is blocked from Done and what evidence must be recorded before closure is claimed.
 - [Add an RPC](add-rpc.md) — The order of changes for a new API method, from proto to permission mapping and console client.
 - [Database migration](db-migration.md) — How to change the SQLite schema without risking existing controller or user data.
 - [Development](development.md) — The canonical Bun launcher owns development process trees and selects explicit loopback or LAN listener profiles.
 - [Frontend change](frontend-change.md) — How to change the SvelteKit console, ServerTabPanel tab-fill chrome, and verify it without breaking the embedded build.
+- [Frontend change — Read next + Shared design system](frontend-change-read-next.md) — Shared homepage feature components also run in the fixture-only build. After
+- [Frontend change — Rules](frontend-change-rules.md) — SvelteKit 3 rejects any /server/ directory under src as server-only, even
+- [Frontend change — Rules (part 2)](frontend-change-rules-2.md) — removed. Login, signup, route-change layout and sidebar collapse inherit that
+- [Frontend change — Steps](frontend-change-steps.md) — Work in web/carbon-panel (SvelteKit 3, Svelte 5, IBM Carbon tokens).
 - [Release](release.md) — The checks and artifacts required before a tagged Carbon Panel release.
+- [Release — Read next](release-read-next.md) — Detailed guidance on read next.
+- [Release — Rules](release-rules.md) — Publication is an explicit opt-in enforced by publication_allowed() in
+- [Release — Rules (part 2)](release-rules-2.md) — the exact mod-vMAJOR.MINOR.PATCH ref; build uses git show-ref --verify,
+- [Release — Rules (part 3)](release-rules-3.md) — the existing edge image is not a fresh nightly.
+- [Release — Rules (part 4)](release-rules-4.md) — or reclassified as a successful check.
+- [Release — Steps](release-steps.md) — Update CHANGELOG.md and any user-facing docs affected by the change.

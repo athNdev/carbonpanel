@@ -44,6 +44,26 @@ func (s *packwizFixtureService) DeletePack(_ context.Context, _ *connect.Request
 	s.calls++
 	return connect.NewResponse(&v1.DeletePackResponse{Success: true}), nil
 }
+func (s *packwizFixtureService) AddPackMod(_ context.Context, _ *connect.Request[v1.AddPackModRequest]) (*connect.Response[v1.AddPackModResponse], error) {
+	s.calls++
+	return connect.NewResponse(&v1.AddPackModResponse{Success: true}), nil
+}
+func (s *packwizFixtureService) AddUrlMod(_ context.Context, _ *connect.Request[v1.AddUrlModRequest]) (*connect.Response[v1.AddUrlModResponse], error) {
+	s.calls++
+	return connect.NewResponse(&v1.AddUrlModResponse{Mod: &v1.PackMod{Slug: "url-mod"}}), nil
+}
+func (s *packwizFixtureService) UpdatePackMod(_ context.Context, _ *connect.Request[v1.UpdatePackModRequest]) (*connect.Response[v1.UpdatePackModResponse], error) {
+	s.calls++
+	return connect.NewResponse(&v1.UpdatePackModResponse{Success: true}), nil
+}
+func (s *packwizFixtureService) DeletePackMod(_ context.Context, _ *connect.Request[v1.DeletePackModRequest]) (*connect.Response[v1.DeletePackModResponse], error) {
+	s.calls++
+	return connect.NewResponse(&v1.DeletePackModResponse{Success: true}), nil
+}
+func (s *packwizFixtureService) BatchPackMods(_ context.Context, _ *connect.Request[v1.BatchPackModsRequest]) (*connect.Response[v1.BatchPackModsResponse], error) {
+	s.calls++
+	return connect.NewResponse(&v1.BatchPackModsResponse{Success: true, Count: 1}), nil
+}
 
 // TestGeneratedPackwizAuthorizationMatchesCompatibilityScope exercises the real
 // authInterceptor with a generated client for every migrated method. The legacy
@@ -63,6 +83,11 @@ func TestGeneratedPackwizAuthorizationMatchesCompatibilityScope(t *testing.T) {
 		{"ClonePack", rbac.ActionCreate, func(c carbonpanelv1connect.PackwizServiceClient) error { _, err := c.ClonePack(context.Background(), connect.NewRequest(&v1.ClonePackRequest{PackId: "p1"})); return err }},
 		{"RefreshPack", rbac.ActionCreate, func(c carbonpanelv1connect.PackwizServiceClient) error { _, err := c.RefreshPack(context.Background(), connect.NewRequest(&v1.RefreshPackRequest{PackId: "p1"})); return err }},
 		{"DeletePack", rbac.ActionCreate, func(c carbonpanelv1connect.PackwizServiceClient) error { _, err := c.DeletePack(context.Background(), connect.NewRequest(&v1.DeletePackRequest{PackId: "p1"})); return err }},
+		{"AddPackMod", rbac.ActionCreate, func(c carbonpanelv1connect.PackwizServiceClient) error { _, err := c.AddPackMod(context.Background(), connect.NewRequest(&v1.AddPackModRequest{PackId: "p1", Mod: &v1.PackMod{Slug: "m"}})); return err }},
+		{"AddUrlMod", rbac.ActionCreate, func(c carbonpanelv1connect.PackwizServiceClient) error { _, err := c.AddUrlMod(context.Background(), connect.NewRequest(&v1.AddUrlModRequest{PackId: "p1"})); return err }},
+		{"UpdatePackMod", rbac.ActionCreate, func(c carbonpanelv1connect.PackwizServiceClient) error { _, err := c.UpdatePackMod(context.Background(), connect.NewRequest(&v1.UpdatePackModRequest{PackId: "p1", Slug: "m"})); return err }},
+		{"DeletePackMod", rbac.ActionCreate, func(c carbonpanelv1connect.PackwizServiceClient) error { _, err := c.DeletePackMod(context.Background(), connect.NewRequest(&v1.DeletePackModRequest{PackId: "p1", Slug: "m"})); return err }},
+		{"BatchPackMods", rbac.ActionCreate, func(c carbonpanelv1connect.PackwizServiceClient) error { _, err := c.BatchPackMods(context.Background(), connect.NewRequest(&v1.BatchPackModsRequest{PackId: "p1", Action: "pin", Slugs: []string{"m"}})); return err }},
 	}
 	type fixtureCase struct {
 		name        string

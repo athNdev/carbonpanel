@@ -121,3 +121,105 @@ func (o *PackwizOperations) Delete(ctx context.Context, packID string) error {
 	}
 	return nil
 }
+
+// AddModResult is the soft result of a dependency-aware mod add. A resolver
+// failure is not an operation failure: the requested mod was already installed,
+// so the compatibility adapter and generated service both report success plus
+// the resolver detail.
+type AddModResult struct {
+	DependencyError   string
+	AddedDependencies []packwiz.ModItem
+	Skipped           []string
+	Unresolved        []packwiz.DependencyRef
+}
+
+// AddMod installs one mod entry. When resolveDependencies is set it also walks
+// required transitive dependencies for the pack's loader/MC version. Both the
+// legacy JSON adapter and the generated PackwizService call this method so
+// per-item behavior cannot drift between transports.
+func (o *PackwizOperations) AddMod(ctx context.Context, packID string, mod packwiz.ModItem, resolveDependencies bool, loader, mcVersion string) (AddModResult, error) {
+	if !o.Ready() {
+		return AddModResult{}, packwizError(http.StatusInternalServerError, "pack manager not initialized")
+	}
+	if err := o.manager.AddMod(packID, mod); err != nil {
+		return AddModResult{}, packwizError(http.StatusInternalServerError, "failed to add mod: %v", err)
+	}
+	if !resolveDependencies {
+		return AddModResult{}, nil
+	}
+	if loader == "" || mcVersion == "" {
+		if pack, err := o.manager.GetPack(packID); err == nil {
+			if loader == "" {
+				loader = pack.ModLoader
+			}
+			if mcVersion == "" {
+				mcVersion = pack.MCVersion
+			}
+		}
+	}
+	report, err := o.manager.AddModWithDependencies(packID, mod, loader, mcVersion, o.manager.NewHTTPDependencyFetcherContext(ctx))
+	if err != nil {
+		return AddModResult{DependencyError: err.Error()}, nil
+	}
+	return AddModResult{
+		AddedDependencies: report.Added,
+		Skipped:           report.Skipped,
+		Unresolved:        report.Unresolved,
+	}, nil
+}
+
+// AddModFromURL installs a mod described by a direct download URL.
+func (o *PackwizOperations) AddModFromURL(ctx context.Context, packID string, req packwiz.DirectURLModRequest) (*packwiz.ModItem, error) {
+	if !o.Ready() {
+		return nil, packwizError(http.StatusInternalServerError, "pack manager not initialized")
+	}
+	mod, err := o.manager.AddModFromURL(packID, req)
+	if err != nil {
+		return nil, packwizError(http.StatusInternalServerError, "failed to add mod from URL: %v", err)
+	}
+	return mod, nil
+}
+
+// UpdateMod changes a mod's side and pinned flag.
+func (o *PackwizOperations) UpdateMod(ctx context.Context, packID, slug, side string, pinned bool) error {
+	if !o.Ready() {
+		return packwizError(http.StatusInternalServerError, "pack manager not initialized")
+	}
+	if err := o.manager.UpdateMod(packID, slug, side, pinned); err != nil {
+		return packwizError(http.StatusInternalServerError, "failed to update mod: %v", err)
+	}
+	return nil
+}
+
+// DeleteMod removes one mod from a pack.
+func (o *PackwizOperations) DeleteMod(ctx context.Context, packID, slug string) error {
+	if !o.Ready() {
+		return packwizError(http.StatusInternalServerError, "pack manager not initialized")
+	}
+	if err := o.manager.DeleteMod(packID, slug); err != nil {
+		return packwizError(http.StatusInternalServerError, "failed to remove mod: %v", err)
+	}
+	return nil
+}
+
+// BatchMods applies one action to a set of slugs. Per-item failures are
+// intentionally ignored, matching the compatibility adapter's best-effort
+// behavior. It returns the number of slugs the caller asked to process.
+func (o *PackwizOperations) BatchMods(ctx context.Context, packID, action string, slugs []string, side string) (int, error) {
+	if !o.Ready() {
+		return 0, packwizError(http.StatusInternalServerError, "pack manager not initialized")
+	}
+	for _, slug := range slugs {
+		switch action {
+		case "set_side":
+			_ = o.manager.UpdateMod(packID, slug, side, false)
+		case "pin":
+			_ = o.manager.UpdateMod(packID, slug, "", true)
+		case "unpin":
+			_ = o.manager.UpdateMod(packID, slug, "", false)
+		case "remove":
+			_ = o.manager.DeleteMod(packID, slug)
+		}
+	}
+	return len(slugs), nil
+}
