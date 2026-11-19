@@ -144,6 +144,15 @@ names and image digest. A host-installed binary can use
 host-side check; it does not substitute for the packaged-container path.
 Neither fixture contacts a live or shared panel.
 
+For a **local build-only** seam (no GHCR push, pull or registry write),
+`scripts/mcp_build_only_packaged_smoke.py` builds `docker/Dockerfile.mcp` and
+`docker/Dockerfile.mcp-mock` from the current checkout, starts the owned fixture
+on an isolated Docker network, and runs the same packaged `stdio` smoke against
+the locally built MCP image. It requires a local Docker daemon and does not
+substitute for verification of a public immutable digest. Use `--dry-run` to
+inspect the planned commands without Docker; when Docker is unavailable it
+reports `blocked` with evidence instead of claiming success.
+
 ## 4. Read-only smoke on a disposable fixture
 
 Use an owned mock panel or a freshly created, disposable panel install. Never a
@@ -259,9 +268,11 @@ call returning `isError: false`. Evidence:
 No image was built or pushed, no live panel was contacted and no real credential
 was used. The **packaged container entrypoint on the isolated fixture network**
 (section 3) is unexecuted in this authoring environment: no Docker daemon is
-available here. It is implemented as a CI step and must pass on an authorized
-dispatch before any registry listing or advertisement. Do not substitute the
-host-binary evidence for that container proof.
+available here. `scripts/mcp_build_only_packaged_smoke.py` provides the local
+build-only seam for environments with Docker, but it does not substitute for
+verification of a public immutable digest or for the authorized dispatch path.
+Packaged-container smoke must pass before any registry listing or advertisement.
+Do not substitute host-binary evidence for that container proof.
 
 The read-only GHCR first-tag probes are recorded in
 `$CARBONPANEL_AUDIT_DIR/mcp-plans/mcp-ghcr-first-tag-probe.json`.
