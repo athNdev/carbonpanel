@@ -52,6 +52,28 @@ test('a late target list cannot overwrite a newer one or clobber a new session',
 	assert.equal(get(store).loading, false);
 });
 
+test('a failed refresh keeps the last known targets so the route can show them as stale', async () => {
+	const lists = [deferred<WorldViewTarget[]>(), deferred<WorldViewTarget[]>()];
+	let call = 0;
+	const store = createWorldViewStore({
+		listTargets() {
+			return lists[call++].promise;
+		},
+		status: async () => undefined
+	});
+	lists[0].resolve([target(RendererState.READY)]);
+	await store.refreshTargets();
+	assert.equal(get(store).targets.length, 1);
+
+	const failed = store.refreshTargets();
+	const reason = new Error('refresh unavailable');
+	lists[1].reject(reason);
+	await assert.rejects(failed, reason);
+	assert.equal(get(store).targets.length, 1, 'last-good rows are not cleared by a failed refresh');
+	assert.equal(get(store).error, reason);
+	assert.equal(get(store).hydrated, true);
+});
+
 test('status errors are isolated per key and reset hides stale data', async () => {
 	const status = deferred<WorldViewTarget | undefined>();
 	const store = createWorldViewStore({

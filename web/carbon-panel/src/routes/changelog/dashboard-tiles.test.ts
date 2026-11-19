@@ -9,15 +9,18 @@ import { readFileSync } from 'node:fs';
 const source = readFileSync(new URL('../+page.svelte', import.meta.url), 'utf8');
 
 test('tiles use p-6 padding (retuned from p-5)', () => {
-	assert.match(source, /bg-\[#262626\] p-6 transition-colors/);
-	assert.doesNotMatch(source, /bg-\[#262626\] p-5 transition-colors/);
+	assert.match(source, /bg-card p-6 transition-colors/);
+	assert.doesNotMatch(source, /bg-card p-5 transition-colors/);
 });
 
-test('tile labels are sans semibold 12px uppercase #a8a8a8 tracking-wider', () => {
+test('tile labels are sans semibold 12px uppercase muted tracking-wider', () => {
 	assert.ok(
-		source.includes('font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase'),
-		'Tile labels must use the Carbon retune classes'
+		source.includes(
+			'font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase'
+		),
+		'Tile labels must use the Carbon retune classes and a theme token'
 	);
+	assert.ok(!/\[#[0-9a-fA-F]{3,8}\]/.test(source), 'Dashboard must not carry literal theme hex');
 });
 
 test('tile values are sans semibold 32px tabular-nums (mono numerals only)', () => {
@@ -25,10 +28,10 @@ test('tile values are sans semibold 32px tabular-nums (mono numerals only)', () 
 	assert.ok(source.includes('tabular-nums'), 'Values must use tabular-nums for numerals');
 });
 
-test('tile footers are 11px #8d8d8d with mt-3 pt-3 border-t', () => {
+test('tile footers are 11px muted with mt-3 pt-3 border-t', () => {
 	assert.match(
 		source,
-		/mt-3 flex items-center justify-between[^"]*border-t border-\[#393939\] pt-3 font-sans text-\[11px\]/
+		/mt-3 flex items-center justify-between[^"]*border-t border-border pt-3 font-sans text-\[11px\]/
 	);
 });
 

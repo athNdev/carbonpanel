@@ -102,9 +102,41 @@ export function createDisplayPreferences(
 
 	function apply() {
 		if (!target) return;
-		target.documentElement.setAttribute('data-carbon-theme', theme);
-		target.documentElement.setAttribute('data-carbon-motion', motion);
-		target.documentElement.setAttribute('data-carbon-density', density);
+		const root = target.documentElement;
+		// A theme flip changes color/background/border/shadow on nearly every
+		// element at once, so every transition on those properties fires in the
+		// same frame and the switch smears instead of snapping. Skip the
+		// transition for the swap itself; ordinary interactions keep theirs.
+		const themeChanged =
+			typeof root.getAttribute === 'function' && root.getAttribute('data-carbon-theme') !== theme;
+		if (themeChanged) suppressTransitionsForThemeSwap(target);
+		root.setAttribute('data-carbon-theme', theme);
+		root.setAttribute('data-carbon-motion', motion);
+		root.setAttribute('data-carbon-density', density);
+	}
+
+	/**
+	 * Disable transitions for one frame, force a style flush so the new palette
+	 * commits while the override still applies, then restore them after paint.
+	 * Test document stubs without a head/view go straight through.
+	 */
+	function suppressTransitionsForThemeSwap(doc: Document) {
+		const head = doc.head;
+		const view = doc.defaultView;
+		if (
+			!head ||
+			typeof doc.createElement !== 'function' ||
+			typeof view?.requestAnimationFrame !== 'function'
+		)
+			return;
+		const style = doc.createElement('style');
+		style.textContent = '*,*::before,*::after{transition:none !important}';
+		head.appendChild(style);
+		// Reading a layout property flushes style synchronously.
+		void doc.body?.offsetHeight;
+		view.requestAnimationFrame(() => {
+			view.requestAnimationFrame(() => style.remove());
+		});
 	}
 
 	function hydrate() {

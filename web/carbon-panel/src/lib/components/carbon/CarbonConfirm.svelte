@@ -46,14 +46,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <CarbonModal bind:open {title} description={message} hasFooter={false} size="sm" {onclose}>
 	{#if details}
 		<div
-			class="rounded-none border border-[#393939] bg-[#161616] p-3 font-mono text-xs text-[#c6c6c6]"
+			class="rounded-none border border-border bg-background p-3 font-mono text-xs text-muted-foreground"
 		>
 			{@render details()}
 		</div>
 	{/if}
 	<div class="flex items-center gap-2">
 		{#if danger}
-			<AlertTriangle class="h-4 w-4 shrink-0 text-[#da1e28]" />
+			<AlertTriangle class="h-4 w-4 shrink-0 text-destructive-text" strokeWidth={1.5} />
 		{/if}
 		<div class="flex flex-1 justify-end gap-2">
 			<CarbonButton
@@ -71,6 +71,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				class="justify-center rounded-none"
 				onclick={handleConfirm}
 				disabled={confirming}
+				loading={confirming}
 			>
 				{confirming ? 'Working…' : confirmLabel}
 			</CarbonButton>

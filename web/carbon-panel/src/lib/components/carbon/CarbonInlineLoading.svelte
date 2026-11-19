@@ -15,12 +15,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let { description = 'Loading...', status = 'active', class: className = '' }: Props = $props();
 </script>
 
-<div class="inline-flex items-center gap-2 font-sans text-xs text-[#c6c6c6] {className}">
+<div class="inline-flex items-center gap-2 font-sans text-xs text-muted-foreground {className}">
 	{#if status === 'active'}
-		<div class="h-4 w-4 animate-spin border-2 border-[#0f62fe] border-t-transparent"></div>
+		<div class="h-4 w-4 animate-spin border-2 border-primary border-t-transparent"></div>
 	{:else if status === 'finished'}
 		<svg
-			class="motion-scale-in h-4 w-4 text-[#24a148]"
+			class="motion-scale-in h-4 w-4 text-success"
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"
@@ -35,7 +35,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</svg>
 	{:else}
 		<svg
-			class="motion-fade-in h-4 w-4 text-[#da1e28]"
+			class="motion-fade-in h-4 w-4 text-destructive"
 			fill="none"
 			stroke="currentColor"
 			viewBox="0 0 24 24"

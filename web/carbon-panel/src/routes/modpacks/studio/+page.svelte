@@ -313,7 +313,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	<title>Modpack Studio - Carbon Panel</title>
 </svelte:head>
 
-<div class="h-full flex-1 space-y-6 rounded-none font-sans text-[#f4f4f4]">
+<div class="h-full flex-1 space-y-6 rounded-none font-sans text-foreground">
 	<!-- Top Bar -->
 	<CarbonPageHeader
 		title="Modpack Studio"
@@ -360,7 +360,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				onkeydown={(e) => e.key === 'Escape' && (filterQuery = '')}
 			/>
 		</div>
-		<p class="font-mono text-xs text-[#8d8d8d]">
+		<p class="font-mono text-xs text-muted-foreground">
 			SHOWING {filteredPacks.length} OF {packs.length} PROJECTS
 		</p>
 	</div>
@@ -371,17 +371,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<CarbonInlineLoading description="Loading modpack projects..." />
 		</div>
 	{:else if filteredPacks.length === 0}
-		<div
-			class="space-y-4 rounded-none border border-dashed border-[#393939] bg-[#262626] p-16 text-center"
-		>
+		<div class="space-y-4 rounded-none border border-dashed border-border bg-card p-16 text-center">
 			<div
-				class="mx-auto flex h-12 w-12 items-center justify-center rounded-none border border-[#393939] bg-[#161616] text-accent-text"
+				class="mx-auto flex h-12 w-12 items-center justify-center rounded-none border border-border bg-background text-accent-text"
 			>
 				<Boxes class="h-6 w-6" />
 			</div>
 			<div class="space-y-1">
-				<h3 class="text-base font-semibold text-white">No Modpack Projects Found</h3>
-				<p class="mx-auto max-w-sm text-xs text-[#a8a8a8]">
+				<h3 class="text-base font-semibold text-foreground">No Modpack Projects Found</h3>
+				<p class="mx-auto max-w-sm text-xs text-muted-foreground">
 					Initialize a new custom modpack or import an existing Modrinth (.mrpack), CurseForge
 					(.zip), or Packwiz archive.
 				</p>
@@ -411,7 +409,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="motion-stagger grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
 			{#each filteredPacks as pack (pack.id)}
 				<CarbonTile
-					class="group flex flex-col justify-between rounded-none border-[#393939] p-5 transition-colors hover:border-[#525252]"
+					class="group flex flex-col justify-between rounded-none border-border p-5 transition-colors hover:border-foreground/30"
 				>
 					<div class="space-y-3">
 						<!-- Tile Header -->
@@ -420,12 +418,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<h3 class="truncate text-lg font-semibold">
 									<a
 										href={resolve(`/modpacks/studio/${pack.id}`)}
-										class="text-white transition-colors hover:text-accent-text"
+										class="text-foreground transition-colors hover:text-accent-text"
 									>
 										{pack.name}
 									</a>
 								</h3>
-								<p class="truncate text-xs text-[#a8a8a8]">
+								<p class="truncate text-xs text-muted-foreground">
 									v{pack.version} · by {pack.author || 'Admin'}
 								</p>
 							</div>
@@ -442,14 +440,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 						<!-- Metadata summary -->
 						<div
-							class="flex items-center justify-between border-y border-[#393939] py-2 text-xs text-[#a8a8a8]"
+							class="flex items-center justify-between border-y border-border py-2 text-xs text-muted-foreground"
 						>
 							<span class="flex items-center gap-1.5 font-mono">
 								<Package class="h-3.5 w-3.5 text-accent-text" />
-								<strong class="text-white">{pack.mod_count}</strong>
+								<strong class="text-foreground">{pack.mod_count}</strong>
 								{pack.mod_count === 1 ? 'mod' : 'mods'}
 							</span>
-							<span class="flex items-center gap-1 font-mono text-xs text-[#8d8d8d]">
+							<span class="flex items-center gap-1 font-mono text-xs text-muted-foreground">
 								<Calendar class="h-3 w-3" />
 								{new Date(pack.updated_at).toLocaleDateString()}
 							</span>
@@ -458,14 +456,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 					<!-- Tile Footer Actions -->
 					<div
-						class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[#393939] pt-3"
+						class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3"
 					>
 						<div class="flex flex-wrap items-center gap-1">
 							<CarbonButton
 								kind="ghost"
 								size="sm"
 								iconOnly
-								class="text-[#a8a8a8] hover:text-white"
+								class="text-muted-foreground hover:text-foreground"
 								onclick={() => clonePack(pack)}
 								title="Duplicate / Clone modpack"
 								aria-label="Duplicate modpack"
@@ -476,7 +474,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								kind="ghost"
 								size="sm"
 								iconOnly
-								class="text-[#da1e28] hover:bg-[#da1e28]/20"
+								class="text-destructive-text hover:bg-destructive/20"
 								onclick={() => deletePack(pack)}
 								title="Delete modpack"
 								aria-label="Delete modpack"
@@ -494,7 +492,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											{...props}
 											disabled={exportingPack !== null}
 											aria-label={`Export ${pack.name}`}
-											class="flex h-8 cursor-pointer items-center gap-1.5 rounded-none border border-[#393939] bg-transparent px-2 font-sans text-xs text-[#c6c6c6] transition-colors hover:border-[#6f6f6f] hover:text-white disabled:opacity-50"
+											class="flex h-8 cursor-pointer items-center gap-1.5 rounded-none border border-border bg-transparent px-2 font-sans text-xs text-muted-foreground transition-colors hover:border-input hover:text-foreground disabled:opacity-50"
 										>
 											<Download class="h-3.5 w-3.5" />
 											Export
@@ -504,16 +502,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								</DropdownMenuTrigger>
 								<DropdownMenuContent
 									align="end"
-									class="rounded-none border border-[#393939] bg-[#161616] p-1 text-[#f4f4f4]"
+									class="rounded-none border border-border bg-background p-1 text-foreground"
 								>
 									{#each EXPORT_FORMATS as f (f.id)}
 										<DropdownMenuItem
-											class="flex cursor-pointer flex-col items-start gap-0.5 rounded-none px-3 py-2 text-xs text-[#f4f4f4] hover:bg-[#353535]"
+											class="flex cursor-pointer flex-col items-start gap-0.5 rounded-none px-3 py-2 text-xs text-foreground hover:bg-accent"
 											onclick={() => exportPack(pack.id, f.id, pack.name)}
 											title={f.hint}
 										>
 											<span class="font-semibold">{f.label}</span>
-											<span class="text-[#8d8d8d]">{f.hint}</span>
+											<span class="text-muted-foreground">{f.hint}</span>
 										</DropdownMenuItem>
 									{/each}
 								</DropdownMenuContent>
@@ -592,7 +590,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{/each}
 		</CarbonSelect>
 
-		<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
+		<div class="flex items-center justify-end gap-3 border-t border-border pt-4">
 			<CarbonButton kind="secondary" onclick={() => (createDialogOpen = false)} disabled={creating}>
 				Cancel
 			</CarbonButton>
@@ -622,7 +620,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 >
 	<div class="space-y-4">
 		<div class="space-y-1.5">
-			<label class="text-xs font-normal tracking-[0.32px] text-[#c6c6c6]">
+			<label class="text-xs font-normal tracking-[0.32px] text-muted-foreground">
 				Modpack Archive File (.mrpack or .zip) *
 			</label>
 			<input
@@ -637,7 +635,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						}
 					}
 				}}
-				class="w-full rounded-none border border-[#393939] bg-[#262626] p-2.5 text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+				class="w-full rounded-none border border-border bg-card p-2.5 text-xs text-foreground focus:border-primary focus:outline-none"
 			/>
 		</div>
 
@@ -655,7 +653,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			disabled={importing}
 		/>
 
-		<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
+		<div class="flex items-center justify-end gap-3 border-t border-border pt-4">
 			<CarbonButton
 				kind="secondary"
 				onclick={() => (importDialogOpen = false)}

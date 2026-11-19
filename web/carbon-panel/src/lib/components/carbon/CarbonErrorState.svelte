@@ -33,21 +33,21 @@
 </script>
 
 <div
-	class="flex flex-col items-center justify-center gap-4 border border-[#393939] bg-[#262626] p-12 text-center {className}"
+	class="flex flex-col items-center justify-center gap-4 border border-border bg-card p-12 text-center {className}"
 	role="alert"
 >
 	<div
-		class="flex h-12 w-12 items-center justify-center border border-[#da1e28]/40 bg-[#da1e28]/10 text-[#ff8389]"
+		class="flex h-12 w-12 items-center justify-center border border-destructive/40 bg-destructive/10 text-destructive-text"
 	>
-		<AlertTriangle class="h-6 w-6" />
+		<AlertTriangle class="h-6 w-6" strokeWidth={1.5} />
 	</div>
 	<div class="space-y-1">
-		<h3 class="text-sm font-semibold text-[#f4f4f4]">{title}</h3>
-		<p class="max-w-md text-xs text-[#a8a8a8]">{message}</p>
+		<h3 class="text-sm font-semibold text-foreground">{title}</h3>
+		<p class="max-w-md text-xs text-muted-foreground">{message}</p>
 	</div>
 	{#if onretry}
 		<CarbonButton kind="secondary" size="sm" onclick={handleRetry} loading={retrying}>
-			<RefreshCw class="h-3.5 w-3.5" />
+			<RefreshCw class="h-3.5 w-3.5" strokeWidth={1.5} />
 			<span>{retryLabel}</span>
 		</CarbonButton>
 	{/if}

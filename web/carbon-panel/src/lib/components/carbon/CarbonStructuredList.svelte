@@ -17,17 +17,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let { class: className = '', header, children }: Props = $props();
 </script>
 
-<div
-	class="w-full rounded-none border-t border-[#393939] bg-[#161616] font-sans text-sm {className}"
->
+<div class="w-full rounded-none border-t border-border bg-background font-sans text-sm {className}">
 	{#if header}
 		<div
-			class="grid rounded-none border-b border-[#525252] bg-[#393939] px-4 py-2.5 text-xs font-semibold tracking-wider text-[#f4f4f4] uppercase"
+			class="grid rounded-none border-b border-border bg-secondary px-4 py-2.5 text-xs font-semibold tracking-wider text-foreground uppercase"
 		>
 			{@render header()}
 		</div>
 	{/if}
-	<div class="divide-y divide-[#393939] rounded-none bg-[#262626] text-[#f4f4f4]">
+	<div class="divide-y divide-border rounded-none bg-card text-foreground">
 		{@render children?.()}
 	</div>
 </div>

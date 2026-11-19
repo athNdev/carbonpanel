@@ -14,20 +14,20 @@ one at https://mozilla.org/MPL/2.0/.
 	import { type VariantProps, tv } from 'tailwind-variants';
 
 	export const buttonVariants = tv({
-		base: "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#0f62fe] inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-none text-sm font-normal outline-none transition-colors disabled:pointer-events-none disabled:opacity-40 disabled:bg-[#393939] disabled:text-[#8d8d8d] aria-disabled:pointer-events-none aria-disabled:opacity-40 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0 cursor-pointer",
+		base: "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-none text-sm font-normal outline-none transition-colors disabled:pointer-events-none disabled:opacity-40 disabled:bg-secondary disabled:text-muted-foreground aria-disabled:pointer-events-none aria-disabled:opacity-40 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0 cursor-pointer",
 		variants: {
 			variant: {
 				default:
-					'bg-[#0f62fe] text-white hover:bg-[#0353e9] active:bg-[#002d9c] border-none shadow-none',
+					'bg-primary text-primary-foreground hover:bg-[var(--button-primary-hover)] active:bg-[var(--button-primary-active)] border-none shadow-none',
 				destructive:
-					'bg-[#da1e28] text-white hover:bg-[#ba1b23] active:bg-[#750e13] border-none shadow-none',
+					'bg-destructive text-primary-foreground hover:bg-[var(--button-danger-hover)] active:bg-[var(--button-danger-active)] border-none shadow-none',
 				outline:
-					'bg-transparent border border-[#0f62fe] text-[#78a9ff] hover:bg-[#0f62fe] hover:text-white shadow-none',
+					'bg-transparent border border-primary text-accent-text hover:bg-primary hover:text-primary-foreground shadow-none',
 				secondary:
-					'bg-[#393939] text-white hover:bg-[#4c4c4c] active:bg-[#6f6f6f] border-none shadow-none',
+					'bg-secondary text-foreground hover:bg-[var(--button-secondary-hover)] active:bg-[var(--button-secondary-active)] border-none shadow-none',
 				ghost:
-					'bg-transparent text-[#78a9ff] hover:bg-[#353535] hover:text-white border-none shadow-none',
-				link: 'text-[#78a9ff] underline-offset-4 hover:underline shadow-none'
+					'bg-transparent text-accent-text hover:bg-accent hover:text-foreground border-none shadow-none',
+				link: 'text-accent-text underline-offset-4 hover:underline shadow-none'
 			},
 			size: {
 				default: 'h-10 px-4 py-2 has-[>svg]:px-3',

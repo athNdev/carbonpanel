@@ -47,14 +47,19 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonTag
 	} from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import { theme as preferenceTheme } from '$lib/display-preferences.svelte';
 
-	const ansiConverter = new AnsiToHtml({
-		fg: '#f4f4f4',
-		bg: '#161616',
-		newline: false,
-		escapeXML: true,
-		stream: true
-	});
+	// ANSI defaults must follow the active theme: they are emitted as inline
+	// colors on every log line, so a fixed dark palette is unreadable in light.
+	let ansiConverter = $derived(
+		new AnsiToHtml({
+			fg: $preferenceTheme === 'light' ? '#161616' : '#f4f4f4',
+			bg: $preferenceTheme === 'light' ? '#ffffff' : '#161616',
+			newline: false,
+			escapeXML: true,
+			stream: true
+		})
+	);
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
@@ -404,21 +409,21 @@ one at https://mozilla.org/MPL/2.0/.
 	function getConnectionColor() {
 		switch (wsConnectionState) {
 			case 'authenticated':
-				return 'text-[#6fdc8c]';
+				return 'text-success-text';
 			case 'connected':
 			case 'connecting':
-				return 'text-[#f1c21b]';
+				return 'text-warning-text';
 			default:
-				return 'text-[#8d8d8d]';
+				return 'text-muted-foreground';
 		}
 	}
 </script>
 
 <!-- Carbon Code/Terminal Container (Requirement 5) -->
 {#snippet logList(entries: LogEntry[])}
-	<div class="font-mono text-xs leading-relaxed text-[#f4f4f4]">
+	<div class="font-mono text-xs leading-relaxed text-foreground">
 		{#if entries.length === 0}
-			<div class="py-12 text-center font-mono text-xs text-[#a8a8a8]">
+			<div class="py-12 text-center font-mono text-xs text-muted-foreground">
 				{#if searchQuery.trim() !== '' && logEntries.length > 0}
 					No lines match this filter.
 				{:else if server.status === ServerStatus.CREATING}
@@ -465,7 +470,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<button
 					type="button"
 					onclick={() => wsClient.reconnect()}
-					class="cursor-pointer font-mono text-xs text-[#78a9ff] hover:text-[#a6c8ff] hover:underline"
+					class="cursor-pointer font-mono text-xs text-accent-text hover:text-accent-text hover:underline"
 					aria-label="Reconnect WebSocket"
 				>
 					Reconnect
@@ -558,7 +563,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<CarbonSearch bind:value={searchQuery} placeholder="Filter logs..." size="sm" />
 				</div>
 				{#if searchQuery.trim() !== ''}
-					<span class="font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
+					<span class="font-mono text-xs whitespace-nowrap text-muted-foreground">
 						{filteredLogs.length} of {logEntries.length}
 					</span>
 				{/if}
@@ -566,7 +571,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{/snippet}
 		<ResizablePaneGroup
 			direction="vertical"
-			class="h-full min-h-0 w-full overflow-hidden rounded-none bg-[#161616] font-mono text-[#f4f4f4]"
+			class="h-full min-h-0 w-full overflow-hidden rounded-none bg-background font-mono text-foreground"
 		>
 			<ResizablePane defaultSize={78} minSize={30}>
 				<div class="flex h-full min-h-0 flex-col">
@@ -576,7 +581,7 @@ one at https://mozilla.org/MPL/2.0/.
 						role="log"
 						aria-live="polite"
 						aria-label="Server console output"
-						class="custom-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-auto bg-[#161616] p-4 selection:bg-[#0f62fe] selection:text-white"
+						class="custom-scrollbar min-h-0 flex-1 overflow-x-auto overflow-y-auto bg-background p-4 selection:bg-primary selection:text-primary-foreground"
 						bind:this={scrollAreaRef}
 						onscroll={handleScroll}
 					>
@@ -585,10 +590,10 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</ResizablePane>
 
-			<ResizableHandle class="bg-[#393939] transition-colors hover:bg-[#525252]" />
+			<ResizableHandle class="bg-secondary transition-colors hover:bg-secondary" />
 
 			<!-- Carbon Command Input Bar -->
-			<div class="flex flex-col bg-[#262626]">
+			<div class="flex flex-col bg-card">
 				<div class="flex shrink-0 items-center gap-2 p-3">
 					<span class="font-mono text-sm font-bold text-accent-text select-none">$</span>
 					<input
@@ -604,7 +609,7 @@ one at https://mozilla.org/MPL/2.0/.
 						disabled={server.status !== ServerStatus.RUNNING &&
 							server.status !== ServerStatus.UNHEALTHY}
 						onkeydown={handleCommandKey}
-						class="h-9 flex-1 rounded-none border border-[#525252] bg-[#161616] px-3 font-mono text-xs text-[#f4f4f4] placeholder-[#6f6f6f] transition-all focus:border-[#0f62fe] focus:outline-none disabled:opacity-40"
+						class="h-9 flex-1 rounded-none border border-border bg-background px-3 font-mono text-xs text-foreground transition-all placeholder:text-muted-foreground focus:border-primary focus:outline-none disabled:opacity-40"
 					/>
 					<button
 						type="button"
@@ -614,7 +619,7 @@ one at https://mozilla.org/MPL/2.0/.
 							server.status !== ServerStatus.UNHEALTHY) ||
 							!command.trim() ||
 							loading}
-						class="flex h-9 cursor-pointer items-center gap-1.5 rounded-none bg-[#0f62fe] px-4 font-mono text-xs text-white transition-colors hover:bg-[#0353e9] active:bg-[#002d9c] disabled:bg-[#393939] disabled:opacity-40"
+						class="flex h-9 cursor-pointer items-center gap-1.5 rounded-none bg-primary px-4 font-mono text-xs text-primary-foreground transition-colors hover:bg-[var(--button-primary-hover)] active:bg-[var(--button-primary-active)] disabled:bg-secondary disabled:text-foreground disabled:opacity-40"
 					>
 						<Send class="h-3.5 w-3.5" />
 						<span>Send</span>
@@ -623,14 +628,14 @@ one at https://mozilla.org/MPL/2.0/.
 
 				<!-- Status / Config Footer -->
 				<div
-					class="flex shrink-0 items-center justify-between border-t border-[#393939] bg-[#161616] px-3 py-1.5 font-mono text-xs text-[#8d8d8d]"
+					class="flex shrink-0 items-center justify-between border-t border-border bg-background px-3 py-1.5 font-mono text-xs text-muted-foreground"
 				>
 					<div class="flex items-center gap-4">
 						<label class="flex cursor-pointer items-center gap-2 select-none">
 							<input
 								type="checkbox"
 								bind:checked={autoScroll}
-								class="h-3.5 w-3.5 rounded-none accent-[#0f62fe]"
+								class="h-3.5 w-3.5 rounded-none accent-primary"
 							/>
 							<span>Auto-scroll</span>
 						</label>
@@ -639,7 +644,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<select
 								bind:value={tailLines}
 								onchange={handleTailChange}
-								class="h-6 rounded-none border border-[#393939] bg-[#262626] px-1.5 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+								class="h-6 rounded-none border border-border bg-card px-1.5 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 							>
 								<option value={100}>100</option>
 								<option value={500}>500</option>
@@ -648,10 +653,12 @@ one at https://mozilla.org/MPL/2.0/.
 							</select>
 						</div>
 						{#if expanded}
-							<span class="hidden font-mono text-xs text-[#6f6f6f] sm:inline">Esc closes</span>
+							<span class="hidden font-mono text-xs text-muted-foreground sm:inline"
+								>Esc closes</span
+							>
 						{/if}
 					</div>
-					<div class="font-mono text-xs text-[#8d8d8d]">
+					<div class="font-mono text-xs text-muted-foreground">
 						{logEntries.length} lines in viewed buffer
 					</div>
 				</div>
@@ -701,16 +708,16 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	.custom-scrollbar::-webkit-scrollbar-track {
-		background: #161616;
+		background: var(--background);
 	}
 
 	.custom-scrollbar::-webkit-scrollbar-thumb {
-		background-color: #393939;
+		background-color: var(--secondary);
 		border-radius: 0px;
 	}
 
 	.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-		background-color: #525252;
+		background-color: var(--muted-foreground);
 	}
 
 	.log-line {
@@ -719,17 +726,17 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	.log-line:hover {
-		background-color: #262626;
+		background-color: var(--accent);
 	}
 
 	.log-line[data-type='command'] {
-		color: #78a9ff;
+		color: var(--accent-text);
 		font-weight: 500;
 	}
 
 	.log-line[data-type='command']::before {
 		content: '$ ';
-		color: #0f62fe;
+		color: var(--primary);
 		font-weight: bold;
 	}
 
@@ -741,14 +748,14 @@ one at https://mozilla.org/MPL/2.0/.
 	/* Severity tinting: backend marks skipped-burst sentinels as warn and
 	   failures as error so they stand out from the info/debug stream. */
 	.log-line[data-type='warn'] {
-		color: #f1c21b;
-		border-left: 2px solid #f1c21b;
+		color: var(--warning-text);
+		border-left: 2px solid var(--warning);
 		padding-left: 0.5rem;
 	}
 
 	.log-line[data-type='error'] {
-		color: #ff8389;
-		border-left: 2px solid #da1e28;
+		color: var(--destructive-text);
+		border-left: 2px solid var(--destructive);
 		padding-left: 0.5rem;
 	}
 </style>
