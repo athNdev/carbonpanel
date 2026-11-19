@@ -1371,10 +1371,10 @@
       "bundle": "inherited-tag-batch2.bundle",
       "sha256": "c7a13bb84538aaf7838de0906df5b85ca6185fa2c33e9c5dc8e1e1fbde8a8e37",
       "refs_removed": 47,
-      "note": "Includes mod-v2.0.6; parent directed it kept retired after an isolated review objection."
+      "note": "Includes mod-v2.0.6, whose Git tag was retired without a Carbon-authored replacement at deletion time. Already-published OCI module images and digests were not changed."
     },
     "total_inherited_refs_removed": 79,
     "remaining_origin_tag_names": 6,
-    "rebuild_note": "Every retired inherited release can be rebuilt from the exact archived bundle refs or the unchanged discohaus/discopanel upstream refs without reintroducing a remote tag on athNdev/carbonpanel. Published OCI module images and digests are unchanged. Future module publication requires an exact, existing Carbon-authored mod-* tag; the workflow's git show-ref check is the only publication authority."
+    "rebuild_note": "The bundles retain the exact source objects, ref OIDs and manifest digests of every retired inherited release, and the unchanged discohaus/discopanel upstream refs retain the same objects; either can be used as a source without reintroducing a remote tag on athNdev/carbonpanel. Retention of exact source is provenance, not proof that a future rebuild produces byte-identical artifacts. Published OCI module images and digests are unchanged. Future module publication requires an exact, existing Carbon-authored mod-* tag; the workflow's git show-ref check is the only publication authority."
   }
 }
