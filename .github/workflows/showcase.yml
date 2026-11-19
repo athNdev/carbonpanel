@@ -129,7 +129,7 @@ jobs:
           PANEL_REVIEW_USER: reviewer
           PANEL_REVIEW_PASSWORD: Review-Panel-2026
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
-          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
+          FEATURES_WORLDS: ${{ inputs.worlds }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
           PORT="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/port")"
@@ -164,7 +164,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
-          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
+          FEATURES_WORLDS: ${{ inputs.worlds }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
           mkdir -p /tmp/showcase-bundle /tmp/showcase-artifact/bundle
@@ -259,7 +259,7 @@ jobs:
       - name: Reject unexpected artifact contents (data only, no code or plan)
         env:
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
-          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
+          FEATURES_WORLDS: ${{ inputs.worlds }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
           FEATURES=""
@@ -303,7 +303,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ github.sha }}
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
-          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
+          FEATURES_WORLDS: ${{ inputs.worlds }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
           FEATURES=""
