@@ -77,14 +77,15 @@ then its documented moving aliases. Tag names are derived in that promotion
 order by `scripts/release.py image-tags`; the GitHub release is exposed only
 after both registries serve a complete multi-architecture index.
 
-The three writing jobs of an explicit product publication (`publish-immutable`,
-`publish` and `promote-aliases`) share ONE global, non-cancelling concurrency
-group, `carbonpanel-product-publish`. Only one explicit publication may mutate
-GitHub `latest` or the Hub/GHCR moving aliases at a time, so two different
-versions cannot both compute stable ordering before either writes. Alias
-decisions are recomputed with live preflight inside the serialized promotion job.
-Build-only rehearsals, tag pushes, pull requests and ordinary main CI have no
-publish group and are not serialized.
+An explicit product publication holds ONE global, non-cancelling
+**workflow-level** concurrency group, `carbonpanel-product-publish`, across the
+**entire** flow — immutable image publish, GitHub release/`latest`, and moving
+alias promotion. The lock is not released between phases, so two versions cannot
+interleave phases or strand a run after immutable publication; a queued
+publication waits rather than cancelling an in-flight writer. Alias decisions
+are recomputed with live preflight inside the same locked run. Build-only
+rehearsals, tag pushes, pull requests and ordinary main CI get a distinct
+per-run key (`carbonpanel-stage-<run_id>`) and are not serialized.
 
 Moving aliases (`latest`, `MAJOR.MINOR`, module `latest`) are conveniences, not
 reproducible references. Consumers that need reproducible rollbacks pin the full

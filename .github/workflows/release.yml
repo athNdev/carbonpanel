@@ -53,12 +53,15 @@ permissions:
   contents: read
   actions: read
 
-# No workflow-level concurrency: build-only rehearsals, tag pushes, PRs and
-# automatic main events are independent and must not serialize ordinary CI.
-# Explicit product publication is serialized across ALL versions by one global
-# group on the writing jobs below, so two versions cannot race on GitHub latest
-# or the Hub/GHCR moving aliases. cancel-in-progress is always false: a queued
-# publication waits rather than cancelling an in-flight alias write.
+# ONE workflow-level concurrency group for the ENTIRE explicit product
+# publication: every phase (immutable image -> GitHub release -> moving aliases)
+# holds the same lock, so a different version cannot interleave phases or strand
+# a run after immutable publication. A queued publication waits; it never cancels
+# an in-flight writer. Build-only rehearsals, tag pushes, PRs and automatic main
+# events get a per-run key instead, so ordinary CI is not serialized.
+concurrency:
+  group: ${{ inputs.publish == true && 'carbonpanel-product-publish' || format('carbonpanel-stage-{0}', github.run_id) }}
+  cancel-in-progress: false
 
 jobs:
   plan:
@@ -297,10 +300,7 @@ jobs:
     needs: [plan, image]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
-    # Global writer guard: one explicit product publication at a time.
-    concurrency:
-      group: carbonpanel-product-publish
-      cancel-in-progress: false
+    # The workflow-level publish lock covers this phase; no per-job group.
     permissions:
       contents: read
       packages: write
@@ -419,11 +419,8 @@ jobs:
     needs: [plan, publish-immutable]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
-    # Same global writer guard: GitHub latest is selected here under product-only
-    # verified stable ordering, never concurrently with another publication.
-    concurrency:
-      group: carbonpanel-product-publish
-      cancel-in-progress: false
+    # GitHub latest is selected here under product-only verified stable ordering,
+    # inside the workflow-level publish lock (never concurrently).
     permissions:
       contents: write
       actions: read
@@ -480,11 +477,8 @@ jobs:
     needs: [plan, publish-immutable, publish]
     if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
     runs-on: ubuntu-24.04
-    # Same global writer guard: alias decisions are recomputed with LIVE preflight
-    # inside this serialized job, so no stale ordering can be applied.
-    concurrency:
-      group: carbonpanel-product-publish
-      cancel-in-progress: false
+    # Alias decisions are recomputed with LIVE preflight inside the
+    # workflow-level publish lock, so no stale ordering can be applied.
     permissions:
       contents: read
       packages: write

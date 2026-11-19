@@ -1866,32 +1866,44 @@ class ReleaseTests(unittest.TestCase):
             self.assertIsNotNone(match, f"missing job {name}")
             return match.group(1)
 
-        # (c) workflow-level version-keyed concurrency is gone: build-only runs
-        # are not serialized, and cancel-in-progress never cancels a writer.
-        self.assertNotRegex(source, r"(?m)^concurrency:")
-        # (a) every explicit publication writing job shares ONE global group.
-        group = ("    concurrency:\n"
-                 "      group: carbonpanel-product-publish\n"
-                 "      cancel-in-progress: false")
+        # (a) ONE workflow-level concurrency group, keyed to the explicit trusted
+        # publish path; every job of that run inherits it.
+        self.assertRegex(source, r"(?m)^concurrency:\n")
+        self.assertIn("inputs.publish == true && 'carbonpanel-product-publish'", source)
+        self.assertEqual(source.count("carbonpanel-product-publish"), 1)
+        # (b) build-only/rehearsal runs get a distinct per-run key, so ordinary
+        # CI is not serialized against another version.
+        self.assertIn("format('carbonpanel-stage-{0}', github.run_id)", source)
+        # (c) cancel-in-progress is false for both keys: a queued publisher waits.
+        self.assertRegex(source, r"(?m)^  cancel-in-progress: false$")
+        self.assertNotIn("cancel-in-progress: true", source)
+        # (d) no job-level group may release the lock between phases. All jobs,
+        # including the three writers, inherit the workflow-level lock.
+        for name in ("plan", "frontend", "source-image", "binaries", "image",
+                     "publish-immutable", "publish", "promote-aliases"):
+            with self.subTest(job=name):
+                self.assertNotRegex(job_block(name), r"(?m)^    concurrency:")
         writers = ("publish-immutable", "publish", "promote-aliases")
         for name in writers:
             with self.subTest(writer=name):
-                self.assertIn(group, job_block(name))
                 self.assertIn("needs.plan.outputs.publish == 'true'", job_block(name))
-        self.assertEqual(source.count("group: carbonpanel-product-publish"), len(writers))
-        # (b) build-only/rehearsal paths never acquire the publishing group.
-        for name in ("plan", "frontend", "source-image", "binaries", "image"):
-            with self.subTest(build_only=name):
-                block = job_block(name)
-                self.assertNotIn("carbonpanel-product-publish", block)
-                self.assertNotRegex(block, r"(?m)^    concurrency:")
-        # (d) alias promotion still re-preflights with LIVE state inside the
-        # serialized job; no decision is cached from the plan step.
+        # The lock spans immutable publish -> GitHub release -> alias promotion:
+        # promotion depends on both earlier writing phases in the same run.
+        self.assertIn("needs: [plan, publish-immutable, publish]",
+                      job_block("promote-aliases"))
+        self.assertIn("needs: [plan, publish-immutable]", job_block("publish"))
+        # (e) alias promotion still re-preflights with LIVE state inside the lock.
         promotion = job_block("promote-aliases")
         for step in ("Re-verify the durable release record before any alias move",
                      "Decide which aliases may advance",
                      "verify-release-record", "alias-promotion", "promote-alias"):
             self.assertIn(step, promotion)
+        # (f) stranded-after-immutable is impossible: one run holds the lock for
+        # all phases, and recovery for a resumed immutable version is inside that
+        # same serialized flow (preflight-immutable -> verify-immutable -> record).
+        self.assertIn("preflight-immutable", job_block("publish-immutable"))
+        self.assertIn("verify-immutable", job_block("publish-immutable"))
+        self.assertIn("release-record", job_block("publish"))
         self.assertNotIn("github.event_name == 'push'", source)
 
 

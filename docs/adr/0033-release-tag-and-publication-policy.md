@@ -94,10 +94,12 @@ refuses.
 GitHub `latest` selection uses the same product-only verified stable ordering
 as registry alias promotion: prereleases never promote, an older maintenance
 release does not displace a newer verified stable, and an undeterminable state
-leaves `latest` unchanged. The three writing jobs share one global,
-non-cancelling `carbonpanel-product-publish` concurrency group so different
-versions cannot race on `latest` or the moving aliases; build-only rehearsals
-and ordinary CI are not serialized.
+leaves `latest` unchanged. The whole explicit publication run holds one
+workflow-level, non-cancelling `carbonpanel-product-publish` concurrency group
+across immutable publish, GitHub release and alias promotion, so different
+versions cannot race or interleave phases or strand a run after immutable
+publication; build-only rehearsals and ordinary CI use a distinct per-run key
+and are not serialized.
 
 Docker Hub is `atharvnaphade/carbonpanel`; GHCR is the lowercased GitHub
 repository name, `ghcr.io/athndev/carbonpanel`.
