@@ -529,12 +529,13 @@ up)
 			docker rm -f "${NAME}" >/dev/null
 			start_panel
 			wait_for_health
-			# The renderer shares the panel's loopback namespace; rebind it to
-			# the newly created container after the restart.
+			# Serve the SAME pre-generated web root (real tiles + settings.json)
+			# with a bounded static server on the panel's loopback namespace.
+			# BlueMap's own web listener is not reliably reachable there.
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
-				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" world; then
-					# The renderer container and the panel restart are asynchronous.
+				if start_map_server "${server_path}/modules/bluemap"; then
+					# The map server container and the panel restart are asynchronous.
 					# Only a semantic readiness signal may unblock the worlds
 					# capture. Match the SEEDED server, never a positional row:
 					# another target in the list must not mask this fixture.
@@ -549,7 +550,8 @@ up)
 					# returned by the backend. No response bodies or secrets.
 					first_probe="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null || true)"
 					echo "review world-view target count: $(printf '%s' "${first_probe}" | list_count targets)" >&2
-					echo "review world-view first target server: $(printf '%s' "${first_probe}" | json_path 'targets.0.serverId')" >&2
+					echo "review world-view target keys: $(printf '%s' "${first_probe}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).targets||[];if(t[0])console.log(Object.keys(t[0]).sort().join(","))}catch(e){}})')" >&2
+					echo "review world-view target server ids: $(printf '%s' "${first_probe}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).targets||[];console.log(t.map(x=>x.serverId||x.server_id||"none").join(","))}catch(e){}})')" >&2
 					echo "review fixture server id: ${fixture_server_id}" >&2
 					while ((SECONDS < ready_deadline)); do
 						# The panel's own health check performs the authoritative
