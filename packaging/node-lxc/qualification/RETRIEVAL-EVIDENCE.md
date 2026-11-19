@@ -27,8 +27,11 @@ Companion LXD metadata tarballs, read from the same signed checksum file:
 | arm64 | `ubuntu-24.04-server-cloudimg-arm64-lxd.tar.xz` | `6fe48e77a3fa52d81f3e5a84d3e83b6c96c16f4824bd49def8efe784529963bf` |
 
 These digests are the exact lines of the GPG-signed `SHA256SUMS` for that dated
-release. Full tarball bytes were not downloaded; HEAD responses supplied the
-content lengths and modification times.
+release. This record captures the original **pin-establishment** slice, where
+HEAD responses supplied content lengths and modification times and the full
+tarball bytes were not downloaded. That limitation was subsequently closed:
+[the full root and LXD tarballs for both architectures were downloaded and
+rehashed against the signed manifest](SIGNED-ARCHIVE-EVIDENCE.md).
 
 ## Signed checksum evidence
 
@@ -55,7 +58,8 @@ evidence for the same dated release, corroborating the fetch.
 1. Direct HTTPS GET of `SHA256SUMS`, `SHA256SUMS.gpg` and the documented signing
    key; hashed locally with SHA-256.
 2. Direct HTTPS HEAD of both dated root tarballs for content length and
-   Last-Modified.
+   Last-Modified (pin-establishment slice); the later full-byte GET and rehash
+   is recorded in [SIGNED-ARCHIVE-EVIDENCE.md](SIGNED-ARCHIVE-EVIDENCE.md).
 3. Local GPG verification of the detached signature against the imported key.
 4. `expected_sha256` values copied from the signed checksum file, not from the
    directory listing or a third-party mirror.

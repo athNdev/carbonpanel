@@ -361,5 +361,205 @@ class NodeLxCFixtureTests(unittest.TestCase):
         self.assertEqual((vol / ".carbon-panel" / "upgrade-state.json").read_text(), state_before)
 
 
+class SignedArchiveFixtureTests(unittest.TestCase):
+    """Offline fixtures for end-to-end signed-archive verification.
+
+    Uses a REAL ephemeral OpenPGP key and REAL gpg verification (no mocked
+    signature success), but synthetic archive bytes and local staged files so
+    the suite stays network-free and host-free.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory(prefix="cp-lxc-signed-archive-")
+        cls.work = Path(cls._tmp.name)
+        cls.gpg_home = cls.work / "gpg-home"
+        cls.key = cls.work / "signing-key.asc"
+        cls.other_key = cls.work / "other-key.asc"
+        # Separate homes guarantee the two exported keys have distinct fingerprints.
+        for home, label, dest in ((cls.gpg_home, "Fixture Signer <fixture@example.invalid>", cls.key),
+                                  (cls.work / "other-gpg-home", "Other Signer <other@example.invalid>", cls.other_key)):
+            home.mkdir()
+            subprocess.run(
+                ["gpg", "--homedir", home.name, "--batch", "--passphrase", "",
+                 "--quick-generate-key", label, "rsa2048", "sign", "0"],
+                cwd=str(cls.work), check=True, capture_output=True, text=True,
+            )
+            listing = subprocess.run(
+                ["gpg", "--homedir", home.name, "--batch", "--with-colons", "--fingerprint"],
+                cwd=str(cls.work), check=True, capture_output=True, text=True,
+            )
+            fpr = next(line.split(":")[9].strip() for line in listing.stdout.splitlines()
+                       if line.startswith("fpr:"))
+            if home == cls.gpg_home:
+                cls.fpr = fpr
+            exported = subprocess.run(
+                ["gpg", "--homedir", home.name, "--batch", "--armor", "--export", fpr],
+                cwd=str(cls.work), check=True, capture_output=True,
+            )
+            dest.write_bytes(exported.stdout)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
+
+    def _make_archive(self, tag: str, *, arch: str = "amd64", version: str = "24.04") -> tuple[Path, Path]:
+        import tarfile
+        import node_lxc_artifact as tool
+
+        base = self.work / tag
+        base.mkdir()
+        shutil.copyfile(self.key, base / "signing-key.asc")
+        src = base / "rootfs-src"
+        for d in ("etc", "usr/lib", "bin", "sbin", "lib", "var"):
+            (src / d).mkdir(parents=True, exist_ok=True)
+        os_release = (f'NAME="Ubuntu"\nVERSION_ID="{version}"\n'
+                      f'VERSION_CODENAME="noble"\nID=ubuntu\n')
+        (src / "etc" / "os-release").write_text(os_release)
+        (src / "usr" / "lib" / "os-release").write_text(os_release)
+        root_name = f"ubuntu-24.04-server-cloudimg-{arch}-root.tar.xz"
+        lxd_name = f"ubuntu-24.04-server-cloudimg-{arch}-lxd.tar.xz"
+        root_tar = base / root_name
+        with tarfile.open(root_tar, "w:xz") as tf:
+            for p in sorted(src.rglob("*")):
+                tf.add(p, arcname=p.relative_to(src).as_posix())
+
+        meta_dir = base / "meta"
+        meta_dir.mkdir()
+        arch_alias = "x86_64" if arch == "amd64" else "aarch64"
+        (meta_dir / "metadata.yaml").write_text(
+            f'architecture: "{arch_alias}"\nproperties:\n    os: "ubuntu"\n'
+            f'    release: "noble"\n    description: "Ubuntu 24.04 LTS server (20261017)"\n'
+        )
+        lxd_tar = base / lxd_name
+        with tarfile.open(lxd_tar, "w:xz") as tf:
+            tf.add(meta_dir / "metadata.yaml", arcname="metadata.yaml")
+
+        sums = base / "SHA256SUMS"
+        sums.write_text(f"{tool.sha256_file(root_tar)}  {root_name}\n"
+                        f"{tool.sha256_file(lxd_tar)}  {lxd_name}\n")
+        sig = base / "SHA256SUMS.gpg"
+        rel = base.relative_to(self.work).as_posix()
+        signed = subprocess.run(
+            ["gpg", "--homedir", self.gpg_home.name, "--batch", "--yes", "--detach-sign",
+             "-o", f"{rel}/SHA256SUMS.gpg", f"{rel}/SHA256SUMS"],
+            cwd=str(self.work), check=True, capture_output=True, text=True,
+        )
+        self.assertEqual(signed.returncode, 0)
+
+        prov = json.loads(ARTIFACT_PROVENANCE.read_text())
+        pin = next(i for i in prov["images"] if i["arch"] == arch)
+        prefix = "https://cloud-images.ubuntu.com/releases/noble/release-20261017/"
+        pin.update({
+            "image_url": prefix + root_name,
+            "lxd_metadata_url": prefix + lxd_name,
+            "checksum_url": prefix + "SHA256SUMS",
+            "signature_url": prefix + "SHA256SUMS.gpg",
+            "image_content_length": root_tar.stat().st_size,
+            "expected_sha256": tool.sha256_file(root_tar),
+            "lxd_metadata_sha256": tool.sha256_file(lxd_tar),
+            "checksum_file_sha256": tool.sha256_file(sums),
+            "signature_file_sha256": tool.sha256_file(sig),
+            "signing_key_fingerprint": self.fpr,
+            "signing_key_source": f"https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x{self.fpr}",
+        })
+        prov["retrieval_evidence"]["key_get"] = (
+            f"GET signing key -> HTTP 200, {self.key.stat().st_size} bytes, "
+            f"sha256 {tool.sha256_file(self.key)}"
+        )
+        prov_path = base / "provenance.json"
+        prov_path.write_text(json.dumps(prov, indent=2, sort_keys=True))
+        return base, prov_path
+
+    def _verify(self, work: Path, prov: Path, arch: str = "amd64") -> dict:
+        return ok("verify-signed-archive", "--provenance", str(prov),
+                  "--arch", arch, "--work-dir", str(work))
+
+    def _prov_copy(self, work: Path, mutate) -> Path:
+        prov = json.loads((work / "provenance.json").read_text())
+        mutate(prov)
+        path = work / "provenance-mutated.json"
+        path.write_text(json.dumps(prov, indent=2, sort_keys=True))
+        return path
+
+    def test_11_signed_archive_real_gpg_and_bytes_ok(self) -> None:
+        work, prov = self._make_archive("signed-ok")
+        result = self._verify(work, prov)
+        self.assertEqual(result["gpg_signature"], "GOOD")
+        self.assertEqual(result["signing_key_fingerprint"], self.fpr.upper())
+        self.assertEqual(len(result["bytes_checked"]), 2)
+        self.assertEqual(result["layout"]["os_release"]["ID"], "ubuntu")
+        self.assertEqual(result["layout"]["os_release"]["VERSION_ID"], "24.04")
+        self.assertEqual(result["lxd_metadata"]["architecture"], "x86_64")
+        self.assertIn("NOT live import/boot evidence", result["evidence_scope"])
+
+    def test_12_signed_archive_tampered_tarball_refused(self) -> None:
+        work, prov = self._make_archive("signed-tampered")
+        root = next(work.glob("*-root.tar.xz"))
+        with root.open("ab") as fh:
+            fh.write(b"tamper")
+        refused("UPSTREAM_DIGEST_MISMATCH", "verify-signed-archive",
+                "--provenance", str(prov), "--arch", "amd64", "--work-dir", str(work))
+
+    def test_13_signed_archive_tampered_checksums_refused(self) -> None:
+        import node_lxc_artifact as tool
+        work, prov = self._make_archive("signed-sums")
+        sums = work / "SHA256SUMS"
+        sums.write_text(sums.read_text() + "deadbeef  extra\n")
+        refused("CONTROL_FILE_DIGEST_MISMATCH", "verify-signed-archive",
+                "--provenance", str(prov), "--arch", "amd64", "--work-dir", str(work))
+        changed = self._prov_copy(work, lambda d: d["images"][0].update(
+            checksum_file_sha256=tool.sha256_file(sums)))
+        refused("SIGNATURE_INVALID", "verify-signed-archive", "--provenance", str(changed),
+                "--arch", "amd64", "--work-dir", str(work))
+
+    def test_14_signed_archive_wrong_key_refused(self) -> None:
+        import node_lxc_artifact as tool
+        work, prov = self._make_archive("signed-key")
+        shutil.copyfile(self.other_key, work / "signing-key.asc")
+        # Keep the control-file digest consistent so verification reaches the
+        # fingerprint/gpg check rather than stopping at the staged-byte pin.
+        changed = self._prov_copy(work, lambda d: d["retrieval_evidence"].update(
+            key_get=f"GET signing key -> HTTP 200, {self.other_key.stat().st_size} bytes, "
+                    f"sha256 {tool.sha256_file(self.other_key)}"))
+        refused("SIGNATURE_INVALID", "verify-signed-archive", "--provenance", str(changed),
+                "--arch", "amd64", "--work-dir", str(work))
+
+    def test_15_signed_archive_refuses_synthetic_placeholder_and_moving(self) -> None:
+        work, prov = self._make_archive("signed-refusals")
+        cases = (
+            ("SYNTHETIC_PROVENANCE", lambda d: d.update(synthetic=True)),
+            ("PLACEHOLDER_DIGEST", lambda d: d["images"][0].update(expected_sha256="0" * 64)),
+            ("UNVERIFIED_DIGEST", lambda d: d["images"][0].update(digest_status="unverified")),
+            ("MOVING_URL", lambda d: d["images"][0].update(
+                image_url="https://cloud-images.ubuntu.com/releases/noble/release/"
+                          "ubuntu-24.04-server-cloudimg-amd64-root.tar.xz")),
+            ("MISSING_SIGNING_EVIDENCE", lambda d: d["images"][0].pop("signature_url")),
+        )
+        for code, mutate in cases:
+            with self.subTest(code=code):
+                changed = self._prov_copy(work, mutate)
+                refused(code, "verify-signed-archive", "--provenance", str(changed),
+                        "--arch", "amd64", "--work-dir", str(work))
+
+    def test_16_signed_archive_metadata_version_refused(self) -> None:
+        work, prov = self._make_archive("signed-version", version="22.04")
+        refused("METADATA_VERSION_MISMATCH", "verify-signed-archive", "--provenance", str(prov),
+                "--arch", "amd64", "--work-dir", str(work))
+
+    def test_17_signed_archive_metadata_arch_refused(self) -> None:
+        work, prov = self._make_archive("signed-arch")
+        changed = self._prov_copy(work, lambda d: d["images"][0].update(arch="arm64"))
+        refused("METADATA_ARCH_MISMATCH", "verify-signed-archive", "--provenance", str(changed),
+                "--arch", "arm64", "--work-dir", str(work))
+
+    def test_18_signed_archive_missing_files_refused(self) -> None:
+        work, prov = self._make_archive("signed-missing")
+        empty = self.work / "signed-empty"
+        empty.mkdir()
+        refused("MISSING_ARCHIVE_FILE", "verify-signed-archive", "--provenance", str(prov),
+                "--arch", "amd64", "--work-dir", str(empty))
+
+
 if __name__ == "__main__":
     unittest.main()
