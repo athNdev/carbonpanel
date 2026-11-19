@@ -11,7 +11,10 @@ const gitignorePath = fileURLToPath(new URL('./.gitignore', import.meta.url));
 
 export default ts.config(
 	{
-		ignores: ['src/lib/xterm.js', 'src/lib/proto/**', 'static/scalar.js']
+		// The OSS-245 live fixture is a Bun/Node-driven harness outside the
+		// SvelteKit tsconfig: bun:test globals and the seeded control-plane
+		// globals are provided by its own runner, not the app project service.
+		ignores: ['src/lib/xterm.js', 'src/lib/proto/**', 'static/scalar.js', 'e2e/**']
 	},
 	includeIgnoreFile(gitignorePath),
 	js.configs.recommended,

@@ -8,6 +8,7 @@
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
+- [Console log buffer ownership](console-buffer-ownership.md) — A delayed log listing or WebSocket snapshot can only write the viewed buffer while it still owns the displayed server and the latest request.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
 - [Frontend accessibility coverage](frontend-a11y-coverage.md) — Component and real application-route accessibility are tested in a real DOM and a real Chromium journey, not by matching source text.
 - [Frontend server inventory ownership](server-inventory.md) — Server reads, lifecycle requests and status presentation share generation guards and account-scoped state.
@@ -39,4 +40,4 @@
 - [Shared provider request adapters](provider-adapters.md) — Modrinth and CurseForge request construction is shared while browse and Packwiz retain their presentation and version-selection policies.
 - [Staged proto generation](proto-generation.md) — Generate and format proto outputs before replacing owned trees, and keep dependency installation frozen.
 - [Website and documentation publication](website-docs.md) — Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.
-- [WebSocket connection lifetime](websocket-lifetime.md) — Socket callbacks and timers belong to one connection generation, and subscriptions retain their requested tail on reconnect.
+- [WebSocket connection lifetime](websocket-lifetime.md) — Socket callbacks and timers belong to one connection generation, subscriptions retain their requested tail on reconnect, and AUTH_FAIL ends in a signed-out state rather than a retry loop.

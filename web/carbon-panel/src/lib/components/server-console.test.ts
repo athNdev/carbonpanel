@@ -66,6 +66,32 @@ test('Root layout provides global Tooltip.Provider safety net', () => {
 	);
 });
 
+test('ServerConsole owns its log buffer across navigation and superseded listings', () => {
+	const consolePath = path.resolve(import.meta.dirname, 'server-console.svelte');
+	const content = fs.readFileSync(consolePath, 'utf-8');
+
+	assert.ok(
+		content.includes("import { createRequestSequence } from '$lib/utils/request-sequence';"),
+		'ServerConsole must use the shared request-sequence guard'
+	);
+	assert.ok(
+		content.includes('logListingSeq') && content.includes('logSubscriptionSeq'),
+		'RPC listings and live subscriptions must use independent sequences'
+	);
+	assert.ok(
+		content.includes('rotateLogBuffer(currentServerId)'),
+		'Navigation and container recreation must rotate the buffer owner'
+	);
+	assert.ok(
+		content.includes('if (!ownsLogBuffer(owner) || !logListingSeq.isCurrent(listingSeq)) return;'),
+		'Every log listing completion must prove owner and sequence before writing'
+	);
+	assert.ok(
+		content.includes('if (!ownsLogBuffer(owner) || serverId !== owner.serverId) return;'),
+		'A full WebSocket snapshot must be rejected for a stale server owner'
+	);
+});
+
 test('Server detail page wraps tab panels with svelte:boundary to prevent tab wedging', () => {
 	const serverPagePath = path.resolve(
 		import.meta.dirname,

@@ -358,6 +358,14 @@ jobs:
         working-directory: scripts/manual-review/e2e
         run: node a11y-check.mjs
 
+      # OSS-245/OSS-185 named diagnostics fixture: stale console responses,
+      # AUTH_FAIL sign-out, non-idempotent requests and recreated subscriptions.
+      - name: Diagnostics reconnect fixture (Chromium)
+        working-directory: web/carbon-panel
+        env:
+          OSS245_LIVE_BROWSER: '1'
+        run: bun test --conditions=browser e2e/oss-245-diagnostics-reconnect.spec.ts
+
   # Optional cross-engine smoke: the same packaged routes (dashboard, players,
   # world library) under both themes at 1440/360, driven in Firefox and WebKit
   # with the locked review driver and an owned runner-temp browser cache. This
