@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { waitForEntryState } from './entry-state.mjs';
+import { waitForEntryState, screenshotAllowed } from './entry-state.mjs';
 
 // A deterministic delayed-hydration fake. `count()` always reports an empty
 // DOM (the SPA has not mounted yet), while `waitFor` models the moment each
@@ -69,6 +69,16 @@ test('delayed hydration: a fatal state is detected and surfaced', async () => {
 test('fail closed: no reachable semantic state rejects instead of guessing bootstrap', async () => {
   const page = delayedHydrationPage({}, 40);
   await assert.rejects(() => waitForEntryState(page, SELECTORS, 40), /no entry state/i);
+});
+
+test('negative: failed skin/readiness prerequisite blocks the feature screenshot', () => {
+  const blocked = new Set(['playerdetail']);
+  assert.equal(screenshotAllowed('playerdetail', blocked), false);
+  assert.equal(screenshotAllowed('players', blocked), true);
+  assert.equal(screenshotAllowed(undefined, blocked), true);
+  const source = readFileSync(new URL('./journey.mjs', import.meta.url), 'utf8');
+  assert.match(source, /screenshotAllowed\(spec\.feature, blockedFeatures\)/);
+  assert.match(source, /blockedFeatures\.add\(spec\.feature\)/);
 });
 
 test('feature-tagged step failures are reported but do not fail the journey', () => {

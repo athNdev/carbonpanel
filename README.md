@@ -55,6 +55,22 @@ or compatible remote Docker nodes, all through one panel.
 
 [![Live server console with filtered startup logs and command controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-server-detail.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-server-detail.png)
 
+### Worlds, kept as revisions.
+
+Keep a world snapshot as an immutable library revision, then review its
+provenance before binding it to a server.
+
+[![World Library list with a seeded real revision entry](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-library.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-library.png)
+
+[![Immutable world revision with version, size and provenance](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-library-revisions.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-library-revisions.png)
+
+### Decide who connects.
+
+Add a player to a server's allowlist before they have joined, with a typed,
+auditable action.
+
+[![Server Players tab with the real allowlist form](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-player-allowlist.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-player-allowlist.png)
+
 ### The next update. When you're ready.
 
 Prepare compatible configuration and content changes in one batch. Review

@@ -18,7 +18,7 @@
 
 import { launchReviewBrowser } from "./browser.mjs";
 import { writeReviewReport } from "./report.mjs";
-import { waitForEntryState } from "./entry-state.mjs";
+import { waitForEntryState, screenshotAllowed } from "./entry-state.mjs";
 import {
   mkdirSync,
   readFileSync,
@@ -59,6 +59,9 @@ async function main() {
   const out = resolve(args.out ?? fileURLToPath(new URL(`../../tmp/review-output/single/${new Date().toISOString().replace(/[:.]/g, '-')}/`, import.meta.url)));
   mkdirSync(out, { recursive: true });
   const results = [];
+  // A failed readiness/data assertion blocks every later screenshot for that
+  // feature. A filename on disk is not proof the prerequisite passed.
+  const blockedFeatures = new Set();
   reportState = { out, profile: 'single-seeded', base: args.base, checks: results };
 
   const { browser, metadata: browserMetadata } = await launchReviewBrowser();
@@ -101,6 +104,10 @@ async function main() {
     const label =
       spec.name ??
       `${kind}:${Object.values(spec).find((v) => typeof v === "string") ?? ""}`;
+    if (kind === "screenshot" && !screenshotAllowed(spec.feature, blockedFeatures)) {
+      record(label, false, `prerequisite failed for feature ${spec.feature}; screenshot blocked`, spec.feature);
+      return;
+    }
     try {
       switch (kind) {
         case "goto":
@@ -112,6 +119,23 @@ async function main() {
             timeout: 30000,
           });
           break;
+        case "setViewport": {
+          // Inline images are legible when the app lays out at roughly their
+          // display width; DPR only controls output sharpness, not text size.
+          await page.setViewportSize(spec.setViewport);
+          break;
+        }
+        case "gotoEnv": {
+          // Navigate to a real route whose dynamic segment was produced by the
+          // disposable fixture (for example an opaque player identity key).
+          const value = process.env[spec.gotoEnv];
+          if (!value) throw new Error(`${spec.gotoEnv} is not set`);
+          await page.goto(base + spec.route.replace("{value}", encodeURIComponent(value)), {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          break;
+        }
         case "gotoIdentityFromTitle": {
           // Read the opaque identity key the real roster renders in its row
           // title, then open the canonical profile route. This exercises the
@@ -143,7 +167,9 @@ async function main() {
           await page
             .locator(spec.fill)
             .first()
-            .fill(spec.value ?? "", { timeout: 15000 });
+            .fill(spec.valueEnv ? (process.env[spec.valueEnv] ?? "") : (spec.value ?? ""), {
+              timeout: 15000,
+            });
           break;
         case "press":
           await page.keyboard.press(spec.press);
@@ -157,6 +183,20 @@ async function main() {
         case "wait":
           await page.waitForTimeout(spec.wait);
           break;
+        case "assertImageLoaded": {
+          // A semantic readiness check for a real rendered preview: the image
+          // must be visible AND decoded with non-zero intrinsic size. No fixed
+          // sleep and no reliance on "loading" text going away.
+          const image = page.locator(spec.assertImageLoaded).first();
+          await image.waitFor({ state: "visible", timeout: spec.timeout ?? 30000 });
+          const width = await image.evaluate(
+            (element) => (element.complete ? element.naturalWidth : 0),
+          );
+          if (!width || width < 1) {
+            throw new Error(`skin preview did not decode: naturalWidth=${width}`);
+          }
+          break;
+        }
         case "assertFrameVisible": {
           // The map is a sandboxed same-origin iframe. Require real renderer
           // DOM inside it (canvas/tiles) before calling the capture qualified.
@@ -284,6 +324,7 @@ async function main() {
         record(label, true, "", spec.feature);
       }
     } catch (error) {
+      if (spec.feature && kind !== "screenshot") blockedFeatures.add(spec.feature);
       record(
         label,
         false,
@@ -406,6 +447,8 @@ async function main() {
     const kind = Object.keys(spec).find((key) =>
       [
         "goto",
+        "setViewport",
+        "gotoEnv",
         "gotoIdentityFromTitle",
         "click",
         "fill",
@@ -415,6 +458,7 @@ async function main() {
         "wait",
         "assertVisible",
         "assertFrameVisible",
+        "assertImageLoaded",
         "assertHidden",
         "assertText",
         "assertNoScrollbar",

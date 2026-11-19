@@ -47,12 +47,22 @@ on:
   workflow_dispatch:
     inputs:
       players:
-        description: 'Capture player lookup/profile/allowlist (feature gate)'
+        description: 'Capture player roster and allowlist (feature gate)'
+        required: false
+        default: true
+        type: boolean
+      playerdetail:
+        description: 'Capture canonical player detail with a loaded skin preview (feature gate)'
+        required: false
+        default: false
+        type: boolean
+      worldtab:
+        description: 'Capture the per-server World tab and Worlds list (independent of BlueMap)'
         required: false
         default: true
         type: boolean
       worlds:
-        description: 'Capture World View with rendered BlueMap tiles (feature gate)'
+        description: 'Capture rendered BlueMap tiles (independent gate; OSS-392)'
         required: false
         default: false
         type: boolean
@@ -129,13 +139,21 @@ jobs:
           PANEL_REVIEW_USER: reviewer
           PANEL_REVIEW_PASSWORD: Review-Panel-2026
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
+          FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
           FEATURES_WORLDS: ${{ inputs.worlds }}
+          FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
           PORT="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/port")"
+          export SHOWCASE_SERVER_ID="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/server-id")"
+          if [ -f "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/skin-identity-id" ]; then
+            export SHOWCASE_PLAYER_IDENTITY="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/skin-identity-id")"
+          fi
           FEATURES=""
           if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
+          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi
           if [ "$FEATURES_WORLDS" = "true" ]; then FEATURES="${FEATURES},worlds"; fi
+          if [ "$FEATURES_WORLDTAB" = "true" ]; then FEATURES="${FEATURES},worldtab"; fi
           if [ "$FEATURES_LIBRARY" = "true" ]; then FEATURES="${FEATURES},library"; fi
           FEATURES="${FEATURES#,}"
           EXTRA=()
@@ -164,13 +182,17 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
+          FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
           FEATURES_WORLDS: ${{ inputs.worlds }}
+          FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
           mkdir -p /tmp/showcase-bundle /tmp/showcase-artifact/bundle
           FEATURES=""
           if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
+          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi
           if [ "$FEATURES_WORLDS" = "true" ]; then FEATURES="${FEATURES},worlds"; fi
+          if [ "$FEATURES_WORLDTAB" = "true" ]; then FEATURES="${FEATURES},worldtab"; fi
           if [ "$FEATURES_LIBRARY" = "true" ]; then FEATURES="${FEATURES},library"; fi
           FEATURES="${FEATURES#,}"
           APP_VERSION="$(git describe --tags --always 2>/dev/null || printf 'packaged-review')"
@@ -259,12 +281,16 @@ jobs:
       - name: Reject unexpected artifact contents (data only, no code or plan)
         env:
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
+          FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
           FEATURES_WORLDS: ${{ inputs.worlds }}
+          FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
           FEATURES=""
           if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
+          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi
           if [ "$FEATURES_WORLDS" = "true" ]; then FEATURES="${FEATURES},worlds"; fi
+          if [ "$FEATURES_WORLDTAB" = "true" ]; then FEATURES="${FEATURES},worldtab"; fi
           if [ "$FEATURES_LIBRARY" = "true" ]; then FEATURES="${FEATURES},library"; fi
           FEATURES="${FEATURES#,}"
           FEATURES="$FEATURES" python3 - <<'PY'
@@ -303,12 +329,16 @@ jobs:
         env:
           SOURCE_SHA: ${{ github.sha }}
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
+          FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
           FEATURES_WORLDS: ${{ inputs.worlds }}
+          FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
           FEATURES=""
           if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
+          if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi
           if [ "$FEATURES_WORLDS" = "true" ]; then FEATURES="${FEATURES},worlds"; fi
+          if [ "$FEATURES_WORLDTAB" = "true" ]; then FEATURES="${FEATURES},worldtab"; fi
           if [ "$FEATURES_LIBRARY" = "true" ]; then FEATURES="${FEATURES},library"; fi
           FEATURES="${FEATURES#,}"
           python3 trusted-source/scripts/showcase_assets.py validate \
@@ -320,7 +350,8 @@ jobs:
       - name: Require the full README-canonical image set
         run: |
           for name in \
-            showcase-dashboard showcase-server-detail showcase-studio showcase-modpacks
+            showcase-dashboard showcase-dashboard-full showcase-server-detail showcase-studio showcase-modpacks \
+            showcase-library showcase-library-revisions showcase-player-allowlist
           do
             if [ ! -s "/tmp/showcase-artifact/bundle/${name}.png" ]; then
               echo "README-canonical screenshot missing: ${name}" >&2
