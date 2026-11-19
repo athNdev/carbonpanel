@@ -21,7 +21,7 @@ stopped server. While the parent is still coming up (for example after a
 self-heal recreate that records `starting`), a running module with no
 container waits and keeps its row; marking it gone would prevent recreate
 once the parent is running. An unreachable node leaves the record untouched
-because a daemon that did not answer is not evidence the container is gone.
+because a daemon that did not answer is not evidence the container is gone, and an uncertain module or parent-server database read likewise leaves the record untouched.
 
 While a declared dependency is not running, the pass neither reports the module
 in sync nor recreates it; it returns a waiting outcome and leaves the row

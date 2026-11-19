@@ -590,3 +590,27 @@ func TestReconcileModuleIgnoresADeletedModule(t *testing.T) {
 		t.Fatalf("outcome = %s, want skipped", outcome)
 	}
 }
+
+func TestReconcileModuleSkipsWhenModuleLookupIsUncertain(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	mod := &storage.Module{ID: "mod-db-uncertain", Name: "sidecar", ServerID: "srv", NodeID: "local", Status: storage.ModuleStatusStopped}
+	if err := store.DB().Create(mod).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	manager := NewManager(store, nil, nil, nil, nil, logger.New())
+	outcome, err := manager.ReconcileModule(ctx, mod.ID)
+	if err == nil {
+		t.Fatalf("error = nil for an uncertain module lookup; convergence must not be assumed (outcome=%s)", outcome)
+	}
+	if outcome != ReconcileSkipped {
+		t.Fatalf("outcome = %s, want skipped (err=%v)", outcome, err)
+	}
+	if !strings.Contains(err.Error(), "load module") {
+		t.Fatalf("error = %v, want load module context", err)
+	}
+}

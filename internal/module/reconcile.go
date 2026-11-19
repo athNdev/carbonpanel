@@ -16,6 +16,14 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
+func isModuleNotFoundError(err error) bool {
+	return err != nil && err.Error() == "module not found"
+}
+
+func isServerNotFoundError(err error) bool {
+	return err != nil && err.Error() == "server not found"
+}
+
 // ReconcileOutcome says what a module convergence pass did. It is returned
 // rather than only logged so the reconciler and its tests can assert on it.
 type ReconcileOutcome string
@@ -168,8 +176,14 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 	}
 
 	mod, err := m.store.GetModule(ctx, moduleID)
-	if err != nil || mod == nil {
-		// Deleted between the event and this pass; nothing to converge.
+	if err != nil {
+		if isModuleNotFoundError(err) {
+			// Deleted between the event and this pass; nothing to converge.
+			return ReconcileSkipped, nil
+		}
+		return ReconcileSkipped, fmt.Errorf("load module %s: %w", moduleID, err)
+	}
+	if mod == nil {
 		return ReconcileSkipped, nil
 	}
 
@@ -183,7 +197,13 @@ func (m *Manager) ReconcileModule(ctx context.Context, moduleID string) (Reconci
 		return ReconcileSkipped, err
 	}
 
-	parent, _ := m.store.GetServer(ctx, mod.ServerID)
+	parent, err := m.store.GetServer(ctx, mod.ServerID)
+	if err != nil {
+		if !isServerNotFoundError(err) {
+			return ReconcileSkipped, fmt.Errorf("load parent server for module %s: %w", mod.Name, err)
+		}
+		parent = nil
+	}
 	depsReady, err := m.moduleDependenciesRunning(ctx, mod)
 	if err != nil {
 		return ReconcileSkipped, fmt.Errorf("check dependencies for module %s: %w", mod.Name, err)
