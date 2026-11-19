@@ -376,15 +376,8 @@ printf '%s\n' '# Seeded vanilla level, mounted read-only' 'id: "${level}"' 'name
 EOF
 	docker cp "${DATA}/config/setup-bluemap.sh" "${NAME}:/tmp/setup-bluemap.sh" >/dev/null 2>&1 || return 0
 	docker exec -u root "${NAME}" sh /tmp/setup-bluemap.sh >/dev/null 2>&1 || return 0
-	if ! start_bluemap_renderer "${host_path}" "${mapdir}" "${level}"; then
+	if ! start_bluemap "${host_path}" "${mapdir}" "${level}"; then
 		echo "could not start the isolated BlueMap renderer; skipping map capture" >&2
-		return 0
-	fi
-	# Serve the generated web root on the panel's loopback namespace as soon as
-	# possible so renderer readiness probes can reach real assets while rendering
-	# continues in the background.
-	if ! start_map_server "${mapdir}"; then
-		echo "could not start the isolated BlueMap static server; skipping map capture" >&2
 		return 0
 	fi
 	deadline=$((SECONDS + 300))
@@ -395,20 +388,20 @@ EOF
 		if [ -f "${mapdir}/web/settings.json" ] && [ -d "${mapdir}/web/maps/${level}/tiles" ]; then
 			count="$(find "${mapdir}/web/maps/${level}/tiles" -type f 2>/dev/null | wc -l | tr -d ' ')"
 		fi
-		if [ "${count}" -ge 40 ] && [ "${count}" = "${prev_count}" ]; then
+		if [ "${count}" -ge 20 ] && [ "${count}" = "${prev_count}" ]; then
 			stable=$((stable + 1))
 		else
 			stable=0
 		fi
 		prev_count="${count}"
-		if [ "${stable}" -ge 5 ] && [ "${count}" -ge 40 ]; then
+		if [ "${stable}" -ge 4 ] && [ "${count}" -ge 20 ]; then
 			break
 		fi
 		sleep 3
 	done
 	if [ ! -f "${mapdir}/web/settings.json" ] ||
 		[ -z "$(find "${mapdir}/web/maps/${level}/tiles" -type f -print -quit 2>/dev/null)" ]; then
-		echo "BlueMap did not produce real tiles/settings.json within 240s; map capture will be unavailable" >&2
+		echo "BlueMap did not produce real tiles/settings.json within 300s; map capture will be unavailable" >&2
 		return 0
 	fi
 	echo "review BlueMap tile files before panel restart: ${prev_count}" >&2
@@ -465,35 +458,22 @@ remove_owned_sidecar() {
 	docker rm -f "$id" >/dev/null
 }
 
-# Real BlueMap renderer: generates genuine tiles/web assets into the bind-mounted
-# web root. It runs in its own network namespace (not the panel's) so its built-in
-# web listener cannot conflict with the static server on port 8100; the static
-# server below serves the same pre-generated real map on the panel's loopback
-# namespace while this renderer keeps running and producing real tiles.
-start_bluemap_renderer() {
+# Real BlueMap renderer and web server for the seeded world. BlueMap's own
+# webserver serves hires/lowres tiles, settings and web assets correctly for the
+# generated web root, so it must be the HTTP origin the panel probes and proxies.
+# It shares the panel's network namespace to be reachable at 127.0.0.1:8100.
+# Because network namespace sharing is tied to the panel container, this sidecar
+# must be recreated after the panel container is recreated.
+start_bluemap() {
 	local host_path="$1" mapdir="$2" level="$3"
-	remove_owned_sidecar "${NAME}-bluemap-render" || return 1
-	docker run -d --name "${NAME}-bluemap-render" \
+	remove_owned_sidecar "${NAME}-bluemap" || return 1
+	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
 		--label "carbonpanel.review.owner=${DATA}" \
 		-v "${mapdir}/config:/app/config" \
 		-v "${host_path}/${level}:/app/world:ro" \
 		-v "${mapdir}/data:/app/data" \
 		-v "${mapdir}/web:/app/web" \
 		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1
-}
-
-# Serve the SAME generated web root (real tiles + settings.json + renderer
-# assets) with a bounded static server on the panel's shared network namespace.
-# BlueMap's own web listener is not reliably reachable there. The renderer may
-# still be writing new real tiles into this directory; python http.server serves
-# the current state per request, so no map is drawn, faked or regenerated here.
-start_map_server() {
-	local mapdir="$1"
-	remove_owned_sidecar "${NAME}-bluemap" || return 1
-	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
-		--label "carbonpanel.review.owner=${DATA}" \
-		-v "${mapdir}/web:/web:ro" \
-		python:3.13-alpine python -m http.server 8100 --bind 0.0.0.0 --directory /web >/dev/null 2>&1
 }
 
 start_panel() {
@@ -557,13 +537,13 @@ up)
 			docker rm -f "${NAME}" >/dev/null
 			start_panel
 			wait_for_health
-			# Serve the SAME generated web root on the panel's loopback namespace.
-			# BlueMap's renderer keeps running in a separate container so tiles
-			# requested after initial paint can appear as real pre-generated assets.
+			# BlueMap shares the panel's network namespace, so recreating the panel
+			# drops that namespace. Restart BlueMap on the new panel container; it
+			# serves the same real generated web root and rendered tiles from disk.
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
-				if start_map_server "${server_path}/modules/bluemap"; then
-					# The map server container and the panel restart are asynchronous.
+				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" "${REVIEW_BLUEMAP_LEVEL:-world}"; then
+					# BlueMap startup/rendering and the panel restart are asynchronous.
 					# Only a semantic readiness signal may unblock the worlds
 					# capture. Match the SEEDED server, never a positional row:
 					# another target in the list must not mask this fixture.
@@ -600,44 +580,12 @@ up)
 						echo "review fixture target fields: $(printf '%s' "${fixture_target}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s);console.log(JSON.stringify({state:t.rendererState,error:t.error,freshness:t.freshness,rendererType:t.rendererType,name:t.name}))}catch(e){console.log("parse_error")}})' | cut -c1-800)" >&2
 					fi
 					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
-						map_probe="$(docker exec "${NAME}-bluemap" python -c 'import json,urllib.request; d=json.loads(urllib.request.urlopen("http://127.0.0.1:8100/settings.json", timeout=3).read().decode()); print("maps="+str(d.get("maps"))[:220])' 2>&1 || true)"
+						map_probe="$(curl -fsS --max-time 3 'http://127.0.0.1:8100/settings.json' 2>&1 || true)"
 						echo "review map settings maps: $(printf '%s' "${map_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
-						tex_probe="$(docker exec "${NAME}-bluemap" sh -c 'for p in /web/maps/*/textures.json /web/maps/*/textures.json.gz; do [ -e "$p" ] && echo "tex:$p"; done | head -n 5' 2>&1 || true)"
-						echo "review textures files: $(printf '%s' "${tex_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
-						http_probe="$(docker exec "${NAME}-bluemap" python -c "
-import json,urllib.request,gzip
-try:
- r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json', timeout=3)
- print('plain='+str(r.status)+' ct='+str(r.headers.get('Content-Type')))
-except Exception as e:
- print('plain='+type(e).__name__)
-try:
- r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json.gz', timeout=3)
- b=r.read()
- dec=gzip.decompress(b)
- print('gz='+str(r.status)+' bytes='+str(len(b))+' dec='+str(len(dec))+' ct='+str(r.headers.get('Content-Type'))+' ce='+str(r.headers.get('Content-Encoding')))
- try:
-  d=json.loads(dec.decode())
-  if isinstance(d, dict):
-   print('json=dict keys='+str(sorted(list(d.keys()))[:8]))
-   t=d.get('textures')
-   print('textures_type='+str(type(t).__name__))
-   if isinstance(t, dict):
-    print('textures_len='+str(len(t)))
-   elif isinstance(t, list):
-    print('textures_len='+str(len(t)))
-  elif isinstance(d, list):
-   print('json=list len='+str(len(d)))
-  else:
-   print('json='+str(type(d).__name__))
-  print('head='+dec[:120].decode('utf-8','replace').replace('\\n',' '))
- except Exception as e:
-  print('gz_parse='+type(e).__name__+':'+str(e)[:80])
-  print('head='+dec[:120].decode('utf-8','replace').replace('\\n',' '))
-except Exception as e:
- print('gz='+type(e).__name__)
-" 2>&1 || true)"
-						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-500)" >&2
+						tex_probe="$(find "${server_path}/modules/bluemap/web/maps" -maxdepth 3 -name 'textures.json*' 2>/dev/null | head -n 5 | tr '\n' ' ' | cut -c1-260)"
+						echo "review textures files: ${tex_probe}" >&2
+						http_probe="$(curl -sS --max-time 3 -D - -o /dev/null 'http://127.0.0.1:8100/maps/world/textures.json.gz' 2>&1 || true)"
+						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-300)" >&2
 						echo "review renderer never became READY; worlds capture will fail closed" >&2
 					else
 						# READY means textures/settings are valid, but the viewport may
@@ -665,15 +613,16 @@ except Exception as e:
 						echo "review BlueMap tile sample: ${tile_sample}" >&2
 						tile_lods="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sed -n 's#.*maps/[^/]*/tiles/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ' | cut -c1-120)"
 						echo "review BlueMap tile lods: ${tile_lods}" >&2
-						settings_info="$(docker exec "${NAME}-bluemap" python -c "
-import json,glob,os
+						settings_info="$(BLUEMAP_WEB="${server_path}/modules/bluemap/web" python3 -c "
+import json,os
 try:
- d=json.load(open('/web/settings.json'))
+ web=os.environ['BLUEMAP_WEB']
+ d=json.load(open(os.path.join(web,'settings.json')))
  m=d.get('maps')
  print('maps='+str(m)[:300])
  if isinstance(m,list) and m:
   mid=m[0] if isinstance(m[0],str) else str(m[0])
-  sp='/web/maps/'+mid+'/settings.json'
+  sp=os.path.join(web,'maps',mid,'settings.json')
   if os.path.exists(sp):
    ms=json.load(open(sp))
    print('map_keys='+str(sorted(ms.keys()))[:300])
