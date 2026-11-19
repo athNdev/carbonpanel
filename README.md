@@ -31,6 +31,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 </div>
 
+[![Full Carbon Panel desktop dashboard with navigation, populated resource panels and a named server fleet](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard-full.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+
+[View the full-resolution dashboard capture ↗](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-dashboard-full.png)
+
 ## Modpack Studio. Modpacks, made simple.
 
 Bring your pack together, choose your export format, and get it ready to share
