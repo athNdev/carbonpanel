@@ -28,7 +28,7 @@ in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-
 A recurring, read-only rehearsal runs in CI (`upgrade-rehearsal.yml`): weekly,
 on PRs that change migration/config/release surfaces and on manual dispatch. It
 runs two fail-closed cases on seeded disposable DB/world copies: the explicit
-`v1.0.40` legacy baseline (35 → 44 → 35 tables) and the current published
+`v1.0.40` legacy baseline (35 â†’ 44 â†’ 35 tables) and the current published
 stable derived from the authoritative release record by the product version
 contract, so the weekly check follows new stables without a hardcoded version.
 Both use real `carbon-panel` binaries and assert integrity, additive table
@@ -39,17 +39,17 @@ touches no live world, host, tag, release or registry, and does not replace the
 OIDC/PROXY migration go/no-go steps above. See
 [ADR 0044](adr/0044-disposable-upgrade-rehearsal-ci.md).
 
-1. **B1 — OIDC role mapping.** v1.0.40's `role_mapping: {}` example granted raw
+1. **B1 â€” OIDC role mapping.** v1.0.40's `role_mapping: {}` example granted raw
    IdP group names directly. Current main uses raw claims only behind
    `auth.oidc.allow_raw_claim_roles` (default `false`) and refuses privileged
    names even then; the default `absent_claim_policy: deny` revokes OIDC roles.
    Add an explicit `auth.oidc.role_mapping` entry for every retained role,
    including admin, and verify a test sign-in before opening access. Setting
    `allow_raw_claim_roles: true` cannot restore a privileged raw-claim role.
-2. **B2 — Explicit admin linking.** There is no implicit first-user admin.
+2. **B2 â€” Explicit admin linking.** There is no implicit first-user admin.
    Keep a local administrator, explicitly link each admin's OIDC subject, and
    verify that an unlinked identity cannot gain admin.
-3. **B3 — PROXY protocol trust.** PROXY v2 headers are trusted only from
+3. **B3 â€” PROXY protocol trust.** PROXY v2 headers are trusted only from
    `proxy.trusted_proxy_cidrs` (default `[]` trusts nobody). Add every load
    balancer source CIDR and confirm real client IPs are preserved after upgrade.
 
@@ -59,9 +59,9 @@ on future 1.0.x maintenance). The next planned stable is
 but three intentional operator/upgrade changes break an unchanged v1.0.40
 config, so a compatible MINOR would be dishonest. See
 [UPGRADE NOTES](#upgrade-notes-from-v1040) before upgrading. Before changing a
-version convention, evaluate the public API — the Connect-RPC contracts, the HTTP
+version convention, evaluate the public API â€” the Connect-RPC contracts, the HTTP
 compatibility surface, CLI flags, the configuration schema and documented
-operator behavior — against SemVer. `1.0.0` already defines that API; existing
+operator behavior â€” against SemVer. `1.0.0` already defines that API; existing
 published versions and Go module endpoints are never renumbered, retargeted or
 unpublished. A tag identifies one source commit. Published releases and their
 assets are not overwritten. Correct a bad release with a new version.
@@ -93,11 +93,11 @@ after both registries serve a complete multi-architecture index.
 
 An explicit product publication holds ONE global, non-cancelling
 **workflow-level** concurrency group, `carbonpanel-product-publish`, across the
-**entire** flow — immutable image publish, GitHub release/`latest`, and moving
+**entire** flow â€” immutable image publish, GitHub release/`latest`, and moving
 alias promotion. The lock is not released between phases, so two versions cannot
 interleave phases or strand a run after immutable publication. `cancel-in-progress:
 false` protects the **running** run; with GitHub's default `queue: single` only
-one pending run is retained, and a later request **replaces** that pending run —
+one pending run is retained, and a later request **replaces** that pending run â€”
 this lane uses **single-operator dispatch**. Do not assume every queued publisher
 waits: after a replacement, the operator must verify the resulting run before
 retrying. Alias decisions are recomputed with live preflight inside the same
@@ -144,7 +144,7 @@ multi-architecture Docker image digest. Both command-line tools support
 `--version` without starting the service or loading configuration.
 
 Download `checksums.txt` beside the archive and verify before extracting. The
-concrete commands below use the current stable 1.0.40 asset names — the files
+concrete commands below use the current stable 1.0.40 asset names â€” the files
 you can actually download today. A future release uses the same pattern with
 its own version:
 
@@ -192,7 +192,7 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | `2.0.0` | An exact stable release, immutable |
 | `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
 | `latest` | Moving stable channel, promoted only with a stable release |
-| `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
+| `edge`, `sha-â€¦` | Docker Hub development builds from CI-verified main commits; not versions |
 | `nightly` | Development channel promoted on every successful trusted main CI on BOTH registries at one verified multiarch digest; never a GitHub Release or a stable version |
 | GHCR `3.0.0-alpha.1` | Historical GHCR-only preview; not a stable release and not on Docker Hub |
 
@@ -252,7 +252,7 @@ previous commit to the **observed** alias digest through that same config-based
 sha evidence before the ancestry check; an operator-supplied commit string alone
 is never trusted. Repeating a promotion at the same digest is idempotent.
 
-Buildx writes only the `sha-<commit>` reference — there is no implicit early
+Buildx writes only the `sha-<commit>` reference â€” there is no implicit early
 `edge` or `nightly` move. After the immutable image is verified, `edge` is moved
 by an explicitly gated, digest-based step (so it survives a sha reuse in either
 publication order), and `nightly` by its own gated step. All publication uses one
@@ -322,17 +322,17 @@ exact staged digest, never a rebuild or blind alias move; partial failure
 reconciles or rolls back to the prior verified receipt.
 
 `nightly` advances on each successful main on both registries at one digest and
-produces NO GitHub Release. No redundant `rolling` channel is added — the user-
+produces NO GitHub Release. No redundant `rolling` channel is added â€” the user-
 facing `nightly` alias and the existing supported release aliases are sufficient.
 Nightly revision belongs in the published artifact/marker and the receipt only;
 no mutable Nightly state is committed to main, which would self-trigger CI.
 Canonical `carbonpanel-v*` builds stay immutable. A reconciliation run re-verifies
 and repairs drift. `latest` and the `stable` alias move only from the verified
-stable digest (`sha256:ead260ef…`, commit `f88748be…`); the planned
+stable digest (`sha256:ead260efâ€¦`, commit `f88748beâ€¦`); the planned
 `carbonpanel-v2.0.0` stable is not a channel publication.
 
-The verified current Docker Hub nightly baseline (`sha256:ecc89ba9…`, commit
-`d8597d4e…`) is a fact about today's registry, not a mandatory first revision.
+The verified current Docker Hub nightly baseline (`sha256:ecc89ba9â€¦`, commit
+`d8597d4eâ€¦`) is a fact about today's registry, not a mandatory first revision.
 It seeds nightly only through a bounded, recorded bootstrap that re-verifies
 dual-registry parity and a matching docs marker; no shipped workflow supplies
 `--bootstrap`. All channel and docs moves share ONE fixed non-cancelling
@@ -345,7 +345,7 @@ digest and commit: an
 ancestor check refuses stale/out-of-order moves, an alias already at the target
 is an idempotent no-op, a partial move converges, and a candidate that loses
 qualification rolls back to the previous verified digest. No immutable tag is
-overwritten and no tag is deleted. See ADR 0046.
+overwritten and no tag is deleted. See ADR 0048.
 
 The trigger/tag-name patterns behind these channels follow the dated primary-
 source research note `container-image-stable-rolling-channels-2026-11-20.md`:
@@ -371,7 +371,7 @@ Releases link; they remain correctly marked as prereleases.
 
 1. Update the changelog and upgrade documentation for shipped changes. Merge the
    intended commit and wait for **Continuous Integration** on main to succeed.
-2. Open **Actions → Carbon Panel Release → Run workflow**. Enter the canonical
+2. Open **Actions â†’ Carbon Panel Release â†’ Run workflow**. Enter the canonical
    product tag (for example `carbonpanel-v2.0.0`) and the exact commit (or
    `main`). Leave **publish** off for a complete build and verification
    rehearsal. The rehearsal creates no tag or release and pushes no image; its
@@ -382,8 +382,8 @@ Releases link; they remain correctly marked as prereleases.
    requires a trusted `refs/heads/main` dispatch ref and exact-commit main CI,
    verified read-only by `verify-publication-ref`.
 
-Pushing a `carbonpanel-v*` tag — like a branch push, a pull request, a CI run, a
-plain `v*` tag, a documentation tag or a rehearsal tag — only stages, builds and
+Pushing a `carbonpanel-v*` tag â€” like a branch push, a pull request, a CI run, a
+plain `v*` tag, a documentation tag or a rehearsal tag â€” only stages, builds and
 verifies. It never writes to a registry or a GitHub release. `mod-*` tags belong
 to the separate module workflow. The publication decision is made by
 `publication_allowed()` in `scripts/release.py` and requires an explicit
@@ -441,7 +441,7 @@ Verification uses per-SHA cancellable concurrency groups, while opted-in
 publication uses a fixed channel-wide, non-cancelling group (`cd-publish-edge`
 and `pages-deploy`) with no SHA. Different commits therefore serialize on the
 moving `:edge`/Pages destinations, and routine builds cannot cancel an
-in-flight publication. The workflows are not disabled — they still build and
+in-flight publication. The workflows are not disabled â€” they still build and
 validate on their normal triggers.
 
 IndexNow notification is deliberately deferred under that model:

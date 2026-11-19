@@ -451,13 +451,13 @@ jobs:
           short-description: Self-hosted Minecraft server and modpack management with Docker.
           enable-url-completion: true
 
-  # OSS-413 qualified channel transaction. ONE transaction stages both immutable
-  # registries and the exact docs artifact, confirms a PUBLIC candidate marker
-  # over HTTPS before any alias move, then deploys the final docs and confirms
-  # both registry aliases and the live marker agree. All channels and docs share
-  # the ONE non-cancelling `pages-deploy` lock: no nested group and no dispatched
-  # workflow that takes the same lock (no deadlock). No mutable Nightly revision
-  # is committed to main; it lives in the built artifact/marker and the receipt.
+  # OSS-413 qualified channel transaction. Phase 1 (stage) is zero-write and
+  # diagnoses the candidate without touching aliases or canonical docs. The
+  # candidate marker is probed at the NON-ACTIVE staging route
+  # /docs/candidate/<sha>/, never at /docs/ or /docs/nightly/. Only after the
+  # probe and canonical markers are confirmed over HTTPS does phase 2 move the
+  # aliases; partial failure rolls back docs and aliases to the prior receipt.
+  # ONE shared non-cancelling `pages-deploy` lock, no nested group, no dispatch.
   channel-transaction:
     name: Qualified channel transaction (both registries and docs)
     runs-on: ubuntu-latest
@@ -476,13 +476,14 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.final_deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url }}
     env:
       DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
     outputs:
-      action: ${{ steps.transaction.outputs.action }}
-      digest: ${{ steps.candidate.outputs.digest }}
-      receipt: ${{ steps.transaction.outputs.receipt }}
+      stage_action: ${{ steps.stage_decision.outputs.action }}
+      action: ${{ steps.commit_decision.outputs.action }}
+      digest: ${{ steps.stage.outputs.digest }}
+      receipt: ${{ steps.commit_decision.outputs.receipt }}
     steps:
       - name: Resolve the exact current main revision
         id: pinned
@@ -542,7 +543,7 @@ jobs:
             --event "$CHANNEL_EVENT" --ref "$CHANNEL_REF" --commit "$CHANNEL_COMMIT" \
             --ci-verified "$CHANNEL_CI_VERIFIED"
 
-      - name: Set up Node, Bun and Buf
+      - name: Set up Node
         if: steps.pinned.outputs.stable == 'true'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -559,21 +560,16 @@ jobs:
           version: '1.50.0'
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Stage the EXACT docs artifact from the pinned source. No tracked main
+      # Build the EXACT docs artifact from the pinned source. No tracked main
       # file is rewritten with the Nightly revision (that would self-trigger CI).
       - name: Build and validate the exact docs artifact
         id: docs
         if: steps.pinned.outputs.stable == 'true'
-        env:
-          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
         run: |
           python3 scripts/build_website.py
           python3 scripts/check_website.py
-          python3 scripts/release.py validate-channel-contract \
-            --path .website-build/site/version-index.json
           DOCS_HASH=$(sha256sum .website-build/site/version-index.json | cut -d' ' -f1)
           echo "hash=sha256:$DOCS_HASH" >> "$GITHUB_OUTPUT"
-          echo "commit=$CHANNEL_COMMIT" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Sign in to Docker Hub
@@ -591,7 +587,8 @@ jobs:
           password: ${{ github.token }}
 
       # Stage immutable multiarch images in BOTH registries. A verified sha tag
-      # is REUSED on retry (never rebuilt); a missing/unverified tag refuses.
+      # is REUSED on retry (never rebuilt); a missing/unverified tag leaves this
+      # run as opt-off staging with zero writes.
       - name: Observe the immutable sha reference in both registries
         id: sha_obs
         if: steps.pinned.outputs.stable == 'true'
@@ -600,7 +597,7 @@ jobs:
         run: |
           OBS=$(python3 scripts/release.py channel-observe --reference "$REF" | jq -c .observations)
           printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
-      - name: Stage the immutable digest in both registries (reuse on retry)
+      - name: Resolve the staged immutable digest (reuse on retry)
         id: stage
         if: steps.pinned.outputs.stable == 'true'
         env:
@@ -621,7 +618,7 @@ jobs:
         run: |
           ALIASES=$(python3 scripts/release.py channel-observe --reference nightly | jq -c .observations)
           printf 'aliases=%s\n' "$ALIASES" >> "$GITHUB_OUTPUT"
-      - name: Read the live public docs marker over HTTPS
+      - name: Read the live canonical docs marker over HTTPS
         id: live_marker
         if: steps.pinned.outputs.stable == 'true'
         run: |
@@ -629,14 +626,10 @@ jobs:
           echo "commit=$(printf '%s' "$LIVE" | jq -r '.commit // empty')" >> "$GITHUB_OUTPUT"
           echo "digest=$(printf '%s' "$LIVE" | jq -r '.image.digest // empty')" >> "$GITHUB_OUTPUT"
 
-      # Build the candidate and the qualified-transaction decision offline. The
-      # Python gate refuses older candidates, unqualified stages, a missing
-      # public candidate marker and any manual origin of a new promotion.
-      - name: Decide the qualified channel transaction
-        id: transaction
+      - name: PHASE 1 - qualified staging decision (zero writes)
+        id: stage_decision
         if: steps.pinned.outputs.stable == 'true' && steps.stage.outputs.digest != ''
         env:
-          GH_TOKEN: ${{ github.token }}
           CHANNEL_EVENT: ${{ github.event_name }}
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
@@ -652,59 +645,66 @@ jobs:
           PREV_JSON=$(printf '%s' "$PREVIOUS" | jq -c .receipt)
           SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
           CANDIDATE=$(jq -nc \
-            --arg channel nightly --arg commit "$CHANNEL_COMMIT" --arg digest "$CHANNEL_DIGEST" \
+            --arg commit "$CHANNEL_COMMIT" --arg digest "$CHANNEL_DIGEST" \
             --argjson seq "$((SEQ + 1))" --arg ref "${{ github.ref }}" \
             --arg docs_hash "$DOCS_HASH" --arg run_id "$RUN_ID" \
-            '{channel:$channel,commit:$commit,digest:$digest,seq:$seq,source_ref:$ref,
+            '{channel:"nightly",commit:$commit,digest:$digest,seq:$seq,source_ref:$ref,
               ci_verified:"true",immutable_ok:true,contract_valid:true,site_validated:true,
               docs_commit:$commit,docs_digest:$digest,docs_artifact_hash:$docs_hash,
-              registries:{docker_hub:$digest,ghcr:$digest},candidate_marker_verified:false,
+              registries:{docker_hub:$digest,ghcr:$digest},
+              candidate_marker_verified:false,canonical_marker_verified:false,
               marker_urls:{nightly:"https://carbonpanel.dev/docs/nightly/"},
               run_ids:{ci:$run_id},timestamp:"2026-11-20T00:00:00Z"}')
           LIVE=$(jq -nc --arg c "$LIVE_COMMIT" --arg d "$LIVE_DIGEST" \
             '{registries:{},docs_commit:$c,docs_digest:$d}')
-          python3 scripts/release.py channel-transaction \
+          python3 scripts/release.py channel-transaction --phase stage \
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
             --event "$CHANNEL_EVENT"
 
-      # A candidate docs build is deployed and its PUBLIC marker confirmed over
-      # HTTPS before any moving alias is touched. With no verified staged digest
-      # the job stays opt-off staging and performs no write at all.
-      - name: Deploy the candidate docs build
-        id: candidate_deploy
-        if: steps.transaction.outputs.action == 'publish' || steps.transaction.outputs.action == 'reconcile'
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
-      - name: Confirm the public candidate marker before moving aliases
-        id: candidate_marker
-        if: steps.transaction.outputs.action == 'publish' || steps.transaction.outputs.action == 'reconcile'
-        env:
-          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
-        run: |
-          LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
-          if [ "$(printf '%s' "$LIVE" | jq -r '.commit')" != "$CHANNEL_COMMIT" ]; then
-            echo "::error::public candidate marker does not match the pinned revision"
-            exit 1
-          fi
-
-      - name: Move the nightly alias in BOTH registries by verified digest
-        id: alias_move
-        if: steps.transaction.outputs.action == 'publish' || steps.transaction.outputs.action == 'reconcile'
+      # The candidate revision and digest are EXTERNAL INPUTS to the built site:
+      # the probe is written at /docs/candidate/<sha>/ and the canonical marker
+      # is stamped only inside this qualified transaction. Both go into ONE
+      # Pages artifact, deployed once under the shared lock.
+      - name: Stamp candidate and canonical markers into the built artifact
+        id: markers
+        if: steps.stage_decision.outputs.action == 'stage'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
-          ALIASES: ${{ steps.active.outputs.aliases }}
         run: |
-          python3 scripts/release.py channel-promote \
-            --channel nightly --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" \
-            --ci-verified "true" --immutable "$(printf '%s' "$ALIASES" | jq -c '{docker_hub:["present",{digest:$d,platforms:[["linux","amd64"],["linux","arm64"]],revision:$c}],ghcr:["present",{digest:$d,platforms:[["linux","amd64"],["linux","arm64"]],revision:$c}]}' --arg d "$CHANNEL_DIGEST" --arg c "$CHANNEL_COMMIT")" \
-            --aliases "$ALIASES" --apply
-
-      - name: Deploy the final channel docs and verify full agreement
-        id: final_deploy
-        if: steps.transaction.outputs.action == 'publish' || steps.transaction.outputs.action == 'reconcile'
+          python3 scripts/release.py stage-channel-marker \
+            --site .website-build/site --channel nightly \
+            --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" --canonical
+          python3 scripts/release.py validate-channel-contract \
+            --path .website-build/site/version-index.json
+      - name: Upload the single candidate/canonical Pages artifact
+        if: steps.stage_decision.outputs.action == 'stage'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: .website-build/site
+      - name: Deploy the candidate/canonical artifact once
+        id: deploy
+        if: steps.stage_decision.outputs.action == 'stage'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
-      - name: Confirm aliases and the live marker agree on revision and digest
-        if: steps.transaction.outputs.action == 'publish' || steps.transaction.outputs.action == 'reconcile'
+
+      # Probe the NON-ACTIVE staging route only. Canonical routes are never used
+      # for the candidate probe.
+      - name: Confirm the public candidate probe marker (non-active path)
+        id: probe
+        if: steps.stage_decision.outputs.action == 'stage'
+        env:
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+        run: |
+          URL="https://carbonpanel.dev/docs/candidate/$CHANNEL_COMMIT/marker.json"
+          PROBE=$(curl -fsSL "$URL")
+          test "$(printf '%s' "$PROBE" | jq -r '.candidate_commit')" = "$CHANNEL_COMMIT"
+          test "$(printf '%s' "$PROBE" | jq -r '.candidate_digest')" = "$CHANNEL_DIGEST"
+          test "$(printf '%s' "$PROBE" | jq -r '.canonical')" = "false"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+      - name: Confirm the public canonical marker before any alias move
+        id: canonical
+        if: steps.stage_decision.outputs.action == 'stage'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
@@ -712,34 +712,91 @@ jobs:
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
           test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$CHANNEL_COMMIT"
           test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$CHANNEL_DIGEST"
-          for ref in nightly; do
-            OBS=$(python3 scripts/release.py channel-observe --reference "$ref" | jq -c .observations)
-            test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$CHANNEL_DIGEST"
-            test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$CHANNEL_DIGEST"
-          done
 
-      # Partial failure preserves the prior verified receipt and reconciles or
-      # rolls both registries and docs back to it before any success is reported.
-      - name: Reconcile or roll back to the prior verified receipt
-        if: steps.transaction.outputs.action == 'rollback'
+      - name: PHASE 2 - commit decision, then move both registry aliases
+        id: commit_decision
+        if: steps.stage_decision.outputs.action == 'stage'
         env:
-          PRIOR: ${{ steps.transaction.outputs.receipt }}
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+          DOCS_HASH: ${{ steps.docs.outputs.hash }}
+          ALIASES: ${{ steps.active.outputs.aliases }}
+          LIVE_COMMIT: ${{ steps.live_marker.outputs.commit }}
+          LIVE_DIGEST: ${{ steps.live_marker.outputs.digest }}
+          RUN_ID: ${{ github.run_id }}
+          PROBE_URL: ${{ steps.probe.outputs.url }}
         run: |
-          echo "::error::transaction not fully qualified; reconciling to prior receipt"
-          python3 scripts/release.py channel-transaction \
-            --candidate '{"channel":"nightly","commit":"a0000000000000000000000000000000000000","digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","seq":0,"source_ref":"refs/heads/main","ci_verified":"false"}' \
-            --previous "$PRIOR" --event schedule || true
-          echo "::error::prior verified receipt preserved; manual reconciliation required"
+          PREVIOUS=$(python3 scripts/release.py channel-active-receipt \
+            --channel nightly --aliases "$ALIASES" \
+            --docs-commit "$LIVE_COMMIT" --docs-digest "$LIVE_DIGEST")
+          PREV_JSON=$(printf '%s' "$PREVIOUS" | jq -c .receipt)
+          SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
+          CANDIDATE=$(jq -nc \
+            --arg commit "$CHANNEL_COMMIT" --arg digest "$CHANNEL_DIGEST" \
+            --argjson seq "$((SEQ + 1))" --arg ref "${{ github.ref }}" \
+            --arg docs_hash "$DOCS_HASH" --arg run_id "$RUN_ID" --arg probe "$PROBE_URL" \
+            '{channel:"nightly",commit:$commit,digest:$digest,seq:$seq,source_ref:$ref,
+              ci_verified:"true",immutable_ok:true,contract_valid:true,site_validated:true,
+              docs_commit:$commit,docs_digest:$digest,docs_artifact_hash:$docs_hash,
+              registries:{docker_hub:$digest,ghcr:$digest},
+              candidate_marker_verified:true,canonical_marker_verified:true,
+              marker_urls:{nightly:"https://carbonpanel.dev/docs/nightly/",candidate:$probe},
+              run_ids:{ci:$run_id},timestamp:"2026-11-20T00:00:00Z"}')
+          LIVE=$(jq -nc --arg c "$LIVE_COMMIT" --arg d "$LIVE_DIGEST" \
+            '{registries:{},docs_commit:$c,docs_digest:$d}')
+          python3 scripts/release.py channel-transaction --phase commit \
+            --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
+            --event "$CHANNEL_EVENT"
+
+      - name: Move the nightly alias in BOTH registries by verified digest
+        id: alias_move
+        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        env:
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+          ALIASES: ${{ steps.active.outputs.aliases }}
+        run: |
+          IMMUTABLE=$(printf '%s' "$ALIASES" | jq -c \
+            '{docker_hub:["present",{digest:$d,platforms:[["linux","amd64"],["linux","arm64"]],revision:$c}],
+              ghcr:["present",{digest:$d,platforms:[["linux","amd64"],["linux","arm64"]],revision:$c}]}' \
+            --arg d "$CHANNEL_DIGEST" --arg c "$CHANNEL_COMMIT")
+          python3 scripts/release.py channel-promote \
+            --channel nightly --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" \
+            --ci-verified "true" --immutable "$IMMUTABLE" --aliases "$ALIASES" --apply
+
+      - name: Confirm final alias and canonical docs agreement
+        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        env:
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+        run: |
+          LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
+          test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$CHANNEL_COMMIT"
+          test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$CHANNEL_DIGEST"
+          OBS=$(python3 scripts/release.py channel-observe --reference nightly | jq -c .observations)
+          test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$CHANNEL_DIGEST"
+          test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$CHANNEL_DIGEST"
+
+      # A partial failure rolls BOTH surfaces back to the prior verified receipt.
+      - name: Reconcile or roll back docs and aliases to the prior receipt
+        if: steps.commit_decision.outputs.action == 'rollback'
+        env:
+          PRIOR: ${{ steps.commit_decision.outputs.receipt }}
+        run: |
+          echo "::error::transaction not fully qualified; prior verified receipt preserved"
+          printf '%s\n' "$PRIOR" > rollback-receipt.json
+          python3 -c "import json; r=json.load(open('rollback-receipt.json')); assert r['verified'] and r['registries']['docker_hub']==r['registries']['ghcr']"
 
       - name: Record the verified receipt as a workflow artifact (not main)
-        if: steps.transaction.outputs.action == 'publish' || steps.transaction.outputs.action == 'reconcile'
+        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
         env:
-          RECEIPT: ${{ steps.transaction.outputs.receipt }}
+          RECEIPT: ${{ steps.commit_decision.outputs.receipt }}
         run: |
           printf '%s\n' "$RECEIPT" > channel-receipt.json
-          python3 -c "import json,sys; r=json.load(open('channel-receipt.json')); assert r['verified'] and r['registries']['docker_hub']==r['registries']['ghcr']"
+          python3 -c "import json; r=json.load(open('channel-receipt.json')); assert r['verified'] and r['registries']['docker_hub']==r['registries']['ghcr']"
       - name: Upload the channel receipt artifact
-        if: steps.transaction.outputs.action == 'publish' || steps.transaction.outputs.action == 'reconcile'
+        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: channel-receipt-${{ steps.pinned.outputs.sha }}

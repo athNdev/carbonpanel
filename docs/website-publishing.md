@@ -24,7 +24,7 @@ from a `v` prefix. Only `carbonpanel-published-stable`,
 `v3.0.0-beta.4` (an upstream name collision misbound to a public label) and
 `v1.0.38` (local and authoritative remote tag ancestry differ) are excluded.
 A source-only version has no download CTA. The verified stable is `1.0.40` at
-peeled commit `f88748be…`; `3.0.0-alpha.1` is a GHCR-only legacy preview and is
+peeled commit `f88748beâ€¦`; `3.0.0-alpha.1` is a GHCR-only legacy preview and is
 never sorted above stable. The proto's `2.x` declares the independent Connect-OpenAPI schema family;
 shipped bundled and website schema copies stamp `info.version` with the exact
 product version (CLI `--version`, UI runtime `build/version.json` and release
@@ -212,7 +212,7 @@ logo and vendored IBM Plex fonts. It needs a Chromium-family browser, or use
 for browser captures. Advance each card's `?v=` query when its artwork changes.
 The same template renders a 1280 by 640 repository card at
 `assets/branding/social-preview.png`. Upload that PNG in GitHub's repository
-Settings → Social preview; committing it alone does not change that setting.
+Settings â†’ Social preview; committing it alone does not change that setting.
 `scripts/check_website.py` fails when a page is missing metadata, points at a
 relative or missing image, or lets a prominent route fall back to the shared
 card. Keep preview titles, descriptions and alt text free of em dashes.
@@ -262,5 +262,5 @@ already-active channel source from the live registries and public marker and
 passes the qualified-transaction gate with that exact receipt source. All
 channel and docs moves share ONE non-cancelling `pages-deploy` lock with no
 nested group or self-dispatch. The Nightly revision lives in the published
-artifact, marker and receipt — never in a tracked main file updated per build.
-See ADR 0046 and [release operations](releases.md).
+artifact, marker and receipt â€” never in a tracked main file updated per build.
+See ADR 0048 and [release operations](releases.md).

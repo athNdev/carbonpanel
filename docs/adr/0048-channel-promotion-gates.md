@@ -1,4 +1,4 @@
-# ADR 0046: Verified channel promotion gates for docs and OCI
+# ADR 0048: Verified channel promotion gates for docs and OCI
 
 - Status: Accepted
 - Date: 2026-11-20
@@ -16,8 +16,8 @@ whose CI never passed, the docs selector can advertise a channel whose image was
 never verified, and a partially applied move can leave one registry or route at
 a newer digest than the other. The existing `nightly` publisher was Docker Hub
 only and required an explicit dispatch, so it could go stale. The `v1.0.40`
-stable baseline (`sha256:ead260ef…`, commit `f88748be…`) and the current Docker
-Hub nightly baseline (`sha256:ecc89ba9…`, commit `d8597d4e…`) are verified facts
+stable baseline (`sha256:ead260efâ€¦`, commit `f88748beâ€¦`) and the current Docker
+Hub nightly baseline (`sha256:ecc89ba9â€¦`, commit `d8597d4eâ€¦`) are verified facts
 about today's registries, not a licence to relabel an old digest as a new
 channel candidate.
 
@@ -87,10 +87,10 @@ paraphrased below rather than duplicated:
    at the same digest and OCI revision and creates NO GitHub Release; per-commit
    `sha-*` images stay immutable. No redundant `rolling` channel is added: the
    user-facing `nightly` alias and existing release aliases are sufficient.
-   Nightly revision belongs in the published artifact/marker and receipt only —
+   Nightly revision belongs in the published artifact/marker and receipt only â€”
    it is never committed to a tracked main file, which would self-trigger CI.
    A reconciliation schedule re-verifies and repairs drift.
-4. **Bounded bootstrap, never a blind relabel.** `d8597d4e…`/`sha256:ecc89ba9…`
+4. **Bounded bootstrap, never a blind relabel.** `d8597d4eâ€¦`/`sha256:ecc89ba9â€¦`
    is a verified current Docker Hub baseline, not a mandatory first revision.
    It seeds nightly only through an explicit `--bootstrap` whose dual-registry
    parity and matching docs marker are re-verified; the normal path promotes the

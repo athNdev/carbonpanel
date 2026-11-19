@@ -10,10 +10,10 @@ code_refs:
   - .github/workflows/release.yml
   - scripts/release.py
   - scripts/test_release.py
-  - docs/adr/0046-channel-promotion-gates.md
+  - docs/adr/0048-channel-promotion-gates.md
 sources:
   - title: Channel promotion decision
-    resource: ../../docs/adr/0046-channel-promotion-gates.md
+    resource: ../../docs/adr/0048-channel-promotion-gates.md
   - title: Release operations and versioning
     resource: ../../docs/releases.md
   - title: Website publishing
@@ -46,14 +46,14 @@ sources:
 - `nightly` advances on each successful main on BOTH registries at one digest with
   NO GitHub Release; a reconciliation re-verifies and repairs drift. No redundant
   `rolling` channel is added. Nightly revision lives in the published artifact,
-  marker and receipt only — never in a tracked main file that would self-trigger
+  marker and receipt only â€” never in a tracked main file that would self-trigger
   CI. Canonical `carbonpanel-v*` images stay immutable.
-- The verified Hub-only nightly baseline `d8597d4e…`/`sha256:ecc89ba9…` is not
+- The verified Hub-only nightly baseline `d8597d4eâ€¦`/`sha256:ecc89ba9â€¦` is not
   a mandatory first revision. It seeds nightly only through a bounded, recorded
   bootstrap that re-verifies dual-registry parity and a matching docs marker;
   no shipped workflow supplies `--bootstrap`.
 - `latest` and the `stable` alias move only from the verified stable digest
-  (`f88748be…`/`sha256:ead260ef…`). The planned `carbonpanel-v2.0.0` stable is
+  (`f88748beâ€¦`/`sha256:ead260efâ€¦`). The planned `carbonpanel-v2.0.0` stable is
   not a channel publication; arbitrary, inherited and legacy tags never publish.
 - All channel and docs moves share ONE fixed non-cancelling publication lock
   (`pages-deploy`, `cancel-in-progress: false`); no nested group and no dispatched
@@ -73,4 +73,4 @@ sources:
 Separate manual publishers let a channel, the images and the docs selector
 drift apart. One verified revision/digest pairing per move, serialized and
 digest-bound, makes retry and rollback safe and keeps immutable releases exact.
-See ADR 0046 and the dated research note referenced there.
+See ADR 0048 and the dated research note referenced there.

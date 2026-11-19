@@ -664,7 +664,7 @@ def immutable_publication_decision(observations, expected_digest=None, provenanc
 
 
 def verify_tag_digest(observation, expected_digest):
-    """Verify the expected tag→digest mapping and both architectures."""
+    """Verify the expected tagâ†’digest mapping and both architectures."""
     state, info = observation
     if state != "present":
         raise ValueError("Version tag is absent after publication")
@@ -758,7 +758,7 @@ def migration_guide_notes(repository, git_tag):
     guide = f"https://github.com/{repository}/blob/{git_tag}/docs/releases.md#upgrade-notes-from-v1040"
     history = f"https://github.com/{repository}/blob/{git_tag}/docs/release-history.md#upgrade-notes--read-before-upgrading-from-v1040"
     return (
-        "## UPGRADE NOTES — read before upgrading from v1.0.40\n\n"
+        "## UPGRADE NOTES â€” read before upgrading from v1.0.40\n\n"
         f"**User-facing migration guide: {guide}** (full provenance and evidence: {history}).\n\n"
         "This MAJOR release has three prerequisites; complete all three before upgrading:\n\n"
         "1. **OIDC raw-group role mapping and explicit admin linking.** v1.0.40's "
@@ -911,7 +911,7 @@ def alias_move_decision(candidate, candidate_digest, observations, digest_versio
     """Fail-closed check before moving a moving alias.
 
     observations: {registry: (state, info)} of the current alias in each
-    registry. digest_versions: digest→version from durable release records.
+    registry. digest_versions: digestâ†’version from durable release records.
     Equal registry refs alone do not authorize a move, and an unknown version
     for an observed digest refuses instead of relying on release history alone.
     """
@@ -996,8 +996,8 @@ NIGHTLY_ALIAS = "nightly"
 def nightly_channel_decision(event_name, opt_in=False, run_event="", conclusion="",
                              ref="", ci_verified=False):
     """Trusted-main dispatch writes require an explicit opt-in and a read-only
-    exact-commit main CI verification. Every other event — main push, CI
-    workflow_run, PR, tag — stages only. Native schedules use the separate,
+    exact-commit main CI verification. Every other event â€” main push, CI
+    workflow_run, PR, tag â€” stages only. Native schedules use the separate,
     default-off nightly_schedule_decision() path below.
     """
     allowed, reason = developer_channel_decision(
@@ -1088,7 +1088,7 @@ def nightly_identity_binding(previous_commit, previous_digest, observer=None,
 
     Uses independent source evidence for the PREVIOUS image: its own live sha
     index digest and both platform config revisions. It never reuses the
-    candidate's CI result or evidence digest. Returns a digest→commit map only
+    candidate's CI result or evidence digest. Returns a digestâ†’commit map only
     for the fully verified previous identity; otherwise {} so promotion refuses.
     """
     if not previous_commit or not previous_digest or not valid_digest(previous_digest):
@@ -1531,7 +1531,7 @@ def preflight_immutable(args):
 
 
 def verify_immutable(args):
-    """Verify expected tag→digest and both architectures in every registry."""
+    """Verify expected tagâ†’digest and both architectures in every registry."""
     tag = resolve_panel_version(args.version)
     results = {}
     for name, ref in immutable_references(tag).items():
@@ -1867,7 +1867,7 @@ def verify_release_record(args):
 
 
 def verify_reference(args):
-    """Verify a single registry reference→digest mapping and both arches."""
+    """Verify a single registry referenceâ†’digest mapping and both arches."""
     observation = observe_reference(args.reference)
     verify_tag_digest(observation, args.digest)
     print(json.dumps({"reference": args.reference, "digest": args.digest,
@@ -1975,14 +1975,13 @@ def publish(args):
 # schema_version 3 contract plus exact site build (docs). Every move is
 # digest-anchored and bound to the previously verified digest so a retry or a
 # partial failure can converge or roll back without ever overwriting an
-# immutable version tag. See ADR 0046 and docs/releases.md.
+# immutable version tag. See ADR 0048 and docs/releases.md.
 
 CHANNEL_CONTRACT_SCHEMA = 3
 CHANNEL_NAMES = ("stable", "nightly")
 CHANNEL_SELECTOR_LABELS = ("Stable", "Nightly")
 LEGACY_DOC_SNAPSHOTS = ("1.0.39", "3.0.0-alpha.1")
 CHANNEL_REGISTRIES = ("docker_hub", "ghcr")
-ROLLING_ALIAS = "rolling"  # legacy constant; no redundant rolling channel is created
 
 # The verified stable baseline is the ONLY source from which `latest` and the
 # `stable` alias may move. It is frozen historical provenance, not a candidate.
@@ -2001,7 +2000,7 @@ NIGHTLY_HUB_BASELINE = {
     "digest": ("sha256:ecc89ba96fb6ea73e3ebb85c4dc8452d8210ce"
                "5e96d00fa1c64239c965a9302d"),
 }
-CHANNEL_MOVABLE = ("stable", "nightly", ROLLING_ALIAS, "docs")
+CHANNEL_MOVABLE = ("stable", "nightly", "docs")
 
 
 def valid_commit(value):
@@ -2276,20 +2275,31 @@ def channel_rollback_decision(channel, previous_commit, previous_digest,
 # so retry reuses the staged digest and partial failure rolls back or reconciles.
 
 CHANNEL_PUBLISH_GROUP = "pages-deploy"  # the ONE shared non-cancelling lock
+TX_STAGE = "stage"  # pre-write phase: no alias move, no docs deployment
+TX_COMMIT = "commit"  # final phase: alias move only after a verified marker
 TX_STAGE_IMMUTABLE = "stage_immutable_both_registries"
 TX_STAGE_DOCS = "stage_exact_docs_artifact"
-TX_DEPLOY_CANDIDATE = "deploy_candidate_docs"
-TX_VERIFY_CANDIDATE = "verify_public_candidate_marker"
+TX_STAGE_MARKER = "stamp_candidate_probe_marker_at_staging_path"
+TX_DEPLOY_CANDIDATE = "deploy_candidate_probe_docs"
+TX_VERIFY_CANDIDATE = "verify_public_candidate_probe_marker"
+TX_DEPLOY_CANONICAL = "deploy_canonical_channel_docs"
+TX_VERIFY_CANONICAL = "verify_public_canonical_marker"
 TX_MOVE_ALIASES = "move_both_registry_aliases"
-TX_DEPLOY_FINAL = "deploy_final_channel_docs"
 TX_VERIFY_FINAL = "verify_final_aliases_and_docs"
 TX_WRITE_RECEIPT = "record_receipt"
 TX_RECONCILE = "reconcile_partial_failure"
 TX_ROLLBACK = "rollback_to_previous_receipt"
+TX_ROLLBACK_DOCS = "restore_previous_canonical_docs"
 
-TX_PUBLISH_STEPS = (TX_STAGE_IMMUTABLE, TX_STAGE_DOCS, TX_DEPLOY_CANDIDATE,
-                    TX_VERIFY_CANDIDATE, TX_MOVE_ALIASES, TX_DEPLOY_FINAL,
-                    TX_VERIFY_FINAL, TX_WRITE_RECEIPT)
+# The candidate probe is a NON-ACTIVE staging route. Canonical channel routes
+# and the public machine-readable marker are published only in the commit phase,
+# before any registry alias move; rollback restores both surfaces together.
+TX_STAGE_STEPS = (TX_STAGE_IMMUTABLE, TX_STAGE_DOCS, TX_STAGE_MARKER,
+                  TX_DEPLOY_CANDIDATE, TX_VERIFY_CANDIDATE)
+TX_PUBLISH_STEPS = (TX_STAGE_IMMUTABLE, TX_STAGE_DOCS, TX_STAGE_MARKER,
+                    TX_DEPLOY_CANDIDATE, TX_VERIFY_CANDIDATE,
+                    TX_DEPLOY_CANONICAL, TX_VERIFY_CANONICAL,
+                    TX_MOVE_ALIASES, TX_VERIFY_FINAL, TX_WRITE_RECEIPT)
 
 
 def channel_receipt(channel, commit, digest, docs_hash, docs_commit, docs_digest,
@@ -2306,14 +2316,17 @@ def channel_receipt(channel, commit, digest, docs_hash, docs_commit, docs_digest
 
 
 def channel_transaction_decision(candidate, previous=None, live=None,
-                                 event="workflow_run", ancestry=None):
+                                 event="workflow_run", ancestry=None,
+                                 phase=TX_COMMIT):
     """Decide one qualified channel transaction.
 
-    Returns (action, reason, receipt, steps). action is publish, noop,
-    reconcile, rollback or refuse. `previous` is the preserved verified receipt;
-    `live` is the observed registry-alias and docs-marker state; `candidate`
-    carries the qualified-stage evidence. A manual dispatch can only re-publish
-    an ALREADY-ACTIVE exact source from the receipt, never originate a move.
+    `phase=stage` applies every gate EXCEPT the public-candidate-marker
+    confirmation and returns a zero-write staging plan: no alias move, no docs
+    deploy, no receipt. `phase=commit` requires the confirmed public marker and
+    may return publish/noop/reconcile/rollback. Returns (action, reason,
+    receipt, steps). `previous` is the preserved verified receipt; `live` is the
+    observed registry-alias and docs-marker state. A manual dispatch can only
+    re-publish an ALREADY-ACTIVE exact source from the receipt.
     """
     channel = candidate.get("channel")
     if channel not in ("nightly", "stable"):
@@ -2369,7 +2382,7 @@ def channel_transaction_decision(candidate, previous=None, live=None,
         if previous.get("verified") and valid_digest(previous.get("digest", "")):
             return ("rollback",
                     "candidate is not fully qualified; preserving the prior verified receipt",
-                    previous, (TX_ROLLBACK, TX_DEPLOY_FINAL, TX_VERIFY_FINAL))
+                    previous, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
         return "refuse", "candidate is not fully qualified (docs marker must match)", previous, []
 
     registries = candidate.get("registries") or {}
@@ -2377,15 +2390,33 @@ def channel_transaction_decision(candidate, previous=None, live=None,
             value != digest for value in registries.values()):
         if previous.get("verified"):
             return ("rollback", "staged digests do not agree in both registries",
-                    previous, (TX_ROLLBACK, TX_DEPLOY_FINAL, TX_VERIFY_FINAL))
+                    previous, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
         return "refuse", "staged digests do not agree in both registries", previous, []
+
+    # Two-phase flow: the staging decision applies all qualification, ordering
+    # and dual-registry gates but can never write an alias or deploy docs. Only
+    # a later commit decision, after the public candidate marker is confirmed,
+    # can authorize a move. This is not a gate bypass: stage returns no write
+    # steps and no new receipt.
+    if phase == TX_STAGE:
+        return ("stage", "qualified staging plan: no alias move and no docs deploy",
+                previous, TX_STAGE_STEPS)
 
     if not candidate.get("candidate_marker_verified"):
         if previous.get("verified"):
             return ("rollback",
-                    "public candidate marker not confirmed; aliases stay at the prior receipt",
-                    previous, (TX_ROLLBACK, TX_DEPLOY_FINAL, TX_VERIFY_FINAL))
-        return "refuse", "public candidate marker must be confirmed before any alias move", previous, []
+                    "public candidate probe marker not confirmed; aliases stay at the prior receipt",
+                    previous, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
+        return "refuse", "public candidate probe marker must be confirmed before any alias move", previous, []
+    # No registry alias may move until the canonical docs marker is published and
+    # verified in THIS transaction. A missing canonical confirmation rolls back
+    # both surfaces to the prior verified receipt.
+    if not candidate.get("canonical_marker_verified"):
+        if previous.get("verified"):
+            return ("rollback",
+                    "canonical docs marker not confirmed; aliases and docs stay at the prior receipt",
+                    previous, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
+        return "refuse", "canonical docs marker must be confirmed before any alias move", previous, []
 
     alias_digests = {k: v for k, v in (live.get("registries") or {}).items()
                      if v and k in CHANNEL_REGISTRIES}
@@ -2404,7 +2435,7 @@ def channel_transaction_decision(candidate, previous=None, live=None,
         # qualified staged candidate; a fully-previous state is a normal advance.
         return "reconcile", "partial state converges to the verified staged candidate", previous, (
             TX_RECONCILE, TX_DEPLOY_CANDIDATE, TX_VERIFY_CANDIDATE,
-            TX_MOVE_ALIASES, TX_DEPLOY_FINAL, TX_VERIFY_FINAL, TX_WRITE_RECEIPT)
+            TX_MOVE_ALIASES, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL, TX_WRITE_RECEIPT)
 
     receipt = channel_receipt(
         channel, commit, digest, candidate.get("docs_hash", ""), commit, digest,
@@ -2412,6 +2443,71 @@ def channel_transaction_decision(candidate, previous=None, live=None,
         candidate.get("run_ids") or {}, seq or prev_seq + 1,
         candidate.get("timestamp", ""))
     return "publish", "qualified transaction staged and verified on both surfaces", receipt, TX_PUBLISH_STEPS
+
+
+def candidate_probe_path(commit):
+    """The NON-ACTIVE staging route for a candidate marker probe."""
+    if not valid_commit(commit):
+        raise ValueError("Candidate probe path needs a full 40-hex commit")
+    return f"/docs/candidate/{commit}/"
+
+
+def stage_channel_marker(site, channel, commit, digest, include_canonical=False):
+    """Write the candidate marker into the BUILT site (never a tracked main file).
+
+    The probe is always written at the non-active staging route
+    `/docs/candidate/<sha>/`; the canonical channel entry (and the public
+    `version-index.json` marker) is stamped only when `include_canonical` is
+    set, i.e. as part of the qualified transaction. Returns the URLs/status so
+    the workflow can prove the probe cannot touch a canonical path.
+    """
+    if channel not in ("nightly", "stable") or not valid_commit(commit) or not valid_digest(digest):
+        raise ValueError("Marker staging needs a known channel, full SHA and verified digest")
+    root = Path(site)
+    probe = root / "docs" / "candidate" / commit
+    probe.mkdir(parents=True, exist_ok=True)
+    marker = {"channel": channel, "candidate_commit": commit,
+              "candidate_digest": digest, "canonical": False,
+              "probe_url": candidate_probe_path(commit) + "marker.json"}
+    (probe / "marker.json").write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+    (probe / "index.html").write_text(
+        "<!doctype html><title>Candidate probe</title>"
+        f"<p>Candidate {commit} @ {digest} (non-active staging route)</p>\n",
+        encoding="utf-8")
+    result = {"probe_path": candidate_probe_path(commit),
+              "probe_url": marker["probe_url"], "canonical_stamped": False,
+              "canonical_url": ""}
+    if include_canonical:
+        path = root / "version-index.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        ok, problems = validate_channel_contract(document)
+        if not ok:
+            raise ValueError("Cannot stamp an invalid channel contract: " + "; ".join(problems))
+        entry = document["channels"][channel]
+        entry["commit"] = commit
+        entry["image"]["revision"] = commit
+        entry["image"]["digest"] = digest
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        result["canonical_stamped"] = True
+        result["canonical_url"] = "/version-index.json"
+    return result
+
+
+def marker_matches(document, commit, digest):
+    """True when a public marker carries the exact candidate revision/digest."""
+    return bool(document.get("candidate_commit") == commit
+                and document.get("candidate_digest") == digest
+                and document.get("canonical") is False)
+
+
+def stage_channel_marker_cli(args):
+    """CLI: stage candidate/canonical markers into the built site only."""
+    result = stage_channel_marker(
+        args.site, args.channel, args.commit, args.digest, args.canonical)
+    values = {**result, "site": args.site}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return result
 
 
 def channel_active_receipt(channel, alias_observations, docs_commit, docs_digest,
@@ -2457,7 +2553,7 @@ def channel_transaction_cli(args):
     previous = json_argument(args.previous, default={}) or {}
     live = json_argument(args.live, default={}) or {}
     action, reason, receipt, steps = channel_transaction_decision(
-        candidate, previous, live, args.event)
+        candidate, previous, live, args.event, phase=args.phase)
     values = {"action": action, "reason": reason,
               "receipt": json.dumps(receipt, sort_keys=True),
               "steps": json.dumps(list(steps))}
@@ -2786,6 +2882,8 @@ def build_parser():
     for name in ("candidate", "previous", "live"):
         transaction.add_argument("--" + name, default="{}")
     transaction.add_argument("--event", default="workflow_run")
+    transaction.add_argument("--phase", default=TX_COMMIT,
+                             choices=(TX_STAGE, TX_COMMIT))
     active = commands.add_parser("channel-active-receipt")
     active.add_argument("--channel", required=True)
     active.add_argument("--aliases", default="{}")
@@ -2793,6 +2891,12 @@ def build_parser():
     active.add_argument("--docs-digest", required=True)
     active.add_argument("--seq", default="0")
     active.add_argument("--timestamp", default="")
+    marker = commands.add_parser("stage-channel-marker")
+    marker.add_argument("--site", required=True)
+    marker.add_argument("--channel", required=True)
+    marker.add_argument("--commit", required=True)
+    marker.add_argument("--digest", required=True)
+    marker.add_argument("--canonical", action="store_true")
     return parser
 
 
@@ -2811,7 +2915,8 @@ def main():
                 "channel-observe": channel_observe_cli,
                 "promote-stable-alias": promote_stable_alias_cli,
                 "channel-transaction": channel_transaction_cli,
-                "channel-active-receipt": channel_active_receipt_cli}
+                "channel-active-receipt": channel_active_receipt_cli,
+                "stage-channel-marker": stage_channel_marker_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:

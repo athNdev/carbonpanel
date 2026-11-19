@@ -2617,7 +2617,7 @@ class ChannelTransactionTests(unittest.TestCase):
             "site_validated": True, "docs_commit": self.COMMIT,
             "docs_digest": self.DIGEST, "docs_hash": "sha256:" + "f" * 64,
             "registries": {"docker_hub": self.DIGEST, "ghcr": self.DIGEST},
-            "candidate_marker_verified": True,
+            "candidate_marker_verified": True, "canonical_marker_verified": True,
             "marker_urls": {"nightly": "https://carbonpanel.dev/docs/nightly/"},
             "run_ids": {"ci": "123"}, "timestamp": "2026-11-20T00:00:00Z",
         }
@@ -2734,6 +2734,49 @@ class ChannelTransactionTests(unittest.TestCase):
         self.assertEqual(action, "publish")
         self.assertEqual(receipt["revision"], self.COMMIT)
 
+    def test_stage_phase_is_zero_write_and_never_moves_aliases(self):
+        previous = self.receipt()
+        action, _, receipt, steps = release.channel_transaction_decision(
+            self.candidate(candidate_marker_verified=False,
+                           canonical_marker_verified=False),
+            previous, {}, "workflow_run", ancestry=lambda older, newer: True,
+            phase=release.TX_STAGE)
+        self.assertEqual(action, "stage")
+        self.assertEqual(receipt, previous)  # no new receipt written
+        self.assertEqual(tuple(steps), release.TX_STAGE_STEPS)
+        for write_step in (release.TX_MOVE_ALIASES, release.TX_DEPLOY_CANONICAL,
+                           release.TX_WRITE_RECEIPT):
+            self.assertNotIn(write_step, steps)
+        # The same candidate in commit phase is refused, not published.
+        self.assertEqual(release.channel_transaction_decision(
+            self.candidate(candidate_marker_verified=False),
+            previous, {}, "workflow_run",
+            ancestry=lambda older, newer: True)[0], "rollback")
+
+    def test_registry_move_requires_canonical_docs_marker_verified(self):
+        previous = self.receipt()
+        action, reason, receipt, steps = self.decide(
+            candidate=self.candidate(canonical_marker_verified=False),
+            previous=previous)
+        self.assertEqual(action, "rollback")
+        self.assertIn("canonical docs marker", reason)
+        self.assertEqual(receipt, previous)
+        self.assertIn(release.TX_ROLLBACK_DOCS, steps)
+        self.assertNotIn(release.TX_MOVE_ALIASES, steps)
+        self.assertEqual(release.channel_transaction_decision(
+            self.candidate(canonical_marker_verified=False))[0], "refuse")
+
+    def test_rollback_restores_both_docs_and_registry_aliases(self):
+        previous = self.receipt()
+        action, _, receipt, steps = release.channel_transaction_decision(
+            self.candidate(candidate_marker_verified=False), previous, {},
+            "workflow_run", ancestry=lambda older, newer: True)
+        self.assertEqual(action, "rollback")
+        self.assertEqual(receipt["registries"], previous["registries"])
+        self.assertEqual(receipt["docs_digest"], previous["docs_digest"])
+        self.assertIn(release.TX_ROLLBACK, steps)
+        self.assertIn(release.TX_ROLLBACK_DOCS, steps)
+
     def test_active_receipt_from_live_state_requires_both_registries_to_agree(self):
         aliases = {"docker_hub": ("present", {"digest": self.PREV_DIGEST}),
                    "ghcr": ("present", {"digest": self.PREV_DIGEST})}
@@ -2754,6 +2797,67 @@ class ChannelTransactionTests(unittest.TestCase):
                                 json.dumps(self.candidate())]), redirect_stdout(out):
             release.main()
         self.assertEqual(json.loads(out.getvalue())["action"], "publish")
+
+
+class ChannelMarkerStagingTests(unittest.TestCase):
+    """The candidate probe lives at a NON-ACTIVE staging path, never a canonical route."""
+
+    COMMIT = "c" * 40
+    DIGEST = "sha256:" + "d" * 64
+
+    def site(self, directory, contract=None):
+        root = Path(directory)
+        (root / "version-index.json").write_text(
+            json.dumps(contract or ChannelPromotionTests().contract(
+                commit=self.COMMIT, digest=self.DIGEST)), encoding="utf-8")
+        return root
+
+    def test_probe_staging_never_touches_canonical_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory)
+            before = (root / "version-index.json").read_bytes()
+            result = release.stage_channel_marker(
+                root, "nightly", self.COMMIT, self.DIGEST)
+            self.assertEqual(result["probe_path"], f"/docs/candidate/{self.COMMIT}/")
+            self.assertTrue(result["probe_url"].startswith("/docs/candidate/"))
+            self.assertFalse(result["canonical_stamped"])
+            self.assertEqual(result["canonical_url"], "")
+            self.assertEqual((root / "version-index.json").read_bytes(), before)
+            self.assertNotIn("/docs/nightly/", result["probe_url"])
+            marker = json.loads((root / "docs" / "candidate" / self.COMMIT
+                                 / "marker.json").read_text(encoding="utf-8"))
+            self.assertTrue(release.marker_matches(marker, self.COMMIT, self.DIGEST))
+            self.assertFalse(marker["canonical"])
+            for canonical in (root / "docs" / "nightly", root / "docs" / "index.html"):
+                self.assertFalse(canonical.exists())
+
+    def test_canonical_stamping_uses_exact_candidate_revision_and_digest(self):
+        old = "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory, ChannelPromotionTests().contract(
+                commit=old, digest="sha256:" + "e" * 64))
+            result = release.stage_channel_marker(
+                root, "nightly", self.COMMIT, self.DIGEST, include_canonical=True)
+            self.assertTrue(result["canonical_stamped"])
+            self.assertEqual(result["canonical_url"], "/version-index.json")
+            document = json.loads((root / "version-index.json").read_text(encoding="utf-8"))
+            nightly = document["channels"]["nightly"]
+            self.assertEqual(nightly["commit"], self.COMMIT)
+            self.assertEqual(nightly["image"]["revision"], self.COMMIT)
+            self.assertEqual(nightly["image"]["digest"], self.DIGEST)
+            self.assertTrue(release.validate_channel_contract(document)[0])
+
+    def test_stage_channel_marker_cli_is_offline_and_reports_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory)
+            out = io.StringIO()
+            with patch("sys.argv", ["release.py", "stage-channel-marker", "--site",
+                                    str(root), "--channel", "nightly", "--commit",
+                                    self.COMMIT, "--digest", self.DIGEST]), \
+                 redirect_stdout(out):
+                release.main()
+            self.assertEqual(json.loads(out.getvalue())["probe_path"],
+                             f"/docs/candidate/{self.COMMIT}/")
 
 
 if __name__ == "__main__":
