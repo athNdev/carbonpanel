@@ -34,9 +34,11 @@ second product HTTP path and gateway-side byte staging. The MCP tool
 `surface:rest_download_stream` operation; `download_get_file`,
 `download_init_file` and the two bundle tools cover the other four pending
 download operations. `DownloadToolSpecs` and `DownloadToolDescriptors` are
-exported seams; the integration owner wires them into the shared catalog and
-STRICT gate when all nine pending operations have real evidence. Until then the
-publication gate stays RED.
+exported seams; the integration owner wired them into the generated catalog and
+production `registerCombinedTools`. With the upload lane's evidence merged,
+all nine formerly pending operations are VERIFIED, `PendingInventory` is empty
+and the STRICT publication gate is green. The retired holds are recorded in
+`internal/mcp/integration_pending.go`.
 
 # Verification
 

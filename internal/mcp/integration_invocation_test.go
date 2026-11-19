@@ -136,6 +136,12 @@ func allInvocationArgs() map[string]map[string]any {
 	for name, args := range integrationInvocationArgs() {
 		out[name] = args
 	}
+	// OSS-370/371-375 upload byte-path lane. These names match the OSS-375
+	// matrix suggestedTool values and are now mounted in production, so the
+	// harness must carry their bounded argument tables.
+	for name, args := range UploadFamilyInvocationArgs() {
+		out[name] = args
+	}
 	return out
 }
 
@@ -148,30 +154,22 @@ func targetProcedure(op FamilyAuditOperation) string {
 	return op.Procedure
 }
 
-// pendingOperations are SUPPORTED operations with no production
-// authorization/transport path in the standalone MCP gateway. They are listed
-// and reachable but deliberately NOT VERIFIED until a real controller-side
-// authenticated transport exists (see integration_pending.go).
-var pendingOperations = map[string]string{
-	"/carbonpanel.v1.FileService/DownloadArchive":  "no authenticated controller-side streaming transport",
-	"/carbonpanel.v1.FileService/ExportWorld":      "no authenticated controller-side streaming transport",
-	"/carbonpanel.v1.FileService/GetFile":          "bounded small-file read only; no session-consuming large transfer",
-	"/carbonpanel.v1.FileService/InitFileDownload": "no authenticated controller-side streaming transport",
-	"/carbonpanel.v1.FileService/SaveUploadedFile": "no gate-owned authorized upload/commit transport",
-	"/carbonpanel.v1.UploadService/InitUpload":     "no gate-owned authorized upload/commit transport",
-	"/carbonpanel.v1.UploadService/UploadChunk":    "no gate-owned authorized upload/commit transport",
-}
-
+// pendingReason is the single hold on the VERIFIED signal. It is derived from
+// the authoritative PendingInventory rather than a second hand-maintained map:
+// the OSS-370/371-375 byte-transport lanes are now mounted in production and
+// exercised by real SDK stdio tools/call fixtures, so the inventory is empty
+// and no supported operation is held. Adding an entry back (for example for a
+// newly declared but unmounted operation) immediately turns the STRICT gate
+// red again without touching this function.
 func pendingReason(op FamilyAuditOperation) string {
-	target := targetProcedure(op)
-	if op.Kind == "rpc" {
-		if reason, ok := pendingOperations[target]; ok {
-			return reason
-		}
+	key := op.Procedure
+	if op.Kind != "rpc" {
+		key = op.ID
 	}
-	if op.Kind != "rpc" && (target == "/carbonpanel.v1.FileService/GetFile" ||
-		target == "/carbonpanel.v1.FileService/SaveUploadedFile") {
-		return "no authenticated controller-side streaming transport"
+	for _, pending := range PendingInventory {
+		if pending.ID == key {
+			return pending.Reason
+		}
 	}
 	return ""
 }
@@ -262,12 +260,29 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 }
 
 func toolSpecForProcedure(procedure string) (ToolSpec, bool) {
+	// Prefer the canonical catalog tool (get_file, export_world, ...) over a
+	// procedure-sharing capability tool (download_get_file,
+	// download_export_world_bundle, ...). The canonical spec owns the pinned
+	// argument table that assertTypedFields understands; capability tools have
+	// their own dedicated stdio fixtures.
+	canonical := ""
+	if entry, ok := DeclaredProcedure(procedure); ok {
+		canonical = entry.Tool
+	}
+	var best ToolSpec
+	found := false
 	for _, spec := range exposedTools {
-		if spec.Procedure == procedure {
+		if spec.Procedure != procedure {
+			continue
+		}
+		if canonical != "" && spec.Name == canonical {
 			return spec, true
 		}
+		if !found || sourcePriority(spec.Source) < sourcePriority(best.Source) {
+			best, found = spec, true
+		}
 	}
-	return ToolSpec{}, false
+	return best, found
 }
 
 func invokeOne(t *testing.T, f *fixture, op FamilyAuditOperation, spec ToolSpec, args map[string]any) OperationInvocationEvidence {

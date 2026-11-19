@@ -256,6 +256,12 @@ func isSHA256Hex(s string) bool {
 func addDownloadTool[In any](s *sdkmcp.Server, name string, c *Clients,
 	run func(context.Context, *Clients, In) (any, error)) {
 	spec := downloadSpecs[name]
+	// Production servers are policy-bound before registration: never mount a
+	// tool the OSS-375 audit excluded, even momentarily. Isolated family-slice
+	// tests are unbound and therefore keep the complete hand-off set.
+	if !toolAllowedOn(s, spec.Name) {
+		return
+	}
 	sdkmcp.AddTool(s, &sdkmcp.Tool{Name: spec.Name, Description: spec.Description},
 		func(ctx context.Context, _ *sdkmcp.CallToolRequest, in In) (*sdkmcp.CallToolResult, ToolOutput, error) {
 			result, err := run(ctx, c, in)
