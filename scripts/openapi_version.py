@@ -9,6 +9,7 @@ carry the authoritative normalized product version instead. The proto and the
 ``carbonpanel.v1`` protocol identity are never rewritten.
 """
 import argparse
+import json
 from pathlib import Path
 import re
 import sys
@@ -93,22 +94,25 @@ def verify(path, version):
 
 
 def verify_ui(directory, version):
-    """The embedded UI build must contain the same exact version string."""
+    """Verify the AUTHORITATIVE runtime UI version, not an incidental string.
+
+    Vite writes build/version.json from the same getVersion() that defines the
+    app's __APP_VERSION__ constant. A version substring in an unrelated asset,
+    schema or metadata file must not satisfy this check.
+    """
     if not SEMVER.fullmatch(version):
         raise ValueError(f"Not an exact normalized product version: {version!r}")
-    root = Path(directory)
-    files = [item for item in root.rglob("*") if item.is_file()]
-    if not files:
-        raise ValueError(f"No UI build files under {root}")
-    for item in files:
-        try:
-            text = item.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        if version in text:
-            print(f"UI build under {root}: embedded version {version} verified")
-            return
-    raise ValueError(f"UI build under {root} does not embed {version!r}")
+    metadata = Path(directory) / "version.json"
+    if not metadata.is_file():
+        raise ValueError(f"UI build has no authoritative version.json: {metadata}")
+    try:
+        document = json.loads(metadata.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as error:
+        raise ValueError(f"UI version.json is invalid: {error}") from error
+    actual = document.get("version") if isinstance(document, dict) else None
+    if actual != version:
+        raise ValueError(f"UI runtime version {actual!r} is not {version!r}")
+    print(f"UI runtime version.json under {directory}: {version} verified")
 
 
 def main():

@@ -54,6 +54,11 @@ for attempt in $(seq 1 "$max_attempts"); do
 	rc=$?
 	set -e
 	if [ "$rc" -eq 0 ]; then
+		# Authoritative runtime UI version for release parity checks. APP_VERSION
+		# is the same input that Vite defines as __APP_VERSION__; an incidental
+		# version string in any built asset is not a parity proof.
+		UI_VERSION="${APP_VERSION:-$(git describe --tags --always 2>/dev/null || printf dev)}"
+		printf '{"version":"%s"}\n' "$UI_VERSION" > build/version.json
 		touch build/.gitkeep
 		exit 0
 	fi

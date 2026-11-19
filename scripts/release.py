@@ -1348,6 +1348,15 @@ def package(args):
     if not any(display.encode() in asset.read_bytes() or tag.encode() in asset.read_bytes()
                for asset in (frontend / "_app").rglob("*.js")):
         raise ValueError("The embedded web UI does not contain the release version")
+    # The handler serves the schema embedded at build/schemav1.yaml. Derive it
+    # from the SAME stamped input used for the bundled and website copies so a
+    # running packaged panel reports the exact product version.
+    stamped_schema = ROOT / ".website-build/release-schema/openapi.yaml"
+    if not stamped_schema.is_file():
+        raise ValueError("Missing stamped release OpenAPI input")
+    verify_text(stamped_schema.read_text(encoding="utf-8"), display)
+    verify_protocol_v1(stamped_schema.read_text(encoding="utf-8"))
+    shutil.copyfile(stamped_schema, frontend / "schemav1.yaml")
     epoch = int(args.epoch)
     date = datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     info = {"version": tag, "commit": commit, "built": date,

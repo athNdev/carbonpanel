@@ -12,7 +12,11 @@ code_refs:
   - docs/adr/0043-version-contract-and-multi-version-docs.md
   - scripts/version_contract.py
   - scripts/version_bump.py
+  - scripts/openapi_version.py
+  - scripts/test_openapi_version.py
+  - scripts/browser_version_check.py
   - scripts/test_version_contract.py
+  - internal/rpc/handlers/openapi.go
   - docs/carbon-panel
   - docs/design-system
   - docs/carbon-panel/src/components/SocialHead.astro

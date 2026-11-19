@@ -23,6 +23,9 @@ on:
       - 'scripts/test_release.py'
       - 'scripts/openapi_version.py'
       - 'scripts/test_openapi_version.py'
+      - 'web/carbon-panel/vite.config.ts'
+      - 'internal/rpc/handlers/openapi.go'
+      - 'internal/rpc/handlers/openapi_parity_test.go'
       - 'internal/buildinfo/**'
       - 'cmd/carbon-panel/main.go'
       - 'cmd/carbon-storage/main.go'
@@ -153,6 +156,8 @@ jobs:
           cd web/carbon-panel
           bun install --frozen-lockfile
           bun run build
+      - name: Stage the stamped schema for the embedded handler
+        run: cp .website-build/release-schema/openapi.yaml web/carbon-panel/build/schemav1.yaml
       - name: Verify UI, CLI input and OpenAPI version parity
         env:
           RELEASE_SEMVER: ${{ needs.plan.outputs.semver }}
@@ -240,6 +245,16 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_EPOCH: ${{ needs.plan.outputs.epoch }}
         run: python3 scripts/release.py package --version "$RELEASE_VERSION" --epoch "$RELEASE_EPOCH" --goos ${{ matrix.goos }} --goarch ${{ matrix.goarch }} --output dist/bundles
+      - name: Probe the served schema on a running disposable handler
+        if: runner.os != 'Windows'
+        env:
+          CARBONPANEL_EXPECTED_OPENAPI_VERSION: ${{ needs.plan.outputs.semver }}
+        run: go test ./internal/rpc/handlers -run TestServedOpenAPIVersionMatchesBuild -count=1 -v
+      - name: Probe the served schema on a running disposable handler (Windows)
+        if: runner.os == 'Windows'
+        env:
+          CARBONPANEL_EXPECTED_OPENAPI_VERSION: ${{ needs.plan.outputs.semver }}
+        run: go test ./internal/rpc/handlers -run TestServedOpenAPIVersionMatchesBuild -count=1 -v
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-bundle-${{ matrix.goos }}-${{ matrix.goarch }}

@@ -52,4 +52,8 @@ the verified exact-commit artifact. The proto declares the independent
 Connect-OpenAPI **schema family** `2.x`; it is not a product version. Bundled
 and website OpenAPI copies stamp `info.version` with the exact normalized
 product version and are verified fail-closed, while the `carbonpanel.v1`
-protocol identity stays unchanged.
+protocol identity stays unchanged. The served schema comes from that same
+stamped input via the embedded build filesystem, so a running packaged panel
+reports the exact version over HTTP. UI parity reads the authoritative
+`build/version.json` emitted by the same version source as `__APP_VERSION__`,
+not an incidental string in any build asset.

@@ -26,8 +26,6 @@ BASE = "https://carbonpanel.dev"
 def chrome_path():
     candidates = [os.environ.get("CHROME_PATH")]
     candidates += [
-        ROOT.parent.parent / "ignore-policies/carbonpanel/tmp/review-browsers/1.49.1/"
-        "chromium-1148/chrome-win/chrome.exe",
         Path("/usr/bin/chromium"), Path("/usr/bin/google-chrome"),
     ]
     for candidate in candidates:
@@ -57,12 +55,23 @@ def main():
     failures = []
 
     def dom(path):
-        result = subprocess.run(
-            [binary, "--headless", "--disable-gpu", "--no-sandbox",
-             "--disable-dev-shm-usage", "--virtual-time-budget=2500", "--dump-dom",
-             origin + path], capture_output=True, text=True,
-            encoding="utf-8", errors="replace")
-        return result.stdout or ""
+        for attempt in range(3):
+            profile = Path(os.environ.get("TEMP", "/tmp")) / \
+                f"cp-version-dom-{abs(hash(path))}-{attempt}"
+            try:
+                result = subprocess.run(
+                    [binary, "--headless", "--disable-gpu", "--no-sandbox",
+                     "--disable-dev-shm-usage", "--disable-javascript",
+                     "--no-first-run", "--no-default-browser-check",
+                     "--virtual-time-budget=500", "--user-data-dir=" + str(profile),
+                     "--dump-dom", origin + path], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=30)
+            except subprocess.TimeoutExpired:
+                continue
+            if result.stdout:
+                return result.stdout
+        failures.append(f"{path}: browser did not return DOM")
+        return ""
 
     def expect(path, needles):
         page = dom(path)

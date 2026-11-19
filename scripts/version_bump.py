@@ -48,6 +48,15 @@ def verify_surfaces(root, contract, index):
     builder = BUILDER.read_text(encoding="utf-8")
     if "render_versions_page" not in builder or "export_snapshot(root, version[\"commit\"]" not in builder:
         errors.append("builder must generate the identity page and snapshot each exact peeled commit")
+    if "openapi_version.stamp_text" not in builder:
+        errors.append("builder must stamp website OpenAPI copies with the exact product version")
+    release_workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    if "openapi_version.py stamp" not in release_workflow or \
+            "web/carbon-panel/build/schemav1.yaml" not in release_workflow:
+        errors.append("release workflow must stamp and stage the served schema")
+    release_tool = (root / "scripts/release.py").read_text(encoding="utf-8")
+    if "verify_text(" not in release_tool or "frontend / \"schemav1.yaml\"" not in release_tool:
+        errors.append("release packaging must verify and embed the stamped served schema")
     changelog = CHANGELOG.read_text(encoding="utf-8")
     if "3.0.0-beta.4" in changelog and "name collision" not in changelog:
         errors.append("docs changelog must mark v3.0.0-beta.4 as an excluded name collision")

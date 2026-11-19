@@ -261,11 +261,13 @@ def check(root, base="/", site="https://carbonpanel.dev"):
         parser.feed(page.read_text(encoding="utf-8"))
         page_url = site + base + page.relative_to(root).as_posix()
         for link in parser.urls:
+            if link.startswith("#"):
+                continue  # in-page anchor, not a version route
             target = urlsplit(urljoin(page_url, link))
             if target.netloc != urlsplit(site).netloc or target.scheme not in ("http", "https"):
                 continue
-            if target.path.startswith("/docs/versions/") and index is not None:
-                allowed = {v["route"] for v in index["versions"]}
+            if target.path.startswith("/docs/versions/") and target.path != "/docs/versions/" and index is not None:
+                allowed = {v["immutable_route"] for v in index["versions"]}
                 if not any(target.path.startswith(route) for route in allowed):
                     errors.append(f"{page.relative_to(root)}: unsupported version URL {link}")
             if not any(target.path.startswith(b) for b in bases):

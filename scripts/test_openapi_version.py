@@ -68,13 +68,26 @@ class OpenApiVersionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             stamp_text(SCHEMA, "v2.0.0")
 
-    def test_ui_build_must_embed_the_exact_version(self):
+    def test_ui_version_uses_authoritative_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "index.js").write_text("const v = \"2.0.0\";", encoding="utf-8")
+            (root / "version.json").write_text('{"version": "2.0.0"}\n', encoding="utf-8")
             verify_ui(root, "2.0.0")
             with self.assertRaises(ValueError):
                 verify_ui(root, "2.0.1")
+
+    def test_version_string_in_an_unrelated_asset_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "schemav1.yaml").write_text("  version: 2.0.0\n", encoding="utf-8")
+            (root / "index.html").write_text("<p>2.0.0</p>", encoding="utf-8")
+            with self.assertRaises(ValueError) as raised:
+                verify_ui(root, "2.0.0")
+            self.assertIn("version.json", str(raised.exception))
+            (root / "version.json").write_text('{"version": "1.0.40"}\n', encoding="utf-8")
+            with self.assertRaises(ValueError) as raised:
+                verify_ui(root, "2.0.0")
+            self.assertIn("UI runtime version", str(raised.exception))
 
 
 if __name__ == "__main__":
