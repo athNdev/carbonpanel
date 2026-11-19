@@ -1574,8 +1574,9 @@ one at https://mozilla.org/MPL/2.0/.
 									Upload local datapack
 								</p>
 								<p class="mt-1 text-xs text-muted-foreground">
-									Upload a <code class="font-mono">.zip</code> containing <code class="font-mono">pack.mcmeta</code>.
-									The archive is queued and installed after the server is created.
+									Upload a <code class="font-mono">.zip</code> containing
+									<code class="font-mono">pack.mcmeta</code>. The archive is queued and installed
+									after the server is created.
 								</p>
 							</div>
 							<div class="flex items-center gap-2">
@@ -1617,7 +1618,10 @@ one at https://mozilla.org/MPL/2.0/.
 										<span class="flex min-w-0 items-center gap-2">
 											<Upload class="h-4 w-4 shrink-0 text-muted-foreground" />
 											<span class="truncate" title={dp.fileName}>{dp.name}</span>
-											<span class="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground uppercase">Local upload</span>
+											<span
+												class="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground uppercase"
+												>Local upload</span
+											>
 										</span>
 										<button
 											type="button"
