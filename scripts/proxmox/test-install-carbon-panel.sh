@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALLER="$SCRIPT_DIR/install-carbon-panel.sh"
 TMPROOT="$(mktemp -d)"
+REAL_MKTEMP="$(command -v mktemp)"
 cleanup() { rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
@@ -80,6 +81,19 @@ exit 0
 EOF
 chmod +x "$STUBBIN/docker"
 
+# mktemp wrapper: when COMPOSE_RACE_TARGET is set, a foreign compose file is
+# created in the window between the installer's existence check and publish.
+cat >"$STUBBIN/mktemp" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+out="\$("$REAL_MKTEMP" "\$@")"
+if [ -n "\${COMPOSE_RACE_TARGET:-}" ] && [ ! -e "\$COMPOSE_RACE_TARGET" ]; then
+  printf 'raced-in-compose: keep-me\n' >"\$COMPOSE_RACE_TARGET"
+fi
+printf '%s\n' "\$out"
+EOF
+chmod +x "$STUBBIN/mktemp"
+
 export DOCKER_STUB_LOG="$TMPROOT/docker.log"
 export DOCKER_STUB_SERVICE_EXISTS=0
 export PATH="$STUBBIN:$PATH"
@@ -105,6 +119,7 @@ grep -Fq './config.yaml:/app/config.yaml:ro' "$INSTDIR/compose.yml" || fail "com
 grep -q 'pull carbon-panel' "$DOCKER_STUB_LOG" || fail "fresh install should pull carbon-panel"
 grep -q 'up -d carbon-panel' "$DOCKER_STUB_LOG" || fail "fresh install should start carbon-panel"
 [ ! -f "$INSTDIR/.carbon-panel-install-owned" ] || fail "marker should be removed on successful install"
+[ ! -d "$INSTDIR/.carbon-panel-install.lock" ] || fail "install lock should be released"
 if find "$INSTDIR" -maxdepth 1 -name 'compose.yml.tmp.*' | grep -q .; then
   fail "temporary compose file should not be left behind"
 fi
@@ -133,6 +148,37 @@ printf 'custom-compose\n' >"$NOMARK/compose.yml"
 run_expect_fail "existing compose without service/marker refused" bash "$INSTALLER" install --dir "$NOMARK"
 grep -Fq 'custom-compose' "$NOMARK/compose.yml" || fail "refusal must preserve compose"
 pass "refuses ambiguous existing compose without marker"
+
+# Preserve contract: a compose that appears between the existence check and
+# publish must never be overwritten or adopted as this installer's partial.
+RACEDIR="$TMPROOT/raced"
+: >"$DOCKER_STUB_LOG"
+export COMPOSE_RACE_TARGET="$RACEDIR/compose.yml"
+run_expect_fail "raced-in compose refused" bash "$INSTALLER" install --dir "$RACEDIR"
+unset COMPOSE_RACE_TARGET
+grep -Fq 'raced-in-compose: keep-me' "$RACEDIR/compose.yml" || fail "raced-in compose must not be overwritten"
+grep -Fq 'refusing to overwrite' "$TMPROOT/last.out" || fail "raced-in compose refusal should be explicit"
+[ ! -f "$RACEDIR/.carbon-panel-install-owned" ] || fail "raced-in compose must not be adopted via the ownership marker"
+if find "$RACEDIR" -maxdepth 1 -name 'compose.yml.tmp.*' | grep -q .; then
+  fail "no temporary compose file after raced-in refusal"
+fi
+if grep -q 'pull carbon-panel' "$DOCKER_STUB_LOG"; then
+  fail "raced-in compose must not be pulled or started"
+fi
+pass "raced-in compose is preserved, not adopted"
+
+# Serialization: a lock left by a dead process is cleared and the install runs.
+LOCKDIR="$TMPROOT/lockstale"
+mkdir -p "$LOCKDIR/.carbon-panel-install.lock"
+bash -c 'exit 0' &
+DEAD_PID=$!
+wait "$DEAD_PID" || true
+printf '%s\n' "$DEAD_PID" >"$LOCKDIR/.carbon-panel-install.lock/pid"
+: >"$DOCKER_STUB_LOG"
+bash "$INSTALLER" install --dir "$LOCKDIR" >/dev/null
+[ -f "$LOCKDIR/compose.yml" ] || fail "stale-lock install should create compose"
+[ ! -d "$LOCKDIR/.carbon-panel-install.lock" ] || fail "stale install lock should be cleared and released"
+pass "stale install lock is cleared"
 
 # Failure/retry: pull failure leaves compose and marker; rerun resumes with pull+up
 FAILDIR="$TMPROOT/failretry"
@@ -168,8 +214,8 @@ grep -q 'up -d carbon-panel' "$DOCKER_STUB_LOG" || fail "resume after failed up 
 DOCKER_STUB_SERVICE_EXISTS=0
 pass "failed fresh install can be resumed"
 
-# Interrupted compose write: ownership marker exists but compose is missing.
-# The next install must regenerate compose atomically and finish, not refuse.
+# Marker without compose (stale ownership marker): install must regenerate
+# compose atomically and finish, not refuse.
 INTERRUPTED="$TMPROOT/interrupted"
 mkdir -p "$INTERRUPTED/data"
 : >"$INTERRUPTED/.carbon-panel-install-owned"
@@ -182,7 +228,7 @@ grep -q 'up -d carbon-panel' "$DOCKER_STUB_LOG" || fail "interrupted write resum
 if find "$INTERRUPTED" -maxdepth 1 -name 'compose.yml.tmp.*' | grep -q .; then
   fail "no temporary compose file after interrupted-write resume"
 fi
-pass "interrupted compose write resumes and regenerates compose"
+pass "stale ownership marker without compose regenerates compose"
 
 # Relative dir input is canonicalized (compose uses fixed relative mounts)
 RELDIR_PARENT="$TMPROOT/reldir"

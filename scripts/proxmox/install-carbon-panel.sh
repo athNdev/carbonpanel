@@ -20,13 +20,29 @@ SERVICE="carbon-panel"
 COMPOSE_BASENAME="compose.yml"
 MARKER_FILE=".carbon-panel-install-owned"
 COMPOSE_TMP=""
+LOCK_DIR=""
+LOCK_HELD=false
 
 cleanup_compose_tmp() {
   if [ -n "$COMPOSE_TMP" ]; then
     rm -f -- "$COMPOSE_TMP"
   fi
 }
-trap cleanup_compose_tmp EXIT
+
+release_dir_lock() {
+  if [ "$LOCK_HELD" = true ] && [ -n "$LOCK_DIR" ]; then
+    if [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
+      rm -rf -- "$LOCK_DIR"
+    fi
+    LOCK_HELD=false
+  fi
+}
+
+cleanup() {
+  cleanup_compose_tmp
+  release_dir_lock
+}
+trap cleanup EXIT
 
 usage() {
   cat <<'EOF'
@@ -60,6 +76,9 @@ Scope and safety:
     must resolve on this guest and generated compose mounts /var/run/docker.sock.
   - Does not create Proxmox guests, change host security, or delete bind mounts.
   - Does not overwrite an existing compose.yml, config.yaml, data, backups, or tmp.
+  - Serializes install/update per install directory and publishes a new
+    compose.yml with an atomic no-clobber link, so a compose created
+    concurrently is never overwritten or resumed as this script's partial.
   - Compose bind mounts use fixed relative paths (./data, ./backups, ./tmp)
     resolved from the install directory.
 
@@ -79,6 +98,46 @@ die() { err "$*"; exit 1; }
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+acquire_dir_lock() {
+  # Serialize install/update for the same install directory. mkdir(2) is the
+  # portable atomic primitive; the pid file lets a later run clear a lock left
+  # by a crashed process. Never hold this lock across a different directory.
+  LOCK_DIR="$DIR/.carbon-panel-install.lock"
+  local tries=0 pid
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      log "Removing stale install lock (pid $pid is not running)."
+      if [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$pid" ]; then
+        rm -rf -- "$LOCK_DIR"
+      fi
+      continue
+    fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 50 ]; then
+      die "another install/update is already running for $DIR (lock: $LOCK_DIR); wait for it to finish or remove the lock if it is stale"
+    fi
+    sleep 0.2
+  done
+  printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  LOCK_HELD=true
+}
+
+compose_digest() {
+  sha256sum "$1" | awk '{print $1}'
+}
+
+marker_matches_compose() {
+  local expected actual
+  expected="$(cat "$DIR/$MARKER_FILE" 2>/dev/null || true)"
+  actual="$(compose_digest "$COMPOSE_FILE" 2>/dev/null || true)"
+  [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" = "$actual" ]
+}
+
+write_marker() {
+  compose_digest "$COMPOSE_FILE" >"$DIR/$MARKER_FILE"
 }
 
 has_control_chars() {
@@ -181,7 +240,15 @@ services:
       - "host.docker.internal:host-gateway"
 EOF
   chmod 0644 "$COMPOSE_TMP" 2>/dev/null || true
-  mv -f "$COMPOSE_TMP" "$COMPOSE_FILE"
+  # link(2) is atomic and fails when the target already exists, unlike mv.
+  # A compose created after the earlier existence check must win.
+  if ! ln "$COMPOSE_TMP" "$COMPOSE_FILE" 2>/dev/null; then
+    rm -f -- "$COMPOSE_TMP"
+    COMPOSE_TMP=""
+    rm -f -- "$DIR/$MARKER_FILE"
+    die "could not publish $COMPOSE_FILE atomically (a compose file may have appeared concurrently); refusing to overwrite it. Re-run install to preserve the existing deployment."
+  fi
+  rm -f -- "$COMPOSE_TMP"
   COMPOSE_TMP=""
 }
 
@@ -228,6 +295,7 @@ if [ "$ACTION" = "install" ]; then
 fi
 
 need_cmd docker
+need_cmd sha256sum
 require_local_docker_context
 if ! docker info >/dev/null 2>&1; then
   die "cannot talk to guest-local Docker daemon (is Docker running and do you have permission?)"
@@ -251,6 +319,8 @@ DATA_DIR="$DIR/data"
 BACKUPS_DIR="$DIR/backups"
 TMP_DIR="$DIR/tmp"
 
+acquire_dir_lock
+
 case "$ACTION" in
   install)
     log "Carbon Panel controller installer (existing guest, guest-local Docker Compose v2)"
@@ -259,7 +329,7 @@ case "$ACTION" in
 
     if [ -f "$COMPOSE_FILE" ]; then
       log "Existing compose file found; preserving it: $COMPOSE_FILE"
-      if [ -f "$DIR/$MARKER_FILE" ]; then
+      if [ -f "$DIR/$MARKER_FILE" ] && marker_matches_compose; then
         log "Incomplete install detected (installer-owned marker present). Resuming pull/start..."
         if ! compose pull "$SERVICE"; then
           die "resume pull failed; compose/config preserved. Fix connectivity or image access, then rerun install to resume (data/backups preserved)."
@@ -269,22 +339,27 @@ case "$ACTION" in
         fi
         rm -f "$DIR/$MARKER_FILE"
         log "Resume complete."
-      elif service_exists; then
-        log "Existing carbon-panel service detected. No pull or container recreate performed."
-        log "To update the controller (after snapshotting the controller DB), run:"
-        log "  sudo bash \"$0\" update --dir \"$DIR\""
       else
-        log "Compose exists but carbon-panel service is not present; preserving existing deployment configuration."
-        log "No pull or container recreate performed. If this was an interrupted install created by this script, remove '$COMPOSE_FILE' only if you intend to regenerate it, or run update/recovery as appropriate."
-        exit 1
+        if [ -f "$DIR/$MARKER_FILE" ]; then
+          log "Ownership marker does not match the current compose; not resuming it."
+          rm -f "$DIR/$MARKER_FILE"
+        fi
+        if service_exists; then
+          log "Existing carbon-panel service detected. No pull or container recreate performed."
+          log "To update the controller (after snapshotting the controller DB), run:"
+          log "  sudo bash \"$0\" update --dir \"$DIR\""
+        else
+          log "Compose exists but carbon-panel service is not present; preserving existing deployment configuration."
+          log "No pull or container recreate performed. If this was an interrupted install created by this script, remove '$COMPOSE_FILE' only if you intend to regenerate it, or run update/recovery as appropriate."
+          exit 1
+        fi
       fi
       log "Data: $DATA_DIR  Backups: $BACKUPS_DIR  Tmp: $TMP_DIR"
       exit 0
     fi
 
-    # Mark ownership before writing so an interrupted write is resumable.
-    : >"$DIR/$MARKER_FILE"
     write_compose
+    write_marker
     log "Wrote compose file: $COMPOSE_FILE"
     log "Pulling and starting Carbon Panel (service: $SERVICE)..."
     if ! compose pull "$SERVICE"; then
