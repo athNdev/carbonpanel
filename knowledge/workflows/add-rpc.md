@@ -14,7 +14,11 @@ code_refs:
 
 1. Add the method and messages to the relevant `.proto` file in
    `proto/carbonpanel/v1`.
-2. Run `make proto` to regenerate Go and TypeScript code.
+2. Run `make proto` to regenerate Go and TypeScript code. A backward-compatible
+   field on an existing request message (for example
+   `OpenStreamRequest.download_session_id`) reuses that procedure's existing
+   permission mapping; it still needs positive and negative coverage at the
+   service seam.
 3. Implement the handler in `internal/rpc/handlers` and the service in
    `internal/rpc/services`.
 4. Map the method to a permission in the RBAC layer. A new method is denied by

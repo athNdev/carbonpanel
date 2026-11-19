@@ -51,6 +51,9 @@ service FileService {
   rpc GetRemoteArchiveProgress(GetRemoteArchiveProgressRequest) returns (GetRemoteArchiveProgressResponse);
   // OSS-387: open a controller-owned bounded byte stream session. The gateway
   // never opens node storage itself; the controller owns the read handle.
+  // With download_session_id set, the bounded handle is opened over a staged
+  // download (InitFileDownload/DownloadArchive/ExportWorld) instead of a
+  // server-relative node path; server_id must still match the session's server.
   rpc OpenStream(OpenStreamRequest) returns (OpenStreamResponse);
   // Read one bounded frame from a controller-owned session.
   rpc ReadStreamFrame(ReadStreamFrameRequest) returns (ReadStreamFrameResponse);
@@ -72,6 +75,12 @@ message OpenStreamRequest {
   string server_id = 1;
   string path = 2;
   int64 total_size = 3;
+  // OSS-370: when set, open the bounded frame stream over the controller-owned
+  // staged file of this download session instead of a server-relative path.
+  // The session's own server_id must equal server_id, and every frame remains
+  // re-authorized to files/read[server_id] by the production interceptor. The
+  // gateway never sees a storage path or holds a storage handle.
+  string download_session_id = 4;
 }
 // Opaque controller session id plus the admission upper bound echoed back to
 // the caller. The authoritative transferred size comes from frame responses.
