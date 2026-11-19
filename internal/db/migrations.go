@@ -292,9 +292,14 @@ func (s *Store) backupDB() error {
 	}
 
 	backupPath := s.cfg.Database.Path + ".pre-migrate.bak"
-	os.Remove(backupPath)
+	_ = os.Remove(backupPath)
 	if err := s.db.Exec("VACUUM INTO ?", backupPath).Error; err != nil {
+		_ = os.Remove(backupPath)
 		return fmt.Errorf("VACUUM INTO %s: %w", backupPath, err)
+	}
+	if err := sqliteIntegrity(backupPath); err != nil {
+		_ = os.Remove(backupPath)
+		return fmt.Errorf("pre-migration backup integrity check failed: %w", err)
 	}
 
 	log.Printf("[migrate] Database backed up to %s", backupPath)
