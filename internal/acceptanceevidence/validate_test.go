@@ -237,12 +237,35 @@ func TestEmptyCandidatesFailClosed(t *testing.T) {
 	}
 }
 
-func TestStaleLiveEvidence(t *testing.T) {
+func TestStaleLiveEvidenceForProposedClosure(t *testing.T) {
 	c, ev, root := fixture(t)
 	ev.Live.CheckedAt = "2026-11-01T00:00:00Z"
 	r := validateFixture(t, c, ev, root)
-	if r.Passed || !hasFailure(r, "live evidence is stale") {
+	if r.Passed || !hasFailure(r, "proposed live evidence is stale") {
 		t.Fatalf("expected stale live failure, got %v", r.Failures)
+	}
+}
+
+func TestHistoricalRecordedObservableStaysValid(t *testing.T) {
+	c, ev, root := fixture(t)
+	c.Candidates[0].ClosureState = ClosureRecorded
+	c.Candidates[0].Live.CheckedAt = "2026-11-01T00:00:00Z"
+	c.Candidates[0].VerifiedAt = "2026-11-01T00:00:00Z"
+	ev.Live.CheckedAt = "2026-11-01T00:00:00Z"
+	r := validateFixture(t, c, ev, root)
+	if !r.Passed {
+		t.Fatalf("recorded historical observable must not expire, got %v", r.Failures)
+	}
+}
+
+func TestRecordedObservableCannotDrift(t *testing.T) {
+	c, ev, root := fixture(t)
+	c.Candidates[0].ClosureState = ClosureRecorded
+	c.Candidates[0].Live.CheckedAt = "2026-11-01T00:00:00Z"
+	ev.Live.CheckedAt = "2026-11-19T00:00:00Z"
+	r := validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "recorded live observable changed") {
+		t.Fatalf("expected recorded observable drift failure, got %v", r.Failures)
 	}
 }
 

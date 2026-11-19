@@ -103,20 +103,34 @@ type ReferenceRun struct {
 	Conclusion string `json:"conclusion"`
 }
 
+// ClosureState distinguishes a closure being proposed (freshness matters) from
+// a historical record whose live observable was verified when it closed. A
+// recorded observable stays valid; the scheduled audit rechecks the immutable
+// GitHub facts, not the age of a past URL check.
+type ClosureState string
+
+const (
+	ClosureProposed ClosureState = "proposed"
+	ClosureRecorded ClosureState = "recorded"
+)
+
+func (s ClosureState) Valid() bool { return s == ClosureProposed || s == ClosureRecorded }
+
 type Candidate struct {
-	IssueKey          string     `json:"issue_key"`
-	Summary           string     `json:"summary"`
-	AcceptanceSurface Surface    `json:"acceptance_surface"`
-	Tier              Tier       `json:"tier"`
-	PR                PRRef      `json:"pr"`
-	CIRunID           int64      `json:"ci_run_id"`
-	TrustedDeploySHA  string     `json:"trusted_deploy_sha,omitempty"`
-	Deploy            *DeployRef `json:"deploy,omitempty"`
-	Live              *LiveRef   `json:"live,omitempty"`
-	Verifier          string     `json:"verifier"`
-	VerifiedAt        string     `json:"verified_at"`
-	Exception         *Exception `json:"exception,omitempty"`
-	Artifact          string     `json:"artifact"`
+	IssueKey          string       `json:"issue_key"`
+	Summary           string       `json:"summary"`
+	ClosureState      ClosureState `json:"closure_state"`
+	AcceptanceSurface Surface      `json:"acceptance_surface"`
+	Tier              Tier         `json:"tier"`
+	PR                PRRef        `json:"pr"`
+	CIRunID           int64        `json:"ci_run_id"`
+	TrustedDeploySHA  string       `json:"trusted_deploy_sha,omitempty"`
+	Deploy            *DeployRef   `json:"deploy,omitempty"`
+	Live              *LiveRef     `json:"live,omitempty"`
+	Verifier          string       `json:"verifier"`
+	VerifiedAt        string       `json:"verified_at"`
+	Exception         *Exception   `json:"exception,omitempty"`
+	Artifact          string       `json:"artifact"`
 }
 
 type PRRef struct {

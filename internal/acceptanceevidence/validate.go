@@ -94,6 +94,15 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 	}
 	seen[cand.IssueKey] = true
 
+	// Missing state defaults to the strict proposed path; a historical record
+	// must opt in explicitly so a stale live claim cannot hide in the contract.
+	if cand.ClosureState == "" {
+		cand.ClosureState = ClosureProposed
+	}
+	if !cand.ClosureState.Valid() {
+		fail("unknown closure_state %q (want proposed or recorded)", cand.ClosureState)
+	}
+
 	required, ok := requiredTier(cand.AcceptanceSurface)
 	if !ok {
 		fail("unknown acceptance_surface %q", cand.AcceptanceSurface)
@@ -233,10 +242,17 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 			checkedAt, err := parseTime(ev.Live.CheckedAt)
 			if err != nil {
 				fail("live checked_at is invalid: %v", err)
-			} else if now.Sub(checkedAt) > time.Duration(c.Gate.MaxEvidenceAgeDays)*24*time.Hour {
-				fail("live evidence is stale (checked_at %s exceeds %d days)", ev.Live.CheckedAt, c.Gate.MaxEvidenceAgeDays)
 			} else if checkedAt.After(now.Add(time.Hour)) {
 				fail("live checked_at is in the future")
+			} else if cand.ClosureState == ClosureProposed {
+				// Freshness is a closure-time requirement, not an eternal one.
+				if now.Sub(checkedAt) > time.Duration(c.Gate.MaxEvidenceAgeDays)*24*time.Hour {
+					fail("proposed live evidence is stale (checked_at %s exceeds %d days)", ev.Live.CheckedAt, c.Gate.MaxEvidenceAgeDays)
+				}
+			} else if cand.Live == nil || ev.Live.CheckedAt != cand.Live.CheckedAt {
+				// A recorded historical observable must remain exactly the one
+				// verified at closure; a later refresh must update both fields.
+				fail("recorded live observable changed; refresh the contract and evidence together")
 			}
 		}
 	}

@@ -38,7 +38,9 @@ sources:
 - GitHub Actions cannot gate, read or undo a Jira transition. The workflow is a
   `record-auditor` over opt-in contract candidates and a real reference run, not
   a Jira gate; the native workflow is authoritative. An empty candidate set is a
-  failure, never a successful no-op.
+  failure, never a successful no-op. Freshness applies to `proposed` closures; a
+  `recorded` historical observable stays valid and the weekly audit rechecks
+  immutable GitHub facts, never the age of a past URL check.
 - OSS has one human actor, so the native role condition does not prove
   author/reviewer independence. Do not claim separation until a distinct reviewer
   actor exists.

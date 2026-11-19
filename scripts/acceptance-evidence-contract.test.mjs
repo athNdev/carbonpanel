@@ -50,6 +50,7 @@ test('contract is a non-empty record audit with a real deploy and reference run'
   assert.ok(contract.reference_runs.length > 0, 'at least one live reference run is required');
   const c = contract.candidates[0];
   assert.equal(c.issue_key, 'OSS-409');
+  assert.equal(c.closure_state, 'recorded');
   assert.equal(c.tier, 'LIVE-VERIFIED');
   assert.ok(c.pr.merge_sha.length === 40);
   assert.ok(c.trusted_deploy_sha.length === 40);
@@ -78,4 +79,6 @@ test('documentation states the true native and scheduled-audit limits', () => {
   assert.match(doc, /single human actor/);
   assert.match(doc, /Completion Evidence:/);
   assert.match(doc, /record-auditor/);
+  assert.match(doc, /proposed.*fresh|freshness applies/i);
+  assert.match(doc, /weekly cron therefore does not turn red/);
 });

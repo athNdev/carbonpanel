@@ -12,6 +12,19 @@ validation fails closed and the drift job exits non-zero when nothing was
 audited. A real reference run is also required so the scheduled audit proves it
 can reach GitHub even when few candidates exist.
 
+Each candidate declares `closure_state`:
+
+- `proposed` (the default when omitted) — the live check must be fresh within
+  `max_evidence_age_days`. This is the path for a closure being requested now.
+- `recorded` — a historical record whose live observable was verified when it
+  closed. Its recorded `checked_at` stays valid indefinitely; the scheduled
+  audit rechecks immutable GitHub facts and the reference run, never the age of
+  a past URL check. The recorded observable must remain byte-identical to the
+  evidence artifact; refreshing it means updating both deliberately.
+
+The weekly cron therefore does not turn red merely because a long-closed item's
+URL check is older than seven days, and it needs no edits to closed history.
+
 ## Tiers
 
 | Tier | Meaning |
@@ -55,7 +68,7 @@ go run ./cmd/acceptance-evidence verify-github   # scheduled record audit; GITHU
 
 ## Qualified record in this repository
 
-OSS-409 is the existing public-docs rollout: PR #575 merged at
+OSS-409 is a `recorded` historical public-docs rollout: PR #575 merged at
 `dbbd22e25ee55f8bc0624eeb45801765819fa6db`; exact-commit CI run `44517658883`
 and Pages deploy run `44522728666` both at the trusted descendant
 `69ddb46d596aea8ed117a3dba6a1f63521572664`; job `deploy` succeeded and the

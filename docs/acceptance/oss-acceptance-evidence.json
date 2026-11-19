@@ -22,6 +22,7 @@
     {
       "issue_key": "OSS-409",
       "summary": "Publish and verify multi-version docs on public Pages",
+      "closure_state": "recorded",
       "acceptance_surface": "public",
       "tier": "LIVE-VERIFIED",
       "pr": {

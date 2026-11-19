@@ -49,7 +49,9 @@ deploy jobs may be skipped; the publishing job is strict.
 `.github/workflows/acceptance-evidence.yml` runs the validator on changes and on
 a weekly schedule, and audits the recorded PR/CI/deploy references plus a real
 reference run against GitHub. Its declared scope is `record-auditor`: it reads
-GitHub only, never Jira.
+GitHub only, never Jira. Freshness applies to `proposed` closures; a `recorded`
+historical observable stays valid and the weekly audit rechecks immutable GitHub
+facts, so closed history needs no repeated edits.
 
 ## Consequences
 
