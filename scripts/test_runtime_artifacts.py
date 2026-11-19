@@ -112,9 +112,12 @@ def make_bundle(root, artifact, *, marker=None, provenance=True,
         else:
             payload.write_bytes(content)
             files.append(payload)
+    lxd_digest = None
     if artifact == "lxc-rootfs":
         lxd = root / "ubuntu-lxd.tar.xz"
-        lxd.write_bytes(_lxd_metadata_bytes())
+        lxd_bytes = _lxd_metadata_bytes()
+        lxd.write_bytes(lxd_bytes)
+        lxd_digest = hashlib.sha256(lxd_bytes).hexdigest()
         files.append(lxd)
     if provenance:
         document = {
@@ -125,7 +128,8 @@ def make_bundle(root, artifact, *, marker=None, provenance=True,
                         "image_url": "https://example.invalid/dated/" + payload.name,
                         "digest_status": "verified",
                         "expected_sha256": digest_override or digest,
-                        "image_content_length": len(content)}],
+                        "image_content_length": len(content),
+                        "lxd_metadata_sha256": lxd_digest}],
         }
         (root / "provenance.json").write_text(json.dumps(document), encoding="utf-8")
         files.append(root / "provenance.json")
@@ -651,6 +655,35 @@ class PublicationPredicateTests(unittest.TestCase):
             self.assertFalse(ok)
             self.assertTrue(any("evil.qcow2" in p and "magic mismatch" in p
                                 for p in problems), problems)
+
+    def test_symlinked_sibling_payload_is_refused(self):
+        """A symlink with a declared-kind name is signed/published unless refused."""
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+            target = Path(tmp) / "external.qcow2"
+            target.write_bytes(_qcow2_bytes())
+            (Path(tmp) / "evil.qcow2").symlink_to(target)
+            ok, problems = self._predicate(tmp, "qcow2")
+            self.assertFalse(ok)
+            self.assertTrue(any("symlink/non-regular" in p for p in problems), problems)
+
+    def test_every_installer_package_and_lxd_metadata_is_verified(self):
+        with self.subTest("second installer package"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "installer", marker={"mode": "apply", "live_build": True})
+                bad = Path(tmp) / "zzz-bad"
+                (bad / "bin").mkdir(parents=True, exist_ok=True)
+                (bad / "bin" / "carbon-node").write_bytes(b"x")
+                (bad / "manifest.json").write_text(
+                    json.dumps({"schema": "wrong", "files": {}}), encoding="utf-8")
+                ok, problems = self._predicate(tmp, "installer")
+                self.assertFalse(ok)
+        with self.subTest("second LXD metadata tarball"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "lxc-rootfs", marker={"mode": "apply", "live_build": True})
+                (Path(tmp) / "zzz-evil-lxd.tar.xz").write_bytes(b"not a tarball")
+                ok, problems = self._predicate(tmp, "lxc-rootfs")
+                self.assertFalse(ok)
 
     def test_installer_negative_shapes_are_refused(self):
         with self.subTest("digest mismatch"):

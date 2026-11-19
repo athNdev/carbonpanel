@@ -173,7 +173,7 @@ def _verify_qcow2(payload, *, runner=None, process_runner=None, problems):
         problems.append("qemu-img reports %s format %r, not qcow2" % (payload.name, info.get("format")))
 
 
-def _verify_lxc(root, *, root_path=None, problems):
+def _verify_lxc(root, *, root_path=None, pin=None, problems):
     module, error = _load_lxc_tool(root_path)
     if module is None:
         problems.append(error + "; publication remains REHEARSAL-ONLY")
@@ -194,14 +194,21 @@ def _verify_lxc(root, *, root_path=None, problems):
     if not lxd_files:
         problems.append("LXD metadata tarball is missing from the staged rootfs bundle")
         return
-    metadata, metadata_error = module._inspect_lxd_metadata(lxd_files[0])
-    if metadata_error:
-        problems.append("LXD metadata validation failed: %s" % metadata_error)
-        return
-    if metadata.get("architecture") not in LXD_ARCHITECTURES:
-        problems.append("LXD metadata architecture %r is unsupported" % metadata.get("architecture"))
-    if metadata.get("os") != "ubuntu" or metadata.get("release") != "noble":
-        problems.append("LXD metadata does not describe Ubuntu 24.04 (noble): %s" % metadata)
+    lxd_pin = dict(pin or {})
+    lxd_pin["expected_sha256"] = (pin or {}).get("lxd_metadata_sha256")
+    lxd_pin.pop("image_content_length", None)
+    for lxd in lxd_files:  # verify every metadata tarball, not just the first
+        _bind_digest(lxd, lxd_pin, problems)
+        metadata, metadata_error = module._inspect_lxd_metadata(lxd)
+        if metadata_error:
+            problems.append("LXD metadata validation failed for %s: %s" % (lxd.name, metadata_error))
+            continue
+        if metadata.get("architecture") not in LXD_ARCHITECTURES:
+            problems.append("LXD metadata architecture %r in %s is unsupported"
+                            % (metadata.get("architecture"), lxd.name))
+        if metadata.get("os") != "ubuntu" or metadata.get("release") != "noble":
+            problems.append("LXD metadata in %s does not describe Ubuntu 24.04 (noble): %s"
+                            % (lxd.name, metadata))
 
 
 def _verify_installer(root, *, runner=None, process_runner=None, problems):
@@ -217,7 +224,8 @@ def _verify_installer(root, *, runner=None, process_runner=None, problems):
         problems.append("no installer package manifest; candidate-only payload")
         return False
     run = process_runner or subprocess.run
-    for manifest in packages:
+    all_pass = True
+    for manifest in packages:  # evaluate every package; all staged files are published
         package_dir = manifest.parent
         try:
             proc = run([go, "run", INSTALLER_PACKAGE, "verify",
@@ -226,22 +234,26 @@ def _verify_installer(root, *, runner=None, process_runner=None, problems):
                        cwd=str(ROOT), capture_output=True, text=True)
         except OSError as error:
             problems.append("installer verifier could not run: %s" % error)
+            all_pass = False
             continue
         if proc.returncode != 0:
             problems.append("nodeinstall.VerifyArtifact refused %s: %s"
                             % (package_dir.name, proc.stderr.strip()[:200]))
+            all_pass = False
             continue
         try:
             document = json.loads(proc.stdout)
         except (ValueError, TypeError):
-            problems.append("installer verifier output is not valid JSON")
+            problems.append("installer verifier output is not valid JSON for %s" % package_dir.name)
+            all_pass = False
             continue
         if document.get("schema") != INSTALLER_MANIFEST_SCHEMA or not document.get("files"):
-            problems.append("installer manifest structure is not the expected package")
-            continue
-        return True
-    problems.append("no installer package passed nodeinstall.VerifyArtifact")
-    return False
+            problems.append("installer manifest structure is not the expected package: %s"
+                            % package_dir.name)
+            all_pass = False
+    if not all_pass:
+        problems.append("at least one staged installer package failed verification")
+    return all_pass
 
 
 def verify_kind_payload(directory, artifact, provenance_documents, *,
@@ -256,6 +268,14 @@ def verify_kind_payload(directory, artifact, provenance_documents, *,
     if artifact not in PAYLOAD_SUFFIXES:
         return False, ["unverified artifact %r has no kind verifier" % artifact], []
     problems = []
+    # A symlink (or any non-regular file) with a declared-kind name is NOT
+    # silently skipped: the workflow checksums path.is_file() (following links)
+    # and publishes every staged file, so it must refuse the whole bundle.
+    for path in Path(directory).rglob("*"):
+        if path.name.lower().endswith(PAYLOAD_SUFFIXES[artifact]) and (
+                path.is_symlink() or not path.is_file()):
+            problems.append("symlink/non-regular %s payload %s is refused"
+                            % (artifact, path.name))
     candidates = [path for path in _regular_payloads(directory)
                   if path.name.lower().endswith(PAYLOAD_SUFFIXES[artifact])
                   and not (artifact == "lxc-rootfs" and "-lxd.tar.xz" in path.name)]
@@ -280,5 +300,5 @@ def verify_kind_payload(directory, artifact, provenance_documents, *,
             _verify_qcow2(payload, runner=runner,
                           process_runner=process_runner, problems=problems)
         elif artifact == "lxc-rootfs":
-            _verify_lxc(payload, root_path=root, problems=problems)
+            _verify_lxc(payload, root_path=root, pin=pin, problems=problems)
     return (not problems), problems, digests
