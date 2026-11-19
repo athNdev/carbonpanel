@@ -407,7 +407,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								</p>
 								{#if detail.aliases.length > 0}
 									<ul class="space-y-2">
-										{#each detail.aliases as alias (alias.name + alias.source)}
+										{#each detail.aliases as alias, aliasIndex (alias.name + alias.source + aliasIndex)}
 											<li class="flex flex-wrap items-center gap-2 text-xs">
 												<span class="font-mono text-foreground">{alias.name}</span>
 												<CarbonTag type="gray" size="sm">

@@ -187,44 +187,64 @@
       "focus": "Player lookup, roster rows and allowlist state"
     },
     {
-      "gotoIdentityFromTitle": "[data-player-row=\"0\"] span[title^=\"pl_\"]",
+      "click": "button[aria-label=\"Expand details\"]",
       "feature": "players",
-      "name": "open the seeded player profile"
+      "name": "expand the fixture identity details"
     },
     {
-      "waitFor": "#player-tab-overview",
+      "assertVisible": "button[aria-label=\"Collapse details\"]",
       "feature": "players",
-      "name": "player profile tabs render"
+      "name": "expanded identity details render"
     },
     {
       "screenshot": "showcase-player-profile",
-      "element": "[data-testid=\"showcase-player-detail-content\"]",
-      "maxHeight": 1000,
+      "element": "[data-testid=\"showcase-players-content\"]",
+      "maxHeight": 720,
       "scroll": false,
       "feature": "players",
-      "name": "player profile identity and skin state",
-      "alt": "Player profile overview with identity details and the actual skin state",
-      "focus": "Observed identity, aliases and the real skin availability state"
+      "name": "player identity and skin state in the real roster",
+      "alt": "Real player roster with the seeded identity expanded, showing its avatar and skin state",
+      "focus": "Observed identity, aliases and the actual skin availability state"
     },
     {
-      "click": "#player-tab-access",
+      "goto": "/servers",
       "feature": "players",
-      "name": "open player access tab"
+      "name": "open servers for the allowlist capture"
     },
     {
-      "waitFor": "#player-panel-access",
+      "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
       "feature": "players",
-      "name": "player access table renders"
+      "name": "open first server for allowlist"
+    },
+    {
+      "waitFor": "#server-detail-tabs-tab-players",
+      "feature": "players",
+      "name": "server players tab renders"
+    },
+    {
+      "click": "#server-detail-tabs-tab-players",
+      "feature": "players",
+      "name": "open server players tab"
+    },
+    {
+      "waitFor": "#server-detail-tabs-panel-players",
+      "feature": "players",
+      "name": "server players panel renders"
+    },
+    {
+      "assertVisible": "section[aria-label=\"Add allowlist entry\"]",
+      "feature": "players",
+      "name": "real allowlist form renders"
     },
     {
       "screenshot": "showcase-player-allowlist",
-      "element": "[data-testid=\"showcase-player-detail-content\"]",
+      "element": "#server-detail-tabs-panel-players",
       "maxHeight": 1000,
       "scroll": false,
       "feature": "players",
-      "name": "player allowlist column",
-      "alt": "Player access table showing the allowlist state observed for the fixture identity",
-      "focus": "Allowlist, operator and moderation state from the real backend"
+      "name": "server allowlist form and scoped roster",
+      "alt": "Server Players tab with the real allowlist form and the seeded identity's scoped access state",
+      "focus": "Allowlist form, scoped roster and moderation controls"
     },
     {
       "goto": "/library",
