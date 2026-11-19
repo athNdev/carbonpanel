@@ -112,7 +112,7 @@ func TestSaveRemoteArchiveAtomicallyKeepsTargetOnFailedCopy(t *testing.T) {
 	if string(got) != original {
 		t.Fatalf("failed copy truncated the target: got %q, want %q", got, original)
 	}
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".atomic-*"))
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".atomic-staging-*"))
 	if err != nil {
 		t.Fatal(err)
 	}

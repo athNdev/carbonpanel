@@ -47,10 +47,12 @@ the policy returns `ErrInvalidURL` with only the redacted form.
 The `DISCO_ALLOW_LOOPBACK_TEST` escape hatch is honoured only inside a Go test
 binary (`testing.Testing()`) with the variable explicitly set to `1`. Production
 builds can never enable loopback through the environment. Controller-local
-remote-archive saves use `pkg/files.AtomicWriter`: staging preserves the
-previous target's mode and owner, a new destination honours the process umask
-(no publish-time chmod can widen a restrictive one), and a failed copy aborts
-the staging file instead of truncating the target.
+remote-archive saves use `pkg/files.AtomicWriter`: the staged file stays `0600`
+inside a private `0700` same-filesystem directory until the final rename; the
+final mode is applied only at publish (umask-masked mode for a new destination,
+previous mode and owner for an existing one), so no restrictive file is
+broadened and no partial content is exposed. A failed copy aborts staging
+instead of truncating the target.
 
 # Alternatives
 

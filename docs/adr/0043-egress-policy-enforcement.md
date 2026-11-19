@@ -44,13 +44,16 @@ deny branch directly testable without a mutable production variable or a build
 tag that a release build could omit.
 
 Remote archive saves go through `pkg/files.AtomicWriter`: the download is
-staged in a sibling temp file, the previous target's permission bits and owner
-are carried to the replacement, and only a complete copy is published. A new
-destination is created with mode `0666` so the operating system applies the
-process umask exactly as the old `os.Create` path did; no publish-time chmod
-widens a restrictive umask. A failed copy aborts the temp file, so the old
-target stays intact. This is the same staged-publish contract as the bounded
-storage stream (ADR 0013) applied to the controller-local save path.
+staged in a private `0700` directory in the destination's own parent (so the
+final rename is on one filesystem), with the staged file itself mode `0600`
+throughout the write. The final mode is applied only immediately before the
+rename: a new destination takes the umask-masked `0666` mode exactly as the old
+`os.Create` path produced, while an existing destination keeps its previous
+mode and best-effort owner. No restrictive mode is broadened and no partial
+content is visible during staging. A failed copy aborts the staged file and its
+directory, so the old target stays intact. This is the same staged-publish
+contract as the bounded storage stream (ADR 0013) applied to the
+controller-local save path.
 
 ## Alternatives
 

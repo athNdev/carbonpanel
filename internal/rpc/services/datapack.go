@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -274,9 +275,15 @@ func (s *DatapackService) InstallDatapack(ctx context.Context, req *connect.Requ
 	defer removeDownload()
 
 	if err := minecraft.DownloadDatapackArchiveFrom(ctx, indexers.DatapackIndexerOrigin(resolved), file.DownloadURL, destPath); err != nil {
-		// The download URL is indexer-controlled and may embed credentials or
-		// presigned query values; never log it verbatim.
-		s.log.Error("Failed to download datapack %s: %v", utils.RedactURL(file.DownloadURL), err)
+		// The download URL is indexer-controlled. http.Client wraps transport
+		// failures in url.Error which strips only the password, leaving
+		// presigned query tokens in its text. Keep the underlying cause.
+		cause := err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			cause = urlErr.Err
+		}
+		s.log.Error("Failed to download datapack %s: %v", utils.RedactURL(file.DownloadURL), cause)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to download datapack"))
 	}
 

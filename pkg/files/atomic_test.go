@@ -39,7 +39,7 @@ func TestAtomicWriter(t *testing.T) {
 	if err := w.Abort(); err != nil {
 		t.Fatal(err)
 	}
-	matches, err := filepath.Glob(filepath.Join(dir, ".atomic-*"))
+	matches, err := filepath.Glob(filepath.Join(dir, ".atomic-staging-*"))
 	if err != nil {
 		t.Fatal(err)
 	}
