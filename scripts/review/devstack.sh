@@ -335,21 +335,19 @@ seed_showcase_bluemap() {
 		return 0
 	fi
 	mapdir="${host_path}/modules/bluemap"
-	mkdir -p "${mapdir}/config/maps" "${mapdir}/data" "${mapdir}/web" || return 0
-	cat >"${mapdir}/config/core.conf" <<EOF
-# Isolated review fixture, not an operator installation.
-accept-download: true
-render-thread-count: 1
-region-file-check-interval: 5
+	# The panel container owns the server data directory; write the fixture
+	# config as root inside that container, then bind the same paths into the
+	# renderer container.
+	cat >"${DATA}/config/setup-bluemap.sh" <<EOF
+#!/bin/sh
+set -eu
+base="${data_path}/modules/bluemap"
+mkdir -p "\${base}/config/maps" "\${base}/data" "\${base}/web"
+printf '%s\n' '# Isolated review fixture' 'accept-download: true' 'render-thread-count: 1' 'region-file-check-interval: 5' > "\${base}/config/core.conf"
+printf '%s\n' '# Seeded vanilla level, mounted read-only' 'id: "${level}"' 'name: "${level}"' 'world: "/app/world"' 'dimension: "minecraft:overworld"' 'storage: file' > "\${base}/config/maps/${level}.conf"
 EOF
-	cat >"${mapdir}/config/maps/${level}.conf" <<EOF
-# Level ${level}: the seeded vanilla world, mounted read-only.
-id: "${level}"
-name: "${level}"
-world: "/app/world"
-dimension: "minecraft:overworld"
-storage: file
-EOF
+	docker cp "${DATA}/config/setup-bluemap.sh" "${NAME}:/tmp/setup-bluemap.sh" >/dev/null 2>&1 || return 0
+	docker exec -u root "${NAME}" sh /tmp/setup-bluemap.sh >/dev/null 2>&1 || return 0
 	if ! start_bluemap "${host_path}" "${mapdir}" "${level}"; then
 		echo "could not start the isolated BlueMap renderer; skipping map capture" >&2
 		return 0
