@@ -76,6 +76,10 @@ type Server struct {
 	// modBrowseManager is the single shared operation used by both the
 	// generated ModBrowseService and the legacy /mods/* JSON adapter.
 	modBrowseManager *handlers.ModOnlineManager
+	// stagedConfigOps and packwizOps are the single shared operations used by
+	// both the generated services and the legacy JSON adapters.
+	stagedConfigOps *handlers.StagedConfigOperations
+	packwizOps      *handlers.PackwizOperations
 
 	// startedAt is the server construction time, surfaced by /healthz and
 	// /readyz as an uptime.
@@ -224,6 +228,9 @@ func NewServer(
 		startedAt:        time.Now(),
 	}
 	s.modBrowseManager = handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer, handlers.ModOnlineOptions{StorageResolver: s.storageResolver})
+	s.stagedConfigOps = handlers.NewStagedConfigOperations(s.store)
+	packwizDir := filepath.Join(cfg.Storage.DataDir, "packwiz")
+	s.packwizOps = handlers.NewPackwizOperations(packwiz.NewManager(packwizDir, log))
 
 	s.setupHandler()
 	return s
@@ -259,11 +266,13 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.ModServiceName,
 		carbonpanelv1connect.ModBrowseServiceName,
 		carbonpanelv1connect.ModpackServiceName,
+		carbonpanelv1connect.PackwizServiceName,
 		carbonpanelv1connect.ModuleServiceName,
 		carbonpanelv1connect.NodeServiceName,
 		carbonpanelv1connect.ProxyServiceName,
 		carbonpanelv1connect.RoleServiceName,
 		carbonpanelv1connect.ServerServiceName,
+		carbonpanelv1connect.StagedConfigServiceName,
 		carbonpanelv1connect.SupportServiceName,
 		carbonpanelv1connect.TaskServiceName,
 		carbonpanelv1connect.UploadServiceName,
@@ -313,15 +322,14 @@ func (s *Server) setupHandler() {
 	// ModBrowseService and is retained for the ADR 0012 deprecation window.
 	mux.Handle("/api/v1/servers/", s.modBrowseManager)
 
-	// Packwiz Modpack Studio and Server Deployment Engine (MINE-30, MINE-31)
-	packwizDir := filepath.Join(s.config.Storage.DataDir, "packwiz")
-	packwizManager := packwiz.NewManager(packwizDir, s.log)
-	packwizHandler := handlers.NewPackwizHandler(packwizManager, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config)
+	// Packwiz Modpack Studio and Server Deployment Engine (MINE-30, MINE-31).
+	// The compatibility adapter and generated PackwizService share one operation.
+	packwizHandler := handlers.NewPackwizHandlerWithOperations(s.packwizOps, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config)
 	packwizHandler.SetStorageResolver(s.storageResolver)
 	mux.Handle("/api/v1/packwiz/", packwizHandler)
 
 	// Scheduled/staged config rollout for instances (staged diffs applied on restart or cron)
-	mux.Handle("/api/v1/staged-config/", handlers.NewStagedConfigHandler(s.store, s.log, s.authManager, s.enforcer))
+	mux.Handle("/api/v1/staged-config/", handlers.NewStagedConfigHandlerWithOperations(s.stagedConfigOps, s.log, s.authManager, s.enforcer))
 
 	// Prometheus OpenMetrics snapshots (MINE-144, PERF-5, SCH-6)
 	metricsHandler := handlers.NewMetricsHandler(s.store, s.metricsCollector, s.authManager, s.enforcer, s.log)
@@ -373,6 +381,8 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	// The generated RPC and the legacy JSON adapter share one operation
 	// instance so provider, credential and audit policy cannot diverge.
 	modBrowseService := services.NewModBrowseService(s.store, s.modBrowseManager)
+	stagedConfigService := services.NewStagedConfigService(s.store, s.stagedConfigOps, s.enforcer)
+	packwizService := services.NewPackwizService(s.packwizOps)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	datapackService := services.NewDatapackService(s.store, s.config, s.uploadManager, s.log)
 	datapackService.SetStorageResolver(s.storageResolver)
@@ -489,6 +499,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	modBrowsePath, modBrowseHandler := carbonpanelv1connect.NewModBrowseServiceHandler(modBrowseService, opts...)
 	mux.Handle(modBrowsePath, modBrowseHandler)
+
+	stagedConfigPath, stagedConfigHandler := carbonpanelv1connect.NewStagedConfigServiceHandler(stagedConfigService, opts...)
+	mux.Handle(stagedConfigPath, stagedConfigHandler)
+
+	packwizPath, packwizHandler := carbonpanelv1connect.NewPackwizServiceHandler(packwizService, opts...)
+	mux.Handle(packwizPath, packwizHandler)
 
 	modpackPath, modpackHandler := carbonpanelv1connect.NewModpackServiceHandler(modpackService, opts...)
 	mux.Handle(modpackPath, modpackHandler)

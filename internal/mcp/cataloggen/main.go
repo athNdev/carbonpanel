@@ -25,6 +25,7 @@ import (
 var mountedServices = []string{
 	"AuthService", "ConfigService", "FileService", "MinecraftService", "ModService",
 	"ModBrowseService", "ModpackService", "DatapackService", "ProxyService", "ServerService",
+	"PackwizService", "StagedConfigService",
 	"NodeService", "SupportService", "TaskService", "ActivityService", "OperationService",
 	"SubuserService", "BlueprintService", "BackupService", "UserService", "RoleService",
 	"ModuleService", "UploadService", "PlayerService", "WorldViewService", "WorldService",
