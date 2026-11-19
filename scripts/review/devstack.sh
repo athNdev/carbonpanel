@@ -380,6 +380,7 @@ world_view:
       health_path: "/"
       player_feed: false
 EOF
+	echo "review BlueMap settings.json: $(head -c 600 "${mapdir}/web/settings.json" 2>/dev/null)" >&2
 	echo "seeded real BlueMap tiles for ${server_id} on ${node_id}"
 }
 
