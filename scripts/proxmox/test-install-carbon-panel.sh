@@ -65,6 +65,11 @@ if [ "${1:-}" = "compose" ]; then
     esac
   done
   sub="${1:-}"
+  if [ "$sub" = "config" ]; then
+    if [ "${DOCKER_STUB_FAIL_CONFIG:-0}" = "1" ]; then exit 1; fi
+    printf '%s\n' "${DOCKER_STUB_COMPOSE_SERVICES:-carbon-panel}"
+    exit 0
+  fi
   if [ "$sub" = "ps" ]; then
     # -aq service: print id only when DOCKER_STUB_SERVICE_EXISTS=1
     if [ "${DOCKER_STUB_SERVICE_EXISTS:-0}" = "1" ]; then
@@ -80,6 +85,17 @@ echo "docker $*" >>"$log"
 exit 0
 EOF
 chmod +x "$STUBBIN/docker"
+
+# Stub systemctl: native evidence is opt-in via DOCKER_STUB_SYSTEMD_UNIT=1.
+cat >"$STUBBIN/systemctl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${DOCKER_STUB_SYSTEMD_UNIT:-0}" = "1" ]; then
+  printf 'carbon-panel.service enabled\n'
+fi
+exit 0
+EOF
+chmod +x "$STUBBIN/systemctl"
 
 # mktemp wrapper: when COMPOSE_RACE_TARGET is set, a foreign compose file is
 # created in the window between the installer's existence check and publish.
@@ -278,5 +294,131 @@ if grep -q 'up -d carbon-panel' "$DOCKER_STUB_LOG"; then
 fi
 DOCKER_STUB_FAIL_PULL=0
 pass "failed update preserves compose and data"
+
+# --- Regression fixtures: standard Compose names, explicit config, refusals ---
+
+write_compose_fixture() {
+  cat >"$1" <<'YAML'
+services:
+  carbon-panel:
+    image: atharvnaphade/carbonpanel:latest
+    volumes:
+      - ./data:/app/data
+YAML
+}
+
+# The original failing invocation (update with no --compose) now resolves every
+# standard Compose name shipped by this repository and by Docker Compose.
+for name in compose.yaml docker-compose.yml docker-compose.yaml; do
+  ALT="$TMPROOT/alt_${name//./_}"
+  mkdir -p "$ALT/data"
+  printf 'keep-data\n' >"$ALT/data/persist.txt"
+  write_compose_fixture "$ALT/$name"
+  : >"$DOCKER_STUB_LOG"
+  bash "$INSTALLER" update --dir "$ALT" >"$TMPROOT/alt.out" 2>&1
+  grep -Fq "Using Compose file: $ALT/$name" "$TMPROOT/alt.out" || fail "update should resolve $name"
+  grep -q 'pull carbon-panel' "$DOCKER_STUB_LOG" || fail "update with $name should pull"
+  grep -q 'up -d carbon-panel' "$DOCKER_STUB_LOG" || fail "update with $name should recreate"
+  grep -Fq 'keep-data' "$ALT/data/persist.txt" || fail "update with $name must preserve data"
+  pass "original update invocation resolves $name"
+done
+
+# Ambiguous standard names must be refused before any operation.
+AMB="$TMPROOT/ambiguous"
+mkdir -p "$AMB"
+write_compose_fixture "$AMB/compose.yml"
+write_compose_fixture "$AMB/docker-compose.yml"
+: >"$DOCKER_STUB_LOG"
+run_expect_fail "ambiguous compose names refused" bash "$INSTALLER" update --dir "$AMB"
+grep -Fq 'ambiguous Compose configuration' "$TMPROOT/last.out" || fail "ambiguity must be explicit"
+grep -Fq -- '--compose' "$TMPROOT/last.out" || fail "ambiguity should suggest --compose"
+if grep -Eq 'compose .*( pull | up )' "$DOCKER_STUB_LOG"; then fail "ambiguous must not pull or recreate"; fi
+[ ! -e "$AMB/.carbon-panel-install.lock" ] || fail "ambiguity must not create a lock"
+pass "ambiguous standard Compose names refused without operations"
+
+# Explicit --compose outside the install directory. The lock is keyed to the
+# compose project directory, so two --dir values cannot update the same file.
+EXT="$TMPROOT/external-config"
+mkdir -p "$EXT" "$TMPROOT/expdir/data"
+write_compose_fixture "$EXT/panel-compose.yml"
+: >"$DOCKER_STUB_LOG"
+bash "$INSTALLER" update --dir "$TMPROOT/expdir" --compose "$EXT/panel-compose.yml" >"$TMPROOT/exp.out" 2>&1
+grep -Fq "Using Compose file: $EXT/panel-compose.yml" "$TMPROOT/exp.out" || fail "external compose should be used"
+grep -q 'pull carbon-panel' "$DOCKER_STUB_LOG" || fail "external compose update should pull"
+[ ! -d "$EXT/.carbon-panel-install.lock" ] || fail "external lock must be released"
+[ ! -d "$TMPROOT/expdir/.carbon-panel-install.lock" ] || fail "no --dir-keyed lock for external compose"
+mkdir -p "$TMPROOT/expdir2"
+mkdir -p "$EXT/.carbon-panel-install.lock"
+printf '999999\n' >"$EXT/.carbon-panel-install.lock/pid"
+: >"$DOCKER_STUB_LOG"
+run_expect_fail "external compose lock shared across --dir values" bash "$INSTALLER" update --dir "$TMPROOT/expdir2" --compose "$EXT/panel-compose.yml"
+grep -Fq 'already running' "$TMPROOT/last.out" || fail "shared lock refusal should be explicit"
+if grep -q 'pull carbon-panel' "$DOCKER_STUB_LOG"; then fail "shared lock must block pull"; fi
+rm -f "$EXT/.carbon-panel-install.lock/pid"
+rmdir "$EXT/.carbon-panel-install.lock"
+# Relative --compose resolves from --dir.
+write_compose_fixture "$TMPROOT/expdir/rel-compose.yml"
+: >"$DOCKER_STUB_LOG"
+bash "$INSTALLER" update --dir "$TMPROOT/expdir" --compose rel-compose.yml >"$TMPROOT/rel.out" 2>&1
+grep -Fq "Using Compose file: $TMPROOT/expdir/rel-compose.yml" "$TMPROOT/rel.out" || fail "relative --compose should resolve from --dir"
+pass "explicit --compose supports external/relative paths with a shared lock"
+
+# Missing Compose config: refusal must be explicit and leave no mutation.
+MISS="$TMPROOT/missing-config"
+mkdir -p "$MISS/data"
+printf 'keep-data\n' >"$MISS/data/persist.txt"
+: >"$DOCKER_STUB_LOG"
+run_expect_fail "update refuses missing compose config" bash "$INSTALLER" update --dir "$MISS"
+if grep -Fq 'run install first' "$TMPROOT/last.out"; then fail "misleading 'run install first' must be gone"; fi
+grep -Fq 'no supported Compose configuration' "$TMPROOT/last.out" || fail "missing config must be explicit"
+grep -Fq 'keep-data' "$MISS/data/persist.txt" || fail "data must be preserved on refusal"
+if find "$MISS" -maxdepth 1 -type f | grep -q .; then fail "missing refusal must not write files in install dir"; fi
+[ ! -e "$MISS/.carbon-panel-install-owned" ] || fail "no marker on refusal"
+[ ! -e "$MISS/.carbon-panel-install.lock" ] || fail "no lock on refusal"
+if [ -s "$DOCKER_STUB_LOG" ]; then fail "missing refusal must not reach Docker"; fi
+pass "missing Compose config refused without writes or operations"
+
+# Native systemd evidence: refusals on update and fresh install, no mutations.
+NAT="$TMPROOT/native-unit"
+mkdir -p "$NAT/data"
+printf 'keep-data\n' >"$NAT/data/persist.txt"
+: >"$DOCKER_STUB_LOG"
+DOCKER_STUB_SYSTEMD_UNIT=1 run_expect_fail "native install refused on update" bash "$INSTALLER" update --dir "$NAT"
+grep -Fq 'Native systemd evidence' "$TMPROOT/last.out" || fail "native evidence must be reported"
+grep -Fq 'docs/getting-started/prebuilt-binaries/' "$TMPROOT/last.out" || fail "native controller guide must be referenced"
+grep -Fq 'https://github.com/athNdev/carbonpanel/releases' "$TMPROOT/last.out" || fail "application Releases link must be referenced"
+grep -Fq 'will not install, migrate' "$TMPROOT/last.out" || fail "no auto-install/migrate"
+if grep -Fq 'run install first' "$TMPROOT/last.out"; then fail "misleading message"; fi
+if [ -s "$DOCKER_STUB_LOG" ]; then fail "native refusal must not reach Docker"; fi
+grep -Fq 'keep-data' "$NAT/data/persist.txt" || fail "data preserved"
+if find "$NAT" -maxdepth 1 -type f | grep -q .; then fail "native refusal must not write files"; fi
+NATINSTALL="$TMPROOT/native-install-refusal"
+: >"$DOCKER_STUB_LOG"
+DOCKER_STUB_SYSTEMD_UNIT=1 run_expect_fail "native install refused on fresh install" bash "$INSTALLER" install --dir "$NATINSTALL"
+grep -Fq 'Native systemd evidence' "$TMPROOT/last.out" || fail "install native evidence"
+grep -Fq 'will not install, migrate' "$TMPROOT/last.out" || fail "install must not migrate"
+[ ! -e "$NATINSTALL" ] || fail "native refusal must not create the install directory"
+if [ -s "$DOCKER_STUB_LOG" ]; then fail "native refusal must not reach Docker"; fi
+pass "native systemd refused on update and fresh install without mutations"
+
+# The carbon-panel service must be verified before an update operates.
+BADSVC="$TMPROOT/bad-service"
+mkdir -p "$BADSVC"
+write_compose_fixture "$BADSVC/compose.yml"
+: >"$DOCKER_STUB_LOG"
+DOCKER_STUB_COMPOSE_SERVICES=web run_expect_fail "carbon-panel service verified before update" bash "$INSTALLER" update --dir "$BADSVC"
+grep -Fq "does not define service 'carbon-panel'" "$TMPROOT/last.out" || fail "missing service must be explicit"
+if grep -Eq 'compose .*( pull | up )' "$DOCKER_STUB_LOG"; then fail "missing service must not pull or recreate"; fi
+DOCKER_STUB_FAIL_CONFIG=1 run_expect_fail "unreadable compose config refused" bash "$INSTALLER" update --dir "$BADSVC"
+grep -Fq 'unable to read services' "$TMPROOT/last.out" || fail "unreadable config must be explicit"
+pass "update verifies carbon-panel service before any operation"
+
+# --compose argument validation.
+run_expect_fail "--compose without value" bash "$INSTALLER" update --compose
+run_expect_fail "--compose with missing file" bash "$INSTALLER" update --dir "$MISS" --compose "$MISS/nope.yml"
+mkdir -p "$TMPROOT/compose-as-dir"
+run_expect_fail "--compose directory refused" bash "$INSTALLER" update --dir "$MISS" --compose "$TMPROOT/compose-as-dir"
+run_expect_fail "--compose rejected for install" bash "$INSTALLER" install --dir "$TMPROOT/install-with-compose" --compose "$EXT/panel-compose.yml"
+pass "--compose argument validation"
 
 echo "All proxmox installer tests passed."
