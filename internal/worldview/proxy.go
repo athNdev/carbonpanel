@@ -271,7 +271,7 @@ func isBlueMapMapDataPath(asset string) bool {
 // coding and "*" is a wildcard. It only decides whether a gzip variant may be
 // offered; it never participates in authorization.
 func acceptsEncoding(header, encoding string) bool {
-	wildcard := false
+	wildcard, explicitlyRefused := false, false
 	for _, value := range strings.Split(header, ",") {
 		parts := strings.Split(value, ";")
 		coding := strings.TrimSpace(parts[0])
@@ -293,9 +293,13 @@ func acceptsEncoding(header, encoding string) bool {
 			} else {
 				return true
 			}
+		} else if strings.EqualFold(coding, encoding) {
+			// An explicit q=0 overrides a wildcard (RFC 9110): a client that
+			// refused gzip must never be served a gzip representation.
+			explicitlyRefused = true
 		}
 	}
-	return wildcard
+	return wildcard && !explicitlyRefused
 }
 
 // blueMapContentType is an explicit, OS-independent media-type table for the

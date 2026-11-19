@@ -6,6 +6,8 @@
 package worldview
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -83,9 +85,11 @@ func TestBlueMapWebServerWithoutMapIsNotReadyFixture(t *testing.T) {
 func TestBlueMapWebServerWithStringMapIDsIsReadyFixture(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/settings.json":
+		switch {
+		case r.URL.Path == "/settings.json":
 			_, _ = w.Write([]byte(`{"maps":["world"]}`))
+		case strings.HasSuffix(r.URL.Path, "/textures.json"):
+			_, _ = w.Write([]byte(`{"textures":["block/stone.png"]}`))
 		default:
 			_, _ = w.Write([]byte(`{"version":"5.29"}`))
 		}
@@ -181,6 +185,99 @@ func TestBlueMapRealTexturesIsReadyFixture(t *testing.T) {
 	}
 	if h.State != v1.RendererState_RENDERER_STATE_READY {
 		t.Fatalf("state = %s, want READY when real texture bytes are served", h.State)
+	}
+}
+
+// TestBlueMapGzipOnlyTexturesIsReadyFixture proves the readiness probe uses the
+// same exact gzip sibling route as the proxy. A gzip-only static web root must
+// be READY (so a session is issued) rather than ABSENT, otherwise the fixed
+// proxy route could never be exercised.
+func TestBlueMapGzipOnlyTexturesIsReadyFixture(t *testing.T) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write([]byte(`{"textures":["block/stone.png"]}`))
+	_ = zw.Close()
+	compressed := buf.Bytes()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/settings.json":
+			_, _ = w.Write([]byte(`{"maps":["world"]}`))
+		case r.URL.Path == "/maps/world/textures.json.gz":
+			w.Header().Set("Content-Type", "application/gzip")
+			_, _ = w.Write(compressed)
+		case r.URL.Path == "/":
+			_, _ = w.Write([]byte(`{"version":"5.29"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+	h, err := adapter.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.State != v1.RendererState_RENDERER_STATE_READY {
+		t.Fatalf("state = %s, want READY when only textures.json.gz exists; detail=%q", h.State, h.Detail)
+	}
+}
+
+// TestBlueMapNonTexturesBodyIsNotReadyFixture rejects a 200 SPA/HTML fallback
+// or an unrelated JSON document: a non-empty body alone is not map data.
+func TestBlueMapNonTexturesBodyIsNotReadyFixture(t *testing.T) {
+	for name, body := range map[string]string{
+		"html":    `<html><body>panel shell</body></html>`,
+		"json":    `{"version":"5.29"}`,
+		"no array": `{"textures":"not-an-array"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/settings.json" {
+					_, _ = w.Write([]byte(`{"maps":["world"]}`))
+					return
+				}
+				_, _ = w.Write([]byte(body))
+			}))
+			defer ts.Close()
+
+			adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+			h, err := adapter.Health(context.Background())
+			if err != nil {
+				t.Fatalf("Health: %v", err)
+			}
+			if h.State == v1.RendererState_RENDERER_STATE_READY {
+				t.Fatalf("body %q must not be accepted as real BlueMap textures", body)
+			}
+		})
+	}
+}
+
+// TestBlueMapEveryConfiguredMapIsProbedFixture pins that a broken second map
+// cannot be hidden behind a healthy first one: the webapp loads every map in
+// settings.json, so all of them must answer with real textures.
+func TestBlueMapEveryConfiguredMapIsProbedFixture(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/settings.json" {
+			_, _ = w.Write([]byte(`{"maps":["world","nether"]}`))
+			return
+		}
+		if r.URL.Path == "/maps/world/textures.json" {
+			_, _ = w.Write([]byte(`{"textures":[]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+	h, err := adapter.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.State == v1.RendererState_RENDERER_STATE_READY {
+		t.Fatal("state = READY although the second configured map has no textures")
 	}
 }
 

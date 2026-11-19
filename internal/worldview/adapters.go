@@ -6,6 +6,7 @@
 package worldview
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -182,13 +183,19 @@ func (a *httpRenderer) Health(ctx context.Context) (*Health, error) {
 			return blueMapNoMapHealth(err), nil
 		}
 		// A reachable map list is still not a viewable map. BlueMap's webapp
-		// loads /maps/{id}/textures.json on startup; a 404 or an empty body
-		// there produces a black canvas even though the iframe and its canvas
-		// are visible. Require real texture bytes from the network before
-		// reporting READY so a missing resource fails closed at the RPC seam
-		// (no session key is issued) instead of being mistaken for a pass.
-		if err := blueMapTexturesReady(ctx, a.ep.baseURL(), ids[0], a.hc); err != nil {
-			return blueMapNoAssetsHealth(err), nil
+		// loads /maps/{id}/textures.json for EVERY configured map on startup;
+		// a 404 or a non-textures body produces a black canvas even though the
+		// iframe and its canvas are visible. Require a real textures document
+		// for each map before READY so a missing resource fails closed at the
+		// RPC seam (no session key is issued). The map count is bounded by the
+		// 1 MiB settings body and capped here so health stays bounded too.
+		if len(ids) > maxBlueMapProbedMaps {
+			return blueMapNoAssetsHealth(), nil
+		}
+		for _, id := range ids {
+			if err := blueMapTexturesReady(ctx, a.ep.baseURL(), id, a.hc); err != nil {
+				return blueMapNoAssetsHealth(), nil
+			}
 		}
 	}
 
@@ -278,38 +285,89 @@ func blueMapNoMapHealth(err error) *Health {
 	return h
 }
 
+const (
+	// maxBlueMapProbedMaps bounds the number of network probes performed by a
+	// single health check even if settings.json carries a very large map list.
+	maxBlueMapProbedMaps = 32
+	maxBlueMapTexturesBytes = 1 << 20
+)
+
 // blueMapTexturesReady verifies that the map data the webapp actually loads on
 // startup is reachable over the private renderer endpoint. BlueMap v5.29 stores
-// map data gzipped on disk; its own webserver answers the plain path by
-// negotiating Accept-Encoding: gzip. A plain static web root that only has
-// textures.json.gz answers 404 here, which is exactly the defect that produces
-// a black canvas while a visible-canvas browser assertion still passes.
-// Only HTTP status and a non-empty, bounded body are inspected; the bytes are
-// not parsed and never reach a browser through this probe.
+// map data gzipped on disk: its own webserver answers the plain path by
+// negotiating Accept-Encoding: gzip, while a plain static web root only has
+// textures.json.gz. Both routes are accepted, with exactly one sibling retry,
+// and the decompressed body must be a plausible textures document. Without the
+// sibling probe a gzip-only web root would be ABSENT and no session would ever
+// be issued, so the proxy's matching retry could not be exercised.
 func blueMapTexturesReady(ctx context.Context, baseURL, mapID string, hc HTTPDoer) error {
-	if strings.TrimSpace(mapID) == "" {
-		return errors.New("empty BlueMap map id")
+	mapID = strings.TrimSpace(mapID)
+	if mapID == "" || strings.ContainsAny(mapID, "/\\?&#%") || strings.Contains(mapID, "..") {
+		return errors.New("invalid BlueMap map id")
 	}
-	url := strings.TrimRight(baseURL, "/") + "/maps/" + mapID + "/textures.json"
+	plain := strings.TrimRight(baseURL, "/") + "/maps/" + mapID + "/textures.json"
+	resp, err := doBlueMapTexturesGet(ctx, plain, hc)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		defer func() { _ = resp.Body.Close() }()
+		return verifyBlueMapTextures(resp, false)
+	}
+	_ = resp.Body.Close()
+
+	variant, err := doBlueMapTexturesGet(ctx, plain+".gz", hc)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = variant.Body.Close() }()
+	if variant.StatusCode < 200 || variant.StatusCode >= 300 {
+		return fmt.Errorf("textures.json and textures.json.gz returned HTTP %d/%d", resp.StatusCode, variant.StatusCode)
+	}
+	return verifyBlueMapTextures(variant, true)
+}
+
+func doBlueMapTexturesGet(ctx context.Context, url string, hc HTTPDoer) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Accept-Encoding", "gzip")
-	resp, err := hc.Do(req)
-	if err != nil {
-		return err
+	return hc.Do(req)
+}
+
+// verifyBlueMapTextures decodes a bounded body and requires a JSON object whose
+// "textures" field is an array. A SPA/HTML fallback or an unrelated JSON
+// document with a 200 is not a rendered map and must not be called READY.
+func verifyBlueMapTextures(resp *http.Response, literalGzip bool) error {
+	var reader io.Reader = io.LimitReader(resp.Body, maxBlueMapTexturesBytes)
+	if literalGzip || strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
+		zr, err := gzip.NewReader(reader)
+		if err != nil {
+			return fmt.Errorf("textures gzip stream: %w", err)
+		}
+		defer func() { _ = zr.Close() }()
+		reader = zr
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("textures.json returned HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(reader, maxBlueMapTexturesBytes))
 	if err != nil {
 		return err
 	}
 	if len(body) == 0 {
 		return errors.New("textures.json returned an empty body")
+	}
+	var doc struct {
+		Textures json.RawMessage `json:"textures"`
+	}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return errors.New("textures.json is not a JSON document")
+	}
+	if len(doc.Textures) == 0 {
+		return errors.New("textures.json has no textures field")
+	}
+	var textures []json.RawMessage
+	if err := json.Unmarshal(doc.Textures, &textures); err != nil {
+		return errors.New("textures.json textures field is not an array")
 	}
 	return nil
 }
@@ -317,16 +375,11 @@ func blueMapTexturesReady(ctx context.Context, baseURL, mapID string, hc HTTPDoe
 // blueMapNoAssetsHealth reports the honest setup/rendering state when the
 // renderer's map list exists but its network-served map data does not. The
 // renderer address and the underlying error are never echoed to the client.
-func blueMapNoAssetsHealth(err error) *Health {
-	h := &Health{
+func blueMapNoAssetsHealth() *Health {
+	return &Health{
 		State: v1.RendererState_RENDERER_STATE_ABSENT, Source: "renderer.http.bluemap",
-		Confidence: "detected", Detail: "BlueMap has a configured map but its map textures are not reachable; wait for rendering or fix the renderer web root before opening the map",
+		Confidence: "unknown", Detail: "BlueMap has a configured map but its map textures could not be read; wait for rendering or fix the renderer web root before opening the map",
 	}
-	if err != nil {
-		h.Confidence = "unknown"
-		h.Detail = "BlueMap has a configured map but its map textures could not be read; wait for rendering or fix the renderer web root before opening the map"
-	}
-	return h
 }
 
 // parseHealthBody reads optional real fields from the renderer response. A

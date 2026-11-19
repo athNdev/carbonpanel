@@ -55,10 +55,11 @@ fallback and no cross-origin iframe.
   the exact target world in the module config, a rendered scoped tile and the
   renderer's own map list (`/settings.json`); missing facts report setup,
   rendering, stopped, unreachable or error with a next action.
-- A reachable map list is not a viewable map. READY also requires non-empty
-  `textures.json` bytes from the node-local renderer network endpoint; a 404 or
-  empty body reports setup/rendering state and issues no map session. A visible
-  iframe/canvas is never evidence that tiles loaded.
+- A reachable map list is not a viewable map. READY also requires a valid,
+  bounded JSON textures document for every configured map from the node-local
+  renderer network endpoint (plain encoded route or exact `.gz` sibling); a
+  404, empty body or SPA fallback reports setup/rendering state and issues no
+  map session. A visible iframe/canvas is never evidence that tiles loaded.
 - BlueMap web assets keep the panel CSP unchanged. The proxy forwards
   `Accept-Encoding`/`Content-Encoding` for every renderer; only for BlueMap map
   `textures.json`/tile payloads it retries exactly the `.gz` sibling of a 404

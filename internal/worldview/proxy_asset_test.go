@@ -380,6 +380,7 @@ func TestAcceptsEncodingFixture(t *testing.T) {
 		{"gzip, deflate", "gzip", true},
 		{"GZIP", "gzip", true},
 		{"gzip;q=0", "gzip", false},
+		{"gzip;q=0, *", "gzip", false},
 		{"gzip;q=0.001", "gzip", true},
 		{"deflate", "gzip", false},
 		{"*", "gzip", true},

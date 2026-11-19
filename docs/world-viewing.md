@@ -99,8 +99,10 @@ representation switching, and the session/auth/scope and private no-store
 cache gates are unchanged. Other renderers, other asset paths, other encodings
 and in-proxy decompression are not introduced. A missing tile or texture stays
 a 404, and the adapter does not report READY (nor issue a map session) unless
-`/maps/{id}/textures.json` answers with real bytes. A visible iframe or canvas
-is never used as evidence that a map loaded.
+`/maps/{id}/textures.json` answers — through the plain encoded route or the
+exact `.gz` sibling — with a bounded JSON textures document for every
+configured map. A visible iframe or canvas is never used as evidence that a
+map loaded.
 
 The panel CSP is unchanged: no `unsafe-eval`, no new `unsafe-inline` and no
 capture-only bypass. Compatibility comes from a pinned rebuild of upstream

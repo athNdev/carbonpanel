@@ -77,11 +77,16 @@ header bypass would remove a real security control from the whole console.
      becoming an empty 200.
 
 4. **READY requires real map data over the network.** For BlueMap, the adapter
-   now probes `/maps/{id}/textures.json` after reading the authoritative map
-   list. A 404 or empty body is reported as `ABSENT` with an actionable
-   diagnostic and no map session key, so a black canvas cannot be captured as
-   a qualified map view. On-disk tile checks in discovery still apply; this is
-   an additional network-side assertion at the readiness seam.
+   probes `/maps/{id}/textures.json` for **every** map in the authoritative
+   list (capped at 32 probes per health check). It accepts the same two routes
+   as the webapp: an encoded plain response or the exact `.gz` sibling from a
+   gzip-only static root. A bounded, decompressed body must be a JSON object
+   whose `textures` field is an array; a 404, empty body, SPA/HTML fallback or
+   unrelated JSON is reported as `ABSENT` with an actionable diagnostic and no
+   map session key, so a black canvas cannot be captured as a qualified map
+   view. Probing all maps prevents a healthy first map from hiding a broken
+   second one. On-disk tile checks in discovery still apply; this is an
+   additional network-side assertion at the readiness seam.
 
 ## Alternatives rejected
 
