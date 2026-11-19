@@ -94,8 +94,12 @@ cannot outlive the code it names.
 - If a failure cannot be reproduced in a test, say so in the change.
 - Frontend accessibility is checked through public UI seams: Happy DOM component
   tests assert focus, roles and states, and the owned-Chromium journey checks
-  focus order, Escape, visible focus and reflow at 360/768/1440. Source-string
-  assertions alone are not accessibility coverage; see
+  focus order, Escape, visible focus and reflow at 360/768/1440 on both the
+  component fixture and real routes served from the production static build,
+  with the high-value routes checked in both light and dark themes. Route data
+  is seeded only at the HTTP/RPC boundary; no source module or store
+  is imported into the browser. Source-string assertions alone are not
+  accessibility coverage; see
   [Frontend accessibility coverage](../decisions/frontend-a11y-coverage.md).
 - The runtime qualification matrix in `internal/docker/runtime_matrix_test.go`
   always inspects the resolved CreateContainer request. Skip only the
