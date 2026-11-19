@@ -1,7 +1,7 @@
 ---
 type: Runbook
 title: Backup and restore
-description: Where backup storage, snapshots and restore are specified.
+description: Where panel database snapshot, backup storage, restore and retention are specified.
 status: stable
 owners: [oss-runtime]
 code_refs:

@@ -37,8 +37,18 @@ type ProxyService struct {
 	pool         *docker.ClientPool
 	proxyManager *proxy.Manager
 	config       *config.Config
+	admission    *serverruntime.AdmissionCoordinator
 	log          *logger.Logger
 	logStreamer  *logger.LogStreamer
+}
+
+// SetAdmissionCoordinator supplies the shared in-process start gate. A routing
+// change that recreates a running container can start it on the node, so it
+// must contend with ordinary starts there (OSS-405).
+func (s *ProxyService) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) {
+	if c != nil {
+		s.admission = c
+	}
 }
 
 // NewProxyService creates a new proxy service
@@ -52,6 +62,7 @@ func NewProxyService(store *storage.Store, dockerClient *docker.Client, pool *do
 		pool:         pool,
 		proxyManager: proxyManager,
 		config:       cfg,
+		admission:    serverruntime.NewAdmissionCoordinator(),
 		log:          log,
 		logStreamer:  logStreamer,
 	}
@@ -538,6 +549,23 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 	// Container recreation needed if proxy mode changes OR listener changes while proxy is enabled
 	needsRecreation := proxyModeChanged || (listenerChanged && hostname != "" && oldProxyHostname != "")
 
+	// Acquire the node gate before any mutation when recreation will start a
+	// replacement container. An admission refusal must leave the old route and
+	// the stored hostname intact, not strip a running server's route (OSS-405).
+	if needsRecreation && server.ContainerID != "" {
+		release, err := s.admission.Acquire(ctx, server.NodeID)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil, connect.NewError(connect.CodeCanceled, fmt.Errorf("node %s start admission: %w", server.NodeID, err))
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, connect.NewError(connect.CodeDeadlineExceeded, fmt.Errorf("node %s start admission: %w", server.NodeID, err))
+			}
+			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("node %s start admission: %w", server.NodeID, err))
+		}
+		defer release()
+	}
+
 	// Removes old route BEFORE updating server in DB and using its hostname
 	if hostnameChanged && oldProxyHostname != "" && s.proxyManager != nil {
 		if err := s.proxyManager.RemoveRouteByHostname(oldProxyHostname, oldProxyListenerID); err != nil {
@@ -549,7 +577,9 @@ func (s *ProxyService) UpdateServerRouting(ctx context.Context, req *connect.Req
 	server.ProxyHostname = hostname
 	server.ProxyListenerID = listenerID
 
-	// Handle container recreation if needed
+	// Handle container recreation if needed. The gate acquired above is held
+	// through the replacement and status persistence so a routing-triggered
+	// start cannot admit against a total another start is about to change.
 	if needsRecreation && server.ContainerID != "" {
 		if s.pool == nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("docker client pool not configured"))

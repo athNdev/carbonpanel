@@ -21,7 +21,7 @@ import (
 func TestDeepSleepManager_PlayerWakeDoesNotStartIntentionalStop(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 	srv, err := store.GetServer(ctx, "srv-sleep")
@@ -72,7 +72,7 @@ func TestDeepSleepManager_PlayerWakeStatusPolicy(t *testing.T) {
 				controller.status["cnt-sleep"] = db.StatusRunning
 			}
 
-			mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+			mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 			err := mgr.WakeServer(ctx, "srv-sleep")
 			controller.mu.Lock()
 			starts := append([]string(nil), controller.starts...)

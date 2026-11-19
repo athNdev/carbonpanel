@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/worldstore"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
@@ -42,6 +44,37 @@ var restorePlayabilityTimeout = 2 * time.Minute
 
 const migrationPlayabilityPoll = 5 * time.Second
 
+// acquireMigrationNodeGates holds both node keys for the whole migration. The
+// sorted order makes a pair of migrations with swapped source/target nodes
+// contend on the same first key instead of deadlocking on opposing holds. The
+// returned function releases every gate that was actually acquired, in reverse.
+func (s *ServerService) acquireMigrationNodeGates(ctx context.Context, a, b string) (func(), error) {
+	// The coordinator folds local aliases and case, so two raw IDs can name the
+	// same key. Acquiring it twice would self-deadlock against our own token.
+	nodes := []string{a, b}
+	if serverruntime.CanonicalNodeKey(a) == serverruntime.CanonicalNodeKey(b) {
+		nodes = []string{a}
+	} else {
+		sort.Strings(nodes)
+	}
+	releases := make([]func(), 0, len(nodes))
+	for _, nodeID := range nodes {
+		release, err := s.acquireNodeAdmissionRaw(ctx, nodeID)
+		if err != nil {
+			for i := len(releases) - 1; i >= 0; i-- {
+				releases[i]()
+			}
+			return nil, fmt.Errorf("node %s start admission: %w", nodeID, err)
+		}
+		releases = append(releases, release)
+	}
+	return func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}, nil
+}
+
 // migrateServerNow performs one journaled migration attempt: quiesce the
 // source world, transfer and verify it at the target, cut the container over
 // per the preserved intent, commit DB and route ownership, and only then
@@ -50,6 +83,18 @@ const migrationPlayabilityPoll = 5 * time.Second
 // remains (OSS-234).
 func (s *ServerService) migrateServerNow(ctx context.Context, server *storage.Server, targetNode *storage.Node, sourceDockerCli, targetDockerCli *docker.Client, srcRoot, dstRoot string, isRunning bool, oldContainerID string, startTime time.Time) (*v1.MigrateServerResponse, error) {
 	sourceNodeID := server.NodeID
+
+	// A migration starts a brand-new container on the target node and may have
+	// to restart the source container during rollback, so both nodes are
+	// genuine starts and must contend with ordinary starts there (OSS-405).
+	// The two keys are always acquired in sorted order: two migrations with
+	// swapped source/target nodes would otherwise deadlock on opposing holds.
+	// The caller already holds the per-server lifecycle transition.
+	releaseBoth, err := s.acquireMigrationNodeGates(ctx, sourceNodeID, targetNode.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseBoth()
 
 	serverConfig, err := s.store.GetServerConfig(ctx, server.ID)
 	if err != nil {
@@ -205,6 +250,20 @@ func (s *ServerService) migrateServerNow(ctx context.Context, server *storage.Se
 func migrationResponseError(err error) error {
 	if nodestorage.IsUnavailable(err) {
 		return connect.NewError(connect.CodeUnavailable, err)
+	}
+	var refusal *serverruntime.AdmissionError
+	if errors.As(err, &refusal) {
+		code := connect.CodeUnavailable
+		if refusal.Kind == serverruntime.InvalidNode {
+			code = connect.CodeFailedPrecondition
+		}
+		return connect.NewError(code, err)
+	}
+	if errors.Is(err, context.Canceled) {
+		return connect.NewError(connect.CodeCanceled, err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
 	}
 	if errors.Is(err, storage.ErrActiveOperation) || errors.Is(err, operation.ErrInProgress) {
 		return connect.NewError(connect.CodeAborted, fmt.Errorf("migration refused while another operation owns the server: %w", err))

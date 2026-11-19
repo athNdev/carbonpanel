@@ -10,6 +10,8 @@ code_refs:
   - CHANGELOG.md
   - scripts/release.py
   - scripts/go_mod_download.py
+  - scripts/upgrade_rehearsal_ci.py
+  - .github/workflows/upgrade-rehearsal.yml
   - internal/buildinfo
   - docker/Dockerfile.release
   - docker/Dockerfile.carbon-panel
@@ -24,6 +26,8 @@ sources:
     resource: ../../docs/adr/0033-release-tag-and-publication-policy.md
   - title: Retrospective tag classification and product tag migration
     resource: ../../docs/release-history.md
+  - title: Disposable real-binary upgrade rehearsal decision
+    resource: ../../docs/adr/0044-disposable-upgrade-rehearsal-ci.md
   - title: Verified runtime artifact installation
     resource: ../../docs/node-runtime/verified-artifacts-install.md
 ---
@@ -163,6 +167,20 @@ resume from the original verified download artifact without rebuilding images.
   draft asset release; it never pushes a registry image, publishes an app
   release or provisions a host. Only formats with real clean import/boot
   evidence are publishable; see the format decision concept.
+- The upgrade rehearsal is a separate read-only CI job, not a publication gate.
+  `upgrade-rehearsal.yml` runs weekly, on path-gated PRs and on dispatch. It
+  builds a candidate and runs two fail-closed cases on seeded disposable
+  DB/world copies with real `carbon-panel` binaries: the explicit v1.0.40 legacy
+  baseline (35 → 44 → 35) and the current published stable derived from the
+  authoritative release record via the OSS-395 product version contract (no
+  hardcoded stable literal; no hardcoded count for the current case). Both
+  assert integrity, additive table growth, row/world preservation, forced-
+  failure refusal and app-level plus copy-back rollback. Disposable artifacts
+  stay under `$RUNNER_TEMP` (build caches excepted); a missing or mismatched
+  fixture, or any failed check, fails closed with no silent skip and still
+  writes a failing evidence report. It grants no write scope and never touches
+  a registry, tag, release, host or live world. See ADR 0044; it does not
+  replace gameplay/OIDC/PROXY go/no-go gates or the OSS-366 stable publisher.
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The

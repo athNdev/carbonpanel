@@ -41,8 +41,12 @@ The reconciler does not recreate a stopped container as a substitute wake.
 wake preparer through `StartContainer` and running-status persistence, so a cold
 wake cannot overcommit a node against another start (ADR 0014). The preparer
 (`PrepareDeepSleepWake`) runs inside that gate and does not acquire it again.
-The wake runs on a bounded background budget; the gate is released inside the
-single `WakeServer` call, never held by an unbounded detached owner.
+The gate is mandatory and fail closed: the constructor installs a gate that
+refuses every wake until the composition root wires the shared coordinator, and
+wiring a nil coordinator cannot remove it. Only an explicitly named test-only
+opt-out clears it. The wake runs on a bounded background budget; the gate is
+released inside the single `WakeServer` call, never held by an unbounded detached
+owner.
 
 # Known gap
 
