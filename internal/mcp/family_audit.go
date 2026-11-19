@@ -14,7 +14,7 @@ import (
 // OSS-375 full-coverage audit lane.
 //
 // family_audit_matrix.json is the exhaustive, machine-checkable evidence
-// artifact: every declared RPC (230), every mounted RPC (220) and every
+// artifact: every declared RPC (245), every mounted RPC (235) and every
 // non-RPC product surface is classified once, with an exact source reason and,
 // for an exclusion, a supported equivalent flow. The three coverage counts
 // (LISTED / REACHABLE / VERIFIED) are kept separate on purpose: a declared
