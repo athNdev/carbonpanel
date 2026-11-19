@@ -364,15 +364,31 @@ func NewSafeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 	})
 }
 
-// NewSafeHTTPClientForEgress builds the same guarded client but binds both the
-// dial-time and redirect-time decisions to a complete EgressPolicy. A redirect
-// is revalidated against the same class-specific allowlist, so it cannot escape
-// into a private network or onto an unlisted host by inheriting a looser grant.
+// egressPolicyTransport applies the class policy to every outbound request,
+// including the initial one. CheckRedirect alone is not enough: a caller can
+// hand the client an indexer-supplied URL that was never policy-checked.
+type egressPolicyTransport struct {
+	base   http.RoundTripper
+	policy EgressPolicy
+}
+
+func (t *egressPolicyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if _, err := ValidateURLForEgress(req.URL.String(), t.policy); err != nil {
+		return nil, err
+	}
+	return t.base.RoundTrip(req)
+}
+
+// NewSafeHTTPClientForEgress builds a guarded client whose complete policy is
+// applied to the initial request, dial time, and every redirect. A caller can
+// neither start from an unlisted host nor escape onto one through a redirect.
 func NewSafeHTTPClientForEgress(timeout time.Duration, policy EgressPolicy) *http.Client {
-	return newSafeHTTPClient(timeout, policy.dialAllowPrivate(), func(rawURL string) error {
+	client := newSafeHTTPClient(timeout, policy.dialAllowPrivate(), func(rawURL string) error {
 		_, err := ValidateURLForEgress(rawURL, policy)
 		return err
 	})
+	client.Transport = &egressPolicyTransport{base: client.Transport, policy: policy}
+	return client
 }
 
 func newSafeHTTPClient(timeout time.Duration, allowPrivate bool, checkRedirectURL func(string) error) *http.Client {

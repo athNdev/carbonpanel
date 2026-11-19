@@ -136,6 +136,44 @@ func TestArchiveEgressRequiresFlagAndNamedNode(t *testing.T) {
 	}
 }
 
+// TestEgressClientValidatesInitialRequest closes the gap where the policy was
+// applied only to redirects: an indexer-supplied URL must be checked before the
+// first request is sent. All fixtures are local; no live egress is performed.
+func TestEgressClientValidatesInitialRequest(t *testing.T) {
+	t.Setenv("DISCO_ALLOW_LOOPBACK_TEST", "1")
+	var hits int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	providerClient := NewSafeHTTPClientForEgress(time.Second,
+		ProviderEgressPolicy(false, "cdn.modrinth.com"))
+	if _, err := providerClient.Get(target.URL); err == nil ||
+		!strings.Contains(err.Error(), "fixed allowlist") {
+		t.Fatalf("initial provider request escaped the fixed allowlist: %v", err)
+	}
+
+	webhookClient := NewSafeHTTPClientForEgress(time.Second,
+		WebhookEgressPolicy("http://10.0.0.5:1/hook"))
+	if _, err := webhookClient.Get(target.URL); err == nil ||
+		!strings.Contains(err.Error(), "explicit receiver") {
+		t.Fatalf("initial webhook request escaped the receiver list: %v", err)
+	}
+
+	archiveClient := NewSafeHTTPClientForEgress(time.Second,
+		ArchiveEgressPolicy(true, ""))
+	if _, err := archiveClient.Get("http://10.0.0.5/a.zip"); err == nil ||
+		!strings.Contains(err.Error(), "archive egress policy") {
+		t.Fatalf("initial archive request escaped the named-node requirement: %v", err)
+	}
+
+	if hits != 0 {
+		t.Fatal("an unlisted initial request reached the target")
+	}
+}
+
 // TestEgressClientRevalidatesRedirects uses only local httptest fixtures and a
 // non-routable address that is refused before any outbound dial; no live egress
 // is performed. Each class must reject a redirect that its policy does not name.

@@ -72,18 +72,27 @@ func (h *PackwizHandler) handleAddDatapack(w http.ResponseWriter, r *http.Reques
 	providerPolicy := utils.ProviderEgressPolicy(
 		minecraft.DownloadAllowsPrivate(indexerOrigin),
 		minecraft.ProviderDownloadHosts(indexerOrigin)...)
+	redactedURL := utils.RedactURL(file.DownloadURL)
+	if _, err := utils.ValidateURLForEgress(file.DownloadURL, providerPolicy); err != nil {
+		h.log.Warn("provider egress blocked studio datapack %s: %v", redactedURL, err)
+		http.Error(w, "download URL rejected by provider egress policy", http.StatusBadGateway)
+		return
+	}
 	client := utils.NewSafeHTTPClientForEgress(5*time.Minute, providerPolicy)
 	dlReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, file.DownloadURL, nil)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("invalid download URL: %v", err), http.StatusBadGateway)
+		h.log.Warn("invalid studio datapack download URL %s: %v", redactedURL, err)
+		http.Error(w, "invalid download URL", http.StatusBadGateway)
 		return
 	}
 	dlReq.Header.Set("User-Agent", "CarbonPanel/2.x (Datapack Installer)")
 
 	resp, err := client.Do(dlReq)
 	if err != nil {
-		h.log.Error("Failed to download studio datapack %s: %v", file.DownloadURL, err)
-		http.Error(w, fmt.Sprintf("download failed: %v", err), http.StatusBadGateway)
+		// client.Do wraps errors in url.Error with the raw request URL, which
+		// may carry indexer-supplied credentials or presigned tokens.
+		h.log.Error("Failed to download studio datapack %s: %v", redactedURL, err)
+		http.Error(w, "download failed", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()

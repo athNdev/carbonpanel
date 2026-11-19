@@ -6,6 +6,7 @@
 package files
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"os"
@@ -23,18 +24,24 @@ var (
 // on Close. The caller resolves dest, including ResolveInRoot, before calling
 // NewAtomicWriter. Abort removes the temp file and leaves dest unchanged.
 type AtomicWriter struct {
-	dest     string
-	tmp      *os.File
-	maxBytes int64
-	written  int64
-	mode     os.FileMode
-	done     bool
+	dest         string
+	tmp          *os.File
+	maxBytes     int64
+	written      int64
+	preserveMode bool
+	mode         os.FileMode
+	done         bool
 }
 
 // NewAtomicWriter creates a temp file in the destination directory.
 // maxBytes is the most Write will accept. The destination directory must exist.
+//
+// For a new destination the staging file is created with mode 0666 so the
+// operating system applies the process umask, exactly as os.Create did. No
+// chmod is performed at publish time, so a restrictive umask is never widened.
 // When dest is an existing regular file, its permission bits and ownership are
-// carried to the replacement; otherwise the published file is mode 0644.
+// carried to the replacement instead; that chmod restores the previous file's
+// permissions rather than broadening a new one.
 func NewAtomicWriter(dest string, maxBytes int64) (*AtomicWriter, error) {
 	if dest == "" {
 		return nil, ErrEmptyRoot
@@ -42,18 +49,31 @@ func NewAtomicWriter(dest string, maxBytes int64) (*AtomicWriter, error) {
 	if maxBytes < 0 {
 		return nil, fmt.Errorf("files: negative size")
 	}
-	mode := os.FileMode(0o644)
+	var preserveMode bool
+	var mode os.FileMode
 	if info, err := os.Stat(dest); err == nil && info.Mode().IsRegular() {
+		preserveMode = true
 		mode = info.Mode().Perm()
 	} else if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 	dir := filepath.Dir(dest)
-	tmp, err := os.CreateTemp(dir, ".atomic-*")
+	// Exclusive creation with an unpredictable name prevents adopting another
+	// writer's staging file. Mode 0666 (not CreateTemp's fixed 0600) lets the
+	// umask decide the permissions of a newly published destination.
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return nil, err
+	}
+	tmpPath := filepath.Join(dir, fmt.Sprintf(".atomic-%x", token))
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
 	if err != nil {
 		return nil, err
 	}
-	return &AtomicWriter{dest: dest, tmp: tmp, maxBytes: maxBytes, mode: mode}, nil
+	return &AtomicWriter{
+		dest: dest, tmp: tmp, maxBytes: maxBytes,
+		preserveMode: preserveMode, mode: mode,
+	}, nil
 }
 
 // Write rejects a chunk that would pass maxBytes and writes none of that chunk.
@@ -102,10 +122,12 @@ func (w *AtomicWriter) Close() error {
 	// a non-root controller cannot chown, but a root controller must preserve
 	// the uid/gid the game container expects.
 	_ = AdoptOwnership(w.dest, name, false)
-	if err := w.tmp.Chmod(w.mode); err != nil {
-		_ = w.tmp.Close()
-		_ = os.Remove(name)
-		return err
+	if w.preserveMode {
+		if err := w.tmp.Chmod(w.mode); err != nil {
+			_ = w.tmp.Close()
+			_ = os.Remove(name)
+			return err
+		}
 	}
 	if err := w.tmp.Sync(); err != nil {
 		_ = w.tmp.Close()

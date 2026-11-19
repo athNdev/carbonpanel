@@ -243,6 +243,12 @@ func ProviderDownloadHosts(indexerURL string) []string {
 // origin that supplied the URL. It does not trust Content-Length.
 func DownloadDatapackArchiveFrom(ctx context.Context, indexerURL, rawURL, destPath string) error {
 	policy := utils.ProviderEgressPolicy(DownloadAllowsPrivate(indexerURL), ProviderDownloadHosts(indexerURL)...)
+	// The URL is indexer-controlled. Reject it before building a request so the
+	// error is redacted and the fixed allowlist is enforced at the source, not
+	// only by the guarded client's transport.
+	if _, err := utils.ValidateURLForEgress(rawURL, policy); err != nil {
+		return fmt.Errorf("provider egress rejected download URL: %w", err)
+	}
 	return DownloadDatapackArchiveWithClient(utils.NewSafeHTTPClientForEgress(5*time.Minute, policy), ctx, rawURL, destPath)
 }
 

@@ -27,9 +27,13 @@ on the remote-archive save path could leave a truncated target on a failed copy.
   targets even when the flag is set. Loopback and link-local remain blocked for
   every class.
 
-`NewSafeHTTPClientForEgress` binds the same policy object to dial time and to
-`CheckRedirect`, so a redirect is revalidated against the same class-specific
-allowlist. The zero value and unknown classes fail closed.
+`NewSafeHTTPClientForEgress` binds the same policy object to every outbound
+request: a policy `RoundTripper` checks the initial URL, the dialer applies the
+coarse private-network decision, and `CheckRedirect` revalidates each redirect.
+Checking only redirects would let an indexer-supplied initial URL bypass the
+provider allowlist entirely. Provider and webhook callers additionally validate
+the URL before building a request so client-side errors never reflect raw indexer
+or receiver URLs. The zero value and unknown classes fail closed.
 
 The loopback test escape hatch is honoured only when `testing.Testing()` is
 true **and** `DISCO_ALLOW_LOOPBACK_TEST=1`. Production binaries cannot be made
@@ -41,10 +45,12 @@ tag that a release build could omit.
 
 Remote archive saves go through `pkg/files.AtomicWriter`: the download is
 staged in a sibling temp file, the previous target's permission bits and owner
-are carried to the replacement, and only a complete copy is published. A
-failed copy aborts the temp file, so the old target stays intact. This is the
-same staged-publish contract as the bounded storage stream (ADR 0013) applied
-to the controller-local save path.
+are carried to the replacement, and only a complete copy is published. A new
+destination is created with mode `0666` so the operating system applies the
+process umask exactly as the old `os.Create` path did; no publish-time chmod
+widens a restrictive umask. A failed copy aborts the temp file, so the old
+target stays intact. This is the same staged-publish contract as the bounded
+storage stream (ADR 0013) applied to the controller-local save path.
 
 ## Alternatives
 

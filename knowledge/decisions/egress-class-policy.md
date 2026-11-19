@@ -36,17 +36,21 @@ node: an empty node id denies RFC1918 targets even when the flag is set.
 Loopback and link-local stay blocked for every class.
 
 `ValidateURLForEgress` and `NewSafeHTTPClientForEgress` apply the same policy
-object at request time, dial time and redirect time. URLs with userinfo are
-rejected, and `RedactURL` strips credentials and sensitive query values before
-any log line or client-facing error. `url.Parse` errors are never chained into
-a diagnostic: the policy returns `ErrInvalidURL` with only the redacted form.
+object to the initial request (via a policy `RoundTripper`), dial time and every
+redirect. Provider and webhook callers also validate the URL before building a
+request. URLs with userinfo are rejected, and `RedactURL` strips credentials and
+sensitive query values before any log line or client-facing error. `url.Error`
+causes are unwrapped before delivery diagnostics, so a raw indexer or receiver
+URL is never reflected. `url.Parse` errors are never chained into a diagnostic:
+the policy returns `ErrInvalidURL` with only the redacted form.
 
 The `DISCO_ALLOW_LOOPBACK_TEST` escape hatch is honoured only inside a Go test
 binary (`testing.Testing()`) with the variable explicitly set to `1`. Production
 builds can never enable loopback through the environment. Controller-local
 remote-archive saves use `pkg/files.AtomicWriter`: staging preserves the
-previous target's mode and owner, and a failed copy aborts the staging file
-instead of truncating the target.
+previous target's mode and owner, a new destination honours the process umask
+(no publish-time chmod can widen a restrictive one), and a failed copy aborts
+the staging file instead of truncating the target.
 
 # Alternatives
 
