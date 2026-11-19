@@ -251,6 +251,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 		if (method === 'GetModLoaders') return reply({ modloaders: ['vanilla', 'fabric'] });
 		if (method === 'GetDockerImages') return reply({ images: [] });
 		if (method === 'GetNextAvailablePort') return reply({ port: 25567 });
+		if (method === 'GetGlobalSettings') return reply({ categories: [] });
 		return reply({});
 	});
 	// OIDC exchange and REST downloads are not part of these journeys.
@@ -506,6 +507,15 @@ const PACKAGED_ROUTES = [
 			['button', 'More server actions'],
 			['button', 'Copy Address']
 		]
+	},
+	{
+		path: '/settings',
+		h1: 'Settings',
+		controls: [
+			['heading', 'Settings'],
+			['tablist', 'Sections'],
+			['tab', 'Server Defaults']
+		]
 	}
 ];
 
@@ -674,6 +684,66 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				}
 				await page.keyboard.press('ArrowLeft');
 				return { ...semantics, focused, selectedAfter: selected };
+			});
+
+			await page.goto(root + '/settings', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor();
+			await check(`route /settings @${width} ${theme}: tabs, tabpanel relationships and arrow-key navigation`, async () => {
+				await page.locator('[role="tablist"]').waitFor();
+				const semantics = await page.evaluate(() => {
+					const tabs = [...document.querySelectorAll('[role="tab"]')];
+					const selected = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+					const panel = document.querySelector('[role="tabpanel"]');
+					return {
+						label: document.querySelector('[role="tablist"]')?.getAttribute('aria-label'),
+						count: tabs.length,
+						first: tabs[0]?.id,
+						selectedId: selected?.id ?? null,
+						selectedControls: selected?.getAttribute('aria-controls') ?? null,
+						panelId: panel?.id ?? null,
+						panelLabelledBy: panel?.getAttribute('aria-labelledby') ?? null,
+						panels: document.querySelectorAll('[role="tabpanel"]').length
+					};
+				});
+				if (
+					semantics.label !== 'Sections' ||
+					semantics.count < 1 ||
+					semantics.first !== 'settings-tabs-tab-server-config' ||
+					semantics.selectedId !== 'settings-tabs-tab-server-config' ||
+					semantics.selectedControls !== 'settings-tabs-panel-server-config' ||
+					semantics.panelId !== 'settings-tabs-panel-server-config' ||
+					semantics.panelLabelledBy !== 'settings-tabs-tab-server-config' ||
+					semantics.panels !== 1
+				) {
+					throw new Error(`settings tab semantics incomplete: ${JSON.stringify(semantics)}`);
+				}
+				const secondTabId = await page.evaluate(() => document.querySelectorAll('[role="tab"]')[1]?.id ?? null);
+				await page.locator('#settings-tabs-tab-server-config').focus();
+				await page.keyboard.press('ArrowRight');
+				const focused = await page.evaluate(() => document.activeElement?.id);
+				if (!secondTabId || focused !== secondTabId) {
+					throw new Error(`ArrowRight did not move settings tab focus (got ${focused}, expected ${secondTabId})`);
+				}
+				const after = await page.evaluate(() => {
+					const selected = document.querySelector('[role="tab"][aria-selected="true"]');
+					const panel = document.querySelector('[role="tabpanel"]');
+					return {
+						selectedId: selected?.id ?? null,
+						selectedControls: selected?.getAttribute('aria-controls') ?? null,
+						panelId: panel?.id ?? null,
+						panelLabelledBy: panel?.getAttribute('aria-labelledby') ?? null
+					};
+				});
+				if (
+					after.selectedId !== secondTabId ||
+					after.selectedControls !== `settings-tabs-panel-${after.selectedId?.replace('settings-tabs-tab-', '')}` ||
+					after.panelId !== after.selectedControls ||
+					after.panelLabelledBy !== after.selectedId
+				) {
+					throw new Error(`settings ArrowRight did not update tab/tabpanel relationship: ${JSON.stringify(after)}`);
+				}
+				await page.keyboard.press('ArrowLeft');
+				return { ...semantics, focusedAfterArrowRight: focused, after };
 			});
 		}
 
