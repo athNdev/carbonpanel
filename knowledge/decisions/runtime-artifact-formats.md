@@ -56,14 +56,22 @@ with `live_build: false`), a fail-closed publication predicate
 (`runtime_artifacts.py publication_predicate`) runs in the workflow before
 checksumming, signing or any draft release, and is also inherited by
 `verify_bundle`. It refuses any offline/fixture marker or fixture-only plan
-record and requires a real payload of the declared artifact kind plus
-non-synthetic artifact provenance, so the rehearsal outputs stamped by these
-wrappers are refused before checksumming, signing or publication. Payload and
-provenance checks are structural (kind/size and a non-synthetic record), not a
-substitute for the consumer's cryptographic verification. The predicate does
-not gate the offline rehearsal reachability seam. Publication remains a manual
-`workflow_dispatch` with `publish=true`, and no real artifact has been
-published.
+record, so the rehearsal outputs stamped by these wrappers are refused before
+checksumming, signing or publication.
+
+A filename suffix or byte count is never a deployable-artifact claim.
+`scripts/artifact_kind_verifiers.py` qualifies each payload with its REAL
+verifier, reusing existing code: QCOW2 header plus `qemu-img info` tool
+inspection with digest/size bound by `scripts/node_vm_verify_image.py`; the
+`packaging/node-lxc/node_lxc_artifact.py` archive/layout inspector for rootfs;
+and `internal/nodeinstall.VerifyArtifact` via the installer `verify` CLI for the
+expected package structure. Provenance is bound to the EXACT payload SHA-256,
+and symlinks or non-regular files are refused. If a native validator is
+unavailable (for example no `qemu-img` on the runner), publication STOPS and the
+lane stays REHEARSAL-ONLY; these are preconditions, not a substitute for the
+consumer's cryptographic verification. The predicate does not gate the offline
+rehearsal reachability seam. Publication remains a manual `workflow_dispatch`
+with `publish=true`, and no real artifact has been published.
 
 # Alternatives
 

@@ -8,12 +8,15 @@ hypervisor or host provisioning. No test writes outside a temporary directory.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,40 +33,96 @@ def fixture(name):
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def make_bundle(root, artifact, *, payload_bytes=8192, marker=None,
-                provenance=True, synthetic_provenance=False, fixture_only=False):
+def _qcow2_bytes(size=8192):
+    """A structurally valid QCOW2 header (v3) plus filler."""
+    return b"QFI\xfb" + struct.pack(">I", 3) + b"Q" * (size - 8)
+
+
+def _lxc_rootfs_bytes():
+    """A real xz rootfs archive with the canonical Ubuntu 24.04 layout."""
+    buffer = io.BytesIO()
+    os_release = b'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME="noble"\n'
+    with tarfile.open(fileobj=buffer, mode="w:xz") as tf:
+        for directory in ("bin", "etc", "lib", "sbin", "usr", "var"):
+            info = tarfile.TarInfo(directory)
+            info.type = tarfile.DIRTYPE
+            tf.addfile(info)
+        info = tarfile.TarInfo("usr/lib/os-release")
+        info.size = len(os_release)
+        tf.addfile(info, io.BytesIO(os_release))
+    return buffer.getvalue()
+
+
+def available_runner(name):
+    """Synthetic PATH fixture: report the native tools as present."""
+    return {"qemu-img": "/fixture/qemu-img", "go": "/fixture/go"}.get(name)
+
+
+def fake_process_runner(args, **kwargs):
+    """Synthetic tool result: qemu-img reports qcow2; installer verify passes."""
+    stdout = json.dumps({"format": "qcow2", "virtual-size": 1024})
+    if "verify" in args:
+        stdout = json.dumps({"schema": "carbon-panel-node-artifact/v1",
+                             "name": "carbon-node", "version": "v0.1.0",
+                             "os": "linux", "arch": "amd64",
+                             "files": {"bin/carbon-node": "a" * 64}})
+    return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+
+
+def make_bundle(root, artifact, *, marker=None, provenance=True,
+                synthetic_provenance=False, fixture_only=False,
+                digest_override=None, include_payload=True, symlink_payload=False):
     """Build a synthetic, fully-integrated staged bundle for predicate tests.
 
-    Everything here is a temporary record: no host, hypervisor, network, cosign
-    or release operation is performed. ``marker`` is an optional
-    BUILD-PREFLIGHT.json object; ``provenance``/``synthetic_provenance`` control
-    the provenance record kind.
+    Every record is a temporary file; no host, hypervisor, network, cosign or
+    release operation is performed. The payload is a real kind-shaped artifact
+    (QCOW2 header / real xz rootfs / installer package) so the native verifier
+    is genuinely exercised through injectable runners.
     """
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     suffix = {"qcow2": ".qcow2", "lxc-rootfs": ".tar.xz", "installer": ".sh"}[artifact]
     payload = root / ("disk" + suffix)
-    payload.write_bytes(b"Q" * payload_bytes)
-    files = [payload]
+    content = {"qcow2": _qcow2_bytes, "lxc-rootfs": _lxc_rootfs_bytes,
+               "installer": lambda: b"# fixture installer\n"}[artifact]()
+    digest = hashlib.sha256(content).hexdigest()
+    files = []
+    if include_payload:
+        if symlink_payload:
+            external = root / "external.bin"
+            external.write_bytes(content)
+            payload.symlink_to(external)
+        else:
+            payload.write_bytes(content)
+            files.append(payload)
     if provenance:
         document = {
             "schema": "carbonpanel.node.provenance/v1",
             "profile": "artifact",
             "synthetic": synthetic_provenance,
-            "images": [{"arch": "amd64", "expected_sha256": "a" * 64}],
+            "images": [{"arch": "amd64", "expected_sha256": digest_override or digest,
+                        "image_content_length": len(content)}],
         }
-        (root / "provenance.json").write_text(
-            json.dumps(document), encoding="utf-8")
+        (root / "provenance.json").write_text(json.dumps(document), encoding="utf-8")
         files.append(root / "provenance.json")
     if marker is not None:
-        (root / "BUILD-PREFLIGHT.json").write_text(
-            json.dumps(marker), encoding="utf-8")
+        (root / "BUILD-PREFLIGHT.json").write_text(json.dumps(marker), encoding="utf-8")
         files.append(root / "BUILD-PREFLIGHT.json")
     if fixture_only:
         (root / "build-plan.json").write_text(
             json.dumps({"mode": "offline", "fixture_only": True, "no_qcow2_built": True}),
             encoding="utf-8")
         files.append(root / "build-plan.json")
+    if artifact == "installer":
+        package = root / "package"
+        (package / "bin").mkdir(parents=True, exist_ok=True)
+        (package / "bin" / "carbon-node").write_bytes(b"binary")
+        (package / "manifest.json").write_text(json.dumps({
+            "schema": "carbon-panel-node-artifact/v1", "name": "carbon-node",
+            "version": "v0.1.0", "os": "linux", "arch": "amd64",
+            "files": {"bin/carbon-node": hashlib.sha256(b"binary").hexdigest()}}),
+            encoding="utf-8")
+        files.extend(path for path in package.rglob("*") if path.is_file())
     manifest = ra.checksum_manifest(files, root=root)
     (root / "SHA256SUMS").write_text(manifest, encoding="utf-8")
     sbom = ra.build_sbom(VERSION, artifact, SHA, files, root=root)
@@ -399,7 +458,9 @@ class IntegrityRecordTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_bundle(root, "qcow2", marker={"mode": "apply", "live_build": True})
-            ok, problems = ra.verify_bundle(root, VERSION, "qcow2", SHA)
+            ok, problems = ra.verify_bundle(root, VERSION, "qcow2", SHA,
+                                            runner=available_runner,
+                                            process_runner=fake_process_runner)
             self.assertTrue(ok, problems)
             (root / "disk.qcow2").write_bytes(b"tampered")
             ok, problems = ra.verify_bundle(root, VERSION, "qcow2", SHA)
@@ -433,43 +494,49 @@ class IntegrityRecordTests(unittest.TestCase):
 class PublicationPredicateTests(unittest.TestCase):
     """OSS-400: synthetic-record tests for the fail-closed publication predicate.
 
-    Every record is written to a temp directory. No dispatch, signing, release,
-    registry, hypervisor, LXC or host operation is executed.
+    Native verifiers are injected as synthetic runners so these tests exercise
+    the real verifier code paths without qemu-img, Go, a network, a registry,
+    signing, publication or any host provisioning.
     """
+
+    def _predicate(self, tmp, artifact, *, runner=available_runner,
+                   process_runner=fake_process_runner):
+        return ra.publication_predicate(tmp, artifact, runner=runner,
+                                        process_runner=process_runner)
 
     def test_qualified_bundle_is_accepted_for_every_kind(self):
         for artifact in ra.VERIFIED_ARTIFACTS:
             with self.subTest(artifact=artifact), tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, artifact, marker={"mode": "apply", "live_build": True})
-                ok, problems = ra.publication_predicate(tmp, artifact)
+                ok, problems = self._predicate(tmp, artifact)
                 self.assertTrue(ok, problems)
 
     def test_offline_wrapper_markers_are_refused_even_when_integrated(self):
         for mode in ("offline-plan", "offline-fixture", "delegate-preflight-only"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, "qcow2", marker={"mode": mode, "live_build": False})
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok)
                 self.assertTrue(any("offline" in p for p in problems), problems)
 
     def test_live_build_false_marker_alone_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": False})
-            ok, problems = ra.publication_predicate(tmp, "qcow2")
+            ok, problems = self._predicate(tmp, "qcow2")
             self.assertFalse(ok)
             self.assertTrue(any("live_build" in p for p in problems), problems)
 
     def test_completed_live_build_marker_is_not_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
-            ok, problems = ra.publication_predicate(tmp, "qcow2")
+            ok, problems = self._predicate(tmp, "qcow2")
             self.assertTrue(ok, problems)
 
     def test_fixture_only_plan_record_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True},
                         fixture_only=True)
-            ok, problems = ra.publication_predicate(tmp, "qcow2")
+            ok, problems = self._predicate(tmp, "qcow2")
             self.assertFalse(ok)
             self.assertTrue(any("fixture-only" in p for p in problems), problems)
 
@@ -478,37 +545,64 @@ class PublicationPredicateTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, "qcow2", synthetic_provenance=True,
                             marker={"mode": "apply", "live_build": True})
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok)
                 self.assertTrue(any("provenance" in p for p in problems), problems)
         with self.subTest("missing"):
             with tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, "qcow2", provenance=False,
                             marker={"mode": "apply", "live_build": True})
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok)
                 self.assertTrue(any("provenance" in p for p in problems), problems)
 
-    def test_missing_or_wrong_kind_payload_is_refused(self):
-        with self.subTest("stub"):
-            with tempfile.TemporaryDirectory() as tmp:
-                make_bundle(tmp, "qcow2", payload_bytes=64,
-                            marker={"mode": "apply", "live_build": True})
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
-                self.assertFalse(ok)
-                self.assertTrue(any("payload" in p for p in problems), problems)
-        with self.subTest("wrong kind"):
+    def test_native_verifier_unavailable_keeps_rehearsal_only(self):
+        """No native validator means STOP PUBLICATION, not a candidate heuristic."""
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+            ok, problems = self._predicate(tmp, "qcow2", runner=lambda name: None)
+            self.assertFalse(ok)
+            self.assertTrue(any("REHEARSAL-ONLY" in p for p in problems), problems)
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "lxc-rootfs", marker={"mode": "apply", "live_build": True},
+                        provenance=False)
+            ok, problems = self._predicate(tmp, "lxc-rootfs")
+            self.assertFalse(ok)
+
+    def test_symlink_payload_is_refused(self):
+        """A symlink is not a regular payload, even with a valid-looking name."""
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True},
+                        symlink_payload=True)
+            ok, problems = self._predicate(tmp, "qcow2")
+            self.assertFalse(ok)
+            self.assertTrue(any("regular payload" in p for p in problems), problems)
+
+    def test_candidate_only_payload_is_refused(self):
+        """A correctly named file that fails the native verifier is not an artifact."""
+        with self.subTest("undersized candidate"):
             with tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
-                ok, problems = ra.publication_predicate(tmp, "lxc-rootfs")
+                (Path(tmp) / "disk.qcow2").write_bytes(b"QFI")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok)
-                self.assertTrue(any("payload" in p for p in problems), problems)
-        with self.subTest("unverified kind"):
+                self.assertTrue(any("magic mismatch" in p for p in problems), problems)
+        with self.subTest("large candidate with invalid format"):
             with tempfile.TemporaryDirectory() as tmp:
-                make_bundle(tmp, "qcow2")
-                ok, problems = ra.publication_predicate(tmp, "vhdx")
+                make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+                (Path(tmp) / "disk.qcow2").write_bytes(b"not-a-qcow2-header" + b"Q" * 8192)
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok)
-                self.assertTrue(any("unverified" in p for p in problems), problems)
+                self.assertTrue(any("magic mismatch" in p for p in problems), problems)
+
+    def test_digest_mismatch_is_refused_before_publication(self):
+        """Provenance must bind to the EXACT payload bytes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True},
+                        digest_override="0" * 64)
+            ok, problems = self._predicate(tmp, "qcow2")
+            self.assertFalse(ok)
+            self.assertTrue(any("does not match provenance pin" in p for p in problems), problems)
 
     def test_bypass_shapes_are_refused(self):
         """Fail closed on re-encoded/nested/misnamed/malformed rehearsal markers."""
@@ -517,7 +611,7 @@ class PublicationPredicateTests(unittest.TestCase):
                 make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": 0})
                 (Path(tmp) / "plan.json").write_text(
                     json.dumps({"fixture_only": 1, "no_qcow2_built": 1}), encoding="utf-8")
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok, problems)
         with self.subTest("case-variant marker filename"):
             with tempfile.TemporaryDirectory() as tmp:
@@ -525,7 +619,7 @@ class PublicationPredicateTests(unittest.TestCase):
                 (Path(tmp) / "BUILD-PREFLIGHT.json").unlink()
                 (Path(tmp) / "build-preflight.JSON").write_text(
                     json.dumps({"mode": "offline-plan", "live_build": False}), encoding="utf-8")
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok, problems)
         with self.subTest("nested marker"):
             with tempfile.TemporaryDirectory() as tmp:
@@ -534,43 +628,51 @@ class PublicationPredicateTests(unittest.TestCase):
                 nested.mkdir()
                 (nested / "BUILD-PREFLIGHT.json").write_text(
                     json.dumps({"mode": "offline-plan", "live_build": False}), encoding="utf-8")
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok, problems)
         with self.subTest("malformed marker"):
             with tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
                 (Path(tmp) / "BUILD-PREFLIGHT.json").write_text("{not json", encoding="utf-8")
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok, problems)
         with self.subTest("marker in integrity record filename"):
             with tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
                 (Path(tmp) / "sbom.cdx.json").write_text(
                     json.dumps({"fixture_only": True}), encoding="utf-8")
-                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "qcow2")
                 self.assertFalse(ok, problems)
 
     def test_verify_bundle_inherits_the_predicate_refusal(self):
         with tempfile.TemporaryDirectory() as tmp:
             make_bundle(tmp, "qcow2", marker={"mode": "offline-plan", "live_build": False})
-            ok, problems = ra.verify_bundle(tmp, VERSION, "qcow2", SHA)
+            ok, problems = ra.verify_bundle(tmp, VERSION, "qcow2", SHA,
+                                            runner=available_runner,
+                                            process_runner=fake_process_runner)
             self.assertFalse(ok)
             self.assertTrue(any("offline" in p for p in problems), problems)
 
-    def test_cli_publication_predicate_refuses_offline_output(self):
-        for offline, mode in ((True, "offline-plan"), (False, "apply")):
-            with self.subTest(offline=offline), tempfile.TemporaryDirectory() as tmp:
-                make_bundle(tmp, "qcow2",
-                            marker={"mode": mode, "live_build": not offline})
-                out = io.StringIO()
-                with contextlib.redirect_stdout(out):
-                    code = ra.main(["publication-predicate", "--dir", tmp,
-                                    "--artifact", "qcow2"])
-                payload = json.loads(out.getvalue())
-                self.assertEqual(code, 0 if not offline else 1, out.getvalue())
-                self.assertEqual(payload["verified"], "false" if offline else "true")
-                if offline:
-                    self.assertTrue(any("offline" in p for p in payload["problems"]))
+    def test_cli_reports_offline_refusal_and_native_verifier_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "offline-plan", "live_build": False})
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = ra.main(["publication-predicate", "--dir", tmp,
+                                "--artifact", "qcow2"])
+            payload = json.loads(out.getvalue())
+            self.assertEqual(code, 1, out.getvalue())
+            self.assertEqual(payload["verified"], "false")
+            self.assertTrue(any("offline" in p for p in payload["problems"]))
+            self.assertEqual(set(payload["native_verifiers"]), set(ra.VERIFIED_ARTIFACTS))
+
+    def test_real_environment_native_verifier_availability_is_reported(self):
+        availability = ra.kind_verifiers.verifier_availability()
+        self.assertEqual(set(availability), set(ra.VERIFIED_ARTIFACTS))
+        for kind, (present, reason) in availability.items():
+            with self.subTest(kind=kind):
+                self.assertIsInstance(present, bool)
+                self.assertTrue(reason)
 
 
 class WorkflowContractTests(unittest.TestCase):

@@ -16,9 +16,11 @@ image. Every write is gated by :func:`publication_gate`, which requires all of:
     green push CI (``verify_main_ci``; never a checkbox),
   * an identity assertion bound to that exact version, commit, artifact and
     project owner, and
-  * a real, non-fixture payload of the declared kind with non-synthetic
-    provenance, enforced by :func:`publication_predicate` before any signing or
-    publication (offline rehearsal outputs are refused).
+  * a real, non-fixture payload of the declared kind, qualified by its native
+    verifier with the provenance pin bound to the exact file digest and
+    non-synthetic provenance, enforced by :func:`publication_predicate` before
+    any signing or publication. A missing native verifier stops publication and
+    keeps the lane REHEARSAL-ONLY.
 
 Home-hypervisor disk formats (VHDX/VDI/VMDK/OVA/OVF/bhyve) are intentionally
 NOT in the publishable set: primary-source research found no real clean
@@ -40,6 +42,11 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+
+try:  # module import from repo root and direct CLI execution both work
+    from scripts import artifact_kind_verifiers as kind_verifiers
+except ImportError:  # pragma: no cover - direct `python3 scripts/runtime_artifacts.py`
+    import artifact_kind_verifiers as kind_verifiers
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -100,13 +107,6 @@ INTEGRITY_RECORDS = frozenset({
 BUILD_PREFLIGHT_RECORD = "BUILD-PREFLIGHT.json"
 OFFLINE_MODES = frozenset({"offline-plan", "offline-fixture", "delegate-preflight-only"})
 OFFLINE_MODE_MARKERS = ("offline", "fixture", "preflight-only", "dry-run", "dryrun")
-# A real payload must carry the declared kind's suffix and be more than a stub.
-PAYLOAD_SUFFIXES = {
-    "qcow2": (".qcow2",),
-    "lxc-rootfs": (".tar.xz", ".tar.zst", ".tar.gz", ".tar"),
-    "installer": (".sh", ".bin", ".tar.xz", ".tar.gz"),
-}
-MIN_PAYLOAD_BYTES = 4096
 WORKFLOW_PATH = ".github/workflows/runtime-artifacts.yml"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 
@@ -563,16 +563,20 @@ def real_provenance(document):
     return isinstance(pins, (list, dict)) and bool(pins)
 
 
-def publication_predicate(directory, artifact, min_payload_bytes=MIN_PAYLOAD_BYTES):
+def publication_predicate(directory, artifact, *, runner=None, process_runner=None):
     """Fail-closed OSS-400 gate: a staged bundle must be a REAL artifact.
 
     Rehearsal outputs are refused even if they are complete, signed and bound
     to a valid identity: an offline marker (``BUILD-PREFLIGHT.json`` with
     live_build != true or an offline/fixture mode), a fixture-only plan record
-    (``fixture_only``/``no_qcow2_built``), a synthetic build, a missing or
-    wrong-kind payload, or missing non-synthetic provenance each refuse the
-    bundle. The offline rehearsal reachability seam (``preflight-build`` and the
-    wrapper ``--preflight`` mode) is intentionally NOT gated by this predicate.
+    (``fixture_only``/``no_qcow2_built``), a synthetic build, missing
+    non-synthetic provenance, or a payload that fails its kind's REAL verifier
+    each refuse the bundle. Candidate filename/size heuristics never qualify a
+    payload: :mod:`artifact_kind_verifiers` binds the provenance pin to the exact
+    file digest and rejects symlinks/non-regular files, and publication stops
+    (REHEARSAL-ONLY) when a native validator is unavailable. The offline
+    rehearsal reachability seam (``preflight-build`` and wrapper ``--preflight``)
+    is intentionally NOT gated by this predicate.
 
     Returns (ok, problems). No file is written or network/host call made.
     """
@@ -620,24 +624,26 @@ def publication_predicate(directory, artifact, min_payload_bytes=MIN_PAYLOAD_BYT
         if "live_build" in document and document["live_build"] is not True:
             problems.append(f"{path.name} declares a non-live build")
 
-    # 2. Require a real payload of the declared artifact kind, not a stub.
-    suffixes = PAYLOAD_SUFFIXES[artifact]
-    payloads = [path for path in files
-                if path.name.lower().endswith(suffixes) and path.stat().st_size >= min_payload_bytes]
-    if not payloads:
-        problems.append(
-            f"no real {artifact} payload ({'/'.join(suffixes)}, >= {min_payload_bytes} bytes) in staged bundle")
-
-    # 3. Require non-synthetic artifact provenance with actual pins.
+    # 2. Require a non-synthetic provenance record with actual pins; the native
+    #    verifier binds those pins to the EXACT file digest in step 3.
     if not any(real_provenance(document) for document in documents.values()):
         problems.append("no non-synthetic artifact provenance in staged bundle")
+
+    # 3. Qualify the payload with the kind's REAL, existing verifier. A filename
+    #    suffix or a byte count never qualifies an artifact. Rehearsal-only
+    #    bundles remain refused even if they carry a candidate-looking file.
+    ok_kind, kind_problems, _digest = kind_verifiers.verify_kind_payload(
+        root, artifact, list(documents.values()),
+        runner=runner, process_runner=process_runner)
+    problems.extend(kind_problems)
 
     return (not problems), problems
 
 
 def verify_bundle(directory, version, artifact, commit, identity=None,
                   repository=None, manifest_name="SHA256SUMS",
-                  sbom_name="sbom.cdx.json", signature_name="signature.json"):
+                  sbom_name="sbom.cdx.json", signature_name="signature.json",
+                  runner=None, process_runner=None):
     """Full offline precondition gate for a staged artifact bundle.
 
     Cryptographic signature verification is NOT performed here; it is the
@@ -681,7 +687,8 @@ def verify_bundle(directory, version, artifact, commit, identity=None,
             ok_sig, issue = verify_signature_binding(signature, manifest_text, oidc_identity)
             if not ok_sig:
                 problems.append(issue)
-    ok_pred, predicate_problems = publication_predicate(root, artifact)
+    ok_pred, predicate_problems = publication_predicate(
+        root, artifact, runner=runner, process_runner=process_runner)
     problems.extend(predicate_problems)
     return (not problems), problems
 
@@ -867,7 +874,11 @@ def main(argv=None):
 
     if args.command == "publication-predicate":
         ok, problems = publication_predicate(args.dir, args.artifact)
-        _print_json({"verified": str(ok).lower(), "problems": problems})
+        available = {kind: {"available": present, "reason": reason}
+                     for kind, (present, reason)
+                     in kind_verifiers.verifier_availability().items()}
+        _print_json({"verified": str(ok).lower(), "problems": problems,
+                     "native_verifiers": available})
         return 0 if ok else 1
     return 2
 
