@@ -64,18 +64,24 @@ func settingsResponseFixture(status int, body string) http.HandlerFunc {
 
 // TestDiscoveredBlueMapUntrustedSettingsFailsClosedFixture pins that a running
 // web server is NEVER treated as a ready renderer when its own map list cannot
-// be read or trusted. 401/403 and malformed JSON must fail closed to a non-ready
-// state and must never issue a map session key (no iframe can be mounted).
+// be read or trusted. 401/403 and malformed/invalid JSON shapes must fail closed
+// to a non-ready state and must never issue a map session key (no iframe can be
+// mounted). The configured map ID safeguard is preserved for v5.29 string-array
+// settings.
 func TestDiscoveredBlueMapUntrustedSettingsFailsClosedFixture(t *testing.T) {
 	cases := []struct {
-		name   string
-		status int
-		body   string
+		name      string
+		status    int
+		body      string
+		wantReady bool
 	}{
-		{"settings 401", http.StatusUnauthorized, `{"maps":[{"id":"world"}]}`},
-		{"settings 403", http.StatusForbidden, `{"maps":[{"id":"world"}]}`},
-		{"malformed settings", http.StatusOK, `{"maps":`},
-		{"valid control", http.StatusOK, `{"maps":[{"id":"world"}]}`},
+		{"settings 401", http.StatusUnauthorized, `{"maps":[{"id":"world"}]}`, false},
+		{"settings 403", http.StatusForbidden, `{"maps":[{"id":"world"}]}`, false},
+		{"malformed settings", http.StatusOK, `{"maps":`, false},
+		{"mixed numeric invalid", http.StatusOK, `{"maps":[123,"world"]}`, false},
+		{"valid control", http.StatusOK, `{"maps":[{"id":"world"}]}`, true},
+		{"v5.29 string map id", http.StatusOK, `{"maps":["world"]}`, true},
+		{"v5.29 string wrong map id", http.StatusOK, `{"maps":["other"]}`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,18 +94,18 @@ func TestDiscoveredBlueMapUntrustedSettingsFailsClosedFixture(t *testing.T) {
 				t.Fatalf("GetWorldViewSession: %v", err)
 			}
 
-			if tc.name == "valid control" {
+			if tc.wantReady {
 				if target.GetRendererState() != v1.RendererState_RENDERER_STATE_READY || session.Msg.GetProxyPath() == "" {
-					t.Fatalf("valid fixture should be READY with a session, got state=%s session=%+v", target.GetRendererState(), session.Msg)
+					t.Fatalf("expected READY with a session, got state=%s session=%+v target=%+v", target.GetRendererState(), session.Msg, target)
 				}
 				return
 			}
 
 			if target.GetRendererState() == v1.RendererState_RENDERER_STATE_READY {
-				t.Fatalf("untrusted settings must not be READY: %+v", target)
+				t.Fatalf("untrusted/invalid settings must not be READY: %+v", target)
 			}
 			if session.Msg.GetProxyPath() != "" || session.Msg.GetReason() == "" {
-				t.Fatalf("untrusted settings must issue no map session: %+v", session.Msg)
+				t.Fatalf("untrusted/invalid settings must issue no map session: %+v", session.Msg)
 			}
 		})
 	}

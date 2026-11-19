@@ -77,6 +77,71 @@ func TestBlueMapWebServerWithoutMapIsNotReadyFixture(t *testing.T) {
 	}
 }
 
+// TestBlueMapWebServerWithStringMapIDsIsReadyFixture covers the upstream
+// BlueMap v5.29 settings.json format, which serializes map IDs as a string
+// array ({"maps":["world"]}) rather than objects with an "id" field.
+func TestBlueMapWebServerWithStringMapIDsIsReadyFixture(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/settings.json":
+			_, _ = w.Write([]byte(`{"maps":["world"]}`))
+		default:
+			_, _ = w.Write([]byte(`{"version":"5.29"}`))
+		}
+	}))
+	defer ts.Close()
+
+	adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+	h, err := adapter.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.State != v1.RendererState_RENDERER_STATE_READY {
+		t.Fatalf("state = %s, want READY for a configured BlueMap v5.29 string map list; detail=%q", h.State, h.Detail)
+	}
+}
+
+// TestBlueMapMalformedMixedMapListFailsClosedFixture preserves the previous
+// malformed-settings failure behavior for mixed/invalid entry shapes. A numeric
+// or otherwise invalid entry must not be ignored in a way that turns a malformed
+// document into READY.
+func TestBlueMapMalformedMixedMapListFailsClosedFixture(t *testing.T) {
+	cases := []string{
+		`{"maps":[123,"world"]}`,
+		`{"maps":["world",123]}`,
+		`{"maps":[true]}`,
+		`{"maps":[{"id":123}]}`,
+		`{"maps":["world",{"id":"world"}]}`,
+		`{"maps":[""]}`,
+	}
+	for _, body := range cases {
+		t.Run(body, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/settings.json" {
+					_, _ = w.Write([]byte(body))
+					return
+				}
+				_, _ = w.Write([]byte(`{"version":"5.29"}`))
+			}))
+			defer ts.Close()
+
+			adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+			h, err := adapter.Health(context.Background())
+			if err != nil || h.State == v1.RendererState_RENDERER_STATE_READY {
+				t.Fatalf("malformed/mixed settings %s must fail closed, got state=%v err=%v detail=%q", body, h.State, err, h.Detail)
+			}
+			if h.State != v1.RendererState_RENDERER_STATE_ABSENT {
+				t.Fatalf("malformed/mixed settings %s state=%v, want ABSENT; detail=%q", body, h.State, h.Detail)
+			}
+			if !strings.Contains(h.Detail, "could not be read") {
+				t.Fatalf("malformed/mixed settings %s detail=%q, want unreadable map-list diagnostic", body, h.Detail)
+			}
+		})
+	}
+}
+
 // TestBlueMapCapabilitiesRequireConfiguredBridgeFixture shows live players are
 // advertised only with an explicit feed, and time/weather/telemetry are always
 // reported unsupported because no adapter verifies them.
