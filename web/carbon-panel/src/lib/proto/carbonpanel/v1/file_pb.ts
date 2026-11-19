@@ -20,8 +20,195 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_file: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChljYXJib25wYW5lbC92MS9maWxlLnByb3RvEg5jYXJib25wYW5lbC52MSKXAQoIRmlsZUluZm8SDAoEbmFtZRgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBmlzX2RpchgDIAEoCBIMCgRzaXplGAQgASgDEhAKCG1vZGlmaWVkGAUgASgDEhMKC2lzX2VkaXRhYmxlGAYgASgIEioKCGNoaWxkcmVuGAcgAygLMhguY2FyYm9ucGFuZWwudjEuRmlsZUluZm8iQQoQTGlzdEZpbGVzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIMCgR0cmVlGAMgASgIIjwKEUxpc3RGaWxlc1Jlc3BvbnNlEicKBWZpbGVzGAEgAygLMhguY2FyYm9ucGFuZWwudjEuRmlsZUluZm8iMQoOR2V0RmlsZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBHBhdGgYAiABKAkiNQoPR2V0RmlsZVJlc3BvbnNlEg8KB2NvbnRlbnQYASABKAwSEQoJbWltZV90eXBlGAIgASgJInMKF1NhdmVVcGxvYWRlZEZpbGVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIZChF1cGxvYWRfc2Vzc2lvbl9pZBgCIAEoCRIYChBkZXN0aW5hdGlvbl9wYXRoGAMgASgJEhAKCGZpbGVuYW1lGAQgASgJIjkKGFNhdmVVcGxvYWRlZEZpbGVSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJEgwKBHBhdGgYAiABKAkiVAoRVXBkYXRlRmlsZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSDwoHY29udGVudBgDIAEoDBINCgVzdGFnZRgEIAEoCCJDChJVcGRhdGVGaWxlUmVzcG9uc2USDwoHbWVzc2FnZRgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBnN0YWdlZBgDIAEoCCJSChFEZWxldGVGaWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDAoEcGF0aBgCIAEoCRINCgVwYXRocxgDIAMoCRINCgVzdGFnZRgEIAEoCCIUChJEZWxldGVGaWxlUmVzcG9uc2UiNgoTQ3JlYXRlRm9sZGVyUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDAoEcGF0aBgCIAEoCSInChRDcmVhdGVGb2xkZXJSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJIlMKD01vdmVGaWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLc291cmNlX3BhdGgYAiABKAkSGAoQZGVzdGluYXRpb25fcGF0aBgDIAEoCSIjChBNb3ZlRmlsZVJlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkiUwoPQ29weUZpbGVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRITCgtzb3VyY2VfcGF0aBgCIAEoCRIYChBkZXN0aW5hdGlvbl9wYXRoGAMgASgJIiMKEENvcHlGaWxlUmVzcG9uc2USDwoHbWVzc2FnZRgBIAEoCSJoChRDcmVhdGVBcmNoaXZlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDQoFcGF0aHMYAiADKAkSGAoQZGVzdGluYXRpb25fcGF0aBgDIAEoCRIUCgxhcmNoaXZlX25hbWUYBCABKAkiVgoVQ3JlYXRlQXJjaGl2ZVJlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkSFAoMYXJjaGl2ZV9wYXRoGAIgASgJEhYKDmZpbGVzX2FyY2hpdmVkGAMgASgFIjoKFkRvd25sb2FkQXJjaGl2ZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg0KBXBhdGhzGAIgAygJIlMKF0Rvd25sb2FkQXJjaGl2ZVJlc3BvbnNlEhIKCnNlc3Npb25faWQYASABKAkSEAoIZmlsZW5hbWUYAiABKAkSEgoKdG90YWxfc2l6ZRgDIAEoAyInChJFeHBvcnRXb3JsZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJImIKE0V4cG9ydFdvcmxkUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghmaWxlbmFtZRgCIAEoCRISCgp0b3RhbF9zaXplGAMgASgDEhEKCWRhdGFfcGF0aBgEIAEoCSJGChFSZW5hbWVGaWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIQCghuZXdfbmFtZRgDIAEoCSI3ChJSZW5hbWVGaWxlUmVzcG9uc2USDwoHbWVzc2FnZRgBIAEoCRIQCghuZXdfcGF0aBgCIAEoCSI4ChVFeHRyYWN0QXJjaGl2ZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBHBhdGgYAiABKAkiLgoWRXh0cmFjdEFyY2hpdmVSZXNwb25zZRIUCgxvcGVyYXRpb25faWQYASABKAkiMgoaR2V0RXh0cmFjdGlvblN0YXR1c1JlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJIlQKG0dldEV4dHJhY3Rpb25TdGF0dXNSZXNwb25zZRINCgVzdGF0ZRgBIAEoCRIXCg9maWxlc19leHRyYWN0ZWQYAiABKAUSDQoFZXJyb3IYAyABKAkiOgoXSW5pdEZpbGVEb3dubG9hZFJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBHBhdGgYAiABKAkiVAoYSW5pdEZpbGVEb3dubG9hZFJlc3BvbnNlEhIKCnNlc3Npb25faWQYASABKAkSEAoIZmlsZW5hbWUYAiABKAkSEgoKdG90YWxfc2l6ZRgDIAEoAyKHAQocRG93bmxvYWRSZW1vdGVBcmNoaXZlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSCwoDdXJsGAIgASgJEhgKEGRlc3RpbmF0aW9uX3BhdGgYAyABKAkSFwoPc2hhMjU2X2NoZWNrc3VtGAQgASgJEhQKDGF1dG9fZXh0cmFjdBgFIAEoCCJBCh1Eb3dubG9hZFJlbW90ZUFyY2hpdmVSZXNwb25zZRIPCgd0YXNrX2lkGAEgASgJEg8KB21lc3NhZ2UYAiABKAkiRQofR2V0UmVtb3RlQXJjaGl2ZVByb2dyZXNzUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDwoHdGFza19pZBgCIAEoCSKbAQogR2V0UmVtb3RlQXJjaGl2ZVByb2dyZXNzUmVzcG9uc2USDwoHdGFza19pZBgBIAEoCRIOCgZzdGF0dXMYAiABKAkSGAoQYnl0ZXNfZG93bmxvYWRlZBgDIAEoAxITCgt0b3RhbF9ieXRlcxgEIAEoAxIYChBwcm9ncmVzc19wZXJjZW50GAUgASgFEg0KBWVycm9yGAYgASgJMtEMCgtGaWxlU2VydmljZRJQCglMaXN0RmlsZXMSIC5jYXJib25wYW5lbC52MS5MaXN0RmlsZXNSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuTGlzdEZpbGVzUmVzcG9uc2USSgoHR2V0RmlsZRIeLmNhcmJvbnBhbmVsLnYxLkdldEZpbGVSZXF1ZXN0Gh8uY2FyYm9ucGFuZWwudjEuR2V0RmlsZVJlc3BvbnNlEmUKEFNhdmVVcGxvYWRlZEZpbGUSJy5jYXJib25wYW5lbC52MS5TYXZlVXBsb2FkZWRGaWxlUmVxdWVzdBooLmNhcmJvbnBhbmVsLnYxLlNhdmVVcGxvYWRlZEZpbGVSZXNwb25zZRJTCgpVcGRhdGVGaWxlEiEuY2FyYm9ucGFuZWwudjEuVXBkYXRlRmlsZVJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5VcGRhdGVGaWxlUmVzcG9uc2USUwoKRGVsZXRlRmlsZRIhLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZUZpbGVSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuRGVsZXRlRmlsZVJlc3BvbnNlElMKClJlbmFtZUZpbGUSIS5jYXJib25wYW5lbC52MS5SZW5hbWVGaWxlUmVxdWVzdBoiLmNhcmJvbnBhbmVsLnYxLlJlbmFtZUZpbGVSZXNwb25zZRJfCg5FeHRyYWN0QXJjaGl2ZRIlLmNhcmJvbnBhbmVsLnYxLkV4dHJhY3RBcmNoaXZlUmVxdWVzdBomLmNhcmJvbnBhbmVsLnYxLkV4dHJhY3RBcmNoaXZlUmVzcG9uc2USWQoMQ3JlYXRlRm9sZGVyEiMuY2FyYm9ucGFuZWwudjEuQ3JlYXRlRm9sZGVyUmVxdWVzdBokLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZUZvbGRlclJlc3BvbnNlEk0KCE1vdmVGaWxlEh8uY2FyYm9ucGFuZWwudjEuTW92ZUZpbGVSZXF1ZXN0GiAuY2FyYm9ucGFuZWwudjEuTW92ZUZpbGVSZXNwb25zZRJNCghDb3B5RmlsZRIfLmNhcmJvbnBhbmVsLnYxLkNvcHlGaWxlUmVxdWVzdBogLmNhcmJvbnBhbmVsLnYxLkNvcHlGaWxlUmVzcG9uc2USXAoNQ3JlYXRlQXJjaGl2ZRIkLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZUFyY2hpdmVSZXF1ZXN0GiUuY2FyYm9ucGFuZWwudjEuQ3JlYXRlQXJjaGl2ZVJlc3BvbnNlEmIKD0Rvd25sb2FkQXJjaGl2ZRImLmNhcmJvbnBhbmVsLnYxLkRvd25sb2FkQXJjaGl2ZVJlcXVlc3QaJy5jYXJib25wYW5lbC52MS5Eb3dubG9hZEFyY2hpdmVSZXNwb25zZRJWCgtFeHBvcnRXb3JsZBIiLmNhcmJvbnBhbmVsLnYxLkV4cG9ydFdvcmxkUmVxdWVzdBojLmNhcmJvbnBhbmVsLnYxLkV4cG9ydFdvcmxkUmVzcG9uc2USZQoQSW5pdEZpbGVEb3dubG9hZBInLmNhcmJvbnBhbmVsLnYxLkluaXRGaWxlRG93bmxvYWRSZXF1ZXN0GiguY2FyYm9ucGFuZWwudjEuSW5pdEZpbGVEb3dubG9hZFJlc3BvbnNlEm4KE0dldEV4dHJhY3Rpb25TdGF0dXMSKi5jYXJib25wYW5lbC52MS5HZXRFeHRyYWN0aW9uU3RhdHVzUmVxdWVzdBorLmNhcmJvbnBhbmVsLnYxLkdldEV4dHJhY3Rpb25TdGF0dXNSZXNwb25zZRJ0ChVEb3dubG9hZFJlbW90ZUFyY2hpdmUSLC5jYXJib25wYW5lbC52MS5Eb3dubG9hZFJlbW90ZUFyY2hpdmVSZXF1ZXN0Gi0uY2FyYm9ucGFuZWwudjEuRG93bmxvYWRSZW1vdGVBcmNoaXZlUmVzcG9uc2USfQoYR2V0UmVtb3RlQXJjaGl2ZVByb2dyZXNzEi8uY2FyYm9ucGFuZWwudjEuR2V0UmVtb3RlQXJjaGl2ZVByb2dyZXNzUmVxdWVzdBowLmNhcmJvbnBhbmVsLnYxLkdldFJlbW90ZUFyY2hpdmVQcm9ncmVzc1Jlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw'
+		'ChljYXJib25wYW5lbC92MS9maWxlLnByb3RvEg5jYXJib25wYW5lbC52MSJIChFPcGVuU3RyZWFtUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSDAoEcGF0aBgCIAEoCRISCgp0b3RhbF9zaXplGAMgASgDIjYKEk9wZW5TdHJlYW1SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEgwKBHNpemUYAiABKAMiVAoWUmVhZFN0cmVhbUZyYW1lUmVxdWVzdBISCgpzZXNzaW9uX2lkGAEgASgJEhMKC2ZyYW1lX2luZGV4GAIgASgFEhEKCXNlcnZlcl9pZBgDIAEoCSJVChdSZWFkU3RyZWFtRnJhbWVSZXNwb25zZRIMCgRkYXRhGAEgASgMEgwKBGRvbmUYAiABKAgSDgoGc2hhMjU2GAMgASgJEg4KBm9mZnNldBgEIAEoAyJLChJDbG9zZVN0cmVhbVJlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCRIOCgZjYW5jZWwYAiABKAgSEQoJc2VydmVyX2lkGAMgASgJIhUKE0Nsb3NlU3RyZWFtUmVzcG9uc2UilwEKCEZpbGVJbmZvEgwKBG5hbWUYASABKAkSDAoEcGF0aBgCIAEoCRIOCgZpc19kaXIYAyABKAgSDAoEc2l6ZRgEIAEoAxIQCghtb2RpZmllZBgFIAEoAxITCgtpc19lZGl0YWJsZRgGIAEoCBIqCghjaGlsZHJlbhgHIAMoCzIYLmNhcmJvbnBhbmVsLnYxLkZpbGVJbmZvIkEKEExpc3RGaWxlc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSDAoEdHJlZRgDIAEoCCI8ChFMaXN0RmlsZXNSZXNwb25zZRInCgVmaWxlcxgBIAMoCzIYLmNhcmJvbnBhbmVsLnYxLkZpbGVJbmZvIjEKDkdldEZpbGVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIMCgRwYXRoGAIgASgJIjUKD0dldEZpbGVSZXNwb25zZRIPCgdjb250ZW50GAEgASgMEhEKCW1pbWVfdHlwZRgCIAEoCSJzChdTYXZlVXBsb2FkZWRGaWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSGQoRdXBsb2FkX3Nlc3Npb25faWQYAiABKAkSGAoQZGVzdGluYXRpb25fcGF0aBgDIAEoCRIQCghmaWxlbmFtZRgEIAEoCSI5ChhTYXZlVXBsb2FkZWRGaWxlUmVzcG9uc2USDwoHbWVzc2FnZRgBIAEoCRIMCgRwYXRoGAIgASgJIlQKEVVwZGF0ZUZpbGVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg8KB2NvbnRlbnQYAyABKAwSDQoFc3RhZ2UYBCABKAgiQwoSVXBkYXRlRmlsZVJlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkSDAoEcGF0aBgCIAEoCRIOCgZzdGFnZWQYAyABKAgiUgoRRGVsZXRlRmlsZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSDQoFcGF0aHMYAyADKAkSDQoFc3RhZ2UYBCABKAgiFAoSRGVsZXRlRmlsZVJlc3BvbnNlIjYKE0NyZWF0ZUZvbGRlclJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBHBhdGgYAiABKAkiJwoUQ3JlYXRlRm9sZGVyUmVzcG9uc2USDwoHbWVzc2FnZRgBIAEoCSJTCg9Nb3ZlRmlsZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEhMKC3NvdXJjZV9wYXRoGAIgASgJEhgKEGRlc3RpbmF0aW9uX3BhdGgYAyABKAkiIwoQTW92ZUZpbGVSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJIlMKD0NvcHlGaWxlUmVxdWVzdBIRCglzZXJ2ZXJfaWQYASABKAkSEwoLc291cmNlX3BhdGgYAiABKAkSGAoQZGVzdGluYXRpb25fcGF0aBgDIAEoCSIjChBDb3B5RmlsZVJlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkiaAoUQ3JlYXRlQXJjaGl2ZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg0KBXBhdGhzGAIgAygJEhgKEGRlc3RpbmF0aW9uX3BhdGgYAyABKAkSFAoMYXJjaGl2ZV9uYW1lGAQgASgJIlYKFUNyZWF0ZUFyY2hpdmVSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJEhQKDGFyY2hpdmVfcGF0aBgCIAEoCRIWCg5maWxlc19hcmNoaXZlZBgDIAEoBSI6ChZEb3dubG9hZEFyY2hpdmVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRINCgVwYXRocxgCIAMoCSJTChdEb3dubG9hZEFyY2hpdmVSZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZpbGVuYW1lGAIgASgJEhIKCnRvdGFsX3NpemUYAyABKAMiJwoSRXhwb3J0V29ybGRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCSJiChNFeHBvcnRXb3JsZFJlc3BvbnNlEhIKCnNlc3Npb25faWQYASABKAkSEAoIZmlsZW5hbWUYAiABKAkSEgoKdG90YWxfc2l6ZRgDIAEoAxIRCglkYXRhX3BhdGgYBCABKAkiRgoRUmVuYW1lRmlsZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSEAoIbmV3X25hbWUYAyABKAkiNwoSUmVuYW1lRmlsZVJlc3BvbnNlEg8KB21lc3NhZ2UYASABKAkSEAoIbmV3X3BhdGgYAiABKAkiOAoVRXh0cmFjdEFyY2hpdmVSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIMCgRwYXRoGAIgASgJIi4KFkV4dHJhY3RBcmNoaXZlUmVzcG9uc2USFAoMb3BlcmF0aW9uX2lkGAEgASgJIjIKGkdldEV4dHJhY3Rpb25TdGF0dXNSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCSJUChtHZXRFeHRyYWN0aW9uU3RhdHVzUmVzcG9uc2USDQoFc3RhdGUYASABKAkSFwoPZmlsZXNfZXh0cmFjdGVkGAIgASgFEg0KBWVycm9yGAMgASgJIjoKF0luaXRGaWxlRG93bmxvYWRSZXF1ZXN0EhEKCXNlcnZlcl9pZBgBIAEoCRIMCgRwYXRoGAIgASgJIlQKGEluaXRGaWxlRG93bmxvYWRSZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZpbGVuYW1lGAIgASgJEhIKCnRvdGFsX3NpemUYAyABKAMihwEKHERvd25sb2FkUmVtb3RlQXJjaGl2ZVJlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEgsKA3VybBgCIAEoCRIYChBkZXN0aW5hdGlvbl9wYXRoGAMgASgJEhcKD3NoYTI1Nl9jaGVja3N1bRgEIAEoCRIUCgxhdXRvX2V4dHJhY3QYBSABKAgiQQodRG93bmxvYWRSZW1vdGVBcmNoaXZlUmVzcG9uc2USDwoHdGFza19pZBgBIAEoCRIPCgdtZXNzYWdlGAIgASgJIkUKH0dldFJlbW90ZUFyY2hpdmVQcm9ncmVzc1JlcXVlc3QSEQoJc2VydmVyX2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkimwEKIEdldFJlbW90ZUFyY2hpdmVQcm9ncmVzc1Jlc3BvbnNlEg8KB3Rhc2tfaWQYASABKAkSDgoGc3RhdHVzGAIgASgJEhgKEGJ5dGVzX2Rvd25sb2FkZWQYAyABKAMSEwoLdG90YWxfYnl0ZXMYBCABKAMSGAoQcHJvZ3Jlc3NfcGVyY2VudBgFIAEoBRINCgVlcnJvchgGIAEoCTLiDgoLRmlsZVNlcnZpY2USUAoJTGlzdEZpbGVzEiAuY2FyYm9ucGFuZWwudjEuTGlzdEZpbGVzUmVxdWVzdBohLmNhcmJvbnBhbmVsLnYxLkxpc3RGaWxlc1Jlc3BvbnNlEkoKB0dldEZpbGUSHi5jYXJib25wYW5lbC52MS5HZXRGaWxlUmVxdWVzdBofLmNhcmJvbnBhbmVsLnYxLkdldEZpbGVSZXNwb25zZRJlChBTYXZlVXBsb2FkZWRGaWxlEicuY2FyYm9ucGFuZWwudjEuU2F2ZVVwbG9hZGVkRmlsZVJlcXVlc3QaKC5jYXJib25wYW5lbC52MS5TYXZlVXBsb2FkZWRGaWxlUmVzcG9uc2USUwoKVXBkYXRlRmlsZRIhLmNhcmJvbnBhbmVsLnYxLlVwZGF0ZUZpbGVSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuVXBkYXRlRmlsZVJlc3BvbnNlElMKCkRlbGV0ZUZpbGUSIS5jYXJib25wYW5lbC52MS5EZWxldGVGaWxlUmVxdWVzdBoiLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZUZpbGVSZXNwb25zZRJTCgpSZW5hbWVGaWxlEiEuY2FyYm9ucGFuZWwudjEuUmVuYW1lRmlsZVJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5SZW5hbWVGaWxlUmVzcG9uc2USXwoORXh0cmFjdEFyY2hpdmUSJS5jYXJib25wYW5lbC52MS5FeHRyYWN0QXJjaGl2ZVJlcXVlc3QaJi5jYXJib25wYW5lbC52MS5FeHRyYWN0QXJjaGl2ZVJlc3BvbnNlElkKDENyZWF0ZUZvbGRlchIjLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZUZvbGRlclJlcXVlc3QaJC5jYXJib25wYW5lbC52MS5DcmVhdGVGb2xkZXJSZXNwb25zZRJNCghNb3ZlRmlsZRIfLmNhcmJvbnBhbmVsLnYxLk1vdmVGaWxlUmVxdWVzdBogLmNhcmJvbnBhbmVsLnYxLk1vdmVGaWxlUmVzcG9uc2USTQoIQ29weUZpbGUSHy5jYXJib25wYW5lbC52MS5Db3B5RmlsZVJlcXVlc3QaIC5jYXJib25wYW5lbC52MS5Db3B5RmlsZVJlc3BvbnNlElwKDUNyZWF0ZUFyY2hpdmUSJC5jYXJib25wYW5lbC52MS5DcmVhdGVBcmNoaXZlUmVxdWVzdBolLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZUFyY2hpdmVSZXNwb25zZRJiCg9Eb3dubG9hZEFyY2hpdmUSJi5jYXJib25wYW5lbC52MS5Eb3dubG9hZEFyY2hpdmVSZXF1ZXN0GicuY2FyYm9ucGFuZWwudjEuRG93bmxvYWRBcmNoaXZlUmVzcG9uc2USVgoLRXhwb3J0V29ybGQSIi5jYXJib25wYW5lbC52MS5FeHBvcnRXb3JsZFJlcXVlc3QaIy5jYXJib25wYW5lbC52MS5FeHBvcnRXb3JsZFJlc3BvbnNlEmUKEEluaXRGaWxlRG93bmxvYWQSJy5jYXJib25wYW5lbC52MS5Jbml0RmlsZURvd25sb2FkUmVxdWVzdBooLmNhcmJvbnBhbmVsLnYxLkluaXRGaWxlRG93bmxvYWRSZXNwb25zZRJuChNHZXRFeHRyYWN0aW9uU3RhdHVzEiouY2FyYm9ucGFuZWwudjEuR2V0RXh0cmFjdGlvblN0YXR1c1JlcXVlc3QaKy5jYXJib25wYW5lbC52MS5HZXRFeHRyYWN0aW9uU3RhdHVzUmVzcG9uc2USdAoVRG93bmxvYWRSZW1vdGVBcmNoaXZlEiwuY2FyYm9ucGFuZWwudjEuRG93bmxvYWRSZW1vdGVBcmNoaXZlUmVxdWVzdBotLmNhcmJvbnBhbmVsLnYxLkRvd25sb2FkUmVtb3RlQXJjaGl2ZVJlc3BvbnNlEn0KGEdldFJlbW90ZUFyY2hpdmVQcm9ncmVzcxIvLmNhcmJvbnBhbmVsLnYxLkdldFJlbW90ZUFyY2hpdmVQcm9ncmVzc1JlcXVlc3QaMC5jYXJib25wYW5lbC52MS5HZXRSZW1vdGVBcmNoaXZlUHJvZ3Jlc3NSZXNwb25zZRJTCgpPcGVuU3RyZWFtEiEuY2FyYm9ucGFuZWwudjEuT3BlblN0cmVhbVJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5PcGVuU3RyZWFtUmVzcG9uc2USYgoPUmVhZFN0cmVhbUZyYW1lEiYuY2FyYm9ucGFuZWwudjEuUmVhZFN0cmVhbUZyYW1lUmVxdWVzdBonLmNhcmJvbnBhbmVsLnYxLlJlYWRTdHJlYW1GcmFtZVJlc3BvbnNlElYKC0Nsb3NlU3RyZWFtEiIuY2FyYm9ucGFuZWwudjEuQ2xvc2VTdHJlYW1SZXF1ZXN0GiMuY2FyYm9ucGFuZWwudjEuQ2xvc2VTdHJlYW1SZXNwb25zZUJIWkZnaXRodWIuY29tL2F0aE5kZXYvY2FyYm9uLXBhbmVsL3BrZy9wcm90by9jYXJib25wYW5lbC92MTtjYXJib25wYW5lbHYxYgZwcm90bzM'
 	);
+
+/**
+ * OSS-387 bounded stream session messages. Frames are capped by the W17
+ * 256 KiB bound; the controller owns handles, expiry and SHA-256 state.
+ *
+ * CONTRACT: total_size / size is an ADMISSION UPPER BOUND, not an exact byte
+ * count. The controller refuses to read beyond it, but the source may be
+ * shorter. The authoritative final byte count is ReadStreamFrameResponse.offset
+ * on the frame with done=true; its sha256 is computed over exactly those
+ * bytes. Composed upload/commit MUST use that actual count, never the declared
+ * bound. A declared size of 0 is valid for opening but yields no committable
+ * bytes.
+ *
+ * @generated from message carbonpanel.v1.OpenStreamRequest
+ */
+export type OpenStreamRequest = Message<'carbonpanel.v1.OpenStreamRequest'> & {
+	/**
+	 * @generated from field: string server_id = 1;
+	 */
+	serverId: string;
+
+	/**
+	 * @generated from field: string path = 2;
+	 */
+	path: string;
+
+	/**
+	 * @generated from field: int64 total_size = 3;
+	 */
+	totalSize: bigint;
+};
+
+/**
+ * Describes the message carbonpanel.v1.OpenStreamRequest.
+ * Use `create(OpenStreamRequestSchema)` to create a new message.
+ */
+export const OpenStreamRequestSchema: GenMessage<OpenStreamRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_file, 0);
+
+/**
+ * Opaque controller session id plus the admission upper bound echoed back to
+ * the caller. The authoritative transferred size comes from frame responses.
+ *
+ * @generated from message carbonpanel.v1.OpenStreamResponse
+ */
+export type OpenStreamResponse = Message<'carbonpanel.v1.OpenStreamResponse'> & {
+	/**
+	 * @generated from field: string session_id = 1;
+	 */
+	sessionId: string;
+
+	/**
+	 * @generated from field: int64 size = 2;
+	 */
+	size: bigint;
+};
+
+/**
+ * Describes the message carbonpanel.v1.OpenStreamResponse.
+ * Use `create(OpenStreamResponseSchema)` to create a new message.
+ */
+export const OpenStreamResponseSchema: GenMessage<OpenStreamResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_file, 1);
+
+/**
+ * Requests exactly one bounded frame, identified by its zero-based index and
+ * the server this request is authorized for.
+ *
+ * @generated from message carbonpanel.v1.ReadStreamFrameRequest
+ */
+export type ReadStreamFrameRequest = Message<'carbonpanel.v1.ReadStreamFrameRequest'> & {
+	/**
+	 * @generated from field: string session_id = 1;
+	 */
+	sessionId: string;
+
+	/**
+	 * @generated from field: int32 frame_index = 2;
+	 */
+	frameIndex: number;
+
+	/**
+	 * The server the caller intends to read from. The controller rejects the
+	 * frame unless it matches the server the session was opened for; the auth
+	 * interceptor also scopes this procedure to files/read[server_id].
+	 *
+	 * @generated from field: string server_id = 3;
+	 */
+	serverId: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.ReadStreamFrameRequest.
+ * Use `create(ReadStreamFrameRequestSchema)` to create a new message.
+ */
+export const ReadStreamFrameRequestSchema: GenMessage<ReadStreamFrameRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_file, 2);
+
+/**
+ * One bounded frame with cumulative SHA-256 and the authoritative byte
+ * offset; done=true marks the final frame.
+ *
+ * @generated from message carbonpanel.v1.ReadStreamFrameResponse
+ */
+export type ReadStreamFrameResponse = Message<'carbonpanel.v1.ReadStreamFrameResponse'> & {
+	/**
+	 * @generated from field: bytes data = 1;
+	 */
+	data: Uint8Array;
+
+	/**
+	 * done=true means the source reached EOF. sha256 is the cumulative digest of
+	 * the bytes actually transferred, and offset is the authoritative ACTUAL
+	 * total byte count (not OpenStreamResponse.size, which is only a bound).
+	 *
+	 * @generated from field: bool done = 2;
+	 */
+	done: boolean;
+
+	/**
+	 * @generated from field: string sha256 = 3;
+	 */
+	sha256: string;
+
+	/**
+	 * @generated from field: int64 offset = 4;
+	 */
+	offset: bigint;
+};
+
+/**
+ * Describes the message carbonpanel.v1.ReadStreamFrameResponse.
+ * Use `create(ReadStreamFrameResponseSchema)` to create a new message.
+ */
+export const ReadStreamFrameResponseSchema: GenMessage<ReadStreamFrameResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_file, 3);
+
+/**
+ * Releases exactly one owned session; cancel=true aborts an in-flight stream.
+ *
+ * @generated from message carbonpanel.v1.CloseStreamRequest
+ */
+export type CloseStreamRequest = Message<'carbonpanel.v1.CloseStreamRequest'> & {
+	/**
+	 * @generated from field: string session_id = 1;
+	 */
+	sessionId: string;
+
+	/**
+	 * @generated from field: bool cancel = 2;
+	 */
+	cancel: boolean;
+
+	/**
+	 * The server the caller intends to close/release; must match the session.
+	 *
+	 * @generated from field: string server_id = 3;
+	 */
+	serverId: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.CloseStreamRequest.
+ * Use `create(CloseStreamRequestSchema)` to create a new message.
+ */
+export const CloseStreamRequestSchema: GenMessage<CloseStreamRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_file, 4);
+
+/**
+ * Empty acknowledgement that the owned session and its handle were released.
+ *
+ * @generated from message carbonpanel.v1.CloseStreamResponse
+ */
+export type CloseStreamResponse = Message<'carbonpanel.v1.CloseStreamResponse'> & {};
+
+/**
+ * Describes the message carbonpanel.v1.CloseStreamResponse.
+ * Use `create(CloseStreamResponseSchema)` to create a new message.
+ */
+export const CloseStreamResponseSchema: GenMessage<CloseStreamResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_file, 5);
 
 /**
  * File metadata and tree
@@ -71,7 +258,7 @@ export type FileInfo = Message<'carbonpanel.v1.FileInfo'> & {
  */
 export const FileInfoSchema: GenMessage<FileInfo> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 0);
+	messageDesc(file_carbonpanel_v1_file, 6);
 
 /**
  * Directory listing parameters
@@ -101,7 +288,7 @@ export type ListFilesRequest = Message<'carbonpanel.v1.ListFilesRequest'> & {
  */
 export const ListFilesRequestSchema: GenMessage<ListFilesRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 1);
+	messageDesc(file_carbonpanel_v1_file, 7);
 
 /**
  * Directory contents
@@ -121,7 +308,7 @@ export type ListFilesResponse = Message<'carbonpanel.v1.ListFilesResponse'> & {
  */
 export const ListFilesResponseSchema: GenMessage<ListFilesResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 2);
+	messageDesc(file_carbonpanel_v1_file, 8);
 
 /**
  * File download parameters
@@ -146,7 +333,7 @@ export type GetFileRequest = Message<'carbonpanel.v1.GetFileRequest'> & {
  */
 export const GetFileRequestSchema: GenMessage<GetFileRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 3);
+	messageDesc(file_carbonpanel_v1_file, 9);
 
 /**
  * File binary content
@@ -171,7 +358,7 @@ export type GetFileResponse = Message<'carbonpanel.v1.GetFileResponse'> & {
  */
 export const GetFileResponseSchema: GenMessage<GetFileResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 4);
+	messageDesc(file_carbonpanel_v1_file, 10);
 
 /**
  * File upload data
@@ -210,7 +397,7 @@ export type SaveUploadedFileRequest = Message<'carbonpanel.v1.SaveUploadedFileRe
  */
 export const SaveUploadedFileRequestSchema: GenMessage<SaveUploadedFileRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 5);
+	messageDesc(file_carbonpanel_v1_file, 11);
 
 /**
  * Save uploaded file result
@@ -235,7 +422,7 @@ export type SaveUploadedFileResponse = Message<'carbonpanel.v1.SaveUploadedFileR
  */
 export const SaveUploadedFileResponseSchema: GenMessage<SaveUploadedFileResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 6);
+	messageDesc(file_carbonpanel_v1_file, 12);
 
 /**
  * File content update
@@ -272,7 +459,7 @@ export type UpdateFileRequest = Message<'carbonpanel.v1.UpdateFileRequest'> & {
  */
 export const UpdateFileRequestSchema: GenMessage<UpdateFileRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 7);
+	messageDesc(file_carbonpanel_v1_file, 13);
 
 /**
  * Update confirmation
@@ -302,7 +489,7 @@ export type UpdateFileResponse = Message<'carbonpanel.v1.UpdateFileResponse'> & 
  */
 export const UpdateFileResponseSchema: GenMessage<UpdateFileResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 8);
+	messageDesc(file_carbonpanel_v1_file, 14);
 
 /**
  * File to delete
@@ -341,7 +528,7 @@ export type DeleteFileRequest = Message<'carbonpanel.v1.DeleteFileRequest'> & {
  */
 export const DeleteFileRequestSchema: GenMessage<DeleteFileRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 9);
+	messageDesc(file_carbonpanel_v1_file, 15);
 
 /**
  * Empty delete response
@@ -356,7 +543,7 @@ export type DeleteFileResponse = Message<'carbonpanel.v1.DeleteFileResponse'> & 
  */
 export const DeleteFileResponseSchema: GenMessage<DeleteFileResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 10);
+	messageDesc(file_carbonpanel_v1_file, 16);
 
 /**
  * Folder creation parameters
@@ -381,7 +568,7 @@ export type CreateFolderRequest = Message<'carbonpanel.v1.CreateFolderRequest'> 
  */
 export const CreateFolderRequestSchema: GenMessage<CreateFolderRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 11);
+	messageDesc(file_carbonpanel_v1_file, 17);
 
 /**
  * Folder creation result
@@ -401,7 +588,7 @@ export type CreateFolderResponse = Message<'carbonpanel.v1.CreateFolderResponse'
  */
 export const CreateFolderResponseSchema: GenMessage<CreateFolderResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 12);
+	messageDesc(file_carbonpanel_v1_file, 18);
 
 /**
  * File move parameters
@@ -431,7 +618,7 @@ export type MoveFileRequest = Message<'carbonpanel.v1.MoveFileRequest'> & {
  */
 export const MoveFileRequestSchema: GenMessage<MoveFileRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 13);
+	messageDesc(file_carbonpanel_v1_file, 19);
 
 /**
  * File move result
@@ -451,7 +638,7 @@ export type MoveFileResponse = Message<'carbonpanel.v1.MoveFileResponse'> & {
  */
 export const MoveFileResponseSchema: GenMessage<MoveFileResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 14);
+	messageDesc(file_carbonpanel_v1_file, 20);
 
 /**
  * File copy parameters
@@ -481,7 +668,7 @@ export type CopyFileRequest = Message<'carbonpanel.v1.CopyFileRequest'> & {
  */
 export const CopyFileRequestSchema: GenMessage<CopyFileRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 15);
+	messageDesc(file_carbonpanel_v1_file, 21);
 
 /**
  * File copy result
@@ -501,7 +688,7 @@ export type CopyFileResponse = Message<'carbonpanel.v1.CopyFileResponse'> & {
  */
 export const CopyFileResponseSchema: GenMessage<CopyFileResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 16);
+	messageDesc(file_carbonpanel_v1_file, 22);
 
 /**
  * Archive creation parameters
@@ -536,7 +723,7 @@ export type CreateArchiveRequest = Message<'carbonpanel.v1.CreateArchiveRequest'
  */
 export const CreateArchiveRequestSchema: GenMessage<CreateArchiveRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 17);
+	messageDesc(file_carbonpanel_v1_file, 23);
 
 /**
  * Archive creation result
@@ -566,7 +753,7 @@ export type CreateArchiveResponse = Message<'carbonpanel.v1.CreateArchiveRespons
  */
 export const CreateArchiveResponseSchema: GenMessage<CreateArchiveResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 18);
+	messageDesc(file_carbonpanel_v1_file, 24);
 
 /**
  * Archive download parameters
@@ -591,7 +778,7 @@ export type DownloadArchiveRequest = Message<'carbonpanel.v1.DownloadArchiveRequ
  */
 export const DownloadArchiveRequestSchema: GenMessage<DownloadArchiveRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 19);
+	messageDesc(file_carbonpanel_v1_file, 25);
 
 /**
  * Archive download session
@@ -621,7 +808,7 @@ export type DownloadArchiveResponse = Message<'carbonpanel.v1.DownloadArchiveRes
  */
 export const DownloadArchiveResponseSchema: GenMessage<DownloadArchiveResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 20);
+	messageDesc(file_carbonpanel_v1_file, 26);
 
 /**
  * Server world to export
@@ -641,7 +828,7 @@ export type ExportWorldRequest = Message<'carbonpanel.v1.ExportWorldRequest'> & 
  */
 export const ExportWorldRequestSchema: GenMessage<ExportWorldRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 21);
+	messageDesc(file_carbonpanel_v1_file, 27);
 
 /**
  * Download session for the exported world
@@ -678,7 +865,7 @@ export type ExportWorldResponse = Message<'carbonpanel.v1.ExportWorldResponse'> 
  */
 export const ExportWorldResponseSchema: GenMessage<ExportWorldResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 22);
+	messageDesc(file_carbonpanel_v1_file, 28);
 
 /**
  * File rename parameters
@@ -708,7 +895,7 @@ export type RenameFileRequest = Message<'carbonpanel.v1.RenameFileRequest'> & {
  */
 export const RenameFileRequestSchema: GenMessage<RenameFileRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 23);
+	messageDesc(file_carbonpanel_v1_file, 29);
 
 /**
  * Rename result
@@ -733,7 +920,7 @@ export type RenameFileResponse = Message<'carbonpanel.v1.RenameFileResponse'> & 
  */
 export const RenameFileResponseSchema: GenMessage<RenameFileResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 24);
+	messageDesc(file_carbonpanel_v1_file, 30);
 
 /**
  * Archive to extract
@@ -758,7 +945,7 @@ export type ExtractArchiveRequest = Message<'carbonpanel.v1.ExtractArchiveReques
  */
 export const ExtractArchiveRequestSchema: GenMessage<ExtractArchiveRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 25);
+	messageDesc(file_carbonpanel_v1_file, 31);
 
 /**
  * Extraction started
@@ -778,7 +965,7 @@ export type ExtractArchiveResponse = Message<'carbonpanel.v1.ExtractArchiveRespo
  */
 export const ExtractArchiveResponseSchema: GenMessage<ExtractArchiveResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 26);
+	messageDesc(file_carbonpanel_v1_file, 32);
 
 /**
  * Extraction status poll
@@ -798,7 +985,7 @@ export type GetExtractionStatusRequest = Message<'carbonpanel.v1.GetExtractionSt
  */
 export const GetExtractionStatusRequestSchema: GenMessage<GetExtractionStatusRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 27);
+	messageDesc(file_carbonpanel_v1_file, 33);
 
 /**
  * Extraction progress
@@ -828,7 +1015,7 @@ export type GetExtractionStatusResponse = Message<'carbonpanel.v1.GetExtractionS
  */
 export const GetExtractionStatusResponseSchema: GenMessage<GetExtractionStatusResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 28);
+	messageDesc(file_carbonpanel_v1_file, 34);
 
 /**
  * Single file download session
@@ -853,7 +1040,7 @@ export type InitFileDownloadRequest = Message<'carbonpanel.v1.InitFileDownloadRe
  */
 export const InitFileDownloadRequestSchema: GenMessage<InitFileDownloadRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 29);
+	messageDesc(file_carbonpanel_v1_file, 35);
 
 /**
  * Download session
@@ -883,7 +1070,7 @@ export type InitFileDownloadResponse = Message<'carbonpanel.v1.InitFileDownloadR
  */
 export const InitFileDownloadResponseSchema: GenMessage<InitFileDownloadResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 30);
+	messageDesc(file_carbonpanel_v1_file, 36);
 
 /**
  * Download archive from remote URL request
@@ -924,7 +1111,7 @@ export type DownloadRemoteArchiveRequest =
  */
 export const DownloadRemoteArchiveRequestSchema: GenMessage<DownloadRemoteArchiveRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 31);
+	messageDesc(file_carbonpanel_v1_file, 37);
 
 /**
  * Download archive from remote URL response
@@ -950,7 +1137,7 @@ export type DownloadRemoteArchiveResponse =
  */
 export const DownloadRemoteArchiveResponseSchema: GenMessage<DownloadRemoteArchiveResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 32);
+	messageDesc(file_carbonpanel_v1_file, 38);
 
 /**
  * Get remote archive download progress request
@@ -976,7 +1163,7 @@ export type GetRemoteArchiveProgressRequest =
  */
 export const GetRemoteArchiveProgressRequestSchema: GenMessage<GetRemoteArchiveProgressRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 33);
+	messageDesc(file_carbonpanel_v1_file, 39);
 
 /**
  * Get remote archive download progress response
@@ -1022,7 +1209,7 @@ export type GetRemoteArchiveProgressResponse =
  */
 export const GetRemoteArchiveProgressResponseSchema: GenMessage<GetRemoteArchiveProgressResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_file, 34);
+	messageDesc(file_carbonpanel_v1_file, 40);
 
 /**
  * Server file management
@@ -1199,5 +1386,36 @@ export const FileService: GenService<{
 		methodKind: 'unary';
 		input: typeof GetRemoteArchiveProgressRequestSchema;
 		output: typeof GetRemoteArchiveProgressResponseSchema;
+	};
+	/**
+	 * OSS-387: open a controller-owned bounded byte stream session. The gateway
+	 * never opens node storage itself; the controller owns the read handle.
+	 *
+	 * @generated from rpc carbonpanel.v1.FileService.OpenStream
+	 */
+	openStream: {
+		methodKind: 'unary';
+		input: typeof OpenStreamRequestSchema;
+		output: typeof OpenStreamResponseSchema;
+	};
+	/**
+	 * Read one bounded frame from a controller-owned session.
+	 *
+	 * @generated from rpc carbonpanel.v1.FileService.ReadStreamFrame
+	 */
+	readStreamFrame: {
+		methodKind: 'unary';
+		input: typeof ReadStreamFrameRequestSchema;
+		output: typeof ReadStreamFrameResponseSchema;
+	};
+	/**
+	 * Close or cancel a controller-owned session.
+	 *
+	 * @generated from rpc carbonpanel.v1.FileService.CloseStream
+	 */
+	closeStream: {
+		methodKind: 'unary';
+		input: typeof CloseStreamRequestSchema;
+		output: typeof CloseStreamResponseSchema;
 	};
 }> = /*@__PURE__*/ serviceDesc(file_carbonpanel_v1_file, 0);

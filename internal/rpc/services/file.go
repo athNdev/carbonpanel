@@ -143,6 +143,15 @@ type FileService struct {
 	extractions     sync.Map
 	remoteDownloads sync.Map
 
+	// OSS-387 controller-owned bounded stream sessions. The gateway never
+	// sees a storage handle; only opaque session ids cross the RPC boundary.
+	streamMu sync.Mutex
+	streams  *controllerStreamState
+
+	// reaperDone is closed when the OSS-387 stream reaper goroutine exits.
+	// It lets shutdown tests observe clean termination rather than infer it.
+	reaperDone chan struct{}
+
 	// cleanupStop terminates the background cleanupExtractions ticker. It was
 	// previously started in the constructor with no way to stop it, leaking one
 	// goroutine (holding a timer) for every FileService ever constructed - which
@@ -173,10 +182,14 @@ func NewFileService(store *storage.Store, docker *docker.Client, uploadManager *
 		uploadManager:   uploadManager,
 		downloadManager: downloadManager,
 		cleanupStop:     make(chan struct{}),
+		reaperDone:      make(chan struct{}),
 		jobCtx:          jobCtx,
 		jobCancel:       jobCancel,
 	}
 	go svc.cleanupExtractions()
+	// OSS-387: bounded, owned TTL reaper for controller stream sessions. It
+	// exits with cleanupStop/jobCtx on Stop() and never leaks a goroutine.
+	go svc.reapStreams()
 	return svc
 }
 
@@ -195,6 +208,9 @@ func (s *FileService) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.cleanupStop)
 		s.jobCancel()
+		// OSS-387: release every controller-owned stream session's bounded
+		// context and storage handle. Idempotent under the stopOnce guard.
+		s.StopStreams()
 	})
 	s.jobWaitDone.Do(func() { s.jobWait.Wait() })
 }
@@ -935,7 +951,7 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 			op.fail(fmt.Sprintf("download request failed: %v", err))
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			op.fail(fmt.Sprintf("remote server returned HTTP status %d", resp.StatusCode))
@@ -962,8 +978,8 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 			return
 		}
 		tmpPath := tmpFile.Name()
-		defer os.Remove(tmpPath)
-		defer tmpFile.Close()
+		defer func() { _ = os.Remove(tmpPath) }()
+		defer func() { _ = tmpFile.Close() }()
 
 		hasher := sha256.New()
 		writer := io.MultiWriter(tmpFile, hasher)
@@ -1575,7 +1591,7 @@ func (s *FileService) DownloadArchive(ctx context.Context, req *connect.Request[
 	// Stat to get final size
 	zipInfo, err := os.Stat(tempPath)
 	if err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to stat archive"))
 	}
 

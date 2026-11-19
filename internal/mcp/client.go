@@ -108,6 +108,14 @@ func NewClients(httpClient connect.HTTPClient, baseURL, token string) (*Clients,
 		return nil, fmt.Errorf("API token is required")
 	}
 	opts := []connect.ClientOption{connect.WithInterceptors(bearerInterceptor(token))}
+	fileClient := carbonpanelv1connect.NewFileServiceClient(httpClient, baseURL, opts...)
+	// OSS-387: the production constructor always builds the controller-owned
+	// stream session registry from the authenticated FileService client. No
+	// fixture-only injection and no gateway-side storage handle exists.
+	transfer, err := NewStreamTransfer(fileClient, 5*time.Minute)
+	if err != nil {
+		return nil, err
+	}
 	return &Clients{
 		Auth:      carbonpanelv1connect.NewAuthServiceClient(httpClient, baseURL, opts...),
 		Server:    carbonpanelv1connect.NewServerServiceClient(httpClient, baseURL, opts...),
@@ -115,13 +123,14 @@ func NewClients(httpClient connect.HTTPClient, baseURL, token string) (*Clients,
 		World:     carbonpanelv1connect.NewWorldServiceClient(httpClient, baseURL, opts...),
 		WorldView: carbonpanelv1connect.NewWorldViewServiceClient(httpClient, baseURL, opts...),
 		Backup:    carbonpanelv1connect.NewBackupServiceClient(httpClient, baseURL, opts...),
-		File:      carbonpanelv1connect.NewFileServiceClient(httpClient, baseURL, opts...),
+		File:      fileClient,
 		Upload:    carbonpanelv1connect.NewUploadServiceClient(httpClient, baseURL, opts...),
 
 		httpClient: httpClient,
 		baseURL:    baseURL,
 		token:      token,
 		owner:      tokenOwner(token),
+		transfer:   transfer,
 	}, nil
 }
 

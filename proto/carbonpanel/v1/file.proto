@@ -49,7 +49,66 @@ service FileService {
   rpc DownloadRemoteArchive(DownloadRemoteArchiveRequest) returns (DownloadRemoteArchiveResponse);
   // Poll remote archive download progress
   rpc GetRemoteArchiveProgress(GetRemoteArchiveProgressRequest) returns (GetRemoteArchiveProgressResponse);
+  // OSS-387: open a controller-owned bounded byte stream session. The gateway
+  // never opens node storage itself; the controller owns the read handle.
+  rpc OpenStream(OpenStreamRequest) returns (OpenStreamResponse);
+  // Read one bounded frame from a controller-owned session.
+  rpc ReadStreamFrame(ReadStreamFrameRequest) returns (ReadStreamFrameResponse);
+  // Close or cancel a controller-owned session.
+  rpc CloseStream(CloseStreamRequest) returns (CloseStreamResponse);
 }
+
+// OSS-387 bounded stream session messages. Frames are capped by the W17
+// 256 KiB bound; the controller owns handles, expiry and SHA-256 state.
+//
+// CONTRACT: total_size / size is an ADMISSION UPPER BOUND, not an exact byte
+// count. The controller refuses to read beyond it, but the source may be
+// shorter. The authoritative final byte count is ReadStreamFrameResponse.offset
+// on the frame with done=true; its sha256 is computed over exactly those
+// bytes. Composed upload/commit MUST use that actual count, never the declared
+// bound. A declared size of 0 is valid for opening but yields no committable
+// bytes.
+message OpenStreamRequest {
+  string server_id = 1;
+  string path = 2;
+  int64 total_size = 3;
+}
+// Opaque controller session id plus the admission upper bound echoed back to
+// the caller. The authoritative transferred size comes from frame responses.
+message OpenStreamResponse {
+  string session_id = 1;
+  int64 size = 2;
+}
+// Requests exactly one bounded frame, identified by its zero-based index and
+// the server this request is authorized for.
+message ReadStreamFrameRequest {
+  string session_id = 1;
+  int32 frame_index = 2;
+  // The server the caller intends to read from. The controller rejects the
+  // frame unless it matches the server the session was opened for; the auth
+  // interceptor also scopes this procedure to files/read[server_id].
+  string server_id = 3;
+}
+// One bounded frame with cumulative SHA-256 and the authoritative byte
+// offset; done=true marks the final frame.
+message ReadStreamFrameResponse {
+  bytes data = 1;
+  // done=true means the source reached EOF. sha256 is the cumulative digest of
+  // the bytes actually transferred, and offset is the authoritative ACTUAL
+  // total byte count (not OpenStreamResponse.size, which is only a bound).
+  bool done = 2;
+  string sha256 = 3;
+  int64 offset = 4;
+}
+// Releases exactly one owned session; cancel=true aborts an in-flight stream.
+message CloseStreamRequest {
+  string session_id = 1;
+  bool cancel = 2;
+  // The server the caller intends to close/release; must match the session.
+  string server_id = 3;
+}
+// Empty acknowledgement that the owned session and its handle were released.
+message CloseStreamResponse {}
 
 // File metadata and tree
 message FileInfo {

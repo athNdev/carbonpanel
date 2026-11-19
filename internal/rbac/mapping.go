@@ -100,6 +100,13 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.FileService/GetExtractionStatus":      {Resource: ResourceFiles, Action: ActionRead},
 	"/carbonpanel.v1.FileService/DownloadRemoteArchive":    {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.FileService/GetRemoteArchiveProgress": {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	// OSS-387 controller-owned bounded stream transport.
+	"/carbonpanel.v1.FileService/OpenStream":       {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	// Every frame and release carries server_id so the interceptor enforces the
+	// same per-server grant as open, and the service binds the handle to that
+	// exact server. A token scoped to server A cannot read/close server B.
+	"/carbonpanel.v1.FileService/ReadStreamFrame": {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.FileService/CloseStream":     {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
 
 	// â”€â”€ ModService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	"/carbonpanel.v1.ModService/ListMods":                       {Resource: ResourceMods, Action: ActionRead, ObjectIDField: "server_id"},

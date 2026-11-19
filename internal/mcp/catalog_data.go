@@ -4,7 +4,7 @@
 
 package mcp
 
-const descriptorFingerprint = "14b539d9cc5f3b7a495625ae5483379c9a10375398368c9490f9f9f7dc124574"
+const descriptorFingerprint = "1fe6033461b595c34ae315457d4ea3202afcc63ff0087ea79fed387fcd5cd47b"
 
 var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.ActivityService/ListActivityLogs", Service: "carbonpanel.v1.ActivityService", Method: "ListActivityLogs", Client: "NewActivityServiceClient", Scope: "activity/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
@@ -46,6 +46,7 @@ var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.DatapackService/ListDatapacks", Service: "carbonpanel.v1.DatapackService", Method: "ListDatapacks", Client: "NewDatapackServiceClient", Scope: "mods/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.DatapackService/SearchDatapacks", Service: "carbonpanel.v1.DatapackService", Method: "SearchDatapacks", Client: "NewDatapackServiceClient", Scope: "mods/read", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.DatapackService/UploadDatapack", Service: "carbonpanel.v1.DatapackService", Method: "UploadDatapack", Client: "NewDatapackServiceClient", Scope: "mods/create[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
+	{Procedure: "/carbonpanel.v1.FileService/CloseStream", Service: "carbonpanel.v1.FileService", Method: "CloseStream", Client: "NewFileServiceClient", Scope: "files/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.FileService/CopyFile", Service: "carbonpanel.v1.FileService", Method: "CopyFile", Client: "NewFileServiceClient", Scope: "files/create[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.FileService/CreateArchive", Service: "carbonpanel.v1.FileService", Method: "CreateArchive", Client: "NewFileServiceClient", Scope: "files/create[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.FileService/CreateFolder", Service: "carbonpanel.v1.FileService", Method: "CreateFolder", Client: "NewFileServiceClient", Scope: "files/create[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
@@ -60,6 +61,8 @@ var rawCatalogEntries = []CatalogEntry{
 	{Procedure: "/carbonpanel.v1.FileService/InitFileDownload", Service: "carbonpanel.v1.FileService", Method: "InitFileDownload", Client: "NewFileServiceClient", Scope: "files/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.FileService/ListFiles", Service: "carbonpanel.v1.FileService", Method: "ListFiles", Client: "NewFileServiceClient", Scope: "files/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.FileService/MoveFile", Service: "carbonpanel.v1.FileService", Method: "MoveFile", Client: "NewFileServiceClient", Scope: "files/update[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
+	{Procedure: "/carbonpanel.v1.FileService/OpenStream", Service: "carbonpanel.v1.FileService", Method: "OpenStream", Client: "NewFileServiceClient", Scope: "files/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
+	{Procedure: "/carbonpanel.v1.FileService/ReadStreamFrame", Service: "carbonpanel.v1.FileService", Method: "ReadStreamFrame", Client: "NewFileServiceClient", Scope: "files/read[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.FileService/RenameFile", Service: "carbonpanel.v1.FileService", Method: "RenameFile", Client: "NewFileServiceClient", Scope: "files/update[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.FileService/SaveUploadedFile", Service: "carbonpanel.v1.FileService", Method: "SaveUploadedFile", Client: "NewFileServiceClient", Scope: "files/create[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
 	{Procedure: "/carbonpanel.v1.FileService/UpdateFile", Service: "carbonpanel.v1.FileService", Method: "UpdateFile", Client: "NewFileServiceClient", Scope: "files/update[server_id]", Class: ClassExclude, Build: PanelBuildStableV140},
