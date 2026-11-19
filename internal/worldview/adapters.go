@@ -340,7 +340,7 @@ func doBlueMapTexturesGet(ctx context.Context, url string, hc HTTPDoer) (*http.R
 // "textures" field is an array. A SPA/HTML fallback or an unrelated JSON
 // document with a 200 is not a rendered map and must not be called READY.
 func verifyBlueMapTextures(resp *http.Response, literalGzip bool) error {
-	var reader io.Reader = io.LimitReader(resp.Body, maxBlueMapTexturesBytes)
+	reader := io.LimitReader(resp.Body, maxBlueMapTexturesBytes)
 	if literalGzip || strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
 		zr, err := gzip.NewReader(reader)
 		if err != nil {

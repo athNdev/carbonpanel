@@ -200,13 +200,13 @@ func TestBlueMapGzipOnlyTexturesIsReadyFixture(t *testing.T) {
 	compressed := buf.Bytes()
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/settings.json":
+		switch r.URL.Path {
+		case "/settings.json":
 			_, _ = w.Write([]byte(`{"maps":["world"]}`))
-		case r.URL.Path == "/maps/world/textures.json.gz":
+		case "/maps/world/textures.json.gz":
 			w.Header().Set("Content-Type", "application/gzip")
 			_, _ = w.Write(compressed)
-		case r.URL.Path == "/":
+		case "/":
 			_, _ = w.Write([]byte(`{"version":"5.29"}`))
 		default:
 			http.NotFound(w, r)
