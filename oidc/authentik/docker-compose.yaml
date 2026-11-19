@@ -1,0 +1,60 @@
+﻿# SPDX-License-Identifier: MIT AND MPL-2.0
+# This file includes DiscoPanel material under the MIT License,
+# Copyright (c) 2025 Nicholas W. Heyer. The MIT license text is in LICENSE
+# and still applies to that inherited material.
+# Maintainer changes are licensed under the Mozilla Public License, v. 2.0.
+# If a copy of the MPL was not distributed with this file, You can obtain
+# one at https://mozilla.org/MPL/2.0/.
+
+# Carbon Panel + authentik (OIDC) example
+#
+# External/self-hosted identity provider example (no bundled IdP container).
+# Replace placeholders with values from your own authentik provider/application.
+# Do not commit real credentials.
+#
+# authentik setup (high level):
+#   1. Create an OAuth2/OpenID Provider and Application in authentik.
+#   2. Set Redirect URI to your Carbon Panel callback URL.
+#   3. Ensure scopes/claims required by Carbon Panel are issued (openid/profile/email).
+#   4. Configure group membership claims if you want role mapping.
+
+services:
+  carbon-panel:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile.carbon-panel
+    #image: athNdev/carbon-panel:dev
+    container_name: carbon-panel
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/carbon-panel:/app/data
+    environment:
+      - TZ=UTC
+
+      - CARBONPANEL_AUTH_LOCAL_ENABLED=true
+      - CARBONPANEL_AUTH_OIDC_ENABLED=true
+
+      # Use the exact issuer URL from authentik provider discovery metadata,
+      # for example: https://auth.example.com/application/o/carbon-panel/
+      - CARBONPANEL_AUTH_OIDC_ISSUER_URI=https://REPLACE_ME/application/o/REPLACE_ME/
+
+      - CARBONPANEL_AUTH_OIDC_CLIENT_ID=REPLACE_ME
+      - CARBONPANEL_AUTH_OIDC_CLIENT_SECRET=REPLACE_ME
+
+      # Must exactly match the redirect URI registered in authentik.
+      - CARBONPANEL_AUTH_OIDC_REDIRECT_URL=http://localhost:8080/api/v1/auth/oidc/callback
+
+      - CARBONPANEL_AUTH_OIDC_SCOPES=openid,profile,email
+      - CARBONPANEL_AUTH_OIDC_ROLE_CLAIM=groups
+      # Example mapping: {"carbon-admins":"admin","carbon-users":"user"}
+      - CARBONPANEL_AUTH_OIDC_ROLE_MAPPING={}
+
+      # Carbon Panel verifies ID tokens using configured signing algorithms and
+      # provider discovery/JWKS. RS256/ES256 are supported by default. HS256 is
+      # accepted by config only when explicitly allowed; tenant-independent
+      # client-secret/JWKS-less verification support must be evidenced separately.
+      - CARBONPANEL_AUTH_OIDC_ALLOWED_SIGNING_ALGS=RS256,ES256
+      - CARBONPANEL_AUTH_OIDC_ABSENT_CLAIM_POLICY=deny
+      - CARBONPANEL_AUTH_OIDC_ALLOW_RAW_CLAIM_ROLES=false
