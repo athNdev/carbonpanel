@@ -30,6 +30,52 @@ def fixture(name):
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
+def make_bundle(root, artifact, *, payload_bytes=8192, marker=None,
+                provenance=True, synthetic_provenance=False, fixture_only=False):
+    """Build a synthetic, fully-integrated staged bundle for predicate tests.
+
+    Everything here is a temporary record: no host, hypervisor, network, cosign
+    or release operation is performed. ``marker`` is an optional
+    BUILD-PREFLIGHT.json object; ``provenance``/``synthetic_provenance`` control
+    the provenance record kind.
+    """
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    suffix = {"qcow2": ".qcow2", "lxc-rootfs": ".tar.xz", "installer": ".sh"}[artifact]
+    payload = root / ("disk" + suffix)
+    payload.write_bytes(b"Q" * payload_bytes)
+    files = [payload]
+    if provenance:
+        document = {
+            "schema": "carbonpanel.node.provenance/v1",
+            "profile": "artifact",
+            "synthetic": synthetic_provenance,
+            "images": [{"arch": "amd64", "expected_sha256": "a" * 64}],
+        }
+        (root / "provenance.json").write_text(
+            json.dumps(document), encoding="utf-8")
+        files.append(root / "provenance.json")
+    if marker is not None:
+        (root / "BUILD-PREFLIGHT.json").write_text(
+            json.dumps(marker), encoding="utf-8")
+        files.append(root / "BUILD-PREFLIGHT.json")
+    if fixture_only:
+        (root / "build-plan.json").write_text(
+            json.dumps({"mode": "offline", "fixture_only": True, "no_qcow2_built": True}),
+            encoding="utf-8")
+        files.append(root / "build-plan.json")
+    manifest = ra.checksum_manifest(files, root=root)
+    (root / "SHA256SUMS").write_text(manifest, encoding="utf-8")
+    sbom = ra.build_sbom(VERSION, artifact, SHA, files, root=root)
+    (root / "sbom.cdx.json").write_text(ra.sbom_json(sbom), encoding="utf-8")
+    oidc = ra.expected_certificate_identity()
+    signature = ra.signature_binding(VERSION, artifact, SHA, manifest, oidc, "c2lnbmF0dXJl")
+    (root / "signature.json").write_text(json.dumps(signature), encoding="utf-8")
+    (root / "signature.sig").write_bytes(b"c2lnbmF0dXJl")
+    (root / "signature.bundle").write_bytes(b"{}")
+    return files
+
+
 class VersionAndOwnershipTests(unittest.TestCase):
     def test_accepts_only_independent_runtime_versions(self):
         self.assertTrue(ra.valid_runtime_version(VERSION)[0])
@@ -352,21 +398,7 @@ class IntegrityRecordTests(unittest.TestCase):
     def test_full_bundle_precondition_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "disk.qcow2").write_bytes(b"image-bytes")
-            files = [root / "disk.qcow2"]
-            manifest = ra.checksum_manifest(files, root=root)
-            (root / "SHA256SUMS").write_text(manifest, encoding="utf-8")
-            doc = ra.build_sbom(VERSION, "qcow2", SHA, files, root=root)
-            (root / "sbom.cdx.json").write_text(ra.sbom_json(doc), encoding="utf-8")
-            oidc = ra.expected_certificate_identity()
-            sig = ra.signature_binding(VERSION, "qcow2", SHA, manifest,
-                                       oidc, "c2lnbmF0dXJl", publisher_label="release-bot")
-            (root / "signature.json").write_text(
-                json.dumps(sig), encoding="utf-8")
-            # A complete cosign bundle also contains these records before
-            # verify-bundle runs; they are integrity records, not artifacts.
-            (root / "signature.sig").write_bytes(b"c2lnbmF0dXJl")
-            (root / "signature.bundle").write_bytes(b'{"mediaType":"application/vnd.dev.sigstore.bundle"}')
+            make_bundle(root, "qcow2", marker={"mode": "apply", "live_build": True})
             ok, problems = ra.verify_bundle(root, VERSION, "qcow2", SHA)
             self.assertTrue(ok, problems)
             (root / "disk.qcow2").write_bytes(b"tampered")
@@ -396,6 +428,150 @@ class IntegrityRecordTests(unittest.TestCase):
             for forbidden in ("C:\\", "/home/", "/opt/carbon-panel", "password", "token="):
                 with self.subTest(file=fixture_file.name, forbidden=forbidden):
                     self.assertNotIn(forbidden, text)
+
+
+class PublicationPredicateTests(unittest.TestCase):
+    """OSS-400: synthetic-record tests for the fail-closed publication predicate.
+
+    Every record is written to a temp directory. No dispatch, signing, release,
+    registry, hypervisor, LXC or host operation is executed.
+    """
+
+    def test_qualified_bundle_is_accepted_for_every_kind(self):
+        for artifact in ra.VERIFIED_ARTIFACTS:
+            with self.subTest(artifact=artifact), tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, artifact, marker={"mode": "apply", "live_build": True})
+                ok, problems = ra.publication_predicate(tmp, artifact)
+                self.assertTrue(ok, problems)
+
+    def test_offline_wrapper_markers_are_refused_even_when_integrated(self):
+        for mode in ("offline-plan", "offline-fixture", "delegate-preflight-only"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", marker={"mode": mode, "live_build": False})
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok)
+                self.assertTrue(any("offline" in p for p in problems), problems)
+
+    def test_live_build_false_marker_alone_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": False})
+            ok, problems = ra.publication_predicate(tmp, "qcow2")
+            self.assertFalse(ok)
+            self.assertTrue(any("live_build" in p for p in problems), problems)
+
+    def test_completed_live_build_marker_is_not_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+            ok, problems = ra.publication_predicate(tmp, "qcow2")
+            self.assertTrue(ok, problems)
+
+    def test_fixture_only_plan_record_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True},
+                        fixture_only=True)
+            ok, problems = ra.publication_predicate(tmp, "qcow2")
+            self.assertFalse(ok)
+            self.assertTrue(any("fixture-only" in p for p in problems), problems)
+
+    def test_synthetic_or_missing_provenance_is_refused(self):
+        with self.subTest("synthetic"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", synthetic_provenance=True,
+                            marker={"mode": "apply", "live_build": True})
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok)
+                self.assertTrue(any("provenance" in p for p in problems), problems)
+        with self.subTest("missing"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", provenance=False,
+                            marker={"mode": "apply", "live_build": True})
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok)
+                self.assertTrue(any("provenance" in p for p in problems), problems)
+
+    def test_missing_or_wrong_kind_payload_is_refused(self):
+        with self.subTest("stub"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", payload_bytes=64,
+                            marker={"mode": "apply", "live_build": True})
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok)
+                self.assertTrue(any("payload" in p for p in problems), problems)
+        with self.subTest("wrong kind"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+                ok, problems = ra.publication_predicate(tmp, "lxc-rootfs")
+                self.assertFalse(ok)
+                self.assertTrue(any("payload" in p for p in problems), problems)
+        with self.subTest("unverified kind"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2")
+                ok, problems = ra.publication_predicate(tmp, "vhdx")
+                self.assertFalse(ok)
+                self.assertTrue(any("unverified" in p for p in problems), problems)
+
+    def test_verify_bundle_inherits_the_predicate_refusal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "offline-plan", "live_build": False})
+            ok, problems = ra.verify_bundle(tmp, VERSION, "qcow2", SHA)
+            self.assertFalse(ok)
+            self.assertTrue(any("offline" in p for p in problems), problems)
+
+    def test_cli_publication_predicate_refuses_offline_output(self):
+        for offline, mode in ((True, "offline-plan"), (False, "apply")):
+            with self.subTest(offline=offline), tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2",
+                            marker={"mode": mode, "live_build": not offline})
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = ra.main(["publication-predicate", "--dir", tmp,
+                                    "--artifact", "qcow2"])
+                payload = json.loads(out.getvalue())
+                self.assertEqual(code, 0 if not offline else 1, out.getvalue())
+                self.assertEqual(payload["verified"], "false" if offline else "true")
+                if offline:
+                    self.assertTrue(any("offline" in p for p in payload["problems"]))
+
+
+class WorkflowContractTests(unittest.TestCase):
+    """The predicate is wired before signing/publishing; reachability is kept."""
+
+    def test_workflow_gates_signature_and_release_on_the_predicate(self):
+        import yaml
+        document = yaml.safe_load(
+            (ra.ROOT / ".github/workflows/runtime-artifacts.yml").read_text(encoding="utf-8"))
+        steps = document["jobs"]["publish"]["steps"]
+        names = [step.get("name", "") for step in steps]
+
+        def index(fragment):
+            return next(i for i, name in enumerate(names) if fragment in name)
+
+        build = index("Build the verified artifact")
+        predicate = index("publication predicate")
+        checksum = index("deterministic checksum manifest")
+        sign = index("Keyless-sign")
+        bundle_verify = index("Verify the staged bundle")
+        publish = index("DRAFT release")
+        self.assertLess(build, predicate)
+        self.assertLess(predicate, checksum)
+        self.assertLess(predicate, sign)
+        self.assertLess(predicate, bundle_verify)
+        self.assertLess(predicate, publish)
+        self.assertIn("publication-predicate", steps[predicate]["run"])
+        self.assertEqual(steps[publish]["if"], "inputs.publish")
+        triggers = document.get("on") or document.get(True)
+        self.assertIn("workflow_dispatch", triggers)
+        self.assertNotIn("schedule", triggers)
+
+    def test_offline_rehearsal_reachability_and_wrappers_are_preserved(self):
+        for artifact in ra.VERIFIED_ARTIFACTS:
+            with self.subTest(artifact=artifact):
+                ok, reason, decision = ra.preflight_build(artifact)
+                self.assertTrue(ok, reason)
+                wrapper = (ra.ROOT / ra.BUILD_SCRIPTS[artifact]).read_text(encoding="utf-8")
+                self.assertIn("--preflight", wrapper)
+                self.assertIn("BUILD-PREFLIGHT.json", wrapper)
+                self.assertIn('"live_build": false', wrapper)
 
 
 if __name__ == "__main__":

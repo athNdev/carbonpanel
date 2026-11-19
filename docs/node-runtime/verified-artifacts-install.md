@@ -112,6 +112,14 @@ this consumer-side `cosign verify-blob` step; the Python checks and
 `verify-bundle` are only offline integrity/binding preconditions, not a substitute
 for it.
 
+The publication lane also enforces a fail-closed publication predicate before
+checksumming or signing: a staged bundle must carry a real payload of the
+declared artifact kind and non-synthetic provenance. Any offline rehearsal
+marker (`BUILD-PREFLIGHT.json` with `live_build: false`, or a fixture-only plan
+record) refuses the bundle. Offline planning and `--preflight` fixtures remain
+reachable for rehearsal, but rehearsal output can never be published as a
+qualified artifact.
+
 ## Accurate announcement (publish only after verification)
 
 The following text is a template, not a claim of completed testing. Publish it

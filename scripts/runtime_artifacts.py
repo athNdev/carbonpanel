@@ -15,7 +15,10 @@ image. Every write is gated by :func:`publication_gate`, which requires all of:
   * a full 40-hex source SHA whose exact commit is an ancestor of main and has
     green push CI (``verify_main_ci``; never a checkbox),
   * an identity assertion bound to that exact version, commit, artifact and
-    project owner.
+    project owner, and
+  * a real, non-fixture payload of the declared kind with non-synthetic
+    provenance, enforced by :func:`publication_predicate` before any signing or
+    publication (offline rehearsal outputs are refused).
 
 Home-hypervisor disk formats (VHDX/VDI/VMDK/OVA/OVF/bhyve) are intentionally
 NOT in the publishable set: primary-source research found no real clean
@@ -88,6 +91,22 @@ INTEGRITY_RECORDS = frozenset({
     "SHA256SUMS", "sbom.cdx.json", "signature.json",
     "signature.sig", "signature.bundle",
 })
+
+# OSS-400 publication predicate. The three allowlisted offline rehearsal
+# wrappers stamp every staged bundle with BUILD-PREFLIGHT.json
+# (live_build=false, an offline/fixture/preflight-only mode), and the real
+# delegates emit plan records with fixture_only/no_qcow2_built. Those outputs
+# must never be checksummed, signed or published as qualified artifacts.
+BUILD_PREFLIGHT_RECORD = "BUILD-PREFLIGHT.json"
+OFFLINE_MODES = frozenset({"offline-plan", "offline-fixture", "delegate-preflight-only"})
+OFFLINE_MODE_MARKERS = ("offline", "fixture", "preflight-only", "dry-run", "dryrun")
+# A real payload must carry the declared kind's suffix and be more than a stub.
+PAYLOAD_SUFFIXES = {
+    "qcow2": (".qcow2",),
+    "lxc-rootfs": (".tar.xz", ".tar.zst", ".tar.gz", ".tar"),
+    "installer": (".sh", ".bin", ".tar.xz", ".tar.gz"),
+}
+MIN_PAYLOAD_BYTES = 4096
 WORKFLOW_PATH = ".github/workflows/runtime-artifacts.yml"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 
@@ -533,14 +552,92 @@ def verify_signature_binding(document, manifest_text, expected_identity):
     return True, "signature record is bound to the manifest and workflow identity"
 
 
+def real_provenance(document):
+    """True only for a non-synthetic artifact-provenance record with real pins."""
+    if not isinstance(document, dict) or document.get("synthetic") is not False:
+        return False
+    profile = str(document.get("profile") or document.get("provenance_profile") or "").lower()
+    if profile != "artifact":
+        return False
+    pins = document.get("images") or document.get("base_image")
+    return isinstance(pins, (list, dict)) and bool(pins)
+
+
+def publication_predicate(directory, artifact, min_payload_bytes=MIN_PAYLOAD_BYTES):
+    """Fail-closed OSS-400 gate: a staged bundle must be a REAL artifact.
+
+    Rehearsal outputs are refused even if they are complete, signed and bound
+    to a valid identity: an offline marker (``BUILD-PREFLIGHT.json`` with
+    live_build != true or an offline/fixture mode), a fixture-only plan record
+    (``fixture_only``/``no_qcow2_built``), a synthetic build, a missing or
+    wrong-kind payload, or missing non-synthetic provenance each refuse the
+    bundle. The offline rehearsal reachability seam (``preflight-build`` and the
+    wrapper ``--preflight`` mode) is intentionally NOT gated by this predicate.
+
+    Returns (ok, problems). No file is written or network/host call made.
+    """
+    root = Path(directory)
+    if artifact not in VERIFIED_ARTIFACTS:
+        return False, [f"unverified artifact {artifact!r} cannot pass the publication predicate"]
+    problems = []
+    files = [path for path in root.rglob("*")
+             if path.is_file() and path.name not in INTEGRITY_RECORDS]
+    documents = {}
+
+    # 1. Refuse any offline / fixture-only / synthetic marker in the bundle.
+    for path in files:
+        if path.name == BUILD_PREFLIGHT_RECORD:
+            try:
+                marker = json.loads(path.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                problems.append("offline marker is not valid JSON")
+                continue
+            if not isinstance(marker, dict):
+                problems.append("offline marker is not an object")
+                continue
+            if marker.get("live_build") is not True:
+                problems.append("offline marker declares live_build != true")
+            mode = str(marker.get("mode", "")).lower()
+            if mode in OFFLINE_MODES or any(word in mode for word in OFFLINE_MODE_MARKERS):
+                problems.append(f"offline marker mode {mode!r} is a rehearsal")
+        if path.suffix != ".json":
+            continue
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        documents[path] = document
+        if not isinstance(document, dict):
+            continue
+        if document.get("fixture_only") is True or document.get("no_qcow2_built") is True:
+            problems.append(f"{path.name} declares a fixture-only plan")
+        if document.get("synthetic") is True or document.get("live_build") is False:
+            problems.append(f"{path.name} declares a synthetic/offline build")
+
+    # 2. Require a real payload of the declared artifact kind, not a stub.
+    suffixes = PAYLOAD_SUFFIXES[artifact]
+    payloads = [path for path in files
+                if path.name.lower().endswith(suffixes) and path.stat().st_size >= min_payload_bytes]
+    if not payloads:
+        problems.append(
+            f"no real {artifact} payload ({'/'.join(suffixes)}, >= {min_payload_bytes} bytes) in staged bundle")
+
+    # 3. Require non-synthetic artifact provenance with actual pins.
+    if not any(real_provenance(document) for document in documents.values()):
+        problems.append("no non-synthetic artifact provenance in staged bundle")
+
+    return (not problems), problems
+
+
 def verify_bundle(directory, version, artifact, commit, identity=None,
                   repository=None, manifest_name="SHA256SUMS",
                   sbom_name="sbom.cdx.json", signature_name="signature.json"):
     """Full offline precondition gate for a staged artifact bundle.
 
     Cryptographic signature verification is NOT performed here; it is the
-    consumer's step (see the install guide). This only checks integrity records
-    and their binding to the trusted OIDC workflow identity.
+    consumer's step (see the install guide). This only checks integrity records,
+    their binding to the trusted OIDC workflow identity, and the OSS-400
+    publication predicate (a real kind payload with non-fixture provenance).
     """
     root = Path(directory)
     problems = []
@@ -578,6 +675,8 @@ def verify_bundle(directory, version, artifact, commit, identity=None,
             ok_sig, issue = verify_signature_binding(signature, manifest_text, oidc_identity)
             if not ok_sig:
                 problems.append(issue)
+    ok_pred, predicate_problems = publication_predicate(root, artifact)
+    problems.extend(predicate_problems)
     return (not problems), problems
 
 
@@ -659,6 +758,10 @@ def build_parser():
     bundle.add_argument("--assertion")
     bundle.add_argument("--assertion-file")
     bundle.add_argument("--owner")
+
+    predicate = commands.add_parser("publication-predicate")
+    predicate.add_argument("--dir", required=True)
+    predicate.add_argument("--artifact", required=True)
     return parser
 
 
@@ -753,6 +856,11 @@ def main(argv=None):
             return 1
         ok, problems = verify_bundle(args.dir, args.version, args.artifact,
                                      args.commit, fields)
+        _print_json({"verified": str(ok).lower(), "problems": problems})
+        return 0 if ok else 1
+
+    if args.command == "publication-predicate":
+        ok, problems = publication_predicate(args.dir, args.artifact)
         _print_json({"verified": str(ok).lower(), "problems": problems})
         return 0 if ok else 1
     return 2

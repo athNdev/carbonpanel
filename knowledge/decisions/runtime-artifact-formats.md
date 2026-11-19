@@ -51,6 +51,17 @@ resolution outside `BUILD_SCRIPTS`/`BUILD_DELEGATES`. The offline fixture
 no QEMU, LXC, systemd, host provisioning or publication is executed. This lane
 has built, signed and published no artifact; the announcement stays gated.
 
+Because those wrappers produce offline plans/fixtures (`BUILD-PREFLIGHT.json`
+with `live_build: false`), a fail-closed publication predicate
+(`runtime_artifacts.py publication_predicate`) runs in the workflow before
+checksumming, signing or any draft release, and is also inherited by
+`verify_bundle`. It refuses any offline/fixture marker or fixture-only plan
+record and requires a real payload of the declared artifact kind plus
+non-synthetic artifact provenance, so a rehearsal output can never be
+published as a qualified artifact. It does not gate the offline rehearsal
+reachability seam. Publication remains a manual `workflow_dispatch` with
+`publish=true`, and no real artifact has been published.
+
 # Alternatives
 
 - Publishing converted VHDX/VMDK/VDI images from `qemu-img` output would claim
