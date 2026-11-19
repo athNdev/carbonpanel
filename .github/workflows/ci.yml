@@ -202,7 +202,7 @@ jobs:
         run: python3 scripts/go_mod_download.py
 
       - name: Run race detector
-        run: go test -race -count=1 ./internal/rpc/... ./internal/reconciler/ ./internal/scheduler/ ./internal/docker/ ./internal/activity/ ./internal/metrics/ ./internal/proxy/ ./internal/db/ ./internal/ws/ ./internal/s3/ ./internal/snapshot/ ./internal/module/
+        run: go test -race -count=1 ./internal/rpc/... ./internal/auth/ ./internal/reconciler/ ./internal/scheduler/ ./internal/docker/ ./internal/activity/ ./internal/metrics/ ./internal/proxy/ ./internal/db/ ./internal/ws/ ./internal/s3/ ./internal/snapshot/ ./internal/module/
 
   lint-proto:
     name: Proto Lint
