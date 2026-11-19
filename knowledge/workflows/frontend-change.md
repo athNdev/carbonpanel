@@ -89,6 +89,10 @@ bun run test
   motion. Animate color/opacity/transform only; do not `transition: all`. Cloud
   visual verification of the same states is out of this repository.
 - Loading, empty and error states are part of the change, not follow-up work.
+  Interactive components add DOM tests through their public props/events, and
+  whole-page keyboard or reflow behavior is exercised by the owned-Chromium
+  journey in `ci.yml`. Both use real components; see
+  [Frontend accessibility coverage](../decisions/frontend-a11y-coverage.md).
 - Reused file-editor dialogs keep content and async requests under one
   `FileEditorSession` identity (generation, server ID and path). Closing or
   selecting another file invalidates earlier load/save completions, including

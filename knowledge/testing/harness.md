@@ -18,6 +18,9 @@ code_refs:
   - docs/testing/windows-verification.md
   - scripts/windows-verification-evidence.ps1
   - scripts/test-windows-verification-evidence.ps1
+  - web/carbon-panel/test/dom-setup.mjs
+  - web/carbon-panel/src/lib/components/carbon/a11y-dom.test.ts
+  - scripts/manual-review/e2e/a11y-check.mjs
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
@@ -89,6 +92,11 @@ cannot outlive the code it names.
   results do not establish that acceptance. The read-only evidence helper never
   changes host policy; UAC-disabled results retain their narrower firewall scope.
 - If a failure cannot be reproduced in a test, say so in the change.
+- Frontend accessibility is checked through public UI seams: Happy DOM component
+  tests assert focus, roles and states, and the owned-Chromium journey checks
+  focus order, Escape, visible focus and reflow at 360/768/1440. Source-string
+  assertions alone are not accessibility coverage; see
+  [Frontend accessibility coverage](../decisions/frontend-a11y-coverage.md).
 - The runtime qualification matrix in `internal/docker/runtime_matrix_test.go`
   always inspects the resolved CreateContainer request. Skip only the
   daemon-`/info` case when Docker is absent; game-readiness stays OSS-247.
