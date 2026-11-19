@@ -128,7 +128,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="h-full flex-1 space-y-6 bg-background font-sans text-foreground" data-testid="showcase-worlds-content">
+<div
+	class="h-full flex-1 space-y-6 bg-background font-sans text-foreground"
+	data-testid="showcase-worlds-content"
+>
 	<CarbonPageHeader
 		title="Worlds"
 		description="View Minecraft worlds through their configured renderer. Maps are observation only."
