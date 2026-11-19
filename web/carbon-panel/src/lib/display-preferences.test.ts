@@ -234,9 +234,6 @@ test('login-before-shell is safe: hydration with no document does not throw', ()
 	assert.equal(get(prefs.theme), 'dark');
 });
 
-// Narrow new-debt ratchet: files migrated in this change must not introduce
-// hardcoded six-digit hex colors. Purposeful third-party/status colors and the
-// remaining legacy shell colors are out of scope for this ratchet.
 test('a throwing localStorage property getter cannot break import or acquisition', async () => {
 	const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 	Object.defineProperty(globalThis, 'localStorage', {
@@ -291,11 +288,20 @@ test('editor theme effects never bootstrap Monaco and clear active runtimes', ()
 	assert.match(dialog, /activeRuntime = null/, 'disposal must release the active runtime');
 });
 
+// Per-feature new-debt ratchet: only files actually migrated to semantic tokens
+// are listed. Purposeful third-party/status colors are kept as semantic tokens
+// (destructive/success/accent) rather than reintroduced as raw hex. This is not
+// a whole-panel claim — the remaining legacy surfaces are tracked by OSS-384.
 test('migrated surfaces introduce no new hardcoded six-digit hex colors', () => {
 	const files = [
 		'./components/PreferencesDialog.svelte',
 		'./components/ui/sonner/sonner.svelte',
-		'./display-preferences.svelte.ts'
+		'./display-preferences.svelte.ts',
+		// Settings: logs (success/accent colors map to --success-text/--accent-text).
+		'./components/logs-settings.svelte',
+		// Datapacks: surface/text/border plus destructive status chips.
+		'./components/datapack-search.svelte',
+		'./components/server-datapacks.svelte'
 	];
 	for (const file of files) {
 		const source = readFileSync(new URL(file, import.meta.url), 'utf8');
