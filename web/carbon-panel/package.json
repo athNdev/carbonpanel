@@ -44,11 +44,11 @@
 		"prettier-plugin-svelte": "^3.3.3",
 		"prettier-plugin-tailwindcss": "^0.6.11",
 		"svelte": "^5.57.3",
-		"svelte-check": "^4.0.0",
+		"svelte-check": "^4.7.8",
 		"svelte-sonner": "1.2.1",
 		"tailwind-merge": "^3.3.1",
 		"tailwind-variants": "^1.0.0",
-		"tailwindcss": "^4.3.3",
+		"tailwindcss": "^4.3.5",
 		"tw-animate-css": "^1.3.6",
 		"typescript": "^5.0.0",
 		"typescript-eslint": "^8.72.1",
@@ -56,8 +56,8 @@
 	},
 	"dependencies": {
 		"@bufbuild/protobuf": "^2.10.0",
-		"@connectrpc/connect": "2.2.0",
-		"@connectrpc/connect-web": "^2.1.0",
+		"@connectrpc/connect": "2.3.0",
+		"@connectrpc/connect-web": "^2.3.0",
 		"marked": "^18.1.1",
 		"monaco-editor": "^0.52.2"
 	}

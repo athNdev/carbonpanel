@@ -3,18 +3,47 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 version: 2
+
+# Routine version updates across all configured ecosystems are consolidated
+# into one weekly pull request. Security updates are assigned to per-ecosystem
+# groups below so an urgent fix is never held behind the routine bundle.
+# See https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configuring-multi-ecosystem-updates
+multi-ecosystem-groups:
+  routine-dependencies:
+    schedule:
+      interval: "weekly"
+
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-actions:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-gomod:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
   - package-ecosystem: "bun"
     directory: "/web/carbon-panel"
     schedule:
       interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-bun:
+        applies-to: "security-updates"
+        patterns: ["*"]
