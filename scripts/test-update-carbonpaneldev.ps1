@@ -42,7 +42,9 @@ $checks = @(
   'Operator message on ambiguity', 'operator action required', $true,
   'Forward-only check uses behind_by direction', 'if ([int]$cmp.behind -ne 0)', $true,
   'Forward-only check is not inverted', 'if ([int]$cmp.ahead -ne 0)', $false,
-  'Rollback data is compared to baseline', '$restoredTables -ne $BaselineState.Tables', $true
+  'Rollback data is compared to baseline', '$restoredTables -ne $BaselineState.Tables', $true,
+  'Image-only failure rehearsal switch', '[switch]$FixtureForceImageFailure', $true,
+  'Image-only rollback decision exists', "Action = 'recreate'", $true
 )
 for ($i = 0; $i -lt $checks.Count; $i += 3) {
   $label = $checks[$i]

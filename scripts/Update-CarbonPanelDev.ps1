@@ -54,6 +54,7 @@ param(
   [switch]$SimulateDataFailure,
   [switch]$FixtureCorruptDatabase,
   [switch]$FixtureCommitMigration,
+  [switch]$FixtureForceImageFailure,
   [ValidateRange(5, 600)]
   [int]$HealthTimeoutSeconds = 90
 )
@@ -721,7 +722,11 @@ function Invoke-Rollback {
         [Parameter(Mandatory = $true)][string]$RollbackDigest,
         [Parameter(Mandatory = $true)][string]$ComposeImage, $BaselineState,
         [switch]$RestoreDatabase)
-  Write-Step 'ROLLBACK starting: restoring the scoped controller only'
+  if ($RestoreDatabase) {
+    Write-Step 'ROLLBACK starting: verified DB restore then scoped controller recreation'
+  } else {
+    Write-Step 'ROLLBACK starting: image-only recreation of the scoped controller (no DB restore)'
+  }
   # If the database may be damaged, quiesce ONLY this service before restore.
   # No other container, game server or WSL service is stopped or restarted.
   if ($RestoreDatabase) {
@@ -811,6 +816,9 @@ try {
   if ($FixtureCommitMigration -and $Scope -ne 'Fixture') {
     Fail '-FixtureCommitMigration is only valid in Fixture scope'
   }
+  if ($FixtureForceImageFailure -and $Scope -ne 'Fixture') {
+    Fail '-FixtureForceImageFailure is only valid in Fixture scope'
+  }
 
   $config = [pscustomobject]@{ Scope = $Scope; FixtureManifest = $FixtureManifest }
   $target = Resolve-TrustedTarget -Config $config
@@ -898,6 +906,13 @@ try {
     $after = Assert-ContainerIdentity -Target $target -Container $container
     if ([string]$after.Image -ne $target.ConfigDigest) {
       throw 'recreated container is not running the verified platform config ID'
+    }
+    if ($FixtureForceImageFailure) {
+      # Qualification-only failure AFTER the immutable image was pulled and the
+      # service recreated, but BEFORE any database hook runs. This exercises a
+      # production-style IMAGE-ONLY rollback with an unchanged database.
+      Write-Step 'fixture: forced post-pull failure before any database mutation'
+      throw 'fixture-forced post-pull failure (image rollback rehearsal)'
     }
     if ($FixtureCorruptDatabase) {
       # Fixture-only REAL data-loss injection: delete controller rows from the
