@@ -10,7 +10,7 @@ code_refs:
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
-verified: { by: human:athNdev, at: 2026-10-24 }
+verified: { by: agent:hy4-flash-free, at: 2026-11-19 }
 review_after: 2027-01-23
 ---
 
@@ -46,3 +46,13 @@ credentials, private endpoints or workstation paths.
 
 History was not scanned, so a secret that was committed and later removed is not
 covered by this rule; that remains an accepted limitation of the check.
+
+Re-verified `2026-11-19` by `agent:hy4-flash-free` against the OSS-397 change:
+
+- `internal/docscheck/workstation_paths_test.go` scans every git-tracked file
+  for Windows drive-letter home paths and WSL `/mnt/<drive>/Users/<name>` paths
+  and fails `go test ./...` on a match; the gate was proven fail-closed with a
+  planted temporary path.
+- The four previously tracked absolute workstation paths are now environment
+  overrides or repo-relative defaults. No credential or private endpoint was
+  introduced by this change.
