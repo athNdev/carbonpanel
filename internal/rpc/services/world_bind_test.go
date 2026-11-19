@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
+	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
@@ -151,5 +153,150 @@ func TestBindWorldReportsUnknownOutcomeInsteadOfRetryableError(t *testing.T) {
 	active, err := store.ListActiveServerOperations(ctx)
 	if err != nil || len(active) != 1 || active[0].ID != out.Msg.OperationId {
 		t.Fatalf("active = %+v, %v; journal must keep its lock", active, err)
+	}
+}
+
+
+func countWorldEvents(t *testing.T, store *storage.Store, event, serverID, requestID string) int64 {
+	t.Helper()
+	var count int64
+	q := store.DB().Model(&storage.ActivityLog{}).Where("event = ? AND subject_id = ?", event, serverID)
+	if requestID != "" {
+		q = q.Where("request_id = ?", requestID)
+	}
+	if err := q.Count(&count).Error; err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	return count
+}
+
+func TestBindWorldEmitsExactlyOneEventOnSuccessAndReplay(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, rev := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	svc := newWorldRPCService(t, store, libraryRoot, &worldTestLifecycle{})
+	req := connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-event-1",
+	})
+	if _, err := svc.BindWorld(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-event-1"); got != 1 {
+		t.Fatalf("events after first bind = %d, want 1", got)
+	}
+	// A replay of the same completed request must not emit a duplicate event.
+	if _, err := svc.BindWorld(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-event-1"); got != 1 {
+		t.Fatalf("events after replay = %d, want 1", got)
+	}
+}
+
+func TestBindWorldReplayEmitsMissingEventAfterCrashRecovery(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, rev := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	svc := newWorldRPCService(t, store, libraryRoot, &worldTestLifecycle{})
+	req := connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-recover-1",
+	})
+	if _, err := svc.BindWorld(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a crash after journal completion but before the activity event
+	// was durably recorded. A client retry of the same request must recover the
+	// missing event exactly once.
+	if err := store.DB().Where("event = ? AND request_id = ?", activity.EventWorldBind, "rpc-bind-recover-1").
+		Delete(&storage.ActivityLog{}).Error; err != nil {
+		t.Fatalf("delete event: %v", err)
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-recover-1"); got != 0 {
+		t.Fatalf("events after simulated crash = %d, want 0", got)
+	}
+	if _, err := svc.BindWorld(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-recover-1"); got != 1 {
+		t.Fatalf("events after recovery replay = %d, want 1", got)
+	}
+}
+
+func TestBindWorldCancellationBeforeMutationEmitsNoEvent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, rev := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	svc := newWorldRPCService(t, store, libraryRoot, &worldTestLifecycle{})
+	_, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-cancel-1",
+	}))
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-cancel-1"); got != 0 {
+		t.Fatalf("events after cancelled bind = %d, want 0", got)
+	}
+}
+
+func TestBindWorldUncertainOutcomeEmitsNoSuccessEvent(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, rev := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	life := &worldTestLifecycle{running: true, failStart: true}
+	svc := newWorldRPCService(t, store, libraryRoot, life)
+
+	out, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-unknown-event",
+	}))
+	if err != nil {
+		t.Fatalf("an uncertain outcome must be reported, not returned as a retryable error: %v", err)
+	}
+	if out.Msg.Outcome != "unknown" {
+		t.Fatalf("outcome = %q, want unknown", out.Msg.Outcome)
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-unknown-event"); got != 0 {
+		t.Fatalf("success events after uncertain outcome = %d, want 0", got)
+	}
+	// Keep the existing uncertain-outcome contract: the journal retains its lock.
+	active, err := store.ListActiveServerOperations(ctx)
+	if err != nil || len(active) != 1 || active[0].ID != out.Msg.OperationId {
+		t.Fatalf("active = %+v, %v; journal must keep its lock", active, err)
+	}
+	_ = time.Now() // keep time import used only if needed by future edits
+}
+
+
+func TestUnbindWorldEmitsExactlyOneEventOnSuccess(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, rev := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	svc := newWorldRPCService(t, store, libraryRoot, &worldTestLifecycle{})
+	if _, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-before-unbind",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.UnbindWorld(ctx, connect.NewRequest(&v1.UnbindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RequestId: "rpc-unbind-event-1",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Msg.Removed {
+		t.Fatal("expected binding to be removed")
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldUnbind, server.ID, "rpc-unbind-event-1"); got != 1 {
+		t.Fatalf("events after unbind = %d, want 1", got)
 	}
 }

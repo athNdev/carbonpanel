@@ -131,6 +131,7 @@ type BindRequest struct {
 type BindResult struct {
 	Binding     *storage.WorldBinding
 	OperationID string
+	RequestID   string
 	Outcome     string
 	Consistency string
 }
@@ -208,7 +209,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	}
 	if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
 		if existing.RevisionID == req.RevisionID {
-			return &BindResult{Binding: existing, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
+			return &BindResult{Binding: existing, RequestID: req.RequestID, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
 		}
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -256,7 +257,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	// cannot be overwritten by a stale read from the first preflight check.
 	if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
 		if existing.RevisionID == req.RevisionID {
-			return &BindResult{Binding: existing, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
+			return &BindResult{Binding: existing, RequestID: req.RequestID, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
 		}
 		if !existing.MatchesOwner(req.NodeID, req.Generation) {
 			return nil, fmt.Errorf("%w: existing binding belongs to another node generation", ErrStaleGeneration)
@@ -285,10 +286,13 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		if errors.Is(err, ErrUncertainOutcome) {
 			// Report the unknown outcome rather than a retryable failure. The
 			// journal row keeps its lock and carries the resolution note.
-			outcome := &BindResult{Outcome: journal.Outcome, OperationID: journal.OperationID}
+			outcome := &BindResult{Outcome: journal.Outcome, OperationID: journal.OperationID, RequestID: req.RequestID}
 			if result != nil {
 				outcome.Binding = result.Binding
 				outcome.Consistency = result.Consistency
+				if result.RequestID != "" {
+					outcome.RequestID = result.RequestID
+				}
 			}
 			return outcome, err
 		}
@@ -301,13 +305,16 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		if journal.Outcome == string(operation.OutcomeSuccess) {
 			if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
 				return &BindResult{Binding: existing, Outcome: string(operation.OutcomeSuccess),
-					OperationID: journal.OperationID, Consistency: existing.Consistency}, nil
+					OperationID: journal.OperationID, RequestID: req.RequestID, Consistency: existing.Consistency}, nil
 			}
 		}
-		return &BindResult{Outcome: string(operation.OutcomeUnknown), OperationID: journal.OperationID},
+		return &BindResult{Outcome: string(operation.OutcomeUnknown), OperationID: journal.OperationID, RequestID: req.RequestID},
 			fmt.Errorf("%w: journal replay did not return a binding", ErrUncertainOutcome)
 	}
 	result.OperationID = journal.OperationID
+	if result.RequestID == "" {
+		result.RequestID = req.RequestID
+	}
 	return result, nil
 }
 
@@ -505,7 +512,7 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	// Keep the old tree until the restart and verification have been observed.
 	if wasRunning && b.lifecycle != nil {
 		if err := b.lifecycle.StartServer(ctx, req.ServerID); err != nil {
-			return &BindResult{Binding: binding, Outcome: string(operation.OutcomeUnknown), Consistency: string(consistency)},
+			return &BindResult{Binding: binding, RequestID: req.RequestID, Outcome: string(operation.OutcomeUnknown), Consistency: string(consistency)},
 				fmt.Errorf("%w: restart after swap failed; recovery tree at %s: %v", ErrUncertainOutcome, oldRoot, err)
 		}
 	}
@@ -517,7 +524,7 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		_ = acc.RemoveAll(oldRoot)
 	}
 
-	return &BindResult{Binding: binding, Outcome: "success", Consistency: string(consistency)}, nil
+	return &BindResult{Binding: binding, RequestID: req.RequestID, Outcome: "success", Consistency: string(consistency)}, nil
 }
 
 // Unbind removes the binding row but never deletes world bytes. Admission is

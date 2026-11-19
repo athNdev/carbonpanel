@@ -99,6 +99,27 @@ func TestRequestIDColumnIsAddedOnUpgrade(t *testing.T) {
 	}
 }
 
+func TestLogOnceEmitsExactlyOneEventPerRequest(t *testing.T) {
+	db := testDB(t)
+	entry := Entry{ActorID: "u1", ActorName: "op", IP: "1.2.3.4", Event: EventServerStart, SubjectTyp: "server", SubjectID: "s1", RequestID: "req-once"}
+	if err := LogOnce(db, entry); err != nil {
+		t.Fatalf("first log: %v", err)
+	}
+	if err := LogOnce(db, entry); err != nil {
+		t.Fatalf("second log: %v", err)
+	}
+	if err := LogOnce(db, Entry{ActorID: "u1", ActorName: "op", IP: "1.2.3.4", Event: EventServerStart, SubjectTyp: "server", SubjectID: "s2", RequestID: "req-once"}); err != nil {
+		t.Fatalf("different subject log: %v", err)
+	}
+	got, err := List(db, "", "", time.Time{}, 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events (one per subject for same request), got %d: %+v", len(got), got)
+	}
+}
+
 func TestLogAndList(t *testing.T) {
 	db := testDB(t)
 	if err := Log(db, Entry{ActorID: "u1", ActorName: "op", IP: "1.2.3.4", Event: EventServerStart, SubjectTyp: "server", SubjectID: "s1"}); err != nil {

@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,10 +19,12 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/internal/worldlib/providers"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -330,6 +333,27 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 		}
 		return nil, worldError(err)
 	}
+	if result != nil && result.Outcome == "success" {
+		requestID := strings.TrimSpace(result.RequestID)
+		if requestID == "" {
+			requestID = strings.TrimSpace(msg.GetRequestId())
+		}
+		operationID := result.OperationID
+		if operationID == "" && requestID != "" {
+			var op storage.ServerOperation
+			if err := s.store.DB().WithContext(ctx).
+				Where("server_id = ? AND request_key = ?", msg.GetServerId(), operation.StorageKey(requestID, "world-bind")).
+				First(&op).Error; err == nil && op.Kind == "world-bind" && op.Phase == storage.ServerOperationComplete {
+				operationID = op.ID
+			}
+		}
+		if operationID != "" && requestID != "" {
+			s.auditWorldOperation(ctx, req, activity.EventWorldBind, msg.GetServerId(), requestID, msg.GetLevelName(), msg.GetRevisionId(), operationID)
+		}
+		if operationID != "" {
+			result.OperationID = operationID
+		}
+	}
 	out := &v1.BindWorldResponse{
 		OperationId: result.OperationID, Outcome: result.Outcome,
 		Consistency: result.Consistency,
@@ -348,6 +372,10 @@ func (s *WorldService) UnbindWorld(ctx context.Context, req *connect.Request[v1.
 	removed, err := s.binder.Unbind(ctx, req.Msg.GetServerId(), req.Msg.GetLevelName(), req.Msg.GetRequestId())
 	if err != nil {
 		return nil, worldError(err)
+	}
+	requestID := strings.TrimSpace(req.Msg.GetRequestId())
+	if requestID != "" {
+		s.auditWorldOperation(ctx, req, activity.EventWorldUnbind, req.Msg.GetServerId(), requestID, req.Msg.GetLevelName(), "", "")
 	}
 	return connect.NewResponse(&v1.UnbindWorldResponse{Removed: removed}), nil
 }
@@ -582,6 +610,45 @@ func operatorName(ctx context.Context) string {
 		return user.Username
 	}
 	return ""
+}
+
+func (s *WorldService) auditWorldOperation(ctx context.Context, req connect.AnyRequest, event, serverID, requestID, levelName, revisionID, operationID string) {
+	actorID, actorName := "", ""
+	if user := auth.GetUserFromContext(ctx); user != nil {
+		actorID, actorName = user.ID, user.Username
+	}
+	ip := ""
+	if req != nil {
+		ip = clientIP(req.Peer().Addr)
+	}
+	props := map[string]any{}
+	if levelName != "" {
+		props["level_name"] = levelName
+	}
+	if revisionID != "" {
+		props["revision_id"] = revisionID
+	}
+	if operationID != "" {
+		props["operation_id"] = operationID
+	}
+	encoded := ""
+	if len(props) > 0 {
+		if b, err := json.Marshal(props); err == nil {
+			encoded = string(b)
+		}
+	}
+	if err := activity.LogOnce(s.store.DB(), activity.Entry{
+		ActorID:    actorID,
+		ActorName:  actorName,
+		IP:         ip,
+		Event:      event,
+		SubjectTyp: "server",
+		SubjectID:  serverID,
+		Properties: encoded,
+		RequestID:  requestID,
+	}); err != nil && s.log != nil {
+		s.log.Warn("failed to record world activity %s for %s: %v", event, serverID, err)
+	}
 }
 
 func notFoundOrInternal(err error, message string) error {
