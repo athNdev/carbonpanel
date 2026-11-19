@@ -154,9 +154,20 @@ def resolve_panel_version(value):
 
 
 def display_version(value):
-    """User-facing SemVer (no v prefix) for a product tag; otherwise unchanged."""
+    """The one user-facing/build SemVer form, with no leading `v`.
+
+    Product tags expose their SemVer field; rehearsal, verification and plain
+    v* staging inputs strip the single leading `v`. This is the SAME form as the
+    plan `semver` output used for APP_VERSION, UI embedding and OCI labels, so
+    package() searches the UI for exactly the string the frontend embedded.
+    Archive filenames and BUILD-INFO keep their internal v-form separately.
+    """
     product = product_release_or_none(value)
-    return product["semver"] if product else value
+    if product:
+        return product["semver"]
+    if isinstance(value, str) and value.startswith("v"):
+        return value[1:]
+    return value
 
 
 def version_from_release_tag(name):
@@ -691,6 +702,72 @@ def alias_promotion_decision(candidate, published_versions):
     if current and semver_key(tag) < semver_key(current):
         return None, f"{tag} is older than published {current}; alias promotion refused"
     return True, f"{tag} is not older than published {current or 'none'}"
+
+
+def github_latest_decision(tag, published_versions):
+    """GitHub 'latest' follows the SAME product-only verified stable ordering as
+    registry promotion. A prerelease never promotes; an older maintenance
+    release must not displace a newer verified stable; and an undeterminable
+    published state fails closed by leaving `latest` unchanged.
+    """
+    internal = version(tag)
+    if "-" in internal:
+        return False, "prereleases never become GitHub latest"
+    if published_versions is None:
+        return False, "published stable state is unavailable; do not move GitHub latest"
+    current = highest_stable(published_versions)
+    if current and semver_key(internal) <= semver_key(current):
+        return (False, f"{internal} is not newer than verified stable {current}; "
+                "GitHub latest stays unchanged")
+    return True, f"{internal} is newer than verified stable {current or 'none'}"
+
+
+def verified_previous_release_tag(releases_json=None):
+    """Actual GitHub tag name of the highest VERIFIED stable product/legacy
+    release, for an explicit compare base. Inherited v* tags are filtered out by
+    version_from_release_tag; no generic tag-name sorting is used.
+    """
+    try:
+        data = (releases_json if releases_json is not None else json.loads(
+            github("api", "--paginate", "--slurp",
+                   "/repos/{owner}/{repo}/releases?per_page=100")))
+        candidates = []
+        for page in data:
+            for item in page:
+                if item.get("draft") or item.get("prerelease"):
+                    continue
+                name = item.get("tag_name", "")
+                if version_from_release_tag(name):
+                    candidates.append(name)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda name: semver_key(
+            version_from_release_tag(name)))
+    except (subprocess.CalledProcessError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def migration_guide_notes(repository, git_tag):
+    """User-facing UPGRADE NOTES block for the first MAJOR product stable."""
+    guide = f"https://github.com/{repository}/blob/{git_tag}/docs/releases.md#upgrade-notes-from-v1040"
+    history = f"https://github.com/{repository}/blob/{git_tag}/docs/release-history.md#upgrade-notes--read-before-upgrading-from-v1040"
+    return (
+        "## UPGRADE NOTES — read before upgrading from v1.0.40\n\n"
+        f"**User-facing migration guide: {guide}** (full provenance and evidence: {history}).\n\n"
+        "This MAJOR release has three prerequisites; complete all three before upgrading:\n\n"
+        "1. **OIDC raw-group role mapping and explicit admin linking.** v1.0.40's "
+        "`role_mapping: {}` example granted raw IdP group names directly. Raw claims are no "
+        "longer granted by default and privileged names are always refused, so add an explicit "
+        "`auth.oidc.role_mapping` entry for every retained role (including admin). There is no "
+        "implicit first-user admin: keep a local administrator and explicitly link each admin "
+        "OIDC subject.\n"
+        "2. **PROXY protocol trust.** PROXY v2 headers are trusted only from "
+        "`proxy.trusted_proxy_cidrs` (default `[]` trusts nobody). Add every load balancer source "
+        "CIDR and confirm real client IPs are preserved after upgrade.\n"
+        "3. **Backup/restore drill.** Back up the database (db + wal + shm), configuration, "
+        "worlds and backups, then rehearse the documented copy-back restore on disposable "
+        "copies before upgrading a live installation.\n\n"
+    )
 
 
 def published_stable_versions(releases_json=None):
@@ -1689,8 +1766,14 @@ def publish(args):
     manifest = json.loads((output / "release-manifest.json").read_text(encoding="utf-8"))
     if manifest["version"] != tag or manifest["commit"] != args.commit or not manifest.get("image_digest"):
         raise ValueError("Release artifacts and published image must match the release commit")
-    if manifest.get("git_tag", git_tag) != git_tag:
-        raise ValueError("Release manifest product tag does not match the requested tag")
+    # FINAL MANIFEST VALIDATION: a canonical product release must carry both
+    # identity fields explicitly. A missing git_tag is NOT accepted as a default,
+    # and semver must equal the product tag's displayed version exactly.
+    product = product_release_or_none(git_tag)
+    if manifest.get("git_tag") != git_tag:
+        raise ValueError("Release manifest git_tag is missing or does not match the requested product tag")
+    if product is None or manifest.get("semver") != product["semver"]:
+        raise ValueError("Release manifest semver is missing or does not match the requested product tag")
     expected = {archive_name(tag, *target) for target in TARGETS} | {"openapi.yaml", "release-manifest.json"}
     lines = (output / "checksums.txt").read_text(encoding="utf-8").splitlines()
     recorded = dict((line.split("  ", 1)[1], line.split("  ", 1)[0]) for line in lines)
@@ -1698,11 +1781,25 @@ def publish(args):
         raise ValueError("Release files do not match their checksums")
     if not run("git", "tag", "--list", git_tag):
         github("api", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/tags/{git_tag}", "-f", f"sha={args.commit}")
-    generated = json.loads(github("api", "repos/{owner}/{repo}/releases/generate-notes", "-f", f"tag_name={git_tag}", "-f", f"target_commitish={args.commit}"))
+    # GitHub latest uses the same product-only verified stable ordering as the
+    # registry alias promotion. An older maintenance release never moves it.
+    published = published_stable_versions()
+    latest, latest_reason = github_latest_decision(tag, published)
+    previous_tag = verified_previous_release_tag()
+    generated_args = ["api", "repos/{owner}/{repo}/releases/generate-notes",
+                      "-f", f"tag_name={git_tag}", "-f", f"target_commitish={args.commit}"]
+    if previous_tag:
+        # Explicit VERIFIED compare base for the first MAJOR release; never
+        # inferred from generic v* tag-name sorting.
+        generated_args += ["-f", f"previous_tag_name={previous_tag}"]
+    generated = json.loads(github(*generated_args))
     repository = os.environ.get("GITHUB_REPOSITORY") or github("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     channel = "This is an alpha/prerelease build for early testing.\n\n" if "-alpha." in tag else (
         "This is a prerelease build.\n\n" if "-" in tag else "")
-    body = (f"{channel}## Downloads\n\nChoose the archive for your operating system and CPU. Each includes the panel with its web UI, the storage helper, configuration example and licenses.\n\n"
+    upgrade = (migration_guide_notes(repository, git_tag)
+               if product and not product["prerelease"]
+               and int(product["semver"].split(".")[0]) >= 2 else "")
+    body = (f"{channel}{upgrade}## Downloads\n\nChoose the archive for your operating system and CPU. Each includes the panel with its web UI, the storage helper, configuration example and licenses.\n\n"
             f"Verify downloads against **checksums.txt**. **release-manifest.json** records the exact source commit and Docker image digest. Back up your database and configuration before upgrading; preserve server worlds and existing data.\n\n"
             f"Container images (Linux amd64 and arm64):\n\n- Docker Hub: `{manifest['image']}`\n- GitHub Packages: `{manifest['github_image']}`\n\n"
             f"[Installation and verification](https://github.com/{repository}/blob/{git_tag}/docs/releases.md)\n\n" + generated["body"])
@@ -1722,7 +1819,11 @@ def publish(args):
         if not uploaded["draft"] or set(remote) != complete or any(
                 remote[name] != "sha256:" + sha256(output / name) for name in complete):
             raise ValueError("Uploaded draft assets do not match the verified local release")
-    github("release", "edit", git_tag, "--draft=false", f"--prerelease={str('-' in tag).lower()}", f"--latest={str('-' not in tag).lower()}")
+    github("release", "edit", git_tag, "--draft=false",
+           f"--prerelease={str('-' in tag).lower()}", f"--latest={str(latest).lower()}")
+    print(json.dumps({"git_tag": git_tag, "semver": product["semver"] if product else tag[1:],
+                      "github_latest": str(latest).lower(), "reason": latest_reason,
+                      "previous_tag": previous_tag or ""}, indent=2))
 
 
 def build_parser():

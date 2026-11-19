@@ -22,6 +22,66 @@ def registry_writes(command):
             if any(token in call.args[0] for token in ("create", "--push", "publish"))]
 
 
+def patch_gh_release_view():
+    """Let `gh release view` report an existing draft without breaking
+    subprocess.check_output (which internally calls subprocess.run)."""
+    original = release.subprocess.run
+
+    def fake(*args, **kwargs):
+        if args and args[0] == "gh" and len(args) > 1 and args[1] == "release":
+            return type("Result", (), {"returncode": 0})()
+        return original(*args, **kwargs)
+
+    return patch.object(release.subprocess, "run", side_effect=fake)
+
+
+def make_publish_fixture(directory, git_tag="carbonpanel-v2.0.0", semver="2.0.0",
+                         commit="a" * 40, include_git_tag=True, include_semver=True,
+                         version_override=None):
+    """A complete, checksummed product-release output directory for publish()."""
+    output = Path(directory)
+    internal = "v" + semver
+    manifest = {"version": version_override or internal, "commit": commit,
+                "image_digest": "sha256:" + "b" * 64,
+                "image": "atharvnaphade/carbonpanel:" + semver,
+                "github_image": "ghcr.io/athndev/carbonpanel:" + semver}
+    if include_git_tag:
+        manifest["git_tag"] = git_tag
+    if include_semver:
+        manifest["semver"] = semver
+    (output / "release-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (output / "openapi.yaml").write_text("schema", encoding="utf-8")
+    for target in release.TARGETS:
+        (output / release.archive_name(internal, *target)).write_bytes(b"original")
+    release.finalize(argparse.Namespace(output=str(output), digest=None))
+    return output, internal
+
+
+def publish_github_reply(notes_holder, generated_args_holder, published=(("v1.0.40",),), output=None):
+    """Offline gh fixture: verified stable list, generate-notes, assets and edit."""
+    def reply(*args):
+        if args[:3] == ("api", "--paginate", "--slurp"):
+            return json.dumps([[{"tag_name": name, "draft": False, "prerelease": False}
+                                for (name,) in published]])
+        if any("generate-notes" in str(arg) for arg in args):
+            generated_args_holder.append(args)
+            return json.dumps({"body": "AUTO GENERATED COMPARE"})
+        if args[:2] == ("repo", "view"):
+            return "athNdev/carbonpanel"
+        if args[:2] == ("release", "view"):
+            return "https://api.github.com/repos/owner/panel/releases/123"
+        if args and args[0] == "api" and str(args[1]).startswith("https://api.github.com"):
+            assets = [{"name": path.name, "digest": "sha256:" + release.sha256(path)}
+                      for path in sorted(output.iterdir()) if path.is_file()] if output else []
+            return json.dumps({"draft": True, "assets": assets})
+        if args[:2] == ("release", "create"):
+            if "--notes-file" in args:
+                notes_holder.append(Path(args[args.index("--notes-file") + 1]).read_text(encoding="utf-8"))
+            return "{}"
+        return "{}"
+    return reply
+
+
 def platform_revisions(commit):
     """Digest-addressed platform config evidence for offline fixtures."""
     return {
@@ -166,14 +226,15 @@ class ReleaseTests(unittest.TestCase):
     def test_tampered_download_is_rejected_before_a_tag_or_release_is_written(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            tag, commit = "v3.0.0-beta.5", "a" * 40
-            manifest = {"version": tag, "commit": commit, "image_digest": "sha256:" + "b" * 64}
+            internal, tag, commit = "v2.0.0", "carbonpanel-v2.0.0", "a" * 40
+            manifest = {"version": internal, "git_tag": tag, "semver": "2.0.0",
+                        "commit": commit, "image_digest": "sha256:" + "b" * 64}
             (output / "release-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
             (output / "openapi.yaml").write_text("schema", encoding="utf-8")
             for target in release.TARGETS:
-                (output / release.archive_name(tag, *target)).write_bytes(b"original")
+                (output / release.archive_name(internal, *target)).write_bytes(b"original")
             release.finalize(argparse.Namespace(output=str(output), digest=None))
-            (output / release.archive_name(tag, "linux", "amd64")).write_bytes(b"changed")
+            (output / release.archive_name(internal, "linux", "amd64")).write_bytes(b"changed")
             with patch.object(release, "guard_publishing"), patch.object(release, "github") as github, \
                  self.assertRaisesRegex(ValueError, "checksums"):
                 release.publish(argparse.Namespace(version=tag, commit=commit, output=str(output)))
@@ -1666,6 +1727,134 @@ class ReleaseTests(unittest.TestCase):
                                   ("before", "after_upgrade", "after_copy_back_rollback",
                                    "world_files_verified", "checks", "pass")})
         self.assertEqual(summaries[0], summaries[1])
+
+
+    # --- PR549 exact findings: latest ordering, notes base, manifest identity --
+
+    def test_github_latest_uses_product_only_verified_stable_ordering(self):
+        newer, reason = release.github_latest_decision("v2.0.0", ["v1.0.40"])
+        self.assertTrue(newer)
+        self.assertIn("newer", reason)
+        # An older maintenance release must not displace a newer verified stable.
+        older, reason = release.github_latest_decision("v1.0.1", ["v1.0.40", "v2.0.0"])
+        self.assertFalse(older)
+        self.assertIn("not newer", reason)
+        # Equal version is not a promotion; prereleases never promote; unknown fails closed.
+        self.assertFalse(release.github_latest_decision("v1.0.40", ["v1.0.40"])[0])
+        self.assertFalse(release.github_latest_decision("v2.0.0-alpha.1", ["v1.0.40"])[0])
+        self.assertFalse(release.github_latest_decision("v2.0.0", None)[0])
+        # Inherited/unclassified releases are not a verified stable state.
+        inherited = release.published_stable_versions([[
+            {"tag_name": "v3.0.0-beta.4", "draft": False, "prerelease": False},
+            {"tag_name": "mod-v2.0.6", "draft": False, "prerelease": False},
+        ]])
+        self.assertEqual(inherited, [])
+
+    def test_old_maintenance_publish_does_not_move_github_latest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output, _ = make_publish_fixture(directory, git_tag="carbonpanel-v1.0.1", semver="1.0.1")
+            notes, generated = [], []
+            with patch.object(release, "guard_publishing"), \
+                 patch.object(release, "run", return_value=""), \
+                 patch_gh_release_view(), \
+                 patch.object(release, "github", side_effect=publish_github_reply(
+                     notes, generated, output=output,
+                     published=(("v1.0.40",), ("v2.0.0",)))) as github, \
+                 redirect_stdout(io.StringIO()):
+                release.publish(argparse.Namespace(
+                    version="carbonpanel-v1.0.1", commit="a" * 40, output=str(output)))
+            edits = [call for call in github.call_args_list
+                     if call.args[:2] == ("release", "edit") and "--draft=false" in call.args]
+            self.assertTrue(edits)
+            self.assertIn("--latest=false", edits[-1].args)
+
+    def test_first_major_release_notes_use_verified_previous_tag_and_migration_guide(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output, _ = make_publish_fixture(directory)
+            notes, generated = [], []
+            with patch.object(release, "guard_publishing"), \
+                 patch.object(release, "run", return_value=""), \
+                 patch_gh_release_view(), \
+                 patch.object(release, "github", side_effect=publish_github_reply(
+                     notes, generated, output=output, published=(("v1.0.40",),))) as github, \
+                 redirect_stdout(io.StringIO()):
+                release.publish(argparse.Namespace(
+                    version="carbonpanel-v2.0.0", commit="a" * 40, output=str(output)))
+            self.assertTrue(generated)
+            self.assertTrue(any("previous_tag_name=v1.0.40" in arg for arg in generated[0]))
+            self.assertTrue(notes)  # notes-file captured at draft creation
+            body = notes[0]
+            for expected in ("docs/releases.md#upgrade-notes-from-v1040", "role_mapping",
+                             "no implicit first-user admin", "trusted_proxy_cidrs",
+                             "Backup/restore drill"):
+                self.assertIn(expected, body)
+            edits = [call for call in github.call_args_list
+                     if call.args[:2] == ("release", "edit") and "--draft=false" in call.args]
+            self.assertIn("--latest=true", edits[-1].args)
+
+    def test_publish_requires_explicit_and_matching_manifest_identity_fields(self):
+        cases = (
+            ("missing git_tag", {"include_git_tag": False}, "git_tag is missing"),
+            ("mismatched git_tag", {"git_tag": "carbonpanel-v2.0.1"}, "git_tag is missing or does not match"),
+            ("missing semver", {"include_semver": False}, "semver is missing"),
+            ("mismatched semver", {"semver": "2.0.1", "version_override": "v2.0.0"},
+             "semver is missing or does not match"),
+        )
+        for name, overrides, expected in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                git_tag = overrides.get("git_tag", "carbonpanel-v2.0.0")
+                semver = overrides.get("semver", "2.0.0")
+                output, _ = make_publish_fixture(
+                    directory, git_tag=git_tag, semver=semver,
+                    include_git_tag=overrides.get("include_git_tag", True),
+                    include_semver=overrides.get("include_semver", True),
+                    version_override=overrides.get("version_override"))
+                with patch.object(release, "guard_publishing"), \
+                     patch.object(release, "github") as github, \
+                     self.assertRaisesRegex(ValueError, expected):
+                    release.publish(argparse.Namespace(
+                        version="carbonpanel-v2.0.0", commit="a" * 40, output=str(output)))
+                github.assert_not_called()
+
+
+    def test_display_version_matches_plan_semver_for_rehearsal_and_plain_v(self):
+        # PR549 regression: APP_VERSION is the plan `semver` output (no leading
+        # v), so display_version() and the UI search must use that same form.
+        for value, expected in (
+            ("v0.0.0-verify.9", "0.0.0-verify.9"),
+            ("v0.0.0-verify.123", "0.0.0-verify.123"),
+            ("v3.0.0", "3.0.0"),
+            ("v3.0.0-alpha.1", "3.0.0-alpha.1"),
+            ("carbonpanel-v2.0.0", "2.0.0"),
+            ("carbonpanel-v2.0.0-alpha.1", "2.0.0-alpha.1"),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(release.display_version(value), expected)
+                # plan() emits the same form as its `semver` output.
+                tag = release.resolve_panel_version(value)
+                self.assertEqual(tag[1:] if value.startswith("v") and
+                                 release.product_release_or_none(value) is None
+                                 else release.display_version(value), expected)
+
+    def test_package_ui_version_check_accepts_canonical_semver_rehearsal(self):
+        # The embedded UI is built with APP_VERSION = plan semver (no v). The
+        # package() search must find that exact string for a rehearsal tag.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            frontend = root / "web/carbon-panel/build/_app"
+            frontend.mkdir(parents=True)
+            (root / "web/carbon-panel/build/index.html").write_text("<html>", encoding="utf-8")
+            (frontend / "app.js").write_text("window.APP_VERSION='0.0.0-verify.9'", encoding="utf-8")
+            value = "v0.0.0-verify.9"
+            display = release.display_version(value)
+            self.assertIn(display.encode(), (frontend / "app.js").read_bytes())
+            self.assertNotEqual(display, value)
+
+    def test_workflow_uses_one_canonical_version_form(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("APP_VERSION: ${{ needs.plan.outputs.semver }}", source)
+        self.assertIn("org.opencontainers.image.version=${{ needs.plan.outputs.semver }}", source)
+        self.assertNotIn("APP_VERSION: ${{ needs.plan.outputs.version }}", source)
 
 
 if __name__ == "__main__":
