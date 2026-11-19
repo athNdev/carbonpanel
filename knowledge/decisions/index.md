@@ -23,6 +23,7 @@
 - [Image digest provenance](image-digest-provenance.md) — Resolved registry digests are recorded for every image; strict pinning is an opt-in runtime preflight, never a default.
 - [Instance owned proxy test sockets](test-listeners.md) — Proxy tests inject instance-owned socket factories and reject non-loopback binds before reaching the operating system.
 - [Library adoption fencing](library-adoption-fencing.md) — Compatibility approval is tuple-bound, binding outcomes keep their reported label, and an unmanaged target is never guessed from a folder name.
+- [Maintained guide publication — Decision](maintained-guide-publication.md) — Automatic docs-only publication of release-independent operational guides
 - [MCP capability qualification](mcp-capability-qualification.md) — A stable MCP tool catalog reports old-controller RPC gaps as structured capability errors instead of hiding tools or switching channels.
 - [MCP controller stream session semantics](mcp-controller-stream-sessions.md) — Bounded controller-owned stream sessions use service-owned deadlines, exact server binding, idempotent frames and terminal partial reads to avoid lost bytes and leaked handles.
 - [MCP controller stream session semantics — Choice](mcp-controller-stream-sessions-choice.md) — The MCP gateway never opens panel/node storage. Bounded OpenStream,
