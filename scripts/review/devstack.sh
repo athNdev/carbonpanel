@@ -665,6 +665,24 @@ except Exception as e:
 						echo "review BlueMap tile sample: ${tile_sample}" >&2
 						tile_lods="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sed -n 's#.*maps/[^/]*/tiles/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ' | cut -c1-120)"
 						echo "review BlueMap tile lods: ${tile_lods}" >&2
+						settings_info="$(docker exec "${NAME}-bluemap" python -c "
+import json,glob,os
+try:
+ d=json.load(open('/web/settings.json'))
+ m=d.get('maps')
+ print('maps='+str(m)[:300])
+ if isinstance(m,list) and m:
+  mid=m[0] if isinstance(m[0],str) else str(m[0])
+  sp='/web/maps/'+mid+'/settings.json'
+  if os.path.exists(sp):
+   ms=json.load(open(sp))
+   print('map_keys='+str(sorted(ms.keys()))[:300])
+   for k in ('hires','lowres','views','startPos','sorting'):
+    if k in ms: print(k+'='+str(ms[k])[:180])
+except Exception as e:
+ print('settings_err='+type(e).__name__)
+" 2>&1 || true)"
+						echo "review BlueMap settings: $(printf '%s' "${settings_info}" | tr '\n' ' ' | cut -c1-700)" >&2
 					fi
 				else
 					echo "review map server container failed to start" >&2
