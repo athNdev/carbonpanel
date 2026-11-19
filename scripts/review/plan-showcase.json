@@ -318,6 +318,47 @@
       "focus": "Compatibility findings and the binding gate"
     },
     {
+      "goto": "/servers",
+      "waitFor": "a[href^=\"/servers/\"]",
+      "feature": "worlds",
+      "name": "open servers for the World tab capture"
+    },
+    {
+      "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
+      "feature": "worlds",
+      "name": "open seeded server for World tab"
+    },
+    {
+      "waitFor": "#server-detail-tabs-tab-world",
+      "feature": "worlds",
+      "name": "server World tab renders"
+    },
+    {
+      "click": "#server-detail-tabs-tab-world",
+      "feature": "worlds",
+      "name": "open the server World tab"
+    },
+    {
+      "waitFor": "#server-detail-tabs-panel-world",
+      "feature": "worlds",
+      "name": "server World panel renders"
+    },
+    {
+      "assertVisible": "#server-world-picker-heading",
+      "feature": "worlds",
+      "name": "real world picker heading renders"
+    },
+    {
+      "screenshot": "showcase-world-tab",
+      "element": "#server-detail-tabs-panel-world",
+      "maxHeight": 1000,
+      "scroll": false,
+      "feature": "worlds",
+      "name": "per-server World tab with real world facts",
+      "alt": "Per-server World tab showing the actual level, binding and relevant configuration",
+      "focus": "Active world, binding and revision for the seeded vanilla server"
+    },
+    {
       "goto": "/worlds",
       "waitFor": "[data-testid=\"showcase-worlds-content\"]",
       "feature": "worlds",
