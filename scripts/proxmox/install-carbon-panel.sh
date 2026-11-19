@@ -10,18 +10,27 @@
 # Inspect before running:
 #   curl -fsSLO https://raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh
 #   less install-carbon-panel.sh
-#   sudo bash install-carbon-panel.sh [install|update] [--dir DIR] [--image IMAGE]
+#   sudo bash install-carbon-panel.sh [install|update] [--dir DIR] [--image IMAGE] [--compose FILE]
 #
 # Existing compose/config and bind-mounted data/backups/tmp are preserved.
 
 set -euo pipefail
 
 SERVICE="carbon-panel"
-COMPOSE_BASENAME="compose.yml"
+DEFAULT_COMPOSE_BASENAME="compose.yml"
+COMPOSE_NAMES=(compose.yml compose.yaml docker-compose.yml docker-compose.yaml)
 MARKER_FILE=".carbon-panel-install-owned"
+DIR=""
+COMPOSE_FILE=""
+COMPOSE_PROJECT_DIR=""
+COMPOSE_EXPLICIT=""
+DATA_DIR=""
+BACKUPS_DIR=""
+TMP_DIR=""
 COMPOSE_TMP=""
 LOCK_DIR=""
 LOCK_HELD=false
+DC=()
 
 cleanup_compose_tmp() {
   if [ -n "$COMPOSE_TMP" ]; then
@@ -48,18 +57,18 @@ trap cleanup EXIT
 
 usage() {
   cat <<'EOF'
-Usage: install-carbon-panel.sh [install|update|help] [--dir DIR] [--image IMAGE]
+Usage: install-carbon-panel.sh [install|update|help] [--dir DIR] [--image IMAGE] [--compose FILE]
 
 Install or update the Carbon Panel controller in an existing Linux guest with
 guest-local Docker Engine and Docker Compose v2.
 
 Commands:
   install   Create install directory/compose if missing and start the
-            carbon-panel service. If compose.yml already exists, preserves it
-            and does not pull or recreate a configured deployment; it may only
-            resume an incomplete install previously started by this script.
+            carbon-panel service. An existing Compose file (any standard name)
+            is preserved; no pull or recreate of a configured deployment occurs
+            unless it is an incomplete install previously started by this script.
   update    Pull and recreate only the carbon-panel service using the existing
-            compose.yml; preserves bind-mounted data/backups/tmp and config.
+            Compose file; preserves bind-mounted data/backups/tmp and config.
             Snapshot the controller database before upgrading (see below).
   help      Show this help
 
@@ -69,6 +78,9 @@ Options:
   --image IMAGE  Container image for a newly written compose.yml only.
                  Default: atharvnaphade/carbonpanel:latest or $CARBON_PANEL_IMAGE
                  Rejected for update to preserve existing compose config.
+  --compose FILE Compose config for update. Use when the file is outside the
+                 install directory or detection is ambiguous. Relative paths
+                 resolve from --dir. Accepted for update only.
 
 Scope and safety:
   - Supported for an existing guest-local Docker deployment only.
@@ -77,13 +89,18 @@ Scope and safety:
     non-local DOCKER_HOST/DOCKER_CONTEXT overrides because bind mount paths
     must resolve on this guest and generated compose mounts /var/run/docker.sock.
   - Does not create Proxmox guests, change host security, or delete bind mounts.
-  - Does not overwrite an existing compose.yml, config.yaml, data, backups, or tmp.
-  - Refuses concurrent install/update for the same install directory
-    (fail-closed lock) and publishes a new compose.yml with an atomic
+  - Does not overwrite an existing compose file, config.yaml, data, backups, or tmp.
+  - Refuses concurrent install/update for the same Compose project
+    directory (fail-closed lock) and publishes a new compose.yml with an atomic
     no-clobber link, so a compose created concurrently is never
     overwritten or resumed as this script's partial.
   - Compose bind mounts use fixed relative paths (./data, ./backups, ./tmp)
     resolved from the install directory.
+  - Standard Compose names (compose.yml, compose.yaml, docker-compose.yml,
+    docker-compose.yaml) are detected; ambiguity is refused, and the
+    carbon-panel service must be present before an update proceeds.
+  - A native systemd install is never migrated or updated by this script; it
+    gets a safe manual-update explanation instead.
 
 Recommended upgrade workflow:
   Snapshot the controller database before upgrading. For guarded snapshot and
@@ -104,13 +121,15 @@ need_cmd() {
 }
 
 acquire_dir_lock() {
-  # Fail-closed per-directory lock. mkdir(2) is atomic on the guest
-  # filesystem; a stale lock is never taken over automatically because a
-  # live/unknown holder cannot be distinguished safely. The operator removes
-  # it only after confirming no installer is running.
-  LOCK_DIR="$DIR/.carbon-panel-install.lock"
+  # Fail-closed lock keyed to the Compose project directory (the directory
+  # holding the resolved file), not to --dir. An external --compose file is
+  # therefore locked consistently even when different --dir values are used.
+  # mkdir(2) is atomic on the guest filesystem; a stale lock is never taken
+  # over automatically because a live/unknown holder cannot be distinguished
+  # safely. The operator removes it only after confirming no installer runs.
+  LOCK_DIR="$COMPOSE_PROJECT_DIR/.carbon-panel-install.lock"
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    die "another install/update is already running for $DIR (lock: $LOCK_DIR); wait for it to finish, or remove the lock only after confirming no installer is running"
+    die "another install/update is already running for $COMPOSE_FILE (lock: $LOCK_DIR); wait for it to finish, or remove the lock only after confirming no installer is running"
   fi
   LOCK_HELD=true
   if ! printf '%s\n' "$$" >"$LOCK_DIR/pid"; then
@@ -162,16 +181,109 @@ validate_image_ref() {
   [[ "$image" =~ ^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$ ]] || die "image contains unsupported characters: $image"
 }
 
+validate_compose_input() {
+  local file=$1
+  [ -n "$file" ] || die "--compose requires a value"
+  if has_control_chars "$file"; then
+    die "compose path contains unsupported control characters"
+  fi
+}
+
 canonicalize_dir_install() {
-  local dir=$1
-  mkdir -p "$dir"
-  (cd "$dir" && pwd -P)
+  # Resolve the target without creating it, so a native install can be
+  # refused before any directory mutation. A missing tail is appended to the
+  # nearest existing ancestor.
+  local dir=$1 ancestor tail="" base
+  if [ -d "$dir" ]; then
+    (cd "$dir" && pwd -P)
+    return
+  fi
+  ancestor="$dir"
+  while [ ! -d "$ancestor" ]; do
+    base="$(basename -- "$ancestor")"
+    tail="/$base$tail"
+    ancestor="$(dirname -- "$ancestor")"
+  done
+  ancestor="$(cd -- "$ancestor" && pwd -P)"
+  printf '%s%s\n' "$ancestor" "$tail"
 }
 
 canonicalize_dir_existing() {
   local dir=$1
   [ -d "$dir" ] || die "install directory not found: $dir"
   (cd "$dir" && pwd -P)
+}
+
+resolve_explicit_compose() {
+  local file=$1 dirpart base
+  validate_compose_input "$file"
+  # Relative paths resolve from the install directory, matching the
+  # directory compose() runs in. Absolute paths (including a config outside
+  # the data directory) are used as given.
+  if [[ "$file" != /* ]]; then
+    file="$DIR/$file"
+  fi
+  [ -e "$file" ] || die "compose file not found: $file"
+  [ -f "$file" ] || die "compose path is not a regular file: $file"
+  dirpart="$(cd -- "$(dirname -- "$file")" && pwd -P)" || die "cannot resolve compose directory: $file"
+  base="$(basename -- "$file")"
+  COMPOSE_FILE="$dirpart/$base"
+}
+
+detect_compose_in_dir() {
+  local name path found=()
+  for name in "${COMPOSE_NAMES[@]}"; do
+    path="$DIR/$name"
+    [ -f "$path" ] && found+=("$path")
+  done
+  if [ "${#found[@]}" -gt 1 ]; then
+    err "multiple standard Compose files found in $DIR:"
+    for path in "${found[@]}"; do
+      err "  $path"
+    done
+    die "ambiguous Compose configuration; re-run with --compose FILE to select one"
+  fi
+  if [ "${#found[@]}" -eq 1 ]; then
+    COMPOSE_FILE="${found[0]}"
+    return 0
+  fi
+  COMPOSE_FILE=""
+  return 1
+}
+
+native_systemd_evidence() {
+  local unit
+  local -a units
+  units=(
+    /etc/systemd/system/carbon-panel.service
+    /run/systemd/system/carbon-panel.service
+    /usr/lib/systemd/system/carbon-panel.service
+    /lib/systemd/system/carbon-panel.service
+    "${HOME:-/root}/.config/systemd/user/carbon-panel.service"
+  )
+  for unit in "${units[@]}"; do
+    if [ -f "$unit" ]; then
+      printf '%s\n' "$unit"
+      return 0
+    fi
+  done
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl list-unit-files --type=service --no-legend 2>/dev/null \
+        | grep -Eq '^carbon-panel(@[^[:space:]]*)?[.]service[[:space:]]'; then
+      printf '%s\n' 'systemctl: carbon-panel.service'
+      return 0
+    fi
+  fi
+  return 1
+}
+
+explain_native_update() {
+  local evidence=$1
+  log "No Compose configuration found in $DIR. Native systemd evidence: $evidence"
+  log "This script updates Docker Compose deployments only. For a native install,"
+  log "follow the controller guidance in docs/getting-started/prebuilt-binaries/"
+  log "and https://github.com/athNdev/carbonpanel/releases"
+  log "It will not install, migrate, or invoke a legacy updater for a native install."
 }
 
 require_local_docker_context() {
@@ -209,6 +321,17 @@ service_exists() {
   local cid
   cid="$(compose ps -aq "$SERVICE" 2>/dev/null || true)"
   [ -n "$cid" ]
+}
+
+require_compose_service() {
+  local services
+  if ! services="$(compose config --services 2>/dev/null)"; then
+    die "unable to read services from $COMPOSE_FILE; refusing to update"
+  fi
+  if ! printf '%s\n' "$services" | grep -qx -- "$SERVICE"; then
+    err "Compose file $COMPOSE_FILE does not define service '$SERVICE'."
+    die "refusing to update; check the selected file or re-run with --compose FILE"
+  fi
 }
 
 write_compose() {
@@ -277,6 +400,11 @@ while [ "$#" -gt 0 ]; do
       IMAGE_SET=true
       shift 2
       ;;
+    --compose)
+      [ "$#" -ge 2 ] || die "--compose requires a value"
+      COMPOSE_EXPLICIT="$2"
+      shift 2
+      ;;
     *)
       die "unknown argument: $1 (use --help)"
       ;;
@@ -288,18 +416,12 @@ validate_dir_input "$DIR_INPUT"
 if [ "$ACTION" = "update" ] && [ "$IMAGE_SET" = true ]; then
   die "--image is not applied during update to preserve existing compose config; edit the compose file if you intend to change the image"
 fi
-
 if [ "$ACTION" = "install" ]; then
   validate_image_ref "$IMAGE"
 fi
-
-need_cmd docker
-need_cmd sha256sum
-require_local_docker_context
-if ! docker info >/dev/null 2>&1; then
-  die "cannot talk to guest-local Docker daemon (is Docker running and do you have permission?)"
+if [ "$ACTION" = "install" ] && [ -n "$COMPOSE_EXPLICIT" ]; then
+  die "--compose is only supported with 'update'; install writes $DIR/compose.yml"
 fi
-require_compose_v2
 
 case "$ACTION" in
   install)
@@ -313,10 +435,40 @@ case "$ACTION" in
     ;;
 esac
 
-COMPOSE_FILE="$DIR/$COMPOSE_BASENAME"
 DATA_DIR="$DIR/data"
 BACKUPS_DIR="$DIR/backups"
 TMP_DIR="$DIR/tmp"
+
+# Resolve the Compose file before any daemon check or write. Detection is
+# read-only and fail-closed; refusals here leave the deployment untouched.
+if [ -n "$COMPOSE_EXPLICIT" ]; then
+  resolve_explicit_compose "$COMPOSE_EXPLICIT"
+elif detect_compose_in_dir; then
+  :
+else
+  # No Compose config: a recognized native unit is a refusal for both install
+  # and update, before Docker checks or install-directory creation.
+  if native="$(native_systemd_evidence)"; then
+    explain_native_update "$native"
+    exit 1
+  fi
+  if [ "$ACTION" = "update" ]; then
+    die "no supported Compose configuration found in $DIR (looked for: ${COMPOSE_NAMES[*]}). Re-run with --compose FILE if your Compose file lives elsewhere; native installs must be updated manually."
+  fi
+  COMPOSE_FILE="$DIR/$DEFAULT_COMPOSE_BASENAME"
+  # Safe to create the target only after native evidence has been ruled out.
+  mkdir -p "$DIR"
+fi
+COMPOSE_PROJECT_DIR="$(dirname -- "$COMPOSE_FILE")"
+log "Using Compose file: $COMPOSE_FILE"
+
+need_cmd docker
+need_cmd sha256sum
+require_local_docker_context
+if ! docker info >/dev/null 2>&1; then
+  die "cannot talk to guest-local Docker daemon (is Docker running and do you have permission?)"
+fi
+require_compose_v2
 
 acquire_dir_lock
 
@@ -377,7 +529,7 @@ case "$ACTION" in
     log "Convenience update command (preserves data/config): sudo bash \"$0\" update --dir \"$DIR\""
     ;;
   update)
-    [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE (run install first)"
+    require_compose_service
     log "Updating Carbon Panel controller in: $DIR"
     log "Recommended: snapshot the controller database before upgrading."
     log "See repo scripts/snapshot-panel-db.sh, scripts/compose-upgrade.sh, scripts/compose-upgrade-rollback.sh"
