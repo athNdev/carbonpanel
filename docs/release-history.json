@@ -1358,5 +1358,23 @@
     "Exact asset bytes of upstream inherited releases were not fetched; UNKNOWN.",
     "Historical GitHub releases preceding v1.0.40 in athNdev/carbonpanel cannot be reconstructed; UNKNOWN.",
     "Module image repositories return anonymous 404; visibility/emptiness UNKNOWN, not asserted empty."
-  ]
+  ],
+  "deletion_archive": {
+    "executed": "2026-11-20",
+    "tracker": "OSS-414",
+    "batch_1": {
+      "bundle": "inherited-tag-cleanup/inherited-tag-candidates.bundle",
+      "sha256": "8139597d3cee368de0ac751bfff44dd0aba9f57a88d5056001730364a72383ec",
+      "refs_removed": 32
+    },
+    "batch_2": {
+      "bundle": "inherited-tag-batch2.bundle",
+      "sha256": "c7a13bb84538aaf7838de0906df5b85ca6185fa2c33e9c5dc8e1e1fbde8a8e37",
+      "refs_removed": 47,
+      "note": "Includes mod-v2.0.6; parent directed it kept retired after an isolated review objection."
+    },
+    "total_inherited_refs_removed": 79,
+    "remaining_origin_tag_names": 6,
+    "rebuild_note": "Every retired inherited release can be rebuilt from the exact archived bundle refs or the unchanged discohaus/discopanel upstream refs without reintroducing a remote tag on athNdev/carbonpanel. Published OCI module images and digests are unchanged. Future module publication requires an exact, existing Carbon-authored mod-* tag; the workflow's git show-ref check is the only publication authority."
+  }
 }
