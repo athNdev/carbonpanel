@@ -16,7 +16,6 @@ import (
 	"path"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // Upstream endpoints are compile-time constants. The unexported vars below are
@@ -24,7 +23,7 @@ import (
 // fixtures; they are deliberately absent from the public API so no caller can
 // turn the proxy into an open URL fetcher.
 const (
-	profileBaseURLConst    = "https://sessionserver.mojang.com/session/minecraft/profile/"
+	profileBaseURLConst = "https://sessionserver.mojang.com/session/minecraft/profile/"
 	// nameBaseURL is the verified first-party Minecraft Services name -> profile
 	// endpoint. It resolves an exact current username to its online UUID; it is
 	// NOT a name-history service (Mojang removed public name history on
@@ -105,7 +104,7 @@ func negativeResult(err error) fetchResult {
 // fetchAndCache performs one upstream lookup and persists the outcome.
 func (c *Cache) fetchAndCache(ctx context.Context, uuid, kind string) Asset {
 	result := c.fetch(ctx, uuid, kind)
-	now := time.Now().UTC()
+	now := c.clock.Now()
 	if result.note != "" {
 		a := unavailable(result.note, SourceIdentityService, false, now)
 		if result.negative {
@@ -183,7 +182,7 @@ func (c *Cache) fetch(ctx context.Context, uuid, kind string) fetchResult {
 		Data:        data,
 		ContentType: contentTypePNG,
 		Source:      SourceIdentityService,
-		ObservedAt:  time.Now().UTC(),
+		ObservedAt:  c.clock.Now(),
 		Confidence:  ConfidenceDetected,
 	}
 	if kind == KindFace {
