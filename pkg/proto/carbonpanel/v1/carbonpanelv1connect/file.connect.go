@@ -131,6 +131,9 @@ type FileServiceClient interface {
 	GetRemoteArchiveProgress(context.Context, *connect.Request[v1.GetRemoteArchiveProgressRequest]) (*connect.Response[v1.GetRemoteArchiveProgressResponse], error)
 	// OSS-387: open a controller-owned bounded byte stream session. The gateway
 	// never opens node storage itself; the controller owns the read handle.
+	// With download_session_id set, the bounded handle is opened over a staged
+	// download (InitFileDownload/DownloadArchive/ExportWorld) instead of a
+	// server-relative node path; server_id must still match the session's server.
 	OpenStream(context.Context, *connect.Request[v1.OpenStreamRequest]) (*connect.Response[v1.OpenStreamResponse], error)
 	// Read one bounded frame from a controller-owned session.
 	ReadStreamFrame(context.Context, *connect.Request[v1.ReadStreamFrameRequest]) (*connect.Response[v1.ReadStreamFrameResponse], error)
@@ -434,6 +437,9 @@ type FileServiceHandler interface {
 	GetRemoteArchiveProgress(context.Context, *connect.Request[v1.GetRemoteArchiveProgressRequest]) (*connect.Response[v1.GetRemoteArchiveProgressResponse], error)
 	// OSS-387: open a controller-owned bounded byte stream session. The gateway
 	// never opens node storage itself; the controller owns the read handle.
+	// With download_session_id set, the bounded handle is opened over a staged
+	// download (InitFileDownload/DownloadArchive/ExportWorld) instead of a
+	// server-relative node path; server_id must still match the session's server.
 	OpenStream(context.Context, *connect.Request[v1.OpenStreamRequest]) (*connect.Response[v1.OpenStreamResponse], error)
 	// Read one bounded frame from a controller-owned session.
 	ReadStreamFrame(context.Context, *connect.Request[v1.ReadStreamFrameRequest]) (*connect.Response[v1.ReadStreamFrameResponse], error)

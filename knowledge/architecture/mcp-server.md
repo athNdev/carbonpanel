@@ -72,6 +72,17 @@ index, partial/over-cap reads terminate the session, and a bounded reaper plus
 `Server.Shutdown -> FileService.Stop -> StopStreams` release handles on expiry
 and shutdown. See [controller stream session semantics](../decisions/mcp-controller-stream-sessions.md).
 
+The download lane adds the staged-download byte path for the four FileService
+download RPCs and `surface:rest_download_stream`. `OpenStreamRequest.download_session_id`
+lets the same controller-owned, bounded `ReadStreamFrame`/`CloseStream` RPCs
+carry bytes from a file that `InitFileDownload`, `DownloadArchive` or
+`ExportWorld` staged on the controller; the gateway holds no storage handle and
+never uses a hand-rolled REST client. `download_get_file`,
+`download_init_file`, `download_archive_bundle`,
+`download_export_world_bundle` and `download_stream` are exported through
+`DownloadToolSpecs`/`DownloadToolDescriptors` for the integration owner. See
+[staged-download byte transport](../decisions/mcp-download-byte-transport.md).
+
 The 9 affected operations remain PENDING in the STRICT publication gate with an
 exact inventory in `internal/mcp/integration_pending.go` and the committed plan
 in `docs/plans/mcp-controller-side-stream-transport.md`. The partial-slice
