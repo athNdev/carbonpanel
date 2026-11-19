@@ -533,9 +533,30 @@ up)
 			# the newly created container after the restart.
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
-				if start_map_server "${server_path}/modules/bluemap"; then
-					renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | json_path 'targets.0.rendererState')"
+				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" world; then
+					# The renderer container and the panel restart are asynchronous.
+					# Only a semantic readiness signal may unblock the worlds
+					# capture. Match the SEEDED server, never a positional row:
+					# another target in the list must not mask this fixture.
+					ready_deadline=$((SECONDS + 120))
+					renderer_state=""
+					fixture_server_id="$(cat "${DATA}/server-id" 2>/dev/null || true)"
+					while ((SECONDS < ready_deadline)); do
+						# The panel's own health check performs the authoritative
+						# upstream probe (map list, keyed root, gzip assets and
+						# CSP-safe bundle). READY is the single semantic signal.
+						renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null |
+							REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t)console.log(t.rendererState||"")}catch(e){}})')"
+						if [ -n "${fixture_server_id}" ] && [ "${renderer_state}" = "RENDERER_STATE_READY" ]; then
+							break
+						fi
+						renderer_state=""
+						sleep 1
+					done
 					echo "review renderer state: ${renderer_state:-unknown}" >&2
+					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
+						echo "review renderer never became READY; worlds capture will fail closed" >&2
+					fi
 				else
 					echo "review map server container failed to start" >&2
 				fi

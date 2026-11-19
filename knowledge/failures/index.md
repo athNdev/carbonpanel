@@ -5,4 +5,6 @@
 ## Concepts
 
 - [Known gaps](known-gaps.md) — Cross-cutting gaps that are not defects to rush, with the live tracker as the authority.
+- [Known gaps — Current gaps + How to use this](known-gaps-current-gaps.md) — A bind-mounted world is not quota-limited by Docker. storage.container_writable_mb
+- [Known gaps — Read next](known-gaps-read-next.md) — Detailed guidance on read next.
 - [Remote node fallback](remote-node-fallback.md) — Operations that cannot resolve a remote node must error instead of using the controller's Docker socket.

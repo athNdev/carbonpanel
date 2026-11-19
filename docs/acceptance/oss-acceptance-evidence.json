@@ -1,0 +1,59 @@
+{
+  "version": "1",
+  "project": {
+    "key": "OSS",
+    "id": "10001",
+    "style": "team-managed"
+  },
+  "gate": {
+    "required_pr_label": "",
+    "max_evidence_age_days": 7,
+    "scope": "record-auditor"
+  },
+  "tiers": {
+    "CODE-MERGED": "Merged code only; never sufficient for a public or live acceptance surface",
+    "CI-GREEN": "Merged code plus exact-commit green CI",
+    "BUILD-ONLY": "Build succeeded but deployment/live proof is absent",
+    "CAPTURE-ONLY": "Captured artifact exists but live status was not verified",
+    "DEPLOY-SKIPPED": "Deployment or publication job was explicitly skipped",
+    "LIVE-VERIFIED": "Exact PR merge SHA, green CI, non-skipped named deploy at the qualified revision, and fresh live URL status"
+  },
+  "candidates": [
+    {
+      "issue_key": "OSS-409",
+      "summary": "Publish and verify multi-version docs on public Pages",
+      "closure_state": "recorded",
+      "acceptance_surface": "public",
+      "tier": "LIVE-VERIFIED",
+      "pr": {
+        "number": 575,
+        "merge_sha": "dbbd22e25ee55f8bc0624eeb45801765819fa6db",
+        "repository": "athNdev/carbonpanel"
+      },
+      "ci_run_id": 44517658883,
+      "trusted_deploy_sha": "69ddb46d596aea8ed117a3dba6a1f63521572664",
+      "deploy": {
+        "workflow": "Deploy Website to GitHub Pages",
+        "run_id": 44522728666,
+        "job": "deploy",
+        "revision_sha": "69ddb46d596aea8ed117a3dba6a1f63521572664"
+      },
+      "live": {
+        "url": "https://carbonpanel.dev/version-index.json",
+        "http_status": 200,
+        "checked_at": "2026-11-19T12:20:14Z"
+      },
+      "verifier": "oss409-live-audit",
+      "verified_at": "2026-11-19T12:20:14Z",
+      "artifact": "docs/acceptance/evidence/OSS-409.json"
+    }
+  ],
+  "reference_runs": [
+    {
+      "run_id": 44522728666,
+      "name": "Deploy Website to GitHub Pages",
+      "head_sha": "69ddb46d596aea8ed117a3dba6a1f63521572664",
+      "conclusion": "success"
+    }
+  ]
+}

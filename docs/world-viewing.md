@@ -83,6 +83,44 @@ the server. Renderer redirects are never followed: a 3xx from a renderer is
 returned as a 502, so an allowlisted node-local endpoint cannot be turned into
 an external or controller-local request under the panel origin.
 
+### Renderer web assets and CSP compatibility
+
+BlueMap v5.29 stores map data gzipped (`textures.json.gz`, `*.prbm.gz`) and its
+own webserver implements two routes: a plain path answered with
+`Content-Encoding: gzip` when the browser accepts gzip, and a literal `.gz`
+path decompressed by the webapp itself. The proxy forwards `Accept-Encoding`
+and `Content-Encoding` end to end for every renderer. Only for the BlueMap
+adapter, and only for its map `textures.json` and PRBM/PNG tile payloads, does
+it also retry exactly the `+".gz"` sibling when a plain path 404s. The
+uncompressed media type is set from an explicit table (`.json` →
+`application/json`, `.prbm` → `application/octet-stream`); a literal `.gz`
+request gets no `Content-Encoding`. Ranged requests are passed through without
+representation switching, and the session/auth/scope and private no-store
+cache gates are unchanged. Other renderers, other asset paths, other encodings
+and in-proxy decompression are not introduced. A missing tile or texture stays
+a 404, and the adapter does not report READY (nor issue a map session) unless
+`/maps/{id}/textures.json` answers — through the plain encoded route or the
+exact `.gz` sibling — with a bounded JSON textures document for every
+configured map. A visible iframe or canvas is never used as evidence that a
+map loaded.
+
+The panel CSP is unchanged: no `unsafe-eval`, no new `unsafe-inline` and no
+capture-only bypass. Compatibility comes from a pinned rebuild of upstream
+BlueMap `v5.29` source commit `a61e143fe1e069c536159e0bc79410d5b6da3885` with
+`__INTLIFY_JIT_COMPILATION__: true` added to `common/webapp/vite.config.js`
+`define`. The verified JIT bundle `index-BA9KJ4pi.js` has SHA-256
+`ba940f930de0642acfd2ca8b0eda6aa0914ce02fcf673cee18262b3dd5217da3` and no
+`new Function` / `compileToFunction` occurrences; the pristine bundle contains
+both. See [ADR 0048](adr/0048-bluemap-asset-routing-and-csp.md) for provenance,
+the rejected alternatives and the evidence limits.
+
+For disposable review stacks, prefer BlueMap's own webserver and verify with
+`curl -H 'Accept-Encoding: gzip' .../maps/world/textures.json` from the panel's
+network namespace before capture. If a plain static root is unavoidable, use
+the proxy route above and assert a non-2xx texture/tile response fails capture
+rather than accepting a black canvas. Do not edit capture code to relax either
+check.
+
 ### Iframe trust assumption and residual risk
 
 The embed is same-origin and carries

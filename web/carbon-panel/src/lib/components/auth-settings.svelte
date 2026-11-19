@@ -154,19 +154,19 @@ one at https://mozilla.org/MPL/2.0/.
 	</div>
 {:else if config}
 	<div class="grid gap-6 lg:grid-cols-2">
-		<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
-			<div class="border-b border-[#393939] px-5 py-4">
+		<CarbonTile class="rounded-none !border-border !bg-card !p-0">
+			<div class="border-b border-border px-5 py-4">
 				<div class="flex items-center gap-3">
 					<div
-						class="flex h-10 w-10 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+						class="flex h-10 w-10 shrink-0 items-center justify-center border border-border bg-background"
 					>
-						<Shield class="h-5 w-5 text-[#78a9ff]" />
+						<Shield class="h-5 w-5 text-accent-text" />
 					</div>
 					<div>
-						<h2 class="font-sans text-base font-semibold text-[#f4f4f4]">
+						<h2 class="font-sans text-base font-semibold text-foreground">
 							Authentication Settings
 						</h2>
-						<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">
+						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 							Manage login methods and access controls
 						</p>
 					</div>
@@ -175,17 +175,17 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<div class="space-y-4 p-5">
 				<div
-					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3"
+					class="flex items-center justify-between rounded-none border border-border bg-card p-3"
 				>
 					<div class="space-y-0.5 pr-4">
-						<p class="font-sans text-sm text-[#f4f4f4]">Local Authentication</p>
-						<p class="text-xs text-[#8d8d8d]">Username and password login</p>
+						<p class="font-sans text-sm text-foreground">Local Authentication</p>
+						<p class="text-xs text-muted-foreground">Username and password login</p>
 					</div>
 					{#if canEdit}
 						<input
 							id="local-auth-enabled"
 							type="checkbox"
-							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 							checked={localAuthEnabled}
 							onchange={(e) => {
 								localAuthEnabled = e.currentTarget.checked;
@@ -206,19 +206,19 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div
-					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3 {!localAuthEnabled
+					class="flex items-center justify-between rounded-none border border-border bg-card p-3 {!localAuthEnabled
 						? 'opacity-50'
 						: ''}"
 				>
 					<div class="space-y-0.5 pr-4">
-						<p class="font-sans text-sm text-[#f4f4f4]">User Registration</p>
-						<p class="text-xs text-[#8d8d8d]">Allow new users to self-register</p>
+						<p class="font-sans text-sm text-foreground">User Registration</p>
+						<p class="text-xs text-muted-foreground">Allow new users to self-register</p>
 					</div>
 					{#if canEdit}
 						<input
 							id="allow-registration"
 							type="checkbox"
-							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 							checked={allowRegistration}
 							onchange={(e) => (allowRegistration = e.currentTarget.checked)}
 							disabled={saving || !localAuthEnabled}
@@ -236,17 +236,17 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div
-					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3"
+					class="flex items-center justify-between rounded-none border border-border bg-card p-3"
 				>
 					<div class="space-y-0.5 pr-4">
-						<p class="font-sans text-sm text-[#f4f4f4]">Anonymous Access</p>
-						<p class="text-xs text-[#8d8d8d]">Limited unauthenticated browsing</p>
+						<p class="font-sans text-sm text-foreground">Anonymous Access</p>
+						<p class="text-xs text-muted-foreground">Limited unauthenticated browsing</p>
 					</div>
 					{#if canEdit}
 						<input
 							id="anonymous-access"
 							type="checkbox"
-							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 							checked={anonymousAccess}
 							onchange={(e) => (anonymousAccess = e.currentTarget.checked)}
 							disabled={saving}
@@ -264,13 +264,13 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div
-					class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3"
+					class="flex items-center justify-between rounded-none border border-border bg-card p-3"
 				>
 					<div class="space-y-0.5">
-						<label for="session-timeout-hours" class="font-sans text-sm text-[#f4f4f4]"
+						<label for="session-timeout-hours" class="font-sans text-sm text-foreground"
 							>Session Timeout</label
 						>
-						<p class="text-xs text-[#8d8d8d]">How long sessions remain valid</p>
+						<p class="text-xs text-muted-foreground">How long sessions remain valid</p>
 					</div>
 					{#if canEdit}
 						<div class="flex items-center gap-2">
@@ -279,12 +279,12 @@ one at https://mozilla.org/MPL/2.0/.
 								type="number"
 								min={0.084}
 								step={0.5}
-								class="[&_input]:h-8 [&_input]:w-24 [&_input]:bg-[#161616]"
+								class="[&_input]:h-8 [&_input]:w-24 [&_input]:bg-background"
 								bind:value={sessionTimeoutText}
 								error={sessionTimeoutError}
 								disabled={saving}
 							/>
-							<span class="text-sm text-[#8d8d8d]">hours</span>
+							<span class="text-sm text-muted-foreground">hours</span>
 						</div>
 					{:else}
 						<CarbonTag type="gray" size="sm">{sessionTimeoutText}h</CarbonTag>
@@ -311,17 +311,17 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		</CarbonTile>
 
-		<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
-			<div class="border-b border-[#393939] px-5 py-4">
+		<CarbonTile class="rounded-none !border-border !bg-card !p-0">
+			<div class="border-b border-border px-5 py-4">
 				<div class="flex flex-wrap items-start gap-3">
 					<div
-						class="flex h-10 w-10 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+						class="flex h-10 w-10 shrink-0 items-center justify-center border border-border bg-background"
 					>
-						<KeyRound class="h-5 w-5 text-[#78a9ff]" />
+						<KeyRound class="h-5 w-5 text-accent-text" />
 					</div>
 					<div class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
-							<h2 class="font-sans text-base font-semibold text-[#f4f4f4]">
+							<h2 class="font-sans text-base font-semibold text-foreground">
 								OIDC / Single Sign-On
 							</h2>
 							{#if config.oidcEnabled}
@@ -330,7 +330,7 @@ one at https://mozilla.org/MPL/2.0/.
 								</CarbonTag>
 							{/if}
 						</div>
-						<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">
+						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 							External identity provider integration
 						</p>
 					</div>
@@ -341,35 +341,35 @@ one at https://mozilla.org/MPL/2.0/.
 				{#if config.oidcEnabled}
 					<div class="grid gap-3">
 						{#if config.oidcIssuerUri}
-							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
-								<p class="text-xs text-[#8d8d8d]">Issuer URI</p>
-								<p class="mt-0.5 font-mono text-sm break-all text-[#f4f4f4]">
+							<div class="rounded-none border border-border bg-card p-3">
+								<p class="text-xs text-muted-foreground">Issuer URI</p>
+								<p class="mt-0.5 font-mono text-sm break-all text-foreground">
 									{config.oidcIssuerUri}
 								</p>
 							</div>
 						{/if}
 
 						{#if config.oidcClientId}
-							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
-								<p class="text-xs text-[#8d8d8d]">Client ID</p>
-								<p class="mt-0.5 font-mono text-sm break-all text-[#f4f4f4]">
+							<div class="rounded-none border border-border bg-card p-3">
+								<p class="text-xs text-muted-foreground">Client ID</p>
+								<p class="mt-0.5 font-mono text-sm break-all text-foreground">
 									{config.oidcClientId}
 								</p>
 							</div>
 						{/if}
 
 						{#if config.oidcRedirectUrl}
-							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
-								<p class="text-xs text-[#8d8d8d]">Redirect URL</p>
-								<p class="mt-0.5 font-mono text-sm break-all text-[#f4f4f4]">
+							<div class="rounded-none border border-border bg-card p-3">
+								<p class="text-xs text-muted-foreground">Redirect URL</p>
+								<p class="mt-0.5 font-mono text-sm break-all text-foreground">
 									{config.oidcRedirectUrl}
 								</p>
 							</div>
 						{/if}
 
 						{#if config.oidcScopes && config.oidcScopes.length > 0}
-							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
-								<p class="text-xs text-[#8d8d8d]">Scopes</p>
+							<div class="rounded-none border border-border bg-card p-3">
+								<p class="text-xs text-muted-foreground">Scopes</p>
 								<div class="mt-1 flex flex-wrap gap-1.5">
 									{#each config.oidcScopes as scope (scope)}
 										<CarbonTag type="gray" size="sm">{scope}</CarbonTag>
@@ -379,22 +379,20 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 
 						{#if config.oidcRoleClaim}
-							<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-3">
-								<p class="text-xs text-[#8d8d8d]">Role Claim</p>
-								<p class="mt-0.5 font-mono text-sm text-[#f4f4f4]">{config.oidcRoleClaim}</p>
+							<div class="rounded-none border border-border bg-card p-3">
+								<p class="text-xs text-muted-foreground">Role Claim</p>
+								<p class="mt-0.5 font-mono text-sm text-foreground">{config.oidcRoleClaim}</p>
 							</div>
 						{/if}
 					</div>
 				{:else}
-					<div
-						class="rounded-none border border-dashed border-[#525252] bg-[#1e1e1e] p-4 text-center"
-					>
-						<Globe class="mx-auto mb-2 h-8 w-8 text-[#8d8d8d]" />
-						<p class="text-sm text-[#a8a8a8]">
+					<div class="rounded-none border border-dashed border-border bg-card p-4 text-center">
+						<Globe class="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+						<p class="text-sm text-muted-foreground">
 							OIDC allows users to sign in with external identity providers like Keycloak, Authelia,
 							Google, or any OpenID Connect compatible service.
 						</p>
-						<p class="mt-2 text-xs text-[#8d8d8d]">
+						<p class="mt-2 text-xs text-muted-foreground">
 							OIDC must be configured outside the UI using one of the methods below.
 						</p>
 					</div>
@@ -402,7 +400,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<CarbonAccordion>
 						<CarbonAccordionItem title="config.yaml" bind:open={configYamlOpen}>
 							<pre
-								class="overflow-x-auto rounded-none bg-[#161616] p-3 font-mono text-xs text-[#c6c6c6]"><code
+								class="overflow-x-auto rounded-none bg-background p-3 font-mono text-xs text-muted-foreground"><code
 									>auth:
   oidc:
     enabled: true
@@ -417,7 +415,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 						<CarbonAccordionItem title="Docker Compose" bind:open={dockerComposeOpen}>
 							<pre
-								class="overflow-x-auto rounded-none bg-[#161616] p-3 font-mono text-xs text-[#c6c6c6]"><code
+								class="overflow-x-auto rounded-none bg-background p-3 font-mono text-xs text-muted-foreground"><code
 									>services:
   carbon-panel:
     environment:
@@ -432,35 +430,40 @@ one at https://mozilla.org/MPL/2.0/.
 						</CarbonAccordionItem>
 
 						<CarbonAccordionItem title="Environment Variables" bind:open={envVarsOpen}>
-							<div class="space-y-1.5 font-mono text-xs text-[#c6c6c6]">
-								<p><code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ENABLED</code></p>
+							<div class="space-y-1.5 font-mono text-xs text-muted-foreground">
 								<p>
-									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ISSUER_URI</code>
+									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ENABLED</code>
 								</p>
 								<p>
-									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_CLIENT_ID</code>
+									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ISSUER_URI</code>
 								</p>
 								<p>
-									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_CLIENT_SECRET</code
+									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_CLIENT_ID</code>
+								</p>
+								<p>
+									<code class="bg-background px-1.5 py-0.5"
+										>CARBONPANEL_AUTH_OIDC_CLIENT_SECRET</code
 									>
 								</p>
 								<p>
-									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_REDIRECT_URL</code>
+									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_REDIRECT_URL</code
+									>
 								</p>
-								<p><code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_SCOPES</code></p>
+								<p><code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_SCOPES</code></p>
 								<p>
-									<code class="bg-[#161616] px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ROLE_CLAIM</code>
+									<code class="bg-background px-1.5 py-0.5">CARBONPANEL_AUTH_OIDC_ROLE_CLAIM</code>
 								</p>
 							</div>
 						</CarbonAccordionItem>
 					</CarbonAccordion>
 
-					<p class="text-xs text-[#8d8d8d]">
+					<p class="text-xs text-muted-foreground">
 						Provider examples are available in the <a
 							href="https://docs.carbon-panel.app/introduction/"
 							target="_blank"
 							rel="noopener noreferrer"
-							class="text-[#78a9ff] underline hover:text-[#a6c8ff]">carbon-panel docs</a
+							class="text-accent-text underline hover:text-[var(--tag-blue-text)]"
+							>carbon-panel docs</a
 						>.
 					</p>
 				{/if}

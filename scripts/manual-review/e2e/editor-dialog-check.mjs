@@ -58,7 +58,9 @@ try {
     await fs.writeFile(path.join(outDir, 'editor.html'), `<html><head>${styles}</head><body><div id="app"></div><script type="module" src="entry.js"></script></body></html>`);
     server = await preview({ configFile: false, root: project, build: { outDir }, preview: { host: '127.0.0.1', port: 0 } });
     const base = `http://127.0.0.1:${server.httpServer.address().port}`;
-    const workers = assets.filter((name) => /worker.*\.js$/.test(name));
+    // Monaco 0.57 also emits a small shared `workers-*.js` chunk; only the five
+    // *.worker-*.js entry bundles are the worker targets this gate must serve.
+    const workers = assets.filter((name) => /\.worker-[^.]+\.js$/.test(name));
     assert.equal(workers.length, 5, 'all five production worker bundles must be emitted');
     for (const worker of workers) assert.equal((await fetch(`${base}/assets/${worker}`)).status, 200);
   } else {

@@ -53,12 +53,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <DialogPrimitive.Root bind:open>
-	<DialogContent class="border-[#393939] bg-[#161616] text-[#f4f4f4] sm:max-w-2xl">
+	<DialogContent class="border-border bg-background text-foreground sm:max-w-2xl">
 		<DialogHeader>
 			<DialogTitle class="flex items-center gap-2">
 				<Package class="h-4 w-4" /> Browse Datapacks
 			</DialogTitle>
-			<DialogDescription class="text-[#a8a8a8]">{description}</DialogDescription>
+			<DialogDescription class="text-muted-foreground">{description}</DialogDescription>
 		</DialogHeader>
 
 		<DatapackSearch {gameVersion} emptyHint="Search for datapacks to install into this world.">
@@ -66,7 +66,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<CarbonButton
 					onclick={() => installDatapack(d.id, d.name, d.indexer)}
 					disabled={installing[d.id]}
-					class="rounded-none bg-[#0f62fe] text-white"
+					class="rounded-none bg-primary text-white"
 				>
 					{#if installing[d.id]}<Loader2 class="h-4 w-4 animate-spin" />{:else}<Download
 							class="h-4 w-4"

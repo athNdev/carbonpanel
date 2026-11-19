@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MPL-2.0
+# Repository-side verifier and drift audit for the native OSS closure guard.
+# This cannot gate a Jira transition; the team-managed workflow does that.
+name: Acceptance evidence gate
+
+on:
+  pull_request:
+    paths:
+      - 'docs/acceptance/**'
+      - 'cmd/acceptance-evidence/**'
+      - 'internal/acceptanceevidence/**'
+      - '.github/workflows/acceptance-evidence.yml'
+      - 'scripts/acceptance-evidence-contract.test.mjs'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/acceptance/**'
+      - 'cmd/acceptance-evidence/**'
+      - 'internal/acceptanceevidence/**'
+      - '.github/workflows/acceptance-evidence.yml'
+      - 'scripts/acceptance-evidence-contract.test.mjs'
+  schedule:
+    # Weekly drift audit of PR merge SHA, exact CI run and deploy jobs.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validator regression suite
+        run: go test ./internal/acceptanceevidence/... ./cmd/acceptance-evidence/...
+      - name: Fail closed on incomplete acceptance evidence
+        run: go run ./cmd/acceptance-evidence validate -contract docs/acceptance/oss-acceptance-evidence.json
+
+  github-drift:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Audit exact PR/CI/deploy references
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run ./cmd/acceptance-evidence verify-github -contract docs/acceptance/oss-acceptance-evidence.json
+
+  workflow-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - run: node --test scripts/acceptance-evidence-contract.test.mjs

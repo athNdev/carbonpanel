@@ -24,7 +24,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:this={ref}
 	data-slot="table-cell"
 	class={cn(
-		'px-4 py-3 align-middle text-sm whitespace-nowrap text-[#f4f4f4] [&:has([role=checkbox])]:pr-0',
+		'px-4 py-3 align-middle text-sm whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0',
 		className
 	)}
 	{...restProps}

@@ -11,10 +11,16 @@ const inspector = readFileSync(
 	'utf8'
 );
 
-test('both studio pages share one export helper', () => {
-	assert.match(studioList, /from '.\/pack-export'/);
-	assert.match(exportDialog, /from '.\/pack-export'/);
+test('both studio pages share the extracted export workflow', () => {
+	assert.match(studioList, /from '\$lib\/features\/modpacks\/studio\/export'/);
+	assert.match(exportDialog, /from '\$lib\/features\/modpacks\/studio\/export'/);
 	assert.match(detail, /from '..\/export-dialog.svelte'/);
+});
+
+test('export callers inject the real transport into the extracted workflow', () => {
+	assert.match(studioList, /DEFAULT_EXPORT_OPTIONS,\s*\n\s*apiFetch/);
+	assert.match(exportDialog, /summary \},\s*\n\s*apiFetch/);
+	assert.doesNotMatch(studioList, /import\('\$lib\/api\/fetch'\)/);
 });
 
 test('studio list collapses every export format into one Export dropdown', () => {

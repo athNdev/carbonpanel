@@ -77,6 +77,65 @@ func TestCleanBundle(t *testing.T) {
 	}
 }
 
+// conceptWithBodyLines builds a valid Overview concept whose total line count
+// is the 7-line frontmatter plus bodyLines body lines.
+func conceptWithBodyLines(bodyLines int, title string) string {
+	var b strings.Builder
+	b.WriteString("---\ntype: Overview\ntitle: " + title + "\ndescription: Entry point.\nstatus: stable\nowners: [oss-runtime]\n---\n")
+	for i := 0; i < bodyLines; i++ {
+		b.WriteString("body line\n")
+	}
+	return b.String()
+}
+
+func TestConceptLineCap(t *testing.T) {
+	root := baseBundle(t)
+	// 7 frontmatter lines + 54 body lines = 61, one over the limit.
+	writeFile(t, root, "knowledge/overview.md", conceptWithBodyLines(54, "Overview"))
+	r := lint(root, true)
+	if !hasSubstring(r.Errors, "exceeds the 60-line limit") {
+		t.Fatalf("expected a concept line-cap error, got %v", r.Errors)
+	}
+}
+
+func TestConceptLineCapBoundary(t *testing.T) {
+	root := baseBundle(t)
+	// Exactly 60 lines must be accepted: the cap is inclusive.
+	writeFile(t, root, "knowledge/overview.md", conceptWithBodyLines(53, "Overview"))
+	if r := lint(root, true); len(r.Errors) != 0 {
+		t.Fatalf("a 60-line concept must pass, got %v", r.Errors)
+	}
+}
+
+func TestCountLines(t *testing.T) {
+	cases := map[string]int{
+		"":             0,
+		"one":          1,
+		"one\n":        1,
+		"one\ntwo":     2,
+		"one\ntwo\n":   2,
+		"one\ntwo\n\n": 3,
+	}
+	for in, want := range cases {
+		if got := countLines(in); got != want {
+			t.Fatalf("countLines(%q) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+func TestIndexLineCap(t *testing.T) {
+	root := baseBundle(t)
+	// Enough concepts in one directory to push the generated index past 150
+	// lines. Each concept contributes one index line plus section headers.
+	for i := 0; i < 160; i++ {
+		writeFile(t, root, fmt.Sprintf("knowledge/concepts/c%03d.md", i), conceptWithBodyLines(0, fmt.Sprintf("Concept %d", i)))
+	}
+	r := lint(root, true)
+	if !hasSubstring(r.Errors, "exceeds the 150-line limit") {
+		t.Fatalf("expected an index line-cap error, got %v", r.Errors)
+	}
+}
+
 func TestMissingType(t *testing.T) {
 	root := baseBundle(t)
 	writeFile(t, root, "knowledge/overview.md", `---

@@ -48,7 +48,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		downloadPackExport,
 		formatExportLabel,
 		type PackExportFormat
-	} from './pack-export';
+	} from '$lib/features/modpacks/studio/export';
 
 	interface PackSummary {
 		id: string;
@@ -133,7 +133,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	async function exportPack(packId: string, format: PackExportFormat, packName: string) {
 		exportingPack = `${packId}-${format}`;
 		try {
-			const result = await downloadPackExport(packId, packName, format, DEFAULT_EXPORT_OPTIONS);
+			const result = await downloadPackExport(
+				packId,
+				packName,
+				format,
+				DEFAULT_EXPORT_OPTIONS,
+				apiFetch
+			);
 			if (result.ok) {
 				toast.success(`Exported ${formatExportLabel(format)}`);
 			} else {

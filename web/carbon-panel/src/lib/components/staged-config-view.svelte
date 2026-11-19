@@ -166,14 +166,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<CarbonTile class="space-y-4 rounded-none border-[#393939]">
-	<div class="flex items-center justify-between border-b border-[#393939] pb-3">
+<CarbonTile class="space-y-4 rounded-none border-border">
+	<div class="flex items-center justify-between border-b border-border pb-3">
 		<div>
-			<h2 class="flex items-center gap-2 text-base font-semibold text-white">
+			<h2 class="flex items-center gap-2 text-base font-semibold text-foreground">
 				<Layers class="h-4 w-4 text-accent-text" />
 				Staged Config Rollout
 			</h2>
-			<p class="text-xs text-[#a8a8a8]">
+			<p class="text-xs text-muted-foreground">
 				Record config changes now, apply on next restart or a cron schedule.
 			</p>
 		</div>
@@ -181,15 +181,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	</div>
 
 	<!-- Stage form -->
-	<div class="space-y-3 rounded-none border border-[#393939] bg-[#161616] p-3">
+	<div class="space-y-3 rounded-none border border-border bg-background p-3">
 		<div class="space-y-1.5">
-			<label class="text-xs font-normal tracking-[0.32px] text-[#c6c6c6]"
+			<label class="text-xs font-normal tracking-[0.32px] text-muted-foreground"
 				>Config diff (JSON, vs live config)</label
 			>
 			<textarea
 				bind:value={stageJson}
 				rows={4}
-				class="w-full rounded-none border-b border-[#8d8d8d] bg-[#262626] p-3 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+				class="w-full rounded-none border-b border-border bg-card p-3 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 				placeholder={'{"motd": "Event night!"}'}
 			></textarea>
 		</div>
@@ -218,13 +218,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<CarbonInlineLoading description="Loading staged changes..." />
 		</div>
 	{:else if changes.length === 0}
-		<p class="py-4 text-center text-xs text-[#8d8d8d]">
+		<p class="py-4 text-center text-xs text-muted-foreground">
 			No staged changes. Stage a diff above to roll it out later.
 		</p>
 	{:else}
 		<div class="space-y-2">
 			{#each changes as change (change.id)}
-				<div class="space-y-2 rounded-none border border-[#393939] bg-[#161616] p-3">
+				<div class="space-y-2 rounded-none border border-border bg-background p-3">
 					<div class="flex flex-wrap items-center justify-between gap-2">
 						<div class="flex items-center gap-2">
 							{#if change.apply_mode === 'scheduled'}
@@ -235,7 +235,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							{:else}
 								<CarbonTag type="cyan" size="sm">on restart</CarbonTag>
 							{/if}
-							<span class="font-mono text-xs text-[#8d8d8d]">
+							<span class="font-mono text-xs text-muted-foreground">
 								{new Date(change.created_at).toLocaleString()}
 							</span>
 						</div>
@@ -254,7 +254,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								size="sm"
 								kind="ghost"
 								iconOnly
-								class="rounded-none text-[#da1e28] hover:bg-[#da1e28]/20"
+								class="rounded-none text-destructive-text hover:bg-destructive/20"
 								onclick={() => discard(change.id)}
 								title="Discard"
 								aria-label="Discard"
@@ -264,7 +264,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</div>
 					</div>
 					<pre
-						class="overflow-x-auto rounded-none border border-[#393939] bg-[#262626] p-2 font-mono text-xs text-[#c6c6c6]">{JSON.stringify(
+						class="overflow-x-auto rounded-none border border-border bg-card p-2 font-mono text-xs text-muted-foreground">{JSON.stringify(
 							parsedPayload(change.payload),
 							null,
 							2

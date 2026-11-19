@@ -13,7 +13,8 @@ import type {
 
 // Blank rows are dropped, keys/paths trimmed, values preserved, duplicate keys
 // use the last row. Persisted malformed JSON retains the existing empty-row
-// fallback; validation changes belong to a separate behavior change.
+// fallback; the *Detailed decoders report it explicitly so a caller can say so.
+// That is lossy tolerant decoding, not validation or rejection.
 export interface EnvVar {
 	key: string;
 	value: string;
@@ -50,28 +51,62 @@ export function volumesToJson(volumes: VolumeMount[]): string {
 	);
 }
 
-export function parseEnvVars(json: string): EnvVar[] {
+/** Rows plus an explicit flag for persisted JSON that could not be parsed. */
+export interface RowParseResult<T> {
+	rows: T[];
+	malformed: boolean;
+}
+
+/**
+ * Decode persisted environment JSON. A blank field is treated as `{}`; a
+ * non-blank parse failure yields the historical empty rows AND reports
+ * `malformed: true`. It is still not validation.
+ */
+export function parseEnvVarsDetailed(json: string): RowParseResult<EnvVar> {
+	const raw = json && json.trim() ? json : '{}';
 	try {
-		return Object.entries(JSON.parse(json || '{}')).map(([key, value]) => ({
-			key,
-			value: String(value)
-		}));
+		return {
+			rows: Object.entries(JSON.parse(raw)).map(([key, value]) => ({
+				key,
+				value: String(value)
+			})),
+			malformed: false
+		};
 	} catch {
-		return [];
+		return { rows: [], malformed: true };
 	}
 }
 
-export function parseVolumes(json: string): VolumeMount[] {
+/** Historical wrapper: returns only the rows, unchanged from before. */
+export function parseEnvVars(json: string): EnvVar[] {
+	return parseEnvVarsDetailed(json).rows;
+}
+
+/**
+ * Decode persisted volume JSON into hostPath/containerPath rows. The
+ * source/target and snake-case booleans are preserved; a non-blank parse
+ * failure yields empty rows AND reports `malformed: true`.
+ */
+export function parseVolumesDetailed(json: string): RowParseResult<VolumeMount> {
+	const raw = json && json.trim() ? json : '[]';
 	try {
-		return JSON.parse(json || '[]').map((v: Record<string, unknown>) => ({
-			hostPath: v.source || '',
-			containerPath: v.target || '',
-			readOnly: v.read_only || false,
-			createDir: v.create_dir || false
-		}));
+		return {
+			rows: JSON.parse(raw).map((v: Record<string, unknown>) => ({
+				hostPath: v.source || '',
+				containerPath: v.target || '',
+				readOnly: v.read_only || false,
+				createDir: v.create_dir || false
+			})),
+			malformed: false
+		};
 	} catch {
-		return [];
+		return { rows: [], malformed: true };
 	}
+}
+
+/** Historical wrapper: returns only the rows, unchanged from before. */
+export function parseVolumes(json: string): VolumeMount[] {
+	return parseVolumesDetailed(json).rows;
 }
 
 export function parsePorts(p: ModulePort[] | undefined): ModulePort[] {

@@ -55,6 +55,21 @@ const (
 	// PackwizServiceDeletePackProcedure is the fully-qualified name of the PackwizService's DeletePack
 	// RPC.
 	PackwizServiceDeletePackProcedure = "/carbonpanel.v1.PackwizService/DeletePack"
+	// PackwizServiceAddPackModProcedure is the fully-qualified name of the PackwizService's AddPackMod
+	// RPC.
+	PackwizServiceAddPackModProcedure = "/carbonpanel.v1.PackwizService/AddPackMod"
+	// PackwizServiceAddUrlModProcedure is the fully-qualified name of the PackwizService's AddUrlMod
+	// RPC.
+	PackwizServiceAddUrlModProcedure = "/carbonpanel.v1.PackwizService/AddUrlMod"
+	// PackwizServiceUpdatePackModProcedure is the fully-qualified name of the PackwizService's
+	// UpdatePackMod RPC.
+	PackwizServiceUpdatePackModProcedure = "/carbonpanel.v1.PackwizService/UpdatePackMod"
+	// PackwizServiceDeletePackModProcedure is the fully-qualified name of the PackwizService's
+	// DeletePackMod RPC.
+	PackwizServiceDeletePackModProcedure = "/carbonpanel.v1.PackwizService/DeletePackMod"
+	// PackwizServiceBatchPackModsProcedure is the fully-qualified name of the PackwizService's
+	// BatchPackMods RPC.
+	PackwizServiceBatchPackModsProcedure = "/carbonpanel.v1.PackwizService/BatchPackMods"
 )
 
 // PackwizServiceClient is a client for the carbonpanel.v1.PackwizService service.
@@ -71,6 +86,16 @@ type PackwizServiceClient interface {
 	CheckUpdates(context.Context, *connect.Request[v1.CheckUpdatesRequest]) (*connect.Response[v1.CheckUpdatesResponse], error)
 	// DeletePack removes a pack and its metadata.
 	DeletePack(context.Context, *connect.Request[v1.DeletePackRequest]) (*connect.Response[v1.DeletePackResponse], error)
+	// AddPackMod adds a mod entry to a pack, optionally resolving dependencies.
+	AddPackMod(context.Context, *connect.Request[v1.AddPackModRequest]) (*connect.Response[v1.AddPackModResponse], error)
+	// AddUrlMod adds a mod from a direct download URL.
+	AddUrlMod(context.Context, *connect.Request[v1.AddUrlModRequest]) (*connect.Response[v1.AddUrlModResponse], error)
+	// UpdatePackMod changes a mod's side and pinned flag.
+	UpdatePackMod(context.Context, *connect.Request[v1.UpdatePackModRequest]) (*connect.Response[v1.UpdatePackModResponse], error)
+	// DeletePackMod removes a mod from a pack.
+	DeletePackMod(context.Context, *connect.Request[v1.DeletePackModRequest]) (*connect.Response[v1.DeletePackModResponse], error)
+	// BatchPackMods applies one action to several mods in a pack.
+	BatchPackMods(context.Context, *connect.Request[v1.BatchPackModsRequest]) (*connect.Response[v1.BatchPackModsResponse], error)
 }
 
 // NewPackwizServiceClient constructs a client for the carbonpanel.v1.PackwizService service. By
@@ -120,17 +145,52 @@ func NewPackwizServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(packwizServiceMethods.ByName("DeletePack")),
 			connect.WithClientOptions(opts...),
 		),
+		addPackMod: connect.NewClient[v1.AddPackModRequest, v1.AddPackModResponse](
+			httpClient,
+			baseURL+PackwizServiceAddPackModProcedure,
+			connect.WithSchema(packwizServiceMethods.ByName("AddPackMod")),
+			connect.WithClientOptions(opts...),
+		),
+		addUrlMod: connect.NewClient[v1.AddUrlModRequest, v1.AddUrlModResponse](
+			httpClient,
+			baseURL+PackwizServiceAddUrlModProcedure,
+			connect.WithSchema(packwizServiceMethods.ByName("AddUrlMod")),
+			connect.WithClientOptions(opts...),
+		),
+		updatePackMod: connect.NewClient[v1.UpdatePackModRequest, v1.UpdatePackModResponse](
+			httpClient,
+			baseURL+PackwizServiceUpdatePackModProcedure,
+			connect.WithSchema(packwizServiceMethods.ByName("UpdatePackMod")),
+			connect.WithClientOptions(opts...),
+		),
+		deletePackMod: connect.NewClient[v1.DeletePackModRequest, v1.DeletePackModResponse](
+			httpClient,
+			baseURL+PackwizServiceDeletePackModProcedure,
+			connect.WithSchema(packwizServiceMethods.ByName("DeletePackMod")),
+			connect.WithClientOptions(opts...),
+		),
+		batchPackMods: connect.NewClient[v1.BatchPackModsRequest, v1.BatchPackModsResponse](
+			httpClient,
+			baseURL+PackwizServiceBatchPackModsProcedure,
+			connect.WithSchema(packwizServiceMethods.ByName("BatchPackMods")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // packwizServiceClient implements PackwizServiceClient.
 type packwizServiceClient struct {
-	listPacks    *connect.Client[v1.ListPacksRequest, v1.ListPacksResponse]
-	getPack      *connect.Client[v1.GetPackRequest, v1.GetPackResponse]
-	clonePack    *connect.Client[v1.ClonePackRequest, v1.ClonePackResponse]
-	refreshPack  *connect.Client[v1.RefreshPackRequest, v1.RefreshPackResponse]
-	checkUpdates *connect.Client[v1.CheckUpdatesRequest, v1.CheckUpdatesResponse]
-	deletePack   *connect.Client[v1.DeletePackRequest, v1.DeletePackResponse]
+	listPacks     *connect.Client[v1.ListPacksRequest, v1.ListPacksResponse]
+	getPack       *connect.Client[v1.GetPackRequest, v1.GetPackResponse]
+	clonePack     *connect.Client[v1.ClonePackRequest, v1.ClonePackResponse]
+	refreshPack   *connect.Client[v1.RefreshPackRequest, v1.RefreshPackResponse]
+	checkUpdates  *connect.Client[v1.CheckUpdatesRequest, v1.CheckUpdatesResponse]
+	deletePack    *connect.Client[v1.DeletePackRequest, v1.DeletePackResponse]
+	addPackMod    *connect.Client[v1.AddPackModRequest, v1.AddPackModResponse]
+	addUrlMod     *connect.Client[v1.AddUrlModRequest, v1.AddUrlModResponse]
+	updatePackMod *connect.Client[v1.UpdatePackModRequest, v1.UpdatePackModResponse]
+	deletePackMod *connect.Client[v1.DeletePackModRequest, v1.DeletePackModResponse]
+	batchPackMods *connect.Client[v1.BatchPackModsRequest, v1.BatchPackModsResponse]
 }
 
 // ListPacks calls carbonpanel.v1.PackwizService.ListPacks.
@@ -163,6 +223,31 @@ func (c *packwizServiceClient) DeletePack(ctx context.Context, req *connect.Requ
 	return c.deletePack.CallUnary(ctx, req)
 }
 
+// AddPackMod calls carbonpanel.v1.PackwizService.AddPackMod.
+func (c *packwizServiceClient) AddPackMod(ctx context.Context, req *connect.Request[v1.AddPackModRequest]) (*connect.Response[v1.AddPackModResponse], error) {
+	return c.addPackMod.CallUnary(ctx, req)
+}
+
+// AddUrlMod calls carbonpanel.v1.PackwizService.AddUrlMod.
+func (c *packwizServiceClient) AddUrlMod(ctx context.Context, req *connect.Request[v1.AddUrlModRequest]) (*connect.Response[v1.AddUrlModResponse], error) {
+	return c.addUrlMod.CallUnary(ctx, req)
+}
+
+// UpdatePackMod calls carbonpanel.v1.PackwizService.UpdatePackMod.
+func (c *packwizServiceClient) UpdatePackMod(ctx context.Context, req *connect.Request[v1.UpdatePackModRequest]) (*connect.Response[v1.UpdatePackModResponse], error) {
+	return c.updatePackMod.CallUnary(ctx, req)
+}
+
+// DeletePackMod calls carbonpanel.v1.PackwizService.DeletePackMod.
+func (c *packwizServiceClient) DeletePackMod(ctx context.Context, req *connect.Request[v1.DeletePackModRequest]) (*connect.Response[v1.DeletePackModResponse], error) {
+	return c.deletePackMod.CallUnary(ctx, req)
+}
+
+// BatchPackMods calls carbonpanel.v1.PackwizService.BatchPackMods.
+func (c *packwizServiceClient) BatchPackMods(ctx context.Context, req *connect.Request[v1.BatchPackModsRequest]) (*connect.Response[v1.BatchPackModsResponse], error) {
+	return c.batchPackMods.CallUnary(ctx, req)
+}
+
 // PackwizServiceHandler is an implementation of the carbonpanel.v1.PackwizService service.
 type PackwizServiceHandler interface {
 	// ListPacks lists available Packwiz projects.
@@ -177,6 +262,16 @@ type PackwizServiceHandler interface {
 	CheckUpdates(context.Context, *connect.Request[v1.CheckUpdatesRequest]) (*connect.Response[v1.CheckUpdatesResponse], error)
 	// DeletePack removes a pack and its metadata.
 	DeletePack(context.Context, *connect.Request[v1.DeletePackRequest]) (*connect.Response[v1.DeletePackResponse], error)
+	// AddPackMod adds a mod entry to a pack, optionally resolving dependencies.
+	AddPackMod(context.Context, *connect.Request[v1.AddPackModRequest]) (*connect.Response[v1.AddPackModResponse], error)
+	// AddUrlMod adds a mod from a direct download URL.
+	AddUrlMod(context.Context, *connect.Request[v1.AddUrlModRequest]) (*connect.Response[v1.AddUrlModResponse], error)
+	// UpdatePackMod changes a mod's side and pinned flag.
+	UpdatePackMod(context.Context, *connect.Request[v1.UpdatePackModRequest]) (*connect.Response[v1.UpdatePackModResponse], error)
+	// DeletePackMod removes a mod from a pack.
+	DeletePackMod(context.Context, *connect.Request[v1.DeletePackModRequest]) (*connect.Response[v1.DeletePackModResponse], error)
+	// BatchPackMods applies one action to several mods in a pack.
+	BatchPackMods(context.Context, *connect.Request[v1.BatchPackModsRequest]) (*connect.Response[v1.BatchPackModsResponse], error)
 }
 
 // NewPackwizServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -222,6 +317,36 @@ func NewPackwizServiceHandler(svc PackwizServiceHandler, opts ...connect.Handler
 		connect.WithSchema(packwizServiceMethods.ByName("DeletePack")),
 		connect.WithHandlerOptions(opts...),
 	)
+	packwizServiceAddPackModHandler := connect.NewUnaryHandler(
+		PackwizServiceAddPackModProcedure,
+		svc.AddPackMod,
+		connect.WithSchema(packwizServiceMethods.ByName("AddPackMod")),
+		connect.WithHandlerOptions(opts...),
+	)
+	packwizServiceAddUrlModHandler := connect.NewUnaryHandler(
+		PackwizServiceAddUrlModProcedure,
+		svc.AddUrlMod,
+		connect.WithSchema(packwizServiceMethods.ByName("AddUrlMod")),
+		connect.WithHandlerOptions(opts...),
+	)
+	packwizServiceUpdatePackModHandler := connect.NewUnaryHandler(
+		PackwizServiceUpdatePackModProcedure,
+		svc.UpdatePackMod,
+		connect.WithSchema(packwizServiceMethods.ByName("UpdatePackMod")),
+		connect.WithHandlerOptions(opts...),
+	)
+	packwizServiceDeletePackModHandler := connect.NewUnaryHandler(
+		PackwizServiceDeletePackModProcedure,
+		svc.DeletePackMod,
+		connect.WithSchema(packwizServiceMethods.ByName("DeletePackMod")),
+		connect.WithHandlerOptions(opts...),
+	)
+	packwizServiceBatchPackModsHandler := connect.NewUnaryHandler(
+		PackwizServiceBatchPackModsProcedure,
+		svc.BatchPackMods,
+		connect.WithSchema(packwizServiceMethods.ByName("BatchPackMods")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/carbonpanel.v1.PackwizService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case PackwizServiceListPacksProcedure:
@@ -236,6 +361,16 @@ func NewPackwizServiceHandler(svc PackwizServiceHandler, opts ...connect.Handler
 			packwizServiceCheckUpdatesHandler.ServeHTTP(w, r)
 		case PackwizServiceDeletePackProcedure:
 			packwizServiceDeletePackHandler.ServeHTTP(w, r)
+		case PackwizServiceAddPackModProcedure:
+			packwizServiceAddPackModHandler.ServeHTTP(w, r)
+		case PackwizServiceAddUrlModProcedure:
+			packwizServiceAddUrlModHandler.ServeHTTP(w, r)
+		case PackwizServiceUpdatePackModProcedure:
+			packwizServiceUpdatePackModHandler.ServeHTTP(w, r)
+		case PackwizServiceDeletePackModProcedure:
+			packwizServiceDeletePackModHandler.ServeHTTP(w, r)
+		case PackwizServiceBatchPackModsProcedure:
+			packwizServiceBatchPackModsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -267,4 +402,24 @@ func (UnimplementedPackwizServiceHandler) CheckUpdates(context.Context, *connect
 
 func (UnimplementedPackwizServiceHandler) DeletePack(context.Context, *connect.Request[v1.DeletePackRequest]) (*connect.Response[v1.DeletePackResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.PackwizService.DeletePack is not implemented"))
+}
+
+func (UnimplementedPackwizServiceHandler) AddPackMod(context.Context, *connect.Request[v1.AddPackModRequest]) (*connect.Response[v1.AddPackModResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.PackwizService.AddPackMod is not implemented"))
+}
+
+func (UnimplementedPackwizServiceHandler) AddUrlMod(context.Context, *connect.Request[v1.AddUrlModRequest]) (*connect.Response[v1.AddUrlModResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.PackwizService.AddUrlMod is not implemented"))
+}
+
+func (UnimplementedPackwizServiceHandler) UpdatePackMod(context.Context, *connect.Request[v1.UpdatePackModRequest]) (*connect.Response[v1.UpdatePackModResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.PackwizService.UpdatePackMod is not implemented"))
+}
+
+func (UnimplementedPackwizServiceHandler) DeletePackMod(context.Context, *connect.Request[v1.DeletePackModRequest]) (*connect.Response[v1.DeletePackModResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.PackwizService.DeletePackMod is not implemented"))
+}
+
+func (UnimplementedPackwizServiceHandler) BatchPackMods(context.Context, *connect.Request[v1.BatchPackModsRequest]) (*connect.Response[v1.BatchPackModsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.PackwizService.BatchPackMods is not implemented"))
 }

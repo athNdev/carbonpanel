@@ -25,7 +25,15 @@ import {
 } from '$lib/proto/carbonpanel/v1/websocket_pb';
 import { authStore } from '$lib/stores/auth';
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'authenticated';
+// `signed-out` is terminal for this client: the server rejected the
+// credentials. It must not be rendered as a reconnect spinner or followed by
+// background retries; a new login creates a new client connection.
+export type ConnectionState =
+	| 'disconnected'
+	| 'connecting'
+	| 'connected'
+	| 'authenticated'
+	| 'signed-out';
 
 export interface WebSocketState {
 	connectionState: ConnectionState;
@@ -191,6 +199,34 @@ class WebSocketClient {
 		this.subscriptions.clear();
 	}
 
+	/**
+	 * AUTH_FAIL is a terminal credential rejection, not a transport failure.
+	 * Invalidate this connection generation before closing so no late socket
+	 * event, timer or queued retry can reopen it, then leave an explicit
+	 * signed-out state and clear the local session like an RPC 401 does.
+	 */
+	private failAuthentication(generation: number): void {
+		if (generation !== this.generation) return;
+		++this.generation;
+		const socket = this.socket;
+		this.socket = null;
+		if (socket) {
+			try {
+				socket.close(1000, 'Authentication failed');
+			} catch {
+				// Already closing/closed; the generation guard makes late events inert.
+			}
+		}
+		this.logBuffer.clear();
+		this.cleanup();
+		this.subscriptions.clear();
+		this.reconnectAttempts = 0;
+		this.state.connectionState = 'signed-out';
+		// Mirror the RPC Unauthenticated interceptor: clear local credentials
+		// and return to login instead of spinning on a rejected token.
+		void authStore.logout();
+	}
+
 	reconnect(): void {
 		++this.generation;
 		this.cleanup();
@@ -306,6 +342,7 @@ class WebSocketClient {
 				case WSMessageType.WS_MESSAGE_TYPE_AUTH_FAIL:
 					console.error('[WS] Auth failed:', msg.payload.value);
 					this.state.error = 'Authentication failed';
+					this.failAuthentication(generation);
 					break;
 
 				case WSMessageType.WS_MESSAGE_TYPE_SUBSCRIBED:

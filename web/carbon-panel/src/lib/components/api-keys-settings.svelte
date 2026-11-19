@@ -135,28 +135,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <div class="space-y-6">
 	<!-- CurseForge API Key Card -->
-	<div class="space-y-4 rounded-none border border-[#393939] bg-[#262626] p-5 shadow-none">
-		<div class="flex items-start justify-between border-b border-[#393939] pb-4">
+	<div class="space-y-4 rounded-none border border-border bg-card p-5 shadow-none">
+		<div class="flex items-start justify-between border-b border-border pb-4">
 			<div class="space-y-1">
-				<h3 class="flex items-center gap-2 text-base font-normal text-[#f4f4f4]">
+				<h3 class="flex items-center gap-2 text-base font-normal text-foreground">
 					<Key class="h-4 w-4 text-accent-text" />
 					CurseForge API Key
 				</h3>
-				<p class="text-xs text-[#a8a8a8]">
+				<p class="text-xs text-muted-foreground">
 					Required to search, browse, and synchronize CurseForge modpacks and mods.
 				</p>
 			</div>
 			<div>
 				{#if cfApiKey.trim()}
 					<span
-						class="inline-flex items-center gap-1 rounded-none border border-[#24a148] bg-[#24a148]/20 px-2 py-0.5 font-mono text-xs text-[#42be65]"
+						class="inline-flex items-center gap-1 rounded-none border border-success bg-success/20 px-2 py-0.5 font-mono text-xs text-success-text"
 					>
 						<CheckCircle2 class="h-3 w-3" />
 						Configured
 					</span>
 				{:else}
 					<span
-						class="inline-flex items-center gap-1 rounded-none border border-[#da1e28] bg-[#da1e28]/20 px-2 py-0.5 font-mono text-xs text-[#ff8389]"
+						class="inline-flex items-center gap-1 rounded-none border border-destructive bg-destructive/20 px-2 py-0.5 font-mono text-xs text-destructive-text"
 					>
 						<AlertCircle class="h-3 w-3" />
 						Not Configured
@@ -166,8 +166,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</div>
 
 		<div class="space-y-4">
-			<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-4 text-xs text-[#a8a8a8]">
-				<p class="font-medium text-[#f4f4f4]">How to get a CurseForge API Key:</p>
+			<div class="rounded-none border border-border bg-card p-4 text-xs text-muted-foreground">
+				<p class="font-medium text-foreground">How to get a CurseForge API Key:</p>
 				<ol class="mt-2 list-inside list-decimal space-y-1">
 					<li>
 						Log in to the
@@ -175,7 +175,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							href="https://console.curseforge.com/#/api-keys"
 							target="_blank"
 							rel="noopener noreferrer"
-							class="inline-flex items-center gap-1 font-medium text-[#78a9ff] hover:underline"
+							class="inline-flex items-center gap-1 font-medium text-accent-text hover:underline"
 						>
 							CurseForge Developer Console <ExternalLink class="h-3 w-3" />
 						</a>.
@@ -193,7 +193,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					revealable
 					placeholder="$2a$10$..."
 					bind:value={cfApiKey}
-					class="min-w-0 flex-1 font-mono [&_input]:bg-[#161616]"
+					class="min-w-0 flex-1 font-mono [&_input]:bg-background"
 				/>
 				<CarbonButton
 					kind="tertiary"
@@ -216,9 +216,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{#if cfTestResult.valid}
 					<div
 						role="status"
-						class="flex gap-3 rounded-none border border-[#24a148]/40 bg-[#24a148]/10 p-3 text-[#42be65]"
+						class="flex gap-3 rounded-none border border-success/40 bg-success/10 p-3 text-success-text"
 					>
-						<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-[#42be65]" />
+						<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-success-text" />
 						<div class="space-y-0.5">
 							<p class="text-xs font-medium">Connection Valid</p>
 							<p class="text-xs">{cfTestResult.message}</p>
@@ -227,9 +227,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{:else}
 					<div
 						role="alert"
-						class="flex gap-3 rounded-none border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-[#ff8389]"
+						class="flex gap-3 rounded-none border border-destructive/40 bg-destructive/10 p-3 text-destructive-text"
 					>
-						<XCircle class="mt-0.5 h-4 w-4 shrink-0 text-[#da1e28]" />
+						<XCircle class="mt-0.5 h-4 w-4 shrink-0 text-destructive-text" />
 						<div class="space-y-0.5">
 							<p class="text-xs font-medium">Validation Failed</p>
 							<p class="text-xs">{cfTestResult.message}</p>
@@ -241,28 +241,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	</div>
 
 	<!-- Modrinth Configuration Card -->
-	<div class="space-y-4 rounded-none border border-[#393939] bg-[#262626] p-5 shadow-none">
-		<div class="flex items-start justify-between border-b border-[#393939] pb-4">
+	<div class="space-y-4 rounded-none border border-border bg-card p-5 shadow-none">
+		<div class="flex items-start justify-between border-b border-border pb-4">
 			<div class="space-y-1">
-				<h3 class="flex items-center gap-2 text-base font-normal text-[#f4f4f4]">
+				<h3 class="flex items-center gap-2 text-base font-normal text-foreground">
 					<Key class="h-4 w-4 text-accent-text" />
 					Modrinth Credentials & User-Agent
 				</h3>
-				<p class="text-xs text-[#a8a8a8]">
+				<p class="text-xs text-muted-foreground">
 					Configure Modrinth API authentication token and identification headers.
 				</p>
 			</div>
 			<div>
 				{#if modrinthToken.trim()}
 					<span
-						class="inline-flex items-center gap-1 rounded-none border border-[#24a148] bg-[#24a148]/20 px-2 py-0.5 font-mono text-xs text-[#42be65]"
+						class="inline-flex items-center gap-1 rounded-none border border-success bg-success/20 px-2 py-0.5 font-mono text-xs text-success-text"
 					>
 						<CheckCircle2 class="h-3 w-3" />
 						Authenticated
 					</span>
 				{:else}
 					<span
-						class="inline-flex items-center gap-1 rounded-none border border-[#525252] bg-transparent px-2 py-0.5 font-mono text-xs text-[#c6c6c6]"
+						class="inline-flex items-center gap-1 rounded-none border border-border bg-transparent px-2 py-0.5 font-mono text-xs text-muted-foreground"
 					>
 						Public Access
 					</span>
@@ -271,8 +271,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</div>
 
 		<div class="space-y-4">
-			<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-4 text-xs text-[#a8a8a8]">
-				<p class="font-medium text-[#f4f4f4]">
+			<div class="rounded-none border border-border bg-card p-4 text-xs text-muted-foreground">
+				<p class="font-medium text-foreground">
 					Modrinth modpack and mod indexing works publicly without authentication. Supplying a
 					Personal Access Token (PAT) unlocks elevated rate limits and enables accessing private or
 					unlisted projects.
@@ -283,7 +283,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						href="https://modrinth.com/settings/pats"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="inline-flex items-center gap-1 font-medium text-[#78a9ff] hover:underline"
+						class="inline-flex items-center gap-1 font-medium text-accent-text hover:underline"
 					>
 						Modrinth PAT Settings <ExternalLink class="h-3 w-3" />
 					</a>.
@@ -297,7 +297,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				revealable
 				placeholder="mrp_..."
 				bind:value={modrinthToken}
-				class="font-mono [&_input]:bg-[#161616]"
+				class="font-mono [&_input]:bg-background"
 			/>
 
 			<CarbonTextInput
@@ -306,7 +306,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				placeholder="CarbonPanel/1.0 (contact@example.com)"
 				bind:value={modrinthUserAgent}
 				helperText="Modrinth API policy encourages client identification including application name and contact info."
-				class="font-mono [&_input]:bg-[#161616]"
+				class="font-mono [&_input]:bg-background"
 			/>
 
 			<div class="pt-2">
@@ -331,9 +331,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{#if modrinthTestResult.valid}
 					<div
 						role="status"
-						class="flex gap-3 rounded-none border border-[#24a148]/40 bg-[#24a148]/10 p-3 text-[#42be65]"
+						class="flex gap-3 rounded-none border border-success/40 bg-success/10 p-3 text-success-text"
 					>
-						<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-[#42be65]" />
+						<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-success-text" />
 						<div class="space-y-0.5">
 							<p class="text-xs font-medium">Connection Valid</p>
 							<p class="text-xs">{modrinthTestResult.message}</p>
@@ -342,9 +342,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{:else}
 					<div
 						role="alert"
-						class="flex gap-3 rounded-none border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-[#ff8389]"
+						class="flex gap-3 rounded-none border border-destructive/40 bg-destructive/10 p-3 text-destructive-text"
 					>
-						<XCircle class="mt-0.5 h-4 w-4 shrink-0 text-[#da1e28]" />
+						<XCircle class="mt-0.5 h-4 w-4 shrink-0 text-destructive-text" />
 						<div class="space-y-0.5">
 							<p class="text-xs font-medium">Validation Failed</p>
 							<p class="text-xs">{modrinthTestResult.message}</p>
