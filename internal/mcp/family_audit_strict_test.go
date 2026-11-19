@@ -7,8 +7,11 @@
 
 // Package mcp: STRICT full-coverage gate. This test is excluded from ordinary
 // `go test ./...` by the mcpfullcoverage build tag and is invoked only by the
-// explicit distribution-verify command. It remains RED for the 9 PENDING
-// streaming operations; it is never waived or flipped to green.
+// explicit distribution-verify command. It is GREEN only while every supported
+// operation is LISTED, REACHABLE and VERIFIED with executable tools/call
+// evidence; the byte-transport lanes are now mounted and the PENDING inventory
+// is empty. The gate is never waived: adding an unmounted operation back to
+// PendingInventory re-reds it, and no skip or tolerance is permitted.
 package mcp
 
 import (
@@ -61,7 +64,8 @@ func TestFamilyAuditFullCoverage(t *testing.T) {
 	if missing != 0 {
 		t.Errorf("OSS-375 STRICT FULL-COVERAGE GATE: %d supported operations are not fully covered "+
 			"(%d PENDING); live: supported=%d listed=%d reachable=%d verified=%d excluded=%d. "+
-			"Publication is BLOCKED until the PENDING inventory is empty.",
+			"Publication is BLOCKED until every supported operation has real production "+
+			"tools/call evidence and the PENDING inventory is empty.",
 			missing, pending, len(matrix.Operations)-liveExcludedN, liveListedN,
 			liveReachableN, liveVerifiedN, liveExcludedN)
 	}

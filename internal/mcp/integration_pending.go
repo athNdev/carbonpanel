@@ -24,6 +24,14 @@
 //   - /carbonpanel.v1.UploadService/InitUpload -> upload_service_init_upload;
 //     /carbonpanel.v1.UploadService/UploadChunk -> upload_service_upload_chunk.
 //
+// The shared invocation harness proves the typed RPC, argument mapping,
+// outcome and scope signals through the canonical catalog tool for each
+// procedure (get_file, export_world, save_uploaded_file, ...). The newly
+// mounted byte-transport tools are additionally driven end to end by their
+// own production-NewServer stdio fixtures (family_download_tools_test.go,
+// family_upload_tools_test.go) and by integration_byte_path_mount_test.go;
+// both layers are required for the retired holds to be honest.
+//
 // Every tool reaches the controller only through a generated Connect client
 // behind the production auth interceptor. Bytes move through the controller-
 // owned bounded frame RPCs; the gateway holds no storage handle and never

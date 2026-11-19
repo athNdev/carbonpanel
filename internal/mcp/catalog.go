@@ -195,10 +195,10 @@ func init() {
 		}
 	}
 	for _, e := range rawCatalogEntries {
-		// Several registered capability tools can share one audited procedure
-		// (for example the scoped stream tools). The canonical first-slice tool
-		// is generated first, so keep the first match and never let a later
-		// capability tool overwrite the catalog's declared tool name.
+		// `exposed` already holds the highest-precedence spec for each procedure
+		// (see sourcePriority above). Capability tools from the stream, download
+		// and upload lanes share a procedure but never overwrite the catalog's
+		// declared tool, class or confirmation flag.
 		if spec, ok := exposed[e.Procedure]; ok && e.Tool == "" {
 			e.Tool = spec.Name
 			e.Class = spec.Class

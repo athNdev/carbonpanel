@@ -12,14 +12,18 @@ import (
 )
 
 // isCapabilityTool reports whether a tool is a deliberately procedure-sharing
-// capability hand-off rather than a canonical catalog tool. Each such tool has
-// a distinct name and its own executable stdio fixture.
+// capability hand-off rather than a canonical catalog tool. The set is explicit:
+// a prefix match would also exempt future canonical tools such as
+// download_archive from the duplicate-procedure guard. Each listed tool has a
+// distinct name and its own executable stdio fixture.
 func isCapabilityTool(name string) bool {
-	if strings.HasPrefix(name, "scoped_stream_") || strings.HasPrefix(name, "download_") {
+	if strings.HasPrefix(name, "scoped_stream_") {
 		return true
 	}
 	switch name {
-	case UploadToolSaveUploadedFile, UploadToolInitUpload, UploadToolUploadChunk, UploadToolStreamCommit:
+	case "download_get_file", "download_init_file", "download_archive_bundle",
+		"download_export_world_bundle", "download_stream",
+		UploadToolSaveUploadedFile, UploadToolInitUpload, UploadToolUploadChunk, UploadToolStreamCommit:
 		return true
 	default:
 		return false

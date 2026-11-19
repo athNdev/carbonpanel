@@ -349,8 +349,8 @@ func uploadFilename(tool, name string) error {
 }
 
 // uploadTool registers one upload-family tool with an explicit spec. It respects
-// the production registration allowlist (an isolated family-slice test server
-// is unbound and therefore allows the full hand-off set).
+// the production registration allowlist; a directly constructed (unbound) test
+// server allows the full hand-off set, while the combined suite uses NewServer.
 func uploadTool[In any](s *sdkmcp.Server, spec ToolSpec, clients *Clients, run func(context.Context, *Clients, In) (any, error)) {
 	if !toolAllowedOn(s, spec.Name) {
 		return

@@ -8,8 +8,9 @@
 // Tools that the OSS-375 audit classifies OUT OF SCOPE are never inserted into
 // a production tool set. The policy is attached to the server instance by
 // NewServer before any add* helper runs, so no excluded tool is momentarily
-// mounted and then removed. Family slice tests build isolated servers that are
-// deliberately not policy-bound; they verify the family hand-off itself.
+// mounted and then removed. Servers built outside NewServer are unbound and
+// allow their full hand-off set; the combined suite now uses NewServer
+// throughout, so production registration is what is actually exercised.
 package mcp
 
 import (
@@ -31,9 +32,9 @@ func bindRegistrationPolicy(s *sdkmcp.Server) map[string]bool {
 	return allowed
 }
 
-// toolAllowedOn reports whether a tool may be added to s. Only production
-// servers created by NewServer are policy-bound; isolated family slice tests
-// keep their own complete hand-off set.
+// toolAllowedOn reports whether a tool may be added to s. Servers created by
+// NewServer are policy-bound; a server built directly with sdkmcp.NewServer is
+// unbound and keeps its own complete hand-off set.
 func toolAllowedOn(s *sdkmcp.Server, name string) bool {
 	v, ok := registrationPolicies.Load(s)
 	if !ok {

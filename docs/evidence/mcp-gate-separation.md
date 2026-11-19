@@ -1,6 +1,8 @@
 # MCP gate separation evidence
 
-Both gates are recorded from pinned Go 1.26.11 on the exact head of this branch.
+Both gates are recorded from pinned Go 1.26.11. Section 2 is the HISTORICAL
+baseline that motivated the byte-transport work; the current green result is
+recorded in section 2a.
 
 ## 1. Ordinary gate — PASS
 
@@ -17,7 +19,7 @@ with a reason and follow-up, no duplicates, no missing or extra entries) and
 requires every supported non-pending operation to be LISTED, REACHABLE and
 VERIFIED with executable `tools/call` evidence. No skips, no waivers.
 
-## 2. Strict full-coverage / publication gate — FAIL (intended)
+## 2. Strict full-coverage / publication gate — historical FAIL (superseded by 2a)
 
 Command: `bash scripts/mcp-full-coverage-gate.sh`, equivalent to
 `go test -tags mcpfullcoverage ./internal/mcp/ -count=1 -run TestFamilyAuditFullCoverage -v`.
@@ -27,10 +29,22 @@ family_audit_strict_test.go:62: OSS-375 STRICT FULL-COVERAGE GATE: 9 supported o
 --- FAIL: TestFamilyAuditFullCoverage
 ```
 
-Exactly 9 gaps are listed: `DownloadArchive`, `ExportWorld`, `GetFile`,
+Exactly 9 gaps were listed: `DownloadArchive`, `ExportWorld`, `GetFile`,
 `InitFileDownload`, `SaveUploadedFile`, `InitUpload`, `UploadChunk`,
 `rest_upload_stream`, `rest_download_stream`. The strict gate is not part of
-ordinary tests (`mcpfullcoverage` build tag) and is not waived.
+ordinary tests (`mcpfullcoverage` build tag) and was never waived.
+
+## 2a. Strict full-coverage / publication gate — current PASS
+
+After the upload/download byte-transport lanes were mounted in production, the
+same command passes. The exact nine operations above have production
+`tools/call` evidence through the generated upload/download tool sets; the gate
+was not weakened. `PendingInventory` is empty (0 entries) and the ordinary
+gate now reports `201/201 supported operations verified`. Live counts:
+`supported=201 listed=201 reachable=201 verified=201 excluded=72`.
+Per-family evidence includes `FileService=17/17`, `UploadService=4/4`,
+`surface=3/3`. The hold mechanism remains live: adding an unmounted operation
+back to `PendingInventory` re-reds both gates.
 
 ## 3. Publication blocking
 

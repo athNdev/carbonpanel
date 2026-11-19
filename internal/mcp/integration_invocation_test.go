@@ -260,7 +260,8 @@ func collectInvocationEvidence(t *testing.T) map[string]OperationInvocationEvide
 }
 
 func toolSpecForProcedure(procedure string) (ToolSpec, bool) {
-	// Prefer the canonical catalog tool (get_file, export_world, ...) over a
+	// Prefer the canonical catalog tool for the procedure (get_file,
+	// export_world, save_uploaded_file, init_upload, ...) over a
 	// procedure-sharing capability tool (download_get_file,
 	// download_export_world_bundle, ...). The canonical spec owns the pinned
 	// argument table that assertTypedFields understands; capability tools have
