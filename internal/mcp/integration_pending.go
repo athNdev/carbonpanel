@@ -15,7 +15,20 @@
 // is genuine (see integration_stream_entrypoint_test.go), but the strict gate
 // is deliberately left RED rather than waived; no enabled-but-unusable tools
 // are advertised.
+//
+// COUNT CLARITY (reviewed at exact head 0752403b318dcdbc4d8e62a3aef8ff7dd020ce23):
+// PendingOperationCount is the PENDING-OPERATION count and is 9. The "four"
+// elsewhere in this file and in architecture/mcp-server.md refers only to the
+// number of MOUNTED scoped_stream_* tools, never to pending operations. The
+// number 4 also appears as VerifiedSurfaces in the STRICT gate's matrix-baseline
+// log; that is a verified-surface count. Neither is a pending count. The
+// STRICT gate at this head reports exactly 9 gap lines, matching this list.
 package mcp
+
+// PendingOperationCount is the authoritative, reviewable size of the pending
+// set. Keep it in sync with PendingInventory; integration_pending_test.go
+// pins both the count and the exact operation IDs.
+const PendingOperationCount = 9
 
 // PendingOperation is one operation with no production authorization/
 // transport path yet.
