@@ -129,18 +129,21 @@ The release also includes `openapi.yaml`, `release-manifest.json`, and
 multi-architecture Docker image digest. Both command-line tools support
 `--version` without starting the service or loading configuration.
 
-Download `checksums.txt` beside the archive and verify before extracting:
+Download `checksums.txt` beside the archive and verify before extracting. The
+concrete commands below use the current stable 1.0.40 asset names — the files
+you can actually download today. A future release uses the same pattern with
+its own version:
 
 ```sh
 # Linux; verifies whichever listed files you downloaded.
 sha256sum --check --ignore-missing checksums.txt
 # macOS: compare this output with the matching line in checksums.txt.
-shasum -a 256 carbon-panel_v2.0.0_darwin_arm64.tar.gz
+shasum -a 256 carbon-panel_v1.0.40_darwin_arm64.tar.gz
 ```
 
 ```powershell
 # Windows: compare this hash with the matching line in checksums.txt.
-Get-FileHash .\carbon-panel_v2.0.0_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\carbon-panel_v1.0.40_windows_amd64.zip -Algorithm SHA256
 ```
 
 Checksums detect changed downloads; they are not a code-signing certificate.
