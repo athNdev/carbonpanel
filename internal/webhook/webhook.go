@@ -225,14 +225,14 @@ func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
 	// usable for homelab receivers like Home Assistant. This closes a
 	// post-auth SSRF where an arbitrary webhook URL could reach panel-internal
 	// or metadata endpoints.
-	client := utils.NewSafeHTTPClient(timeout, true)
+	client := utils.NewSafeHTTPClientForEgress(timeout, utils.EgressClassWebhook, true)
 	resp, err := client.Do(req)
 	result.DurationMs = time.Since(start).Milliseconds()
 	if err != nil {
 		result.ErrorMessage = err.Error()
 		return result
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	result.ResponseCode = resp.StatusCode
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

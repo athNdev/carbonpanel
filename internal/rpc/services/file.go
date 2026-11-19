@@ -165,11 +165,23 @@ type FileService struct {
 	jobCancel   context.CancelFunc
 	jobWait     sync.WaitGroup
 	jobWaitDone sync.Once
+
+	// allowPrivateArchiveEgress is the explicit operator opt-in for remote
+	// archive URLs that target RFC1918 addresses. It defaults to false so a
+	// user-supplied URL cannot reach a private network without configuration.
+	allowPrivateArchiveEgress bool
 }
 
 // SetStorageResolver selects the storage transport before the service starts.
 func (s *FileService) SetStorageResolver(resolver *nodestorage.Resolver) {
 	s.storageResolver = resolver
+}
+
+// SetAllowPrivateArchiveEgress grants the explicit archive egress exception
+// from operator configuration. Loopback and link-local targets stay blocked
+// by the SSRF guard regardless of this flag.
+func (s *FileService) SetAllowPrivateArchiveEgress(allow bool) {
+	s.allowPrivateArchiveEgress = allow
 }
 
 // NewFileService creates a new file service
@@ -891,11 +903,14 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	// Validate URL against SSRF (allow homelab private network if needed)
-	_, err = utils.ValidateURL(rawURL, true)
-	if err != nil {
-		s.log.Warn("SSRF check blocked remote archive URL %s: %v", rawURL, err)
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("SSRF guard blocked URL: %w", err))
+	// Archive egress is its own policy: private RFC1918 targets require the
+	// explicit operator opt-in. No raw URL (which may embed credentials) is
+	// logged or returned to the caller.
+	redactedURL := utils.RedactURL(rawURL)
+	if _, err = utils.ValidateURLForEgress(rawURL, utils.EgressClassArchive, s.allowPrivateArchiveEgress); err != nil {
+		s.log.Warn("archive egress policy blocked URL %s: %v", redactedURL, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("archive egress policy blocked URL %s", redactedURL))
 	}
 
 	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
@@ -938,7 +953,7 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		defer op.markCompletedAt()
 		defer release()
 
-		client := utils.NewSafeHTTPClient(15*time.Minute, true)
+		client := utils.NewSafeHTTPClientForEgress(15*time.Minute, utils.EgressClassArchive, s.allowPrivateArchiveEgress)
 		httpReq, err := http.NewRequestWithContext(detachedCtx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			op.fail(fmt.Sprintf("failed to create HTTP request: %v", err))
@@ -1127,7 +1142,7 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 		defer release()
 		defer func() { _ = acc.Close() }()
 
-		client := utils.NewSafeHTTPClient(15*time.Minute, true)
+		client := utils.NewSafeHTTPClientForEgress(15*time.Minute, utils.EgressClassArchive, s.allowPrivateArchiveEgress)
 		httpReq, err := http.NewRequestWithContext(detachedCtx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			op.fail(fmt.Sprintf("failed to create HTTP request: %v", err))

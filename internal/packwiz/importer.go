@@ -7,9 +7,11 @@ package packwiz
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,10 +22,126 @@ import (
 	toml "github.com/pelletier/go-toml/v2"
 
 	"github.com/athNdev/carbon-panel/pkg/files"
+	"github.com/athNdev/carbon-panel/pkg/utils"
 )
 
-// maxExtractedOverrideFileSize guards against decompression bomb attacks and disk exhaustion (500MB per file).
-const maxExtractedOverrideFileSize = 500 * 1024 * 1024
+// extractArchiveBounded is the single import entry point into the shared
+// bounded extractor. The uploaded reader is spilled to a temp .zip so the same
+// pkg/files.ExtractArchiveWithLimits implementation used for generic archives
+// governs imports: aggregate/per-file/entry caps, symlink and device refusal,
+// and symlink-evaluating traversal containment. A hostile archive is rejected
+// in a staging directory, before any pack directory is written.
+//
+// The returned cleanup must always be called. The staging path is only valid
+// until then.
+func (m *Manager) extractArchiveBounded(r io.ReaderAt, size int64) (staging string, cleanup func(), err error) {
+	if size < 0 {
+		return "", func() {}, fmt.Errorf("invalid archive size %d", size)
+	}
+	tmp, err := os.CreateTemp("", "carbon-panel-import-*.zip")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("failed to create import temp file: %w", err)
+	}
+	cleanup = func() { _ = os.Remove(tmp.Name()) }
+
+	if _, err := io.Copy(tmp, io.NewSectionReader(r, 0, size)); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return "", func() {}, fmt.Errorf("failed to stage uploaded archive: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("failed to close staged archive: %w", err)
+	}
+
+	staging, err = os.MkdirTemp("", "carbon-panel-import-stage-*")
+	if err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("failed to create import staging directory: %w", err)
+	}
+	cleanup = func() {
+		_ = os.RemoveAll(staging)
+		_ = os.Remove(tmp.Name())
+	}
+
+	if _, err := files.ExtractArchiveWithLimits(context.Background(), tmp.Name(), staging, nil, m.importLimits); err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("rejected unsafe archive: %w", err)
+	}
+	return staging, cleanup, nil
+}
+
+// copyStagedEntries copies the prefix-selected files from a validated staging
+// tree into the pack directory. Both ends are rechecked with WithinReal so a
+// stale symlink or an unexpected nested traversal is an explicit rejection,
+// never a silent skip.
+func copyStagedEntries(staging, pDir, prefix string) error {
+	return filepath.WalkDir(staging, func(src string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !files.WithinReal(staging, src) {
+			return fmt.Errorf("staged file escapes its root: %s", src)
+		}
+		rel, err := filepath.Rel(staging, src)
+		if err != nil {
+			return err
+		}
+		if prefix != "" {
+			if !strings.HasPrefix(rel, prefix) {
+				return nil
+			}
+			rel = strings.TrimPrefix(rel, prefix)
+		}
+		if rel == "" || rel == "." {
+			return nil
+		}
+		target := filepath.Join(pDir, rel)
+		if !files.WithinReal(pDir, target) {
+			return fmt.Errorf("import entry escapes the pack directory: %s", rel)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		in, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = in.Close() }()
+		out, err := os.Create(target)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			_ = out.Close()
+			return err
+		}
+		return out.Close()
+	})
+}
+
+// validateImportDownloadURLs applies the provider egress policy at import time,
+// without DNS resolution. Credentials in a URL and non-http(s) schemes are
+// rejected, and no raw URL (which may embed a secret) is reflected in an error.
+func validateImportDownloadURLs(urls []string) error {
+	for _, raw := range urls {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		parsed, err := utils.ValidateURLStatic(raw, false)
+		if err != nil {
+			return fmt.Errorf("invalid mod downloads URL %s: %w", utils.RedactURL(raw), err)
+		}
+		if parsed.User != nil {
+			return fmt.Errorf("mod downloads URL %s must not contain credentials", utils.RedactURL(raw))
+		}
+	}
+	return nil
+}
 
 // ImportOptions defines settings for modpack import
 type ImportOptions struct {
@@ -149,39 +267,23 @@ func (m *Manager) ImportMrpack(r io.ReaderAt, size int64, opts ImportOptions) (*
 		}
 	}()
 
+	// 1. Extract overrides through the shared bounded extractor. Unsafe
+	// entries are rejected in staging before the pack directory is written.
+	staging, cleanup, err := m.extractArchiveBounded(r, size)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	if err := os.MkdirAll(pDir, 0755); err != nil {
+		return nil, err
+	}
 	modsDir := filepath.Join(pDir, "mods")
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
 		return nil, err
 	}
-
-	// 1. Extract overrides into pack root with decompression bomb limit
-	for _, f := range zr.File {
-		if strings.HasPrefix(f.Name, "overrides/") && !f.FileInfo().IsDir() {
-			rel := strings.TrimPrefix(f.Name, "overrides/")
-			targetPath := filepath.Join(pDir, rel)
-			if !files.Within(pDir, targetPath) {
-				continue
-			}
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				continue
-			}
-			frc, err := f.Open()
-			if err != nil {
-				continue
-			}
-			out, err := os.Create(targetPath)
-			if err != nil {
-				frc.Close()
-				continue
-			}
-			if _, err := io.Copy(out, io.LimitReader(frc, maxExtractedOverrideFileSize)); err != nil {
-				frc.Close()
-				out.Close()
-				return nil, fmt.Errorf("failed to extract override %s: %w", f.Name, err)
-			}
-			frc.Close()
-			out.Close()
-		}
+	if err := copyStagedEntries(staging, pDir, "overrides"+string(filepath.Separator)); err != nil {
+		return nil, fmt.Errorf("rejected unsafe override entry: %w", err)
 	}
 
 	// 2. Parse mods and generate .pw.toml files
@@ -204,6 +306,9 @@ func (m *Manager) ImportMrpack(r io.ReaderAt, size int64, opts ImportOptions) (*
 			}
 		}
 
+		if err := validateImportDownloadURLs(file.Downloads); err != nil {
+			return nil, fmt.Errorf("mod %s: %w", slug, err)
+		}
 		dlURL := ""
 		if len(file.Downloads) > 0 {
 			dlURL = file.Downloads[0]
@@ -394,45 +499,29 @@ func (m *Manager) ImportCurseForge(r io.ReaderAt, size int64, opts ImportOptions
 		}
 	}()
 
+	// Extract overrides through the shared bounded extractor before writing
+	// anything into the pack directory.
+	staging, cleanup, err := m.extractArchiveBounded(r, size)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	if err := os.MkdirAll(pDir, 0755); err != nil {
+		return nil, err
+	}
 	modsDir := filepath.Join(pDir, "mods")
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
 		return nil, err
 	}
 
-	// Extract overrides with decompression bomb limit
 	overridesDir := manifest.Overrides
 	if overridesDir == "" {
 		overridesDir = "overrides"
 	}
-	prefix := strings.TrimSuffix(overridesDir, "/") + "/"
-
-	for _, f := range zr.File {
-		if strings.HasPrefix(f.Name, prefix) && !f.FileInfo().IsDir() {
-			rel := strings.TrimPrefix(f.Name, prefix)
-			targetPath := filepath.Join(pDir, rel)
-			if !files.Within(pDir, targetPath) {
-				continue
-			}
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				continue
-			}
-			frc, err := f.Open()
-			if err != nil {
-				continue
-			}
-			out, err := os.Create(targetPath)
-			if err != nil {
-				frc.Close()
-				continue
-			}
-			if _, err := io.Copy(out, io.LimitReader(frc, maxExtractedOverrideFileSize)); err != nil {
-				frc.Close()
-				out.Close()
-				return nil, fmt.Errorf("failed to extract override %s: %w", f.Name, err)
-			}
-			frc.Close()
-			out.Close()
-		}
+	prefix := filepath.Clean(filepath.FromSlash(strings.TrimSuffix(overridesDir, "/"))) + string(filepath.Separator)
+	if err := copyStagedEntries(staging, pDir, prefix); err != nil {
+		return nil, fmt.Errorf("rejected unsafe override entry: %w", err)
 	}
 
 	// Register CurseForge mods
@@ -534,49 +623,17 @@ func (m *Manager) ImportPackwizZip(r io.ReaderAt, size int64, opts ImportOptions
 
 	packID := uuid.New().String()
 	pDir := m.packDir(packID)
+	staging, cleanup, err := m.extractArchiveBounded(r, size)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
 	if err := os.MkdirAll(pDir, 0755); err != nil {
 		return nil, err
 	}
-
-	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		rel := f.Name
-		if rootPrefix != "" {
-			if !strings.HasPrefix(rel, rootPrefix) {
-				continue
-			}
-			rel = strings.TrimPrefix(rel, rootPrefix)
-		}
-
-		targetPath := filepath.Join(pDir, rel)
-
-		if !files.Within(pDir, targetPath) {
-
-			continue
-
-		}
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-			continue
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			continue
-		}
-		out, err := os.Create(targetPath)
-		if err != nil {
-			rc.Close()
-			continue
-		}
-		if _, err := io.Copy(out, rc); err != nil {
-			rc.Close()
-			out.Close()
-			return nil, fmt.Errorf("failed to extract %s: %w", f.Name, err)
-		}
-		rc.Close()
-		out.Close()
+	if err := copyStagedEntries(staging, pDir, filepath.FromSlash(rootPrefix)); err != nil {
+		return nil, fmt.Errorf("rejected unsafe archive entry: %w", err)
 	}
 
 	m.mu.Lock()

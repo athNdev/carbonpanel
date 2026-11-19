@@ -6,6 +6,7 @@
 
 - [Architecture decisions](adrs.md) — Index of the accepted ADRs and the concept each one governs.
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
+- [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
 - [Frontend server inventory ownership](server-inventory.md) — Server reads, lifecycle requests and status presentation share generation guards and account-scoped state.
@@ -18,6 +19,8 @@
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
 - [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields and staging policy.
+- [Module sidecar confinement parity](module-confinement-parity.md) — Module sidecars inherit the game-container HostConfig baseline; one named, permission-gated profile is the only relaxation.
+- [Named egress classes](egress-class-policy.md) — Provider, webhook and archive outbound requests use separate egress decisions; URLs are redacted before being logged or returned.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
