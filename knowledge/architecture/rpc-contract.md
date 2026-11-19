@@ -46,6 +46,23 @@ requireGlobalObject policy in internal/rpc/handlers, which authenticates even
 in explicit no-auth mode and fails closed on missing policy dependencies.
 The raw validator's HTTP client strips credentials on cross-origin redirects.
 
+Packwiz pack control and staged config rollout are further compatibility
+migrations. Generated `PackwizService` (ListPacks, GetPack, ClonePack,
+RefreshPack, CheckUpdates, DeletePack) and the legacy `/api/v1/packwiz/packs`
+routes share one `handlers.PackwizOperations`; modpacks/read for read methods
+and modpacks/create for mutations use the legacy global `*` scope. Generated
+`StagedConfigService` (ListStagedChanges, StageConfigChange, ApplyStagedChange,
+RollbackStagedChange, DiscardStagedChange) and the legacy
+`/api/v1/staged-config/{server}/staged` routes share one
+`handlers.StagedConfigOperations`; server_config/read for list and
+server_config/create for mutations are scoped to the request's `server_id`, and
+the generated service re-authorizes the staged record's real owner before
+mutation so a path server cannot mask another owner. Both families fail closed
+with a nil enforcer. Multipart import, upload-session bytes, raw pack files and
+export archives stay on HTTP; create/update/import and migrate/deploy pack
+operations remain adapter-only until a later slice. Legacy routes remain for the
+ADR 0012 window.
+
 Online mod browse is the second compatibility migration: generated
 `ModBrowseService` (SearchMods, GetModVersions, InstallMods) and the legacy
 `/api/v1/servers/{id}/mods/*` JSON routes share one `ModOnlineManager` operation.

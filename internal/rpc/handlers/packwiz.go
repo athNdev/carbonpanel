@@ -32,6 +32,10 @@ import (
 type PackwizHandler struct {
 	uploadManager   *upload.Manager
 	manager         *packwiz.Manager
+	// ops is the shared pack-control operation used by the generated
+	// PackwizService as well. Keep the manager for the binary/content routes
+	// that stay on HTTP (ADR 0012).
+	ops             *PackwizOperations
 	store           *storage.Store
 	log             *logger.Logger
 	authManager     *auth.Manager
@@ -47,8 +51,15 @@ func (h *PackwizHandler) SetStorageResolver(resolver *nodestorage.Resolver) {
 }
 
 func NewPackwizHandler(manager *packwiz.Manager, store *storage.Store, uploadManager *upload.Manager, log *logger.Logger, authManager *auth.Manager, enforcer *rbac.Enforcer, cfg *config.Config) *PackwizHandler {
+	return NewPackwizHandlerWithOperations(NewPackwizOperations(manager), store, uploadManager, log, authManager, enforcer, cfg)
+}
+
+// NewPackwizHandlerWithOperations builds the compatibility adapter over the
+// same shared operation instance given to the generated service.
+func NewPackwizHandlerWithOperations(ops *PackwizOperations, store *storage.Store, uploadManager *upload.Manager, log *logger.Logger, authManager *auth.Manager, enforcer *rbac.Enforcer, cfg *config.Config) *PackwizHandler {
 	return &PackwizHandler{
-		manager:       manager,
+		manager:       packwizManagerFromOperations(ops),
+		ops:           ops,
 		store:         store,
 		uploadManager: uploadManager,
 		log:           log,
@@ -56,6 +67,22 @@ func NewPackwizHandler(manager *packwiz.Manager, store *storage.Store, uploadMan
 		enforcer:      enforcer,
 		config:        cfg,
 	}
+}
+
+func packwizManagerFromOperations(ops *PackwizOperations) *packwiz.Manager {
+	if ops == nil {
+		return nil
+	}
+	return ops.manager
+}
+
+func writePackwizError(w http.ResponseWriter, err error) {
+	var opErr *PackwizError
+	if errors.As(err, &opErr) {
+		http.Error(w, opErr.Message, opErr.Status)
+		return
+	}
+	http.Error(w, fmt.Sprintf("pack operation failed: %v", err), http.StatusInternalServerError)
 }
 
 type DeployPackRequest struct {
@@ -214,18 +241,18 @@ func (h *PackwizHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PackwizHandler) handleListPacks(w http.ResponseWriter, r *http.Request) {
-	packs, err := h.manager.ListPacks()
+	packs, err := h.ops.List(r.Context())
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to list packs: %v", err), http.StatusInternalServerError)
+		writePackwizError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"packs": packs})
 }
 
 func (h *PackwizHandler) handleGetPack(w http.ResponseWriter, r *http.Request, packID string) {
-	pack, err := h.manager.GetPack(packID)
+	pack, err := h.ops.Get(r.Context(), packID)
 	if err != nil {
-		http.Error(w, "pack not found", http.StatusNotFound)
+		writePackwizError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, pack)
@@ -262,8 +289,8 @@ func (h *PackwizHandler) handleUpdatePack(w http.ResponseWriter, r *http.Request
 }
 
 func (h *PackwizHandler) handleDeletePack(w http.ResponseWriter, r *http.Request, packID string) {
-	if err := h.manager.DeletePack(packID); err != nil {
-		http.Error(w, fmt.Sprintf("failed to delete pack: %v", err), http.StatusInternalServerError)
+	if err := h.ops.Delete(r.Context(), packID); err != nil {
+		writePackwizError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
@@ -275,36 +302,27 @@ func (h *PackwizHandler) handleClonePack(w http.ResponseWriter, r *http.Request,
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	cloned, err := h.manager.ClonePack(packID, req.Name)
+	cloned, err := h.ops.Clone(r.Context(), packID, req.Name)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to clone pack: %v", err), http.StatusInternalServerError)
+		writePackwizError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, cloned)
 }
 
 func (h *PackwizHandler) handleRefreshPack(w http.ResponseWriter, r *http.Request, packID string) {
-	if err := h.manager.RefreshPack(packID); err != nil {
-		http.Error(w, fmt.Sprintf("failed to refresh pack: %v", err), http.StatusInternalServerError)
+	if err := h.ops.Refresh(r.Context(), packID); err != nil {
+		writePackwizError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Pack re-indexed and refreshed successfully"})
 }
 
 func (h *PackwizHandler) handleCheckUpdates(w http.ResponseWriter, r *http.Request, packID string) {
-	updates, err := h.manager.CheckContentUpdatesContext(r.Context(), packID)
+	updates, err := h.ops.CheckUpdates(r.Context(), packID, r.URL.Query().Get("kind"))
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to check updates: %v", err), http.StatusInternalServerError)
+		writePackwizError(w, err)
 		return
-	}
-	if kind := strings.TrimSpace(r.URL.Query().Get("kind")); kind != "" {
-		filtered := updates[:0]
-		for _, update := range updates {
-			if update.Kind == kind {
-				filtered = append(filtered, update)
-			}
-		}
-		updates = filtered
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"updates": updates})
 }
