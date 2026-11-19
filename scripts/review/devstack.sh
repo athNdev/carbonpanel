@@ -324,8 +324,12 @@ seed_showcase_bluemap() {
 		echo "could not resolve seeded server/node facts for BlueMap; skipping renderer" >&2
 		return 0
 	fi
-	host_path="${data_path/\/app\/data/${DATA}/data}"
+	case "${data_path}" in
+		/app/data/*) host_path="${DATA}/data/${data_path#/app/data/}" ;;
+		*) host_path="${DATA}/data/servers/${server_id}" ;;
+	esac
 	DATA_PATH_FOR_BLUEMAP="${host_path}"
+	echo "review BlueMap world path: ${data_path} -> ${host_path}" >&2
 	if [ ! -d "${host_path}/${level}" ]; then
 		echo "seeded world ${host_path}/${level} is absent; skipping BlueMap renderer" >&2
 		return 0
