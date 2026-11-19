@@ -146,6 +146,9 @@ jobs:
         run: |
           PORT="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/port")"
           export SHOWCASE_SERVER_ID="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/server-id")"
+          if [ -f "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/skin-identity-id" ]; then
+            export SHOWCASE_PLAYER_IDENTITY="$(cat "${HOME}/.cache/carbon-panel-review/sessions/carbon-panel-review/skin-identity-id")"
+          fi
           FEATURES=""
           if [ "$FEATURES_PLAYERS" = "true" ]; then FEATURES="${FEATURES},players"; fi
           if [ "$FEATURES_PLAYERDETAIL" = "true" ]; then FEATURES="${FEATURES},playerdetail"; fi

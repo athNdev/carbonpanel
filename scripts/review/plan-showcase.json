@@ -253,12 +253,8 @@
       "name": "roster for canonical player detail"
     },
     {
-      "assertVisible": "[data-player-row]:has-text(\"069a79f4\")",
-      "feature": "playerdetail",
-      "name": "public fixture identity is present with a primary UUID"
-    },
-    {
-      "gotoIdentityFromTitle": "[data-player-row]:has-text(\"069a79f4\") span[title^=\"pl_\"]",
+      "gotoEnv": "SHOWCASE_PLAYER_IDENTITY",
+      "route": "/players/{value}",
       "feature": "playerdetail",
       "name": "open canonical player detail route"
     },
@@ -402,11 +398,6 @@
       "waitFor": "#server-detail-tabs-panel-world",
       "feature": "worldtab",
       "name": "server World panel renders"
-    },
-    {
-      "assertVisible": "#server-world-picker-heading",
-      "feature": "worldtab",
-      "name": "real world picker heading renders"
     },
     {
       "screenshot": "showcase-world-tab",

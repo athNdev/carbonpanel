@@ -112,6 +112,17 @@ async function main() {
             timeout: 30000,
           });
           break;
+        case "gotoEnv": {
+          // Navigate to a real route whose dynamic segment was produced by the
+          // disposable fixture (for example an opaque player identity key).
+          const value = process.env[spec.gotoEnv];
+          if (!value) throw new Error(`${spec.gotoEnv} is not set`);
+          await page.goto(base + spec.route.replace("{value}", encodeURIComponent(value)), {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          break;
+        }
         case "gotoIdentityFromTitle": {
           // Read the opaque identity key the real roster renders in its row
           // title, then open the canonical profile route. This exercises the
@@ -422,6 +433,7 @@ async function main() {
     const kind = Object.keys(spec).find((key) =>
       [
         "goto",
+        "gotoEnv",
         "gotoIdentityFromTitle",
         "click",
         "fill",

@@ -271,7 +271,12 @@ seed_showcase_player() {
 	# render a loaded face preview. Provider outages leave the offline fixture.
 	payload="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-skin-fixture-001",playerQuery:"069a79f4-44e9-4726-a5be-fca90e38aaf5"}))')"
 	response="$(rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" 2>&1 || true)"
-	skin_state="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"069a79f4","limit":20}' "${token}" 2>/dev/null | json_path 'players.0.skinAvailable')"
+	skin_response="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"069a79f4","limit":20}' "${token}" 2>/dev/null)"
+	skin_state="$(printf '%s' "${skin_response}" | json_path 'players.0.skinAvailable')"
+	skin_key="$(printf '%s' "${skin_response}" | json_path 'players.0.ref.identityKey')"
+	if [ -n "${skin_key}" ]; then
+		printf '%s\n' "${skin_key}" >"${DATA}/skin-identity-id"
+	fi
 	echo "review skin fixture skinAvailable: ${skin_state:-false}; add result: $(printf '%s' "${response}" | cut -c1-120)" >&2
 }
 
