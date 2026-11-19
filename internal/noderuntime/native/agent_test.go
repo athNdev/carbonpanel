@@ -90,3 +90,34 @@ func TestRunnerComposesSharedContract(t *testing.T) {
 		t.Fatalf("legitimate node operation refused: %v", err)
 	}
 }
+
+// Authenticated enrollment/captive daemon lifecycle: enrolled-node preflight
+// reports are authorized only within the node's own object and granted scopes.
+func TestRunnerAuthorizePreflightLifecycleRefusals(t *testing.T) {
+	r, err := NewRunner(TopologyDirectTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := Credential{Kind: CredentialBootstrap}
+	operator := Credential{Kind: CredentialOperator}
+	reporter := Credential{Kind: CredentialNode, ObjectID: "node", Scopes: []string{"node:report", "node:heartbeat"}}
+
+	if err := r.AuthorizePreflight(reporter, "node", []string{"node:report"}); err != nil {
+		t.Fatalf("legitimate preflight report refused: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		cred Credential
+		obj  string
+		sc   []string
+	}{
+		{"bootstrap domain crossing", bootstrap, "node", []string{"node:report"}},
+		{"operator domain crossing", operator, "node", []string{"node:report"}},
+		{"cross node object", reporter, "other-node", []string{"node:report"}},
+		{"over-scope report", reporter, "node", []string{"node:report", "nodes:create"}},
+	} {
+		if err := r.AuthorizePreflight(tc.cred, tc.obj, tc.sc); !errors.Is(err, ErrScope) {
+			t.Fatalf("%s: expected scope refusal, got %v", tc.name, err)
+		}
+	}
+}

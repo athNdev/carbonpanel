@@ -8,6 +8,8 @@ package native
 import (
 	"strings"
 	"testing"
+
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
 // qualifiedFacts is a disposable, synthetic host description. No field is read
@@ -170,6 +172,59 @@ func TestSharedDaemonIsNeverAFallback(t *testing.T) {
 	}
 }
 
+// Capability-granted semantics are distinct from mount presence refusals:
+// an isolation capability is granted only when its mount/path is accepted,
+// while a refusal on a different mount must not revoke unrelated grants.
+func TestCapabilitiesDistinguishGrantedCapabilitiesFromMountRefusals(t *testing.T) {
+	t.Run("socket collision refuses only private socket capability", func(t *testing.T) {
+		f := qualifiedFacts()
+		f.ChosenSocket = "/var/run/docker.sock"
+		sel := ApplyGates(f)
+		if sel.Mode != ModeNone || !hasCode(sel.Reasons, CodePrivateSocketCollision) {
+			t.Fatalf("expected private socket refusal, got %s", Describe(sel))
+		}
+		caps := capabilitySet(Capabilities(f, sel))
+		if caps["NODE_CAPABILITY_PRIVATE_SOCKET"] {
+			t.Fatalf("private socket capability must not be granted on mount refusal: %v", caps)
+		}
+		if !caps["NODE_CAPABILITY_DEDICATED_ROOTS"] || !caps["NODE_CAPABILITY_CONTAINERD_NAMESPACE"] {
+			t.Fatalf("unrelated isolation capabilities should remain granted when their mounts are present: %v", caps)
+		}
+	})
+
+	t.Run("dedicated root collision refuses only dedicated roots capability", func(t *testing.T) {
+		f := qualifiedFacts()
+		f.ChosenDataRoot = "/var/lib/docker"
+		sel := ApplyGates(f)
+		if sel.Mode != ModeNone || !hasCode(sel.Reasons, CodeDedicatedRootCollision) {
+			t.Fatalf("expected dedicated root refusal, got %s", Describe(sel))
+		}
+		caps := capabilitySet(Capabilities(f, sel))
+		if caps["NODE_CAPABILITY_DEDICATED_ROOTS"] {
+			t.Fatalf("dedicated roots capability must not be granted on mount refusal: %v", caps)
+		}
+		if !caps["NODE_CAPABILITY_PRIVATE_SOCKET"] || !caps["NODE_CAPABILITY_CONTAINERD_NAMESPACE"] {
+			t.Fatalf("unrelated isolation capabilities should remain granted when their mounts are present: %v", caps)
+		}
+	})
+
+	t.Run("containerd namespace collision refuses only namespace capability", func(t *testing.T) {
+		f := qualifiedFacts()
+		f.ContainerdNamespace = "moby"
+		sel := ApplyGates(f)
+		if sel.Mode != ModeNone || !hasCode(sel.Reasons, CodeNamespaceCollision) {
+			t.Fatalf("expected namespace refusal, got %s", Describe(sel))
+		}
+		caps := capabilitySet(Capabilities(f, sel))
+		if caps["NODE_CAPABILITY_CONTAINERD_NAMESPACE"] {
+			t.Fatalf("containerd namespace capability must not be granted on refusal: %v", caps)
+		}
+		if !caps["NODE_CAPABILITY_PRIVATE_SOCKET"] || !caps["NODE_CAPABILITY_DEDICATED_ROOTS"] {
+			t.Fatalf("unrelated isolation capabilities should remain granted when their mounts are present: %v", caps)
+		}
+	})
+}
+
 func TestPreflightReportIsRedacted(t *testing.T) {
 	sel := ApplyGates(qualifiedFacts())
 	report := PreflightReport("node-fixture", sel, fixtureTime())
@@ -182,6 +237,14 @@ func TestPreflightReportIsRedacted(t *testing.T) {
 			t.Fatalf("preflight check leaked a private path: %+v", c)
 		}
 	}
+}
+
+func capabilitySet(caps interface{ GetCapabilities() []v1.NodeCapability }) map[string]bool {
+	out := make(map[string]bool)
+	for _, c := range caps.GetCapabilities() {
+		out[c.String()] = true
+	}
+	return out
 }
 
 func hasCode(checks []Check, code string) bool {

@@ -57,18 +57,28 @@ func preflightReportAt(nodeID string, sel Selection, ts *timestamppb.Timestamp) 
 	return report
 }
 
-// Capabilities converts qualified facts and the selected mode into the
-// shared capability snapshot. Capabilities that were not observed are omitted,
-// never assumed. A privileged-port capability is only advertised when the
-// host allows unprivileged binds up to port 1024 or an explicit grant exists.
+// Capabilities converts qualified facts and the selected mode into the shared
+// capability snapshot. Capabilities are granted only when supported by the
+// observed facts and selection; they are never assumed from mount/path presence
+// alone. Isolation capabilities depend on private socket, dedicated roots and a
+// dedicated containerd namespace being accepted (no corresponding refusal),
+// keeping capability-granted semantics separate from mount presence refusals.
 func Capabilities(f HostFacts, sel Selection) *v1.NodeCapabilities {
-	caps := []v1.NodeCapability{
-		v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET,
-		v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS,
-		v1.NodeCapability_NODE_CAPABILITY_CONTAINERD_NAMESPACE,
+	caps := make([]v1.NodeCapability, 0, 8)
+	if !hasFailedCode(sel.Checks, CodePrivateSocketCollision) {
+		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET)
+	}
+	if !hasFailedCode(sel.Checks, CodeDedicatedRootCollision) {
+		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS)
+	}
+	if !hasFailedCode(sel.Checks, CodeNamespaceCollision) {
+		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CONTAINERD_NAMESPACE)
+	}
+	// Agent/runtime capabilities are independent of host mount/path refusals.
+	caps = append(caps,
 		v1.NodeCapability_NODE_CAPABILITY_STORAGE_WORKER,
 		v1.NodeCapability_NODE_CAPABILITY_DRAIN,
-	}
+	)
 	if sel.Mode == ModeRootless {
 		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_ROOTLESS)
 	}
@@ -92,6 +102,15 @@ func Capabilities(f HostFacts, sel Selection) *v1.NodeCapabilities {
 		Systemd:             f.Systemd,
 		Capabilities:        caps,
 	}
+}
+
+func hasFailedCode(checks []Check, code string) bool {
+	for _, c := range checks {
+		if c.Code == code && !c.Passed && !c.Unknown {
+			return true
+		}
+	}
+	return false
 }
 
 // NegotiateVersion implements the shared version-skew outcome for this mode.
