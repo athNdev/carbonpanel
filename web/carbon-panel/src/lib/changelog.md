@@ -111,7 +111,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 [Unreleased]: https://github.com/athNdev/carbonpanel/compare/v1.0.40...HEAD
 [1.0.40]: https://github.com/athNdev/carbonpanel/releases/tag/v1.0.40
 [3.0.0-alpha.1]: https://github.com/athNdev/carbonpanel/releases/tag/v3.0.0-alpha.1
-[3.0.0-beta.4]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.4
-[3.0.0-beta.3]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.3
-[2.0.15]: https://github.com/athNdev/carbon-panel/releases/tag/v2.0.15
+[3.0.0-beta.4]: https://github.com/discohaus/discopanel/releases/tag/v3.0.0-beta.4
+[3.0.0-beta.3]: https://github.com/discohaus/discopanel/releases/tag/v3.0.0-beta.3
+[2.0.15]: https://github.com/discohaus/discopanel/releases/tag/v2.0.15
 [1.0.38]: https://github.com/athNdev/carbon-panel/releases/tag/v1.0.38
