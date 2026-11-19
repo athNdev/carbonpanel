@@ -30,9 +30,11 @@ cleanup_compose_tmp() {
 }
 
 release_dir_lock() {
-  if [ "$LOCK_HELD" = true ] && [ -n "$LOCK_DIR" ]; then
+  if [ "$LOCK_HELD" = true ]; then
+    # Only remove the pid file we wrote, then the (now empty) lock directory.
     if [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
-      rm -rf -- "$LOCK_DIR"
+      rm -f -- "$LOCK_DIR/pid"
+      rmdir -- "$LOCK_DIR" 2>/dev/null || true
     fi
     LOCK_HELD=false
   fi
@@ -76,9 +78,10 @@ Scope and safety:
     must resolve on this guest and generated compose mounts /var/run/docker.sock.
   - Does not create Proxmox guests, change host security, or delete bind mounts.
   - Does not overwrite an existing compose.yml, config.yaml, data, backups, or tmp.
-  - Serializes install/update per install directory and publishes a new
-    compose.yml with an atomic no-clobber link, so a compose created
-    concurrently is never overwritten or resumed as this script's partial.
+  - Refuses concurrent install/update for the same install directory
+    (fail-closed lock) and publishes a new compose.yml with an atomic
+    no-clobber link, so a compose created concurrently is never
+    overwritten or resumed as this script's partial.
   - Compose bind mounts use fixed relative paths (./data, ./backups, ./tmp)
     resolved from the install directory.
 
@@ -101,28 +104,23 @@ need_cmd() {
 }
 
 acquire_dir_lock() {
-  # Serialize install/update for the same install directory. mkdir(2) is the
-  # portable atomic primitive; the pid file lets a later run clear a lock left
-  # by a crashed process. Never hold this lock across a different directory.
+  # Fail-closed per-directory lock. mkdir(2) is atomic on the guest
+  # filesystem; a stale lock is never taken over automatically because a
+  # live/unknown holder cannot be distinguished safely. The operator removes
+  # it only after confirming no installer is running.
   LOCK_DIR="$DIR/.carbon-panel-install.lock"
-  local tries=0 pid
-  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-    pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-      log "Removing stale install lock (pid $pid is not running)."
-      if [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$pid" ]; then
-        rm -rf -- "$LOCK_DIR"
-      fi
-      continue
-    fi
-    tries=$((tries + 1))
-    if [ "$tries" -ge 50 ]; then
-      die "another install/update is already running for $DIR (lock: $LOCK_DIR); wait for it to finish or remove the lock if it is stale"
-    fi
-    sleep 0.2
-  done
-  printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    die "another install/update is already running for $DIR (lock: $LOCK_DIR); wait for it to finish, or remove the lock only after confirming no installer is running"
+  fi
   LOCK_HELD=true
+  if ! printf '%s\n' "$$" >"$LOCK_DIR/pid"; then
+    # We created this lock directory, so it is safe to unlink our pid and
+    # remove it; never recurse.
+    rm -f -- "$LOCK_DIR/pid"
+    rmdir -- "$LOCK_DIR" 2>/dev/null || true
+    LOCK_HELD=false
+    die "unable to write install lock pid file: $LOCK_DIR/pid"
+  fi
 }
 
 compose_digest() {
@@ -240,9 +238,10 @@ services:
       - "host.docker.internal:host-gateway"
 EOF
   chmod 0644 "$COMPOSE_TMP" 2>/dev/null || true
-  # link(2) is atomic and fails when the target already exists, unlike mv.
+  # link(2) is atomic and fails when the target exists, unlike mv. -T keeps
+  # the target itself as the link path even if it is a directory or symlink.
   # A compose created after the earlier existence check must win.
-  if ! ln "$COMPOSE_TMP" "$COMPOSE_FILE" 2>/dev/null; then
+  if ! ln -T -- "$COMPOSE_TMP" "$COMPOSE_FILE" 2>/dev/null; then
     rm -f -- "$COMPOSE_TMP"
     COMPOSE_TMP=""
     rm -f -- "$DIR/$MARKER_FILE"

@@ -167,18 +167,22 @@ if grep -q 'pull carbon-panel' "$DOCKER_STUB_LOG"; then
 fi
 pass "raced-in compose is preserved, not adopted"
 
-# Serialization: a lock left by a dead process is cleared and the install runs.
-LOCKDIR="$TMPROOT/lockstale"
+# Lock: an existing lock is fail-closed (no stale takeover, no deletion).
+LOCKDIR="$TMPROOT/lockheld"
 mkdir -p "$LOCKDIR/.carbon-panel-install.lock"
-bash -c 'exit 0' &
-DEAD_PID=$!
-wait "$DEAD_PID" || true
-printf '%s\n' "$DEAD_PID" >"$LOCKDIR/.carbon-panel-install.lock/pid"
+printf '424242\n' >"$LOCKDIR/.carbon-panel-install.lock/pid"
 : >"$DOCKER_STUB_LOG"
-bash "$INSTALLER" install --dir "$LOCKDIR" >/dev/null
-[ -f "$LOCKDIR/compose.yml" ] || fail "stale-lock install should create compose"
-[ ! -d "$LOCKDIR/.carbon-panel-install.lock" ] || fail "stale install lock should be cleared and released"
-pass "stale install lock is cleared"
+run_expect_fail "held install lock refused" bash "$INSTALLER" install --dir "$LOCKDIR"
+grep -Fq 'already running' "$TMPROOT/last.out" || fail "held lock refusal should be explicit"
+[ -d "$LOCKDIR/.carbon-panel-install.lock" ] || fail "fail-closed lock must not be removed"
+[ -f "$LOCKDIR/.carbon-panel-install.lock/pid" ] || fail "lock pid must not be removed"
+[ ! -f "$LOCKDIR/compose.yml" ] || fail "held lock must not publish compose"
+if grep -q 'pull carbon-panel' "$DOCKER_STUB_LOG"; then
+  fail "held lock must not run docker compose"
+fi
+rm -f "$LOCKDIR/.carbon-panel-install.lock/pid"
+rmdir "$LOCKDIR/.carbon-panel-install.lock"
+pass "held install lock is refused without takeover"
 
 # Failure/retry: pull failure leaves compose and marker; rerun resumes with pull+up
 FAILDIR="$TMPROOT/failretry"
