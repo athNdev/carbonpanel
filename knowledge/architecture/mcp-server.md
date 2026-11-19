@@ -44,12 +44,12 @@ user. A well-formed token against a no-auth installation is refused, and every
 call uses a bounded HTTP client timeout.
 
 The tool catalog is stable across controller builds. `internal/mcp/catalog.go`
-holds the pinned first-slice declarations and the 25-name mount list mirroring
+holds the pinned first-slice declarations and the 27-name mount list mirroring
 `internal/rpc/server.go registerServices`; `catalog_data.go` is generated from
 proto descriptors and the live RBAC map. The single generator also emits
 `integration_catalog.go`, resolving duplicate tools by source precedence so
 `list_files`/`get_file` and similar collisions are never double-registered. The
-coverage drift test still enumerates the 224 reachable RPCs and fails on a
+coverage drift test still enumerates the 235 reachable RPCs and fails on a
 missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
 a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
 or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and

@@ -27,10 +27,35 @@ world-view work. The pinned post-stable build
 package that installs successfully says nothing about which of those RPCs a
 given panel build implements.
 
-The implemented tool catalogue is a deliberate **first slice of 30 tools**.
-Mounted-service/RPC inventory (25 services / 220 RPCs) is not tool coverage,
-and this ADR must not be read as a claim of full API coverage: OSS-370 remains
-open for supported families still missing.
+The original implementation decision was a deliberate **first slice of 30
+tools**. The mounted-service/RPC inventory available at that time was
+**25 services / 220 RPCs**. Both figures are the historical baseline of this
+decision, not the current catalogue. Mounted-service/RPC inventory is not tool
+coverage, and this ADR must not be read as a claim of full API coverage:
+OSS-370 remains open for supported families still missing.
+
+### Current catalogue (superseding note, derived from the generator)
+
+The figures below are read from the checked-in generators and gates, not hand
+counted. `go run ./internal/mcp/cataloggen` reports `entries=235 services=27`
+and `combined tools=211`; `internal/mcp/family_audit_test.go` asserts 245
+declared proto RPCs and a 245/235/10 (declared/mounted/unmounted) matrix split,
+while `internal/mcp/drift_test.go` asserts 27 mounted services and 235 mounted
+RPCs. `scripts/mcp-generated-artifacts-check.sh` reproduces the generated
+artifacts byte-for-byte from checked-in source.
+
+The gateway now mounts the **211-tool combined catalogue**: **245 declared
+RPCs**, of which **235 are mounted/reachable** across **27 mounted services**.
+The 30-tool first slice is retained as the highest-precedence pinned subset
+inside that combined catalogue; it is not the total tool count. The three
+counts stay deliberately distinct: declared RPCs include 10 `NodeControlService`
+RPCs that are never mounted, and audit exclusions plus duplicate-name
+resolution reduce the 235 mounted RPCs to 211 exposed tools. A `tools/list`
+result is therefore evidence of the exposed tool catalogue, not of RPC
+coverage or of a panel build's capability (see the two compatibility concepts
+below). This note supersedes the historical counts above for present-tense
+claims; it does not change the decision, capability distinctions or publication
+cautions recorded in this ADR.
 
 ## Decision
 
