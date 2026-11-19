@@ -260,15 +260,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	function setTab(id: string) {
-		const params = new SvelteURLSearchParams(page.url.searchParams);
+		const params = new SvelteURLSearchParams(page.url.searchParams.toString());
 		if (id === 'overview') params.delete('tab');
 		else params.set('tab', id);
 		activeTab = id as TabId;
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- URL is a resolve()d player route plus an encoded query string
 		void goto(`${resolve('/players/[key]', { key })}?${params.toString()}`, {
-			replaceState: false,
-			noScroll: true,
-			keepFocus: true
+			reset: false
 		});
 	}
 

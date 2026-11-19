@@ -57,7 +57,7 @@ SPDX-License-Identifier: MPL-2.0
 	} from '$lib/features/server-world/state';
 	import { encodeWorldKey } from '$lib/features/worldview/world-ref';
 	import { effectiveLoader } from '$lib/utils/mod-loader';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import {
 		CarbonButton,
 		CarbonConfirm,
@@ -521,7 +521,7 @@ SPDX-License-Identifier: MPL-2.0
 					serverId: server.id,
 					levelName: description.levelName
 				});
-		return resolve(`/worlds/${server.id}/${encodeWorldKey(ref)}`);
+		return resolve('/worlds/[server]/[world]', { server: server.id, world: encodeWorldKey(ref) });
 	}
 
 	function libraryHref(): string {
@@ -533,7 +533,7 @@ SPDX-License-Identifier: MPL-2.0
 						candidate.id === boundRevision?.worldEntryId
 				)
 			: undefined;
-		return entry ? resolve(`/library/${entry.id}`) : resolve('/library');
+		return entry ? resolve('/library/[id]', { id: entry.id }) : resolve('/library');
 	}
 </script>
 

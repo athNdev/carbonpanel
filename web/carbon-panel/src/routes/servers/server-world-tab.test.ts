@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 
 const detail = readFileSync(new URL('./[id]/+page.svelte', import.meta.url), 'utf8');
 const component = readFileSync(
-	new URL('../../lib/components/server/ServerWorld.svelte', import.meta.url),
+	new URL('../../lib/components/server-ui/ServerWorld.svelte', import.meta.url),
 	'utf8'
 );
 const worldState = readFileSync(
@@ -34,7 +34,10 @@ test('world tab deep-links through resolve() with an opaque world key', () => {
 	assert.match(component, /encodeWorldKey/);
 	assert.match(component, /WorldRef_Kind\.LIBRARY_BINDING/);
 	assert.match(component, /WorldRef_Kind\.SERVER_LOCAL/);
-	assert.match(component, /resolve\(`\/worlds\/\$\{server\.id\}\/\$\{encodeWorldKey\(ref\)\}`\)/);
+	assert.match(
+		component,
+		/resolve\('\/worlds\/\[server\]\/\[world\]', \{ server: server\.id, world: encodeWorldKey\(ref\) \}\)/
+	);
 	assert.match(component, /resolve\('\/library'\)/);
 	assert.doesNotMatch(component, /href="\/(?!\/)/);
 });

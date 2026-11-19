@@ -9,7 +9,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { goto } from '$app/navigation';
 import { resolve } from '$app/paths';
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import { create } from '@bufbuild/protobuf';
 import { rpcClient } from '$lib/api/rpc-client';
 import type { User, Permission } from '$lib/proto/carbonpanel/v1/common_pb';

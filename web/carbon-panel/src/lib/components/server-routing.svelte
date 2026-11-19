@@ -30,7 +30,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { ServerStatus } from '$lib/proto/carbonpanel/v1/common_pb';
 	import type { GetServerRoutingResponse, ProxyRoute } from '$lib/proto/carbonpanel/v1/proxy_pb';
 	import { CarbonButton } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
 	let {
 		server,

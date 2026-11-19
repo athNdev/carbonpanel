@@ -51,6 +51,7 @@ sources:
 | [0039](../../docs/adr/0039-docker-readable-build-aliases.md) | Pure readable UTC aliases for immutable Docker builds with tag-push provenance | [Release](../workflows/release.md) |
 | [0040](../../docs/adr/0040-bluemap-installed-module-discovery.md) | Private identity-bound BlueMap discovery, explicit consent and server-side singleton install | [World viewing](../architecture/world-viewing.md), [Runtime seams](../architecture/runtime-seams.md) |
 | [0041](../../docs/adr/0041-bounded-trusted-main-nightly.md) | Native scheduled nightly publishes only a verified current-main commit, default-off | [Release](../workflows/release.md) |
+| [0042](../../docs/adr/0042-sveltekit3-security-migration.md) | SvelteKit 3 security migration with narrow compatibility shims | [Frontend change](../workflows/frontend-change.md) |
 
 # Rule
 

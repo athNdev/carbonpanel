@@ -10,11 +10,13 @@ code_refs:
 sources:
   - title: SvelteKit resolve navigation ADR
     resource: ../../docs/adr/0002-sveltekit-resolve-navigation.md
+  - title: SvelteKit 3 security migration ADR
+    resource: ../../docs/adr/0042-sveltekit3-security-migration.md
 ---
 
 # Steps
 
-1. Work in `web/carbon-panel` (SvelteKit 2, Svelte 5, IBM Carbon tokens).
+1. Work in `web/carbon-panel` (SvelteKit 3, Svelte 5, IBM Carbon tokens).
 2. Use the generated Connect client from `src/lib/proto`; do not add a second
    API layer.
 3. Run:
@@ -31,6 +33,8 @@ bun run test
 
 # Rules
 
+- SvelteKit 3 rejects any `/server/` directory under `src` as server-only, even
+  for browser components. Keep shared UI in `components/server-ui/`; see ADR 0042.
 - Keep the Carbon geometry, typography and token usage consistent with the
   existing shell.
 - Start every primary route with `CarbonPageHeader`; do not hand-roll a title,

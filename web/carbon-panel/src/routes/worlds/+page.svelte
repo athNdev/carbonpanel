@@ -7,6 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import type { ResolvedPathname } from '$app/types';
 	import { create } from '@bufbuild/protobuf';
 	import { ConnectError, Code } from '@connectrpc/connect';
 	import { Lock, Map as MapIcon, RefreshCw, X } from '@lucide/svelte';
@@ -115,10 +116,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		});
 	});
 
-	function targetHref(target: WorldViewTarget): string {
+	function targetHref(target: WorldViewTarget): ResolvedPathname {
 		const key = encodeWorldKey(target.worldRef);
-		const base = resolve(`/worlds/${target.serverId}/${key}`);
-		return target.dimension ? `${base}?dimension=${encodeURIComponent(target.dimension)}` : base;
+		const base = resolve('/worlds/[server]/[world]', { server: target.serverId, world: key });
+		return (
+			target.dimension ? `${base}?dimension=${encodeURIComponent(target.dimension)}` : base
+		) as ResolvedPathname;
 	}
 
 	function clearFilters() {
@@ -257,9 +260,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<tr class="transition-colors hover:bg-accent">
 						<td class="min-w-[180px] px-3 py-3">
 							<a
-								href={resolve(
-									`/worlds/${target.serverId}/${encodeWorldKey(target.worldRef)}${target.dimension ? `?dimension=${encodeURIComponent(target.dimension)}` : ''}`
-								)}
+								href={targetHref(target)}
 								class="block truncate font-medium text-foreground hover:text-accent-text hover:underline"
 							>
 								{target.name || target.worldRef?.levelName || 'Untitled world'}

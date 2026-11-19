@@ -12,7 +12,6 @@ one at https://mozilla.org/MPL/2.0/.
 	import { onMount } from 'svelte';
 
 	import { asset } from '$app/paths';
-	import type { Asset } from '$app/types';
 	import { CarbonBreadcrumbs, CarbonTag, CarbonPageHeader } from '$lib/components/carbon';
 	import { theme as preferenceTheme } from '$lib/display-preferences.svelte';
 
@@ -30,7 +29,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<meta charset="utf-8">
 				<meta name="viewport" content="width=device-width, initial-scale=1">
 				<script src="` +
-		asset('/scalar.js' as Asset) +
+		asset('scalar.js') +
 		`">${'<'}/script>
         <style>
           /* Hide "Powered by Scalar" link... */

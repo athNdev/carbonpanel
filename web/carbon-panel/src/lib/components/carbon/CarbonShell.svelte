@@ -27,7 +27,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	} from '@lucide/svelte';
 	import { motionDuration } from '$lib/motion';
 	import { page } from '$app/state';
-	import { base, resolve } from '$app/paths';
+	import { asset, resolve } from '$app/paths';
 	import { runningServers, activitySortedServers } from '$lib/stores/servers';
 	import { authStore, currentUser, canAccessSettings } from '$lib/stores/auth';
 	import CarbonModal from './CarbonModal.svelte';
@@ -261,7 +261,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				class="focus-ring flex items-center gap-2 font-sans text-sm tracking-[0.16px] text-foreground transition-colors hover:text-accent-text"
 			>
 				<img
-					src="{base}/{$theme === 'dark' ? 'brand-mark-light.svg' : 'brand-mark-dark.svg'}"
+					src={asset($theme === 'dark' ? 'brand-mark-light.svg' : 'brand-mark-dark.svg')}
 					alt=""
 					class="h-6 w-6"
 				/>

@@ -718,7 +718,7 @@ one at https://mozilla.org/MPL/2.0/.
 										<tr class="group transition-colors hover:bg-accent">
 											<td class="px-4 py-3 align-middle">
 												<a
-													href={resolve(`/servers/${server.id}`)}
+													href={resolve('/servers/[id]', { id: server.id })}
 													class="block transition-colors hover:text-accent-text"
 												>
 													<div class="text-sm font-medium text-foreground">{server.name}</div>
@@ -828,7 +828,7 @@ one at https://mozilla.org/MPL/2.0/.
 														</button>
 													{/if}
 													<a
-														href={resolve(`/servers/${server.id}`)}
+														href={resolve('/servers/[id]', { id: server.id })}
 														class="mono-label-accent inline-flex h-7 items-center px-2.5 transition-colors hover:bg-secondary hover:text-foreground"
 													>
 														Manage

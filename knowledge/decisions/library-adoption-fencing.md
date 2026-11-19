@@ -6,7 +6,7 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - web/carbon-panel/src/lib/features/server-world
-  - web/carbon-panel/src/lib/components/server/ServerWorld.svelte
+  - web/carbon-panel/src/lib/components/server-ui/ServerWorld.svelte
   - web/carbon-panel/src/lib/features/world-library/presentation.ts
   - scripts/manual-review/e2e/server-world-tab-check.mjs
 sources:
