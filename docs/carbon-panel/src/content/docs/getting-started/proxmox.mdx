@@ -1,6 +1,6 @@
 ---
-title: Proxmox LXC
-description: Deploy Carbon Panel in a Proxmox LXC container using the community helper script.
+title: Proxmox (existing guest)
+description: Install the Carbon Panel controller in an existing Proxmox LXC or VM using the first-party installer script.
 ---
 {/*
 SPDX-License-Identifier: MIT AND MPL-2.0
@@ -12,35 +12,89 @@ If a copy of the MPL was not distributed with this file, You can obtain
 one at https://mozilla.org/MPL/2.0/.
 */}
 
+This guide uses Carbon Panel's first-party installer script to deploy the **Carbon Panel controller** inside an **existing** Linux guest (Proxmox LXC or VM). It does **not** provision a Proxmox host, create the guest, or change host security settings. You prepare and secure the guest yourself, then run the script inside it.
 
 ## Prerequisites
 
-- A [Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview) host
+- A [Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview) host where you can create and manage a guest
+- An existing Debian or Ubuntu LXC/VM (or another compatible Linux guest) with:
+  - [Docker Engine](https://docs.docker.com/engine/install/) and Docker Compose v2 (`docker compose`)
+  - Network access to pull `atharvnaphade/carbonpanel` images
+  - Persistent storage for `/opt/carbon-panel` (or your chosen install directory)
+  - Permission to run Docker commands (typically root or a user in the `docker` group)
 
-## Installation
+:::note[Docker inside LXC]
+Running Docker inside an LXC depends on your Proxmox/LXC configuration and kernel features. Carbon Panel does not require or apply privileged LXC settings, nesting changes, or AppArmor/seccomp relaxations. Use a guest configuration that meets your security requirements and supports Docker.
+:::
 
-The [Proxmox VE Community Scripts](https://community-scripts.github.io/ProxmoxVE/) project maintains a [Carbon Panel helper script](https://community-scripts.github.io/ProxmoxVE/scripts?id=carbon-panel) that creates a Debian 13 LXC container with everything pre-installed (Docker, Go, Node.js, Carbon Panel built from source) and managed as a systemd service.
+:::caution[Guest-local Docker socket]
+The generated `compose.yml` mounts `/var/run/docker.sock` because Carbon Panel manages Minecraft server containers through the guest-local Docker daemon. Control of the panel container therefore implies control of Docker on that guest. Keep the panel on a trusted network, set strong credentials, and treat the guest as dedicated to Carbon Panel.
+:::
 
-From your **Proxmox host shell**:
+## Install (inspect, then run)
+
+Run these commands **inside the guest**, not on the Proxmox host shell. Download the script, inspect it, then run it:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/carbon-panel.sh)"
+curl -fsSLO https://raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh
+less install-carbon-panel.sh
+sudo bash install-carbon-panel.sh
 ```
 
-The interactive wizard lets you adjust the default container resources. Set these based on what you expect your servers to need.
+By default the script:
+
+- Installs to `/opt/carbon-panel`
+- Creates `data`, `backups`, and `tmp` directories if they do not exist
+- Writes `compose.yml` **only if no standard Compose file already exists** in the install directory (`compose.yml`, `compose.yaml`, `docker-compose.yml`, `docker-compose.yaml`); existing compose/config are preserved
+- Uses the shipped controller image `atharvnaphade/carbonpanel:latest` with host networking and bind mounts for `/app/data`, `/app/backups`, and `/app/tmp`
+- Pulls the image and starts the `carbon-panel` container with `docker compose pull` then `docker compose up -d`
+
+Once complete, Carbon Panel is accessible at **http://\<guest-ip\>:8080** (default port).
+
+To use a different install directory or image:
+
+```bash
+sudo bash install-carbon-panel.sh --dir /srv/carbon-panel --image atharvnaphade/carbonpanel:latest
+```
+
+## Update
+
+To update the controller while preserving existing deployment data, compose customizations, and config, run in the guest from the directory that holds the script:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh
+less install-carbon-panel.sh
+sudo bash install-carbon-panel.sh update --dir /opt/carbon-panel
+```
+
+The script detects the standard Compose names in `--dir` (`compose.yml`, `compose.yaml`, `docker-compose.yml`, `docker-compose.yaml`), including the `docker-compose.yml` shipped in this repository. It requires the `carbon-panel` service to be defined in the selected file before pulling or recreating it, and refuses when several standard names are present rather than guessing which deployment to touch.
+
+If your Compose file lives elsewhere, select it explicitly; the config may sit outside the data directory and relative paths resolve from `--dir`:
+
+```bash
+sudo bash install-carbon-panel.sh update --dir /opt/carbon-panel --compose /etc/carbon/docker-compose.yml
+```
+
+`--dir` defaults to `/opt/carbon-panel` (or `$CARBON_PANEL_DIR`), so you can omit it if you used the default install directory. You can also re-download and inspect the script before running `update`.
+
+The update path pulls the selected image and recreates only the `carbon-panel` service (`docker compose pull && docker compose up -d`) without deleting bind-mounted data, backups, or tmp files. Before upgrading, consider a controller database snapshot as described in [Docker Compose](/getting-started/docker-compose/).
+
+If no Compose config is found but a native `carbon-panel` systemd unit is evidenced, the script stops with a diagnostic pointing to the controller's [Prebuilt binaries](/getting-started/prebuilt-binaries/) guide and the repository [Releases](https://github.com/athNdev/carbonpanel/releases) page. It does not install, migrate, or run a third-party updater for a native install. The former third-party Proxmox VE Community Scripts `carbon-panel.sh` helper is no longer available (its download returns HTTP 404); do not download or execute it.
+
+## Existing deployments and data
+
+- **Preserved:** `data/`, `backups/`, `tmp/`, and any existing standard-name Compose file (`compose.yml`, `compose.yaml`, `docker-compose.yml`, `docker-compose.yaml`) or `config.yaml` in the install directory.
+- **Not overwritten:** re-running `install` leaves an existing standard-name Compose file unchanged.
+- **Not touched:** this script does not delete Docker volumes or bind mounts, and does not modify Proxmox host configuration.
+
+If you previously used the third-party Proxmox VE Community Scripts helper, your existing container/data remain where that helper placed them. Its `carbon-panel.sh` download now returns HTTP 404, so do not fetch or run it. This first-party script is a supported path for **existing prepared guests** and for future installs you manage with this repository's script; a native systemd install is updated through the controller's Prebuilt binaries guide and repository Releases instead.
 
 ## Sizing guidance
 
-**CPU** — A single Minecraft server (vanilla or modded) rarely exceeds 400% (4 cores). While up to 4 cores per server is recommended for optimal performance, you can start with the default of `4` and increase as needed.
+**CPU** — A single Minecraft server (vanilla or modded) rarely exceeds 400% (4 cores). While up to 4 cores per server is recommended for optimal performance, you can start with 4 cores and increase as needed.
 
-**RAM** — Vanilla servers may only need a few GB, but heavily modded servers average 10 GB+ per instance, especially with multiple players. You can safely allocate most of your available RAM — Proxmox doesn't strictly reserve it, so other LXCs and the host OS can still use whatever Carbon Panel isn't actively consuming.
+**RAM** — Vanilla servers may only need a few GB, but heavily modded servers average 10 GB+ per instance, especially with multiple players. Size the guest for the panel plus the Minecraft servers you plan to run.
 
-**Disk** — Entirely depends on what you plan to run and for how long. 40–80 GB is a reasonable starting point and can be expanded later.
-
-## Paths
-
-Since Carbon Panel runs directly on the host here (not inside a Docker container), file paths are straightforward: the panel and the Docker daemon see the same filesystem, so no translation or extra variable is involved. The default `./data` relative to `/opt/carbon-panel` works out of the box.
-
-Once complete, Carbon Panel is accessible at **http://\<container-ip\>:8080**.
+**Disk** — Depends on what you plan to run and for how long. 40–80 GB is a reasonable starting point for a small setup and can be expanded later.
 
 For all available configuration options, see [Configuration](/configuration/).

@@ -1,0 +1,483 @@
+﻿# SPDX-License-Identifier: MPL-2.0
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Focused docs-only publication lane (independent of OCI channel promotion).
+# A normal successful CI run on trusted main republishes changed maintained
+# guides from the exact tested commit under the SAME pages-deploy lock. The
+# live Stable and Nightly product/image receipt is resolved and qualified
+# BEFORE the build, then reproduced exactly. No registry alias, immutable tag,
+# version pin or GitHub Release is touched here.
+
+name: Docs-only guide publication
+
+on:
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+  actions: read
+  deployments: read
+
+# Only an eligible successful push CI run on trusted main joins the shared
+# pages-deploy lock, so a failed/PR event with skipped jobs cannot occupy the
+# single pending slot and displace a real queued site deployment. Every other
+# event gets its own non-cancelling group; the job `if` still gates all writes.
+concurrency:
+  group: ${{ github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'success' && 'pages-deploy' || format('docs-only-verify-{0}', github.event.workflow_run.id) }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and qualify the preserved docs artifact
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.decision_record.outputs.publish }}
+      guide_fingerprint: ${{ steps.fingerprint.outputs.fingerprint }}
+      guide_fingerprint_json: ${{ steps.fingerprint.outputs.json }}
+      source_state: ${{ steps.live_state.outputs.state }}
+      live_index: ${{ steps.live.outputs.index }}
+      stable_commit: ${{ steps.live.outputs.stable_commit }}
+      stable_digest: ${{ steps.live.outputs.stable_digest }}
+      nightly_commit: ${{ steps.live.outputs.nightly_commit }}
+      nightly_digest: ${{ steps.live.outputs.nightly_digest }}
+      baseline_artifact: ${{ steps.baseline.outputs.artifact_id }}
+      baseline_run: ${{ steps.baseline.outputs.run_id }}
+      prior_hash: ${{ steps.baseline_assert.outputs.hash }}
+      baseline_mode: ${{ steps.baseline_assert.outputs.baseline_mode }}
+      rollback_artifact: ${{ steps.upload_prior.outcome }}
+    steps:
+      - name: Pin the exact tested main revision
+        id: pinned
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if ! printf '%s' "$RUN_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::CI head is not a full 40-hex commit"
+            exit 1
+          fi
+          echo "sha=$RUN_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the exact tested trusted commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pinned.outputs.sha }}
+          fetch-depth: 0
+      - name: Assert the checked-out tree is the tested revision
+        env:
+          EXPECTED_SHA: ${{ steps.pinned.outputs.sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED_SHA" ]; then
+            echo "::error::checked-out HEAD $actual differs from tested revision $EXPECTED_SHA"
+            exit 1
+          fi
+
+      - name: Verify exact-commit trusted main CI
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: |
+          OUT=$(python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT")
+          printf '%s\n' "$OUT"
+          VERIFIED=$(printf '%s' "$OUT" | jq -r '.verified // empty')
+          if [ "$VERIFIED" != "true" ]; then
+            echo "::error::exact trusted main CI did not verify"
+            exit 1
+          fi
+          echo "verified=true" >> "$GITHUB_OUTPUT"
+
+      # Liveness comes from exact source bytes, not a one-commit diff. A later
+      # unrelated merge or a cancelled queue cannot hide a needed guide update:
+      # the candidate fingerprint is the declaration plus the real Git blobs at
+      # the trusted revision, compared with the receipt actually served live.
+      - name: Fingerprint the maintained guides at the tested revision
+        id: fingerprint
+        env:
+          GUIDE_REVISION: ${{ steps.pinned.outputs.sha }}
+        run: |
+          python3 scripts/docs_publication_gate.py guide-fingerprint \
+            --declaration docs/maintained-guides.json \
+            --revision "$GUIDE_REVISION" --root "$GITHUB_WORKSPACE" \
+            > .guide-fingerprint.json
+          echo "fingerprint=$(jq -r '.fingerprint' .guide-fingerprint.json)" >> "$GITHUB_OUTPUT"
+          echo "json=$(jq -c . .guide-fingerprint.json)" >> "$GITHUB_OUTPUT"
+      - name: Read the live maintained-guide receipt
+        id: guide_evidence
+        run: |
+          python3 scripts/docs_publication_gate.py guide-evidence \
+            --base-url https://carbonpanel.dev > .guide-evidence.json
+      - name: Decide whether the live guides are stale or missing
+        id: decision_record
+        run: |
+          python3 scripts/docs_publication_gate.py guide-change-decision \
+            --candidate .guide-fingerprint.json --evidence .guide-evidence.json \
+            > .guide-decision.json
+          echo "publish=$(jq -r '.publish' .guide-decision.json)" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason' .guide-decision.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        if: steps.decision_record.outputs.publish == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.1'
+      - name: Set up Bun
+        if: steps.decision_record.outputs.publish == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+      - name: Set up Buf
+        if: steps.decision_record.outputs.publish == 'true'
+        uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99
+        with:
+          version: '1.50.0'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Resolve and QUALIFY the active live channel state before any build. A
+      # promoted final nightly is rendered with its observed final input; the
+      # explicitly unpromoted matched baseline is rendered from the contract.
+      # A candidate/unknown/mismatched state fails closed with zero writes.
+      - name: Read the live channel receipt
+        id: live
+        if: steps.decision_record.outputs.publish == 'true'
+        run: |
+          mkdir -p .website-build
+          curl -fsSL https://carbonpanel.dev/version-index.json \
+            -o .website-build/live-version-index.json
+          LIVE=$(cat .website-build/live-version-index.json)
+          echo "stable_commit=$(printf '%s' "$LIVE" | jq -r '.channels.stable.commit // empty')" >> "$GITHUB_OUTPUT"
+          echo "stable_digest=$(printf '%s' "$LIVE" | jq -r '.channels.stable.image.digest // empty')" >> "$GITHUB_OUTPUT"
+          echo "nightly_commit=$(printf '%s' "$LIVE" | jq -r '.channels.nightly.commit // empty')" >> "$GITHUB_OUTPUT"
+          echo "nightly_digest=$(printf '%s' "$LIVE" | jq -r '.channels.nightly.image.digest // empty')" >> "$GITHUB_OUTPUT"
+          echo "index=$(printf '%s' "$LIVE" | jq -c .)" >> "$GITHUB_OUTPUT"
+      - name: Resolve and qualify the active live docs state
+        id: live_state
+        if: steps.decision_record.outputs.publish == 'true'
+        run: |
+          python3 scripts/docs_publication_gate.py resolve-live-docs-state \
+            --path .website-build/live-version-index.json \
+            > .website-build/live-state.json
+          echo "state=$(jq -r '.state' .website-build/live-state.json)" >> "$GITHUB_OUTPUT"
+          echo "revision=$(jq -r '.revision' .website-build/live-state.json)" >> "$GITHUB_OUTPUT"
+          echo "digest=$(jq -r '.digest' .website-build/live-state.json)" >> "$GITHUB_OUTPUT"
+          echo "receipt=$(jq -r '.receipt' .website-build/live-state.json)" >> "$GITHUB_OUTPUT"
+
+      # Render the FULL preserved artifact from the resolved live state. A
+      # docs-only change never invents a channel pin: final uses the observed
+      # immutable pair; baseline keeps the explicit unpromoted contract.
+      - name: Build and validate the full preserved docs artifact
+        id: build
+        if: steps.decision_record.outputs.publish == 'true'
+        env:
+          LIVE_STATE: ${{ steps.live_state.outputs.state }}
+          LIVE_REVISION: ${{ steps.live_state.outputs.revision }}
+          LIVE_DIGEST: ${{ steps.live_state.outputs.digest }}
+          LIVE_RECEIPT: ${{ steps.live_state.outputs.receipt }}
+        run: |
+          BUILD_ARGS=()
+          if [ "$LIVE_STATE" = "final" ]; then
+            BUILD_ARGS+=(--nightly-revision "$LIVE_REVISION"
+                         --nightly-digest "$LIVE_DIGEST"
+                         --promotion-state final
+                         --promotion-receipt "$LIVE_RECEIPT")
+            python3 scripts/build_website.py "${BUILD_ARGS[@]}"
+            python3 scripts/check_website.py \
+              --expect-nightly-revision "$LIVE_REVISION" \
+              --expect-nightly-digest "$LIVE_DIGEST" \
+              --expect-promotion-state final \
+              --expect-promotion-receipt "$LIVE_RECEIPT"
+          elif [ "$LIVE_STATE" = "baseline" ]; then
+            python3 scripts/build_website.py
+            python3 scripts/check_website.py
+          else
+            echo "::error::unresolved live docs state $LIVE_STATE"
+            exit 1
+          fi
+
+      - name: Validate the built channel contract
+        if: steps.decision_record.outputs.publish == 'true'
+        run: python3 scripts/docs_publication_gate.py validate-channel-contract --path .website-build/site/version-index.json
+      - name: Verify the built site preserves the live product/image receipt
+        if: steps.decision_record.outputs.publish == 'true'
+        run: |
+          python3 scripts/docs_publication_gate.py verify-docs-receipt \
+            --built .website-build/site/version-index.json \
+            --live .website-build/live-version-index.json
+      - name: Verify maintained guides come from the tested trusted checkout
+        if: steps.decision_record.outputs.publish == 'true'
+        env:
+          GUIDE_REVISION: ${{ steps.pinned.outputs.sha }}
+        run: |
+          python3 scripts/docs_publication_gate.py verify-maintained-guides \
+            --site .website-build/site --revision "$GUIDE_REVISION"
+      - name: Stamp the exact publication receipt into the built artifact
+        if: steps.decision_record.outputs.publish == 'true'
+        env:
+          GUIDE_REVISION: ${{ steps.pinned.outputs.sha }}
+        run: |
+          python3 scripts/docs_publication_gate.py stamp-publication-receipt \
+            --site .website-build/site --candidate .guide-fingerprint.json \
+            --live .website-build/live-version-index.json --revision "$GUIDE_REVISION"
+      - name: Verify maintained guide identity and real rendered content
+        if: steps.decision_record.outputs.publish == 'true'
+        env:
+          GUIDE_REVISION: ${{ steps.pinned.outputs.sha }}
+        run: |
+          python3 scripts/docs_publication_gate.py verify-publication-receipt \
+            --site .website-build/site --candidate .guide-fingerprint.json \
+            --live .website-build/live-version-index.json --revision "$GUIDE_REVISION"
+          python3 scripts/docs_publication_gate.py verify-rendered-guides \
+            --site .website-build/site --live .website-build/live-version-index.json \
+            --root "$GITHUB_WORKSPACE"
+      - name: Verify canonical Stable and Nightly page identity
+        if: steps.decision_record.outputs.publish == 'true'
+        env:
+          STABLE_COMMIT: ${{ steps.live.outputs.stable_commit }}
+          STABLE_DIGEST: ${{ steps.live.outputs.stable_digest }}
+          NIGHTLY_COMMIT: ${{ steps.live.outputs.nightly_commit }}
+          NIGHTLY_DIGEST: ${{ steps.live.outputs.nightly_digest }}
+        run: |
+          python3 scripts/docs_publication_gate.py verify-channel-docs \
+            --site .website-build/site --channel stable \
+            --commit "$STABLE_COMMIT" --digest "$STABLE_DIGEST" \
+            --stable-source .website-build/live-version-index.json
+          python3 scripts/docs_publication_gate.py verify-channel-docs \
+            --site .website-build/site --channel nightly \
+            --commit "$NIGHTLY_COMMIT" --digest "$NIGHTLY_DIGEST" \
+            --stable-source .website-build/live-version-index.json
+
+      # Rollback baseline comes from deployment statuses (last successful
+      # github-pages deployment -> exact run/artifact), then the exact artifact
+      # bytes are proven equal to the live public index before any deploy.
+      - name: Resolve the exact prior Pages baseline from deployment statuses
+        id: baseline
+        if: steps.decision_record.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASE=$(python3 scripts/docs_publication_gate.py pages-baseline --repository "$GITHUB_REPOSITORY")
+          printf '%s\n' "$BASE" > .website-build/pages-baseline.json
+          echo "artifact_id=$(printf '%s' "$BASE" | jq -r '.artifact_id')" >> "$GITHUB_OUTPUT"
+          echo "run_id=$(printf '%s' "$BASE" | jq -r '.run_id')" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$(printf '%s' "$BASE" | jq -r '.deployment_id')" >> "$GITHUB_OUTPUT"
+          echo "sha=$(printf '%s' "$BASE" | jq -r '.sha')" >> "$GITHUB_OUTPUT"
+      - name: Fetch and byte-verify the exact prior deployed docs
+        id: prior
+        if: steps.decision_record.outputs.publish == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.baseline.outputs.run_id }}
+        run: |
+          python3 scripts/docs_publication_gate.py fetch-prior-pages \
+            --site .website-build/prior-site \
+            --live-url https://carbonpanel.dev/version-index.json \
+            --repository "$GITHUB_REPOSITORY" --run-id "$RUN_ID"
+          RESULT=$(python3 scripts/docs_publication_gate.py verify-prior-bytes \
+            --site .website-build/prior-site --base-url https://carbonpanel.dev)
+          printf '%s\n' "$RESULT"
+          echo "verified_hash=$(printf '%s' "$RESULT" | jq -r '.hash // empty')" >> "$GITHUB_OUTPUT"
+          echo "baseline_mode=exact-artifact" >> "$GITHUB_OUTPUT"
+      # Retention recovery is SHA-anchored: only the exact commit of the last
+      # successful Pages deployment, confirmed on origin/main, may be checked
+      # out in a separate worktree. Live channel state is re-qualified and all
+      # live bytes are compared; this is a reconstruction, never the artifact.
+      - name: Recover a verified prior baseline when the artifact expired
+        id: recover
+        if: always() && steps.decision_record.outputs.publish == 'true' && steps.prior.outcome == 'failure'
+        continue-on-error: true
+        env:
+          DEPLOY_SHA: ${{ steps.baseline.outputs.sha }}
+        run: |
+          printf '%s' "$DEPLOY_SHA" | grep -Eq '^[0-9a-f]{40}$' || {
+            echo "::error::no exact deployment SHA for recovery"; exit 1; }
+          git fetch origin main --no-tags
+          git worktree add --detach .recover "$DEPLOY_SHA"
+          RESULT=$(python3 scripts/docs_publication_gate.py recover-prior-pages \
+            --site .website-build/prior-site --base-url https://carbonpanel.dev \
+            --root .recover --deployment-sha "$DEPLOY_SHA" \
+            --trusted-declaration "$GITHUB_WORKSPACE/docs/maintained-guides.json")
+          printf '%s\n' "$RESULT"
+          echo "verified_hash=$(printf '%s' "$RESULT" | jq -r '.hash // empty')" >> "$GITHUB_OUTPUT"
+          echo "baseline_mode=reconstructed" >> "$GITHUB_OUTPUT"
+      # Explicit baseline assertion: the run proceeds only with a verified
+      # prior artifact OR a fully verified reconstruction, never on an absent
+      # baseline. continue-on-error above keeps earlier steps non-fatal.
+      - name: Assert a verified rollback baseline is available
+        id: baseline_assert
+        if: always() && steps.decision_record.outputs.publish == 'true'
+        env:
+          EXACT_HASH: ${{ steps.prior.outputs.verified_hash }}
+          EXACT_OK: ${{ steps.prior.outcome }}
+          REBUILT_HASH: ${{ steps.recover.outputs.verified_hash }}
+          REBUILT_OK: ${{ steps.recover.outcome }}
+        run: |
+          if [ "$EXACT_OK" = "success" ] && [ -n "$EXACT_HASH" ]; then
+            echo "hash=$EXACT_HASH" >> "$GITHUB_OUTPUT"
+            echo "baseline_mode=exact-artifact" >> "$GITHUB_OUTPUT"
+          elif [ "$REBUILT_OK" = "success" ] && [ -n "$REBUILT_HASH" ]; then
+            echo "hash=$REBUILT_HASH" >> "$GITHUB_OUTPUT"
+            echo "baseline_mode=reconstructed" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::no exact or reconstructed prior baseline was fully verified"
+            exit 1
+          fi
+      # Recheck immediately before any write: trusted main must still be the
+      # exact tested commit and the live guide receipt must still be the stale
+      # or missing one that qualified this run.
+      - name: Recheck the trusted pin and live guide receipt before write
+        id: recheck
+        if: steps.decision_record.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ steps.pinned.outputs.sha }}
+        run: |
+          python3 scripts/docs_publication_gate.py recheck-main-tip \
+            --repository "$GITHUB_REPOSITORY" --expected "$EXPECTED_SHA"
+          python3 scripts/docs_publication_gate.py guide-evidence \
+            --base-url https://carbonpanel.dev > .guide-evidence-recheck.json
+          python3 scripts/docs_publication_gate.py guide-change-decision \
+            --candidate .guide-fingerprint.json --evidence .guide-evidence-recheck.json \
+            --require-publish
+      - name: Upload the full preserved site
+        if: steps.decision_record.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: .website-build/site
+          retention-days: 90
+      - name: Upload the verified prior bytes for rollback
+        id: upload_prior
+        if: steps.baseline_assert.outcome == 'success'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: github-pages-prior
+          path: .website-build/prior-site
+          retention-days: 90
+
+  deploy:
+    needs: publish
+    if: >-
+      needs.publish.outputs.publish == 'true' &&
+      needs.publish.outputs.prior_hash != '' &&
+      needs.publish.outputs.rollback_artifact == 'success' &&
+      needs.publish.outputs.stable_commit != '' &&
+      needs.publish.outputs.nightly_commit != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      deploy_started: ${{ steps.marker.outputs.started }}
+    steps:
+      - name: Checkout the tested trusted revision for public verification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      # Recheck the exact trusted pin immediately before the Pages write; a
+      # main move between artifact upload and deploy must not publish stale.
+      - name: Recheck the exact trusted main revision before the Pages write
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python3 scripts/docs_publication_gate.py recheck-main-tip \
+            --repository "$GITHUB_REPOSITORY" --expected "$EXPECTED_SHA"
+      # This marker is the only signal rollback may use: a checkout or recheck
+      # failure before it must never restore bytes that were never overwritten.
+      - name: Mark the Pages write as attempted
+        id: marker
+        run: echo "started=true" >> "$GITHUB_OUTPUT"
+      - name: Deploy the full preserved site once
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+      - name: Verify public canonical pages and source metadata
+        env:
+          STABLE_COMMIT: ${{ needs.publish.outputs.stable_commit }}
+          STABLE_DIGEST: ${{ needs.publish.outputs.stable_digest }}
+          NIGHTLY_COMMIT: ${{ needs.publish.outputs.nightly_commit }}
+          NIGHTLY_DIGEST: ${{ needs.publish.outputs.nightly_digest }}
+          LIVE_INDEX: ${{ needs.publish.outputs.live_index }}
+          CANDIDATE: ${{ needs.publish.outputs.guide_fingerprint_json }}
+          GUIDE_REVISION: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          printf '%s\n' "$CANDIDATE" > .guide-fingerprint.json
+          printf '%s\n' "$LIVE_INDEX" > .predeploy-live-index.json
+          verify() {
+            curl -fsSL https://carbonpanel.dev/version-index.json -o .public-index.json || return 1
+            python3 scripts/docs_publication_gate.py verify-docs-receipt \
+              --built .public-index.json --live .predeploy-live-index.json || return 1
+            python3 scripts/docs_publication_gate.py verify-maintained-guides \
+              --base-url https://carbonpanel.dev --revision "$GUIDE_REVISION" || return 1
+            python3 scripts/docs_publication_gate.py verify-publication-receipt \
+              --base-url https://carbonpanel.dev --candidate .guide-fingerprint.json \
+              --live .predeploy-live-index.json --revision "$GUIDE_REVISION" || return 1
+            python3 scripts/docs_publication_gate.py verify-rendered-guides \
+              --base-url https://carbonpanel.dev \
+              --live .predeploy-live-index.json --root "$GITHUB_WORKSPACE" || return 1
+            python3 scripts/docs_publication_gate.py verify-channel-docs \
+              --base-url https://carbonpanel.dev --channel stable \
+              --commit "$STABLE_COMMIT" --digest "$STABLE_DIGEST" \
+              --stable-source .predeploy-live-index.json || return 1
+            python3 scripts/docs_publication_gate.py verify-channel-docs \
+              --base-url https://carbonpanel.dev --channel nightly \
+              --commit "$NIGHTLY_COMMIT" --digest "$NIGHTLY_DIGEST" \
+              --stable-source .predeploy-live-index.json
+          }
+          # Bounded CDN propagation allowance before a rollback is considered.
+          for attempt in 1 2 3 4 5; do
+            if verify; then exit 0; fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "::error::public verification failed after bounded propagation retries"
+              exit 1
+            fi
+            sleep 10
+          done
+
+  # No alias or immutable pin is moved by this lane, so rollback restores only
+  # the exact previously deployed bytes from the resolved baseline artifact.
+  rollback:
+    needs: [publish, deploy]
+    if: >-
+      always() && needs.publish.outputs.publish == 'true' &&
+      needs.publish.outputs.prior_hash != '' &&
+      needs.deploy.outputs.deploy_started == 'true' &&
+      needs.deploy.result == 'failure' && needs.deploy.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy the exact prior docs bytes
+        id: rollback_deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: github-pages-prior
+      - name: Verify restored live bytes match the resolved baseline
+        env:
+          PRIOR_HASH: ${{ needs.publish.outputs.prior_hash }}
+        run: |
+          LIVE_HASH=$(curl -fsSL https://carbonpanel.dev/version-index.json | sha256sum | cut -d' ' -f1)
+          test "sha256:$LIVE_HASH" = "$PRIOR_HASH"
+      - name: Fail the run when a docs rollback was required
+        run: |
+          echo "::error::docs-only deploy rolled back to the exact prior Pages baseline"
+          exit 1

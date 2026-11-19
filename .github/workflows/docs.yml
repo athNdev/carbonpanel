@@ -13,10 +13,13 @@ on:
       - 'web/carbon-panel/src/routes/servers/**'
       - 'web/carbon-panel/src/routes/modpacks/studio/**'
       - 'docs/website-source.json'
+      - 'docs/maintained-guides.json'
       - 'docs/version-index.json'
       - 'docs/release-history.json'
       - 'scripts/*website*'
       - 'scripts/version_contract.py'
+      - 'scripts/maintained_guides.py'
+      - 'scripts/test_maintained_guides.py'
       - 'scripts/version_bump.py'
       - 'scripts/openapi_version.py'
       - 'scripts/test_openapi_version.py'
@@ -54,7 +57,7 @@ jobs:
           version: '1.50.0'
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Test snapshot isolation, URL handling and version contract
-        run: python3 -m unittest scripts.test_website scripts.test_version_contract scripts.test_landing_page scripts.test_design_system_page
+        run: python3 -m unittest scripts.test_website scripts.test_version_contract scripts.test_maintained_guides scripts.test_landing_page scripts.test_design_system_page
       - name: Validate every version surface on the same commit
         run: python3 scripts/version_bump.py prepare --check
       - name: Build the homepage and exact-peel versioned docs
