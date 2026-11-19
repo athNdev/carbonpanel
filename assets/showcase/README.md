@@ -34,15 +34,11 @@ README-canonical set. Publication fails closed if any one is missing, corrupt,
 stale or inconsistent with the manifest. The `-full` shot is a full-window
 capture with navigation and shell; the others are inline feature crops.
 
-**Publication follow-up (explicit):** this change lands the required-asset,
-validation, and World/BlueMap decoupling groundwork. The live public manifest
-does **not** yet contain `showcase-dashboard-full.png` (raw URL is 404), so the
-root README deliberately does **not** link it yet. A separate follow-up will
-add the prominent public README link **only after** a trusted-main automatic
-publish proves that exact PNG is in the public manifest, its raw URL returns
-HTTP 200 with the manifest SHA256 and byte count, and source id, version and
-data provenance are verified. Last-good assets and fail-closed validation are
-preserved meanwhile.
+**Publication follow-up (completed):** the full-window PNG was published by
+trusted-main run 44517658952 (public asset commit `dbd6e4ea`), with raw URL
+HTTP 200, manifest SHA256 and byte count verified (2880x2000). The root README
+now links it prominently. Last-good assets and fail-closed validation remain
+in force.
 
 Feature-gated journey steps (`--features players,library,worldtab,worlds,
 playerdetail`) are mandatory when enabled, so a partial set cannot publish.

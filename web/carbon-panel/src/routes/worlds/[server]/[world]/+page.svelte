@@ -410,7 +410,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full flex-1 space-y-4 bg-background font-sans text-foreground">
+<div
+	class="h-full flex-1 space-y-4 bg-background font-sans text-foreground"
+	data-testid="showcase-world-map-content"
+>
 	<CarbonBreadcrumbs
 		items={[
 			{ label: 'Worlds', href: resolve('/worlds') },
