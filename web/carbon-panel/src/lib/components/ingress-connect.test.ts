@@ -57,3 +57,33 @@ test('Server creation form does not leak proxy parameters on direct port mode', 
 		'Must clear proxyListenerId when not in proxy mode'
 	);
 });
+
+test('Server creation wizard can queue local datapack uploads for post-create install', () => {
+	const newPagePath = path.resolve(import.meta.dirname, '../../routes/servers/new/+page.svelte');
+	const content = fs.readFileSync(newPagePath, 'utf-8');
+
+	assert.ok(
+		content.includes("import { uploadFile } from '$lib/utils/chunked-upload';"),
+		'wizard must use chunked upload utility for local datapacks'
+	);
+	assert.ok(
+		content.includes('pendingDatapackUploads'),
+		'wizard must track pending local datapack uploads'
+	);
+	assert.ok(
+		content.includes('handleWizardDatapackUpload'),
+		'wizard must handle local datapack archive uploads'
+	);
+	assert.ok(
+		content.includes('rpcClient.datapack.uploadDatapack'),
+		'wizard must install queued local datapacks after server creation'
+	);
+	assert.ok(
+		content.includes('Upload local datapack'),
+		'wizard datapack step must expose a local upload workflow'
+	);
+	assert.ok(
+		content.includes('Local upload'),
+		'queued local datapack uploads must be labeled in the selection list'
+	);
+});
