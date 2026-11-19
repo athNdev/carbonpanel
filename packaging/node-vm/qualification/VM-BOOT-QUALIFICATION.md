@@ -208,7 +208,7 @@ qemu-img info ubuntu-amd64.img
 python -m unittest discover -s scripts -p 'test_node_vm_*.py' -v
 ```
 
-## 12. 2026-11-19 follow-up: disposable container TCG probe (this session)
+## 12. 2026-11-19 follow-up: disposable container TCG probe and boot attempt (this session)
 
 Environment probe (Windows host, WSL `ubuntu_general`):
 - `qemu-system-x86_64`/`qemu-system-aarch64`: not installed on host or in WSL.
@@ -224,23 +224,44 @@ prepare deterministic seed/NoCloud ISO inputs, verify qemu availability, run a
 disposable QEMU boot attempt with serial-console capture, scan for cloud-init
 and first-boot enrollment markers, and optionally perform read-only offline disk
 inspection for bundle/secret persistence when guestfs tools are available. The
-driver reports gates conservatively (PASS/FAIL/BLOCKED/NOT_RUN/OBSERVED/NOT
-OBSERVED) and does not claim live enrollment, daemon health or effective
-network isolation from serial markers alone.
+driver reports gates conservatively and does not claim live enrollment, daemon
+health or effective network isolation from serial markers alone.
 
-Prepare-only check in this session (Windows Python, no ISO tool/qemu on PATH):
-deterministic seed generation succeeded for `oss377-boot-qual-0001` (`node-label
-oss377boot`) but CIDATA ISO creation and qemu availability were correctly
-reported as blocked/missing in that environment. In WSL, `genisoimage` and
-deterministic seed/ISO creation are available for disposable runs.
+Preparation (task-owned, WSL): deterministic NoCloud seed/ISO generated for
+`instance-id oss377-boot-qual-0001`, `node-label oss377boot` (CIDATA ISO via
+`genisoimage`). Verified amd64 `release-20261017` image re-downloaded in WSL
+temp and hash-checked: `04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`,
+621284352 B (matches pinned provenance; see section 3).
 
-TCG boot attempt status: a task-owned download of the verified amd64
-`release-20261017` image and a disposable container-based QEMU TCG boot attempt
-were initiated from WSL as part of this follow-up. At the time of this record,
-no completed clean-boot evidence (first-boot bundle creation, network/health
-probe, or reboot persistence) has been captured from that attempt in this
-document. Any later evidence must be appended with exact command, log/report
-artifacts, elapsed time and explicit gate outcomes; absence of evidence here is
-**not** a boot pass. Prior claims remain unchanged: whole-image byte
-provenance is VERIFIED (section 3); real clean boot on a capable runner
-remains the acceptance gate.
+Disposable QEMU TCG boot attempt (boot-attempt-3, 2026-11-19, container
+`oss377-qemu:local` / Debian bookworm `qemu-system-x86_64` 7.2, `--accel tcg`,
+`-m 2048 -smp 2`, user-mode networking, `-no-reboot` to capture first
+boot-to-reboot boundary, serial console to file, offline inspection skipped):
+
+| Gate | Status | Evidence |
+| --- | --- | --- |
+| qemu available / seed / seed ISO / boot disk overlay | PASS | qemu-system-x86_64 found; deterministic nocloud seed and prebuilt CIDATA ISO used; qcow2 backing overlay created |
+| boot attempt | **COMPLETED** | qemu exited `returncode 0`, `timed_out false`, elapsed ~504.1s (2400s timeout) |
+| serial console | SCANNED | `serial-console.log` captured (88272 bytes) |
+| cloud-init finished | **PASS (marker)** | `cloud_init_finished: true` in serial scan |
+| first-boot identity marker (enroll stdout JSON) | **INCONCLUSIVE** | `enroll_stdout_json: false`; cloud-init finished marker seen but enroll stdout JSON not found in serial log (runcmd stdout is typically recorded in guest `cloud-init-output.log`, not serial console). On-disk bundle/secret creation not proven by this scan. |
+| reboot/poweroff boundary | **OBSERVED** | `reboot_or_poweroff_signal: true`; clean qemu exit with `-no-reboot` at boundary |
+| serial secret scan | NO_HIGH_SIGNAL_MARKERS | no PEM/assignment markers found in captured serial log; absence of all secret material not proven |
+| network config | CONFIGURED (not proven) | seed DHCP-only; qemu user-mode netdev configured; effective connectivity/health not proven |
+| offline disk inspection / bundle persistence | NOT_RUN | inspection skipped (no guestfs tools in runtime container); bundle/secret on-disk presence and reboot persistence not verified |
+| service health / reboot persistence (second boot) | NOT_RUN | no in-guest health probe; second-boot persistence not automatically verified |
+
+**Interpretation:** this provides real disposable-runner evidence of **clean VM
+boot and cloud-init completion** for the verified amd64 image with the
+deterministic NoCloud seed, and a clean reboot/poweroff boundary under TCG
+(~8.4 min). It does **not** by itself prove first-boot enrollment bundle/secret
+creation on disk, effective user-setup completion beyond cloud-init markers,
+network connectivity/daemon health, or post-reboot persistence (second boot not
+performed, guest disk not inspected). Prior claims remain unchanged: whole-image
+byte provenance is VERIFIED (section 3). Full OSS-377 boot acceptance still
+requires evidence for user setup/bundle persistence and reboot persistence (and
+network/health where possible) on a capable disposable runner; this run reduces
+but does not close that gap. No live mTLS enrollment, registry/release,
+deployment or live host write was performed. Task-owned downloaded image and run
+artifacts in WSL temp remain local evidence unless explicitly retained/cleaned
+per task policy.
