@@ -451,7 +451,12 @@ up)
 			# the newly created container after the restart.
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
-				start_bluemap "${server_path}" "${server_path}/modules/bluemap" world >/dev/null 2>&1 || true
+				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" world; then
+					echo "review bluemap container running: $(docker inspect --format '{{.Id}} {{.HostConfig.NetworkMode}}' "${NAME}-bluemap" 2>/dev/null)" >&2
+					echo "review renderer local probe: $(docker exec "${NAME}-bluemap" sh -c 'wget -q -O - http://127.0.0.1:8100/settings.json 2>/dev/null | head -c 120' 2>/dev/null)" >&2
+				else
+					echo "review bluemap container failed to restart" >&2
+				fi
 				echo "review world view targets after renderer: $(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | head -c 1200)" >&2
 			fi
 		fi
