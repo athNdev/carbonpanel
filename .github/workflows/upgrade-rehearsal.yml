@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MPL-2.0
 # Recurring, DISPOSABLE real-binary upgrade rehearsal (OSS-406).
-# Build-only and read-only: downloads the verified v1.0.40 stable archive,
-# builds a candidate from this checkout, and runs both real binaries against
-# seeded disposable DB/world copies. No registry, release, tag, host or live
-# world is read or written. Every write stays under $RUNNER_TEMP.
+# Build-only and read-only: downloads the verified v1.0.40 LEGACY baseline and
+# the current published stable derived from the product version contract,
+# builds a candidate from this checkout, and runs the real binaries against
+# seeded disposable DB/world copies in two cases. No registry, release, tag,
+# host or live world is read or written; all disposable artifacts stay under
+# $RUNNER_TEMP (toolchain build caches excepted).
 name: Upgrade rehearsal
 
 on:
@@ -37,7 +39,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: upgrade-rehearsal-${{ github.run_id }}
+  group: carbonpanel-stage-rehearsal-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -48,6 +50,9 @@ jobs:
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job builds PR-contributed code and runs a downloaded binary.
+          persist-credentials: false
 
       - name: Set up Go from go.mod
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -63,16 +68,17 @@ jobs:
       - name: Run offline helper fail-closed tests
         run: python3 -m unittest scripts.test_upgrade_rehearsal_ci
 
-      - name: Run real-binary disposable rehearsal
+      - name: Run real-binary disposable rehearsal (legacy + derived current stable)
         env:
           WORKSPACE: ${{ runner.temp }}/upgrade-rehearsal
           CANDIDATE_VERSION: 2.0.0-verify.ci
+          # Read-only token used only to derive the current stable from the
+          # authoritative GitHub release record via the product version contract.
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/upgrade_rehearsal_ci.py \
             --workspace "$WORKSPACE" \
             --target-os linux --target-arch amd64 \
-            --stable-version v1.0.40 \
-            --stable-commit f88748be6a216b187e675bbb1f110df07e544148 \
             --candidate-version "$CANDIDATE_VERSION" \
             --candidate-commit "$(git rev-parse HEAD)" \
             --go-binary go
@@ -85,11 +91,16 @@ jobs:
           import json, sys
           report = json.load(open(sys.argv[1], encoding="utf-8"))
           print("upgrade rehearsal pass:", report["pass"])
-          print("stable:", report["stable"]["archive"], report["stable"]["archive_sha256"])
+          for case in ("legacy", "current"):
+              meta = report.get("stable_" + case, {})
+              if meta:
+                  print(case + " stable:", meta.get("release_tag"), meta.get("archive_sha256"),
+                        "source:", meta.get("source"))
           print("candidate:", report["candidate"]["version"], report["candidate"]["commit"],
                 report["candidate"]["binary_sha256"])
           print("failed checks:", report["failed_checks"])
-          print("world files hashed:", report["world_files_hashed"])
+          for name, detail in report["cases"].items():
+              print(name, "tables:", detail["stable_tables"], "->", detail["candidate_tables"])
           PY
           fi
 

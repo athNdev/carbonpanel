@@ -27,14 +27,17 @@ in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-
 
 A recurring, read-only rehearsal runs in CI (`upgrade-rehearsal.yml`): weekly,
 on PRs that change migration/config/release surfaces and on manual dispatch. It
-downloads the verified `v1.0.40` archive, builds a candidate from the checkout,
-runs both real `carbon-panel` binaries against seeded disposable DB/world copies
-and asserts integrity, additive 35 → 44 table growth, row/world preservation
-and forced-failure restore/rollback. Exact artifact versions and SHA-256
-digests are emitted in the job's evidence report. This check is not a release
-approval gate: it grants no write scope, touches no live world, host, tag,
-release or registry, and does not replace the OIDC/PROXY migration go/no-go
-steps above. See [ADR 0043](adr/0043-disposable-upgrade-rehearsal-ci.md).
+runs two fail-closed cases on seeded disposable DB/world copies: the explicit
+`v1.0.40` legacy baseline (35 → 44 → 35 tables) and the current published
+stable derived from the authoritative release record by the product version
+contract, so the weekly check follows new stables without a hardcoded version.
+Both use real `carbon-panel` binaries and assert integrity, additive table
+growth, row/world preservation, forced-failure refusal and both restore paths.
+Exact artifact versions and SHA-256 digests are emitted in the job's evidence
+report. This check is not a release approval gate: it grants no write scope,
+touches no live world, host, tag, release or registry, and does not replace the
+OIDC/PROXY migration go/no-go steps above. See
+[ADR 0044](adr/0044-disposable-upgrade-rehearsal-ci.md).
 
 1. **B1 — OIDC role mapping.** v1.0.40's `role_mapping: {}` example granted raw
    IdP group names directly. Current main uses raw claims only behind
