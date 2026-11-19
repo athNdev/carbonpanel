@@ -2686,180 +2686,46 @@ def install_prior_pages(candidate, live_version_index, destination):
     return {"hash": "sha256:" + sha256_bytes((target / "version-index.json").read_bytes())}
 
 
-def resolve_prior_deployment(deployments, statuses, run_artifacts,
-                             environment_url=None):
-    """Resolve the latest SUCCESSFUL Pages deployment to its archived artifact.
-
-    Pure and injectable. A build-only artifact sharing the live index hash is
-    NOT a prior deployment: only a deployment with a `success` status, its
-    workflow run and that run's named artifact forms an identity. Fail closed
-    when the artifact's head SHA disagrees with the deployment SHA.
-    """
-    for deployment in deployments or []:
-        deployment_id = str(deployment.get("id", ""))
-        records = statuses.get(deployment_id) or []
-        success = next(
-            (status for status in records
-             if status.get("state") == "success"
-             and (not environment_url
-                  or (status.get("environment_url") or "").rstrip("/")
-                  == environment_url.rstrip("/"))), None)
-        if success is None:
-            continue
-        log_url = success.get("log_url") or success.get("target_url") or ""
-        match = re.search(r"/actions/runs/(\d+)", log_url)
-        if match is None:
-            continue
-        run_id = match.group(1)
-        artifact = next(
-            (item for item in (run_artifacts.get(run_id) or [])
-             if item.get("name") == PAGES_ARTIFACT_NAME and not item.get("expired")),
-            None)
-        if artifact is None:
-            continue
-        identity = {"deployment_id": deployment_id, "sha": deployment.get("sha", ""),
-                    "run_id": run_id, "artifact_id": str(artifact.get("id", "")),
-                    "artifact_sha": (artifact.get("workflow_run") or {}).get("head_sha", "")}
-        if identity["artifact_sha"] and identity["artifact_sha"] != identity["sha"]:
-            continue
-        return identity
-    return None
-
-
-def pages_from_index(document):
-    """HTML page paths published by a version-index, for content comparison."""
-    paths = set()
-    for version in (document or {}).get("versions") or []:
-        base = (version.get("route") or "/docs/").strip("/")
-        for page in version.get("pages") or []:
-            slug = page.strip("/")
-            paths.add(f"{base}/{slug}/index.html" if slug else f"{base}/index.html")
-    return sorted(paths)
-
-
 def fetch_prior_pages(destination, live_url, repository, artifacts, download,
                       limit=6, identity=None, live_page=None, pages=()):
-    """Download the ACTUALLY DEPLOYED Pages artifact and verify it byte-exactly.
+    """Compatibility wrapper around the shared docs publication gate.
 
-    `identity` is resolved from successful github-pages deployment statuses
-    and ties the candidate to one deployment's run and artifact id; an index
-    hash match alone is not enough because a docs-only rebuild can share the
-    same index while serving different guide content. When `live_page` is
-    supplied, every listed page is also compared byte-for-byte with the live
-    site before the artifact is accepted for rollback.
+    Deployment identity, the exact artifact and all live-byte qualification
+    live in scripts/docs_publication_gate.py (the shared docs-only lane). This
+    wrapper exists only so older release gates still find the command; it must
+    not grow a second implementation that can drift from that gate.
     """
+    from scripts import docs_publication_gate as gate
+
+    baseline = identity
+    if baseline is None:
+        baseline, reason = gate.pages_baseline(repository)
+        if not baseline:
+            raise ValueError("Pages baseline resolution failed: " + reason)
     live = urllib.request.urlopen(live_url, timeout=60).read()
-    live_hash = sha256_bytes(live)
-    live_document = json.loads(live.decode("utf-8"))
-    if identity is not None:
-        artifact_id = str(identity.get("artifact_id", ""))
-        if not artifact_id:
-            raise ValueError("No verified prior deployment artifact identity")
-        artifacts = [item for item in artifacts
-                     if str(item.get("id", "")) == artifact_id]
-        if not artifacts:
-            raise ValueError("The deployed prior artifact is absent or expired")
-    considered = 0
-    for artifact in artifacts:
-        if artifact.get("expired"):
-            continue
-        if considered >= limit:
-            break
-        considered += 1
-        with tempfile.TemporaryDirectory(prefix="carbon-prior-pages-") as temporary:
-            staging = Path(temporary) / "artifact"
-            staging.mkdir()
-            site = _extract_pages_artifact(download(artifact), staging)
-            verified = install_prior_pages(site, live, destination)
-            if not verified:
-                continue
-            if live_page is not None:
-                for page in pages or pages_from_index(live_document):
-                    target = Path(destination) / page.lstrip("/")
-                    if not target.is_file():
-                        raise ValueError(f"prior artifact is missing live page {page}")
-                    if sha256_bytes(target.read_bytes()) != sha256_bytes(live_page(page)):
-                        raise ValueError(
-                            f"prior artifact page {page} disagrees with the live site; "
-                            "an equal version index is not proof of deployed content")
-            return {"verified": True, "hash": verified["hash"],
-                    "artifact_id": str(artifact.get("id", "")),
-                    "artifact_commit": (artifact.get("workflow_run") or {}).get(
-                        "head_sha", ""),
-                    "deployment_id": (identity or {}).get("deployment_id", ""),
-                    "run_id": (identity or {}).get("run_id", ""),
-                    "live_hash": "sha256:" + live_hash,
-                    "considered": considered}
-    raise ValueError(
-        "No non-expired Pages artifact matches the deployed prior receipt; "
-        "the exact prior docs bytes cannot be verified or restored")
+    result = gate.fetch_prior_pages(
+        destination, artifacts, download, live,
+        artifact_id=(baseline or {}).get("artifact_id") or None,
+        run_id=(baseline or {}).get("run_id") or None,
+        live_url=live_url)
+    return {**result,
+            "deployment_id": str((baseline or {}).get("deployment_id", "")),
+            "artifact_commit": result.get("artifact_commit")
+            or (baseline or {}).get("sha", "")}
 
 
 def fetch_prior_pages_cli(args):
-    """CLI: download and verify the deployed Pages artifact before any write."""
-    token = os.environ.get("GH_TOKEN", "")
-    headers = {"Accept": "application/vnd.github+json",
-               "X-GitHub-Api-Version": "2022-11-28",
-               "User-Agent": "carbonpanel-release-gate"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    """CLI: emit the shared gate's byte-qualified prior deployment artifact."""
+    from scripts import docs_publication_gate as gate
 
-    class ArtifactRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
-            if redirected is not None:
-                # The signed artifact URL rejects the API bearer token.
-                redirected.headers.pop("Authorization", None)
-            return redirected
-
-    opener = urllib.request.build_opener(ArtifactRedirect())
-
-    def api(url):
-        request = urllib.request.Request(url, headers=headers)
-        with opener.open(request, timeout=120) as response:
-            return response.read()
-
-    api_root = f"https://api.github.com/repos/{args.repository}"
+    api, root = gate.github_api(args.repository)
     listing = json.loads(api(
-        f"{api_root}/actions/artifacts?name={PAGES_ARTIFACT_NAME}&per_page=40"))
-    artifacts = listing.get("artifacts") or []
-
-    # The prior artifact identity comes from a SUCCESSFUL github-pages
-    # deployment and its run, never from an index-hash match alone.
-    deployments = json.loads(api(
-        f"{api_root}/deployments?environment=github-pages&per_page=10"))
-    statuses = {}
-    run_artifacts = {}
-    for deployment in deployments[:6]:
-        deployment_id = str(deployment.get("id", ""))
-        statuses[deployment_id] = json.loads(api(
-            f"{api_root}/deployments/{deployment_id}/statuses?per_page=10"))
-        for status in statuses[deployment_id]:
-            if status.get("state") != "success":
-                continue
-            match = re.search(r"/actions/runs/(\d+)",
-                              status.get("log_url") or status.get("target_url") or "")
-            if match and match.group(1) not in run_artifacts:
-                run_id = match.group(1)
-                run_artifacts[run_id] = (json.loads(api(
-                    f"{api_root}/actions/runs/{run_id}/artifacts")).get("artifacts") or [])
-    origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlsplit(args.live_url))
-    identity = resolve_prior_deployment(
-        deployments, statuses, run_artifacts, origin)
-
-    def live_page(path):
-        request = urllib.request.Request(
-            origin + "/" + path.lstrip("/"),
-            headers={"User-Agent": "carbonpanel-release-gate"})
-        with urllib.request.urlopen(request, timeout=60) as response:
-            return response.read()
-
-    def download(artifact):
-        return api(artifact["archive_download_url"])
-
-    result = fetch_prior_pages(args.site, args.live_url, args.repository,
-                               artifacts, download, limit=args.limit,
-                               identity=identity, live_page=live_page)
+        f"{root}/actions/artifacts?name={gate.PAGES_ARTIFACT_NAME}&per_page=40"))
+    live = urllib.request.urlopen(args.live_url, timeout=60).read()
+    result = gate.fetch_prior_pages(
+        args.site, listing.get("artifacts") or [],
+        lambda artifact: api(artifact["archive_download_url"]), live,
+        live_url=args.live_url)
     values = {key: str(value).lower() if isinstance(value, bool) else value
               for key, value in result.items()}
     print(json.dumps(values, indent=2))

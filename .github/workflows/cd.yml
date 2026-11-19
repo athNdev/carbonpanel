@@ -665,16 +665,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           rm -rf .website-build/prior-site
-          RESULT=$(python3 scripts/release.py fetch-prior-pages \
-            --site .website-build/prior-site \
-            --repository "$GITHUB_REPOSITORY" \
-            --live-url https://carbonpanel.dev/version-index.json)
+          # Single shared gate: successful deployment identity, exact artifact
+          # and real live-byte qualification all live in docs_publication_gate.
+          BASE=$(python3 scripts/docs_publication_gate.py pages-baseline \
+            --repository "$GITHUB_REPOSITORY")
+          test "$(printf '%s' "$BASE" | jq -r .verified)" = "true"
+          RESULT=$(python3 scripts/docs_publication_gate.py fetch-prior-pages \
+            --site .website-build/prior-site --repository "$GITHUB_REPOSITORY" \
+            --artifact-id "$(printf '%s' "$BASE" | jq -r .artifact_id)" \
+            --run-id "$(printf '%s' "$BASE" | jq -r .run_id)")
           test "$(printf '%s' "$RESULT" | jq -r .verified)" = "true"
           echo "hash=$(printf '%s' "$RESULT" | jq -r .hash)" >> "$GITHUB_OUTPUT"
           echo "artifact_id=$(printf '%s' "$RESULT" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
           echo "artifact_commit=$(printf '%s' "$RESULT" | jq -r .artifact_commit)" >> "$GITHUB_OUTPUT"
-          echo "deployment_id=$(printf '%s' "$RESULT" | jq -r .deployment_id)" >> "$GITHUB_OUTPUT"
-          echo "run_id=$(printf '%s' "$RESULT" | jq -r .run_id)" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$(printf '%s' "$BASE" | jq -r .deployment_id)" >> "$GITHUB_OUTPUT"
+          echo "run_id=$(printf '%s' "$BASE" | jq -r .run_id)" >> "$GITHUB_OUTPUT"
 
       # Verify the staged artifact before any public write: the canonical
       # Stable/Nightly site must still match the live active receipt (the
