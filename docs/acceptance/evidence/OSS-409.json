@@ -1,0 +1,38 @@
+{
+  "issue_key": "OSS-409",
+  "merge": {
+    "pr": 575,
+    "merged": true,
+    "merge_sha": "dbbd22e25ee55f8bc0624eeb45801765819fa6db",
+    "head_sha": "67374fbafcba7a0f5fb3c11b291e79628398bc7b",
+    "author": "athNdev"
+  },
+  "ci": {
+    "run_id": 44517658883,
+    "head_sha": "69ddb46d596aea8ed117a3dba6a1f63521572664",
+    "conclusion": "success"
+  },
+  "build": {
+    "run_id": 44522728666,
+    "conclusion": "success"
+  },
+  "deploy": {
+    "run_id": 44522728666,
+    "workflow": "Deploy Website to GitHub Pages",
+    "head_sha": "69ddb46d596aea8ed117a3dba6a1f63521572664",
+    "revision_sha": "69ddb46d596aea8ed117a3dba6a1f63521572664",
+    "url": "https://github.com/athNdev/carbonpanel/actions/runs/44522728666",
+    "jobs": [
+      { "name": "build", "conclusion": "success" },
+      { "name": "deploy", "conclusion": "success" },
+      { "name": "indexable-changes", "conclusion": "success" },
+      { "name": "notify-indexnow", "conclusion": "skipped" }
+    ]
+  },
+  "live": {
+    "url": "https://carbonpanel.dev/version-index.json",
+    "http_status": 200,
+    "checked_at": "2026-11-19T12:20:14Z",
+    "evidence": "docs/acceptance/evidence/OSS-409-live.txt"
+  }
+}
