@@ -164,3 +164,90 @@ func (s *PackwizService) DeletePack(ctx context.Context, req *connect.Request[v1
 	}
 	return connect.NewResponse(&v1.DeletePackResponse{Success: true}), nil
 }
+
+// protoToPackMod is the inverse of packModToProto. It lets the generated
+// contract feed the same shared operation as the compatibility adapter instead
+// of decoding a second, parallel mod shape.
+func protoToPackMod(m *v1.PackMod) packwiz.ModItem {
+	if m == nil {
+		return packwiz.ModItem{}
+	}
+	return packwiz.ModItem{
+		Slug: m.Slug, Name: m.Name, FileName: m.FileName, Side: m.Side,
+		Platform: m.Platform, ProjectID: m.ProjectId, VersionID: m.VersionId,
+		DownloadURL: m.DownloadUrl, FileSize: m.FileSize, Pinned: m.Pinned,
+		Kind: m.Kind, Optional: m.Optional, Default: m.Default,
+		OptionDescription: m.OptionDescription, Hash: m.Hash,
+		HashFormat: m.HashFormat, SHA512: m.Sha512,
+	}
+}
+
+func dependencyRefToProto(d packwiz.DependencyRef) *v1.PackDependencyRef {
+	return &v1.PackDependencyRef{
+		ProjectId: d.ProjectID, VersionId: d.VersionID,
+		Title: d.Title, DependencyType: d.DependencyType,
+		Platform: d.Platform,
+	}
+}
+
+// AddPackMod adds one mod and, when requested, resolves required dependencies.
+func (s *PackwizService) AddPackMod(ctx context.Context, req *connect.Request[v1.AddPackModRequest]) (*connect.Response[v1.AddPackModResponse], error) {
+	msg := req.Msg
+	result, err := s.ops.AddMod(ctx, msg.PackId, protoToPackMod(msg.Mod), msg.ResolveDependencies, msg.Loader, msg.McVersion)
+	if err != nil {
+		return nil, packwizConnectError(err)
+	}
+	out := &v1.AddPackModResponse{
+		Success:         true,
+		DependencyError: result.DependencyError,
+		Skipped:         result.Skipped,
+	}
+	for _, m := range result.AddedDependencies {
+		out.AddedDependencies = append(out.AddedDependencies, packModToProto(m))
+	}
+	for _, d := range result.Unresolved {
+		out.Unresolved = append(out.Unresolved, dependencyRefToProto(d))
+	}
+	return connect.NewResponse(out), nil
+}
+
+// AddUrlMod adds a mod from a direct download URL.
+func (s *PackwizService) AddUrlMod(ctx context.Context, req *connect.Request[v1.AddUrlModRequest]) (*connect.Response[v1.AddUrlModResponse], error) {
+	msg := req.Msg
+	mod, err := s.ops.AddModFromURL(ctx, msg.PackId, packwiz.DirectURLModRequest{
+		Name: msg.Name, FileName: msg.FileName, DownloadURL: msg.DownloadUrl,
+		Side: msg.Side, Pinned: msg.Pinned,
+	})
+	if err != nil {
+		return nil, packwizConnectError(err)
+	}
+	return connect.NewResponse(&v1.AddUrlModResponse{Mod: packModToProto(*mod)}), nil
+}
+
+// UpdatePackMod changes one mod's side and pinned flag.
+func (s *PackwizService) UpdatePackMod(ctx context.Context, req *connect.Request[v1.UpdatePackModRequest]) (*connect.Response[v1.UpdatePackModResponse], error) {
+	msg := req.Msg
+	if err := s.ops.UpdateMod(ctx, msg.PackId, msg.Slug, msg.Side, msg.Pinned); err != nil {
+		return nil, packwizConnectError(err)
+	}
+	return connect.NewResponse(&v1.UpdatePackModResponse{Success: true}), nil
+}
+
+// DeletePackMod removes one mod from a pack.
+func (s *PackwizService) DeletePackMod(ctx context.Context, req *connect.Request[v1.DeletePackModRequest]) (*connect.Response[v1.DeletePackModResponse], error) {
+	msg := req.Msg
+	if err := s.ops.DeleteMod(ctx, msg.PackId, msg.Slug); err != nil {
+		return nil, packwizConnectError(err)
+	}
+	return connect.NewResponse(&v1.DeletePackModResponse{Success: true}), nil
+}
+
+// BatchPackMods applies one action to several mods.
+func (s *PackwizService) BatchPackMods(ctx context.Context, req *connect.Request[v1.BatchPackModsRequest]) (*connect.Response[v1.BatchPackModsResponse], error) {
+	msg := req.Msg
+	count, err := s.ops.BatchMods(ctx, msg.PackId, msg.Action, msg.Slugs, msg.Side)
+	if err != nil {
+		return nil, packwizConnectError(err)
+	}
+	return connect.NewResponse(&v1.BatchPackModsResponse{Success: true, Count: int32(count)}), nil
+}

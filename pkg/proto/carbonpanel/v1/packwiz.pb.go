@@ -1162,6 +1162,708 @@ func (x *DeletePackResponse) GetSuccess() bool {
 	return false
 }
 
+// AddPackModRequest adds a mod entry. The optional dependency fields mirror the
+// legacy resolve_dependencies=true query so both transports share one operation.
+type AddPackModRequest struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	PackId              string                 `protobuf:"bytes,1,opt,name=pack_id,json=packId,proto3" json:"pack_id,omitempty"`
+	Mod                 *PackMod               `protobuf:"bytes,2,opt,name=mod,proto3" json:"mod,omitempty"`
+	ResolveDependencies bool                   `protobuf:"varint,3,opt,name=resolve_dependencies,json=resolveDependencies,proto3" json:"resolve_dependencies,omitempty"`
+	Loader              string                 `protobuf:"bytes,4,opt,name=loader,proto3" json:"loader,omitempty"`
+	McVersion           string                 `protobuf:"bytes,5,opt,name=mc_version,json=mcVersion,proto3" json:"mc_version,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *AddPackModRequest) Reset() {
+	*x = AddPackModRequest{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddPackModRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddPackModRequest) ProtoMessage() {}
+
+func (x *AddPackModRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddPackModRequest.ProtoReflect.Descriptor instead.
+func (*AddPackModRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *AddPackModRequest) GetPackId() string {
+	if x != nil {
+		return x.PackId
+	}
+	return ""
+}
+
+func (x *AddPackModRequest) GetMod() *PackMod {
+	if x != nil {
+		return x.Mod
+	}
+	return nil
+}
+
+func (x *AddPackModRequest) GetResolveDependencies() bool {
+	if x != nil {
+		return x.ResolveDependencies
+	}
+	return false
+}
+
+func (x *AddPackModRequest) GetLoader() string {
+	if x != nil {
+		return x.Loader
+	}
+	return ""
+}
+
+func (x *AddPackModRequest) GetMcVersion() string {
+	if x != nil {
+		return x.McVersion
+	}
+	return ""
+}
+
+// PackDependencyRef is one unresolvable required dependency reported by a
+// dependency-aware add. It mirrors the legacy JSON object field for field,
+// including the platform discriminator (modrinth vs curseforge), so a caller
+// can choose the right provider for a follow-up resolution attempt.
+type PackDependencyRef struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ProjectId      string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	VersionId      string                 `protobuf:"bytes,2,opt,name=version_id,json=versionId,proto3" json:"version_id,omitempty"`
+	Title          string                 `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
+	DependencyType string                 `protobuf:"bytes,4,opt,name=dependency_type,json=dependencyType,proto3" json:"dependency_type,omitempty"`
+	Platform       string                 `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *PackDependencyRef) Reset() {
+	*x = PackDependencyRef{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PackDependencyRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PackDependencyRef) ProtoMessage() {}
+
+func (x *PackDependencyRef) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PackDependencyRef.ProtoReflect.Descriptor instead.
+func (*PackDependencyRef) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *PackDependencyRef) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *PackDependencyRef) GetVersionId() string {
+	if x != nil {
+		return x.VersionId
+	}
+	return ""
+}
+
+func (x *PackDependencyRef) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *PackDependencyRef) GetDependencyType() string {
+	if x != nil {
+		return x.DependencyType
+	}
+	return ""
+}
+
+func (x *PackDependencyRef) GetPlatform() string {
+	if x != nil {
+		return x.Platform
+	}
+	return ""
+}
+
+// AddPackModResponse reports an add and, when requested, dependency resolution.
+// A resolver failure is reported as a soft result because the requested mod was
+// already installed, matching the compatibility adapter.
+type AddPackModResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Success           bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	DependencyError   string                 `protobuf:"bytes,2,opt,name=dependency_error,json=dependencyError,proto3" json:"dependency_error,omitempty"`
+	AddedDependencies []*PackMod             `protobuf:"bytes,3,rep,name=added_dependencies,json=addedDependencies,proto3" json:"added_dependencies,omitempty"`
+	Skipped           []string               `protobuf:"bytes,4,rep,name=skipped,proto3" json:"skipped,omitempty"`
+	Unresolved        []*PackDependencyRef   `protobuf:"bytes,5,rep,name=unresolved,proto3" json:"unresolved,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *AddPackModResponse) Reset() {
+	*x = AddPackModResponse{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddPackModResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddPackModResponse) ProtoMessage() {}
+
+func (x *AddPackModResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddPackModResponse.ProtoReflect.Descriptor instead.
+func (*AddPackModResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *AddPackModResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *AddPackModResponse) GetDependencyError() string {
+	if x != nil {
+		return x.DependencyError
+	}
+	return ""
+}
+
+func (x *AddPackModResponse) GetAddedDependencies() []*PackMod {
+	if x != nil {
+		return x.AddedDependencies
+	}
+	return nil
+}
+
+func (x *AddPackModResponse) GetSkipped() []string {
+	if x != nil {
+		return x.Skipped
+	}
+	return nil
+}
+
+func (x *AddPackModResponse) GetUnresolved() []*PackDependencyRef {
+	if x != nil {
+		return x.Unresolved
+	}
+	return nil
+}
+
+// AddUrlModRequest adds a mod from a direct download URL.
+type AddUrlModRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PackId        string                 `protobuf:"bytes,1,opt,name=pack_id,json=packId,proto3" json:"pack_id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	FileName      string                 `protobuf:"bytes,3,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
+	DownloadUrl   string                 `protobuf:"bytes,4,opt,name=download_url,json=downloadUrl,proto3" json:"download_url,omitempty"`
+	Side          string                 `protobuf:"bytes,5,opt,name=side,proto3" json:"side,omitempty"`
+	Pinned        bool                   `protobuf:"varint,6,opt,name=pinned,proto3" json:"pinned,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddUrlModRequest) Reset() {
+	*x = AddUrlModRequest{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddUrlModRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddUrlModRequest) ProtoMessage() {}
+
+func (x *AddUrlModRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddUrlModRequest.ProtoReflect.Descriptor instead.
+func (*AddUrlModRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AddUrlModRequest) GetPackId() string {
+	if x != nil {
+		return x.PackId
+	}
+	return ""
+}
+
+func (x *AddUrlModRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *AddUrlModRequest) GetFileName() string {
+	if x != nil {
+		return x.FileName
+	}
+	return ""
+}
+
+func (x *AddUrlModRequest) GetDownloadUrl() string {
+	if x != nil {
+		return x.DownloadUrl
+	}
+	return ""
+}
+
+func (x *AddUrlModRequest) GetSide() string {
+	if x != nil {
+		return x.Side
+	}
+	return ""
+}
+
+func (x *AddUrlModRequest) GetPinned() bool {
+	if x != nil {
+		return x.Pinned
+	}
+	return false
+}
+
+// AddUrlModResponse returns the stored mod entry.
+type AddUrlModResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mod           *PackMod               `protobuf:"bytes,1,opt,name=mod,proto3" json:"mod,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddUrlModResponse) Reset() {
+	*x = AddUrlModResponse{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddUrlModResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddUrlModResponse) ProtoMessage() {}
+
+func (x *AddUrlModResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddUrlModResponse.ProtoReflect.Descriptor instead.
+func (*AddUrlModResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AddUrlModResponse) GetMod() *PackMod {
+	if x != nil {
+		return x.Mod
+	}
+	return nil
+}
+
+// UpdatePackModRequest changes one mod's side and pinned flag.
+type UpdatePackModRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PackId        string                 `protobuf:"bytes,1,opt,name=pack_id,json=packId,proto3" json:"pack_id,omitempty"`
+	Slug          string                 `protobuf:"bytes,2,opt,name=slug,proto3" json:"slug,omitempty"`
+	Side          string                 `protobuf:"bytes,3,opt,name=side,proto3" json:"side,omitempty"`
+	Pinned        bool                   `protobuf:"varint,4,opt,name=pinned,proto3" json:"pinned,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdatePackModRequest) Reset() {
+	*x = UpdatePackModRequest{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdatePackModRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdatePackModRequest) ProtoMessage() {}
+
+func (x *UpdatePackModRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdatePackModRequest.ProtoReflect.Descriptor instead.
+func (*UpdatePackModRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *UpdatePackModRequest) GetPackId() string {
+	if x != nil {
+		return x.PackId
+	}
+	return ""
+}
+
+func (x *UpdatePackModRequest) GetSlug() string {
+	if x != nil {
+		return x.Slug
+	}
+	return ""
+}
+
+func (x *UpdatePackModRequest) GetSide() string {
+	if x != nil {
+		return x.Side
+	}
+	return ""
+}
+
+func (x *UpdatePackModRequest) GetPinned() bool {
+	if x != nil {
+		return x.Pinned
+	}
+	return false
+}
+
+// UpdatePackModResponse acknowledges a mod update.
+type UpdatePackModResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdatePackModResponse) Reset() {
+	*x = UpdatePackModResponse{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdatePackModResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdatePackModResponse) ProtoMessage() {}
+
+func (x *UpdatePackModResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdatePackModResponse.ProtoReflect.Descriptor instead.
+func (*UpdatePackModResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *UpdatePackModResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+// DeletePackModRequest removes one mod from a pack.
+type DeletePackModRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PackId        string                 `protobuf:"bytes,1,opt,name=pack_id,json=packId,proto3" json:"pack_id,omitempty"`
+	Slug          string                 `protobuf:"bytes,2,opt,name=slug,proto3" json:"slug,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeletePackModRequest) Reset() {
+	*x = DeletePackModRequest{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePackModRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePackModRequest) ProtoMessage() {}
+
+func (x *DeletePackModRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePackModRequest.ProtoReflect.Descriptor instead.
+func (*DeletePackModRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *DeletePackModRequest) GetPackId() string {
+	if x != nil {
+		return x.PackId
+	}
+	return ""
+}
+
+func (x *DeletePackModRequest) GetSlug() string {
+	if x != nil {
+		return x.Slug
+	}
+	return ""
+}
+
+// DeletePackModResponse acknowledges a mod removal.
+type DeletePackModResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeletePackModResponse) Reset() {
+	*x = DeletePackModResponse{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeletePackModResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeletePackModResponse) ProtoMessage() {}
+
+func (x *DeletePackModResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeletePackModResponse.ProtoReflect.Descriptor instead.
+func (*DeletePackModResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *DeletePackModResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+// BatchPackModsRequest applies one action (set_side, pin, unpin, remove) to a
+// set of mod slugs.
+type BatchPackModsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PackId        string                 `protobuf:"bytes,1,opt,name=pack_id,json=packId,proto3" json:"pack_id,omitempty"`
+	Action        string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	Slugs         []string               `protobuf:"bytes,3,rep,name=slugs,proto3" json:"slugs,omitempty"`
+	Side          string                 `protobuf:"bytes,4,opt,name=side,proto3" json:"side,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchPackModsRequest) Reset() {
+	*x = BatchPackModsRequest{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchPackModsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchPackModsRequest) ProtoMessage() {}
+
+func (x *BatchPackModsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchPackModsRequest.ProtoReflect.Descriptor instead.
+func (*BatchPackModsRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *BatchPackModsRequest) GetPackId() string {
+	if x != nil {
+		return x.PackId
+	}
+	return ""
+}
+
+func (x *BatchPackModsRequest) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *BatchPackModsRequest) GetSlugs() []string {
+	if x != nil {
+		return x.Slugs
+	}
+	return nil
+}
+
+func (x *BatchPackModsRequest) GetSide() string {
+	if x != nil {
+		return x.Side
+	}
+	return ""
+}
+
+// BatchPackModsResponse reports how many slugs were processed.
+type BatchPackModsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Count         int32                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchPackModsResponse) Reset() {
+	*x = BatchPackModsResponse{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchPackModsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchPackModsResponse) ProtoMessage() {}
+
+func (x *BatchPackModsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchPackModsResponse.ProtoReflect.Descriptor instead.
+func (*BatchPackModsResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *BatchPackModsResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *BatchPackModsResponse) GetCount() int32 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
 var File_carbonpanel_v1_packwiz_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_packwiz_proto_rawDesc = "" +
@@ -1264,7 +1966,59 @@ const file_carbonpanel_v1_packwiz_proto_rawDesc = "" +
 	"\x11DeletePackRequest\x12\x17\n" +
 	"\apack_id\x18\x01 \x01(\tR\x06packId\".\n" +
 	"\x12DeletePackResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess2\x88\x04\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xc1\x01\n" +
+	"\x11AddPackModRequest\x12\x17\n" +
+	"\apack_id\x18\x01 \x01(\tR\x06packId\x12)\n" +
+	"\x03mod\x18\x02 \x01(\v2\x17.carbonpanel.v1.PackModR\x03mod\x121\n" +
+	"\x14resolve_dependencies\x18\x03 \x01(\bR\x13resolveDependencies\x12\x16\n" +
+	"\x06loader\x18\x04 \x01(\tR\x06loader\x12\x1d\n" +
+	"\n" +
+	"mc_version\x18\x05 \x01(\tR\tmcVersion\"\xac\x01\n" +
+	"\x11PackDependencyRef\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
+	"\n" +
+	"version_id\x18\x02 \x01(\tR\tversionId\x12\x14\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\x12'\n" +
+	"\x0fdependency_type\x18\x04 \x01(\tR\x0edependencyType\x12\x1a\n" +
+	"\bplatform\x18\x05 \x01(\tR\bplatform\"\xfe\x01\n" +
+	"\x12AddPackModResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
+	"\x10dependency_error\x18\x02 \x01(\tR\x0fdependencyError\x12F\n" +
+	"\x12added_dependencies\x18\x03 \x03(\v2\x17.carbonpanel.v1.PackModR\x11addedDependencies\x12\x18\n" +
+	"\askipped\x18\x04 \x03(\tR\askipped\x12A\n" +
+	"\n" +
+	"unresolved\x18\x05 \x03(\v2!.carbonpanel.v1.PackDependencyRefR\n" +
+	"unresolved\"\xab\x01\n" +
+	"\x10AddUrlModRequest\x12\x17\n" +
+	"\apack_id\x18\x01 \x01(\tR\x06packId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
+	"\tfile_name\x18\x03 \x01(\tR\bfileName\x12!\n" +
+	"\fdownload_url\x18\x04 \x01(\tR\vdownloadUrl\x12\x12\n" +
+	"\x04side\x18\x05 \x01(\tR\x04side\x12\x16\n" +
+	"\x06pinned\x18\x06 \x01(\bR\x06pinned\">\n" +
+	"\x11AddUrlModResponse\x12)\n" +
+	"\x03mod\x18\x01 \x01(\v2\x17.carbonpanel.v1.PackModR\x03mod\"o\n" +
+	"\x14UpdatePackModRequest\x12\x17\n" +
+	"\apack_id\x18\x01 \x01(\tR\x06packId\x12\x12\n" +
+	"\x04slug\x18\x02 \x01(\tR\x04slug\x12\x12\n" +
+	"\x04side\x18\x03 \x01(\tR\x04side\x12\x16\n" +
+	"\x06pinned\x18\x04 \x01(\bR\x06pinned\"1\n" +
+	"\x15UpdatePackModResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"C\n" +
+	"\x14DeletePackModRequest\x12\x17\n" +
+	"\apack_id\x18\x01 \x01(\tR\x06packId\x12\x12\n" +
+	"\x04slug\x18\x02 \x01(\tR\x04slug\"1\n" +
+	"\x15DeletePackModResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"q\n" +
+	"\x14BatchPackModsRequest\x12\x17\n" +
+	"\apack_id\x18\x01 \x01(\tR\x06packId\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12\x14\n" +
+	"\x05slugs\x18\x03 \x03(\tR\x05slugs\x12\x12\n" +
+	"\x04side\x18\x04 \x01(\tR\x04side\"G\n" +
+	"\x15BatchPackModsResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x05R\x05count2\xc9\a\n" +
 	"\x0ePackwizService\x12P\n" +
 	"\tListPacks\x12 .carbonpanel.v1.ListPacksRequest\x1a!.carbonpanel.v1.ListPacksResponse\x12J\n" +
 	"\aGetPack\x12\x1e.carbonpanel.v1.GetPackRequest\x1a\x1f.carbonpanel.v1.GetPackResponse\x12P\n" +
@@ -1272,7 +2026,13 @@ const file_carbonpanel_v1_packwiz_proto_rawDesc = "" +
 	"\vRefreshPack\x12\".carbonpanel.v1.RefreshPackRequest\x1a#.carbonpanel.v1.RefreshPackResponse\x12Y\n" +
 	"\fCheckUpdates\x12#.carbonpanel.v1.CheckUpdatesRequest\x1a$.carbonpanel.v1.CheckUpdatesResponse\x12S\n" +
 	"\n" +
-	"DeletePack\x12!.carbonpanel.v1.DeletePackRequest\x1a\".carbonpanel.v1.DeletePackResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
+	"DeletePack\x12!.carbonpanel.v1.DeletePackRequest\x1a\".carbonpanel.v1.DeletePackResponse\x12S\n" +
+	"\n" +
+	"AddPackMod\x12!.carbonpanel.v1.AddPackModRequest\x1a\".carbonpanel.v1.AddPackModResponse\x12P\n" +
+	"\tAddUrlMod\x12 .carbonpanel.v1.AddUrlModRequest\x1a!.carbonpanel.v1.AddUrlModResponse\x12\\\n" +
+	"\rUpdatePackMod\x12$.carbonpanel.v1.UpdatePackModRequest\x1a%.carbonpanel.v1.UpdatePackModResponse\x12\\\n" +
+	"\rDeletePackMod\x12$.carbonpanel.v1.DeletePackModRequest\x1a%.carbonpanel.v1.DeletePackModResponse\x12\\\n" +
+	"\rBatchPackMods\x12$.carbonpanel.v1.BatchPackModsRequest\x1a%.carbonpanel.v1.BatchPackModsResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
 
 var (
 	file_carbonpanel_v1_packwiz_proto_rawDescOnce sync.Once
@@ -1286,24 +2046,35 @@ func file_carbonpanel_v1_packwiz_proto_rawDescGZIP() []byte {
 	return file_carbonpanel_v1_packwiz_proto_rawDescData
 }
 
-var file_carbonpanel_v1_packwiz_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_carbonpanel_v1_packwiz_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_carbonpanel_v1_packwiz_proto_goTypes = []any{
-	(*PackSummary)(nil),          // 0: carbonpanel.v1.PackSummary
-	(*PackMod)(nil),              // 1: carbonpanel.v1.PackMod
-	(*Pack)(nil),                 // 2: carbonpanel.v1.Pack
-	(*PackUpdate)(nil),           // 3: carbonpanel.v1.PackUpdate
-	(*ListPacksRequest)(nil),     // 4: carbonpanel.v1.ListPacksRequest
-	(*ListPacksResponse)(nil),    // 5: carbonpanel.v1.ListPacksResponse
-	(*GetPackRequest)(nil),       // 6: carbonpanel.v1.GetPackRequest
-	(*GetPackResponse)(nil),      // 7: carbonpanel.v1.GetPackResponse
-	(*ClonePackRequest)(nil),     // 8: carbonpanel.v1.ClonePackRequest
-	(*ClonePackResponse)(nil),    // 9: carbonpanel.v1.ClonePackResponse
-	(*RefreshPackRequest)(nil),   // 10: carbonpanel.v1.RefreshPackRequest
-	(*RefreshPackResponse)(nil),  // 11: carbonpanel.v1.RefreshPackResponse
-	(*CheckUpdatesRequest)(nil),  // 12: carbonpanel.v1.CheckUpdatesRequest
-	(*CheckUpdatesResponse)(nil), // 13: carbonpanel.v1.CheckUpdatesResponse
-	(*DeletePackRequest)(nil),    // 14: carbonpanel.v1.DeletePackRequest
-	(*DeletePackResponse)(nil),   // 15: carbonpanel.v1.DeletePackResponse
+	(*PackSummary)(nil),           // 0: carbonpanel.v1.PackSummary
+	(*PackMod)(nil),               // 1: carbonpanel.v1.PackMod
+	(*Pack)(nil),                  // 2: carbonpanel.v1.Pack
+	(*PackUpdate)(nil),            // 3: carbonpanel.v1.PackUpdate
+	(*ListPacksRequest)(nil),      // 4: carbonpanel.v1.ListPacksRequest
+	(*ListPacksResponse)(nil),     // 5: carbonpanel.v1.ListPacksResponse
+	(*GetPackRequest)(nil),        // 6: carbonpanel.v1.GetPackRequest
+	(*GetPackResponse)(nil),       // 7: carbonpanel.v1.GetPackResponse
+	(*ClonePackRequest)(nil),      // 8: carbonpanel.v1.ClonePackRequest
+	(*ClonePackResponse)(nil),     // 9: carbonpanel.v1.ClonePackResponse
+	(*RefreshPackRequest)(nil),    // 10: carbonpanel.v1.RefreshPackRequest
+	(*RefreshPackResponse)(nil),   // 11: carbonpanel.v1.RefreshPackResponse
+	(*CheckUpdatesRequest)(nil),   // 12: carbonpanel.v1.CheckUpdatesRequest
+	(*CheckUpdatesResponse)(nil),  // 13: carbonpanel.v1.CheckUpdatesResponse
+	(*DeletePackRequest)(nil),     // 14: carbonpanel.v1.DeletePackRequest
+	(*DeletePackResponse)(nil),    // 15: carbonpanel.v1.DeletePackResponse
+	(*AddPackModRequest)(nil),     // 16: carbonpanel.v1.AddPackModRequest
+	(*PackDependencyRef)(nil),     // 17: carbonpanel.v1.PackDependencyRef
+	(*AddPackModResponse)(nil),    // 18: carbonpanel.v1.AddPackModResponse
+	(*AddUrlModRequest)(nil),      // 19: carbonpanel.v1.AddUrlModRequest
+	(*AddUrlModResponse)(nil),     // 20: carbonpanel.v1.AddUrlModResponse
+	(*UpdatePackModRequest)(nil),  // 21: carbonpanel.v1.UpdatePackModRequest
+	(*UpdatePackModResponse)(nil), // 22: carbonpanel.v1.UpdatePackModResponse
+	(*DeletePackModRequest)(nil),  // 23: carbonpanel.v1.DeletePackModRequest
+	(*DeletePackModResponse)(nil), // 24: carbonpanel.v1.DeletePackModResponse
+	(*BatchPackModsRequest)(nil),  // 25: carbonpanel.v1.BatchPackModsRequest
+	(*BatchPackModsResponse)(nil), // 26: carbonpanel.v1.BatchPackModsResponse
 }
 var file_carbonpanel_v1_packwiz_proto_depIdxs = []int32{
 	1,  // 0: carbonpanel.v1.Pack.mods:type_name -> carbonpanel.v1.PackMod
@@ -1314,23 +2085,37 @@ var file_carbonpanel_v1_packwiz_proto_depIdxs = []int32{
 	2,  // 5: carbonpanel.v1.GetPackResponse.pack:type_name -> carbonpanel.v1.Pack
 	2,  // 6: carbonpanel.v1.ClonePackResponse.pack:type_name -> carbonpanel.v1.Pack
 	3,  // 7: carbonpanel.v1.CheckUpdatesResponse.updates:type_name -> carbonpanel.v1.PackUpdate
-	4,  // 8: carbonpanel.v1.PackwizService.ListPacks:input_type -> carbonpanel.v1.ListPacksRequest
-	6,  // 9: carbonpanel.v1.PackwizService.GetPack:input_type -> carbonpanel.v1.GetPackRequest
-	8,  // 10: carbonpanel.v1.PackwizService.ClonePack:input_type -> carbonpanel.v1.ClonePackRequest
-	10, // 11: carbonpanel.v1.PackwizService.RefreshPack:input_type -> carbonpanel.v1.RefreshPackRequest
-	12, // 12: carbonpanel.v1.PackwizService.CheckUpdates:input_type -> carbonpanel.v1.CheckUpdatesRequest
-	14, // 13: carbonpanel.v1.PackwizService.DeletePack:input_type -> carbonpanel.v1.DeletePackRequest
-	5,  // 14: carbonpanel.v1.PackwizService.ListPacks:output_type -> carbonpanel.v1.ListPacksResponse
-	7,  // 15: carbonpanel.v1.PackwizService.GetPack:output_type -> carbonpanel.v1.GetPackResponse
-	9,  // 16: carbonpanel.v1.PackwizService.ClonePack:output_type -> carbonpanel.v1.ClonePackResponse
-	11, // 17: carbonpanel.v1.PackwizService.RefreshPack:output_type -> carbonpanel.v1.RefreshPackResponse
-	13, // 18: carbonpanel.v1.PackwizService.CheckUpdates:output_type -> carbonpanel.v1.CheckUpdatesResponse
-	15, // 19: carbonpanel.v1.PackwizService.DeletePack:output_type -> carbonpanel.v1.DeletePackResponse
-	14, // [14:20] is the sub-list for method output_type
-	8,  // [8:14] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	1,  // 8: carbonpanel.v1.AddPackModRequest.mod:type_name -> carbonpanel.v1.PackMod
+	1,  // 9: carbonpanel.v1.AddPackModResponse.added_dependencies:type_name -> carbonpanel.v1.PackMod
+	17, // 10: carbonpanel.v1.AddPackModResponse.unresolved:type_name -> carbonpanel.v1.PackDependencyRef
+	1,  // 11: carbonpanel.v1.AddUrlModResponse.mod:type_name -> carbonpanel.v1.PackMod
+	4,  // 12: carbonpanel.v1.PackwizService.ListPacks:input_type -> carbonpanel.v1.ListPacksRequest
+	6,  // 13: carbonpanel.v1.PackwizService.GetPack:input_type -> carbonpanel.v1.GetPackRequest
+	8,  // 14: carbonpanel.v1.PackwizService.ClonePack:input_type -> carbonpanel.v1.ClonePackRequest
+	10, // 15: carbonpanel.v1.PackwizService.RefreshPack:input_type -> carbonpanel.v1.RefreshPackRequest
+	12, // 16: carbonpanel.v1.PackwizService.CheckUpdates:input_type -> carbonpanel.v1.CheckUpdatesRequest
+	14, // 17: carbonpanel.v1.PackwizService.DeletePack:input_type -> carbonpanel.v1.DeletePackRequest
+	16, // 18: carbonpanel.v1.PackwizService.AddPackMod:input_type -> carbonpanel.v1.AddPackModRequest
+	19, // 19: carbonpanel.v1.PackwizService.AddUrlMod:input_type -> carbonpanel.v1.AddUrlModRequest
+	21, // 20: carbonpanel.v1.PackwizService.UpdatePackMod:input_type -> carbonpanel.v1.UpdatePackModRequest
+	23, // 21: carbonpanel.v1.PackwizService.DeletePackMod:input_type -> carbonpanel.v1.DeletePackModRequest
+	25, // 22: carbonpanel.v1.PackwizService.BatchPackMods:input_type -> carbonpanel.v1.BatchPackModsRequest
+	5,  // 23: carbonpanel.v1.PackwizService.ListPacks:output_type -> carbonpanel.v1.ListPacksResponse
+	7,  // 24: carbonpanel.v1.PackwizService.GetPack:output_type -> carbonpanel.v1.GetPackResponse
+	9,  // 25: carbonpanel.v1.PackwizService.ClonePack:output_type -> carbonpanel.v1.ClonePackResponse
+	11, // 26: carbonpanel.v1.PackwizService.RefreshPack:output_type -> carbonpanel.v1.RefreshPackResponse
+	13, // 27: carbonpanel.v1.PackwizService.CheckUpdates:output_type -> carbonpanel.v1.CheckUpdatesResponse
+	15, // 28: carbonpanel.v1.PackwizService.DeletePack:output_type -> carbonpanel.v1.DeletePackResponse
+	18, // 29: carbonpanel.v1.PackwizService.AddPackMod:output_type -> carbonpanel.v1.AddPackModResponse
+	20, // 30: carbonpanel.v1.PackwizService.AddUrlMod:output_type -> carbonpanel.v1.AddUrlModResponse
+	22, // 31: carbonpanel.v1.PackwizService.UpdatePackMod:output_type -> carbonpanel.v1.UpdatePackModResponse
+	24, // 32: carbonpanel.v1.PackwizService.DeletePackMod:output_type -> carbonpanel.v1.DeletePackModResponse
+	26, // 33: carbonpanel.v1.PackwizService.BatchPackMods:output_type -> carbonpanel.v1.BatchPackModsResponse
+	23, // [23:34] is the sub-list for method output_type
+	12, // [12:23] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_packwiz_proto_init() }
@@ -1344,7 +2129,7 @@ func file_carbonpanel_v1_packwiz_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_packwiz_proto_rawDesc), len(file_carbonpanel_v1_packwiz_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
