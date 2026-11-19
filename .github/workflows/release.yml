@@ -1,17 +1,21 @@
 # SPDX-License-Identifier: MPL-2.0
 name: Carbon Panel Release
-# A pushed v* tag only stages, builds and verifies. Publication is a separate,
-# explicit operator action: workflow_dispatch with publish=true. The decision is
-# enforced by scripts/release.py publication_allowed(); no automatic event can
-# write to a registry or a GitHub release. Staging a tag does not assert that its
-# target commit is current main: tags can point at old commits and a workflow
-# reflects that target's history. The trusted publish gate is the Python
-# boundary plus exact-commit main CI, never the dispatch revision input alone.
+# A pushed carbonpanel-v* product tag only stages, builds and verifies. Plain
+# v*, mod-* and inherited tags are separate historical domains and never start
+# a panel release. Publication is a separate, explicit operator action:
+# workflow_dispatch with publish=true. The decision is enforced by
+# scripts/release.py publication_allowed() and verify-publication-ref; no
+# automatic event can write to a registry or a GitHub release. Staging a tag
+# does not assert that its target commit is current main: tags can point at old
+# commits and a workflow reflects that target's history. The trusted publish
+# gate is the Python boundary, a trusted refs/heads/main dispatch and
+# exact-commit main CI, never the dispatch revision input alone.
 
 on:
   push:
-    # Staging-only trigger. See the comment above and publication_allowed().
-    tags: ['v*']
+    # Staging-only trigger. Inherited v* tags are NOT panel release candidates;
+    # see the comment above, docs/release-history.md and publication_allowed().
+    tags: ['carbonpanel-v*']
   pull_request:
     paths:
       - '.github/workflows/release.yml'
@@ -23,10 +27,13 @@ on:
       - 'docker/Dockerfile.release'
       - 'docker/Dockerfile.carbon-panel'
       - 'docs/release-bundle.md'
+      - 'docs/releases.md'
+      - 'docs/release-history.md'
+      - 'docs/release-history.json'
   workflow_dispatch:
     inputs:
       version:
-        description: 'SemVer tag, for example v3.0.0-alpha.1'
+        description: 'Product tag, for example carbonpanel-v2.0.0-alpha.1'
         required: true
         type: string
       revision:
@@ -56,6 +63,10 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.plan.outputs.version }}
+      internal_version: ${{ steps.plan.outputs.internal_version }}
+      semver: ${{ steps.plan.outputs.semver }}
+      git_tag: ${{ steps.plan.outputs.git_tag }}
+      product: ${{ steps.plan.outputs.product }}
       commit: ${{ steps.plan.outputs.commit }}
       epoch: ${{ steps.plan.outputs.epoch }}
       date: ${{ steps.plan.outputs.date }}
@@ -70,6 +81,8 @@ jobs:
           ref: ${{ inputs.revision || github.ref }}
       - name: Check release tooling
         run: python3 -m unittest scripts.test_release
+      - name: Check the checked-in release history catalog
+        run: python3 scripts/release.py verify-release-history
       - name: Validate source and version
         id: plan
         env:
@@ -82,6 +95,17 @@ jobs:
         run: |
           python3 scripts/release.py plan --version "$RELEASE_VERSION" \
             --event "$RELEASE_EVENT" --publish-input "$RELEASE_PUBLISH"
+      - name: Verify trusted ref and exact main CI for an explicit publication
+        if: inputs.publish
+        env:
+          RELEASE_COMMIT: ${{ steps.plan.outputs.commit }}
+          RELEASE_REF: ${{ github.ref }}
+        # A checkbox is never CI evidence. verify-publication-ref requires the
+        # trusted refs/heads/main dispatch ref and a successful completed push
+        # CI run for the exact checked-out SHA, including ancestry of main.
+        run: |
+          python3 scripts/release.py verify-publication-ref \
+            --commit "$RELEASE_COMMIT" --ref "$RELEASE_REF"
 
   frontend:
     name: Build versioned UI and API schema
@@ -109,7 +133,7 @@ jobs:
           '{"version":"v2","plugins":[{"remote":"buf.build/community/sudorandom-connect-openapi:v0.21.3","out":".website-build/release-schema","opt":["path=openapi.yaml"]}]}'
       - name: Build the embedded web UI
         env:
-          APP_VERSION: ${{ needs.plan.outputs.version }}
+          APP_VERSION: ${{ needs.plan.outputs.semver }}
         run: |
           cd web/carbon-panel
           bun install --frozen-lockfile
@@ -141,7 +165,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           build-args: |
-            APP_VERSION=${{ needs.plan.outputs.version }}
+            APP_VERSION=${{ needs.plan.outputs.semver }}
             APP_COMMIT=${{ needs.plan.outputs.commit }}
             BUILD_DATE=${{ needs.plan.outputs.date }}
           cache-from: type=gha,scope=source-image
@@ -239,13 +263,13 @@ jobs:
           outputs: type=oci,dest=dist/image.oci.tar
           labels: |
             org.opencontainers.image.title=Carbon Panel
-            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.semver }}
             org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
             org.opencontainers.image.url=https://carbonpanel.dev/
             org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
             org.opencontainers.image.licenses=MPL-2.0
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          build-args: APP_VERSION=${{ needs.plan.outputs.version }}
+          build-args: APP_VERSION=${{ needs.plan.outputs.semver }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
       - name: Check final download checksums (digest added after immutable publication)
@@ -345,13 +369,13 @@ jobs:
           tags: ${{ steps.immutable_tag.outputs.tags }}
           labels: |
             org.opencontainers.image.title=Carbon Panel
-            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.semver }}
             org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
             org.opencontainers.image.url=https://carbonpanel.dev/
             org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
             org.opencontainers.image.licenses=MPL-2.0
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          build-args: APP_VERSION=${{ needs.plan.outputs.version }}
+          build-args: APP_VERSION=${{ needs.plan.outputs.semver }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
       - name: Resolve the verified digest (resume uses the operator-supplied digest)

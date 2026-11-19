@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Product releases are tagged `carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N]`; the displayed SemVer and immutable image tag stay `MAJOR.MINOR.PATCH`. Historical tags are classified in `docs/release-history.md` and `docs/release-history.json`; plain `v*`, `mod-*` and inherited tags remain separate domains and never start a panel release. The current 1.0 rollback line is `1.0.40`; the next planned stable is the MAJOR `carbonpanel-v2.0.0` because three operator-facing changes require migration from v1.0.40.
+
 ## [3.0.0-alpha.1] - 2026-11-13
 
 ### Added
@@ -103,7 +107,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web UI with Carbon Design System.
 - Docker-based server isolation.
 
-[Unreleased]: https://github.com/athNdev/carbonpanel/compare/v3.0.0-alpha.1...HEAD
+[Unreleased]: https://github.com/athNdev/carbonpanel/compare/v1.0.40...HEAD
+[1.0.40]: https://github.com/athNdev/carbonpanel/releases/tag/v1.0.40
 [3.0.0-alpha.1]: https://github.com/athNdev/carbonpanel/releases/tag/v3.0.0-alpha.1
 [3.0.0-beta.4]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.4
 [3.0.0-beta.3]: https://github.com/athNdev/carbon-panel/releases/tag/v3.0.0-beta.3

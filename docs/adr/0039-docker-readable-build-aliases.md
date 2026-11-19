@@ -55,3 +55,10 @@ digest is the OCI index digest (attestation descriptors are not runnable
 platforms). Every alias is pinned to an exact existing digest, so rollback is
 unaffected. The actual backfill is a separate authorized step after reviewed
 merge and verified main CI; no registry write occurs in this change.
+
+The 19 aliases and the original `sha-<40hex>` refs remain preserved by the
+Carbon Panel product tag migration (`docs/release-history.md`). That migration
+records a separately authorized, candidate-only GHCR
+`legacy-preview-3.0.0-alpha.1` alias at an existing verified manifest digest;
+the policy PR does not create it. No `build-*` alias or moving channel is reused,
+renamed or retargeted, and no Docker Hub alpha is invented.

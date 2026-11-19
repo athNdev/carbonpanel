@@ -56,6 +56,232 @@ MODULE_TAG = re.compile(
 RESERVED_PRERELEASE = frozenset(
     {"verify", "verification", "test", "testing", "dryrun", "dry-run", "docs", "doc"})
 
+# --- Carbon Panel product release tag domain -------------------------------
+# Product tags are SEPARATE from plain v* Go/module tags and from archive
+# filenames. The Git tag carries the `carbonpanel-v` prefix; the user-facing
+# SemVer and the immutable image tag are MAJOR.MINOR.PATCH with the same
+# optional alpha/beta/rc suffix. Keep both fields instead of guessing one from
+# the other. See docs/releases.md, docs/release-history.md and ADR 0033.
+PRODUCT_PREFIX = "carbonpanel-v"
+PRODUCT_PRERELEASE = frozenset({"alpha", "beta", "rc"})
+PRODUCT_TAG = re.compile(
+    r"carbonpanel-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-(alpha|beta|rc)\.(0|[1-9][0-9]*))?")
+
+# The only verified historical stable release in athNdev/carbonpanel. It is
+# recognised for monotonic promotion and rollback, never republished or
+# retargeted. The next planned stable is the MAJOR 2.0.0 (see UPGRADE NOTES in
+# docs/releases.md): three intentional operator changes break an unchanged
+# v1.0.40 config, so a compatible MINOR would be dishonest. The 1.0 alias stays
+# at 1.0.40 today; a future 1.0.x maintenance patch is not permanently banned
+# and may move that alias only through the normal explicit promotion path.
+LEGACY_STABLE_TAG = "v1.0.40"
+LEGACY_STABLE_COMMIT = "f88748be6a216b187e675bbb1f110df07e544148"
+LEGACY_STABLE_DIGEST = (
+    "sha256:ead260ef33c9a9fa8929097e4e50db02243e8889a74efeb95c8fda622862c001")
+ROLLBACK_MINOR = "1.0"
+ROLLBACK_VERSION = LEGACY_STABLE_TAG
+
+# Inherited tag names are historical refs, never panel publication candidates.
+# v1.0.38 and v1.0.39 are source/module history; v3.0.0-alpha.1 is a GHCR-only
+# legacy preview; v3.0.0-beta.4 is a cross-repository provenance collision;
+# v3.0.0-beta.5-.8 are upstream-only discopanel prereleases.
+SOURCE_ONLY_TAGS = frozenset({"v1.0.38", "v1.0.39"})
+LEGACY_PREVIEW_TAG = "v3.0.0-alpha.1"
+NAME_COLLISION_TAG = "v3.0.0-beta.4"
+UPSTREAM_ONLY_TAGS = frozenset({
+    "v3.0.0-beta.5", "v3.0.0-beta.6", "v3.0.0-beta.7", "v3.0.0-beta.8"})
+
+# The canonical annotated alias planned at the legacy stable commit is a
+# HISTORICAL reference. It is valid for provenance, recovery and rollback, but
+# it must NEVER start a new release attempt: that would republish 1.0.40 under
+# a second name. This is enforced in publication_candidate_decision() before
+# any immutable registry preflight runs.
+HISTORICAL_PRODUCT_ALIAS = "carbonpanel-v1.0.40"
+
+# Product tags may not reuse a legacy preview/collision version number, even
+# with a different Git tag. These are reserved historical identities.
+RESERVED_LEGACY_SEMVERS = frozenset({
+    "1.0.40", "3.0.0-alpha.1", "3.0.0-beta.4",
+    "3.0.0-beta.5", "3.0.0-beta.6", "3.0.0-beta.7", "3.0.0-beta.8"})
+
+# The MAJOR boundary for the next stable. Kept as data so docs, tests and the
+# release history catalog cannot drift from the policy.
+NEXT_STABLE_GIT_TAG = "carbonpanel-v2.0.0"
+NEXT_STABLE_SEMVER = "2.0.0"
+NEXT_STABLE_MINOR = "2.0"
+
+
+def product_release(value):
+    """Parse a canonical product tag into its separate Git/SemVer fields."""
+    match = PRODUCT_TAG.fullmatch(value or "")
+    if not match:
+        raise ValueError(
+            "Use carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N] for a product tag")
+    core = ".".join(match.group(1, 2, 3))
+    prerelease = match.group(4)
+    semver = core + ("-" + prerelease + "." + match.group(5) if prerelease else "")
+    return {
+        "git_tag": value,
+        "version": "v" + semver,          # internal form for existing tooling
+        "semver": semver,                 # user-facing / immutable image tag
+        "prerelease": bool(prerelease),
+        "channel": "prerelease" if prerelease else "stable",
+        "minor": ".".join(core.split(".")[:2]),
+    }
+
+
+def product_release_or_none(value):
+    try:
+        return product_release(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def resolve_panel_version(value):
+    """Resolve an input ref to the internal vMAJOR.MINOR.PATCH form.
+
+    Only product tags, the verified legacy stable and internal v-forms (used by
+    rehearsals, fixtures and historical staging) are accepted. Publication is
+    gated separately by publication_allowed(), which accepts product tags only.
+    """
+    product = product_release_or_none(value)
+    if product:
+        return product["version"]
+    if value == LEGACY_STABLE_TAG:
+        return value
+    return version(value)
+
+
+def display_version(value):
+    """User-facing SemVer (no v prefix) for a product tag; otherwise unchanged."""
+    product = product_release_or_none(value)
+    return product["semver"] if product else value
+
+
+def version_from_release_tag(name):
+    """Map a published release tag to an internal panel version, or None.
+
+    Inherited v*, module and documentation tags are not panel releases. A
+    product tag and the verified legacy stable are the only recognised inputs.
+    """
+    product = product_release_or_none(name)
+    if product:
+        return product["version"]
+    return name if name == LEGACY_STABLE_TAG else None
+
+
+def rollback_line():
+    """The immutable 1.0 rollback reference; never advanced by a new release."""
+    return {"minor": ROLLBACK_MINOR, "version": ROLLBACK_VERSION,
+            "semver": ROLLBACK_VERSION[1:], "commit": LEGACY_STABLE_COMMIT,
+            "digest": LEGACY_STABLE_DIGEST}
+
+
+def rollback_line_guard(value):
+    """Resolve a version for promotion without imposing a permanent ban.
+
+    The 1.0 alias currently points at 1.0.40, but that is a fact about today's
+    published state, not a product decision to forbid future 1.0.x maintenance.
+    A later 1.0.x patch may move the 1.0 alias through the ordinary explicit,
+    monotonic promotion path. Historical-only refs are still refused at the
+    publication boundary by publication_candidate_decision().
+    """
+    return resolve_panel_version(value)
+
+
+HISTORY_PATH = ROOT / "docs/release-history.json"
+HISTORY_CATEGORIES = frozenset({
+    "upstream-identical", "upstream-name-collision", "carbonpanel-published-stable",
+    "carbonpanel-source-only", "carbonpanel-legacy-preview", "historical-component",
+    "unknown",
+})
+HISTORY_PROVENANCE = frozenset({
+    "upstream-identical", "upstream-name-collision", "origin-only", "unknown",
+})
+
+
+def load_release_history():
+    return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+
+
+def verify_release_history(document=None):
+    """Validate the checked-in retrospective catalog without network access."""
+    doc = document if document is not None else load_release_history()
+    problems = []
+    tags = doc.get("tags", [])
+    if len(tags) != 84 or len({item["name"] for item in tags}) != 84:
+        problems.append("expected 84 unique tag records")
+    categories = {}
+    provenance = {}
+    for item in tags:
+        if item.get("classification") not in HISTORY_CATEGORIES:
+            problems.append("unknown classification for " + item.get("name", "?"))
+        if item.get("provenance") not in HISTORY_PROVENANCE:
+            problems.append("unknown provenance for " + item.get("name", "?"))
+        if item.get("domain") not in {"panel-release", "go-module", "module-image",
+                                      "docs", "inherited", "product-history",
+                                      "unknown"}:
+            problems.append("unknown domain for " + item.get("name", "?"))
+        if item.get("publishable") is not False:
+            problems.append("historical tag marked publishable: " + item.get("name", "?"))
+        categories[item.get("classification")] = categories.get(
+            item.get("classification"), 0) + 1
+        provenance[item.get("provenance")] = provenance.get(
+            item.get("provenance"), 0) + 1
+    # Counts follow the independent provenance audit (migration-provenance-audit.md
+    # section 5): origin/rm are historical components, not upstream-identical
+    # product history. 57 + 22 + 1 + 1 + 2 + 1 = 84 origin tags.
+    expected_categories = {
+        "upstream-identical": 57, "historical-component": 22,
+        "upstream-name-collision": 1, "carbonpanel-published-stable": 1,
+        "carbonpanel-source-only": 2, "carbonpanel-legacy-preview": 1,
+    }
+    if categories != expected_categories:
+        problems.append("category counts differ from the first-party inventory: "
+                        + repr(categories))
+    expected_provenance = {"upstream-identical": 79,
+                           "upstream-name-collision": 1, "origin-only": 4}
+    if provenance != expected_provenance:
+        problems.append("provenance counts differ from the first-party inventory: "
+                        + repr(provenance))
+    stable = doc.get("canonical_stable", {})
+    if (stable.get("git_tag"), stable.get("version"), stable.get("commit"),
+            stable.get("image_digest")) != (
+            LEGACY_STABLE_TAG, LEGACY_STABLE_TAG, LEGACY_STABLE_COMMIT,
+            LEGACY_STABLE_DIGEST):
+        problems.append("canonical stable identity does not match v1.0.40")
+    rollback = doc.get("rollback_line", {})
+    if (rollback.get("minor"), rollback.get("version")) != (ROLLBACK_MINOR, ROLLBACK_VERSION):
+        problems.append("rollback line is not the frozen 1.0.40")
+    if doc.get("build_aliases", {}).get("count") != 19:
+        problems.append("expected the 19 preserved Docker Hub build aliases")
+    if doc.get("invented_registry_alias") is not False:
+        problems.append("no historical registry alias may be invented")
+    # The MAJOR boundary is data, not prose drift.
+    nxt = doc.get("next_stable", {})
+    if (nxt.get("git_tag"), nxt.get("semver"), nxt.get("minor_alias"),
+            nxt.get("boundary")) != (
+            NEXT_STABLE_GIT_TAG, NEXT_STABLE_SEMVER, NEXT_STABLE_MINOR, "major"):
+        problems.append("planned next stable must be carbonpanel-v2.0.0 (MAJOR)")
+    alias = doc.get("historical_alias", {})
+    if (alias.get("git_tag") != HISTORICAL_PRODUCT_ALIAS
+            or alias.get("commit") != LEGACY_STABLE_COMMIT
+            or alias.get("classification") != "historical-only"
+            or alias.get("publishable") is not False
+            or alias.get("duplicate_release") is not False):
+        problems.append("historical carbonpanel-v1.0.40 alias is not historical-only")
+    upstream = {item.get("name") for item in doc.get("upstream_only_tags", [])}
+    if upstream != UPSTREAM_ONLY_TAGS:
+        problems.append("the four upstream-only discopanel beta tags must be recorded")
+    if stable.get("release_asset_count") != 8:
+        problems.append("the v1.0.40 release has 8 verified assets")
+    if stable.get("manifest_asset") != "release-manifest.json":
+        problems.append("release-manifest.json is the commit/digest anchor")
+    if not doc.get("unknown_boundaries"):
+        problems.append("UNKNOWN provenance boundaries must be recorded explicitly")
+    return (not problems), problems
+
 
 def ghcr_repository(repository=None):
     """GHCR namespace is the lowercased GitHub owner/repo. It is never a Docker
@@ -95,35 +321,91 @@ def ref_channel(ref_name, ref_type="tag"):
         return "documentation"
     if is_verification_tag(ref_name):
         return "verification"
+    product = product_release_or_none(ref_name)
+    if product:
+        return product["channel"]
+    # Plain v* refs are the Go/legacy application domain. They are preserved
+    # as historical refs but never infer a new panel release.
     if ref_name.startswith("v"):
-        return "prerelease" if "-" in ref_name else "stable"
+        return "legacy-version"
     return "other"
+
+
+def publication_candidate_decision(version_value):
+    """Classify a ref BEFORE any preflight or registry read.
+
+    Returns (ok, reason). Only a canonical, non-historical product tag is a
+    new-release candidate. This is deliberately earlier than immutable digest
+    preflight so an inherited or historical tag can never be used to start a
+    release attempt, even by a dispatch that sets publish=true.
+    """
+    if is_verification_tag(version_value):
+        return False, "verification and test tags are never published"
+    value = version_value or ""
+    if value == HISTORICAL_PRODUCT_ALIAS:
+        return (False, "carbonpanel-v1.0.40 is a HISTORICAL-ONLY alias of the "
+                "verified v1.0.40 release; it cannot start a new release")
+    if value in SOURCE_ONLY_TAGS:
+        return False, f"{value} is source/module history only; it is not a panel release"
+    if value == LEGACY_PREVIEW_TAG:
+        return (False, f"{value} is the GHCR-only legacy preview; its version "
+                "number is reserved and cannot be reused for a product release")
+    if value == NAME_COLLISION_TAG:
+        return (False, f"{value} is an upstream name-collision tag retained as "
+                "history; it cannot start a panel release")
+    if value in UPSTREAM_ONLY_TAGS:
+        return False, f"{value} is an upstream-only discopanel prerelease, not a panel release"
+    product = product_release_or_none(value)
+    if product is None:
+        if value.startswith("v"):
+            return False, f"{value} is an inherited/plain v* tag; product tags use the carbonpanel-v prefix"
+        return False, "only carbonpanel-vMAJOR.MINOR.PATCH product tags publish panel releases"
+    if product["semver"] in RESERVED_LEGACY_SEMVERS:
+        return (False, f"{value} reuses reserved legacy version {product['semver']}; "
+                "choose a new version")
+    return True, "canonical, non-historical product tag"
 
 
 def publication_allowed(event_name, publish_requested, version_value):
     """The single auditable publication boundary.
 
     Only an explicit operator `workflow_dispatch` that requests publication may
-    write to a registry or GitHub release. Branch pushes, tag pushes, pull
-    requests, workflow_run and every other automatic event only stage, build and
-    verify. A version/tag ref is therefore always safe to stage.
+    write to a registry or GitHub release. Branch pushes, product/legacy tag
+    pushes, pull requests, workflow_run and every other automatic event only
+    stage, build and verify. Publication additionally requires a canonical,
+    non-historical `carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N]` tag:
+    inherited v* tags, the historical 1.0 alias, source-only versions, reserved
+    legacy previews/collisions and archive filenames are refused even with the
+    opt-in, and before any immutable registry preflight.
     """
     if event_name != "workflow_dispatch":
         return False, f"{event_name} events stage only; publication needs an explicit workflow_dispatch"
     if str(publish_requested).strip().lower() != "true":
         return False, "publication needs publish=true on workflow_dispatch"
-    if is_verification_tag(version_value):
-        return False, "verification and test tags are never published"
-    if SEMVER.fullmatch(version_value) is None:
-        return False, "only SemVer panel versions publish from this workflow"
-    return True, "explicit workflow_dispatch publish opt-in"
+    ok, reason = publication_candidate_decision(version_value)
+    if not ok:
+        return False, reason
+    return True, "explicit workflow_dispatch publish opt-in for a canonical product tag"
+
+
+def publication_ref_decision(event_name, ref, ci_verified):
+    """A panel publication requires a trusted default-branch ref and real CI."""
+    if event_name != "workflow_dispatch":
+        return False, f"{event_name} is a build-only event"
+    if ref != TRUSTED_DEVELOPER_REF:
+        return False, "publication requires the trusted refs/heads/main dispatch ref"
+    if str(ci_verified).strip().lower() != "true":
+        return False, "exact main CI must be verified before publication"
+    return True, "trusted main dispatch with verified exact-commit CI"
 
 
 def promotion_plan(version_value):
     """Ordered tag destinations. The immutable full version always precedes a
-    moving alias; prereleases publish no stable alias at all.
+    moving alias; prereleases publish no stable alias at all. The current 1.0
+    rollback line is 1.0.40; a future 1.0.x patch may move `1.0` only through
+    ordinary explicit monotonic promotion.
     """
-    tag = version(version_value)
+    tag = rollback_line_guard(version_value)
     plain = tag[1:]
     prerelease = "-" in tag
     plan = [{"tag": plain, "mutable": False,
@@ -422,10 +704,11 @@ def published_stable_versions(releases_json=None):
             for release in page:
                 if release.get("draft") or release.get("prerelease"):
                     continue
-                try:
-                    tags.append(version(release.get("tag_name", "")))
-                except ValueError:
-                    continue
+                # Inherited/unclassified tags never count as published panel
+                # versions; only product tags and the verified legacy stable do.
+                candidate = version_from_release_tag(release.get("tag_name", ""))
+                if candidate:
+                    tags.append(candidate)
         return tags
     except (subprocess.CalledProcessError, ValueError, TypeError, AttributeError):
         return None
@@ -446,18 +729,19 @@ def published_module_versions(tags=None):
         return None
 
 
-def release_provenance(tag, commit, expected_digest, releases_json=None):
+def release_provenance(tag, commit, expected_digest, releases_json=None, git_tag=None):
     """Prove from a verified release manifest that an existing image digest is
     the build of this exact version and source commit. Returns (ok, reason,
     manifest). Unknown or mismatched provenance always fails closed.
     """
+    release_tag = git_tag or tag
     try:
         data = (releases_json if releases_json is not None else json.loads(
             github("api", "--paginate", "--slurp",
                    "/repos/{owner}/{repo}/releases?per_page=100")))
         for page in data:
             for item in page:
-                if item.get("tag_name") != tag:
+                if item.get("tag_name") != release_tag:
                     continue
                 if item.get("draft"):
                     return False, "release is still a draft; not a durable record", None
@@ -506,26 +790,35 @@ def durable_release_records(releases_json=None):
                              "-H", "Accept: application/octet-stream")
                 manifest = json.loads(raw)
                 digest = manifest.get("image_digest")
-                tag = item.get("tag_name", "")
-                if valid_digest(digest) and SEMVER.fullmatch(tag):
-                    records[digest] = tag
+                panel_version = version_from_release_tag(item.get("tag_name", ""))
+                if valid_digest(digest) and panel_version:
+                    records[digest] = panel_version
         return records
     except (subprocess.CalledProcessError, ValueError, TypeError, AttributeError, KeyError):
         return {}
 
 
-def release_record_decision(tag, commit, digest, releases_json=None):
+def release_record_decision(tag, commit, digest, releases_json=None, git_tag=None):
     """Decide how to reach a durable release record before any alias moves.
     Returns (action, reason) with action publish / verified / refuse.
+
+    An unpublished draft is a resumable record: the publisher reuses its stable
+    release ID, re-uploads the verified assets and then exposes it. Only a
+    published record with matching provenance is 'verified'; a conflicting or
+    unknown state refuses.
     """
+    release_tag = git_tag or tag
     try:
         data = (releases_json if releases_json is not None else json.loads(
             github("api", "--paginate", "--slurp",
                    "/repos/{owner}/{repo}/releases?per_page=100")))
-        found = any(item.get("tag_name") == tag for page in data for item in page)
-        if not found:
+        matching = [item for page in data for item in page
+                    if item.get("tag_name") == release_tag]
+        if not matching:
             return "publish", "no release record for this version"
-        ok, reason, _ = release_provenance(tag, commit, digest, data)
+        if any(item.get("draft") for item in matching):
+            return "publish", "unpublished draft is resumable; assets are re-verified before exposure"
+        ok, reason, _ = release_provenance(tag, commit, digest, data, git_tag)
         return ("verified", reason) if ok else ("refuse", reason)
     except (subprocess.CalledProcessError, ValueError, TypeError, AttributeError, KeyError):
         return "refuse", "release record state is unknown"
@@ -562,18 +855,19 @@ def alias_move_decision(candidate, candidate_digest, observations, digest_versio
     return True, "alias may advance from the verified digest"
 
 
-def resume_provenance(tag, commit, expected_digest, releases_json=None):
+def resume_provenance(tag, commit, expected_digest, releases_json=None, git_tag=None):
     """RESUME needs the exact tag identity plus verified release provenance,
     not merely equal tag digests and matching platform counts."""
+    release_tag = git_tag or tag
     if not valid_digest(expected_digest):
         return False, "a verified expected digest is required to resume"
     try:
-        local = run("git", "tag", "--list", tag)
-        if local and run("git", "rev-parse", f"{tag}^{{commit}}") != commit:
+        local = run("git", "tag", "--list", release_tag)
+        if local and run("git", "rev-parse", f"{release_tag}^{{commit}}") != commit:
             return False, "version tag points at a different commit"
     except subprocess.CalledProcessError:
         return False, "version tag identity cannot be determined"
-    return release_provenance(tag, commit, expected_digest, releases_json)[:2]
+    return release_provenance(tag, commit, expected_digest, releases_json, release_tag)[:2]
 
 
 TRUSTED_DEVELOPER_REF = "refs/heads/main"
@@ -813,9 +1107,17 @@ def get_release(tag):
     return json.loads(github("api", api_url))
 
 
-def guard_publishing(tag, commit):
-    if SEMVER.fullmatch(tag) is None or is_verification_tag(tag):
-        raise ValueError("Only immutable SemVer panel versions can be published")
+def guard_publishing(tag, commit, git_tag=None):
+    """Refuse any non-product tag and require verified exact-main CI.
+
+    `tag` is the internal v-form; `git_tag` is the canonical product ref that is
+    actually created and published. Inherited, source-only, preview and
+    collision tags can never start a new panel release.
+    """
+    release_tag = git_tag or tag
+    ok, reason = publication_candidate_decision(release_tag)
+    if not ok:
+        raise ValueError("Publication refused: " + reason)
     try:
         subprocess.run(["git", "merge-base", "--is-ancestor", commit, "origin/main"], check=True)
     except subprocess.CalledProcessError as error:
@@ -825,25 +1127,30 @@ def guard_publishing(tag, commit):
                               "--json", "status,conclusion", "--limit", "1"))
     if not runs or runs[0] != {"conclusion": "success", "status": "completed"}:
         raise ValueError("Publishing requires successful main CI for this exact commit")
-    tags = run("git", "tag", "--list", tag)
-    if tags and run("git", "rev-parse", f"{tag}^{{commit}}") != commit:
+    tags = run("git", "tag", "--list", release_tag)
+    if tags and run("git", "rev-parse", f"{release_tag}^{{commit}}") != commit:
         raise ValueError("The version tag already points at a different commit")
     releases = json.loads(github("api", "--paginate", "--slurp", "/repos/{owner}/{repo}/releases?per_page=100"))
-    if any(release["tag_name"] == tag and not release["draft"]
+    if any(release["tag_name"] == release_tag and not release["draft"]
            for page in releases for release in page):
         raise ValueError("A published release is immutable; choose a new version")
 
 
 def plan(args):
-    tag = version(args.version)
+    raw = args.version
+    tag = resolve_panel_version(raw)
+    product = product_release_or_none(raw)
     commit = run("git", "rev-parse", "HEAD")
     epoch = int(run("git", "show", "-s", "--format=%ct", "HEAD"))
-    allowed, reason = publication_allowed(args.event, args.publish_input, tag)
+    allowed, reason = publication_allowed(args.event, args.publish_input, raw)
     if allowed:
-        guard_publishing(tag, commit)
-    values = {"version": tag, "commit": commit, "epoch": str(epoch),
+        guard_publishing(tag, commit, raw)
+    values = {"version": raw, "internal_version": tag,
+              "semver": product["semver"] if product else tag[1:],
+              "git_tag": raw, "product": str(bool(product)).lower(),
+              "commit": commit, "epoch": str(epoch),
               "date": datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "prerelease": str("-" in tag).lower(), "channel": ref_channel(tag),
+              "prerelease": str("-" in tag).lower(), "channel": ref_channel(raw),
               "publish": str(allowed).lower(), "publication_reason": reason}
     print(json.dumps(values, indent=2))
     write_output(values)
@@ -887,7 +1194,9 @@ def read_archive(path):
 
 
 def package(args):
-    tag = version(args.version)
+    tag = resolve_panel_version(args.version)
+    display = display_version(args.version)
+    product = product_release_or_none(args.version)
     target = (args.goos, args.goarch)
     if target not in TARGETS:
         raise ValueError(f"Unsupported platform: {target}")
@@ -897,14 +1206,18 @@ def package(args):
     frontend = ROOT / "web/carbon-panel/build"
     if not (frontend / "index.html").is_file() or not (frontend / "_app").is_dir():
         raise ValueError("Build the complete, versioned frontend before packaging")
-    if not any(tag.encode() in asset.read_bytes() for asset in (frontend / "_app").rglob("*.js")):
+    if not any(display.encode() in asset.read_bytes() or tag.encode() in asset.read_bytes()
+               for asset in (frontend / "_app").rglob("*.js")):
         raise ValueError("The embedded web UI does not contain the release version")
     epoch = int(args.epoch)
     date = datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     info = {"version": tag, "commit": commit, "built": date,
             "os": args.goos, "arch": args.goarch, "go": run("go", "version")}
+    if product:
+        # Git tag, displayed SemVer and archive filename are separate fields.
+        info.update({"git_tag": product["git_tag"], "semver": product["semver"]})
     environment = {**os.environ, "CGO_ENABLED": "0", "GOOS": args.goos, "GOARCH": args.goarch}
-    flags = f"-s -w -X github.com/athNdev/carbon-panel/internal/buildinfo.Version={tag} -X github.com/athNdev/carbon-panel/internal/buildinfo.Commit={commit} -X github.com/athNdev/carbon-panel/internal/buildinfo.Date={date}"
+    flags = f"-s -w -X github.com/athNdev/carbon-panel/internal/buildinfo.Version={display} -X github.com/athNdev/carbon-panel/internal/buildinfo.Commit={commit} -X github.com/athNdev/carbon-panel/internal/buildinfo.Date={date}"
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     members = []
@@ -917,7 +1230,7 @@ def package(args):
             # Each release target runs on a matching native runner. This checks
             # the actual shipped CLI without configuration, Docker or data I/O.
             reported = run(str(binary), "--version", cwd=temporary)
-            if not reported.startswith(f"{program} {tag} ") or commit not in reported:
+            if not reported.startswith(f"{program} {display} ") or commit not in reported:
                 raise ValueError(f"Incorrect embedded version: {reported}")
             print(reported, flush=True)
             members.append((name, binary.read_bytes(), 0o755))
@@ -939,13 +1252,16 @@ def sha256(path):
 
 
 def collect(args):
-    tag = version(args.version)
+    tag = resolve_panel_version(args.version)
+    product = product_release_or_none(args.version)
     source, output = Path(args.source), Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     image = output.parent / "image"
     image.mkdir(parents=True, exist_ok=True)
     manifest = {"version": tag, "commit": args.commit, "image": IMAGE + ":" + tag[1:],
                 "github_image": github_image(tag), "artifacts": []}
+    if product:
+        manifest.update({"git_tag": product["git_tag"], "semver": product["semver"]})
     for goos, goarch in TARGETS:
         name = archive_name(tag, goos, goarch)
         path = source / name
@@ -1024,7 +1340,7 @@ def image_tags(args):
     """Emit tag names for display/staging only. Promotion order is NOT enforced
     by this list; the publish jobs push the immutable tag before any alias."""
     plan = (module_promotion_plan(args.version) if args.module
-            else promotion_plan(args.version))
+            else promotion_plan(resolve_panel_version(args.version)))
     if args.immutable_only:
         plan = plan[:1]
     for step in plan:
@@ -1039,12 +1355,13 @@ def immutable_references(tag):
 
 def preflight_immutable(args):
     """Read-only preflight of the immutable version tag in every registry."""
-    tag = version(args.version)
+    tag = resolve_panel_version(args.version)
     if args.expected_digest and not valid_digest(args.expected_digest):
         raise ValueError("Invalid expected digest")
     observations = {name: observe_reference(ref)
                     for name, ref in immutable_references(tag).items()}
-    provenance = (resume_provenance(tag, args.commit, args.expected_digest)
+    provenance = (resume_provenance(tag, args.commit, args.expected_digest,
+                                    git_tag=args.version)
                   if args.commit else None)
     action, reason = immutable_publication_decision(
         observations, args.expected_digest, provenance)
@@ -1061,7 +1378,7 @@ def preflight_immutable(args):
 
 def verify_immutable(args):
     """Verify expected tag→digest and both architectures in every registry."""
-    tag = version(args.version)
+    tag = resolve_panel_version(args.version)
     results = {}
     for name, ref in immutable_references(tag).items():
         observation = observe_reference(ref)
@@ -1078,11 +1395,12 @@ def verify_immutable(args):
 
 def alias_promotion(args):
     """Decide which moving aliases, if any, may be promoted from a verified digest."""
-    tag = version(args.version)
+    tag = resolve_panel_version(args.version)
     allowed, reason = alias_promotion_decision(tag, published_stable_versions())
     # A durable release record must exist before any alias can move.
     if allowed:
-        verified, detail, _ = release_provenance(tag, args.commit, args.digest)
+        verified, detail, _ = release_provenance(
+            tag, args.commit, args.digest, git_tag=args.version)
         if not verified:
             allowed, reason = None, "durable release record unavailable: " + detail
     plain = tag[1:]
@@ -1100,13 +1418,14 @@ def promote_alias(args):
     every registry. Unknown state or an untraceable current digest refuses;
     an alias already at the verified digest is left untouched (no overwrite).
     """
-    tag = version(args.version)
+    tag = resolve_panel_version(args.version)
     if not valid_digest(args.digest):
         raise ValueError("Missing or invalid verified digest")
     minor = ".".join(tag[1:].split("-", 1)[0].split(".")[:2])
     if args.alias not in (minor, "latest"):
         raise ValueError("Unsupported moving alias: " + args.alias)
-    verified, detail, _ = release_provenance(tag, args.commit, args.digest)
+    verified, detail, _ = release_provenance(
+        tag, args.commit, args.digest, git_tag=args.version)
     if not verified:
         raise ValueError("Durable release record refused alias promotion: " + detail)
     refs = {"docker_hub": f"{DOCKER_HUB_IMAGE}:{args.alias}",
@@ -1148,6 +1467,42 @@ def verify_main_ci(args):
     print(json.dumps(values, indent=2))
     write_output(values)
     return verified
+
+
+def product_version_info(args):
+    """Parse a product tag into its separate Git, SemVer and channel fields."""
+    product = product_release(args.version)
+    values = {**product, "display_version": product["semver"],
+              "internal_version": product["version"]}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return values
+
+
+def verify_publication_ref(args):
+    """Trusted-ref plus exact-main-CI gate for an explicit publication."""
+    ci_verified, ci_reason = exact_main_ci_verified(args.commit)
+    allowed, reason = publication_ref_decision(
+        args.event, args.ref, str(ci_verified).lower())
+    values = {"publish": str(allowed).lower(), "reason": reason,
+              "ci_verified": str(ci_verified).lower(), "ci_reason": ci_reason,
+              "commit": args.commit, "ref": args.ref}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not allowed:
+        raise ValueError("Publication ref gate refused: " + reason)
+    return allowed
+
+
+def verify_release_history_cli(args):
+    """Validate the checked-in 84-tag retrospective catalog."""
+    ok, problems = verify_release_history(None)
+    values = {"verified": str(ok).lower(), "problems": json.dumps(problems)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Release history validation failed: " + "; ".join(problems))
+    return ok
 
 
 def indexable_urls_cli(args):
@@ -1270,7 +1625,8 @@ def edge_promote(args):
 def release_record(args):
     """Decide whether a durable release record exists before alias promotion."""
     action, reason = release_record_decision(
-        version(args.version), args.commit, args.digest)
+        resolve_panel_version(args.version), args.commit, args.digest,
+        git_tag=args.version)
     values = {"action": action, "reason": reason}
     print(json.dumps(values, indent=2))
     write_output(values)
@@ -1282,7 +1638,8 @@ def release_record(args):
 def verify_release_record(args):
     """Re-verify the durable record immediately before moving an alias."""
     ok, reason, _ = release_provenance(
-        version(args.version), args.commit, args.digest)
+        resolve_panel_version(args.version), args.commit, args.digest,
+        git_tag=args.version)
     values = {"verified": str(ok).lower(), "reason": reason}
     print(json.dumps(values, indent=2))
     write_output(values)
@@ -1325,43 +1682,47 @@ def module_promotion(args):
 
 
 def publish(args):
-    tag = version(args.version)
-    guard_publishing(tag, args.commit)
+    tag = resolve_panel_version(args.version)
+    git_tag = args.version
+    guard_publishing(tag, args.commit, git_tag)
     output = Path(args.output)
     manifest = json.loads((output / "release-manifest.json").read_text(encoding="utf-8"))
     if manifest["version"] != tag or manifest["commit"] != args.commit or not manifest.get("image_digest"):
         raise ValueError("Release artifacts and published image must match the release commit")
+    if manifest.get("git_tag", git_tag) != git_tag:
+        raise ValueError("Release manifest product tag does not match the requested tag")
     expected = {archive_name(tag, *target) for target in TARGETS} | {"openapi.yaml", "release-manifest.json"}
     lines = (output / "checksums.txt").read_text(encoding="utf-8").splitlines()
     recorded = dict((line.split("  ", 1)[1], line.split("  ", 1)[0]) for line in lines)
     if set(recorded) != expected or any(sha256(output / name) != digest for name, digest in recorded.items()):
         raise ValueError("Release files do not match their checksums")
-    if not run("git", "tag", "--list", tag):
-        github("api", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/tags/{tag}", "-f", f"sha={args.commit}")
-    generated = json.loads(github("api", "repos/{owner}/{repo}/releases/generate-notes", "-f", f"tag_name={tag}", "-f", f"target_commitish={args.commit}"))
+    if not run("git", "tag", "--list", git_tag):
+        github("api", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/tags/{git_tag}", "-f", f"sha={args.commit}")
+    generated = json.loads(github("api", "repos/{owner}/{repo}/releases/generate-notes", "-f", f"tag_name={git_tag}", "-f", f"target_commitish={args.commit}"))
     repository = os.environ.get("GITHUB_REPOSITORY") or github("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     channel = "This is an alpha/prerelease build for early testing.\n\n" if "-alpha." in tag else (
         "This is a prerelease build.\n\n" if "-" in tag else "")
     body = (f"{channel}## Downloads\n\nChoose the archive for your operating system and CPU. Each includes the panel with its web UI, the storage helper, configuration example and licenses.\n\n"
             f"Verify downloads against **checksums.txt**. **release-manifest.json** records the exact source commit and Docker image digest. Back up your database and configuration before upgrading; preserve server worlds and existing data.\n\n"
             f"Container images (Linux amd64 and arm64):\n\n- Docker Hub: `{manifest['image']}`\n- GitHub Packages: `{manifest['github_image']}`\n\n"
-            f"[Installation and verification](https://github.com/{repository}/blob/{tag}/docs/releases.md)\n\n" + generated["body"])
+            f"[Installation and verification](https://github.com/{repository}/blob/{git_tag}/docs/releases.md)\n\n" + generated["body"])
     with tempfile.TemporaryDirectory(prefix="carbon-release-notes-") as temporary:
         notes = Path(temporary) / "notes.md"
         notes.write_text(body, encoding="utf-8")
         # Only drafts are reusable; the guard above refuses published versions.
-        exists = subprocess.run(["gh", "release", "view", tag], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        exists = subprocess.run(["gh", "release", "view", git_tag], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
         if not exists:
-            github("release", "create", tag, "--verify-tag", "--draft", "--title", f"Carbon Panel {tag}", "--notes-file", str(notes))
-        github("release", "edit", tag, "--notes-file", str(notes))
-        github("release", "upload", tag, *(str(output / name) for name in sorted(expected | {"checksums.txt"})), "--clobber")
-        uploaded = get_release(tag)
+            github("release", "create", git_tag, "--verify-tag", "--draft",
+                   "--title", f"Carbon Panel {display_version(args.version)}", "--notes-file", str(notes))
+        github("release", "edit", git_tag, "--notes-file", str(notes))
+        github("release", "upload", git_tag, *(str(output / name) for name in sorted(expected | {"checksums.txt"})), "--clobber")
+        uploaded = get_release(git_tag)
         remote = {asset["name"]: asset.get("digest") for asset in uploaded["assets"]}
         complete = expected | {"checksums.txt"}
         if not uploaded["draft"] or set(remote) != complete or any(
                 remote[name] != "sha256:" + sha256(output / name) for name in complete):
             raise ValueError("Uploaded draft assets do not match the verified local release")
-    github("release", "edit", tag, "--draft=false", f"--prerelease={str('-' in tag).lower()}", f"--latest={str('-' not in tag).lower()}")
+    github("release", "edit", git_tag, "--draft=false", f"--prerelease={str('-' in tag).lower()}", f"--latest={str('-' not in tag).lower()}")
 
 
 def build_parser():
@@ -1444,6 +1805,13 @@ def build_parser():
     module_resolver.add_argument("--version", required=True)
     ci_checker = commands.add_parser("verify-main-ci")
     ci_checker.add_argument("--commit", required=True)
+    product_resolver = commands.add_parser("product-version")
+    product_resolver.add_argument("--version", required=True)
+    ref_checker = commands.add_parser("verify-publication-ref")
+    ref_checker.add_argument("--commit", required=True)
+    ref_checker.add_argument("--ref", required=True)
+    ref_checker.add_argument("--event", default="workflow_dispatch")
+    commands.add_parser("verify-release-history")
     indexable = commands.add_parser("indexable-urls")
     indexable.add_argument("--event", required=True)
     indexable.add_argument("--before", default="")
@@ -1466,6 +1834,9 @@ def main():
     # module-version is a CLI display command; the bare module_version() helper
     # validates a string and must never be used as its handler.
     handlers = {"module-version": module_version_info,
+                "product-version": product_version_info,
+                "verify-release-history": verify_release_history_cli,
+                "verify-publication-ref": verify_publication_ref,
                 "indexable-urls": indexable_urls_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
