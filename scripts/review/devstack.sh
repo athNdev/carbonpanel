@@ -506,7 +506,7 @@ overlay_csp_safe_webapp() {
 # the tile-coverage wait and immediately before the journey.
 set_bluemap_start_location() {
 	local mapdir="$1" web="${1}/web"
-	local start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:15:0:0:0:0:perspective}"
+	local start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:-16:0:-32:18:0:0:0:0:perspective}"
 	local settings_tmp="${DATA}/config/bluemap-settings.json"
 	[ -f "${web}/settings.json" ] || return 1
 	START_LOCATION="${start_location}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);j.startLocation=process.env.START_LOCATION;process.stdout.write(JSON.stringify(j))}catch(e){process.exit(1)}})' \
