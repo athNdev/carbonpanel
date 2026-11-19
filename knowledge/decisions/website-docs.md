@@ -4,7 +4,7 @@ title: Website and documentation publication
 description: Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.
 status: stable
 owners: [oss-runtime]
-code_refs: [.github/workflows/landing.yml, .github/workflows/docs.yml, docs/website-source.json, docs/version-index.json, docs/adr/0045-version-contract-and-multi-version-docs.md, scripts/version_contract.py, scripts/version_bump.py, scripts/openapi_version.py, scripts/test_openapi_version.py, scripts/browser_version_check.py, scripts/test_version_contract.py, internal/rpc/handlers/openapi.go, docs/carbon-panel, docs/design-system, docs/carbon-panel/src/components/SocialHead.astro, landing/assets, web/carbon-panel/src/lib/design-system/tokens.css, scripts/build_website.py, scripts/check_website.py, scripts/generate_social_cards.py, web/carbon-panel/demo]
+code_refs: [.github/workflows/landing.yml, .github/workflows/docs.yml, docs/website-source.json, docs/maintained-guides.json, docs/version-index.json, docs/adr/0045-version-contract-and-multi-version-docs.md, docs/adr/0050-maintained-operational-guides.md, scripts/version_contract.py, scripts/maintained_guides.py, scripts/test_maintained_guides.py, scripts/version_bump.py, scripts/openapi_version.py, scripts/test_openapi_version.py, scripts/browser_version_check.py, scripts/test_version_contract.py, internal/rpc/handlers/openapi.go, docs/carbon-panel, docs/design-system, docs/carbon-panel/src/components/SocialHead.astro, landing/assets, web/carbon-panel/src/lib/design-system/tokens.css, scripts/build_website.py, scripts/check_website.py, scripts/generate_social_cards.py, web/carbon-panel/demo]
 sources:
   - title: Website publishing
     resource: ../../docs/website-publishing.md
