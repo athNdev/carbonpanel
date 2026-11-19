@@ -143,6 +143,31 @@ jobs:
           printf 'aliases=%s\n' "$ALIASES" >> "$GITHUB_OUTPUT"
           echo "commit=$(printf '%s' "$LIVE" | jq -r '.commit // empty')" >> "$GITHUB_OUTPUT"
           echo "digest=$(printf '%s' "$LIVE" | jq -r '.image.digest // empty')" >> "$GITHUB_OUTPUT"
+      - name: Preserve the already-active Nightly in a site-only artifact
+        id: active_site
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          steps.active_source.outputs.commit != '' &&
+          steps.active_source.outputs.digest != ''
+        env:
+          ACTIVE_COMMIT: ${{ steps.active_source.outputs.commit }}
+          ACTIVE_DIGEST: ${{ steps.active_source.outputs.digest }}
+        run: |
+          # A site-only dispatch is not a promotion: rebuild the full canonical
+          # site from the ACTIVE receipt so the aliases and docs cannot disagree.
+          python3 scripts/build_website.py --nightly-revision "$ACTIVE_COMMIT" \
+            --nightly-digest "$ACTIVE_DIGEST" --promotion-state final \
+            --promotion-receipt "site-only-$ACTIVE_COMMIT"
+          python3 scripts/release.py validate-channel-contract \
+            --path .website-build/site/version-index.json
+          python3 scripts/release.py verify-channel-docs \
+            --site .website-build/site --channel nightly \
+            --commit "$ACTIVE_COMMIT" --digest "$ACTIVE_DIGEST" \
+            --stable-source docs/website-source.json
+          test -s .website-build/site/docs/index.html
+          test -s .website-build/site/docs/nightly/index.html
+          echo "active_site=preserved" >> "$GITHUB_OUTPUT"
+
       - name: Gate site-only dispatch to an already-active exact source
         id: transaction
         if: github.event_name == 'workflow_dispatch'

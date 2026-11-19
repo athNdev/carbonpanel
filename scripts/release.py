@@ -2729,9 +2729,19 @@ def fetch_prior_pages_cli(args):
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
+    class ArtifactRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if redirected is not None:
+                # The signed artifact URL rejects the API bearer token.
+                redirected.headers.pop("Authorization", None)
+            return redirected
+
+    opener = urllib.request.build_opener(ArtifactRedirect())
+
     def api(url):
         request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with opener.open(request, timeout=120) as response:
             return response.read()
 
     listing = json.loads(api(

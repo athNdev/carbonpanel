@@ -549,34 +549,44 @@ jobs:
             echo "::notice::no verified staged digest; this run is opt-off staging only"
           fi
 
-      # Build the EXACT docs artifact from the pinned source. No tracked main
-      # file is rewritten with the Nightly revision (that would self-trigger CI).
-      - name: Build and validate the exact docs artifact
+      # Stage artifact: the FULL canonical site (Stable + Nightly at their
+      # active routes, matching the registries) plus an OFF-PATH candidate
+      # probe. A candidate-only site must never become the Pages artifact.
+      - name: Build the full canonical site with the off-path candidate probe
         id: docs
         if: steps.pinned.outputs.stable == 'true'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
         run: |
-          BUILD_ARGS=()
           if [ -n "$CHANNEL_DIGEST" ]; then
-            BUILD_ARGS+=(--nightly-revision "$CHANNEL_COMMIT"
-                         --nightly-digest "$CHANNEL_DIGEST"
-                         --promotion-receipt "staged-$CHANNEL_COMMIT")
+            # Render the candidate from the exact pair, but keep only its
+            # off-path subtree for the probe - never as the published site.
+            python3 scripts/build_website.py --nightly-revision "$CHANNEL_COMMIT" \
+              --nightly-digest "$CHANNEL_DIGEST" \
+              --promotion-receipt "staged-$CHANNEL_COMMIT"
+            rm -rf .website-build/candidate-probe
+            mkdir -p .website-build/candidate-probe
+            cp -a ".website-build/site/docs/candidate/$CHANNEL_COMMIT/." .website-build/candidate-probe/
           fi
-          python3 scripts/build_website.py "${BUILD_ARGS[@]}"
-          DOCS_HASH=$(sha256sum .website-build/site/version-index.json | cut -d' ' -f1)
-          echo "hash=sha256:$DOCS_HASH" >> "$GITHUB_OUTPUT"
+          # The published artifact always starts as the full canonical site.
+          python3 scripts/build_website.py
+          python3 scripts/check_website.py
           if [ -n "$CHANNEL_DIGEST" ]; then
-            # Candidate validation: the compiled Nightly Proxmox page on the
-            # non-active route must carry the first-party raw installer link.
+            mkdir -p ".website-build/site/docs/candidate/$CHANNEL_COMMIT"
+            cp -a .website-build/candidate-probe/. ".website-build/site/docs/candidate/$CHANNEL_COMMIT/"
+            # Non-canonical probe only: the canonical marker stays at the
+            # active receipt until the aliases actually move.
+            python3 scripts/release.py stage-channel-marker \
+              --site .website-build/site --channel nightly \
+              --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST"
             PAGE=".website-build/site/docs/candidate/$CHANNEL_COMMIT/getting-started/proxmox/index.html"
             test -s "$PAGE"
             grep -q "raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh" "$PAGE"
             echo "proxmox_page=$PAGE" >> "$GITHUB_OUTPUT"
-          else
-            python3 scripts/check_website.py
           fi
+          DOCS_HASH=$(sha256sum .website-build/site/version-index.json | cut -d' ' -f1)
+          echo "hash=sha256:$DOCS_HASH" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Sign in to Docker Hub
@@ -645,39 +655,50 @@ jobs:
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
             --event "$CHANNEL_EVENT"
 
-      # Preserve the exact bytes of the currently published docs artifact before
-      # any candidate write. Rollback redeploys THESE bytes, never a re-stamp.
+      # Preserve the EXACT bytes of the currently DEPLOYED Pages artifact before
+      # any write. A freshly rebuilt site is not a rollback source: the prior
+      # artifact is downloaded and byte-verified against the live index.
       - name: Preserve the exact prior docs artifact before any candidate write
         id: preserve_prior
         if: steps.stage_decision.outputs.action == 'stage'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           rm -rf .website-build/prior-site
-          cp -a .website-build/site .website-build/prior-site
-          PRIOR_HASH=$(sha256sum .website-build/prior-site/version-index.json | cut -d' ' -f1)
-          echo "hash=sha256:$PRIOR_HASH" >> "$GITHUB_OUTPUT"
+          RESULT=$(python3 scripts/release.py fetch-prior-pages \
+            --site .website-build/prior-site \
+            --repository "$GITHUB_REPOSITORY" \
+            --live-url https://carbonpanel.dev/version-index.json)
+          test "$(printf '%s' "$RESULT" | jq -r .verified)" = "true"
+          echo "hash=$(printf '%s' "$RESULT" | jq -r .hash)" >> "$GITHUB_OUTPUT"
+          echo "artifact_id=$(printf '%s' "$RESULT" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
+          echo "artifact_commit=$(printf '%s' "$RESULT" | jq -r .artifact_commit)" >> "$GITHUB_OUTPUT"
 
-      # The candidate revision and digest are EXTERNAL INPUTS to the built site:
-      # the probe is written at /docs/candidate/<sha>/ and the canonical marker
-      # is stamped only inside this qualified transaction. Both go into ONE
-      # Pages artifact, deployed once under the shared lock.
-      - name: Stamp candidate and canonical markers into the built artifact
+      # Verify the staged artifact before any public write: the canonical
+      # Stable/Nightly site must still match the live active receipt (the
+      # registries' current state), with the exact pair only in the probe.
+      - name: Verify the full canonical stage artifact with the off-path probe
         id: markers
         if: steps.preserve_prior.outcome == 'success'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+          ACTIVE_COMMIT: ${{ steps.live_marker.outputs.commit }}
+          ACTIVE_DIGEST: ${{ steps.live_marker.outputs.digest }}
         run: |
-          python3 scripts/release.py stage-channel-marker \
-            --site .website-build/site --channel nightly \
-            --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" --canonical
+          python3 scripts/release.py verify-staged-page-site \
+            --site .website-build/site \
+            --candidate-commit "$CHANNEL_COMMIT" --candidate-digest "$CHANNEL_DIGEST" \
+            --active-commit "$ACTIVE_COMMIT" --active-digest "$ACTIVE_DIGEST" \
+            --stable-source docs/website-source.json
           python3 scripts/release.py validate-channel-contract \
             --path .website-build/site/version-index.json
-      - name: Upload the single candidate/canonical Pages artifact
+      - name: Upload the full canonical stage artifact with the candidate probe
         if: steps.markers.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: .website-build/site
-      - name: Deploy the candidate/canonical artifact once
+      - name: Deploy the full canonical stage artifact
         id: deploy
         if: steps.markers.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
@@ -697,16 +718,18 @@ jobs:
           test "$(printf '%s' "$PROBE" | jq -r '.candidate_digest')" = "$CHANNEL_DIGEST"
           test "$(printf '%s' "$PROBE" | jq -r '.canonical')" = "false"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
-      - name: Confirm the public canonical marker before any alias move
+      - name: Confirm canonical docs still match the active receipt before alias move
         id: canonical
         if: steps.probe.outcome == 'success'
         env:
-          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
-          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+          ACTIVE_COMMIT: ${{ steps.live_marker.outputs.commit }}
+          ACTIVE_DIGEST: ${{ steps.live_marker.outputs.digest }}
         run: |
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
-          test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$CHANNEL_COMMIT"
-          test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$CHANNEL_DIGEST"
+          test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$ACTIVE_COMMIT"
+          test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$ACTIVE_DIGEST"
+          curl -fsSL https://carbonpanel.dev/docs/ -o /dev/null
+          curl -fsSL https://carbonpanel.dev/docs/nightly/ -o /dev/null
 
       - name: PHASE 2 - commit decision, then move both registry aliases
         id: commit_decision
@@ -760,9 +783,43 @@ jobs:
             --channel nightly --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" \
             --ci-verified "true" --immutable "$IMMUTABLE" --aliases "$ALIASES" --apply
 
+      # Reconcile the public canonical site with the NEW aliases only after both
+      # registry moves succeed. Before this point the canonical docs stay at the
+      # active receipt, so no interval can disagree with the registries.
+      - name: Build and validate the final canonical artifact from the exact pair
+        id: final_artifact
+        if: steps.alias_move.outcome == 'success'
+        env:
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+        run: |
+          python3 scripts/build_website.py --nightly-revision "$CHANNEL_COMMIT" \
+            --nightly-digest "$CHANNEL_DIGEST" --promotion-state final \
+            --promotion-receipt "final-$CHANNEL_COMMIT"
+          # Exact HTML checks: updated canonical guide and preserved Stable routes.
+          python3 scripts/release.py verify-channel-docs \
+            --site .website-build/site --channel nightly \
+            --commit "$CHANNEL_COMMIT" --digest "$CHANNEL_DIGEST" \
+            --page getting-started/proxmox \
+            --contains "raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh" \
+            --stable-source docs/website-source.json
+          test -s .website-build/site/docs/index.html
+          test -s .website-build/site/docs/getting-started/proxmox/index.html
+          test -s .website-build/site/docs/nightly/index.html
+          echo "final_built=true" >> "$GITHUB_OUTPUT"
+      - name: Upload the final canonical artifact
+        if: steps.final_artifact.outcome == 'success'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: .website-build/site
+      - name: Deploy the final canonical artifact
+        id: final_deploy
+        if: steps.final_artifact.outcome == 'success'
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
       - name: Confirm final alias and canonical docs agreement
         id: final_verify
-        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        if: steps.final_deploy.outcome == 'success'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
@@ -773,6 +830,10 @@ jobs:
           OBS=$(python3 scripts/release.py channel-observe --reference nightly | jq -c .observations)
           test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$CHANNEL_DIGEST"
           test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$CHANNEL_DIGEST"
+          curl -fsSL https://carbonpanel.dev/docs/ -o /dev/null
+          curl -fsSL https://carbonpanel.dev/docs/getting-started/proxmox/ -o /dev/null
+          curl -fsSL https://carbonpanel.dev/docs/nightly/getting-started/proxmox/ \
+            | grep -q "raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh"
 
       # Genuine failure branch. always() with explicit outcome checks and NO
       # commit_decision success guard (a deploy/probe failure skips that step).
@@ -786,7 +847,8 @@ jobs:
            steps.probe.outcome == 'failure' || steps.canonical.outcome == 'failure' ||
            steps.commit_decision.outcome == 'failure' ||
            steps.commit_decision.outputs.action == 'rollback' ||
-           steps.alias_move.outcome == 'failure' || steps.final_verify.outcome == 'failure')
+           steps.alias_move.outcome == 'failure' || steps.final_artifact.outcome == 'failure' ||
+           steps.final_deploy.outcome == 'failure' || steps.final_verify.outcome == 'failure')
         env:
           PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
         run: |
@@ -829,14 +891,14 @@ jobs:
           exit 1
 
       - name: Record the verified receipt as a workflow artifact (not main)
-        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        if: steps.final_verify.outcome == 'success'
         env:
           RECEIPT: ${{ steps.commit_decision.outputs.receipt }}
         run: |
           printf '%s\n' "$RECEIPT" > channel-receipt.json
           python3 -c "import json; r=json.load(open('channel-receipt.json')); assert r['verified'] and r['registries']['docker_hub']==r['registries']['ghcr']"
       - name: Upload the channel receipt artifact
-        if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
+        if: steps.final_verify.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: channel-receipt-${{ steps.pinned.outputs.sha }}
