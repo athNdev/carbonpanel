@@ -140,6 +140,91 @@ test('live switches and reset update state, storage and attributes together', ()
 	assert.equal(attributes.get('data-carbon-theme'), 'dark');
 });
 
+test('a theme flip suppresses transitions for one frame, then restores them', () => {
+	const attributes = new Map<string, string>();
+	const appended: Array<{ textContent: string; removed: boolean; remove(): void }> = [];
+	const frames: Array<() => void> = [];
+	const documentStub = {
+		documentElement: {
+			getAttribute: (name: string) => attributes.get(name) ?? null,
+			setAttribute: (name: string, value: string) => attributes.set(name, value)
+		},
+		head: { appendChild: (node: unknown) => appended.push(node as never) },
+		createElement: () => {
+			const node = {
+				textContent: '',
+				removed: false,
+				remove() {
+					this.removed = true;
+				}
+			};
+			return node;
+		},
+		body: { offsetHeight: 0 },
+		defaultView: {
+			requestAnimationFrame: (callback: () => void) => {
+				frames.push(callback);
+				return frames.length;
+			}
+		}
+	} as unknown as Document;
+	const prefs = createDisplayPreferences({ getItem: () => null, setItem: () => {} }, documentStub);
+
+	prefs.setTheme('light');
+	assert.equal(attributes.get('data-carbon-theme'), 'light');
+	assert.equal(appended.length, 1, 'the swap must inject one transition override');
+	assert.match(appended[0].textContent, /transition:none !important/);
+
+	frames.shift()?.();
+	frames.shift()?.();
+	assert.equal(appended[0].removed, true, 'transitions must be restored after the swap paints');
+
+	// A density change under the same theme must not disable transitions.
+	prefs.setDensity('compact');
+	assert.equal(appended.length, 1);
+});
+
+test('rapid theme flips own separate overrides and remove all of them', () => {
+	const attributes = new Map<string, string>();
+	const appended: Array<{ textContent: string; removed: boolean; remove(): void }> = [];
+	const frames: Array<() => void> = [];
+	const documentStub = {
+		documentElement: {
+			getAttribute: (name: string) => attributes.get(name) ?? null,
+			setAttribute: (name: string, value: string) => attributes.set(name, value)
+		},
+		head: { appendChild: (node: unknown) => appended.push(node as never) },
+		createElement: () => ({
+			textContent: '',
+			removed: false,
+			remove() {
+				this.removed = true;
+			}
+		}),
+		body: { offsetHeight: 0 },
+		defaultView: {
+			requestAnimationFrame: (callback: () => void) => {
+				frames.push(callback);
+				return frames.length;
+			}
+		}
+	} as unknown as Document;
+	const prefs = createDisplayPreferences({ getItem: () => null, setItem: () => {} }, documentStub);
+
+	prefs.setTheme('light');
+	prefs.setTheme('dark');
+	assert.equal(attributes.get('data-carbon-theme'), 'dark');
+	assert.equal(appended.length, 2, 'each flip owns its own override');
+
+	// Drain both two-frame chains; no style node may leak across flips.
+	for (let i = 0; i < 4; i++) frames.shift()?.();
+	assert.equal(
+		appended.every((node) => node.removed),
+		true,
+		'every override is removed'
+	);
+});
+
 test('login-before-shell is safe: hydration with no document does not throw', () => {
 	const { storage } = fixture({ [THEME_KEY]: 'light' });
 	const prefs = createDisplayPreferences(storage, null);

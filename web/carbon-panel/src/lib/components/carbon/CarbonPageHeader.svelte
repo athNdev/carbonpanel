@@ -24,17 +24,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <div
-	class="flex flex-col justify-between gap-4 border-b border-[#393939] pb-4 sm:flex-row sm:flex-wrap sm:items-center {className}"
+	class="flex flex-col justify-between gap-4 border-b border-border pb-4 sm:flex-row sm:flex-wrap sm:items-center {className}"
 >
 	<div class="min-w-0">
 		<div class="flex min-w-0 flex-wrap items-center gap-2">
-			<h1 class="font-sans text-2xl font-light tracking-tight text-[#f4f4f4]">
+			<h1 class="font-sans text-2xl font-light tracking-tight text-foreground">
 				{title}
 			</h1>
 			{@render tag?.()}
 		</div>
 		{#if description}
-			<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
+			<p class="mt-1 font-sans text-xs text-muted-foreground">
 				{description}
 			</p>
 		{/if}

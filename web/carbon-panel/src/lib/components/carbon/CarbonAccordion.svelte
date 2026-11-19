@@ -16,6 +16,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let { class: className = '', children }: Props = $props();
 </script>
 
-<ul class="m-0 w-full list-none rounded-none border-t border-[#393939] p-0 {className}">
+<ul class="m-0 w-full list-none rounded-none border-t border-border p-0 {className}">
 	{@render children?.()}
 </ul>

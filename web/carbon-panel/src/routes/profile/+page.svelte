@@ -234,7 +234,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<title>Profile - Carbon Panel</title>
 </svelte:head>
 
-<div class="flex-1 space-y-6 rounded-none font-sans text-[#f4f4f4]">
+<div class="flex-1 space-y-6 rounded-none font-sans text-foreground">
 	{#if !user}
 		<CarbonErrorState
 			title="Failed to load profile"
@@ -255,36 +255,36 @@ one at https://mozilla.org/MPL/2.0/.
 		<div class="grid gap-6 md:grid-cols-2">
 			<!-- Account Information Tile -->
 			<CarbonTile class="rounded-none">
-				<div class="mb-4 flex items-center gap-3 border-b border-[#393939] pb-4">
+				<div class="mb-4 flex items-center gap-3 border-b border-border pb-4">
 					<div
-						class="flex h-8 w-8 items-center justify-center rounded-none bg-[#393939] text-accent-text"
+						class="flex h-8 w-8 items-center justify-center rounded-none bg-secondary text-accent-text"
 					>
 						<User class="h-4 w-4" />
 					</div>
 					<div>
-						<h2 class="text-base font-semibold text-white">Account Information</h2>
-						<p class="text-xs text-[#a8a8a8]">Identity and profile configuration</p>
+						<h2 class="text-base font-semibold text-foreground">Account Information</h2>
+						<p class="text-xs text-muted-foreground">Identity and profile configuration</p>
 					</div>
 				</div>
 
 				<div class="space-y-3">
 					<!-- Username -->
 					<div
-						class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3"
+						class="flex items-center justify-between rounded-none border border-border bg-background p-3"
 					>
-						<div class="flex items-center gap-2 text-xs text-[#c6c6c6]">
-							<User class="h-3.5 w-3.5 text-[#a8a8a8]" />
+						<div class="flex items-center gap-2 text-xs text-muted-foreground">
+							<User class="h-3.5 w-3.5 text-muted-foreground" />
 							<span>Username</span>
 						</div>
-						<span class="font-mono text-sm font-medium text-white">{user.username}</span>
+						<span class="font-mono text-sm font-medium text-foreground">{user.username}</span>
 					</div>
 
 					<!-- Auth Provider -->
 					<div
-						class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3"
+						class="flex items-center justify-between rounded-none border border-border bg-background p-3"
 					>
-						<div class="flex items-center gap-2 text-xs text-[#c6c6c6]">
-							<Shield class="h-3.5 w-3.5 text-[#a8a8a8]" />
+						<div class="flex items-center gap-2 text-xs text-muted-foreground">
+							<Shield class="h-3.5 w-3.5 text-muted-foreground" />
 							<span>Auth Provider</span>
 						</div>
 						<CarbonTag type="blue" size="sm">{providerLabel}</CarbonTag>
@@ -293,13 +293,13 @@ one at https://mozilla.org/MPL/2.0/.
 					<!-- Email -->
 					{#if user.email}
 						<div
-							class="flex items-center justify-between gap-3 rounded-none border border-[#393939] bg-[#161616] p-3"
+							class="flex items-center justify-between gap-3 rounded-none border border-border bg-background p-3"
 						>
-							<div class="flex shrink-0 items-center gap-2 text-xs text-[#c6c6c6]">
-								<Mail class="h-3.5 w-3.5 text-[#a8a8a8]" />
+							<div class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+								<Mail class="h-3.5 w-3.5 text-muted-foreground" />
 								<span>Email</span>
 							</div>
-							<span class="truncate font-mono text-sm text-white" title={user.email ?? ''}
+							<span class="truncate font-mono text-sm text-foreground" title={user.email ?? ''}
 								>{user.email}</span
 							>
 						</div>
@@ -307,10 +307,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 					<!-- Roles -->
 					<div
-						class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3"
+						class="flex items-center justify-between rounded-none border border-border bg-background p-3"
 					>
-						<div class="flex items-center gap-2 text-xs text-[#c6c6c6]">
-							<Shield class="h-3.5 w-3.5 text-[#a8a8a8]" />
+						<div class="flex items-center gap-2 text-xs text-muted-foreground">
+							<Shield class="h-3.5 w-3.5 text-muted-foreground" />
 							<span>Roles</span>
 						</div>
 						<div class="flex flex-wrap gap-1">
@@ -318,41 +318,41 @@ one at https://mozilla.org/MPL/2.0/.
 								<CarbonTag type={getRoleTagType(role)} size="sm">{role}</CarbonTag>
 							{/each}
 							{#if !user.roles?.length}
-								<span class="text-xs text-[#8d8d8d]">No roles</span>
+								<span class="text-xs text-muted-foreground">No roles</span>
 							{/if}
 						</div>
 					</div>
 
 					<!-- Member Since -->
 					<div
-						class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3"
+						class="flex items-center justify-between rounded-none border border-border bg-background p-3"
 					>
-						<div class="flex items-center gap-2 text-xs text-[#c6c6c6]">
-							<Calendar class="h-3.5 w-3.5 text-[#a8a8a8]" />
+						<div class="flex items-center gap-2 text-xs text-muted-foreground">
+							<Calendar class="h-3.5 w-3.5 text-muted-foreground" />
 							<span>Member Since</span>
 						</div>
-						<span class="text-xs text-[#c6c6c6]">{memberSince}</span>
+						<span class="text-xs text-muted-foreground">{memberSince}</span>
 					</div>
 
 					<!-- Last Active -->
 					{#if lastActive}
 						<div
-							class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3"
+							class="flex items-center justify-between rounded-none border border-border bg-background p-3"
 						>
-							<div class="flex items-center gap-2 text-xs text-[#c6c6c6]">
-								<Clock class="h-3.5 w-3.5 text-[#a8a8a8]" />
+							<div class="flex items-center gap-2 text-xs text-muted-foreground">
+								<Clock class="h-3.5 w-3.5 text-muted-foreground" />
 								<span>Last Active</span>
 							</div>
-							<span class="text-xs text-[#c6c6c6]">{lastActive}</span>
+							<span class="text-xs text-muted-foreground">{lastActive}</span>
 						</div>
 					{/if}
 
 					<!-- Account Status -->
 					<div
-						class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3"
+						class="flex items-center justify-between rounded-none border border-border bg-background p-3"
 					>
-						<div class="flex items-center gap-2 text-xs text-[#c6c6c6]">
-							<Activity class="h-3.5 w-3.5 text-[#a8a8a8]" />
+						<div class="flex items-center gap-2 text-xs text-muted-foreground">
+							<Activity class="h-3.5 w-3.5 text-muted-foreground" />
 							<span>Account Status</span>
 						</div>
 						<CarbonTag type={user.isActive ? 'green' : 'red'} size="sm">
@@ -364,29 +364,29 @@ one at https://mozilla.org/MPL/2.0/.
 
 			<!-- Security Tile -->
 			<CarbonTile class="rounded-none">
-				<div class="mb-4 flex items-center gap-3 border-b border-[#393939] pb-4">
+				<div class="mb-4 flex items-center gap-3 border-b border-border pb-4">
 					<div
-						class="flex h-8 w-8 items-center justify-center rounded-none bg-[#393939] text-accent-text"
+						class="flex h-8 w-8 items-center justify-center rounded-none bg-secondary text-accent-text"
 					>
 						<Key class="h-4 w-4" />
 					</div>
 					<div>
-						<h2 class="text-base font-semibold text-white">Security & Password</h2>
-						<p class="text-xs text-[#a8a8a8]">Manage credentials and session access</p>
+						<h2 class="text-base font-semibold text-foreground">Security & Password</h2>
+						<p class="text-xs text-muted-foreground">Manage credentials and session access</p>
 					</div>
 				</div>
 
 				<div class="space-y-4">
 					<div
-						class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-3"
+						class="flex items-center justify-between rounded-none border border-border bg-background p-3"
 					>
-						<span class="text-xs text-[#c6c6c6]">Active Session Provider</span>
+						<span class="text-xs text-muted-foreground">Active Session Provider</span>
 						<CarbonTag type="blue" size="sm">{providerLabel}</CarbonTag>
 					</div>
 
 					{#if user.authProvider === 'local' || !user.authProvider}
 						<div class="pt-2">
-							<h3 class="mb-3 text-sm font-semibold text-white">Change Password</h3>
+							<h3 class="mb-3 text-sm font-semibold text-foreground">Change Password</h3>
 							<form
 								onsubmit={(e) => {
 									e.preventDefault();
@@ -440,11 +440,11 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 					{:else}
 						<div
-							class="rounded-none border border-dashed border-[#525252] bg-[#161616] p-4 text-center"
+							class="rounded-none border border-dashed border-border bg-background p-4 text-center"
 						>
-							<Key class="mx-auto mb-2 h-6 w-6 text-[#8d8d8d]" />
-							<p class="text-xs text-[#a8a8a8]">
-								Your account is authenticated via <span class="font-semibold text-white"
+							<Key class="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
+							<p class="text-xs text-muted-foreground">
+								Your account is authenticated via <span class="font-semibold text-foreground"
 									>{providerLabel}</span
 								> SSO. Password changes must be performed through your identity provider.
 							</p>
@@ -508,10 +508,10 @@ one at https://mozilla.org/MPL/2.0/.
 					</tr>
 				{:else if apiTokens.length === 0}
 					<tr>
-						<td colspan="5" class="py-12 text-center text-[#8d8d8d]">
-							<KeyRound class="mx-auto mb-2 h-8 w-8 text-[#525252]" />
-							<p class="text-sm font-medium text-[#c6c6c6]">No API tokens generated</p>
-							<p class="mt-1 text-xs text-[#8d8d8d]">
+						<td colspan="5" class="py-12 text-center text-muted-foreground">
+							<KeyRound class="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+							<p class="text-sm font-medium text-muted-foreground">No API tokens generated</p>
+							<p class="mt-1 text-xs text-muted-foreground">
 								Generate a token to interact with the Carbon Panel gRPC/Connect API
 								programmatically.
 							</p>
@@ -519,14 +519,14 @@ one at https://mozilla.org/MPL/2.0/.
 					</tr>
 				{:else}
 					{#each apiTokens as token (token.id)}
-						<tr class="transition-colors hover:bg-[#353535]">
-							<td class="max-w-[200px] px-4 py-3 font-medium text-white">
+						<tr class="transition-colors hover:bg-accent">
+							<td class="max-w-[200px] px-4 py-3 font-medium text-foreground">
 								<div class="flex items-center gap-2">
 									<KeyRound class="h-3.5 w-3.5 shrink-0 text-accent-text" />
 									<span class="truncate font-mono text-sm" title={token.name}>{token.name}</span>
 								</div>
 							</td>
-							<td class="px-4 py-3 font-mono text-xs text-[#a8a8a8]">
+							<td class="px-4 py-3 font-mono text-xs text-muted-foreground">
 								{formatTimestamp(token.createdAt)}
 							</td>
 							<td class="px-4 py-3">
@@ -538,7 +538,7 @@ one at https://mozilla.org/MPL/2.0/.
 									<CarbonTag type="gray" size="sm">Never</CarbonTag>
 								{/if}
 							</td>
-							<td class="px-4 py-3 font-mono text-xs text-[#a8a8a8]">
+							<td class="px-4 py-3 font-mono text-xs text-muted-foreground">
 								{formatTimestamp(token.lastUsedAt)}
 							</td>
 							<td class="px-4 py-3 text-right">
@@ -546,7 +546,7 @@ one at https://mozilla.org/MPL/2.0/.
 									kind="ghost"
 									size="sm"
 									iconOnly
-									class="rounded-none text-[#da1e28] hover:bg-[#da1e28]/20"
+									class="rounded-none text-destructive-text hover:bg-destructive/20"
 									onclick={() => deleteToken(token)}
 									disabled={deletingTokenId === token.id}
 									title="Delete token"
@@ -581,27 +581,27 @@ one at https://mozilla.org/MPL/2.0/.
 	{#if createdToken}
 		<div class="space-y-4">
 			<div
-				class="space-y-2 rounded-none border-l-4 border-[#0f62fe] bg-[#0f62fe]/10 p-4 text-xs text-white"
+				class="space-y-2 rounded-none border-l-4 border-primary bg-primary/10 p-4 text-xs text-foreground"
 			>
-				<div class="flex items-center gap-2 font-semibold text-[#78a9ff]">
+				<div class="flex items-center gap-2 font-semibold text-accent-text">
 					<Check class="h-4 w-4" />
 					<span>API Token Generated</span>
 				</div>
 				<div class="relative mt-2">
 					<div
-						class="rounded-none border border-[#393939] bg-[#161616] p-3 pr-12 font-mono text-xs break-all text-[#6fdc8c] select-all"
+						class="rounded-none border border-border bg-background p-3 pr-12 font-mono text-xs break-all text-success-text select-all"
 					>
 						{createdToken}
 					</div>
 					<button
 						type="button"
 						onclick={copyToken}
-						class="absolute top-2 right-2 cursor-pointer rounded-none border border-[#393939] bg-[#262626] p-1.5 text-[#f4f4f4] transition-colors hover:bg-[#353535]"
+						class="absolute top-2 right-2 cursor-pointer rounded-none border border-border bg-card p-1.5 text-foreground transition-colors hover:bg-accent"
 						title="Copy Token"
 						aria-label="Copy Token"
 					>
 						{#if copied}
-							<Check class="h-4 w-4 text-[#6fdc8c]" />
+							<Check class="h-4 w-4 text-success-text" />
 						{:else}
 							<Copy class="h-4 w-4" />
 						{/if}
@@ -610,12 +610,12 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 
 			<div
-				class="flex items-start gap-2 rounded-none border-l-4 border-[#da1e28] bg-[#da1e28]/10 p-3 text-xs text-[#ff8389]"
+				class="flex items-start gap-2 rounded-none border-l-4 border-destructive bg-destructive/10 p-3 text-xs text-destructive-text"
 			>
 				<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
 				<div>
 					<p class="font-semibold">Save this secret now</p>
-					<p class="mt-0.5 text-[#c6c6c6]">
+					<p class="mt-0.5 text-muted-foreground">
 						This bearer token will never be displayed again. Store it securely in your secrets
 						manager or CI/CD environment.
 					</p>
@@ -623,9 +623,9 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 
 			<div class="space-y-1.5 pt-2">
-				<span class="text-xs font-semibold text-[#c6c6c6]">Example Usage</span>
+				<span class="text-xs font-semibold text-muted-foreground">Example Usage</span>
 				<pre
-					class="overflow-x-auto rounded-none border border-[#393939] bg-[#161616] p-3 font-mono text-xs text-[#a8a8a8]">curl {typeof window !==
+					class="overflow-x-auto rounded-none border border-border bg-background p-3 font-mono text-xs text-muted-foreground">curl {typeof window !==
 					'undefined'
 						? window.location.origin
 						: ''}/carbonpanel.v1.UserService/ListUsers \
@@ -635,7 +635,7 @@ one at https://mozilla.org/MPL/2.0/.
   -d '{'{}'}'</pre>
 			</div>
 
-			<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
+			<div class="flex items-center justify-end gap-3 border-t border-border pt-4">
 				<CarbonButton kind="secondary" onclick={copyToken} class="rounded-none">
 					{#if copied}
 						<Check class="mr-2 h-4 w-4" />
@@ -676,16 +676,16 @@ one at https://mozilla.org/MPL/2.0/.
 			</CarbonSelect>
 
 			<div
-				class="space-y-1 rounded-none border-l-4 border-[#0f62fe] bg-[#161616] p-3 text-xs text-[#c6c6c6]"
+				class="space-y-1 rounded-none border-l-4 border-primary bg-background p-3 text-xs text-muted-foreground"
 			>
-				<p class="font-semibold text-white">Security note:</p>
+				<p class="font-semibold text-foreground">Security note:</p>
 				<p>
 					This token inherits all permissions and roles granted to your account ({user?.username}).
 					Treat it with the same confidentiality as your password.
 				</p>
 			</div>
 
-			<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
+			<div class="flex items-center justify-end gap-3 border-t border-border pt-4">
 				<CarbonButton
 					kind="secondary"
 					onclick={closeCreateDialog}

@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import type { Snippet } from 'svelte';
 	import { fade, scale } from 'svelte/transition';
 	import { cubicOut, cubicIn } from 'svelte/easing';
+	import { X } from '@lucide/svelte';
 	import { motionDuration } from '$lib/motion';
 	import CarbonButton from './CarbonButton.svelte';
 
@@ -205,7 +206,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			tabindex="-1"
 			class="w-full {fullscreen
 				? 'h-screen max-h-screen max-w-none'
-				: `${sizeClasses[size]} max-h-[90vh] border border-[#393939]`} flex flex-col rounded-none bg-[#161616] shadow-[var(--carbon-shadow-overlay)] outline-none select-text focus:outline-none"
+				: `${sizeClasses[size]} max-h-[90vh] border border-border`} flex flex-col rounded-none bg-background shadow-[var(--carbon-shadow-overlay)] outline-none select-text focus:outline-none"
 			in:scale={{ start: 0.97, opacity: 0, duration: motionDuration(200), easing: cubicOut }}
 			out:scale={{ start: 0.97, opacity: 0, duration: motionDuration(150), easing: cubicIn }}
 		>
@@ -219,31 +220,25 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<!-- Header -->
 			{#if !bare}
 				<div
-					class="flex items-start justify-between rounded-none border-b border-[#393939] bg-[#262626] p-4 sm:p-6"
+					class="flex items-start justify-between rounded-none border-b border-border bg-card p-4 sm:p-6"
 				>
 					<div>
 						{#if description}
-							<span id={descId} class="font-sans text-xs font-normal text-[#c6c6c6]"
+							<span id={descId} class="font-sans text-xs font-normal text-muted-foreground"
 								>{description}</span
 							>
 						{/if}
-						<h3 id={titleId} class="mt-1 font-sans text-xl font-semibold text-[#f4f4f4]">
+						<h3 id={titleId} class="mt-1 font-sans text-xl font-semibold text-foreground">
 							{title}
 						</h3>
 					</div>
 					<button
 						type="button"
 						onclick={handleClose}
-						class="cursor-pointer rounded-none p-2 text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white focus:ring-1 focus:ring-[#0f62fe] focus:outline-none"
+						class="focus-ring motion-press cursor-pointer rounded-none p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 						aria-label="Close modal"
 					>
-						<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-							<path
-								fill-rule="evenodd"
-								d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-								clip-rule="evenodd"
-							/>
-						</svg>
+						<X class="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
 					</button>
 				</div>
 			{/if}
@@ -252,7 +247,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<div
 				class={bare
 					? 'flex min-h-0 flex-1 flex-col overflow-hidden'
-					: 'flex-1 space-y-4 overflow-y-auto rounded-none p-4 font-sans text-sm text-[#f4f4f4] sm:p-6'}
+					: 'flex-1 space-y-4 overflow-y-auto rounded-none p-4 font-sans text-sm text-foreground sm:p-6'}
 			>
 				{@render children?.()}
 			</div>
@@ -260,13 +255,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<!-- Footer -->
 			{#if !bare}
 				{#if footer}
-					<div class="rounded-none border-t border-[#393939] bg-[#262626]">
+					<div class="rounded-none border-t border-border bg-card">
 						{@render footer()}
 					</div>
 				{:else if hasFooter}
-					<div
-						class="flex items-center justify-end rounded-none border-t border-[#393939] bg-[#262626]"
-					>
+					<div class="flex items-center justify-end rounded-none border-t border-border bg-card">
 						<CarbonButton
 							kind="secondary"
 							size="lg"

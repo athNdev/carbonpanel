@@ -250,13 +250,13 @@ one at https://mozilla.org/MPL/2.0/.
 	// ERROR is red; UNHEALTHY is a yellow degraded state, and deep sleep and
 	// other transients are purple.
 	const statusPipColor: Record<string, string> = {
-		green: 'bg-[#24a148]',
-		red: 'bg-[#da1e28]',
-		yellow: 'bg-[#f1c21b]',
-		purple: 'bg-[#a56eff]',
-		blue: 'bg-[#0f62fe]',
-		gray: 'bg-[#8d8d8d]',
-		'warm-gray': 'bg-[#8d8d8d]'
+		green: 'bg-success',
+		red: 'bg-destructive',
+		yellow: 'bg-warning',
+		purple: 'bg-[var(--chart-4)]',
+		blue: 'bg-primary',
+		gray: 'bg-muted-foreground',
+		'warm-gray': 'bg-muted-foreground'
 	};
 
 	const formatUptime = (lastStarted?: Timestamp) => {
@@ -273,10 +273,10 @@ one at https://mozilla.org/MPL/2.0/.
 	};
 
 	const getTpsColor = (tps: number | undefined) => {
-		if (!tps) return 'text-[#8d8d8d]';
-		if (tps >= 19) return 'text-[#24a148]';
-		if (tps >= 17) return 'text-[#f1c21b]';
-		return 'text-[#da1e28]';
+		if (!tps) return 'text-muted-foreground';
+		if (tps >= 19) return 'text-success-text';
+		if (tps >= 17) return 'text-warning-text';
+		return 'text-destructive-text';
 	};
 
 	function countUp(node: HTMLElement, params: { value: number; decimals?: number }) {
@@ -319,34 +319,34 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 {#if isLoading}
-	<div class="space-y-6 bg-[#161616] text-[#f4f4f4]">
+	<div class="space-y-6 bg-background text-foreground">
 		<div
-			class="flex flex-col justify-between gap-4 border-b border-[#393939] pb-4 sm:flex-row sm:items-center"
+			class="flex flex-col justify-between gap-4 border-b border-border pb-4 sm:flex-row sm:items-center"
 		>
 			<div class="w-full">
-				<div class="motion-skeleton h-8 w-56 bg-[#262626]"></div>
-				<div class="motion-skeleton mt-2 h-3 w-80 bg-[#262626]"></div>
+				<div class="motion-skeleton h-8 w-56 bg-card"></div>
+				<div class="motion-skeleton mt-2 h-3 w-80 bg-card"></div>
 			</div>
 			<div class="flex items-center gap-2">
-				<div class="motion-skeleton h-8 w-28 bg-[#262626]"></div>
-				<div class="motion-skeleton h-8 w-32 bg-[#262626]"></div>
+				<div class="motion-skeleton h-8 w-28 bg-card"></div>
+				<div class="motion-skeleton h-8 w-32 bg-card"></div>
 			</div>
 		</div>
 		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 			{#each [0, 1, 2, 3] as _ (_)}
 				<div
-					class="flex h-[140px] flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 select-none"
+					class="flex h-[140px] flex-col justify-between rounded-none border border-border bg-card p-6 select-none"
 				>
 					<div>
 						<div class="flex items-center justify-between">
-							<div class="motion-skeleton h-3 w-24 bg-[#393939]"></div>
-							<div class="motion-skeleton h-4 w-4 bg-[#393939]"></div>
+							<div class="motion-skeleton h-3 w-24 bg-secondary"></div>
+							<div class="motion-skeleton h-4 w-4 bg-secondary"></div>
 						</div>
-						<div class="motion-skeleton mt-3 h-8 w-20 bg-[#393939]"></div>
+						<div class="motion-skeleton mt-3 h-8 w-20 bg-secondary"></div>
 					</div>
-					<div class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3">
-						<div class="motion-skeleton h-3 w-20 bg-[#393939]"></div>
-						<div class="motion-skeleton h-3 w-12 bg-[#393939]"></div>
+					<div class="mt-3 flex items-center justify-between border-t border-border pt-3">
+						<div class="motion-skeleton h-3 w-20 bg-secondary"></div>
+						<div class="motion-skeleton h-3 w-12 bg-secondary"></div>
 					</div>
 				</div>
 			{/each}
@@ -361,7 +361,7 @@ one at https://mozilla.org/MPL/2.0/.
 		/>
 	</div>
 {:else}
-	<div class="space-y-6 bg-[#161616] text-[#f4f4f4]" data-testid="showcase-dashboard-content">
+	<div class="space-y-6 bg-background text-foreground" data-testid="showcase-dashboard-content">
 		<CarbonPageHeader
 			title="Cluster Overview"
 			description="Hardware utilization, game servers status, and network routing topology"
@@ -399,191 +399,191 @@ one at https://mozilla.org/MPL/2.0/.
 		>
 			<!-- Tile 1: Total Servers -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"
+				class="flex flex-col justify-between rounded-none border border-border bg-card p-6 transition-colors select-none hover:border-foreground/30"
 			>
 				<div>
 					<div
-						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
+						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 					>
 						<span>Total Servers</span>
-						<Server class="h-4 w-4 text-[#8d8d8d]" />
+						<Server class="h-4 w-4 text-muted-foreground" />
 					</div>
 					<div
-						class="mt-3 font-sans text-[32px] leading-none font-semibold tracking-tight text-[#f4f4f4] tabular-nums"
+						class="mt-3 font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
 					>
 						<span use:countUp={{ value: stats.total, decimals: 0 }}></span>
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between gap-2 border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
+					class="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
 					<div class="flex items-center gap-3">
-						<div class="flex items-center gap-1.5 text-[#24a148]">
-							<span class="h-1.5 w-1.5 bg-[#24a148]"></span>
+						<div class="flex items-center gap-1.5 text-success-text">
+							<span class="h-1.5 w-1.5 bg-success"></span>
 							<span>{stats.running} ACTIVE</span>
 						</div>
 						{#if stats.error > 0}
-							<div class="flex items-center gap-1.5 text-[#da1e28]">
-								<span class="h-1.5 w-1.5 bg-[#da1e28]"></span>
+							<div class="flex items-center gap-1.5 text-destructive-text">
+								<span class="h-1.5 w-1.5 bg-destructive"></span>
 								<span>{stats.error} ISSUES</span>
 							</div>
 						{:else if stats.warning > 0}
-							<div class="flex items-center gap-1.5 text-[#f1c21b]">
-								<span class="h-1.5 w-1.5 bg-[#f1c21b]"></span>
+							<div class="flex items-center gap-1.5 text-warning-text">
+								<span class="h-1.5 w-1.5 bg-warning"></span>
 								<span>{stats.warning} DEGRADED</span>
 							</div>
 						{:else}
-							<span class="text-[#8d8d8d]">{stats.stopped} STOPPED</span>
+							<span class="text-muted-foreground">{stats.stopped} STOPPED</span>
 						{/if}
 					</div>
-					<span class="text-[#8d8d8d]">RATIO {stats.activeRatio}%</span>
+					<span class="text-muted-foreground">RATIO {stats.activeRatio}%</span>
 				</div>
 			</div>
 
 			<!-- Tile 2: Active Players -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"
+				class="flex flex-col justify-between rounded-none border border-border bg-card p-6 transition-colors select-none hover:border-foreground/30"
 			>
 				<div>
 					<div
-						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
+						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 					>
 						<span>Active Players</span>
-						<Users class="h-4 w-4 text-[#8d8d8d]" />
+						<Users class="h-4 w-4 text-muted-foreground" />
 					</div>
 					<div
-						class="mt-3 font-sans text-[32px] leading-none font-semibold tracking-tight text-[#f4f4f4] tabular-nums"
+						class="mt-3 font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
 					>
 						<span use:countUp={{ value: stats.totalPlayers, decimals: 0 }}></span>
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
+					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
 					{#if stats.totalPlayers > 0}
-						<div class="flex items-center gap-1.5 text-[#24a148]">
-							<span class="h-1.5 w-1.5 bg-[#24a148]"></span>
+						<div class="flex items-center gap-1.5 text-success-text">
+							<span class="h-1.5 w-1.5 bg-success"></span>
 							<span
 								>{stats.totalPlayers === 1 ? '1 PLAYER' : `${stats.totalPlayers} PLAYERS`} ONLINE</span
 							>
 						</div>
 					{:else}
-						<span class="text-[#8d8d8d]">0 PLAYERS ONLINE</span>
+						<span class="text-muted-foreground">0 PLAYERS ONLINE</span>
 					{/if}
 					{#if stats.totalMaxPlayers > 0}
-						<span class="text-[#8d8d8d]">MAX: {stats.totalMaxPlayers}</span>
+						<span class="text-muted-foreground">MAX: {stats.totalMaxPlayers}</span>
 					{/if}
 				</div>
 			</div>
 
 			<!-- Tile 3: Memory Usage -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"
+				class="flex flex-col justify-between rounded-none border border-border bg-card p-6 transition-colors select-none hover:border-foreground/30"
 			>
 				<div>
 					<div
-						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
+						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 					>
 						<span>Memory Allocation</span>
-						<MemoryStick class="h-4 w-4 text-[#8d8d8d]" />
+						<MemoryStick class="h-4 w-4 text-muted-foreground" />
 					</div>
 					<div class="mt-3 flex items-baseline gap-1.5">
 						<span
-							class="font-sans text-[32px] leading-none font-semibold tracking-tight text-[#f4f4f4] tabular-nums"
+							class="font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
 							use:countUp={{
 								value: stats.totalMemory > 0 ? stats.usedMemory / 1024 : 0,
 								decimals: 1
 							}}
 						></span>
-						<span class="font-sans text-sm text-[#8d8d8d]">
+						<span class="font-sans text-sm text-muted-foreground">
 							/ {stats.totalMemory > 0 ? (stats.totalMemory / 1024).toFixed(1) : '0.0'} GB
 						</span>
 					</div>
 					<!-- Sharp Carbon Progress Bar -->
-					<div class="mt-3 h-1.5 w-full overflow-hidden rounded-none bg-[#393939]">
+					<div class="mt-3 h-1.5 w-full overflow-hidden rounded-none bg-secondary">
 						<div
-							class="h-full bg-[#0f62fe] transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
+							class="h-full bg-primary transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
 							style="width: {stats.memUsagePercent}%"
 						></div>
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
+					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
 					<div
 						class="flex items-center gap-1.5 {stats.memUsagePercent > 85
-							? 'text-[#da1e28]'
+							? 'text-destructive-text'
 							: stats.memUsagePercent > 70
-								? 'text-[#f1c21b]'
-								: 'text-[#24a148]'}"
+								? 'text-warning-text'
+								: 'text-success-text'}"
 					>
 						<span
 							class="h-1.5 w-1.5 {stats.memUsagePercent > 85
-								? 'bg-[#da1e28]'
+								? 'bg-destructive'
 								: stats.memUsagePercent > 70
-									? 'bg-[#f1c21b]'
-									: 'bg-[#24a148]'}"
+									? 'bg-warning'
+									: 'bg-success'}"
 						></span>
 						<span>{stats.memUsagePercent}% UTILIZED</span>
 					</div>
-					<span class="text-[#8d8d8d]">RAM POOL</span>
+					<span class="text-muted-foreground">RAM POOL</span>
 				</div>
 			</div>
 
 			<!-- Tile 4: Cluster Performance -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-6 transition-colors select-none hover:border-[#525252]"
+				class="flex flex-col justify-between rounded-none border border-border bg-card p-6 transition-colors select-none hover:border-foreground/30"
 			>
 				<div>
 					<div
-						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
+						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 					>
 						<span>Cluster Performance</span>
-						<Gauge class="h-4 w-4 text-[#8d8d8d]" />
+						<Gauge class="h-4 w-4 text-muted-foreground" />
 					</div>
 					<div class="mt-3 flex items-baseline gap-2">
 						{#if stats.avgTps > 0}
 							<span
 								class="font-sans text-[32px] leading-none font-semibold tracking-tight tabular-nums {stats.avgTps >=
 								18
-									? 'text-[#24a148]'
-									: 'text-[#da1e28]'}"
+									? 'text-success-text'
+									: 'text-destructive-text'}"
 								use:countUp={{ value: stats.avgTps, decimals: 1 }}
 							></span>
 						{:else}
 							<span
-								class="font-sans text-[32px] leading-none font-semibold tracking-tight text-[#8d8d8d] tabular-nums"
+								class="font-sans text-[32px] leading-none font-semibold tracking-tight text-muted-foreground tabular-nums"
 								>—</span
 							>
 						{/if}
-						<span class="font-sans text-sm text-[#8d8d8d]">AVG TPS</span>
+						<span class="font-sans text-sm text-muted-foreground">AVG TPS</span>
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-[#393939] pt-3 font-sans text-[11px] text-[#8d8d8d]"
+					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
 					{#if stats.running === 0}
-						<div class="flex items-center gap-1.5 text-[#8d8d8d]">
-							<span class="h-1.5 w-1.5 bg-[#8d8d8d]"></span>
+						<div class="flex items-center gap-1.5 text-muted-foreground">
+							<span class="h-1.5 w-1.5 bg-muted-foreground"></span>
 							<span>IDLE</span>
 						</div>
 					{:else if stats.avgTps <= 0}
-						<div class="flex items-center gap-1.5 text-[#8d8d8d]">
-							<span class="h-1.5 w-1.5 bg-[#8d8d8d]"></span>
+						<div class="flex items-center gap-1.5 text-muted-foreground">
+							<span class="h-1.5 w-1.5 bg-muted-foreground"></span>
 							<span>AWAITING SAMPLE</span>
 						</div>
 					{:else}
 						<div
 							class="flex items-center gap-1.5 {stats.avgTps >= 18
-								? 'text-[#24a148]'
-								: 'text-[#da1e28]'}"
+								? 'text-success-text'
+								: 'text-destructive-text'}"
 						>
-							<span class="h-1.5 w-1.5 {stats.avgTps >= 18 ? 'bg-[#24a148]' : 'bg-[#da1e28]'}"
+							<span class="h-1.5 w-1.5 {stats.avgTps >= 18 ? 'bg-success' : 'bg-destructive'}"
 							></span>
 							<span>{stats.avgTps >= 18 ? 'HEALTHY' : 'DEGRADED'}</span>
 						</div>
 					{/if}
-					<span class="text-[#8d8d8d]">
+					<span class="text-muted-foreground">
 						AVG CPU {stats.avgCpu > 0 ? `${stats.avgCpu.toFixed(0)}%` : '—'}
 					</span>
 				</div>
@@ -594,18 +594,18 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if serversByStatus.critical.length > 0 || serversByStatus.warning.length > 0}
 			<div
 				class="rounded-none border-l-4 {serversByStatus.critical.length > 0
-					? 'border-l-[#da1e28]'
-					: 'border-l-[#f1c21b]'} flex flex-col justify-between gap-3 border-t border-r border-b border-[#393939] bg-[#262626] p-4 text-sm sm:flex-row sm:items-center"
+					? 'border-l-destructive'
+					: 'border-l-warning'} flex flex-col justify-between gap-3 border-t border-r border-b border-border bg-card p-4 text-sm sm:flex-row sm:items-center"
 			>
 				<div class="flex items-center gap-3">
 					<AlertTriangle
 						class="h-5 w-5 {serversByStatus.critical.length > 0
-							? 'text-[#da1e28]'
-							: 'text-[#f1c21b]'} shrink-0"
+							? 'text-destructive-text'
+							: 'text-warning-text'} shrink-0"
 					/>
-					<div class="font-sans text-xs text-[#f4f4f4]">
+					<div class="font-sans text-xs text-foreground">
 						{#if serversByStatus.critical.length > 0}
-							<span class="font-mono font-bold text-[#da1e28]"
+							<span class="font-mono font-bold text-destructive-text"
 								>{serversByStatus.critical.length} SERVER{serversByStatus.critical.length > 1
 									? 'S'
 									: ''} CRITICAL</span
@@ -613,7 +613,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 						{#if serversByStatus.warning.length > 0}
 							<span
-								class="font-mono font-bold text-[#f1c21b] {serversByStatus.critical.length > 0
+								class="font-mono font-bold text-warning-text {serversByStatus.critical.length > 0
 									? 'ml-2'
 									: ''}"
 								>{serversByStatus.warning.length} SERVER{serversByStatus.warning.length > 1
@@ -625,7 +625,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<a
 					href={resolve('/servers')}
-					class="mono-label-accent flex shrink-0 items-center gap-1 hover:text-white"
+					class="mono-label-accent flex shrink-0 items-center gap-1 hover:text-foreground"
 				>
 					<span>Inspect Servers</span>
 					<ChevronRight class="h-3.5 w-3.5" />
@@ -637,22 +637,22 @@ one at https://mozilla.org/MPL/2.0/.
 		<div class="grid gap-6 lg:grid-cols-7 [&>*]:min-w-0">
 			<!-- Carbon DataTable: Server Overview (4 cols on lg) -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] lg:col-span-4"
+				class="flex flex-col justify-between rounded-none border border-border bg-card lg:col-span-4"
 			>
 				<div>
 					<!-- Table Toolbar / Header -->
-					<div class="flex items-center justify-between border-b border-[#393939] bg-[#262626] p-4">
+					<div class="flex items-center justify-between border-b border-border bg-card p-4">
 						<div>
-							<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
+							<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
 								Server Overview
 							</h2>
-							<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">
+							<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 								Instance telemetry & state across cluster
 							</p>
 						</div>
 						<a
 							href={resolve('/servers')}
-							class="mono-label-accent inline-flex h-8 items-center gap-1 px-3 transition-colors hover:bg-[#353535] hover:text-white"
+							class="mono-label-accent inline-flex h-8 items-center gap-1 px-3 transition-colors hover:bg-accent hover:text-foreground"
 						>
 							<span>View All ({dashboardServers.length})</span>
 							<ChevronRight class="h-3.5 w-3.5" />
@@ -663,12 +663,12 @@ one at https://mozilla.org/MPL/2.0/.
 					{#if dashboardServers.length === 0}
 						<div class="px-4 py-12 text-center">
 							<div
-								class="mx-auto mb-3 flex h-10 w-10 items-center justify-center border border-[#393939] bg-[#161616]"
+								class="mx-auto mb-3 flex h-10 w-10 items-center justify-center border border-border bg-background"
 							>
-								<Server class="h-5 w-5 text-[#8d8d8d]" />
+								<Server class="h-5 w-5 text-muted-foreground" />
 							</div>
-							<h3 class="text-sm font-semibold text-[#f4f4f4]">No servers configured</h3>
-							<p class="mt-1 mb-4 font-mono text-xs text-[#8d8d8d]">
+							<h3 class="text-sm font-semibold text-foreground">No servers configured</h3>
+							<p class="mt-1 mb-4 font-mono text-xs text-muted-foreground">
 								Create your first Minecraft server instance
 							</p>
 							<CarbonButton
@@ -684,45 +684,45 @@ one at https://mozilla.org/MPL/2.0/.
 					{:else}
 						<div class="overflow-x-auto">
 							<table class="w-full border-collapse text-left font-sans text-sm">
-								<thead class="border-b border-[#525252] bg-[#393939] text-[#f4f4f4]">
+								<thead class="border-b border-border bg-secondary text-foreground">
 									<tr>
 										<th
 											scope="col"
-											class="px-4 py-2.5 text-xs font-semibold tracking-wider text-[#f4f4f4] uppercase"
+											class="px-4 py-2.5 text-xs font-semibold tracking-wider text-foreground uppercase"
 											>Server</th
 										>
 										<th
 											scope="col"
-											class="px-4 py-2.5 text-xs font-semibold tracking-wider text-[#f4f4f4] uppercase"
+											class="px-4 py-2.5 text-xs font-semibold tracking-wider text-foreground uppercase"
 											>Status</th
 										>
 										<th
 											scope="col"
-											class="hidden px-4 py-2.5 text-xs font-semibold tracking-wider text-[#f4f4f4] uppercase sm:table-cell"
+											class="hidden px-4 py-2.5 text-xs font-semibold tracking-wider text-foreground uppercase sm:table-cell"
 											>Version</th
 										>
 										<th
 											scope="col"
-											class="px-4 py-2.5 text-xs font-semibold tracking-wider text-[#f4f4f4] uppercase"
+											class="px-4 py-2.5 text-xs font-semibold tracking-wider text-foreground uppercase"
 											>Metrics</th
 										>
 										<th
 											scope="col"
-											class="px-4 py-2.5 text-right text-xs font-semibold tracking-wider text-[#f4f4f4] uppercase"
+											class="px-4 py-2.5 text-right text-xs font-semibold tracking-wider text-foreground uppercase"
 											>Actions</th
 										>
 									</tr>
 								</thead>
-								<tbody class="motion-stagger divide-y divide-[#393939] bg-[#262626] text-[#f4f4f4]">
+								<tbody class="motion-stagger divide-y divide-border bg-card text-foreground">
 									{#each sortServersByActivity( [...dashboardServers] ).slice(0, 5) as server (server.id)}
-										<tr class="group transition-colors hover:bg-[#353535]">
+										<tr class="group transition-colors hover:bg-accent">
 											<td class="px-4 py-3 align-middle">
 												<a
 													href={resolve(`/servers/${server.id}`)}
-													class="block transition-colors hover:text-[#78a9ff]"
+													class="block transition-colors hover:text-accent-text"
 												>
-													<div class="text-sm font-medium text-[#f4f4f4]">{server.name}</div>
-													<div class="font-mono text-xs text-[#8d8d8d]">
+													<div class="text-sm font-medium text-foreground">{server.name}</div>
+													<div class="font-mono text-xs text-muted-foreground">
 														{server.id.slice(0, 8)}
 													</div>
 												</a>
@@ -740,15 +740,15 @@ one at https://mozilla.org/MPL/2.0/.
 												</CarbonTag>
 											</td>
 											<td
-												class="hidden px-4 py-3 align-middle font-mono text-xs text-[#c6c6c6] sm:table-cell"
+												class="hidden px-4 py-3 align-middle font-mono text-xs text-muted-foreground sm:table-cell"
 											>
 												{server.mcVersion || '—'}
 											</td>
 											<td class="px-4 py-3 align-middle">
 												{#if server.status === ServerStatus.RUNNING}
 													<div class="flex items-center gap-3 font-mono text-xs">
-														<span class="flex items-center gap-1 text-[#c6c6c6]">
-															<Users class="h-3.5 w-3.5 text-[#8d8d8d]" />
+														<span class="flex items-center gap-1 text-muted-foreground">
+															<Users class="h-3.5 w-3.5 text-muted-foreground" />
 															{#if joinIsPlayable(server)}
 																{server.playersOnline || 0}/{server.maxPlayers}
 															{:else}
@@ -763,11 +763,11 @@ one at https://mozilla.org/MPL/2.0/.
 														{/if}
 													</div>
 												{:else if server.status === ServerStatus.DEEPSLEEP}
-													<span class="font-mono text-xs text-[#a56eff]">DEEP SLEEP</span>
+													<span class="font-mono text-xs text-[var(--chart-4)]">DEEP SLEEP</span>
 												{:else if server.status === ServerStatus.PAUSED}
-													<span class="font-mono text-xs text-[#78a9ff]">PAUSED</span>
+													<span class="font-mono text-xs text-accent-text">PAUSED</span>
 												{:else}
-													<span class="font-mono text-xs text-[#8d8d8d]">OFFLINE</span>
+													<span class="font-mono text-xs text-muted-foreground">OFFLINE</span>
 												{/if}
 											</td>
 											<td class="px-4 py-3 text-right align-middle">
@@ -776,7 +776,7 @@ one at https://mozilla.org/MPL/2.0/.
 														<button
 															type="button"
 															onclick={() => handleServerAction('start', server)}
-															class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#24a148] transition-colors hover:bg-[#393939] hover:text-[#42be65]"
+															class="flex h-7 w-7 cursor-pointer items-center justify-center text-success-text transition-colors hover:bg-secondary hover:text-success-text"
 															title={server.status === ServerStatus.DEEPSLEEP
 																? 'Wake Server'
 																: 'Start Server'}
@@ -790,7 +790,7 @@ one at https://mozilla.org/MPL/2.0/.
 															<button
 																type="button"
 																onclick={() => handleServerAction('stop', server)}
-																class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#da1e28] transition-colors hover:bg-[#393939] hover:text-[#ff8389]"
+																class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 																title="Stop Server"
 																aria-label="Stop Server"
 															>
@@ -801,7 +801,7 @@ one at https://mozilla.org/MPL/2.0/.
 														<button
 															type="button"
 															onclick={() => handleServerAction('start', server)}
-															class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#4589ff] transition-colors hover:bg-[#393939] hover:text-[#78a9ff]"
+															class="flex h-7 w-7 cursor-pointer items-center justify-center text-accent-text transition-colors hover:bg-secondary hover:text-accent-text"
 															title="Resume Server"
 															aria-label="Resume Server"
 														>
@@ -810,7 +810,7 @@ one at https://mozilla.org/MPL/2.0/.
 														<button
 															type="button"
 															onclick={() => handleServerAction('stop', server)}
-															class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#da1e28] transition-colors hover:bg-[#393939] hover:text-[#ff8389]"
+															class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 															title="Stop Server"
 															aria-label="Stop Server"
 														>
@@ -820,7 +820,7 @@ one at https://mozilla.org/MPL/2.0/.
 														<button
 															type="button"
 															onclick={() => handleServerAction('stop', server)}
-															class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#da1e28] transition-colors hover:bg-[#393939] hover:text-[#ff8389]"
+															class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 															title="Stop Server"
 															aria-label="Stop Server"
 														>
@@ -829,7 +829,7 @@ one at https://mozilla.org/MPL/2.0/.
 													{/if}
 													<a
 														href={resolve(`/servers/${server.id}`)}
-														class="mono-label-accent inline-flex h-7 items-center px-2.5 transition-colors hover:bg-[#393939] hover:text-white"
+														class="mono-label-accent inline-flex h-7 items-center px-2.5 transition-colors hover:bg-secondary hover:text-foreground"
 													>
 														Manage
 													</a>
@@ -845,41 +845,41 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 
 			<!-- Carbon Structured List: Recent Activity (3 cols on lg) -->
-			<div class="flex flex-col rounded-none border border-[#393939] bg-[#262626] lg:col-span-3">
+			<div class="flex flex-col rounded-none border border-border bg-card lg:col-span-3">
 				<!-- Header -->
-				<div class="flex items-center justify-between border-b border-[#393939] bg-[#262626] p-4">
+				<div class="flex items-center justify-between border-b border-border bg-card p-4">
 					<div>
-						<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
+						<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
 							Recent Activity
 						</h2>
-						<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">
+						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 							Latest lifecycle and cluster events
 						</p>
 					</div>
-					<Clock class="h-4 w-4 text-[#8d8d8d]" />
+					<Clock class="h-4 w-4 text-muted-foreground" />
 				</div>
 
 				<!-- Content -->
 				{#if recentActivity.length === 0}
 					<div
-						class="flex flex-1 flex-col items-center justify-center p-8 text-center text-[#8d8d8d]"
+						class="flex flex-1 flex-col items-center justify-center p-8 text-center text-muted-foreground"
 					>
-						<Clock class="mb-2 h-8 w-8 text-[#525252]" />
+						<Clock class="mb-2 h-8 w-8 text-muted-foreground" />
 						<p class="mono-label">No recent events recorded</p>
 					</div>
 				{:else}
 					<!-- Structured List Header -->
 					<div
-						class="flex items-center justify-between border-b border-[#525252] bg-[#393939] px-4 py-2.5 text-xs font-semibold tracking-wider text-[#f4f4f4] uppercase"
+						class="flex items-center justify-between border-b border-border bg-secondary px-4 py-2.5 text-xs font-semibold tracking-wider text-foreground uppercase"
 					>
 						<span>Event / Instance</span>
 						<span>Timestamp</span>
 					</div>
 					<!-- Structured List Rows -->
-					<div class="motion-stagger flex-1 divide-y divide-[#393939] bg-[#262626]">
+					<div class="motion-stagger flex-1 divide-y divide-border bg-card">
 						{#each recentActivity as activity (activity.server + (activity.time?.seconds ?? ''))}
 							<div
-								class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-[#353535]"
+								class="flex items-center justify-between px-4 py-3 transition-colors hover:bg-accent"
 							>
 								<div class="flex min-w-0 items-center gap-3">
 									<!-- Sharp status pip -->
@@ -895,11 +895,11 @@ one at https://mozilla.org/MPL/2.0/.
 											: ''}"
 									></div>
 									<div class="min-w-0">
-										<p class="truncate text-sm font-medium text-[#f4f4f4]">{activity.server}</p>
-										<p class="font-mono text-xs text-[#8d8d8d]">{activity.action}</p>
+										<p class="truncate text-sm font-medium text-foreground">{activity.server}</p>
+										<p class="font-mono text-xs text-muted-foreground">{activity.action}</p>
 									</div>
 								</div>
-								<div class="shrink-0 pl-3 font-mono text-xs text-[#8d8d8d]">
+								<div class="shrink-0 pl-3 font-mono text-xs text-muted-foreground">
 									{formatUptime(activity.time)} ago
 								</div>
 							</div>
@@ -910,28 +910,30 @@ one at https://mozilla.org/MPL/2.0/.
 		</div>
 
 		{#if dashboardNodes.length > 0}
-			<div class="rounded-none border border-[#393939] bg-[#262626]" data-testid="node-section">
+			<div class="rounded-none border border-border bg-card" data-testid="node-section">
 				<div
-					class="flex flex-col justify-between gap-3 border-b border-[#393939] p-4 sm:flex-row sm:items-center"
+					class="flex flex-col justify-between gap-3 border-b border-border p-4 sm:flex-row sm:items-center"
 				>
 					<div>
-						<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
+						<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
 							Nodes
 						</h2>
-						<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">Docker hosts backing this cluster</p>
+						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
+							Docker hosts backing this cluster
+						</p>
 					</div>
 					<CarbonTag type={nodeStats.offline > 0 ? 'yellow' : 'green'} size="sm">
 						{nodeStats.online}/{nodeStats.total} ONLINE
 					</CarbonTag>
 				</div>
-				<div class="divide-y divide-[#393939]">
+				<div class="divide-y divide-border">
 					{#each dashboardNodes as node (node.id)}
 						<div
 							class="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
 							data-testid="node-row"
 						>
 							<div class="flex min-w-0 items-center gap-2">
-								<span class="truncate text-sm font-medium text-[#f4f4f4]">{node.name}</span>
+								<span class="truncate text-sm font-medium text-foreground">{node.name}</span>
 								{#if node.isLocal}
 									<CarbonTag type="blue" size="sm">LOCAL</CarbonTag>
 								{/if}
@@ -939,7 +941,7 @@ one at https://mozilla.org/MPL/2.0/.
 									{describeNodeStatusLabel(node.status)}
 								</CarbonTag>
 							</div>
-							<div class="flex items-center gap-4 font-sans text-[11px] text-[#8d8d8d]">
+							<div class="flex items-center gap-4 font-sans text-[11px] text-muted-foreground">
 								<span class="tabular-nums">
 									{node.runningCount ?? 0}/{node.serverCount ?? 0} SERVERS
 								</span>
@@ -952,15 +954,17 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		<!-- Carbon System Health Strip -->
-		<div class="rounded-none border border-[#393939] bg-[#262626]">
+		<div class="rounded-none border border-border bg-card">
 			<div
-				class="flex flex-col justify-between gap-3 border-b border-[#393939] p-4 sm:flex-row sm:items-center"
+				class="flex flex-col justify-between gap-3 border-b border-border p-4 sm:flex-row sm:items-center"
 			>
 				<div>
-					<h2 class="font-sans text-sm font-semibold tracking-wider text-[#f4f4f4] uppercase">
+					<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
 						System Health
 					</h2>
-					<p class="mt-0.5 font-sans text-xs text-[#8d8d8d]">Underlying daemon and network state</p>
+					<p class="mt-0.5 font-sans text-xs text-muted-foreground">
+						Underlying daemon and network state
+					</p>
 				</div>
 				<CarbonTag
 					type={serversByStatus.critical.length > 0
@@ -978,7 +982,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</CarbonTag>
 			</div>
 			<div
-				class="grid grid-cols-1 divide-y divide-[#393939] sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4"
+				class="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4"
 			>
 				<div class="flex items-center justify-between gap-3 px-4 py-3">
 					<span class="mono-label"> RPC Telemetry </span>
@@ -992,7 +996,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 				<div class="flex items-center justify-between gap-3 px-4 py-3">
 					<span class="mono-label"> Storage Allocation </span>
-					<span class="font-mono text-xs text-[#f4f4f4]">
+					<span class="font-mono text-xs text-foreground">
 						{stats.totalDiskUsage > 0
 							? `${formatBytes(stats.totalDiskUsage)}${stats.totalDiskSize}`
 							: 'LOCAL VOLUMES'}

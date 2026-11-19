@@ -30,7 +30,10 @@ test('all inventory routes consume the shared severity policy', () => {
 });
 
 test('overview pips and buckets treat unhealthy as degraded, not critical', () => {
-	assert.ok(overview.includes("yellow: 'bg-[#f1c21b]'"), 'pip palette needs a yellow entry');
+	assert.ok(
+		overview.includes("yellow: 'bg-warning'"),
+		'pip palette needs a tokenized yellow entry'
+	);
 	assert.ok(
 		overview.includes('s.status === ServerStatus.UNHEALTHY'),
 		'warning bucket must count unhealthy'
@@ -56,7 +59,7 @@ test('detail tile shows amber heartbeat and names the condition', () => {
 
 test('list issues pill goes amber when nothing actually errored', () => {
 	assert.ok(list.includes('hasErrorIssue'), 'pill must distinguish error from degraded');
-	assert.ok(list.includes('border-[#f1c21b]'), 'degraded-only pill must use amber styling');
+	assert.ok(list.includes('border-warning'), 'degraded-only pill must use tokenized amber styling');
 });
 
 test('error tile names the recorded failure cause', () => {

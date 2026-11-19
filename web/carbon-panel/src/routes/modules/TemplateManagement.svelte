@@ -96,7 +96,7 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="space-y-4 rounded-none font-sans text-[#f4f4f4]">
+<div class="space-y-4 rounded-none font-sans text-foreground">
 	{#snippet templateToolbar()}
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="w-36">
@@ -168,10 +168,10 @@ one at https://mozilla.org/MPL/2.0/.
 			</tr>
 		{:else if filteredTemplates.length === 0}
 			<tr>
-				<td colspan="6" class="py-16 text-center text-[#8d8d8d]">
-					<Layers class="mx-auto mb-3 h-10 w-10 text-[#525252]" />
-					<p class="text-sm font-semibold text-white">No module templates found</p>
-					<p class="mt-1 text-xs text-[#8d8d8d]">
+				<td colspan="6" class="py-16 text-center text-muted-foreground">
+					<Layers class="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+					<p class="text-sm font-semibold text-foreground">No module templates found</p>
+					<p class="mt-1 text-xs text-muted-foreground">
 						Create your first custom module blueprint to get started.
 					</p>
 					<div class="mt-4">
@@ -184,11 +184,11 @@ one at https://mozilla.org/MPL/2.0/.
 			</tr>
 		{:else}
 			{#each filteredTemplates as template (template.name)}
-				<tr class="transition-colors hover:bg-[#353535]">
-					<td class="max-w-[240px] px-4 py-3 font-medium whitespace-nowrap text-white">
+				<tr class="transition-colors hover:bg-accent">
+					<td class="max-w-[240px] px-4 py-3 font-medium whitespace-nowrap text-foreground">
 						<div class="flex items-center gap-2.5">
 							<div
-								class="flex h-7 w-7 shrink-0 items-center justify-center rounded-none border border-[#393939] bg-[#161616] text-accent-text"
+								class="flex h-7 w-7 shrink-0 items-center justify-center rounded-none border border-border bg-background text-accent-text"
 							>
 								<DynamicIcon
 									name={template.icon}
@@ -214,19 +214,19 @@ one at https://mozilla.org/MPL/2.0/.
 						{#if template.category}
 							<CarbonTag type="gray" size="sm">{template.category}</CarbonTag>
 						{:else}
-							<span class="font-mono text-xs text-[#8d8d8d]">-</span>
+							<span class="font-mono text-xs text-muted-foreground">-</span>
 						{/if}
 					</td>
 
 					<td
-						class="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-[#a8a8a8]"
+						class="max-w-[180px] truncate px-4 py-3 font-mono text-xs text-muted-foreground"
 						title={template.dockerImage}
 					>
 						{template.dockerImage}
 					</td>
 
 					<td
-						class="max-w-[240px] truncate px-4 py-3 text-xs text-[#a8a8a8]"
+						class="max-w-[240px] truncate px-4 py-3 text-xs text-muted-foreground"
 						title={template.description}
 					>
 						{template.description || 'No description provided'}
@@ -239,7 +239,7 @@ one at https://mozilla.org/MPL/2.0/.
 									kind="ghost"
 									size="sm"
 									iconOnly
-									class="rounded-none text-[#c6c6c6] hover:text-white"
+									class="rounded-none text-muted-foreground hover:text-foreground"
 									onclick={() => openEditDialog(template)}
 									title="Edit template"
 									aria-label="Edit template"
@@ -250,7 +250,7 @@ one at https://mozilla.org/MPL/2.0/.
 									kind="ghost"
 									size="sm"
 									iconOnly
-									class="rounded-none text-[#da1e28] hover:bg-[#da1e28]/20"
+									class="rounded-none text-destructive-text hover:bg-destructive/20"
 									onclick={() => handleDeleteTemplate(template)}
 									title="Delete template"
 									aria-label="Delete template"

@@ -20,6 +20,22 @@ test('describeNodeStatus falls back to UNKNOWN for missing values', () => {
 	assert.equal(describeNodeStatus(undefined).label, 'UNKNOWN');
 });
 
+test('node status labels use theme tokens instead of fixed dark-theme hex', () => {
+	const descriptions = [
+		describeNodeStatus(NodeStatus.ONLINE),
+		describeNodeStatus(NodeStatus.OFFLINE),
+		describeNodeStatus(NodeStatus.ERROR),
+		describeNodeStatus(null)
+	];
+	assert.deepEqual(
+		descriptions.map((item) => item.dotClass),
+		['text-success-text', 'text-muted-foreground', 'text-destructive-text', 'text-muted-foreground']
+	);
+	for (const { dotClass } of descriptions) {
+		assert.ok(!/#[0-9a-fA-F]{3,8}/.test(dotClass), `${dotClass} must not contain literal hex`);
+	}
+});
+
 test('pickPrimaryNode returns null when there are no nodes', () => {
 	assert.equal(pickPrimaryNode([]), null);
 });

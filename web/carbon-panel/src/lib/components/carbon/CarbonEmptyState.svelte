@@ -24,21 +24,21 @@
 </script>
 
 <div
-	class="flex flex-col items-center justify-center gap-4 border border-[#393939] bg-[#262626] p-12 text-center {className}"
+	class="flex flex-col items-center justify-center gap-4 border border-border bg-card p-12 text-center {className}"
 >
 	<div
-		class="flex h-12 w-12 items-center justify-center border border-[#393939] bg-[#161616] text-[#8d8d8d]"
+		class="flex h-12 w-12 items-center justify-center border border-border bg-background text-muted-foreground"
 	>
 		{#if icon}
 			{@render icon()}
 		{:else}
-			<Inbox class="h-6 w-6" />
+			<Inbox class="h-6 w-6" strokeWidth={1.5} />
 		{/if}
 	</div>
 	<div class="space-y-1">
-		<h3 class="text-sm font-semibold text-[#f4f4f4]">{title}</h3>
+		<h3 class="text-sm font-semibold text-foreground">{title}</h3>
 		{#if description}
-			<p class="max-w-md text-xs text-[#a8a8a8]">{description}</p>
+			<p class="max-w-md text-xs text-muted-foreground">{description}</p>
 		{/if}
 	</div>
 	{#if actionLabel && onaction}

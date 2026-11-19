@@ -446,7 +446,7 @@ one at https://mozilla.org/MPL/2.0/.
 </svelte:head>
 
 <div
-	class="h-full flex-1 space-y-6 rounded-none font-sans text-[#f4f4f4]"
+	class="h-full flex-1 space-y-6 rounded-none font-sans text-foreground"
 	data-testid="showcase-modpacks-content"
 >
 	{#if searchError && !showFavorites && !showUploaded}
@@ -497,10 +497,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 	{#if selectedIndexer === 'fuego'}
 		<div
-			class="flex items-center justify-between rounded-none border-y border-r border-l-4 border-[#393939] border-l-[#0f62fe] bg-[#262626] p-3.5 text-xs text-[#c6c6c6]"
+			class="flex items-center justify-between rounded-none border-y border-r border-l-4 border-border border-l-primary bg-card p-3.5 text-xs text-muted-foreground"
 		>
 			<div class="flex items-center gap-2">
-				<KeyRound class="h-4 w-4 shrink-0 text-[#78a9ff]" />
+				<KeyRound class="h-4 w-4 shrink-0 text-accent-text" />
 				<span
 					>CurseForge Keyless Mode: syncing and browsing modpacks operates through community
 					proxies.</span
@@ -586,7 +586,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</CarbonButton>
 				</div>
 
-				<div class="flex items-center gap-3 font-mono text-xs text-[#8d8d8d]">
+				<div class="flex items-center gap-3 font-mono text-xs text-muted-foreground">
 					{#if searchResults}
 						<span>TOTAL: {searchResults.total} PACKS</span>
 					{/if}
@@ -601,10 +601,10 @@ one at https://mozilla.org/MPL/2.0/.
 	{/if}
 
 	{#if uploading && uploadProgress}
-		<div class="space-y-2 border border-[#393939] bg-[#262626] p-4">
+		<div class="space-y-2 border border-border bg-card p-4">
 			<div class="flex items-center justify-between text-xs">
-				<span class="font-medium text-white">Importing modpack archive...</span>
-				<div class="flex items-center gap-3 font-mono text-[#a8a8a8]">
+				<span class="font-medium text-foreground">Importing modpack archive...</span>
+				<div class="flex items-center gap-3 font-mono text-muted-foreground">
 					<span>{uploadProgress.percentComplete.toFixed(0)}%</span>
 					<span
 						>{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(
@@ -614,7 +614,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<button
 						type="button"
 						onclick={cancelCurrentUpload}
-						class="cursor-pointer text-[#da1e28] hover:text-white"
+						class="cursor-pointer text-destructive-text hover:text-foreground"
 						title="Cancel import"
 						aria-label="Cancel import"
 					>
@@ -622,9 +622,9 @@ one at https://mozilla.org/MPL/2.0/.
 					</button>
 				</div>
 			</div>
-			<div class="h-2 w-full overflow-hidden bg-[#161616]">
+			<div class="h-2 w-full overflow-hidden bg-background">
 				<div
-					class="h-full bg-[#0f62fe] transition-all"
+					class="h-full bg-primary transition-all"
 					style="width: {uploadProgress.percentComplete}%"
 				></div>
 			</div>
@@ -638,7 +638,7 @@ one at https://mozilla.org/MPL/2.0/.
 	>
 		{#each displayModpacks as modpack, i (modpack.id)}
 			<CarbonTile
-				class="group flex flex-col justify-between rounded-none border-[#393939] p-5 transition-colors hover:border-[#525252]"
+				class="group flex flex-col justify-between rounded-none border-border p-5 transition-colors hover:border-foreground/30"
 				data-testid={i === 0 ? 'showcase-modpack-card' : undefined}
 			>
 				<div class="space-y-3">
@@ -648,25 +648,25 @@ one at https://mozilla.org/MPL/2.0/.
 							<img
 								src={modpack.logoUrl}
 								alt={modpack.name}
-								class="h-14 w-14 shrink-0 rounded-none border border-[#393939] bg-[#161616] object-cover"
+								class="h-14 w-14 shrink-0 rounded-none border border-border bg-background object-cover"
 							/>
 						{:else}
 							<div
-								class="flex h-14 w-14 shrink-0 items-center justify-center rounded-none border border-[#393939] bg-[#161616] text-[#525252]"
+								class="flex h-14 w-14 shrink-0 items-center justify-center rounded-none border border-border bg-background text-muted-foreground"
 							>
 								<Package class="h-7 w-7" />
 							</div>
 						{/if}
 
 						<div class="min-w-0 flex-1">
-							<h3 class="truncate text-base font-semibold text-white" title={modpack.name}>
+							<h3 class="truncate text-base font-semibold text-foreground" title={modpack.name}>
 								{modpack.name}
 							</h3>
 							<div class="mt-1 flex flex-wrap items-center gap-2">
 								<CarbonTag type={modpack.indexer === 'manual' ? 'purple' : 'blue'} size="sm">
 									{modpack.indexer === 'manual' ? 'Imported' : modpack.indexer}
 								</CarbonTag>
-								<span class="flex items-center gap-1 font-mono text-xs text-[#8d8d8d]">
+								<span class="flex items-center gap-1 font-mono text-xs text-muted-foreground">
 									<Download class="inline h-3 w-3" />
 									{formatNumber(modpack.downloadCount)}
 								</span>
@@ -676,20 +676,20 @@ one at https://mozilla.org/MPL/2.0/.
 						<button
 							type="button"
 							onclick={() => toggleFavorite(modpack)}
-							class="cursor-pointer rounded-none p-2 text-[#8d8d8d] transition-colors hover:text-[#da1e28]"
+							class="cursor-pointer rounded-none p-2 text-muted-foreground transition-colors hover:text-destructive-text"
 							title={modpack.isFavorited ? 'Remove favorite' : 'Add favorite'}
 							aria-label={modpack.isFavorited
 								? `Remove ${modpack.name} from favorites`
 								: `Add ${modpack.name} to favorites`}
 						>
 							<Heart
-								class={`h-4 w-4 ${modpack.isFavorited ? 'fill-[#da1e28] text-[#da1e28]' : ''}`}
+								class={`h-4 w-4 ${modpack.isFavorited ? 'fill-destructive text-destructive-text' : ''}`}
 							/>
 						</button>
 					</div>
 
 					<!-- Description -->
-					<p class="line-clamp-2 min-h-8 text-xs text-[#a8a8a8]">
+					<p class="line-clamp-2 min-h-8 text-xs text-muted-foreground">
 						{modpack.summary || 'No summary available for this modpack.'}
 					</p>
 
@@ -704,7 +704,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 
 						{#if parseJsonArray(modpack.gameVersions).length > 0}
-							<div class="truncate font-mono text-xs text-[#8d8d8d]">
+							<div class="truncate font-mono text-xs text-muted-foreground">
 								MC: {parseJsonArray(modpack.gameVersions).slice(0, 3).join(', ')}
 								{#if parseJsonArray(modpack.gameVersions).length > 3}
 									+{parseJsonArray(modpack.gameVersions).length - 3} more
@@ -715,7 +715,7 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<!-- Tile Actions -->
-				<div class="mt-4 flex items-center justify-between gap-2 border-t border-[#393939] pt-3">
+				<div class="mt-4 flex items-center justify-between gap-2 border-t border-border pt-3">
 					<div class="flex items-center gap-1">
 						{#if modpack.websiteUrl}
 							<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- external modpack homepage URL used directly; resolve() throws on non-absolute pathnames -->
@@ -745,9 +745,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Empty state -->
 	{#if displayModpacks.length === 0}
-		<div class="rounded-none border border-dashed border-[#393939] bg-[#262626] py-16 text-center">
-			<Package class="mx-auto mb-3 h-10 w-10 text-[#525252]" />
-			<p class="text-sm font-semibold text-[#f4f4f4]">
+		<div class="rounded-none border border-dashed border-border bg-card py-16 text-center">
+			<Package class="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+			<p class="text-sm font-semibold text-foreground">
 				{#if showFavorites}
 					No favorite modpacks found
 				{:else if loading}
@@ -760,7 +760,7 @@ one at https://mozilla.org/MPL/2.0/.
 					No modpacks available locally
 				{/if}
 			</p>
-			<p class="mx-auto mt-1 max-w-sm text-xs text-[#8d8d8d]">
+			<p class="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
 				{#if showFavorites}
 					Click the heart icon on any package to add it to your pinned favorites.
 				{:else if !loading && !syncing}
@@ -788,7 +788,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Pagination -->
 	{#if !showFavorites && !showUploaded && searchResults && searchResults.total > searchResults.pageSize}
-		<div class="flex items-center justify-center gap-3 border-t border-[#393939] pt-4">
+		<div class="flex items-center justify-center gap-3 border-t border-border pt-4">
 			<CarbonButton
 				kind="tertiary"
 				size="sm"
@@ -800,7 +800,7 @@ one at https://mozilla.org/MPL/2.0/.
 			>
 				Previous
 			</CarbonButton>
-			<span class="font-mono text-xs text-[#a8a8a8]">
+			<span class="font-mono text-xs text-muted-foreground">
 				Page {searchParams.page} of {Math.ceil(searchResults.total / searchResults.pageSize)}
 			</span>
 			<CarbonButton
@@ -837,10 +837,12 @@ one at https://mozilla.org/MPL/2.0/.
 					class="space-y-3"
 				>
 					<div>
-						<h4 class="font-mono text-xs font-semibold tracking-[0.32px] text-[#c6c6c6] uppercase">
+						<h4
+							class="font-mono text-xs font-semibold tracking-[0.32px] text-muted-foreground uppercase"
+						>
 							Upload ZIP
 						</h4>
-						<p class="mt-1 text-xs text-[#a8a8a8]">
+						<p class="mt-1 text-xs text-muted-foreground">
 							Import a modpack archive (.zip) from this computer. The pack becomes an Imported entry
 							in your library and can be deployed to a server.
 						</p>
@@ -859,12 +861,12 @@ one at https://mozilla.org/MPL/2.0/.
 				>
 					<div>
 						<h4
-							class="flex items-center gap-1.5 font-mono text-xs font-semibold tracking-[0.32px] text-[#c6c6c6] uppercase"
+							class="flex items-center gap-1.5 font-mono text-xs font-semibold tracking-[0.32px] text-muted-foreground uppercase"
 						>
 							<Globe class="h-3.5 w-3.5 text-accent-text" />
 							From URL
 						</h4>
-						<p class="mt-1 text-xs text-[#a8a8a8]">
+						<p class="mt-1 text-xs text-muted-foreground">
 							Import an archive hosted on GitHub Releases, Cloudflare R2 or a static CDN.
 						</p>
 					</div>
@@ -922,7 +924,7 @@ one at https://mozilla.org/MPL/2.0/.
 						disabled={importingRemote}
 					/>
 
-					<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
+					<div class="flex items-center justify-end gap-3 border-t border-border pt-4">
 						<CarbonButton
 							kind="secondary"
 							size="md"

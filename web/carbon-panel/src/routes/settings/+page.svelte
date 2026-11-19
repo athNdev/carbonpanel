@@ -117,7 +117,7 @@ one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="min-h-full flex-1 space-y-6 bg-[#161616] text-[#f4f4f4]">
+<div class="min-h-full flex-1 space-y-6 bg-background text-foreground">
 	<CarbonPageHeader
 		title="Settings"
 		description="Configure Carbon Panel and default server settings"
@@ -129,7 +129,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if activeTab === 'server-config' && showSettings}
 			<div class="motion-fade-in space-y-4">
 				{#if loading}
-					<div class="flex items-center justify-center border border-[#393939] bg-[#262626] p-16">
+					<div class="flex items-center justify-center border border-border bg-card p-16">
 						<CarbonInlineLoading description="Loading settings..." />
 					</div>
 				{:else if globalSettingsError}

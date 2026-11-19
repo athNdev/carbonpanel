@@ -105,9 +105,9 @@
 	{/if}
 	<div class="grid gap-6 lg:grid-cols-[220px_1fr]">
 		<aside class="lg:sticky lg:top-4 lg:self-start">
-			<nav aria-label="Versions" class="border border-[#393939] bg-[#262626] p-3">
+			<nav aria-label="Versions" class="border border-border bg-card p-3">
 				<p
-					class="px-1 pb-2 font-sans text-xs font-semibold tracking-wider text-[#a8a8a8] uppercase"
+					class="px-1 pb-2 font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 				>
 					Versions
 				</p>
@@ -116,7 +116,7 @@
 						<li>
 							<a
 								href={`#${version.id}`}
-								class="block truncate px-2 py-1.5 font-sans text-xs text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+								class="block truncate px-2 py-1.5 font-sans text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
 								{version.title}
 							</a>
@@ -138,11 +138,11 @@
 						{#if group.kind}
 							<div class="mt-4 flex items-center gap-2">
 								{#if group.kind.toLowerCase() === 'added'}
-									<Plus class="h-4 w-4 text-[#24a148]" aria-hidden="true" />
+									<Plus class="h-4 w-4 text-success-text" aria-hidden="true" />
 								{:else if group.kind.toLowerCase() === 'fixed'}
-									<Check class="h-4 w-4 text-[#0f62fe]" aria-hidden="true" />
+									<Check class="h-4 w-4 text-accent-text" aria-hidden="true" />
 								{:else}
-									<RefreshCw class="h-4 w-4 text-[#8d8d8d]" aria-hidden="true" />
+									<RefreshCw class="h-4 w-4 text-muted-foreground" aria-hidden="true" />
 								{/if}
 								<h3 class="changelog-group-title">{group.kind}</h3>
 							</div>
@@ -159,7 +159,7 @@
 <style>
 	.changelog-md {
 		max-width: 72ch;
-		color: #f4f4f4;
+		color: var(--foreground);
 		font-size: 0.9375rem;
 		line-height: 1.7;
 	}
@@ -170,8 +170,8 @@
 		margin: 0;
 		font-size: 1.5rem;
 		font-weight: 600;
-		color: #ffffff;
-		border-bottom: 1px solid #393939;
+		color: var(--foreground);
+		border-bottom: 1px solid var(--border);
 		padding-bottom: 0.5rem;
 		scroll-margin-top: 5rem;
 		flex: 1 1 auto;
@@ -181,14 +181,14 @@
 		margin: 0;
 		font-size: 1.0625rem;
 		font-weight: 600;
-		color: #c6c6c6;
+		color: var(--muted-foreground);
 	}
 	.changelog-md :global(h1) {
 		margin: 1.5rem 0 0.75rem;
 		font-size: 1.5rem;
 		font-weight: 600;
-		color: #ffffff;
-		border-bottom: 1px solid #393939;
+		color: var(--foreground);
+		border-bottom: 1px solid var(--border);
 		padding-bottom: 0.5rem;
 		scroll-margin-top: 5rem;
 	}
@@ -196,8 +196,8 @@
 		margin: 1.5rem 0 0.75rem;
 		font-size: 1.5rem;
 		font-weight: 600;
-		color: #ffffff;
-		border-bottom: 1px solid #393939;
+		color: var(--foreground);
+		border-bottom: 1px solid var(--border);
 		padding-bottom: 0.5rem;
 		scroll-margin-top: 5rem;
 	}
@@ -205,7 +205,7 @@
 		margin: 1.25rem 0 0.5rem;
 		font-size: 1.0625rem;
 		font-weight: 600;
-		color: #c6c6c6;
+		color: var(--muted-foreground);
 		scroll-margin-top: 5rem;
 	}
 	.changelog-md :global(ul) {
@@ -220,24 +220,24 @@
 		margin: 0.75rem 0;
 	}
 	.changelog-md :global(a) {
-		color: #78a9ff;
+		color: var(--accent-text);
 		text-decoration: underline;
 		text-underline-offset: 2px;
 	}
 	.changelog-md :global(a:hover) {
-		color: #a6c8ff;
+		color: var(--accent-text);
 	}
 	.changelog-md :global(code) {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 0.875em;
-		background: #262626;
-		border: 1px solid #393939;
+		background: var(--card);
+		border: 1px solid var(--border);
 		padding: 0.1em 0.35em;
-		color: #ff8389;
+		color: var(--destructive-text);
 	}
 	.changelog-md :global(pre) {
-		background: #262626;
-		border: 1px solid #393939;
+		background: var(--card);
+		border: 1px solid var(--border);
 		padding: 0.75rem 1rem;
 		overflow-x: auto;
 		margin: 0.75rem 0;
@@ -246,17 +246,17 @@
 		background: none;
 		border: none;
 		padding: 0;
-		color: #f4f4f4;
+		color: var(--foreground);
 	}
 	.changelog-md :global(hr) {
 		border: none;
-		border-top: 1px solid #393939;
+		border-top: 1px solid var(--border);
 		margin: 1.5rem 0;
 	}
 	.changelog-md :global(blockquote) {
-		border-left: 3px solid #525252;
+		border-left: 3px solid var(--border);
 		margin: 0.75rem 0;
 		padding-left: 1rem;
-		color: #a8a8a8;
+		color: var(--muted-foreground);
 	}
 </style>

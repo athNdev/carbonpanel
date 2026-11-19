@@ -106,7 +106,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	aria-label="Sections"
 	onkeydown={handleTablistKeydown}
 	data-carbon-tabs
-	class="scroll-strip relative flex items-center border-b border-[#393939] bg-[#161616] font-sans {className}"
+	class="scroll-strip relative flex items-center border-b border-border bg-background font-sans {className}"
 >
 	{#each tabs as tab (tab.id)}
 		<button
@@ -119,14 +119,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			data-tab
 			data-testid="tab-{tab.id}"
 			onclick={() => handleTabClick(tab.id)}
-			class="relative z-10 flex h-10 shrink-0 cursor-pointer items-center gap-2 border-b-2 border-transparent px-3 text-sm font-normal whitespace-nowrap transition-colors select-none {selectedTab ===
+			class="focus-ring relative z-10 flex h-[var(--carbon-control-md)] shrink-0 cursor-pointer items-center gap-2 border-b-2 border-transparent px-3 text-sm font-normal whitespace-nowrap transition-colors select-none {selectedTab ===
 			tab.id
-				? 'bg-[#262626] font-semibold text-[#f4f4f4]'
-				: 'text-[#a8a8a8] hover:bg-[#262626] hover:text-[#f4f4f4]'}"
+				? 'bg-card font-semibold text-foreground'
+				: 'text-muted-foreground hover:bg-card hover:text-foreground'}"
 		>
 			<span>{tab.label}</span>
 			{#if tab.badge !== undefined}
-				<span class="bg-[#393939] px-1.5 py-0.5 font-mono text-xs text-[#c6c6c6]">
+				<span class="bg-secondary px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
 					{tab.badge}
 				</span>
 			{/if}
@@ -136,7 +136,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- GPU-only motion: translateX + scaleX on a 1px base avoids transitioning
 		     the layout `width` property, which is what made tab switches janky. -->
 		<div
-			class="pointer-events-none absolute bottom-0 left-0 z-20 h-0.5 w-px origin-left bg-[#0f62fe] transition-transform duration-[var(--motion-fast)] ease-[var(--ease-in-out-standard)]"
+			class="pointer-events-none absolute bottom-0 left-0 z-20 h-0.5 w-px origin-left bg-primary transition-transform duration-[var(--motion-fast)] ease-[var(--ease-in-out-standard)]"
 			style="transform: translateX({indicatorLeft}px) scaleX({indicatorWidth})"
 		></div>
 	{/if}
