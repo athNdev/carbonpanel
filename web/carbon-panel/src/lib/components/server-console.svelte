@@ -39,6 +39,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import AnsiToHtml from 'ansi-to-html';
 	import { getStringForEnum } from '$lib/utils';
 	import { wsClient } from '$lib/stores/websocket.svelte';
+	import { createRequestSequence } from '$lib/utils/request-sequence';
 	import {
 		CarbonButton,
 		CarbonConfirm,
@@ -64,6 +65,27 @@ one at https://mozilla.org/MPL/2.0/.
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
 	let logEntries = $state<LogEntry[]>([]);
+
+	// Ownership of the live buffer. A log listing (RPC) or a full WebSocket
+	// snapshot can resolve after the user has navigated away or after a newer
+	// request started; neither may render or persist into the current server's
+	// buffer. Two independent sequences cover the two producers.
+	const logListingSeq = createRequestSequence();
+	const logSubscriptionSeq = createRequestSequence();
+	type LogBufferOwner = { generation: number; serverId: string };
+	let logBufferOwner: LogBufferOwner = {
+		generation: logSubscriptionSeq.next(),
+		serverId: server.id
+	};
+
+	function rotateLogBuffer(serverId: string): void {
+		logBufferOwner = { generation: logSubscriptionSeq.next(), serverId };
+	}
+
+	function ownsLogBuffer(owner: LogBufferOwner): boolean {
+		return owner.generation === logBufferOwner.generation && owner.serverId === server.id;
+	}
+
 	let command = $state('');
 	let loading = $state(false);
 	let autoScroll = $state(true);
@@ -128,7 +150,10 @@ one at https://mozilla.org/MPL/2.0/.
 	function startFallbackPolling() {
 		if (fallbackPollTimer) return;
 		fallbackPollTimer = setInterval(() => {
-			if (active && wsClient.state.connectionState !== 'authenticated') {
+			const state = wsClient.state.connectionState;
+			// A signed-out session has no valid token; polling it would only
+			// produce another 401/autologout. Stop until a new login reconnects.
+			if (active && state !== 'authenticated' && state !== 'signed-out') {
 				fetchLogs();
 			}
 		}, 5000);
@@ -145,7 +170,10 @@ one at https://mozilla.org/MPL/2.0/.
 	$effect(() => {
 		const s = wsConnectionState;
 		if (s === 'connected' || s === 'authenticated') everConnected = true;
-		if (
+		if (s === 'signed-out') {
+			// Terminal credential rejection: say so once, never "reconnecting".
+			alertMessage = 'Session expired. Sign in again.';
+		} else if (
 			(previousConnectionState === 'connected' || previousConnectionState === 'authenticated') &&
 			s === 'disconnected'
 		) {
@@ -153,7 +181,7 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 		previousConnectionState = s;
 
-		if (active && s !== 'authenticated') {
+		if (active && s !== 'authenticated' && s !== 'signed-out') {
 			startFallbackPolling();
 		} else {
 			stopFallbackPolling();
@@ -190,13 +218,16 @@ one at https://mozilla.org/MPL/2.0/.
 
 			untrack(() => {
 				wsClient.unsubscribe(oldServerId);
+				// Invalidate every in-flight producer for the previous server
+				// before the buffer is cleared, so a late listing or full log
+				// snapshot for A cannot render or save into B's buffer.
+				rotateLogBuffer(currentServerId);
 				logEntries = [];
 				command = '';
 
-				if (active) {
-					wsClient.subscribe(currentServerId, tailLines);
-					fetchLogs();
-				}
+				// Re-register handlers for the new owner, not just the socket
+				// subscription: a captured owner makes stale callbacks inert.
+				if (active) setupWebSocket();
 			});
 		} else if (
 			(currentContainerId !== previousContainerId || currentStatus !== previousStatus) &&
@@ -212,8 +243,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 			if (hadNoContainer || transitionedToActive) {
 				untrack(() => {
-					wsClient.subscribe(currentServerId, tailLines);
-					fetchLogs();
+					// A recreated container starts a new log stream; drop any
+					// in-flight listing from the previous stream before refetch.
+					rotateLogBuffer(currentServerId);
+					if (active) setupWebSocket();
 				});
 			}
 		}
@@ -223,18 +256,19 @@ one at https://mozilla.org/MPL/2.0/.
 		cleanupWebSocket();
 		wsClient.connect();
 
+		// Handlers capture this owner. Navigation or container recreation
+		// rotates the owner and re-registers handlers, so a delayed full-list
+		// message from the old stream is dropped instead of replacing the view.
+		const owner = logBufferOwner;
 		const unsubLogs = wsClient.onLogs((serverId, logs) => {
-			if (serverId === server.id) {
-				logEntries = logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs;
-			}
+			if (!ownsLogBuffer(owner) || serverId !== owner.serverId) return;
+			logEntries = logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs;
 		});
 
 		const unsubLogEntry = wsClient.onLogEntry((serverId, logs) => {
-			if (serverId === server.id && logs.length > 0) {
-				const combined = [...logEntries, ...logs];
-				logEntries =
-					combined.length > MAX_LOG_ENTRIES ? combined.slice(-MAX_LOG_ENTRIES) : combined;
-			}
+			if (!ownsLogBuffer(owner) || serverId !== owner.serverId || logs.length === 0) return;
+			const combined = [...logEntries, ...logs];
+			logEntries = combined.length > MAX_LOG_ENTRIES ? combined.slice(-MAX_LOG_ENTRIES) : combined;
 		});
 
 		const unsubCommandResult = wsClient.onCommandResult((result) => {
@@ -280,38 +314,45 @@ one at https://mozilla.org/MPL/2.0/.
 	async function fetchLogs() {
 		loading = true;
 		const requestedId = server.id;
+		const owner = logBufferOwner;
+		const listingSeq = logListingSeq.next();
 		try {
 			const request = create(GetServerLogsRequestSchema, {
 				id: requestedId,
 				tail: tailLines
 			});
 			const response = await rpcClient.server.getServerLogs(request);
-			if (server.id !== requestedId) return;
+			// Both checks matter: identity rejects a response for another server,
+			// sequence rejects an older (slower) listing for this same server.
+			if (!ownsLogBuffer(owner) || !logListingSeq.isCurrent(listingSeq)) return;
 			logEntries = response.logs;
 		} catch (error) {
-			if (server.id !== requestedId) return;
+			if (!ownsLogBuffer(owner) || !logListingSeq.isCurrent(listingSeq)) return;
 			reportError(
 				'Failed to fetch logs: ' + (error instanceof Error ? error.message : 'Unknown error')
 			);
 		} finally {
-			if (server.id === requestedId) loading = false;
+			if (ownsLogBuffer(owner)) loading = false;
 		}
 	}
 
 	async function clearLogs() {
+		const owner = logBufferOwner;
 		clearing = true;
 		try {
 			const request = create(ClearServerLogsRequestSchema, { id: server.id });
 			await rpcClient.server.clearServerLogs(request);
+			if (!ownsLogBuffer(owner)) return;
 			logEntries = [];
 			searchQuery = '';
 			toast.success('Viewed buffer cleared');
 		} catch (error) {
+			if (!ownsLogBuffer(owner)) return;
 			reportError(
 				'Failed to clear logs: ' + (error instanceof Error ? error.message : 'Unknown error')
 			);
 		} finally {
-			clearing = false;
+			if (ownsLogBuffer(owner)) clearing = false;
 		}
 	}
 
@@ -461,9 +502,14 @@ one at https://mozilla.org/MPL/2.0/.
 			{:else}
 				<WifiOff class="h-3.5 w-3.5 {getConnectionColor()}" />
 			{/if}
-			{#if everConnected && wsConnectionState !== 'authenticated'}
+			{#if everConnected && wsConnectionState !== 'authenticated' && wsConnectionState !== 'signed-out'}
 				<CarbonTag type="yellow" size="sm">
 					<span class="motion-pulse">RECONNECTING</span>
+				</CarbonTag>
+			{/if}
+			{#if wsConnectionState === 'signed-out'}
+				<CarbonTag type="red" size="sm" aria-label="Session expired, signed out">
+					SIGNED OUT
 				</CarbonTag>
 			{/if}
 			{#if wsConnectionState === 'disconnected'}
