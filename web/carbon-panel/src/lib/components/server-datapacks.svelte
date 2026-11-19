@@ -7,7 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { CarbonButton } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Download, Trash2, Loader2, Package, RefreshCw, Upload } from '@lucide/svelte';

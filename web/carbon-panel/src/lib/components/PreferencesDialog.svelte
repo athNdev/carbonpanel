@@ -6,7 +6,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { browser } from '$app/environment';
+	import { browser } from '$app/env';
 	import CarbonModal from './carbon/CarbonModal.svelte';
 	import CarbonButton from './carbon/CarbonButton.svelte';
 	import CarbonSelect from './carbon/CarbonSelect.svelte';

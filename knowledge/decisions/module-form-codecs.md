@@ -8,8 +8,8 @@ code_refs:
   - web/carbon-panel/src/lib/features/modules/form-codecs.ts
   - web/carbon-panel/src/lib/features/modpacks/studio
   - scripts/manual-review/e2e/module-forms-check.mjs
-  - web/carbon-panel/src/lib/components/server/ModuleDialog.svelte
-  - web/carbon-panel/src/lib/components/server/ModuleTemplateCreateDialog.svelte
+  - web/carbon-panel/src/lib/components/server-ui/ModuleDialog.svelte
+  - web/carbon-panel/src/lib/components/server-ui/ModuleTemplateCreateDialog.svelte
 sources:
   - title: Module and Studio extraction
     resource: https://carbonpanel.atlassian.net/browse/OSS-341

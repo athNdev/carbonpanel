@@ -13,7 +13,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { toast } from 'svelte-sonner';
 	import { CarbonButton, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';

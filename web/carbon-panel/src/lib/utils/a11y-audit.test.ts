@@ -137,8 +137,8 @@ test('Root layout mounts Toaster component with sonner wrapper for live announce
 test('icon-only buttons in server-files, ModuleLogsDialog, ServerModules, and AliasHelper declare aria-label', () => {
 	const components = [
 		'components/files/server-files.svelte',
-		'components/server/ModuleLogsDialog.svelte',
-		'components/server/ServerModules.svelte',
+		'components/server-ui/ModuleLogsDialog.svelte',
+		'components/server-ui/ServerModules.svelte',
 		'components/server-tasks.svelte',
 		'components/support-settings.svelte',
 		'components/ui/AliasHelper.svelte'

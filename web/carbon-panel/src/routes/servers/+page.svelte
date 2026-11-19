@@ -430,7 +430,7 @@ one at https://mozilla.org/MPL/2.0/.
 									</div>
 									<div class="min-w-0">
 										<a
-											href={resolve(`/servers/${server.id}`)}
+											href={resolve('/servers/[id]', { id: server.id })}
 											class="block truncate text-sm font-medium text-foreground hover:text-accent-text hover:underline"
 										>
 											{server.name}
@@ -573,7 +573,7 @@ one at https://mozilla.org/MPL/2.0/.
 									</button>
 
 									<a
-										href={resolve(`/servers/${server.id}`)}
+										href={resolve('/servers/[id]', { id: server.id })}
 										title="View Details"
 										aria-label={`View details for ${server.name}`}
 										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-accent-text transition-colors hover:bg-primary/20"
@@ -606,7 +606,7 @@ one at https://mozilla.org/MPL/2.0/.
 								</div>
 								<div class="min-w-0">
 									<a
-										href={resolve(`/servers/${server.id}`)}
+										href={resolve('/servers/[id]', { id: server.id })}
 										class="block truncate text-base font-semibold text-foreground hover:text-accent-text"
 									>
 										{server.name}
@@ -764,7 +764,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<!-- Bottom Link -->
 					<div class="mt-4 border-t border-border pt-3">
 						<a
-							href={resolve(`/servers/${server.id}`)}
+							href={resolve('/servers/[id]', { id: server.id })}
 							class="flex h-8 w-full items-center justify-between rounded-none border border-border bg-background px-3 font-sans text-xs text-foreground transition-colors hover:bg-accent"
 						>
 							<span>View Server Details</span>

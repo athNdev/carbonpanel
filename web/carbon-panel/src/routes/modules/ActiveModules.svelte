@@ -34,8 +34,8 @@ one at https://mozilla.org/MPL/2.0/.
 		Package,
 		RefreshCw
 	} from '@lucide/svelte';
-	import ModuleDialog from '$lib/components/server/ModuleDialog.svelte';
-	import ModuleLogsDialog from '$lib/components/server/ModuleLogsDialog.svelte';
+	import ModuleDialog from '$lib/components/server-ui/ModuleDialog.svelte';
+	import ModuleLogsDialog from '$lib/components/server-ui/ModuleLogsDialog.svelte';
 	import { onMount, onDestroy } from 'svelte';
 
 	let modules = $state<Module[]>([]);

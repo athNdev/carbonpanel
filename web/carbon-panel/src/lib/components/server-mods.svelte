@@ -35,7 +35,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonButton,
 		CarbonConfirm
 	} from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
 	interface Props {
 		server: Server;

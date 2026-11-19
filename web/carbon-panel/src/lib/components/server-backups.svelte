@@ -20,7 +20,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { formatTimestamp } from '$lib/utils/format-time';
 	import { CarbonButton, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 

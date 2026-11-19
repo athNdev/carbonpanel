@@ -23,7 +23,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import type { ModuleTemplate } from '$lib/proto/carbonpanel/v1/module_pb';
 	import { ModuleTemplateType } from '$lib/proto/carbonpanel/v1/module_pb';
 	import { Plus, Trash2, Settings, RefreshCw, Layers } from '@lucide/svelte';
-	import ModuleTemplateCreateDialog from '$lib/components/server/ModuleTemplateCreateDialog.svelte';
+	import ModuleTemplateCreateDialog from '$lib/components/server-ui/ModuleTemplateCreateDialog.svelte';
 	import { onMount } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 
