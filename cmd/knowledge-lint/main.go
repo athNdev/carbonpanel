@@ -367,6 +367,31 @@ func (c *concept) validate(root string) (errs, warns []string) {
 			add("code_refs %q: %v", ref, err)
 		}
 	}
+	// Source resources are concept-relative paths (for example
+	// ../../docs/adr/0001.md) or external URLs. checkRef validates repository-
+	// relative paths only, so resolve relative sources against the concept's
+	// own directory. This catches links that point outside a tracked tree.
+	for _, s := range c.Meta.Sources {
+		res := strings.TrimSpace(strings.ReplaceAll(s.Resource, "\\", "/"))
+		if res == "" || strings.Contains(res, "://") || strings.HasPrefix(res, "mailto:") {
+			continue
+		}
+		if filepath.IsAbs(res) || strings.HasPrefix(res, "/") {
+			add("sources[%q].resource %q: must be concept-relative", s.Title, res)
+			continue
+		}
+		full := filepath.Join(filepath.Dir(c.Abs), filepath.FromSlash(path.Clean(res)))
+		if strings.ContainsAny(res, "*?[") {
+			matches, err := filepath.Glob(full)
+			if err != nil {
+				add("sources[%q].resource %q: %v", s.Title, res, err)
+			} else if len(matches) == 0 {
+				add("sources[%q].resource %q: no matching file", s.Title, res)
+			}
+		} else if _, err := os.Stat(full); err != nil {
+			add("sources[%q].resource %q: %v", s.Title, res, err)
+		}
+	}
 	return errs, warns
 }
 

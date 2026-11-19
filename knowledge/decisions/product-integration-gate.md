@@ -13,8 +13,8 @@ code_refs:
 sources:
   - title: Cross-feature integration gate
     resource: https://carbonpanel.atlassian.net/browse/OSS-365
-  - title: Integrated roadmap
-    resource: ../../product-plans/integrated-roadmap.md
+  - title: OSS-365 in-repository re-baseline record
+    resource: ../../docs/plans/product-integration-gate-rebaseline.md
 ---
 
 # Choice
