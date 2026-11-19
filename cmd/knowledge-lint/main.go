@@ -23,7 +23,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const knowledgeDir = "knowledge"
+const (
+	knowledgeDir    = "knowledge"
+	maxConceptLines = 60
+	maxIndexLines   = 150
+)
 
 var (
 	allowedTypes = []string{
@@ -79,11 +83,12 @@ type meta struct {
 }
 
 type concept struct {
-	ID   string
-	Rel  string
-	Abs  string
-	Meta meta
-	Body string
+	ID    string
+	Rel   string
+	Abs   string
+	Lines int
+	Meta  meta
+	Body  string
 }
 
 type report struct {
@@ -280,12 +285,26 @@ func parseConcept(absRoot, kroot, file string) (*concept, error) {
 	}
 	rel = filepath.ToSlash(rel)
 	return &concept{
-		ID:   strings.TrimSuffix(rel, ".md"),
-		Rel:  rel,
-		Abs:  file,
-		Meta: m,
-		Body: strings.Join(lines[end+1:], "\n"),
+		ID:    strings.TrimSuffix(rel, ".md"),
+		Rel:   rel,
+		Abs:   file,
+		Lines: countLines(s),
+		Meta:  m,
+		Body:  strings.Join(lines[end+1:], "\n"),
 	}, nil
+}
+
+// countLines returns the number of logical lines in a normalized (\n) document.
+// A trailing newline terminates the final line; it does not create an extra one.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
 }
 
 func (c *concept) validate(root string) (errs, warns []string) {
@@ -294,6 +313,13 @@ func (c *concept) validate(root string) (errs, warns []string) {
 	}
 	warn := func(format string, args ...interface{}) {
 		warns = append(warns, c.ID+": "+fmt.Sprintf(format, args...))
+	}
+
+	// OSS-24: a concept is a bounded unit. The whole Markdown file, including
+	// frontmatter, must stay within the 60-line acceptance limit so concepts
+	// remain reviewable in one screen and git merges stay small.
+	if c.Lines > maxConceptLines {
+		add("concept is %d lines, exceeds the %d-line limit; split it into bounded, linked concepts", c.Lines, maxConceptLines)
 	}
 
 	if strings.TrimSpace(c.Meta.Type) == "" {
@@ -588,6 +614,11 @@ func checkIndexes(root, kroot string, concepts []*concept, fix bool, r *report) 
 			continue
 		}
 		content := renderIndex(rel, di, sections)
+		// OSS-24: the root index is capped at 150 lines. Every generated index
+		// obeys the same ceiling so an index never becomes an unbounded catalog.
+		if n := countLines(content); n > maxIndexLines {
+			errs = append(errs, fmt.Sprintf("%s: index.md is %d lines, exceeds the %d-line limit; split concepts across sections", displayDir(rel), n, maxIndexLines))
+		}
 		indexPath := filepath.Join(kroot, filepath.FromSlash(rel), "index.md")
 		existing, readErr := os.ReadFile(indexPath)
 		if readErr == nil && string(existing) == content {

@@ -44,7 +44,7 @@ export default defineConfig({
 					label: 'Getting Started',
 					items: [
 						{ label: 'Docker Compose', slug: 'getting-started/docker-compose' },
-						{ label: 'Proxmox LXC', slug: 'getting-started/proxmox' },
+						{ label: 'Proxmox (existing guest)', slug: 'getting-started/proxmox' },
 						{ label: 'Prebuilt Binaries', slug: 'getting-started/prebuilt-binaries' },
 						{ label: 'Building from Source', slug: 'getting-started/build-from-source' },
 					],
