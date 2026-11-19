@@ -388,7 +388,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			confirmAdminOpen = false;
 			toast.success(`${action.label} was sent to the server.`);
 		} catch (error) {
-			handleError(error);
+			// servers/command denial is separate from world_view/read; keep the map usable.
 			adminError = isPermissionDenied(error)
 				? 'Permission denied: your account cannot run commands on this server. A map session cannot grant this.'
 				: formatRpcError(error, 'The command could not be sent.');
