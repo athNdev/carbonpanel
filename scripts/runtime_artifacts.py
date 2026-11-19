@@ -48,14 +48,28 @@ FULL_SHA = re.compile(r"[0-9a-f]{40}")
 TRUSTED_REF = "refs/heads/main"
 DEFAULT_REPOSITORY = "athNdev/carbonpanel"
 
-# Publishable kinds. These map to build scripts owned by the QCOW2/LXC/installer
-# artifact lanes; this lane publishes their outputs under one independent
-# version and does not reimplement their build logic.
+# Publishable kinds. These map to thin, allowlisted wrapper scripts that
+# delegate to the REAL entry points owned by the QCOW2/LXC/installer artifact
+# lanes; this lane publishes their outputs under one independent version and
+# does not reimplement their build logic. The wrappers exist because the
+# real entry points have heterogeneous interfaces (a Python module, a bash
+# ``build`` subcommand and a host-mutating systemd qualification fixture)
+# while this workflow invokes one uniform ``bash <script> --version --commit
+# --output`` contract. Both the wrapper and its delegate MUST exist on disk or
+# the build step fails closed (see ``preflight_build``). No wrapper resolves to
+# a script outside these explicit maps.
 VERIFIED_ARTIFACTS = ("qcow2", "lxc-rootfs", "installer")
 BUILD_SCRIPTS = {
     "qcow2": "scripts/build-runtime-qcow2.sh",
     "lxc-rootfs": "scripts/build-runtime-lxc.sh",
     "installer": "scripts/build-runtime-installer.sh",
+}
+# The real, checked-in entry points on main that each wrapper delegates to.
+# ADR 0035/0036 and knowledge/architecture/node-installer.md own these lanes.
+BUILD_DELEGATES = {
+    "qcow2": "scripts/node_vm_build.py",
+    "lxc-rootfs": "packaging/node-lxc/build-rootfs.sh",
+    "installer": "scripts/qualify-node-installer-systemd.sh",
 }
 # Documented but UNSUPPORTED until real clean import/boot evidence exists.
 UNSUPPORTED_FORMATS = ("vhdx", "vdi", "vmdk", "ova", "ovf", "bhyve", "vhd")
@@ -105,11 +119,55 @@ def valid_runtime_version(value):
     return True, "independent runtime version"
 
 
-def build_script_for(artifact):
-    """Allowlisted build entry point for a publishable artifact kind."""
+def build_script_for(artifact, root=None):
+    """Allowlisted build wrapper for a publishable artifact kind.
+
+    Fail closed if the wrapper is missing on disk: a resolved-but-absent script
+    must never be handed to the workflow's build step. ``root`` is injectable
+    so offline fixtures can exercise the failure path without touching main.
+    """
     if artifact not in BUILD_SCRIPTS:
         raise ValueError(f"No verified build script for artifact {artifact!r}")
-    return BUILD_SCRIPTS[artifact]
+    relative = BUILD_SCRIPTS[artifact]
+    base = Path(root) if root is not None else ROOT
+    if not (base / relative).is_file():
+        raise ValueError(f"Allowlisted build script is missing: {relative}")
+    return relative
+
+
+def resolve_build_delegate(artifact, root=None):
+    """The real main entry point a wrapper delegates to; fail closed if absent.
+
+    Resolution is read-only: it never imports, executes or mutates the delegate.
+    """
+    if artifact not in BUILD_DELEGATES:
+        raise ValueError(f"No verified build delegate for artifact {artifact!r}")
+    relative = BUILD_DELEGATES[artifact]
+    base = Path(root) if root is not None else ROOT
+    if not (base / relative).is_file():
+        raise ValueError(f"Build delegate is missing on main: {relative}")
+    return relative
+
+
+def preflight_build(artifact, root=None):
+    """Prove the build step is REACHABLE without executing any live tool.
+
+    Resolves both the allowlisted wrapper and its real delegate and checks that
+    both files exist. No QEMU, LXC, systemd, host provisioning, network or
+    release operation is performed. Returns (ok, reason, decision).
+    """
+    decision = {"artifact": artifact}
+    try:
+        decision["build_script"] = build_script_for(artifact, root=root)
+    except ValueError as error:
+        return False, str(error), decision
+    try:
+        decision["delegate"] = resolve_build_delegate(artifact, root=root)
+    except ValueError as error:
+        return False, str(error), decision
+    decision["build_script_exists"] = True
+    decision["delegate_exists"] = True
+    return True, "build entry point and delegate resolved offline", decision
 
 
 # --- Identity assertion ------------------------------------------------------
@@ -570,6 +628,9 @@ def build_parser():
     script = commands.add_parser("build-script")
     script.add_argument("--artifact", required=True)
 
+    preflight = commands.add_parser("preflight-build")
+    preflight.add_argument("--artifact", required=True)
+
     independent = commands.add_parser("assert-no-app-release")
     independent.add_argument("--version", required=True)
     independent.add_argument("--artifact")
@@ -645,6 +706,12 @@ def main(argv=None):
     if args.command == "build-script":
         print(build_script_for(args.artifact))
         return 0
+
+    if args.command == "preflight-build":
+        ok, reason, decision = preflight_build(args.artifact)
+        _print_json({"reachable": str(ok).lower(), "reason": reason,
+                     "decision": decision})
+        return 0 if ok else 1
 
     if args.command == "assert-no-app-release":
         assert_no_app_release(args.version, args.artifact)

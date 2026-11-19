@@ -1,0 +1,14 @@
+{
+  "schema": "runtime-artifact-build-delegates-v1",
+  "note": "Offline reachability fixture: allowlisted wrappers must resolve to these real entry points on main. Resolution only; no script is executed.",
+  "delegates": {
+    "qcow2": "scripts/node_vm_build.py",
+    "lxc-rootfs": "packaging/node-lxc/build-rootfs.sh",
+    "installer": "scripts/qualify-node-installer-systemd.sh"
+  },
+  "wrappers": {
+    "qcow2": "scripts/build-runtime-qcow2.sh",
+    "lxc-rootfs": "scripts/build-runtime-lxc.sh",
+    "installer": "scripts/build-runtime-installer.sh"
+  }
+}

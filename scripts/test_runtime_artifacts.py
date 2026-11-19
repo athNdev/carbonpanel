@@ -7,8 +7,13 @@ hypervisor or host provisioning. No test writes outside a temporary directory.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -53,6 +58,104 @@ class VersionAndOwnershipTests(unittest.TestCase):
         for bad in ("vhdx", "vdi", "vmdk", "ova", "bhyve"):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 ra.build_script_for(bad)
+
+
+class BuildStepReachabilityTests(unittest.TestCase):
+    """Offline fixture: the build step resolves real scripts and fails closed.
+
+    Nothing here executes a wrapper, QEMU, LXC, systemd, a network call or a
+    release. Resolution is a read-only file-exists check against the repository
+    (or an injected temporary root for the negative cases).
+    """
+
+    def setUp(self):
+        self.fixture = json.loads(
+            fixture("build-delegates.fixture.json"))
+        self.assertNotEqual(
+            set(self.fixture["wrappers"]), set())
+        self.assertEqual(
+            set(self.fixture["wrappers"]), set(ra.VERIFIED_ARTIFACTS))
+        self.assertEqual(
+            set(self.fixture["delegates"]), set(ra.VERIFIED_ARTIFACTS))
+        self.assertEqual(set(ra.BUILD_SCRIPTS), set(ra.VERIFIED_ARTIFACTS))
+        self.assertEqual(set(ra.BUILD_DELEGATES), set(ra.VERIFIED_ARTIFACTS))
+
+    def test_allowlisted_wrappers_resolve_to_real_main_entry_points(self):
+        for artifact, wrapper in self.fixture["wrappers"].items():
+            delegate = self.fixture["delegates"][artifact]
+            with self.subTest(artifact=artifact):
+                self.assertEqual(ra.build_script_for(artifact), wrapper)
+                self.assertEqual(ra.resolve_build_delegate(artifact), delegate)
+                self.assertTrue((ra.ROOT / wrapper).is_file(), wrapper)
+                self.assertTrue((ra.ROOT / delegate).is_file(), delegate)
+
+    def test_preflight_proves_reachability_without_execution(self):
+        for artifact in ra.VERIFIED_ARTIFACTS:
+            with self.subTest(artifact=artifact):
+                ok, reason, decision = ra.preflight_build(artifact)
+                self.assertTrue(ok, reason)
+                self.assertTrue(decision["build_script_exists"])
+                self.assertTrue(decision["delegate_exists"])
+                self.assertEqual(decision["build_script"],
+                                 self.fixture["wrappers"][artifact])
+                self.assertEqual(decision["delegate"],
+                                 self.fixture["delegates"][artifact])
+
+    def test_cli_preflight_is_reachable_offline(self):
+        for artifact in ra.VERIFIED_ARTIFACTS:
+            with self.subTest(artifact=artifact):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = ra.main(["preflight-build", "--artifact", artifact])
+                self.assertEqual(code, 0, out.getvalue())
+                payload = json.loads(out.getvalue())
+                self.assertEqual(payload["reachable"], "true")
+                self.assertEqual(payload["decision"]["delegate"],
+                                 self.fixture["delegates"][artifact])
+
+    def test_unknown_artifact_fails_closed(self):
+        for bad in ("vhdx", "vdi", "vmdk", "ova", "bhyve", "vhd", "", None):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    ra.build_script_for(bad)
+                with self.assertRaises(ValueError):
+                    ra.resolve_build_delegate(bad)
+                ok, _, _ = ra.preflight_build(bad)
+                self.assertFalse(ok)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    code = ra.main(["preflight-build", "--artifact", str(bad)])
+                self.assertEqual(code, 1)
+
+    def test_missing_wrapper_or_delegate_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Neither file present: wrapper resolution must refuse first.
+            self.assertFalse(ra.preflight_build("qcow2", root=root)[0])
+            with self.assertRaises(ValueError):
+                ra.build_script_for("qcow2", root=root)
+            # Wrapper present but real delegate absent: still fail closed.
+            wrapper = root / ra.BUILD_SCRIPTS["qcow2"]
+            wrapper.parent.mkdir(parents=True, exist_ok=True)
+            wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+            self.assertEqual(ra.build_script_for("qcow2", root=root),
+                             ra.BUILD_SCRIPTS["qcow2"])
+            ok, reason, _ = ra.preflight_build("qcow2", root=root)
+            self.assertFalse(ok)
+            self.assertIn("delegate", reason)
+
+    @unittest.skipIf(os.name == "nt" or shutil.which("bash") is None,
+                     "shell entry-point check runs on POSIX with bash")
+    def test_wrapper_preflight_shell_entry_points_are_reachable(self):
+        for artifact, wrapper in self.fixture["wrappers"].items():
+            with self.subTest(artifact=artifact):
+                result = subprocess.run(
+                    ["bash", str(ra.ROOT / wrapper), "--preflight"],
+                    cwd=str(ra.ROOT), text=True, capture_output=True,
+                    timeout=30, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(self.fixture["delegates"][artifact],
+                              result.stdout)
 
 
 class IdentityAssertionTests(unittest.TestCase):
