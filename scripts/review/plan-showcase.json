@@ -82,8 +82,8 @@
       "required": true
     },
     {
-      "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
-      "name": "open first server",
+      "click": "a[href^=\"/servers/\"]:has-text(\"review-vanilla\")",
+      "name": "open seeded vanilla server",
       "required": true
     },
     {
@@ -234,7 +234,7 @@
       "name": "open servers for the allowlist capture"
     },
     {
-      "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
+      "click": "a[href^=\"/servers/\"]:has-text(\"review-vanilla\")",
       "feature": "players",
       "name": "open first server for allowlist"
     },
@@ -259,9 +259,14 @@
       "name": "real allowlist form renders"
     },
     {
+      "assertVisible": "#server-detail-tabs-panel-players [data-player-row=\"0\"]",
+      "feature": "players",
+      "name": "seeded identity is present in the server-scoped roster"
+    },
+    {
       "screenshot": "showcase-player-allowlist",
       "element": "#server-detail-tabs-panel-players",
-      "maxHeight": 1000,
+      "maxHeight": 1700,
       "scroll": false,
       "feature": "players",
       "name": "server allowlist form and scoped roster",
@@ -402,7 +407,7 @@
       "name": "open servers for the World tab capture"
     },
     {
-      "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
+      "click": "a[href^=\"/servers/\"]:has-text(\"review-vanilla\")",
       "feature": "worldtab",
       "name": "open seeded server for World tab"
     },
