@@ -139,9 +139,16 @@ try {
 				if (semantics.modal !== 'true' || !semantics.labelledBy || !semantics.label) {
 					throw new Error(`dialog semantics incomplete: ${JSON.stringify(semantics)}`);
 				}
-				await page.waitForTimeout(120); // modal focuses its first control on a timer
-				const inside = await dialog.evaluate((el) => el.contains(document.activeElement));
-				if (!inside) throw new Error('focus did not move into the dialog');
+				// CarbonModal focuses its first control on a timer; poll the real
+				// state instead of relying on a fixed sleep under CI load.
+				await page.waitForFunction(
+					() => {
+						const el = document.querySelector('[role="dialog"]');
+						return Boolean(el && el.contains(document.activeElement));
+					},
+					null,
+					{ timeout: 5000 }
+				);
 
 				const buttons = dialog.locator('button:not([disabled])');
 				await buttons.last().focus();
@@ -154,6 +161,11 @@ try {
 
 				await page.keyboard.press('Escape');
 				await dialog.waitFor({ state: 'detached' });
+				await page.waitForFunction(
+					() => document.activeElement?.id === 'open-dialog',
+					null,
+					{ timeout: 5000 }
+				);
 				const restored = await page.evaluate(() => document.activeElement?.id);
 				if (restored !== 'open-dialog') {
 					throw new Error(`focus was not restored to the trigger (got ${restored})`);
@@ -180,7 +192,15 @@ try {
 				if (focused !== 'a11y-tab-files') {
 					throw new Error(`ArrowRight did not move tab focus (got ${focused})`);
 				}
-				return { ...semantics, focused };
+				const after = await page.evaluate(() =>
+					[...document.querySelectorAll('[role="tab"]')].map((tab) =>
+						tab.getAttribute('aria-selected')
+					)
+				);
+				if (after[1] !== 'true' || after[0] !== 'false') {
+					throw new Error(`ArrowRight did not move tab selection: ${JSON.stringify(after)}`);
+				}
+				return { ...semantics, focused, selectedAfter: after };
 			});
 
 			await check(`states ${width}: empty, populated and error are exposed`, async () => {
@@ -209,8 +229,12 @@ try {
 	checks.push({ name: 'journey-setup', status: 'failed', detail: String(error?.message ?? error) });
 	console.error(`FAIL journey-setup: ${error?.message ?? error}`);
 } finally {
-	if (browser) await browser.close();
-	fixture.child.kill('SIGTERM');
+	// Always stop the fixture even if browser shutdown fails.
+	try {
+		if (browser) await browser.close();
+	} finally {
+		fixture.child.kill('SIGTERM');
+	}
 	console.log(JSON.stringify({ check: 'a11y-browser-summary', total: checks.length, failures, checks }));
 	process.exitCode = failures === 0 ? 0 : 1;
 }
