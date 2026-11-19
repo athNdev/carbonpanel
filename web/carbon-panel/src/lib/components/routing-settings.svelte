@@ -280,19 +280,21 @@ one at https://mozilla.org/MPL/2.0/.
 
 <div class="space-y-6">
 	<!-- Global Proxy Configuration -->
-	<div class="space-y-4 rounded-none border border-[#393939] bg-[#262626] p-5 shadow-none">
-		<div class="flex items-center justify-between border-b border-[#393939] pb-4">
+	<div class="space-y-4 rounded-none border border-border bg-card p-5 shadow-none">
+		<div class="flex items-center justify-between border-b border-border pb-4">
 			<div class="flex items-center gap-3">
 				<Network class="h-5 w-5 text-accent-text" />
 				<div>
-					<h3 class="font-sans text-base font-normal text-[#f4f4f4]">Proxy Configuration</h3>
-					<p class="text-xs text-[#a8a8a8]">Global proxy settings and base domain configuration</p>
+					<h3 class="font-sans text-base font-normal text-foreground">Proxy Configuration</h3>
+					<p class="text-xs text-muted-foreground">
+						Global proxy settings and base domain configuration
+					</p>
 				</div>
 			</div>
 			<input
 				id="proxy-enabled"
 				type="checkbox"
-				class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+				class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 				checked={proxyEnabled}
 				onchange={(e) => (proxyEnabled = e.currentTarget.checked)}
 				disabled={loading || saving}
@@ -307,7 +309,7 @@ one at https://mozilla.org/MPL/2.0/.
 				placeholder="minecraft.example.com"
 				disabled={saving || !proxyEnabled}
 				helperText={baseDomainHelp}
-				class="[&_input]:bg-[#161616]"
+				class="[&_input]:bg-background"
 			/>
 
 			<div class="flex justify-end">
@@ -331,34 +333,32 @@ one at https://mozilla.org/MPL/2.0/.
 	</div>
 
 	{#if loading}
-		<div
-			class="flex items-center justify-center rounded-none border border-[#393939] bg-[#262626] p-12"
-		>
+		<div class="flex items-center justify-center rounded-none border border-border bg-card p-12">
 			<CarbonInlineLoading description="Loading proxy configuration..." />
 		</div>
 	{:else if !proxyEnabled}
 		<div
 			role="status"
-			class="flex gap-3 rounded-none border border-[#393939] bg-[#262626] p-4 text-[#c6c6c6]"
+			class="flex gap-3 rounded-none border border-border bg-card p-4 text-muted-foreground"
 		>
-			<Info class="mt-0.5 h-4 w-4 shrink-0 text-[#78a9ff]" />
-			<p class="text-xs text-[#a8a8a8]">
+			<Info class="mt-0.5 h-4 w-4 shrink-0 text-accent-text" />
+			<p class="text-xs text-muted-foreground">
 				Enable the proxy system to allow servers to use custom hostnames instead of direct port
 				connections.
 			</p>
 		</div>
 	{:else}
 		<!-- Proxy Listeners -->
-		<div class="space-y-4 rounded-none border border-[#393939] bg-[#262626] p-5 shadow-none">
-			<div class="flex items-center justify-between border-b border-[#393939] pb-4">
+		<div class="space-y-4 rounded-none border border-border bg-card p-5 shadow-none">
+			<div class="flex items-center justify-between border-b border-border pb-4">
 				<div>
-					<h3 class="font-sans text-base font-normal text-[#f4f4f4]">Proxy Listeners</h3>
-					<p class="text-xs text-[#a8a8a8]">Configure individual proxy listening ports</p>
+					<h3 class="font-sans text-base font-normal text-foreground">Proxy Listeners</h3>
+					<p class="text-xs text-muted-foreground">Configure individual proxy listening ports</p>
 				</div>
 				<span
-					class="inline-flex items-center gap-1 rounded-none border border-[#525252] bg-[#161616] px-2 py-0.5 font-mono text-xs text-[#c6c6c6]"
+					class="inline-flex items-center gap-1 rounded-none border border-border bg-background px-2 py-0.5 font-mono text-xs text-muted-foreground"
 				>
-					<Server class="h-3 w-3 text-[#78a9ff]" />
+					<Server class="h-3 w-3 text-accent-text" />
 					{listenersWithCount.length}
 					{listenersWithCount.length === 1 ? 'Listener' : 'Listeners'}
 				</span>
@@ -372,7 +372,7 @@ one at https://mozilla.org/MPL/2.0/.
 							{@const status = getListenerStatus(listener, lwc.serverCount)}
 							{@const StatusIcon = getStatusIcon(status)}
 							{#if listener}
-								<div class="rounded-none border border-[#393939] bg-[#1e1e1e] p-4">
+								<div class="rounded-none border border-border bg-card p-4">
 									{#if editingListener?.id === listener.id}
 										<!-- Edit Mode -->
 										<div class="space-y-3">
@@ -381,47 +381,47 @@ one at https://mozilla.org/MPL/2.0/.
 													label="Name"
 													bind:value={editingListener.name}
 													placeholder="Listener name"
-													class="[&_input]:bg-[#161616]"
+													class="[&_input]:bg-background"
 												/>
 												<CarbonTextInput
 													label="Port"
 													type="number"
 													value={String(listener.port)}
 													disabled
-													class="[&_input]:bg-[#161616] [&_input]:text-[#8d8d8d]"
+													class="[&_input]:bg-background [&_input]:text-muted-foreground"
 												/>
 											</div>
 											<CarbonTextInput
 												label="Description"
 												bind:value={editingListener.description}
 												placeholder="Optional description"
-												class="[&_input]:bg-[#161616]"
+												class="[&_input]:bg-background"
 											/>
 											<div class="flex items-center justify-between pt-2">
 												<div class="flex items-center gap-4">
 													<label class="flex cursor-pointer items-center gap-2">
 														<input
 															type="checkbox"
-															class="focus-ring h-4 w-4 cursor-pointer accent-[#0f62fe]"
+															class="focus-ring h-4 w-4 cursor-pointer accent-primary"
 															checked={editingListener?.enabled ?? false}
 															onchange={(e) => {
 																if (editingListener)
 																	editingListener.enabled = e.currentTarget.checked;
 															}}
 														/>
-														<span class="text-xs text-[#c6c6c6]">Enabled</span>
+														<span class="text-xs text-muted-foreground">Enabled</span>
 													</label>
 													<label class="flex cursor-pointer items-center gap-2">
 														<input
 															type="checkbox"
-															class="focus-ring h-4 w-4 cursor-pointer accent-[#0f62fe]"
+															class="focus-ring h-4 w-4 cursor-pointer accent-primary"
 															checked={editingListener?.isDefault ?? false}
 															onchange={(e) => {
 																if (editingListener)
 																	editingListener.isDefault = e.currentTarget.checked;
 															}}
 														/>
-														<span class="text-xs text-[#c6c6c6]">Default</span>
+														<span class="text-xs text-muted-foreground">Default</span>
 													</label>
 												</div>
 												<div class="flex gap-2">
@@ -450,14 +450,14 @@ one at https://mozilla.org/MPL/2.0/.
 											<div class="space-y-2">
 												<div class="flex items-center gap-3">
 													<StatusIcon class="h-4 w-4 {getStatusColor(status)}" />
-													<span class="text-sm font-normal text-[#f4f4f4]">{listener.name}</span>
+													<span class="text-sm font-normal text-foreground">{listener.name}</span>
 													<span
-														class="rounded-none border border-[#525252] bg-[#161616] px-1.5 py-0.5 font-mono text-xs text-[#c6c6c6]"
+														class="rounded-none border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
 														>:{listener.port}</span
 													>
 													{#if listener.isDefault}
 														<span
-															class="inline-flex items-center gap-1 rounded-none border border-[#0f62fe] bg-[#0043ce]/20 px-1.5 py-0.5 font-mono text-xs text-[#78a9ff]"
+															class="inline-flex items-center gap-1 rounded-none border border-[var(--tag-blue-text)] bg-[var(--tag-blue-bg)] px-1.5 py-0.5 font-mono text-xs text-[var(--tag-blue-text)]"
 														>
 															<Star class="h-3 w-3" />
 															Default
@@ -465,23 +465,25 @@ one at https://mozilla.org/MPL/2.0/.
 													{/if}
 													{#if !listener.enabled}
 														<span
-															class="rounded-none border border-[#525252] bg-transparent px-1.5 py-0.5 font-mono text-xs text-[#8d8d8d]"
+															class="rounded-none border border-border bg-transparent px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
 															>Disabled</span
 														>
 													{/if}
 												</div>
 
 												{#if listener.description}
-													<p class="text-xs text-[#a8a8a8]">{listener.description}</p>
+													<p class="text-xs text-muted-foreground">{listener.description}</p>
 												{/if}
 
 												{#if lwc.serverCount > 0}
-													<p class="text-xs text-[#8d8d8d]">
+													<p class="text-xs text-muted-foreground">
 														{lwc.serverCount}
 														{lwc.serverCount === 1 ? 'server' : 'servers'} using this listener
 													</p>
 												{:else}
-													<p class="text-xs text-[#8d8d8d]">No servers using this listener</p>
+													<p class="text-xs text-muted-foreground">
+														No servers using this listener
+													</p>
 												{/if}
 											</div>
 
@@ -489,7 +491,7 @@ one at https://mozilla.org/MPL/2.0/.
 												{#if !listener.isDefault}
 													<button
 														type="button"
-														class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-[#8d8d8d] transition-colors hover:bg-[#353535] hover:text-[#f4f4f4]"
+														class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
 														onclick={() => setDefaultListener(listener)}
 														title="Set as default"
 														aria-label="Set as default"
@@ -499,7 +501,7 @@ one at https://mozilla.org/MPL/2.0/.
 												{/if}
 												<button
 													type="button"
-													class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-[#8d8d8d] transition-colors hover:bg-[#353535] hover:text-[#f4f4f4]"
+													class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
 													onclick={() => (editingListener = { ...listener })}
 													aria-label="Edit listener"
 												>
@@ -508,7 +510,7 @@ one at https://mozilla.org/MPL/2.0/.
 												{#if listenersWithCount.length > 1 && lwc.serverCount === 0}
 													<button
 														type="button"
-														class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-[#8d8d8d] transition-colors hover:bg-[#da1e28]/20 hover:text-[#ff8389]"
+														class="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-destructive/20 hover:text-destructive-text"
 														onclick={() => deleteListener(lwc)}
 														aria-label="Delete listener"
 													>
@@ -525,15 +527,15 @@ one at https://mozilla.org/MPL/2.0/.
 				{/if}
 
 				<!-- Add New Listener -->
-				<div class="border-t border-[#393939] pt-4">
-					<h4 class="mb-3 text-sm font-normal text-[#f4f4f4]">Add New Listener</h4>
+				<div class="border-t border-border pt-4">
+					<h4 class="mb-3 text-sm font-normal text-foreground">Add New Listener</h4>
 					<div class="space-y-3">
 						<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
 							<CarbonTextInput
 								label="Name"
 								bind:value={newListener.name}
 								placeholder="e.g., Secondary, Development"
-								class="[&_input]:bg-[#161616]"
+								class="[&_input]:bg-background"
 							/>
 							<CarbonTextInput
 								label="Port"
@@ -553,35 +555,35 @@ one at https://mozilla.org/MPL/2.0/.
 									validatePort(port);
 								}}
 								error={portError}
-								class="[&_input]:bg-[#161616]"
+								class="[&_input]:bg-background"
 							/>
 						</div>
 						<CarbonTextInput
 							label="Description (Optional)"
 							bind:value={newListener.description}
 							placeholder="Optional description for this listener"
-							class="[&_input]:bg-[#161616]"
+							class="[&_input]:bg-background"
 						/>
 						<div class="flex items-center justify-between pt-2">
 							<div class="flex items-center gap-4">
 								<label class="flex cursor-pointer items-center gap-2">
 									<input
 										type="checkbox"
-										class="focus-ring h-4 w-4 cursor-pointer accent-[#0f62fe]"
+										class="focus-ring h-4 w-4 cursor-pointer accent-primary"
 										checked={newListener.enabled}
 										onchange={(e) => (newListener.enabled = e.currentTarget.checked)}
 									/>
-									<span class="text-xs text-[#c6c6c6]">Enabled</span>
+									<span class="text-xs text-muted-foreground">Enabled</span>
 								</label>
 								{#if listenersWithCount.length === 0}
 									<label class="flex cursor-pointer items-center gap-2">
 										<input
 											type="checkbox"
-											class="focus-ring h-4 w-4 cursor-pointer accent-[#0f62fe]"
+											class="focus-ring h-4 w-4 cursor-pointer accent-primary"
 											checked={newListener.isDefault}
 											onchange={(e) => (newListener.isDefault = e.currentTarget.checked)}
 										/>
-										<span class="text-xs text-[#c6c6c6]">Set as Default</span>
+										<span class="text-xs text-muted-foreground">Set as Default</span>
 									</label>
 								{/if}
 							</div>
@@ -603,29 +605,31 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Active Routes -->
 		{#if activeRoutes.length > 0}
-			<div class="space-y-4 rounded-none border border-[#393939] bg-[#262626] p-5 shadow-none">
-				<div class="border-b border-[#393939] pb-4">
-					<h3 class="font-sans text-base font-normal text-[#f4f4f4]">Active Routes</h3>
-					<p class="text-xs text-[#a8a8a8]">Servers currently using proxy routing</p>
+			<div class="space-y-4 rounded-none border border-border bg-card p-5 shadow-none">
+				<div class="border-b border-border pb-4">
+					<h3 class="font-sans text-base font-normal text-foreground">Active Routes</h3>
+					<p class="text-xs text-muted-foreground">Servers currently using proxy routing</p>
 				</div>
 				<div class="space-y-2">
 					{#each activeRoutes as route (route.serverId)}
 						<div
-							class="flex items-center justify-between rounded-none border border-[#393939] bg-[#1e1e1e] p-3"
+							class="flex items-center justify-between rounded-none border border-border bg-card p-3"
 						>
 							<div class="flex items-center gap-3">
-								<Activity class="h-4 w-4 {route.active ? 'text-[#42be65]' : 'text-[#8d8d8d]'}" />
+								<Activity
+									class="h-4 w-4 {route.active ? 'text-success-text' : 'text-muted-foreground'}"
+								/>
 								<div>
-									<p class="font-mono text-xs text-[#f4f4f4]">{route.hostname}</p>
-									<p class="text-xs text-[#8d8d8d]">
+									<p class="font-mono text-xs text-foreground">{route.hostname}</p>
+									<p class="text-xs text-muted-foreground">
 										Server: {route.serverId.slice(0, 8)}...
 									</p>
 								</div>
 							</div>
 							<span
 								class="rounded-none border px-2 py-0.5 font-mono text-xs {route.active
-									? 'border-[#24a148] bg-[#24a148]/20 text-[#42be65]'
-									: 'border-[#525252] bg-transparent text-[#8d8d8d]'}"
+									? 'border-success bg-success/20 text-success-text'
+									: 'border-border bg-transparent text-muted-foreground'}"
 							>
 								{route.active ? 'Active' : 'Inactive'}
 							</span>

@@ -69,7 +69,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 <div
 	bind:this={container}
-	class="min-h-0 flex-1 overflow-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-[#0f62fe] focus-visible:ring-inset"
+	class="min-h-0 flex-1 overflow-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ring)] focus-visible:ring-inset"
 	tabindex="0"
 	role="tree"
 	onkeydown={onKeydown}

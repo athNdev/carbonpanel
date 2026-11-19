@@ -24,7 +24,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:this={ref}
 	data-slot="table-row"
 	class={cn(
-		'border-b border-[#393939] bg-[#262626] transition-colors data-[state=selected]:bg-[#393939] hover:[&,&>svelte-css-wrapper]:[&>th,td]:bg-[#353535]',
+		'border-b border-border bg-card transition-colors data-[state=selected]:bg-secondary hover:[&,&>svelte-css-wrapper]:[&>th,td]:bg-secondary',
 		className
 	)}
 	{...restProps}
