@@ -27,6 +27,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 -m unittest scripts.test_release scripts.test_go_mod_download scripts.test_runtime_artifacts
 
+  proxmox-installer:
+    name: Proxmox installer fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run installer fixtures (stub Docker; no live Proxmox)
+        run: bash scripts/proxmox/test-install-carbon-panel.sh
+
   test-backend:
     name: Backend Test Suite
     runs-on: ubuntu-latest

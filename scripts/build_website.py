@@ -29,7 +29,7 @@ SHELL_FILES = ("package.json", "package-lock.json", "tsconfig.json")
 PAGE_LABELS = {
     "": "Documentation home", "introduction": "Introduction",
     "getting-started/docker-compose": "Docker Compose",
-    "getting-started/proxmox": "Proxmox LXC",
+    "getting-started/proxmox": "Proxmox (existing guest)",
     "getting-started/prebuilt-binaries": "Prebuilt Binaries",
     "getting-started/build-from-source": "Building from Source",
     "configuration": "Configuration",
