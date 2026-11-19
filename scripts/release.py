@@ -1968,6 +1968,957 @@ def publish(args):
                       "previous_tag": previous_tag or ""}, indent=2))
 
 
+# --- OSS-413 channel promotion gates ----------------------------------------
+# A channel move is allowed only from an EXACT source revision pinned read-only
+# from trusted main, after a QUALIFIED stage: exact-commit main CI plus a
+# verified multiarch digest in BOTH maintained registries (OCI) or a validated
+# schema_version 3 contract plus exact site build (docs). Every move is
+# digest-anchored and bound to the previously verified digest so a retry or a
+# partial failure can converge or roll back without ever overwriting an
+# immutable version tag. See ADR 0049 and docs/releases.md.
+
+CHANNEL_CONTRACT_SCHEMA = 3
+CHANNEL_NAMES = ("stable", "nightly")
+CHANNEL_SELECTOR_LABELS = ("Stable", "Nightly")
+LEGACY_DOC_SNAPSHOTS = ("1.0.39", "3.0.0-alpha.1")
+CHANNEL_REGISTRIES = ("docker_hub", "ghcr")
+
+# The verified stable baseline is the ONLY source from which `latest` and the
+# `stable` alias may move. It is frozen historical provenance, not a candidate.
+STABLE_CHANNEL_BASELINE = {
+    "commit": LEGACY_STABLE_COMMIT,
+    "digest": LEGACY_STABLE_DIGEST,
+    "tag": "latest",
+    "stable_alias": "stable",
+}
+# A VERIFIED CURRENT Docker Hub nightly baseline. It is NOT a mandatory first
+# publication revision. It may seed nightly only through a recorded, bounded
+# bootstrap that also qualifies in GHCR and whose docs marker matches; otherwise
+# the first nightly promotion carries the first qualified current-main revision.
+NIGHTLY_HUB_BASELINE = {
+    "commit": "d8597d4e953522d2eb2fa6d4764965ae8e58686f",
+    "digest": ("sha256:ecc89ba96fb6ea73e3ebb85c4dc8452d8210ce"
+               "5e96d00fa1c64239c965a9302d"),
+}
+CHANNEL_MOVABLE = ("stable", "nightly", "docs")
+
+
+def valid_commit(value):
+    """A canonical, full-length commit SHA (never a short id or a ref name)."""
+    return bool(value and re.fullmatch(r"[0-9a-f]{40}", value))
+
+
+def validate_channel_contract(document):
+    """Fail-closed validation of the docs schema_version 3 channel contract.
+
+    Rejects a wrong schema, extra/missing channels, non-40-hex commits, missing
+    or mismatched digests/revisions, a stable image that is not pinned to the
+    verified stable digest, version terminology in the public selector, and any
+    of the two removed legacy DOC snapshots. Source tags and historical records
+    in docs/release-history.json are unaffected; this validates only the public
+    channel contract artifact.
+    """
+    problems = []
+    if not isinstance(document, dict):
+        return False, ["channel contract must be a JSON object"]
+    if document.get("schema_version") != CHANNEL_CONTRACT_SCHEMA:
+        problems.append("schema_version must be 3")
+    repository = document.get("repository", "")
+    if not isinstance(repository, str) or not repository.startswith("https://github.com/"):
+        problems.append("repository must be an https GitHub URL")
+    if not isinstance(document.get("catalog"), str) or not document["catalog"]:
+        problems.append("catalog path is required")
+    channels = document.get("channels")
+    if not isinstance(channels, dict) or set(channels) != set(CHANNEL_NAMES):
+        problems.append("channels must contain exactly stable and nightly")
+        return False, problems
+    blob = json.dumps(channels, sort_keys=True)
+    for stale in LEGACY_DOC_SNAPSHOTS:
+        if stale in blob:
+            problems.append(f"legacy doc snapshot {stale} must not appear in channels")
+    for name in CHANNEL_NAMES:
+        entry = channels[name]
+        if not isinstance(entry, dict):
+            problems.append(f"{name} channel must be an object")
+            continue
+        if entry.get("display") not in CHANNEL_SELECTOR_LABELS:
+            problems.append(f"{name} display must be Stable or Nightly")
+        commit = entry.get("commit")
+        if not valid_commit(commit):
+            problems.append(f"{name} commit must be a full 40-hex SHA")
+        image = entry.get("image")
+        if not isinstance(image, dict):
+            problems.append(f"{name} image is required")
+            continue
+        if not valid_digest(image.get("digest")):
+            problems.append(f"{name} image digest must be a valid sha256 digest")
+        if image.get("revision") != commit:
+            problems.append(f"{name} image revision must equal its commit")
+        for registry in CHANNEL_REGISTRIES:
+            ref = image.get(registry, "")
+            if not isinstance(ref, str) or ":" not in ref:
+                problems.append(f"{name} image must name a {registry} reference")
+        for key in ("commit_url", "pinned_link", "pinned_url"):
+            if key in entry and entry[key] != f"{repository}/commit/{commit}":
+                problems.append(f"{name}.{key} must be the full-SHA commit URL")
+    stable = channels["stable"]
+    simage = stable.get("image", {}) if isinstance(stable, dict) else {}
+    if simage.get("tag") != STABLE_CHANNEL_BASELINE["tag"]:
+        problems.append("stable image tag must be latest")
+    if simage.get("stable_alias") != STABLE_CHANNEL_BASELINE["stable_alias"]:
+        problems.append("stable must define the stable alias")
+    if simage.get("digest") != STABLE_CHANNEL_BASELINE["digest"]:
+        problems.append("stable digest must be the verified stable baseline")
+    if stable.get("commit") != STABLE_CHANNEL_BASELINE["commit"]:
+        problems.append("stable commit must be the verified stable baseline")
+    nightly = channels["nightly"]
+    nimage = nightly.get("image", {}) if isinstance(nightly, dict) else {}
+    if nightly.get("tag") is not None:
+        problems.append("nightly must not carry a release/version tag")
+    if nimage.get("tag") != "nightly":
+        problems.append("nightly image tag must be nightly")
+    if not valid_digest(nimage.get("digest")):
+        problems.append("nightly digest must be a verified sha256 digest")
+    return (not problems), problems
+
+
+def channel_oci_parity(observations, digest, commit, registries=CHANNEL_REGISTRIES):
+    """Both maintained registries must serve the SAME verified multiarch digest
+    and OCI revision. A missing, unknown, single-arch or mismatched registry
+    fails the qualified stage with zero writes.
+    """
+    for registry in registries:
+        observation = observations.get(registry)
+        if not observation:
+            return False, f"{registry} observation is missing"
+        state, info = observation
+        if state == "unknown":
+            return False, f"{registry} state is unknown"
+        if state != "present":
+            return False, f"{registry} immutable image is absent"
+        if info.get("digest") != digest:
+            return False, f"{registry} digest differs from the verified digest"
+        if not REQUIRED_PLATFORMS <= set(info.get("platforms", ())):
+            return False, f"{registry} lacks both required Linux architectures"
+        if info.get("revision") != commit:
+            return False, f"{registry} OCI revision does not match the pinned commit"
+    return True, "both registries serve the same verified multiarch digest and revision"
+
+
+def channel_source_gate(event, ref, commit, ci_verified, contract=None,
+                        contract_valid=False, docs_validated=False):
+    """Exact source revision pinned read-only from trusted main + qualified stage.
+
+    A tag ref, a short SHA or an unverified CI result never qualifies. When a
+    contract is supplied (the docs lane) it must pass schema_version 3
+    validation and the exact site build validation must also be green; stale
+    docs can never mask a channel candidate.
+    """
+    if ref != TRUSTED_DEVELOPER_REF:
+        return False, "channel promotion requires the trusted refs/heads/main source pin"
+    if not valid_commit(commit):
+        return False, "the pinned source revision must be a full 40-hex SHA"
+    if str(ci_verified).strip().lower() != "true":
+        return False, "exact-commit main CI must be verified"
+    if contract is not None:
+        if not contract_valid:
+            ok, _ = validate_channel_contract(contract)
+            if not ok:
+                return False, "channel contract schema_version 3 validation failed"
+        if str(docs_validated).strip().lower() != "true":
+            return False, "exact site build validation must pass before docs promotion"
+        pinned = {entry.get("commit")
+                  for entry in (contract.get("channels") or {}).values()
+                  if isinstance(entry, dict)}
+        if commit not in pinned:
+            return False, "the built docs contract does not pin the candidate source revision"
+    return True, f"{event} source pin qualified from trusted main"
+
+
+def channel_move_decision(channel, candidate_commit, candidate_digest,
+                          immutable_observations=None, alias_observations=None,
+                          previous=None, ancestry=None, bootstrap=False,
+                          qualification=None):
+    """Return (action, reason, target_digest) for one channel move.
+
+    action is publish (including an idempotent convergence of a partial move),
+    noop (alias already at the verified digest), rollback (preserve the previous
+    verified digest after a failed candidate) or refuse. No action ever
+    overwrites an immutable version tag or deletes a tag.
+    """
+    if channel not in CHANNEL_MOVABLE:
+        return "refuse", "unknown channel", ""
+    if not valid_commit(candidate_commit):
+        return "refuse", "candidate must be a full 40-hex commit", ""
+    if not valid_digest(candidate_digest):
+        return "refuse", "candidate digest must be a verified sha256 digest", ""
+    qualification = qualification or {}
+    if str(qualification.get("ci_verified", False)).strip().lower() != "true":
+        return "refuse", "exact-commit main CI is not verified", ""
+
+    # The planned 2.0.0 stable is deliberately NOT publishable by a channel move.
+    tag = str(qualification.get("tag", ""))
+    if tag in (NEXT_STABLE_GIT_TAG, "v" + NEXT_STABLE_SEMVER, NEXT_STABLE_SEMVER):
+        return "refuse", "the planned 2.0.0 stable is not a channel publication", ""
+
+    # Stable is frozen to the verified baseline; no arbitrary/legacy tag moves it.
+    if channel == "stable":
+        release_tag = qualification.get("release_tag", "")
+        if release_tag:
+            ok, reason = publication_candidate_decision(release_tag)
+            product = product_release_or_none(release_tag)
+            if (not ok or product is None or product["channel"] != "stable"
+                    or release_tag == NEXT_STABLE_GIT_TAG):
+                return "refuse", "stable aliases require an exact stable product tag: " + reason, ""
+        elif (candidate_commit != STABLE_CHANNEL_BASELINE["commit"]
+              or candidate_digest != STABLE_CHANNEL_BASELINE["digest"]):
+            return "refuse", "stable aliases may only move from the verified stable digest", ""
+
+    # Docs qualify on the contract + exact site build, not on registry aliases.
+    if channel == "docs":
+        if not qualification.get("contract_valid") or not qualification.get("site_validated"):
+            return ("refuse",
+                    "docs promotion needs a validated schema_version 3 contract and exact site build",
+                    "")
+        contract = qualification.get("contract") or {}
+        commits = {entry.get("commit")
+                   for entry in (contract.get("channels") or {}).values()
+                   if isinstance(entry, dict)}
+        if candidate_commit not in commits:
+            return "refuse", "the docs candidate commit is not pinned by the channel contract", ""
+        return _channel_alias_transition(
+            channel, candidate_commit, candidate_digest,
+            alias_observations or {}, previous, ancestry)
+
+    # OCI channels qualify only after BOTH registries serve the same digest.
+    parity_ok, parity_reason = channel_oci_parity(
+        immutable_observations or {}, candidate_digest, candidate_commit)
+    if not parity_ok:
+        if previous and previous.get("bound") and valid_digest(previous.get("digest", "")):
+            return ("rollback",
+                    "candidate failed dual-registry parity (" + parity_reason
+                    + "); preserving previous verified digest",
+                    previous["digest"])
+        return "refuse", "candidate failed dual-registry parity: " + parity_reason, ""
+
+    # A verified Hub-only baseline may seed nightly ONLY via a recorded bounded
+    # bootstrap that is already mirrored/qualified in GHCR (parity above) and
+    # whose docs marker carries the same revision (contract validation upstream).
+    if (channel == "nightly"
+            and (candidate_commit, candidate_digest)
+            == (NIGHTLY_HUB_BASELINE["commit"], NIGHTLY_HUB_BASELINE["digest"])
+            and not bootstrap):
+        return ("refuse",
+                "the verified Hub-only nightly baseline is not a first-publish revision; "
+                "promote a qualified current-main commit", "")
+
+    return _channel_alias_transition(
+        channel, candidate_commit, candidate_digest,
+        alias_observations or {}, previous, ancestry)
+
+
+def _channel_alias_transition(channel, candidate_commit, candidate_digest,
+                              alias_observations, previous, ancestry):
+    """Digest-anchored alias state machine shared by OCI and docs moves."""
+    present = {}
+    for registry, observation in alias_observations.items():
+        state, info = observation
+        if state == "unknown":
+            return "refuse", f"{registry} alias state is unknown", ""
+        if state == "present":
+            present[registry] = info.get("digest", "")
+    if not present:
+        return "publish", "first publish: no verified alias holds a digest", candidate_digest
+    if set(present.values()) == {candidate_digest}:
+        return "noop", "alias already at the verified digest; no overwrite", candidate_digest
+
+    # A partial move leaves one registry at the candidate and the other at the
+    # previous digest. Converge only when the other digest is verifiably bound.
+    other = {digest for digest in present.values() if digest != candidate_digest}
+    if len(other) != 1:
+        return "refuse", "alias digests conflict across registries", ""
+    bound_digest = other.pop()
+    if not previous or not previous.get("bound") or previous.get("digest") != bound_digest:
+        return "refuse", "alias digest has no verified previous binding", bound_digest
+    previous_commit = previous.get("commit", "")
+    if not valid_commit(previous_commit) or previous_commit == candidate_commit:
+        return "refuse", "previous binding is not a distinct full-SHA commit", bound_digest
+    checker = ancestry or commit_is_ancestor
+    if not checker(previous_commit, candidate_commit):
+        return ("refuse",
+                "stale/out-of-order revision: candidate is not a descendant of the bound previous commit",
+                bound_digest)
+    return "publish", "advance from the verified previous digest", candidate_digest
+
+
+def channel_rollback_decision(channel, previous_commit, previous_digest,
+                              previous_binding_verified, observations=None):
+    """Explicit rollback to the previous verified digest after a partial failure.
+
+    Refuses unless the previous identity was independently verified; an alias
+    already at that digest is a noop so rollback is idempotent and safe to retry.
+    """
+    if channel not in CHANNEL_MOVABLE:
+        return "refuse", "unknown channel", ""
+    if not valid_commit(previous_commit) or not valid_digest(previous_digest):
+        return "refuse", "rollback needs a full-SHA commit and verified digest", ""
+    if not previous_binding_verified:
+        return "refuse", "previous digest identity is not independently verified", ""
+    for observation in (observations or {}).values():
+        state, info = observation
+        if state == "unknown":
+            return "refuse", "alias state is unknown; refusing rollback", ""
+        if state == "present" and info.get("digest") != previous_digest:
+            if info.get("digest") and info.get("digest") != previous_digest:
+                return "refuse", "alias holds an unbound digest; refusing blind rollback", ""
+    return "rollback", "restore the previous verified digest", previous_digest
+
+
+# --- OSS-413 qualified channel transaction ----------------------------------
+# A channel is NOT promoted by moving an OCI alias. One transaction stages both
+# immutable registries AND the exact docs artifact, confirms a PUBLIC candidate
+# marker before any alias move, then deploys final docs and confirms both
+# registries and the live marker agree. A receipt preserves the verified state
+# so retry reuses the staged digest and partial failure rolls back or reconciles.
+
+CHANNEL_PUBLISH_GROUP = "pages-deploy"  # the ONE shared non-cancelling lock
+TX_STAGE = "stage"  # pre-write phase: no alias move, no docs deployment
+TX_COMMIT = "commit"  # final phase: alias move only after a verified marker
+TX_STAGE_IMMUTABLE = "stage_immutable_both_registries"
+TX_STAGE_DOCS = "stage_exact_docs_artifact"
+TX_STAGE_MARKER = "stamp_candidate_probe_marker_at_staging_path"
+TX_DEPLOY_CANDIDATE = "deploy_candidate_probe_docs"
+TX_VERIFY_CANDIDATE = "verify_public_candidate_probe_marker"
+TX_DEPLOY_CANONICAL = "deploy_canonical_channel_docs"
+TX_VERIFY_CANONICAL = "verify_public_canonical_marker"
+TX_MOVE_ALIASES = "move_both_registry_aliases"
+TX_VERIFY_FINAL = "verify_final_aliases_and_docs"
+TX_WRITE_RECEIPT = "record_receipt"
+TX_RECONCILE = "reconcile_partial_failure"
+TX_ROLLBACK = "rollback_to_previous_receipt"
+TX_ROLLBACK_DOCS = "restore_previous_canonical_docs"
+
+# The candidate probe is a NON-ACTIVE staging route. Canonical channel routes
+# and the public machine-readable marker are published only in the commit phase,
+# before any registry alias move; rollback restores both surfaces together.
+TX_STAGE_STEPS = (TX_STAGE_IMMUTABLE, TX_STAGE_DOCS, TX_STAGE_MARKER,
+                  TX_DEPLOY_CANDIDATE, TX_VERIFY_CANDIDATE)
+TX_PUBLISH_STEPS = (TX_STAGE_IMMUTABLE, TX_STAGE_DOCS, TX_STAGE_MARKER,
+                    TX_DEPLOY_CANDIDATE, TX_VERIFY_CANDIDATE,
+                    TX_DEPLOY_CANONICAL, TX_VERIFY_CANONICAL,
+                    TX_MOVE_ALIASES, TX_VERIFY_FINAL, TX_WRITE_RECEIPT)
+
+
+def channel_receipt(channel, commit, digest, docs_hash, docs_commit, docs_digest,
+                    registries, before, marker_urls, run_ids, seq, timestamp):
+    """Build a complete, durable promotion receipt (no mutable main file)."""
+    return {
+        "channel": channel, "revision": commit, "digest": digest,
+        "docs_artifact_hash": docs_hash, "docs_commit": docs_commit,
+        "docs_digest": docs_digest, "registries": dict(registries),
+        "before": dict(before), "marker_urls": dict(marker_urls),
+        "run_ids": dict(run_ids), "seq": int(seq), "timestamp": timestamp,
+        "verified": True,
+    }
+
+
+def channel_transaction_decision(candidate, previous=None, live=None,
+                                 event="workflow_run", ancestry=None,
+                                 phase=TX_COMMIT):
+    """Decide one qualified channel transaction.
+
+    `phase=stage` applies every gate EXCEPT the public-candidate-marker
+    confirmation and returns a zero-write staging plan: no alias move, no docs
+    deploy, no receipt. `phase=commit` requires the confirmed public marker and
+    may return publish/noop/reconcile/rollback. Returns (action, reason,
+    receipt, steps). `previous` is the preserved verified receipt; `live` is the
+    observed registry-alias and docs-marker state. A manual dispatch can only
+    re-publish an ALREADY-ACTIVE exact source from the receipt.
+    """
+    channel = candidate.get("channel")
+    if channel not in ("nightly", "stable"):
+        return "refuse", "unknown channel", previous or {}, []
+    commit, digest = candidate.get("commit"), candidate.get("digest")
+    if not valid_commit(commit) or not valid_digest(digest):
+        return "refuse", "candidate needs a full-SHA revision and verified digest", previous or {}, []
+    if candidate.get("source_ref") != TRUSTED_DEVELOPER_REF:
+        return "refuse", "exact source revision must be pinned from trusted main", previous or {}, []
+    if str(candidate.get("ci_verified", False)).strip().lower() != "true":
+        return "refuse", "exact-commit main CI is not verified", previous or {}, []
+    # A verified Hub-only baseline is not a mandatory first revision; it may
+    # seed nightly only via a recorded bounded bootstrap with dual-registry
+    # parity and a matching docs marker (both verified below).
+    if (channel == "nightly"
+            and (commit, digest) == (NIGHTLY_HUB_BASELINE["commit"],
+                                     NIGHTLY_HUB_BASELINE["digest"])
+            and not candidate.get("bootstrap")):
+        prior = previous or {}
+        if prior.get("verified"):
+            return ("rollback",
+                    "Hub-only baseline needs a recorded bootstrap; preserving prior receipt",
+                    prior, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
+        return ("refuse",
+                "the Hub-only nightly baseline needs a recorded bounded bootstrap", prior, [])
+    if channel == "stable":
+        release_tag = candidate.get("release_tag", "")
+        if release_tag:
+            # An exact canonical stable product tag with its verified immutable
+            # digest; the planned 2.0.0 and arbitrary/legacy tags are refused.
+            ok, reason = publication_candidate_decision(release_tag)
+            product = product_release_or_none(release_tag)
+            if (not ok or product is None or product["channel"] != "stable"
+                    or release_tag == NEXT_STABLE_GIT_TAG):
+                return ("refuse", "stable channel requires an exact canonical stable release tag: "
+                        + reason, previous or {}, [])
+        elif (commit != STABLE_CHANNEL_BASELINE["commit"]
+              or digest != STABLE_CHANNEL_BASELINE["digest"]):
+            return ("refuse",
+                    "stable channel moves only from the verified stable digest", previous or {}, [])
+
+    previous = previous or {}
+    live = live or {}
+    seq = int(candidate.get("seq", 0))
+    prev_seq = int(previous.get("seq", 0))
+
+    # Stale/out-of-order candidates are refused before any stage or write.
+    if previous.get("verified") and seq:
+        if seq < prev_seq or (seq == prev_seq and
+                              (candidate.get("commit") != previous.get("revision")
+                               or candidate.get("digest") != previous.get("digest"))):
+            return ("refuse",
+                    "older/out-of-order candidate rejected against the active receipt",
+                    previous, [])
+        if seq > prev_seq and previous.get("revision"):
+            checker = ancestry or commit_is_ancestor
+            if not checker(previous["revision"], commit):
+                return ("refuse", "candidate revision is not a descendant of the active receipt",
+                        previous, [])
+
+    # Manual/site-only deploy may publish only an already-active exact source.
+    if event == "workflow_dispatch" and not (
+            previous.get("verified")
+            and previous.get("revision") == commit
+            and previous.get("digest") == digest):
+        return ("refuse",
+                "manual/site-only deploy may publish only an already-active exact channel source from the receipt",
+                previous, [])
+
+    qualified = all((candidate.get("immutable_ok"), candidate.get("contract_valid"),
+                     candidate.get("site_validated")))
+    marker_ok = (candidate.get("docs_commit") == commit
+                 and candidate.get("docs_digest") == digest)
+    if not qualified or not marker_ok:
+        # Losing qualification preserves the prior verified receipt and rolls
+        # both surfaces back to it rather than improving a broken candidate.
+        if previous.get("verified") and valid_digest(previous.get("digest", "")):
+            return ("rollback",
+                    "candidate is not fully qualified; preserving the prior verified receipt",
+                    previous, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
+        return "refuse", "candidate is not fully qualified (docs marker must match)", previous, []
+
+    registries = candidate.get("registries") or {}
+    if set(registries) != set(CHANNEL_REGISTRIES) or any(
+            value != digest for value in registries.values()):
+        if previous.get("verified"):
+            return ("rollback", "staged digests do not agree in both registries",
+                    previous, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
+        return "refuse", "staged digests do not agree in both registries", previous, []
+
+    # Two-phase flow: the staging decision applies all qualification, ordering
+    # and dual-registry gates but can never write an alias or deploy docs. Only
+    # a later commit decision, after the public candidate marker is confirmed,
+    # can authorize a move. This is not a gate bypass: stage returns no write
+    # steps and no new receipt.
+    if phase == TX_STAGE:
+        return ("stage", "qualified staging plan: no alias move and no docs deploy",
+                previous, TX_STAGE_STEPS)
+
+    if not candidate.get("candidate_marker_verified"):
+        if previous.get("verified"):
+            return ("rollback",
+                    "public candidate probe marker not confirmed; aliases stay at the prior receipt",
+                    previous, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
+        return "refuse", "public candidate probe marker must be confirmed before any alias move", previous, []
+    # No registry alias may move until the canonical docs marker is published and
+    # verified in THIS transaction. A missing canonical confirmation rolls back
+    # both surfaces to the prior verified receipt.
+    if not candidate.get("canonical_marker_verified"):
+        if previous.get("verified"):
+            return ("rollback",
+                    "canonical docs marker not confirmed; aliases and docs stay at the prior receipt",
+                    previous, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
+        return "refuse", "canonical docs marker must be confirmed before any alias move", previous, []
+
+    alias_digests = {k: v for k, v in (live.get("registries") or {}).items()
+                     if v and k in CHANNEL_REGISTRIES}
+    live_docs = (live.get("docs_commit"), live.get("docs_digest"))
+    fully_live = (set(alias_digests.values()) == {digest}
+                  and live_docs == (commit, digest))
+    if fully_live:
+        return "noop", "both registries and the live docs marker already match the candidate", previous, []
+
+    alias_values = set(alias_digests.values())
+    docs_values = {value for value in live_docs if value}
+    mixed = ((digest in alias_values and any(v != digest for v in alias_values))
+             or (digest in docs_values and any(v != digest for v in docs_values)))
+    if mixed and previous.get("verified"):
+        # A PARTIAL move (one surface already at the candidate) converges to the
+        # qualified staged candidate; a fully-previous state is a normal advance.
+        return "reconcile", "partial state converges to the verified staged candidate", previous, (
+            TX_RECONCILE, TX_DEPLOY_CANDIDATE, TX_VERIFY_CANDIDATE,
+            TX_MOVE_ALIASES, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL, TX_WRITE_RECEIPT)
+
+    receipt = channel_receipt(
+        channel, commit, digest, candidate.get("docs_hash", ""), commit, digest,
+        registries, live.get("registries") or {}, candidate.get("marker_urls") or {},
+        candidate.get("run_ids") or {}, seq or prev_seq + 1,
+        candidate.get("timestamp", ""))
+    return "publish", "qualified transaction staged and verified on both surfaces", receipt, TX_PUBLISH_STEPS
+
+
+def candidate_probe_path(commit):
+    """The NON-ACTIVE staging route for a candidate marker probe."""
+    if not valid_commit(commit):
+        raise ValueError("Candidate probe path needs a full 40-hex commit")
+    return f"/docs/candidate/{commit}/"
+
+
+def stage_channel_marker(site, channel, commit, digest, include_canonical=False):
+    """Write the candidate marker into the BUILT site (never a tracked main file).
+
+    The probe is always written at the non-active staging route
+    `/docs/candidate/<sha>/`; the canonical channel entry (and the public
+    `version-index.json` marker) is stamped only when `include_canonical` is
+    set, i.e. as part of the qualified transaction. Returns the URLs/status so
+    the workflow can prove the probe cannot touch a canonical path.
+    """
+    if channel not in ("nightly", "stable") or not valid_commit(commit) or not valid_digest(digest):
+        raise ValueError("Marker staging needs a known channel, full SHA and verified digest")
+    root = Path(site)
+    probe = root / "docs" / "candidate" / commit
+    probe.mkdir(parents=True, exist_ok=True)
+    marker = {"channel": channel, "candidate_commit": commit,
+              "candidate_digest": digest, "canonical": False,
+              "probe_url": candidate_probe_path(commit) + "marker.json"}
+    (probe / "marker.json").write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+    (probe / "index.html").write_text(
+        "<!doctype html><title>Candidate probe</title>"
+        f"<p>Candidate {commit} @ {digest} (non-active staging route)</p>\n",
+        encoding="utf-8")
+    result = {"probe_path": candidate_probe_path(commit),
+              "probe_url": marker["probe_url"], "canonical_stamped": False,
+              "canonical_url": ""}
+    if include_canonical:
+        path = root / "version-index.json"
+        document = json.loads(path.read_text(encoding="utf-8"))
+        ok, problems = validate_channel_contract(document)
+        if not ok:
+            raise ValueError("Cannot stamp an invalid channel contract: " + "; ".join(problems))
+        entry = document["channels"][channel]
+        entry["commit"] = commit
+        entry["image"]["revision"] = commit
+        entry["image"]["digest"] = digest
+        path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        result["canonical_stamped"] = True
+        result["canonical_url"] = "/version-index.json"
+    return result
+
+
+def marker_matches(document, commit, digest):
+    """True when a public marker carries the exact candidate revision/digest."""
+    return bool(document.get("candidate_commit") == commit
+                and document.get("candidate_digest") == digest
+                and document.get("canonical") is False)
+
+
+def stage_channel_marker_cli(args):
+    """CLI: stage candidate/canonical markers into the built site only."""
+    result = stage_channel_marker(
+        args.site, args.channel, args.commit, args.digest, args.canonical)
+    values = {**result, "site": args.site}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return result
+
+
+def channel_active_receipt(channel, alias_observations, docs_commit, docs_digest,
+                           seq=0, timestamp=""):
+    """Reconstruct the currently active receipt from LIVE published surfaces.
+
+    Used by a manual/site-only dispatch so it can republish only the exact source
+    already active in both registries and the public docs marker. A mixed or
+    unknown alias state yields {} and the dispatch refuses.
+    """
+    registries = {}
+    for name, (state, info) in alias_observations.items():
+        if name not in CHANNEL_REGISTRIES:
+            continue
+        if state != "present" or not info or not valid_digest(info.get("digest", "")):
+            return {}
+        registries[name] = info["digest"]
+    if set(registries) != set(CHANNEL_REGISTRIES) or len(set(registries.values())) != 1:
+        return {}
+    if not valid_commit(docs_commit) or not valid_digest(docs_digest):
+        return {}
+    digest = registries["docker_hub"]
+    return channel_receipt(channel, docs_commit, digest, "", docs_commit, docs_digest,
+                           registries, registries, {}, {}, seq, timestamp)
+
+
+def channel_active_receipt_cli(args):
+    """CLI: emit the live active receipt (read-only) for a manual dispatch."""
+    receipt = channel_active_receipt(
+        args.channel, _observation_map(args.aliases), args.docs_commit,
+        args.docs_digest, args.seq, args.timestamp)
+    values = {"receipt": json.dumps(receipt, sort_keys=True)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not receipt:
+        raise ValueError("No single verified active channel receipt could be reconstructed")
+    return receipt
+
+
+# Commands an older target's release.py must contain before any trusted gate
+# may run against it; otherwise the workflow would silently use the wrong script.
+REQUIRED_GATE_COMMANDS = ("channel-transaction", "channel-active-receipt",
+                          "channel-rollback", "channel-observe",
+                          "stage-channel-marker")
+
+
+def verify_gate_script(path):
+    """Fail closed when a checked-out target lacks the trusted gate commands."""
+    text = Path(path).read_text(encoding="utf-8")
+    missing = [command for command in REQUIRED_GATE_COMMANDS
+               if f'"{command}"' not in text]
+    return (not missing), missing
+
+
+def verify_gate_script_cli(args):
+    ok, missing = verify_gate_script(args.path)
+    values = {"verified": str(ok).lower(), "missing": json.dumps(missing)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Older release target lacks the trusted gate script; "
+                         "missing commands: " + ", ".join(missing))
+    return ok
+
+
+def verify_channel_parity_cli(args):
+    """CLI: prove the OBSERVED digests in both registries match the candidate."""
+    observations = _coerce_observation_map(json_argument(args.observations, default={}) or {})
+    ok, reason = channel_oci_parity(observations, args.digest, args.commit)
+    values = {"parity": str(ok).lower(), "reason": reason,
+              "digest": args.digest, "commit": args.commit}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Immutable digest parity failed: " + reason)
+    return ok
+
+
+def channel_resume_plan(receipt, candidate_digest=""):
+    """A retry resumes the EXACT recorded digest; it never rebuilds a new one."""
+    if not receipt or not receipt.get("verified") or not valid_digest(receipt.get("digest", "")):
+        return {"action": "refuse", "reason": "no verified receipt digest to resume"}
+    target = receipt["digest"]
+    if candidate_digest and candidate_digest != target:
+        return {"action": "refuse", "reason": "retry must resume the exact recorded digest"}
+    return {"action": "resume", "digest": target, "commit": receipt.get("revision", ""),
+            "reason": "resuming the exact recorded verified digest"}
+
+
+def channel_transaction_run(candidate, previous, writer=None, docs_publisher=None,
+                            final_probe=None, live=None, event="workflow_run",
+                            ancestry=None):
+    """Execute the qualified transaction with injectable failures (offline).
+
+    `writer(registry, digest) -> (ok, error)`, `docs_publisher(commit, digest) -> bool`
+    and `final_probe(commit, digest) -> bool` are the seams a fixture replaces to
+    simulate a second-registry write failure or a final probe failure. On ANY
+    failure both registry aliases and the docs marker are restored to the prior
+    verified receipt; no immutable artifact is overwritten. Returns an outcome
+    dict, never raises for an injected failure.
+    """
+    writer = writer or (lambda registry, digest: (True, ""))
+    docs_publisher = docs_publisher or (lambda commit, digest: True)
+    final_probe = final_probe or (lambda commit, digest: True)
+    commit, digest = candidate.get("commit"), candidate.get("digest")
+    action, reason, receipt, steps = channel_transaction_decision(
+        candidate, previous, live or {}, event, ancestry=ancestry)
+    if action in ("refuse", "rollback"):
+        return {"outcome": "refused", "reason": reason, "moved": [], "restored": False,
+                "receipt": previous or {}, "steps": list(steps)}
+    if action == "noop":
+        return {"outcome": "noop", "reason": reason, "moved": [], "restored": False,
+                "receipt": previous or {}, "steps": []}
+
+    failure = ""
+    if not docs_publisher(commit, digest):
+        failure = "canonical docs marker publish failed"
+    if not failure:
+        for registry in CHANNEL_REGISTRIES:
+            ok, error = writer(registry, digest)
+            if not ok:
+                failure = f"{registry} alias write failed: {error}"
+                break
+    if not failure and not final_probe(commit, digest):
+        failure = "final public marker/alias probe failed"
+
+    if failure:
+        prior = previous or {}
+        prior_digest = prior.get("digest", "")
+        restored = []
+        if valid_digest(prior_digest):
+            for registry in CHANNEL_REGISTRIES:
+                writer(registry, prior_digest)
+                restored.append(registry)
+            docs_publisher(prior.get("revision", ""), prior_digest)
+        return {"outcome": "rolled_back", "reason": failure, "moved": [],
+                "restored": restored, "receipt": prior, "steps": (
+                    TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_VERIFY_FINAL),
+                "resume": channel_resume_plan(prior)}
+    return {"outcome": "published", "reason": reason,
+            "moved": list(CHANNEL_REGISTRIES), "restored": False,
+            "receipt": receipt, "steps": list(steps)}
+
+
+def channel_rollback(receipt, apply=False):
+    """Roll both registry aliases and the docs marker back to a verified receipt."""
+    if not receipt or not receipt.get("verified") or not valid_digest(receipt.get("digest", "")):
+        raise ValueError("Rollback needs a verified receipt with a valid digest")
+    if not valid_commit(receipt.get("revision", "")):
+        raise ValueError("Rollback needs the full-SHA revision recorded in the receipt")
+    values = {"action": "rollback", "digest": receipt["digest"],
+              "commit": receipt["revision"], "registries": list(CHANNEL_REGISTRIES),
+              "docs_commit": receipt.get("docs_commit", receipt["revision"])}
+    if apply:
+        _apply_channel_alias(receipt.get("channel", "nightly"), receipt["digest"])
+    return values
+
+
+def channel_rollback_cli(args):
+    """CLI: emit/apply the exact-digest rollback to a verified prior receipt."""
+    receipt = json_argument(args.receipt, default={}) or {}
+    values = channel_rollback(receipt, apply=args.apply)
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return values
+
+
+def channel_simulate_cli(args):
+    """CLI: run the transaction with injected failures (fully offline evidence)."""
+    candidate = json_argument(args.candidate, default={}) or {}
+    previous = json_argument(args.previous, default={}) or {}
+    fail_registry = args.fail_registry
+    fail_final = args.fail_final_probe
+    fail_docs = args.fail_docs
+
+    def writer(registry, digest):
+        if registry == fail_registry and digest != previous.get("digest", ""):
+            return False, "injected second-registry write failure"
+        return True, ""
+
+    outcome = channel_transaction_run(
+        candidate, previous, writer=writer,
+        docs_publisher=lambda commit, digest: not fail_docs,
+        final_probe=lambda commit, digest: not fail_final,
+        ancestry=lambda older, newer: True)
+    print(json.dumps(outcome, indent=2, sort_keys=True))
+    return outcome
+
+
+def channel_transaction_cli(args):
+    """CLI: emit the qualified-transaction decision (offline, no writes)."""
+    candidate = json_argument(args.candidate, default={}) or {}
+    previous = json_argument(args.previous, default={}) or {}
+    live = json_argument(args.live, default={}) or {}
+    action, reason, receipt, steps = channel_transaction_decision(
+        candidate, previous, live, args.event, phase=args.phase)
+    values = {"action": action, "reason": reason,
+              "receipt": json.dumps(receipt, sort_keys=True),
+              "steps": json.dumps(list(steps))}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if action == "refuse":
+        raise ValueError("Channel transaction refused: " + reason)
+    return action
+
+
+def validate_channel_contract_cli(args):
+    """CLI: validate a generated channel contract artifact (offline)."""
+    document = json.loads(Path(args.path).read_text(encoding="utf-8"))
+    ok, problems = validate_channel_contract(document)
+    values = {"verified": str(ok).lower(), "problems": json.dumps(problems)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Channel contract validation failed: " + "; ".join(problems))
+    return ok
+
+
+def channel_source_gate_cli(args):
+    """CLI: emit the exact-source + qualified-stage decision for a channel move."""
+    contract = json_argument(args.contract) if args.contract else None
+    allowed, reason = channel_source_gate(
+        args.event, args.ref, args.commit, args.ci_verified, contract,
+        args.contract_validated == "true", args.docs_validated)
+    values = {"qualified": str(allowed).lower(), "reason": reason,
+              "commit": args.commit, "event": args.event}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not allowed:
+        raise ValueError("Channel source gate refused: " + reason)
+    return allowed
+
+
+def channel_promote_cli(args):
+    """CLI: decide (and with --apply, perform) one digest-anchored channel move."""
+    immutable = _observation_map(args.immutable)
+    aliases = _observation_map(args.aliases)
+    previous = None
+    if args.previous_commit or args.previous_digest:
+        previous = {"commit": args.previous_commit, "digest": args.previous_digest,
+                    "bound": args.previous_binding == "true"}
+    qualification = {
+        "ci_verified": args.ci_verified,
+        "contract_valid": args.contract_validated == "true",
+        "site_validated": args.docs_validated,
+        "tag": args.tag,
+        "release_tag": args.release_tag,
+    }
+    if args.contract:
+        qualification["contract"] = json_argument(args.contract)
+    action, reason, target = channel_move_decision(
+        args.channel, args.commit, args.digest, immutable, aliases, previous,
+        bootstrap=args.bootstrap, qualification=qualification)
+    values = {"channel": args.channel, "action": action, "reason": reason,
+              "target_digest": target, "previous_digest": args.previous_digest,
+              "commit": args.commit}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if action == "refuse":
+        raise ValueError("Channel promotion refused: " + reason)
+    if args.apply and action in ("publish", "rollback", "noop"):
+        _apply_channel_alias(args.channel, target)
+    return action
+
+
+def _coerce_observation_map(document):
+    """Normalise a registry -> [state, info] map from JSON or a parsed dict."""
+    result = {}
+    for registry, value in document.items():
+        state, info = value
+        if state == "present" and info:
+            info = dict(info)
+            info["platforms"] = {tuple(item) for item in info.get("platforms", ())}
+        result[registry] = (state, info)
+    return result
+
+
+def _observation_map(raw):
+    """Parse a JSON map of registry -> [state, info] observations."""
+    return _coerce_observation_map(json_argument(raw, default={}) or {})
+
+
+def channel_observe(reference):
+    """Read-only observation of one reference in BOTH maintained registries.
+
+    Emits the digest-anchored observation map consumed by channel-promote. The
+    OCI revision is derived from agreeing, digest-addressed platform configs;
+    an ambiguous or mixed revision stays empty and fails the move closed.
+    """
+    observations = {}
+    for name, registry_ref in (("docker_hub", f"{DOCKER_HUB_IMAGE}:{reference}"),
+                               ("ghcr", f"ghcr.io/{ghcr_repository()}:{reference}")):
+        observation = observe_reference(registry_ref, strict=True)
+        state, info = observation
+        info = dict(info) if info else {}
+        if state == "present":
+            index_digest, revisions = platform_manifest_revisions(
+                registry_ref, anchor_digest=info["digest"])
+            commit, _ = nightly_alias_identity((state, info), revisions, index_digest)
+            info["revision"] = commit
+        info["platforms"] = sorted(tuple(platform) for platform in info.get("platforms", ()))
+        observations[name] = [state, info]
+    return observations
+
+
+def channel_observe_cli(args):
+    """CLI: emit both registries' observations for a reference (read-only)."""
+    observations = channel_observe(args.reference)
+    values = {"reference": args.reference,
+              "observations": json.dumps(observations, sort_keys=True)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return observations
+
+
+def promote_stable_alias_cli(args):
+    """CLI: promote only the `stable` alias from the verified stable digest.
+
+    Never touches `latest` (owned by the product release lane), an immutable
+    version tag or a Git tag. No tag is deleted and no release is created.
+    """
+    immutable = _observation_map(args.immutable)
+    aliases = _observation_map(args.aliases)
+    qualification = {"ci_verified": args.ci_verified, "tag": args.tag}
+    action, reason, target = channel_move_decision(
+        "stable", STABLE_CHANNEL_BASELINE["commit"], STABLE_CHANNEL_BASELINE["digest"],
+        immutable, aliases, qualification=qualification)
+    values = {"channel": "stable", "action": action, "reason": reason,
+              "target_digest": target}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if action == "refuse" and not args.soft:
+        raise ValueError("Stable alias promotion refused: " + reason)
+    if action == "refuse" and args.soft:
+        print("::notice::stable alias not promoted: " + reason)
+        return action
+    if args.apply and action in ("publish", "rollback"):
+        for reference in (f"{DOCKER_HUB_IMAGE}:stable",
+                          f"ghcr.io/{ghcr_repository()}:stable"):
+            state, info = observe_reference(reference, strict=True)
+            if state == "present" and info.get("digest") == target:
+                continue
+            source = reference.rsplit(":", 1)[0] + "@" + target
+            subprocess.run(["docker", "buildx", "imagetools", "create",
+                            "--tag", reference, source], check=True, cwd=ROOT)
+            verify_tag_digest(observe_reference(reference, strict=True), target)
+
+
+def _apply_channel_alias(channel, digest):
+    """Move a moving alias at an already verified digest in BOTH registries.
+
+    Immutable version tags are never touched and no tag is deleted. An alias is
+    skipped when it already holds the target digest (idempotent retry).
+    """
+    if not valid_digest(digest):
+        raise ValueError("Missing or invalid verified digest for alias move")
+    alias = "nightly" if channel == "nightly" else (
+        "latest" if channel == "stable" else channel)
+    for reference in (f"{DOCKER_HUB_IMAGE}:{alias}",
+                      f"ghcr.io/{ghcr_repository()}:{alias}"):
+        state, info = observe_reference(reference, strict=True)
+        if state == "present" and info.get("digest") == digest:
+            continue
+        source = reference.rsplit(":", 1)[0] + "@" + digest
+        subprocess.run(["docker", "buildx", "imagetools", "create",
+                        "--tag", reference, source], check=True, cwd=ROOT)
+        verify_tag_digest(observe_reference(reference, strict=True), digest)
+    # The stable alias is promoted alongside latest only from the verified digest.
+    if channel == "stable":
+        for reference in (f"{DOCKER_HUB_IMAGE}:stable",
+                          f"ghcr.io/{ghcr_repository()}:stable"):
+            state, info = observe_reference(reference, strict=True)
+            if state == "present" and info.get("digest") == digest:
+                continue
+            source = reference.rsplit(":", 1)[0] + "@" + digest
+            subprocess.run(["docker", "buildx", "imagetools", "create",
+                            "--tag", reference, source], check=True, cwd=ROOT)
+            verify_tag_digest(observe_reference(reference, strict=True), digest)
+
+
 def build_parser():
     """Parser exposed so workflow job arguments can be fixture-parsed."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -2081,6 +3032,73 @@ def build_parser():
     publisher = commands.add_parser("publish")
     for name in ("version", "commit", "output"):
         publisher.add_argument("--" + name, required=True)
+    contract_checker = commands.add_parser("validate-channel-contract")
+    contract_checker.add_argument("--path", required=True)
+    source_gate = commands.add_parser("channel-source-gate")
+    for name in ("event", "ref", "commit", "ci-verified"):
+        source_gate.add_argument("--" + name, required=True)
+    source_gate.add_argument("--contract", default="")
+    source_gate.add_argument("--contract-validated", default="false")
+    source_gate.add_argument("--docs-validated", default="false")
+    promote = commands.add_parser("channel-promote")
+    for name in ("channel", "commit", "digest"):
+        promote.add_argument("--" + name, required=True)
+    promote.add_argument("--ci-verified", default="false")
+    promote.add_argument("--contract", default="")
+    promote.add_argument("--contract-validated", default="false")
+    promote.add_argument("--docs-validated", default="false")
+    promote.add_argument("--tag", default="")
+    promote.add_argument("--release-tag", default="")
+    promote.add_argument("--immutable", default="{}")
+    promote.add_argument("--aliases", default="{}")
+    promote.add_argument("--previous-commit", default="")
+    promote.add_argument("--previous-digest", default="")
+    promote.add_argument("--previous-binding", default="false")
+    promote.add_argument("--bootstrap", action="store_true")
+    promote.add_argument("--apply", action="store_true")
+    observe = commands.add_parser("channel-observe")
+    observe.add_argument("--reference", required=True)
+    stable_alias = commands.add_parser("promote-stable-alias")
+    stable_alias.add_argument("--ci-verified", default="false")
+    stable_alias.add_argument("--tag", default="")
+    stable_alias.add_argument("--immutable", default="{}")
+    stable_alias.add_argument("--aliases", default="{}")
+    stable_alias.add_argument("--apply", action="store_true")
+    stable_alias.add_argument("--soft", action="store_true")
+    transaction = commands.add_parser("channel-transaction")
+    for name in ("candidate", "previous", "live"):
+        transaction.add_argument("--" + name, default="{}")
+    transaction.add_argument("--event", default="workflow_run")
+    transaction.add_argument("--phase", default=TX_COMMIT,
+                             choices=(TX_STAGE, TX_COMMIT))
+    active = commands.add_parser("channel-active-receipt")
+    active.add_argument("--channel", required=True)
+    active.add_argument("--aliases", default="{}")
+    active.add_argument("--docs-commit", required=True)
+    active.add_argument("--docs-digest", required=True)
+    active.add_argument("--seq", default="0")
+    active.add_argument("--timestamp", default="")
+    marker = commands.add_parser("stage-channel-marker")
+    marker.add_argument("--site", required=True)
+    marker.add_argument("--channel", required=True)
+    marker.add_argument("--commit", required=True)
+    marker.add_argument("--digest", required=True)
+    marker.add_argument("--canonical", action="store_true")
+    rollback = commands.add_parser("channel-rollback")
+    rollback.add_argument("--receipt", default="{}")
+    rollback.add_argument("--apply", action="store_true")
+    simulate = commands.add_parser("channel-simulate")
+    simulate.add_argument("--candidate", default="{}")
+    simulate.add_argument("--previous", default="{}")
+    simulate.add_argument("--fail-registry", default="")
+    simulate.add_argument("--fail-docs", action="store_true")
+    simulate.add_argument("--fail-final-probe", action="store_true")
+    gate_script = commands.add_parser("verify-gate-script")
+    gate_script.add_argument("--path", required=True)
+    parity = commands.add_parser("verify-channel-parity")
+    parity.add_argument("--observations", default="{}")
+    parity.add_argument("--digest", required=True)
+    parity.add_argument("--commit", required=True)
     return parser
 
 
@@ -2092,7 +3110,19 @@ def main():
                 "product-version": product_version_info,
                 "verify-release-history": verify_release_history_cli,
                 "verify-publication-ref": verify_publication_ref,
-                "indexable-urls": indexable_urls_cli}
+                "indexable-urls": indexable_urls_cli,
+                "validate-channel-contract": validate_channel_contract_cli,
+                "channel-source-gate": channel_source_gate_cli,
+                "channel-promote": channel_promote_cli,
+                "channel-observe": channel_observe_cli,
+                "promote-stable-alias": promote_stable_alias_cli,
+                "channel-transaction": channel_transaction_cli,
+                "channel-active-receipt": channel_active_receipt_cli,
+                "stage-channel-marker": stage_channel_marker_cli,
+                "channel-rollback": channel_rollback_cli,
+                "channel-simulate": channel_simulate_cli,
+                "verify-gate-script": verify_gate_script_cli,
+                "verify-channel-parity": verify_channel_parity_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:

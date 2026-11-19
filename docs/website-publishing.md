@@ -26,8 +26,7 @@ legacy doc snapshots `1.0.39` and `3.0.0-alpha.1` are not published or offered
 in the selector.
 
 The public selector vocabulary is exactly `Stable` and `Nightly`, with no
-version numbers or legacy snapshot names. The proto's `2.x` declares the independent Connect-OpenAPI schema family;
-shipped bundled and website schema copies stamp `info.version` with the exact
+version numbers or legacy snapshot names. The proto's `2.x` declares the independent Connect-OpenAPI schema family;shipped bundled and website schema copies stamp `info.version` with the exact
 product version (CLI `--version`, UI runtime `build/version.json` and release
 manifest agree), and the same stamped input becomes the schema embedded in the
 packaged panel and served by its running OpenAPI handler. The runtime UI version
@@ -268,3 +267,31 @@ card. Keep preview titles, descriptions and alt text free of em dashes.
 Neither publishing a docs pin nor publishing the website creates an application
 release. Pinned documentation must not claim live runtime acceptance that has
 not been performed.
+
+## Channel promotion gate (OSS-413)
+
+A Pages deployment is a docs channel promotion, so it is gated beyond the
+build-only validation. `landing.yml` validates the BUILT site's public
+`version-index.json` with `scripts/release.py validate-channel-contract`: the
+contract must be `schema_version` 3 with exactly `Stable` and `Nightly` channels
+(no version terminology), full 40-hex commits, verified sha256 digests whose
+revision equals the commit, stable `latest`+`stable` aliases pinned to the
+verified stable digest, nightly with no version tag, and full-SHA
+`${repository}/commit/<sha>` pinned links. The removed legacy DOC snapshots
+`1.0.39` and `3.0.0-alpha.1` must not appear in the built selector; their source
+tags and historical records stay in `docs/release-history.json`.
+
+The same gate requires the trusted `refs/heads/main` source pin, a successful
+exact-commit main CI result, and that the built contract pins that SAME commit.
+Stale docs therefore cannot be deployed to mask a channel candidate. Both
+checks run before the Pages artifact is uploaded and the deploy job additionally
+requires their outputs, so a failed gate never reaches the `pages-deploy`
+environment-protected job.
+
+A site-only `deploy=true` dispatch is not a new promotion: it reconstructs the
+already-active channel source from the live registries and public marker and
+passes the qualified-transaction gate with that exact receipt source. All
+channel and docs moves share ONE non-cancelling `pages-deploy` lock with no
+nested group or self-dispatch. The Nightly revision lives in the published
+artifact, marker and receipt — never in a tracked main file updated per build.
+See ADR 0049 and [release operations](releases.md).
