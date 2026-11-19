@@ -122,6 +122,13 @@ async function call(client, name, args = {}) {
   return result;
 }
 
+// Some git operations legitimately report conflicts as tool errors. The caller
+// inspects the text instead of throwing so the fixture can prove detection.
+async function callAllowError(client, name, args = {}) {
+  const result = await client.request('tools/call', { name, arguments: args });
+  return { isError: Boolean(result.isError), text: textOf(result) || JSON.stringify(result) };
+}
+
 function argFor(tool, keys, value) {
   const properties = Object.keys(tool?.inputSchema?.properties ?? {});
   for (const key of keys) {
@@ -146,6 +153,7 @@ async function main() {
   const gitRepo = await mkdtemp(join(tmpdir(), 'carbon-mcp-git-'));
   let fsClient;
   let gitClient;
+  let repoFsClient;
 
   try {
     fsClient = new McpClient('filesystem', NPX, ['-y', FS_PACKAGE, fsRoot]);
@@ -182,16 +190,27 @@ async function main() {
     execFileSync('git', ['init', '-q'], { cwd: gitRepo });
     execFileSync('git', ['config', 'user.email', 'smoke@example.invalid'], { cwd: gitRepo });
     execFileSync('git', ['config', 'user.name', 'Knowledge Smoke'], { cwd: gitRepo });
+    // Keep the fixture deterministic: never require a signing key from the host.
+    execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: gitRepo });
+    execFileSync('git', ['config', 'tag.gpgsign', 'false'], { cwd: gitRepo });
     await writeFile(join(gitRepo, 'README.md'), '# Smoke\n');
 
     gitClient = new McpClient('git', NPX, ['-y', GIT_PACKAGE], {
       GIT_BASE_DIR: gitRepo,
       MCP_TRANSPORT_TYPE: 'stdio',
       MCP_LOG_LEVEL: 'error',
+      GIT_SIGN_COMMITS: 'false',
+      // Inject config into every git subprocess the server spawns so a host
+      // signing policy can never require a key in this disposable fixture.
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'commit.gpgsign',
+      GIT_CONFIG_VALUE_0: 'false',
+      GIT_CONFIG_KEY_1: 'tag.gpgsign',
+      GIT_CONFIG_VALUE_1: 'false',
     });
     await gitClient.initialize();
     const gitTools = (await gitClient.request('tools/list')).tools;
-    for (const name of ['git_status', 'git_add', 'git_commit', 'git_log']) {
+    for (const name of ['git_status', 'git_add', 'git_commit', 'git_log', 'git_merge']) {
       toolByName(gitTools, name);
     }
     await setWorkingDirectory(gitClient, gitTools, gitRepo);
@@ -228,15 +247,96 @@ async function main() {
     const log = textOf(await call(gitClient, 'git_log', logArgs));
     if (!log.includes('smoke commit')) throw new Error(`git log did not return the commit: ${log}`);
 
+    const baseBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: gitRepo,
+      encoding: 'utf8',
+    }).trim();
+
+    // Merge fixture: an additive feature branch merged through the pinned git
+    // MCP server. Branch creation uses the CLI; the merge itself is tools/call.
+    execFileSync('git', ['checkout', '-q', '-b', 'smoke-feature'], { cwd: gitRepo });
+    await writeFile(join(gitRepo, 'FEATURE.md'), '# Feature\n');
+    await call(gitClient, 'git_add', {
+      path: gitRepo,
+      [filesKey]: ['FEATURE.md'],
+    });
+    await call(gitClient, 'git_commit', {
+      path: gitRepo,
+      [messageKey]: 'smoke feature commit',
+    });
+    execFileSync('git', ['checkout', '-q', baseBranch], { cwd: gitRepo });
+
+    const mergeTool = toolByName(gitTools, 'git_merge');
+    const mergeProperties = Object.keys(mergeTool.inputSchema?.properties ?? {});
+    const branchKey = ['branch', 'branchName', 'source', 'ref'].find((key) =>
+      mergeProperties.includes(key),
+    );
+    if (!branchKey) throw new Error('git_merge has no discoverable branch argument');
+    const merge = textOf(
+      await call(gitClient, 'git_merge', {
+        path: gitRepo,
+        [branchKey]: 'smoke-feature',
+        noFastForward: true,
+        message: 'smoke merge',
+      }),
+    );
+    const mergedLog = textOf(await call(gitClient, 'git_log', logArgs));
+    if (!mergedLog.includes('smoke merge') && !mergedLog.includes('smoke feature commit')) {
+      throw new Error(`git merge did not record the feature: ${merge} / ${mergedLog}`);
+    }
+    // Conflict fixture: both branches edit the same concept file, then the
+    // conflict is resolved with a real filesystem MCP write and committed.
+    execFileSync('git', ['checkout', '-q', '-b', 'smoke-conflict'], { cwd: gitRepo });
+    await writeFile(join(gitRepo, 'README.md'), '# Conflict branch\n');
+    await call(gitClient, 'git_add', { path: gitRepo, [filesKey]: ['README.md'] });
+    await call(gitClient, 'git_commit', { path: gitRepo, [messageKey]: 'conflict branch commit' });
+    execFileSync('git', ['checkout', '-q', baseBranch], { cwd: gitRepo });
+    await writeFile(join(gitRepo, 'README.md'), '# Main branch\n');
+    await call(gitClient, 'git_add', { path: gitRepo, [filesKey]: ['README.md'] });
+    await call(gitClient, 'git_commit', { path: gitRepo, [messageKey]: 'main branch commit' });
+    const conflict = await callAllowError(gitClient, 'git_merge', {
+      path: gitRepo,
+      [branchKey]: 'smoke-conflict',
+    });
+    if (!conflict.isError && !/conflict/i.test(conflict.text)) {
+      throw new Error(`expected a merge conflict, got: ${conflict.text}`);
+    }
+
+    // A second filesystem MCP server scoped to the temp repo resolves the
+    // conflict through tools/call; no repository or user file is touched.
+    const repoFsClient = new McpClient('filesystem-repo', NPX, ['-y', FS_PACKAGE, gitRepo]);
+    await repoFsClient.initialize();
+    await call(repoFsClient, 'write_file', {
+      path: join(gitRepo, 'README.md'),
+      content: '# Smoke resolved\n',
+    });
+    await call(gitClient, 'git_add', { path: gitRepo, [filesKey]: ['README.md'] });
+    const resolved = textOf(
+      await call(gitClient, 'git_commit', { path: gitRepo, [messageKey]: 'resolve smoke conflict' }),
+    );
+    if (!resolved.includes('resolve smoke conflict')) {
+      throw new Error(`conflict resolution commit missing: ${resolved}`);
+    }
+
     console.log(`filesystem: ${fsTools.length} tools; write/read/edit/search OK`);
-    console.log(`git: ${gitTools.length} tools; status/add/commit/log OK`);
+    console.log(`git: ${gitTools.length} tools; status/add/commit/log/merge OK`);
+    console.log('capability matrix (real stdio, pinned servers):');
+    console.log('  read:   read_text_file  -> read-back asserted');
+    console.log('  write:  write_file      -> read-back asserted');
+    console.log('  edit:   edit_file       -> read-back asserted');
+    console.log('  commit: git_commit      -> message asserted in commit + log');
+    console.log('  merge:  git_merge       -> additive merge + conflict detection + resolved commit asserted');
     console.log('MCP smoke: PASS');
   } finally {
     fsClient?.close();
     gitClient?.close();
+    repoFsClient?.close();
     await rm(fsRoot, { recursive: true, force: true });
     await rm(gitRepo, { recursive: true, force: true });
   }
+  // npx.cmd spawns a process tree on Windows; killing the shell can leave
+  // inherited pipes open. Exit explicitly once all assertions have passed.
+  process.exit(0);
 }
 
 main().catch((error) => {

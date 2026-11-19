@@ -447,3 +447,9 @@ jobs:
 
       - name: Lint knowledge base
         run: go run ./cmd/knowledge-lint -root .
+
+      # OSS-24: reproducible stdio capability matrix for the pinned MCP
+      # servers. This proves the protocol surface only; Zed-editor end-to-end
+      # use remains an interactive, human-owned verification step.
+      - name: MCP stdio capability smoke
+        run: node scripts/mcp-smoke.mjs
