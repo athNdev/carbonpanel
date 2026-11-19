@@ -499,7 +499,7 @@ overlay_csp_safe_webapp() {
 	# area as a few pixels in a black void. Start the map zoomed into the real
 	# generated tiles using BlueMap's own startLocation setting. This changes
 	# only the initial camera, never the real settings.json map list or tiles.
-	start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:45:0:0:0:0:perspective}"
+	start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:15:0:0:0:0:perspective}"
 	settings_tmp="${DATA}/config/bluemap-settings.json"
 	if [ -f "${web}/settings.json" ]; then
 		START_LOCATION="${start_location}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);j.startLocation=process.env.START_LOCATION;process.stdout.write(JSON.stringify(j))}catch(e){process.exit(1)}})' \
