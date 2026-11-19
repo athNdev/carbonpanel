@@ -326,6 +326,10 @@ type ClientConfig struct {
 	// WorldQuotaMB refuses create when measured world bytes meet or exceed
 	// this many mebibytes. 0 disables. Not a daemon or xfs world quota.
 	WorldQuotaMB int64
+	// RequirePinnedImages makes the runtime preflight fatal for an unpinned
+	// Minecraft image. It is the docker.require_pinned_digests opt-in; the
+	// default keeps mutable tags working.
+	RequirePinnedImages bool
 }
 
 type ContainerLogStreamer interface {
@@ -1127,7 +1131,7 @@ func (c *Client) CreateContainer(ctx context.Context, server *models.Server, ser
 	// create anything. An unsupported image/runtime combination must fail here
 	// with a specific reason instead of boot-looping in the container or
 	// replacing a container that was working.
-	spec := runtimeSpecFor(imageName, dataPath, server, config, hostConfig)
+	spec := runtimeSpecFor(imageName, dataPath, server, config, hostConfig, c.config.RequirePinnedImages)
 	if server != nil {
 		spec.RequestedMemoryMB = int64(server.Memory)
 	}

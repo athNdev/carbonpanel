@@ -170,7 +170,7 @@ jobs:
 
       - name: Upload full lint report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: full-lint-${{ github.sha }}
           path: validation/lint/
@@ -206,7 +206,7 @@ jobs:
 
       - name: Upload vulnerability scan and policy result
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: govulncheck-${{ github.sha }}
           path: validation/vuln/
@@ -308,14 +308,16 @@ jobs:
       - name: Production Vite Build
         run: bun run build
 
-  # Real-Chromium keyboard/accessibility journey over the shared component
-  # fixture. Kept as its own job so the ordinary unit/build gate above stays
-  # fast; this job uses the repository's existing owned review-browser harness
-  # and an owned runner-temp browser cache (no global install or GC).
+  # Real-Chromium keyboard/accessibility journeys: the shared component fixture
+  # and real application routes served from the production static build (the
+  # assets the Go binary embeds) with RPCs seeded at the network boundary. Kept
+  # as its own job so the ordinary unit/build gate above stays fast; this job
+  # uses the repository's existing owned review-browser harness and an owned
+  # runner-temp browser cache (no global install or GC).
   test-frontend-a11y:
     name: Frontend Accessibility Journey (Chromium)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     steps:
       - name: Configure private browser cache
@@ -338,6 +340,12 @@ jobs:
         working-directory: web/carbon-panel
         run: bun install --frozen-lockfile
 
+      # The route journey drives the packaged bundle, not a dev server. Build
+      # the real SvelteKit output before launching the loopback static server.
+      - name: Production frontend build for packaged routes
+        working-directory: web/carbon-panel
+        run: bun run build
+
       - name: Install browser harness
         working-directory: scripts/manual-review/e2e
         run: bun install --frozen-lockfile
@@ -346,9 +354,67 @@ jobs:
         working-directory: scripts/manual-review/e2e
         run: bunx playwright install --with-deps chromium
 
-      - name: Exercise keyboard, focus and reflow in Chromium
+      - name: Exercise component and packaged-route accessibility in Chromium
         working-directory: scripts/manual-review/e2e
         run: node a11y-check.mjs
+
+      # OSS-245/OSS-185 named diagnostics fixture: stale console responses,
+      # AUTH_FAIL sign-out, non-idempotent requests and recreated subscriptions.
+      - name: Diagnostics reconnect fixture (Chromium)
+        working-directory: web/carbon-panel
+        env:
+          OSS245_LIVE_BROWSER: '1'
+        run: bun test --conditions=browser e2e/oss-245-diagnostics-reconnect.spec.ts
+
+  # Optional cross-engine smoke: the same packaged routes (dashboard, players,
+  # world library) under both themes at 1440/360, driven in Firefox and WebKit
+  # with the locked review driver and an owned runner-temp browser cache. This
+  # is a smoke check, not a claim of full cross-engine coverage.
+  test-frontend-a11y-cross-engine:
+    name: Frontend Route Accessibility Smoke (Firefox/WebKit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Configure private browser cache
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/carbonpanel-a11y-browsers" >> "$GITHUB_ENV"
+
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+
+      - name: Install frontend dependencies
+        working-directory: web/carbon-panel
+        run: bun install --frozen-lockfile
+
+      - name: Production frontend build for packaged routes
+        working-directory: web/carbon-panel
+        run: bun run build
+
+      - name: Install browser harness
+        working-directory: scripts/manual-review/e2e
+        run: bun install --frozen-lockfile
+
+      - name: Install Firefox and WebKit into the owned cache
+        working-directory: scripts/manual-review/e2e
+        run: bunx playwright install --with-deps firefox webkit
+
+      - name: Smoke packaged routes in Firefox
+        working-directory: scripts/manual-review/e2e
+        run: node a11y-check.mjs --engine=firefox
+
+      - name: Smoke packaged routes in WebKit
+        working-directory: scripts/manual-review/e2e
+        run: node a11y-check.mjs --engine=webkit
 
   test-landing:
     name: Landing Page Checks

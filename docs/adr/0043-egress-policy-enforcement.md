@@ -55,6 +55,17 @@ directory, so the old target stays intact. This is the same staged-publish
 contract as the bounded storage stream (ADR 0013) applied to the
 controller-local save path.
 
+## Addendum — remote modpack imports (OSS-369 closeout)
+
+`ImportRemoteModpack` had kept the pre-ADR bare `allowPrivate` boolean from the
+request's `allow_private_network` field. A controller-scoped library import has
+no destination server or node whose identity could bind that flag, so it now
+uses the archive class with an empty node name: RFC1918 targets are refused no
+matter what the caller requests, and the client policy revalidates redirects.
+The UI and MCP tool never exposed that field; direct callers that used it to
+reach a LAN host must use a public URL or the upload path. Rejected URLs and
+import logs are redacted, so credentials embedded in a URL cannot be reflected.
+
 ## Alternatives
 
 Keeping a single boolean with three named constants was smaller but left the

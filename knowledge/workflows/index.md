@@ -4,6 +4,7 @@
 
 ## Concepts
 
+- [Acceptance evidence and closure](acceptance-evidence.md) — How an OSS work item is blocked from Done and what evidence must be recorded before closure is claimed.
 - [Add an RPC](add-rpc.md) — The order of changes for a new API method, from proto to permission mapping and console client.
 - [Database migration](db-migration.md) — How to change the SQLite schema without risking existing controller or user data.
 - [Development](development.md) — The canonical Bun launcher owns development process trees and selects explicit loopback or LAN listener profiles.

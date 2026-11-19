@@ -149,6 +149,12 @@ type DockerConfig struct {
 	// created but the database no longer knows about. Disabled by default:
 	// orphaned, legacy and foreign containers are quarantined and left running.
 	ReconcilePurgeOrphans bool `mapstructure:"reconcile_purge_orphans" json:"reconcile_purge_orphans"`
+	// RequirePinnedDigests is the B-09 opt-in strict provenance mode: a
+	// Minecraft server whose resolved image reference is a tag, not
+	// name@sha256:<digest>, fails runtime preflight. The registry digest is
+	// recorded for every image regardless of this flag; strict mode only
+	// changes the moving-tag finding from a warning into a fatal refusal.
+	RequirePinnedDigests bool `mapstructure:"require_pinned_digests" json:"require_pinned_digests"`
 }
 
 type StorageConfig struct {

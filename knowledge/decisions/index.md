@@ -8,11 +8,13 @@
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
+- [Console log buffer ownership](console-buffer-ownership.md) — A delayed log listing or WebSocket snapshot can only write the viewed buffer while it still owns the displayed server and the latest request.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
-- [Frontend accessibility coverage](frontend-a11y-coverage.md) — Component accessibility is tested in a real DOM and a real Chromium journey, not by matching source text.
+- [Frontend accessibility coverage](frontend-a11y-coverage.md) — Component and real application-route accessibility are tested in a real DOM and a real Chromium journey, not by matching source text.
 - [Frontend server inventory ownership](server-inventory.md) — Server reads, lifecycle requests and status presentation share generation guards and account-scoped state.
 - [Geyser safe bind default](geyser-safe-bind.md) — A standalone Geyser entrypoint defaults to a loopback Bedrock bind; an explicit BEDROCK_ADDRESS is the opt-in to wider exposure.
 - [Homepage UI fragments](homepage-fragments.md) — Render real panel feature components as isolated, browser-local homepage examples.
+- [Image digest provenance](image-digest-provenance.md) — Resolved registry digests are recorded for every image; strict pinning is an opt-in runtime preflight, never a default.
 - [Instance owned proxy test sockets](test-listeners.md) — Proxy tests inject instance-owned socket factories and reject non-loopback binds before reaching the operating system.
 - [Library adoption fencing](library-adoption-fencing.md) — Compatibility approval is tuple-bound, binding outcomes keep their reported label, and an unmanaged target is never guessed from a folder name.
 - [MCP capability qualification](mcp-capability-qualification.md) — A stable MCP tool catalog reports old-controller RPC gaps as structured capability errors instead of hiding tools or switching channels.
@@ -21,7 +23,7 @@
 - [MCP upload/commit family seam](mcp-upload-commit-family.md) — Upload and commit operations are exposed as lane-owned typed tools and a composed bounded-stream path whose descriptors are handed to the integration owner, never wired directly into shared catalog files.
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
-- [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields and staging policy.
+- [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields, staging policy, and explicit malformed-JSON reporting.
 - [Module sidecar confinement parity](module-confinement-parity.md) — Module sidecars inherit the game-container HostConfig baseline; one named, permission-gated profile is the only relaxation.
 - [Named egress classes](egress-class-policy.md) — Provider, webhook and archive outbound requests use class-specific policy objects; loopback is a test-only opt-in and remote saves are staged.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
@@ -38,4 +40,4 @@
 - [Shared provider request adapters](provider-adapters.md) — Modrinth and CurseForge request construction is shared while browse and Packwiz retain their presentation and version-selection policies.
 - [Staged proto generation](proto-generation.md) — Generate and format proto outputs before replacing owned trees, and keep dependency installation frozen.
 - [Website and documentation publication](website-docs.md) — Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.
-- [WebSocket connection lifetime](websocket-lifetime.md) — Socket callbacks and timers belong to one connection generation, and subscriptions retain their requested tail on reconnect.
+- [WebSocket connection lifetime](websocket-lifetime.md) — Socket callbacks and timers belong to one connection generation, subscriptions retain their requested tail on reconnect, and AUTH_FAIL ends in a signed-out state rather than a retry loop.

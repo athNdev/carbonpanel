@@ -63,6 +63,18 @@ type Asset struct {
 	Note        string // Actionable explanation when unavailable; empty otherwise.
 }
 
+// cacheClock abstracts the clock used for cache TTL decisions. Production uses
+// realClock (wall time, unchanged); tests inject a controllable clock through
+// the same constructor so TTL boundaries can be asserted deterministically
+// without sleeping or depending on scheduler timing.
+type cacheClock interface {
+	Now() time.Time
+}
+
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now().UTC() }
+
 // Cache is a bounded, on-disk skin cache. It is safe for concurrent use.
 // All paths are derived from a sha256 key; no caller-controlled string ever
 // becomes a path component.
@@ -70,6 +82,7 @@ type Cache struct {
 	dir     string
 	ttl     time.Duration
 	client  *http.Client
+	clock   cacheClock
 	initErr error
 
 	mu        sync.Mutex
@@ -85,8 +98,16 @@ type Cache struct {
 // so a wrapper cannot re-inject credentials. Network calls are bounded by ctx
 // as well as by the client timeout.
 func NewCache(dir string, ttl time.Duration, client *http.Client) *Cache {
+	return newCache(dir, ttl, client, realClock{})
+}
+
+// newCache is the single constructor. NewCache supplies the real wall clock;
+// tests supply a controllable clock over the identical production path, so no
+// product behavior or TTL value is special-cased for tests.
+func newCache(dir string, ttl time.Duration, client *http.Client, clock cacheClock) *Cache {
 	c := &Cache{
 		client: client,
+		clock:  clock,
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
 	}

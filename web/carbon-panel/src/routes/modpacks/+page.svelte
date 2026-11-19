@@ -56,6 +56,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { debounce } from 'lodash-es';
 	import { uploadFile, cancelUpload, type UploadProgress } from '$lib/utils/chunked-upload';
 	import { formatBytes } from '$lib/utils';
+	import { parsePersistedStringArray } from '$lib/features/modpacks/persisted-json';
 
 	let searchParams = $state<SearchModpacksRequest>(
 		create(SearchModpacksRequestSchema, {
@@ -277,11 +278,17 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	function parseJsonArray(jsonStr: string): string[] {
-		try {
-			return JSON.parse(jsonStr);
-		} catch {
-			return [];
-		}
+		return parsePersistedStringArray(jsonStr).values;
+	}
+
+	// Malformed persisted metadata is no longer silent: valid values render
+	// exactly as before, but an unparseable loader/version field is reported on
+	// the card. This is explicit tolerant decoding, not validation or repair.
+	function hasMalformedMetadata(modpack: IndexedModpack): boolean {
+		return (
+			parsePersistedStringArray(modpack.modLoaders).malformed ||
+			parsePersistedStringArray(modpack.gameVersions).malformed
+		);
 	}
 
 	async function handleModpackUpload(event: Event) {
@@ -692,6 +699,16 @@ one at https://mozilla.org/MPL/2.0/.
 					<p class="line-clamp-2 min-h-8 text-xs text-muted-foreground">
 						{modpack.summary || 'No summary available for this modpack.'}
 					</p>
+
+					{#if hasMalformedMetadata(modpack)}
+						<p
+							class="font-mono text-xs text-destructive-text"
+							data-testid="modpack-metadata-malformed"
+							title="Stored loader/version metadata is not valid JSON and cannot be displayed. The entry was not changed."
+						>
+							Metadata unreadable
+						</p>
+					{/if}
 
 					<!-- Loaders & Versions -->
 					<div class="space-y-1.5 pt-1">

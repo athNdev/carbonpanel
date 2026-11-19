@@ -14,6 +14,8 @@ import {
 	volumesToJson,
 	parseEnvVars,
 	parseVolumes,
+	parseEnvVarsDetailed,
+	parseVolumesDetailed,
 	parsePorts,
 	parseDependencies,
 	parseEventHooks,
@@ -60,6 +62,35 @@ test('malformed persisted JSON keeps the existing explicit empty-row fallback', 
 	for (const raw of ['', '{invalid', 'null', '{}', '[null]'])
 		assert.deepEqual(parseVolumes(raw), []);
 	assert.deepEqual(parseEnvVars('["legacy"]'), [{ key: '0', value: 'legacy' }]);
+});
+
+test('detailed codecs report malformed persisted JSON without changing valid rows', () => {
+	// Valid input: byte-for-byte the same rows, with an explicit not-malformed flag.
+	assert.deepEqual(parseEnvVarsDetailed('{"A":" value "}'), {
+		rows: [{ key: 'A', value: ' value ' }],
+		malformed: false
+	});
+	assert.deepEqual(
+		parseVolumesDetailed(
+			'[{"source":"/data/a","target":"/a","read_only":true,"create_dir":false}]'
+		),
+		{
+			rows: [{ hostPath: '/data/a', containerPath: '/a', readOnly: true, createDir: false }],
+			malformed: false
+		}
+	);
+	// Blank fields (including whitespace) mean "absent", as before.
+	assert.deepEqual(parseEnvVarsDetailed(''), { rows: [], malformed: false });
+	assert.deepEqual(parseVolumesDetailed(''), { rows: [], malformed: false });
+	assert.deepEqual(parseEnvVarsDetailed('   '), { rows: [], malformed: false });
+	assert.deepEqual(parseVolumesDetailed('   '), { rows: [], malformed: false });
+	// Non-blank invalid JSON keeps the empty-row fallback AND is now explicit.
+	assert.deepEqual(parseEnvVarsDetailed('{invalid'), { rows: [], malformed: true });
+	assert.deepEqual(parseVolumesDetailed('{invalid'), { rows: [], malformed: true });
+	assert.deepEqual(parseEnvVarsDetailed('null'), { rows: [], malformed: true });
+	assert.deepEqual(parseVolumesDetailed('null'), { rows: [], malformed: true });
+	assert.equal(parseEnvVars('{invalid').length, 0);
+	assert.equal(parseVolumes('{invalid').length, 0);
 });
 
 test('instance rows are independent copies with the original numeric and protocol defaults', () => {

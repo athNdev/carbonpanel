@@ -40,9 +40,9 @@ def chunk(kind: bytes, body: bytes) -> bytes:
     )
 
 
-def fake_png(width: int = 320, height: int = 320, pad: int = 6000, seed: bytes = b"fixture") -> bytes:
+def fake_png(width: int = 320, height: int = 320, pad: int = 6000, seed: bytes = b"fixture", color=(40, 90, 160)) -> bytes:
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    row = b"\x00" + bytes([40, 90, 160]) * width
+    row = b"\x00" + bytes(color) * width
     idat = zlib.compress(row * height, 6)
     text = b"Comment\x00" + (seed + b"-" * pad)[:pad]
     return (
@@ -128,6 +128,30 @@ class ShowcaseAssetsTest(unittest.TestCase):
                 run_id='1', run_url='u', captured_at='2026-11-19T00:00:00Z',
                 app_version='review', driver_version='1', browser_version='1',
                 features='players',
+            ))
+
+    def test_black_rendered_map_canvas_is_rejected(self) -> None:
+        plan = {
+            'steps': [
+                {'screenshot': 'showcase-world-view', 'name': 'rendered map'},
+            ]
+        }
+        self.plan.write_text(json.dumps(plan), encoding='utf-8')
+        (self.images / 'showcase-world-view.png').write_bytes(
+            fake_png(color=(0, 0, 0))
+        )
+        sa.build(sa.argparse.Namespace(
+            images_dir=str(self.images), publish_dir=str(self.publish / 'map'),
+            plan=str(self.plan), seed_script=str(self.seed), source_sha='a' * 40,
+            source_ref='refs/heads/main', repository='athNdev/carbonpanel',
+            run_id='1', run_url='u', captured_at=datetime.now(timezone.utc).isoformat(),
+            app_version='review', driver_version=REVIEW_DRIVER_VERSION,
+            browser_version='1', features='worlds',
+        ))
+        with self.assertRaisesRegex(sa.AssetError, 'blank'):
+            sa.validate(sa.argparse.Namespace(
+                publish_dir=str(self.publish / 'map'), plan=str(self.plan),
+                expected_source_sha='a' * 40, features='worlds', max_age_hours=12,
             ))
 
     def test_thin_strip_crop_is_rejected(self) -> None:

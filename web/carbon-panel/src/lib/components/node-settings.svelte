@@ -525,16 +525,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <div class="space-y-4">
 	<!-- Header panel: section title, node actions, and cluster summary -->
-	<CarbonTile class="overflow-hidden rounded-none !border-[#393939] !bg-[#262626] !p-0">
+	<CarbonTile class="overflow-hidden rounded-none !border-border !bg-card !p-0">
 		<div class="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
 			<div class="min-w-0">
 				<div class="flex items-center gap-2">
-					<Layers class="h-4 w-4 shrink-0 text-[#78a9ff]" />
-					<h2 class="truncate font-sans text-base font-semibold text-[#f4f4f4]">
+					<Layers class="h-4 w-4 shrink-0 text-accent-text" />
+					<h2 class="truncate font-sans text-base font-semibold text-foreground">
 						Docker Daemons & Nodes
 					</h2>
 				</div>
-				<p class="mt-1 max-w-2xl font-sans text-xs text-[#8d8d8d]">
+				<p class="mt-1 max-w-2xl font-sans text-xs text-muted-foreground">
 					Configure multiple remote Docker daemons for distributed container execution and load
 					balancing.
 				</p>
@@ -575,38 +575,38 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 		{#if !loading}
 			<!-- One-line cluster summary; 1px gaps paint the dividers -->
-			<div class="grid grid-cols-2 gap-px border-t border-[#393939] bg-[#393939] sm:grid-cols-4">
-				<div class="bg-[#262626] px-5 py-3">
-					<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+			<div class="grid grid-cols-2 gap-px border-t border-border bg-secondary sm:grid-cols-4">
+				<div class="bg-card px-5 py-3">
+					<p class="font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase">
 						Nodes
 					</p>
-					<p class="mt-0.5 font-mono text-base font-semibold text-[#f4f4f4]">
+					<p class="mt-0.5 font-mono text-base font-semibold text-foreground">
 						{nodeSummary.total}
 					</p>
 				</div>
-				<div class="bg-[#262626] px-5 py-3">
-					<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+				<div class="bg-card px-5 py-3">
+					<p class="font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase">
 						Online
 					</p>
-					<p class="mt-0.5 font-mono text-base font-semibold text-[#24a148]">
+					<p class="mt-0.5 font-mono text-base font-semibold text-success-text">
 						{nodeSummary.online}
-						<span class="text-sm text-[#8d8d8d]">/ {nodeSummary.total}</span>
+						<span class="text-sm text-muted-foreground">/ {nodeSummary.total}</span>
 					</p>
 				</div>
-				<div class="bg-[#262626] px-5 py-3">
-					<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+				<div class="bg-card px-5 py-3">
+					<p class="font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase">
 						Running Servers
 					</p>
-					<p class="mt-0.5 font-mono text-base font-semibold text-[#f4f4f4]">
+					<p class="mt-0.5 font-mono text-base font-semibold text-foreground">
 						{nodeSummary.runningServers}
-						<span class="text-sm text-[#8d8d8d]">/ {nodeSummary.totalServers}</span>
+						<span class="text-sm text-muted-foreground">/ {nodeSummary.totalServers}</span>
 					</p>
 				</div>
-				<div class="bg-[#262626] px-5 py-3">
-					<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+				<div class="bg-card px-5 py-3">
+					<p class="font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase">
 						Allocated RAM
 					</p>
-					<p class="mt-0.5 font-mono text-base font-semibold text-[#f4f4f4]">
+					<p class="mt-0.5 font-mono text-base font-semibold text-foreground">
 						{formatMemory(nodeSummary.allocatedMemoryMb)}
 					</p>
 				</div>
@@ -616,25 +616,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Nodes List -->
 	{#if loading}
-		<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+		<CarbonTile class="rounded-none !border-border !bg-card !p-0">
 			<div class="flex items-center justify-center px-5 py-16">
 				<CarbonInlineLoading description="Loading Docker nodes..." />
 			</div>
 		</CarbonTile>
 	{:else if nodes.length === 0}
-		<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+		<CarbonTile class="rounded-none !border-border !bg-card !p-0">
 			<div class="flex flex-col items-center justify-center gap-4 px-5 py-16 text-center">
-				<div
-					class="flex h-12 w-12 items-center justify-center border border-[#393939] bg-[#161616]"
-				>
-					<Server class="h-6 w-6 text-[#8d8d8d]" />
+				<div class="flex h-12 w-12 items-center justify-center border border-border bg-background">
+					<Server class="h-6 w-6 text-muted-foreground" />
 				</div>
 				<div class="space-y-1">
-					<p class="font-mono text-[11px] tracking-wider text-[#8d8d8d] uppercase">
+					<p class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">
 						No nodes registered
 					</p>
-					<h3 class="font-sans text-base font-semibold text-[#f4f4f4]">No Docker nodes found</h3>
-					<p class="mx-auto max-w-md font-sans text-xs text-[#a8a8a8]">
+					<h3 class="font-sans text-base font-semibold text-foreground">No Docker nodes found</h3>
+					<p class="mx-auto max-w-md font-sans text-xs text-muted-foreground">
 						Add a remote Docker host to scale server instances across multiple physical machines, or
 						auto-detect daemons listening on your local network.
 					</p>
@@ -674,13 +672,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					pingInfo?.status === NodeStatus.ERROR || pingInfo?.status === NodeStatus.OFFLINE}
 
 				<CarbonTile
-					class="flex h-full flex-col rounded-none !border-[#393939] !bg-[#262626] !p-0 transition-colors hover:!border-[#525252]"
+					class="flex h-full flex-col rounded-none !border-border !bg-card !p-0 transition-colors hover:!border-[var(--button-secondary-hover)]"
 				>
 					<!-- Identity -->
 					<div class="px-5 pt-4">
 						<div class="flex items-start justify-between gap-3">
 							<h3
-								class="min-w-0 flex-1 truncate font-sans text-sm font-semibold text-[#f4f4f4]"
+								class="min-w-0 flex-1 truncate font-sans text-sm font-semibold text-foreground"
 								title={node.name}
 							>
 								{node.name}
@@ -689,7 +687,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</div>
 						<div class="mt-1 flex items-center justify-between gap-2">
 							<p
-								class="min-w-0 flex-1 truncate font-mono text-[11px] text-[#8d8d8d]"
+								class="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
 								title={node.host}
 							>
 								{node.host}
@@ -709,15 +707,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<div class="flex flex-1 flex-col px-5 pt-4">
 						<div class="grid grid-cols-1 gap-x-4 gap-y-3 min-[380px]:grid-cols-2">
 							<div class="min-w-0">
-								<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+								<p
+									class="font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase"
+								>
 									Servers
 								</p>
 								<p
-									class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm text-[#f4f4f4]"
+									class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm text-foreground"
 								>
 									<span class="whitespace-nowrap">{node.runningCount} / {node.serverCount}</span>
 									{#if node.maxServers > 0}
-										<span class="text-[11px] whitespace-nowrap text-[#8d8d8d]">
+										<span class="text-[11px] whitespace-nowrap text-muted-foreground">
 											MAX {node.maxServers}
 										</span>
 									{/if}
@@ -725,15 +725,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 
 							<div class="min-w-0">
-								<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+								<p
+									class="font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase"
+								>
 									Allocated RAM
 								</p>
 								<p
-									class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm text-[#f4f4f4]"
+									class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm text-foreground"
 								>
 									<span class="whitespace-nowrap">{formatMemory(node.allocatedMemoryMb)}</span>
 									{#if capMb > 0}
-										<span class="text-[11px] whitespace-nowrap text-[#8d8d8d]">
+										<span class="text-[11px] whitespace-nowrap text-muted-foreground">
 											/ {formatMemory(capMb)}
 										</span>
 									{/if}
@@ -741,34 +743,38 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 
 							<div class="min-w-0">
-								<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+								<p
+									class="font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase"
+								>
 									Available RAM
 								</p>
 								<p
 									class="mt-0.5 font-mono text-sm whitespace-nowrap {available.state === 'full'
-										? 'text-[#da1e28]'
+										? 'text-destructive-text'
 										: available.state === 'ok'
-											? 'text-[#24a148]'
-											: 'text-[#8d8d8d]'}"
+											? 'text-success-text'
+											: 'text-muted-foreground'}"
 								>
 									{available.text}{available.state === 'full' ? ' (full)' : ''}
 								</p>
 							</div>
 
 							<div class="min-w-0">
-								<p class="font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase">
+								<p
+									class="font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase"
+								>
 									TLS
 								</p>
 								<p class="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 font-mono text-sm">
 									<span
 										class="whitespace-nowrap {node.tlsEnabled
-											? 'text-[#24a148]'
-											: 'text-[#8d8d8d]'}"
+											? 'text-success-text'
+											: 'text-muted-foreground'}"
 									>
 										{node.tlsEnabled ? 'Enabled' : 'Off'}
 									</span>
 									{#if node.tlsEnabled && node.tlsSkipVerify}
-										<span class="text-[11px] whitespace-nowrap text-[#f1c21b]">SKIP VERIFY</span>
+										<span class="text-[11px] whitespace-nowrap text-warning-text">SKIP VERIFY</span>
 									{/if}
 								</p>
 							</div>
@@ -776,14 +782,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<div class="min-w-0 min-[380px]:col-span-2">
 								<div class="flex items-baseline justify-between gap-3">
 									<p
-										class="shrink-0 font-mono text-[11px] leading-4 tracking-wider text-[#8d8d8d] uppercase"
+										class="shrink-0 font-mono text-[11px] leading-4 tracking-wider text-muted-foreground uppercase"
 									>
 										Advertised IP
 									</p>
 									<p
 										class="min-w-0 truncate font-mono text-[13px] {node.advertisedIp
-											? 'text-[#f4f4f4]'
-											: 'text-[#8d8d8d]'}"
+											? 'text-foreground'
+											: 'text-muted-foreground'}"
 										title={node.advertisedIp || 'Not set'}
 									>
 										{node.advertisedIp || 'Not set'}
@@ -795,7 +801,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<!-- Sharp capacity bar for the memory ceiling -->
 						{#if capMb > 0}
 							<div
-								class="mt-3 h-1 w-full overflow-hidden bg-[#393939]"
+								class="mt-3 h-1 w-full overflow-hidden bg-secondary"
 								role="progressbar"
 								aria-label="{node.name} allocated memory"
 								aria-valuemin="0"
@@ -804,8 +810,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							>
 								<div
 									class="h-full {usedPercent >= 100
-										? 'bg-[#da1e28]'
-										: 'bg-[#0f62fe]'} transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
+										? 'bg-destructive'
+										: 'bg-primary'} transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
 									style="width: {usedPercent}%"
 								></div>
 							</div>
@@ -814,8 +820,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						{#if pingInfo}
 							<p
 								class="mt-2.5 font-mono text-[11px] tracking-wider uppercase {pingFailed
-									? 'text-[#da1e28]'
-									: 'text-[#78a9ff]'}"
+									? 'text-destructive-text'
+									: 'text-accent-text'}"
 							>
 								Last ping {pingInfo.latency} ms
 							</p>
@@ -824,7 +830,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 					<!-- Footer actions, pinned to the bottom of the tile -->
 					<div
-						class="mt-auto flex items-center justify-between gap-2 border-t border-[#393939] px-4 py-1.5"
+						class="mt-auto flex items-center justify-between gap-2 border-t border-border px-4 py-1.5"
 					>
 						<CarbonButton
 							kind="ghost"
@@ -857,7 +863,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<CarbonButton
 									kind="ghost"
 									iconOnly
-									class="hover:text-[#da1e28]"
+									class="hover:text-destructive-text"
 									onclick={() => handleDeleteNode(node)}
 									title="Delete node"
 									aria-label="Delete {node.name}"
@@ -883,14 +889,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 >
 	<div class="max-h-[50vh] space-y-3 overflow-y-auto">
 		{#each detectedDaemons as d (d.host)}
-			<div class="space-y-2 rounded-none border border-[#393939] bg-[#262626] p-3">
+			<div class="space-y-2 rounded-none border border-border bg-card p-3">
 				<div class="flex items-center justify-between gap-2">
 					<div class="min-w-0">
 						<div class="flex items-center gap-2">
-							<CheckCircle2 class="h-4 w-4 shrink-0 text-[#42be65]" />
-							<span class="truncate font-mono text-xs text-[#f4f4f4]" title={d.host}>{d.host}</span>
+							<CheckCircle2 class="h-4 w-4 shrink-0 text-success-text" />
+							<span class="truncate font-mono text-xs text-foreground" title={d.host}>{d.host}</span
+							>
 						</div>
-						<p class="mt-0.5 text-xs text-[#8d8d8d]">
+						<p class="mt-0.5 text-xs text-muted-foreground">
 							{#if d.latencyMs > 0}responded in {d.latencyMs}ms ·
 							{/if}{d.source}
 						</p>
@@ -962,7 +969,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			placeholder="e.g. worker-1"
 			bind:value={newNode.name}
 			disabled={isSaving}
-			class="[&_input]:bg-[#262626]"
+			class="[&_input]:bg-card"
 		/>
 
 		<CarbonTextInput
@@ -972,7 +979,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			bind:value={newNode.host}
 			disabled={isSaving}
 			helperText="Ensure Docker daemon on the host is listening on this socket/address."
-			class="[&_input]:bg-[#262626]"
+			class="[&_input]:bg-card"
 		/>
 
 		<CarbonTextInput
@@ -982,7 +989,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			bind:value={newNode.advertisedIp}
 			disabled={isSaving}
 			helperText="External IP address that players connect to when servers run on this node."
-			class="[&_input]:bg-[#262626]"
+			class="[&_input]:bg-card"
 		/>
 
 		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -996,7 +1003,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				bind:value={newNodeMemoryText}
 				error={newMemoryError}
 				disabled={isSaving}
-				class="[&_input]:bg-[#262626]"
+				class="[&_input]:bg-card"
 			/>
 			<CarbonTextInput
 				id="node-max-srv"
@@ -1007,90 +1014,94 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				bind:value={newNodeServersText}
 				error={newServersError}
 				disabled={isSaving}
-				class="[&_input]:bg-[#262626]"
+				class="[&_input]:bg-card"
 			/>
 		</div>
 
-		<div
-			class="flex items-center justify-between rounded-none border border-[#393939] bg-[#262626] p-3"
-		>
+		<div class="flex items-center justify-between rounded-none border border-border bg-card p-3">
 			<div class="space-y-0.5 pr-4">
-				<label for="node-enabled" class="font-sans text-sm text-[#f4f4f4]">Enable Node</label>
-				<p class="text-xs text-[#8d8d8d]">
+				<label for="node-enabled" class="font-sans text-sm text-foreground">Enable Node</label>
+				<p class="text-xs text-muted-foreground">
 					Allow placement engine to assign servers to this Docker node.
 				</p>
 			</div>
 			<input
 				id="node-enabled"
 				type="checkbox"
-				class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+				class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 				bind:checked={newNode.enabled}
 				disabled={isSaving}
 			/>
 		</div>
 
-		<div class="space-y-3 rounded-none border border-[#393939] bg-[#262626] p-3">
+		<div class="space-y-3 rounded-none border border-border bg-card p-3">
 			<div class="flex items-center justify-between gap-4">
 				<div class="space-y-0.5">
-					<label for="node-tls" class="font-sans text-sm text-[#f4f4f4]">TLS Authentication</label>
-					<p class="text-xs text-[#8d8d8d]">
+					<label for="node-tls" class="font-sans text-sm text-foreground">TLS Authentication</label>
+					<p class="text-xs text-muted-foreground">
 						Use client certificates for mutual TLS docker daemon auth.
 					</p>
 				</div>
 				<input
 					id="node-tls"
 					type="checkbox"
-					class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+					class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 					bind:checked={newNode.tlsEnabled}
 					disabled={isSaving}
 				/>
 			</div>
 
 			{#if newNode.tlsEnabled}
-				<div class="space-y-3 border-t border-[#393939] pt-3">
+				<div class="space-y-3 border-t border-border pt-3">
 					<div class="flex items-center justify-between gap-4">
-						<label for="node-skip-verify" class="text-xs text-[#c6c6c6]"
+						<label for="node-skip-verify" class="text-xs text-muted-foreground"
 							>Skip TLS Certificate Verification</label
 						>
 						<input
 							id="node-skip-verify"
 							type="checkbox"
-							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+							class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 							bind:checked={newNode.tlsSkipVerify}
 							disabled={isSaving}
 						/>
 					</div>
 
 					<div class="space-y-1">
-						<label for="node-ca-cert" class="text-xs text-[#c6c6c6]">CA Certificate (PEM)</label>
+						<label for="node-ca-cert" class="text-xs text-muted-foreground"
+							>CA Certificate (PEM)</label
+						>
 						<textarea
 							id="node-ca-cert"
 							placeholder="-----BEGIN CERTIFICATE-----&#10;..."
 							bind:value={newNode.tlsCaCert}
 							disabled={isSaving}
-							class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+							class="focus-ring h-16 w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-border"
 						></textarea>
 					</div>
 
 					<div class="space-y-1">
-						<label for="node-cert" class="text-xs text-[#c6c6c6]">Client Certificate (PEM)</label>
+						<label for="node-cert" class="text-xs text-muted-foreground"
+							>Client Certificate (PEM)</label
+						>
 						<textarea
 							id="node-cert"
 							placeholder="-----BEGIN CERTIFICATE-----&#10;..."
 							bind:value={newNode.tlsCert}
 							disabled={isSaving}
-							class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+							class="focus-ring h-16 w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-border"
 						></textarea>
 					</div>
 
 					<div class="space-y-1">
-						<label for="node-key" class="text-xs text-[#c6c6c6]">Client Private Key (PEM)</label>
+						<label for="node-key" class="text-xs text-muted-foreground"
+							>Client Private Key (PEM)</label
+						>
 						<textarea
 							id="node-key"
 							placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;..."
 							bind:value={newNode.tlsKey}
 							disabled={isSaving}
-							class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+							class="focus-ring h-16 w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-border"
 						></textarea>
 					</div>
 				</div>
@@ -1141,7 +1152,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				label="Node Name *"
 				bind:value={editingNode.name}
 				disabled={isSaving}
-				class="[&_input]:bg-[#262626]"
+				class="[&_input]:bg-card"
 			/>
 
 			<CarbonTextInput
@@ -1149,7 +1160,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				label="Docker Host URL *"
 				bind:value={editingNode.host}
 				disabled={isSaving}
-				class="[&_input]:bg-[#262626]"
+				class="[&_input]:bg-card"
 			/>
 
 			<CarbonTextInput
@@ -1158,7 +1169,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				placeholder="e.g. 192.168.0.102"
 				bind:value={editingNode.advertisedIp}
 				disabled={isSaving}
-				class="[&_input]:bg-[#262626]"
+				class="[&_input]:bg-card"
 			/>
 
 			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -1172,7 +1183,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					bind:value={editMemoryText}
 					error={editMemoryError}
 					disabled={isSaving}
-					class="[&_input]:bg-[#262626]"
+					class="[&_input]:bg-card"
 				/>
 				<CarbonTextInput
 					id="edit-node-max-srv"
@@ -1183,24 +1194,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					bind:value={editServersText}
 					error={editServersError}
 					disabled={isSaving}
-					class="[&_input]:bg-[#262626]"
+					class="[&_input]:bg-card"
 				/>
 			</div>
 
-			<div
-				class="flex items-center justify-between rounded-none border border-[#393939] bg-[#262626] p-3"
-			>
+			<div class="flex items-center justify-between rounded-none border border-border bg-card p-3">
 				<div class="space-y-0.5 pr-4">
-					<label for="edit-node-enabled" class="font-sans text-sm text-[#f4f4f4]">Enable Node</label
+					<label for="edit-node-enabled" class="font-sans text-sm text-foreground"
+						>Enable Node</label
 					>
-					<p class="text-xs text-[#8d8d8d]">
+					<p class="text-xs text-muted-foreground">
 						Allow placement engine to assign servers to this Docker node.
 					</p>
 				</div>
 				<input
 					id="edit-node-enabled"
 					type="checkbox"
-					class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+					class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 					checked={editingNode.enabled}
 					onchange={(e) => {
 						if (editingNode) editingNode.enabled = e.currentTarget.checked;
@@ -1209,18 +1219,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				/>
 			</div>
 
-			<div class="space-y-3 rounded-none border border-[#393939] bg-[#262626] p-3">
+			<div class="space-y-3 rounded-none border border-border bg-card p-3">
 				<div class="flex items-center justify-between gap-4">
 					<div class="space-y-0.5">
-						<label for="edit-node-tls" class="font-sans text-sm text-[#f4f4f4]"
+						<label for="edit-node-tls" class="font-sans text-sm text-foreground"
 							>TLS Authentication</label
 						>
-						<p class="text-xs text-[#8d8d8d]">Use client certificates for mutual TLS auth.</p>
+						<p class="text-xs text-muted-foreground">
+							Use client certificates for mutual TLS auth.
+						</p>
 					</div>
 					<input
 						id="edit-node-tls"
 						type="checkbox"
-						class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+						class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 						checked={editingNode.tlsEnabled}
 						onchange={(e) => {
 							if (editingNode) editingNode.tlsEnabled = e.currentTarget.checked;
@@ -1230,15 +1242,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				{#if editingNode.tlsEnabled}
-					<div class="space-y-3 border-t border-[#393939] pt-3">
+					<div class="space-y-3 border-t border-border pt-3">
 						<div class="flex items-center justify-between gap-4">
-							<label for="edit-node-skip-verify" class="text-xs text-[#c6c6c6]"
+							<label for="edit-node-skip-verify" class="text-xs text-muted-foreground"
 								>Skip TLS Certificate Verification</label
 							>
 							<input
 								id="edit-node-skip-verify"
 								type="checkbox"
-								class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+								class="focus-ring h-4 w-4 shrink-0 cursor-pointer accent-primary"
 								checked={editingNode.tlsSkipVerify}
 								onchange={(e) => {
 									if (editingNode) editingNode.tlsSkipVerify = e.currentTarget.checked;
@@ -1247,11 +1259,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							/>
 						</div>
 
-						<div class="space-y-2 rounded-none border border-[#393939] bg-[#262626] p-3">
+						<div class="space-y-2 rounded-none border border-border bg-card p-3">
 							<div class="flex flex-wrap items-center justify-between gap-2">
 								<div class="min-w-0 space-y-0.5">
-									<p class="text-xs text-[#c6c6c6]">TLS client credentials</p>
-									<p class="text-xs text-[#8d8d8d]">
+									<p class="text-xs text-muted-foreground">TLS client credentials</p>
+									<p class="text-xs text-muted-foreground">
 										{#if tlsReplaceIntent === 'unchanged'}
 											Stored on the server and never displayed. Saving without a replacement keeps
 											them.
@@ -1282,9 +1294,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</div>
 
 							{#if tlsReplaceIntent === 'replace'}
-								<div class="space-y-3 border-t border-[#393939] pt-3">
+								<div class="space-y-3 border-t border-border pt-3">
 									<div class="space-y-1">
-										<label for="edit-node-ca-cert" class="text-xs text-[#c6c6c6]"
+										<label for="edit-node-ca-cert" class="text-xs text-muted-foreground"
 											>CA Certificate (PEM)</label
 										>
 										<textarea
@@ -1294,17 +1306,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											disabled={isSaving}
 											aria-invalid={tlsErrors.tlsCaCert !== ''}
 											aria-describedby={tlsErrors.tlsCaCert ? 'edit-node-ca-cert-error' : undefined}
-											class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+											class="focus-ring h-16 w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-border"
 										></textarea>
 										{#if tlsErrors.tlsCaCert}
-											<p id="edit-node-ca-cert-error" role="alert" class="text-xs text-[#da1e28]">
+											<p
+												id="edit-node-ca-cert-error"
+												role="alert"
+												class="text-xs text-destructive-text"
+											>
 												{tlsErrors.tlsCaCert}
 											</p>
 										{/if}
 									</div>
 
 									<div class="space-y-1">
-										<label for="edit-node-cert" class="text-xs text-[#c6c6c6]"
+										<label for="edit-node-cert" class="text-xs text-muted-foreground"
 											>Client Certificate (PEM)</label
 										>
 										<textarea
@@ -1314,17 +1330,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											disabled={isSaving}
 											aria-invalid={tlsErrors.tlsCert !== ''}
 											aria-describedby={tlsErrors.tlsCert ? 'edit-node-cert-error' : undefined}
-											class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+											class="focus-ring h-16 w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-border"
 										></textarea>
 										{#if tlsErrors.tlsCert}
-											<p id="edit-node-cert-error" role="alert" class="text-xs text-[#da1e28]">
+											<p
+												id="edit-node-cert-error"
+												role="alert"
+												class="text-xs text-destructive-text"
+											>
 												{tlsErrors.tlsCert}
 											</p>
 										{/if}
 									</div>
 
 									<div class="space-y-1">
-										<label for="edit-node-key" class="text-xs text-[#c6c6c6]"
+										<label for="edit-node-key" class="text-xs text-muted-foreground"
 											>Client Private Key (PEM)</label
 										>
 										<textarea
@@ -1334,10 +1354,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											disabled={isSaving}
 											aria-invalid={tlsErrors.tlsKey !== ''}
 											aria-describedby={tlsErrors.tlsKey ? 'edit-node-key-error' : undefined}
-											class="focus-ring h-16 w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-mono text-xs text-[#f4f4f4] placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+											class="focus-ring h-16 w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:border-border"
 										></textarea>
 										{#if tlsErrors.tlsKey}
-											<p id="edit-node-key-error" role="alert" class="text-xs text-[#da1e28]">
+											<p
+												id="edit-node-key-error"
+												role="alert"
+												class="text-xs text-destructive-text"
+											>
 												{tlsErrors.tlsKey}
 											</p>
 										{/if}

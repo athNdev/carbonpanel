@@ -62,10 +62,10 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	import {
-		parseVolumes,
+		parseVolumesDetailed,
 		envVarsToJson,
 		volumesToJson,
-		parseEnvVars,
+		parseEnvVarsDetailed,
 		metadataToMap,
 		type EnvVar,
 		type VolumeMount,
@@ -98,6 +98,8 @@ one at https://mozilla.org/MPL/2.0/.
 	// Environment variables and volumes as editable arrays
 	let envVars = $state<EnvVar[]>([]);
 	let volumes = $state<VolumeMount[]>([]);
+	let envMalformed = $state(false);
+	let volumesMalformed = $state(false);
 
 	// Port configuration
 	let ports = $state<PortConfig[]>([]);
@@ -230,9 +232,12 @@ one at https://mozilla.org/MPL/2.0/.
 		defaultInitCommandDelay = t.defaultInitCommandDelay;
 		defaultRestartAfterInit = t.defaultRestartAfterInit;
 
-		envVars = parseEnvVars(t.defaultEnv);
-
-		volumes = parseVolumes(t.defaultVolumes);
+		const decodedEnv = parseEnvVarsDetailed(t.defaultEnv);
+		const decodedVolumes = parseVolumesDetailed(t.defaultVolumes);
+		envVars = decodedEnv.rows;
+		volumes = decodedVolumes.rows;
+		envMalformed = decodedEnv.malformed;
+		volumesMalformed = decodedVolumes.malformed;
 
 		ports = t.ports.map((p) => ({
 			name: p.name,
@@ -273,6 +278,8 @@ one at https://mozilla.org/MPL/2.0/.
 		defaultRestartAfterInit = false;
 		envVars = [];
 		volumes = [];
+		envMalformed = false;
+		volumesMalformed = false;
 		ports = [];
 		suggestedDependencies = '';
 		defaultHooks = [];
@@ -724,6 +731,12 @@ one at https://mozilla.org/MPL/2.0/.
 										Use template aliases like {'{{server.data_path}}'} for dynamic values
 									</p>
 								</div>
+								{#if envMalformed}
+									<p class="text-sm text-destructive" data-testid="template-env-malformed">
+										Stored environment JSON was unreadable, so this form started empty. No defaults
+										were changed.
+									</p>
+								{/if}
 								<Button onclick={addEnvVar} class="gap-2">
 									<Plus class="h-4 w-4" />
 									Add Variable
@@ -784,6 +797,12 @@ one at https://mozilla.org/MPL/2.0/.
 										Use template aliases like {'{{module.data_path}}'} for dynamic paths
 									</p>
 								</div>
+								{#if volumesMalformed}
+									<p class="text-sm text-destructive" data-testid="template-volumes-malformed">
+										Stored volume JSON was unreadable, so this form started empty. No mounts were
+										changed.
+									</p>
+								{/if}
 								<Button onclick={addVolume} class="gap-2">
 									<Plus class="h-4 w-4" />
 									Add Volume

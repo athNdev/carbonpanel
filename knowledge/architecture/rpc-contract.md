@@ -48,9 +48,12 @@ The raw validator's HTTP client strips credentials on cross-origin redirects.
 
 Packwiz pack control and staged config rollout are further compatibility
 migrations. Generated `PackwizService` (ListPacks, GetPack, ClonePack,
-RefreshPack, CheckUpdates, DeletePack) and the legacy `/api/v1/packwiz/packs`
-routes share one `handlers.PackwizOperations`; modpacks/read for read methods
-and modpacks/create for mutations use the legacy global `*` scope. Generated
+RefreshPack, CheckUpdates, DeletePack, AddPackMod, AddUrlMod, UpdatePackMod,
+DeletePackMod, BatchPackMods) and the legacy `/api/v1/packwiz/packs` routes
+share one `handlers.PackwizOperations`; modpacks/read for read methods and
+modpacks/create for pack and mod mutations use the legacy global `*` scope.
+The mod-add operation keeps the soft dependency-resolution result so a resolver
+failure does not undo the already-installed requested mod. Generated
 `StagedConfigService` (ListStagedChanges, StageConfigChange, ApplyStagedChange,
 RollbackStagedChange, DiscardStagedChange) and the legacy
 `/api/v1/staged-config/{server}/staged` routes share one
@@ -60,8 +63,10 @@ the generated service re-authorizes the staged record's real owner before
 mutation so a path server cannot mask another owner. Both families fail closed
 with a nil enforcer. Multipart import, upload-session bytes, raw pack files and
 export archives stay on HTTP; create/update/import and migrate/deploy pack
-operations remain adapter-only until a later slice. Legacy routes remain for the
-ADR 0012 window.
+operations remain adapter-only until a later slice. Pack files, datapacks,
+content edits and the unauthenticated loader-version catalog also remain
+adapter-only: they need their own boundary or scope decision rather than a
+mechanical client switch. Legacy routes remain for the ADR 0012 window.
 
 Online mod browse is the second compatibility migration: generated
 `ModBrowseService` (SearchMods, GetModVersions, InstallMods) and the legacy
