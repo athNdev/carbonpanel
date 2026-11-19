@@ -75,6 +75,7 @@
 - [Shared enrollment boundary — Rule + Why](shared-enrollment-boundary-rule.md) — internal/noderuntime/enroll is the SINGLE mode-agnostic production boundary
 - [TCP proxy](proxy.md) — One public TCP port multiplexes Minecraft traffic by inspecting the handshake and routing on hostname.
 - [Unprivileged LXC node artifact lane](node-lxc-artifact.md) — Separate rootfs artifact lane for unprivileged LXC managed nodes; shares the ADR0019 contract and gates on nested-runtime capabilities.
+- [Unprivileged LXC node artifact lane — Qualification and boot evidence](node-lxc-artifact-qual.md) — Fail-closed boot qualification and runtime evidence boundaries for the LXC artifact lane.
 - [Unprivileged LXC node artifact lane — Rule](node-lxc-artifact-rule.md) — The unprivileged LXC / Proxmox rootfs template is a separate artifact lane at
 - [World Library](world-library.md) — Library worlds are immutable content-addressed revisions; servers get private writable clones through journaled, stop-based bindings, never a live folder rename.
 - [World Library — Read next](world-library-read-next.md) — Fail-closed authorization
