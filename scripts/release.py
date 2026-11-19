@@ -2834,12 +2834,85 @@ def verify_channel_docs_cli(args):
     return ok
 
 
+def verify_staged_page_site(site, candidate_commit, candidate_digest,
+                            active_commit, active_digest, stable_source=None):
+    """Fail closed unless a pre-alias Pages artifact preserves the canonical site.
+
+    At the staging phase the public artifact must still serve the full Stable
+    and canonical Nightly site bound to the CURRENT active receipt (matching
+    the registries). The qualified candidate may exist only as the off-path
+    /docs/candidate/<sha>/ probe. A candidate-only site, a stamped canonical
+    marker or a missing canonical route would create an interval where Stable
+    or canonical docs disagree with the registries, so all of those refuse.
+    """
+    root = Path(site)
+    problems = []
+    index_path = root / "version-index.json"
+    if not index_path.is_file():
+        return False, ["staged site has no version-index.json"]
+    try:
+        document = json.loads(index_path.read_text(encoding="utf-8"))
+    except ValueError as error:
+        return False, [f"staged version-index.json is invalid: {error}"]
+    channels = document.get("channels") or {}
+    if set(channels) != set(CHANNEL_NAMES):
+        problems.append("staged site must publish exactly stable and nightly channels")
+    stable = channels.get("stable") or {}
+    nightly = channels.get("nightly") or {}
+    if nightly.get("commit") != active_commit:
+        problems.append("staged canonical nightly commit moved before alias promotion")
+    if (nightly.get("image") or {}).get("digest") != active_digest:
+        problems.append("staged canonical nightly digest moved before alias promotion")
+    if nightly.get("route") != "/docs/nightly/":
+        problems.append("staged nightly route is not the canonical docs route")
+    if stable.get("route") != "/docs/":
+        problems.append("staged stable route is not the canonical docs route")
+    if stable_source is not None:
+        source = stable_source.get("channels", {}).get("stable", {})
+        if (stable.get("commit") != source.get("commit")
+                or (stable.get("image") or {}).get("digest")
+                != (source.get("image") or {}).get("digest")):
+            problems.append("staged stable identity no longer matches the checked-in contract")
+    for page in ("docs/index.html", "docs/nightly/index.html",
+                 "docs/getting-started/proxmox/index.html"):
+        if not (root / page).is_file():
+            problems.append(f"staged canonical page missing: {page}")
+    probe = root / "docs" / "candidate" / candidate_commit / "marker.json"
+    if not probe.is_file():
+        problems.append("off-path candidate probe marker is missing")
+    else:
+        try:
+            marker = json.loads(probe.read_text(encoding="utf-8"))
+        except ValueError as error:
+            return False, [f"candidate probe marker is invalid: {error}"]
+        if not marker_matches(marker, candidate_commit, candidate_digest):
+            problems.append("candidate probe does not match the exact pair")
+    return (not problems), problems
+
+
+def verify_staged_page_site_cli(args):
+    """CLI: verify a pre-alias Pages artifact preserves the canonical site."""
+    stable_source = None
+    if args.stable_source:
+        stable_source = json.loads(Path(args.stable_source).read_text(encoding="utf-8"))
+    ok, problems = verify_staged_page_site(
+        args.site, args.candidate_commit, args.candidate_digest,
+        args.active_commit, args.active_digest, stable_source)
+    values = {"verified": str(ok).lower(), "problems": json.dumps(problems)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Staged page site verification failed: " + "; ".join(problems))
+    return ok
+
+
 # Commands an older target's release.py must contain before any trusted gate
 # may run against it; otherwise the workflow would silently use the wrong script.
 REQUIRED_GATE_COMMANDS = ("channel-transaction", "channel-active-receipt",
                           "channel-rollback", "channel-observe",
                           "stage-channel-marker", "channel-bootstrap-plan",
-                          "fetch-prior-pages", "verify-channel-docs")
+                          "fetch-prior-pages", "verify-channel-docs",
+                          "verify-staged-page-site")
 
 
 def verify_gate_script(path):
@@ -3379,6 +3452,13 @@ def build_parser():
     docs.add_argument("--contains", action="append", default=[])
     docs.add_argument("--excludes", action="append", default=[])
     docs.add_argument("--stable-source", default="")
+    staged_site = commands.add_parser("verify-staged-page-site")
+    staged_site.add_argument("--site", required=True)
+    staged_site.add_argument("--candidate-commit", required=True)
+    staged_site.add_argument("--candidate-digest", required=True)
+    staged_site.add_argument("--active-commit", required=True)
+    staged_site.add_argument("--active-digest", required=True)
+    staged_site.add_argument("--stable-source", default="")
     simulate = commands.add_parser("channel-simulate")
     simulate.add_argument("--candidate", default="{}")
     simulate.add_argument("--previous", default="{}")
@@ -3417,7 +3497,8 @@ def main():
                 "verify-channel-parity": verify_channel_parity_cli,
                 "channel-bootstrap-plan": channel_bootstrap_plan_cli,
                 "fetch-prior-pages": fetch_prior_pages_cli,
-                "verify-channel-docs": verify_channel_docs_cli}
+                "verify-channel-docs": verify_channel_docs_cli,
+                "verify-staged-page-site": verify_staged_page_site_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:

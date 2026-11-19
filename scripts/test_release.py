@@ -2904,5 +2904,90 @@ class ChannelMarkerStagingTests(unittest.TestCase):
                              f"/docs/candidate/{self.COMMIT}/")
 
 
+class ChannelPageStagingTests(unittest.TestCase):
+    """Pre-alias Pages artifacts keep the full canonical site; the candidate
+    pair exists only in the off-path probe until the aliases actually move."""
+
+    ACTIVE_COMMIT = "a" * 40
+    ACTIVE_DIGEST = "sha256:" + "e" * 64
+    CANDIDATE_COMMIT = "c" * 40
+    CANDIDATE_DIGEST = "sha256:" + "d" * 64
+
+    def site(self, directory, nightly_commit=None, nightly_digest=None):
+        root = Path(directory)
+        contract = ChannelPromotionTests().contract(
+            commit=nightly_commit or self.ACTIVE_COMMIT,
+            digest=nightly_digest or self.ACTIVE_DIGEST)
+        (root / "version-index.json").write_text(
+            json.dumps(contract), encoding="utf-8")
+        for page in ("docs/index.html", "docs/nightly/index.html",
+                     "docs/getting-started/proxmox/index.html"):
+            target = root / page
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("<html></html>", encoding="utf-8")
+        return root
+
+    def probe(self, root):
+        release.stage_channel_marker(
+            root, "nightly", self.CANDIDATE_COMMIT, self.CANDIDATE_DIGEST)
+
+    def verify(self, root):
+        return release.verify_staged_page_site(
+            root, self.CANDIDATE_COMMIT, self.CANDIDATE_DIGEST,
+            self.ACTIVE_COMMIT, self.ACTIVE_DIGEST)
+
+    def test_full_site_with_off_path_probe_is_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory)
+            self.probe(root)
+            ok, problems = self.verify(root)
+            self.assertTrue(ok, problems)
+            self.assertEqual(problems, [])
+
+    def test_incomplete_stage_refuses_stamped_canonical_missing_stable_or_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory, nightly_commit=self.CANDIDATE_COMMIT,
+                             nightly_digest=self.CANDIDATE_DIGEST)
+            self.probe(root)
+            ok, problems = self.verify(root)
+            self.assertFalse(ok)
+            self.assertTrue(any("canonical nightly commit moved" in item
+                                for item in problems))
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory)
+            self.probe(root)
+            document = json.loads((root / "version-index.json").read_text(encoding="utf-8"))
+            del document["channels"]["stable"]
+            (root / "version-index.json").write_text(
+                json.dumps(document), encoding="utf-8")
+            ok, problems = self.verify(root)
+            self.assertFalse(ok)
+            self.assertTrue(any("exactly stable and nightly" in item
+                                for item in problems))
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory)  # no off-path probe
+            ok, problems = self.verify(root)
+            self.assertFalse(ok)
+            self.assertTrue(any("probe marker is missing" in item
+                                for item in problems))
+
+    def test_rollback_restores_prior_receipt_and_exact_prior_bytes(self):
+        prior = {"channel": "nightly", "revision": self.ACTIVE_COMMIT,
+                 "digest": self.ACTIVE_DIGEST, "verified": True}
+        values = release.channel_rollback(prior)
+        self.assertEqual(values["digest"], self.ACTIVE_DIGEST)
+        self.assertEqual(values["commit"], self.ACTIVE_COMMIT)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            live = b'{"schema_version": 3, "channels": {"stable": {}, "nightly": {}}}'
+            candidate = root / "artifact"
+            candidate.mkdir()
+            (candidate / "version-index.json").write_bytes(live)
+            target = root / "restored"
+            hint = release.install_prior_pages(candidate, live, target)
+            self.assertTrue(hint["hash"].startswith("sha256:"))
+            self.assertEqual((target / "version-index.json").read_bytes(), live)
+
+
 if __name__ == "__main__":
     unittest.main()
