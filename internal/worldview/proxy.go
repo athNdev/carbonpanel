@@ -10,12 +10,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rbac"
+	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
 // Authenticator, Authorizer and SubuserStore are the narrow seams used by the
@@ -170,7 +172,7 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.proxyAsset(w, r, renderer.ProxyBaseURL(), upstreamAsset)
+	h.proxyAsset(w, r, renderer.ProxyBaseURL(), upstreamAsset, renderer.Type() == v1.RendererType_RENDERER_TYPE_BLUEMAP)
 }
 
 // authorized mirrors the RPC interceptor: role grant first, then the
@@ -196,22 +198,175 @@ func (h *proxyHandler) authorized(ctx context.Context, user *auth.AuthenticatedU
 	return allowed
 }
 
-func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseURL, asset string) {
-	target := strings.TrimRight(baseURL, "/") + "/" + asset
+// blueMapCompressedSuffix is the on-disk compression BlueMap uses for map data
+// (Compression.GZIP carries the ".gz" suffix in the pinned v5.29 source). The
+// webapp has two modes: with clientDecompression it requests the literal ".gz"
+// path and decompresses in the browser (no Content-Encoding); otherwise it
+// requests the plain path and expects the webserver to negotiate gzip through
+// Content-Encoding. Both routes are reproduced here without widening the
+// admitted path set: every auth, session, scope and path gate runs first.
+const blueMapCompressedSuffix = ".gz"
+
+// assetRoute describes the exact upstream request for a browser asset and how
+// its response must be labelled.
+type assetRoute struct {
+	upstreamPath    string
+	contentType     string // empty: keep the upstream value
+	contentEncoding string
+	forceEncoding   bool // true: force contentEncoding, even when it is empty
+}
+
+// literalCompressedRoute handles clientDecompression mode: the browser asks
+// for the literal ".gz" file and decompresses it itself, so the response must
+// NOT carry Content-Encoding. Plain static servers label that file
+// application/gzip; BlueMap's own webserver labels it with the media type of
+// the uncompressed path. We always use the latter, matching BlueMap.
+func literalCompressedRoute(asset string) (assetRoute, bool) {
+	if !strings.HasSuffix(asset, blueMapCompressedSuffix) {
+		return assetRoute{}, false
+	}
+	return assetRoute{
+		upstreamPath:    asset,
+		contentEncoding: "",
+		forceEncoding:   true,
+		contentType:     blueMapContentType(strings.TrimSuffix(asset, blueMapCompressedSuffix)),
+	}, true
+}
+
+// compressedVariant implements BlueMap's exact gzip routing for a plain asset
+// that the upstream answered with 404. BlueMap's own webserver normally
+// answers the plain path itself through Accept-Encoding negotiation, so this
+// is only a fallback for web roots that store the compressed file directly
+// (the CPython http.server used in disposable review stacks is one such root).
+// It is gzip-only because BlueMap v5.29 produces no other compression format.
+func compressedVariant(asset, acceptEncoding string) (assetRoute, bool) {
+	if strings.HasSuffix(asset, blueMapCompressedSuffix) || !acceptsEncoding(acceptEncoding, "gzip") {
+		return assetRoute{}, false
+	}
+	return assetRoute{
+		upstreamPath:    asset + blueMapCompressedSuffix,
+		contentEncoding: "gzip",
+		forceEncoding:   true,
+		contentType:     blueMapContentType(asset),
+	}, true
+}
+
+// isBlueMapMapDataPath limits the compressed route to the map data BlueMap
+// actually stores gzipped: a map's textures.json and its PRBM/PNG tile
+// payloads. Browser assets (index.html, JS, CSS, fonts, locales) and every
+// non-BlueMap renderer keep their existing pass-through behavior.
+func isBlueMapMapDataPath(asset string) bool {
+	clean := strings.TrimPrefix(asset, "/")
+	base := path.Base(clean)
+	if strings.HasPrefix(clean, "maps/") && base == "textures.json" {
+		return true
+	}
+	if strings.Contains(clean, "/tiles/") && (strings.HasSuffix(base, ".prbm") || strings.HasSuffix(base, ".png")) {
+		return true
+	}
+	return false
+}
+
+// acceptsEncoding mirrors BlueMap's own Accept-Encoding check: q=0 refuses a
+// coding and "*" is a wildcard. It only decides whether a gzip variant may be
+// offered; it never participates in authorization.
+func acceptsEncoding(header, encoding string) bool {
+	wildcard := false
+	for _, value := range strings.Split(header, ",") {
+		parts := strings.Split(value, ";")
+		coding := strings.TrimSpace(parts[0])
+		if !strings.EqualFold(coding, encoding) && coding != "*" {
+			continue
+		}
+		q := 1.0
+		for _, param := range parts[1:] {
+			param = strings.TrimSpace(param)
+			if len(param) >= 2 && strings.EqualFold(param[:2], "q=") {
+				if parsed, err := strconv.ParseFloat(strings.TrimSpace(param[2:]), 64); err == nil {
+					q = parsed
+				}
+			}
+		}
+		if q > 0 {
+			if coding == "*" {
+				wildcard = true
+			} else {
+				return true
+			}
+		}
+	}
+	return wildcard
+}
+
+// blueMapContentType is an explicit, OS-independent media-type table for the
+// assets BlueMap serves. mime.TypeByExtension is deliberately avoided: its
+// answer depends on the host's mime.types database and is not portable.
+func blueMapContentType(asset string) string {
+	switch strings.ToLower(path.Ext(asset)) {
+	case ".json", ".webmanifest":
+		return "application/json"
+	case ".prbm":
+		return "application/octet-stream"
+	case ".png":
+		return "image/png"
+	case ".js", ".mjs":
+		return "text/javascript"
+	case ".css":
+		return "text/css"
+	case ".wasm":
+		return "application/wasm"
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".conf", ".txt":
+		return "text/plain; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".ttf":
+		return "font/ttf"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// upstreamRequest builds the renderer request. Accept-Encoding is forwarded so
+// a real BlueMap webserver performs its native negotiation; because the header
+// is set explicitly, Go's transport does not transparently decompress and
+// strip Content-Encoding, so the exact upstream encoding reaches the browser.
+// Conditional validators are never sent: every asset is private and must be
+// re-authenticated, so a cached 304 must never be part of this path.
+func (h *proxyHandler) upstreamRequest(r *http.Request, baseURL, upstreamPath string) (*http.Request, error) {
+	target := strings.TrimRight(baseURL, "/") + "/" + upstreamPath
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
 	upstream, err := http.NewRequestWithContext(r.Context(), r.Method, target, nil)
 	if err != nil {
-		http.Error(w, "invalid renderer asset path", http.StatusForbidden)
-		return
+		return nil, err
 	}
-	// Do not send conditional validators upstream: every asset is private and
-	// must be re-authenticated, so a cached 304 must never be part of this path.
-	for _, name := range []string{"Accept", "Range"} {
+	for _, name := range []string{"Accept", "Range", "Accept-Encoding"} {
 		if v := r.Header.Get(name); v != "" {
 			upstream.Header.Set(name, v)
 		}
+	}
+	return upstream, nil
+}
+
+func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseURL, asset string, blueMap bool) {
+	// Range requests identify a byte range of a specific representation. Never
+	// switch representation (plain <-> gzip) for them: keep the upstream's own
+	// answer and its Range/Content-Range semantics exactly as before.
+	ranged := r.Header.Get("Range") != ""
+	special := blueMap && !ranged
+	route := assetRoute{upstreamPath: asset}
+	if special {
+		if literalRoute, ok := literalCompressedRoute(asset); ok {
+			route = literalRoute
+		}
+	}
+	upstream, err := h.upstreamRequest(r, baseURL, route.upstreamPath)
+	if err != nil {
+		http.Error(w, "invalid renderer asset path", http.StatusForbidden)
+		return
 	}
 	resp, err := h.deps.Client.Do(upstream)
 	if err != nil {
@@ -223,7 +378,28 @@ func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseUR
 		http.Error(w, "renderer unavailable", http.StatusBadGateway)
 		return
 	}
+
+	// A web root that stores BlueMap's compressed file directly has no plain
+	// entry. Retry the exact ".gz" sibling once under the SAME gates and label
+	// it exactly as BlueMap's own webserver would. No other path is admitted;
+	// a failed retry keeps the original 404 so a missing tile never becomes an
+	// empty or black canvas.
+	if resp.StatusCode == http.StatusNotFound && special && isBlueMapMapDataPath(asset) {
+		if variant, ok := compressedVariant(asset, r.Header.Get("Accept-Encoding")); ok {
+			if retry, retryErr := h.upstreamRequest(r, baseURL, variant.upstreamPath); retryErr == nil {
+				if alt, altErr := h.deps.Client.Do(retry); altErr == nil {
+					if alt.StatusCode >= 200 && alt.StatusCode < 300 {
+						_ = resp.Body.Close()
+						resp, route = alt, variant
+					} else {
+						_ = alt.Body.Close()
+					}
+				}
+			}
+		}
+	}
 	defer func() { _ = resp.Body.Close() }()
+
 	// A 304 has no body to stream. Since this proxy never sends validators, a
 	// renderer 304 is anomalous; refuse it explicitly rather than falling into
 	// the generic 3xx branch or writing an empty protected asset.
@@ -245,13 +421,27 @@ func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseUR
 
 	// Only safe, end-to-end headers are forwarded; hop-by-hop headers,
 	// Set-Cookie and renderer-defined security headers never pass through.
+	// Content-Encoding is end-to-end and MUST be relayed: BlueMap's webserver
+	// uses it to serve gzipped tiles/textures with the uncompressed media type.
 	if length := resp.Header.Get("Content-Length"); length != "" {
 		if n, convErr := strconv.ParseInt(length, 10, 64); convErr == nil && n > MaxAssetBytes {
 			http.Error(w, "renderer asset too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 	}
-	for _, name := range []string{"Content-Type", "Content-Range", "Accept-Ranges"} {
+	if route.contentType != "" {
+		w.Header().Set("Content-Type", route.contentType)
+	} else if v := resp.Header.Get("Content-Type"); v != "" {
+		w.Header().Set("Content-Type", v)
+	}
+	if route.forceEncoding {
+		if route.contentEncoding != "" {
+			w.Header().Set("Content-Encoding", route.contentEncoding)
+		}
+	} else if v := resp.Header.Get("Content-Encoding"); v != "" {
+		w.Header().Set("Content-Encoding", v)
+	}
+	for _, name := range []string{"Content-Range", "Accept-Ranges"} {
 		if v := resp.Header.Get(name); v != "" {
 			w.Header().Set(name, v)
 		}

@@ -102,6 +102,88 @@ func TestBlueMapWebServerWithStringMapIDsIsReadyFixture(t *testing.T) {
 	}
 }
 
+// TestBlueMapMissingTexturesIsNotReadyFixture pins the fail-closed readiness
+// rule behind the black-canvas defect: a renderer with a valid map list whose
+// textures.json network response is 404 must not be READY and must not yield
+// a map session. A visible iframe/canvas is not evidence of a viewable map.
+func TestBlueMapMissingTexturesIsNotReadyFixture(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/settings.json" {
+			_, _ = w.Write([]byte(`{"maps":["world"]}`))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/maps/world/") {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"version":"5.29"}`))
+	}))
+	defer ts.Close()
+
+	adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+	h, err := adapter.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.State == v1.RendererState_RENDERER_STATE_READY {
+		t.Fatalf("state = READY although textures.json returned 404; black canvas would be captured")
+	}
+	if h.State != v1.RendererState_RENDERER_STATE_ABSENT {
+		t.Fatalf("state = %s, want ABSENT for unreachable map textures", h.State)
+	}
+	if !strings.Contains(h.Detail, "textures") || strings.Contains(h.Detail, ts.URL) {
+		t.Fatalf("detail = %q, want actionable textures diagnostic without renderer address", h.Detail)
+	}
+}
+
+// TestBlueMapEmptyTexturesIsNotReadyFixture rejects an empty 200 body as well:
+// an empty texture asset is the same black-canvas failure as a 404.
+func TestBlueMapEmptyTexturesIsNotReadyFixture(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/settings.json" {
+			_, _ = w.Write([]byte(`{"maps":["world"]}`))
+			return
+		}
+		_, _ = w.Write(nil)
+	}))
+	defer ts.Close()
+
+	adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+	h, err := adapter.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.State == v1.RendererState_RENDERER_STATE_READY {
+		t.Fatal("state = READY although textures.json was empty")
+	}
+}
+
+// TestBlueMapRealTexturesIsReadyFixture confirms the positive path still
+// reports READY when the map data answers with non-empty bytes.
+func TestBlueMapRealTexturesIsReadyFixture(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/settings.json" {
+			_, _ = w.Write([]byte(`{"maps":["world"]}`))
+			return
+		}
+		if r.URL.Path == "/maps/world/textures.json" {
+			_, _ = w.Write([]byte(`{"textures":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"version":"5.29"}`))
+	}))
+	defer ts.Close()
+
+	adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+	h, err := adapter.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.State != v1.RendererState_RENDERER_STATE_READY {
+		t.Fatalf("state = %s, want READY when real texture bytes are served", h.State)
+	}
+}
+
 // TestBlueMapMalformedMixedMapListFailsClosedFixture preserves the previous
 // malformed-settings failure behavior for mixed/invalid entry shapes. A numeric
 // or otherwise invalid entry must not be ignored in a way that turns a malformed

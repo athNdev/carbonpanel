@@ -8,6 +8,7 @@ package worldview
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -180,6 +181,15 @@ func (a *httpRenderer) Health(ctx context.Context) (*Health, error) {
 		if err != nil || len(ids) == 0 {
 			return blueMapNoMapHealth(err), nil
 		}
+		// A reachable map list is still not a viewable map. BlueMap's webapp
+		// loads /maps/{id}/textures.json on startup; a 404 or an empty body
+		// there produces a black canvas even though the iframe and its canvas
+		// are visible. Require real texture bytes from the network before
+		// reporting READY so a missing resource fails closed at the RPC seam
+		// (no session key is issued) instead of being mistaken for a pass.
+		if err := blueMapTexturesReady(ctx, a.ep.baseURL(), ids[0], a.hc); err != nil {
+			return blueMapNoAssetsHealth(err), nil
+		}
 	}
 
 	h.State = v1.RendererState_RENDERER_STATE_READY
@@ -264,6 +274,57 @@ func blueMapNoMapHealth(err error) *Health {
 	if err != nil {
 		h.Confidence = "unknown"
 		h.Detail = "BlueMap web server is reachable but its configured map list could not be read; configure the target world to finish setup"
+	}
+	return h
+}
+
+// blueMapTexturesReady verifies that the map data the webapp actually loads on
+// startup is reachable over the private renderer endpoint. BlueMap v5.29 stores
+// map data gzipped on disk; its own webserver answers the plain path by
+// negotiating Accept-Encoding: gzip. A plain static web root that only has
+// textures.json.gz answers 404 here, which is exactly the defect that produces
+// a black canvas while a visible-canvas browser assertion still passes.
+// Only HTTP status and a non-empty, bounded body are inspected; the bytes are
+// not parsed and never reach a browser through this probe.
+func blueMapTexturesReady(ctx context.Context, baseURL, mapID string, hc HTTPDoer) error {
+	if strings.TrimSpace(mapID) == "" {
+		return errors.New("empty BlueMap map id")
+	}
+	url := strings.TrimRight(baseURL, "/") + "/maps/" + mapID + "/textures.json"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("textures.json returned HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if len(body) == 0 {
+		return errors.New("textures.json returned an empty body")
+	}
+	return nil
+}
+
+// blueMapNoAssetsHealth reports the honest setup/rendering state when the
+// renderer's map list exists but its network-served map data does not. The
+// renderer address and the underlying error are never echoed to the client.
+func blueMapNoAssetsHealth(err error) *Health {
+	h := &Health{
+		State: v1.RendererState_RENDERER_STATE_ABSENT, Source: "renderer.http.bluemap",
+		Confidence: "detected", Detail: "BlueMap has a configured map but its map textures are not reachable; wait for rendering or fix the renderer web root before opening the map",
+	}
+	if err != nil {
+		h.Confidence = "unknown"
+		h.Detail = "BlueMap has a configured map but its map textures could not be read; wait for rendering or fix the renderer web root before opening the map"
 	}
 	return h
 }

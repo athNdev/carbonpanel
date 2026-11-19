@@ -13,6 +13,8 @@ sources:
     resource: ../../docs/adr/0015-world-viewing-renderer-proxy.md
   - title: ADR 0040 - installed BlueMap discovery, consent and in-context install
     resource: ../../docs/adr/0040-bluemap-installed-module-discovery.md
+  - title: ADR 0048 - BlueMap asset routing and CSP compatibility
+    resource: ../../docs/adr/0048-bluemap-asset-routing-and-csp.md
 ---
 
 # Rule
@@ -53,6 +55,20 @@ fallback and no cross-origin iframe.
   the exact target world in the module config, a rendered scoped tile and the
   renderer's own map list (`/settings.json`); missing facts report setup,
   rendering, stopped, unreachable or error with a next action.
+- A reachable map list is not a viewable map. READY also requires non-empty
+  `textures.json` bytes from the node-local renderer network endpoint; a 404 or
+  empty body reports setup/rendering state and issues no map session. A visible
+  iframe/canvas is never evidence that tiles loaded.
+- BlueMap web assets keep the panel CSP unchanged. The proxy forwards
+  `Accept-Encoding`/`Content-Encoding` for every renderer; only for BlueMap map
+  `textures.json`/tile payloads it retries exactly the `.gz` sibling of a 404
+  and serves literal `.gz` client-decompression paths with the uncompressed
+  media type and no `Content-Encoding`. Ranged requests, other renderers and
+  other paths keep their prior behavior; session/auth/scope and private
+  no-store cache gates are unchanged. Compatibility with `script-src` comes
+  from the pinned BlueMap v5.29 JIT webapp rebuild, not from `unsafe-eval`, a
+  per-route CSP, or a capture-only bypass. See
+  [ADR 0048](../../docs/adr/0048-bluemap-asset-routing-and-csp.md).
 - In-context BlueMap install uses existing ModuleService authorization. It is a
   server-side singleton per server guarded by a controller-PROCESS mutex held
   through persistence: it covers concurrent RPCs/tabs/operators/retries on ONE
