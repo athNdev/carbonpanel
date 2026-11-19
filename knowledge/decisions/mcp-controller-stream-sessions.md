@@ -31,7 +31,16 @@ count; the authoritative final size is `ReadStreamFrameResponse.offset` on
 `done=true`, and composed commit uses those actual bytes, never the declared
 bound. Frames are idempotent by `frame_index` via a small bounded cache, so a
 caller canceled during a remote read can retry the same index without losing a
-frame.
+frame. On the gateway side each session has its own mutex (the registry lock is
+never held across a controller RPC); commit requires a completed stream whose
+controller final SHA equals the locally computed digest. Gateway staging is
+bounded by per-session (8 MiB), aggregate (64 MiB) and session-count (64) caps;
+TTL timers, cancel and successful commit proactively free staged bytes so
+neither memory nor registry entries leak. A one-at-a-time commit lease is
+claimed atomically before any upload mutation: parallel commits of one handle
+get a busy result, the lease pins budget for the whole upload (TTL/cancel cannot
+free bytes still referenced by an in-flight commit), and FinishCommit releases
+exactly once with a deterministic terminal or retryable state.
 A read that returns bytes together with a non-EOF error, or that would exceed
 the declared/staged cap, terminates the session and closes the handle rather
 than returning a retryable error at an advanced offset. A bounded reaper evicts

@@ -147,10 +147,15 @@ func RegisterStreamingTools(s *sdkmcp.Server, c *Clients) {
 		if err := requireID("scoped_stream_commit", "filename", in.Filename); err != nil {
 			return nil, err
 		}
-		data, digest, err := transfer.Frames(cl.owner, in.SessionHandle)
+		// ClaimCommit is the one-at-a-time lease: it pins gateway memory for the
+		// whole upload and refuses a parallel commit of the same handle before
+		// any mutation. FinishCommit always runs exactly once via defer.
+		data, digest, err := transfer.ClaimCommit(cl.owner, in.SessionHandle)
 		if err != nil {
 			return nil, err
 		}
+		committed := false
+		defer func() { transfer.FinishCommit(cl.owner, in.SessionHandle, committed) }()
 		// The declared size is only a bound. A zero-byte stream has nothing to
 		// commit; refuse explicitly instead of presenting a false success.
 		if len(data) == 0 {
@@ -192,6 +197,9 @@ func RegisterStreamingTools(s *sdkmcp.Server, c *Clients) {
 		})); err != nil {
 			return nil, err
 		}
+		// A successful SaveUploadedFile marks the lease successful; the deferred
+		// FinishCommit then frees the pinned budget exactly once.
+		committed = true
 		// len(data) is the ACTUAL transferred byte count (the final frame's
 		// offset), never the declared upper bound returned by scoped_stream_open.
 		return map[string]any{"bytes": len(data), "sha256": digest, "destination": in.Destination,

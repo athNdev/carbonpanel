@@ -61,7 +61,7 @@ func recordingStreamInterceptor() connect.UnaryInterceptorFunc {
 	}
 }
 
-func newControllerStreamFixture(t *testing.T) *controllerStreamFixture {
+func newControllerStreamFixture(t *testing.T, extra ...connect.Interceptor) *controllerStreamFixture {
 	t.Helper()
 	store := newTestStore(t)
 	enforcer, err := rbac.NewEnforcer(store.DB())
@@ -95,7 +95,9 @@ func newControllerStreamFixture(t *testing.T) *controllerStreamFixture {
 
 	// The auth interceptor and the recording interceptor both run on every
 	// controller RPC: real scope enforcement plus real invocation evidence.
-	interceptors := connect.WithInterceptors(ic, recordingStreamInterceptor())
+	chain := []connect.Interceptor{ic, recordingStreamInterceptor()}
+	chain = append(chain, extra...)
+	interceptors := connect.WithInterceptors(chain...)
 	mux := http.NewServeMux()
 	mux.Handle("/carbonpanel.v1.AuthService/GetAuthStatus", connect.NewUnaryHandler(
 		"/carbonpanel.v1.AuthService/GetAuthStatus",
