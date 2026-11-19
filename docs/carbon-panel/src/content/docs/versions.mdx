@@ -3,30 +3,46 @@ title: Documentation version
 description: The application snapshot used to build this documentation.
 ---
 {/* SPDX-License-Identifier: MPL-2.0 */}
-import version from '../../../../website-source.json';
+import contract from '../../../../website-source.json';
 
 ## Current documentation
 
-<p><strong>{version.label}</strong></p>
-<p>Application commit: <a href={version.repository + '/tree/' + version.revision}><code>{version.revision}</code></a></p>
-{version.label.startsWith('v') && (
-  <p>Release: <a href={version.repository + '/releases/tag/' + version.label}>{version.label}</a></p>
-)}
+The website publishes exactly two channels from `docs/website-source.json`:
+**{contract.channels.stable.display}** (the verified
+`{contract.channels.stable.version}` release at `/docs/`) and
+**{contract.channels.nightly.display}** (the rolling, qualified revision at
+`/docs/nightly/`). The public selector uses those two channel names only.
 
-The guides, configuration examples, Compose files, identity-provider examples, and generated API schema are taken from this exact commit. The website's navigation and visual theme can be updated independently.
+Every page shows the exact application commit behind it. The `Pinned to <short>`
+text links to `{contract.repository}/commit/<FULL_SHA>`, never to a generic
+versions index. The same generated index drives the selector, route validation,
+search scoping, canonical URLs and sitemap.
 
-{version.label.startsWith('v')
-  ? `${version.label} is a prerelease. It is a published GitHub release, but not a stable release.`
-  : 'This is a development snapshot, not a published release.'}
+Nightly's image is qualified in both Docker Hub and GHCR at the same digest and
+revision; a Docker Hub baseline is only usable as a recorded bootstrap pending
+GHCR qualification. The promotion gate supplies the exact qualified revision and
+digest as external build input, and the generated site publishes them in
+`channel-marker.json` and the banner's `data-channel-*` attributes. Ordinary
+builds keep the deterministic baseline and never claim a promoted nightly.
+Nightly produces no GitHub Release. Stable keeps the verified `latest`/`stable`
+image and its immutable release tag.
+
+The guides, configuration examples, Compose files, identity-provider examples,
+and generated API schema are taken from the exact pinned commit. The website
+navigation and visual theme may evolve independently.
 
 ## Match your installation
 
-Check the version or commit used to build your installation before following a guide. Later development changes may differ from the snapshot documented here.
-
-The API reference describes the pinned schema. Your running panel remains the authority for the API it actually serves.
+Check the version or commit used to build your installation before following a
+guide. Later development changes may differ from the snapshot documented here.
+The API reference describes the pinned schema; your running panel remains the
+authority for the API it actually serves.
 
 ## Updating the pin
 
-Maintainers update `docs/website-source.json` deliberately, review the guides and examples against that release, and rebuild the complete website. Prefer a published release tag and use the tag as the label; label any other commit as a development snapshot. The site build checks links and generates its API reference from the same source.
-
-Repository pages linked from these docs use the pinned commit where an exact file version is needed.
+Maintainers update `docs/website-source.json` deliberately, review the guides
+and examples against the exact pinned commit, and rebuild the complete website.
+Publication is gated separately: no tag, registry, Pages or release write happens
+from this source change alone. The fail-closed drift checks reject an extra
+channel, a legacy snapshot, a missing or stale digest/revision, a mismatched
+marker or a broken switcher link before a package is produced.

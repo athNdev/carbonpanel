@@ -4,24 +4,7 @@ title: Data safety
 description: Worlds, databases, backups and snapshots are persistent user data and must survive build, development and cleanup commands.
 status: stable
 owners: [oss-runtime]
-code_refs:
-  - internal/snapshot
-  - internal/s3
-  - internal/db
-  - internal/module/manager.go
-  - internal/rpc/services/server.go
-  - internal/worldlib
-  - internal/rpc/services/world.go
-  - Makefile
-  - docker-compose.yml
-  - scripts/snapshot-panel-db.sh
-  - scripts/compose-upgrade.sh
-  - scripts/compose-upgrade-rollback.sh
-  - scripts/web-build.sh
-  - scripts/dev.sh
-  - scripts/review/devstack.sh
-  - internal/docscheck/upgrade_safety_test.go
-  - internal/docscheck/compose_upgrade_test.go
+code_refs: [internal/snapshot, internal/s3, internal/db, internal/module/manager.go, internal/rpc/services/server.go, internal/worldlib, internal/rpc/services/world.go, Makefile, docker-compose.yml, scripts/snapshot-panel-db.sh, scripts/compose-upgrade.sh, scripts/compose-upgrade-rollback.sh, scripts/web-build.sh, scripts/dev.sh, scripts/review/devstack.sh, internal/docscheck/upgrade_safety_test.go, internal/docscheck/compose_upgrade_test.go]
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
@@ -35,92 +18,42 @@ verified: { by: agent:opencode-world-library, at: 2026-11-18 }
 review_after: 2027-01-23
 ---
 
-# Rule
+# Parts
 
-A build, development or cleanup command must preserve server worlds, the
-controller database, backups and snapshots. A destructive operation must be
-explicitly named and separately invoked; it is never a side effect.
+- [Data safety — Rule + Why](data-safety-rule.md) — A build, development or cleanup command must preserve server worlds, the
+- [Data safety — How to check](data-safety-how-to-check.md) — Look for remove, prune, rm, clean or volume deletion in the changed
+- [Data safety — How to check (part 2)](data-safety-how-to-check-2.md) — ExportWorld zips the server directory on the owning node's storage into
+- [Data safety — Review](data-safety-review.md) — Reviewed 2026-10-24 by agent:mimo-v2.6-pro against the code and attested by
 
-# Why
+# Key facts
 
-Worlds and databases are the user's data. Re-creating a container is routine;
-losing a world is not recoverable by rebuilding the controller.
-
-# How to check
-
-- Look for `remove`, `prune`, `rm`, `clean` or volume deletion in the changed
-  path. If it touches a world, backup or database path, stop.
-- `internal/docscheck/upgrade_safety_test.go` must stay green: `make clean`,
-  `make test`, `make build`, `scripts/web-build.sh`, `scripts/dev.sh` and
-  `docker compose down` (without `--volumes`) do not delete worlds or the
-  controller database. `scripts/review/devstack.sh clean` is the named
-  destructive command for the disposable review stack only.
-- Before a controller upgrade, `scripts/snapshot-panel-db.sh` (also
-  `make snapshot-panel-db`) writes a timestamped SQLite copy beside the data
-  directory. Rollback is `scripts/compose-upgrade-rollback.sh` (also
-  `make compose-upgrade-rollback`): copy that file onto `carbon-panel.db` and
-  leave worlds and bind mounts untouched. Ordinary test/build/compose paths
-  must not invoke it.
-- A Compose image upgrade uses `scripts/compose-upgrade.sh` (also
-  `make compose-upgrade`). It recreates the panel with
-  `docker compose up -d --pull always` and never a volumes-deleting compose
-  down. A failed snapshot (disk-full or interrupted copy) stops before `up`.
-  The shipped file bind-mounts data and backups, so worlds survive the
-  container recreate. Helm and Terraform are not shipped.
-- Named destructive cleanup for the disposable review stack is
-  `make review-stack-clean` (`scripts/review/devstack.sh clean`). It is never
-  a side effect of `make clean`, `make test` or `make build`.
-- Backup and restore must be tested; a backup that cannot be restored is not a
-  backup.
-- Remote archive paths must not silently read the controller filesystem.
-- Deleting a server removes its directory on the owning node's storage
-  before the database row. A failed removal keeps the row so the delete
-  can be retried. A remote node without shared storage does not have a
-  controller-local directory removed in its place.
+- The shipped file bind-mounts data and backups, so worlds survive the
+- A build, development or cleanup command must preserve server worlds, the
+- Worlds and databases are the user's data. Re-creating a container is routine;
+- `docker compose down` (without `--volumes`) do not delete worlds or the
+- before the database row. A failed removal keeps the row so the delete
 - Every delete writes a disposition row first and keeps it after the panel
-  row is gone. The row records delete, keep_data, or detach, and it stays
-  unsettled until that choice is recorded. A retry of a delete whose row is
-  already gone only settles that record. It does not delete files again.
-- Panel startup resumes an unsettled disposition. A pending delete continues
-  the original choice. A disposition that already recorded the world outcome
-  only removes the remaining panel row.
+- row is gone. The row records delete, keep_data, or detach, and it stays
 - `DeleteServer` with `keep_data` drops the panel record and container and
-  leaves the world directory where it is. Sidecar module records are
-  dropped without removing their containers, so module volumes are not
-  purged. The audit row records that path.
+- leaves the world directory where it is. Sidecar module records are
 - `DeleteServer` with `detach` leaves the container and the world directory
-  and keeps that server's host port lease. The audit row records the
-  container id and the path. `-operations release-port` frees that lease
-  only after the panel row is gone, and it does not stop the container or
-  delete the world.
-- `ExportWorld` zips the server directory on the owning node's storage into
-  a download and leaves the container, the world, and the panel row in
-  place. Transport-only nodes zip through the injected storage resolver; a node
-  with no worker is refused before a controller-local tree is created.
+- delete the world.
+- controller database, backups and snapshots. A destructive operation must be
+- losing a world is not recoverable by rebuilding the controller.
+- path. If it touches a world, backup or database path, stop.
+- `make snapshot-panel-db`) writes a timestamped SQLite copy beside the data
+- leave worlds and bind mounts untouched. Ordinary test/build/compose paths
+- Named destructive cleanup for the disposable review stack is
+- unsettled until that choice is recorded. A retry of a delete whose row is
+- already gone only settles that record. It does not delete files again.
+- Panel startup resumes an unsettled disposition. A pending delete continues
+- the original choice. A disposition that already recorded the world outcome
+- dropped without removing their containers, so module volumes are not
+- and keeps that server's host port lease. The audit row records the
+- a download and leaves the container, the world, and the panel row in
 - World Library revisions are immutable and bound servers receive private
-  clones. A bind or swap keeps the previous level family until verification
-  succeeds, journals intent before mutating, and never auto-retries an
-  uncertain outcome. Rejecting an import or a swap leaves the live world and
-  the controller database unchanged. See
-  [World Library](../architecture/world-library.md).
-
-# Review
-
-Reviewed `2026-10-24` by `agent:mimo-v2.6-pro` against the code and attested by
-`human:athNdev`:
-
+- clones. A bind or swap keeps the previous level family until verification
+- uncertain outcome. Rejecting an import or a swap leaves the live world and
+- [World Library](../architecture/world-library.md).
 - `make clean` removes only the build binary and states that server data and
-  Docker volumes are preserved; `proto-clean` removes generated proto output.
 - `make help` describes clean as preserving worlds and databases.
-- Compose bind-mounts host data; `docker compose down` without `--volumes`
-  leaves those mounts in place (`docker-compose.yml`).
-- Snapshot retention prunes only expired snapshots and protects the most recent
-  copy (`internal/snapshot/integrity_retention_test.go`).
-- Restore coverage exists in `internal/snapshot`.
-- Upgrade snapshots and copy-back rollback are covered by
-  `internal/docscheck/upgrade_safety_test.go`. Compose bind-mount upgrades,
-  snapshot-failure abort-before-up, copy-back rollback, and the unshipped
-  Helm/Terraform claim are covered by `internal/docscheck/compose_upgrade_test.go`.
-
-The remote archive path gap is tracked in
-[known gaps](../failures/known-gaps.md).

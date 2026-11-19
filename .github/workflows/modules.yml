@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Module version to stage/publish, e.g. mod-v2.0.6 (required when publishing)'
+        description: 'Exact existing Carbon-authored module tag to stage/publish, e.g. mod-v2.1.0 (required when publishing)'
         required: false
         type: string
       publish:
@@ -97,6 +97,13 @@ jobs:
           fi
           python3 scripts/release.py module-version --version "$VERSION"
 
+      # Publication requires an exact, existing Carbon-authored mod-* tag on
+      # this repository (the checks below are the only authority). The retired
+      # inherited mod-* tags are no longer here; their already-published OCI
+      # images are unchanged. A historical rebuild of an inherited release must
+      # use the exact archived/upstream source recorded in release-history.json
+      # (OSS-414 bundles and the discohaus/discopanel refs) and must NOT
+      # reintroduce the retired remote tag.
       - name: Verify the exact version tag for publication
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         env:

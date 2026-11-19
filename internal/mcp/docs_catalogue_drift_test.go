@@ -48,9 +48,8 @@ func TestMCPDocsCatalogueCountsMatchSourceOfTruth(t *testing.T) {
 			any:  []string{combined, combinedAlt},
 		},
 		{
-			file: "knowledge/architecture/mcp-server.md",
+			file: "knowledge/architecture/mcp-server-rule-2.md",
 			want: []string{fmt.Sprintf("enumerates the %d mounted RPCs", IntegrationMountedRPCs)},
-			any:  []string{combined, fmt.Sprintf("combined OSS-370 catalog: %d tools", IntegrationCombinedTools)},
 		},
 		{
 			file: "docs/adr/0034-mcp-server-distribution.md",

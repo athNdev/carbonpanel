@@ -1,8 +1,47 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "repository": "https://github.com/athNdev/carbonpanel",
   "catalog": "docs/release-history.json",
-  "stable_tag": "v1.0.40",
+  "channels": {
+    "stable": {
+      "display": "Stable",
+      "version": "1.0.40",
+      "tag": "v1.0.40",
+      "commit": "f88748be6a216b187e675bbb1f110df07e544148",
+      "image": {
+        "docker_hub": "atharvnaphade/carbonpanel:latest",
+        "ghcr": "ghcr.io/athndev/carbonpanel:latest",
+        "tag": "latest",
+        "stable_alias": "stable",
+        "digest": "sha256:ead260ef33c9a9fa8929097e4e50db02243e8889a74efeb95c8fda622862c001",
+        "revision": "f88748be6a216b187e675bbb1f110df07e544148"
+      },
+      "route": "/docs/",
+      "default": true,
+      "promotion": {"state": "published", "promoted": true}
+    },
+    "nightly": {
+      "display": "Nightly",
+      "tag": null,
+      "commit": "d8597d4e953522d2eb2fa6d4764965ae8e58686f",
+      "image": {
+        "docker_hub": "atharvnaphade/carbonpanel:nightly",
+        "ghcr": "ghcr.io/athndev/carbonpanel:nightly",
+        "tag": "nightly",
+        "digest": "sha256:ecc89ba96fb6ea73e3ebb85c4dc8452d8210ce5e96d00fa1c64239c965a9302d",
+        "revision": "d8597d4e953522d2eb2fa6d4764965ae8e58686f",
+        "bootstrap": true,
+        "bootstrap_note": "Verified Docker Hub baseline only. Promotion is gated until GHCR mirrors the identical digest/revision and the docs marker matches; otherwise use the first qualified current-main pair."
+      },
+      "route": "/docs/nightly/",
+      "default": false,
+      "promotion": {
+        "state": "baseline",
+        "promoted": false,
+        "note": "Deterministic default only. The qualified revision/digest are supplied by the promotion gate as external build input and published in the artifact marker and receipt; they are never committed to this file."
+      }
+    }
+  },
   "development": {
     "label": "2.0.0-dev",
     "channel": "development",
@@ -48,46 +87,5 @@
       "protocol": "v1",
       "note": "The 1.0 line stays at 1.0.40; the next planned stable is carbonpanel-v2.0.0 (MAJOR)."
     }
-  },
-  "versions": [
-    {
-      "tag": "v1.0.40",
-      "display": "1.0.40",
-      "classification": "carbonpanel-published-stable",
-      "channel": "stable",
-      "availability": "published-release",
-      "commit": "f88748be6a216b187e675bbb1f110df07e544148",
-      "source_commit": "f88748be6a216b187e675bbb1f110df07e544148",
-      "cta": true,
-      "download_kind": "github-release",
-      "download_url": "https://github.com/athNdev/carbonpanel/releases/tag/v1.0.40",
-      "default": true
-    },
-    {
-      "tag": "v3.0.0-alpha.1",
-      "display": "3.0.0-alpha.1",
-      "classification": "carbonpanel-legacy-preview",
-      "channel": "preview",
-      "availability": "ghcr-only-legacy-preview",
-      "commit": "5bbc06fefe5fc0c600672ef8401f9bf7e4495a01",
-      "source_commit": "5bbc06fefe5fc0c600672ef8401f9bf7e4495a01",
-      "cta": true,
-      "download_kind": "ghcr",
-      "download_url": "https://github.com/athNdev/carbonpanel/pkgs/container/carbonpanel",
-      "default": false
-    },
-    {
-      "tag": "v1.0.39",
-      "display": "1.0.39",
-      "classification": "carbonpanel-source-only",
-      "channel": "historical",
-      "availability": "source-only",
-      "commit": "05844203cedfa2ee6d8bd039cfeeddb5ac69714f",
-      "source_commit": "05844203cedfa2ee6d8bd039cfeeddb5ac69714f",
-      "cta": false,
-      "download_kind": "source",
-      "download_url": "https://github.com/athNdev/carbonpanel/tree/v1.0.39",
-      "default": false
-    }
-  ]
+  }
 }

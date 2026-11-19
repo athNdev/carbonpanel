@@ -6,7 +6,16 @@
 
 - [Actionable recovery paths](actionable-recovery.md) — Safe next actions for permission, port, pull, stale node, partial restore or migration, and disk exhaustion without treating unknown as failed.
 - [Backup and restore](backup-restore.md) — Where panel database snapshot, backup storage, restore and retention are specified.
+- [Backup and restore — Use this when + Rules + Known gap + Read next](backup-restore-use-this-when.md) — A backup, snapshot, restore or retention change is being made.
 - [Deep sleep and wake](deep-sleep.md) — A player knock must not start an intentionally stopped server. Hibernation and deep sleep share one idle-power module.
+- [Deep sleep and wake — Use this when + Procedure + Player knock versus intentional stop + Known gap + Read next](deep-sleep-use-this-when.md) — A server should hibernate or wake, or a sleep-related change is being reviewed.
 - [Deployment modes](deployment-modes.md) — Which install paths are shipped (Compose and native binary), which are not (Helm, Terraform), and how Compose upgrade and copy-back rollback keep host data.
-- [Health and readiness](health-checks.md) — Which endpoint answers which question, and why a degraded node must not stop the API.
+- [Health and readiness](health-checks.md) — Which endpoint answers which question. The support bundle records stale last-good observations in observations.json; a degraded node must not stop the API.
+- [Health and readiness — Layers](health-checks-layers.md) — /health/detail reports five layers and never rounds one into another. Each
+- [Health and readiness — Use this when + Endpoints](health-checks-use-this-when.md) — Wiring a deployment probe, debugging a report that a server is "down", or
+- [Health and readiness — Why a runtime outage is not a `503` + How to check + Read next](health-checks-why-a-runtime-outage-is-not-a-503.md) — /readyz gates traffic to the API. A remote Docker node that is down does not
 - [Server lifecycle journal](lifecycle-journal.md) — Interrupted container mutations stay locked until the daemon is observed, and an operator can release that lock without deleting containers.
+- [Server lifecycle journal — Read next](lifecycle-journal-read-next.md) — Detailed guidance on read next.
+- [Server lifecycle journal — Rules](lifecycle-journal-rules.md) — Persist the intent before calling Docker. If the intent cannot be stored,
+- [Server lifecycle journal — Rules (part 2)](lifecycle-journal-rules-2.md) — The support bundle always carries operations.json with that projection and
+- [Server lifecycle journal — Use this when](lifecycle-journal-use-this-when.md) — A server lifecycle action must survive a panel crash, or a server is stuck
