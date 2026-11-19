@@ -86,6 +86,9 @@ on cross-origin redirects using the indexer policy.
   descriptors) are only detected and reported; they are never installed or run.
 - `world_quota_mb` remains advisory panel admission and is never reported as an
   enforced `WorldDiskEnforced` quota.
-- Until the exactly-one-event gate (ADR 0011 / D7) is closed, the operation
-  journal is the authoritative audit surface and the activity event stream is
-  best-effort.
+- Successful journaled world bind and unbind outcomes emit idempotent,
+  request-keyed activity events (`world.bind`, `world.unbind`) for the owning
+  server; replay of the same request restores a missing event instead of
+  duplicating it. Uncertain outcomes and pre-mutation cancellation emit no
+  success event. The operation journal remains authoritative for outcome,
+  lock ownership and operator resolution.
