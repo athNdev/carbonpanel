@@ -303,11 +303,11 @@ func contentMutationTools() []string {
 // every descriptor's factual tuple matches the generated catalog.
 func TestContentDescriptorCoverage(t *testing.T) {
 	counts := CoverageCounts()
-	if counts.ListedDescriptors != 73 {
-		t.Fatalf("listed descriptors = %d, want 73 (69 RPC + 4 REST)", counts.ListedDescriptors)
+	if counts.ListedDescriptors != 76 {
+		t.Fatalf("listed descriptors = %d, want 76 (69 RPC + 4 REST + 3 controller-stream transport primitives)", counts.ListedDescriptors)
 	}
-	if counts.ListedRPCs != 69 || counts.ListedREST != 4 {
-		t.Fatalf("listed RPC/REST = %d/%d, want 69/4", counts.ListedRPCs, counts.ListedREST)
+	if counts.ListedRPCs != 69 || counts.ListedREST != 7 {
+		t.Fatalf("listed RPC/REST = %d/%d, want 69/7 (the 3 extra non-RPC descriptors are controller-stream primitives)", counts.ListedRPCs, counts.ListedREST)
 	}
 	if counts.NewContentTools != 67 || counts.FirstSliceTools != 2 {
 		t.Fatalf("new/first-slice tools = %d/%d, want 67/2", counts.NewContentTools, counts.FirstSliceTools)

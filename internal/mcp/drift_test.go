@@ -111,8 +111,10 @@ func TestCoverageDriftGate(t *testing.T) {
 	if len(MountedServices) != 25 {
 		t.Fatalf("expected 25 mounted services, got %d", len(MountedServices))
 	}
-	if len(mounted) != 221 {
-		t.Fatalf("expected 221 mounted RPCs, got %d", len(mounted))
+	// OSS-387 added the three controller-owned bounded-frame transport RPCs
+	// (OpenStream/ReadStreamFrame/CloseStream) to the mounted FileService.
+	if len(mounted) != 224 {
+		t.Fatalf("expected 224 mounted RPCs, got %d", len(mounted))
 	}
 
 	// Catalog is the declared table after exposure overrides are applied.

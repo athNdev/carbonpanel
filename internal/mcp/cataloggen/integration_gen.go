@@ -108,9 +108,15 @@ func combinedToolSpecs() []combinedSpec {
 		byProc[s.Procedure] = s
 		out = append(out, s)
 	}
-	// Scoped streaming tools are NOT generated: no authenticated
-	// controller-side transport exists for the standalone gateway. See
-	// integration_pending.go for the exact PENDING inventory.
+	// OSS-387 scoped streaming entry points are real MCP tools backed by
+	// controller-owned authenticated frame RPCs.
+	for _, s := range specsFrom("integration_stream", mcp.StreamToolSpecs()) {
+		if _, dup := byName[s.Name]; dup {
+			continue
+		}
+		byName[s.Name] = s
+		out = append(out, s)
+	}
 	// Stable final order is by tool name, which is what MCP clients display.
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

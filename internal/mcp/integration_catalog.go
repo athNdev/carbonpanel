@@ -162,6 +162,10 @@ var exposedTools = []ToolSpec{
 	{Name: "restart_server", Procedure: "/carbonpanel.v1.ServerService/RestartServer", Class: Class("review"), Confirm: true, Description: "Restart one server. Requires confirm=true and an exact server id."},
 	{Name: "restore_backup", Procedure: "/carbonpanel.v1.BackupService/RestoreBackup", Class: Class("review"), Confirm: true, Description: "Restore one backup. Destructive: requires confirm=true and an exact backup id."},
 	{Name: "save_uploaded_file", Procedure: "/carbonpanel.v1.FileService/SaveUploadedFile", Class: Class("review"), Confirm: true, Description: "Complete a scoped upload session into one server path. Requires confirm=true; consumes an upload session created by init_upload."},
+	{Name: "scoped_stream_cancel", Procedure: "/carbonpanel.v1.FileService/GetFile", Class: Class("review"), Confirm: true, Description: "Cancel an owned streaming session mid-transfer. Requires confirm=true."},
+	{Name: "scoped_stream_chunk", Procedure: "/carbonpanel.v1.FileService/GetFile", Class: Class("safe"), Confirm: false, Description: "Read one bounded base64 frame and cumulative SHA-256 from an owned session. On done=true, offset is the authoritative actual byte count (not the declared bound)."},
+	{Name: "scoped_stream_commit", Procedure: "/carbonpanel.v1.FileService/SaveUploadedFile", Class: Class("review"), Confirm: true, Description: "Commit transferred bytes to one controlled server-relative destination. Requires confirm=true."},
+	{Name: "scoped_stream_open", Procedure: "/carbonpanel.v1.FileService/InitFileDownload", Class: Class("safe"), Confirm: false, Description: "Open a bounded, authenticated scoped download session. total_size is an admission upper bound; the final frame reports the actual byte count. The owner is derived from the presented dp_ token."},
 	{Name: "search_datapacks", Procedure: "/carbonpanel.v1.DatapackService/SearchDatapacks", Class: Class("safe"), Confirm: false, Description: "Search a datapack index using the existing mods/read grant. Read-only."},
 	{Name: "search_modpacks", Procedure: "/carbonpanel.v1.ModpackService/SearchModpacks", Class: Class("safe"), Confirm: false, Description: "Search the configured modpack index. Read-only."},
 	{Name: "search_mods", Procedure: "/carbonpanel.v1.ModBrowseService/SearchMods", Class: Class("safe"), Confirm: false, Description: "Search the configured mod index using the existing mods/read grant. Read-only; no credentials in the request or response."},
@@ -206,9 +210,9 @@ var exposedTools = []ToolSpec{
 }
 
 const (
-	IntegrationDeclaredRPCs = 231
-	IntegrationMountedRPCs = 221
-	IntegrationExcludedOps = 58
+	IntegrationDeclaredRPCs = 234
+	IntegrationMountedRPCs = 224
+	IntegrationExcludedOps = 61
 	IntegrationSupportedOps = 201
-	IntegrationCombinedTools = 198
+	IntegrationCombinedTools = 202
 )

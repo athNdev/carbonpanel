@@ -42,8 +42,13 @@ func registerCombinedTools(s *sdkmcp.Server, c *Clients) error {
 	}
 
 	RegisterIntegrationTools(s, c)
-	// Scoped stream tools are intentionally NOT advertised: the standalone
-	// gateway has no authenticated controller-side transport (path B hold).
+	// OSS-387: the four scoped_stream_* tools are now advertised from the
+	// production constructor. They carry bounded frames only through the
+	// authenticated controller FileService RPCs; the gateway owns no panel or
+	// node storage handle. The registration policy bound above is the single
+	// allowlist, so a tool is mounted only when the generated catalog declares
+	// it. Never remove this call to re-take the path-B hold.
+	RegisterStreamingTools(s, c)
 	RegisterFamilyAdminTools(s, adminFam)
 	registerContentTools(s, contentFam)
 	RegisterFamilyServerTools(s, serverFam)

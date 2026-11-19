@@ -37,3 +37,21 @@ absent from the generated catalog and from `NewServer`.
 5. Add generated descriptors/RBAC scopes, regenerate the catalog, and drive all
    9 operations through the same executable `tools/call` evidence harness.
 6. Only then remove entries from `PendingInventory` and claim full coverage.
+
+## Size contract (decided)
+
+`OpenStreamRequest.total_size` and the echoed `OpenStreamResponse.size` are an
+**admission upper bound**, not an exact byte count. The controller refuses to
+read past the bound, but the source may be shorter. The authoritative final
+byte count is `ReadStreamFrameResponse.offset` on the frame with `done=true`;
+its `sha256` is computed over exactly those bytes. Composed upload/commit uses
+that actual count (`len(accumulated frames)`), never the declared bound. A
+declared size of `0` is valid for opening and produces a `done` frame with the
+empty digest, but the composed commit explicitly refuses a zero-byte stream.
+
+Rationale: callers often declare a cap rather than a precomputed size; treating
+it as exact would produce false `Done` failures for legitimate short sources.
+Deriving the actual size from transferred bytes keeps SHA, `Done` and commit
+honest. `TestIntegrationControllerStreamSizeContract` drives a 64 KiB source
+declared as 1 MiB through real `tools/call` and asserts the actual size/SHA and
+the composed upload size, plus the zero-byte refusal.

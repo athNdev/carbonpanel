@@ -92,6 +92,11 @@ type Server struct {
 	// WebSocket reader; it is stopped with the controller.
 	playerService *services.PlayerService
 
+	// fileService owns OSS-387 controller stream sessions, their bounded
+	// contexts/storage handles and the TTL reaper. Normal controller shutdown
+	// must call Stop so none of them outlive the server.
+	fileService *services.FileService
+
 	// worldViewProxy is the authenticated same-origin renderer proxy. It is
 	// created in registerServices and mounted before the frontend catch-all
 	// in setupHandler.
@@ -359,6 +364,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	configService.SetStorageResolver(s.storageResolver)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	fileService.SetStorageResolver(s.storageResolver)
+	s.fileService = fileService
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modService.SetStorageResolver(s.storageResolver)
@@ -572,6 +578,11 @@ func (s *Server) Shutdown() {
 	if s.playerService != nil {
 		s.playerService.Stop()
 	}
+	// OSS-387: release every controller-owned stream session, cancel their
+	// bounded contexts and stop the TTL reaper on normal shutdown.
+	if s.fileService != nil {
+		s.fileService.Stop()
+	}
 }
 
 // pollingProcedures lists endpoints that are called frequently and should be excluded from logging.
@@ -632,7 +643,7 @@ func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 
 		file, err := fs.Open(path)
 		if err == nil {
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			stat, _ := file.Stat()
 			setFrontendCacheHeaders(w, path)
 			http.ServeContent(w, r, path, stat.ModTime(), file)
@@ -645,7 +656,7 @@ func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		defer indexFile.Close()
+		defer func() { _ = indexFile.Close() }()
 
 		stat, _ := indexFile.Stat()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

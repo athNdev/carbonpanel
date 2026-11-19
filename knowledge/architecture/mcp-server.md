@@ -25,11 +25,11 @@ by a Connect unary interceptor. Missing credentials stop startup rather than
 falling back to anonymous access, session cookies or the no-auth bypass.
 
 The pinned FIRST SLICE of 30 tools remains unchanged, but the gateway now
-mounts the combined OSS-370 catalog: 198 tools covering 201 SUPPORTED operations (9 PENDING)
+mounts the combined OSS-370 catalog: 202 tools covering 201 SUPPORTED operations (9 PENDING)
 operations from the OSS-375 audit matrix. The 30 first-slice declarations are
 the highest-precedence source; family descriptors (server, content, admin),
 stream typed equivalents and integration-owned additions are merged by
-`internal/mcp/cataloggen` into one generated `exposedTools` list. The 58
+`internal/mcp/cataloggen` into one generated `exposedTools` list. The 61
 excluded operations stay unmounted with exact source reasons and supported
 equivalent flows in `family_audit_matrix.json`; free-form commands, node
 enrollment/TLS dumps, secret bootstrap and third-party egress are never tools.
@@ -48,7 +48,7 @@ holds the pinned first-slice declarations and the 25-name mount list mirroring
 proto descriptors and the live RBAC map. The single generator also emits
 `integration_catalog.go`, resolving duplicate tools by source precedence so
 `list_files`/`get_file` and similar collisions are never double-registered. The
-coverage drift test still enumerates the 221 reachable RPCs and fails on a
+coverage drift test still enumerates the 224 reachable RPCs and fails on a
 missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
 a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
 or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and
@@ -58,11 +58,25 @@ Connect method with exact typed-field assertions on ids, booleans, enums,
 limits, bytes and repeated/map values, observe the real handler status and
 exercise the resource scope (including a denied ungranted dp_ token). Negative
 fixtures prove wrong fields, missing ids, conflicting arguments and out-of-
-range bounds are refused before any typed RPC. Scoped streaming tools are intentionally ABSENT from the live catalog:
-the standalone gateway has no authenticated controller-side transport and must not
-share panel/node storage. The 9 affected operations are PENDING with an exact
-inventory in internal/mcp/integration_pending.go and a committed follow-up plan
-in docs/plans/mcp-controller-side-stream-transport.md. No enabled-but-unusable
+range bounds are refused before any typed RPC.
+
+OSS-387 added an authenticated controller-side bounded-frame transport. The four
+`scoped_stream_*` tools are advertised from the production `NewServer` wiring;
+they move bytes only through `OpenStream`/`ReadStreamFrame`/`CloseStream` typed
+RPCs behind the production auth interceptor. The gateway holds an opaque handle
+and a cumulative SHA-256 only; panel/node storage is never shared. Every frame
+and close is re-authorized with `files/read[server_id]` and bound to the exact
+server the session was opened for. Session contexts are real bounded contexts
+owned by the service (not `context.WithoutCancel`); frames are idempotent by
+index, partial/over-cap reads terminate the session, and a bounded reaper plus
+`Server.Shutdown -> FileService.Stop -> StopStreams` release handles on expiry
+and shutdown. See [controller stream session semantics](../decisions/mcp-controller-stream-sessions.md).
+
+The 9 affected operations remain PENDING in the STRICT publication gate with an
+exact inventory in `internal/mcp/integration_pending.go` and the committed plan
+in `docs/plans/mcp-controller-side-stream-transport.md`. The partial-slice
+regression gate is green; the full-coverage gate stays red until every pending
+operation has real production `tools/call` evidence. No enabled-but-unusable
 tool is advertised.
 Registration strings, quoted procedure names and substring-of-JSON checks
 never count. The exclusion policy is bound to the server before any tool is

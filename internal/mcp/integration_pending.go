@@ -5,12 +5,16 @@
 
 // Package mcp integration lane (OSS-370): exact PENDING inventory.
 //
-// Path B (no enabled-but-unusable tool advertisement): the standalone MCP
-// gateway has no authenticated controller-side streaming transport. Panel/node
-// storage is deliberately NOT shared with the gateway process. The previously
-// prototyped scoped_stream_* tools are therefore absent from the generated
-// catalog and from NewServer registration. Their operations remain LISTED and
-// REACHABLE but are PENDING, not VERIFIED.
+// OSS-387 implemented the authenticated controller-side bounded-frame
+// transport: the four scoped_stream_* tools are advertised from the production
+// NewServer wiring and move bytes only through typed, auth-intercepted
+// controller RPCs. Panel/node storage is still NOT shared with the gateway.
+//
+// These nine operations stay PENDING in the STRICT publication gate until each
+// has real production tools/call evidence in the shared harness. The transport
+// is genuine (see integration_stream_entrypoint_test.go), but the strict gate
+// is deliberately left RED rather than waived; no enabled-but-unusable tools
+// are advertised.
 package mcp
 
 // PendingOperation is one operation with no production authorization/
