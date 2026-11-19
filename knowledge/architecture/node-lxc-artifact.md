@@ -48,6 +48,11 @@ credential type, TLS stack or publication workflow.
   `metadata.yaml` for Ubuntu 24.04 and the requested architecture. Byte
   verification is artifact evidence, never guest-boot evidence
   ([signed-archive evidence](../../packaging/node-lxc/qualification/SIGNED-ARCHIVE-EVIDENCE.md)).
+  The upstream pin is the **raw** SHA-256 of the immutable tarball bytes, as in
+  the GPG-signed `SHA256SUMS`; both `verify-signed-archive` and a pinned
+  production `build` compare raw bytes, never a CRLF-normalized digest. This
+  keeps the ADR0019 pinned-provenance guarantee (a tarball whose compressed
+  bytes contain CRLF cannot be accepted by one command and refused by the other).
 - First-boot identity and the ADR0019 digest-only enrollment bundle are created
   on the persistent volume; no secret, private key or credential appears in the
   template or provisioning metadata.
