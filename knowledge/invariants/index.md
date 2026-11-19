@@ -5,10 +5,18 @@
 ## Concepts
 
 - [Container privileges](container-privileges.md) — Container hardening must stay the baseline; privileges are broadened only through a documented, tested operator override.
+- [Container privileges — Review](container-privileges-review.md) — Reviewed 2026-10-24 by agent:mimo-v2.6-pro against the code and attested by
+- [Container privileges — Review (part 2)](container-privileges-review-2.md) — Re-verified 2026-11-17 by agent:cursor: the same preflight still runs after
+- [Container privileges — Rule + Why + How to check](container-privileges-rule.md) — Do not add privileged, broad capabilities, host mounts or a writable Docker
 - [Data safety](data-safety.md) — Worlds, databases, backups and snapshots are persistent user data and must survive build, development and cleanup commands.
+- [Data safety — How to check](data-safety-how-to-check.md) — Look for remove, prune, rm, clean or volume deletion in the changed
+- [Data safety — How to check (part 2)](data-safety-how-to-check-2.md) — ExportWorld zips the server directory on the owning node's storage into
+- [Data safety — Review](data-safety-review.md) — Reviewed 2026-10-24 by agent:mimo-v2.6-pro against the code and attested by
+- [Data safety — Rule + Why](data-safety-rule.md) — A build, development or cleanup command must preserve server worlds, the
 - [Design-system component inventory](design-system-inventory.md) — Every component exported from carbon/index.ts is documented with a prop table and behaviour notes on the design-system page.
 - [Fail-closed authorization](authz-fail-closed.md) — Unmapped RPCs and resource scopes are denied; a usable RPC needs an explicit permission mapping and a negative test.
 - [Recorded architecture seams](architecture-seams.md) — The Locator, lifecycle handle, idle-power, PlanFor and worldstore seams stay named in DESIGN.md with live package paths.
 - [Secrets and endpoints](secrets-and-endpoints.md) — Credentials, tokens, private endpoints and workstation paths never enter tracked source or the knowledge base.
 - [SSO identity and entitlement origin](sso-identity.md) — OIDC identity is issuer plus subject; no auto-link or implicit privilege, and OIDC roles are reconciled transactionally before session issue.
 - [Staged server updates](staged-updates.md) — Staging a config, mod, datapack, file, modpack, or module edit records the open batch and does not restart the server or write the live tree.
+- [Staged server updates — Rule](staged-updates-rule.md) — A server has one open update batch. Staging adds to that batch. It must not
