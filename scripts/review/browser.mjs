@@ -7,6 +7,9 @@ import { join } from 'node:path';
 // this shared entrypoint. No home-directory module or browser search is used.
 const require = createRequire(new URL('../manual-review/e2e/package.json', import.meta.url));
 const expectedVersion = require('./package.json').dependencies.playwright;
+// Single authoritative source for the pinned review driver version. Tests and
+// launch metadata derive expectations from this value instead of copying it.
+export const reviewBrowserVersion = expectedVersion;
 const root = fileURLToPath(new URL('../../', import.meta.url));
 
 // Owned, disposable cache; an explicit operator override remains supported.
