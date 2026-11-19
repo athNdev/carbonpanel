@@ -429,6 +429,19 @@ start_bluemap() {
 		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1
 }
 
+# BlueMap produced real tiles above, but its own web listener is not reliably
+# reachable from the panel's loopback namespace. Serve the SAME generated web
+# root (tiles + settings.json + renderer assets) with a bounded static server
+# on the shared network namespace. No map is drawn, faked or regenerated here.
+start_map_server() {
+	local mapdir="$1"
+	remove_owned_sidecar || return 1
+	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
+		--label "carbonpanel.review.owner=${DATA}" \
+		-v "${mapdir}/web:/web:ro" \
+		python:3.13-alpine python -m http.server 8100 --bind 0.0.0.0 --directory /web >/dev/null 2>&1
+}
+
 start_panel() {
 	docker run -d --name "${NAME}" \
 		--label "carbonpanel.review.owner=${DATA}" \
@@ -490,11 +503,11 @@ up)
 			# the newly created container after the restart.
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
-				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" world; then
+				if start_map_server "${server_path}/modules/bluemap"; then
 					renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | json_path 'targets.0.rendererState')"
 					echo "review renderer state: ${renderer_state:-unknown}" >&2
 				else
-					echo "review bluemap container failed to restart" >&2
+					echo "review map server container failed to start" >&2
 				fi
 			fi
 		fi
