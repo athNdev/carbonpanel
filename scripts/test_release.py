@@ -22,6 +22,66 @@ def registry_writes(command):
             if any(token in call.args[0] for token in ("create", "--push", "publish"))]
 
 
+def patch_gh_release_view():
+    """Let `gh release view` report an existing draft without breaking
+    subprocess.check_output (which internally calls subprocess.run)."""
+    original = release.subprocess.run
+
+    def fake(*args, **kwargs):
+        if args and args[0] == "gh" and len(args) > 1 and args[1] == "release":
+            return type("Result", (), {"returncode": 0})()
+        return original(*args, **kwargs)
+
+    return patch.object(release.subprocess, "run", side_effect=fake)
+
+
+def make_publish_fixture(directory, git_tag="carbonpanel-v2.0.0", semver="2.0.0",
+                         commit="a" * 40, include_git_tag=True, include_semver=True,
+                         version_override=None):
+    """A complete, checksummed product-release output directory for publish()."""
+    output = Path(directory)
+    internal = "v" + semver
+    manifest = {"version": version_override or internal, "commit": commit,
+                "image_digest": "sha256:" + "b" * 64,
+                "image": "atharvnaphade/carbonpanel:" + semver,
+                "github_image": "ghcr.io/athndev/carbonpanel:" + semver}
+    if include_git_tag:
+        manifest["git_tag"] = git_tag
+    if include_semver:
+        manifest["semver"] = semver
+    (output / "release-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (output / "openapi.yaml").write_text("schema", encoding="utf-8")
+    for target in release.TARGETS:
+        (output / release.archive_name(internal, *target)).write_bytes(b"original")
+    release.finalize(argparse.Namespace(output=str(output), digest=None))
+    return output, internal
+
+
+def publish_github_reply(notes_holder, generated_args_holder, published=(("v1.0.40",),), output=None):
+    """Offline gh fixture: verified stable list, generate-notes, assets and edit."""
+    def reply(*args):
+        if args[:3] == ("api", "--paginate", "--slurp"):
+            return json.dumps([[{"tag_name": name, "draft": False, "prerelease": False}
+                                for (name,) in published]])
+        if any("generate-notes" in str(arg) for arg in args):
+            generated_args_holder.append(args)
+            return json.dumps({"body": "AUTO GENERATED COMPARE"})
+        if args[:2] == ("repo", "view"):
+            return "athNdev/carbonpanel"
+        if args[:2] == ("release", "view"):
+            return "https://api.github.com/repos/owner/panel/releases/123"
+        if args and args[0] == "api" and str(args[1]).startswith("https://api.github.com"):
+            assets = [{"name": path.name, "digest": "sha256:" + release.sha256(path)}
+                      for path in sorted(output.iterdir()) if path.is_file()] if output else []
+            return json.dumps({"draft": True, "assets": assets})
+        if args[:2] == ("release", "create"):
+            if "--notes-file" in args:
+                notes_holder.append(Path(args[args.index("--notes-file") + 1]).read_text(encoding="utf-8"))
+            return "{}"
+        return "{}"
+    return reply
+
+
 def platform_revisions(commit):
     """Digest-addressed platform config evidence for offline fixtures."""
     return {
@@ -133,11 +193,13 @@ class ReleaseTests(unittest.TestCase):
                 release.guard_publishing("v3.0.0-beta.5", "a" * 40)
 
     def test_published_version_cannot_be_overwritten(self):
+        # Use a non-reserved product tag: reserved legacy preview versions are
+        # rejected even earlier by publication_candidate_decision().
         replies = [json.dumps([{"conclusion": "success", "status": "completed"}]),
-                   json.dumps([[{"tag_name": "v3.0.0-beta.5", "draft": False}]])]
+                   json.dumps([[{"tag_name": "carbonpanel-v2.0.0", "draft": False}]])]
         with patch.object(release.subprocess, "run"), patch.object(release, "run", return_value=""), \
              patch.object(release, "github", side_effect=replies), self.assertRaisesRegex(ValueError, "immutable"):
-            release.guard_publishing("v3.0.0-beta.5", "a" * 40)
+            release.guard_publishing("v2.0.0", "a" * 40, "carbonpanel-v2.0.0")
 
     def test_collection_refuses_bundle_from_another_commit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -164,14 +226,15 @@ class ReleaseTests(unittest.TestCase):
     def test_tampered_download_is_rejected_before_a_tag_or_release_is_written(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            tag, commit = "v3.0.0-beta.5", "a" * 40
-            manifest = {"version": tag, "commit": commit, "image_digest": "sha256:" + "b" * 64}
+            internal, tag, commit = "v2.0.0", "carbonpanel-v2.0.0", "a" * 40
+            manifest = {"version": internal, "git_tag": tag, "semver": "2.0.0",
+                        "commit": commit, "image_digest": "sha256:" + "b" * 64}
             (output / "release-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
             (output / "openapi.yaml").write_text("schema", encoding="utf-8")
             for target in release.TARGETS:
-                (output / release.archive_name(tag, *target)).write_bytes(b"original")
+                (output / release.archive_name(internal, *target)).write_bytes(b"original")
             release.finalize(argparse.Namespace(output=str(output), digest=None))
-            (output / release.archive_name(tag, "linux", "amd64")).write_bytes(b"changed")
+            (output / release.archive_name(internal, "linux", "amd64")).write_bytes(b"changed")
             with patch.object(release, "guard_publishing"), patch.object(release, "github") as github, \
                  self.assertRaisesRegex(ValueError, "checksums"):
                 release.publish(argparse.Namespace(version=tag, commit=commit, output=str(output)))
@@ -184,10 +247,13 @@ class ReleaseTests(unittest.TestCase):
         # pull request, workflow_run and schedule. A normal merge is a push.
         for event in ("push", "pull_request", "workflow_run", "schedule", "create"):
             with self.subTest(event=event):
-                self.assertFalse(release.publication_allowed(event, "true", "v3.0.0")[0])
+                self.assertFalse(release.publication_allowed(
+                    event, "true", "carbonpanel-v3.0.0")[0])
         # A dispatch without the affirmative flag is still a rehearsal.
-        self.assertFalse(release.publication_allowed("workflow_dispatch", "false", "v3.0.0")[0])
-        allowed, reason = release.publication_allowed("workflow_dispatch", "true", "v3.0.0")
+        self.assertFalse(release.publication_allowed(
+            "workflow_dispatch", "false", "carbonpanel-v3.0.0")[0])
+        allowed, reason = release.publication_allowed(
+            "workflow_dispatch", "true", "carbonpanel-v3.0.0")
         self.assertTrue(allowed)
         self.assertIn("explicit", reason)
 
@@ -203,8 +269,9 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(release.is_verification_tag("v3.0.0-alpha.1"))
 
     def test_release_domains_and_module_versions(self):
-        self.assertEqual(release.ref_channel("v3.0.0"), "stable")
-        self.assertEqual(release.ref_channel("v3.0.0-rc.1"), "prerelease")
+        self.assertEqual(release.ref_channel("carbonpanel-v3.0.0"), "stable")
+        self.assertEqual(release.ref_channel("carbonpanel-v3.0.0-rc.1"), "prerelease")
+        self.assertEqual(release.ref_channel("v3.0.0"), "legacy-version")
         self.assertEqual(release.ref_channel("mod-v2.0.6"), "module")
         self.assertEqual(release.ref_channel("main", "branch"), "development")
         self.assertEqual(release.module_version("mod-v2.0.6"), "mod-v2.0.6")
@@ -258,16 +325,16 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release.subprocess, "run",
                           side_effect=subprocess.CalledProcessError(1, "git")), \
              self.assertRaisesRegex(ValueError, "main-ancestor"):
-            release.guard_publishing("v3.0.0", "a" * 40)
+            release.guard_publishing("v3.0.0", "a" * 40, "carbonpanel-v3.0.0")
 
     def test_initial_publication_and_unpublished_draft_are_allowed(self):
         success = json.dumps([{"conclusion": "success", "status": "completed"}])
-        for existing in ([[]], [[{"tag_name": "v3.0.0", "draft": True}]]):
+        for existing in ([[]], [[{"tag_name": "carbonpanel-v3.0.0", "draft": True}]]):
             with self.subTest(existing=existing), \
                  patch.object(release.subprocess, "run"), \
                  patch.object(release, "run", return_value=""), \
                  patch.object(release, "github", side_effect=[success, json.dumps(existing)]):
-                release.guard_publishing("v3.0.0", "a" * 40)
+                release.guard_publishing("v3.0.0", "a" * 40, "carbonpanel-v3.0.0")
 
     def test_finalize_refuses_a_conflicting_image_digest(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -545,8 +612,12 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release, "github", return_value=json.dumps(good)):
             self.assertEqual(release.release_record_decision(
                 "v3.1.0", commit, digest, published)[0], "verified")
-            self.assertEqual(release.release_record_decision(
-                "v3.1.0", commit, digest, draft)[0], "refuse")
+            # An unpublished draft is resumable: the publisher reuses its stable
+            # release ID and re-verifies the uploaded assets before exposure.
+            action, reason = release.release_record_decision(
+                "v3.1.0", commit, digest, draft)
+            self.assertEqual(action, "publish")
+            self.assertIn("draft", reason)
         with patch.object(release, "github", side_effect=subprocess.CalledProcessError(1, ["gh"])):
             self.assertEqual(release.release_record_decision(
                 "v3.1.0", commit, digest)[0], "refuse")
@@ -625,9 +696,9 @@ class ReleaseTests(unittest.TestCase):
                 with self.subTest(event=event, candidate=candidate):
                     allowed, _ = release.publication_allowed(event, publish_input, candidate)
                     self.assertFalse(allowed)
-        # Only the explicit dispatch opt-in for a publishable panel version.
+        # Only the explicit dispatch opt-in for a canonical product tag.
         self.assertTrue(release.publication_allowed(
-            "workflow_dispatch", "true", "v3.0.0")[0])
+            "workflow_dispatch", "true", "carbonpanel-v3.0.0")[0])
         self.assertFalse(release.publication_allowed(
             "workflow_dispatch", "true", "v0.0.0-verify.9")[0])
 
@@ -728,7 +799,8 @@ class ReleaseTests(unittest.TestCase):
 
     def test_staged_tag_scope_is_documented_honestly(self):
         source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        self.assertIn("tags can point at old commits", source)
+        self.assertIn("tags can point at old", source)
+        self.assertIn("tags: ['carbonpanel-v*']", source)
         self.assertIn("never the dispatch revision input alone", source)
         docs = (release.ROOT / "docs/releases.md").read_text(encoding="utf-8")
         self.assertIn("old commits", docs)
@@ -820,7 +892,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("id: pinned", source)
         self.assertIn("RUN_SHA: ${{ github.event.workflow_run.head_sha }}", source)
         self.assertIn("EVENT_SHA: ${{ github.sha }}", source)
-        self.assertIn("ref: ${{ steps.pinned.outputs.sha }}", source)
+        self.assertIn("ref: ${{ steps.pinned.outputs.sha || github.sha }}", source)
+        self.assertIn("steps.pinned.outputs.sha != ''", source)
         self.assertIn("fetch-depth: 0", source)
         self.assertIn("Assert checked-out HEAD equals the pinned commit", source)
         self.assertIn("CI_COMMIT: ${{ steps.pinned.outputs.sha }}", source)
@@ -835,11 +908,11 @@ class ReleaseTests(unittest.TestCase):
                 self.assertNotIn("head_sha || github.sha", line)
         # Publication is one fixed, channel-wide, non-cancelling group: two
         # opted-in publishes of different commits cannot race on :edge.
-        self.assertIn("&& (inputs.push || inputs.nightly) && 'cd-publish-edge'", source)
-        self.assertIn("|| format('cd-verify-{0}'", source)
-        self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' "
-                      "|| !(inputs.push || inputs.nightly) }}", source)
+        self.assertIn("&& (inputs.push || inputs.nightly)) || (github.event_name == 'schedule'", source)
         self.assertIn("&& 'cd-publish-edge' || format('cd-verify-{0}'", source)
+        self.assertIn("|| format('cd-verify-{0}'", source)
+        self.assertIn("cancel-in-progress: ${{ !((github.event_name == 'workflow_dispatch'", source)
+        self.assertIn("|| (github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true')) }}", source)
         # Pin assertion precedes every side-effecting step.
         self.assertLess(source.index("Assert checked-out HEAD"),
                         source.index("Docker Hub Credentials & Login Check"))
@@ -951,8 +1024,227 @@ class ReleaseTests(unittest.TestCase):
                     event, opt_in, ref=ref, ci_verified=ci)[0])
         self.assertFalse(release.nightly_channel_decision(
             "workflow_run", "true", "push", "success", trusted, "true")[0])
+        # A native schedule is NOT an opt-in dispatch path. It is decided only
+        # by nightly_schedule_decision() with a default-off operator setting.
         self.assertFalse(release.nightly_channel_decision(
             "schedule", "true", ref=trusted, ci_verified="true")[0])
+
+    def test_scheduled_nightly_decision_is_bounded_and_verify_only(self):
+        trusted = release.TRUSTED_DEVELOPER_REF
+        allowed, reason = release.nightly_schedule_decision(
+            "schedule", trusted, "true", "true", "true")
+        self.assertTrue(allowed)
+        self.assertIn("authorized", reason)
+        for label, event, ref, ci, stable, setting in (
+            ("setting off (default)", "schedule", trusted, "true", "true", "false"),
+            ("empty setting", "schedule", trusted, "true", "true", ""),
+            ("main moved", "schedule", trusted, "true", "false", "true"),
+            ("CI failed", "schedule", trusted, "false", "true", "true"),
+            ("non-default ref", "schedule", "refs/heads/feature/x", "true", "true", "true"),
+            ("tag ref", "schedule", "refs/tags/v3.0.0", "true", "true", "true"),
+            ("blank ref", "schedule", "", "true", "true", "true"),
+            ("push event", "push", trusted, "true", "true", "true"),
+            ("pull request event", "pull_request", trusted, "true", "true", "true"),
+            ("workflow_run event", "workflow_run", trusted, "true", "true", "true"),
+            ("dispatch event", "workflow_dispatch", trusted, "true", "true", "true"),
+        ):
+            with self.subTest(case=label):
+                ok, detail = release.nightly_schedule_decision(
+                    event, ref, ci, stable, setting)
+                self.assertFalse(ok)
+                self.assertTrue(detail)
+        # The CLI emits an actionable, testable decision with no write.
+        out = io.StringIO()
+        with patch("sys.argv", [
+                "release.py", "nightly-schedule-gate", "--event", "schedule",
+                "--commit", "a" * 40, "--ref", trusted,
+                "--ci-verified", "true", "--pin-stable", "false",
+                "--operator-setting", "true"]), redirect_stdout(out):
+            release.main()
+        values = json.loads(out.getvalue())
+        self.assertEqual(values["publish"], "false")
+        self.assertIn("stable", values["reason"])
+        self.assertEqual(values["immutable_ref"],
+                         "atharvnaphade/carbonpanel:sha-" + "a" * 40)
+
+    def test_schedule_sha_gate_pushes_reuses_or_skips_with_zero_writes(self):
+        commit, digest = "d" * 40, "sha256:" + "e" * 64
+        revisions = platform_revisions(commit)
+        # Absent sha tag: a new immutable image may be built.
+        with patch.object(release, "observe_reference", return_value=("absent", None)), \
+             patch("sys.argv", ["release.py", "nightly-schedule-sha-gate",
+                                "--commit", commit, "--ci-verified", "true"]), \
+             redirect_stdout(io.StringIO()):
+            self.assertEqual(release.nightly_schedule_sha_gate(
+                argparse.Namespace(commit=commit, ci_verified="true")), "push")
+        # Present and independently verified: reuse, no build.
+        with patch.object(release, "observe_reference", return_value=present(digest)), \
+             patch.object(release, "platform_manifest_revisions",
+                          return_value=(digest, revisions)), \
+             patch("sys.argv", ["release.py", "nightly-schedule-sha-gate",
+                                "--commit", commit, "--ci-verified", "true"]), \
+             redirect_stdout(io.StringIO()):
+            self.assertEqual(release.nightly_schedule_sha_gate(
+                argparse.Namespace(commit=commit, ci_verified="true")), "reuse")
+        # Unknown or unverified present tag: skip with no write at all.
+        for label, observation, ci in (
+            ("unknown", ("unknown", None), "true"),
+            ("failed CI", present(digest), "false"),
+            ("wrong revision", present(digest), "true"),
+        ):
+            with self.subTest(case=label):
+                revs = platform_revisions("b" * 40) if label == "wrong revision" else revisions
+                with patch.object(release, "observe_reference", return_value=observation), \
+                     patch.object(release, "platform_manifest_revisions",
+                                  return_value=(digest, revs)), \
+                     patch.object(release.subprocess, "run") as command, \
+                     patch("sys.argv", ["release.py", "nightly-schedule-sha-gate",
+                                        "--commit", commit, "--ci-verified", ci]), \
+                     redirect_stdout(io.StringIO()):
+                    self.assertEqual(release.nightly_schedule_sha_gate(
+                        argparse.Namespace(commit=commit, ci_verified=ci)), "skip")
+                    self.assertEqual(registry_writes(command), [])
+
+    def test_nightly_alias_identity_requires_both_agreeing_platform_revisions(self):
+        commit = "f" * 40
+        digest = "sha256:" + "7" * 64
+        alias = ("present", {"digest": digest,
+                             "platforms": {("linux", "amd64"), ("linux", "arm64")}})
+        self.assertEqual(release.nightly_alias_identity(
+            alias, revisions=platform_revisions(commit), index_digest=digest),
+            (commit, digest))
+        mixed = platform_revisions(commit)
+        mixed[("linux", "arm64")] = {"digest": "sha256:" + "8" * 64,
+                                     "revision": "a" * 40}
+        self.assertEqual(release.nightly_alias_identity(alias, revisions=mixed)[0], "")
+        self.assertEqual(release.nightly_alias_identity(alias, revisions={})[0], "")
+        self.assertEqual(release.nightly_alias_identity(("absent", None))[0], "")
+        self.assertEqual(release.nightly_alias_identity(
+            alias, revisions=platform_revisions(commit),
+            index_digest="sha256:" + "9" * 64)[0], "")
+
+    def test_scheduled_nightly_derives_previous_binding_from_live_alias(self):
+        """An unattended run has no operator previous-commit string; it must
+        derive the binding from the live alias and still refuse an unbound move.
+        """
+        candidate, previous = "c" * 40, "a" * 40
+        digest, old = "sha256:" + "d" * 64, "sha256:" + "f" * 64
+        revisions = platform_revisions(candidate)
+        previous_revisions = platform_revisions(previous)
+        alias = present(old)
+        argv = ["release.py", "nightly-promote", "--commit", candidate,
+                "--digest", digest, "--ci-verified", "true",
+                "--auto-bind-previous", "--apply"]
+        def observe(ref, strict=False):
+            if ref == release.nightly_immutable_reference(candidate):
+                return present(digest)
+            if ref == release.nightly_immutable_reference(previous):
+                return present(old)
+            if ref == f"{release.DOCKER_HUB_IMAGE}:nightly":
+                return alias
+            return ("absent", None)
+        def revisions_for(ref, anchor_digest=None):
+            if ref == release.nightly_immutable_reference(candidate):
+                return digest, revisions
+            if (ref == release.nightly_immutable_reference(previous)
+                    or ref == f"{release.DOCKER_HUB_IMAGE}:nightly"):
+                return old, previous_revisions
+            return "", {}
+        alias_state = {"digest": old}
+        def fake_run(args, **kwargs):
+            # imagetools create moves the alias to the candidate digest; the
+            # subsequent strict re-observation must see that exact digest.
+            alias_state["digest"] = digest
+            return subprocess.CompletedProcess(args, 0)
+        def observe_after_move(ref, strict=False):
+            if ref == f"{release.DOCKER_HUB_IMAGE}:nightly":
+                return present(alias_state["digest"])
+            return observe(ref, strict)
+        # Bound previous identity + ancestor → exactly one write (the alias).
+        with patch.object(release, "observe_reference", side_effect=observe_after_move), \
+             patch.object(release, "platform_manifest_revisions", side_effect=revisions_for), \
+             patch.object(release, "commit_is_ancestor", return_value=True), \
+             patch.object(release.subprocess, "run", side_effect=fake_run) as command, \
+             patch("sys.argv", argv):
+            release.main()
+            self.assertEqual(len(registry_writes(command)), 1)
+        # No bound previous identity → refuse with zero writes.
+        with patch.object(release, "observe_reference", side_effect=observe), \
+             patch.object(release, "platform_manifest_revisions", side_effect=revisions_for), \
+             patch.object(release, "nightly_identity_binding", return_value={}), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", argv):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                release.main()
+            self.assertEqual(registry_writes(command), [])
+
+    def test_manual_nightly_binding_is_unchanged_and_schedule_only_auto_binds(self):
+        """Auto-binding must never rescue a manual dispatch: an explicit or
+        ambiguous manual case keeps the original refusal/zero-write behavior.
+        """
+        candidate, previous = "c" * 40, "a" * 40
+        digest, old = "sha256:" + "d" * 64, "sha256:" + "f" * 64
+        revisions = platform_revisions(candidate)
+        previous_revisions = platform_revisions(previous)
+        manual_argv = self.workflow_argv(
+            "Verify immutable sha image and move only the nightly alias",
+            {"PINNED_COMMIT": candidate, "IMAGE_DIGEST": digest,
+             "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
+             "PREVIOUS_COMMIT": previous, "PREVIOUS_DIGEST": old})
+        scheduled_argv = self.workflow_argv(
+            "Verify immutable sha image and move only the nightly alias (trusted schedule)",
+            {"PINNED_COMMIT": candidate, "IMAGE_DIGEST": digest,
+             "CI_VERIFIED": "true"})
+        self.assertNotIn("--auto-bind-previous", manual_argv)
+        self.assertIn("--auto-bind-previous", scheduled_argv)
+        self.assertIn("--previous-commit", manual_argv)
+        self.assertNotIn("--previous-commit", scheduled_argv)
+
+        alias_state = {"digest": old}
+        def observe(ref, strict=False):
+            if ref == release.nightly_immutable_reference(candidate):
+                return present(digest)
+            if ref == release.nightly_immutable_reference(previous):
+                return present(old)
+            if ref == f"{release.DOCKER_HUB_IMAGE}:nightly":
+                return present(alias_state["digest"])
+            return ("absent", None)
+        def revisions_for(ref, anchor_digest=None):
+            if ref == release.nightly_immutable_reference(candidate):
+                return digest, revisions
+            if ref == release.nightly_immutable_reference(previous):
+                return old, previous_revisions
+            return "", {}
+        def fake_run(args, **kwargs):
+            alias_state["digest"] = digest
+            return subprocess.CompletedProcess(args, 0)
+        # Manual WITH explicit previous binding: one write, no auto derivation.
+        with patch.object(release, "nightly_alias_identity") as derive, \
+             patch.object(release, "observe_reference", side_effect=observe), \
+             patch.object(release, "platform_manifest_revisions", side_effect=revisions_for), \
+             patch.object(release, "commit_is_ancestor", return_value=True), \
+             patch.object(release.subprocess, "run", side_effect=fake_run) as command, \
+             patch("sys.argv", ["release.py"] + manual_argv):
+            release.main()
+            self.assertEqual(len(registry_writes(command)), 1)
+            derive.assert_not_called()
+        # Manual WITHOUT previous binding: original refusal, zero writes, even
+        # if an auto-derivation helper could have supplied a valid binding.
+        no_binding = self.workflow_argv(
+            "Verify immutable sha image and move only the nightly alias",
+            {"PINNED_COMMIT": candidate, "IMAGE_DIGEST": digest,
+             "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
+             "PREVIOUS_COMMIT": "", "PREVIOUS_DIGEST": ""})
+        alias_state["digest"] = old
+        with patch.object(release, "nightly_alias_identity",
+                          return_value=(previous, old)), \
+             patch.object(release, "observe_reference", side_effect=observe), \
+             patch.object(release, "platform_manifest_revisions", side_effect=revisions_for), \
+             patch.object(release.subprocess, "run") as command, \
+             patch("sys.argv", ["release.py"] + no_binding):
+            with self.assertRaisesRegex(ValueError, "refused"):
+                release.main()
+            self.assertEqual(registry_writes(command), [])
 
     def test_sha_tag_gate_reuse_conflict_and_unknown(self):
         commit, digest = "c" * 40, "sha256:" + "d" * 64
@@ -1139,7 +1431,13 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(inputs["nightly"]["default"])
         self.assertEqual(inputs["previous_nightly_digest"]["default"], "")
         self.assertEqual(inputs["expected_sha_digest"]["default"], "")
-        self.assertNotIn("schedule", triggers)
+        # Native Actions schedule only, pinned to verified main via the
+        # default-off operator gate — never a stable/latest/edge write.
+        self.assertEqual(len(triggers["schedule"]), 1)
+        self.assertEqual(triggers["schedule"][0]["cron"], "0 18 * * *")
+        self.assertIn("NIGHTLY_SCHEDULE_PUBLISH", source)
+        self.assertIn("nightly-schedule-gate", source)
+        self.assertIn("nightly-schedule-sha-gate", source)
         names = [step.get("name", "") for step in doc["jobs"]["build-and-push"]["steps"]]
         sha_gate = next(i for i, name in enumerate(names) if "Preflight shared sha tag" in name)
         build = next(i for i, name in enumerate(names) if name.startswith("Build (and optionally push)"))
@@ -1168,6 +1466,79 @@ class ReleaseTests(unittest.TestCase):
              redirect_stdout(out):
             release.main()
         self.assertEqual(json.loads(out.getvalue())["publish"], "false")
+
+    def test_scheduled_nightly_contract_no_stable_writes_and_no_other_lane_schedules(self):
+        import yaml
+        cd_source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        cd = yaml.safe_load(cd_source)
+        steps = cd["jobs"]["build-and-push"]["steps"]
+        # The scheduled job uses a single fixed, non-cancellable publish group
+        # shared with manual publishes: one writer on the shared sha identity.
+        self.assertIn("cd-publish-edge", cd["jobs"]["build-and-push"]["concurrency"]["group"])
+        self.assertIn("github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true'",
+                      cd["jobs"]["build-and-push"]["concurrency"]["group"])
+        # No step in CD writes a stable alias, a release record, a GitHub
+        # release, GHCR or the edge alias on a schedule. Edge stays gated by the
+        # manual channel decision (which is always false for schedule events).
+        for token in ("promote-alias", "release-record", "verify-release-record",
+                      "alias-promotion", "modules-promotion", "module-promotion",
+                      "value=latest", "value=edge", "ghcr.io", "packages: write"):
+            self.assertNotIn(token, cd_source)
+        edge = next(s for s in steps if "Promote edge" in s.get("name", ""))
+        self.assertIn("steps.channel.outputs.publish == 'true'", edge["if"])
+        # Skip conditions are wired into the workflow, not just the policy.
+        self.assertIn("--pin-stable \"$MAIN_PIN_STABLE\"", cd_source)
+        self.assertIn("--operator-setting \"$NIGHTLY_SCHEDULE_PUBLISH\"", cd_source)
+        self.assertIn("steps.sha_gate.outputs.action != 'skip'", cd_source)
+        self.assertIn("steps.scheduled_recheck.outputs.stable != 'false'", cd_source)
+        self.assertIn("steps.scheduled_prepush.outputs.stable != 'false'", cd_source)
+        self.assertIn("steps.scheduled_prepush.outputs.verified != 'false'", cd_source)
+        self.assertIn("stable=false", cd_source)
+        # A CI run turning non-green between push and alias move MUST be caught
+        # by a FRESH exact-commit recheck inside scheduled_recheck. The stale
+        # pre-push result must not authorize or feed the alias move.
+        scheduled_alias = next(s for s in steps if s.get("name", "").endswith(
+            "nightly alias (trusted schedule)"))
+        recheck = next(s for s in steps if s.get("id") == "scheduled_recheck")
+        self.assertIn('verify-main-ci --commit "$PINNED_COMMIT"', recheck["run"])
+        self.assertIn('echo "verified=false"', recheck["run"])
+        self.assertIn("steps.scheduled_recheck.outputs.verified != 'false'",
+                      scheduled_alias["if"])
+        self.assertIn("steps.scheduled_prepush.outputs.verified != 'false'",
+                      scheduled_alias["if"])
+        self.assertEqual(scheduled_alias["env"]["CI_VERIFIED"],
+                         "${{ steps.scheduled_recheck.outputs.verified }}")
+        # The late guard genuinely precedes every buildx write: it is listed
+        # before the build step AND is a condition on that step's push input.
+        prepush = next(i for i, s in enumerate(steps)
+                       if "Late main and exact-CI check before any immutable write" in s.get("name", ""))
+        build = next(i for i, s in enumerate(steps)
+                     if s.get("name", "").startswith("Build (and optionally push)"))
+        self.assertLess(prepush, build)
+        build_step = steps[build]
+        self.assertIn("steps.scheduled_prepush.outputs.stable != 'false'",
+                      build_step["with"]["push"])
+        self.assertIn("steps.scheduled_prepush.outputs.verified != 'false'",
+                      build_step["with"]["push"])
+        # Auto-binding is a scheduled-only capability; the manual step keeps
+        # the original explicit-binding refusal.
+        manual = next(s for s in steps if s.get("name") ==
+                      "Verify immutable sha image and move only the nightly alias")
+        self.assertNotIn("--auto-bind-previous", str(manual["run"]))
+        self.assertIn("--auto-bind-previous", str(scheduled_alias["run"]))
+        self.assertIn("github.event_name != 'schedule'", manual["if"])
+        self.assertIn("github.event_name == 'schedule'", scheduled_alias["if"])
+        # Native cadence is limited to this one trusted-main nightly workflow.
+        for path in ("release.yml", "modules.yml", "mcp-dist.yml",
+                     "runtime-artifacts.yml", "build-inputs.yml", "landing.yml"):
+            with self.subTest(workflow=path):
+                doc = yaml.safe_load(
+                    (release.ROOT / ".github/workflows" / path).read_text(encoding="utf-8"))
+                triggers = doc.get("on") or doc.get(True)
+                self.assertNotIn("schedule", triggers)
+        # The default-off setting is documented but not mutated by the repo.
+        self.assertIn("NIGHTLY_SCHEDULE_PUBLISH",
+                      (release.ROOT / "docs/releases.md").read_text(encoding="utf-8"))
 
 
     def test_edge_and_nightly_survive_both_publication_orders_on_sha_reuse(self):
@@ -1389,6 +1760,458 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "refused"):
                 release.main()
             self.assertEqual(registry_writes(command), [])
+
+
+    # --- Carbon Panel product tag line and retrospective migration -----------
+
+    def test_product_tag_fields_are_separate_from_git_tag_and_semver(self):
+        product = release.product_release("carbonpanel-v2.0.0-alpha.1")
+        self.assertEqual(product["git_tag"], "carbonpanel-v2.0.0-alpha.1")
+        self.assertEqual(product["version"], "v2.0.0-alpha.1")
+        self.assertEqual(product["semver"], "2.0.0-alpha.1")
+        self.assertEqual(product["minor"], "2.0")
+        self.assertTrue(product["prerelease"])
+        self.assertEqual(product["channel"], "prerelease")
+        stable = release.product_release("carbonpanel-v2.0.0")
+        self.assertEqual(stable["semver"], "2.0.0")
+        self.assertFalse(stable["prerelease"])
+        self.assertEqual(stable["channel"], "stable")
+        self.assertEqual(release.display_version("carbonpanel-v2.0.0"), "2.0.0")
+        self.assertEqual(release.resolve_panel_version("carbonpanel-v2.0.0"), "v2.0.0")
+        self.assertEqual(release.version_from_release_tag("v1.0.40"), "v1.0.40")
+        self.assertEqual(release.version_from_release_tag("carbonpanel-v2.0.0"), "v2.0.0")
+        self.assertIsNone(release.version_from_release_tag("v3.0.0-alpha.1"))
+        self.assertIsNone(release.version_from_release_tag("docs1.0.0"))
+        for bad in ("v2.0.0", "carbonpanel-v2.0", "carbonpanel-v02.0.0",
+                    "carbonpanel-v2.0.0-rc.01", "carbonpanel-v2.0.0\n"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                release.product_release(bad)
+
+    def test_next_stable_outputs_are_2_0_0_and_minor_2_0_latest(self):
+        plan = release.promotion_plan("carbonpanel-v2.0.0")
+        self.assertEqual([step["tag"] for step in plan], ["2.0.0", "2.0", "latest"])
+        self.assertEqual([step["mutable"] for step in plan], [False, True, True])
+        self.assertEqual(release.product_release(release.NEXT_STABLE_GIT_TAG)["semver"],
+                         release.NEXT_STABLE_SEMVER)
+        # The immutable image tag is the displayed SemVer, never the Git tag.
+        with patch("sys.argv", ["release.py", "image-tags",
+                                "--version", "carbonpanel-v2.0.0", "--immutable-only"]), \
+             redirect_stdout(io.StringIO()) as out:
+            release.main()
+        self.assertEqual(out.getvalue().strip(), "2.0.0")
+        with patch("sys.argv", ["release.py", "image-tags",
+                                "--version", "carbonpanel-v2.0.0"]), \
+             redirect_stdout(io.StringIO()) as out:
+            release.main()
+        self.assertEqual(out.getvalue().split(), ["2.0.0", "2.0", "latest"])
+        rollback = release.rollback_line()
+        self.assertEqual((rollback["minor"], rollback["version"], rollback["commit"]),
+                         ("1.0", "v1.0.40", "f88748be6a216b187e675bbb1f110df07e544148"))
+
+    def test_historical_alias_is_refused_before_any_registry_preflight(self):
+        # TOOL REVIEW POINT A: the canonical alias is historical-only at the
+        # publication policy level, before immutable digest preflight runs.
+        tag = release.HISTORICAL_PRODUCT_ALIAS
+        ok, reason = release.publication_candidate_decision(tag)
+        self.assertFalse(ok)
+        self.assertIn("HISTORICAL-ONLY", reason)
+        self.assertFalse(release.publication_allowed("workflow_dispatch", "true", tag)[0])
+        with patch.object(release, "observe_reference") as observe, \
+             self.assertRaisesRegex(ValueError, "HISTORICAL-ONLY"):
+            release.guard_publishing("v1.0.40", "a" * 40, tag)
+        observe.assert_not_called()
+        # The alias is still recognised for provenance and rollback.
+        self.assertEqual(release.version_from_release_tag(tag), "v1.0.40")
+
+    def test_legacy_preview_and_collision_versions_are_refused_with_clear_errors(self):
+        # TOOL REVIEW POINT B: legacy preview and collision identities cannot be
+        # reused for a future product release attempt; each has a clear error.
+        cases = {
+            release.LEGACY_PREVIEW_TAG: "GHCR-only legacy preview",
+            release.NAME_COLLISION_TAG: "name-collision",
+            "v3.0.0-beta.5": "upstream-only",
+            "v3.0.0-beta.8": "upstream-only",
+            "carbonpanel-v3.0.0-alpha.1": "reserved legacy version",
+            "carbonpanel-v3.0.0-beta.4": "reserved legacy version",
+        }
+        for tag, expected in cases.items():
+            with self.subTest(tag=tag):
+                ok, reason = release.publication_candidate_decision(tag)
+                self.assertFalse(ok)
+                self.assertIn(expected, reason)
+                self.assertFalse(release.publication_allowed(
+                    "workflow_dispatch", "true", tag)[0])
+
+    def test_inherited_and_source_only_tags_never_publish(self):
+        for tag in ("v3.0.0", "v2.0.0", "v1.0.40", "v1.0.38", "v1.0.39",
+                    "v3.0.0-rc.1", "mod-v2.0.6", "docs1.0.0"):
+            with self.subTest(tag=tag):
+                ok, reason = release.publication_candidate_decision(tag)
+                self.assertFalse(ok)
+                self.assertTrue(reason)
+                self.assertFalse(release.publication_allowed(
+                    "workflow_dispatch", "true", tag)[0])
+
+    def test_no_permanent_ban_on_future_1_0_x_maintenance(self):
+        # 1.0 is currently at 1.0.40, but a future 1.0.x patch is not banned.
+        self.assertEqual(release.rollback_line_guard("carbonpanel-v1.0.1"), "v1.0.1")
+        self.assertEqual(release.rollback_line_guard("carbonpanel-v2.0.0"), "v2.0.0")
+        doc = release.load_release_history()
+        self.assertIs(doc["rollback_line"]["permanent_ban_on_future_1_0_x"], False)
+        plan = release.promotion_plan("carbonpanel-v1.0.1")
+        self.assertEqual([step["tag"] for step in plan], ["1.0.1", "1.0", "latest"])
+
+    def test_release_history_catalog_validates_and_detects_tamper(self):
+        ok, problems = release.verify_release_history()
+        self.assertTrue(ok, problems)
+        doc = json.loads(json.dumps(release.load_release_history()))
+        doc["tags"][0]["classification"] = "unknown"
+        ok, problems = release.verify_release_history(doc)
+        self.assertFalse(ok)
+        self.assertTrue(any("category counts" in p for p in problems))
+        doc = json.loads(json.dumps(release.load_release_history()))
+        doc["next_stable"]["semver"] = "1.1.0"
+        self.assertFalse(release.verify_release_history(doc)[0])
+        doc = json.loads(json.dumps(release.load_release_history()))
+        doc["historical_alias"]["publishable"] = True
+        self.assertFalse(release.verify_release_history(doc)[0])
+
+    def test_release_history_records_audited_provenance_facts(self):
+        doc = release.load_release_history()
+        self.assertEqual(len(doc["tags"]), 84)
+        self.assertEqual(doc["counts"]["exact_object_matches"], 79)
+        self.assertEqual(doc["counts"]["name_collisions"], 1)
+        self.assertEqual(doc["counts"]["origin_only"], 4)
+        self.assertEqual(doc["counts"]["upstream_only"], 4)
+        self.assertEqual({t["name"] for t in doc["upstream_only_tags"]},
+                         {"v3.0.0-beta.5", "v3.0.0-beta.6", "v3.0.0-beta.7", "v3.0.0-beta.8"})
+        stable = doc["canonical_stable"]
+        self.assertEqual(stable["release_asset_count"], 8)
+        self.assertEqual(stable["manifest_asset"], "release-manifest.json")
+        self.assertEqual(stable["commit"], "f88748be6a216b187e675bbb1f110df07e544148")
+        self.assertIn("ba734569", doc["build_aliases"]["notes"])  # not the release image
+        self.assertEqual(doc["registries"]["attestation_children"], 2)
+        self.assertEqual(doc["registries"]["platform_children"], ["linux/amd64", "linux/arm64"])
+        self.assertIn("sha-f88748be", doc["build_aliases"]["notes"])
+        self.assertIn("sha-d8597d4e", doc["build_aliases"]["notes"])
+        self.assertEqual(len(doc["downstream_pins"]), 3)
+        self.assertEqual(doc["invented_registry_alias"], False)
+        self.assertGreaterEqual(len(doc["unknown_boundaries"]), 5)
+
+    def test_workflow_separates_git_tag_from_app_version_and_oci_version(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("APP_VERSION: ${{ needs.plan.outputs.semver }}", source)
+        self.assertIn("org.opencontainers.image.version=${{ needs.plan.outputs.semver }}", source)
+        self.assertIn("tags: ['carbonpanel-v*']", source)
+        self.assertIn("python3 scripts/release.py verify-publication-ref", source)
+        self.assertIn("python3 scripts/release.py verify-release-history", source)
+        # The Git tag is used for the release ref, not as APP_VERSION or OCI label.
+        self.assertNotIn("APP_VERSION: ${{ needs.plan.outputs.git_tag }}", source)
+        self.assertNotIn("org.opencontainers.image.version=${{ needs.plan.outputs.git_tag }}", source)
+        self.assertNotIn("tags: ['v*']", source)
+
+    def test_upgrade_notes_cover_all_three_breaking_changes(self):
+        for path in ("docs/releases.md", "docs/release-history.md"):
+            doc = (release.ROOT / path).read_text(encoding="utf-8")
+            with self.subTest(path=path):
+                self.assertIn("UPGRADE NOTES", doc)
+                self.assertIn("role_mapping", doc)
+                self.assertIn("allow_raw_claim_roles", doc)
+                self.assertIn("trusted_proxy_cidrs", doc)
+                self.assertIn("admin", doc)
+                self.assertIn("2.0.0", doc)
+        self.assertIn("carbonpanel-v2.0.0", (release.ROOT / "docs/releases.md").read_text(encoding="utf-8"))
+
+
+    def test_publication_ref_gate_requires_trusted_main_ref_and_exact_ci(self):
+        trusted = release.TRUSTED_DEVELOPER_REF
+        for label, event, ref, ci, expected in (
+            ("dispatch main with CI", "workflow_dispatch", trusted, "true", True),
+            ("feature ref", "workflow_dispatch", "refs/heads/feature/x", "true", False),
+            ("tag ref", "workflow_dispatch", "refs/tags/carbonpanel-v2.0.0", "true", False),
+            ("blank ref", "workflow_dispatch", "", "true", False),
+            ("no CI", "workflow_dispatch", trusted, "false", False),
+            ("push", "push", trusted, "true", False),
+            ("pr", "pull_request", trusted, "true", False),
+        ):
+            with self.subTest(case=label):
+                allowed, _ = release.publication_ref_decision(event, ref, ci)
+                self.assertEqual(allowed, expected)
+        # The CLI combines that decision with a read-only exact-commit CI check.
+        out = io.StringIO()
+        with patch.object(release, "exact_main_ci_verified",
+                          return_value=(True, "exact main CI verified")), \
+             patch("sys.argv", ["release.py", "verify-publication-ref",
+                                "--commit", "a" * 40, "--ref", trusted]), \
+             redirect_stdout(out):
+            release.main()
+        values = json.loads(out.getvalue())
+        self.assertEqual((values["publish"], values["ci_verified"]), ("true", "true"))
+        # A failed CI check cannot be overridden by the trusted ref.
+        with patch.object(release, "exact_main_ci_verified",
+                          return_value=(False, "no successful completed push CI")), \
+             self.assertRaisesRegex(ValueError, "refused"):
+            release.verify_publication_ref(argparse.Namespace(
+                commit="a" * 40, ref=trusted, event="workflow_dispatch"))
+
+    def test_product_tag_alias_promotion_uses_canonical_release_identity(self):
+        product = "carbonpanel-v2.0.0"
+        digest, old = "sha256:" + "a" * 64, "sha256:" + "d" * 64
+        releases_json = [[
+            {"tag_name": "v1.0.40", "draft": False, "prerelease": False},
+            {"tag_name": "v3.0.0-beta.4", "draft": False, "prerelease": False},
+            {"tag_name": product, "draft": False, "prerelease": False},
+        ]]
+        # Inherited names never count as published panel versions; the legacy
+        # stable and the canonical product tag do.
+        self.assertEqual(release.published_stable_versions(releases_json),
+                         ["v1.0.40", "v2.0.0"])
+        out = io.StringIO()
+        with patch.object(release, "published_stable_versions",
+                          return_value=["v1.0.40"]), \
+             patch.object(release, "release_provenance",
+                          return_value=(True, "verified", None)) as provenance, \
+             redirect_stdout(out):
+            release.alias_promotion(argparse.Namespace(
+                version=product, commit="b" * 40, digest=digest))
+        values = json.loads(out.getvalue())
+        self.assertEqual((values["minor"], values["latest"]), ("2.0", "true"))
+        self.assertNotEqual(values["minor"], "1.0")  # rollback alias untouched
+        provenance.assert_called_once_with(
+            "v2.0.0", "b" * 40, digest, git_tag=product)
+
+        with patch.object(release.subprocess, "run") as command, \
+             patch.object(release, "release_provenance",
+                          return_value=(True, "verified", None)) as provenance, \
+             patch.object(release, "observe_reference",
+                          side_effect=[("absent", None), ("absent", None),
+                                       present(digest), present(digest)]), \
+             patch.object(release, "durable_release_records", return_value={}):
+            release.promote_alias(argparse.Namespace(
+                version=product, commit="b" * 40, alias="2.0", digest=digest))
+            writes = registry_writes(command)
+            self.assertEqual(len(writes), 2)  # both registries, immutable then alias
+            for item in writes:
+                self.assertIn("imagetools", item.args[0])
+                self.assertIn("create", item.args[0])
+            provenance.assert_called_once_with(
+                "v2.0.0", "b" * 40, digest, git_tag=product)
+        # A prerelease product tag promotes no stable alias at all.
+        out = io.StringIO()
+        with patch.object(release, "published_stable_versions",
+                          return_value=["v1.0.40"]), \
+             patch.object(release, "release_provenance",
+                          return_value=(True, "verified", None)), \
+             redirect_stdout(out):
+            release.alias_promotion(argparse.Namespace(
+                version=product + "-rc.1", commit="b" * 40, digest=old))
+        values = json.loads(out.getvalue())
+        self.assertEqual((values["minor"], values["latest"]), ("", "false"))
+
+
+    def test_upgrade_rehearsal_is_deterministic_and_passes_on_disposable_fixtures(self):
+        import importlib
+        rehearsal = importlib.import_module("scripts.rehearse_upgrade")
+        summaries = []
+        for _ in range(2):
+            with tempfile.TemporaryDirectory() as directory:
+                report = rehearsal.run(directory)
+                self.assertTrue(report["pass"], report["checks"])
+                self.assertEqual(report["before"]["tables"], 35)
+                self.assertEqual(report["after_upgrade"]["tables"], 44)
+                self.assertEqual(report["after_copy_back_rollback"]["tables"], 35)
+                self.assertEqual(report["after_upgrade"]["nodes_backfill"], "legacy")
+                self.assertTrue(all(report["checks"].values()))
+                summaries.append({key: report[key] for key in
+                                  ("before", "after_upgrade", "after_copy_back_rollback",
+                                   "world_files_verified", "checks", "pass")})
+        self.assertEqual(summaries[0], summaries[1])
+
+
+    # --- PR549 exact findings: latest ordering, notes base, manifest identity --
+
+    def test_github_latest_uses_product_only_verified_stable_ordering(self):
+        newer, reason = release.github_latest_decision("v2.0.0", ["v1.0.40"])
+        self.assertTrue(newer)
+        self.assertIn("newer", reason)
+        # An older maintenance release must not displace a newer verified stable.
+        older, reason = release.github_latest_decision("v1.0.1", ["v1.0.40", "v2.0.0"])
+        self.assertFalse(older)
+        self.assertIn("not newer", reason)
+        # Equal version is not a promotion; prereleases never promote; unknown fails closed.
+        self.assertFalse(release.github_latest_decision("v1.0.40", ["v1.0.40"])[0])
+        self.assertFalse(release.github_latest_decision("v2.0.0-alpha.1", ["v1.0.40"])[0])
+        self.assertFalse(release.github_latest_decision("v2.0.0", None)[0])
+        # Inherited/unclassified releases are not a verified stable state.
+        inherited = release.published_stable_versions([[
+            {"tag_name": "v3.0.0-beta.4", "draft": False, "prerelease": False},
+            {"tag_name": "mod-v2.0.6", "draft": False, "prerelease": False},
+        ]])
+        self.assertEqual(inherited, [])
+
+    def test_old_maintenance_publish_does_not_move_github_latest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output, _ = make_publish_fixture(directory, git_tag="carbonpanel-v1.0.1", semver="1.0.1")
+            notes, generated = [], []
+            with patch.object(release, "guard_publishing"), \
+                 patch.object(release, "run", return_value=""), \
+                 patch_gh_release_view(), \
+                 patch.object(release, "github", side_effect=publish_github_reply(
+                     notes, generated, output=output,
+                     published=(("v1.0.40",), ("v2.0.0",)))) as github, \
+                 redirect_stdout(io.StringIO()):
+                release.publish(argparse.Namespace(
+                    version="carbonpanel-v1.0.1", commit="a" * 40, output=str(output)))
+            edits = [call for call in github.call_args_list
+                     if call.args[:2] == ("release", "edit") and "--draft=false" in call.args]
+            self.assertTrue(edits)
+            self.assertIn("--latest=false", edits[-1].args)
+
+    def test_first_major_release_notes_use_verified_previous_tag_and_migration_guide(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output, _ = make_publish_fixture(directory)
+            notes, generated = [], []
+            with patch.object(release, "guard_publishing"), \
+                 patch.object(release, "run", return_value=""), \
+                 patch_gh_release_view(), \
+                 patch.object(release, "github", side_effect=publish_github_reply(
+                     notes, generated, output=output, published=(("v1.0.40",),))) as github, \
+                 redirect_stdout(io.StringIO()):
+                release.publish(argparse.Namespace(
+                    version="carbonpanel-v2.0.0", commit="a" * 40, output=str(output)))
+            self.assertTrue(generated)
+            self.assertTrue(any("previous_tag_name=v1.0.40" in arg for arg in generated[0]))
+            self.assertTrue(notes)  # notes-file captured at draft creation
+            body = notes[0]
+            for expected in ("docs/releases.md#upgrade-notes-from-v1040", "role_mapping",
+                             "no implicit first-user admin", "trusted_proxy_cidrs",
+                             "Backup/restore drill"):
+                self.assertIn(expected, body)
+            edits = [call for call in github.call_args_list
+                     if call.args[:2] == ("release", "edit") and "--draft=false" in call.args]
+            self.assertIn("--latest=true", edits[-1].args)
+
+    def test_publish_requires_explicit_and_matching_manifest_identity_fields(self):
+        cases = (
+            ("missing git_tag", {"include_git_tag": False}, "git_tag is missing"),
+            ("mismatched git_tag", {"git_tag": "carbonpanel-v2.0.1"}, "git_tag is missing or does not match"),
+            ("missing semver", {"include_semver": False}, "semver is missing"),
+            ("mismatched semver", {"semver": "2.0.1", "version_override": "v2.0.0"},
+             "semver is missing or does not match"),
+        )
+        for name, overrides, expected in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                git_tag = overrides.get("git_tag", "carbonpanel-v2.0.0")
+                semver = overrides.get("semver", "2.0.0")
+                output, _ = make_publish_fixture(
+                    directory, git_tag=git_tag, semver=semver,
+                    include_git_tag=overrides.get("include_git_tag", True),
+                    include_semver=overrides.get("include_semver", True),
+                    version_override=overrides.get("version_override"))
+                with patch.object(release, "guard_publishing"), \
+                     patch.object(release, "github") as github, \
+                     self.assertRaisesRegex(ValueError, expected):
+                    release.publish(argparse.Namespace(
+                        version="carbonpanel-v2.0.0", commit="a" * 40, output=str(output)))
+                github.assert_not_called()
+
+
+    def test_display_version_matches_plan_semver_for_rehearsal_and_plain_v(self):
+        # PR549 regression: APP_VERSION is the plan `semver` output (no leading
+        # v), so display_version() and the UI search must use that same form.
+        for value, expected in (
+            ("v0.0.0-verify.9", "0.0.0-verify.9"),
+            ("v0.0.0-verify.123", "0.0.0-verify.123"),
+            ("v3.0.0", "3.0.0"),
+            ("v3.0.0-alpha.1", "3.0.0-alpha.1"),
+            ("carbonpanel-v2.0.0", "2.0.0"),
+            ("carbonpanel-v2.0.0-alpha.1", "2.0.0-alpha.1"),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(release.display_version(value), expected)
+                # plan() emits the same form as its `semver` output.
+                tag = release.resolve_panel_version(value)
+                self.assertEqual(tag[1:] if value.startswith("v") and
+                                 release.product_release_or_none(value) is None
+                                 else release.display_version(value), expected)
+
+    def test_package_ui_version_check_accepts_canonical_semver_rehearsal(self):
+        # The embedded UI is built with APP_VERSION = plan semver (no v). The
+        # package() search must find that exact string for a rehearsal tag.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            frontend = root / "web/carbon-panel/build/_app"
+            frontend.mkdir(parents=True)
+            (root / "web/carbon-panel/build/index.html").write_text("<html>", encoding="utf-8")
+            (frontend / "app.js").write_text("window.APP_VERSION='0.0.0-verify.9'", encoding="utf-8")
+            value = "v0.0.0-verify.9"
+            display = release.display_version(value)
+            self.assertIn(display.encode(), (frontend / "app.js").read_bytes())
+            self.assertNotEqual(display, value)
+
+    def test_workflow_uses_one_canonical_version_form(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("APP_VERSION: ${{ needs.plan.outputs.semver }}", source)
+        self.assertIn("org.opencontainers.image.version=${{ needs.plan.outputs.semver }}", source)
+        self.assertNotIn("APP_VERSION: ${{ needs.plan.outputs.version }}", source)
+
+
+    def test_release_workflow_serializes_full_publication_with_one_global_group(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        import re as _re
+
+        def job_block(name):
+            match = _re.search(rf"(?ms)^  {_re.escape(name)}:\n(.*?)(?=^  [a-zA-Z][\w-]*:\n|\Z)", source)
+            self.assertIsNotNone(match, f"missing job {name}")
+            return match.group(1)
+
+        # (a) ONE workflow-level concurrency group, keyed to the explicit trusted
+        # publish path; every job of that run inherits it.
+        self.assertRegex(source, r"(?m)^concurrency:\n")
+        self.assertIn("inputs.publish == true && 'carbonpanel-product-publish'", source)
+        self.assertEqual(source.count("carbonpanel-product-publish"), 1)
+        # (b) build-only/rehearsal runs get a distinct per-run key, so ordinary
+        # CI is not serialized against another version.
+        self.assertIn("format('carbonpanel-stage-{0}', github.run_id)", source)
+        # (c) cancel-in-progress:false protects the RUNNING run only. Default
+        # queue:single retains ONE pending run that a later request replaces;
+        # this lane is single-operator dispatch, never "all queued publishers wait".
+        self.assertRegex(source, r"(?m)^  cancel-in-progress: false$")
+        self.assertNotIn("cancel-in-progress: true", source)
+        self.assertNotRegex(source, r"(?m)^  queue:")
+        self.assertIn("SINGLE-OPERATOR DISPATCH", source)
+        self.assertIn("REPLACES it", source)
+        ops = (release.ROOT / "docs/releases.md").read_text(encoding="utf-8")
+        self.assertIn("single-operator dispatch", ops)
+        self.assertIn("replaces", ops)
+        # (d) no job-level group may release the lock between phases. All jobs,
+        # including the three writers, inherit the workflow-level lock.
+        for name in ("plan", "frontend", "source-image", "binaries", "image",
+                     "publish-immutable", "publish", "promote-aliases"):
+            with self.subTest(job=name):
+                self.assertNotRegex(job_block(name), r"(?m)^    concurrency:")
+        writers = ("publish-immutable", "publish", "promote-aliases")
+        for name in writers:
+            with self.subTest(writer=name):
+                self.assertIn("needs.plan.outputs.publish == 'true'", job_block(name))
+        # The lock spans immutable publish -> GitHub release -> alias promotion:
+        # promotion depends on both earlier writing phases in the same run.
+        self.assertIn("needs: [plan, publish-immutable, publish]",
+                      job_block("promote-aliases"))
+        self.assertIn("needs: [plan, publish-immutable]", job_block("publish"))
+        # (e) alias promotion still re-preflights with LIVE state inside the lock.
+        promotion = job_block("promote-aliases")
+        for step in ("Re-verify the durable release record before any alias move",
+                     "Decide which aliases may advance",
+                     "verify-release-record", "alias-promotion", "promote-alias"):
+            self.assertIn(step, promotion)
+        # (f) stranded-after-immutable is impossible: one run holds the lock for
+        # all phases, and recovery for a resumed immutable version is inside that
+        # same serialized flow (preflight-immutable -> verify-immutable -> record).
+        self.assertIn("preflight-immutable", job_block("publish-immutable"))
+        self.assertIn("verify-immutable", job_block("publish-immutable"))
+        self.assertIn("release-record", job_block("publish"))
+        self.assertNotIn("github.event_name == 'push'", source)
 
 
 if __name__ == "__main__":

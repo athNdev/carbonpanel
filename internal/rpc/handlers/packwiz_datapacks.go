@@ -7,6 +7,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/athNdev/carbon-panel/internal/indexers"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/pkg/upload"
 	"github.com/athNdev/carbon-panel/pkg/utils"
 )
 
@@ -66,18 +68,31 @@ func (h *PackwizHandler) handleAddDatapack(w http.ResponseWriter, r *http.Reques
 		name = filepath.Base(file.Filename)
 	}
 
-	client := utils.NewSafeHTTPClient(5*time.Minute, minecraft.DownloadAllowsPrivate(indexers.DatapackIndexerOrigin(resolved)))
+	indexerOrigin := indexers.DatapackIndexerOrigin(resolved)
+	providerPolicy := utils.ProviderEgressPolicy(
+		minecraft.DownloadAllowsPrivate(indexerOrigin),
+		minecraft.ProviderDownloadHosts(indexerOrigin)...)
+	redactedURL := utils.RedactURL(file.DownloadURL)
+	if _, err := utils.ValidateURLForEgress(file.DownloadURL, providerPolicy); err != nil {
+		h.log.Warn("provider egress blocked studio datapack %s: %v", redactedURL, err)
+		http.Error(w, "download URL rejected by provider egress policy", http.StatusBadGateway)
+		return
+	}
+	client := utils.NewSafeHTTPClientForEgress(5*time.Minute, providerPolicy)
 	dlReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, file.DownloadURL, nil)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("invalid download URL: %v", err), http.StatusBadGateway)
+		h.log.Warn("invalid studio datapack download URL %s: %v", redactedURL, err)
+		http.Error(w, "invalid download URL", http.StatusBadGateway)
 		return
 	}
 	dlReq.Header.Set("User-Agent", "CarbonPanel/2.x (Datapack Installer)")
 
 	resp, err := client.Do(dlReq)
 	if err != nil {
-		h.log.Error("Failed to download studio datapack %s: %v", file.DownloadURL, err)
-		http.Error(w, fmt.Sprintf("download failed: %v", err), http.StatusBadGateway)
+		// client.Do wraps errors in url.Error with the raw request URL, which
+		// may carry indexer-supplied credentials or presigned tokens.
+		h.log.Error("Failed to download studio datapack %s: %v", redactedURL, err)
+		http.Error(w, "download failed", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -111,8 +126,13 @@ func (h *PackwizHandler) handleUploadDatapack(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	tempPath, originalFilename, err := h.uploadManager.GetTempPath(req.UploadSessionID)
+	ownerID := requestUploadOwnerID(r)
+	tempPath, originalFilename, err := h.uploadManager.GetTempPathFor(req.UploadSessionID, ownerID)
 	if err != nil {
+		if errors.Is(err, upload.ErrOwnerMismatch) {
+			http.Error(w, "upload session belongs to another user", http.StatusForbidden)
+			return
+		}
 		http.Error(w, "upload session not found or not completed", http.StatusNotFound)
 		return
 	}
@@ -123,21 +143,21 @@ func (h *PackwizHandler) handleUploadDatapack(w http.ResponseWriter, r *http.Req
 	}
 	if err := minecraft.ValidateDatapackFilename(name); err != nil {
 		_ = os.Remove(tempPath)
-		_ = h.uploadManager.CleanupSession(req.UploadSessionID)
+		_ = h.uploadManager.CleanupSessionFor(req.UploadSessionID, ownerID)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	f, err := os.Open(tempPath)
 	if err != nil {
-		_ = h.uploadManager.CleanupSession(req.UploadSessionID)
+		_ = h.uploadManager.CleanupSessionFor(req.UploadSessionID, ownerID)
 		http.Error(w, "uploaded file unavailable", http.StatusInternalServerError)
 		return
 	}
 	installErr := h.manager.AddDatapackFile(packID, name, f)
 	_ = f.Close()
 	_ = os.Remove(tempPath)
-	_ = h.uploadManager.CleanupSession(req.UploadSessionID)
+	_ = h.uploadManager.CleanupSessionFor(req.UploadSessionID, ownerID)
 	if installErr != nil {
 		// Most failures come from the uploaded archive itself (invalid name or
 		// not a real datapack), so surface them as bad requests.

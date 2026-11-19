@@ -14,8 +14,12 @@ code_refs:
   - scripts/review/profile.test.mjs
   - scripts/review/profile-browser.test.mjs
   - scripts/review/journey.mjs
+  - scripts/review/entry-state.mjs
+  - scripts/review/entry-state.test.mjs
   - scripts/manual-review/e2e/run.mjs
+  - scripts/manual-review/e2e/a11y-check.mjs
   - .github/workflows/review-ownership.yml
+  - .github/workflows/ci.yml
 sources:
   - title: Review toolkit
     resource: ../../scripts/review/README.md
@@ -46,3 +50,10 @@ base URL; detailed screenshots and reports remain local review artifacts.
 Default artifacts are timestamped beneath the checkout's ignored tmp tree,
 independent of the caller's working directory; explicit output overrides are
 supported for attaching evidence elsewhere.
+
+The login route hydrates after DOMContentLoaded, so bootstrap/login/auth/fatal
+selection waits for one mutually exclusive semantic DOM state instead of an
+immediate pre-hydration `count()`; no reachable state fails closed. A delayed-
+hydration fixture covers the seeded-login regression. The frontend accessibility
+journey reuses this same driver and owned cache; it drives a self-contained
+component fixture and claims Chromium behavior only.

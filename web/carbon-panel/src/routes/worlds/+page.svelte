@@ -7,9 +7,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import type { ResolvedPathname } from '$app/types';
 	import { create } from '@bufbuild/protobuf';
 	import { ConnectError, Code } from '@connectrpc/connect';
-	import { Lock, Map as MapIcon, RefreshCw } from '@lucide/svelte';
+	import { Lock, Map as MapIcon, RefreshCw, X } from '@lucide/svelte';
 	import {
 		CarbonPageHeader,
 		CarbonTag,
@@ -70,6 +71,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (error instanceof ConnectError && error.code === Code.PermissionDenied) denied = true;
 	}
 
+	function retryTargets() {
+		void store.refreshTargets().catch(handleListError);
+	}
+
+	// A failed refresh must not erase a previously loaded inventory. Remember
+	// which error was dismissed so a new failure shows the warning again.
+	let dismissedStaleError: unknown = $state(null);
+	let showStaleBanner = $derived(
+		Boolean(snapshot.error) && snapshot.targets.length > 0 && dismissedStaleError !== snapshot.error
+	);
+
 	$effect(() => {
 		if (!canRead || auth.isLoading || started) return;
 		started = true;
@@ -104,10 +116,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		});
 	});
 
-	function targetHref(target: WorldViewTarget): string {
+	function targetHref(target: WorldViewTarget): ResolvedPathname {
 		const key = encodeWorldKey(target.worldRef);
-		const base = resolve(`/worlds/${target.serverId}/${key}`);
-		return target.dimension ? `${base}?dimension=${encodeURIComponent(target.dimension)}` : base;
+		const base = resolve('/worlds/[server]/[world]', { server: target.serverId, world: key });
+		return (
+			target.dimension ? `${base}?dimension=${encodeURIComponent(target.dimension)}` : base
+		) as ResolvedPathname;
 	}
 
 	function clearFilters() {
@@ -117,7 +131,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="h-full flex-1 space-y-6 bg-background font-sans text-foreground">
+<div
+	class="h-full flex-1 space-y-6 bg-background font-sans text-foreground"
+	data-testid="showcase-worlds-content"
+>
 	<CarbonPageHeader
 		title="Worlds"
 		description="View Minecraft worlds through their configured renderer. Maps are observation only."
@@ -129,12 +146,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<CarbonButton kind="tertiary" size="sm" href={resolve('/modules')}>
 				Renderer modules
 			</CarbonButton>
-			<CarbonButton
-				kind="secondary"
-				size="sm"
-				onclick={() => void store.refreshTargets().catch(handleListError)}
-				loading={snapshot.loading}
-			>
+			<CarbonButton kind="secondary" size="sm" onclick={retryTargets} loading={snapshot.loading}>
 				<RefreshCw class="h-3.5 w-3.5" />
 				<span>Refresh</span>
 			</CarbonButton>
@@ -158,13 +170,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="border border-border bg-card p-6" role="status">
 			<CarbonInlineLoading description="Loading viewable worlds…" />
 		</div>
-	{:else if snapshot.error}
+	{:else if snapshot.error && snapshot.targets.length === 0}
 		<CarbonErrorState
 			title="Could not load worlds"
 			message={formatRpcError(snapshot.error, 'The world inventory could not be read.')}
-			onretry={() => {
-				void store.refreshTargets().catch(handleListError);
-			}}
+			onretry={retryTargets}
 		/>
 	{:else if snapshot.targets.length === 0}
 		<CarbonEmptyState
@@ -176,6 +186,25 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{/snippet}
 		</CarbonEmptyState>
 	{:else}
+		{#if showStaleBanner}
+			<div
+				role="alert"
+				class="mb-4 flex flex-col gap-2 border-l-4 border-destructive bg-destructive/10 p-3 text-sm text-destructive-text sm:flex-row sm:items-center sm:justify-between"
+			>
+				<span>World inventory refresh failed. Showing the last known worlds.</span>
+				<div class="flex shrink-0 items-center gap-2">
+					<CarbonButton kind="tertiary" size="sm" onclick={retryTargets}>Retry</CarbonButton>
+					<button
+						type="button"
+						class="focus-ring motion-press flex h-8 w-8 cursor-pointer items-center justify-center"
+						aria-label="Dismiss refresh error"
+						onclick={() => (dismissedStaleError = snapshot.error)}
+					>
+						<X class="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
+					</button>
+				</div>
+			</div>
+		{/if}
 		<div
 			class="flex flex-col items-stretch gap-3 border border-border bg-card p-3 sm:flex-row sm:items-end"
 		>
@@ -231,9 +260,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<tr class="transition-colors hover:bg-accent">
 						<td class="min-w-[180px] px-3 py-3">
 							<a
-								href={resolve(
-									`/worlds/${target.serverId}/${encodeWorldKey(target.worldRef)}${target.dimension ? `?dimension=${encodeURIComponent(target.dimension)}` : ''}`
-								)}
+								href={targetHref(target)}
 								class="block truncate font-medium text-foreground hover:text-accent-text hover:underline"
 							>
 								{target.name || target.worldRef?.levelName || 'Untitled world'}

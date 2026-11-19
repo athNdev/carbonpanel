@@ -11,7 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { Progress } from '$lib/components/ui/progress';
 	import { CarbonButton } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import {

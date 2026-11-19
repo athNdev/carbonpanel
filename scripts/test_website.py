@@ -10,7 +10,9 @@ import unittest
 from scripts.build_website import (
     build_sitemap,
     export_snapshot,
+    normalize_mdx,
     publish_design_system,
+    render_astro_config,
     scoped_links,
 )
 from scripts.check_website import Links, check
@@ -84,6 +86,32 @@ class WebsiteTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             export_snapshot(Path("."), "main", Path("."))
 
+    def test_hero_frontmatter_links_are_rebased(self):
+        source = "---\nhero:\n  actions:\n      link: /introduction/\n      link: https://example.com/\n---\n"
+        result = scoped_links(source, "/docs/versions/1.0.39/", "a" * 40)
+        self.assertIn("link: /docs/versions/1.0.39/introduction/", result)
+        self.assertIn("link: https://example.com/", result)
+
+    def test_legacy_spdx_html_comment_compiles_as_mdx(self):
+        source = "---\ntitle: x\n---\n<!--\nSPDX-License-Identifier: MIT\n-->\nBody"
+        result = normalize_mdx(source)
+        self.assertNotIn("<!--", result)
+        self.assertIn("{/*", result)
+        self.assertIn("Body", result)
+
+    def test_sidebar_only_contains_pages_at_the_exact_commit(self):
+        root = Path(__file__).resolve().parent.parent
+        shell = (root / "docs/carbon-panel/astro.config.mjs").read_text(encoding="utf-8")
+        config = render_astro_config(
+            shell, ["", "introduction", "getting-started/docker-compose"], "/docs/")
+        self.assertIn('slug: "introduction"', config)
+        self.assertIn('slug: "getting-started/docker-compose"', config)
+        self.assertNotIn("modpack-studio", config)
+        self.assertIn("link: '../design-system/'", config)
+        nested = render_astro_config(
+            shell, ["", "introduction"], "/docs/versions/1.0.39/")
+        self.assertIn("link: '../../../design-system/'", nested)
+
 
     def test_design_system_source_links_labels_and_fragments(self):
         page = Path(__file__).resolve().parent.parent / "docs/design-system/index.html"
@@ -108,7 +136,7 @@ class WebsiteTests(unittest.TestCase):
             self.assertIn("github.com/athNdev/carbonpanel/blob/main/docs/design-system/README.md", page)
             self.assertNotIn("../../web/carbon-panel/", page)
             self.assertIn('property="og:image"', page)
-            self.assertIn('content="https://carbonpanel.dev/assets/og-design-system.png?v=20261113-2"', page)
+            self.assertIn('content="https://carbonpanel.dev/assets/og-design-system.png?v=20261118"', page)
             self.assertEqual(
                 (design / "tokens.css").read_bytes(),
                 (root / "web/carbon-panel/src/lib/design-system/tokens.css").read_bytes())

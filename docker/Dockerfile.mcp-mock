@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MPL-2.0
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# Disposable CI-only fixture: a mock Connect controller on an isolated Docker
+# network. It is never published, never carries credentials, and holds no data.
+FROM python:3.13-alpine
+COPY scripts/mcp_mock_controller.py /mock_controller.py
+EXPOSE 8080
+ENTRYPOINT ["python", "/mock_controller.py", "--port", "8080"]

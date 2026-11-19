@@ -427,22 +427,60 @@ func canonicalNodeID(nodeID string) string {
 	return nodeID
 }
 
+// ActualLevelName is the exported form used by the private module-discovery
+// adapter so it resolves the same world identity as the target projection.
+func ActualLevelName(cfg *storage.ServerConfig) string { return configuredLevelName(cfg) }
+
+// configuredLevelName resolves the ACTUAL save-folder identity with an
+// explicit, documented precedence (OSS-388): an operator's level-name line in
+// server.properties wins, then the panel's Level field, then Minecraft's
+// built-in "world" default. A folder name is validated as a plain path
+// component; an invalid or unknown value stays empty rather than being guessed.
 func configuredLevelName(cfg *storage.ServerConfig) string {
-	if cfg == nil || cfg.CustomServerProperties == nil {
+	if cfg == nil {
 		return ""
 	}
-	for _, line := range strings.Split(*cfg.CustomServerProperties, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	if cfg.CustomServerProperties != nil {
+		for _, line := range strings.Split(*cfg.CustomServerProperties, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			key, value, ok := strings.Cut(line, "=")
+			if !ok || !strings.EqualFold(strings.TrimSpace(key), "level-name") {
+				continue
+			}
+			name := strings.TrimSpace(value)
+			if validLevelName(name) {
+				return name
+			}
+			return "" // explicitly configured but invalid: fail closed
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(key), "level-name") {
-			continue
-		}
-		return strings.TrimSpace(value)
 	}
-	return ""
+	if cfg.Level != nil && strings.TrimSpace(*cfg.Level) != "" {
+		name := strings.TrimSpace(*cfg.Level)
+		if validLevelName(name) {
+			return name
+		}
+		return ""
+	}
+	return "world" // Minecraft's documented default when the panel has no override
+}
+
+// validLevelName accepts only a single plain path component. Directory
+// separators, drive/URL separators and relative/absolute path markers are
+// rejected so a world name can never escape the server data directory.
+func validLevelName(name string) bool {
+	if name == "" || strings.TrimSpace(name) != name {
+		return false
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\:`) {
+		return false
+	}
+	if strings.ContainsAny(name, "\x00\r\n") || strings.HasPrefix(name, "-") {
+		return false
+	}
+	return true
 }
 
 func (s *Service) audit(e activity.Entry) error {

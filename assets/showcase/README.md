@@ -2,39 +2,74 @@
 
 # Current application captures
 
-Captured on 12 November 2026. The dashboard, Studio, console and modpack catalog
-use application sources at `a30c385bbb560454d1ed31f350209f5a5c40655e`, compiled into
-a production Docker image. The staging image was refreshed from the production
-frontend built at `cf3725d0dffff06a2de62b14c90ff1356515bab9`, served through Vite
-preview against the same isolated backend installation. It shows the current
-shared inventory rather than the earlier select-and-list layout.
+The README renders these images from the dedicated `showcase-assets` branch so
+the URLs are stable:
 
-These are unretouched browser crops of an isolated installation, not mockups or
-the homepage's sample islands. The installation contains a real running Vanilla
-1.21.1 server and seeded Studio projects. Mod entries use versions returned by
-the provider through the panel's API. Resource figures and logs are observed
-values from that installation, not performance claims. Missing or stale metrics
-are not replaced with invented readings.
+`https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/<name>.png`
 
-| Image                        | Focus                                                                                    |
-| ---------------------------- | ---------------------------------------------------------------------------------------- |
-| `showcase-studio.png`        | Content tabs and the real mod table, including client/server sides and a pinned version. |
-| `showcase-server-detail.png` | Running server console with its native log filter set to `Server thread`.                |
-| `showcase-staging.png`       | A real `viewDistance` batch staged for the next restart, not applied.                    |
-| `showcase-dashboard.png`     | Cluster overview and observed server state.                                              |
-| `showcase-modpacks.png`      | The live Modrinth catalog as displayed by the review installation.                       |
+The branch is seeded with the last known-good real captures before any README
+link changes. The README no longer links to PNGs tracked on main; generated
+captures are published on the asset branch. `manifest.json` there records the
+exact source commit, version, data provenance, and a SHA256, byte count and
+pixel size for every published image.
 
-The standard viewport is 1440 × 1000 at 2× device scale. The staged-batch crop
-uses the actual responsive UI at 1100 × 1200, also at 2×. Crops remove navigation
-and unrelated fields to keep features readable at README width. No UI elements,
-labels, metrics or logs are repainted. Both this directory and
-`landing/assets/showcase/` carry identical PNGs.
+These are unretouched browser crops of the packaged application running in an
+isolated disposable installation with seeded fixtures, not mockups or homepage
+sample islands. The stack seeds a first admin, a local node, a running Vanilla
+1.21.1 server, real Packwiz mods, one World Library revision, and an offline
+player identity through the real allowlist RPC. A compatibility verdict is
+computed on demand by the read-only `CheckCompatibility` RPC; a panel that has
+not run that check correctly shows "No compatibility report yet". The expanded
+roster capture shows an offline identity's honest unavailable avatar state,
+not a skin profile. Resource figures and logs are observed values, not
+performance claims. No production account, world, log or private player profile
+is used.
+
+## Required and optional images
+
+`showcase-dashboard`, `showcase-dashboard-full`, `showcase-server-detail`,
+`showcase-studio`, `showcase-modpacks`, `showcase-library`,
+`showcase-library-revisions` and `showcase-player-allowlist` are the
+README-canonical set. Publication fails closed if any one is missing, corrupt,
+stale or inconsistent with the manifest. The `-full` shot is a full-window
+capture with navigation and shell; the others are inline feature crops.
+
+**Publication follow-up (explicit):** this change lands the required-asset,
+validation, and World/BlueMap decoupling groundwork. The live public manifest
+does **not** yet contain `showcase-dashboard-full.png` (raw URL is 404), so the
+root README deliberately does **not** link it yet. A separate follow-up will
+add the prominent public README link **only after** a trusted-main automatic
+publish proves that exact PNG is in the public manifest, its raw URL returns
+HTTP 200 with the manifest SHA256 and byte count, and source id, version and
+data provenance are verified. Last-good assets and fail-closed validation are
+preserved meanwhile.
+
+Feature-gated journey steps (`--features players,library,worldtab,worlds,
+playerdetail`) are mandatory when enabled, so a partial set cannot publish.
+World tab and Worlds list (`worldtab`) are independent of the renderer gate.
+Rendered BlueMap tiles (`worlds`) and a canonical player detail preview
+(`playerdetail`) are off by default and only linked from the README after a
+real capture passes: a visible decoded skin image or rendered map canvas. A
+Worlds list or a renderer status object is never presented as map imagery.
+
+## Automated path
+
+`.github/workflows/showcase.yml` runs on main pushes that touch the represented
+UI, or on `workflow_dispatch` with explicit feature gates. The capture job is
+read-only and runs the real production journey. A separate minimal
+`contents:write` job publishes only `showcase-assets`, in one atomic commit,
+after:
+
+- re-validating the bundle against the plan and validator from an exact pinned
+  `github.sha` checkout (the artifact is data only, never executable code),
+- confirming the capture is live main and a descendant of the last published
+  source commit, and refusing a divergent re-run,
+- requiring every README-canonical image, and
+- checking a content digest so an unchanged capture is a no-op.
+
+Any failure leaves the previous good screenshots untouched.
 
 ## Regeneration
-
-Start a disposable stack with a unique name, port and data directory. The
-bootstrap script requires Docker, Bash, curl and Node on its execution PATH.
-Never use a shared installation or real player data for public screenshots.
 
 ```sh
 REVIEW_STACK_NAME=carbon-readme-review \
@@ -45,23 +80,25 @@ REVIEW_DATA_DIR=/tmp/carbon-readme-review \
 node scripts/review/journey.mjs \
   --plan scripts/review/plan-showcase.json \
   --base http://127.0.0.1:<port-from-devstack> \
-  --out /tmp/showcase
+  --out /tmp/showcase \
+  --features players,library
 
-cp /tmp/showcase/showcase-*.png assets/showcase/
-cp /tmp/showcase/showcase-*.png landing/assets/showcase/
+python3 scripts/showcase_assets.py build \
+  --images-dir /tmp/showcase --publish-dir /tmp/showcase-bundle \
+  --plan scripts/review/plan-showcase.json \
+  --seed-script scripts/review/devstack.sh \
+  --features players,library \
+  --source-sha <sha> --source-ref refs/heads/main \
+  --repository athNdev/carbonpanel --run-id local --run-url <url> \
+  --captured-at <utc-iso> --app-version <version> \
+  --driver-version <version> --browser-version <version>
+python3 scripts/showcase_assets.py validate \
+  --publish-dir /tmp/showcase-bundle \
+  --plan scripts/review/plan-showcase.json --features players,library \
+  --expected-source-sha <sha>
 ```
 
-For a manual capture, use the same real routes and controls through a browser.
-In Configuration → Game Settings, enable a custom View Distance, enter `12`,
-and choose **Stage**. Keep **On next restart** selected. Use keyboard focus to
-bring the batch controls into view. Use a viewport tall enough for the whole
-inventory to fit inside the form pane, then crop the complete batch, including
-its apply window, staged item, discard actions and explanatory text. Keep the
-native safety disclosure collapsed. Do not apply the batch merely to obtain
-an image.
-
-Inspect exports at README display size before replacing files. Record the new
-application revision and date here, update both PNG directories together, and
-re-render the README. Refresh captures whenever the represented UI changes.
-`.github/workflows/showcase.yml` runs the four-image standard journey in CI;
-the additional staged-batch image uses the manual steps above.
+Use a unique stack name and data directory; never use a shared installation or
+real player data for public screenshots. The standard viewport is 1440 × 1000
+at 2× device scale. Crops remove navigation and unrelated fields to keep
+features readable at README width; no labels, metrics or logs are repainted.

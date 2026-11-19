@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/athNdev/carbon-panel/cmd/geyser/pin"
 )
@@ -14,6 +16,11 @@ const (
 	geyserJar  = "/opt/geyser/Geyser.jar"
 	dataDir    = "/data"
 	configFile = "/data/config.yml"
+
+	// defaultBedrockAddress keeps a standalone Geyser entrypoint off the
+	// network. Setting BEDROCK_ADDRESS explicitly is the opt-in to a wider
+	// bind; the shipped module template does that for its UDP proxy.
+	defaultBedrockAddress = "127.0.0.1"
 )
 
 func main() {
@@ -42,7 +49,7 @@ func main() {
 
 	// Generate config if needed
 	if getEnv("OVERWRITE_CONFIG", "false") == "true" || !fileExists(configFile) {
-		if err := generateConfig(); err != nil {
+		if err := generateConfig(configFile); err != nil {
 			fatal("failed to generate config: %v", err)
 		}
 		if err := chownPath(configFile, puid, pgid); err != nil {
@@ -88,10 +95,14 @@ func downloadGeyser(dest string) error {
 	return pin.Fetch(http.DefaultClient, pin.URL, dest, pin.SHA256, pin.MaxBytes)
 }
 
-func generateConfig() error {
+func generateConfig(path string) error {
 	auth, err := pin.RemoteAuthType(os.Getenv("REMOTE_AUTH_TYPE"), os.Getenv("GEYSER_ALLOW_OFFLINE_AUTH"))
 	if err != nil {
 		return err
+	}
+	bedrockAddress := resolveBedrockAddress()
+	if bedrockBindIsPublic(bedrockAddress) {
+		fmt.Fprintf(os.Stderr, "warning: BEDROCK_ADDRESS=%q listens on all interfaces; restrict the published UDP port to trusted networks\n", bedrockAddress)
 	}
 	config := fmt.Sprintf(`bedrock:
   address: %s
@@ -136,7 +147,7 @@ metrics:
   enabled: %s
   uuid: %s
 `,
-		getEnv("BEDROCK_ADDRESS", "0.0.0.0"),
+		bedrockAddress,
 		getEnv("BEDROCK_PORT", "19132"),
 		getEnv("BEDROCK_MOTD1", "GeyserMC"),
 		getEnv("BEDROCK_MOTD2", "Minecraft Server"),
@@ -174,7 +185,27 @@ metrics:
 		getEnv("GEYSER_METRICS_UUID", "generateduuid"),
 	)
 
-	return os.WriteFile(configFile, []byte(config), 0644)
+	return os.WriteFile(path, []byte(config), 0644)
+}
+
+// resolveBedrockAddress defaults a standalone Geyser listener to loopback.
+// Setting BEDROCK_ADDRESS explicitly is the opt-in to a wider bind: existing
+// module instances and direct-entrypoint deployments that set it keep working.
+func resolveBedrockAddress() string {
+	return getEnv("BEDROCK_ADDRESS", defaultBedrockAddress)
+}
+
+// bedrockBindIsPublic reports wildcard binds, which expose the UDP listener on
+// every container interface. Private and loopback addresses are not reported.
+func bedrockBindIsPublic(address string) bool {
+	addr := strings.TrimSpace(strings.Trim(address, "[]"))
+	if addr == "*" {
+		return true
+	}
+	if ip := net.ParseIP(addr); ip != nil {
+		return ip.IsUnspecified()
+	}
+	return false
 }
 
 func getEnv(key, def string) string {

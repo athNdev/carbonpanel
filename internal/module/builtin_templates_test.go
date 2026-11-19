@@ -25,6 +25,42 @@ func TestGeyserBedrockStaysPublic(t *testing.T) {
 	}
 }
 
+// The standalone Geyser entrypoint now defaults to a loopback bind. The
+// shipped module keeps its explicit wide bind because the panel's UDP proxy
+// dials the container IP, so legitimate Bedrock clients must keep working.
+func TestBuiltinGeyserOptsInToContainerWideBind(t *testing.T) {
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	if err := InitBuiltinTemplates(store); err != nil {
+		t.Fatal(err)
+	}
+	templates, err := store.ListModuleTemplates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var geyser *storage.ModuleTemplate
+	for _, tpl := range templates {
+		if tpl.ID == "builtin-geyser" {
+			geyser = tpl
+			break
+		}
+	}
+	if geyser == nil {
+		t.Fatal("builtin geyser template missing")
+	}
+
+	var env map[string]string
+	if err := json.Unmarshal([]byte(geyser.DefaultEnv), &env); err != nil {
+		t.Fatalf("geyser template DefaultEnv: %v", err)
+	}
+	if env["BEDROCK_ADDRESS"] != "0.0.0.0" {
+		t.Errorf("geyser BEDROCK_ADDRESS = %q, want explicit 0.0.0.0 for UDP proxy reachability", env["BEDROCK_ADDRESS"])
+	}
+	if !strings.Contains(strings.ToLower(geyser.Documentation), "all interfaces") {
+		t.Error("geyser template documentation must state why the container-wide bind is explicit")
+	}
+}
+
 // The status sidecar's web endpoint has no request authentication. Its
 // published port stays reachable only when the shipped container binds all
 // interfaces; the panel's port proxy dials the container IP, not localhost
@@ -68,6 +104,66 @@ func TestBuiltinStatusPanelPublishesReachablePort(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(status.Documentation), "no request authentication") {
 		t.Error("status template documentation must state the unauthenticated endpoint contract")
+	}
+}
+
+// OSS-388: the built-in BlueMap template must pin its renderer version, keep
+// the world read-only and derived from the actual level folder, expose no
+// browser-facing access URL, and never silently accept Mojang downloads.
+func TestBuiltinBlueMapTemplateSafetyContract(t *testing.T) {
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	if err := InitBuiltinTemplates(store); err != nil {
+		t.Fatal(err)
+	}
+	templates, err := store.ListModuleTemplates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tpl *storage.ModuleTemplate
+	for _, candidate := range templates {
+		if candidate.ID == "builtin-bluemap" {
+			tpl = candidate
+			break
+		}
+	}
+	if tpl == nil {
+		t.Fatal("builtin-bluemap template missing")
+	}
+	if strings.HasSuffix(tpl.DockerImage, ":latest") {
+		t.Fatalf("image %q is not pinned; upstream requires a specific release", tpl.DockerImage)
+	}
+	if !strings.Contains(tpl.DockerImage, ":v5.29") {
+		t.Fatalf("image %q is not the ADR 0015 verified v5.29 adapter", tpl.DockerImage)
+	}
+	if len(tpl.DefaultAccessUrls) != 0 {
+		t.Fatalf("DefaultAccessUrls = %v, want none: browser must never receive a renderer origin/port", tpl.DefaultAccessUrls)
+	}
+	if tpl.DefaultInitCommand != "" || tpl.DefaultRestartAfterInit || tpl.DefaultInitCommandDelay != 0 {
+		t.Fatalf("template ships silent init/restart consent: cmd=%q delay=%d restart=%v",
+			tpl.DefaultInitCommand, tpl.DefaultInitCommandDelay, tpl.DefaultRestartAfterInit)
+	}
+	if !strings.Contains(tpl.DefaultVolumes, "{{server.config.level}}") {
+		t.Fatalf("world mount is not derived from the actual level folder: %s", tpl.DefaultVolumes)
+	}
+	var vols []docker.ModuleVolumeMount
+	if err := json.Unmarshal([]byte(tpl.DefaultVolumes), &vols); err != nil {
+		t.Fatalf("DefaultVolumes: %v", err)
+	}
+	foundWorld := false
+	for _, v := range vols {
+		if v.Target == "/app/world" {
+			foundWorld = true
+			if !v.ReadOnly {
+				t.Fatal("world mount must stay read-only")
+			}
+		}
+	}
+	if !foundWorld {
+		t.Fatal("missing /app/world read-only mount")
+	}
+	if len(tpl.Ports) != 1 || tpl.Ports[0].ContainerPort != 8100 || tpl.Ports[0].ExposePublic {
+		t.Fatalf("renderer port must stay private container-only 8100: %+v", tpl.Ports)
 	}
 }
 

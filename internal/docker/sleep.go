@@ -40,9 +40,24 @@ type SleepController interface {
 	SetRestartPolicy(ctx context.Context, containerID string, policy container.RestartPolicy) error
 }
 
+// ErrAdmissionGateUnavailable is returned by the constructor's default gate.
+// It makes an unwired DeepSleepManager fail closed instead of starting a
+// container without node admission (OSS-405).
+var ErrAdmissionGateUnavailable = errors.New("start admission gate is not configured")
+
+// failClosedAdmissionGate is the constructor default. It refuses every wake so
+// a DeepSleepManager that was not wired to the shared coordinator cannot start
+// a container ungated. Production replaces it via SetAdmissionGate.
+type failClosedAdmissionGate struct{}
+
+func (failClosedAdmissionGate) Acquire(context.Context, string) (func(), error) {
+	return nil, ErrAdmissionGateUnavailable
+}
+
 // AdmissionGate serializes container starts on one node across lifecycle
 // entrypoints. The composition root supplies the same instance-owned gate used
-// by RPC and scheduler starts; a nil gate leaves the historical behaviour.
+// by RPC and scheduler starts. The constructor default refuses every wake;
+// only the explicit test opt-out below may remove the gate.
 type AdmissionGate interface {
 	Acquire(ctx context.Context, nodeID string) (release func(), err error)
 }
@@ -88,12 +103,13 @@ type DeepSleepManager struct {
 // may be nil (RCON flush and route refresh are then skipped).
 func NewDeepSleepManager(controller SleepController, store SleeperStore, commander SleepCommander, refresher RouteRefresher, log *logger.Logger) *DeepSleepManager {
 	m := &DeepSleepManager{
-		controller: controller,
-		commander:  commander,
-		store:      store,
-		refresher:  refresher,
-		logger:     log,
-		idle:       newIdleTracker(),
+		controller:    controller,
+		commander:     commander,
+		store:         store,
+		refresher:     refresher,
+		logger:        log,
+		idle:          newIdleTracker(),
+		admissionGate: failClosedAdmissionGate{},
 	}
 	m.runner = newIdleRunner(store, m.idle, m.idleMode(), log)
 	return m
@@ -164,11 +180,24 @@ func (m *DeepSleepManager) SetWakePreparer(preparer WakePreparer) {
 // SetAdmissionGate installs the shared in-process start gate. WakeServer holds
 // it from before the staged wake preparation through the container start and
 // running-status persistence, so a cold wake cannot admit against an active
-// total another start is about to change.
+// total another start is about to change. A nil gate is ignored: production
+// must never be able to remove admission by wiring a nil coordinator.
 func (m *DeepSleepManager) SetAdmissionGate(gate AdmissionGate) {
+	if gate == nil {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.admissionGate = gate
+}
+
+// AllowUngatedWakeForTest removes the admission gate. It exists only for tests
+// that exercise wake mechanics without a coordinator; production callers must
+// use SetAdmissionGate with the shared instance-owned gate.
+func (m *DeepSleepManager) AllowUngatedWakeForTest() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.admissionGate = nil
 }
 
 func (m *DeepSleepManager) tryBeginTransition(serverID, op string) bool {
@@ -495,6 +524,8 @@ func (m *DeepSleepManager) WakeServer(ctx context.Context, serverID string) erro
 	gate := m.admissionGate
 	prepareWake := m.wakePreparer
 	m.mu.Unlock()
+	// The constructor gate is fail-closed, so this branch always acquires in
+	// production. A nil gate is reachable only through AllowUngatedWakeForTest.
 	if gate != nil {
 		release, err := gate.Acquire(ctx, srv.NodeID)
 		if err != nil {

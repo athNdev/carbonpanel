@@ -25,6 +25,7 @@ import (
 var mountedServices = []string{
 	"AuthService", "ConfigService", "FileService", "MinecraftService", "ModService",
 	"ModBrowseService", "ModpackService", "DatapackService", "ProxyService", "ServerService",
+	"PackwizService", "StagedConfigService",
 	"NodeService", "SupportService", "TaskService", "ActivityService", "OperationService",
 	"SubuserService", "BlueprintService", "BackupService", "UserService", "RoleService",
 	"ModuleService", "UploadService", "PlayerService", "WorldViewService", "WorldService",
@@ -127,8 +128,8 @@ func main() {
 	b.WriteString("const descriptorFingerprint = \"" + fingerprint + "\"\n\n")
 	b.WriteString("var rawCatalogEntries = []CatalogEntry{\n")
 	for _, e := range entries {
-		b.WriteString(fmt.Sprintf("\t{Procedure: %q, Service: %q, Method: %q, Client: %q, Scope: %q, Class: ClassExclude, Build: %s},\n",
-			e.procedure, e.service, e.method, e.client, e.scope, e.build))
+		fmt.Fprintf(&b, "\t{Procedure: %q, Service: %q, Method: %q, Client: %q, Scope: %q, Class: ClassExclude, Build: %s},\n",
+			e.procedure, e.service, e.method, e.client, e.scope, e.build)
 	}
 	b.WriteString("}\n")
 
@@ -136,4 +137,8 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("entries=%d services=%d fingerprint=%s\n", len(entries), len(mountedServices), fingerprint)
+	// A single generator owns both the declared descriptor table and the
+	// combined exposed tool list; generation is reproducible from checked-in
+	// source plus the pinned family descriptors.
+	writeIntegrationCatalog(combinedToolSpecs())
 }

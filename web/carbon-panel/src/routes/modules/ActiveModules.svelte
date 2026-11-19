@@ -34,8 +34,8 @@ one at https://mozilla.org/MPL/2.0/.
 		Package,
 		RefreshCw
 	} from '@lucide/svelte';
-	import ModuleDialog from '$lib/components/server/ModuleDialog.svelte';
-	import ModuleLogsDialog from '$lib/components/server/ModuleLogsDialog.svelte';
+	import ModuleDialog from '$lib/components/server-ui/ModuleDialog.svelte';
+	import ModuleLogsDialog from '$lib/components/server-ui/ModuleLogsDialog.svelte';
 	import { onMount, onDestroy } from 'svelte';
 
 	let modules = $state<Module[]>([]);
@@ -179,7 +179,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="space-y-4 rounded-none font-sans text-[#f4f4f4]">
+<div class="space-y-4 rounded-none font-sans text-foreground">
 	{#snippet activeToolbar()}
 		<CarbonButton
 			kind="tertiary"
@@ -239,10 +239,10 @@ one at https://mozilla.org/MPL/2.0/.
 			</tr>
 		{:else if modules.length === 0}
 			<tr>
-				<td colspan="7" class="py-16 text-center text-[#8d8d8d]">
-					<Package class="mx-auto mb-3 h-10 w-10 text-[#525252]" />
-					<p class="text-sm font-semibold text-[#f4f4f4]">No active module instances</p>
-					<p class="mt-1 text-xs text-[#8d8d8d]">
+				<td colspan="7" class="py-16 text-center text-muted-foreground">
+					<Package class="mx-auto mb-3 h-10 w-10 text-muted-foreground" />
+					<p class="text-sm font-semibold text-foreground">No active module instances</p>
+					<p class="mt-1 text-xs text-muted-foreground">
 						Attach modules to a Minecraft server to provision sidecar containers.
 					</p>
 				</td>
@@ -251,13 +251,13 @@ one at https://mozilla.org/MPL/2.0/.
 			{#each modules as module (module.id)}
 				{@const isLoading = actionLoading === module.id}
 				{@const identity = moduleIdentityFromRecord(module)}
-				<tr class="transition-colors hover:bg-[#353535]">
+				<tr class="transition-colors hover:bg-accent">
 					<td class="max-w-[240px] px-4 py-3">
 						<div class="space-y-0.5">
-							<div class="flex items-center gap-2 text-sm font-semibold text-[#f4f4f4]">
+							<div class="flex items-center gap-2 text-sm font-semibold text-foreground">
 								<span class="min-w-0 flex-1 truncate" title={module.name}>{module.name}</span>
 							</div>
-							<div class="flex items-center gap-1.5 font-mono text-xs text-[#a8a8a8]">
+							<div class="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
 								<Server class="h-3 w-3 shrink-0 text-accent-text" />
 								<span class="min-w-0 flex-1 truncate" title={module.serverName || module.serverId}
 									>{module.serverName || module.serverId}</span
@@ -267,7 +267,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</td>
 
 					<td
-						class="max-w-[180px] truncate px-4 py-3 font-mono text-xs whitespace-nowrap text-[#c6c6c6]"
+						class="max-w-[180px] truncate px-4 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground"
 						title={module.templateName}
 					>
 						{module.templateName}
@@ -280,7 +280,7 @@ one at https://mozilla.org/MPL/2.0/.
 							</CarbonTag>
 							{#if identity.shortContainerId}
 								<div
-									class="font-mono text-[11px] text-[#8d8d8d]"
+									class="font-mono text-[11px] text-muted-foreground"
 									title={identity.containerId}
 									data-testid="module-container-id"
 								>
@@ -290,7 +290,7 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 					</td>
 
-					<td class="px-4 py-3 font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
+					<td class="px-4 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground">
 						{#if module.status === ModuleStatus.RUNNING && module.memoryUsage > 0}
 							{module.memoryUsage.toFixed(0)} MB
 						{:else}
@@ -298,7 +298,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</td>
 
-					<td class="px-4 py-3 font-mono text-xs whitespace-nowrap text-[#a8a8a8]">
+					<td class="px-4 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground">
 						{#if module.status === ModuleStatus.RUNNING}
 							{module.cpuPercent.toFixed(1)}%
 						{:else}
@@ -310,7 +310,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{#if module.autoStart}
 							<CarbonTag type="blue" size="sm">Enabled</CarbonTag>
 						{:else}
-							<span class="font-mono text-xs text-[#8d8d8d]">Disabled</span>
+							<span class="font-mono text-xs text-muted-foreground">Disabled</span>
 						{/if}
 					</td>
 
@@ -355,7 +355,7 @@ one at https://mozilla.org/MPL/2.0/.
 									kind="ghost"
 									size="sm"
 									iconOnly
-									class="rounded-none text-[#c6c6c6] hover:text-white"
+									class="rounded-none text-muted-foreground hover:text-foreground"
 									onclick={() => handleRestartModule(module)}
 									disabled={isLoading}
 									title="Restart module"
@@ -398,7 +398,7 @@ one at https://mozilla.org/MPL/2.0/.
 								kind="ghost"
 								size="sm"
 								iconOnly
-								class="rounded-none text-[#c6c6c6] hover:text-white"
+								class="rounded-none text-muted-foreground hover:text-foreground"
 								onclick={() => openLogsDialog(module)}
 								title="View logs"
 								aria-label="View logs"
@@ -411,7 +411,7 @@ one at https://mozilla.org/MPL/2.0/.
 								kind="ghost"
 								size="sm"
 								iconOnly
-								class="rounded-none text-[#c6c6c6] hover:text-white"
+								class="rounded-none text-muted-foreground hover:text-foreground"
 								onclick={() => openEditDialog(module)}
 								title="Edit module"
 								aria-label="Edit module"

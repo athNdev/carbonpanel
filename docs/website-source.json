@@ -1,5 +1,93 @@
 {
-  "revision": "e1f23829115a9a7e4ddc308e3919c1920a123cc2",
-  "label": "v3.0.0-beta.4",
-  "repository": "https://github.com/athNdev/carbonpanel"
+  "schema_version": 2,
+  "repository": "https://github.com/athNdev/carbonpanel",
+  "catalog": "docs/release-history.json",
+  "stable_tag": "v1.0.40",
+  "development": {
+    "label": "2.0.0-dev",
+    "channel": "development",
+    "commit": "resolved-from-build-sha",
+    "note": "Working-tree / CI preview only. It never replaces the stable docs route."
+  },
+  "artifacts": {
+    "protocol": {
+      "version": "v1",
+      "source": "proto/carbonpanel/v1",
+      "independent": true,
+      "note": "The Connect/HTTP wire contract is versioned independently of the product release."
+    },
+    "openapi": {
+      "schema_family": "2.x",
+      "source": "proto/carbonpanel/v1/auth.proto",
+      "independent": true,
+      "product_version_stamped": true,
+      "note": "The proto's 2.x declares the independent Connect-OpenAPI schema family, not a product release. Shipped bundled and website schema copies stamp info.version with the exact normalized product version; the carbonpanel.v1 protocol identity is unchanged."
+    },
+    "module": {
+      "version": "mod-v2.0.6",
+      "domain": "module-image",
+      "independent": true
+    },
+    "mcp": {
+      "filesystem_server": "@modelcontextprotocol/server-filesystem@2.0.0",
+      "git_server": "@cyanheads/git-mcp-server@2.15.3",
+      "domain": "developer-tooling"
+    },
+    "node_runtime": {
+      "version": "unreleased",
+      "status": "reserved",
+      "note": "No runtime-v* workflow or registry destination exists yet."
+    },
+    "cli": {
+      "version_source": "embedded build metadata exposed by --version",
+      "flavors": ["carbon-panel", "carbon-storage"]
+    },
+    "compatibility": {
+      "rollback_version": "1.0.40",
+      "next_stable_boundary": "major",
+      "protocol": "v1",
+      "note": "The 1.0 line stays at 1.0.40; the next planned stable is carbonpanel-v2.0.0 (MAJOR)."
+    }
+  },
+  "versions": [
+    {
+      "tag": "v1.0.40",
+      "display": "1.0.40",
+      "classification": "carbonpanel-published-stable",
+      "channel": "stable",
+      "availability": "published-release",
+      "commit": "f88748be6a216b187e675bbb1f110df07e544148",
+      "source_commit": "f88748be6a216b187e675bbb1f110df07e544148",
+      "cta": true,
+      "download_kind": "github-release",
+      "download_url": "https://github.com/athNdev/carbonpanel/releases/tag/v1.0.40",
+      "default": true
+    },
+    {
+      "tag": "v3.0.0-alpha.1",
+      "display": "3.0.0-alpha.1",
+      "classification": "carbonpanel-legacy-preview",
+      "channel": "preview",
+      "availability": "ghcr-only-legacy-preview",
+      "commit": "5bbc06fefe5fc0c600672ef8401f9bf7e4495a01",
+      "source_commit": "5bbc06fefe5fc0c600672ef8401f9bf7e4495a01",
+      "cta": true,
+      "download_kind": "ghcr",
+      "download_url": "https://github.com/athNdev/carbonpanel/pkgs/container/carbonpanel",
+      "default": false
+    },
+    {
+      "tag": "v1.0.39",
+      "display": "1.0.39",
+      "classification": "carbonpanel-source-only",
+      "channel": "historical",
+      "availability": "source-only",
+      "commit": "05844203cedfa2ee6d8bd039cfeeddb5ac69714f",
+      "source_commit": "05844203cedfa2ee6d8bd039cfeeddb5ac69714f",
+      "cta": false,
+      "download_kind": "source",
+      "download_url": "https://github.com/athNdev/carbonpanel/tree/v1.0.39",
+      "default": false
+    }
+  ]
 }

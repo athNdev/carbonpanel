@@ -180,7 +180,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="h-full flex-1 space-y-6 bg-[#161616] font-sans text-[#f4f4f4]">
+<div class="h-full flex-1 space-y-6 bg-background font-sans text-foreground">
 	<CarbonPageHeader
 		title="Servers"
 		description="Manage, inspect, and deploy your Minecraft server instances"
@@ -203,19 +203,19 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Carbon Action Bar: Search, Filters, View Toggles -->
 	<div
-		class="flex flex-col items-stretch justify-between gap-3 border border-[#393939] bg-[#262626] p-3 sm:flex-row sm:items-center"
+		class="flex flex-col items-stretch justify-between gap-3 border border-border bg-card p-3 sm:flex-row sm:items-center"
 	>
 		<!-- Search Input (Carbon Style) -->
 		<div class="relative max-w-lg flex-1">
 			<div class="relative flex items-center">
-				<Search class="pointer-events-none absolute left-3 h-4 w-4 text-[#8d8d8d]" />
+				<Search class="pointer-events-none absolute left-3 h-4 w-4 text-muted-foreground" />
 				<input
 					type="search"
 					aria-label="Search servers"
 					placeholder="Search by name, description, version, loader, or port..."
 					bind:value={searchQuery}
 					onkeydown={(e) => e.key === 'Escape' && (searchQuery = '')}
-					class="h-9 w-full rounded-none border-b border-[#8d8d8d] bg-[#161616] pr-3 pl-9 font-sans text-xs text-[#f4f4f4] placeholder-[#6f6f6f] transition-all focus:border-b-2 focus:border-[#0f62fe] focus:outline-none"
+					class="h-9 w-full rounded-none border-b border-input bg-background pr-3 pl-9 font-sans text-xs text-foreground transition-all placeholder:text-muted-foreground focus:border-b-2 focus:border-primary focus:outline-none"
 				/>
 			</div>
 		</div>
@@ -223,15 +223,15 @@ one at https://mozilla.org/MPL/2.0/.
 		<!-- Status Filter Tags and View Toggles -->
 		<div class="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
 			<!-- Filter Tags -->
-			<div class="mr-1 flex items-center gap-1 border-r border-[#393939] pr-2">
+			<div class="mr-1 flex items-center gap-1 border-r border-border pr-2">
 				<button
 					type="button"
 					onclick={() => (statusFilter = 'all')}
 					aria-pressed={statusFilter === 'all'}
 					class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {statusFilter ===
 					'all'
-						? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-						: 'border-[#393939] bg-[#161616] text-[#c6c6c6] hover:bg-[#353535]'}"
+						? 'border-primary bg-primary text-primary-foreground'
+						: 'border-border bg-background text-muted-foreground hover:bg-accent'}"
 				>
 					All ({servers.length})
 				</button>
@@ -241,8 +241,8 @@ one at https://mozilla.org/MPL/2.0/.
 					aria-pressed={statusFilter === 'running'}
 					class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {statusFilter ===
 					'running'
-						? 'border-[#198038] bg-[#198038] text-white'
-						: 'border-[#198038]/50 bg-[#161616] text-[#6fdc8c] hover:bg-[#353535]'}"
+						? 'border-success bg-success text-primary-foreground'
+						: 'border-success/50 bg-background text-success-text hover:bg-accent'}"
 				>
 					Running ({servers.filter((s) => s.status === ServerStatus.RUNNING).length})
 				</button>
@@ -252,8 +252,8 @@ one at https://mozilla.org/MPL/2.0/.
 					aria-pressed={statusFilter === 'stopped'}
 					class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {statusFilter ===
 					'stopped'
-						? 'border-[#525252] bg-[#525252] text-white'
-						: 'border-[#525252]/60 bg-[#161616] text-[#c6c6c6] hover:bg-[#353535]'}"
+						? 'border-border bg-secondary text-foreground'
+						: 'border-border/60 bg-background text-muted-foreground hover:bg-accent'}"
 				>
 					Stopped ({servers.filter((s) => s.status === ServerStatus.STOPPED).length})
 				</button>
@@ -265,11 +265,11 @@ one at https://mozilla.org/MPL/2.0/.
 						class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {statusFilter ===
 						'issues'
 							? hasErrorIssue
-								? 'border-[#da1e28] bg-[#da1e28] text-white'
-								: 'border-[#f1c21b] bg-[#f1c21b] text-black'
+								? 'border-destructive bg-destructive text-primary-foreground'
+								: 'border-warning bg-warning text-black'
 							: hasErrorIssue
-								? 'border-[#da1e28]/50 bg-[#161616] text-[#ff8389] hover:bg-[#353535]'
-								: 'border-[#f1c21b]/50 bg-[#161616] text-[#f1c21b] hover:bg-[#353535]'}"
+								? 'border-destructive/50 bg-background text-destructive-text hover:bg-accent'
+								: 'border-warning/50 bg-background text-warning-text hover:bg-accent'}"
 					>
 						Issues ({servers.filter(
 							(s) => s.status === ServerStatus.ERROR || s.status === ServerStatus.UNHEALTHY
@@ -279,7 +279,7 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 
 			<!-- View Mode Switcher -->
-			<div class="flex items-center border border-[#393939] bg-[#161616]">
+			<div class="flex items-center border border-border bg-background">
 				<button
 					type="button"
 					onclick={() => (viewMode = 'table')}
@@ -288,8 +288,8 @@ one at https://mozilla.org/MPL/2.0/.
 					aria-pressed={viewMode === 'table'}
 					class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none transition-colors {viewMode ===
 					'table'
-						? 'bg-[#393939] text-[#f4f4f4]'
-						: 'text-[#8d8d8d] hover:bg-[#262626] hover:text-[#f4f4f4]'}"
+						? 'bg-secondary text-foreground'
+						: 'text-muted-foreground hover:bg-card hover:text-foreground'}"
 				>
 					<TableIcon class="h-4 w-4" />
 				</button>
@@ -301,8 +301,8 @@ one at https://mozilla.org/MPL/2.0/.
 					aria-pressed={viewMode === 'tiles'}
 					class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none transition-colors {viewMode ===
 					'tiles'
-						? 'bg-[#393939] text-[#f4f4f4]'
-						: 'text-[#8d8d8d] hover:bg-[#262626] hover:text-[#f4f4f4]'}"
+						? 'bg-secondary text-foreground'
+						: 'text-muted-foreground hover:bg-card hover:text-foreground'}"
 				>
 					<LayoutGrid class="h-4 w-4" />
 				</button>
@@ -313,12 +313,12 @@ one at https://mozilla.org/MPL/2.0/.
 	<!-- Loading skeleton (cold direct load, before first fetch settles) -->
 	{#if !hydrated}
 		<div
-			class="w-full overflow-hidden rounded-none border border-[#393939] bg-[#161616]"
+			class="w-full overflow-hidden rounded-none border border-border bg-background"
 			role="status"
 			aria-label="Loading servers"
 		>
 			{#each [0, 1, 2, 3] as _, i (i)}
-				<div class="flex items-center gap-3 border-b border-[#393939] px-4 py-3.5 last:border-b-0">
+				<div class="flex items-center gap-3 border-b border-border px-4 py-3.5 last:border-b-0">
 					<div class="motion-skeleton h-5 w-16"></div>
 					<div class="motion-skeleton h-8 w-8"></div>
 					<div class="min-w-0 flex-1">
@@ -332,9 +332,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Empty State -->
 	{:else if loadError}
-		<div class="rounded-none border border-[#da1e28] bg-[#262626] p-12 text-center" role="alert">
-			<h3 class="mb-1 text-base font-semibold text-[#f4f4f4]">Failed to load servers</h3>
-			<p class="mx-auto mb-6 max-w-md font-sans text-xs text-[#a8a8a8]">
+		<div class="rounded-none border border-destructive bg-card p-12 text-center" role="alert">
+			<h3 class="mb-1 text-base font-semibold text-foreground">Failed to load servers</h3>
+			<p class="mx-auto mb-6 max-w-md font-sans text-xs text-muted-foreground">
 				{loadError}
 			</p>
 			<CarbonButton kind="secondary" size="sm" onclick={loadServers} class="justify-center">
@@ -345,15 +345,15 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Empty State -->
 	{:else if filteredServers.length === 0}
-		<div class="rounded-none border border-[#393939] bg-[#262626] p-12 text-center">
+		<div class="rounded-none border border-border bg-card p-12 text-center">
 			{#if servers.length === 0}
 				<div
-					class="mx-auto mb-4 flex h-14 w-14 items-center justify-center border border-[#393939] bg-[#161616] text-accent-text"
+					class="mx-auto mb-4 flex h-14 w-14 items-center justify-center border border-border bg-background text-accent-text"
 				>
 					<ServerIcon class="h-7 w-7" />
 				</div>
-				<h3 class="mb-1 text-base font-semibold text-[#f4f4f4]">No servers configured</h3>
-				<p class="mx-auto mb-6 max-w-md font-sans text-xs text-[#a8a8a8]">
+				<h3 class="mb-1 text-base font-semibold text-foreground">No servers configured</h3>
+				<p class="mx-auto mb-6 max-w-md font-sans text-xs text-muted-foreground">
 					Create your first Minecraft server instance to begin managing containers and game
 					topology.
 				</p>
@@ -368,12 +368,14 @@ one at https://mozilla.org/MPL/2.0/.
 				</CarbonButton>
 			{:else}
 				<div
-					class="mx-auto mb-4 flex h-14 w-14 items-center justify-center border border-[#393939] bg-[#161616] text-[#8d8d8d]"
+					class="mx-auto mb-4 flex h-14 w-14 items-center justify-center border border-border bg-background text-muted-foreground"
 				>
 					<Search class="h-7 w-7" />
 				</div>
-				<h3 class="mb-1 text-base font-semibold text-[#f4f4f4]">No matching servers</h3>
-				<p class="text-xs text-[#a8a8a8]">Try adjusting your search criteria or status filter.</p>
+				<h3 class="mb-1 text-base font-semibold text-foreground">No matching servers</h3>
+				<p class="text-xs text-muted-foreground">
+					Try adjusting your search criteria or status filter.
+				</p>
 				<CarbonButton
 					kind="secondary"
 					size="sm"
@@ -390,11 +392,11 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon DataTable Layout (Requirement 2) -->
 	{:else if viewMode === 'table'}
-		<div class="w-full overflow-x-auto rounded-none border border-[#393939] bg-[#161616]">
+		<div class="w-full overflow-x-auto rounded-none border border-border bg-background">
 			<table class="w-full border-collapse text-left font-sans text-sm">
 				<!-- Sharp Header Row #393939 -->
 				<thead
-					class="border-b border-[#525252] bg-[#393939] text-xs font-medium tracking-wider text-[#f4f4f4] uppercase select-none"
+					class="border-b border-border bg-secondary text-xs font-medium tracking-wider text-foreground uppercase select-none"
 				>
 					<tr>
 						<th scope="col" class="w-28 px-3 py-3">Status</th>
@@ -408,9 +410,9 @@ one at https://mozilla.org/MPL/2.0/.
 				</thead>
 
 				<!-- Sharp Alternating/Hover Rows #353535 -->
-				<tbody class="motion-stagger divide-y divide-[#393939] bg-[#262626] text-[#f4f4f4]">
+				<tbody class="motion-stagger divide-y divide-border bg-card text-foreground">
 					{#each filteredServers as server (server.id)}
-						<tr class="group transition-colors hover:bg-[#353535]">
+						<tr class="group transition-colors hover:bg-accent">
 							<!-- Status Cell -->
 							<td class="px-3 py-3.5 whitespace-nowrap">
 								<CarbonTag type={getStatusTagType(server.status)} size="sm">
@@ -422,18 +424,18 @@ one at https://mozilla.org/MPL/2.0/.
 							<td class="min-w-[200px] px-3 py-3.5">
 								<div class="flex items-center gap-2.5">
 									<div
-										class="flex h-8 w-8 shrink-0 items-center justify-center border border-[#393939] bg-[#161616] text-[#78a9ff]"
+										class="flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-background text-accent-text"
 									>
 										<ServerIcon class="h-4 w-4" />
 									</div>
 									<div class="min-w-0">
 										<a
-											href={resolve(`/servers/${server.id}`)}
-											class="block truncate text-sm font-medium text-[#f4f4f4] hover:text-[#78a9ff] hover:underline"
+											href={resolve('/servers/[id]', { id: server.id })}
+											class="block truncate text-sm font-medium text-foreground hover:text-accent-text hover:underline"
 										>
 											{server.name}
 										</a>
-										<p class="line-clamp-1 text-xs text-[#a8a8a8]">
+										<p class="line-clamp-1 text-xs text-muted-foreground">
 											{server.description || 'No description provided'}
 										</p>
 									</div>
@@ -443,13 +445,13 @@ one at https://mozilla.org/MPL/2.0/.
 							<!-- Engine & Loader -->
 							<td class="px-3 py-3.5 whitespace-nowrap">
 								<div class="flex items-center gap-1.5 font-mono text-xs">
-									<span class="text-[#f4f4f4]">{server.mcVersion || 'Latest'}</span>
+									<span class="text-foreground">{server.mcVersion || 'Latest'}</span>
 									{#if server.modLoader !== ModLoader.VANILLA && server.modLoader !== ModLoader.UNSPECIFIED}
 										<CarbonTag type="teal" size="sm">
 											{getModLoaderDisplay(server)}
 										</CarbonTag>
 									{:else}
-										<span class="text-xs text-[#8d8d8d]">Vanilla</span>
+										<span class="text-xs text-muted-foreground">Vanilla</span>
 									{/if}
 								</div>
 							</td>
@@ -457,8 +459,8 @@ one at https://mozilla.org/MPL/2.0/.
 							<!-- Host / Port -->
 							<td class="hidden px-3 py-3.5 whitespace-nowrap md:table-cell">
 								<div class="flex items-center gap-1.5 font-mono text-xs">
-									<Wifi class="h-3.5 w-3.5 text-[#8d8d8d]" />
-									<span class="text-[#c6c6c6]">
+									<Wifi class="h-3.5 w-3.5 text-muted-foreground" />
+									<span class="text-muted-foreground">
 										{server.proxyHostname ? server.proxyHostname : `:${server.port}`}
 									</span>
 								</div>
@@ -466,8 +468,8 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Memory -->
 							<td class="hidden px-3 py-3.5 whitespace-nowrap md:table-cell">
-								<div class="flex items-center gap-1.5 font-mono text-xs text-[#c6c6c6]">
-									<MemoryStick class="h-3.5 w-3.5 text-[#8d8d8d]" />
+								<div class="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+									<MemoryStick class="h-3.5 w-3.5 text-muted-foreground" />
 									<span>{(server.memory / 1024).toFixed(1)} GB</span>
 								</div>
 							</td>
@@ -478,8 +480,8 @@ one at https://mozilla.org/MPL/2.0/.
 									<div class="flex items-center gap-3 font-mono text-xs">
 										<span
 											class="flex items-center gap-1 {joinIsPlayable(server)
-												? 'text-[#6fdc8c]'
-												: 'text-[#8d8d8d]'}"
+												? 'text-success-text'
+												: 'text-muted-foreground'}"
 										>
 											<Users class="h-3.5 w-3.5" />
 											{#if joinIsPlayable(server)}
@@ -490,17 +492,17 @@ one at https://mozilla.org/MPL/2.0/.
 										</span>
 										<span
 											class="flex items-center gap-1 {server.tps && server.tps >= 18
-												? 'text-[#6fdc8c]'
+												? 'text-success-text'
 												: server.tps && server.tps >= 15
-													? 'text-[#f1c21b]'
-													: 'text-[#ff8389]'}"
+													? 'text-warning-text'
+													: 'text-destructive-text'}"
 										>
 											<Zap class="h-3.5 w-3.5" />
 											{server.tps ? server.tps.toFixed(1) : '—'}
 										</span>
 									</div>
 								{:else}
-									<span class="font-mono text-xs text-[#a8a8a8]">—</span>
+									<span class="font-mono text-xs text-muted-foreground">—</span>
 								{/if}
 							</td>
 
@@ -509,7 +511,7 @@ one at https://mozilla.org/MPL/2.0/.
 								class="px-3 py-3.5 text-right whitespace-nowrap"
 								onclick={(e) => e.stopPropagation()}
 							>
-								<div class="inline-flex items-center border border-[#393939] bg-[#161616]">
+								<div class="inline-flex items-center border border-border bg-background">
 									{#if server.status === ServerStatus.STOPPED || server.status === ServerStatus.ERROR || server.status === ServerStatus.DEEPSLEEP || server.status === ServerStatus.PAUSED}
 										<button
 											title={server.status === ServerStatus.DEEPSLEEP
@@ -519,7 +521,7 @@ one at https://mozilla.org/MPL/2.0/.
 													: 'Start'}
 											aria-label={`${server.status === ServerStatus.DEEPSLEEP ? 'Wake' : server.status === ServerStatus.PAUSED ? 'Resume' : 'Start'} server ${server.name}`}
 											disabled={loading}
-											class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#6fdc8c] transition-colors hover:bg-[#198038]/20 disabled:opacity-40"
+											class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-success-text transition-colors hover:bg-success/20 disabled:opacity-40"
 											onclick={(e) => handleServerAction('start', server, e)}
 										>
 											<Play class="h-3.5 w-3.5 fill-current" />
@@ -531,7 +533,7 @@ one at https://mozilla.org/MPL/2.0/.
 											title="Stop"
 											aria-label={`Stop server ${server.name}`}
 											disabled={loading}
-											class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#ff8389] transition-colors hover:bg-[#da1e28]/20 disabled:opacity-40"
+											class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-destructive-text transition-colors hover:bg-destructive/20 disabled:opacity-40"
 											onclick={(e) => handleServerAction('stop', server, e)}
 										>
 											<Square class="h-3.5 w-3.5 fill-current" />
@@ -543,7 +545,7 @@ one at https://mozilla.org/MPL/2.0/.
 											title="Restart"
 											aria-label={`Restart server ${server.name}`}
 											disabled={loading}
-											class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#f1c21b] transition-colors hover:bg-[#f1c21b]/20 disabled:opacity-40"
+											class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-warning-text transition-colors hover:bg-warning/20 disabled:opacity-40"
 											onclick={(e) => handleServerAction('restart', server, e)}
 										>
 											<RotateCw class="h-3.5 w-3.5" />
@@ -554,7 +556,7 @@ one at https://mozilla.org/MPL/2.0/.
 										title="Recreate"
 										aria-label={`Recreate server ${server.name}`}
 										disabled={loading}
-										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#c6c6c6] transition-colors hover:bg-[#353535] disabled:opacity-40"
+										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-accent disabled:opacity-40"
 										onclick={(e) => handleServerAction('recreate', server, e)}
 									>
 										<RefreshCcw class="h-3.5 w-3.5" />
@@ -564,17 +566,17 @@ one at https://mozilla.org/MPL/2.0/.
 										title="Delete"
 										aria-label={`Delete server ${server.name}`}
 										disabled={loading}
-										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#ff8389] transition-colors hover:bg-[#da1e28]/20 disabled:opacity-40"
+										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-destructive-text transition-colors hover:bg-destructive/20 disabled:opacity-40"
 										onclick={(e) => deleteServer(server, e)}
 									>
 										<Trash2 class="h-3.5 w-3.5" />
 									</button>
 
 									<a
-										href={resolve(`/servers/${server.id}`)}
+										href={resolve('/servers/[id]', { id: server.id })}
 										title="View Details"
 										aria-label={`View details for ${server.name}`}
-										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-[#78a9ff] transition-colors hover:bg-[#0f62fe]/20"
+										class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-accent-text transition-colors hover:bg-primary/20"
 									>
 										<ArrowRight class="h-3.5 w-3.5" />
 									</a>
@@ -591,32 +593,32 @@ one at https://mozilla.org/MPL/2.0/.
 		<div class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">
 			{#each filteredServers as server (server.id)}
 				<div
-					class="flex flex-col justify-between rounded-none border border-[#393939] bg-[#262626] p-4 transition-colors hover:border-[#525252]"
+					class="flex flex-col justify-between rounded-none border border-border bg-card p-4 transition-colors hover:border-foreground/30"
 				>
 					<div>
 						<!-- Header & Actions -->
-						<div class="flex items-start justify-between gap-3 border-b border-[#393939] pb-3">
+						<div class="flex items-start justify-between gap-3 border-b border-border pb-3">
 							<div class="flex min-w-0 items-center gap-3">
 								<div
-									class="flex h-10 w-10 shrink-0 items-center justify-center border border-[#393939] bg-[#161616] text-[#78a9ff]"
+									class="flex h-10 w-10 shrink-0 items-center justify-center border border-border bg-background text-accent-text"
 								>
 									<ServerIcon class="h-5 w-5" />
 								</div>
 								<div class="min-w-0">
 									<a
-										href={resolve(`/servers/${server.id}`)}
-										class="block truncate text-base font-semibold text-[#f4f4f4] hover:text-[#78a9ff]"
+										href={resolve('/servers/[id]', { id: server.id })}
+										class="block truncate text-base font-semibold text-foreground hover:text-accent-text"
 									>
 										{server.name}
 									</a>
-									<p class="truncate text-xs text-[#a8a8a8]">
+									<p class="truncate text-xs text-muted-foreground">
 										{server.description || 'No description provided'}
 									</p>
 								</div>
 							</div>
 
 							<!-- Action Buttons Bar -->
-							<div class="flex shrink-0 border border-[#393939] bg-[#161616]">
+							<div class="flex shrink-0 border border-border bg-background">
 								{#if server.status === ServerStatus.STOPPED || server.status === ServerStatus.ERROR || server.status === ServerStatus.DEEPSLEEP || server.status === ServerStatus.PAUSED}
 									<button
 										title={server.status === ServerStatus.DEEPSLEEP
@@ -626,7 +628,7 @@ one at https://mozilla.org/MPL/2.0/.
 												: 'Start'}
 										aria-label={`${server.status === ServerStatus.DEEPSLEEP ? 'Wake' : server.status === ServerStatus.PAUSED ? 'Resume' : 'Start'} server ${server.name}`}
 										disabled={loading}
-										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#6fdc8c] transition-colors hover:bg-[#198038]/20 disabled:opacity-50"
+										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-border text-success-text transition-colors hover:bg-success/20 disabled:opacity-50"
 										onclick={(e) => handleServerAction('start', server, e)}
 									>
 										<Play class="h-3 w-3 fill-current" />
@@ -637,7 +639,7 @@ one at https://mozilla.org/MPL/2.0/.
 										title="Stop"
 										aria-label={`Stop server ${server.name}`}
 										disabled={loading}
-										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#ff8389] transition-colors hover:bg-[#da1e28]/20 disabled:opacity-50"
+										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-border text-destructive-text transition-colors hover:bg-destructive/20 disabled:opacity-50"
 										onclick={(e) => handleServerAction('stop', server, e)}
 									>
 										<Square class="h-2.5 w-2.5 fill-current" />
@@ -648,7 +650,7 @@ one at https://mozilla.org/MPL/2.0/.
 										title="Restart"
 										aria-label={`Restart server ${server.name}`}
 										disabled={loading}
-										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#f1c21b] transition-colors hover:bg-[#f1c21b]/20 disabled:opacity-50"
+										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-border text-warning-text transition-colors hover:bg-warning/20 disabled:opacity-50"
 										onclick={(e) => handleServerAction('restart', server, e)}
 									>
 										<RotateCw class="h-3 w-3" />
@@ -658,7 +660,7 @@ one at https://mozilla.org/MPL/2.0/.
 									title="Recreate"
 									aria-label={`Recreate server ${server.name}`}
 									disabled={loading}
-									class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#c6c6c6] transition-colors hover:bg-[#353535] disabled:opacity-50"
+									class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
 									onclick={(e) => handleServerAction('recreate', server, e)}
 								>
 									<RefreshCcw class="h-3 w-3" />
@@ -667,7 +669,7 @@ one at https://mozilla.org/MPL/2.0/.
 									title="Delete"
 									aria-label={`Delete server ${server.name}`}
 									disabled={loading}
-									class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-[#ff8389] transition-colors hover:bg-[#da1e28]/20 disabled:opacity-50"
+									class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-destructive-text transition-colors hover:bg-destructive/20 disabled:opacity-50"
 									onclick={(e) => deleteServer(server, e)}
 								>
 									<Trash2 class="h-3 w-3" />
@@ -680,7 +682,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<CarbonTag type={getStatusTagType(server.status)} size="sm">
 								{getStatusDisplayName(server.status)}
 							</CarbonTag>
-							<span class="font-mono text-xs text-[#a8a8a8]">{server.mcVersion}</span>
+							<span class="font-mono text-xs text-muted-foreground">{server.mcVersion}</span>
 							{#if server.modLoader !== ModLoader.VANILLA && server.modLoader !== ModLoader.UNSPECIFIED}
 								<CarbonTag type="teal" size="sm">
 									{getModLoaderDisplay(server)}
@@ -691,38 +693,38 @@ one at https://mozilla.org/MPL/2.0/.
 						<!-- Stats Sharp Grid -->
 						<div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
 							<div
-								class="flex items-center gap-2 rounded-none border border-[#393939] bg-[#161616] p-2"
+								class="flex items-center gap-2 rounded-none border border-border bg-background p-2"
 							>
-								<Wifi class="h-3.5 w-3.5 shrink-0 text-[#8d8d8d]" />
+								<Wifi class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 								<div class="min-w-0">
 									<p class="mono-label">Port</p>
-									<p class="truncate font-mono text-xs font-semibold text-[#f4f4f4]">
+									<p class="truncate font-mono text-xs font-semibold text-foreground">
 										{server.port}
 									</p>
 								</div>
 							</div>
 							<div
-								class="flex items-center gap-2 rounded-none border border-[#393939] bg-[#161616] p-2"
+								class="flex items-center gap-2 rounded-none border border-border bg-background p-2"
 							>
-								<MemoryStick class="h-3.5 w-3.5 shrink-0 text-[#8d8d8d]" />
+								<MemoryStick class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 								<div class="min-w-0">
 									<p class="mono-label">Memory</p>
-									<p class="truncate font-mono text-xs font-semibold text-[#f4f4f4]">
+									<p class="truncate font-mono text-xs font-semibold text-foreground">
 										{(server.memory / 1024).toFixed(1)} GB
 									</p>
 								</div>
 							</div>
 							{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY}
 								<div
-									class="flex items-center gap-2 rounded-none border border-[#393939] bg-[#161616] p-2"
+									class="flex items-center gap-2 rounded-none border border-border bg-background p-2"
 								>
-									<Users class="h-3.5 w-3.5 shrink-0 text-[#6fdc8c]" />
+									<Users class="h-3.5 w-3.5 shrink-0 text-success-text" />
 									<div class="min-w-0">
 										<p class="mono-label">Players</p>
 										<p
 											class="font-mono text-xs font-semibold {joinIsPlayable(server)
-												? 'text-[#6fdc8c]'
-												: 'text-[#8d8d8d]'}"
+												? 'text-success-text'
+												: 'text-muted-foreground'}"
 										>
 											{#if joinIsPlayable(server)}
 												{server.playersOnline || 0} / {server.maxPlayers}
@@ -733,23 +735,23 @@ one at https://mozilla.org/MPL/2.0/.
 									</div>
 								</div>
 								<div
-									class="flex items-center gap-2 rounded-none border border-[#393939] bg-[#161616] p-2"
+									class="flex items-center gap-2 rounded-none border border-border bg-background p-2"
 								>
 									<Zap
 										class="h-3.5 w-3.5 shrink-0 {server.tps && server.tps >= 18
-											? 'text-[#6fdc8c]'
+											? 'text-success-text'
 											: server.tps && server.tps >= 15
-												? 'text-[#f1c21b]'
-												: 'text-[#ff8389]'}"
+												? 'text-warning-text'
+												: 'text-destructive-text'}"
 									/>
 									<div class="min-w-0">
 										<p class="mono-label">TPS</p>
 										<p
 											class="font-mono text-xs font-semibold {server.tps && server.tps >= 18
-												? 'text-[#6fdc8c]'
+												? 'text-success-text'
 												: server.tps && server.tps >= 15
-													? 'text-[#f1c21b]'
-													: 'text-[#ff8389]'}"
+													? 'text-warning-text'
+													: 'text-destructive-text'}"
 										>
 											{server.tps ? server.tps.toFixed(1) : '—'}
 										</p>
@@ -760,13 +762,13 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					<!-- Bottom Link -->
-					<div class="mt-4 border-t border-[#393939] pt-3">
+					<div class="mt-4 border-t border-border pt-3">
 						<a
-							href={resolve(`/servers/${server.id}`)}
-							class="flex h-8 w-full items-center justify-between rounded-none border border-[#393939] bg-[#161616] px-3 font-sans text-xs text-[#f4f4f4] transition-colors hover:bg-[#353535]"
+							href={resolve('/servers/[id]', { id: server.id })}
+							class="flex h-8 w-full items-center justify-between rounded-none border border-border bg-background px-3 font-sans text-xs text-foreground transition-colors hover:bg-accent"
 						>
 							<span>View Server Details</span>
-							<ArrowRight class="h-3.5 w-3.5 text-[#78a9ff]" />
+							<ArrowRight class="h-3.5 w-3.5 text-accent-text" />
 						</a>
 					</div>
 				</div>
@@ -806,8 +808,8 @@ one at https://mozilla.org/MPL/2.0/.
 			{#if pendingDelete}
 				{pendingDelete.name} · {pendingDelete.mcVersion || 'Latest'}
 			{/if}
-			<fieldset class="mt-3 space-y-2 font-sans text-xs text-[#f4f4f4]">
-				<legend class="mb-1 text-[#c6c6c6]">What to do with the server</legend>
+			<fieldset class="mt-3 space-y-2 font-sans text-xs text-foreground">
+				<legend class="mb-1 text-muted-foreground">What to do with the server</legend>
 				<label class="flex items-start gap-2">
 					<input
 						type="radio"

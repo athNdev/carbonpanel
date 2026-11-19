@@ -67,9 +67,21 @@ type skinAsset struct {
 	ObservedAt               time.Time
 }
 
+// identityLookup is the provider-facing result of an exact-identity lookup.
+// It deliberately mirrors only the honest states and never carries a guessed
+// name or UUID.
+type identityLookup struct {
+	Status string // found | not_found | ambiguous | unavailable
+	UUID   string
+	Name   string
+	Note   string
+	Source string
+}
+
 type skinProvider interface {
 	Get(ctx context.Context, uuid, kind string) (skinAsset, error)
 	Refresh(ctx context.Context, uuid, kind string) (skinAsset, error)
+	Lookup(ctx context.Context, query string) (identityLookup, error)
 	Close()
 }
 
@@ -98,6 +110,11 @@ type PlayerService struct {
 	skins      skinProvider
 	deep       deepProvider
 
+	// edition is the effective player edition from controller configuration.
+	// It gates manual allowlist adds so a Bedrock/unknown edition is refused
+	// explicitly instead of falling into a Java-only command adapter.
+	edition string
+
 	// Ingestion is a bounded refresh, not network I/O on every keystroke.
 	ingestMu   sync.Mutex
 	lastIngest map[string]time.Time
@@ -121,6 +138,7 @@ func (s *PlayerService) shouldIngest(serverID string) bool {
 func (s *PlayerService) SetSourceNegotiator(n sourceNegotiator) { s.negotiator = n }
 func (s *PlayerService) SetSkinProvider(p skinProvider)         { s.skins = p }
 func (s *PlayerService) SetDeepDataReader(r deepProvider)       { s.deep = r }
+func (s *PlayerService) SetEdition(edition string)              { s.edition = strings.TrimSpace(edition) }
 
 // Stop releases long-lived owned resources (skin cache janitor).
 func (s *PlayerService) Stop() {
@@ -370,6 +388,187 @@ func (s *PlayerService) ingestRoster(ctx context.Context, serverID string) {
 	}
 }
 
+// LookupPlayer resolves a previously unseen account by exact UUID or current
+// username. It is deliberately READ-ONLY: the result is ephemeral (name, UUID,
+// provenance and a note) and never creates an identity, session, access row,
+// roster entry, presence claim or audit row. A separate authorized mutation
+// (the per-server allowlist add) is the only path that persists an identity,
+// with its own RBAC, journal and audit row. Public name history is not queried
+// or claimed (Mojang removed it on 2022-09-13).
+func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v1.LookupPlayerRequest]) (*connect.Response[v1.LookupPlayerResponse], error) {
+	query := strings.TrimSpace(req.Msg.Query)
+	if query == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("lookup query is required"))
+	}
+	kind, value := classifyPlayerQuery(query)
+	if kind == "invalid" {
+		return connect.NewResponse(&v1.LookupPlayerResponse{
+			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_AMBIGUOUS,
+			Note:   "Enter an exact UUID (32 or 36 characters) or a username of 1-16 letters, digits or underscores.",
+		}), nil
+	}
+
+	var provider identityLookup
+	if s.skins == nil {
+		provider = identityLookup{Status: "unavailable", Note: "Identity provider is not configured."}
+	} else {
+		resolved, err := s.skins.Lookup(ctx, query)
+		if err != nil {
+			provider = identityLookup{Status: "unavailable", Note: err.Error()}
+		} else {
+			provider = resolved
+		}
+	}
+
+	switch provider.Status {
+	case "found":
+		if !isCanonicalUUID(provider.UUID) || strings.TrimSpace(provider.Name) == "" {
+			return connect.NewResponse(&v1.LookupPlayerResponse{
+				Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_AMBIGUOUS,
+				Note:   "The identity provider returned incomplete data; refusing to guess an identity.",
+			}), nil
+		}
+		return connect.NewResponse(&v1.LookupPlayerResponse{
+			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_FOUND,
+			Name:   provider.Name,
+			Uuid:   provider.UUID,
+			Observation: observation(
+				v1.PlayerDataSource_PLAYER_DATA_SOURCE_IDENTITY_SERVICE,
+				v1.PlayerConfidence_PLAYER_CONFIDENCE_DETECTED,
+				time.Now().UTC(),
+				"Ephemeral provider result; no identity was created.",
+			),
+			Note: "Ephemeral result: only the provider's current name is shown. No identity, roster entry or presence was created. Official name history is unavailable.",
+		}), nil
+	case "ambiguous":
+		return connect.NewResponse(&v1.LookupPlayerResponse{
+			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_AMBIGUOUS,
+			Note:   noteOr(provider.Note, "The query does not identify exactly one account."),
+		}), nil
+	case "unavailable":
+		// An outage (timeout, 5xx, transport failure) is never a negative.
+		return connect.NewResponse(&v1.LookupPlayerResponse{
+			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_UNAVAILABLE,
+			Note:   noteOr(provider.Note, "Identity provider is unavailable; try again later."),
+		}), nil
+	}
+
+	// Authoritative negative from the provider. A single local observation may
+	// be shown as ephemeral context, but nothing is persisted or presented as
+	// presence; multiple local matches are ambiguous.
+	matches, err := s.store.FindPlayerIdentitiesByExact(ctx, valueForLookup(kind, value), nameForLookup(kind, value))
+	if err != nil {
+		s.log.Debug("Failed exact local lookup during read-only lookup: %v", err)
+		matches = nil
+	}
+	if len(matches) > 1 {
+		return connect.NewResponse(&v1.LookupPlayerResponse{
+			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_AMBIGUOUS,
+			Note:   "More than one observed identity matches that name. Use the exact UUID to disambiguate.",
+		}), nil
+	}
+	if len(matches) == 1 {
+		identity := matches[0]
+		return connect.NewResponse(&v1.LookupPlayerResponse{
+			Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_FOUND,
+			Name:   identity.CurrentName,
+			Uuid:   identity.PrimaryUUID,
+			Observation: observation(
+				v1.PlayerDataSource_PLAYER_DATA_SOURCE_PANEL_DB,
+				v1.PlayerConfidence_PLAYER_CONFIDENCE_STALE,
+				identity.LastSeenAt,
+				"Ephemeral result from this panel's observations; no identity was created.",
+			),
+			Note: "No online Mojang profile; shown from this panel's observations only. No identity, roster entry or presence was created.",
+		}), nil
+	}
+	return connect.NewResponse(&v1.LookupPlayerResponse{
+		Status: v1.PlayerLookupStatus_PLAYER_LOOKUP_STATUS_NOT_FOUND,
+		Note:   noteOr(provider.Note, "No account matches that exact UUID or username."),
+	}), nil
+}
+
+func noteOr(note, fallback string) string {
+	if strings.TrimSpace(note) != "" {
+		return note
+	}
+	return fallback
+}
+
+func valueForLookup(kind, value string) string {
+	if kind == "uuid" {
+		return value
+	}
+	return ""
+}
+
+func nameForLookup(kind, value string) string {
+	if kind == "name" {
+		return value
+	}
+	return ""
+}
+
+// classifyPlayerQuery mirrors the provider's query classifier so the service
+// can reject ambiguous input before any lookup or mutation.
+func classifyPlayerQuery(query string) (kind, value string) {
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return "invalid", ""
+	}
+	compact := strings.ReplaceAll(q, "-", "")
+	isHex := true
+	for _, r := range compact {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			isHex = false
+			break
+		}
+	}
+	if isHex && (len(compact) == 32) && ((len(q) == 32) || (len(q) == 36 && strings.Count(q, "-") == 4)) {
+		compact = strings.ToLower(compact)
+		return "uuid", compact[0:8] + "-" + compact[8:12] + "-" + compact[12:16] + "-" + compact[16:20] + "-" + compact[20:32]
+	}
+	if len(q) >= 1 && len(q) <= 16 {
+		valid := true
+		for _, r := range q {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			return "name", q
+		}
+	}
+	return "invalid", ""
+}
+
+func isCanonicalUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	compact := strings.ReplaceAll(value, "-", "")
+	if len(compact) != 32 {
+		return false
+	}
+	for _, r := range compact {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return strings.Count(value, "-") == 4
+}
+
+// normalizeRosterFilter maps the console's "all" sentinel to an empty filter.
+// An empty filter lists every identity; explicit bands remain exact matches.
+func normalizeRosterFilter(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if strings.EqualFold(trimmed, "all") {
+		return ""
+	}
+	return trimmed
+}
+
 // ListPlayers returns a bounded, sorted roster. Filters are applied over
 // observed identities only; no fabricated zero values are produced.
 func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1.ListPlayersRequest]) (*connect.Response[v1.ListPlayersResponse], error) {
@@ -392,6 +591,10 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list players"))
 	}
 
+	// The console's default roster filter sends "all" for both dimensions;
+	// "all" means no filter, not a literal presence/access band.
+	stateFilter := normalizeRosterFilter(msg.StateFilter)
+	accessFilter := normalizeRosterFilter(msg.AccessFilter)
 	serverName := map[string]string{}
 	access := map[string]storage.PlayerAccessState{}
 	out := make([]*v1.PlayerSummary, 0, len(identities))
@@ -439,10 +642,10 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 			band = "whitelisted"
 		}
 
-		if msg.StateFilter != "" && !strings.EqualFold(msg.StateFilter, presenceStateName(presence)) {
+		if stateFilter != "" && !strings.EqualFold(stateFilter, presenceStateName(presence)) {
 			continue
 		}
-		if msg.AccessFilter != "" && !strings.EqualFold(msg.AccessFilter, band) {
+		if accessFilter != "" && !strings.EqualFold(accessFilter, band) {
 			continue
 		}
 
@@ -1020,13 +1223,27 @@ func (s *PlayerService) SetOperator(ctx context.Context, req *connect.Request[v1
 
 func (s *PlayerService) SetWhitelistEntry(ctx context.Context, req *connect.Request[v1.SetWhitelistEntryRequest]) (*connect.Response[v1.SetWhitelistEntryResponse], error) {
 	msg := req.Msg
+	identityKey, targetName := msg.IdentityKey, strings.TrimSpace(msg.PlayerName)
+
+	// A manual add before the account has ever played carries player_query
+	// instead of an identity key. Resolve it to a real, journal-backed identity
+	// through the same lookup seam, then continue on the existing typed action
+	// path. There is no second command path and no invented online identity.
+	if identityKey == "" && strings.TrimSpace(msg.PlayerQuery) != "" {
+		resolved, name, err := s.resolveManualAllowlistTarget(ctx, msg.ServerId, msg.PlayerQuery, msg.Remove)
+		if err != nil {
+			return nil, err
+		}
+		identityKey, targetName = resolved.ID, name
+	}
+
 	action, event := "allowlist_add", activity.EventPlayerWhitelistAdd
 	inverse := `{"inverse":"allowlist_remove"}`
 	if msg.Remove {
 		action, event = "allowlist_remove", activity.EventPlayerWhitelistRemove
 		inverse = `{"inverse":"allowlist_add"}`
 	}
-	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, msg.IdentityKey, msg.PlayerName, action, event, "", msg.RequestId, true,
+	out, err := s.runAction(ctx, clientIP(req.Peer().Addr), msg.ServerId, identityKey, targetName, action, event, "", msg.RequestId, true,
 		func(source playerSource, target string) (string, error) {
 			return inverse, source.SetWhitelist(ctx, target, msg.Remove)
 		})
@@ -1034,6 +1251,127 @@ func (s *PlayerService) SetWhitelistEntry(ctx context.Context, req *connect.Requ
 		return nil, err
 	}
 	return connect.NewResponse(&v1.SetWhitelistEntryResponse{Outcome: out}), nil
+}
+
+// manualAllowlistCapability refuses a manual add unless an effective adapter
+// can actually edit the allowlist for the server's edition. Java name/UUID
+// adds rely on the negotiated Java adapter; Bedrock Gamertag/XUID adds require
+// an adapter that proves Bedrock allowlist support, which is not available, so
+// they are refused with an actionable capability error rather than a silent
+// Java-command fallback. A provider outage is never converted into permission.
+func (s *PlayerService) manualAllowlistCapability(ctx context.Context, serverID string) error {
+	if s.negotiator == nil {
+		return connect.NewError(connect.CodeUnavailable, errors.New("player source negotiation is not configured"))
+	}
+	server, err := s.server(ctx, serverID)
+	if err != nil {
+		return err
+	}
+	var cfg *storage.ServerConfig
+	if stored, cfgErr := s.store.GetServerConfig(ctx, server.ID); cfgErr == nil {
+		cfg = stored
+	}
+	_, caps, err := s.negotiator.Negotiate(ctx, server, cfg)
+	if err != nil {
+		detail := caps.Detail
+		if strings.TrimSpace(detail) == "" {
+			detail = "no player source adapter is available"
+		}
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("server %q cannot accept allowlist edits: %s", serverID, detail))
+	}
+	edition := strings.ToLower(strings.TrimSpace(s.edition))
+	if edition == "" {
+		edition = "java" // matches the composition-root default in player_wiring.go
+	}
+	if edition != "java" {
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("server %q edition %q: Bedrock allowlist edits require an adapter that proves Gamertag/XUID support; none is available", serverID, s.edition))
+	}
+	// Negotiation success alone is not proof: only the three Java adapters
+	// implement allowlist edits. Refuse any other chosen source rather than
+	// persisting an identity for a command path that cannot honor the add.
+	switch strings.ToLower(strings.TrimSpace(caps.ChosenSource)) {
+	case "management_protocol", "rcon", "exec":
+		return nil
+	default:
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("server %q source %q does not support Java allowlist edits", serverID, caps.ChosenSource))
+	}
+}
+
+// resolveManualAllowlistTarget turns an operator's exact name/UUID into a real
+// identity for the typed allowlist action. Only an effective Java adapter is
+// accepted; a name can be added locally as an explicitly offline identity
+// before it has played, while a UUID must first resolve to a current name
+// through the provider so we never manufacture a name we cannot identify.
+func (s *PlayerService) resolveManualAllowlistTarget(ctx context.Context, serverID, query string, remove bool) (*storage.PlayerIdentity, string, error) {
+	if err := s.manualAllowlistCapability(ctx, serverID); err != nil {
+		return nil, "", err
+	}
+	kind, value := classifyPlayerQuery(query)
+	if kind == "invalid" {
+		return nil, "", connect.NewError(connect.CodeInvalidArgument, errors.New("player_query must be an exact UUID or a username of 1-16 letters, digits or underscores"))
+	}
+
+	// Prefer an existing online identity; a removal must never create a new
+	// identity just to remove a name that was never on this server.
+	matches, err := s.store.FindPlayerIdentitiesByExact(ctx, valueForLookup(kind, value), nameForLookup(kind, value))
+	if err != nil {
+		return nil, "", connect.NewError(connect.CodeInternal, err)
+	}
+	if len(matches) > 1 {
+		return nil, "", connect.NewError(connect.CodeFailedPrecondition, errors.New("more than one identity matches that name; use the exact UUID"))
+	}
+	if len(matches) == 1 && !matches[0].OfflineUUID {
+		return &matches[0], matches[0].CurrentName, nil
+	}
+
+	// Ask the identity provider for a definitive current name (needed for UUID
+	// queries, and preferred for names so the allowlist uses the online name).
+	var looked identityLookup
+	if s.skins == nil {
+		looked = identityLookup{Status: "unavailable", Note: "identity provider is not configured"}
+	} else {
+		looked, err = s.skins.Lookup(ctx, query)
+		if err != nil {
+			looked = identityLookup{Status: "unavailable", Note: err.Error()}
+		}
+	}
+
+	// Outages and ambiguous replies are never converted into permission: do
+	// not persist an offline identity or attempt a mutation on either state.
+	switch looked.Status {
+	case "unavailable":
+		return nil, "", connect.NewError(connect.CodeUnavailable, errors.New(noteOr(looked.Note, "identity provider is unavailable")))
+	case "ambiguous":
+		return nil, "", connect.NewError(connect.CodeFailedPrecondition,
+			errors.New(noteOr(looked.Note, "the identity provider could not pin this query to one account; use the exact UUID")))
+	}
+
+	if looked.Status == "found" && isCanonicalUUID(looked.UUID) && strings.TrimSpace(looked.Name) != "" {
+		identity, err := s.store.EnsurePlayerIdentity(ctx, looked.UUID, looked.Name, "", "", false)
+		if err != nil {
+			return nil, "", connect.NewError(connect.CodeInternal, err)
+		}
+		return identity, looked.Name, nil
+	}
+	// Only an authoritative negative permits a name-only offline identity.
+	if looked.Status == "not_found" && kind == "name" && !remove {
+		identity, err := s.store.EnsureOfflinePlayerIdentity(ctx, value, serverID, "manual_allowlist")
+		if err != nil {
+			return nil, "", connect.NewError(connect.CodeInternal, err)
+		}
+		return identity, value, nil
+	}
+	if len(matches) == 1 {
+		return &matches[0], matches[0].CurrentName, nil
+	}
+	if looked.Status == "not_found" {
+		return nil, "", connect.NewError(connect.CodeNotFound, errors.New(noteOr(looked.Note, "no Mojang profile exists for that exact identity")))
+	}
+	return nil, "", connect.NewError(connect.CodeUnavailable,
+		errors.New(noteOr(looked.Note, "the identity provider returned no usable result; refusing to guess an identity")))
 }
 
 // BulkPlayerAction applies one typed action to a bounded set of targets. Each

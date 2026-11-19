@@ -1,32 +1,44 @@
 # SPDX-License-Identifier: MPL-2.0
 name: Carbon Panel Release
-# A pushed v* tag only stages, builds and verifies. Publication is a separate,
-# explicit operator action: workflow_dispatch with publish=true. The decision is
-# enforced by scripts/release.py publication_allowed(); no automatic event can
-# write to a registry or a GitHub release. Staging a tag does not assert that its
-# target commit is current main: tags can point at old commits and a workflow
-# reflects that target's history. The trusted publish gate is the Python
-# boundary plus exact-commit main CI, never the dispatch revision input alone.
+# A pushed carbonpanel-v* product tag only stages, builds and verifies. Plain
+# v*, mod-* and inherited tags are separate historical domains and never start
+# a panel release. Publication is a separate, explicit operator action:
+# workflow_dispatch with publish=true. The decision is enforced by
+# scripts/release.py publication_allowed() and verify-publication-ref; no
+# automatic event can write to a registry or a GitHub release. Staging a tag
+# does not assert that its target commit is current main: tags can point at old
+# commits and a workflow reflects that target's history. The trusted publish
+# gate is the Python boundary, a trusted refs/heads/main dispatch and
+# exact-commit main CI, never the dispatch revision input alone.
 
 on:
   push:
-    # Staging-only trigger. See the comment above and publication_allowed().
-    tags: ['v*']
+    # Staging-only trigger. Inherited v* tags are NOT panel release candidates;
+    # see the comment above, docs/release-history.md and publication_allowed().
+    tags: ['carbonpanel-v*']
   pull_request:
     paths:
       - '.github/workflows/release.yml'
       - 'scripts/release.py'
       - 'scripts/test_release.py'
+      - 'scripts/openapi_version.py'
+      - 'scripts/test_openapi_version.py'
+      - 'web/carbon-panel/vite.config.ts'
+      - 'internal/rpc/handlers/openapi.go'
+      - 'internal/rpc/handlers/openapi_parity_test.go'
       - 'internal/buildinfo/**'
       - 'cmd/carbon-panel/main.go'
       - 'cmd/carbon-storage/main.go'
       - 'docker/Dockerfile.release'
       - 'docker/Dockerfile.carbon-panel'
       - 'docs/release-bundle.md'
+      - 'docs/releases.md'
+      - 'docs/release-history.md'
+      - 'docs/release-history.json'
   workflow_dispatch:
     inputs:
       version:
-        description: 'SemVer tag, for example v3.0.0-alpha.1'
+        description: 'Product tag, for example carbonpanel-v2.0.0-alpha.1'
         required: true
         type: string
       revision:
@@ -46,8 +58,17 @@ permissions:
   contents: read
   actions: read
 
+# ONE workflow-level concurrency group for the ENTIRE explicit product
+# publication: every phase (immutable image -> GitHub release -> moving aliases)
+# holds the same lock, so a different version cannot interleave phases or strand
+# a run after immutable publication. cancel-in-progress:false protects the
+# RUNNING run; with default queue:single only one pending run is retained and a
+# later request REPLACES it. This lane is SINGLE-OPERATOR DISPATCH: do not
+# assume every queued publisher waits; verify the resulting run before retry.
+# Build-only rehearsals, tag pushes, PRs and automatic main events get a per-run
+# key instead, so ordinary CI is not serialized.
 concurrency:
-  group: release-${{ inputs.version || github.ref }}
+  group: ${{ inputs.publish == true && 'carbonpanel-product-publish' || format('carbonpanel-stage-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -56,6 +77,10 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.plan.outputs.version }}
+      internal_version: ${{ steps.plan.outputs.internal_version }}
+      semver: ${{ steps.plan.outputs.semver }}
+      git_tag: ${{ steps.plan.outputs.git_tag }}
+      product: ${{ steps.plan.outputs.product }}
       commit: ${{ steps.plan.outputs.commit }}
       epoch: ${{ steps.plan.outputs.epoch }}
       date: ${{ steps.plan.outputs.date }}
@@ -69,7 +94,9 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.revision || github.ref }}
       - name: Check release tooling
-        run: python3 -m unittest scripts.test_release
+        run: python3 -m unittest scripts.test_release scripts.test_openapi_version
+      - name: Check the checked-in release history catalog
+        run: python3 scripts/release.py verify-release-history
       - name: Validate source and version
         id: plan
         env:
@@ -82,6 +109,17 @@ jobs:
         run: |
           python3 scripts/release.py plan --version "$RELEASE_VERSION" \
             --event "$RELEASE_EVENT" --publish-input "$RELEASE_PUBLISH"
+      - name: Verify trusted ref and exact main CI for an explicit publication
+        if: inputs.publish
+        env:
+          RELEASE_COMMIT: ${{ steps.plan.outputs.commit }}
+          RELEASE_REF: ${{ github.ref }}
+        # A checkbox is never CI evidence. verify-publication-ref requires the
+        # trusted refs/heads/main dispatch ref and a successful completed push
+        # CI run for the exact checked-out SHA, including ancestry of main.
+        run: |
+          python3 scripts/release.py verify-publication-ref \
+            --commit "$RELEASE_COMMIT" --ref "$RELEASE_REF"
 
   frontend:
     name: Build versioned UI and API schema
@@ -107,13 +145,25 @@ jobs:
         run: >-
           buf generate --template
           '{"version":"v2","plugins":[{"remote":"buf.build/community/sudorandom-connect-openapi:v0.21.3","out":".website-build/release-schema","opt":["path=openapi.yaml"]}]}'
+      - name: Stamp the exact product version into the release schema
+        env:
+          RELEASE_SEMVER: ${{ needs.plan.outputs.semver }}
+        run: python3 scripts/openapi_version.py stamp .website-build/release-schema/openapi.yaml "$RELEASE_SEMVER"
       - name: Build the embedded web UI
         env:
-          APP_VERSION: ${{ needs.plan.outputs.version }}
+          APP_VERSION: ${{ needs.plan.outputs.semver }}
         run: |
           cd web/carbon-panel
           bun install --frozen-lockfile
           bun run build
+      - name: Stage the stamped schema for the embedded handler
+        run: cp .website-build/release-schema/openapi.yaml web/carbon-panel/build/schemav1.yaml
+      - name: Verify UI, CLI input and OpenAPI version parity
+        env:
+          RELEASE_SEMVER: ${{ needs.plan.outputs.semver }}
+        run: |
+          python3 scripts/openapi_version.py verify-ui web/carbon-panel/build "$RELEASE_SEMVER"
+          python3 scripts/openapi_version.py verify .website-build/release-schema/openapi.yaml "$RELEASE_SEMVER"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-build-inputs
@@ -141,7 +191,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           build-args: |
-            APP_VERSION=${{ needs.plan.outputs.version }}
+            APP_VERSION=${{ needs.plan.outputs.semver }}
             APP_COMMIT=${{ needs.plan.outputs.commit }}
             BUILD_DATE=${{ needs.plan.outputs.date }}
           cache-from: type=gha,scope=source-image
@@ -195,6 +245,16 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_EPOCH: ${{ needs.plan.outputs.epoch }}
         run: python3 scripts/release.py package --version "$RELEASE_VERSION" --epoch "$RELEASE_EPOCH" --goos ${{ matrix.goos }} --goarch ${{ matrix.goarch }} --output dist/bundles
+      - name: Probe the served schema on a running disposable handler
+        if: runner.os != 'Windows'
+        env:
+          CARBONPANEL_EXPECTED_OPENAPI_VERSION: ${{ needs.plan.outputs.semver }}
+        run: go test ./internal/rpc/handlers -run TestServedOpenAPIVersionMatchesBuild -count=1 -v
+      - name: Probe the served schema on a running disposable handler (Windows)
+        if: runner.os == 'Windows'
+        env:
+          CARBONPANEL_EXPECTED_OPENAPI_VERSION: ${{ needs.plan.outputs.semver }}
+        run: go test ./internal/rpc/handlers -run TestServedOpenAPIVersionMatchesBuild -count=1 -v
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-bundle-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -239,13 +299,13 @@ jobs:
           outputs: type=oci,dest=dist/image.oci.tar
           labels: |
             org.opencontainers.image.title=Carbon Panel
-            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.semver }}
             org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
             org.opencontainers.image.url=https://carbonpanel.dev/
             org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
             org.opencontainers.image.licenses=MPL-2.0
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          build-args: APP_VERSION=${{ needs.plan.outputs.version }}
+          build-args: APP_VERSION=${{ needs.plan.outputs.semver }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
       - name: Check final download checksums (digest added after immutable publication)
@@ -270,6 +330,7 @@ jobs:
     needs: [plan, image]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
+    # The workflow-level publish lock covers this phase; no per-job group.
     permissions:
       contents: read
       packages: write
@@ -345,13 +406,13 @@ jobs:
           tags: ${{ steps.immutable_tag.outputs.tags }}
           labels: |
             org.opencontainers.image.title=Carbon Panel
-            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.semver }}
             org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
             org.opencontainers.image.url=https://carbonpanel.dev/
             org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
             org.opencontainers.image.licenses=MPL-2.0
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          build-args: APP_VERSION=${{ needs.plan.outputs.version }}
+          build-args: APP_VERSION=${{ needs.plan.outputs.semver }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
       - name: Resolve the verified digest (resume uses the operator-supplied digest)
@@ -388,6 +449,8 @@ jobs:
     needs: [plan, publish-immutable]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
+    # GitHub latest is selected here under product-only verified stable ordering,
+    # inside the workflow-level publish lock (never concurrently).
     permissions:
       contents: write
       actions: read
@@ -444,6 +507,8 @@ jobs:
     needs: [plan, publish-immutable, publish]
     if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
     runs-on: ubuntu-24.04
+    # Alias decisions are recomputed with LIVE preflight inside the
+    # workflow-level publish lock, so no stale ordering can be applied.
     permissions:
       contents: read
       packages: write

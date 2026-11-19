@@ -3,8 +3,10 @@
 | Need | Authoritative source |
 | --- | --- |
 | Install, configure or use the panel | [User guides](carbon-panel/src/content/docs/index.mdx), authored in the Starlight content tree |
+| Connect an AI assistant / MCP server | [MCP server guide](carbon-panel/src/content/docs/guides/mcp-server.mdx), [distribution smoke](runbook-mcp-smoke.md) and [ADR 0034](adr/0034-mcp-server-distribution.md) |
 | Operate or recover an installation | [Deployment modes](deployment-modes.md), [server operations](runbook-server-operations.md), [panel database recovery](runbook-panel-db-restore.md), and other `runbook-*.md` files |
 | Develop and verify a change | [Contributor guide](../AGENTS.md), [development commands](development.md), and [verification](../knowledge/testing/verification.md) |
+| Review advisories with no patched release | [Dependency security review](dependency-security-review.md) — weekly owner/cadence and re-check steps |
 | Understand accepted architecture | [ADR register](../knowledge/decisions/adrs.md) and the records in `adr/` |
 | Find subsystem constraints and code ownership | [Knowledge index](../knowledge/index.md) and [repository map](../knowledge/repo-map.md) |
 | Read a dated proposal or investigation | `plans/`, `research/` and `issues/`; check each document's scope, revision and evidence limits |
@@ -20,6 +22,12 @@ The public user guides, examples and API schema describe the application commit
 selected in [website-source.json](website-source.json). Website presentation
 changes have a separate lifecycle. See [website publishing](website-publishing.md)
 for the source pin, snapshot isolation and publication checks.
+
+The new MCP guide is authored in the Starlight tree but its sidebar and home-page
+cards are deliberately **not** registered yet: the pinned source does not
+contain the page, so adding the slug breaks the website build. Registration must
+follow a separate, reviewed advance of the source pin. The guide is reachable in
+the repository and from the root README until then.
 
 ## Cloud product policy
 

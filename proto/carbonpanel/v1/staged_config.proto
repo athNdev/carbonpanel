@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+syntax = "proto3";
+
+package carbonpanel.v1;
+
+option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
+
+// StagedConfigService is the generated control contract for staged/rollout
+// configuration changes. The legacy /api/v1/staged-config/{serverID}/staged
+// JSON routes remain compatibility adapters during the deprecation window and
+// share one application operation and permission scope. Mutations by staged ID
+// re-authorize the record's real owner in both transports.
+service StagedConfigService {
+  // ListStagedChanges lists staged changes for a server, optionally filtered by status.
+  rpc ListStagedChanges(ListStagedChangesRequest) returns (ListStagedChangesResponse);
+  // StageConfigChange records a config diff for later or scheduled apply.
+  rpc StageConfigChange(StageConfigChangeRequest) returns (StageConfigChangeResponse);
+  // ApplyStagedChange applies a staged change immediately.
+  rpc ApplyStagedChange(ApplyStagedChangeRequest) returns (ApplyStagedChangeResponse);
+  // RollbackStagedChange restores the values captured before an apply.
+  rpc RollbackStagedChange(RollbackStagedChangeRequest) returns (RollbackStagedChangeResponse);
+  // DiscardStagedChange removes a staged change without applying it.
+  rpc DiscardStagedChange(DiscardStagedChangeRequest) returns (DiscardStagedChangeResponse);
+}
+
+// StagedConfigChange is one recorded config diff.
+message StagedConfigChange {
+  string id = 1;
+  string server_id = 2;
+  string batch_id = 3;
+  string payload = 4;
+  string base_payload = 5;
+  string previous_payload = 6;
+  string apply_mode = 7;
+  string cron_expr = 8;
+  string apply_at = 9;
+  int32 idle_minutes = 10;
+  string status = 11;
+  string created_at = 12;
+  string applied_at = 13;
+  string rolled_back_at = 14;
+}
+
+// ListStagedChangesRequest carries the server and an optional status filter.
+message ListStagedChangesRequest {
+  string server_id = 1;
+  string status = 2;
+}
+
+// ListStagedChangesResponse is the filtered list of staged changes.
+message ListStagedChangesResponse {
+  repeated StagedConfigChange changes = 1;
+  int32 count = 2;
+}
+
+// StageConfigChangeRequest carries the diff and its apply policy.
+message StageConfigChangeRequest {
+  string server_id = 1;
+  string changes = 2;
+  string apply_mode = 3;
+  string cron_expr = 4;
+}
+
+// StageConfigChangeResponse returns the newly staged record.
+message StageConfigChangeResponse {
+  StagedConfigChange change = 1;
+}
+
+// ApplyStagedChangeRequest identifies a staged record to apply.
+message ApplyStagedChangeRequest {
+  string server_id = 1;
+  string staged_id = 2;
+}
+
+// ApplyStagedChangeResponse returns the applied record.
+message ApplyStagedChangeResponse {
+  bool success = 1;
+  StagedConfigChange change = 2;
+}
+
+// RollbackStagedChangeRequest identifies a staged record to roll back.
+message RollbackStagedChangeRequest {
+  string server_id = 1;
+  string staged_id = 2;
+}
+
+// RollbackStagedChangeResponse returns the rolled-back record.
+message RollbackStagedChangeResponse {
+  bool success = 1;
+  StagedConfigChange change = 2;
+}
+
+// DiscardStagedChangeRequest identifies a staged record to discard.
+message DiscardStagedChangeRequest {
+  string server_id = 1;
+  string staged_id = 2;
+}
+
+// DiscardStagedChangeResponse acknowledges a discard.
+message DiscardStagedChangeResponse {
+  bool success = 1;
+}

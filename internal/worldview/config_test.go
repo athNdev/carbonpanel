@@ -52,7 +52,7 @@ func TestRemoteEndpointRequiresAllowlistedNodeLocalHostFixture(t *testing.T) {
 		t.Fatalf("unallowlisted remote host error = %v, want ErrInvalidEndpoint", err)
 	}
 	cfg := Config{
-		Endpoints: []Endpoint{remote},
+		Endpoints:    []Endpoint{remote},
 		AllowedHosts: []string{"10.0.0.9"},
 	}
 	if _, err := NewResolver(cfg, loc).Resolve(context.Background(), "remote-1", "srv-r"); err != nil {

@@ -48,23 +48,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <div>
 	<div class="mb-3 flex items-center justify-between">
-		<h3 class="text-sm font-medium text-[#f4f4f4]">Audit log</h3>
+		<h3 class="text-sm font-medium text-foreground">Audit log</h3>
 		<button
 			type="button"
-			class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
+			class="inline-flex h-8 items-center rounded-none bg-secondary px-4 text-xs text-foreground transition-colors hover:bg-[var(--button-secondary-hover)] disabled:opacity-50"
 			onclick={loadActivity}
 			disabled={loading}
 		>
 			{loading ? 'Loading…' : 'Refresh'}
 		</button>
 	</div>
-	<p class="mb-6 text-xs text-[#a8a8a8]">
+	<p class="mb-6 text-xs text-muted-foreground">
 		Who did what on this server, newest first. Journaled actions show the request id that joins them
 		to the operations journal.
 	</p>
 
 	{#if entries.length === 0}
-		<p class="py-8 text-center font-mono text-xs text-[#a8a8a8]">
+		<p class="py-8 text-center font-mono text-xs text-muted-foreground">
 			{loading
 				? 'Loading activity…'
 				: 'No activity recorded yet. Start or stop the server to generate entries.'}
@@ -73,7 +73,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="overflow-x-auto">
 			<table class="w-full min-w-[480px] text-xs" aria-label="Server activity log">
 				<thead>
-					<tr class="border-b border-[#393939] text-left text-[#a8a8a8]">
+					<tr class="border-b border-border text-left text-muted-foreground">
 						<th scope="col" class="py-2 pr-4 font-medium">Time</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Actor</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Event</th>
@@ -83,7 +83,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</thead>
 				<tbody>
 					{#each entries as entry (entry.id)}
-						<tr class="border-b border-[#262626] font-mono text-[#f4f4f4]">
+						<tr class="border-b border-border font-mono text-foreground">
 							<td class="py-2 pr-4 whitespace-nowrap">{formatTimestamp(entry.createdAt)}</td>
 							<td
 								class="max-w-[160px] truncate py-2 pr-4"

@@ -29,6 +29,380 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// OSS-387 bounded stream session messages. Frames are capped by the W17
+// 256 KiB bound; the controller owns handles, expiry and SHA-256 state.
+//
+// CONTRACT: total_size / size is an ADMISSION UPPER BOUND, not an exact byte
+// count. The controller refuses to read beyond it, but the source may be
+// shorter. The authoritative final byte count is ReadStreamFrameResponse.offset
+// on the frame with done=true; its sha256 is computed over exactly those
+// bytes. Composed upload/commit MUST use that actual count, never the declared
+// bound. A declared size of 0 is valid for opening but yields no committable
+// bytes.
+type OpenStreamRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ServerId  string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	Path      string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	TotalSize int64                  `protobuf:"varint,3,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
+	// OSS-370: when set, open the bounded frame stream over the controller-owned
+	// staged file of this download session instead of a server-relative path.
+	// The session's own server_id must equal server_id, and every frame remains
+	// re-authorized to files/read[server_id] by the production interceptor. The
+	// gateway never sees a storage path or holds a storage handle.
+	DownloadSessionId string `protobuf:"bytes,4,opt,name=download_session_id,json=downloadSessionId,proto3" json:"download_session_id,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *OpenStreamRequest) Reset() {
+	*x = OpenStreamRequest{}
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenStreamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenStreamRequest) ProtoMessage() {}
+
+func (x *OpenStreamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenStreamRequest.ProtoReflect.Descriptor instead.
+func (*OpenStreamRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *OpenStreamRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
+	}
+	return ""
+}
+
+func (x *OpenStreamRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *OpenStreamRequest) GetTotalSize() int64 {
+	if x != nil {
+		return x.TotalSize
+	}
+	return 0
+}
+
+func (x *OpenStreamRequest) GetDownloadSessionId() string {
+	if x != nil {
+		return x.DownloadSessionId
+	}
+	return ""
+}
+
+// Opaque controller session id plus the admission upper bound echoed back to
+// the caller. The authoritative transferred size comes from frame responses.
+type OpenStreamResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Size          int64                  `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenStreamResponse) Reset() {
+	*x = OpenStreamResponse{}
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenStreamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenStreamResponse) ProtoMessage() {}
+
+func (x *OpenStreamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenStreamResponse.ProtoReflect.Descriptor instead.
+func (*OpenStreamResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *OpenStreamResponse) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *OpenStreamResponse) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+// Requests exactly one bounded frame, identified by its zero-based index and
+// the server this request is authorized for.
+type ReadStreamFrameRequest struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	SessionId  string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	FrameIndex int32                  `protobuf:"varint,2,opt,name=frame_index,json=frameIndex,proto3" json:"frame_index,omitempty"`
+	// The server the caller intends to read from. The controller rejects the
+	// frame unless it matches the server the session was opened for; the auth
+	// interceptor also scopes this procedure to files/read[server_id].
+	ServerId      string `protobuf:"bytes,3,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadStreamFrameRequest) Reset() {
+	*x = ReadStreamFrameRequest{}
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadStreamFrameRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadStreamFrameRequest) ProtoMessage() {}
+
+func (x *ReadStreamFrameRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadStreamFrameRequest.ProtoReflect.Descriptor instead.
+func (*ReadStreamFrameRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ReadStreamFrameRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ReadStreamFrameRequest) GetFrameIndex() int32 {
+	if x != nil {
+		return x.FrameIndex
+	}
+	return 0
+}
+
+func (x *ReadStreamFrameRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
+	}
+	return ""
+}
+
+// One bounded frame with cumulative SHA-256 and the authoritative byte
+// offset; done=true marks the final frame.
+type ReadStreamFrameResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Data  []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	// done=true means the source reached EOF. sha256 is the cumulative digest of
+	// the bytes actually transferred, and offset is the authoritative ACTUAL
+	// total byte count (not OpenStreamResponse.size, which is only a bound).
+	Done          bool   `protobuf:"varint,2,opt,name=done,proto3" json:"done,omitempty"`
+	Sha256        string `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	Offset        int64  `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReadStreamFrameResponse) Reset() {
+	*x = ReadStreamFrameResponse{}
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReadStreamFrameResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReadStreamFrameResponse) ProtoMessage() {}
+
+func (x *ReadStreamFrameResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReadStreamFrameResponse.ProtoReflect.Descriptor instead.
+func (*ReadStreamFrameResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ReadStreamFrameResponse) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *ReadStreamFrameResponse) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+func (x *ReadStreamFrameResponse) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *ReadStreamFrameResponse) GetOffset() int64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+// Releases exactly one owned session; cancel=true aborts an in-flight stream.
+type CloseStreamRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Cancel    bool                   `protobuf:"varint,2,opt,name=cancel,proto3" json:"cancel,omitempty"`
+	// The server the caller intends to close/release; must match the session.
+	ServerId      string `protobuf:"bytes,3,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseStreamRequest) Reset() {
+	*x = CloseStreamRequest{}
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseStreamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseStreamRequest) ProtoMessage() {}
+
+func (x *CloseStreamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseStreamRequest.ProtoReflect.Descriptor instead.
+func (*CloseStreamRequest) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CloseStreamRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *CloseStreamRequest) GetCancel() bool {
+	if x != nil {
+		return x.Cancel
+	}
+	return false
+}
+
+func (x *CloseStreamRequest) GetServerId() string {
+	if x != nil {
+		return x.ServerId
+	}
+	return ""
+}
+
+// Empty acknowledgement that the owned session and its handle were released.
+type CloseStreamResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseStreamResponse) Reset() {
+	*x = CloseStreamResponse{}
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseStreamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseStreamResponse) ProtoMessage() {}
+
+func (x *CloseStreamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseStreamResponse.ProtoReflect.Descriptor instead.
+func (*CloseStreamResponse) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{5}
+}
+
 // File metadata and tree
 type FileInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -45,7 +419,7 @@ type FileInfo struct {
 
 func (x *FileInfo) Reset() {
 	*x = FileInfo{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[0]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -57,7 +431,7 @@ func (x *FileInfo) String() string {
 func (*FileInfo) ProtoMessage() {}
 
 func (x *FileInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[0]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -70,7 +444,7 @@ func (x *FileInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileInfo.ProtoReflect.Descriptor instead.
 func (*FileInfo) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{0}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *FileInfo) GetName() string {
@@ -134,7 +508,7 @@ type ListFilesRequest struct {
 
 func (x *ListFilesRequest) Reset() {
 	*x = ListFilesRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[1]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -146,7 +520,7 @@ func (x *ListFilesRequest) String() string {
 func (*ListFilesRequest) ProtoMessage() {}
 
 func (x *ListFilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[1]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -159,7 +533,7 @@ func (x *ListFilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListFilesRequest.ProtoReflect.Descriptor instead.
 func (*ListFilesRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{1}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListFilesRequest) GetServerId() string {
@@ -193,7 +567,7 @@ type ListFilesResponse struct {
 
 func (x *ListFilesResponse) Reset() {
 	*x = ListFilesResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -205,7 +579,7 @@ func (x *ListFilesResponse) String() string {
 func (*ListFilesResponse) ProtoMessage() {}
 
 func (x *ListFilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -218,7 +592,7 @@ func (x *ListFilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListFilesResponse.ProtoReflect.Descriptor instead.
 func (*ListFilesResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{2}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListFilesResponse) GetFiles() []*FileInfo {
@@ -239,7 +613,7 @@ type GetFileRequest struct {
 
 func (x *GetFileRequest) Reset() {
 	*x = GetFileRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -251,7 +625,7 @@ func (x *GetFileRequest) String() string {
 func (*GetFileRequest) ProtoMessage() {}
 
 func (x *GetFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -264,7 +638,7 @@ func (x *GetFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFileRequest.ProtoReflect.Descriptor instead.
 func (*GetFileRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{3}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetFileRequest) GetServerId() string {
@@ -292,7 +666,7 @@ type GetFileResponse struct {
 
 func (x *GetFileResponse) Reset() {
 	*x = GetFileResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -304,7 +678,7 @@ func (x *GetFileResponse) String() string {
 func (*GetFileResponse) ProtoMessage() {}
 
 func (x *GetFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -317,7 +691,7 @@ func (x *GetFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetFileResponse.ProtoReflect.Descriptor instead.
 func (*GetFileResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{4}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *GetFileResponse) GetContent() []byte {
@@ -347,7 +721,7 @@ type SaveUploadedFileRequest struct {
 
 func (x *SaveUploadedFileRequest) Reset() {
 	*x = SaveUploadedFileRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -359,7 +733,7 @@ func (x *SaveUploadedFileRequest) String() string {
 func (*SaveUploadedFileRequest) ProtoMessage() {}
 
 func (x *SaveUploadedFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -372,7 +746,7 @@ func (x *SaveUploadedFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveUploadedFileRequest.ProtoReflect.Descriptor instead.
 func (*SaveUploadedFileRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{5}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SaveUploadedFileRequest) GetServerId() string {
@@ -414,7 +788,7 @@ type SaveUploadedFileResponse struct {
 
 func (x *SaveUploadedFileResponse) Reset() {
 	*x = SaveUploadedFileResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -426,7 +800,7 @@ func (x *SaveUploadedFileResponse) String() string {
 func (*SaveUploadedFileResponse) ProtoMessage() {}
 
 func (x *SaveUploadedFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -439,7 +813,7 @@ func (x *SaveUploadedFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveUploadedFileResponse.ProtoReflect.Descriptor instead.
 func (*SaveUploadedFileResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{6}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SaveUploadedFileResponse) GetMessage() string {
@@ -470,7 +844,7 @@ type UpdateFileRequest struct {
 
 func (x *UpdateFileRequest) Reset() {
 	*x = UpdateFileRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -482,7 +856,7 @@ func (x *UpdateFileRequest) String() string {
 func (*UpdateFileRequest) ProtoMessage() {}
 
 func (x *UpdateFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -495,7 +869,7 @@ func (x *UpdateFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateFileRequest.ProtoReflect.Descriptor instead.
 func (*UpdateFileRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{7}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UpdateFileRequest) GetServerId() string {
@@ -538,7 +912,7 @@ type UpdateFileResponse struct {
 
 func (x *UpdateFileResponse) Reset() {
 	*x = UpdateFileResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -550,7 +924,7 @@ func (x *UpdateFileResponse) String() string {
 func (*UpdateFileResponse) ProtoMessage() {}
 
 func (x *UpdateFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -563,7 +937,7 @@ func (x *UpdateFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateFileResponse.ProtoReflect.Descriptor instead.
 func (*UpdateFileResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{8}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *UpdateFileResponse) GetMessage() string {
@@ -601,7 +975,7 @@ type DeleteFileRequest struct {
 
 func (x *DeleteFileRequest) Reset() {
 	*x = DeleteFileRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -613,7 +987,7 @@ func (x *DeleteFileRequest) String() string {
 func (*DeleteFileRequest) ProtoMessage() {}
 
 func (x *DeleteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -626,7 +1000,7 @@ func (x *DeleteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteFileRequest.ProtoReflect.Descriptor instead.
 func (*DeleteFileRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{9}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeleteFileRequest) GetServerId() string {
@@ -666,7 +1040,7 @@ type DeleteFileResponse struct {
 
 func (x *DeleteFileResponse) Reset() {
 	*x = DeleteFileResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[10]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -678,7 +1052,7 @@ func (x *DeleteFileResponse) String() string {
 func (*DeleteFileResponse) ProtoMessage() {}
 
 func (x *DeleteFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[10]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -691,7 +1065,7 @@ func (x *DeleteFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteFileResponse.ProtoReflect.Descriptor instead.
 func (*DeleteFileResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{10}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{16}
 }
 
 // Folder creation parameters
@@ -705,7 +1079,7 @@ type CreateFolderRequest struct {
 
 func (x *CreateFolderRequest) Reset() {
 	*x = CreateFolderRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[11]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -717,7 +1091,7 @@ func (x *CreateFolderRequest) String() string {
 func (*CreateFolderRequest) ProtoMessage() {}
 
 func (x *CreateFolderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[11]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -730,7 +1104,7 @@ func (x *CreateFolderRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateFolderRequest.ProtoReflect.Descriptor instead.
 func (*CreateFolderRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{11}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CreateFolderRequest) GetServerId() string {
@@ -757,7 +1131,7 @@ type CreateFolderResponse struct {
 
 func (x *CreateFolderResponse) Reset() {
 	*x = CreateFolderResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -769,7 +1143,7 @@ func (x *CreateFolderResponse) String() string {
 func (*CreateFolderResponse) ProtoMessage() {}
 
 func (x *CreateFolderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -782,7 +1156,7 @@ func (x *CreateFolderResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateFolderResponse.ProtoReflect.Descriptor instead.
 func (*CreateFolderResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{12}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CreateFolderResponse) GetMessage() string {
@@ -804,7 +1178,7 @@ type MoveFileRequest struct {
 
 func (x *MoveFileRequest) Reset() {
 	*x = MoveFileRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -816,7 +1190,7 @@ func (x *MoveFileRequest) String() string {
 func (*MoveFileRequest) ProtoMessage() {}
 
 func (x *MoveFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -829,7 +1203,7 @@ func (x *MoveFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MoveFileRequest.ProtoReflect.Descriptor instead.
 func (*MoveFileRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{13}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *MoveFileRequest) GetServerId() string {
@@ -863,7 +1237,7 @@ type MoveFileResponse struct {
 
 func (x *MoveFileResponse) Reset() {
 	*x = MoveFileResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -875,7 +1249,7 @@ func (x *MoveFileResponse) String() string {
 func (*MoveFileResponse) ProtoMessage() {}
 
 func (x *MoveFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -888,7 +1262,7 @@ func (x *MoveFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MoveFileResponse.ProtoReflect.Descriptor instead.
 func (*MoveFileResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{14}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *MoveFileResponse) GetMessage() string {
@@ -910,7 +1284,7 @@ type CopyFileRequest struct {
 
 func (x *CopyFileRequest) Reset() {
 	*x = CopyFileRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -922,7 +1296,7 @@ func (x *CopyFileRequest) String() string {
 func (*CopyFileRequest) ProtoMessage() {}
 
 func (x *CopyFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -935,7 +1309,7 @@ func (x *CopyFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CopyFileRequest.ProtoReflect.Descriptor instead.
 func (*CopyFileRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{15}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CopyFileRequest) GetServerId() string {
@@ -969,7 +1343,7 @@ type CopyFileResponse struct {
 
 func (x *CopyFileResponse) Reset() {
 	*x = CopyFileResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[16]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -981,7 +1355,7 @@ func (x *CopyFileResponse) String() string {
 func (*CopyFileResponse) ProtoMessage() {}
 
 func (x *CopyFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[16]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -994,7 +1368,7 @@ func (x *CopyFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CopyFileResponse.ProtoReflect.Descriptor instead.
 func (*CopyFileResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{16}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CopyFileResponse) GetMessage() string {
@@ -1017,7 +1391,7 @@ type CreateArchiveRequest struct {
 
 func (x *CreateArchiveRequest) Reset() {
 	*x = CreateArchiveRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[17]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1029,7 +1403,7 @@ func (x *CreateArchiveRequest) String() string {
 func (*CreateArchiveRequest) ProtoMessage() {}
 
 func (x *CreateArchiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[17]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1042,7 +1416,7 @@ func (x *CreateArchiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateArchiveRequest.ProtoReflect.Descriptor instead.
 func (*CreateArchiveRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{17}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CreateArchiveRequest) GetServerId() string {
@@ -1085,7 +1459,7 @@ type CreateArchiveResponse struct {
 
 func (x *CreateArchiveResponse) Reset() {
 	*x = CreateArchiveResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[18]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1097,7 +1471,7 @@ func (x *CreateArchiveResponse) String() string {
 func (*CreateArchiveResponse) ProtoMessage() {}
 
 func (x *CreateArchiveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[18]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1110,7 +1484,7 @@ func (x *CreateArchiveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateArchiveResponse.ProtoReflect.Descriptor instead.
 func (*CreateArchiveResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{18}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CreateArchiveResponse) GetMessage() string {
@@ -1145,7 +1519,7 @@ type DownloadArchiveRequest struct {
 
 func (x *DownloadArchiveRequest) Reset() {
 	*x = DownloadArchiveRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[19]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1157,7 +1531,7 @@ func (x *DownloadArchiveRequest) String() string {
 func (*DownloadArchiveRequest) ProtoMessage() {}
 
 func (x *DownloadArchiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[19]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1170,7 +1544,7 @@ func (x *DownloadArchiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadArchiveRequest.ProtoReflect.Descriptor instead.
 func (*DownloadArchiveRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{19}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *DownloadArchiveRequest) GetServerId() string {
@@ -1199,7 +1573,7 @@ type DownloadArchiveResponse struct {
 
 func (x *DownloadArchiveResponse) Reset() {
 	*x = DownloadArchiveResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[20]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1211,7 +1585,7 @@ func (x *DownloadArchiveResponse) String() string {
 func (*DownloadArchiveResponse) ProtoMessage() {}
 
 func (x *DownloadArchiveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[20]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1224,7 +1598,7 @@ func (x *DownloadArchiveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadArchiveResponse.ProtoReflect.Descriptor instead.
 func (*DownloadArchiveResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{20}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DownloadArchiveResponse) GetSessionId() string {
@@ -1258,7 +1632,7 @@ type ExportWorldRequest struct {
 
 func (x *ExportWorldRequest) Reset() {
 	*x = ExportWorldRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[21]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1270,7 +1644,7 @@ func (x *ExportWorldRequest) String() string {
 func (*ExportWorldRequest) ProtoMessage() {}
 
 func (x *ExportWorldRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[21]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1283,7 +1657,7 @@ func (x *ExportWorldRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportWorldRequest.ProtoReflect.Descriptor instead.
 func (*ExportWorldRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{21}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ExportWorldRequest) GetServerId() string {
@@ -1307,7 +1681,7 @@ type ExportWorldResponse struct {
 
 func (x *ExportWorldResponse) Reset() {
 	*x = ExportWorldResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[22]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1319,7 +1693,7 @@ func (x *ExportWorldResponse) String() string {
 func (*ExportWorldResponse) ProtoMessage() {}
 
 func (x *ExportWorldResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[22]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1332,7 +1706,7 @@ func (x *ExportWorldResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportWorldResponse.ProtoReflect.Descriptor instead.
 func (*ExportWorldResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{22}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ExportWorldResponse) GetSessionId() string {
@@ -1375,7 +1749,7 @@ type RenameFileRequest struct {
 
 func (x *RenameFileRequest) Reset() {
 	*x = RenameFileRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[23]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1387,7 +1761,7 @@ func (x *RenameFileRequest) String() string {
 func (*RenameFileRequest) ProtoMessage() {}
 
 func (x *RenameFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[23]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1400,7 +1774,7 @@ func (x *RenameFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenameFileRequest.ProtoReflect.Descriptor instead.
 func (*RenameFileRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{23}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *RenameFileRequest) GetServerId() string {
@@ -1435,7 +1809,7 @@ type RenameFileResponse struct {
 
 func (x *RenameFileResponse) Reset() {
 	*x = RenameFileResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[24]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1447,7 +1821,7 @@ func (x *RenameFileResponse) String() string {
 func (*RenameFileResponse) ProtoMessage() {}
 
 func (x *RenameFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[24]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1460,7 +1834,7 @@ func (x *RenameFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenameFileResponse.ProtoReflect.Descriptor instead.
 func (*RenameFileResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{24}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RenameFileResponse) GetMessage() string {
@@ -1488,7 +1862,7 @@ type ExtractArchiveRequest struct {
 
 func (x *ExtractArchiveRequest) Reset() {
 	*x = ExtractArchiveRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[25]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1500,7 +1874,7 @@ func (x *ExtractArchiveRequest) String() string {
 func (*ExtractArchiveRequest) ProtoMessage() {}
 
 func (x *ExtractArchiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[25]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1513,7 +1887,7 @@ func (x *ExtractArchiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExtractArchiveRequest.ProtoReflect.Descriptor instead.
 func (*ExtractArchiveRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{25}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ExtractArchiveRequest) GetServerId() string {
@@ -1540,7 +1914,7 @@ type ExtractArchiveResponse struct {
 
 func (x *ExtractArchiveResponse) Reset() {
 	*x = ExtractArchiveResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1552,7 +1926,7 @@ func (x *ExtractArchiveResponse) String() string {
 func (*ExtractArchiveResponse) ProtoMessage() {}
 
 func (x *ExtractArchiveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1565,7 +1939,7 @@ func (x *ExtractArchiveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExtractArchiveResponse.ProtoReflect.Descriptor instead.
 func (*ExtractArchiveResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{26}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ExtractArchiveResponse) GetOperationId() string {
@@ -1585,7 +1959,7 @@ type GetExtractionStatusRequest struct {
 
 func (x *GetExtractionStatusRequest) Reset() {
 	*x = GetExtractionStatusRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[27]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1597,7 +1971,7 @@ func (x *GetExtractionStatusRequest) String() string {
 func (*GetExtractionStatusRequest) ProtoMessage() {}
 
 func (x *GetExtractionStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[27]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1610,7 +1984,7 @@ func (x *GetExtractionStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExtractionStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetExtractionStatusRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{27}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GetExtractionStatusRequest) GetOperationId() string {
@@ -1632,7 +2006,7 @@ type GetExtractionStatusResponse struct {
 
 func (x *GetExtractionStatusResponse) Reset() {
 	*x = GetExtractionStatusResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[28]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1644,7 +2018,7 @@ func (x *GetExtractionStatusResponse) String() string {
 func (*GetExtractionStatusResponse) ProtoMessage() {}
 
 func (x *GetExtractionStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[28]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1657,7 +2031,7 @@ func (x *GetExtractionStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetExtractionStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetExtractionStatusResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{28}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *GetExtractionStatusResponse) GetState() string {
@@ -1692,7 +2066,7 @@ type InitFileDownloadRequest struct {
 
 func (x *InitFileDownloadRequest) Reset() {
 	*x = InitFileDownloadRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[29]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1704,7 +2078,7 @@ func (x *InitFileDownloadRequest) String() string {
 func (*InitFileDownloadRequest) ProtoMessage() {}
 
 func (x *InitFileDownloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[29]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1717,7 +2091,7 @@ func (x *InitFileDownloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitFileDownloadRequest.ProtoReflect.Descriptor instead.
 func (*InitFileDownloadRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{29}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *InitFileDownloadRequest) GetServerId() string {
@@ -1746,7 +2120,7 @@ type InitFileDownloadResponse struct {
 
 func (x *InitFileDownloadResponse) Reset() {
 	*x = InitFileDownloadResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[30]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1758,7 +2132,7 @@ func (x *InitFileDownloadResponse) String() string {
 func (*InitFileDownloadResponse) ProtoMessage() {}
 
 func (x *InitFileDownloadResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[30]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1771,7 +2145,7 @@ func (x *InitFileDownloadResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitFileDownloadResponse.ProtoReflect.Descriptor instead.
 func (*InitFileDownloadResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{30}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *InitFileDownloadResponse) GetSessionId() string {
@@ -1809,7 +2183,7 @@ type DownloadRemoteArchiveRequest struct {
 
 func (x *DownloadRemoteArchiveRequest) Reset() {
 	*x = DownloadRemoteArchiveRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[31]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1821,7 +2195,7 @@ func (x *DownloadRemoteArchiveRequest) String() string {
 func (*DownloadRemoteArchiveRequest) ProtoMessage() {}
 
 func (x *DownloadRemoteArchiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[31]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1834,7 +2208,7 @@ func (x *DownloadRemoteArchiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadRemoteArchiveRequest.ProtoReflect.Descriptor instead.
 func (*DownloadRemoteArchiveRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{31}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *DownloadRemoteArchiveRequest) GetServerId() string {
@@ -1883,7 +2257,7 @@ type DownloadRemoteArchiveResponse struct {
 
 func (x *DownloadRemoteArchiveResponse) Reset() {
 	*x = DownloadRemoteArchiveResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[32]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1895,7 +2269,7 @@ func (x *DownloadRemoteArchiveResponse) String() string {
 func (*DownloadRemoteArchiveResponse) ProtoMessage() {}
 
 func (x *DownloadRemoteArchiveResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[32]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1908,7 +2282,7 @@ func (x *DownloadRemoteArchiveResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadRemoteArchiveResponse.ProtoReflect.Descriptor instead.
 func (*DownloadRemoteArchiveResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{32}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *DownloadRemoteArchiveResponse) GetTaskId() string {
@@ -1936,7 +2310,7 @@ type GetRemoteArchiveProgressRequest struct {
 
 func (x *GetRemoteArchiveProgressRequest) Reset() {
 	*x = GetRemoteArchiveProgressRequest{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[33]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1948,7 +2322,7 @@ func (x *GetRemoteArchiveProgressRequest) String() string {
 func (*GetRemoteArchiveProgressRequest) ProtoMessage() {}
 
 func (x *GetRemoteArchiveProgressRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[33]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1961,7 +2335,7 @@ func (x *GetRemoteArchiveProgressRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRemoteArchiveProgressRequest.ProtoReflect.Descriptor instead.
 func (*GetRemoteArchiveProgressRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{33}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetRemoteArchiveProgressRequest) GetServerId() string {
@@ -1993,7 +2367,7 @@ type GetRemoteArchiveProgressResponse struct {
 
 func (x *GetRemoteArchiveProgressResponse) Reset() {
 	*x = GetRemoteArchiveProgressResponse{}
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[34]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2005,7 +2379,7 @@ func (x *GetRemoteArchiveProgressResponse) String() string {
 func (*GetRemoteArchiveProgressResponse) ProtoMessage() {}
 
 func (x *GetRemoteArchiveProgressResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_file_proto_msgTypes[34]
+	mi := &file_carbonpanel_v1_file_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2018,7 +2392,7 @@ func (x *GetRemoteArchiveProgressResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRemoteArchiveProgressResponse.ProtoReflect.Descriptor instead.
 func (*GetRemoteArchiveProgressResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{34}
+	return file_carbonpanel_v1_file_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *GetRemoteArchiveProgressResponse) GetTaskId() string {
@@ -2067,7 +2441,34 @@ var File_carbonpanel_v1_file_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_file_proto_rawDesc = "" +
 	"\n" +
-	"\x19carbonpanel/v1/file.proto\x12\x0ecarbonpanel.v1\"\xd0\x01\n" +
+	"\x19carbonpanel/v1/file.proto\x12\x0ecarbonpanel.v1\"\x93\x01\n" +
+	"\x11OpenStreamRequest\x12\x1b\n" +
+	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1d\n" +
+	"\n" +
+	"total_size\x18\x03 \x01(\x03R\ttotalSize\x12.\n" +
+	"\x13download_session_id\x18\x04 \x01(\tR\x11downloadSessionId\"G\n" +
+	"\x12OpenStreamResponse\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04size\x18\x02 \x01(\x03R\x04size\"u\n" +
+	"\x16ReadStreamFrameRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1f\n" +
+	"\vframe_index\x18\x02 \x01(\x05R\n" +
+	"frameIndex\x12\x1b\n" +
+	"\tserver_id\x18\x03 \x01(\tR\bserverId\"q\n" +
+	"\x17ReadStreamFrameResponse\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12\x12\n" +
+	"\x04done\x18\x02 \x01(\bR\x04done\x12\x16\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x16\n" +
+	"\x06offset\x18\x04 \x01(\x03R\x06offset\"h\n" +
+	"\x12CloseStreamRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
+	"\x06cancel\x18\x02 \x01(\bR\x06cancel\x12\x1b\n" +
+	"\tserver_id\x18\x03 \x01(\tR\bserverId\"\x15\n" +
+	"\x13CloseStreamResponse\"\xd0\x01\n" +
 	"\bFileInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x15\n" +
@@ -2204,7 +2605,7 @@ const file_carbonpanel_v1_file_proto_rawDesc = "" +
 	"\vtotal_bytes\x18\x04 \x01(\x03R\n" +
 	"totalBytes\x12)\n" +
 	"\x10progress_percent\x18\x05 \x01(\x05R\x0fprogressPercent\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error2\xd1\f\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error2\xe2\x0e\n" +
 	"\vFileService\x12P\n" +
 	"\tListFiles\x12 .carbonpanel.v1.ListFilesRequest\x1a!.carbonpanel.v1.ListFilesResponse\x12J\n" +
 	"\aGetFile\x12\x1e.carbonpanel.v1.GetFileRequest\x1a\x1f.carbonpanel.v1.GetFileResponse\x12e\n" +
@@ -2225,7 +2626,11 @@ const file_carbonpanel_v1_file_proto_rawDesc = "" +
 	"\x10InitFileDownload\x12'.carbonpanel.v1.InitFileDownloadRequest\x1a(.carbonpanel.v1.InitFileDownloadResponse\x12n\n" +
 	"\x13GetExtractionStatus\x12*.carbonpanel.v1.GetExtractionStatusRequest\x1a+.carbonpanel.v1.GetExtractionStatusResponse\x12t\n" +
 	"\x15DownloadRemoteArchive\x12,.carbonpanel.v1.DownloadRemoteArchiveRequest\x1a-.carbonpanel.v1.DownloadRemoteArchiveResponse\x12}\n" +
-	"\x18GetRemoteArchiveProgress\x12/.carbonpanel.v1.GetRemoteArchiveProgressRequest\x1a0.carbonpanel.v1.GetRemoteArchiveProgressResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
+	"\x18GetRemoteArchiveProgress\x12/.carbonpanel.v1.GetRemoteArchiveProgressRequest\x1a0.carbonpanel.v1.GetRemoteArchiveProgressResponse\x12S\n" +
+	"\n" +
+	"OpenStream\x12!.carbonpanel.v1.OpenStreamRequest\x1a\".carbonpanel.v1.OpenStreamResponse\x12b\n" +
+	"\x0fReadStreamFrame\x12&.carbonpanel.v1.ReadStreamFrameRequest\x1a'.carbonpanel.v1.ReadStreamFrameResponse\x12V\n" +
+	"\vCloseStream\x12\".carbonpanel.v1.CloseStreamRequest\x1a#.carbonpanel.v1.CloseStreamResponseBHZFgithub.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1b\x06proto3"
 
 var (
 	file_carbonpanel_v1_file_proto_rawDescOnce sync.Once
@@ -2239,83 +2644,95 @@ func file_carbonpanel_v1_file_proto_rawDescGZIP() []byte {
 	return file_carbonpanel_v1_file_proto_rawDescData
 }
 
-var file_carbonpanel_v1_file_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_carbonpanel_v1_file_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
 var file_carbonpanel_v1_file_proto_goTypes = []any{
-	(*FileInfo)(nil),                         // 0: carbonpanel.v1.FileInfo
-	(*ListFilesRequest)(nil),                 // 1: carbonpanel.v1.ListFilesRequest
-	(*ListFilesResponse)(nil),                // 2: carbonpanel.v1.ListFilesResponse
-	(*GetFileRequest)(nil),                   // 3: carbonpanel.v1.GetFileRequest
-	(*GetFileResponse)(nil),                  // 4: carbonpanel.v1.GetFileResponse
-	(*SaveUploadedFileRequest)(nil),          // 5: carbonpanel.v1.SaveUploadedFileRequest
-	(*SaveUploadedFileResponse)(nil),         // 6: carbonpanel.v1.SaveUploadedFileResponse
-	(*UpdateFileRequest)(nil),                // 7: carbonpanel.v1.UpdateFileRequest
-	(*UpdateFileResponse)(nil),               // 8: carbonpanel.v1.UpdateFileResponse
-	(*DeleteFileRequest)(nil),                // 9: carbonpanel.v1.DeleteFileRequest
-	(*DeleteFileResponse)(nil),               // 10: carbonpanel.v1.DeleteFileResponse
-	(*CreateFolderRequest)(nil),              // 11: carbonpanel.v1.CreateFolderRequest
-	(*CreateFolderResponse)(nil),             // 12: carbonpanel.v1.CreateFolderResponse
-	(*MoveFileRequest)(nil),                  // 13: carbonpanel.v1.MoveFileRequest
-	(*MoveFileResponse)(nil),                 // 14: carbonpanel.v1.MoveFileResponse
-	(*CopyFileRequest)(nil),                  // 15: carbonpanel.v1.CopyFileRequest
-	(*CopyFileResponse)(nil),                 // 16: carbonpanel.v1.CopyFileResponse
-	(*CreateArchiveRequest)(nil),             // 17: carbonpanel.v1.CreateArchiveRequest
-	(*CreateArchiveResponse)(nil),            // 18: carbonpanel.v1.CreateArchiveResponse
-	(*DownloadArchiveRequest)(nil),           // 19: carbonpanel.v1.DownloadArchiveRequest
-	(*DownloadArchiveResponse)(nil),          // 20: carbonpanel.v1.DownloadArchiveResponse
-	(*ExportWorldRequest)(nil),               // 21: carbonpanel.v1.ExportWorldRequest
-	(*ExportWorldResponse)(nil),              // 22: carbonpanel.v1.ExportWorldResponse
-	(*RenameFileRequest)(nil),                // 23: carbonpanel.v1.RenameFileRequest
-	(*RenameFileResponse)(nil),               // 24: carbonpanel.v1.RenameFileResponse
-	(*ExtractArchiveRequest)(nil),            // 25: carbonpanel.v1.ExtractArchiveRequest
-	(*ExtractArchiveResponse)(nil),           // 26: carbonpanel.v1.ExtractArchiveResponse
-	(*GetExtractionStatusRequest)(nil),       // 27: carbonpanel.v1.GetExtractionStatusRequest
-	(*GetExtractionStatusResponse)(nil),      // 28: carbonpanel.v1.GetExtractionStatusResponse
-	(*InitFileDownloadRequest)(nil),          // 29: carbonpanel.v1.InitFileDownloadRequest
-	(*InitFileDownloadResponse)(nil),         // 30: carbonpanel.v1.InitFileDownloadResponse
-	(*DownloadRemoteArchiveRequest)(nil),     // 31: carbonpanel.v1.DownloadRemoteArchiveRequest
-	(*DownloadRemoteArchiveResponse)(nil),    // 32: carbonpanel.v1.DownloadRemoteArchiveResponse
-	(*GetRemoteArchiveProgressRequest)(nil),  // 33: carbonpanel.v1.GetRemoteArchiveProgressRequest
-	(*GetRemoteArchiveProgressResponse)(nil), // 34: carbonpanel.v1.GetRemoteArchiveProgressResponse
+	(*OpenStreamRequest)(nil),                // 0: carbonpanel.v1.OpenStreamRequest
+	(*OpenStreamResponse)(nil),               // 1: carbonpanel.v1.OpenStreamResponse
+	(*ReadStreamFrameRequest)(nil),           // 2: carbonpanel.v1.ReadStreamFrameRequest
+	(*ReadStreamFrameResponse)(nil),          // 3: carbonpanel.v1.ReadStreamFrameResponse
+	(*CloseStreamRequest)(nil),               // 4: carbonpanel.v1.CloseStreamRequest
+	(*CloseStreamResponse)(nil),              // 5: carbonpanel.v1.CloseStreamResponse
+	(*FileInfo)(nil),                         // 6: carbonpanel.v1.FileInfo
+	(*ListFilesRequest)(nil),                 // 7: carbonpanel.v1.ListFilesRequest
+	(*ListFilesResponse)(nil),                // 8: carbonpanel.v1.ListFilesResponse
+	(*GetFileRequest)(nil),                   // 9: carbonpanel.v1.GetFileRequest
+	(*GetFileResponse)(nil),                  // 10: carbonpanel.v1.GetFileResponse
+	(*SaveUploadedFileRequest)(nil),          // 11: carbonpanel.v1.SaveUploadedFileRequest
+	(*SaveUploadedFileResponse)(nil),         // 12: carbonpanel.v1.SaveUploadedFileResponse
+	(*UpdateFileRequest)(nil),                // 13: carbonpanel.v1.UpdateFileRequest
+	(*UpdateFileResponse)(nil),               // 14: carbonpanel.v1.UpdateFileResponse
+	(*DeleteFileRequest)(nil),                // 15: carbonpanel.v1.DeleteFileRequest
+	(*DeleteFileResponse)(nil),               // 16: carbonpanel.v1.DeleteFileResponse
+	(*CreateFolderRequest)(nil),              // 17: carbonpanel.v1.CreateFolderRequest
+	(*CreateFolderResponse)(nil),             // 18: carbonpanel.v1.CreateFolderResponse
+	(*MoveFileRequest)(nil),                  // 19: carbonpanel.v1.MoveFileRequest
+	(*MoveFileResponse)(nil),                 // 20: carbonpanel.v1.MoveFileResponse
+	(*CopyFileRequest)(nil),                  // 21: carbonpanel.v1.CopyFileRequest
+	(*CopyFileResponse)(nil),                 // 22: carbonpanel.v1.CopyFileResponse
+	(*CreateArchiveRequest)(nil),             // 23: carbonpanel.v1.CreateArchiveRequest
+	(*CreateArchiveResponse)(nil),            // 24: carbonpanel.v1.CreateArchiveResponse
+	(*DownloadArchiveRequest)(nil),           // 25: carbonpanel.v1.DownloadArchiveRequest
+	(*DownloadArchiveResponse)(nil),          // 26: carbonpanel.v1.DownloadArchiveResponse
+	(*ExportWorldRequest)(nil),               // 27: carbonpanel.v1.ExportWorldRequest
+	(*ExportWorldResponse)(nil),              // 28: carbonpanel.v1.ExportWorldResponse
+	(*RenameFileRequest)(nil),                // 29: carbonpanel.v1.RenameFileRequest
+	(*RenameFileResponse)(nil),               // 30: carbonpanel.v1.RenameFileResponse
+	(*ExtractArchiveRequest)(nil),            // 31: carbonpanel.v1.ExtractArchiveRequest
+	(*ExtractArchiveResponse)(nil),           // 32: carbonpanel.v1.ExtractArchiveResponse
+	(*GetExtractionStatusRequest)(nil),       // 33: carbonpanel.v1.GetExtractionStatusRequest
+	(*GetExtractionStatusResponse)(nil),      // 34: carbonpanel.v1.GetExtractionStatusResponse
+	(*InitFileDownloadRequest)(nil),          // 35: carbonpanel.v1.InitFileDownloadRequest
+	(*InitFileDownloadResponse)(nil),         // 36: carbonpanel.v1.InitFileDownloadResponse
+	(*DownloadRemoteArchiveRequest)(nil),     // 37: carbonpanel.v1.DownloadRemoteArchiveRequest
+	(*DownloadRemoteArchiveResponse)(nil),    // 38: carbonpanel.v1.DownloadRemoteArchiveResponse
+	(*GetRemoteArchiveProgressRequest)(nil),  // 39: carbonpanel.v1.GetRemoteArchiveProgressRequest
+	(*GetRemoteArchiveProgressResponse)(nil), // 40: carbonpanel.v1.GetRemoteArchiveProgressResponse
 }
 var file_carbonpanel_v1_file_proto_depIdxs = []int32{
-	0,  // 0: carbonpanel.v1.FileInfo.children:type_name -> carbonpanel.v1.FileInfo
-	0,  // 1: carbonpanel.v1.ListFilesResponse.files:type_name -> carbonpanel.v1.FileInfo
-	1,  // 2: carbonpanel.v1.FileService.ListFiles:input_type -> carbonpanel.v1.ListFilesRequest
-	3,  // 3: carbonpanel.v1.FileService.GetFile:input_type -> carbonpanel.v1.GetFileRequest
-	5,  // 4: carbonpanel.v1.FileService.SaveUploadedFile:input_type -> carbonpanel.v1.SaveUploadedFileRequest
-	7,  // 5: carbonpanel.v1.FileService.UpdateFile:input_type -> carbonpanel.v1.UpdateFileRequest
-	9,  // 6: carbonpanel.v1.FileService.DeleteFile:input_type -> carbonpanel.v1.DeleteFileRequest
-	23, // 7: carbonpanel.v1.FileService.RenameFile:input_type -> carbonpanel.v1.RenameFileRequest
-	25, // 8: carbonpanel.v1.FileService.ExtractArchive:input_type -> carbonpanel.v1.ExtractArchiveRequest
-	11, // 9: carbonpanel.v1.FileService.CreateFolder:input_type -> carbonpanel.v1.CreateFolderRequest
-	13, // 10: carbonpanel.v1.FileService.MoveFile:input_type -> carbonpanel.v1.MoveFileRequest
-	15, // 11: carbonpanel.v1.FileService.CopyFile:input_type -> carbonpanel.v1.CopyFileRequest
-	17, // 12: carbonpanel.v1.FileService.CreateArchive:input_type -> carbonpanel.v1.CreateArchiveRequest
-	19, // 13: carbonpanel.v1.FileService.DownloadArchive:input_type -> carbonpanel.v1.DownloadArchiveRequest
-	21, // 14: carbonpanel.v1.FileService.ExportWorld:input_type -> carbonpanel.v1.ExportWorldRequest
-	29, // 15: carbonpanel.v1.FileService.InitFileDownload:input_type -> carbonpanel.v1.InitFileDownloadRequest
-	27, // 16: carbonpanel.v1.FileService.GetExtractionStatus:input_type -> carbonpanel.v1.GetExtractionStatusRequest
-	31, // 17: carbonpanel.v1.FileService.DownloadRemoteArchive:input_type -> carbonpanel.v1.DownloadRemoteArchiveRequest
-	33, // 18: carbonpanel.v1.FileService.GetRemoteArchiveProgress:input_type -> carbonpanel.v1.GetRemoteArchiveProgressRequest
-	2,  // 19: carbonpanel.v1.FileService.ListFiles:output_type -> carbonpanel.v1.ListFilesResponse
-	4,  // 20: carbonpanel.v1.FileService.GetFile:output_type -> carbonpanel.v1.GetFileResponse
-	6,  // 21: carbonpanel.v1.FileService.SaveUploadedFile:output_type -> carbonpanel.v1.SaveUploadedFileResponse
-	8,  // 22: carbonpanel.v1.FileService.UpdateFile:output_type -> carbonpanel.v1.UpdateFileResponse
-	10, // 23: carbonpanel.v1.FileService.DeleteFile:output_type -> carbonpanel.v1.DeleteFileResponse
-	24, // 24: carbonpanel.v1.FileService.RenameFile:output_type -> carbonpanel.v1.RenameFileResponse
-	26, // 25: carbonpanel.v1.FileService.ExtractArchive:output_type -> carbonpanel.v1.ExtractArchiveResponse
-	12, // 26: carbonpanel.v1.FileService.CreateFolder:output_type -> carbonpanel.v1.CreateFolderResponse
-	14, // 27: carbonpanel.v1.FileService.MoveFile:output_type -> carbonpanel.v1.MoveFileResponse
-	16, // 28: carbonpanel.v1.FileService.CopyFile:output_type -> carbonpanel.v1.CopyFileResponse
-	18, // 29: carbonpanel.v1.FileService.CreateArchive:output_type -> carbonpanel.v1.CreateArchiveResponse
-	20, // 30: carbonpanel.v1.FileService.DownloadArchive:output_type -> carbonpanel.v1.DownloadArchiveResponse
-	22, // 31: carbonpanel.v1.FileService.ExportWorld:output_type -> carbonpanel.v1.ExportWorldResponse
-	30, // 32: carbonpanel.v1.FileService.InitFileDownload:output_type -> carbonpanel.v1.InitFileDownloadResponse
-	28, // 33: carbonpanel.v1.FileService.GetExtractionStatus:output_type -> carbonpanel.v1.GetExtractionStatusResponse
-	32, // 34: carbonpanel.v1.FileService.DownloadRemoteArchive:output_type -> carbonpanel.v1.DownloadRemoteArchiveResponse
-	34, // 35: carbonpanel.v1.FileService.GetRemoteArchiveProgress:output_type -> carbonpanel.v1.GetRemoteArchiveProgressResponse
-	19, // [19:36] is the sub-list for method output_type
-	2,  // [2:19] is the sub-list for method input_type
+	6,  // 0: carbonpanel.v1.FileInfo.children:type_name -> carbonpanel.v1.FileInfo
+	6,  // 1: carbonpanel.v1.ListFilesResponse.files:type_name -> carbonpanel.v1.FileInfo
+	7,  // 2: carbonpanel.v1.FileService.ListFiles:input_type -> carbonpanel.v1.ListFilesRequest
+	9,  // 3: carbonpanel.v1.FileService.GetFile:input_type -> carbonpanel.v1.GetFileRequest
+	11, // 4: carbonpanel.v1.FileService.SaveUploadedFile:input_type -> carbonpanel.v1.SaveUploadedFileRequest
+	13, // 5: carbonpanel.v1.FileService.UpdateFile:input_type -> carbonpanel.v1.UpdateFileRequest
+	15, // 6: carbonpanel.v1.FileService.DeleteFile:input_type -> carbonpanel.v1.DeleteFileRequest
+	29, // 7: carbonpanel.v1.FileService.RenameFile:input_type -> carbonpanel.v1.RenameFileRequest
+	31, // 8: carbonpanel.v1.FileService.ExtractArchive:input_type -> carbonpanel.v1.ExtractArchiveRequest
+	17, // 9: carbonpanel.v1.FileService.CreateFolder:input_type -> carbonpanel.v1.CreateFolderRequest
+	19, // 10: carbonpanel.v1.FileService.MoveFile:input_type -> carbonpanel.v1.MoveFileRequest
+	21, // 11: carbonpanel.v1.FileService.CopyFile:input_type -> carbonpanel.v1.CopyFileRequest
+	23, // 12: carbonpanel.v1.FileService.CreateArchive:input_type -> carbonpanel.v1.CreateArchiveRequest
+	25, // 13: carbonpanel.v1.FileService.DownloadArchive:input_type -> carbonpanel.v1.DownloadArchiveRequest
+	27, // 14: carbonpanel.v1.FileService.ExportWorld:input_type -> carbonpanel.v1.ExportWorldRequest
+	35, // 15: carbonpanel.v1.FileService.InitFileDownload:input_type -> carbonpanel.v1.InitFileDownloadRequest
+	33, // 16: carbonpanel.v1.FileService.GetExtractionStatus:input_type -> carbonpanel.v1.GetExtractionStatusRequest
+	37, // 17: carbonpanel.v1.FileService.DownloadRemoteArchive:input_type -> carbonpanel.v1.DownloadRemoteArchiveRequest
+	39, // 18: carbonpanel.v1.FileService.GetRemoteArchiveProgress:input_type -> carbonpanel.v1.GetRemoteArchiveProgressRequest
+	0,  // 19: carbonpanel.v1.FileService.OpenStream:input_type -> carbonpanel.v1.OpenStreamRequest
+	2,  // 20: carbonpanel.v1.FileService.ReadStreamFrame:input_type -> carbonpanel.v1.ReadStreamFrameRequest
+	4,  // 21: carbonpanel.v1.FileService.CloseStream:input_type -> carbonpanel.v1.CloseStreamRequest
+	8,  // 22: carbonpanel.v1.FileService.ListFiles:output_type -> carbonpanel.v1.ListFilesResponse
+	10, // 23: carbonpanel.v1.FileService.GetFile:output_type -> carbonpanel.v1.GetFileResponse
+	12, // 24: carbonpanel.v1.FileService.SaveUploadedFile:output_type -> carbonpanel.v1.SaveUploadedFileResponse
+	14, // 25: carbonpanel.v1.FileService.UpdateFile:output_type -> carbonpanel.v1.UpdateFileResponse
+	16, // 26: carbonpanel.v1.FileService.DeleteFile:output_type -> carbonpanel.v1.DeleteFileResponse
+	30, // 27: carbonpanel.v1.FileService.RenameFile:output_type -> carbonpanel.v1.RenameFileResponse
+	32, // 28: carbonpanel.v1.FileService.ExtractArchive:output_type -> carbonpanel.v1.ExtractArchiveResponse
+	18, // 29: carbonpanel.v1.FileService.CreateFolder:output_type -> carbonpanel.v1.CreateFolderResponse
+	20, // 30: carbonpanel.v1.FileService.MoveFile:output_type -> carbonpanel.v1.MoveFileResponse
+	22, // 31: carbonpanel.v1.FileService.CopyFile:output_type -> carbonpanel.v1.CopyFileResponse
+	24, // 32: carbonpanel.v1.FileService.CreateArchive:output_type -> carbonpanel.v1.CreateArchiveResponse
+	26, // 33: carbonpanel.v1.FileService.DownloadArchive:output_type -> carbonpanel.v1.DownloadArchiveResponse
+	28, // 34: carbonpanel.v1.FileService.ExportWorld:output_type -> carbonpanel.v1.ExportWorldResponse
+	36, // 35: carbonpanel.v1.FileService.InitFileDownload:output_type -> carbonpanel.v1.InitFileDownloadResponse
+	34, // 36: carbonpanel.v1.FileService.GetExtractionStatus:output_type -> carbonpanel.v1.GetExtractionStatusResponse
+	38, // 37: carbonpanel.v1.FileService.DownloadRemoteArchive:output_type -> carbonpanel.v1.DownloadRemoteArchiveResponse
+	40, // 38: carbonpanel.v1.FileService.GetRemoteArchiveProgress:output_type -> carbonpanel.v1.GetRemoteArchiveProgressResponse
+	1,  // 39: carbonpanel.v1.FileService.OpenStream:output_type -> carbonpanel.v1.OpenStreamResponse
+	3,  // 40: carbonpanel.v1.FileService.ReadStreamFrame:output_type -> carbonpanel.v1.ReadStreamFrameResponse
+	5,  // 41: carbonpanel.v1.FileService.CloseStream:output_type -> carbonpanel.v1.CloseStreamResponse
+	22, // [22:42] is the sub-list for method output_type
+	2,  // [2:22] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name
@@ -2332,7 +2749,7 @@ func file_carbonpanel_v1_file_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_file_proto_rawDesc), len(file_carbonpanel_v1_file_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   41,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

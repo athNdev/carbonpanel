@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "artifact_family": "carbonpanel-node-vm",
+  "artifact_version": "0.1.0-fixture",
+  "artifact_revision": "REPLACE_WITH_SOURCE_COMMIT",
+  "base_image_ref": "ubuntu-24.04-amd64",
+  "provenance_file": "provenance/base-images.json",
+  "fixture_provenance_file": "provenance/base-images.fixture.json",
+  "profiles": {
+    "artifact": "provenance/base-images.json",
+    "fixture": "provenance/base-images.fixture.json"
+  },
+  "agent_version": "0.1.0-fixture",
+  "disk": {
+    "size_gib": 20,
+    "format": "qcow2",
+    "firmware": "efi"
+  },
+  "compute": {
+    "cpus": 2,
+    "memory_mib": 2048
+  },
+  "cloud_init": {
+    "datasource": "NoCloud",
+    "user_data_template": "cloud-init/user-data.yml.tpl",
+    "meta_data_template": "cloud-init/meta-data.yml.tpl",
+    "network_config_template": "cloud-init/network-config.yml.tpl",
+    "firstboot_script": "cloud-init/firstboot/enroll.py"
+  },
+  "toolchain": {
+    "qemu_img": "8.2.0",
+    "xorriso": "1.5.6",
+    "python": "3.12"
+  },
+  "source_date_epoch": "1700000000",
+  "enrollment_policy": "config/enrollment-policy.json",
+  "upgrade_policy": "config/upgrade-policy.json",
+  "notes": "Build definition with REAL pinned dated Ubuntu 24.04 provenance. Artifact mode fails closed on synthetic/placeholder digests. Not published, not a release, and no QCOW2 has been built. See qualification/QUALIFICATION.md and provenance/RETRIEVAL-EVIDENCE.md."
+}

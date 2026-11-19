@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: MPL-2.0
+# Adds human-readable immutable UTC build aliases to EXISTING Docker Hub images.
+# No rebuild, no layer push, no platform change, no channel/release alias move.
+name: Docker readable build aliases
+
+on:
+  # An explicit trusted-main dispatch is the only way to reach the write step.
+  # Ordinary main merges and validation builds never publish aliases.
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'EXPLICIT opt-in: add immutable build-* aliases at the observed digests (off = dry run only)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  # Serialized channel-wide so two alias runs cannot race on the same refs.
+  group: docker-readable-aliases
+  cancel-in-progress: false
+
+jobs:
+  add-aliases:
+    name: Add immutable readable aliases
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the pinned commit
+        id: pinned
+        env:
+          EVENT_SHA: ${{ github.sha }}
+        run: echo "sha=$EVENT_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pinned.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Assert checked-out HEAD equals the pinned commit
+        env:
+          EXPECTED_SHA: ${{ steps.pinned.outputs.sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED_SHA" ]; then
+            echo "::error::HEAD $actual differs from pinned commit $EXPECTED_SHA"
+            exit 1
+          fi
+
+      - name: Verify exact main CI for the pinned commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT"
+
+      - name: Decide whether alias addition is permitted
+        id: gate
+        env:
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_CONFIRM: ${{ inputs.confirm }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+        run: |
+          python3 scripts/docker_readable_aliases.py gate \
+            --event "$CHANNEL_EVENT" --confirm "$CHANNEL_CONFIRM" \
+            --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED"
+
+      - name: Validate the checked-in alias mapping
+        run: python3 scripts/docker_readable_aliases.py validate --input docs/docker-readable-aliases.json
+
+      - name: Sign in to Docker Hub
+        if: steps.gate.outputs.publish == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+
+      - name: Add missing aliases by exact digest (dry run unless confirmed)
+        env:
+          PUBLISH_ALIASES: ${{ steps.gate.outputs.publish }}
+        # Explicit shell branches: no &&/|| empty-string idiom (GitHub treats
+        # '' as falsy, which would force --dry-run even on a confirmed run).
+        run: |
+          if [ "$PUBLISH_ALIASES" = "true" ]; then
+            python3 scripts/docker_readable_aliases.py apply --mapping docs/docker-readable-aliases.json
+          else
+            python3 scripts/docker_readable_aliases.py apply --mapping docs/docker-readable-aliases.json --dry-run
+          fi

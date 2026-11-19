@@ -54,10 +54,10 @@ var (
 type RendererKind string
 
 const (
-	RendererBlueMap  RendererKind = "bluemap"
+	RendererBlueMap   RendererKind = "bluemap"
 	RendererSquaremap RendererKind = "squaremap"
-	RendererDynmap   RendererKind = "dynmap"
-	RendererStatic   RendererKind = "static"
+	RendererDynmap    RendererKind = "dynmap"
+	RendererStatic    RendererKind = "static"
 )
 
 // Endpoint is an explicit, operator-owned renderer location.
@@ -96,9 +96,10 @@ type NodeLocator interface {
 
 // Resolver turns a server's node into a renderer adapter or a typed error.
 type Resolver struct {
-	cfg     Config
-	locator NodeLocator
-	hc      HTTPDoer
+	cfg       Config
+	locator   NodeLocator
+	hc        HTTPDoer
+	discovery ModuleDiscovery
 }
 
 // Resolve returns the adapter for the given node/server. A remote node without
@@ -111,28 +112,72 @@ func (r *Resolver) Resolve(ctx context.Context, nodeID, serverID string) (Render
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+
+	// Explicit operator endpoints ALWAYS win. An operator who configured an
+	// endpoint has made a deliberate trust decision (ADR 0015); discovery must
+	// never override it.
 	ep, ok := r.cfg.endpointFor(nodeID, serverID)
-	if !ok {
+	if ok {
+		local := false
+		if r.locator != nil {
+			var err error
+			local, err = r.locator.IsLocal(ctx, nodeID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: cannot classify node %q: %w", ErrRendererUnavailable, nodeID, err)
+			}
+		}
+		if err := r.cfg.validateEndpoint(ep, local); err != nil {
+			return nil, err
+		}
+		return newRenderer(ep, r.healthClient()), nil
+	}
+
+	return r.resolveDiscovered(ctx, nodeID, serverID)
+}
+
+// resolveDiscovered locates an installed renderer through the PRIVATE backend
+// transport. It is node-local and fail-closed: no port probing, no host-port
+// dependency, no cross-server fallback and no controller-local fallback.
+func (r *Resolver) resolveDiscovered(ctx context.Context, nodeID, serverID string) (Renderer, error) {
+	if r.discovery == nil || r.locator == nil {
 		return nil, fmt.Errorf("%w: node %q server %q", ErrRendererUnavailable, nodeID, serverID)
 	}
-	local := false
-	if r.locator != nil {
-		var err error
-		local, err = r.locator.IsLocal(ctx, nodeID)
-		if err != nil {
-			return nil, fmt.Errorf("%w: cannot classify node %q: %w", ErrRendererUnavailable, nodeID, err)
-		}
+	local, err := r.locator.IsLocal(ctx, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cannot classify node %q: %w", ErrRendererUnavailable, nodeID, err)
 	}
-	if err := r.cfg.validateEndpoint(ep, local); err != nil {
-		return nil, err
+	if !local {
+		// A remote node has no private owned-network path from the controller.
+		// It needs an explicit, allowlisted node-local endpoint (rule 3 of ADR 0015).
+		return nil, fmt.Errorf("%w: node %q is remote; no private renderer transport", ErrRendererUnavailable, nodeID)
 	}
-	return newRenderer(ep, r.healthClient()), nil
+	facts, err := r.discovery.FindRenderer(ctx, canonicalNodeID(nodeID), serverID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: module discovery for node %q server %q: %w", ErrRendererUnavailable, nodeID, serverID, err)
+	}
+	if !identityMatches(facts, nodeID, serverID) {
+		// Exact server/node/module identity is mandatory; never serve a map
+		// discovered for a different server or an untrusted template.
+		return nil, fmt.Errorf("%w: node %q server %q", ErrRendererUnavailable, nodeID, serverID)
+	}
+	return newDiscoveredRenderer(facts, r.healthClient()), nil
 }
 
 // NewResolver builds a resolver. A nil locator fails closed: no endpoint can
-// be classified as local, so remote-only endpoints stay unavailable.
+// be classified as local, so remote-only endpoints stay unavailable. Without a
+// discovery implementation it also preserves the explicit-config-only behavior.
 func NewResolver(cfg Config, locator NodeLocator) *Resolver {
-	return &Resolver{cfg: cfg, locator: locator}
+	return &Resolver{cfg: cfg, locator: locator, discovery: NoModuleDiscovery{}}
+}
+
+// NewResolverWithDiscovery builds a resolver that can also locate installed
+// renderer modules through the PRIVATE backend transport. Explicit operator
+// endpoints still take precedence over discovery.
+func NewResolverWithDiscovery(cfg Config, locator NodeLocator, discovery ModuleDiscovery) *Resolver {
+	if discovery == nil {
+		discovery = NoModuleDiscovery{}
+	}
+	return &Resolver{cfg: cfg, locator: locator, discovery: discovery}
 }
 
 func (r *Resolver) healthClient() HTTPDoer {

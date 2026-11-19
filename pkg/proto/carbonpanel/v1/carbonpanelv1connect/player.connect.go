@@ -38,6 +38,9 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// PlayerServiceLookupPlayerProcedure is the fully-qualified name of the PlayerService's
+	// LookupPlayer RPC.
+	PlayerServiceLookupPlayerProcedure = "/carbonpanel.v1.PlayerService/LookupPlayer"
 	// PlayerServiceListPlayersProcedure is the fully-qualified name of the PlayerService's ListPlayers
 	// RPC.
 	PlayerServiceListPlayersProcedure = "/carbonpanel.v1.PlayerService/ListPlayers"
@@ -88,6 +91,9 @@ const (
 
 // PlayerServiceClient is a client for the carbonpanel.v1.PlayerService service.
 type PlayerServiceClient interface {
+	// Look up a previously unseen account by exact UUID or username using a
+	// legitimate identity-provider capability. No name history is queried.
+	LookupPlayer(context.Context, *connect.Request[v1.LookupPlayerRequest]) (*connect.Response[v1.LookupPlayerResponse], error)
 	// List a searchable, filterable and sortable player roster.
 	ListPlayers(context.Context, *connect.Request[v1.ListPlayersRequest]) (*connect.Response[v1.ListPlayersResponse], error)
 	// Get grouped detail for one opaque player identity.
@@ -133,6 +139,12 @@ func NewPlayerServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 	baseURL = strings.TrimRight(baseURL, "/")
 	playerServiceMethods := v1.File_carbonpanel_v1_player_proto.Services().ByName("PlayerService").Methods()
 	return &playerServiceClient{
+		lookupPlayer: connect.NewClient[v1.LookupPlayerRequest, v1.LookupPlayerResponse](
+			httpClient,
+			baseURL+PlayerServiceLookupPlayerProcedure,
+			connect.WithSchema(playerServiceMethods.ByName("LookupPlayer")),
+			connect.WithClientOptions(opts...),
+		),
 		listPlayers: connect.NewClient[v1.ListPlayersRequest, v1.ListPlayersResponse](
 			httpClient,
 			baseURL+PlayerServiceListPlayersProcedure,
@@ -234,6 +246,7 @@ func NewPlayerServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 
 // playerServiceClient implements PlayerServiceClient.
 type playerServiceClient struct {
+	lookupPlayer           *connect.Client[v1.LookupPlayerRequest, v1.LookupPlayerResponse]
 	listPlayers            *connect.Client[v1.ListPlayersRequest, v1.ListPlayersResponse]
 	getPlayer              *connect.Client[v1.GetPlayerRequest, v1.GetPlayerResponse]
 	listPlayerSessions     *connect.Client[v1.ListPlayerSessionsRequest, v1.ListPlayerSessionsResponse]
@@ -250,6 +263,11 @@ type playerServiceClient struct {
 	setWhitelistEntry      *connect.Client[v1.SetWhitelistEntryRequest, v1.SetWhitelistEntryResponse]
 	bulkPlayerAction       *connect.Client[v1.BulkPlayerActionRequest, v1.BulkPlayerActionResponse]
 	undoPlayerAction       *connect.Client[v1.UndoPlayerActionRequest, v1.UndoPlayerActionResponse]
+}
+
+// LookupPlayer calls carbonpanel.v1.PlayerService.LookupPlayer.
+func (c *playerServiceClient) LookupPlayer(ctx context.Context, req *connect.Request[v1.LookupPlayerRequest]) (*connect.Response[v1.LookupPlayerResponse], error) {
+	return c.lookupPlayer.CallUnary(ctx, req)
 }
 
 // ListPlayers calls carbonpanel.v1.PlayerService.ListPlayers.
@@ -334,6 +352,9 @@ func (c *playerServiceClient) UndoPlayerAction(ctx context.Context, req *connect
 
 // PlayerServiceHandler is an implementation of the carbonpanel.v1.PlayerService service.
 type PlayerServiceHandler interface {
+	// Look up a previously unseen account by exact UUID or username using a
+	// legitimate identity-provider capability. No name history is queried.
+	LookupPlayer(context.Context, *connect.Request[v1.LookupPlayerRequest]) (*connect.Response[v1.LookupPlayerResponse], error)
 	// List a searchable, filterable and sortable player roster.
 	ListPlayers(context.Context, *connect.Request[v1.ListPlayersRequest]) (*connect.Response[v1.ListPlayersResponse], error)
 	// Get grouped detail for one opaque player identity.
@@ -375,6 +396,12 @@ type PlayerServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewPlayerServiceHandler(svc PlayerServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	playerServiceMethods := v1.File_carbonpanel_v1_player_proto.Services().ByName("PlayerService").Methods()
+	playerServiceLookupPlayerHandler := connect.NewUnaryHandler(
+		PlayerServiceLookupPlayerProcedure,
+		svc.LookupPlayer,
+		connect.WithSchema(playerServiceMethods.ByName("LookupPlayer")),
+		connect.WithHandlerOptions(opts...),
+	)
 	playerServiceListPlayersHandler := connect.NewUnaryHandler(
 		PlayerServiceListPlayersProcedure,
 		svc.ListPlayers,
@@ -473,6 +500,8 @@ func NewPlayerServiceHandler(svc PlayerServiceHandler, opts ...connect.HandlerOp
 	)
 	return "/carbonpanel.v1.PlayerService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case PlayerServiceLookupPlayerProcedure:
+			playerServiceLookupPlayerHandler.ServeHTTP(w, r)
 		case PlayerServiceListPlayersProcedure:
 			playerServiceListPlayersHandler.ServeHTTP(w, r)
 		case PlayerServiceGetPlayerProcedure:
@@ -513,6 +542,10 @@ func NewPlayerServiceHandler(svc PlayerServiceHandler, opts ...connect.HandlerOp
 
 // UnimplementedPlayerServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedPlayerServiceHandler struct{}
+
+func (UnimplementedPlayerServiceHandler) LookupPlayer(context.Context, *connect.Request[v1.LookupPlayerRequest]) (*connect.Response[v1.LookupPlayerResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.PlayerService.LookupPlayer is not implemented"))
+}
 
 func (UnimplementedPlayerServiceHandler) ListPlayers(context.Context, *connect.Request[v1.ListPlayersRequest]) (*connect.Response[v1.ListPlayersResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.PlayerService.ListPlayers is not implemented"))

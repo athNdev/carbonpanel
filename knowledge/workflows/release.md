@@ -10,6 +10,8 @@ code_refs:
   - CHANGELOG.md
   - scripts/release.py
   - scripts/go_mod_download.py
+  - scripts/upgrade_rehearsal_ci.py
+  - .github/workflows/upgrade-rehearsal.yml
   - internal/buildinfo
   - docker/Dockerfile.release
   - docker/Dockerfile.carbon-panel
@@ -22,6 +24,12 @@ sources:
     resource: ../../docs/adr/0010-versioned-release-artifacts.md
   - title: Publication boundary and version domains
     resource: ../../docs/adr/0033-release-tag-and-publication-policy.md
+  - title: Retrospective tag classification and product tag migration
+    resource: ../../docs/release-history.md
+  - title: Disposable real-binary upgrade rehearsal decision
+    resource: ../../docs/adr/0044-disposable-upgrade-rehearsal-ci.md
+  - title: Verified runtime artifact installation
+    resource: ../../docs/node-runtime/verified-artifacts-install.md
 ---
 
 # Steps
@@ -31,10 +39,13 @@ sources:
 3. Build the frontend with `bash scripts/web-build.sh`.
 4. Let CI build the backend, Windows compile target, frontend checks, proto
    lint and images.
-5. Tag only after CI is green. A tag stages, builds and verifies; it does not
-   publish. Publication is a separate operator action: run Carbon Panel Release
-   with `publish=true`, or dispatch Module Builder for module images. Do not
-   merge or deploy from an agent session; that is the supervisor's decision.
+5. Tag a product release only as `carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N]`
+   after CI is green. Plain `v*`, `mod-*`, `docs*` and inherited tags are
+   historical refs, not panel releases. A tag stages, builds and verifies; it
+   does not publish. Publication is a separate operator action: run Carbon Panel
+   Release with `publish=true`, a canonical product tag, a trusted main ref and
+   exact-commit CI, or dispatch Module Builder for module images. Do not merge
+   or deploy from an agent session; that is the supervisor's decision.
 
 The release workflow supports a build-only rehearsal. Publishing requires a
 SemVer version, a main-ancestor commit with successful exact-commit main CI,
@@ -62,7 +73,26 @@ resume from the original verified download artifact without rebuilding images.
 - Publication is an explicit opt-in enforced by `publication_allowed()` in
   `scripts/release.py`. Branch pushes, tag pushes, PRs, CI, documentation and
   rehearsal tags only stage, build and verify; no registry or release write.
-  `workflow_dispatch` with `publish=true` is the only panel publication path.
+  `workflow_dispatch` with `publish=true`, a canonical `carbonpanel-v*` tag, a
+  trusted `refs/heads/main` ref and exact-commit main CI (verified by
+  `verify-publication-ref`) is the only panel publication path. Inherited,
+  source-only, preview, name-collision and unclassified tags are rejected. The
+  Git tag, displayed SemVer, immutable image tag and archive filename are
+  separate fields; product tags are never parsed as Go versions. Plain `v*` and
+  `mod-*` tags stay in their historical domains. The 84-tag classification with
+  domain and provenance is in `docs/release-history.md` and
+  `docs/release-history.json`; `v1.0.40` is the only verified historical stable
+  and the current 1.0 rollback line (not a permanent ban on 1.0.x maintenance).
+  The planned `carbonpanel-v1.0.40` alias is historical-only and refused as a
+  new release candidate before registry preflight.
+  The ENTIRE explicit publication run holds one workflow-level non-cancelling
+  `carbonpanel-product-publish` concurrency group across immutable publish,
+  GitHub release and alias promotion; build-only rehearsals and ordinary CI use
+  a distinct per-run key and are not serialized. `cancel-in-progress: false`
+  protects the running run only; default `queue: single` can replace the pending
+  run, so this is single-operator dispatch and the operator must verify the
+  resulting run before retry. GitHub `latest` follows the same product-only
+  verified stable ordering as registry aliases.
   Staging a tag makes no claim about its target's age: tags can point at old
   commits and tag-triggered runs reflect that history. The dispatch revision is
   a convenience, not the trusted gate; the Python boundary plus exact-commit
@@ -97,6 +127,14 @@ resume from the original verified download artifact without rebuilding images.
   operator checkbox is never CI evidence. IndexNow notification is deferred
   because URLs come from a push diff while deployment is dispatch-only. A scoped
   publish-boundary opt-in needs release-auditor review before held merges.
+- Human-readable `build-YYYY-MM-DD-HHMMSS` aliases are immutable additions at
+  exact existing digests, not releases or channels, and carry no SHA fragment.
+  They are recomputed from the checked-in mapping by
+  `scripts/docker_readable_aliases.py` using observed Hub tag publication time
+  (`tag_last_pushed`, fallback `last_updated`; a proxy, not build time) and never
+  move `latest`, a minor tag, `edge`, `nightly` or an original `sha-*` ref. Only
+  an explicit trusted-main dispatch may add them, using imagetools create with
+  strict observation and idempotence; see ADR 0039.
 - `nightly` is a development alias, not a release version: it points to the most
   recent qualifying build of a pinned main commit with exact successful CI, and
   reuses the verified `sha-<full-commit>` image rather than adding a date alias.
@@ -113,9 +151,36 @@ resume from the original verified download artifact without rebuilding images.
   commit to the observed alias digest through that same evidence before checking
   ancestry. Buildx writes only the sha reference; an explicitly gated digest-based
   step moves edge so it survives sha reuse in either order. Nightly never moves
-  `latest` or a minor tag, and no scheduled registry write is enabled. Seeding a
-  live nightly is separately authorized; the existing `edge` image is not a fresh
-  nightly.
+  `latest`, a minor tag or `edge`. A native Actions schedule (18:00 UTC) may now
+  publish nightly only from the exact current main tip, with a late main/CI
+  recheck before the buildx push and another before the alias move. It verifies
+  by default and writes only when the separately reviewed, default-off
+  `NIGHTLY_SCHEDULE_PUBLISH` variable is true. It joins the fixed channel-wide
+  publish concurrency group and adds no schedule to the release, module, MCP or
+  runtime lanes. See ADR 0041. Seeding a live nightly is separately authorized;
+  the existing `edge` image is not a fresh nightly.
+- Managed node-runtime artifacts are a separate publication lane, not an
+  application release. `runtime-artifacts.yml` is dispatch-only, uses the
+  independent `runtime-vMAJOR.MINOR.PATCH` domain, and requires trusted-main
+  SHA, exact-commit main CI and a bound identity assertion before any write.
+  It produces checksums, a cosign keyless signature and a CycloneDX SBOM for a
+  draft asset release; it never pushes a registry image, publishes an app
+  release or provisions a host. Only formats with real clean import/boot
+  evidence are publishable; see the format decision concept.
+- The upgrade rehearsal is a separate read-only CI job, not a publication gate.
+  `upgrade-rehearsal.yml` runs weekly, on path-gated PRs and on dispatch. It
+  builds a candidate and runs two fail-closed cases on seeded disposable
+  DB/world copies with real `carbon-panel` binaries: the explicit v1.0.40 legacy
+  baseline (35 → 44 → 35) and the current published stable derived from the
+  authoritative release record via the OSS-395 product version contract (no
+  hardcoded stable literal; no hardcoded count for the current case). Both
+  assert integrity, additive table growth, row/world preservation, forced-
+  failure refusal and app-level plus copy-back rollback. Disposable artifacts
+  stay under `$RUNNER_TEMP` (build caches excepted); a missing or mismatched
+  fixture, or any failed check, fails closed with no silent skip and still
+  writes a failing evidence report. It grants no write scope and never touches
+  a registry, tag, release, host or live world. See ADR 0044; it does not
+  replace gameplay/OIDC/PROXY go/no-go gates or the OSS-366 stable publisher.
 - A release note must describe shipped behavior, not planned behavior.
 - Buf CLI 1.50.0 is the default in Make, container and publication workflows;
   generator plugin versions are pinned separately in `buf.gen.yaml`. The

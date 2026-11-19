@@ -50,6 +50,33 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		runMigration,
 		type MigrationReport
 	} from '$lib/features/modpacks/studio/migration';
+	import { fetchLoaderVersions as resolveLoaderVersions } from '$lib/features/modpacks/studio/loader-versions';
+	import {
+		deletePackFile,
+		fetchPackFiles,
+		fetchPackToml,
+		installDatapack,
+		savePackFile,
+		type PackFileInfo
+	} from '$lib/features/modpacks/studio/pack-resources';
+	import {
+		fetchPackUpdates,
+		refreshPack,
+		type ModUpdateInfo
+	} from '$lib/features/modpacks/studio/pack-maintenance';
+	import {
+		addModToPack as postMod,
+		addUrlMod as postUrlMod,
+		batchModAction,
+		findModVersions,
+		modFromSearch,
+		nextModSide,
+		patchMod,
+		removeModFromPack,
+		searchOnlineMods,
+		type ModItem,
+		type SearchModResult
+	} from '$lib/features/modpacks/studio/mod-actions';
 	import { uploadFile } from '$lib/utils/chunked-upload';
 	import ModpackDeployDialog from '$lib/components/modpack-deploy-dialog.svelte';
 	import ManifestInspectorDialog from '$lib/components/manifest-inspector-dialog.svelte';
@@ -57,26 +84,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import PackContentPanel from '$lib/components/pack-content-panel.svelte';
 	import ExportDialog from '../export-dialog.svelte';
 	import { formatBytes } from '$lib/utils';
-
-	interface ModItem {
-		slug: string;
-		name: string;
-		file_name: string;
-		side: 'both' | 'client' | 'server';
-		platform: string;
-		project_id: string;
-		version_id: string;
-		download_url: string;
-		file_size?: number;
-		pinned?: boolean;
-		kind?: string;
-		optional?: boolean;
-		default?: boolean;
-		option_description?: string;
-		hash?: string;
-		hash_format?: string;
-		sha512?: string;
-	}
 
 	interface Pack {
 		id: string;
@@ -92,37 +99,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		resourcepacks?: ModItem[];
 		shaderpacks?: ModItem[];
 		datapack_folder?: string;
-	}
-
-	interface SearchModResult {
-		id: string;
-		slug: string;
-		title: string;
-		description: string;
-		icon_url: string;
-		author: string;
-		downloads: number;
-		categories: string[];
-		platform: string;
-	}
-
-	interface PackFileInfo {
-		path: string;
-		size: number;
-		mod_time: string;
-		category: string;
-	}
-
-	interface ModUpdateInfo {
-		slug: string;
-		name: string;
-		platform: string;
-		current_version_id: string;
-		latest_version_id: string;
-		latest_file_name: string;
-		latest_download_url: string;
-		update_available: boolean;
-		pinned: boolean;
 	}
 
 	let packId = $derived(page.params.id);
@@ -214,15 +190,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function installStudioDatapack(datapackId: string, gameVersion: string, indexer: string) {
-		const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/datapacks`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ datapack_id: datapackId, game_version: gameVersion, indexer })
-		});
-		if (!res.ok) {
-			const text = await res.text();
-			throw new Error(text || `HTTP ${res.status}`);
-		}
+		await installDatapack(packId!, datapackId, gameVersion, indexer, apiFetch);
 		await loadFiles();
 	}
 
@@ -279,25 +247,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!loader) return;
 		loadingLoaderVersions = true;
 		try {
-			const res = await apiFetch(
-				`/api/v1/packwiz/loaders/${loader.toLowerCase()}/versions?game_version=${mcVer || ''}`
-			);
-			if (res.ok) {
-				const data = await res.json();
-				if (data.versions && data.versions.length > 0) {
-					availableLoaderVersions = data.versions;
-					if (pack?.loader_version && !availableLoaderVersions.includes(pack.loader_version)) {
-						availableLoaderVersions = [pack.loader_version, ...availableLoaderVersions];
-					}
-					return;
-				}
-			}
-		} catch (err) {
-			console.error('Failed to load loader versions:', err);
+			const versions = await resolveLoaderVersions(loader, mcVer, pack?.loader_version, apiFetch);
+			if (versions !== null) availableLoaderVersions = versions;
 		} finally {
 			loadingLoaderVersions = false;
 		}
-		availableLoaderVersions = ['latest'];
 	}
 
 	$effect(() => {
@@ -365,20 +319,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	async function toggleSide(mod: ModItem) {
 		if (!pack) return;
-		const nextSide: Record<string, 'both' | 'client' | 'server'> = {
-			both: 'server',
-			server: 'client',
-			client: 'both'
-		};
-		const newSide = nextSide[mod.side] || 'both';
-
+		const newSide = nextModSide(mod.side);
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/mods/${mod.slug}`, {
-				method: 'PATCH',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ side: newSide, pinned: mod.pinned ?? false })
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await patchMod(packId!, mod.slug, newSide, mod.pinned ?? false, apiFetch);
 			mod.side = newSide;
 			toast.success(`Updated ${mod.name} side to ${newSide.toUpperCase()}`);
 		} catch (err) {
@@ -391,12 +334,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!pack) return;
 		const newPinned = !mod.pinned;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/mods/${mod.slug}`, {
-				method: 'PATCH',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ side: mod.side, pinned: newPinned })
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await patchMod(packId!, mod.slug, mod.side, newPinned, apiFetch);
 			mod.pinned = newPinned;
 			toast.success(newPinned ? `Pinned ${mod.name}` : `Unpinned ${mod.name}`);
 		} catch (err) {
@@ -408,10 +346,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	async function removeMod(mod: ModItem) {
 		if (!pack) return;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/mods/${mod.slug}`, {
-				method: 'DELETE'
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await removeModFromPack(packId!, mod.slug, apiFetch);
 			pack.mods = (pack.mods || []).filter((m) => m.slug !== mod.slug);
 			selectedSlugs = selectedSlugs.filter((s) => s !== mod.slug);
 			toast.success(`Removed ${mod.name} from modpack`);
@@ -424,12 +359,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	async function runBatchAction(action: 'set_side' | 'pin' | 'unpin' | 'remove', side?: string) {
 		if (!pack || selectedSlugs.length === 0) return;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/mods/batch`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ action, slugs: selectedSlugs, side })
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await batchModAction(packId!, action, selectedSlugs, side, apiFetch);
 			toast.success(`Batch action applied to ${selectedSlugs.length} mods`);
 			selectedSlugs = [];
 			await loadPack();
@@ -443,17 +373,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!pack) return;
 		checkingUpdates = true;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/updates`);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
-			const updates = data.updates || [];
-			const map: Record<string, ModUpdateInfo> = {};
-			let availableCount = 0;
-			for (const u of updates) {
-				map[u.slug] = u;
-				if (u.update_available) availableCount++;
-			}
-			updatesMap = map;
+			const { updates, availableCount } = await fetchPackUpdates(packId!, apiFetch);
+			updatesMap = updates;
 			toast.success(`Checked updates: ${availableCount} newer versions available`);
 		} catch (err) {
 			console.error('Check updates failed:', err);
@@ -467,10 +388,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!packId) return;
 		loadingFiles = true;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/files`);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
-			packFiles = data.files || [];
+			packFiles = await fetchPackFiles(packId!, apiFetch);
 		} catch (err) {
 			console.error('Failed to load files:', err);
 		} finally {
@@ -485,12 +403,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 		savingFile = true;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/files`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ path: uploadFilePath.trim(), content: uploadFileContent })
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await savePackFile(packId!, uploadFilePath.trim(), uploadFileContent, apiFetch);
 			toast.success(`Saved override file: ${uploadFilePath}`);
 			uploadFileDialogOpen = false;
 			await loadFiles();
@@ -514,13 +427,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const filePath = pendingDeleteFile;
 		if (!filePath) return;
 		try {
-			const res = await apiFetch(
-				`/api/v1/packwiz/packs/${packId}/files?path=${encodeURIComponent(filePath)}`,
-				{
-					method: 'DELETE'
-				}
-			);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await deletePackFile(packId!, filePath, apiFetch);
 			toast.success(`Deleted file "${filePath}"`);
 			await loadFiles();
 		} catch (err) {
@@ -559,8 +466,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!packId) return;
 		refreshing = true;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/refresh`, { method: 'POST' });
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await refreshPack(packId!, apiFetch);
 			toast.success('Packwiz re-indexed & refreshed successfully');
 			await loadPack();
 			await loadRawTomls();
@@ -576,10 +482,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		if (!packId) return;
 		loadingRaw = true;
 		try {
-			const pRes = await apiFetch(`/api/v1/packwiz/${packId}/pack.toml`);
-			if (pRes.ok) rawPackToml = await pRes.text();
-		} catch (err) {
-			console.error('Failed to load raw tomls:', err);
+			const text = await fetchPackToml(packId!, apiFetch);
+			if (text !== null) rawPackToml = text;
 		} finally {
 			loadingRaw = false;
 		}
@@ -592,19 +496,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		searchResults = [];
 
 		try {
-			const params = new URLSearchParams({
-				query: searchQuery.trim(),
-				platform: addTab === 'curseforge' ? 'curseforge' : 'modrinth',
-				loader: pack.mod_loader.toLowerCase(),
-				mc_version: pack.mc_version
-			});
-
-			const res = await apiFetch(`/api/v1/servers/none/mods/search?${params.toString()}`);
-			const data = await res.json();
-			if (!res.ok) {
-				searchError = data.error || 'Search request failed';
+			const platform = addTab === 'curseforge' ? 'curseforge' : 'modrinth';
+			const result = await searchOnlineMods(
+				searchQuery,
+				platform,
+				pack.mod_loader,
+				pack.mc_version,
+				apiFetch
+			);
+			if (result.error) {
+				searchError = result.error;
 			} else {
-				searchResults = data.results || [];
+				searchResults = result.results;
 			}
 		} catch (err) {
 			console.error('Search failed:', err);
@@ -617,18 +520,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	async function addModToPack(item: SearchModResult, side: 'both' | 'client' | 'server' = 'both') {
 		if (!pack) return;
 		try {
-			const vParams = new URLSearchParams({
-				platform: item.platform,
-				loader: pack.mod_loader.toLowerCase(),
-				mc_version: pack.mc_version
-			});
-			const modTarget = item.platform === 'curseforge' && item.id ? item.id : item.slug || item.id;
-			const vRes = await apiFetch(
-				`/api/v1/servers/none/mods/${modTarget}/versions?${vParams.toString()}`
-			);
-			if (!vRes.ok) throw new Error('No compatible versions found');
-			const vData = await vRes.json();
-			const versions = vData.versions || [];
+			const versions = await findModVersions(item, pack.mod_loader, pack.mc_version, apiFetch);
 			if (versions.length === 0) {
 				toast.error(
 					`No compatible versions of ${item.title} for MC ${pack.mc_version} on ${pack.mod_loader}`
@@ -637,25 +529,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			}
 
 			const selectedVer = versions[0];
-			const newMod: ModItem = {
-				slug: item.slug || item.id,
-				name: item.title,
-				file_name: selectedVer.file_name || selectedVer.fileName || 'mod.jar',
-				side,
-				platform: item.platform,
-				project_id: item.id,
-				version_id: selectedVer.id,
-				download_url: selectedVer.download_url || selectedVer.downloadUrl || '',
-				file_size: selectedVer.file_size || selectedVer.fileSize,
-				pinned: false
-			};
-
-			const addRes = await apiFetch(`/api/v1/packwiz/packs/${packId}/mods`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(newMod)
-			});
-			if (!addRes.ok) throw new Error(`HTTP ${addRes.status}`);
+			const newMod = modFromSearch(item, selectedVer, side);
+			await postMod(packId!, newMod, apiFetch);
 
 			toast.success(`Added ${item.title} (${side.toUpperCase()}) to pack!`);
 
@@ -696,22 +571,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 		addingUrlMod = true;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}/mods/url`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					name: urlModName.trim(),
-					file_name: urlModFileName.trim(),
-					download_url: urlModDownloadUrl.trim(),
+			const created = await postUrlMod(
+				packId!,
+				{
+					name: urlModName,
+					fileName: urlModFileName,
+					downloadUrl: urlModDownloadUrl,
 					side: urlModSide,
 					pinned: urlModPinned
-				})
-			});
-			if (!res.ok) {
-				const txt = await res.text();
-				throw new Error(txt || `HTTP ${res.status}`);
-			}
-			const created = await res.json();
+				},
+				apiFetch
+			);
 			toast.success(`Added custom mod "${created.name}" from URL`);
 			searchDrawerOpen = false;
 			urlModName = '';

@@ -1,0 +1,41 @@
+{
+  "schema_version": 2,
+  "profile": "fixture",
+  "synthetic": true,
+  "purpose": "SYNTHETIC fixture-only provenance for offline tests. These placeholder digests are NOT real upstream hashes and MUST NOT be used to claim a real artifact. Select with --profile fixture; artifact mode refuses these values.",
+  "published_date": "fixture",
+  "verified_on": "not-applicable",
+  "digest_status_values": ["fixture-placeholder"],
+  "images": [
+    {
+      "ref": "ubuntu-24.04-amd64",
+      "distro": "ubuntu",
+      "version": "24.04 LTS (Noble) FIXTURE",
+      "release_date": "fixture",
+      "arch": "amd64",
+      "immutable": true,
+      "image_url": "https://cloud-images.example.invalid/fixture/ubuntu-24.04-server-cloudimg-amd64.img",
+      "checksum_url": "https://cloud-images.example.invalid/fixture/SHA256SUMS",
+      "signature_url": "https://cloud-images.example.invalid/fixture/SHA256SUMS.gpg",
+      "signing_key_fingerprint": "SYNTHETIC-FIXTURE-FINGERPRINT",
+      "expected_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "digest_status": "fixture-placeholder"
+    },
+    {
+      "ref": "ubuntu-24.04-arm64",
+      "distro": "ubuntu",
+      "version": "24.04 LTS (Noble) FIXTURE",
+      "release_date": "fixture",
+      "arch": "arm64",
+      "immutable": true,
+      "image_url": "https://cloud-images.example.invalid/fixture/ubuntu-24.04-server-cloudimg-arm64.img",
+      "checksum_url": "https://cloud-images.example.invalid/fixture/SHA256SUMS",
+      "signature_url": "https://cloud-images.example.invalid/fixture/SHA256SUMS.gpg",
+      "signing_key_fingerprint": "SYNTHETIC-FIXTURE-FINGERPRINT",
+      "expected_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "digest_status": "fixture-placeholder"
+    }
+  ],
+  "verification_rule": "Fixture mode only. Never use for artifact claims; node_vm_build.verify_artifact_provenance rejects these images.",
+  "fixture_rule": "Every emitted plan is labeled fixture-provenance."
+}

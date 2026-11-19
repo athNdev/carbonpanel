@@ -24,6 +24,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { prefersReducedMotion } from '$lib/motion';
+	import { settleViewTransition } from '$lib/view-transition';
 
 	let { children } = $props();
 
@@ -49,7 +50,7 @@ one at https://mozilla.org/MPL/2.0/.
 		});
 		const next = document.startViewTransition(() => updated);
 		activeViewTransition = next;
-		void next.finished.finally(() => {
+		settleViewTransition(next, () => {
 			if (activeViewTransition === next) {
 				activeViewTransition = null;
 			}
@@ -147,8 +148,8 @@ one at https://mozilla.org/MPL/2.0/.
 	{#if page.url.pathname === '/login'}
 		{@render children?.()}
 	{:else if loading}
-		<div class="flex min-h-screen items-center justify-center bg-[#161616]" role="status">
-			<div class="h-10 w-10 animate-spin border-4 border-[#0f62fe] border-t-transparent"></div>
+		<div class="flex min-h-screen items-center justify-center bg-background" role="status">
+			<div class="h-10 w-10 animate-spin border-4 border-primary border-t-transparent"></div>
 			<span class="sr-only">Loading Carbon Panel…</span>
 		</div>
 	{:else}

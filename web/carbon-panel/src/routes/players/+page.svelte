@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { onMount } from 'svelte';
 	import { CarbonPageHeader, CarbonTag } from '$lib/components/carbon';
 	import PlayerRoster from '$lib/features/players/PlayerRoster.svelte';
+	import PlayerLookup from '$lib/features/players/PlayerLookup.svelte';
 	import { serversStore } from '$lib/stores/servers';
 
 	const serverOptions = $derived(
@@ -20,7 +21,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full flex-1 space-y-6 font-sans">
+<div class="h-full flex-1 space-y-6 font-sans" data-testid="showcase-players-content">
 	<CarbonPageHeader
 		title="Players"
 		description="Search player identities across every server, then inspect observed data and moderate with an audit trail."
@@ -30,5 +31,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{/snippet}
 	</CarbonPageHeader>
 
+	<PlayerLookup />
 	<PlayerRoster syncUrl={true} {serverOptions} />
 </div>

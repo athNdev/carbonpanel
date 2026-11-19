@@ -12,9 +12,9 @@ export interface NodeStatusDescription {
 }
 
 const STATUS_DESCRIPTIONS: Record<number, NodeStatusDescription> = {
-	[NodeStatus.ONLINE]: { label: 'ONLINE', dotClass: 'text-emerald-500' },
-	[NodeStatus.OFFLINE]: { label: 'OFFLINE', dotClass: 'text-[#8d8d8d]' },
-	[NodeStatus.ERROR]: { label: 'ERROR', dotClass: 'text-[#ff8389]' }
+	[NodeStatus.ONLINE]: { label: 'ONLINE', dotClass: 'text-success-text' },
+	[NodeStatus.OFFLINE]: { label: 'OFFLINE', dotClass: 'text-muted-foreground' },
+	[NodeStatus.ERROR]: { label: 'ERROR', dotClass: 'text-destructive-text' }
 };
 
 /**
@@ -24,9 +24,9 @@ const STATUS_DESCRIPTIONS: Record<number, NodeStatusDescription> = {
  */
 export function describeNodeStatus(status: NodeStatus | null | undefined): NodeStatusDescription {
 	if (status === null || status === undefined) {
-		return { label: 'UNKNOWN', dotClass: 'text-[#8d8d8d]' };
+		return { label: 'UNKNOWN', dotClass: 'text-muted-foreground' };
 	}
-	return STATUS_DESCRIPTIONS[status] ?? { label: 'UNKNOWN', dotClass: 'text-[#8d8d8d]' };
+	return STATUS_DESCRIPTIONS[status] ?? { label: 'UNKNOWN', dotClass: 'text-muted-foreground' };
 }
 
 export interface PrimaryNodeCandidate {

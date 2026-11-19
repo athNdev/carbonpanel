@@ -79,6 +79,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		overlayKindLabel
 	} from '$lib/features/worldview/overlays';
 	import { adminActions, buildAdminRequest, type AdminAction } from '$lib/features/worldview/admin';
+	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
 	import { prefersReducedMotion } from '$lib/motion';
 
 	const store = createWorldViewStore({
@@ -150,7 +151,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	function writeQuery(patch: Record<string, string | null>, mode: 'push' | 'replace' = 'push') {
 		if (typeof window === 'undefined') return;
-		const url = new URL(resolve(`/worlds/${serverId}/${worldKey}`), window.location.origin);
+		const url = new URL(
+			resolve('/worlds/[server]/[world]', { server: serverId, world: worldKey }),
+			window.location.origin
+		);
 		for (const [key, value] of page.url.searchParams) url.searchParams.set(key, value);
 		for (const [key, value] of Object.entries(patch)) {
 			if (value === null || value === '') url.searchParams.delete(key);
@@ -486,9 +490,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								Open modules
 							</CarbonButton>
 						</div>
-						<p class="text-xs text-muted-foreground">
-							Setup documentation (docs/world-viewing.md) is not linked in this build yet.
-						</p>
+						<BlueMapInstall
+							{serverId}
+							target={statusTarget}
+							can={(resource, action) =>
+								checkPermission(auth.permissions, resource, action, serverId)}
+							oncomplete={() => void retry()}
+						/>
 					</div>
 				{:else if view === 'installing'}
 					<div class="space-y-3 border border-border bg-card p-8" role="status">

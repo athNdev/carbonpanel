@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package docker
 
 import (
@@ -21,6 +20,11 @@ func TestPublishModuleHostPort(t *testing.T) {
 	}
 	if !publishModuleHostPort(&v1.ModulePort{HostPort: 8080, Protocol: "tcp"}) {
 		t.Fatal("unproxied module port must be published")
+	}
+	// The managed renderer's -1 sentinel never binds or publishes a host port,
+	// even when ExposePublic is wrongly requested.
+	if publishModuleHostPort(&v1.ModulePort{HostPort: -1, ExposePublic: true}) {
+		t.Fatal("private-port sentinel -1 must never publish a host port")
 	}
 	if publishModuleHostPort(&v1.ModulePort{HostPort: 0, ExposePublic: true}) {
 		t.Fatal("unallocated host port must not be published")

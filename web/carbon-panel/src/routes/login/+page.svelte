@@ -11,7 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { base, resolve } from '$app/paths';
+	import { asset, resolve } from '$app/paths';
 	import { create } from '@bufbuild/protobuf';
 	import { authStore } from '$lib/stores/auth';
 	import { rpcClient } from '$lib/api/rpc-client';
@@ -266,7 +266,7 @@ one at https://mozilla.org/MPL/2.0/.
 		<!-- Header -->
 		<div class="mb-8 text-center">
 			<div class="mb-2 flex items-center justify-center gap-3">
-				<img src="{base}/brand-mark-light.svg" alt="" class="h-8 w-8" />
+				<img src={asset('brand-mark-light.svg')} alt="" class="h-8 w-8" />
 				<h1 class="text-2xl font-semibold tracking-wide text-white">Carbon Panel</h1>
 			</div>
 			{#if authStatus.firstUserSetup}

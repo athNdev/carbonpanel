@@ -23,6 +23,12 @@ unmarked directories are not adopted. A marker and matching Docker
 label establish ownership before stopping or explicitly cleaning a session.
 Ordinary down preserves its files. Listeners bind to loopback.
 
+The optional renderer sidecar carries the same session ownership label. Both
+start and teardown inspect the sidecar, verify that label and remove only the
+inspected immutable container ID; a name collision without the expected label
+is a hard refusal, never a removal or replacement. A disposable fake-docker
+fixture covers the refusal and ID-only removal paths.
+
 # Consequences
 
 Old unmarked sessions require a deliberate migration; they are never silently

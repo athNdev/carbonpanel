@@ -7,6 +7,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
@@ -74,6 +76,26 @@ type Clients struct {
 	WorldView carbonpanelv1connect.WorldViewServiceClient
 	Backup    carbonpanelv1connect.BackupServiceClient
 	File      carbonpanelv1connect.FileServiceClient
+	Upload    carbonpanelv1connect.UploadServiceClient
+
+	// httpClient, baseURL and token are retained so NewServer can derive the
+	// family clients from the exact same authenticated connection. No tool
+	// ever sees the token directly and no anonymous fallback is possible.
+	httpClient connect.HTTPClient
+	baseURL    string
+	token      string
+
+	// owner is derived from the authenticated dp_ token, never from a tool
+	// argument. transfer is the optional W17 scoped streaming filesystem.
+	owner    string
+	transfer *StreamTransfer
+}
+
+// SetStreamTransfer injects the shared W17 streaming filesystem. Called by
+// composition roots that own node storage; MCP-only deployments leave it nil
+// and the scoped tools return a structured capability error.
+func (c *Clients) SetStreamTransfer(transfer *StreamTransfer) {
+	c.transfer = transfer
 }
 
 // NewClients constructs typed clients with the bearer Authorization
@@ -86,6 +108,14 @@ func NewClients(httpClient connect.HTTPClient, baseURL, token string) (*Clients,
 		return nil, fmt.Errorf("API token is required")
 	}
 	opts := []connect.ClientOption{connect.WithInterceptors(bearerInterceptor(token))}
+	fileClient := carbonpanelv1connect.NewFileServiceClient(httpClient, baseURL, opts...)
+	// OSS-387: the production constructor always builds the controller-owned
+	// stream session registry from the authenticated FileService client. No
+	// fixture-only injection and no gateway-side storage handle exists.
+	transfer, err := NewStreamTransfer(fileClient, 5*time.Minute)
+	if err != nil {
+		return nil, err
+	}
 	return &Clients{
 		Auth:      carbonpanelv1connect.NewAuthServiceClient(httpClient, baseURL, opts...),
 		Server:    carbonpanelv1connect.NewServerServiceClient(httpClient, baseURL, opts...),
@@ -93,8 +123,42 @@ func NewClients(httpClient connect.HTTPClient, baseURL, token string) (*Clients,
 		World:     carbonpanelv1connect.NewWorldServiceClient(httpClient, baseURL, opts...),
 		WorldView: carbonpanelv1connect.NewWorldViewServiceClient(httpClient, baseURL, opts...),
 		Backup:    carbonpanelv1connect.NewBackupServiceClient(httpClient, baseURL, opts...),
-		File:      carbonpanelv1connect.NewFileServiceClient(httpClient, baseURL, opts...),
+		File:      fileClient,
+		Upload:    carbonpanelv1connect.NewUploadServiceClient(httpClient, baseURL, opts...),
+
+		httpClient: httpClient,
+		baseURL:    baseURL,
+		token:      token,
+		owner:      tokenOwner(token),
+		transfer:   transfer,
 	}, nil
+}
+
+// familyClients derives the four family hand-off client sets from the same
+// authenticated connection. It is used only by NewServer when mounting the
+// combined catalog; each family keeps its own typed client constructors.
+func (c *Clients) familyClients() (*FamilyServerClients, *ContentClients, *FamilyAdminClients, error) {
+	server, err := NewFamilyServerClients(c.httpClient, c.baseURL, c.token)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	content, err := NewContentClients(c.httpClient, c.baseURL, c.token)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	admin, err := NewFamilyAdminClients(c.httpClient, c.baseURL, c.token)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return server, content, admin, nil
+}
+
+// streamClients derives the typed streaming client set for the composed
+// upload/download workflows. It is used by the executable streaming evidence
+// harness, not by tool registration: raw byte channels stay out of the tool
+// set, and their bytes are carried by the typed RPC equivalents.
+func (c *Clients) streamClients() (*FamilyStreamClients, error) {
+	return NewFamilyStreamClients(c.httpClient, c.baseURL, c.token)
 }
 
 // Verify proves that the controller has a real authentication provider and
@@ -122,6 +186,14 @@ func (c *Clients) Verify(ctx context.Context) error {
 		return fmt.Errorf("API token does not identify an active non-anonymous user")
 	}
 	return nil
+}
+
+// tokenOwner derives a stable principal identifier from the authenticated
+// credential itself. It is the only identity source for scoped stream
+// sessions: no tool argument can supply or override it.
+func tokenOwner(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func bearerInterceptor(token string) connect.UnaryInterceptorFunc {

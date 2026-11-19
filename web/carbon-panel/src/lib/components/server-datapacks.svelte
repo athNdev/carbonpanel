@@ -7,7 +7,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <script lang="ts">
 	import { CarbonButton } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { Card, CardContent } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Download, Trash2, Loader2, Package, RefreshCw, Upload } from '@lucide/svelte';
@@ -141,21 +141,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	<div class="min-h-0 flex-1 overflow-auto p-4">
 		{#if error}
-			<p class="border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-sm text-[#ff8389]">{error}</p>
+			<p class="border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive-text">
+				{error}
+			</p>
 		{/if}
 
 		{#if loading}
-			<div class="flex items-center justify-center py-8 text-[#8d8d8d]">
+			<div class="flex items-center justify-center py-8 text-muted-foreground">
 				<Loader2 class="h-5 w-5 animate-spin" />
 			</div>
 		{:else if datapacks.length === 0}
-			<Card class="border-[#393939] bg-[#262626]">
+			<Card class="border-border bg-card">
 				<CardContent class="flex flex-col items-center gap-2 py-10 text-center">
-					<Package class="h-8 w-8 text-[#525252]" />
-					<p class="text-sm text-[#8d8d8d]">No datapacks installed</p>
+					<Package class="h-8 w-8 text-muted-foreground" />
+					<p class="text-sm text-muted-foreground">No datapacks installed</p>
 					<CarbonButton
 						onclick={() => (browseOpen = true)}
-						class="rounded-none bg-[#0f62fe] text-white"
+						class="rounded-none bg-primary text-white"
 					>
 						Browse Datapacks
 					</CarbonButton>
@@ -164,31 +166,34 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{:else}
 			<div class="space-y-2">
 				{#each datapacks as d (d.fileName)}
-					<Card class="border-[#393939] bg-[#262626]">
+					<Card class="border-border bg-card">
 						<CardContent class="flex items-center gap-3 p-3">
-							<Package class="h-5 w-5 shrink-0 text-[#0f62fe]" />
+							<Package class="h-5 w-5 shrink-0 text-primary" />
 							<div class="min-w-0 flex-1">
 								<p class="truncate font-medium whitespace-nowrap text-white" title={d.displayName}>
 									{d.displayName}
 								</p>
-								<p class="truncate text-xs whitespace-nowrap text-[#8d8d8d]" title={d.fileName}>
+								<p
+									class="truncate text-xs whitespace-nowrap text-muted-foreground"
+									title={d.fileName}
+								>
 									{d.fileName}
 								</p>
 								{#if d.packFormat}
-									<p class="text-xs text-[#8d8d8d]">pack format {d.packFormat}</p>
+									<p class="text-xs text-muted-foreground">pack format {d.packFormat}</p>
 								{/if}
 								{#if d.formatWarning}
-									<p class="text-xs text-[#ff8389]">{d.formatWarning}</p>
+									<p class="text-xs text-destructive-text">{d.formatWarning}</p>
 								{/if}
 							</div>
-							<Badge class="border-[#393939] bg-[#393939] whitespace-nowrap text-[#c6c6c6]">
+							<Badge class="border-border bg-muted whitespace-nowrap text-foreground">
 								{(d.size / 1024).toFixed(1)} KB
 							</Badge>
 							<CarbonButton
 								kind="ghost"
 								onclick={() => remove(d.fileName)}
 								disabled={deleting[d.fileName]}
-								class="shrink-0 rounded-none text-[#ff8389] hover:bg-[#da1e28]/20"
+								class="shrink-0 rounded-none text-destructive-text hover:bg-destructive/20"
 								aria-label={`Delete ${d.displayName}`}
 							>
 								{#if deleting[d.fileName]}<Loader2 class="h-4 w-4 animate-spin" />{:else}<Trash2

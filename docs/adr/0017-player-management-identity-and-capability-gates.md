@@ -1,6 +1,8 @@
 # ADR 0017: Player identity, provenance and capability gates
 
-Status: Proposed
+Status: Accepted (OSS-345; integration gate OSS-365, 2026-11-19)
+
+Acceptance evidence: PR #506 (`codex/player-management-epic`, head `4e2671213813d37433f5b45d5a7eac5290d17b24`, merge `15816bf5057ce4f4e7e63383c82f0fd7c814dae2`) implemented the `pl_*` identity model, `Observation` provenance, `players:*` capability gates, typed moderation and the node-owned read path on `origin/main@9e81679b`. Optional bridges and full Bedrock parity remain decision-pending capabilities reported as such, not implementation promises.
 
 ## Context
 
@@ -43,6 +45,35 @@ inventory, Bedrock parity) have no verified vanilla source.
    bundled and no unverified capability is advertised. The UI and capability
    RPC report each such capability as `DECISION_PENDING` or `UNSUPPORTED` with
    an actionable explanation and a licence/verification requirement.
+8. Exact-identity lookup of an account the panel has never observed is a
+   **read-only** operation. It resolves an exact UUID or current username via
+   the same bounded, first-party identity-provider transport used for skins
+   (session-server profile by UUID; `api.minecraftservices.com/minecraft/
+   profile/lookup/name` by name — both verified to return the canonical
+   `{id,name}` shape on 2026-11-18). The result is ephemeral: it never creates
+   an identity, session, access row, roster entry, presence claim or audit row.
+   `NOT_FOUND` is only an authoritative negative (200 with no matching result,
+   or 404); timeouts, 5xx and transport failures are `UNAVAILABLE`, and an
+   input that cannot be pinned to one identity is `AMBIGUOUS`. No name-history
+   service is queried.
+9. A manual per-server allowlist add before first join is a separate,
+   authorized mutation. It reuses the existing typed moderation path (RBAC
+   `players:access:write` on `server_id`, request id, player journal, audit and
+   undo). It only persists the identity the mutation itself needs. Java
+   name/UUID entries use the negotiated Java adapter (a UUID is resolved to a
+   current name through the provider, never guessed). Bedrock Gamertag/XUID
+   entries require an adapter that proves Bedrock allowlist support; because
+   none exists, those combinations are refused with a clear capability error
+   rather than a Java-command fallback. Cross-server grants never imply a
+   manual add on another server. An outage or ambiguous provider reply never
+   creates an offline identity and never reaches a command adapter; only an
+   authoritative negative permits a name-only offline identity. Identity and
+   alias rows written by a mutation are idempotent observations: if the
+   adapter later fails, the journal records FAILED and no success audit row is
+   written, but the observation rows remain (they are not fake presence and
+   are not rolled back, because that would erase a true observation and break
+   undo). The journal, not the identity row, is the source of truth for the
+   action outcome.
 
 ## Decision register (OSS-353)
 

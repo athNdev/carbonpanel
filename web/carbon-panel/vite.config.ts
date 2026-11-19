@@ -8,6 +8,7 @@
 
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
+import sveltekitConfig from './sveltekit.config.js';
 import { defineConfig } from 'vite';
 import { execSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
@@ -45,16 +46,12 @@ function getVersion() {
 }
 
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [tailwindcss(), sveltekit(sveltekitConfig)],
 	define: {
 		__APP_VERSION__: JSON.stringify(getVersion())
 	},
 	build: {
-		sourcemap: false,
-		rollupOptions: {
-			maxParallelFileOps: 2,
-			cache: false
-		}
+		sourcemap: false
 	},
 	server: {
 		host: process.env.CARBONPANEL_DEV_HOST ?? '127.0.0.1',

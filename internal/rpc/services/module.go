@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -23,6 +24,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/proxy"
+	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -45,6 +47,41 @@ type ModuleService struct {
 	log             *logger.Logger
 	logStreamer     *logger.LogStreamer
 	storageResolver *nodestorage.Resolver
+	enforcer        ModuleAuthorizer
+
+	// blueMapInstallMu serializes the built-in BlueMap singleton check and
+	// create path per controller process. It makes retries/concurrent tabs
+	// converge on one module per server; it is explicitly NOT a cross-process
+	// atomic reservation (ADR 0011/0015).
+	blueMapInstallMu sync.Mutex
+}
+
+// ModuleAuthorizer is the mapped RBAC seam used for managed-install create and
+// start checks. *rbac.Enforcer satisfies it; tests inject a scoped fake.
+type ModuleAuthorizer interface {
+	Enforce(roles []string, resource, action, objectID string) (bool, error)
+}
+
+// SetEnforcer supplies the RBAC seam used for managed-install authorization.
+func (s *ModuleService) SetEnforcer(enforcer ModuleAuthorizer) {
+	s.enforcer = enforcer
+}
+
+// requireModuleSecurityException gates a named sidecar confinement exception
+// behind the existing elevated Docker permission. Missing identity or enforcer
+// fails closed: a broadened profile is never granted by default.
+func (s *ModuleService) requireModuleSecurityException(ctx context.Context) error {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil || s.enforcer == nil {
+		return connect.NewError(connect.CodePermissionDenied,
+			errors.New("named module security profile requires servers/manage_docker_privileged"))
+	}
+	allowed, err := s.enforcer.Enforce(user.Roles, rbac.ResourceServers, rbac.ActionManageDockerPrivileged, "*")
+	if err != nil || !allowed {
+		return connect.NewError(connect.CodePermissionDenied,
+			errors.New("named module security profile requires servers/manage_docker_privileged"))
+	}
+	return nil
 }
 
 // SetStorageResolver supplies the instance-owned node storage resolver.
@@ -580,6 +617,27 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("template not found"))
 	}
 
+	// A named confinement exception is only granted to callers holding the
+	// existing elevated Docker permission. The Docker layer still applies the
+	// baseline; this gate decides whether the exception may be requested.
+	if docker.ModuleSecurityProfile(template) == docker.ModuleProfileHostExtension {
+		if err := s.requireModuleSecurityException(ctx); err != nil {
+			return nil, err
+		}
+	}
+
+	// OSS-388: the built-in renderer is a server-side singleton. Adoption and
+	// consent/eligibility are decided here, not in the browser. The lock is
+	// held by the winner until the module row is persisted below.
+	handled, adopted, finalizeBlueMap, prepErr := s.prepareBuiltinBlueMap(ctx, msg, server, template)
+	if handled {
+		return adopted, prepErr
+	}
+	if finalizeBlueMap != nil {
+		// Any early return rolls staging back; a successful persist commits it.
+		defer func() { _ = finalizeBlueMap(false, "") }()
+	}
+
 	// Use ports from request, or fall back to template defaults
 	ports := msg.Ports
 	if len(ports) == 0 {
@@ -591,6 +649,11 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	allocatedInRequest := make(map[int]bool)
 	for _, port := range ports {
 		if port == nil || port.ContainerPort == 0 {
+			continue
+		}
+		// A negative HostPort is the private, proxy-only sentinel: no host
+		// port is allocated or published for the managed renderer sidecar.
+		if port.HostPort < 0 {
 			continue
 		}
 		if port.HostPort == 0 {
@@ -605,7 +668,7 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 
 	// Verify all ports are available (considering proxy/protocol rules)
 	for _, port := range ports {
-		if port == nil || port.HostPort == 0 {
+		if port == nil || port.HostPort <= 0 {
 			continue
 		}
 		protocol := port.Protocol
@@ -699,6 +762,13 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 
 	if err := s.store.CreateModule(ctx, module); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create module: %w", err))
+	}
+	if finalizeBlueMap != nil {
+		if commitErr := finalizeBlueMap(true, module.ID); commitErr != nil {
+			// finalize performed staged-file cleanup AND deleted the module row
+			// while still holding the singleton lock with a bounded context.
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("managed BlueMap config was rolled back: %w", commitErr))
+		}
 	}
 
 	// Create container in background

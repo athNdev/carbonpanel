@@ -15,6 +15,9 @@ on:
 jobs:
   driver:
     strategy:
+      # Keep a failed ubuntu leg from cancelling the Windows leg during setup;
+      # both platforms must report their own result for a dependency bump.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -29,6 +32,7 @@ jobs:
       - run: node scripts/review/setup-browser.mjs --with-deps
       - run: node --test scripts/review/browser.test.mjs
       - run: node --test scripts/review/profile.test.mjs
+      - run: node --test scripts/review/entry-state.test.mjs
       - run: node scripts/review/browser-check.mjs
       - run: node --test scripts/review/profile-browser.test.mjs
   ownership:
@@ -36,3 +40,4 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash scripts/review/test-ownership.sh
+      - run: bash scripts/review/test-bluemap-ownership.sh

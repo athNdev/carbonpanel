@@ -67,13 +67,23 @@ export function importPhasePresentation(phase: string | undefined): WorldPresent
 	}
 }
 
-/** Bind/unbind journal outcomes, including the uncertain one. */
+/**
+ * Bind/unbind journal outcomes, including the uncertain one. Every reported
+ * outcome keeps its own label and explanation: a queued, skipped, cancelled or
+ * failed operation must never be dressed up as an applied success.
+ */
 export function operationOutcomePresentation(outcome: string | undefined): WorldPresentation {
 	switch (outcome) {
 		case 'applied':
 		case 'complete':
 		case 'committed':
 			return { label: 'APPLIED', tone: 'green', hint: 'The backend confirmed the change' };
+		case 'success':
+			return {
+				label: 'SUCCESS',
+				tone: 'green',
+				hint: 'The backend confirmed the change and recorded it in the journal.'
+			};
 		case 'unknown':
 		case 'uncertain':
 			return {
@@ -81,16 +91,98 @@ export function operationOutcomePresentation(outcome: string | undefined): World
 				tone: 'yellow',
 				hint: 'The mutation may have happened. Resolve it from real node state; it is not retried automatically.'
 			};
+		case 'resolved':
+			return {
+				label: 'RESOLVED',
+				tone: 'green',
+				hint: 'The operator decision was recorded in the journal.'
+			};
 		case 'rolled_back':
 		case 'rollback':
-			return { label: 'ROLLED BACK', tone: 'gray' };
+			return {
+				label: 'ROLLED BACK',
+				tone: 'gray',
+				hint: 'The prior level family was restored; no new world was applied.'
+			};
 		case 'failed':
-			return { label: 'FAILED', tone: 'red' };
-		case 'in_progress':
+			return {
+				label: 'FAILED',
+				tone: 'red',
+				hint: 'The operation reported a definite failure. No applied state is claimed.'
+			};
+		case 'queued':
 		case 'pending':
-			return { label: upper(outcome ?? 'pending'), tone: 'blue' };
+		case 'prepared':
+			return {
+				label: outcome ? upper(outcome) : 'QUEUED',
+				tone: 'blue',
+				hint: 'The intent was recorded but the attempt has not started; no world bytes were changed.'
+			};
+		case 'running':
+		case 'in_progress':
+			return {
+				label: outcome ? upper(outcome) : 'RUNNING',
+				tone: 'blue',
+				hint: 'The operation is still being attempted. Wait for completion; no success is claimed yet.'
+			};
+		case 'skipped':
+			return {
+				label: 'SKIPPED',
+				tone: 'warm-gray',
+				hint: 'No mutation was performed for this target.'
+			};
+		case 'cancelled':
+		case 'canceled':
+			return {
+				label: 'CANCELLED',
+				tone: 'gray',
+				hint: 'The operation was cancelled before mutating world bytes.'
+			};
 		default:
-			return { label: outcome ? upper(outcome) : 'UNKNOWN', tone: 'gray' };
+			return {
+				label: outcome ? upper(outcome) : 'UNKNOWN',
+				tone: 'gray',
+				hint: 'The backend reported an unrecognised outcome. Check the journal before claiming success.'
+			};
+	}
+}
+
+export type BindingOutcomeDisposition =
+	| 'applied'
+	| 'uncertain'
+	| 'in_progress'
+	| 'failed'
+	| 'not_applied'
+	| 'unknown';
+
+/** How the UI may react to a reported bind outcome. Never auto-retries. */
+export function bindingOutcomeDisposition(outcome: string | undefined): BindingOutcomeDisposition {
+	switch (outcome) {
+		case 'applied':
+		case 'complete':
+		case 'committed':
+		case 'success':
+		case 'resolved':
+			return 'applied';
+		case 'unknown':
+		case 'uncertain':
+			return 'uncertain';
+		case 'queued':
+		case 'pending':
+		case 'prepared':
+		case 'running':
+		case 'in_progress':
+			return 'in_progress';
+		case 'failed':
+			return 'failed';
+		case 'skipped':
+		case 'cancelled':
+		case 'canceled':
+		case 'rolled_back':
+		case 'rollback':
+			return 'not_applied';
+		default:
+			return 'unknown';
 	}
 }
 
@@ -158,6 +250,26 @@ export function bindingGateReason(
 		default:
 			return 'Unknown findings gate binding. The check is read-only; resolve the missing evidence before continuing.';
 	}
+}
+
+/**
+ * Gate reason for adopting a library revision onto a server level from the
+ * server-detail WORLD tab. It reuses the library detail verdict/confidence
+ * policy: compatible with no unknown findings is the only state that permits
+ * the mutating bind. Missing evidence still fails closed.
+ */
+export function adoptionGateReason(
+	overall: string | undefined,
+	unknownFindingCount: number,
+	reportPresent: boolean
+): string {
+	if (!reportPresent) {
+		return 'Run a read-only compatibility check before swapping this level. Nothing is mutated by the check.';
+	}
+	return (
+		bindingGateReason(overall, unknownFindingCount) ??
+		'This revision is compatible with the target. Review the confirmation before swapping.'
+	);
 }
 
 /** Transform dry-run status. Unsupported/blocked transforms are never applied. */

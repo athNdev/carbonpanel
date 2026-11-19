@@ -82,26 +82,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <div class="w-full min-w-0 space-y-3">
 	<div class="flex items-center gap-2">
 		<div class="relative flex-1">
-			<Search class="absolute top-1/2 left-2 h-4 w-4 -translate-y-1/2 text-[#8d8d8d]" />
+			<Search class="absolute top-1/2 left-2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 			<Input
 				bind:value={query}
 				{onkeydown}
 				placeholder="Search datapacks..."
-				class="border-[#393939] bg-[#262626] pl-8 text-[#f4f4f4]"
+				class="border-border bg-card pl-8 text-foreground"
 			/>
 		</div>
-		<CarbonButton
-			onclick={search}
-			disabled={searching}
-			class="rounded-none bg-[#0f62fe] text-white"
-		>
+		<CarbonButton onclick={search} disabled={searching} class="rounded-none bg-primary text-white">
 			{#if searching}<Loader2 class="h-4 w-4 animate-spin" />{:else}Search{/if}
 		</CarbonButton>
 	</div>
 
 	{#if error}
 		<div
-			class="flex items-start gap-2 border border-[#da1e28]/40 bg-[#da1e28]/10 p-3 text-sm text-[#ff8389]"
+			class="flex items-start gap-2 border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive-text"
 		>
 			<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
 			<span>{error}</span>
@@ -110,29 +106,29 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	<div class="max-h-[50vh] min-w-0 space-y-2 overflow-y-auto">
 		{#each results as d (d.id)}
-			<Card class="border-[#393939] bg-[#262626]">
+			<Card class="border-border bg-card">
 				<CardContent class="flex items-start gap-3 p-3">
 					{#if d.iconUrl}
 						<img src={d.iconUrl} alt="" class="h-10 w-10 shrink-0 object-cover" />
 					{:else}
-						<div class="flex h-10 w-10 shrink-0 items-center justify-center bg-[#393939]">
-							<Package class="h-5 w-5 text-[#8d8d8d]" />
+						<div class="flex h-10 w-10 shrink-0 items-center justify-center bg-muted">
+							<Package class="h-5 w-5 text-muted-foreground" />
 						</div>
 					{/if}
 					<div class="min-w-0 flex-1">
 						<div class="flex items-center gap-2">
 							<span class="truncate font-medium text-white">{d.name}</span>
-							<Badge class="border-[#393939] bg-[#393939] whitespace-nowrap text-[#c6c6c6]"
+							<Badge class="border-border bg-muted whitespace-nowrap text-foreground"
 								>datapack</Badge
 							>
 							{#if d.indexer}
-								<Badge class="border-[#393939] bg-[#262626] whitespace-nowrap text-[#8d8d8d]"
+								<Badge class="border-border bg-card whitespace-nowrap text-muted-foreground"
 									>{d.indexer}</Badge
 								>
 							{/if}
 						</div>
-						<p class="line-clamp-2 text-xs text-[#a8a8a8]">{d.summary}</p>
-						<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#8d8d8d]">
+						<p class="line-clamp-2 text-xs text-muted-foreground">{d.summary}</p>
+						<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 							<span>by {d.author}</span>
 							<span>· {d.downloadCount.toLocaleString()} downloads</span>
 							{#if d.gameVersions.length}
@@ -145,9 +141,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</Card>
 		{:else}
 			{#if searched && !searching}
-				<p class="py-8 text-center text-sm text-[#8d8d8d]">No datapacks found.</p>
+				<p class="py-8 text-center text-sm text-muted-foreground">No datapacks found.</p>
 			{:else if !searching}
-				<p class="py-8 text-center text-sm text-[#8d8d8d]">{emptyHint}</p>
+				<p class="py-8 text-center text-sm text-muted-foreground">{emptyHint}</p>
 			{/if}
 		{/each}
 	</div>

@@ -18,6 +18,7 @@
 
 import { launchReviewBrowser } from "./browser.mjs";
 import { writeReviewReport } from "./report.mjs";
+import { waitForEntryState, screenshotAllowed } from "./entry-state.mjs";
 import {
   mkdirSync,
   readFileSync,
@@ -45,9 +46,22 @@ async function main() {
   }
 
   const plan = JSON.parse(readFileSync(resolve(args.plan), "utf8"));
+  // Feature gates: a step tagged with `feature` only runs when that feature
+  // was explicitly selected. Core steps (no tag) always run. The same list is
+  // passed to the asset gate so a skipped feature cannot leave a hole in the
+  // published set.
+  const features = new Set(
+    (args.features ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+  );
+  const planSteps = (plan.steps ?? []).filter(
+    (step) => !step.feature || features.has(step.feature),
+  );
   const out = resolve(args.out ?? fileURLToPath(new URL(`../../tmp/review-output/single/${new Date().toISOString().replace(/[:.]/g, '-')}/`, import.meta.url)));
   mkdirSync(out, { recursive: true });
   const results = [];
+  // A failed readiness/data assertion blocks every later screenshot for that
+  // feature. A filename on disk is not proof the prerequisite passed.
+  const blockedFeatures = new Set();
   reportState = { out, profile: 'single-seeded', base: args.base, checks: results };
 
   const { browser, metadata: browserMetadata } = await launchReviewBrowser();
@@ -80,12 +94,20 @@ async function main() {
   });
 
   const base = args.base.replace(/\/$/, "");
-  const record = (name, ok, detail) => results.push({ name, ok, detail });
+  // A tagged feature is best-effort: it can be skipped by --features, and a
+  // failure there is evidence in the report but must not fail the capture for
+  // the mandatory core screenshots. Untagged (core/setup) failures still fail.
+  const record = (name, ok, detail, feature) =>
+    results.push({ name, ok, detail, ...(feature ? { feature } : {}) });
 
   async function step(kind, spec) {
     const label =
       spec.name ??
       `${kind}:${Object.values(spec).find((v) => typeof v === "string") ?? ""}`;
+    if (kind === "screenshot" && !screenshotAllowed(spec.feature, blockedFeatures)) {
+      record(label, false, `prerequisite failed for feature ${spec.feature}; screenshot blocked`, spec.feature);
+      return;
+    }
     try {
       switch (kind) {
         case "goto":
@@ -97,6 +119,41 @@ async function main() {
             timeout: 30000,
           });
           break;
+        case "setViewport": {
+          // Inline images are legible when the app lays out at roughly their
+          // display width; DPR only controls output sharpness, not text size.
+          await page.setViewportSize(spec.setViewport);
+          break;
+        }
+        case "gotoEnv": {
+          // Navigate to a real route whose dynamic segment was produced by the
+          // disposable fixture (for example an opaque player identity key).
+          const value = process.env[spec.gotoEnv];
+          if (!value) throw new Error(`${spec.gotoEnv} is not set`);
+          await page.goto(base + spec.route.replace("{value}", encodeURIComponent(value)), {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          break;
+        }
+        case "gotoIdentityFromTitle": {
+          // Read the opaque identity key the real roster renders in its row
+          // title, then open the canonical profile route. This exercises the
+          // real route without the row's server-scoped query, which is not
+          // needed for a cross-server profile capture.
+          const identityKey = await page
+            .locator(spec.gotoIdentityFromTitle)
+            .first()
+            .getAttribute("title", { timeout: 15000 });
+          if (!identityKey || !identityKey.startsWith("pl_")) {
+            throw new Error(`no opaque player identity in ${spec.gotoIdentityFromTitle}`);
+          }
+          await page.goto(base + `/players/${encodeURIComponent(identityKey)}`, {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          break;
+        }
         case "select":
           await page
             .locator(spec.select)
@@ -110,7 +167,9 @@ async function main() {
           await page
             .locator(spec.fill)
             .first()
-            .fill(spec.value ?? "", { timeout: 15000 });
+            .fill(spec.valueEnv ? (process.env[spec.valueEnv] ?? "") : (spec.value ?? ""), {
+              timeout: 15000,
+            });
           break;
         case "press":
           await page.keyboard.press(spec.press);
@@ -124,6 +183,30 @@ async function main() {
         case "wait":
           await page.waitForTimeout(spec.wait);
           break;
+        case "assertImageLoaded": {
+          // A semantic readiness check for a real rendered preview: the image
+          // must be visible AND decoded with non-zero intrinsic size. No fixed
+          // sleep and no reliance on "loading" text going away.
+          const image = page.locator(spec.assertImageLoaded).first();
+          await image.waitFor({ state: "visible", timeout: spec.timeout ?? 30000 });
+          const width = await image.evaluate(
+            (element) => (element.complete ? element.naturalWidth : 0),
+          );
+          if (!width || width < 1) {
+            throw new Error(`skin preview did not decode: naturalWidth=${width}`);
+          }
+          break;
+        }
+        case "assertFrameVisible": {
+          // The map is a sandboxed same-origin iframe. Require real renderer
+          // DOM inside it (canvas/tiles) before calling the capture qualified.
+          await page
+            .frameLocator(spec.frame)
+            .locator(spec.assertFrameVisible)
+            .first()
+            .waitFor({ state: "visible", timeout: spec.timeout ?? 60000 });
+          break;
+        }
         case "assertVisible":
           await page
             .locator(spec.assertVisible)
@@ -236,15 +319,17 @@ async function main() {
             fullPage: spec.fullPage ?? false,
           });
         }
-        record(label, true, `screenshot ${file}`);
+        record(label, true, `screenshot ${file}`, spec.feature);
       } else {
-        record(label, true, "");
+        record(label, true, "", spec.feature);
       }
     } catch (error) {
+      if (spec.feature && kind !== "screenshot") blockedFeatures.add(spec.feature);
       record(
         label,
         false,
         error instanceof Error ? error.message : String(error),
+        spec.feature,
       );
       if (spec.screenshot) {
         const file = join(out, `FAILED-${spec.screenshot}.png`);
@@ -254,10 +339,11 @@ async function main() {
     }
   }
 
-  // A brand-new review stack shows first-user setup instead of a login form.
-  // Bootstrap only runs when that form is actually on screen, so the same plan
-  // works against a fresh stack and a seeded one.
+  // A brand-new review stack shows first-user setup; a seeded one shows a
+  // login form. Both hydrate after DOMContentLoaded, so detect the semantic
+  // state rather than counting nodes before the app has mounted.
   const bootstrap = plan.bootstrap;
+  let alreadyAuthenticated = false;
   if (bootstrap) {
     // Same credentials as the login step: one account, one place to set it.
     const setupUser = process.env[bootstrap.usernameEnv ?? "PANEL_REVIEW_USER"];
@@ -272,10 +358,31 @@ async function main() {
       goto: bootstrap.path ?? "/login",
       name: "open setup",
     });
-    const hasLoginForm =
-      (await page.locator(bootstrap.detectSelector).count()) > 0;
-    if (hasLoginForm) {
-      record("bootstrap", true, "already set up; skipped");
+    // The login route hydrates after DOMContentLoaded. An immediate count sees
+    // an empty DOM and cannot tell a seeded login page from first-user setup.
+    // Wait for ONE mutually exclusive semantic state instead, so the same plan
+    // works on a fresh and a seeded stack without a fixed sleep.
+    const entrySelectors = {
+      login: bootstrap.detectSelector,
+      bootstrap: bootstrap.usernameSelector,
+      authenticated: bootstrap.authenticatedSelector ?? plan.login?.successSelector,
+      fatal: bootstrap.fatalSelector,
+    };
+    for (const [state, selector] of Object.entries(entrySelectors)) {
+      if (selector === undefined) delete entrySelectors[state];
+    }
+    const entry = await waitForEntryState(
+      page,
+      entrySelectors,
+      bootstrap.entryTimeout ?? 30000,
+    );
+    record("entry state", true, entry.state);
+    if (entry.state === "fatal") {
+      throw new Error("panel reported a fatal state on the login route");
+    }
+    if (entry.state === "login" || entry.state === "authenticated") {
+      record("bootstrap", true, `${entry.state} state; skipped`);
+      alreadyAuthenticated = entry.state === "authenticated";
     } else {
       await step("fill", {
         fill: bootstrap.usernameSelector,
@@ -304,7 +411,7 @@ async function main() {
   }
 
   const login = plan.login;
-  if (login) {
+  if (login && !alreadyAuthenticated) {
     const username = process.env[login.usernameEnv ?? "PANEL_REVIEW_USER"];
     const password = process.env[login.passwordEnv ?? "PANEL_REVIEW_PASSWORD"];
     if (!username || !password) {
@@ -332,7 +439,7 @@ async function main() {
   }
   critical = false;
 
-  for (const spec of plan.steps ?? []) {
+  for (const spec of planSteps) {
     if (spec.screenshot && Object.keys(spec).length === 1) {
       await step("screenshot", spec);
       continue;
@@ -340,6 +447,9 @@ async function main() {
     const kind = Object.keys(spec).find((key) =>
       [
         "goto",
+        "setViewport",
+        "gotoEnv",
+        "gotoIdentityFromTitle",
         "click",
         "fill",
         "select",
@@ -347,6 +457,8 @@ async function main() {
         "waitFor",
         "wait",
         "assertVisible",
+        "assertFrameVisible",
+        "assertImageLoaded",
         "assertHidden",
         "assertText",
         "assertNoScrollbar",
@@ -361,11 +473,12 @@ async function main() {
   activeBrowser = undefined;
 
   const failed = results.filter((r) => !r.ok);
+  const blockingFailed = failed.filter((r) => !r.feature);
   const lines = [
     `# Manual review: ${plan.title ?? plan.name ?? "journey"}`,
     "",
     `Base: \`${base}\``,
-    `Result: ${results.length === 0 ? "INCOMPLETE" : failed.length === 0 ? "PASS" : `FAIL (${failed.length})`}`,
+    `Result: ${results.length === 0 ? "INCOMPLETE" : blockingFailed.length === 0 ? (failed.length === 0 ? "PASS" : "PASS (optional feature findings)") : `FAIL (${blockingFailed.length} required)`}`,
     "",
     "| Step | Result | Detail |",
     "| --- | --- | --- |",
@@ -399,7 +512,7 @@ async function main() {
   writeReviewReport({ out, profile: 'single-seeded', base, driver: browserMetadata, checks: results.map(item => ({ name: item.name, status: item.ok ? 'passed' : 'failed', detail: item.detail })) });
 
   process.stdout.write(lines.join("\n") + "\n");
-  process.exit(results.length === 0 ? 2 : failed.length === 0 ? 0 : 1);
+  process.exit(results.length === 0 ? 2 : blockingFailed.length === 0 ? 0 : 1);
 }
 
 main().catch(async (error) => {

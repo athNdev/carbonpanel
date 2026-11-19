@@ -1,0 +1,17 @@
+{
+  "schema": "carbonpanel.node-lxc.capability/v1",
+  "kernel_version": "6.8.12-4-pve",
+  "user_namespaces_enabled": false,
+  "userns_clone_allowed": false,
+  "cgroup_version": 2,
+  "cgroup_controllers": ["cpu", "cpuacct", "memory", "pids", "io", "cpuset"],
+  "seccomp_available": true,
+  "apparmor_available": true,
+  "selinux_available": false,
+  "nesting_attested": true,
+  "privileged_container": false,
+  "lxc_unprivileged": true,
+  "device_nodes": {"/dev/fuse": true, "/dev/net/tun": true, "/dev/ptmx": true},
+  "host_docker_socket_visible": false,
+  "host_docker_data_root_visible": false
+}

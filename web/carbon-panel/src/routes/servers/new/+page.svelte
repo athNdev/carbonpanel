@@ -511,7 +511,7 @@ one at https://mozilla.org/MPL/2.0/.
 			}
 
 			toast.success(`Server "${response.server?.name}" created successfully!`);
-			goto(resolve(`/servers/${serverId}`));
+			goto(resolve('/servers/[id]', { id: serverId }));
 		} catch (error) {
 			toast.error(
 				`Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -523,7 +523,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="bg-[#161616] font-sans text-[#f4f4f4]">
+<div class="bg-background font-sans text-foreground">
 	<div class="space-y-6">
 		<!-- Carbon Page Header -->
 		<CarbonPageHeader
@@ -532,7 +532,7 @@ one at https://mozilla.org/MPL/2.0/.
 		>
 			{#snippet tag()}
 				<span
-					class="border border-[#0f62fe]/40 bg-[#0f62fe]/20 px-2 py-0.5 font-mono text-xs text-[#78a9ff]"
+					class="border border-primary/40 bg-primary/20 px-2 py-0.5 font-mono text-xs text-accent-text"
 				>
 					WIZARD
 				</span>
@@ -552,7 +552,7 @@ one at https://mozilla.org/MPL/2.0/.
 		</CarbonPageHeader>
 
 		<!-- Carbon Progress Indicator / Steps (Requirement 3) -->
-		<div class="w-full rounded-none border border-[#393939] bg-[#262626] p-4">
+		<div class="w-full rounded-none border border-border bg-card p-4">
 			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
 				{#each steps as step (step.id)}
 					<button
@@ -561,19 +561,19 @@ one at https://mozilla.org/MPL/2.0/.
 						onclick={() => goToStep(step.id)}
 						class="focus-ring relative flex cursor-pointer items-center gap-3 rounded-none border p-3 text-left transition-colors select-none {currentStep ===
 						step.id
-							? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
+							? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
 							: currentStep > step.id
-								? 'border-[#393939] bg-[#161616] hover:bg-[#262626]'
-								: 'border-[#393939] bg-[#161616] opacity-70 hover:opacity-100'}"
+								? 'border-border bg-background hover:bg-card'
+								: 'border-border bg-background opacity-70 hover:opacity-100'}"
 					>
 						<!-- Indicator Badge -->
 						<div
 							class="flex h-7 w-7 shrink-0 items-center justify-center rounded-none font-mono text-xs font-bold {currentStep ===
 							step.id
-								? 'bg-[#0f62fe] text-white'
+								? 'bg-primary text-primary-foreground'
 								: currentStep > step.id
-									? 'bg-[#24a148] text-white'
-									: 'bg-[#393939] text-[#8d8d8d]'}"
+									? 'bg-success text-primary-foreground'
+									: 'bg-secondary text-muted-foreground'}"
 						>
 							{#if currentStep > step.id}
 								<Check class="h-4 w-4" />
@@ -586,14 +586,14 @@ one at https://mozilla.org/MPL/2.0/.
 							<p
 								class="text-[10px] leading-tight font-semibold tracking-wide break-words uppercase {currentStep ===
 								step.id
-									? 'text-[#f4f4f4]'
+									? 'text-foreground'
 									: currentStep > step.id
-										? 'text-[#c6c6c6]'
-										: 'text-[#8d8d8d]'}"
+										? 'text-muted-foreground'
+										: 'text-muted-foreground'}"
 							>
 								{step.title}
 							</p>
-							<p class="mt-0.5 font-sans text-xs break-words text-[#8d8d8d]">
+							<p class="mt-0.5 font-sans text-xs break-words text-muted-foreground">
 								{step.subtitle}
 							</p>
 						</div>
@@ -606,10 +606,10 @@ one at https://mozilla.org/MPL/2.0/.
 		<form onsubmit={handleSubmit} class="space-y-6">
 			<!-- Step 0: Basic Information & Preset -->
 			{#if currentStep === 0}
-				<div class="space-y-6 rounded-none border border-[#393939] bg-[#262626] p-6">
+				<div class="space-y-6 rounded-none border border-border bg-card p-6">
 					<div>
-						<h2 class="text-lg font-light text-[#f4f4f4]">Step 1: Basic Information & Preset</h2>
-						<p class="mt-1 font-sans text-xs text-[#a8a8a8]">
+						<h2 class="text-lg font-light text-foreground">Step 1: Basic Information & Preset</h2>
+						<p class="mt-1 font-sans text-xs text-muted-foreground">
 							Provide server identification and select whether to build manual config or load from a
 							curated modpack.
 						</p>
@@ -619,7 +619,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="space-y-2">
 						<span
 							id="config-method-label"
-							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+							class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 						>
 							Configuration Method
 						</span>
@@ -636,14 +636,14 @@ one at https://mozilla.org/MPL/2.0/.
 								onclick={() => (selectedModpack = null)}
 								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack ===
 								null
-									? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-									: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
+									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+									: 'border-border bg-background hover:bg-card'}"
 							>
 								<div class="flex items-center gap-2">
 									<Settings class="h-4 w-4 text-accent-text" />
-									<h4 class="text-sm font-semibold text-[#f4f4f4]">Manual Configuration</h4>
+									<h4 class="text-sm font-semibold text-foreground">Manual Configuration</h4>
 								</div>
-								<p class="mt-1 text-xs text-[#a8a8a8]">
+								<p class="mt-1 text-xs text-muted-foreground">
 									Start with clean Minecraft server settings and custom modloaders.
 								</p>
 							</button>
@@ -656,16 +656,16 @@ one at https://mozilla.org/MPL/2.0/.
 								onclick={() => (showModpackDialog = true)}
 								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack !==
 								null
-									? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-									: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
+									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+									: 'border-border bg-background hover:bg-card'}"
 							>
 								<div class="flex items-center gap-2">
-									<Package class="h-4 w-4 text-[#78a9ff]" />
-									<h4 class="text-sm font-semibold text-[#f4f4f4]">
+									<Package class="h-4 w-4 text-accent-text" />
+									<h4 class="text-sm font-semibold text-foreground">
 										{selectedModpack ? selectedModpack.name : 'From Modpack Preset'}
 									</h4>
 								</div>
-								<p class="mt-1 text-xs text-[#a8a8a8]">
+								<p class="mt-1 text-xs text-muted-foreground">
 									{selectedModpack
 										? `${selectedModpack.indexer} • MC ${selectedModpack.mcVersion}`
 										: favoriteModpacks.length === 0
@@ -677,31 +677,31 @@ one at https://mozilla.org/MPL/2.0/.
 
 						{#if selectedModpack}
 							<div
-								class="mt-3 flex items-start justify-between gap-4 rounded-none border border-[#0f62fe] bg-[#161616] p-4"
+								class="mt-3 flex items-start justify-between gap-4 rounded-none border border-primary bg-background p-4"
 							>
 								<div class="flex min-w-0 items-start gap-3">
 									{#if selectedModpack.logoUrl}
 										<img
 											src={selectedModpack.logoUrl}
 											alt={selectedModpack.name}
-											class="h-12 w-12 shrink-0 rounded-none border border-[#393939] object-cover"
+											class="h-12 w-12 shrink-0 rounded-none border border-border object-cover"
 										/>
 									{/if}
 									<div class="min-w-0">
 										<div class="flex items-center gap-2">
-											<h4 class="text-sm font-semibold text-[#f4f4f4]">{selectedModpack.name}</h4>
+											<h4 class="text-sm font-semibold text-foreground">{selectedModpack.name}</h4>
 											<CarbonTag type="blue" size="sm">{selectedModpack.indexer}</CarbonTag>
 										</div>
-										<p class="mt-1 line-clamp-2 font-sans text-xs text-[#a8a8a8]">
+										<p class="mt-1 line-clamp-2 font-sans text-xs text-muted-foreground">
 											{selectedModpack.summary}
 										</p>
 										{#if modpackVersions.length > 0 || loadingModpackVersions}
 											<div class="mt-2 flex items-center gap-2">
-												<span class="font-mono text-xs text-[#c6c6c6]">Version:</span>
+												<span class="font-mono text-xs text-muted-foreground">Version:</span>
 												<select
 													bind:value={selectedVersionId}
 													disabled={loadingModpackVersions}
-													class="h-8 rounded-none border border-[#525252] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none disabled:opacity-50"
+													class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none disabled:opacity-50"
 												>
 													<option value="">
 														{loadingModpackVersions ? 'Loading versions…' : 'Latest Release'}
@@ -720,7 +720,7 @@ one at https://mozilla.org/MPL/2.0/.
 								<button
 									type="button"
 									onclick={removeModpack}
-									class="shrink-0 cursor-pointer rounded-none bg-[#393939] px-3 py-1.5 font-mono text-xs text-white uppercase transition-colors hover:bg-[#da1e28]"
+									class="shrink-0 cursor-pointer rounded-none bg-secondary px-3 py-1.5 font-mono text-xs text-foreground uppercase transition-colors hover:bg-destructive hover:text-primary-foreground"
 								>
 									Remove
 								</button>
@@ -741,9 +741,9 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="space-y-1.5">
 						<label
 							for="description"
-							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+							class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 						>
-							Description <span class="text-xs font-normal text-[#8d8d8d] lowercase"
+							Description <span class="text-xs font-normal text-muted-foreground lowercase"
 								>(optional)</span
 							>
 						</label>
@@ -752,27 +752,29 @@ one at https://mozilla.org/MPL/2.0/.
 							placeholder="Primary survival server instance for cluster..."
 							bind:value={formData.description}
 							rows={3}
-							class="focus-ring w-full resize-none rounded-none border border-[#393939] bg-[#161616] p-3 text-sm text-[#f4f4f4] transition-colors placeholder:text-[#8d8d8d] focus:bg-[#353535]"
+							class="focus-ring w-full resize-none rounded-none border border-border bg-background p-3 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:bg-accent"
 						></textarea>
 					</div>
 
 					{#if catalogBlueprints.length > 0}
 						<div class="space-y-2">
 							<div class="flex items-center justify-between gap-2">
-								<p class="font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase">
+								<p
+									class="font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+								>
 									Catalog seed
 								</p>
 								{#if selectedBlueprintId}
 									<button
 										type="button"
 										onclick={clearBlueprint}
-										class="font-mono text-xs text-[#78a9ff] uppercase hover:underline"
+										class="font-mono text-xs text-accent-text uppercase hover:underline"
 									>
 										Clear seed
 									</button>
 								{/if}
 							</div>
-							<p class="font-sans text-xs text-[#8d8d8d]">
+							<p class="font-sans text-xs text-muted-foreground">
 								A qualified seed fills Java image, loader TYPE and protocol. Unsupported rows are
 								not a native Bedrock edition path.
 							</p>
@@ -785,22 +787,22 @@ one at https://mozilla.org/MPL/2.0/.
 										onclick={() => applyBlueprint(seed)}
 										class="rounded-none border p-3 text-left transition-colors {selectedBlueprintId ===
 										seed.id
-											? 'border-[#0f62fe] bg-[#161616]'
-											: 'border-[#393939] bg-[#161616]'} {spec.qualified
-											? 'hover:border-[#78a9ff]'
+											? 'border-primary bg-background'
+											: 'border-border bg-background'} {spec.qualified
+											? 'hover:border-accent-text'
 											: 'cursor-not-allowed opacity-80'}"
 									>
 										<div class="flex items-center justify-between gap-2">
-											<span class="text-sm font-semibold text-[#f4f4f4]">{seed.name}</span>
+											<span class="text-sm font-semibold text-foreground">{seed.name}</span>
 											{#if spec.qualified}
 												<CarbonTag type="green" size="sm">Java</CarbonTag>
 											{:else}
 												<CarbonTag type="yellow" size="sm">Unsupported</CarbonTag>
 											{/if}
 										</div>
-										<p class="mt-1 font-sans text-xs text-[#a8a8a8]">{seed.description}</p>
+										<p class="mt-1 font-sans text-xs text-muted-foreground">{seed.description}</p>
 										{#if !spec.qualified}
-											<p class="mt-2 font-sans text-xs text-[#f1c21b]">{spec.limitation}</p>
+											<p class="mt-2 font-sans text-xs text-warning-text">{spec.limitation}</p>
 										{/if}
 									</button>
 								{/each}
@@ -811,10 +813,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 				<!-- Step 1: Game Engine & Version -->
 			{:else if currentStep === 1}
-				<div class="space-y-6 rounded-none border border-[#393939] bg-[#262626] p-6">
+				<div class="space-y-6 rounded-none border border-border bg-card p-6">
 					<div>
-						<h2 class="text-lg font-light text-[#f4f4f4]">Step 2: Engine & Version</h2>
-						<p class="mt-1 font-sans text-xs text-[#a8a8a8]">
+						<h2 class="text-lg font-light text-foreground">Step 2: Engine & Version</h2>
+						<p class="mt-1 font-sans text-xs text-muted-foreground">
 							Select the Minecraft server release and runtime loader.
 						</p>
 					</div>
@@ -823,12 +825,12 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="space-y-1.5">
 						<label
 							for="mcVersion"
-							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+							class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 						>
 							Minecraft Version
 						</label>
 						{#if loadingVersions}
-							<div class="flex items-center gap-2 border border-[#393939] bg-[#161616] p-3">
+							<div class="flex items-center gap-2 border border-border bg-background p-3">
 								<CarbonInlineLoading description="Loading supported versions catalog..." />
 							</div>
 						{:else}
@@ -837,7 +839,7 @@ one at https://mozilla.org/MPL/2.0/.
 									id="mcVersion"
 									bind:value={formData.mcVersion}
 									disabled={loading}
-									class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-[#393939] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
+									class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-border bg-background px-4 pr-10 text-sm text-foreground transition-colors focus:bg-accent"
 								>
 									{#each minecraftVersions as version (version)}
 										<option value={version}>
@@ -847,7 +849,7 @@ one at https://mozilla.org/MPL/2.0/.
 									{/each}
 								</select>
 								<div
-									class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#c6c6c6]"
+									class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
 								>
 									<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
 										<path
@@ -865,7 +867,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="space-y-1.5">
 						<label
 							for="modLoader"
-							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+							class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 						>
 							Mod Loader / Server Software
 						</label>
@@ -878,7 +880,7 @@ one at https://mozilla.org/MPL/2.0/.
 									formData.modLoader = val as ModLoader;
 								}}
 								disabled={loading || !!selectedModpack}
-								class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-[#393939] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535] disabled:opacity-50"
+								class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-border bg-background px-4 pr-10 text-sm text-foreground transition-colors focus:bg-accent disabled:opacity-50"
 							>
 								{#each modLoaders as loader (loader.name)}
 									{@const enumVal =
@@ -889,7 +891,7 @@ one at https://mozilla.org/MPL/2.0/.
 								{/each}
 							</select>
 							<div
-								class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#c6c6c6]"
+								class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
 							>
 								<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
 									<path
@@ -902,15 +904,15 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 
 						{#if selectedModpack}
-							<p class="mt-1 font-mono text-xs text-[#78a9ff]">
+							<p class="mt-1 font-mono text-xs text-accent-text">
 								Mod loader auto-determined by preset configuration.
 							</p>
 						{:else if formData.modLoader === ModLoader.VANILLA}
-							<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
+							<p class="mt-1 font-sans text-xs text-muted-foreground">
 								Vanilla Minecraft server binary with no mod dependencies.
 							</p>
 						{:else}
-							<p class="mt-1 font-sans text-xs text-[#6fdc8c]">
+							<p class="mt-1 font-sans text-xs text-success-text">
 								Supports runtime mod jar injection and server extensions.
 							</p>
 						{/if}
@@ -921,7 +923,7 @@ one at https://mozilla.org/MPL/2.0/.
 						<div class="space-y-1.5">
 							<label
 								for="loaderVersion"
-								class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+								class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 							>
 								{formData.modLoader === ModLoader.NEOFORGE ? 'NeoForge' : 'Loader'} Version
 							</label>
@@ -931,7 +933,7 @@ one at https://mozilla.org/MPL/2.0/.
 									value={formData.loaderVersion}
 									onchange={(e) => (formData.loaderVersion = e.currentTarget.value)}
 									disabled={loading || loadingLoaderVersions || !formData.mcVersion}
-									class="h-10 w-full cursor-pointer appearance-none rounded-none border-b border-[#8d8d8d] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] focus:border-b-2 focus:border-[#0f62fe] focus:bg-[#262626] focus:outline-none disabled:opacity-50"
+									class="h-10 w-full cursor-pointer appearance-none rounded-none border-b border-input bg-background px-4 pr-10 text-sm text-foreground focus:border-b-2 focus:border-primary focus:bg-card focus:outline-none disabled:opacity-50"
 								>
 									<option value="">Latest (recommended)</option>
 									{#each loaderVersions as version (version)}
@@ -941,7 +943,7 @@ one at https://mozilla.org/MPL/2.0/.
 									{/each}
 								</select>
 								<div
-									class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#c6c6c6]"
+									class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
 								>
 									<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
 										<path
@@ -952,7 +954,7 @@ one at https://mozilla.org/MPL/2.0/.
 									</svg>
 								</div>
 							</div>
-							<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
+							<p class="mt-1 font-sans text-xs text-muted-foreground">
 								{loadingLoaderVersions
 									? 'Looking up published builds…'
 									: 'Pin an exact build, or leave it on Latest to follow the loader.'}
@@ -963,10 +965,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 				<!-- Step 2: Resources & Network -->
 			{:else if currentStep === 2}
-				<div class="space-y-6 rounded-none border border-[#393939] bg-[#262626] p-6">
+				<div class="space-y-6 rounded-none border border-border bg-card p-6">
 					<div>
-						<h2 class="text-lg font-light text-[#f4f4f4]">Step 3: Resources & Network</h2>
-						<p class="mt-1 font-sans text-xs text-[#a8a8a8]">
+						<h2 class="text-lg font-light text-foreground">Step 3: Resources & Network</h2>
+						<p class="mt-1 font-sans text-xs text-muted-foreground">
 							Configure port routing, reverse proxy domain, and a memory request (not a hard cap
 							until the engine reports it as enforced).
 						</p>
@@ -977,7 +979,7 @@ one at https://mozilla.org/MPL/2.0/.
 						<div class="space-y-2">
 							<span
 								id="ingress-method-label"
-								class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+								class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 							>
 								Connection Ingress Method
 							</span>
@@ -996,11 +998,11 @@ one at https://mozilla.org/MPL/2.0/.
 										portError = '';
 									}}
 									class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {!useProxyMode
-										? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-										: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
+										? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+										: 'border-border bg-background hover:bg-card'}"
 								>
-									<h4 class="text-sm font-semibold text-[#f4f4f4]">Direct Port</h4>
-									<p class="mt-1 text-xs text-[#a8a8a8]">
+									<h4 class="text-sm font-semibold text-foreground">Direct Port</h4>
+									<p class="mt-1 text-xs text-muted-foreground">
 										Bind directly to container host port (e.g. :25565)
 									</p>
 								</button>
@@ -1023,11 +1025,11 @@ one at https://mozilla.org/MPL/2.0/.
 										portError = '';
 									}}
 									class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {useProxyMode
-										? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-										: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
+										? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+										: 'border-border bg-background hover:bg-card'}"
 								>
-									<h4 class="text-sm font-semibold text-[#f4f4f4]">SNI / Custom Hostname</h4>
-									<p class="mt-1 text-xs text-[#a8a8a8]">
+									<h4 class="text-sm font-semibold text-foreground">SNI / Custom Hostname</h4>
+									<p class="mt-1 text-xs text-muted-foreground">
 										Route traffic through proxy using virtual domain hostname
 									</p>
 								</button>
@@ -1042,7 +1044,7 @@ one at https://mozilla.org/MPL/2.0/.
 								<div class="space-y-1.5">
 									<label
 										for="proxy_listener"
-										class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+										class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 									>
 										Proxy Listener
 									</label>
@@ -1050,7 +1052,7 @@ one at https://mozilla.org/MPL/2.0/.
 										<select
 											id="proxy_listener"
 											bind:value={formData.proxyListenerId}
-											class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-[#393939] bg-[#161616] px-4 pr-10 text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
+											class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-border bg-background px-4 pr-10 text-sm text-foreground transition-colors focus:bg-accent"
 										>
 											{#each proxyListeners as listener (listener.id)}
 												<option value={listener.id}>
@@ -1061,7 +1063,7 @@ one at https://mozilla.org/MPL/2.0/.
 											{/each}
 										</select>
 										<div
-											class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#c6c6c6]"
+											class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
 										>
 											<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
 												<path
@@ -1087,14 +1089,14 @@ one at https://mozilla.org/MPL/2.0/.
 							<div class="flex items-center justify-between">
 								<label
 									for="port"
-									class="font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+									class="font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 								>
 									Server Port
 								</label>
 								<button
 									type="button"
 									onclick={refreshAvailablePort}
-									class="focus-ring cursor-pointer font-mono text-xs text-[#78a9ff] hover:underline"
+									class="focus-ring cursor-pointer font-mono text-xs text-accent-text hover:underline"
 								>
 									Auto-Assign Next Port
 								</button>
@@ -1108,12 +1110,14 @@ one at https://mozilla.org/MPL/2.0/.
 								oninput={(e) => validatePort(Number(e.currentTarget.value))}
 								aria-invalid={portError ? 'true' : undefined}
 								aria-describedby={portError ? 'port-error' : undefined}
-								class="focus-ring h-10 w-full rounded-none border border-[#393939] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535] {portError
-									? '!border-[#da1e28]'
+								class="focus-ring h-10 w-full rounded-none border border-border bg-background px-4 font-mono text-sm text-foreground transition-colors focus:bg-accent {portError
+									? '!border-destructive'
 									: ''}"
 							/>
 							{#if portError}
-								<p id="port-error" class="mt-1 font-mono text-xs text-[#ff8389]">{portError}</p>
+								<p id="port-error" class="mt-1 font-mono text-xs text-destructive-text">
+									{portError}
+								</p>
 							{/if}
 						</div>
 					{/if}
@@ -1123,7 +1127,7 @@ one at https://mozilla.org/MPL/2.0/.
 						<div class="space-y-1.5">
 							<label
 								for="memory"
-								class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+								class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 							>
 								Memory request (MB)
 							</label>
@@ -1133,9 +1137,9 @@ one at https://mozilla.org/MPL/2.0/.
 								min="512"
 								step="256"
 								bind:value={formData.memory}
-								class="focus-ring h-10 w-full rounded-none border border-[#393939] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
+								class="focus-ring h-10 w-full rounded-none border border-border bg-background px-4 font-mono text-sm text-foreground transition-colors focus:bg-accent"
 							/>
-							<p class="font-mono text-xs text-[#8d8d8d]">
+							<p class="font-mono text-xs text-muted-foreground">
 								Equals {(formData.memory / 1024).toFixed(1)} GB · not a hard cap if the engine reports
 								memory_limit_unsupported
 								{#if selectedModpack && selectedModpack.recommendedRam > 0}
@@ -1147,7 +1151,7 @@ one at https://mozilla.org/MPL/2.0/.
 						<div class="space-y-1.5">
 							<label
 								for="max_players"
-								class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+								class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 							>
 								Max Players
 							</label>
@@ -1157,13 +1161,13 @@ one at https://mozilla.org/MPL/2.0/.
 								min="1"
 								max="1000"
 								bind:value={formData.maxPlayers}
-								class="focus-ring h-10 w-full rounded-none border border-[#393939] bg-[#161616] px-4 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
+								class="focus-ring h-10 w-full rounded-none border border-border bg-background px-4 font-mono text-sm text-foreground transition-colors focus:bg-accent"
 							/>
 						</div>
 					</div>
 
 					<!-- Additional Ports Editor -->
-					<div class="border-t border-[#393939] pt-2">
+					<div class="border-t border-border pt-2">
 						<AdditionalPortsEditor
 							bind:ports={formData.additionalPorts}
 							disabled={loading}
@@ -1175,10 +1179,10 @@ one at https://mozilla.org/MPL/2.0/.
 
 				<!-- Step 3: Cluster Placement & Runtime -->
 			{:else if currentStep === 3}
-				<div class="space-y-6 rounded-none border border-[#393939] bg-[#262626] p-6">
+				<div class="space-y-6 rounded-none border border-border bg-card p-6">
 					<div>
-						<h2 class="text-lg font-light text-[#f4f4f4]">Step 4: Cluster Placement & Runtime</h2>
-						<p class="mt-1 font-sans text-xs text-[#a8a8a8]">
+						<h2 class="text-lg font-light text-foreground">Step 4: Cluster Placement & Runtime</h2>
+						<p class="mt-1 font-sans text-xs text-muted-foreground">
 							Designate physical cluster host and configure container startup options.
 						</p>
 					</div>
@@ -1187,7 +1191,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<div class="space-y-3">
 						<span
 							id="node-placement-label"
-							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+							class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 						>
 							Node Placement Mode
 						</span>
@@ -1203,16 +1207,16 @@ one at https://mozilla.org/MPL/2.0/.
 								onclick={() => (nodePlacementMode = 'auto')}
 								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {nodePlacementMode ===
 								'auto'
-									? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-									: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
+									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+									: 'border-border bg-background hover:bg-card'}"
 							>
 								<div class="flex items-center gap-2">
 									<Activity class="h-4 w-4 text-accent-text" />
-									<h4 class="text-sm font-semibold text-[#f4f4f4]">
+									<h4 class="text-sm font-semibold text-foreground">
 										Auto-Placement (Load Balanced)
 									</h4>
 								</div>
-								<p class="mt-1 text-xs text-[#a8a8a8]">
+								<p class="mt-1 text-xs text-muted-foreground">
 									Cluster scheduler selects optimal worker node based on available memory and active
 									workload.
 								</p>
@@ -1225,31 +1229,31 @@ one at https://mozilla.org/MPL/2.0/.
 								onclick={() => (nodePlacementMode = 'manual')}
 								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {nodePlacementMode ===
 								'manual'
-									? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-									: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'}"
+									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+									: 'border-border bg-background hover:bg-card'}"
 							>
 								<div class="flex items-center gap-2">
-									<ServerIcon class="h-4 w-4 text-[#78a9ff]" />
-									<h4 class="text-sm font-semibold text-[#f4f4f4]">Target Specific Node</h4>
+									<ServerIcon class="h-4 w-4 text-accent-text" />
+									<h4 class="text-sm font-semibold text-foreground">Target Specific Node</h4>
 								</div>
-								<p class="mt-1 text-xs text-[#a8a8a8]">
+								<p class="mt-1 text-xs text-muted-foreground">
 									Pin this Minecraft container instance to a designated Docker host machine.
 								</p>
 							</button>
 						</div>
 
 						{#if nodePlacementMode === 'auto'}
-							<div class="space-y-2 rounded-none border border-[#393939] bg-[#161616] p-4">
+							<div class="space-y-2 rounded-none border border-border bg-background p-4">
 								<label
 									for="placement_strategy"
-									class="block font-mono text-xs text-[#c6c6c6] uppercase"
+									class="block font-mono text-xs text-muted-foreground uppercase"
 								>
 									Placement Strategy
 								</label>
 								<select
 									id="placement_strategy"
 									bind:value={placementStrategy}
-									class="focus-ring h-10 w-full rounded-none border border-[#525252] bg-[#262626] px-3 font-mono text-xs text-[#f4f4f4] transition-colors focus:bg-[#353535]"
+									class="focus-ring h-10 w-full rounded-none border border-border bg-card px-3 font-mono text-xs text-foreground transition-colors focus:bg-accent"
 								>
 									<option value="least_memory">Least Memory Allocated (Recommended)</option>
 									<option value="least_servers">Least Active Server Count</option>
@@ -1260,12 +1264,12 @@ one at https://mozilla.org/MPL/2.0/.
 							<div class="space-y-2">
 								{#if loadingNodes}
 									<div
-										class="flex items-center justify-center border border-[#393939] bg-[#161616] p-6"
+										class="flex items-center justify-center border border-border bg-background p-6"
 									>
 										<CarbonInlineLoading description="Scanning cluster topology..." />
 									</div>
 								{:else if nodes.length === 0}
-									<div class="border border-[#393939] bg-[#161616] p-4 text-xs text-[#a8a8a8]">
+									<div class="border border-border bg-background p-4 text-xs text-muted-foreground">
 										No worker nodes available. Add and enable a Docker node in Settings → Docker
 										Nodes before creating servers.
 									</div>
@@ -1286,17 +1290,17 @@ one at https://mozilla.org/MPL/2.0/.
 												}}
 												class="focus-ring relative cursor-pointer rounded-none border p-3.5 text-left transition-colors {selectedNodeId ===
 												node.id
-													? 'border-[#0f62fe] bg-[#353535] shadow-[inset_3px_0_0_#0f62fe]'
-													: 'border-[#393939] bg-[#161616] hover:bg-[#262626]'} {!node.enabled
+													? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+													: 'border-border bg-background hover:bg-card'} {!node.enabled
 													? 'cursor-not-allowed opacity-40'
 													: ''}"
 											>
 												<div class="flex items-center justify-between">
 													<div class="flex items-center gap-2">
-														<span class="text-sm font-medium text-[#f4f4f4]">{node.name}</span>
+														<span class="text-sm font-medium text-foreground">{node.name}</span>
 														{#if node.isLocal}
 															<span
-																class="py-0.2 bg-[#393939] px-1.5 font-mono text-xs text-[#c6c6c6]"
+																class="py-0.2 bg-secondary px-1.5 font-mono text-xs text-muted-foreground"
 																>Local</span
 															>
 														{/if}
@@ -1308,11 +1312,11 @@ one at https://mozilla.org/MPL/2.0/.
 														{node.status === NodeStatus.ONLINE ? 'ONLINE' : 'OFFLINE'}
 													</CarbonTag>
 												</div>
-												<p class="mt-1 truncate font-mono text-xs text-[#8d8d8d]">
+												<p class="mt-1 truncate font-mono text-xs text-muted-foreground">
 													{node.host || node.advertisedIp || 'local socket'}
 												</p>
 												<div
-													class="mt-1 flex items-center gap-1.5 font-mono text-xs text-[#8d8d8d]"
+													class="mt-1 flex items-center gap-1.5 font-mono text-xs text-muted-foreground"
 												>
 													{#if Number(node.availableMemoryMb) > 0}
 														<span class="text-emerald-400"
@@ -1346,12 +1350,12 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					<!-- Advanced Docker Image -->
-					<div class="space-y-1.5 border-t border-[#393939] pt-2">
+					<div class="space-y-1.5 border-t border-border pt-2">
 						<label
 							for="docker_image"
-							class="block font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase"
+							class="block font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 						>
-							Docker Image <span class="text-xs font-normal text-[#8d8d8d] lowercase"
+							Docker Image <span class="text-xs font-normal text-muted-foreground lowercase"
 								>(Advanced)</span
 							>
 						</label>
@@ -1359,7 +1363,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<select
 								id="docker_image"
 								bind:value={formData.dockerImage}
-								class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-[#393939] bg-[#161616] px-4 pr-10 font-mono text-sm text-[#f4f4f4] transition-colors focus:bg-[#353535]"
+								class="focus-ring h-10 w-full cursor-pointer appearance-none rounded-none border border-border bg-background px-4 pr-10 font-mono text-sm text-foreground transition-colors focus:bg-accent"
 							>
 								<option value="">Auto-select base image (Recommended)</option>
 								{#each getUniqueDockerImages(dockerImages) as image (image.tag)}
@@ -1369,7 +1373,7 @@ one at https://mozilla.org/MPL/2.0/.
 								{/each}
 							</select>
 							<div
-								class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#c6c6c6]"
+								class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground"
 							>
 								<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
 									<path
@@ -1383,23 +1387,25 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					<!-- Lifecycle Toggles -->
-					<div class="space-y-3 border-t border-[#393939] pt-2">
-						<h3 class="font-mono text-xs font-semibold tracking-wider text-[#c6c6c6] uppercase">
+					<div class="space-y-3 border-t border-border pt-2">
+						<h3
+							class="font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+						>
 							Lifecycle & Autostart
 						</h3>
 						<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
 							<!-- Start Immediately -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626]"
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card"
 							>
 								<input
 									type="checkbox"
 									bind:checked={formData.startImmediately}
-									class="h-4 w-4 rounded-none accent-[#0f62fe]"
+									class="h-4 w-4 rounded-none accent-primary"
 								/>
 								<div>
-									<span class="block text-xs font-medium text-[#f4f4f4]">Start Immediately</span>
-									<span class="block font-sans text-xs text-[#8d8d8d]"
+									<span class="block text-xs font-medium text-foreground">Start Immediately</span>
+									<span class="block font-sans text-xs text-muted-foreground"
 										>Boot container upon creation</span
 									>
 								</div>
@@ -1407,7 +1413,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Detached Mode -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626] {useProxyMode
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card {useProxyMode
 									? 'cursor-not-allowed opacity-50'
 									: ''}"
 							>
@@ -1415,11 +1421,11 @@ one at https://mozilla.org/MPL/2.0/.
 									type="checkbox"
 									bind:checked={formData.detached}
 									disabled={useProxyMode}
-									class="h-4 w-4 rounded-none accent-[#0f62fe]"
+									class="h-4 w-4 rounded-none accent-primary"
 								/>
 								<div>
-									<span class="block text-xs font-medium text-[#f4f4f4]">Detached Mode</span>
-									<span class="block font-sans text-xs text-[#8d8d8d]"
+									<span class="block text-xs font-medium text-foreground">Detached Mode</span>
+									<span class="block font-sans text-xs text-muted-foreground"
 										>Persists past daemon stop</span
 									>
 								</div>
@@ -1427,7 +1433,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Auto Start -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626] {formData.detached
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card {formData.detached
 									? 'cursor-not-allowed opacity-50'
 									: ''}"
 							>
@@ -1435,11 +1441,11 @@ one at https://mozilla.org/MPL/2.0/.
 									type="checkbox"
 									bind:checked={formData.autoStart}
 									disabled={formData.detached}
-									class="h-4 w-4 rounded-none accent-[#0f62fe]"
+									class="h-4 w-4 rounded-none accent-primary"
 								/>
 								<div>
-									<span class="block text-xs font-medium text-[#f4f4f4]">Auto Start</span>
-									<span class="block font-sans text-xs text-[#8d8d8d]"
+									<span class="block text-xs font-medium text-foreground">Auto Start</span>
+									<span class="block font-sans text-xs text-muted-foreground"
 										>Start when host daemon starts</span
 									>
 								</div>
@@ -1447,16 +1453,16 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Freeze on Idle -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626]"
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card"
 							>
 								<input
 									type="checkbox"
 									bind:checked={formData.autoHibernate}
-									class="h-4 w-4 rounded-none accent-[#0f62fe]"
+									class="h-4 w-4 rounded-none accent-primary"
 								/>
 								<div>
-									<span class="block text-xs font-medium text-[#f4f4f4]">Freeze on Idle</span>
-									<span class="block font-sans text-xs text-[#8d8d8d]"
+									<span class="block text-xs font-medium text-foreground">Freeze on Idle</span>
+									<span class="block font-sans text-xs text-muted-foreground"
 										>Pause container when empty</span
 									>
 								</div>
@@ -1464,16 +1470,16 @@ one at https://mozilla.org/MPL/2.0/.
 
 							<!-- Deep Sleep on Idle -->
 							<label
-								class="flex cursor-pointer items-center gap-3 rounded-none border border-[#393939] bg-[#161616] p-3 select-none hover:bg-[#262626]"
+								class="flex cursor-pointer items-center gap-3 rounded-none border border-border bg-background p-3 select-none hover:bg-card"
 							>
 								<input
 									type="checkbox"
 									bind:checked={formData.autoDeepSleep}
-									class="h-4 w-4 rounded-none accent-[#0f62fe]"
+									class="h-4 w-4 rounded-none accent-primary"
 								/>
 								<div>
-									<span class="block text-xs font-medium text-[#f4f4f4]">Deep Sleep on Idle</span>
-									<span class="block font-sans text-xs text-[#8d8d8d]"
+									<span class="block text-xs font-medium text-foreground">Deep Sleep on Idle</span>
+									<span class="block font-sans text-xs text-muted-foreground"
 										>Stop container when empty</span
 									>
 								</div>
@@ -1482,7 +1488,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					<!-- Docker Overrides -->
-					<div class="border-t border-[#393939] pt-2">
+					<div class="border-t border-border pt-2">
 						<DockerOverridesEditor
 							bind:overrides={formData.dockerOverrides}
 							disabled={loading}
@@ -1493,8 +1499,8 @@ one at https://mozilla.org/MPL/2.0/.
 			{:else if currentStep === 4}
 				<div class="space-y-5">
 					<div>
-						<h2 class="text-lg font-light text-[#f4f4f4]">Step 5: Datapacks (Optional)</h2>
-						<p class="mt-1 text-xs text-[#a8a8a8]">
+						<h2 class="text-lg font-light text-foreground">Step 5: Datapacks (Optional)</h2>
+						<p class="mt-1 text-xs text-muted-foreground">
 							Search and select datapacks to install into the world after the server is created.
 							Datapacks run on Vanilla servers with no mod loader — skip this step and add them
 							later from the server's Datapacks tab if you prefer.
@@ -1502,24 +1508,24 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					{#if selectedDatapacks.length > 0}
-						<div class="border border-[#393939] bg-[#262626]">
+						<div class="border border-border bg-card">
 							<div
-								class="border-b border-[#393939] px-4 py-2.5 text-xs font-semibold text-[#f4f4f4] uppercase"
+								class="border-b border-border px-4 py-2.5 text-xs font-semibold text-foreground uppercase"
 							>
 								Selected for install ({selectedDatapacks.length})
 							</div>
-							<ul class="divide-y divide-[#393939]">
+							<ul class="divide-y divide-border">
 								{#each selectedDatapacks as dp (dp.id)}
-									<li class="flex items-center justify-between px-4 py-2.5 text-sm text-[#f4f4f4]">
+									<li class="flex items-center justify-between px-4 py-2.5 text-sm text-foreground">
 										<span class="flex items-center gap-2">
-											<Package class="h-4 w-4 text-[#8d8d8d]" />
+											<Package class="h-4 w-4 text-muted-foreground" />
 											{dp.name}
 										</span>
 										<button
 											type="button"
 											onclick={() => removeDatapack(dp.id)}
 											aria-label={`Remove datapack ${dp.name}`}
-											class="flex h-8 w-8 cursor-pointer items-center justify-center text-[#8d8d8d] transition-colors hover:bg-[#353535] hover:text-[#ff8389]"
+											class="flex h-8 w-8 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-text"
 										>
 											<X class="h-4 w-4" />
 										</button>
@@ -1540,8 +1546,8 @@ one at https://mozilla.org/MPL/2.0/.
 								aria-pressed={added}
 								onclick={() => toggleDatapack(d.id, d.name, d.indexer)}
 								class="focus-ring flex h-9 cursor-pointer items-center gap-1.5 rounded-none px-3 font-sans text-xs font-medium transition-colors {added
-									? 'bg-[#393939] text-[#c6c6c6] hover:bg-[#525252]'
-									: 'bg-[#0f62fe] text-white hover:bg-[#0353e9]'}"
+									? 'bg-secondary text-muted-foreground hover:bg-secondary'
+									: 'bg-primary text-primary-foreground hover:bg-[var(--button-primary-hover)]'}"
 							>
 								{#if added}<Check class="h-3.5 w-3.5" /> Added{:else}<Plus class="h-3.5 w-3.5" /> Add{/if}
 							</button>
@@ -1551,7 +1557,7 @@ one at https://mozilla.org/MPL/2.0/.
 			{/if}
 
 			<!-- Carbon Wizard Navigation Bar -->
-			<div class="flex items-center justify-between gap-3 border-t border-[#393939] pt-4">
+			<div class="flex items-center justify-between gap-3 border-t border-border pt-4">
 				<CarbonButton
 					href={resolve('/servers')}
 					kind="tertiary"
@@ -1615,10 +1621,10 @@ one at https://mozilla.org/MPL/2.0/.
 >
 	<div class="max-h-[60vh] space-y-3 overflow-y-auto">
 		{#if favoriteModpacks.length === 0}
-			<div class="rounded-none border border-[#393939] bg-[#262626] p-8 text-center">
-				<Package class="mx-auto mb-2 h-8 w-8 text-[#8d8d8d]" />
-				<p class="text-sm font-semibold text-[#f4f4f4]">No favorite modpacks yet</p>
-				<p class="mt-1 text-xs text-[#a8a8a8]">
+			<div class="rounded-none border border-border bg-card p-8 text-center">
+				<Package class="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+				<p class="text-sm font-semibold text-foreground">No favorite modpacks yet</p>
+				<p class="mt-1 text-xs text-muted-foreground">
 					Visit the Modpacks directory to search and favorite packs to use as presets.
 				</p>
 			</div>
@@ -1627,24 +1633,24 @@ one at https://mozilla.org/MPL/2.0/.
 				<button
 					type="button"
 					onclick={() => selectModpack(modpack)}
-					class="flex w-full cursor-pointer items-start gap-3 rounded-none border border-[#393939] bg-[#262626] p-3.5 text-left transition-colors hover:bg-[#353535]"
+					class="flex w-full cursor-pointer items-start gap-3 rounded-none border border-border bg-card p-3.5 text-left transition-colors hover:bg-accent"
 				>
 					{#if modpack.logoUrl}
 						<img
 							src={modpack.logoUrl}
 							alt={modpack.name}
-							class="h-12 w-12 shrink-0 rounded-none border border-[#393939] object-cover"
+							class="h-12 w-12 shrink-0 rounded-none border border-border object-cover"
 						/>
 					{/if}
 					<div class="min-w-0 flex-1">
 						<div class="flex items-center gap-2">
-							<h4 class="text-sm font-semibold text-[#f4f4f4]">{modpack.name}</h4>
+							<h4 class="text-sm font-semibold text-foreground">{modpack.name}</h4>
 							<CarbonTag type="blue" size="sm">{modpack.indexer}</CarbonTag>
 						</div>
-						<p class="mt-1 line-clamp-2 text-xs text-[#a8a8a8]">
+						<p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
 							{modpack.summary}
 						</p>
-						<div class="mt-2 flex items-center gap-2 font-mono text-xs text-[#78a9ff]">
+						<div class="mt-2 flex items-center gap-2 font-mono text-xs text-accent-text">
 							{#if parseJsonArray(modpack.gameVersions).length > 0}
 								<span>MC {parseJsonArray(modpack.gameVersions)[0]}</span>
 							{/if}

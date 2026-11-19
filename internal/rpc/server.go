@@ -20,6 +20,7 @@ import (
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect"
 	"github.com/athNdev/carbon-panel/internal/auth"
+	"github.com/athNdev/carbon-panel/internal/bluemapdiscovery"
 	"github.com/athNdev/carbon-panel/internal/command"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
@@ -75,6 +76,10 @@ type Server struct {
 	// modBrowseManager is the single shared operation used by both the
 	// generated ModBrowseService and the legacy /mods/* JSON adapter.
 	modBrowseManager *handlers.ModOnlineManager
+	// stagedConfigOps and packwizOps are the single shared operations used by
+	// both the generated services and the legacy JSON adapters.
+	stagedConfigOps *handlers.StagedConfigOperations
+	packwizOps      *handlers.PackwizOperations
 
 	// startedAt is the server construction time, surfaced by /healthz and
 	// /readyz as an uptime.
@@ -92,6 +97,11 @@ type Server struct {
 	// WebSocket reader; it is stopped with the controller.
 	playerService *services.PlayerService
 
+	// fileService owns OSS-387 controller stream sessions, their bounded
+	// contexts/storage handles and the TTL reaper. Normal controller shutdown
+	// must call Stop so none of them outlive the server.
+	fileService *services.FileService
+
 	// worldViewProxy is the authenticated same-origin renderer proxy. It is
 	// created in registerServices and mounted before the frontend catch-all
 	// in setupHandler.
@@ -100,6 +110,10 @@ type Server struct {
 	// serverService backs SetAdmissionCoordinator. It is created in
 	// registerServices, so it may be nil on a server that never registered.
 	serverService *services.ServerService
+	// configService and proxyService also start containers (recreation) and
+	// receive the shared gate in SetAdmissionCoordinator (OSS-405).
+	configService *services.ConfigService
+	proxyService  *services.ProxyService
 }
 
 // Creates new Connect RPC server
@@ -218,6 +232,9 @@ func NewServer(
 		startedAt:        time.Now(),
 	}
 	s.modBrowseManager = handlers.NewModOnlineManager(s.store, s.log, s.authManager, s.enforcer, handlers.ModOnlineOptions{StorageResolver: s.storageResolver})
+	s.stagedConfigOps = handlers.NewStagedConfigOperations(s.store)
+	packwizDir := filepath.Join(cfg.Storage.DataDir, "packwiz")
+	s.packwizOps = handlers.NewPackwizOperations(packwiz.NewManager(packwizDir, log))
 
 	s.setupHandler()
 	return s
@@ -253,11 +270,13 @@ func (s *Server) setupHandler() {
 		carbonpanelv1connect.ModServiceName,
 		carbonpanelv1connect.ModBrowseServiceName,
 		carbonpanelv1connect.ModpackServiceName,
+		carbonpanelv1connect.PackwizServiceName,
 		carbonpanelv1connect.ModuleServiceName,
 		carbonpanelv1connect.NodeServiceName,
 		carbonpanelv1connect.ProxyServiceName,
 		carbonpanelv1connect.RoleServiceName,
 		carbonpanelv1connect.ServerServiceName,
+		carbonpanelv1connect.StagedConfigServiceName,
 		carbonpanelv1connect.SupportServiceName,
 		carbonpanelv1connect.TaskServiceName,
 		carbonpanelv1connect.UploadServiceName,
@@ -307,15 +326,14 @@ func (s *Server) setupHandler() {
 	// ModBrowseService and is retained for the ADR 0012 deprecation window.
 	mux.Handle("/api/v1/servers/", s.modBrowseManager)
 
-	// Packwiz Modpack Studio and Server Deployment Engine (MINE-30, MINE-31)
-	packwizDir := filepath.Join(s.config.Storage.DataDir, "packwiz")
-	packwizManager := packwiz.NewManager(packwizDir, s.log)
-	packwizHandler := handlers.NewPackwizHandler(packwizManager, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config)
+	// Packwiz Modpack Studio and Server Deployment Engine (MINE-30, MINE-31).
+	// The compatibility adapter and generated PackwizService share one operation.
+	packwizHandler := handlers.NewPackwizHandlerWithOperations(s.packwizOps, s.store, s.uploadManager, s.log, s.authManager, s.enforcer, s.config)
 	packwizHandler.SetStorageResolver(s.storageResolver)
 	mux.Handle("/api/v1/packwiz/", packwizHandler)
 
 	// Scheduled/staged config rollout for instances (staged diffs applied on restart or cron)
-	mux.Handle("/api/v1/staged-config/", handlers.NewStagedConfigHandler(s.store, s.log, s.authManager, s.enforcer))
+	mux.Handle("/api/v1/staged-config/", handlers.NewStagedConfigHandlerWithOperations(s.stagedConfigOps, s.log, s.authManager, s.enforcer))
 
 	// Prometheus OpenMetrics snapshots (MINE-144, PERF-5, SCH-6)
 	metricsHandler := handlers.NewMetricsHandler(s.store, s.metricsCollector, s.authManager, s.enforcer, s.log)
@@ -348,6 +366,12 @@ func (s *Server) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) 
 	if s.serverService != nil {
 		s.serverService.SetAdmissionCoordinator(c)
 	}
+	if s.configService != nil {
+		s.configService.SetAdmissionCoordinator(c)
+	}
+	if s.proxyService != nil {
+		s.proxyService.SetAdmissionCoordinator(c)
+	}
 }
 
 // Registers all Connect RPC service handlers
@@ -356,20 +380,26 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
 	authService.SetTrustProxy(s.config != nil && s.config.Server.TrustProxy)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.clientPool, s.log)
+	s.configService = configService
 	configService.SetStorageResolver(s.storageResolver)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	fileService.SetStorageResolver(s.storageResolver)
+	fileService.SetAllowPrivateArchiveEgress(s.config != nil && s.config.Security.AllowPrivateArchiveEgress)
+	s.fileService = fileService
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
 	modService.SetStorageResolver(s.storageResolver)
 	// The generated RPC and the legacy JSON adapter share one operation
 	// instance so provider, credential and audit policy cannot diverge.
 	modBrowseService := services.NewModBrowseService(s.store, s.modBrowseManager)
+	stagedConfigService := services.NewStagedConfigService(s.store, s.stagedConfigOps, s.enforcer)
+	packwizService := services.NewPackwizService(s.packwizOps)
 	modpackService := services.NewModpackService(s.store, s.config, s.uploadManager, s.log)
 	datapackService := services.NewDatapackService(s.store, s.config, s.uploadManager, s.log)
 	datapackService.SetStorageResolver(s.storageResolver)
 	nodeService := services.NewNodeService(s.store, s.clientPool, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.clientPool, s.proxyManager, s.config, s.logStreamer, s.log)
+	s.proxyService = proxyService
 	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log, s.clientPool, s.placementEngine, s.enforcer)
 	s.serverService = serverService
 	if s.admission != nil {
@@ -407,6 +437,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
+	moduleService.SetEnforcer(s.enforcer)
 	moduleService.SetStorageResolver(s.storageResolver)
 	uploadService := services.NewUploadService(s.uploadManager, s.config, s.log)
 	// Player management uses the injected node resolver for read-only deep data
@@ -418,10 +449,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	)
 	s.playerService = playerService
 
-	// World viewing is observation-only. The renderer topology comes from
-	// explicit operator configuration: with no node-local endpoint every world
-	// reports ABSENT instead of probing a guessed port or falling back to a
-	// controller-local renderer.
+	// World viewing is observation-only. Explicit operator endpoints ALWAYS
+	// take precedence. When none is configured, discovery of an installed
+	// builtin-bluemap module uses the private owned network and node-scoped
+	// container metadata (never port probing or a controller-local fallback).
+	// The same resolver backs the same-origin proxy, so a discovered renderer
+	// can only be reached through the authenticated scoped proxy.
 	worldViewConfig := worldview.Config{AllowedHosts: s.config.WorldView.AllowedHosts}
 	for _, ep := range s.config.WorldView.Endpoints {
 		worldViewConfig.Endpoints = append(worldViewConfig.Endpoints, worldview.Endpoint{
@@ -435,9 +468,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 			PlayerFeed: ep.PlayerFeed,
 		})
 	}
-	worldViewResolver := worldview.NewResolver(
+	bluemapDiscovery := bluemapdiscovery.New(s.store, s.clientPool, s.storageResolver,
+		s.config.Docker.NetworkName, s.log)
+	worldViewResolver := worldview.NewResolverWithDiscovery(
 		worldViewConfig,
 		docker.NewLocator(s.clientPool, s.docker, s.store),
+		bluemapDiscovery,
 	)
 	worldViewService := worldview.NewService(worldview.ServiceDeps{
 		Store: s.store, Authorizer: s.enforcer, Resolver: worldViewResolver,
@@ -475,6 +511,12 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 
 	modBrowsePath, modBrowseHandler := carbonpanelv1connect.NewModBrowseServiceHandler(modBrowseService, opts...)
 	mux.Handle(modBrowsePath, modBrowseHandler)
+
+	stagedConfigPath, stagedConfigHandler := carbonpanelv1connect.NewStagedConfigServiceHandler(stagedConfigService, opts...)
+	mux.Handle(stagedConfigPath, stagedConfigHandler)
+
+	packwizPath, packwizHandler := carbonpanelv1connect.NewPackwizServiceHandler(packwizService, opts...)
+	mux.Handle(packwizPath, packwizHandler)
 
 	modpackPath, modpackHandler := carbonpanelv1connect.NewModpackServiceHandler(modpackService, opts...)
 	mux.Handle(modpackPath, modpackHandler)
@@ -572,6 +614,11 @@ func (s *Server) Shutdown() {
 	if s.playerService != nil {
 		s.playerService.Stop()
 	}
+	// OSS-387: release every controller-owned stream session, cancel their
+	// bounded contexts and stop the TTL reaper on normal shutdown.
+	if s.fileService != nil {
+		s.fileService.Stop()
+	}
 }
 
 // pollingProcedures lists endpoints that are called frequently and should be excluded from logging.
@@ -632,7 +679,7 @@ func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 
 		file, err := fs.Open(path)
 		if err == nil {
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			stat, _ := file.Stat()
 			setFrontendCacheHeaders(w, path)
 			http.ServeContent(w, r, path, stat.ModTime(), file)
@@ -645,7 +692,7 @@ func (s *Server) createFrontendHandler(fs http.FileSystem) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		defer indexFile.Close()
+		defer func() { _ = indexFile.Close() }()
 
 		stat, _ := indexFile.Stat()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

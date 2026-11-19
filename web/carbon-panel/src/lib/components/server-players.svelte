@@ -8,8 +8,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { CarbonButton, CarbonErrorState, CarbonTag } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import PlayerRoster from '$lib/features/players/PlayerRoster.svelte';
+	import AddAllowlistEntry from '$lib/features/players/AddAllowlistEntry.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
@@ -53,7 +54,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</p>
 	{/snippet}
 
-	<div class="min-h-0 flex-1 overflow-auto p-4">
+	<div class="min-h-0 flex-1 space-y-4 overflow-auto p-4">
+		{#if mounted}
+			<AddAllowlistEntry serverId={server.id} onDone={loadPlayers} />
+		{/if}
 		{#if loadError}
 			<CarbonErrorState title="Could not load players" message={loadError} onretry={loadPlayers} />
 		{:else if mounted}

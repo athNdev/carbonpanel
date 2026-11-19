@@ -11,6 +11,8 @@ code_refs:
 sources:
   - title: ADR 0015 - first-class world viewing through an authenticated renderer proxy
     resource: ../../docs/adr/0015-world-viewing-renderer-proxy.md
+  - title: ADR 0040 - installed BlueMap discovery, consent and in-context install
+    resource: ../../docs/adr/0040-bluemap-installed-module-discovery.md
 ---
 
 # Rule
@@ -39,6 +41,38 @@ fallback and no cross-origin iframe.
 - Freshness is an `Observation`: timestamp, source and confidence. A missing
   renderer is onboarding, a stopped renderer is stale, not blank or "live".
 - Container privileges do not change; renderer world mounts stay read-only.
+- Explicit `world_view.endpoints` always win. An installed `builtin-bluemap`
+  module is discovered only on a local node through its exact server/node/module
+  identity, verified container metadata (labels, pinned image, owned-network IP
+  and membership, effective read-only level bind) and the confined node data
+  accessor. The renderer is dialed at the inspected IP, not a Docker DNS alias
+  (host/native modes cannot resolve container names); no port probing,
+  host-port binding, public listener or cross-server fallback. No HTTP is sent
+  when a runtime gate fails.
+- A listening web server is not a configured or rendered world. READY requires
+  the exact target world in the module config, a rendered scoped tile and the
+  renderer's own map list (`/settings.json`); missing facts report setup,
+  rendering, stopped, unreachable or error with a next action.
+- In-context BlueMap install uses existing ModuleService authorization. It is a
+  server-side singleton per server guarded by a controller-PROCESS mutex held
+  through persistence: it covers concurrent RPCs/tabs/operators/retries on ONE
+  controller process and makes no cross-controller or distributed guarantee.
+  Consent is explicit but its actor/time come from the authenticated principal
+  and server clock. An existing module is adopted read-only. `startImmediately`
+  needs `modules/start` as well as `modules/create`; both are checked before any
+  world read or config write, and refusals leave zero config side effects. The
+  managed signal isolates this workflow so generic Modules-page creation still
+  works without it.
+- The managed renderer variant is constructed on the backend from actual world
+  facts read via the confined node accessor: private container-only web port
+  (no host allocation/publication), read-only `/app/world` bind of the canonical
+  level folder, pinned image/command, and deterministic per-dimension map config
+  including consent. Client port/volume/command/init/URL overrides are discarded.
+  Config is staged then committed after the module row persists; commit failure
+  deletes the row under the still-held lock with a fresh bounded cleanup context.
+  No-clobber promotion preserves a target created between staging and commit.
+  The private web port uses
+  a `-1` host-port sentinel skipped by every allocation/publish/reconcile path.
 
 # Read next
 

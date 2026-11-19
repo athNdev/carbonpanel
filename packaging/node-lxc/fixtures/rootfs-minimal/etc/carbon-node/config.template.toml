@@ -1,0 +1,30 @@
+# Captive daemon template for an UNPRIVILEGED LXC guest.
+# No host global configuration and no secrets are stored in this template.
+# First-boot identity and the enrollment secret are created at boot on the
+# persistent volume, never baked into this rootfs.
+
+[daemon]
+socket = "/run/carbon-node/docker.sock"        # private socket, mode 0660
+data_root = "/var/lib/carbon-node/docker"
+exec_root = "/run/carbon-node/docker"
+containerd_namespace = "carbonpanel-node"
+config_file = "/etc/carbon-node/daemon.json"
+host_tcp_listener = false                       # plain 2375 is refused
+public_api = false
+
+[network]
+bridge_cidr = "172.31.0.1/24"
+default_address_pool = "172.31.0.0/16"
+userland_proxy = false
+privileged_ports = false
+
+[security]
+no_new_privileges = true
+read_only_rootfs = true
+allow_privileged_containers = false
+host_socket_sharing = false
+
+[persistence]
+data_volume = "/var/lib/carbon-node/state"
+secrets_directory = "/var/lib/carbon-node/state/secrets"
+identity_directory = "/var/lib/carbon-node/state/identity"

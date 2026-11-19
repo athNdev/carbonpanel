@@ -1,0 +1,428 @@
+# SPDX-License-Identifier: MPL-2.0
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
+# MCP artifact distribution. There is deliberately NO push, pull_request,
+# schedule or workflow_run trigger: an ordinary main merge can never publish.
+# Every write is an explicit dispatch from the trusted default branch, pinned
+# to an exact commit with successful main CI and an asserted checkout SHA.
+# Operator inputs never authorize a write by themselves. GHCR and the MCP
+# Registry are two separate opt-ins; registry publication additionally requires
+# an anonymous pull, a real stdio smoke and a unique immutable digest.
+
+name: MCP Artifact Distribution
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Pinned MCP artifact version (SemVer, never latest/main/edge)'
+        required: true
+        type: string
+      publish:
+        description: 'EXPLICIT GHCR OPT-IN: off builds and verifies only'
+        required: false
+        default: false
+        type: boolean
+      publish_registry:
+        description: 'EXPLICIT MCP REGISTRY OPT-IN: requires publish=true and all evidence'
+        required: false
+        default: false
+        type: boolean
+      expected_digest:
+        description: 'Optional verified sha256 digest for identical immutable reuse; blank publishes new'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mcp-dist-${{ inputs.version || github.run_id }}
+  cancel-in-progress: false
+
+# Approved static ownership values. The validator enforces the same constants;
+# the Dockerfile label and server.json name must equal this value on every
+# platform image. Never derive these from an operator input.
+env:
+  GHCR_IMAGE: ghcr.io/athndev/carbonpanel-mcp
+  MCP_SERVER_NAME: io.github.athNdev/carbon-panel
+  EXPECTED_REPO_ID: '1369132627'
+  MCP_PUBLISHER_VERSION: v1.8.1
+
+jobs:
+  verify:
+    name: Verify trusted pin, manifest and multi-arch build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Resolve the trusted pinned commit
+        id: pinned
+        env:
+          PINNED_REF: ${{ github.ref }}
+          PINNED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$PINNED_REF" = 'refs/heads/main' || { echo "::error::dispatch must be on refs/heads/main" >&2; exit 1; }
+          case "$PINNED_SHA" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
+            *) echo "::error::invalid pinned commit $PINNED_SHA" >&2; exit 1 ;;
+          esac
+          echo "sha=$PINNED_SHA" >> "$GITHUB_OUTPUT"
+      - name: Checkout the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pinned.outputs.sha }}
+          fetch-depth: 0
+      - name: Assert checked-out HEAD equals the pinned commit
+        env:
+          EXPECTED_SHA: ${{ steps.pinned.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED_SHA" ]; then
+            echo "::error::HEAD $actual differs from pinned $EXPECTED_SHA" >&2
+            exit 1
+          fi
+      - name: Resolve reproducible build date from the pinned commit
+        id: meta
+        run: echo "build_date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify exact main CI for the pinned commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT"
+      - name: Refuse a write when exact main CI is not proven
+        env:
+          CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          PINNED_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          test "$PINNED_REF" = 'refs/heads/main'
+          test "$CI_VERIFIED" = 'true' || { echo "::error::exact main CI not verified" >&2; exit 1; }
+      - name: Assert MCP generated artifacts are reproducible
+        run: bash scripts/mcp-generated-artifacts-check.sh
+      - name: STRICT full-coverage publication gate (must stay green to publish)
+        id: fullcoverage
+        continue-on-error: true
+        run: bash scripts/mcp-full-coverage-gate.sh
+      - name: Block publication while the full-coverage gate is RED
+        env:
+          FULL_COVERAGE: ${{ steps.fullcoverage.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$FULL_COVERAGE" != 'success' ]; then
+            echo "::error::STRICT MCP full-coverage gate is RED; GHCR and MCP registry writes are BLOCKED" >&2
+            exit 1
+          fi
+      - name: Validate manifest structure, static ownership and version pinning
+        run: |
+          python3 scripts/validate_mcp_server_json.py --file docker/mcp.server.json
+          python3 -m unittest scripts.test_validate_mcp_server_json scripts.test_mcp_onboarding_fixture scripts.test_mcp_stdio_smoke scripts.test_mcp_ghcr_preflight
+      - name: Assert pinned version is not a moving alias
+        env:
+          MCP_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          case "$MCP_VERSION" in
+            ''|latest|main|edge|dev|master|*' '*|*'/'*|*'@'*) echo "refusing moving version: $MCP_VERSION" >&2; exit 1 ;;
+          esac
+          printf '%s' "$MCP_VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build both platforms locally (no registry write)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile.mcp
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            MCP_ARTIFACT_VERSION=${{ inputs.version }}
+            MCP_ARTIFACT_COMMIT=${{ steps.pinned.outputs.sha }}
+            MCP_ARTIFACT_BUILDDATE=${{ steps.meta.outputs.build_date }}
+
+  publish-image:
+    name: Publish immutable GHCR image after trusted-main gate
+    needs: verify
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    outputs:
+      digest: ${{ steps.resolved.outputs.digest }}
+      action: ${{ steps.preflight.outputs.action }}
+      identity: ${{ steps.identity.outputs.verified }}
+      anonymous_pull: ${{ steps.anon.outputs.ok }}
+      stdio_smoke: ${{ steps.stdio.outputs.ok }}
+    steps:
+      - name: Resolve the trusted pinned commit
+        id: pinned
+        env:
+          PINNED_REF: ${{ github.ref }}
+          PINNED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$PINNED_REF" = 'refs/heads/main'
+          echo "sha=$PINNED_SHA" >> "$GITHUB_OUTPUT"
+      - name: Checkout the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.pinned.outputs.sha }}
+          fetch-depth: 0
+      - name: Assert checked-out HEAD equals the pinned commit
+        env:
+          EXPECTED_SHA: ${{ steps.pinned.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$EXPECTED_SHA" || { echo "::error::HEAD mismatch before push: $actual" >&2; exit 1; }
+      - name: Resolve reproducible build date from the pinned commit
+        id: meta
+        run: echo "build_date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify exact main CI for the pinned commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT"
+      - name: Decide publication from the shared trusted-main gate
+        id: gate
+        env:
+          GATE_EVENT: ${{ github.event_name }}
+          GATE_OPT_IN: ${{ inputs.publish }}
+          GATE_REF: ${{ github.ref }}
+          GATE_CI: ${{ steps.ci.outputs.verified }}
+        run: python3 scripts/release.py developer-channel-gate --event "$GATE_EVENT" --opt-in "$GATE_OPT_IN" --ref "$GATE_REF" --ci-verified "$GATE_CI"
+      - name: Fail closed unless the trusted gate allowed publication
+        env:
+          ALLOWED: ${{ steps.gate.outputs.publish }}
+        run: |
+          set -euo pipefail
+          test "$ALLOWED" = 'true' || { echo "::error::trusted-main publication gate refused" >&2; exit 1; }
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Strict immutable-tag preflight (shared release.py observation)
+        id: preflight
+        env:
+          MCP_VERSION: ${{ inputs.version }}
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/mcp_ghcr_preflight.py --image "$GHCR_IMAGE"
+          --version "$MCP_VERSION" --expected-digest "$EXPECTED_DIGEST"
+      - name: Sign in to GHCR only for a new push
+        if: steps.preflight.outputs.action == 'publish'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Push the unique immutable version tag only
+        id: push
+        if: steps.preflight.outputs.action == 'publish'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile.mcp
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.GHCR_IMAGE }}:${{ inputs.version }}
+          build-args: |
+            MCP_ARTIFACT_VERSION=${{ inputs.version }}
+            MCP_ARTIFACT_COMMIT=${{ steps.pinned.outputs.sha }}
+            MCP_ARTIFACT_BUILDDATE=${{ steps.meta.outputs.build_date }}
+      - name: Resolve the verified digest
+        id: resolved
+        env:
+          PUSH_DIGEST: ${{ steps.push.outputs.digest }}
+          RESUME_DIGEST: ${{ steps.preflight.outputs.digest }}
+        run: |
+          set -euo pipefail
+          digest="${PUSH_DIGEST:-$RESUME_DIGEST}"
+          case "$digest" in sha256:*) ;; *) echo "::error::missing verified digest" >&2; exit 1 ;; esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Verify pinned revision/version/labels on BOTH platform configs by digest
+        id: identity
+        env:
+          IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+          MCP_VERSION: ${{ inputs.version }}
+        run: >-
+          python3 scripts/mcp_ghcr_identity.py --image "$GHCR_IMAGE"
+          --digest "$IMAGE_DIGEST" --revision "$PINNED_COMMIT"
+          --version "$MCP_VERSION" --expected-name "$MCP_SERVER_NAME"
+
+      - name: Verify manifest list, both platforms and per-platform ownership labels by digest
+        env:
+          IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
+        run: |
+          set -euo pipefail
+          ref="${GHCR_IMAGE}@${IMAGE_DIGEST}"
+          docker buildx imagetools inspect "$ref"
+          raw=$(docker buildx imagetools inspect --raw "$ref")
+          count=$(printf '%s' "$raw" | jq -r '.manifests | length')
+          test "$count" -ge 2 || { echo "::error::manifest list lacks multiple platforms" >&2; exit 1; }
+          for platform in amd64 arm64; do
+            child=$(printf '%s' "$raw" | jq -r --arg p "$platform" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $p) | .digest' | head -n 1)
+            test -n "$child" || { echo "::error::missing linux/$platform manifest" >&2; exit 1; }
+            docker pull -q --platform "linux/$platform" "${GHCR_IMAGE}@${child}"
+            label=$(docker inspect --format '{{index .Config.Labels "io.modelcontextprotocol.server.name"}}' "${GHCR_IMAGE}@${child}")
+            test "$label" = "$MCP_SERVER_NAME" || { echo "::error::linux/$platform label mismatch: $label" >&2; exit 1; }
+          done
+
+      - name: Verify public package visibility with an anonymous pull
+        id: anon
+        env:
+          IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
+        run: |
+          set -euo pipefail
+          anon="$RUNNER_TEMP/mcp-anon-docker"
+          mkdir -p "$anon"
+          docker --config "$anon" pull -q "${GHCR_IMAGE}@${IMAGE_DIGEST}"
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+      - name: Verify the packaged container on an isolated fixture network
+        id: stdio
+        env:
+          IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
+        run: |
+          set -euo pipefail
+          anon="$RUNNER_TEMP/mcp-anon-docker"
+          network="mcp-smoke-${GITHUB_RUN_ID}"
+          fixture="mcp-fixture-${GITHUB_RUN_ID}"
+          mock_image="mcp-smoke-fixture:${GITHUB_RUN_ID}"
+          trap 'docker rm -f "$fixture" >/dev/null 2>&1 || true; docker network rm "$network" >/dev/null 2>&1 || true' EXIT
+          docker network create "$network"
+          docker build -f docker/Dockerfile.mcp-mock -t "$mock_image" .
+          docker run -d --name "$fixture" --network "$network" \
+            --network-alias panel-fixture "$mock_image"
+          ready=0
+          for i in $(seq 1 30); do
+            if docker exec "$fixture" python -c \
+              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2)" \
+              >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = '1' || { echo "::error::fixture never became ready" >&2; exit 1; }
+          python3 scripts/mcp_stdio_smoke.py --expect-tool list_servers \
+            --call-tool list_servers --url http://panel-fixture:8080 \
+            --evidence mcp-stdio-smoke.json -- \
+            docker --config "$anon" run -i --rm --network "$network" \
+            -e CARBONPANEL_URL -e CARBONPANEL_TOKEN -e CARBONPANEL_API_TOKEN \
+            -e CARBONPANEL_MCP_TRANSPORT \
+            "${GHCR_IMAGE}@${IMAGE_DIGEST}"
+          docker logs "$fixture" > mcp-container-fixture.log 2>&1
+          grep -q 'GetAuthStatus' mcp-container-fixture.log
+          grep -q 'GetCurrentUser' mcp-container-fixture.log
+          grep -q 'ListServers' mcp-container-fixture.log
+          printf '{"network":"%s","fixture_container":"%s","image":"%s","fixture_log":"mcp-container-fixture.log","proof":"packaged container reached the scoped read-only fixture by service DNS on an isolated network"}\n' \
+            "$network" "$fixture" "${GHCR_IMAGE}@${IMAGE_DIGEST}" > mcp-container-fixture.json
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcp-stdio-smoke
+          path: |
+            mcp-stdio-smoke.json
+            mcp-container-fixture.log
+            mcp-container-fixture.json
+          if-no-files-found: error
+
+  publish-registry:
+    name: Publish verified listing to the official MCP Registry
+    needs: publish-image
+    if: ${{ inputs.publish_registry && inputs.publish }}
+    runs-on: ubuntu-24.04
+    environment: mcp-registry-publish
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Require image evidence before any registry write
+        env:
+          ANON: ${{ needs.publish-image.outputs.anonymous_pull }}
+          SMOKE: ${{ needs.publish-image.outputs.stdio_smoke }}
+          IDENTITY: ${{ needs.publish-image.outputs.identity }}
+          DIGEST: ${{ needs.publish-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test "$ANON" = 'true' && test "$SMOKE" = 'true'
+          test "$IDENTITY" = 'true' || { echo "::error::pinned identity unverified" >&2; exit 1; }
+          case "$DIGEST" in sha256:*) ;; *) echo "::error::no verified image digest" >&2; exit 1 ;; esac
+      - name: Checkout the pinned commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Assert checked-out HEAD equals the verified commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$EXPECTED_SHA" || { echo "::error::HEAD mismatch before registry write: $actual" >&2; exit 1; }
+      - name: Verify exact main CI again in the write job
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_COMMIT: ${{ github.sha }}
+        run: python3 scripts/release.py verify-main-ci --commit "$CI_COMMIT"
+      - name: Require exact main CI before any registry write
+        env:
+          CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+        run: |
+          set -euo pipefail
+          test "$CI_VERIFIED" = 'true' || { echo "::error::exact main CI not verified" >&2; exit 1; }
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Download and cosign-verify pinned mcp-publisher v1.8.1
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl --fail --location --silent --show-error --output "$archive" "$base/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          chmod +x mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+      - name: Inject the verified digest, validate and publish the listing
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-image.outputs.digest }}
+          MCP_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p .mcp-publish
+          jq --arg v "$MCP_VERSION" --arg d "$IMAGE_DIGEST" \
+            '.version = $v | .packages[0].version = $v |
+             .packages[0].identifier = "ghcr.io/athndev/carbonpanel-mcp:" + $v + "@" + $d' \
+            docker/mcp.server.json > .mcp-publish/server.json
+          python3 scripts/validate_mcp_server_json.py --file .mcp-publish/server.json --require-real-digest
+          cp mcp-publisher .mcp-publish/mcp-publisher
+          (cd .mcp-publish && ./mcp-publisher validate)
+          (cd .mcp-publish && ./mcp-publisher login github-oidc)
+          (cd .mcp-publish && ./mcp-publisher publish)
+      - name: Verify the registry listing itself (not the package push)
+        env:
+          MCP_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          body=$(curl --fail --silent --show-error "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.athNdev%2Fcarbon-panel")
+          printf '%s' "$body" | jq -e --arg n "$MCP_SERVER_NAME" --arg v "$MCP_VERSION" \
+            '[.. | strings | select(. == $n or . == $v)] | length >= 2' > /dev/null
+          printf '%s\n' "$body" > mcp-registry-verification.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcp-registry-verification
+          path: mcp-registry-verification.json
+          if-no-files-found: error

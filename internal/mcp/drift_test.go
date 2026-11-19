@@ -108,11 +108,13 @@ func TestSharedMountListMatchesServerRegistrations(t *testing.T) {
 
 func TestCoverageDriftGate(t *testing.T) {
 	mounted := mountedProcedures(t)
-	if len(MountedServices) != 25 {
-		t.Fatalf("expected 25 mounted services, got %d", len(MountedServices))
+	if len(MountedServices) != 27 {
+		t.Fatalf("expected 27 mounted services, got %d", len(MountedServices))
 	}
-	if len(mounted) != 220 {
-		t.Fatalf("expected 220 mounted RPCs, got %d", len(mounted))
+	// OSS-387 added the three controller-owned bounded-frame transport RPCs
+	// (OpenStream/ReadStreamFrame/CloseStream) to the mounted FileService.
+	if len(mounted) != 235 {
+		t.Fatalf("expected 235 mounted RPCs, got %d", len(mounted))
 	}
 
 	// Catalog is the declared table after exposure overrides are applied.
@@ -210,11 +212,11 @@ func TestCoverageDriftGate(t *testing.T) {
 
 	// Exposed tool declarations must be a subset of the catalog with
 	// consistent class, confirmation and capability qualification.
-	if len(exposedTools) != FirstSliceToolCount {
-		t.Fatalf("expected %d FIRST SLICE tools, got %d", FirstSliceToolCount, len(exposedTools))
+	if len(firstSliceTools) != FirstSliceToolCount {
+		t.Fatalf("expected %d FIRST SLICE tools, got %d", FirstSliceToolCount, len(firstSliceTools))
 	}
-	seen := make(map[string]bool, len(exposedTools))
-	for _, spec := range exposedTools {
+	seen := make(map[string]bool, len(firstSliceTools))
+	for _, spec := range firstSliceTools {
 		if seen[spec.Name] {
 			t.Fatalf("duplicate tool %s", spec.Name)
 		}

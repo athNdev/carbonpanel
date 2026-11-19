@@ -1,0 +1,138 @@
+{
+  "schema": "carbonpanel.node-lxc.provenance/v1",
+  "schema_version": 2,
+  "profile": "artifact",
+  "synthetic": false,
+  "artifact_family": "carbonpanel-node-lxc-rootfs",
+  "purpose": "REAL pinned upstream base-rootfs provenance for the unprivileged LXC/Proxmox template. Every pin is an immutable dated Ubuntu Cloud Images release entry with a verified non-placeholder SHA256 from a GPG-signed SHA256SUMS. Synthetic fixture pins live only in config/provenance.fixture.json.",
+  "published_date": "2026-10-17",
+  "verified_on": "2026-11-19",
+  "digest_status_values": ["verified"],
+  "base": {
+    "name": "ubuntu",
+    "version": "24.04 LTS (Noble Numbat) release 20261017",
+    "release_date": "2026-10-17",
+    "upstream_ref": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/",
+    "digest_status": "verified",
+    "note": "The /releases/noble/release/ symlink is a moving target and is explicitly NOT a pin."
+  },
+  "images": [
+    {
+      "ref": "ubuntu-24.04-amd64-lxc-rootfs",
+      "distro": "ubuntu",
+      "version": "24.04 LTS (Noble Numbat) release 20261017",
+      "release_date": "2026-10-17",
+      "arch": "amd64",
+      "immutable": true,
+      "image_url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64-root.tar.xz",
+      "image_content_length": 227213232,
+      "image_last_modified": "Sat, 17 Oct 2026 20:31:16 GMT",
+      "lxd_metadata_url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64-lxd.tar.xz",
+      "lxd_metadata_sha256": "dcfdfaf5239f2e1630540c091fd38a9f1e6cdabbaff267041a11ad0a5dcb35b2",
+      "checksum_url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/SHA256SUMS",
+      "signature_url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/SHA256SUMS.gpg",
+      "signature_made": "Sun Oct 18 07:33:10 2026 AUSEDT",
+      "signing_key_name": "UEC Image Automatic Signing Key <cdimage@ubuntu.com>",
+      "signing_key_fingerprint": "D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81",
+      "signing_key_source": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xD2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81",
+      "checksum_file_sha256": "0449a33b78dddb301a3ce2b80398984bc3e1f7880e27b86a31e58bdcbd3d3816",
+      "signature_file_sha256": "68aae716a548e466e58afddd8b767c54c791f40f1d20d1d12e27c471edb535e5",
+      "expected_sha256": "ec6972af8ea2bd05c55299d204e5ae3f91769b84cfaec7395639d236a39f9a03",
+      "digest_status": "verified"
+    },
+    {
+      "ref": "ubuntu-24.04-arm64-lxc-rootfs",
+      "distro": "ubuntu",
+      "version": "24.04 LTS (Noble Numbat) release 20261017",
+      "release_date": "2026-10-17",
+      "arch": "arm64",
+      "immutable": true,
+      "image_url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-arm64-root.tar.xz",
+      "image_content_length": 216215656,
+      "image_last_modified": "Sat, 17 Oct 2026 20:31:28 GMT",
+      "lxd_metadata_url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-arm64-lxd.tar.xz",
+      "lxd_metadata_sha256": "6fe48e77a3fa52d81f3e5a84d3e83b6c96c16f4824bd49def8efe784529963bf",
+      "checksum_url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/SHA256SUMS",
+      "signature_url": "https://cloud-images.ubuntu.com/releases/noble/release-20261017/SHA256SUMS.gpg",
+      "signature_made": "Sun Oct 18 07:33:10 2026 AUSEDT",
+      "signing_key_name": "UEC Image Automatic Signing Key <cdimage@ubuntu.com>",
+      "signing_key_fingerprint": "D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81",
+      "signing_key_source": "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xD2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81",
+      "checksum_file_sha256": "0449a33b78dddb301a3ce2b80398984bc3e1f7880e27b86a31e58bdcbd3d3816",
+      "signature_file_sha256": "68aae716a548e466e58afddd8b767c54c791f40f1d20d1d12e27c471edb535e5",
+      "expected_sha256": "b68ef0444ca56ce4f00ae7e8ccfb0c553ffbc92e4a1b14ed7dd8aa18c6d68652",
+      "digest_status": "verified"
+    }
+  ],
+  "platform_matrix": {
+    "amd64": {
+      "host": "Proxmox VE 8.x / 9.x on x86_64",
+      "guest": "unprivileged Ubuntu 24.04 LXC from the dated root tarball",
+      "nested_runtime": "rootless captive Docker daemon",
+      "minimum_kernel": "5.11",
+      "status": "real upstream pins verified; live import/boot EXTERNALLY BLOCKED on this host"
+    },
+    "arm64": {
+      "host": "Proxmox VE 9.x on aarch64",
+      "guest": "unprivileged Ubuntu 24.04 LXC from the dated root tarball",
+      "nested_runtime": "rootless captive Docker daemon",
+      "minimum_kernel": "5.11",
+      "status": "real upstream pins verified; live import/boot EXTERNALLY BLOCKED on this host"
+    }
+  },
+  "components": [
+    {
+      "type": "application",
+      "name": "carbon-panel-node-agent",
+      "version": "runtime-v0.0.0-not-published",
+      "purl": "pkg:generic/carbonpanel-node-agent@runtime-v0.0.0-not-published",
+      "license": "MIT",
+      "pin_status": "sbom-inventory; no published artifact digest to pin yet"
+    },
+    {
+      "type": "library",
+      "name": "docker-engine",
+      "version": "27.5.1",
+      "purl": "pkg:generic/docker-engine@27.5.1",
+      "license": "Apache-2.0",
+      "pin_status": "sbom-inventory; no published artifact digest to pin yet"
+    },
+    {
+      "type": "library",
+      "name": "runc",
+      "version": "1.2.4",
+      "purl": "pkg:generic/runc@1.2.4",
+      "license": "Apache-2.0",
+      "pin_status": "sbom-inventory; no published artifact digest to pin yet"
+    },
+    {
+      "type": "library",
+      "name": "fuse-overlayfs",
+      "version": "1.13",
+      "purl": "pkg:generic/fuse-overlayfs@1.13",
+      "license": "GPL-3.0-only",
+      "pin_status": "sbom-inventory; no published artifact digest to pin yet"
+    },
+    {
+      "type": "library",
+      "name": "slirp4netns",
+      "version": "1.3.1",
+      "purl": "pkg:generic/slirp4netns@1.3.1",
+      "license": "GPL-2.0-only",
+      "pin_status": "sbom-inventory; no published artifact digest to pin yet"
+    }
+  ],
+  "retrieval_evidence": {
+    "method": "targeted direct HTTPS GET/HEAD against official Canonical hosts (no web search); gpg 2.4.9 local verification",
+    "directory_listing": "https://cloud-images.ubuntu.com/releases/noble/ lists release-20261017/ as the immutable dated release entry; /release/ is the moving symlink and is NOT used as a pin",
+    "checksum_get": "GET checksum_url -> HTTP 200, 7843 bytes, sha256 0449a33b78dddb301a3ce2b80398984bc3e1f7880e27b86a31e58bdcbd3d3816",
+    "signature_get": "GET signature_url -> HTTP 200, 833 bytes, sha256 68aae716a548e466e58afddd8b767c54c791f40f1d20d1d12e27c471edb535e5",
+    "key_get": "GET signing_key_source -> HTTP 200, 3325 bytes, sha256 927138de292fac4d861105a052cf56e9c5921987da385c844d88f34d19b39ab0",
+    "gpg_verify": "gpg --verify SHA256SUMS.gpg SHA256SUMS -> Good signature from UEC Image Automatic Signing Key <cdimage@ubuntu.com>; primary key fingerprint D2EB 4462 6FDD C30B 513D 5BB7 1A5D 6C4C 7DB8 7C81; exit 0",
+    "image_head": "HEAD each image_url -> HTTP 200; amd64 content-length 227213232, arm64 content-length 216215656; full tarball bytes were later downloaded and rehashed against the signed SHA256SUMS (see qualification/SIGNED-ARCHIVE-EVIDENCE.md)",
+    "checksum_lines": "expected_sha256 values were read from the GPG-signed SHA256SUMS for ubuntu-24.04-server-cloudimg-{amd64,arm64}-root.tar.xz and the two -lxd.tar.xz metadata files",
+    "full_details": "packaging/node-lxc/qualification/RETRIEVAL-EVIDENCE.md"
+  },
+  "verification_rule": "In artifact mode, refuse any image whose digest_status is not 'verified', whose expected_sha256 is a placeholder/repeated-character/all-zero value, whose URL is not an immutable dated primary-source URL, or whose signed-checksum/signature/key evidence is missing. A real build must fetch checksum_url, verify its GPG signature against signing_key_fingerprint, and require the downloaded root tarball SHA256 to equal expected_sha256. No silent fallback to the moving /release/ symlink, a daily image, a host image or a fixture.",
+  "fixture_rule": "Offline tests use config/provenance.fixture.json explicitly. Fixture digests are synthetic and must never be used for artifact claims."
+}

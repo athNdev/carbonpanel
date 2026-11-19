@@ -52,7 +52,7 @@ func InitBuiltinTemplates(store *storage.Store) error {
 				{"source": "{{server.data_path}}/modules/geyser", "target": "/data", "read_only": false},
 				{"source": "{{server.data_path}}/plugins", "target": "/java-plugins", "read_only": false, "create_dir": true}
 			]`,
-			Documentation:   "Geyser translates Bedrock packets to Java packets. Default auth is floodgate, so a Bedrock client cannot join as an arbitrary Java name. The entrypoint installs the pinned Floodgate Spigot jar into plugins/ when that directory is mounted, and both sides share plugins/floodgate/key.pem. Offline auth is refused unless GEYSER_ALLOW_OFFLINE_AUTH=1, which is only appropriate when the Java server itself is offline-mode behind Velocity.",
+			Documentation:   "Geyser translates Bedrock packets to Java packets. Default auth is floodgate, so a Bedrock client cannot join as an arbitrary Java name. The entrypoint installs the pinned Floodgate Spigot jar into plugins/ when that directory is mounted, and both sides share plugins/floodgate/key.pem. Offline auth is refused unless GEYSER_ALLOW_OFFLINE_AUTH=1, which is only appropriate when the Java server itself is offline-mode behind Velocity. This module sets BEDROCK_ADDRESS=0.0.0.0 explicitly to listen on all interfaces inside its container so the panel's UDP port proxy can reach it; a standalone Geyser entrypoint without that setting binds loopback. Restrict the published UDP port to trusted networks.",
 			HealthCheckPort: 19132,
 			DefaultMemory:   1024,
 		},
@@ -111,11 +111,14 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			DefaultMemory:   512,
 		},
 		{
-			ID:             "builtin-bluemap",
-			Name:           "BlueMap",
-			Description:    "Interactive 3D map renderer for Minecraft worlds with a web-based viewer. Renders overworld, nether, and end dimensions.",
-			Type:           storage.ModuleTemplateTypeBuiltin,
-			DockerImage:    "ghcr.io/bluemap-minecraft/bluemap:latest",
+			ID:          "builtin-bluemap",
+			Name:        "BlueMap",
+			Description: "Interactive 3D map renderer for Minecraft Java Edition worlds. The same-origin World View proxy is the only browser path; no renderer origin or port is exposed.",
+			Type:        storage.ModuleTemplateTypeBuiltin,
+			// Upstream mandates pinning a specific release for production
+			// (minor upgrades can require manual migration). ADR 0015 verified
+			// this adapter against v5.29; do not ship :latest.
+			DockerImage:    "ghcr.io/bluemap-minecraft/bluemap:v5.29",
 			Category:       "monitoring",
 			SupportsProxy:  true,
 			RequiresServer: true,
@@ -124,23 +127,25 @@ func InitBuiltinTemplates(store *storage.Store) error {
 			Ports: []*v1.ModulePort{
 				{Name: "Web", ContainerPort: 8100, HostPort: 0, Protocol: "http", ProxyEnabled: true},
 			},
-			DefaultAccessUrls: []string{"http://{{host.hostname}}:{{module.ports.Web.host_port}}"},
-			DefaultEnv:        `{}`,
+			// No DefaultAccessUrls: ADR 0015 forbids giving the browser a
+			// renderer origin/port. World View is the only supported path.
+			DefaultEnv: `{}`,
 			DefaultVolumes: `[
 				{"source": "{{server.data_path}}/modules/bluemap/config", "target": "/app/config", "read_only": false, "create_dir": true},
-				{"source": "{{server.data_path}}/world", "target": "/app/world", "read_only": true},
+				{"source": "{{server.data_path}}/{{server.config.level}}", "target": "/app/world", "read_only": true},
 				{"source": "{{server.data_path}}/modules/bluemap/data", "target": "/app/data", "read_only": false, "create_dir": true},
 				{"source": "{{server.data_path}}/modules/bluemap/web", "target": "/app/web", "read_only": false, "create_dir": true}
 				]`,
-			HealthCheckPath:         "/",
-			HealthCheckPort:         8100,
-			Documentation:           "Renders 3D maps of your Minecraft worlds accessible via a web interface. Supports overworld, nether, and end dimensions. World volumes are mounted read-only from the server data path. Config, data, and web assets are stored in the bluemap module directory.",
-			DefaultMemory:           2048,
-			DefaultUID:              "{{host.uid}}",
-			DefaultGID:              "{{host.gid}}",
-			DefaultInitCommand:      `sed -i 's/accept-download: false/accept-download: true/' /app/config/core.conf`,
-			DefaultInitCommandDelay: 1,
-			DefaultRestartAfterInit: true,
+			HealthCheckPath: "/",
+			HealthCheckPort: 8100,
+			Documentation:   "Renders 3D maps of Minecraft Java Edition worlds. Pinned to v5.29 (upstream requires a specific release for production). The world folder comes from the server's actual level name and is mounted read-only; non-default level folders and dimensions need matching map configs. Config, data and web assets live in the bluemap module directory. BlueMap's web server has no authentication, so it is reachable only through the authenticated same-origin World View proxy and is never published to the host. Accepting the Mojang resource download is an explicit operator consent step for NEW installs; adopted modules keep their existing config untouched.",
+			DefaultMemory:   2048, // conservative default, not an upstream minimum (512 MB is documented as workable)
+			DefaultUID:      "{{host.uid}}",
+			DefaultGID:      "{{host.gid}}",
+			// No DefaultInitCommand / restart: silently setting accept-download
+			// accepted the Minecraft EULA and a Mojang download on the user's
+			// behalf (OSS-388). New installs obtain explicit recorded consent
+			// through ModuleService; adoption never runs an init command.
 		},
 		{
 			ID:             "builtin-status-panel",

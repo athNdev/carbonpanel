@@ -77,6 +77,27 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.ConfigService/UpdateServerConfig":          {Resource: ResourceServerConfig, Action: ActionUpdate, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.ConfigService/GetUpdateBatch":              {Resource: ResourceServerConfig, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.ConfigService/DiscardUpdateBatch":          {Resource: ResourceServerConfig, Action: ActionUpdate, ObjectIDField: "server_id"},
+
+	// StagedConfigService mirrors the legacy /api/v1/staged-config adapter:
+	// reads need server config read on the request's server, mutations need
+	// create. Mutations re-authorize the staged record's real owner in the
+	// service before storage access.
+	"/carbonpanel.v1.StagedConfigService/ListStagedChanges":    {Resource: ResourceServerConfig, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.StagedConfigService/StageConfigChange":    {Resource: ResourceServerConfig, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.StagedConfigService/ApplyStagedChange":    {Resource: ResourceServerConfig, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.StagedConfigService/RollbackStagedChange": {Resource: ResourceServerConfig, Action: ActionCreate, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.StagedConfigService/DiscardStagedChange":  {Resource: ResourceServerConfig, Action: ActionCreate, ObjectIDField: "server_id"},
+
+	// PackwizService mirrors the legacy /api/v1/packwiz adapter: list and get
+	// need modpacks/read, clone/refresh/check-updates/delete need modpacks/create.
+	// The legacy handler checked the global "*" object; no ObjectIDField keeps
+	// that exact scope.
+	"/carbonpanel.v1.PackwizService/ListPacks":    {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/GetPack":      {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/ClonePack":    {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/RefreshPack":  {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/CheckUpdates": {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/DeletePack":   {Resource: ResourceModpacks, Action: ActionCreate},
 	"/carbonpanel.v1.ConfigService/GetGlobalSettings":           {Resource: ResourceSettings, Action: ActionRead},
 	"/carbonpanel.v1.ConfigService/UpdateGlobalSettings":        {Resource: ResourceSettings, Action: ActionUpdate},
 	"/carbonpanel.v1.ConfigService/SyncGlobalSettingsToServers": {Resource: ResourceSettings, Action: ActionUpdate},
@@ -100,6 +121,13 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.FileService/GetExtractionStatus":      {Resource: ResourceFiles, Action: ActionRead},
 	"/carbonpanel.v1.FileService/DownloadRemoteArchive":    {Resource: ResourceFiles, Action: ActionCreate, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.FileService/GetRemoteArchiveProgress": {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	// OSS-387 controller-owned bounded stream transport.
+	"/carbonpanel.v1.FileService/OpenStream":       {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	// Every frame and release carries server_id so the interceptor enforces the
+	// same per-server grant as open, and the service binds the handle to that
+	// exact server. A token scoped to server A cannot read/close server B.
+	"/carbonpanel.v1.FileService/ReadStreamFrame": {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
+	"/carbonpanel.v1.FileService/CloseStream":     {Resource: ResourceFiles, Action: ActionRead, ObjectIDField: "server_id"},
 
 	// â”€â”€ ModService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	"/carbonpanel.v1.ModService/ListMods":                       {Resource: ResourceMods, Action: ActionRead, ObjectIDField: "server_id"},
@@ -273,6 +301,10 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	// Server-scoped procedures use "server_id" so SubuserPermissions apply.
 	// The skin lookup carries an optional server_id for the same reason; its
 	// skin_ref is an opaque cache key and never an arbitrary URL.
+	// Exact-identity lookup has no server scope: it resolves an account the
+	// panel has not observed yet. It stays fail-closed behind players:read on
+	// the global "*" scope; no subuser per-server grant implies it.
+	"/carbonpanel.v1.PlayerService/LookupPlayer":            {Resource: ResourcePlayers, Action: ActionRead},
 	"/carbonpanel.v1.PlayerService/ListPlayers":             {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/GetPlayer":               {Resource: ResourcePlayers, Action: ActionRead, ObjectIDField: "server_id"},
 	"/carbonpanel.v1.PlayerService/ListPlayerSessions":      {Resource: ResourcePlayers, Action: ActionPresence, ObjectIDField: "server_id"},

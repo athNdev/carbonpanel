@@ -747,6 +747,14 @@ func (s *Scheduler) stopServerForBackup(ctx context.Context, server *storage.Ser
 }
 
 func (s *Scheduler) startServerAfterBackup(ctx context.Context, server *storage.Server) error {
+	// The server was stopped only for the archive; its restart is a real
+	// container start and must contend with other starts on the node (OSS-405).
+	release, err := s.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	dockerCli, err := s.dockerForNode(server.NodeID)
 	if err != nil {
 		return fmt.Errorf("docker is unavailable: %w", err)

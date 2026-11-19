@@ -84,6 +84,13 @@ const (
 	// FileServiceGetRemoteArchiveProgressProcedure is the fully-qualified name of the FileService's
 	// GetRemoteArchiveProgress RPC.
 	FileServiceGetRemoteArchiveProgressProcedure = "/carbonpanel.v1.FileService/GetRemoteArchiveProgress"
+	// FileServiceOpenStreamProcedure is the fully-qualified name of the FileService's OpenStream RPC.
+	FileServiceOpenStreamProcedure = "/carbonpanel.v1.FileService/OpenStream"
+	// FileServiceReadStreamFrameProcedure is the fully-qualified name of the FileService's
+	// ReadStreamFrame RPC.
+	FileServiceReadStreamFrameProcedure = "/carbonpanel.v1.FileService/ReadStreamFrame"
+	// FileServiceCloseStreamProcedure is the fully-qualified name of the FileService's CloseStream RPC.
+	FileServiceCloseStreamProcedure = "/carbonpanel.v1.FileService/CloseStream"
 )
 
 // FileServiceClient is a client for the carbonpanel.v1.FileService service.
@@ -122,6 +129,16 @@ type FileServiceClient interface {
 	DownloadRemoteArchive(context.Context, *connect.Request[v1.DownloadRemoteArchiveRequest]) (*connect.Response[v1.DownloadRemoteArchiveResponse], error)
 	// Poll remote archive download progress
 	GetRemoteArchiveProgress(context.Context, *connect.Request[v1.GetRemoteArchiveProgressRequest]) (*connect.Response[v1.GetRemoteArchiveProgressResponse], error)
+	// OSS-387: open a controller-owned bounded byte stream session. The gateway
+	// never opens node storage itself; the controller owns the read handle.
+	// With download_session_id set, the bounded handle is opened over a staged
+	// download (InitFileDownload/DownloadArchive/ExportWorld) instead of a
+	// server-relative node path; server_id must still match the session's server.
+	OpenStream(context.Context, *connect.Request[v1.OpenStreamRequest]) (*connect.Response[v1.OpenStreamResponse], error)
+	// Read one bounded frame from a controller-owned session.
+	ReadStreamFrame(context.Context, *connect.Request[v1.ReadStreamFrameRequest]) (*connect.Response[v1.ReadStreamFrameResponse], error)
+	// Close or cancel a controller-owned session.
+	CloseStream(context.Context, *connect.Request[v1.CloseStreamRequest]) (*connect.Response[v1.CloseStreamResponse], error)
 }
 
 // NewFileServiceClient constructs a client for the carbonpanel.v1.FileService service. By default,
@@ -237,6 +254,24 @@ func NewFileServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(fileServiceMethods.ByName("GetRemoteArchiveProgress")),
 			connect.WithClientOptions(opts...),
 		),
+		openStream: connect.NewClient[v1.OpenStreamRequest, v1.OpenStreamResponse](
+			httpClient,
+			baseURL+FileServiceOpenStreamProcedure,
+			connect.WithSchema(fileServiceMethods.ByName("OpenStream")),
+			connect.WithClientOptions(opts...),
+		),
+		readStreamFrame: connect.NewClient[v1.ReadStreamFrameRequest, v1.ReadStreamFrameResponse](
+			httpClient,
+			baseURL+FileServiceReadStreamFrameProcedure,
+			connect.WithSchema(fileServiceMethods.ByName("ReadStreamFrame")),
+			connect.WithClientOptions(opts...),
+		),
+		closeStream: connect.NewClient[v1.CloseStreamRequest, v1.CloseStreamResponse](
+			httpClient,
+			baseURL+FileServiceCloseStreamProcedure,
+			connect.WithSchema(fileServiceMethods.ByName("CloseStream")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -259,6 +294,9 @@ type fileServiceClient struct {
 	getExtractionStatus      *connect.Client[v1.GetExtractionStatusRequest, v1.GetExtractionStatusResponse]
 	downloadRemoteArchive    *connect.Client[v1.DownloadRemoteArchiveRequest, v1.DownloadRemoteArchiveResponse]
 	getRemoteArchiveProgress *connect.Client[v1.GetRemoteArchiveProgressRequest, v1.GetRemoteArchiveProgressResponse]
+	openStream               *connect.Client[v1.OpenStreamRequest, v1.OpenStreamResponse]
+	readStreamFrame          *connect.Client[v1.ReadStreamFrameRequest, v1.ReadStreamFrameResponse]
+	closeStream              *connect.Client[v1.CloseStreamRequest, v1.CloseStreamResponse]
 }
 
 // ListFiles calls carbonpanel.v1.FileService.ListFiles.
@@ -346,6 +384,21 @@ func (c *fileServiceClient) GetRemoteArchiveProgress(ctx context.Context, req *c
 	return c.getRemoteArchiveProgress.CallUnary(ctx, req)
 }
 
+// OpenStream calls carbonpanel.v1.FileService.OpenStream.
+func (c *fileServiceClient) OpenStream(ctx context.Context, req *connect.Request[v1.OpenStreamRequest]) (*connect.Response[v1.OpenStreamResponse], error) {
+	return c.openStream.CallUnary(ctx, req)
+}
+
+// ReadStreamFrame calls carbonpanel.v1.FileService.ReadStreamFrame.
+func (c *fileServiceClient) ReadStreamFrame(ctx context.Context, req *connect.Request[v1.ReadStreamFrameRequest]) (*connect.Response[v1.ReadStreamFrameResponse], error) {
+	return c.readStreamFrame.CallUnary(ctx, req)
+}
+
+// CloseStream calls carbonpanel.v1.FileService.CloseStream.
+func (c *fileServiceClient) CloseStream(ctx context.Context, req *connect.Request[v1.CloseStreamRequest]) (*connect.Response[v1.CloseStreamResponse], error) {
+	return c.closeStream.CallUnary(ctx, req)
+}
+
 // FileServiceHandler is an implementation of the carbonpanel.v1.FileService service.
 type FileServiceHandler interface {
 	// Browse server directory
@@ -382,6 +435,16 @@ type FileServiceHandler interface {
 	DownloadRemoteArchive(context.Context, *connect.Request[v1.DownloadRemoteArchiveRequest]) (*connect.Response[v1.DownloadRemoteArchiveResponse], error)
 	// Poll remote archive download progress
 	GetRemoteArchiveProgress(context.Context, *connect.Request[v1.GetRemoteArchiveProgressRequest]) (*connect.Response[v1.GetRemoteArchiveProgressResponse], error)
+	// OSS-387: open a controller-owned bounded byte stream session. The gateway
+	// never opens node storage itself; the controller owns the read handle.
+	// With download_session_id set, the bounded handle is opened over a staged
+	// download (InitFileDownload/DownloadArchive/ExportWorld) instead of a
+	// server-relative node path; server_id must still match the session's server.
+	OpenStream(context.Context, *connect.Request[v1.OpenStreamRequest]) (*connect.Response[v1.OpenStreamResponse], error)
+	// Read one bounded frame from a controller-owned session.
+	ReadStreamFrame(context.Context, *connect.Request[v1.ReadStreamFrameRequest]) (*connect.Response[v1.ReadStreamFrameResponse], error)
+	// Close or cancel a controller-owned session.
+	CloseStream(context.Context, *connect.Request[v1.CloseStreamRequest]) (*connect.Response[v1.CloseStreamResponse], error)
 }
 
 // NewFileServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -493,6 +556,24 @@ func NewFileServiceHandler(svc FileServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(fileServiceMethods.ByName("GetRemoteArchiveProgress")),
 		connect.WithHandlerOptions(opts...),
 	)
+	fileServiceOpenStreamHandler := connect.NewUnaryHandler(
+		FileServiceOpenStreamProcedure,
+		svc.OpenStream,
+		connect.WithSchema(fileServiceMethods.ByName("OpenStream")),
+		connect.WithHandlerOptions(opts...),
+	)
+	fileServiceReadStreamFrameHandler := connect.NewUnaryHandler(
+		FileServiceReadStreamFrameProcedure,
+		svc.ReadStreamFrame,
+		connect.WithSchema(fileServiceMethods.ByName("ReadStreamFrame")),
+		connect.WithHandlerOptions(opts...),
+	)
+	fileServiceCloseStreamHandler := connect.NewUnaryHandler(
+		FileServiceCloseStreamProcedure,
+		svc.CloseStream,
+		connect.WithSchema(fileServiceMethods.ByName("CloseStream")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/carbonpanel.v1.FileService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case FileServiceListFilesProcedure:
@@ -529,6 +610,12 @@ func NewFileServiceHandler(svc FileServiceHandler, opts ...connect.HandlerOption
 			fileServiceDownloadRemoteArchiveHandler.ServeHTTP(w, r)
 		case FileServiceGetRemoteArchiveProgressProcedure:
 			fileServiceGetRemoteArchiveProgressHandler.ServeHTTP(w, r)
+		case FileServiceOpenStreamProcedure:
+			fileServiceOpenStreamHandler.ServeHTTP(w, r)
+		case FileServiceReadStreamFrameProcedure:
+			fileServiceReadStreamFrameHandler.ServeHTTP(w, r)
+		case FileServiceCloseStreamProcedure:
+			fileServiceCloseStreamHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -604,4 +691,16 @@ func (UnimplementedFileServiceHandler) DownloadRemoteArchive(context.Context, *c
 
 func (UnimplementedFileServiceHandler) GetRemoteArchiveProgress(context.Context, *connect.Request[v1.GetRemoteArchiveProgressRequest]) (*connect.Response[v1.GetRemoteArchiveProgressResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.FileService.GetRemoteArchiveProgress is not implemented"))
+}
+
+func (UnimplementedFileServiceHandler) OpenStream(context.Context, *connect.Request[v1.OpenStreamRequest]) (*connect.Response[v1.OpenStreamResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.FileService.OpenStream is not implemented"))
+}
+
+func (UnimplementedFileServiceHandler) ReadStreamFrame(context.Context, *connect.Request[v1.ReadStreamFrameRequest]) (*connect.Response[v1.ReadStreamFrameResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.FileService.ReadStreamFrame is not implemented"))
+}
+
+func (UnimplementedFileServiceHandler) CloseStream(context.Context, *connect.Request[v1.CloseStreamRequest]) (*connect.Response[v1.CloseStreamResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("carbonpanel.v1.FileService.CloseStream is not implemented"))
 }

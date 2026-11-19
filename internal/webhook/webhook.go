@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package webhook
 
 import (
@@ -16,10 +15,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
 	"strings"
 	"text/template"
 	"time"
@@ -152,9 +153,13 @@ func Deliver(ctx context.Context, cfg Config, payload *Payload) Result {
 		retryBaseMs = defaultRetryBaseMs
 	}
 
+	// The receiver is the operator-configured webhook URL, which is also the
+	// explicit grant. Bind it once so every attempt uses the same policy.
+	receiverPolicy := utils.WebhookEgressPolicy(cfg.URL)
+
 	var last Result
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		last = deliverOnce(ctx, cfg, payload)
+		last = deliverOnce(ctx, cfg, payload, receiverPolicy)
 		last.Attempts = attempt
 		if last.Success {
 			break
@@ -183,7 +188,7 @@ func Deliver(ctx context.Context, cfg Config, payload *Payload) Result {
 	return last
 }
 
-func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
+func deliverOnce(ctx context.Context, cfg Config, payload *Payload, receiverPolicy utils.EgressPolicy) Result {
 	start := time.Now()
 	result := Result{}
 
@@ -198,6 +203,15 @@ func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
+	// Reject a receiver outside the explicit grant before building a request.
+	// The failure is counted as a normal attempt, preserving retry semantics.
+	if _, err := utils.ValidateURLForEgress(cfg.URL, receiverPolicy); err != nil {
+		result.ErrorMessage = fmt.Sprintf("webhook egress policy blocked receiver %s: %v",
+			utils.RedactURL(cfg.URL), err)
+		result.DurationMs = time.Since(start).Milliseconds()
+		return result
+	}
+
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -220,19 +234,26 @@ func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
 		req.Header.Set(k, v)
 	}
 
-	// Use the SSRF-guarded client: loopback, link-local (cloud metadata) and
-	// unspecified targets are always refused, while RFC1918 LAN webhooks stay
-	// usable for homelab receivers like Home Assistant. This closes a
-	// post-auth SSRF where an arbitrary webhook URL could reach panel-internal
-	// or metadata endpoints.
-	client := utils.NewSafeHTTPClient(timeout, true)
+	// The receiver URL comes from the operator-configured webhook task, so it
+	// is the explicit receiver grant. Loopback, link-local (cloud metadata) and
+	// unspecified targets are always refused; RFC1918 LAN receivers stay usable
+	// for homelab devices like Home Assistant. The class policy also pins every
+	// redirect to the same origin, so a receiver cannot bounce the request into
+	// panel-internal or metadata endpoints.
+	client := utils.NewSafeHTTPClientForEgress(timeout, receiverPolicy)
 	resp, err := client.Do(req)
 	result.DurationMs = time.Since(start).Milliseconds()
 	if err != nil {
+		// url.Error embeds the raw request URL, which may carry webhook
+		// credentials or tokens. Keep only the underlying cause.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
 		result.ErrorMessage = err.Error()
 		return result
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	result.ResponseCode = resp.StatusCode
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

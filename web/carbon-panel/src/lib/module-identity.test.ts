@@ -32,7 +32,7 @@ test('the Modules tab identity comes from the reconciled record, not a stale ins
 test('ActiveModules and ServerModules render identity from the listModules record', () => {
 	const files = [
 		path.resolve(import.meta.dirname, '../routes/modules/ActiveModules.svelte'),
-		path.resolve(import.meta.dirname, './components/server/ServerModules.svelte')
+		path.resolve(import.meta.dirname, './components/server-ui/ServerModules.svelte')
 	];
 	for (const file of files) {
 		const src = fs.readFileSync(file, 'utf-8');

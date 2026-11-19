@@ -42,6 +42,16 @@ func (s *playerFixtureService) GetPlayerSkin(context.Context, *connect.Request[v
 	return connect.NewResponse(&v1.GetPlayerSkinResponse{}), nil
 }
 
+func (s *playerFixtureService) LookupPlayer(context.Context, *connect.Request[v1.LookupPlayerRequest]) (*connect.Response[v1.LookupPlayerResponse], error) {
+	s.calls++
+	return connect.NewResponse(&v1.LookupPlayerResponse{}), nil
+}
+
+func (s *playerFixtureService) SetWhitelistEntry(context.Context, *connect.Request[v1.SetWhitelistEntryRequest]) (*connect.Response[v1.SetWhitelistEntryResponse], error) {
+	s.calls++
+	return connect.NewResponse(&v1.SetWhitelistEntryResponse{}), nil
+}
+
 // TestPlayerProceduresFailClosed exercises the real interceptor for the new
 // resource. Every case asserts the handler ran zero times on denial, so a UI
 // that merely hides a button cannot accidentally authorize the RPC.

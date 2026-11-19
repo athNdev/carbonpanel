@@ -1,0 +1,23 @@
+{
+  "hosts": [
+    "unix:///run/user/1000/carbon-node/docker.sock"
+  ],
+  "data-root": "/home/ubuntu/carbon-qual/docker",
+  "exec-root": "/run/user/1000/carbon-node/exec",
+  "pidfile": "/run/user/1000/carbon-node/docker.pid",
+  "containerd-namespace": "carbon-qual-rootless",
+  "bip": "10.231.0.1/24",
+  "storage-driver": "vfs",
+  "no-new-privileges": true,
+  "live-restore": true,
+  "userland-proxy": false,
+  "log-driver": "journald",
+  "log-opts": {
+    "tag": "carbon-node-rootless-qual"
+  },
+  "iptables": true,
+  "ip6tables": false,
+  "features": {
+    "containerd-snapshotter": false
+  }
+}

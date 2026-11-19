@@ -24,7 +24,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:this={ref}
 	data-slot="card"
 	class={cn(
-		'flex flex-col gap-4 rounded-none border border-[#393939] bg-[#262626] p-6 text-[#f4f4f4] shadow-none',
+		'flex flex-col gap-4 rounded-none border border-border bg-card p-6 text-foreground shadow-none',
 		className
 	)}
 	{...restProps}

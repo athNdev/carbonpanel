@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,6 +26,7 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/upload"
+	"github.com/athNdev/carbon-panel/pkg/utils"
 )
 
 // DatapackService manages datapack discovery and installation. Datapacks are
@@ -273,8 +275,16 @@ func (s *DatapackService) InstallDatapack(ctx context.Context, req *connect.Requ
 	defer removeDownload()
 
 	if err := minecraft.DownloadDatapackArchiveFrom(ctx, indexers.DatapackIndexerOrigin(resolved), file.DownloadURL, destPath); err != nil {
-		s.log.Error("Failed to download datapack %s: %v", file.DownloadURL, err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to download datapack: %w", err))
+		// The download URL is indexer-controlled. http.Client wraps transport
+		// failures in url.Error which strips only the password, leaving
+		// presigned query tokens in its text. Keep the underlying cause.
+		cause := err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			cause = urlErr.Err
+		}
+		s.log.Error("Failed to download datapack %s: %v", utils.RedactURL(file.DownloadURL), cause)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to download datapack"))
 	}
 
 	// Reject anything that is not a real datapack before it reaches the world.
@@ -339,15 +349,19 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	tempPath, originalFilename, err := s.uploadManager.GetTempPath(msg.UploadSessionId)
+	ownerID := uploadOwnerID(ctx)
+	tempPath, originalFilename, err := s.uploadManager.GetTempPathFor(msg.UploadSessionId, ownerID)
 	if err != nil {
+		if denied := ownerMismatchError(err); denied != nil {
+			return nil, denied
+		}
 		s.log.Error("Failed to get upload session: %v", err)
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("upload session not found or not completed"))
 	}
 	// Failures after this point own the temp file and the session.
 	fail := func(err error) (*connect.Response[v1.UploadDatapackResponse], error) {
 		_ = os.Remove(tempPath)
-		_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+		_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 		return nil, err
 	}
 
@@ -384,7 +398,7 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 			Size:        int64(len(data)),
 		}, tempPath, server.MCVersion)
 		_ = os.Remove(tempPath)
-		_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+		_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 		s.log.Info("Staged datapack %s for server %s", filename, server.ID)
 		return connect.NewResponse(&v1.UploadDatapackResponse{
 			Datapack: pack,
@@ -412,7 +426,7 @@ func (s *DatapackService) UploadDatapack(ctx context.Context, req *connect.Reque
 		}
 		_ = os.Remove(tempPath)
 	}
-	_ = s.uploadManager.CleanupSession(msg.UploadSessionId)
+	_ = s.uploadManager.CleanupSessionFor(msg.UploadSessionId, ownerID)
 
 	info, err := os.Stat(destPath)
 	if err != nil {

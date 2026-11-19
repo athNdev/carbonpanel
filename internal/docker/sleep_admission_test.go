@@ -13,7 +13,18 @@ import (
 	"testing"
 
 	"github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/pkg/logger"
 )
+
+// newTestDeepSleepManager constructs a production-shaped manager (including
+// its fail-closed default gate) and then takes the explicit test-only opt-out
+// so wake-mechanics tests do not need an admission coordinator. Tests that
+// exercise admission build the manager directly and install their own gate.
+func newTestDeepSleepManager(controller SleepController, store SleeperStore, commander SleepCommander, refresher RouteRefresher, log *logger.Logger) *DeepSleepManager {
+	m := NewDeepSleepManager(controller, store, commander, refresher, log)
+	m.AllowUngatedWakeForTest()
+	return m
+}
 
 // recordingAdmissionGate is a test double for the shared in-process start gate.
 type recordingAdmissionGate struct {
@@ -72,6 +83,50 @@ func deepSleepAdmissionHarness() (*mockSleepController, *mockFreezerStore, *Deep
 	store.servers["srv-sleep"].Status = db.StatusDeepSleep
 	controller.status["cnt-sleep"] = db.StatusStopped
 	return controller, store, NewDeepSleepManager(controller, store, nil, nil, nil)
+}
+
+// TestDeepSleepWakeFailsClosedWithoutGate proves a manager that was never wired
+// to the shared coordinator refuses to start, instead of silently starting
+// ungated (OSS-405 defect 1).
+func TestDeepSleepWakeFailsClosedWithoutGate(t *testing.T) {
+	controller, store, mgr := deepSleepAdmissionHarness()
+
+	err := mgr.WakeServer(context.Background(), "srv-sleep")
+	if !errors.Is(err, ErrAdmissionGateUnavailable) {
+		t.Fatalf("WakeServer error = %v, want %v", err, ErrAdmissionGateUnavailable)
+	}
+	controller.mu.Lock()
+	starts := len(controller.starts)
+	controller.mu.Unlock()
+	if starts != 0 {
+		t.Fatalf("fail-closed wake started the container %d times", starts)
+	}
+	got, err := store.GetServer(context.Background(), "srv-sleep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != db.StatusDeepSleep || got.LastStarted != nil {
+		t.Fatalf("fail-closed wake changed server = %+v", got)
+	}
+}
+
+// TestSetAdmissionGateNilCannotRemoveGate proves production cannot silently
+// disable admission by wiring a nil coordinator; the test-only opt-out is the
+// only way to clear the gate.
+func TestSetAdmissionGateNilCannotRemoveGate(t *testing.T) {
+	controller, _, mgr := deepSleepAdmissionHarness()
+	mgr.SetAdmissionGate(nil)
+
+	err := mgr.WakeServer(context.Background(), "srv-sleep")
+	if !errors.Is(err, ErrAdmissionGateUnavailable) {
+		t.Fatalf("WakeServer error = %v, want fail-closed refusal", err)
+	}
+	controller.mu.Lock()
+	starts := len(controller.starts)
+	controller.mu.Unlock()
+	if starts != 0 {
+		t.Fatalf("nil-wired wake started the container %d times", starts)
+	}
 }
 
 // TestDeepSleepWakeRefusesAdmissionBeforeStart proves a refusal reaches the

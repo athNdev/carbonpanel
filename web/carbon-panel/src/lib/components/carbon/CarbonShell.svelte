@@ -6,12 +6,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import type { Component, Snippet } from 'svelte';
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
+	import {
+		Blocks,
+		Boxes,
+		ChevronDown,
+		CirclePlus,
+		FileCode2,
+		Globe,
+		History,
+		LayoutGrid,
+		LibraryBig,
+		Menu,
+		Package,
+		Server,
+		Settings,
+		Users
+	} from '@lucide/svelte';
 	import { motionDuration } from '$lib/motion';
 	import { page } from '$app/state';
-	import { base, resolve } from '$app/paths';
+	import { asset, resolve } from '$app/paths';
 	import { runningServers, activitySortedServers } from '$lib/stores/servers';
 	import { authStore, currentUser, canAccessSettings } from '$lib/stores/auth';
 	import CarbonModal from './CarbonModal.svelte';
@@ -22,7 +38,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { type Node } from '$lib/proto/carbonpanel/v1/node_pb';
 	import { describeNodeStatus, pickPrimaryNode } from '$lib/utils/node-status';
 	import CarbonTag from './CarbonTag.svelte';
-	import { displayPreferences } from '$lib/display-preferences.svelte';
+	import { displayPreferences, theme } from '$lib/display-preferences.svelte';
 
 	interface Props {
 		children?: Snippet;
@@ -179,68 +195,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			| '/docs/api'
 			| '/changelog';
 		label: string;
-		icon: string;
+		icon: Component;
 		badge?: boolean;
 	}
 
+	// One icon library for the whole navigation: lucide stroke glyphs at 1.5px,
+	// matching the regular-weight labels. The previous filled Material paths
+	// mixed two optical conventions in the same column.
 	const navItems: NavItem[] = [
-		{
-			href: '/',
-			label: 'Overview',
-			icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z'
-		},
-		{
-			href: '/servers',
-			label: 'Servers',
-			badge: true,
-			icon: 'M4 6h16v3H4V6zm0 5h16v3H4v-3zm0 5h16v3H4v-3z'
-		},
-		{ href: '/servers/new', label: 'Create Server', icon: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z' },
-		{
-			href: '/players',
-			label: 'Players',
-			icon: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z'
-		},
-		{
-			href: '/worlds',
-			label: 'World View',
-			icon: 'M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z'
-		},
-		{
-			href: '/library',
-			label: 'World Library',
-			icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z'
-		},
-		{
-			href: '/modpacks/studio',
-			label: 'Modpack Studio',
-			icon: 'M21 16.5l-9 5.2-9-5.2V7.5l9-5.2 9 5.2v9zM12 4.1L5 8.1l7 4 7-4-7-4zm-7 5.7v6.6l6 3.5v-6.6l-6-3.5zm8 10.1l6-3.5V9.8l-6 3.5v6.6z'
-		},
-		{
-			href: '/modpacks',
-			label: 'Modpacks',
-			icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z'
-		},
-		{
-			href: '/modules',
-			label: 'Modules & Sidecars',
-			icon: 'M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 00-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 000-5z'
-		},
-		{
-			href: '/settings',
-			label: 'Settings',
-			icon: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z'
-		},
-		{
-			href: '/docs/api',
-			label: 'API Reference',
-			icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z'
-		},
-		{
-			href: '/changelog',
-			label: 'Changelog',
-			icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z'
-		}
+		{ href: '/', label: 'Overview', icon: LayoutGrid },
+		{ href: '/servers', label: 'Servers', icon: Server, badge: true },
+		{ href: '/servers/new', label: 'Create Server', icon: CirclePlus },
+		{ href: '/players', label: 'Players', icon: Users },
+		{ href: '/worlds', label: 'World View', icon: Globe },
+		{ href: '/library', label: 'World Library', icon: LibraryBig },
+		{ href: '/modpacks/studio', label: 'Modpack Studio', icon: Blocks },
+		{ href: '/modpacks', label: 'Modpacks', icon: Package },
+		{ href: '/modules', label: 'Modules & Sidecars', icon: Boxes },
+		{ href: '/settings', label: 'Settings', icon: Settings },
+		{ href: '/docs/api', label: 'API Reference', icon: FileCode2 },
+		{ href: '/changelog', label: 'Changelog', icon: History }
 	];
 
 	let activeNavHref = $derived.by(() => {
@@ -262,11 +236,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <svelte:window onkeydown={handleWindowKeydown} />
 
 <div
-	class="flex h-dvh min-h-0 flex-col bg-[#161616] font-sans text-[#f4f4f4] antialiased selection:bg-[#0f62fe] selection:text-white"
+	class="flex h-dvh min-h-0 flex-col bg-background font-sans text-foreground antialiased selection:bg-primary selection:text-primary-foreground"
 >
 	<!-- IBM Carbon Global Header (48px fixed) -->
 	<header
-		class="fixed top-0 right-0 left-0 z-50 flex h-12 items-center justify-between border-b border-[#393939] bg-[#161616] px-3"
+		class="fixed top-0 right-0 left-0 z-50 flex h-12 items-center justify-between border-b border-border bg-background px-3"
 	>
 		<div class="flex items-center gap-2">
 			<!-- Hamburger Button -->
@@ -275,24 +249,22 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				onclick={toggleNav}
 				aria-expanded={sideNavExpanded}
 				aria-controls="carbon-sidenav"
-				class="flex h-8 w-8 cursor-pointer items-center justify-center text-[#f4f4f4] transition-colors hover:bg-[#353535]"
+				class="carbon-nav-toggle focus-ring motion-press flex h-8 w-8 cursor-pointer items-center justify-center text-foreground transition-colors hover:bg-accent"
 				aria-label="Toggle Navigation"
 			>
-				<svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-					<path
-						fill-rule="evenodd"
-						d="M3 5h14a1 1 0 010 2H3a1 1 0 010-2zm0 4h14a1 1 0 010 2H3a1 1 0 010-2zm0 4h14a1 1 0 010 2H3a1 1 0 010-2z"
-						clip-rule="evenodd"
-					/>
-				</svg>
+				<Menu class="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
 			</button>
 
 			<!-- Brand Logo & Name -->
 			<a
 				href={resolve('/')}
-				class="flex items-center gap-2 font-sans text-sm tracking-[0.16px] text-white transition-colors hover:text-accent-text"
+				class="focus-ring flex items-center gap-2 font-sans text-sm tracking-[0.16px] text-foreground transition-colors hover:text-accent-text"
 			>
-				<img src="{base}/brand-mark-light.svg" alt="" class="h-6 w-6" />
+				<img
+					src={asset($theme === 'dark' ? 'brand-mark-light.svg' : 'brand-mark-dark.svg')}
+					alt=""
+					class="h-6 w-6"
+				/>
 				<span class="font-semibold tracking-wide">Carbon Panel</span>
 			</a>
 		</div>
@@ -301,7 +273,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="flex items-center gap-3">
 			<!-- Quick Server Switcher -->
 			<div class="hidden items-center gap-2 font-mono text-xs md:flex">
-				<span class="text-[#8d8d8d]">RUNNING:</span>
+				<span class="text-muted-foreground">RUNNING:</span>
 				<CarbonTag type={runningCount > 0 ? 'green' : 'gray'} size="sm">
 					{runningCount} / {servers.length}
 				</CarbonTag>
@@ -309,29 +281,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 			<!-- User Profile Menu -->
 			{#if user}
-				<div class="relative flex items-center gap-2 border-l border-[#393939] pl-2">
+				<div class="relative flex items-center gap-2 border-l border-border pl-2">
 					<button
 						type="button"
-						class="flex items-center gap-2 px-1 py-1 transition-colors hover:bg-[#262626] focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0f62fe]"
+						class="focus-ring motion-press flex items-center gap-2 px-1 py-1 transition-colors hover:bg-accent"
 						aria-haspopup="menu"
 						aria-expanded={profileOpen}
 						onclick={toggleProfile}
 						onkeydown={handleProfileKeydown}
 					>
 						<div
-							class="flex h-6 w-6 items-center justify-center bg-[#393939] font-mono text-xs font-bold text-[#f4f4f4]"
+							class="flex h-6 w-6 items-center justify-center bg-secondary font-mono text-xs font-bold text-foreground"
 						>
 							{user.username.slice(0, 2).toUpperCase()}
 						</div>
-						<span class="hidden text-xs text-[#c6c6c6] lg:inline">{user.username}</span>
-						<svg
-							class="h-3 w-3 text-[#8d8d8d]"
-							viewBox="0 0 24 24"
-							fill="currentColor"
+						<span class="hidden text-xs text-muted-foreground lg:inline">{user.username}</span>
+						<ChevronDown
+							class="h-3 w-3 text-muted-foreground"
+							strokeWidth={1.5}
 							aria-hidden="true"
-						>
-							<path d="M7 10l5 5 5-5z" />
-						</svg>
+						/>
 					</button>
 
 					{#if profileOpen}
@@ -344,12 +313,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<div
 							role="menu"
 							aria-label="Profile"
-							class="absolute top-full right-0 z-50 mt-1 w-44 border border-[#393939] bg-[#262626] py-1 shadow-lg"
+							class="absolute top-full right-0 z-50 mt-1 w-44 border border-border bg-popover py-1 shadow-[var(--carbon-shadow-overlay)]"
 						>
 							<button
 								type="button"
 								role="menuitem"
-								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 								onclick={openProfileDialog}
 							>
 								Profile
@@ -357,16 +326,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<button
 								type="button"
 								role="menuitem"
-								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 								onclick={openPreferencesDialog}
 							>
 								Preferences
 							</button>
-							<div class="my-1 border-t border-[#393939]"></div>
+							<div class="my-1 border-t border-border"></div>
 							<button
 								type="button"
 								role="menuitem"
-								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-[#ff8389] transition-colors hover:bg-[#353535]"
+								class="block w-full px-3 py-2 text-left font-sans text-sm whitespace-nowrap text-destructive-text transition-colors hover:bg-accent"
 								onclick={handleSignOut}
 							>
 								Sign out
@@ -383,7 +352,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- IBM Carbon SideNav: off-canvas overlay on narrow screens, rail/panel on md+ -->
 		<aside
 			id="carbon-sidenav"
-			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 w-64 overflow-x-hidden overflow-y-auto border-r border-[#393939] bg-[#161616] transition-[width,transform] duration-(--motion-fast) ease-[var(--ease-out-quart)] {sideNavExpanded
+			class="scrollbar-stable fixed top-12 bottom-0 left-0 z-40 w-64 overflow-x-hidden overflow-y-auto border-r border-border bg-background transition-[width,transform] duration-(--motion-fast) ease-[var(--ease-out-quart)] {sideNavExpanded
 				? 'translate-x-0'
 				: '-translate-x-full'} {sideNavExpanded ? 'md:w-64' : 'md:w-12'} md:translate-x-0"
 		>
@@ -396,21 +365,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<a
 							href={resolve(item.href as '/')}
 							onclick={closeMobileNav}
-							class="relative flex items-center gap-3 py-2.5 font-sans text-sm transition-colors {sideNavExpanded
+							class="focus-ring relative flex items-center gap-3 py-2.5 font-sans text-sm transition-colors {sideNavExpanded
 								? 'px-3.5'
 								: 'justify-center px-0'} {isCurrentPath(item.href)
-								? 'bg-[#353535] font-medium text-white before:absolute before:top-0 before:bottom-0 before:left-0 before:w-1 before:bg-[#0f62fe]'
-								: 'text-[#c6c6c6] hover:bg-[#262626] hover:text-white'}"
+								? 'bg-accent font-medium text-foreground before:absolute before:top-0 before:bottom-0 before:left-0 before:w-1 before:bg-primary'
+								: 'text-muted-foreground hover:bg-card hover:text-foreground'}"
 							title={item.label}
 						>
-							<svg class="h-4 w-4 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
-								<path d={item.icon} />
-							</svg>
+							<item.icon class="h-4 w-4 flex-shrink-0" strokeWidth={1.5} aria-hidden="true" />
 							{#if sideNavExpanded}
 								<span class="flex-1 truncate">{item.label}</span>
 								{#if item.badge && runningCount > 0}
 									<span
-										class="flex h-4 items-center justify-center bg-[#0f62fe] px-1.5 font-mono text-xs font-semibold text-white"
+										class="flex h-4 items-center justify-center bg-primary px-1.5 font-mono text-xs font-semibold text-primary-foreground"
 									>
 										{runningCount}
 									</span>
@@ -427,7 +394,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					href={resolve('/settings?tab=nodes')}
 					onclick={closeMobileNav}
 					title="View Docker nodes"
-					class="absolute right-0 bottom-0 left-0 border-t border-[#393939] bg-[#161616] p-3 font-mono text-xs text-[#8d8d8d] transition-colors hover:bg-[#262626]"
+					class="focus-ring absolute right-0 bottom-0 left-0 border-t border-border bg-background p-3 font-mono text-xs text-muted-foreground transition-colors hover:bg-card"
 				>
 					<div class="flex items-center justify-between gap-2">
 						<span class="truncate"
@@ -441,7 +408,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							>{primaryNodeStatus.label}</span
 						>
 					</div>
-					<div class="mt-1 text-xs text-[#a8a8a8]">PORT {appPort || '···'} · CARBON V11</div>
+					<div class="mt-1 text-xs text-muted-foreground">PORT {appPort || '···'} · CARBON V11</div>
 				</a>
 			{/if}
 		</aside>
@@ -480,29 +447,29 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{#if user}
 			<div class="space-y-3">
 				<div
-					class="flex items-center justify-between gap-3 rounded-none border border-[#393939] bg-[#161616] p-3"
+					class="flex items-center justify-between gap-3 rounded-none border border-border bg-background p-3"
 				>
-					<span class="text-xs text-[#c6c6c6]">Username</span>
-					<span class="truncate font-mono text-sm font-medium text-white" title={user.username}
+					<span class="text-xs text-muted-foreground">Username</span>
+					<span class="truncate font-mono text-sm font-medium text-foreground" title={user.username}
 						>{user.username}</span
 					>
 				</div>
 				{#if user.email}
 					<div
-						class="flex items-center justify-between gap-3 rounded-none border border-[#393939] bg-[#161616] p-3"
+						class="flex items-center justify-between gap-3 rounded-none border border-border bg-background p-3"
 					>
-						<span class="shrink-0 text-xs text-[#c6c6c6]">Email</span>
-						<span class="truncate font-mono text-sm text-white" title={user.email ?? ''}
+						<span class="shrink-0 text-xs text-muted-foreground">Email</span>
+						<span class="truncate font-mono text-sm text-foreground" title={user.email ?? ''}
 							>{user.email}</span
 						>
 					</div>
 				{/if}
 				<div
-					class="flex items-center justify-between gap-3 rounded-none border border-[#393939] bg-[#161616] p-3"
+					class="flex items-center justify-between gap-3 rounded-none border border-border bg-background p-3"
 				>
-					<span class="shrink-0 text-xs text-[#c6c6c6]">Roles</span>
+					<span class="shrink-0 text-xs text-muted-foreground">Roles</span>
 					<span
-						class="truncate font-mono text-xs text-[#c6c6c6]"
+						class="truncate font-mono text-xs text-muted-foreground"
 						title={(user.roles ?? []).join(', ')}
 						>{(user.roles ?? []).join(', ') || 'No roles'}</span
 					>
@@ -510,12 +477,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<a
 					href={resolve('/profile')}
 					onclick={() => (profileDialogOpen = false)}
-					class="block truncate text-sm text-accent-text hover:underline"
+					class="focus-ring block truncate text-sm text-accent-text hover:underline"
 				>
 					Manage profile, password and API tokens
 				</a>
-				<div class="space-y-3 border-t border-[#393939] pt-4">
-					<h3 class="text-sm font-semibold text-white">Change password</h3>
+				<div class="space-y-3 border-t border-border pt-4">
+					<h3 class="text-sm font-semibold text-foreground">Change password</h3>
 					<CarbonTextInput
 						revealable
 						type="password"
@@ -542,10 +509,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						disabled={passwordSaving}
 					/>
 					{#if passwordError}
-						<p class="text-xs text-[#ff8389]">{passwordError}</p>
+						<p class="text-xs text-destructive-text">{passwordError}</p>
 					{/if}
 					{#if passwordDone}
-						<p class="text-xs text-[#6fdc8c]">Password changed successfully.</p>
+						<p class="text-xs text-success-text">Password changed successfully.</p>
 					{/if}
 					<div class="flex items-center justify-end gap-3">
 						<CarbonButton
@@ -567,7 +534,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 		{:else}
-			<p class="text-sm text-[#a8a8a8]">No signed-in user.</p>
+			<p class="text-sm text-muted-foreground">No signed-in user.</p>
 		{/if}
 	</CarbonModal>
 

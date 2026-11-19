@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
@@ -29,18 +30,20 @@ type DockerExecutor interface {
 }
 
 type Sender struct {
-	store  *storage.Store
-	config *config.Config
-	docker DockerExecutor
-	pool   *docker.ClientPool
+	store   *storage.Store
+	config  *config.Config
+	docker  DockerExecutor
+	pool    *docker.ClientPool
+	limiter *commandLimiter
 }
 
 func NewSender(store *storage.Store, cfg *config.Config, dockerExec DockerExecutor, pool *docker.ClientPool) *Sender {
 	return &Sender{
-		store:  store,
-		config: cfg,
-		docker: dockerExec,
-		pool:   pool,
+		store:   store,
+		config:  cfg,
+		docker:  dockerExec,
+		pool:    pool,
+		limiter: newCommandLimiter(),
 	}
 }
 
@@ -56,6 +59,11 @@ func (s *Sender) resolveExecutor(nodeID string) (DockerExecutor, error) {
 }
 
 func (s *Sender) SendCommand(ctx context.Context, serverID string, command string) (string, error) {
+	// Enforce the same bound for the generated RPC console and the WebSocket
+	// console before either RCON or docker exec sees the command.
+	if len(command) > maxCommandBytes {
+		return "", fmt.Errorf("%w: %d bytes", ErrCommandTooLong, len(command))
+	}
 	server, err := s.store.GetServer(ctx, serverID)
 
 	if err != nil || server == nil {
@@ -63,6 +71,16 @@ func (s *Sender) SendCommand(ctx context.Context, serverID string, command strin
 	}
 	if server.ContainerID == "" {
 		return "", fmt.Errorf("server container not found")
+	}
+
+	// Only validated servers create limiter keys. Checking before lookup would
+	// let an unauthenticated caller grow the key map with arbitrary IDs.
+	limitKey := "server:" + serverID
+	if user := auth.GetUserFromContext(ctx); user != nil {
+		limitKey = "user:" + user.ID
+	}
+	if s.limiter != nil && !s.limiter.allow(limitKey) {
+		return "", fmt.Errorf("%w: key %s", ErrCommandRateLimited, limitKey)
 	}
 
 	executor, err := s.resolveExecutor(server.NodeID)

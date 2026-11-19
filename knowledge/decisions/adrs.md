@@ -47,6 +47,16 @@ sources:
 | [0031](../../docs/adr/0031-module-sidecar-confinement.md) | Module sidecar confinement parity | [Runtime seams](../architecture/runtime-seams.md) |
 | [0032](../../docs/adr/0032-security-audit-events.md) | Security audit events and redaction | [Fail-closed authorization](../invariants/authz-fail-closed.md) |
 | [0033](../../docs/adr/0033-release-tag-and-publication-policy.md) | One explicit publication boundary and separate immutable version domains | [Release](../workflows/release.md) |
+| [0034](../../docs/adr/0034-mcp-server-distribution.md) | Independent MCP artifact distribution with build-bound capabilities and auth-enabled installs | [Release](../workflows/release.md), [Fail-closed authorization](../invariants/authz-fail-closed.md) |
+| [0035](../../docs/adr/0035-node-vm-artifact.md) | Reproducible, secret-free QCOW2/cloud-init node VM artifact with pinned provenance and staged rollback | [Node VM artifact](../architecture/node-vm-artifact.md) |
+| [0036](../../docs/adr/0036-node-lxc-template.md) | Unprivileged LXC node template gated on nested-runtime capabilities, on the shared ADR 0019 contract | [Unprivileged LXC node artifact lane](../architecture/node-lxc-artifact.md) |
+| [0039](../../docs/adr/0039-docker-readable-build-aliases.md) | Retroactive human-readable immutable Docker build aliases from observed Hub tag-push time | [Release](../workflows/release.md) |
+| [0040](../../docs/adr/0040-bluemap-installed-module-discovery.md) | Private identity-bound BlueMap discovery, explicit consent and server-side singleton install | [World viewing](../architecture/world-viewing.md), [Runtime seams](../architecture/runtime-seams.md) |
+| [0041](../../docs/adr/0041-bounded-trusted-main-nightly.md) | Native scheduled nightly publishes only a verified current-main commit, default-off | [Release](../workflows/release.md) |
+| [0042](../../docs/adr/0042-sveltekit3-security-migration.md) | SvelteKit 3 security migration with narrow compatibility shims | [Frontend change](../workflows/frontend-change.md) |
+| [0043](../../docs/adr/0043-egress-policy-enforcement.md) | Enforce egress policy per class, not per boolean | [Named egress classes](../decisions/egress-class-policy.md) |
+| [0044](../../docs/adr/0044-disposable-upgrade-rehearsal-ci.md) | Recurring read-only real-binary upgrade rehearsal on disposable fixtures | [Release](../workflows/release.md) |
+| [0045](../../docs/adr/0045-version-contract-and-multi-version-docs.md) | One fail-closed version contract and immutable per-version docs routes | [Website and documentation publication](website-docs.md) |
 
 # Rule
 

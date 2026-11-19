@@ -679,6 +679,9 @@ func main() {
 		log,
 		reconciler.Config{},
 	)
+	// Self-heal can start a replacement container, so it shares the same
+	// in-process node gate as RPC and scheduler starts (OSS-405).
+	reconcilerEngine.SetAdmissionCoordinator(admission)
 	// Module containers get the same level-triggered convergence as server
 	// containers: an externally removed or recreated sidecar is adopted or
 	// recorded as stopped instead of drifting away from its row.
@@ -701,14 +704,14 @@ func main() {
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
-	srv := &http.Server{
+	srv := applyPanelRequestLimits(&http.Server{
 		Addr:         fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),
 		Handler:      rpcServer.Handler(),
 		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
 		IdleTimeout:  time.Duration(cfg.Server.IdleTimeout) * time.Second,
 		Protocols:    protocols,
-	}
+	})
 
 	// Start server in goroutine
 	go func() {

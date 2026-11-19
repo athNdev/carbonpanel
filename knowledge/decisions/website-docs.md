@@ -8,6 +8,15 @@ code_refs:
   - .github/workflows/landing.yml
   - .github/workflows/docs.yml
   - docs/website-source.json
+  - docs/version-index.json
+  - docs/adr/0045-version-contract-and-multi-version-docs.md
+  - scripts/version_contract.py
+  - scripts/version_bump.py
+  - scripts/openapi_version.py
+  - scripts/test_openapi_version.py
+  - scripts/browser_version_check.py
+  - scripts/test_version_contract.py
+  - internal/rpc/handlers/openapi.go
   - docs/carbon-panel
   - docs/design-system
   - docs/carbon-panel/src/components/SocialHead.astro
@@ -44,6 +53,26 @@ sources:
 - Application prose, imported examples and API schema come from the same full
   commit in `docs/website-source.json`. Never substitute the current checkout or
   a floating branch if that commit is unavailable.
+- `docs/website-source.json` is the single build contract; channel and
+  availability are derived from the classified catalog
+  `docs/release-history.json`, never from a `v` prefix. The generated
+  `docs/version-index.json` is shared by the banner, version switcher, direct
+  URL validation and Pages metadata. Every entry is validated against the
+  catalog peel and the real Git tag; a disagreement fails closed before
+  packaging. See ADR 0045.
+- Stable docs default to `/docs/`; immutable per-version routes
+  `/docs/versions/<display-version>/` are built from exact peeled commits for
+  `1.0.40` (stable), `3.0.0-alpha.1` (GHCR-only legacy preview) and `1.0.39`
+  (source-only, no download CTA). `v1.0.38` and the misbound `v3.0.0-beta.4`
+  are excluded. The common switcher carries the current page when the target
+  version has it, otherwise it lands on the target home.
+- `scripts/version_bump.py prepare`/`bump` is the one atomic workflow; it
+  derives or validates every surface on the same commit, checks rendered and
+  packaged output, and never tags, publishes or marks a candidate published.
+- The proto's `2.x` is the independent Connect-OpenAPI schema family, not a
+  product version. Bundled and website OpenAPI copies stamp `info.version`
+  with the exact normalized product version (matching CLI/UI/release manifest)
+  and are verified fail-closed; the `carbonpanel.v1` protocol stays unchanged.
 - The shared design system is published with the homepage from the current
   branch, including its canonical tokens. It shares site branding, local fonts
   and navigation with the website and docs, while keeping its component
@@ -76,7 +105,8 @@ sources:
   deployment date as `lastmod`; utility pages with `noindex` are excluded.
   Website validation rejects missing or incomplete output.
 - Current social cards are rendered from `assets/branding/social-preview.html`
-  with the approved logo, homepage terrain and Plex fonts. The website uses
+  with the approved logo, homepage terrain and Plex fonts. The crop centers
+  the lit doorway and nearby terraces so they read at thumbnail size. The website uses
   1200 by 630 PNGs; GitHub has a separate 1280 by 640 repository PNG and an
   independent upload setting. Regeneration must not alter the approved logo.
 

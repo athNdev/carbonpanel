@@ -20,7 +20,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { toast } from 'svelte-sonner';
 	import { formatTimestamp } from '$lib/utils/format-time';
 	import { CarbonButton, CarbonConfirm, CarbonErrorState } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
 	let { server, active = false }: { server: Server; active?: boolean } = $props();
 
@@ -182,7 +182,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{#if loadError && backups.length === 0}
 			<CarbonErrorState title="Failed to load backups" message={loadError} onretry={loadBackups} />
 		{:else if backups.length === 0}
-			<p class="py-8 text-center font-mono text-xs text-[#a8a8a8]">
+			<p class="py-8 text-center font-mono text-xs text-muted-foreground">
 				{loading
 					? 'Loading backups…'
 					: 'No backups yet. Back up now or create a scheduled backup task.'}
@@ -190,7 +190,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		{:else}
 			<table class="w-full text-xs" aria-label="Server backups">
 				<thead>
-					<tr class="border-b border-[#393939] text-left text-[#a8a8a8]">
+					<tr class="border-b border-border text-left text-muted-foreground">
 						<th scope="col" class="py-2 pr-4 font-medium">Name</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Created</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Size</th>
@@ -200,10 +200,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</thead>
 				<tbody>
 					{#each backups as backup (backup.id)}
-						<tr class="border-b border-[#262626] font-mono text-[#f4f4f4]">
+						<tr class="border-b border-border font-mono text-foreground">
 							<td class="max-w-[220px] truncate py-2 pr-4" title={backup.name}>
 								{backup.name}{#if backup.locked}
-									<span class="ml-2 border border-[#f1c21b]/50 px-1 text-xs text-[#f1c21b]"
+									<span class="ml-2 border border-warning/50 px-1 text-xs text-warning-text"
 										>LOCKED</span
 									>
 								{/if}</td
@@ -214,7 +214,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<td class="flex flex-wrap gap-2 py-2">
 								<button
 									type="button"
-									class="h-7 rounded-none bg-[#393939] px-3 text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
+									class="h-7 rounded-none bg-secondary px-3 text-foreground transition-colors hover:bg-[var(--button-secondary-hover)] disabled:opacity-50"
 									disabled={acting !== null}
 									onclick={() => promptRestore(backup)}
 								>
@@ -222,7 +222,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								</button>
 								<button
 									type="button"
-									class="h-7 rounded-none bg-[#393939] px-3 text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
+									class="h-7 rounded-none bg-secondary px-3 text-foreground transition-colors hover:bg-[var(--button-secondary-hover)] disabled:opacity-50"
 									disabled={acting !== null}
 									onclick={() => toggleLock(backup.id, !backup.locked)}
 								>
@@ -230,7 +230,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								</button>
 								<button
 									type="button"
-									class="h-7 rounded-none bg-[#393939] px-3 text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
+									class="h-7 rounded-none bg-secondary px-3 text-foreground transition-colors hover:bg-[var(--button-secondary-hover)] disabled:opacity-50"
 									disabled={acting !== null || backup.locked}
 									onclick={() => promptDelete(backup)}
 								>

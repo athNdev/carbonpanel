@@ -33,7 +33,7 @@ one at https://mozilla.org/MPL/2.0/.
 	} from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { CarbonButton, CarbonInlineLoading } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
 		ConfigApplyWindow,
@@ -585,7 +585,7 @@ one at https://mozilla.org/MPL/2.0/.
 >
 	{#snippet chip()}
 		{#if hasChanges}
-			<span class="font-mono text-xs whitespace-nowrap text-[#ff832b]">
+			<span class="font-mono text-xs whitespace-nowrap text-warning-text">
 				{modifiedFields.size} unsaved {modifiedFields.size === 1 ? 'change' : 'changes'}
 			</span>
 		{/if}
@@ -647,31 +647,31 @@ one at https://mozilla.org/MPL/2.0/.
 				<CarbonInlineLoading description="Loading server configuration..." />
 			</div>
 		{:else if filteredCategories.length === 0}
-			<div class="flex flex-col items-center justify-center py-12 text-[#8d8d8d]">
+			<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
 				<p class="mb-2 text-sm">No configuration found</p>
-				<p class="text-xs text-[#a8a8a8]">Unable to load server configuration</p>
+				<p class="text-xs text-muted-foreground">Unable to load server configuration</p>
 			</div>
 		{:else}
 			<div class="flex h-full">
 				<!-- Category Sidebar -->
-				<div class="w-48 shrink-0 overflow-y-auto border-r border-[#393939] bg-[#161616]">
+				<div class="w-48 shrink-0 overflow-y-auto border-r border-border bg-background">
 					<nav class="space-y-0 p-0">
 						{#each filteredCategories as category (category.name)}
 							{@const categoryId = getCategoryId(category.name)}
 							{@const isActive = activeCategory === categoryId}
 							{@const modCount = modifiedCountByCategory.get(categoryId) ?? 0}
 							<button
-								class="flex w-full cursor-pointer items-center justify-between rounded-none border-b border-[#262626] px-3 py-2.5 text-left text-xs transition-colors
+								class="flex w-full cursor-pointer items-center justify-between rounded-none border-b border-border px-3 py-2.5 text-left text-xs transition-colors
 									{isActive
-									? 'border-l-4 border-l-[#0f62fe] bg-[#353535] pl-2.5 font-medium text-white'
-									: 'border-l-4 border-l-transparent text-[#8d8d8d] hover:bg-[#262626] hover:text-white'}"
+									? 'border-l-4 border-l-primary bg-accent pl-2.5 font-medium text-foreground'
+									: 'border-l-4 border-l-transparent text-muted-foreground hover:bg-card hover:text-foreground'}"
 								onclick={() => selectCategory(categoryId)}
 							>
 								<span class="truncate">{category.name}</span>
 								{#if modCount > 0}
 									<span
 										class="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-none px-1 font-mono text-xs font-medium
-										{isActive ? 'bg-[#ff832b] font-semibold text-black' : 'bg-[#ff832b] text-black'}"
+										{isActive ? 'bg-warning font-semibold text-black' : 'bg-warning text-black'}"
 									>
 										{modCount}
 									</span>
@@ -682,11 +682,11 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<!-- Fields Panel -->
-				<div class="flex min-w-0 flex-1 flex-col bg-[#161616]">
+				<div class="flex min-w-0 flex-1 flex-col bg-background">
 					<!-- Category Header -->
-					<div class="shrink-0 border-b border-[#393939] bg-[#262626] px-4 py-3">
-						<h3 class="font-sans text-sm font-normal text-[#f4f4f4]">{currentCategoryName}</h3>
-						<p class="mt-0.5 text-xs text-[#a8a8a8]">{currentCategoryProps.length} fields</p>
+					<div class="shrink-0 border-b border-border bg-card px-4 py-3">
+						<h3 class="font-sans text-sm font-normal text-foreground">{currentCategoryName}</h3>
+						<p class="mt-0.5 text-xs text-muted-foreground">{currentCategoryProps.length} fields</p>
 					</div>
 
 					{#snippet fieldCard(prop: ConfigProperty)}
@@ -698,13 +698,13 @@ one at https://mozilla.org/MPL/2.0/.
 						<div
 							id={prop.key}
 							data-field="true"
-							class="group rounded-none border border-[#393939] p-4 transition-all duration-150
-								{isHighlighted ? 'outline-2 outline-[#0f62fe]' : ''}
+							class="group rounded-none border border-border p-4 transition-all duration-150
+								{isHighlighted ? 'outline-2 outline-primary' : ''}
 								{isModified
-								? 'border-l-4 border-l-[#ff832b] bg-[#2d251e]'
+								? 'border-l-4 border-l-warning bg-muted'
 								: !isEnabled
-									? 'bg-[#1e1e1e] opacity-80'
-									: 'bg-[#262626]'}"
+									? 'bg-muted opacity-80'
+									: 'bg-card'}"
 						>
 							<!-- Field Header -->
 							<div class="mb-3 flex items-start justify-between gap-2">
@@ -712,49 +712,51 @@ one at https://mozilla.org/MPL/2.0/.
 									<div class="mb-1 flex flex-wrap items-center gap-2">
 										<Label
 											for={prop.key}
-											class="text-xs font-medium text-[#f4f4f4] {!isEnabled
-												? 'text-[#8d8d8d]'
+											class="text-xs font-medium text-foreground {!isEnabled
+												? 'text-muted-foreground'
 												: ''}"
 										>
 											{prop.label}
 										</Label>
 										{#if prop.required}
 											<span
-												class="rounded-none border border-[#da1e28]/40 bg-[#da1e28]/20 px-1 py-0.5 font-mono text-xs font-medium text-[#ff8389]"
+												class="rounded-none border border-destructive/40 bg-destructive/20 px-1 py-0.5 font-mono text-xs font-medium text-destructive-text"
 												>required</span
 											>
 										{/if}
 										{#if prop.system}
 											<span
-												class="rounded-none border border-[#0f62fe]/40 bg-[#0f62fe]/20 px-1 py-0.5 font-mono text-xs font-medium text-[#78a9ff]"
+												class="rounded-none border border-primary/40 bg-primary/20 px-1 py-0.5 font-mono text-xs font-medium text-accent-text"
 												>system</span
 											>
 										{/if}
 										{#if isModified}
 											<span
-												class="rounded-none border border-[#ff832b]/40 bg-[#ff832b]/20 px-1 py-0.5 font-mono text-xs font-medium text-[#ff832b]"
+												class="rounded-none border border-warning/40 bg-warning/20 px-1 py-0.5 font-mono text-xs font-medium text-warning-text"
 												>modified</span
 											>
 										{/if}
 										{#if !isEnabled}
 											<span
-												class="rounded-none border border-[#525252] bg-[#353535] px-1 py-0.5 font-mono text-xs text-[#8d8d8d]"
+												class="rounded-none border border-border bg-accent px-1 py-0.5 font-mono text-xs text-muted-foreground"
 												>(unset)</span
 											>
 										{/if}
 										{#if prop.key === 'cfApiKey'}
 											<span
-												class="rounded-none border border-[#0f62fe]/40 bg-[#0f62fe]/20 px-1.5 py-0.5 font-mono text-xs font-medium text-[#78a9ff]"
+												class="rounded-none border border-primary/40 bg-primary/20 px-1.5 py-0.5 font-mono text-xs font-medium text-accent-text"
 											>
 												Optional (Keyless Fallback)
 											</span>
 										{/if}
 									</div>
 									{#if prop.envVar}
-										<code class="font-mono text-xs break-all text-[#8d8d8d]">{prop.envVar}</code>
+										<code class="font-mono text-xs break-all text-muted-foreground"
+											>{prop.envVar}</code
+										>
 									{/if}
 									{#if prop.description}
-										<p class="mt-1 text-xs text-[#a8a8a8]">{prop.description}</p>
+										<p class="mt-1 text-xs text-muted-foreground">{prop.description}</p>
 									{/if}
 
 									<!-- Quick Actions for CurseForge Fields -->
@@ -762,7 +764,7 @@ one at https://mozilla.org/MPL/2.0/.
 										<div class="mt-2">
 											<button
 												type="button"
-												class="inline-flex h-6 cursor-pointer items-center rounded-none border border-[#393939] bg-[#353535] px-2 font-sans text-xs text-[#78a9ff] hover:bg-[#393939] hover:text-white"
+												class="inline-flex h-6 cursor-pointer items-center rounded-none border border-border bg-accent px-2 font-sans text-xs text-accent-text hover:bg-secondary hover:text-foreground"
 												onclick={assumeCfSlugFromServerName}
 											>
 												<Wand2 class="mr-1 h-3 w-3" />
@@ -774,7 +776,7 @@ one at https://mozilla.org/MPL/2.0/.
 										<div class="mt-2">
 											<button
 												type="button"
-												class="inline-flex h-6 cursor-pointer items-center rounded-none border border-[#393939] bg-[#353535] px-2 font-sans text-xs text-[#78a9ff] hover:bg-[#393939] hover:text-white"
+												class="inline-flex h-6 cursor-pointer items-center rounded-none border border-border bg-accent px-2 font-sans text-xs text-accent-text hover:bg-secondary hover:text-foreground"
 												onclick={() => handleExtractFromPageUrl(getDisplayValue(prop))}
 											>
 												<Wand2 class="mr-1 h-3 w-3" />
@@ -787,7 +789,7 @@ one at https://mozilla.org/MPL/2.0/.
 									<!-- Set/Unset Toggle -->
 									<button
 										class="rounded-none p-1 transition-colors
-											{canToggle ? 'cursor-pointer hover:bg-[#353535]' : 'cursor-not-allowed opacity-50'}"
+											{canToggle ? 'cursor-pointer hover:bg-accent' : 'cursor-not-allowed opacity-50'}"
 										onclick={() => canToggle && toggleFieldEnabled(prop.key, !isEnabled, prop)}
 										disabled={!canToggle}
 										title={isEnabled
@@ -795,14 +797,14 @@ one at https://mozilla.org/MPL/2.0/.
 											: 'Click to set a custom value'}
 									>
 										{#if isEnabled}
-											<CircleDot class="h-4 w-4 text-[#42be65]" />
+											<CircleDot class="h-4 w-4 text-success-text" />
 										{:else}
-											<Circle class="h-4 w-4 text-[#8d8d8d]" />
+											<Circle class="h-4 w-4 text-muted-foreground" />
 										{/if}
 									</button>
 									<button
 										type="button"
-										class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-none text-[#8d8d8d] transition-colors hover:bg-[#353535] hover:text-white"
+										class="flex h-6 w-6 cursor-pointer items-center justify-center rounded-none text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 										onclick={() => copyLinkToClipboard(prop.key)}
 										title="Copy link to field"
 									>
@@ -820,7 +822,7 @@ one at https://mozilla.org/MPL/2.0/.
 										onCheckedChange={(checked) => updateValue(prop.key, checked)}
 										disabled={prop.system || !isEnabled}
 									/>
-									<span class="text-xs text-[#c6c6c6] {!isEnabled ? 'text-[#8d8d8d]' : ''}">
+									<span class="text-xs text-foreground {!isEnabled ? 'text-muted-foreground' : ''}">
 										{getBooleanValue(prop) ? 'Enabled' : 'Disabled'}
 									</span>
 								</div>
@@ -832,7 +834,7 @@ one at https://mozilla.org/MPL/2.0/.
 									disabled={prop.system || !isEnabled}
 								>
 									<SelectTrigger
-										class="h-9 rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4] {!isEnabled
+										class="h-9 rounded-none border border-border bg-background text-foreground {!isEnabled
 											? 'opacity-60'
 											: ''}"
 									>
@@ -840,7 +842,7 @@ one at https://mozilla.org/MPL/2.0/.
 											{getDisplayValue(prop) || 'Select...'}
 										</span>
 									</SelectTrigger>
-									<SelectContent class="rounded-none border border-[#393939] bg-[#262626]">
+									<SelectContent class="rounded-none border border-border bg-card">
 										{#each prop.options as option (option)}
 											<SelectItem value={option} class="rounded-none"
 												>{option || '(empty)'}</SelectItem
@@ -856,7 +858,7 @@ one at https://mozilla.org/MPL/2.0/.
 									placeholder={prop.defaultValue ?? ''}
 									oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
 									disabled={prop.system || !isEnabled}
-									class="h-9 rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4] placeholder:text-[#6f6f6f] {!isEnabled
+									class="h-9 rounded-none border border-border bg-background text-foreground placeholder:text-muted-foreground {!isEnabled
 										? 'opacity-60'
 										: ''}"
 								/>
@@ -868,7 +870,7 @@ one at https://mozilla.org/MPL/2.0/.
 									placeholder={prop.defaultValue ?? ''}
 									oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
 									disabled={prop.system || !isEnabled}
-									class="h-9 rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4] placeholder:text-[#6f6f6f] {!isEnabled
+									class="h-9 rounded-none border border-border bg-background text-foreground placeholder:text-muted-foreground {!isEnabled
 										? 'opacity-60'
 										: ''}"
 								/>
@@ -880,16 +882,16 @@ one at https://mozilla.org/MPL/2.0/.
 									placeholder={prop.defaultValue ?? ''}
 									oninput={(e) => updateValue(prop.key, e.currentTarget.value)}
 									disabled={prop.system || !isEnabled}
-									class="h-9 rounded-none border border-[#525252] bg-[#161616] text-[#f4f4f4] placeholder:text-[#6f6f6f] {!isEnabled
+									class="h-9 rounded-none border border-border bg-background text-foreground placeholder:text-muted-foreground {!isEnabled
 										? 'opacity-60'
 										: ''}"
 								/>
 							{/if}
 
 							{#if prop.defaultValue !== undefined && prop.defaultValue !== ''}
-								<p class="mt-2 text-xs text-[#8d8d8d]">
+								<p class="mt-2 text-xs text-muted-foreground">
 									Default: <code
-										class="rounded-none bg-[#353535] px-1 py-0.5 font-mono text-xs text-[#c6c6c6]"
+										class="rounded-none bg-accent px-1 py-0.5 font-mono text-xs text-muted-foreground"
 										>{prop.defaultValue}</code
 									>
 								</p>
@@ -900,12 +902,12 @@ one at https://mozilla.org/MPL/2.0/.
 					<!-- Fields Grid -->
 					<div class="flex-1 overflow-y-auto p-4">
 						{#if activeCategory === 'curseforge'}
-							<div class="mb-4 rounded-none border border-[#0f62fe]/40 bg-[#0043ce]/10 p-3 text-sm">
-								<div class="flex items-center gap-2 font-medium text-[#78a9ff]">
+							<div class="mb-4 rounded-none border border-primary/40 bg-primary/10 p-3 text-sm">
+								<div class="flex items-center gap-2 font-medium text-accent-text">
 									<KeyRound class="h-4 w-4" />
 									CurseForge Keyless Mode & Defaults Active
 								</div>
-								<p class="mt-1 text-xs text-[#a8a8a8]">
+								<p class="mt-1 text-xs text-muted-foreground">
 									CurseForge modpacks and mods can be downloaded and searched without an API key via
 									community proxies. If provided, slugs and file IDs can be auto-extracted directly
 									from modpack URLs or assumed from the server name.
@@ -920,21 +922,21 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 
 						{#if activeCategory === 'curseforge' && advancedCategoryProps.length > 0}
-							<div class="mt-6 rounded-none border border-[#393939] bg-[#1e1e1e] p-4">
+							<div class="mt-6 rounded-none border border-border bg-muted p-4">
 								<button
 									type="button"
 									onclick={() => (showAdvancedCurseForge = !showAdvancedCurseForge)}
-									class="flex w-full cursor-pointer items-center justify-between rounded-none text-left text-sm font-medium text-[#f4f4f4] transition-colors hover:text-[#78a9ff]"
+									class="flex w-full cursor-pointer items-center justify-between rounded-none text-left text-sm font-medium text-foreground transition-colors hover:text-accent-text"
 								>
 									<span class="flex items-center gap-2">
 										{#if showAdvancedCurseForge}
-											<ChevronDown class="h-4 w-4 text-[#8d8d8d]" />
+											<ChevronDown class="h-4 w-4 text-muted-foreground" />
 										{:else}
-											<ChevronRight class="h-4 w-4 text-[#8d8d8d]" />
+											<ChevronRight class="h-4 w-4 text-muted-foreground" />
 										{/if}
 										Advanced CurseForge Options
 									</span>
-									<span class="text-xs text-[#8d8d8d]">
+									<span class="text-xs text-muted-foreground">
 										{advancedCategoryProps.length} additional options
 									</span>
 								</button>

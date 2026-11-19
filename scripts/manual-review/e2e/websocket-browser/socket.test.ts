@@ -9,7 +9,7 @@ import {
 	WebSocketServerMessageSchema
 } from '../../../../web/carbon-panel/src/lib/proto/carbonpanel/v1/websocket_pb';
 
-mock.module('$app/environment', () => ({ browser: false }));
+mock.module('$app/env', () => ({ browser: false }));
 mock.module('$lib/stores/auth', () => ({
 	authStore: {
 		subscribe: (fn: (v: object) => void) => {

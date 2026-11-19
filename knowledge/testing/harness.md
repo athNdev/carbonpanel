@@ -18,6 +18,9 @@ code_refs:
   - docs/testing/windows-verification.md
   - scripts/windows-verification-evidence.ps1
   - scripts/test-windows-verification-evidence.ps1
+  - web/carbon-panel/test/dom-setup.mjs
+  - web/carbon-panel/src/lib/components/carbon/a11y-dom.test.ts
+  - scripts/manual-review/e2e/a11y-check.mjs
 sources:
   - title: Contributor guide
     resource: ../../AGENTS.md
@@ -30,6 +33,13 @@ With `--docker` it compares real exported build contexts from a clean source
 archive and a copy containing synthetic local state; it also checks required
 controller, worker, protocol and backup-encryption inputs. It never deletes or
 reads a developer's actual local data.
+
+The check asserts that SvelteKit source routes ship in packaged builds while
+saved-world data and credentials do not. The `/worlds` route re-include in
+`.dockerignore` must stay above the general sensitive/persistent exclusions and
+be limited to source extensions, so those later rules still win. Sentinel
+canaries placed inside the route tree (credential, database, nested data)
+verify that ordering; a broad trailing negation that leaks them fails the check.
 
 Tests are ordinary Go package tests. Docker-facing code sits behind seams, for
 example `ContainerFreezer` in `internal/docker`, so a test can substitute a
@@ -82,6 +92,11 @@ cannot outlive the code it names.
   results do not establish that acceptance. The read-only evidence helper never
   changes host policy; UAC-disabled results retain their narrower firewall scope.
 - If a failure cannot be reproduced in a test, say so in the change.
+- Frontend accessibility is checked through public UI seams: Happy DOM component
+  tests assert focus, roles and states, and the owned-Chromium journey checks
+  focus order, Escape, visible focus and reflow at 360/768/1440. Source-string
+  assertions alone are not accessibility coverage; see
+  [Frontend accessibility coverage](../decisions/frontend-a11y-coverage.md).
 - The runtime qualification matrix in `internal/docker/runtime_matrix_test.go`
   always inspects the resolved CreateContainer request. Skip only the
   daemon-`/info` case when Docker is absent; game-readiness stays OSS-247.

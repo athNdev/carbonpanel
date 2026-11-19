@@ -64,8 +64,8 @@ type fakeStore struct {
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		servers: make(map[string]*storage.Server),
-		configs: make(map[string]*storage.ServerConfig),
+		servers:  make(map[string]*storage.Server),
+		configs:  make(map[string]*storage.ServerConfig),
 		subusers: make(map[string][]string),
 	}
 }
@@ -202,6 +202,19 @@ func (c *countingDoer) hits() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.count
+}
+
+// serveBlueMapFixture is the owned HTTP fixture for a BlueMap renderer that is
+// actually configured for a target world. "/" answers the health probe and
+// /settings.json is BlueMap's own authoritative map list (OSS-388: a listening
+// web server alone is not READY).
+func serveBlueMapFixture(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Path == "/settings.json" {
+		_, _ = w.Write([]byte(`{"maps":[{"id":"world","name":"World"}]}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"version":"5.29","last_render":"2026-11-18T10:00:00Z"}`))
 }
 
 // endpointForFixture converts an httptest.Server URL into a loopback endpoint
