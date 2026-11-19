@@ -97,6 +97,14 @@ resume from the original verified download artifact without rebuilding images.
   commits and tag-triggered runs reflect that history. The dispatch revision is
   a convenience, not the trusted gate; the Python boundary plus exact-commit
   main CI are authoritative.
+- Every step that calls `gh` — directly or through a gh-backed `scripts/release.py`
+  gate (including `plan`, `preflight-immutable` on the resume path,
+  `verify-publication-ref`, `verify-main-ci`, `release-record`, `publish`,
+  `verify-release-record`, `alias-promotion` and `promote-alias`) — sets `GH_TOKEN`
+  in its own step `env`. gh does not inherit a token set on a different
+  step or job; a missing token makes the gate fail closed. `verify-publication-ref`
+  in `release.yml` is the trusted-ref/exact-CI boundary and must carry it.
+  `scripts/workflow-contract.test.mjs` guards this for both publication lanes.
 - Publication is phased. A read-only preflight classifies each registry
   reference as absent, present or unknown; conflicts, unknown errors and partial
   states refuse. The immutable full-version tag is pushed and verified

@@ -112,6 +112,7 @@ jobs:
       - name: Verify trusted ref and exact main CI for an explicit publication
         if: inputs.publish
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ steps.plan.outputs.commit }}
           RELEASE_REF: ${{ github.ref }}
         # A checkbox is never CI evidence. verify-publication-ref requires the
@@ -372,6 +373,7 @@ jobs:
       - name: Preflight exact immutable version in every registry
         id: preflight
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           EXPECTED_DIGEST: ${{ inputs.expected_digest }}
