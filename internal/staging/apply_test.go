@@ -177,6 +177,85 @@ func TestApplyStopsBeforeRestartWhenConfigMoved(t *testing.T) {
 	require.Equal(t, "old", string(got))
 }
 
+func TestApplyBatchKeepsConfigRetryableAfterPublishFailure(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "retry", Name: "retry", DataPath: data, Status: storage.StatusRunning, ContainerID: "c1"}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.DB().Create(&storage.ServerConfig{ID: server.ID, ServerID: server.ID}).Error)
+	require.NoError(t, os.WriteFile(filepath.Join(data, "keep.txt"), []byte("old"), 0o644))
+	when := time.Now().Add(-time.Minute).UTC()
+	_, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "new"}, storage.UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	stageFile(t, store, data, batch.ID, server.ID, "keep.txt", "new")
+
+	err = Sweep(ctx, store, nil, time.Now(), nil, func(context.Context, *storage.Server, Plan) error {
+		return os.ErrClosed
+	})
+	require.Error(t, err)
+
+	body, readErr := os.ReadFile(filepath.Join(data, "keep.txt"))
+	require.NoError(t, readErr)
+	require.Equal(t, "old", string(body))
+	cfg, err := store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	if cfg.MOTD != nil {
+		require.NotEqual(t, "new", *cfg.MOTD)
+	}
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, open)
+	configs, err := store.ListBatchConfig(ctx, open.ID)
+	require.NoError(t, err)
+	require.Len(t, configs, 1)
+	require.Equal(t, storage.StagedStatusStaged, configs[0].Status)
+	rows, err := store.ListStagedContent(ctx, server.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	require.NoError(t, Sweep(ctx, store, nil, time.Now(), nil, func(context.Context, *storage.Server, Plan) error {
+		return nil
+	}))
+	cfg, err = store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.MOTD)
+	require.Equal(t, "new", *cfg.MOTD)
+	body, err = os.ReadFile(filepath.Join(data, "keep.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "new", string(body))
+	open, err = store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+}
+
+func TestApplyBatchReconcilesExistingRolledBackConfig(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "reconcile", Name: "reconcile", DataPath: data, Status: storage.StatusDeepSleep}
+	require.NoError(t, store.CreateServer(ctx, server))
+	require.NoError(t, store.DB().Create(&storage.ServerConfig{ID: server.ID, ServerID: server.ID}).Error)
+	when := time.Now().Add(-time.Minute).UTC()
+	staged, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"motd": "new"}, storage.UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.NoError(t, store.DB().Model(&storage.StagedConfigChange{}).Where("id = ?", staged.ID).
+		Updates(map[string]any{"status": string(storage.StagedStatusRolledBack), "rolled_back_at": time.Now()}).Error)
+
+	require.NoError(t, Sweep(ctx, store, nil, time.Now(), nil, func(context.Context, *storage.Server, Plan) error { return nil }))
+	cfg, err := store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.MOTD)
+	require.Equal(t, "new", *cfg.MOTD)
+	open, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Nil(t, open)
+}
+
 func TestIdleClockSurvivesAndDoesNotFireEarly(t *testing.T) {
 	ctx := context.Background()
 	store, data := newStageStore(t)

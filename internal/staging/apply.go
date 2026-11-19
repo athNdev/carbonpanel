@@ -97,6 +97,9 @@ func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now ti
 func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, server *storage.Server, batch storage.ServerUpdateBatch, publish Publisher, resolvers ...*nodestorage.Resolver) error {
 	resolver := firstResolver(resolvers)
 	return operation.RunJournaled(ctx, store, log, server, "apply-batch", "", func() error {
+		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
+			return err
+		}
 		if err := store.StagedConfigConflict(ctx, server.ID, batch.ID); err != nil {
 			return err
 		}
@@ -168,6 +171,13 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		}
 		return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
 	})
+}
+
+func reconcileOpenBatchState(ctx context.Context, store *storage.Store, batchID string) error {
+	if store == nil || batchID == "" {
+		return nil
+	}
+	return store.RestageOpenBatchRolledBackConfigs(ctx, batchID)
 }
 
 // CommitNextRestartFiles copies content for a next-restart batch onto the live
@@ -313,7 +323,7 @@ func undoApply(ctx context.Context, store *storage.Store, restore func() error, 
 		failed = restore()
 	}
 	for _, cfg := range configs {
-		if _, err := store.RollbackStagedConfigChange(ctx, cfg.ID); err != nil {
+		if _, err := store.RevertStagedConfigApplyToStaged(ctx, cfg.ID); err != nil {
 			failed = errors.Join(failed, err)
 		}
 	}
