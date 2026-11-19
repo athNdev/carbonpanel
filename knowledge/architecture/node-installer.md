@@ -6,8 +6,10 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/nodeinstall
+  - internal/noderuntime/enroll
   - cmd/carbon-node-installer
   - scripts/install-node.sh
+  - internal/rpc/enrollment_integration_test.go
   - docs/node-installer.md
 sources:
   - title: Portable Linux node installer
@@ -34,7 +36,11 @@ It is also the supported fallback wherever an image format is unqualified.
 - Enrollment material is the **shared** ADR 0019 contract (generated proto
   messages), not a parallel DTO: a scoped secret-free bundle, a `CSR_PRE`
   registration artifact, and a one-time challenge-bound claim signed over the
-  canonical context. No enrollment handler is mounted by this installer.
+  canonical context. `ClaimContext` only normalises capability names to proto
+  enum names and delegates to the single shared `ClaimContextRaw` encoder; there
+  is no mode-local encoder or authority. An owned integration fixture verifies
+  real installer claims at the shared boundary. No enrollment handler is mounted
+  by this installer and no live trust boundary or deployment is claimed.
 - Artifacts are verified (platform, per-file SHA-256, optional Ed25519
   signature) before promotion. Two slots plus an atomic state file give
   repeatable upgrade/rollback; an interrupted promotion completes from a
