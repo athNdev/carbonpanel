@@ -25,6 +25,9 @@
   "steps": [
     {
       "goto": "/modpacks/studio",
+      "name": "navigate to modpacks studio"
+    },
+    {
       "waitFor": "text=Visual workspace for custom modpacks: create, import (.mrpack, CurseForge, Packwiz), edit overrides, and deploy.",
       "name": "modpacks studio library loads"
     },

@@ -24,6 +24,9 @@
   "steps": [
     {
       "goto": "/modpacks",
+      "name": "navigate to modpacks library"
+    },
+    {
       "waitFor": "text=Browse, import and manage modpack packages",
       "name": "modpacks library loads"
     },
