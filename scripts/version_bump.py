@@ -42,9 +42,15 @@ def verify_surfaces(root, contract, index):
         errors.append("shipped OpenAPI copies must stamp the exact product version, never the 2.x family placeholder")
     if contract["artifacts"]["protocol"]["version"] != "v1":
         errors.append("the independent protocol version must stay v1")
+    if set(contract.get("channels", {})) != set(vc.CHANNEL_NAMES):
+        errors.append(f"contract must publish exactly {', '.join(vc.CHANNEL_NAMES)}")
+    if contract["channels"]["nightly"].get("promotion", {}).get("promoted") is not False:
+        errors.append("tracked nightly default must never claim a promotion")
     banner = BANNER.read_text(encoding="utf-8")
     if "../generated/version-index.json" not in banner or "data-version-switcher" not in banner:
         errors.append("VersionBanner must render the common switcher from the generated index")
+    if "/commit/" not in banner or 'onchange="location.assign(this.value)"' not in banner:
+        errors.append("VersionBanner must pin full commits and navigate on select change")
     builder = BUILDER.read_text(encoding="utf-8")
     if "render_versions_page" not in builder or "export_snapshot(root, version[\"commit\"]" not in builder:
         errors.append("builder must generate the identity page and snapshot each exact peeled commit")
@@ -61,12 +67,14 @@ def verify_surfaces(root, contract, index):
     if "3.0.0-beta.4" in changelog and "name collision" not in changelog:
         errors.append("docs changelog must mark v3.0.0-beta.4 as an excluded name collision")
     readme = README.read_text(encoding="utf-8")
-    stable = contract["stable_tag"].removeprefix("v")
+    stable = contract["channels"]["stable"]["tag"].removeprefix("v")
     if stable not in readme:
         errors.append(f"README install refs must name the verified stable {stable}")
-    for version in contract["versions"]:
+    for version in index["versions"]:
         if version["tag"] in vc.EXCLUDED:
             errors.append(f"contract documents excluded tag {version['tag']}")
+        if version["display"] in vc.RETIRED_DISPLAYS:
+            errors.append(f"contract publishes retired snapshot {version['display']}")
     return errors
 
 
@@ -85,48 +93,45 @@ def prepare(root, check_index, site):
             raise ValueError("docs/version-index.json is stale; run 'version_bump.py prepare'")
         print("prepare --check: contract, catalog, Git, index and rendered surfaces agree.")
         return
-    vc.INDEX_PATH.write_text(vc.render_index(index), encoding="utf-8")
+    vc.write_index(index)
     print(f"prepare: regenerated {vc.INDEX_PATH.relative_to(root)} from {len(index['versions'])} versions.")
 
 
 def bump(tag, root, apply):
-    """Derive a candidate version from the tag/catalog; never publish or retag."""
+    """Verify the stable channel against its tag/catalog; never publish or retag.
+
+    Schema 3 has exactly two channels, so a legacy tag can never add a third
+    published snapshot. Nightly has no tag and is changed only by the qualified
+    promotion gate, not by this helper.
+    """
     contract, catalog = vc.load(root)
     vc.validate(contract, catalog, root)
+    stable_tag = contract["channels"]["stable"]["tag"]
+    if tag != stable_tag:
+        raise ValueError(f"{tag}: only the stable channel tag {stable_tag} can be bumped here")
     entry = next((item for item in catalog["tags"] if item["name"] == tag), None)
     if entry is None:
         raise ValueError(f"{tag}: not in the classified catalog")
     if tag in vc.EXCLUDED:
         raise ValueError(f"{tag}: excluded ({vc.EXCLUDED[tag]})")
     channel = vc.CHANNELS.get(entry["classification"])
-    if channel is None:
-        raise ValueError(f"{tag}: unsupported classification {entry['classification']}")
+    if channel is None or channel["channel"] != "stable":
+        raise ValueError(f"{tag}: not classified as the published stable channel")
     commit = vc.git_peel(root, tag)
     if commit != entry["peeled_commit"]:
         raise ValueError(f"{tag}: Git peel {commit} != catalog {entry['peeled_commit']}")
+    stable = contract["channels"]["stable"]
     candidate = {
-        "tag": tag,
-        "display": tag.removeprefix("v"),
-        "classification": entry["classification"],
-        "channel": channel["channel"],
-        "availability": channel["availability"],
+        **stable,
+        "version": tag.removeprefix("v"),
         "commit": commit,
-        "source_commit": commit,
-        "cta": channel["cta"],
-        "download_kind": channel["download_kind"],
-        "download_url": vc._download_url(contract["repository"], tag, channel["download_kind"]),
-        "default": channel["channel"] == "stable",
+        "image": {**stable["image"], "revision": commit},
     }
     updated = copy.deepcopy(contract)
-    existing = next((v for v in updated["versions"] if v["tag"] == tag), None)
-    if existing is None:
-        updated["versions"].append(candidate)
-    elif existing != candidate:
+    if updated["channels"]["stable"] != candidate:
         if not apply:
-            raise ValueError(f"{tag}: contract entry disagrees with the derived candidate")
-        existing.update(candidate)
-    if channel["channel"] == "stable":
-        updated["stable_tag"] = tag
+            raise ValueError(f"{tag}: stable channel disagrees with the derived candidate")
+        updated["channels"]["stable"] = candidate
     vc.validate(updated, catalog, root)
     index = vc.version_index(updated, catalog, root)
     errors = verify_surfaces(root, updated, index)
@@ -134,7 +139,7 @@ def bump(tag, root, apply):
         raise ValueError("bump blocked by surface drift:\n- " + "\n- ".join(sorted(set(errors))))
     if apply:
         vc.CONTRACT_PATH.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
-        vc.INDEX_PATH.write_text(vc.render_index(index), encoding="utf-8")
+        vc.write_index(index)
         print(f"bump: staged candidate {tag} @ {commit} across contract and index (no publication).")
     else:
         print(f"bump --check: {tag} @ {commit} derives consistently across every surface.")

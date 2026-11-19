@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MPL-2.0
 """Integration checks for snapshot isolation and subpath publication."""
 from html.parser import HTMLParser
+import copy
+import json
 from pathlib import Path
 from urllib.parse import urlsplit
 import subprocess
@@ -15,7 +17,10 @@ from scripts.build_website import (
     render_astro_config,
     scoped_links,
 )
-from scripts.check_website import Links, check
+from scripts import version_contract as vc
+from scripts.check_website import (
+    Links, bases_from_index, check, check_channels, check_marker, check_version_ui,
+)
 
 
 class DesignPageParser(HTMLParser):
@@ -180,6 +185,132 @@ class WebsiteTests(unittest.TestCase):
             self.assertNotIn("404.html", sitemap)
             self.assertNotIn("embed.html", sitemap)
             self.assertEqual(sitemap.count("<lastmod>2026-11-13</lastmod>"), 2)
+
+    def test_banner_dropdown_and_pinned_links_fail_closed(self):
+        root = Path(__file__).resolve().parent.parent
+        contract, catalog = vc.load(root)
+        index = vc.version_index(contract, catalog, root)
+
+        def banner(sha, pinned, channel, stable_href="/docs/"):
+            entry = index["channels"][channel]
+            return (
+                '<html><head></head><body>'
+                f'<div class="version-banner" data-channel-revision="{sha}" '
+                f'data-channel-digest="{entry["image"]["digest"]}" '
+                f'data-channel-promotion="{entry["promotion"]["state"]}" '
+                f'data-channel-promoted="{str(entry["promotion"]["promoted"]).lower()}">'
+                f'<a href="{pinned}">Pinned to {sha[:7]}</a>'
+                '<label for="version-channel-select">Documentation version</label>'
+                '<select id="version-channel-select" data-version-switcher '
+                'aria-label="Documentation version" onchange="location.assign(this.value)">'
+                f'<option value="{stable_href}">Stable</option>'
+                '<option value="/docs/nightly/">Nightly</option>'
+                '</select></div></body></html>')
+
+        with tempfile.TemporaryDirectory() as temporary:
+            site = Path(temporary)
+            (site / "version-index.json").write_text(vc.render_index(index), encoding="utf-8")
+            pages = {}
+            for version in index["versions"]:
+                target = site / version["route"].strip("/")
+                target.mkdir(parents=True, exist_ok=True)
+                pages[version["channel"]] = target / "index.html"
+                pinned = f"{index['repository']}/commit/{version['commit']}"
+                pages[version["channel"]].write_text(
+                    banner(version["commit"], pinned, version["channel"]), encoding="utf-8")
+                (target / "source.json").write_text(json.dumps({
+                    "revision": version["commit"],
+                    "source_commit": version["source_commit"],
+                    "channel": version["channel"],
+                    "image_digest": index["channels"][version["channel"]]["image"]["digest"],
+                }), encoding="utf-8")
+            bases = bases_from_index(site, "/")
+            marker = vc.channel_marker(index)
+
+            def validate_all():
+                errors = []
+                for page in pages.values():
+                    check_version_ui(site, page, index, bases, errors, marker)
+                return errors
+
+            self.assertEqual(validate_all(), [])
+
+            stable_page = pages["stable"]
+            stable_sha = index["channels"]["stable"]["commit"]
+            original = stable_page.read_text(encoding="utf-8")
+            # Truncated SHA in the pinned URL is not an immutable link.
+            stable_page.write_text(
+                original.replace(f"/commit/{stable_sha}", f"/commit/{stable_sha[:7]}"),
+                encoding="utf-8")
+            self.assertTrue(any("non-canonical pinned commit URL" in item
+                                for item in validate_all()))
+            # Pinned links may never point at a generic versions index.
+            stable_page.write_text(
+                original.replace(f"/commit/{stable_sha}", "/docs/versions/"), encoding="utf-8")
+            self.assertTrue(any("non-canonical pinned commit URL" in item
+                                for item in validate_all()))
+            # Broken switcher hrefs (double slash / wrong appended slug) fail.
+            stable_page.write_text(
+                original.replace('value="/docs/"', 'value="/docs/versions/1.0.40//"'),
+                encoding="utf-8")
+            self.assertTrue(any("not canonical" in item for item in validate_all()))
+            # A legacy option label reintroduces a retired snapshot.
+            stable_page.write_text(
+                original.replace(">Stable</option>", ">1.0.39</option>"), encoding="utf-8")
+            self.assertTrue(any("selector options must be Stable and Nightly" in item
+                                for item in validate_all()))
+
+    def test_public_channel_marker_rejects_stale_and_wrong_exact_input(self):
+        root = Path(__file__).resolve().parent.parent
+        contract, catalog = vc.load(root)
+        index = vc.version_index(contract, catalog, root)
+        with tempfile.TemporaryDirectory() as temporary:
+            site = Path(temporary)
+            marker = vc.channel_marker(index)
+            (site / "channel-marker.json").write_text(
+                json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+            self.assertEqual(check_marker(site, index), [])
+            self.assertEqual(check_marker(site, index, {
+                "revision": marker["channels"]["nightly"]["revision"],
+                "digest": marker["channels"]["nightly"]["digest"],
+                "state": "baseline",
+            }), [])
+            self.assertTrue(any("nightly marker digest is not the qualified" in item
+                                for item in check_marker(site, index, {
+                                    "revision": marker["channels"]["nightly"]["revision"],
+                                    "digest": "sha256:" + "c" * 64})))
+            stale = copy.deepcopy(marker)
+            stale["channels"]["nightly"]["revision"] = "0" * 40
+            (site / "channel-marker.json").write_text(
+                json.dumps(stale, indent=2) + "\n", encoding="utf-8")
+            self.assertTrue(any("marker revision disagrees" in item
+                                for item in check_marker(site, index)))
+
+    def test_promoted_build_requires_the_exact_external_input(self):
+        root = Path(__file__).resolve().parent.parent
+        contract, catalog = vc.load(root)
+        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        digest = "sha256:" + "d" * 64
+        expect = {"revision": revision, "digest": digest,
+                  "state": "final", "receipt": "OSS-413-test-3"}
+        promoted = vc.apply_promotion(contract, expect)
+        index = vc.version_index(promoted, catalog, root)
+        with tempfile.TemporaryDirectory() as temporary:
+            site = Path(temporary)
+            marker = vc.channel_marker(index)
+            (site / "channel-marker.json").write_text(
+                json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+            self.assertEqual(check_marker(site, index, expect), [])
+            errors = []
+            check_channels(index, errors, expect)
+            self.assertEqual(errors, [])
+            # Without the exact input, a promoted nightly is never accepted.
+            errors = []
+            check_channels(index, errors)
+            self.assertTrue(any("stale nightly revision" in item for item in errors))
+            self.assertTrue(any("promotion claim disagrees" in item for item in errors))
+            self.assertTrue(any("qualif" in item for item in check_marker(site, index, {
+                "revision": revision, "digest": "sha256:" + "e" * 64})))
 
     def test_a_page_without_social_metadata_fails_the_website_check(self):
         with tempfile.TemporaryDirectory() as temporary:

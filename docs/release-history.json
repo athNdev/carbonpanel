@@ -313,7 +313,7 @@
       "publishable": false,
       "release": null,
       "consumers": "No workflow, release, doc or consumer found; duplicate of docs1.0.7 commit 1a3f1388",
-      "notes": "Inherited unversioned historical ref, duplicate of docs1.0.7 commit 1a3f1388. Retained outside channel discovery; no deletion proposed."
+      "notes": "Inherited unversioned historical ref, duplicate of docs1.0.7 commit 1a3f1388. Counts above record the 2026-11-19 audit snapshot. This ref and the other 31 exact inherited refs in the OSS-414 bundle were deleted from athNdev/carbonpanel on 2026-11-20 after exact-match verification and independent review; archived in inherited-tag-cleanup/inherited-tag-candidates.bundle (SHA-256 8139597d3cee368de0ac751bfff44dd0aba9f57a88d5056001730364a72383ec) with rollback instructions. Upstream discohaus/discopanel retains the ref."
     },
     {
       "name": "rm",
@@ -328,7 +328,7 @@
       "publishable": false,
       "release": null,
       "consumers": "No workflow, release, doc or consumer found; disco-agent experiment commit a7f43f0b",
-      "notes": "Inherited unversioned historical ref, commit a7f43f0b (disco-agent experiment). Retained outside channel discovery; no deletion proposed."
+      "notes": "Inherited unversioned historical ref, commit a7f43f0b (disco-agent experiment). Counts above record the 2026-11-19 audit snapshot. Deleted from athNdev/carbonpanel on 2026-11-20 in the OSS-414 first batch; archived in inherited-tag-cleanup/inherited-tag-candidates.bundle (SHA-256 8139597d3cee368de0ac751bfff44dd0aba9f57a88d5056001730364a72383ec) with rollback instructions. Upstream discohaus/discopanel retains the ref; external reachability remains UNKNOWN."
     },
     {
       "name": "v1.0.0",
@@ -1358,5 +1358,11 @@
     "Exact asset bytes of upstream inherited releases were not fetched; UNKNOWN.",
     "Historical GitHub releases preceding v1.0.40 in athNdev/carbonpanel cannot be reconstructed; UNKNOWN.",
     "Module image repositories return anonymous 404; visibility/emptiness UNKNOWN, not asserted empty."
-  ]
+  ],
+  "retired_ref_provenance": {
+    "tracker": "https://carbonpanel.atlassian.net/browse/OSS-414",
+    "upstream_source": "The exact Git source objects for the retired inherited tags remain on the unchanged upstream repository discohaus/discopanel. athNdev/carbonpanel retains only the six protected Carbon refs.",
+    "rebuild_boundary": "Recovering exact source from upstream is provenance, not proof that a future rebuild produces byte-identical artifacts. Published OCI images and their digests were not changed by retiring the Git tags.",
+    "publication_boundary": "Future module publication requires an exact, existing Carbon-authored mod-* tag; the workflow's git show-ref check is the only publication authority."
+  }
 }
