@@ -1,0 +1,59 @@
+{
+  "name": "modpacks-library",
+  "title": "Modpacks library: recurring browse and management controls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "bootstrap": {
+    "path": "/login",
+    "detectSelector": "input[placeholder=\"Enter your username\"]",
+    "usernameSelector": "input[placeholder=\"Choose admin username\"]",
+    "passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
+    "confirmSelector": "input[placeholder=\"Confirm your password\"]",
+    "submitSelector": "button[type=\"submit\"]",
+    "successSelector": "a[href^=\"/servers/\"]"
+  },
+  "login": {
+    "path": "/login",
+    "usernameSelector": "input[placeholder=\"Enter your username\"]",
+    "passwordSelector": "input[placeholder=\"Enter your password\"]",
+    "submitSelector": "button[type=\"submit\"]",
+    "successSelector": "a[href^=\"/servers/\"]"
+  },
+  "steps": [
+    {
+      "goto": "/modpacks",
+      "waitFor": "text=Browse, import and manage modpack packages",
+      "name": "modpacks library loads"
+    },
+    {
+      "assertVisible": "[data-testid=\"showcase-modpacks-content\"]",
+      "name": "modpacks content area is present"
+    },
+    {
+      "assertVisible": "[data-testid=\"tab-browse\"]",
+      "name": "browse library tab is present"
+    },
+    {
+      "assertVisible": "[data-testid=\"tab-imported\"]",
+      "name": "imported library tab is present"
+    },
+    {
+      "assertVisible": "[data-testid=\"tab-favorites\"]",
+      "name": "favorites library tab is present"
+    },
+    {
+      "assertVisible": "input[placeholder=\"Search modpacks by name or description...\"]",
+      "name": "modpack search control is present"
+    },
+    {
+      "assertNoScrollbar": "[data-carbon-tabs]",
+      "name": "modpacks library tabs do not scroll vertically"
+    },
+    {
+      "screenshot": "modpacks-library-controls",
+      "name": "capture modpacks library controls"
+    }
+  ]
+}
