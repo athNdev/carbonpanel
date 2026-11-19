@@ -77,6 +77,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		type ModItem,
 		type SearchModResult
 	} from '$lib/features/modpacks/studio/mod-actions';
+	import {
+		allPackContentMods,
+		fetchStudioPack,
+		isMcVersionChanged,
+		saveStudioPack,
+		summarizePackContent,
+		type StudioPack
+	} from '$lib/features/modpacks/studio/pack-metadata';
 	import { uploadFile } from '$lib/utils/chunked-upload';
 	import ModpackDeployDialog from '$lib/components/modpack-deploy-dialog.svelte';
 	import ManifestInspectorDialog from '$lib/components/manifest-inspector-dialog.svelte';
@@ -85,21 +93,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import ExportDialog from '../export-dialog.svelte';
 	import { formatBytes } from '$lib/utils';
 
-	interface Pack {
-		id: string;
-		name: string;
-		author: string;
-		version: string;
-		mc_version: string;
-		mod_loader: string;
-		loader_version: string;
-		updated_at: string;
-		mods: ModItem[];
-		datapacks?: ModItem[];
-		resourcepacks?: ModItem[];
-		shaderpacks?: ModItem[];
-		datapack_folder?: string;
-	}
+	type Pack = StudioPack;
 
 	let packId = $derived(page.params.id);
 
@@ -267,14 +261,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		loadError = '';
 		loading = true;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}`);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
-			if (data) {
-				data.mods = data.mods || [];
-			}
+			const data = await fetchStudioPack(packId, apiFetch);
 			pack = data;
-			loadedMCVersion = data.mc_version || '';
+			loadedMCVersion = data?.mc_version || '';
 		} catch (err) {
 			console.error('Failed to load pack:', err);
 			loadError = err instanceof Error ? err.message : 'Failed to load modpack project';
@@ -286,15 +275,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	async function saveMetadata() {
 		if (!pack) return;
-		const mcChanged = loadedMCVersion !== '' && pack.mc_version !== loadedMCVersion;
+		const mcChanged = isMcVersionChanged(loadedMCVersion, pack.mc_version);
 		saving = true;
 		try {
-			const res = await apiFetch(`/api/v1/packwiz/packs/${packId}`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(pack)
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await saveStudioPack(packId!, pack, apiFetch);
 			if (mcChanged) {
 				// MC version change marks installed mods stale: jump to the
 				// migration tab and simulate so the user can update & resolve
@@ -613,6 +597,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			return true;
 		})
 	);
+
+	let contentBreakdown = $derived(pack ? summarizePackContent(pack.mods, packFiles.length) : null);
 
 	function formatDownloads(count: number): string {
 		if (!count) return '0';
@@ -1300,18 +1286,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<!-- Manifest breakdown -->
 						<div class="space-y-2">
 							<div class="flex flex-wrap items-center gap-2">
-								<CarbonTag type="cyan" size="sm">Total {pack.mods.length}</CarbonTag>
+								<CarbonTag type="cyan" size="sm">Total {contentBreakdown?.total ?? 0}</CarbonTag>
 								<CarbonTag type="blue" size="sm">
-									Both {pack.mods.filter((m) => m.side === 'both').length}
+									Both {contentBreakdown?.both ?? 0}
 								</CarbonTag>
 								<CarbonTag type="purple" size="sm">
-									Client {pack.mods.filter((m) => m.side === 'client').length}
+									Client {contentBreakdown?.client ?? 0}
 								</CarbonTag>
 								<CarbonTag type="green" size="sm">
-									Server {pack.mods.filter((m) => m.side === 'server').length}
+									Server {contentBreakdown?.server ?? 0}
 								</CarbonTag>
 								<CarbonTag type="gray" size="sm">
-									Pinned {pack.mods.filter((m) => m.pinned).length}
+									Pinned {contentBreakdown?.pinned ?? 0}
 								</CarbonTag>
 							</div>
 							<CarbonStructuredList>
@@ -1323,19 +1309,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								{/snippet}
 								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
 									<span class="text-white">Client-only (excluded with server export)</span>
-									<span>{pack.mods.filter((m) => m.side === 'client').length}</span>
+									<span>{contentBreakdown?.clientOnly ?? 0}</span>
 								</div>
 								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
 									<span class="text-white">CurseForge-ready (numeric IDs)</span>
 									<span
-										>{pack.mods.filter(
-											(m) => m.platform === 'curseforge' && /^\d+$/.test(m.project_id || '')
-										).length} of {pack.mods.length}</span
+										>{contentBreakdown?.curseforgeReady ?? 0} of {contentBreakdown?.total ??
+											0}</span
 									>
 								</div>
 								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
 									<span class="text-white">Override files bundled</span>
-									<span>{packFiles.length}</span>
+									<span>{contentBreakdown?.overrides ?? 0}</span>
 								</div>
 							</CarbonStructuredList>
 						</div>
@@ -1715,12 +1700,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		bind:open={exportDialogOpen}
 		packId={pack.id}
 		packName={pack.name}
-		mods={[
-			...(pack.mods ?? []),
-			...(pack.datapacks ?? []),
-			...(pack.resourcepacks ?? []),
-			...(pack.shaderpacks ?? [])
-		]}
+		mods={allPackContentMods(pack)}
 	/>
 {/if}
 <ManifestInspectorDialog bind:open={inspectorOpen} onOpenChange={(v) => (inspectorOpen = v)} />
