@@ -35,9 +35,11 @@ def verify_surfaces(root, contract, index):
         errors.append("docs/version-index.json is stale; run 'version_bump.py prepare'")
     proto = PROTO.read_text(encoding="utf-8")
     match = re.search(r'^\s*version:\s*"([^"]+)"', proto, re.MULTILINE)
-    openapi = contract["artifacts"]["openapi"]["version"]
-    if not match or match.group(1) != openapi:
-        errors.append(f"proto info.version must equal artifacts.openapi.version ({openapi})")
+    openapi = contract["artifacts"]["openapi"]
+    if not match or match.group(1) != openapi["schema_family"]:
+        errors.append(f"proto info.version must equal artifacts.openapi.schema_family ({openapi['schema_family']})")
+    if openapi.get("product_version_stamped") is not True:
+        errors.append("shipped OpenAPI copies must stamp the exact product version, never the 2.x family placeholder")
     if contract["artifacts"]["protocol"]["version"] != "v1":
         errors.append("the independent protocol version must stay v1")
     banner = BANNER.read_text(encoding="utf-8")

@@ -65,6 +65,10 @@ sources:
 - `scripts/version_bump.py prepare`/`bump` is the one atomic workflow; it
   derives or validates every surface on the same commit, checks rendered and
   packaged output, and never tags, publishes or marks a candidate published.
+- The proto's `2.x` is the independent Connect-OpenAPI schema family, not a
+  product version. Bundled and website OpenAPI copies stamp `info.version`
+  with the exact normalized product version (matching CLI/UI/release manifest)
+  and are verified fail-closed; the `carbonpanel.v1` protocol stays unchanged.
 - The shared design system is published with the homepage from the current
   branch, including its canonical tokens. It shares site branding, local fonts
   and navigation with the website and docs, while keeping its component

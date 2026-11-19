@@ -25,8 +25,10 @@ from a `v` prefix. Only `carbonpanel-published-stable`,
 `v1.0.38` (local and authoritative remote tag ancestry differ) are excluded.
 A source-only version has no download CTA. The verified stable is `1.0.40` at
 peeled commit `f88748be…`; `3.0.0-alpha.1` is a GHCR-only legacy preview and is
-never sorted above stable. OpenAPI `info.version` (2.x) comes from
-`proto/carbonpanel/v1/auth.proto` and stays independent of protocol `v1`.
+never sorted above stable. The proto's `2.x` declares the independent Connect-OpenAPI schema family;
+shipped bundled and website schema copies stamp `info.version` with the exact
+product version (CLI `--version`, UI `APP_VERSION` and release manifest agree)
+while protocol `v1` stays unchanged.
 
 The contract is validated fail-closed: every version's commit must match the
 catalog peel **and** the real Git tag resolved at build time. A tag-ID, peel or

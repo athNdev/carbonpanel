@@ -9,6 +9,12 @@ import re
 from urllib.parse import unquote, urljoin, urlsplit
 import xml.etree.ElementTree as ET
 
+_ROOT = Path(__file__).resolve().parent.parent
+import sys  # noqa: E402
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from scripts.openapi_version import verify_text  # noqa: E402
+
 
 class Links(HTMLParser):
     def __init__(self, not_found=False):
@@ -222,8 +228,14 @@ def check_versions(root, index, errors):
         pin = json.loads((target / "source.json").read_text(encoding="utf-8"))
         if pin.get("revision") != version["commit"] or pin.get("source_commit") != version["source_commit"]:
             errors.append(f"{version['display']}: published source.json disagrees with the index")
-        if not (target / "schemav1.yaml").is_file():
+        schema = target / "schemav1.yaml"
+        if not schema.is_file():
             errors.append(f"{version['display']}: missing generated OpenAPI schema")
+        else:
+            try:
+                verify_text(schema.read_text(encoding="utf-8"), version["display"])
+            except ValueError as error:
+                errors.append(f"{version['display']}: OpenAPI schema drift: {error}")
         page = (target / "index.html").read_text(encoding="utf-8")
         if "data-version-switcher" not in page:
             errors.append(f"{version['display']}: common version switcher is missing")

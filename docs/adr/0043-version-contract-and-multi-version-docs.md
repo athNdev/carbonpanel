@@ -5,9 +5,9 @@ Status: Accepted
 ## Context
 
 The published `/docs/` pages reported `v3.0.0-beta.4` at a commit
-(`e1f23829…`) that did not match the origin tag peel (`896ea7a1…`). The label
+(`e1f23829ΓÇª`) that did not match the origin tag peel (`896ea7a1ΓÇª`). The label
 was also misbound to an upstream name collision, the verified stable was
-`1.0.40` at `f88748be…`, and the docs npm metadata claimed `2.0.0`. Free-form
+`1.0.40` at `f88748beΓÇª`, and the docs npm metadata claimed `2.0.0`. Free-form
 label/revision fields in `docs/website-source.json` let a label and a commit
 drift apart, and the version page inferred "prerelease" from a `v` prefix,
 which misclassified source-only historical tags.
@@ -48,5 +48,8 @@ now blocks packaging instead of reaching the live site. Consumers get
 reproducible immutable version routes without retagging or republishing.
 Staging, Pages and registry/GitHub writes remain separate deterministic steps;
 there is no cross-provider atomic transaction, so reconciliation retries from
-the verified exact-commit artifact. OpenAPI `info.version` (2.x) stays anchored
-in `proto/carbonpanel/v1/auth.proto` and remains independent of protocol `v1`.
+the verified exact-commit artifact. The proto declares the independent
+Connect-OpenAPI **schema family** `2.x`; it is not a product version. Bundled
+and website OpenAPI copies stamp `info.version` with the exact normalized
+product version and are verified fail-closed, while the `carbonpanel.v1`
+protocol identity stays unchanged.

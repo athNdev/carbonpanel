@@ -11,12 +11,18 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from datetime import datetime, timezone
 import zipfile
 
-ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from scripts.openapi_version import verify_protocol_v1, verify_text
+
+ROOT = _ROOT
 IMAGE = "atharvnaphade/carbonpanel"
 TARGETS = (("linux", "amd64"), ("linux", "arm64"), ("darwin", "amd64"),
            ("darwin", "arm64"), ("windows", "amd64"))
@@ -1416,7 +1422,13 @@ def collect(args):
                 (platform / program).write_bytes(members[program])
                 (platform / program).chmod(0o755)
     shutil.copyfile(ROOT / "config.example.yaml", image / "config.example.yaml")
-    shutil.copyfile(ROOT / ".website-build/release-schema/openapi.yaml", output / "openapi.yaml")
+    # The bundled schema must carry the exact product version, never the proto's
+    # independent 2.x placeholder. CLI/UI use the same normalized version.
+    semver = product["semver"] if product else tag[1:]
+    release_schema = ROOT / ".website-build/release-schema/openapi.yaml"
+    verify_text(release_schema.read_text(encoding="utf-8"), semver)
+    verify_protocol_v1(release_schema.read_text(encoding="utf-8"))
+    shutil.copyfile(release_schema, output / "openapi.yaml")
     (output / "release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     finalize(argparse.Namespace(output=str(output), digest=None))
 

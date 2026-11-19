@@ -20,9 +20,11 @@
       "note": "The Connect/HTTP wire contract is versioned independently of the product release."
     },
     "openapi": {
-      "version": "2.x",
+      "schema_family": "2.x",
       "source": "proto/carbonpanel/v1/auth.proto",
-      "note": "OpenAPI info.version is declared in the proto and stays independent of protocol v1."
+      "independent": true,
+      "product_version_stamped": true,
+      "note": "The proto's 2.x declares the independent Connect-OpenAPI schema family, not a product release. Shipped bundled and website schema copies stamp info.version with the exact normalized product version; the carbonpanel.v1 protocol identity is unchanged."
     },
     "module": {
       "version": "mod-v2.0.6",

@@ -92,14 +92,18 @@ class VersionContractTests(unittest.TestCase):
                 for route in (version["route"], version["immutable_route"]):
                     target = root / route.strip("/")
                     target.mkdir(parents=True, exist_ok=True)
-                (target / "index.html").write_text(
-                    '<html><head><title>v</title></head><body>'
-                    + " ".join(v["display"] for v in index["versions"])
-                    + '<nav data-version-switcher></nav></body></html>', encoding="utf-8")
-                source = {"revision": version["commit"],
-                          "source_commit": version["source_commit"]}
-                (target / "source.json").write_text(json.dumps(source), encoding="utf-8")
-                (target / "schemav1.yaml").write_text("x" * 2000, encoding="utf-8")
+                    (target / "index.html").write_text(
+                        '<html><head><title>v</title></head><body>'
+                        + " ".join(v["display"] for v in index["versions"])
+                        + '<nav data-version-switcher></nav></body></html>', encoding="utf-8")
+                    source = {"revision": version["commit"],
+                              "source_commit": version["source_commit"]}
+                    (target / "source.json").write_text(json.dumps(source), encoding="utf-8")
+                    (target / "schemav1.yaml").write_text(
+                        "openapi: 3.1.0\ninfo:\n  title: Carbon Panel API\n"
+                        f"  version: {version['display']}\npaths:\n"
+                        "  /carbonpanel.v1.ActivityService/List:\n    post: {}\n",
+                        encoding="utf-8")
             errors = []
             check_versions(root, index, errors)
             self.assertEqual(errors, [])

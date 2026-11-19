@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-from scripts import version_contract
+from scripts import openapi_version, version_contract
 
 ROOT = _ROOT
 SCHEMA_CACHE = ROOT / ".website-build/schema-cache"
@@ -265,7 +265,8 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
     api_page.write_text(api_page.read_text(encoding="utf-8").replace(
         "This spec is auto-generated from the protobuf definitions and stays in sync with the latest release.",
         f"This API schema is generated from application commit {current['commit'][:12]} "
-        f"({current['display']}, OpenAPI {index['artifacts']['openapi']['version']})."),
+        f"({current['display']}, Connect-OpenAPI schema family "
+        f"{index['artifacts']['openapi']['schema_family']})."),
         encoding="utf-8")
     # The proto at an exact commit is immutable, so cache its generated schema
     # across rebuilds; a fresh CI checkout still generates each one from source.
@@ -281,6 +282,12 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
                        cwd=snapshot, check=True)
         cached.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(generated_schema, cached)
+    # The website schema copy carries this version's exact product identity.
+    schema = generated_schema.read_text(encoding="utf-8")
+    generated_schema.write_text(
+        openapi_version.stamp_text(schema, current["display"]), encoding="utf-8")
+    openapi_version.verify_text(
+        generated_schema.read_text(encoding="utf-8"), current["display"])
     environment = {**os.environ, "DOCS_BASE_PATH": base,
                    "WEBSITE_BASE_PATH": root_base, "WEBSITE_ORIGIN": site,
                    "ASTRO_TELEMETRY_DISABLED": "1"}
