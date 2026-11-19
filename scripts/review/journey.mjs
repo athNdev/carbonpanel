@@ -157,6 +157,16 @@ async function main() {
         case "wait":
           await page.waitForTimeout(spec.wait);
           break;
+        case "assertFrameVisible": {
+          // The map is a sandboxed same-origin iframe. Require real renderer
+          // DOM inside it (canvas/tiles) before calling the capture qualified.
+          await page
+            .frameLocator(spec.frame)
+            .locator(spec.assertFrameVisible)
+            .first()
+            .waitFor({ state: "visible", timeout: spec.timeout ?? 60000 });
+          break;
+        }
         case "assertVisible":
           await page
             .locator(spec.assertVisible)
@@ -404,6 +414,7 @@ async function main() {
         "waitFor",
         "wait",
         "assertVisible",
+        "assertFrameVisible",
         "assertHidden",
         "assertText",
         "assertNoScrollbar",

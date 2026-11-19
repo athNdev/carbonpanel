@@ -380,7 +380,8 @@ world_view:
       health_path: "/"
       player_feed: false
 EOF
-	echo "review BlueMap settings.json: $(head -c 600 "${mapdir}/web/settings.json" 2>/dev/null)" >&2
+	map_count="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).maps;console.log(Array.isArray(m)?m.length:0)}catch(e){console.log(0)}})' <"${mapdir}/web/settings.json" 2>/dev/null || printf '0')"
+	echo "review BlueMap map count: ${map_count}" >&2
 	echo "seeded real BlueMap tiles for ${server_id} on ${node_id}"
 }
 
@@ -452,12 +453,11 @@ up)
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
 				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" world; then
-					echo "review bluemap container running: $(docker inspect --format '{{.Id}} {{.HostConfig.NetworkMode}}' "${NAME}-bluemap" 2>/dev/null)" >&2
-					echo "review renderer local probe: $(docker exec "${NAME}-bluemap" sh -c 'wget -q -O - http://127.0.0.1:8100/settings.json 2>/dev/null | head -c 120' 2>/dev/null)" >&2
+					renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | json_path 'targets.0.rendererState')"
+					echo "review renderer state: ${renderer_state:-unknown}" >&2
 				else
 					echo "review bluemap container failed to restart" >&2
 				fi
-				echo "review world view targets after renderer: $(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | head -c 1200)" >&2
 			fi
 		fi
 	fi

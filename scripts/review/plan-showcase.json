@@ -391,6 +391,13 @@
       "name": "BlueMap iframe mounted"
     },
     {
+      "assertFrameVisible": "canvas",
+      "frame": "iframe[title^=\"World map for\"]",
+      "timeout": 60000,
+      "feature": "worlds",
+      "name": "renderer canvas with real map tiles is visible"
+    },
+    {
       "wait": 5000,
       "feature": "worlds",
       "name": "let real tiles paint"
