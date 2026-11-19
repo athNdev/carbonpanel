@@ -113,12 +113,14 @@ this consumer-side `cosign verify-blob` step; the Python checks and
 for it.
 
 The publication lane also enforces a fail-closed publication predicate before
-checksumming or signing: a staged bundle must carry a real payload of the
-declared artifact kind and non-synthetic provenance. Any offline rehearsal
+checksumming or signing: a staged bundle must carry a payload of the declared
+artifact kind and a non-synthetic provenance record. Any offline rehearsal
 marker (`BUILD-PREFLIGHT.json` with `live_build: false`, or a fixture-only plan
-record) refuses the bundle. Offline planning and `--preflight` fixtures remain
-reachable for rehearsal, but rehearsal output can never be published as a
-qualified artifact.
+record, including re-encoded, nested or case-variant forms) refuses the bundle.
+`verify-bundle` now inherits this predicate, so verifying a rehearsal bundle
+fails too. Offline planning and `--preflight` fixtures remain reachable for
+rehearsal, but their stamped output is refused by the publication lane. These
+are structural checks, not a substitute for the cryptographic step above.
 
 ## Accurate announcement (publish only after verification)
 

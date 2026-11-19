@@ -57,10 +57,13 @@ with `live_build: false`), a fail-closed publication predicate
 checksumming, signing or any draft release, and is also inherited by
 `verify_bundle`. It refuses any offline/fixture marker or fixture-only plan
 record and requires a real payload of the declared artifact kind plus
-non-synthetic artifact provenance, so a rehearsal output can never be
-published as a qualified artifact. It does not gate the offline rehearsal
-reachability seam. Publication remains a manual `workflow_dispatch` with
-`publish=true`, and no real artifact has been published.
+non-synthetic artifact provenance, so the rehearsal outputs stamped by these
+wrappers are refused before checksumming, signing or publication. Payload and
+provenance checks are structural (kind/size and a non-synthetic record), not a
+substitute for the consumer's cryptographic verification. The predicate does
+not gate the offline rehearsal reachability seam. Publication remains a manual
+`workflow_dispatch` with `publish=true`, and no real artifact has been
+published.
 
 # Alternatives
 

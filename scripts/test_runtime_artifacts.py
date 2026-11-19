@@ -510,6 +510,46 @@ class PublicationPredicateTests(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertTrue(any("unverified" in p for p in problems), problems)
 
+    def test_bypass_shapes_are_refused(self):
+        """Fail closed on re-encoded/nested/misnamed/malformed rehearsal markers."""
+        with self.subTest("non-boolean flags"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": 0})
+                (Path(tmp) / "plan.json").write_text(
+                    json.dumps({"fixture_only": 1, "no_qcow2_built": 1}), encoding="utf-8")
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok, problems)
+        with self.subTest("case-variant marker filename"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+                (Path(tmp) / "BUILD-PREFLIGHT.json").unlink()
+                (Path(tmp) / "build-preflight.JSON").write_text(
+                    json.dumps({"mode": "offline-plan", "live_build": False}), encoding="utf-8")
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok, problems)
+        with self.subTest("nested marker"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+                nested = Path(tmp) / "nested"
+                nested.mkdir()
+                (nested / "BUILD-PREFLIGHT.json").write_text(
+                    json.dumps({"mode": "offline-plan", "live_build": False}), encoding="utf-8")
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok, problems)
+        with self.subTest("malformed marker"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+                (Path(tmp) / "BUILD-PREFLIGHT.json").write_text("{not json", encoding="utf-8")
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok, problems)
+        with self.subTest("marker in integrity record filename"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+                (Path(tmp) / "sbom.cdx.json").write_text(
+                    json.dumps({"fixture_only": True}), encoding="utf-8")
+                ok, problems = ra.publication_predicate(tmp, "qcow2")
+                self.assertFalse(ok, problems)
+
     def test_verify_bundle_inherits_the_predicate_refusal(self):
         with tempfile.TemporaryDirectory() as tmp:
             make_bundle(tmp, "qcow2", marker={"mode": "offline-plan", "live_build": False})
