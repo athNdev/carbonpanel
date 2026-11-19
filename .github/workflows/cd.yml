@@ -521,35 +521,11 @@ jobs:
           version: '1.50.0'
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build the EXACT docs artifact from the pinned source. No tracked main
-      # file is rewritten with the Nightly revision (that would self-trigger CI).
-      - name: Build and validate the exact docs artifact
-        id: docs
-        if: steps.pinned.outputs.stable == 'true'
-        run: |
-          python3 scripts/build_website.py
-          python3 scripts/check_website.py
-          DOCS_HASH=$(sha256sum .website-build/site/version-index.json | cut -d' ' -f1)
-          echo "hash=sha256:$DOCS_HASH" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - name: Sign in to Docker Hub
-        if: steps.pinned.outputs.stable == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-      - name: Sign in to the linked GitHub container registry
-        if: steps.pinned.outputs.stable == 'true'
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      # Stage immutable multiarch images in BOTH registries. A verified sha tag
-      # is REUSED on retry (never rebuilt); a missing/unverified tag leaves this
-      # run as opt-off staging with zero writes.
+      # Observe the immutable sha reference in BOTH registries before the docs
+      # build: the staged digest is the Nightly candidate input, so the build
+      # must render the real candidate page, never the baseline. Read-only. A
+      # verified sha tag is REUSED on retry (never rebuilt); a missing or
+      # unverified tag leaves this run as opt-off staging with zero writes.
       - name: Observe the immutable sha reference in both registries
         id: sha_obs
         if: steps.pinned.outputs.stable == 'true'
@@ -572,6 +548,50 @@ jobs:
           else
             echo "::notice::no verified staged digest; this run is opt-off staging only"
           fi
+
+      # Build the EXACT docs artifact from the pinned source. No tracked main
+      # file is rewritten with the Nightly revision (that would self-trigger CI).
+      - name: Build and validate the exact docs artifact
+        id: docs
+        if: steps.pinned.outputs.stable == 'true'
+        env:
+          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
+          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
+        run: |
+          BUILD_ARGS=()
+          if [ -n "$CHANNEL_DIGEST" ]; then
+            BUILD_ARGS+=(--nightly-revision "$CHANNEL_COMMIT"
+                         --nightly-digest "$CHANNEL_DIGEST"
+                         --promotion-receipt "staged-$CHANNEL_COMMIT")
+          fi
+          python3 scripts/build_website.py "${BUILD_ARGS[@]}"
+          DOCS_HASH=$(sha256sum .website-build/site/version-index.json | cut -d' ' -f1)
+          echo "hash=sha256:$DOCS_HASH" >> "$GITHUB_OUTPUT"
+          if [ -n "$CHANNEL_DIGEST" ]; then
+            # Candidate validation: the compiled Nightly Proxmox page on the
+            # non-active route must carry the first-party raw installer link.
+            PAGE=".website-build/site/docs/candidate/$CHANNEL_COMMIT/getting-started/proxmox/index.html"
+            test -s "$PAGE"
+            grep -q "raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh" "$PAGE"
+            echo "proxmox_page=$PAGE" >> "$GITHUB_OUTPUT"
+          else
+            python3 scripts/check_website.py
+          fi
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Sign in to Docker Hub
+        if: steps.pinned.outputs.stable == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+      - name: Sign in to the linked GitHub container registry
+        if: steps.pinned.outputs.stable == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Observe live aliases and reconstruct the active receipt
         id: active
