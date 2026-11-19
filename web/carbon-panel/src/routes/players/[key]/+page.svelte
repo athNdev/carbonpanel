@@ -280,7 +280,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 </script>
 
 {#snippet fieldRows(fields: PlayerField[])}
-	{#each fields as field (field.name + field.observation?.source)}
+	{#each fields as field, fieldIndex (field.name + field.observation?.source + fieldIndex)}
 		<div class="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
 			<div class="min-w-0">
 				<p class="mono-label">{field.name}</p>
@@ -293,7 +293,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{/each}
 {/snippet}
 
-<div class="h-full flex-1 space-y-4 font-sans">
+<div class="h-full flex-1 space-y-4 font-sans" data-testid="showcase-player-detail-content">
 	<CarbonBreadcrumbs
 		items={[{ label: 'Players', href: resolve('/players') }, { label: displayName }]}
 	/>
@@ -407,7 +407,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								</p>
 								{#if detail.aliases.length > 0}
 									<ul class="space-y-2">
-										{#each detail.aliases as alias (alias.name + alias.source)}
+										{#each detail.aliases as alias, aliasIndex (alias.name + alias.source + aliasIndex)}
 											<li class="flex flex-wrap items-center gap-2 text-xs">
 												<span class="font-mono text-foreground">{alias.name}</span>
 												<CarbonTag type="gray" size="sm">

@@ -145,9 +145,10 @@ def expected_images(plan_path: Path, features: set[str] | None = None) -> list[d
                 "name": name,
                 "alt": step.get("alt") or step.get("name") or name,
                 "focus": step.get("focus") or step.get("name") or "",
-                # Core screenshots are mandatory; feature-tagged screenshots
-                # are best-effort until a README link makes them canonical.
-                "required": bool(step.get("required", not bool(feature))),
+                # Every selected screenshot is mandatory for the bundle: a
+                # feature that was enabled but failed to capture must block
+                # publication rather than publish a partial set.
+                "required": bool(step.get("required", True)),
             }
         )
     if not images:

@@ -119,6 +119,12 @@ json_path() {
 	node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{let v=JSON.parse(s);for(const k of process.argv[1].split("."))v=v?.[k];if(v===undefined||v===null)return;console.log(typeof v==="object"?JSON.stringify(v):String(v))}catch(e){}})' "$1"
 }
 
+login_token() {
+	local payload
+	payload="$(REVIEW_SEED_USER="$USER_NAME" REVIEW_SEED_PASS="$USER_PASS" node -e 'console.log(JSON.stringify({username:process.env.REVIEW_SEED_USER,password:process.env.REVIEW_SEED_PASS}))')"
+	rpc /carbonpanel.v1.AuthService/Login "${payload}" 2>/dev/null | json_path 'token'
+}
+
 # seed makes a fresh stack usable: the first admin account, a local Docker node
 # and a stopped starter server. Every step is safe to repeat.
 seed() {
@@ -241,15 +247,26 @@ wait_for_server_running() {
 # identity. If the provider is unavailable the add is skipped with a warning:
 # player captures are best-effort and never borrow a real player's profile.
 seed_showcase_player() {
-	local token="$1" server_id="$2" count payload response
+	local token="$1" server_id="$2" count payload response query
 	response="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null || true)"
 	count="$(printf '%s' "${response}" | list_count players || printf '0')"
 	if [ "${count}" -gt 0 ]; then
+		echo "review roster already has ${count} player identity/identities"
 		return 0
 	fi
-	payload="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-allowlist-fixture",playerQuery:"ReviewFixture"}))')"
-	rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" >/dev/null 2>&1 ||
-		echo "could not seed the review allowlist identity (identity provider may be unavailable)" >&2
+	# Two reserved fixture names: a transient provider failure must not cost the
+	# player captures. Only an authoritative NOT_FOUND creates an offline identity.
+	for query in ReviewFixture ReviewFixtureTwo; do
+		payload="$(REVIEW_SERVER_ID="${server_id}" REVIEW_PLAYER_QUERY="${query}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-allowlist-"+process.env.REVIEW_PLAYER_QUERY,playerQuery:process.env.REVIEW_PLAYER_QUERY}))')"
+		response="$(rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" 2>&1 || true)"
+		response="$(printf '%s' "${response}" | cut -c1-200)"
+		count="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null | list_count players || printf '0')"
+		if [ "${count}" -gt 0 ]; then
+			echo "seeded offline review identity with ${query}; roster count ${count}"
+			return 0
+		fi
+		echo "review allowlist query ${query} produced no roster identity: ${response}" >&2
+	done
 }
 
 # seed_showcase_pack creates a small fabric pack with real mods so studio and
@@ -292,10 +309,146 @@ seed_showcase_pack() {
 	create_extra_pack 'Adventure Kit' '1.2.4' '1.20.1' 'quilt'
 }
 
+# A real BlueMap renderer for the gated World View capture. Managed install is
+# unavailable on this stack because CreateNode mints a UUID node id, so the
+# explicit world_view endpoint path is used instead: the renderer container
+# shares the panel's loopback namespace and serves genuinely rendered tiles
+# from a read-only bind of the seeded vanilla world. All steps are best-effort;
+# a failure leaves the core captures untouched.
+seed_showcase_bluemap() {
+	local token="$1" node_id data_path host_path server_id level="world" mapdir deadline
+	server_id="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null | json_path 'servers.0.id')"
+	node_id="$(rpc /carbonpanel.v1.NodeService/ListNodes '{}' "${token}" 2>/dev/null | json_path 'nodes.0.id')"
+	data_path="$(rpc /carbonpanel.v1.ServerService/GetServer "{\"id\":\"${server_id}\"}" "${token}" 2>/dev/null | json_path 'server.dataPath')"
+	if [ -z "${server_id}" ] || [ -z "${node_id}" ] || [ -z "${data_path}" ]; then
+		echo "could not resolve seeded server/node facts for BlueMap; skipping renderer" >&2
+		return 0
+	fi
+	case "${data_path}" in
+		/app/data/*) host_path="${DATA}/data/${data_path#/app/data/}" ;;
+		*) host_path="${DATA}/data/servers/${server_id}" ;;
+	esac
+	DATA_PATH_FOR_BLUEMAP="${host_path}"
+	echo "review BlueMap world path: ${data_path} -> ${host_path}" >&2
+	if [ ! -d "${host_path}/${level}" ]; then
+		echo "seeded world ${host_path}/${level} is absent; skipping BlueMap renderer" >&2
+		return 0
+	fi
+	mapdir="${host_path}/modules/bluemap"
+	# The panel container owns the server data directory; write the fixture
+	# config as root inside that container, then bind the same paths into the
+	# renderer container.
+	cat >"${DATA}/config/setup-bluemap.sh" <<EOF
+#!/bin/sh
+set -eu
+base="${data_path}/modules/bluemap"
+mkdir -p "\${base}/config/maps" "\${base}/data" "\${base}/web"
+printf '%s\n' '# Isolated review fixture' 'accept-download: true' 'render-thread-count: 1' 'region-file-check-interval: 5' > "\${base}/config/core.conf"
+printf '%s\n' '# Seeded vanilla level, mounted read-only' 'id: "${level}"' 'name: "${level}"' 'world: "/app/world"' 'dimension: "minecraft:overworld"' 'storage: file' > "\${base}/config/maps/${level}.conf"
+EOF
+	docker cp "${DATA}/config/setup-bluemap.sh" "${NAME}:/tmp/setup-bluemap.sh" >/dev/null 2>&1 || return 0
+	docker exec -u root "${NAME}" sh /tmp/setup-bluemap.sh >/dev/null 2>&1 || return 0
+	if ! start_bluemap "${host_path}" "${mapdir}" "${level}"; then
+		echo "could not start the isolated BlueMap renderer; skipping map capture" >&2
+		return 0
+	fi
+	deadline=$((SECONDS + 240))
+	while ((SECONDS < deadline)); do
+		if [ -f "${mapdir}/web/settings.json" ] &&
+			[ -d "${mapdir}/web/maps/${level}/tiles" ] &&
+			[ -n "$(find "${mapdir}/web/maps/${level}/tiles" -type f -print -quit 2>/dev/null)" ]; then
+			break
+		fi
+		sleep 3
+	done
+	if [ ! -f "${mapdir}/web/settings.json" ] ||
+		[ -z "$(find "${mapdir}/web/maps/${level}/tiles" -type f -print -quit 2>/dev/null)" ]; then
+		echo "BlueMap did not produce real tiles/settings.json within 240s; map capture will be unavailable" >&2
+		return 0
+	fi
+	mkdir -p "${DATA}/config"
+	cat >"${DATA}/config/config.yaml" <<EOF
+# Isolated review fixture: explicit node-local renderer endpoint.
+world_view:
+  endpoints:
+    - node_id: "${node_id}"
+      server_id: "${server_id}"
+      kind: "bluemap"
+      host: "127.0.0.1"
+      port: 8100
+      base_path: "/"
+      health_path: "/"
+      player_feed: false
+EOF
+	map_count="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const m=JSON.parse(s).maps;console.log(Array.isArray(m)?m.length:0)}catch(e){console.log(0)}})' <"${mapdir}/web/settings.json" 2>/dev/null || printf '0')"
+	echo "review BlueMap map count: ${map_count}" >&2
+	echo "seeded real BlueMap tiles for ${server_id} on ${node_id}"
+}
+
+# The sidecar is disposable but it is still a container on the host daemon.
+# Never remove a name: inspect, verify the immutable ID and ownership label,
+# then remove exactly that ID. A colliding unowned container is a hard refusal.
+owned_sidecar_id() {
+	local record id owner
+	record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "${NAME}-bluemap" 2>/dev/null)" || return 1
+	id="${record%% *}"; owner="${record#* }"
+	if [[ ! "$id" =~ ^[0-9a-f]{64}$ ]]; then
+		echo "refusing sidecar operation: ${NAME}-bluemap has no immutable container id" >&2
+		return 1
+	fi
+	if [ "$owner" != "$DATA" ]; then
+		echo "refusing sidecar operation: ${NAME}-bluemap is not owned by this review session" >&2
+		return 1
+	fi
+	printf '%s' "$id"
+}
+
+sidecar_exists() {
+	docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "${NAME}-bluemap"
+}
+
+remove_owned_sidecar() {
+	if ! sidecar_exists; then
+		return 0
+	fi
+	assert_owner || return 1
+	local id
+	id="$(owned_sidecar_id)" || return 1
+	docker rm -f "$id" >/dev/null
+}
+
+start_bluemap() {
+	local host_path="$1" mapdir="$2" level="$3"
+	remove_owned_sidecar || return 1
+	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
+		--label "carbonpanel.review.owner=${DATA}" \
+		-v "${mapdir}/config:/app/config" \
+		-v "${host_path}/${level}:/app/world:ro" \
+		-v "${mapdir}/data:/app/data" \
+		-v "${mapdir}/web:/app/web" \
+		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1
+}
+
+start_panel() {
+	docker run -d --name "${NAME}" \
+		--label "carbonpanel.review.owner=${DATA}" \
+		--restart unless-stopped \
+		-p "127.0.0.1:${PORT}:8080" \
+		-v "${DATA}/data:/app/data" \
+		-v "${DATA}/backups:/app/backups" \
+		-v "${DATA}/tmp:/app/tmp" \
+		-v "${DATA}/config/config.yaml:/etc/carbon-panel/config.yaml:ro" \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		"${IMAGE}" >/dev/null
+}
+
 down() {
 	docker info >/dev/null 2>&1 || { echo "Docker is unavailable; refusing teardown" >&2; return 1; }
 	local names
 	names="$(docker ps -a --format '{{.Names}}')" || { echo "cannot list containers; refusing teardown" >&2; return 1; }
+	if printf '%s\n' "$names" | grep -Fxq "${NAME}-bluemap"; then
+		remove_owned_sidecar || return 1
+	fi
 	if printf '%s\n' "$names" | grep -Fxq "$NAME"; then
 		assert_owner
 		local record id owner
@@ -306,26 +459,46 @@ down() {
 	fi
 }
 
+# Unit tests source this file with a fake docker on PATH to exercise the
+# ownership guards without touching a daemon or running the up/down dispatch.
+if [ "${REVIEW_DEVSTACK_SOURCE_ONLY:-}" = "1" ]; then
+	return 0 2>/dev/null || exit 0
+fi
+
 case "${1:-up}" in
 up)
 	init_owner
 	down
 	PORT="$(free_port "${PORT}")"
-	mkdir -p "${DATA}/data" "${DATA}/backups" "${DATA}/tmp"
+	mkdir -p "${DATA}/data" "${DATA}/backups" "${DATA}/tmp" "${DATA}/config"
 	echo "${PORT}" >"${DATA}/port"
+	[ -f "${DATA}/config/config.yaml" ] || printf '{}\n' >"${DATA}/config/config.yaml"
 	docker build -q -f "${REPO}/docker/Dockerfile.carbon-panel" \
 		-t "${IMAGE}" --build-arg APP_VERSION=review "${REPO}" >/dev/null
-	docker run -d --name "${NAME}" \
-		--label "carbonpanel.review.owner=${DATA}" \
-		--restart unless-stopped \
-		-p "127.0.0.1:${PORT}:8080" \
-		-v "${DATA}/data:/app/data" \
-		-v "${DATA}/backups:/app/backups" \
-		-v "${DATA}/tmp:/app/tmp" \
-		-v /var/run/docker.sock:/var/run/docker.sock \
-		"${IMAGE}" >/dev/null
+	start_panel
 	wait_for_health
 	seed
+	token="$(login_token)"
+	if [ -n "${token}" ]; then
+		seed_showcase_bluemap "${token}"
+		if [ -f "${DATA}/config/config.yaml" ] && grep -q 'world_view:' "${DATA}/config/config.yaml"; then
+			# Restart the panel so the explicit renderer endpoint is loaded.
+			docker rm -f "${NAME}" >/dev/null
+			start_panel
+			wait_for_health
+			# The renderer shares the panel's loopback namespace; rebind it to
+			# the newly created container after the restart.
+			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
+			if [ -n "${server_path}" ]; then
+				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" world; then
+					renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | json_path 'targets.0.rendererState')"
+					echo "review renderer state: ${renderer_state:-unknown}" >&2
+				else
+					echo "review bluemap container failed to restart" >&2
+				fi
+			fi
+		fi
+	fi
 	echo "review panel: http://127.0.0.1:${PORT}  (data: ${DATA})"
 	echo "account: ${USER_NAME} (password from PANEL_REVIEW_PASSWORD or the local default)"
 	;;

@@ -187,44 +187,64 @@
       "focus": "Player lookup, roster rows and allowlist state"
     },
     {
-      "click": "[data-player-row=\"0\"] button",
+      "click": "button[aria-label=\"Expand details\"]",
       "feature": "players",
-      "name": "open the seeded player profile"
+      "name": "expand the fixture identity details"
     },
     {
-      "waitFor": "#player-tab-overview",
+      "assertVisible": "button[aria-label=\"Collapse details\"]",
       "feature": "players",
-      "name": "player profile tabs render"
+      "name": "expanded identity details render"
     },
     {
       "screenshot": "showcase-player-profile",
-      "element": "#player-panel-overview",
-      "maxHeight": 600,
+      "element": "[data-testid=\"showcase-players-content\"]",
+      "maxHeight": 720,
       "scroll": false,
       "feature": "players",
-      "name": "player profile identity and skin state",
-      "alt": "Player profile overview with identity details and the actual skin state",
-      "focus": "Observed identity, aliases and the real skin availability state"
+      "name": "player identity and skin state in the real roster",
+      "alt": "Real player roster with the seeded identity expanded, showing its avatar and skin state",
+      "focus": "Observed identity, aliases and the actual skin availability state"
     },
     {
-      "click": "#player-tab-access",
+      "goto": "/servers",
       "feature": "players",
-      "name": "open player access tab"
+      "name": "open servers for the allowlist capture"
     },
     {
-      "waitFor": "#player-panel-access",
+      "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
       "feature": "players",
-      "name": "player access table renders"
+      "name": "open first server for allowlist"
+    },
+    {
+      "waitFor": "#server-detail-tabs-tab-players",
+      "feature": "players",
+      "name": "server players tab renders"
+    },
+    {
+      "click": "#server-detail-tabs-tab-players",
+      "feature": "players",
+      "name": "open server players tab"
+    },
+    {
+      "waitFor": "#server-detail-tabs-panel-players",
+      "feature": "players",
+      "name": "server players panel renders"
+    },
+    {
+      "assertVisible": "section[aria-label=\"Add allowlist entry\"]",
+      "feature": "players",
+      "name": "real allowlist form renders"
     },
     {
       "screenshot": "showcase-player-allowlist",
-      "element": "#player-panel-access",
-      "maxHeight": 528,
+      "element": "#server-detail-tabs-panel-players",
+      "maxHeight": 1000,
       "scroll": false,
       "feature": "players",
-      "name": "player allowlist column",
-      "alt": "Player access table showing the allowlist state observed for the fixture identity",
-      "focus": "Allowlist, operator and moderation state from the real backend"
+      "name": "server allowlist form and scoped roster",
+      "alt": "Server Players tab with the real allowlist form and the seeded identity's scoped access state",
+      "focus": "Allowlist form, scoped roster and moderation controls"
     },
     {
       "goto": "/library",
@@ -269,8 +289,8 @@
     },
     {
       "screenshot": "showcase-library-revisions",
-      "element": "#world-panel-revisions",
-      "maxHeight": 528,
+      "element": "[data-testid=\"showcase-library-detail-content\"]",
+      "maxHeight": 1000,
       "scroll": false,
       "feature": "library",
       "name": "world library immutable revision",
@@ -289,13 +309,54 @@
     },
     {
       "screenshot": "showcase-library-compatibility",
-      "element": "#world-panel-compatibility",
-      "maxHeight": 528,
+      "element": "[data-testid=\"showcase-library-detail-content\"]",
+      "maxHeight": 1000,
       "scroll": false,
       "feature": "library",
       "name": "world library compatibility report",
       "alt": "Real compatibility report for the seeded revision, including its honest unknown verdict",
       "focus": "Compatibility findings and the binding gate"
+    },
+    {
+      "goto": "/servers",
+      "waitFor": "a[href^=\"/servers/\"]",
+      "feature": "worlds",
+      "name": "open servers for the World tab capture"
+    },
+    {
+      "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
+      "feature": "worlds",
+      "name": "open seeded server for World tab"
+    },
+    {
+      "waitFor": "#server-detail-tabs-tab-world",
+      "feature": "worlds",
+      "name": "server World tab renders"
+    },
+    {
+      "click": "#server-detail-tabs-tab-world",
+      "feature": "worlds",
+      "name": "open the server World tab"
+    },
+    {
+      "waitFor": "#server-detail-tabs-panel-world",
+      "feature": "worlds",
+      "name": "server World panel renders"
+    },
+    {
+      "assertVisible": "#server-world-picker-heading",
+      "feature": "worlds",
+      "name": "real world picker heading renders"
+    },
+    {
+      "screenshot": "showcase-world-tab",
+      "element": "#server-detail-tabs-panel-world",
+      "maxHeight": 1000,
+      "scroll": false,
+      "feature": "worlds",
+      "name": "per-server World tab with real world facts",
+      "alt": "Per-server World tab showing the actual level, binding and relevant configuration",
+      "focus": "Active world, binding and revision for the seeded vanilla server"
     },
     {
       "goto": "/worlds",
@@ -309,6 +370,16 @@
       "name": "a ready renderer target exists"
     },
     {
+      "screenshot": "showcase-worlds-list",
+      "element": "[data-testid=\"showcase-worlds-content\"]",
+      "maxHeight": 720,
+      "scroll": false,
+      "feature": "worlds",
+      "name": "world list renderer state",
+      "alt": "World View list showing the observed renderer state for the seeded world",
+      "focus": "Renderer state and target row"
+    },
+    {
       "click": "a[href^=\"/worlds/\"]",
       "feature": "worlds",
       "name": "open the rendered world map"
@@ -318,6 +389,13 @@
       "timeout": 120000,
       "feature": "worlds",
       "name": "BlueMap iframe mounted"
+    },
+    {
+      "assertFrameVisible": "canvas",
+      "frame": "iframe[title^=\"World map for\"]",
+      "timeout": 60000,
+      "feature": "worlds",
+      "name": "renderer canvas with real map tiles is visible"
     },
     {
       "wait": 5000,
