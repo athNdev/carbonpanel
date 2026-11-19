@@ -193,6 +193,11 @@ func (a *httpRenderer) Health(ctx context.Context) (*Health, error) {
 // /settings.json over the private endpoint. It is not a port probe and the
 // response never reaches a browser. An empty list means the web server is up
 // but no map is configured/rendered for any target world.
+//
+// BlueMap v5.29 serializes maps as a JSON array of map ID strings
+// ({"maps":["world"]}); earlier fixtures and compatible renderers may use
+// objects with an "id" field. Accept both without relaxing the configured
+// map ID safeguard enforced by callers.
 func blueMapMapIDs(ctx context.Context, baseURL string, hc HTTPDoer) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/settings.json", nil)
 	if err != nil {
@@ -207,17 +212,27 @@ func blueMapMapIDs(ctx context.Context, baseURL string, hc HTTPDoer) ([]string, 
 		return nil, fmt.Errorf("settings.json returned HTTP %d", resp.StatusCode)
 	}
 	var payload struct {
-		Maps []struct {
-			ID string `json:"id"`
-		} `json:"maps"`
+		Maps []json.RawMessage `json:"maps"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return nil, err
 	}
 	ids := make([]string, 0, len(payload.Maps))
-	for _, m := range payload.Maps {
-		if id := strings.TrimSpace(m.ID); id != "" {
-			ids = append(ids, id)
+	for _, raw := range payload.Maps {
+		var id string
+		if err := json.Unmarshal(raw, &id); err == nil {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				ids = append(ids, trimmed)
+			}
+			continue
+		}
+		var obj struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &obj); err == nil {
+			if trimmed := strings.TrimSpace(obj.ID); trimmed != "" {
+				ids = append(ids, trimmed)
+			}
 		}
 	}
 	return ids, nil
