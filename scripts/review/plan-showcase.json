@@ -477,12 +477,13 @@
     },
     {
       "screenshot": "showcase-world-view",
-      "element": "iframe[title^=\"World map for\"]",
+      "element": "[data-testid=\"showcase-world-map-content\"]",
+      "maxHeight": 1800,
       "scroll": false,
       "feature": "worlds",
-      "name": "rendered BlueMap world tiles",
-      "alt": "In-app world view showing genuinely rendered BlueMap tiles for the seeded world",
-      "focus": "Rendered map tiles and in-app overlay controls"
+      "name": "full panel view with rendered BlueMap terrain",
+      "alt": "In-app World View panel with the embedded BlueMap renderer showing genuine rendered terrain tiles and its overlay controls",
+      "focus": "Authenticated proxied terrain in the embedded renderer and the surrounding view controls"
     }
   ]
 }
