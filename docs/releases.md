@@ -241,9 +241,11 @@ ahead of the 06:30 Australia/Sydney local updater). A schedule **verifies by
 default**: it resolves the CURRENT `main` tip read-only twice (a moving or
 unavailable tip pins nothing), checks out that exact SHA, requires a completed
 successful push CI run for that SHA, then re-reads the live tip and re-verifies
-exact-commit CI again immediately before the buildx push, and once more before
-moving the alias. A tip that moved after pinning blocks both the immutable
-write and the alias move; the run still builds locally without pushing. It may
+exact-commit CI again immediately before the buildx push, and a THIRD time
+(fresh result, not the pre-push one) immediately before moving the alias. A
+tip that moved after pinning, or a CI run that stopped being green between the
+push and the alias move, blocks the affected write; verification-only runs
+still build locally without pushing. It may
 move only the `nightly` alias, reusing the verified
 `sha-<commit>` image; a present-but-unverified or unknown sha tag is skipped
 with zero writes. The unattended path alone derives the previous alias binding

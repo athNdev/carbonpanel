@@ -38,11 +38,20 @@ The default is dry-run. With `-Apply`, a durable lock is taken before the state
 baseline, the SQLite controller database is snapshotted with the online backup
 API, a bounded rollback image is preserved, and only the scoped service is
 recreated with `up -d --no-deps --pull never --force-recreate`. Health,
-mounts, config ID and data are re-verified. On failure a required database
-restore happens with ONLY the scoped service stopped, the old image is
-recreated without tolerating failure, and any mismatch, failed health or
-failed data check is an error rather than a reported success. Worlds, other
-containers, game servers and WSL services are never touched.
+mounts, config ID and data are re-verified. On failure, restore safety is decided from OBSERVED DATABASE STATE, never from
+the wording of the error. A baseline state (user_version, table/row counts and
+a database-plus-WAL fingerprint) is captured immediately after the verified
+backup and compared with the state at failure time. If the database is
+unchanged, only the old image is recreated. If `user_version` increased, a
+schema migration committed after the snapshot: automatic restore is withheld,
+no image recreation is attempted, and the operator gets an explicit fail-closed
+message because overwriting that newer state could destroy legitimate data. Any
+other post-snapshot change is ambiguous and also fails closed in Production;
+only a fixture-injected, explicitly marked loss may authorize a real restore.
+A permitted restore stops ONLY the scoped service, restores the verified
+backup, then recreates the old image and verifies identity, mounts, health and
+data. Mismatches and failed checks are errors, not reported success. Worlds,
+other containers, game servers and WSL services are never touched.
 
 Live use requires a trusted nightly publication and exact tool review. The
 existing 06:30 Sydney Codex automation is guarded until the reviewed script is

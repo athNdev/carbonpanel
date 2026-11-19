@@ -24,7 +24,9 @@ cadence; no extra automation system or infrastructure setting is introduced.
    nothing and the run is skipped.
 2. Check out and assert that exact SHA, require a completed successful push CI
    run for that SHA, and re-read the tip plus re-verify CI again immediately
-   before the buildx push and once more before the alias move.
+   before the buildx push and once more before the alias move. The alias move
+   uses the FRESH pre-alias `verified` output and gates on it, so a CI result
+   that turned non-green after the push cannot authorize the alias move.
 3. Preflight the shared `sha-<commit>` image with strict, digest-anchored
    both-architecture evidence. A present-but-unverified or unknown reference is
    SKIPPED with zero writes; a verified reference is reused, never retargeted.

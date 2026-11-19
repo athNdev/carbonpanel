@@ -53,6 +53,7 @@ param(
   [string]$FixtureManifest,
   [switch]$SimulateDataFailure,
   [switch]$FixtureCorruptDatabase,
+  [switch]$FixtureCommitMigration,
   [ValidateRange(5, 600)]
   [int]$HealthTimeoutSeconds = 90
 )
@@ -543,6 +544,77 @@ finally:
   return ($result -join ' ').Trim()
 }
 
+function Get-DatabaseState {
+  # State, not error text, decides whether a restore is safe. user_version
+  # detects a committed schema migration; the fingerprint covers the database
+  # plus WAL/SHM bytes so post-snapshot writes cannot be mistaken for safety.
+  param([Parameter(Mandatory = $true)]$Target)
+  $db = "$($Target.DataDir)/carbon-panel.db"
+  $code = @'
+import sqlite3, sys, hashlib, os
+db = sys.argv[1]
+c = sqlite3.connect("file:" + db + "?mode=ro", uri=True)
+try:
+    uv = int(c.execute("PRAGMA user_version").fetchone()[0])
+    tables = int(c.execute("select count(*) from sqlite_master where type='table'").fetchone()[0])
+    servers = int(c.execute("select count(*) from servers").fetchone()[0]) if tables else -1
+finally:
+    c.close()
+h = hashlib.sha256()
+for suffix in ("", "-wal", "-shm"):
+    path = db + suffix
+    if os.path.exists(path):
+        with open(path, "rb") as handle:
+            h.update(handle.read())
+print("DBSTATE user_version=%d tables=%d servers=%d fingerprint=%s" %
+      (uv, tables, servers, h.hexdigest()))
+'@
+  $text = ((Invoke-WslPython -Code $code -Args @($db)) -join ' ')
+  if ($text -notmatch 'DBSTATE user_version=(\d+) tables=(\d+) servers=(-?\d+) fingerprint=([0-9a-f]{64})') {
+    Fail "cannot read database state for a safe rollback decision: $text"
+  }
+  return [pscustomobject]@{
+    UserVersion = [int]$Matches[1]
+    Tables = [int]$Matches[2]
+    Servers = [int]$Matches[3]
+    Fingerprint = $Matches[4]
+    Summary = $text.Trim()
+  }
+}
+
+function Test-FixtureLossMarker {
+  # Qualification-only explicit declaration of an injected data loss. Never
+  # consulted in Production scope; production ambiguity always fails closed.
+  param([Parameter(Mandatory = $true)]$Target)
+  if (-not $Target.Fixture) { return $false }
+  $marker = "$($Target.DataDir)/.devnightly-fixture-loss-marker"
+  $code = @'
+import os, sys
+p = sys.argv[1]
+print("MARKER_OK" if os.path.exists(p) and open(p).read().strip() == "FIXTURE_LOSS_v1" else "MARKER_ABSENT")
+'@
+  $result = Invoke-WslPython -Code $code -Args @($marker)
+  return (($result -join ' ') -match 'MARKER_OK')
+}
+
+function Get-RestoreDecision {
+  param([Parameter(Mandatory = $true)]$Target,
+        [Parameter(Mandatory = $true)]$Baseline,
+        [Parameter(Mandatory = $true)]$Failure)
+
+  if ($Failure.Fingerprint -eq $Baseline.Fingerprint -and
+      $Failure.UserVersion -eq $Baseline.UserVersion) {
+    return [pscustomobject]@{ Action = 'recreate'; Reason = 'database has no post-snapshot writes; recreate the old image only' }
+  }
+  if ($Failure.UserVersion -gt $Baseline.UserVersion) {
+    return [pscustomobject]@{ Action = 'fail-closed'; Reason = "committed schema migration after snapshot (user_version $($Baseline.UserVersion) -> $($Failure.UserVersion)); automatic restore would overwrite newer state" }
+  }
+  if (Test-FixtureLossMarker -Target $Target) {
+    return [pscustomobject]@{ Action = 'restore-and-recreate'; Reason = 'fixture-injected loss marker authorizes restore of the verified backup' }
+  }
+  return [pscustomobject]@{ Action = 'fail-closed'; Reason = 'post-snapshot database state is ambiguous; refusing to auto-restore over possible newer data' }
+}
+
 # --- Health -----------------------------------------------------------------
 function Assert-Health {
   param([Parameter(Mandatory = $true)][string]$Endpoint, [Parameter(Mandatory = $true)][int]$TimeoutSeconds)
@@ -668,6 +740,17 @@ finally:
     if (-not (($result -join ' ') -match 'RESTORE_OK')) {
       Fail 'ROLLBACK database restore failed: verified backup could not be restored'
     }
+    if ($Target.Fixture) {
+      $marker = "$($Target.DataDir)/.devnightly-fixture-loss-marker"
+      $clear = @'
+import os, sys
+p = sys.argv[1]
+if os.path.exists(p):
+    os.remove(p)
+print("MARKER_CLEARED")
+'@
+      $null = Invoke-WslPython -Code $clear -Args @($marker)
+    }
   }
 
   Invoke-Docker -Arguments @('tag', $RollbackTag, $ComposeImage) | Out-Null
@@ -707,6 +790,9 @@ try {
   }
   if ($FixtureCorruptDatabase -and $Scope -ne 'Fixture') {
     Fail '-FixtureCorruptDatabase is only valid in Fixture scope'
+  }
+  if ($FixtureCommitMigration -and $Scope -ne 'Fixture') {
+    Fail '-FixtureCommitMigration is only valid in Fixture scope'
   }
 
   $config = [pscustomobject]@{ Scope = $Scope; FixtureManifest = $FixtureManifest }
@@ -774,6 +860,11 @@ try {
   }
 
   $backup = New-DatabaseBackup -Target $target -Stamp "pre-$stamp"
+  # Capture STATE immediately after the verified snapshot. Rollback safety is
+  # decided from this state versus the state at failure time, never from the
+  # wording of the error that triggered the failure.
+  $baselineState = Get-DatabaseState -Target $target
+  Write-Step "backup baseline state: $($baselineState.Summary)"
   $rollbackTag = Register-Rollback -Target $target -Stamp $stamp -Digest $currentConfigId
   $script:RollbackDigest = $currentConfigId
   Limit-RollbackTags -KeepTag $rollbackTag
@@ -809,6 +900,36 @@ print("FIXTURE_DB_DAMAGED")
       if (-not (($damaged -join ' ') -match 'FIXTURE_DB_DAMAGED')) {
         throw 'fixture data-loss injection failed'
       }
+      # Explicit qualification-only declaration: this change was INJECTED, not
+      # legitimate newer state. Production never consults this marker.
+      $marker = "$($target.DataDir)/.devnightly-fixture-loss-marker"
+      $mark = @'
+import sys
+open(sys.argv[1], "w").write("FIXTURE_LOSS_v1")
+print("MARKER_WRITTEN")
+'@
+      $marked = Invoke-WslPython -Code $mark -Args @($marker)
+      if (-not (($marked -join ' ') -match 'MARKER_WRITTEN')) {
+        throw 'fixture loss marker could not be written'
+      }
+    }
+    if ($FixtureCommitMigration) {
+      # Qualification-only committed migration AFTER the snapshot: this is
+      # legitimate newer schema state and must never be auto-restored over.
+      Write-Step 'fixture: committing a post-snapshot schema migration'
+      $migrateDb = "$($target.DataDir)/carbon-panel.db"
+      $migrate = @'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.execute("PRAGMA user_version = %d" % (c.execute("PRAGMA user_version").fetchone()[0] + 1))
+c.commit()
+c.close()
+print("FIXTURE_MIGRATION_COMMITTED")
+'@
+      $migrated = Invoke-WslPython -Code $migrate -Args @($migrateDb)
+      if (-not (($migrated -join ' ') -match 'FIXTURE_MIGRATION_COMMITTED')) {
+        throw 'fixture migration injection failed'
+      }
     }
     if ($SimulateDataFailure) { throw 'data verification failed (simulated fixture failure)' }
     $afterData = Get-DatabaseMetrics -Target $target
@@ -827,11 +948,28 @@ print("FIXTURE_DB_DAMAGED")
 
   if ($failed) {
     Write-Step "UPDATE FAILED: $failureReason"
-    $dataBad = $failureReason -match 'data|SQLite|integrity|database'
+    # Decide from OBSERVED STATE, not error text. A generic readiness failure
+    # can happen after a schema migration committed; restoring the pre-update
+    # snapshot over that newer state would destroy legitimate data.
+    try {
+      $failureState = Get-DatabaseState -Target $target
+      Write-Step "failure state: $($failureState.Summary)"
+    } catch {
+      # Unreadable state is itself ambiguous: withhold all automatic mutation.
+      Fail "update failed; database state is unreadable, so automatic rollback is withheld. Backup: $($backup.Path). Error: $($_.Exception.Message)"
+    }
+    $decision = Get-RestoreDecision -Target $target -Baseline $baselineState -Failure $failureState
+    if ($decision.Action -eq 'fail-closed') {
+      Write-Step "FAIL-CLOSED: $($decision.Reason)"
+      Write-Step "no database restore and no image recreation were performed; backup retained at $($backup.Path)"
+      Write-Step 'operator action required: inspect the database state and choose an explicit recovery'
+      Fail "update failed; automatic rollback withheld because state is ambiguous. $($decision.Reason)"
+    }
+    Write-Step "rollback decision: $($decision.Action) - $($decision.Reason)"
     Invoke-Rollback -Target $target -RollbackTag $rollbackTag -Backup $backup `
       -Container $container -RollbackDigest $script:RollbackDigest -ComposeImage $composeImage `
-      -RestoreDatabase:$dataBad
-    Fail 'update failed; rollback verified (see prior log lines)'
+      -RestoreDatabase:($decision.Action -eq 'restore-and-recreate')
+    Fail "update failed; rollback verified ($($decision.Reason))"
   }
 } finally {
   Release-Lock -Lock $lock

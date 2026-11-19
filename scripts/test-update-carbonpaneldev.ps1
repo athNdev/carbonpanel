@@ -34,7 +34,12 @@ $checks = @(
   'Fixture scope marker guard', 'fixture marker label', $true,
   'Rollback stops only the scoped service', "Invoke-Compose -Target `$Target -Arguments @('stop', `$Target.Service)", $true,
   'Rollback recreate cannot be tolerated', "'--force-recreate', `$Target.Service) | Out-Null", $true,
-  'Rollback mismatch is fatal', 'ROLLBACK DID NOT VERIFY', $true
+  'Rollback mismatch is fatal', 'ROLLBACK DID NOT VERIFY', $true,
+  'Restore decision reads state, not error text', '$failureState = Get-DatabaseState -Target $target', $true,
+  'Committed migration is detected', '$Failure.UserVersion -gt $Baseline.UserVersion', $true,
+  'Ambiguity fails closed', "Action = 'fail-closed'", $true,
+  'No error-text inference for DB safety', '$failureReason -match ''data|SQLite|integrity|database''', $false,
+  'Operator message on ambiguity', 'operator action required', $true
 )
 for ($i = 0; $i -lt $checks.Count; $i += 3) {
   $label = $checks[$i]

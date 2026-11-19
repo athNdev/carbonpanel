@@ -385,10 +385,15 @@ jobs:
           current=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
           if [ "$current" != "$PINNED_COMMIT" ]; then
             echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "verified=false" >> "$GITHUB_OUTPUT"
             echo "::warning::main moved after pinning; skipping the nightly alias move"
-          else
-            echo "stable=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "stable=true" >> "$GITHUB_OUTPUT"
+          # A CI run can turn non-green between the buildx push and this alias
+          # move. Re-verify the EXACT pinned commit here; the pre-push result is
+          # stale by this point and is never reused as CI evidence for a move.
+          python3 scripts/release.py verify-main-ci --commit "$PINNED_COMMIT"
       - name: Promote edge from the verified immutable digest
         if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true'
         env:
@@ -423,11 +428,11 @@ jobs:
             --previous-commit "$PREVIOUS_COMMIT" --previous-digest "$PREVIOUS_DIGEST" \
             --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" --apply
       - name: Verify immutable sha image and move only the nightly alias (trusted schedule)
-        if: github.event_name == 'schedule' && steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && steps.sha_gate.outputs.action != 'skip' && steps.scheduled_prepush.outputs.stable != 'false' && steps.scheduled_prepush.outputs.verified != 'false' && steps.scheduled_recheck.outputs.stable != 'false'
+        if: github.event_name == 'schedule' && steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && steps.sha_gate.outputs.action != 'skip' && steps.scheduled_prepush.outputs.stable != 'false' && steps.scheduled_prepush.outputs.verified != 'false' && steps.scheduled_recheck.outputs.stable != 'false' && steps.scheduled_recheck.outputs.verified != 'false'
         env:
           PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
           IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
-          CI_VERIFIED: ${{ steps.scheduled_prepush.outputs.verified }}
+          CI_VERIFIED: ${{ steps.scheduled_recheck.outputs.verified }}
         run: |
           python3 scripts/release.py nightly-promote \
             --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \

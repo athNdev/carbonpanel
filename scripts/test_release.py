@@ -1494,6 +1494,20 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("steps.scheduled_prepush.outputs.stable != 'false'", cd_source)
         self.assertIn("steps.scheduled_prepush.outputs.verified != 'false'", cd_source)
         self.assertIn("stable=false", cd_source)
+        # A CI run turning non-green between push and alias move MUST be caught
+        # by a FRESH exact-commit recheck inside scheduled_recheck. The stale
+        # pre-push result must not authorize or feed the alias move.
+        scheduled_alias = next(s for s in steps if s.get("name", "").endswith(
+            "nightly alias (trusted schedule)"))
+        recheck = next(s for s in steps if s.get("id") == "scheduled_recheck")
+        self.assertIn('verify-main-ci --commit "$PINNED_COMMIT"', recheck["run"])
+        self.assertIn('echo "verified=false"', recheck["run"])
+        self.assertIn("steps.scheduled_recheck.outputs.verified != 'false'",
+                      scheduled_alias["if"])
+        self.assertIn("steps.scheduled_prepush.outputs.verified != 'false'",
+                      scheduled_alias["if"])
+        self.assertEqual(scheduled_alias["env"]["CI_VERIFIED"],
+                         "${{ steps.scheduled_recheck.outputs.verified }}")
         # The late guard genuinely precedes every buildx write: it is listed
         # before the build step AND is a condition on that step's push input.
         prepush = next(i for i, s in enumerate(steps)
@@ -1510,12 +1524,10 @@ class ReleaseTests(unittest.TestCase):
         # the original explicit-binding refusal.
         manual = next(s for s in steps if s.get("name") ==
                       "Verify immutable sha image and move only the nightly alias")
-        scheduled = next(s for s in steps if s.get("name", "").endswith(
-            "nightly alias (trusted schedule)"))
         self.assertNotIn("--auto-bind-previous", str(manual["run"]))
-        self.assertIn("--auto-bind-previous", str(scheduled["run"]))
+        self.assertIn("--auto-bind-previous", str(scheduled_alias["run"]))
         self.assertIn("github.event_name != 'schedule'", manual["if"])
-        self.assertIn("github.event_name == 'schedule'", scheduled["if"])
+        self.assertIn("github.event_name == 'schedule'", scheduled_alias["if"])
         # Native cadence is limited to this one trusted-main nightly workflow.
         for path in ("release.yml", "modules.yml", "mcp-dist.yml",
                      "runtime-artifacts.yml", "build-inputs.yml", "landing.yml"):
