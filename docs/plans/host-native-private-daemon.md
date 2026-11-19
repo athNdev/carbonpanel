@@ -182,16 +182,57 @@ defects:
 `CheckOptionParity` and `CheckUnitContract` assert these properties in Go
 fixtures; they are contract checks, not boot proof.
 
+### Rootless exact-unit boot on a suitable disposable fixture (2026-11-19)
+
+The EXACT shipped rootless per-user unit, including `NotifyAccess=all`, was
+booted with REAL dockerd 29.1.3 in a disposable Ubuntu 24.04 / systemd 255
+container with delegated cgroup v2, a real non-root service user (`ubuntu`,
+uid 1000), a real `systemd --user` manager and a real user D-Bus session.
+`dockerd-rootless.sh`, `rootlesskit`, slirp4netns, uidmap and subuid/subgid were
+supplied as launcher prerequisites. The unit and `daemon.json` were the
+unmodified artifacts from `DaemonSpec.BuildManifest()`: no no-op fixture daemon,
+no `Type=` change and no config substitution. The earlier WSL2 failure was a
+fixture-layout limit — the host cgroup namespace had no `user-1000.slice`, and
+doubly-nested userns NAT was denied — not a defect in the shipped unit. A
+private cgroup namespace and host network namespace in the disposable container
+provide the single-nested userns and real delegation the unit expects.
+
+Observed, exactly:
+
+```
+===ACTIVE===   Result=success  NRestarts=0  ExecMainStatus=0
+               ActiveState=active  SubState=running
+===SOCKET===   srw-rw---T ubuntu /run/user/1000/carbon-node/docker.sock
+===PIDFILE===  ubuntu-owned dockerd --config-file=/run/user/1000/carbon-node/daemon.json
+===INFO===     Server Version: 29.1.3  Storage Driver: vfs
+               Docker Root Dir: /home/ubuntu/carbon-qual/docker
+               SecurityOptions: ["name=seccomp,profile=builtin","name=rootless",
+                                 "name=cgroupns","name=no-new-privileges"]
+===CONTAINER=== cp-rootless-game 0.0.0.0:30555->8080/tcp Up
+===BRIDGE===   container IP 10.231.0.2; BRIDGE_LISTENER_OPEN from a 2nd container
+===PUBLISHED=== LISTEN_CHECK=1  CLIENT_TCP_REACHABLE=1  HTTP/1.0 200 OK
+===LIMITS===   MEM=67108864  PIDS=12
+===XDG_RESET=== XDG_RESET_ACTIVE=1; same private socket and data root after
+               ambient XDG_RUNTIME_DIR was reset to a bogus /tmp path
+```
+
+**Precise network wording:** the published mapping, a bridge-side TCP listener
+at `10.231.0.2:8080` from a second container, and measured client TCP
+reachability plus an HTTP 200 response on `127.0.0.1:30555` are three distinct
+observations. Rootless publishing used the slirp4netns builtin userspace port
+driver, so no host DNAT rule is expected or claimed in this mode.
+
+Fail-closed path refusals were exercised on Linux with pinned Go 1.26.11:
+symlink escape outside the owned root, host/shared socket and data roots,
+world-writable runtime parent, shared namespace, unsafe runtime dir and the
+shared default pidfile were all refused. Full output is in the external audit
+file `security-runtime-plans/node-rootless-qualification-20261119.md`.
+
 ### What remains NOT verified (do not claim deployability)
 
-- **Rootless active/success on a clean systemd host**: the `NotifyAccess=all`
-  fix is present and its unit contract/syntax verified, but a real rootless boot
-  to `active/success` was **not** completed in the latest fixture: nested
-  user-namespace iptables cannot create the bridge NAT chain on the WSL2
-  fixture kernel (`can't initialize iptables table 'nat': Permission denied`).
-  This is a fixture environment limitation, not a claim that the unit works.
 - **Live-host install, real-gameplay, release or deployment** evidence does not
-  exist. The re-qualification was fixture-only.
+  exist. Both rootful and rootless re-qualification were fixture-only; a real
+  host with delegated cgroup v2 and working userns NAT is still required.
 - **VM guest boot smoke** may use isolated QEMU software emulation only if
   available without KVM; this host has no `/dev/kvm`, so no VM boot was done.
 - **LXC guest boot** needs its own suitable disposable runtime with real pinned

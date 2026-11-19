@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/athNdev/carbon-panel/internal/noderuntime/enroll"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -321,24 +322,29 @@ type ClaimChallenge struct {
 	ChannelContext []byte    `json:"channel_context"`
 }
 
-// ClaimContext builds the exact canonical context that ADR 0019 / the P1
-// fixture require the fresh signature to cover. It is exported so other mode
-// lanes and fixtures verify against one implementation, not a copy.
+// ClaimContext builds the ADR 0019 canonical SIG_CLAIM context. It is a thin
+// adapter over the ONE shared byte encoder in internal/noderuntime/enroll, so
+// no mode lane has a second delimiter/capability encoding path. Caller capability
+// names are normalised to the canonical proto enum names the controller signs
+// before they enter the shared encoder; signing the short bundle names here
+// would make a real node claim unverifiable at the controller boundary.
 func ClaimContext(nodeID, enrollmentID, challengeID string, nonce []byte, expiresAt time.Time, capabilities []string, channel []byte) []byte {
-	var b bytes.Buffer
-	b.WriteString("carbon-panel-enroll-v1\x00")
-	for _, part := range []string{nodeID, enrollmentID, challengeID} {
-		b.WriteString(part)
-		b.WriteByte(0)
+	names := make([]string, 0, len(capabilities))
+	for _, c := range capabilities {
+		names = append(names, canonicalCapabilityName(c))
 	}
-	b.Write(nonce)
-	b.WriteByte(0)
-	b.WriteString(expiresAt.UTC().Format(time.RFC3339Nano))
-	b.WriteByte(0)
-	b.WriteString(strings.Join(capabilities, ","))
-	b.WriteByte(0)
-	b.Write(channel)
-	return b.Bytes()
+	return enroll.ClaimContextRaw(nodeID, enrollmentID, challengeID, nonce, expiresAt, names, channel)
+}
+
+// canonicalCapabilityName maps a bundle capability name to the proto enum name
+// used by the shared signing context. Unknown names pass through unchanged so
+// this adapter never panics; BuildEnrollmentBundle/BuildClaim reject unknown
+// names earlier through parseCapabilities.
+func canonicalCapabilityName(name string) string {
+	if c, ok := capabilityNames[strings.ToUpper(strings.TrimSpace(name))]; ok {
+		return c.String()
+	}
+	return name
 }
 
 // BuildClaim produces the one-time ClaimEnrollmentRequest as protojson. It

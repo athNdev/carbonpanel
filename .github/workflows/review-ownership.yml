@@ -29,6 +29,7 @@ jobs:
       - run: node scripts/review/setup-browser.mjs --with-deps
       - run: node --test scripts/review/browser.test.mjs
       - run: node --test scripts/review/profile.test.mjs
+      - run: node --test scripts/review/entry-state.test.mjs
       - run: node scripts/review/browser-check.mjs
       - run: node --test scripts/review/profile-browser.test.mjs
   ownership:

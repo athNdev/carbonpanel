@@ -1,0 +1,19 @@
+[Unit]
+Description=Carbon Panel managed node daemon (rootless, per-user)
+Documentation=https://docs.carbonpanel.example/managed-node
+After=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=all
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/usr/bin/dockerd-rootless.sh --config-file=/run/user/1000/carbon-node/daemon.json
+Delegate=cpu cpuset io memory pids
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=carbon-node-rootless-qual
+
+[Install]
+WantedBy=default.target

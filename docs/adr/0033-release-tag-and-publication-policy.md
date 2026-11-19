@@ -23,12 +23,29 @@ verify. A version/tag ref is always safe to stage. The workflow derives its
 `publish` output from that function rather than from the event, and the publish
 job is gated on that output.
 
-Version domains are separate and immutable: panel releases use `vMAJOR.MINOR.PATCH`
-with a full-version tag, `release-manifest.json` and an `image_digest`;
-prereleases use their full version and move no stable alias; modules use
-`mod-vMAJOR.MINOR.PATCH`; managed node-runtime artifacts reserve
-`runtime-vMAJOR.MINOR.PATCH` without a workflow today; development builds use
-per-commit `sha-<commit>` identity and the `edge` alias. Moving aliases
+Version domains are separate and immutable: panel releases use the product tag
+`carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N]`; the displayed SemVer
+and immutable image tag are `MAJOR.MINOR.PATCH` with the same suffix, and the
+Git tag, SemVer and archive filename remain separate fields. A product release
+must not depend on adding a plain `v*` tag. Plain `v*`, `mod-v*`, `docs*` and
+inherited refs are historical domains, never publication candidates; only the
+verified legacy stable `v1.0.40` is recognised for monotonic promotion and the
+frozen 1.0 rollback line. `publication_allowed()` rejects inherited,
+source-only, preview, name-collision and unclassified tags even with the
+opt-in, before any immutable registry preflight. The historical-only alias
+`carbonpanel-v1.0.40` resolves to the original commit for provenance and
+rollback but is also refused as a new release candidate; reserved legacy
+preview/collision version numbers cannot be reused by a product tag. The
+current 1.0 rollback line is 1.0.40; this is today's published state, not a
+permanent ban on future 1.0.x maintenance, which may move `1.0` only through
+ordinary explicit monotonic promotion. The 84-tag classification with domain, provenance and evidence is
+checked in at `docs/release-history.md` and `docs/release-history.json` and
+validated by `verify-release-history`; this extends the existing framework
+rather than creating a second one. Prereleases use their full version and move
+no stable alias; modules use `mod-vMAJOR.MINOR.PATCH`; managed node-runtime
+artifacts reserve `runtime-vMAJOR.MINOR.PATCH` without a workflow today;
+development builds use per-commit `sha-<commit>` identity and the `edge` alias.
+Moving aliases
 (`latest`, `MAJOR.MINOR`, module `latest`) move only under the matching explicit
 promotion and are dropped only after a documented migration window. Publication
 is phased: a read-only preflight classifies each registry reference as absent,
@@ -74,8 +91,46 @@ is deliberately stronger than equal tag digests: it requires an operator-supplie
 verified digest, an exact tag-to-commit identity, and a release manifest whose
 version, commit, revision and digest all match; unknown or mismatched provenance
 refuses.
+GitHub `latest` selection uses the same product-only verified stable ordering
+as registry alias promotion: prereleases never promote, an older maintenance
+release does not displace a newer verified stable, and an undeterminable state
+leaves `latest` unchanged. The whole explicit publication run holds one
+workflow-level, non-cancelling `carbonpanel-product-publish` concurrency group
+across immutable publish, GitHub release and alias promotion, so different
+versions cannot race or interleave phases or strand a run after immutable
+publication; build-only rehearsals and ordinary CI use a distinct per-run key
+and are not serialized. `cancel-in-progress: false` protects the running run
+only: with the default `queue: single` a later dispatch can replace the one
+pending run, so this lane requires single-operator dispatch and the operator
+must verify the resulting run before retrying.
+
 Docker Hub is `atharvnaphade/carbonpanel`; GHCR is the lowercased GitHub
 repository name, `ghcr.io/athndev/carbonpanel`.
+
+## Product tag line and retrospective catalog
+
+A publication additionally requires a trusted `refs/heads/main` dispatch ref
+and a read-only exact-commit main CI check (`verify-publication-ref`); a tag,
+feature ref, blank ref or operator checkbox can never substitute. The
+retrospective catalog preserves all 84 origin tags: the only verified stable
+`v1.0.40` is canonical history with five archives and matching Hub/GHCR digests;
+the planned product alias `carbonpanel-v1.0.40` resolves to the same peeled
+commit without a duplicate GitHub release; `v1.0.38`/`v1.0.39` remain
+source/module history and `v3.0.0-alpha.1` remains a GHCR-only legacy preview.
+The `v3.0.0-beta.4` name collision records both repository-qualified commits,
+and `origin`/`rm` stay outside channel discovery. No ref deletion, image rebuild
+or invented historical alias is part of this decision; ADR 0039 still governs
+the 19 immutable readable build aliases.
+
+The first new stable is deliberately `carbonpanel-v2.0.0` (MAJOR), not a
+compatible `1.1.0`: the wire/Connect contract and database schema are additive,
+but three operator-facing changes (OIDC raw-claim role mapping locked out by
+default and no implicit first-user admin; explicit local admin linking;
+PROXY v2 trusted only from `trusted_proxy_cidrs`) require migration from an
+unchanged v1.0.40 configuration. The audit evidence and operator steps are in
+`docs/release-history.md` and `docs/releases.md`. Using the correct SemVer
+boundary here is part of this decision; a future compatible release remains a
+MINOR under the same rules.
 
 ## Consequences
 
