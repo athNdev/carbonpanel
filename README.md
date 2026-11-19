@@ -135,7 +135,12 @@ For the full walkthrough, see
 
 Prefer a prebuilt download? [GitHub Releases](https://github.com/athNdev/carbonpanel/releases)
 provides versioned archives for Linux, macOS and Windows.
-See [release downloads and checksum verification](docs/releases.md).
+See [release downloads and checksum verification](docs/releases.md) and the
+[release history and tag migration](docs/release-history.md): product releases
+use `carbonpanel-vMAJOR.MINOR.PATCH` tags, while plain `v*` tags remain the
+separate Go/module domain. The verified stable is `1.0.40` (`v1.0.40`), the
+current 1.0 rollback line; see the upgrade notes before moving to the next
+MAJOR release. Prereleases never move `latest` or a minor alias.
 
 ### 1. Download the repository and build or pull the image
 

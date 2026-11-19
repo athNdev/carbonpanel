@@ -1,24 +1,58 @@
 # Releases and versioning
 
-Carbon Panel uses Semantic Versioning 2.0.0 with a `v` prefix on Git tags:
-`vMAJOR.MINOR.PATCH`. Current builds are alpha prereleases, starting with
-`v3.0.0-alpha.1`. Earlier beta tags are retained as historical versions. Alpha
-releases are for early testing and are not promoted to stable releases for
-visibility.
+Carbon Panel uses Semantic Versioning 2.0.0. A **product release tag** is
+`carbonpanel-vMAJOR.MINOR.PATCH[-alpha.N|-beta.N|-rc.N]`. The displayed version
+and the immutable Docker tag are `MAJOR.MINOR.PATCH` with the same optional
+prerelease suffix. The Git tag, SemVer, image tag and archive filename are
+separate fields; tooling never infers a release from an arbitrary `v*` tag or a
+filename. Plain `v*`, `mod-v*`, `docs*` and inherited tags are preserved as
+historical refs in their own domains (see
+[release history](release-history.md)). `v1.0.40` is the only verified
+historical stable; `v3.0.0-alpha.1` was a GHCR-only preview. Prereleases are for
+early testing and never move a stable alias.
 
 - **Patch:** compatible fixes and maintenance.
 - **Minor:** compatible new features.
 - **Major:** incompatible operator or API changes that require migration.
 - **Prerelease:** append `-alpha.N`, `-beta.N` or `-rc.N`; increment N for each published build.
 
-Before changing a version convention, evaluate the public API — the Connect-RPC
-contracts, the HTTP compatibility surface, CLI flags, the configuration schema
-and documented operator behavior — against SemVer. `1.0.0` already defines that
-API; existing published versions and Go module endpoints are never renumbered,
-retargeted or unpublished. A tag identifies one source commit. Published
-releases and their assets are not overwritten. Correct a bad release with a new
-version. The tag is the release version; `web/carbon-panel/package.json` is a
-private workspace package, not a second release-version counter.
+## UPGRADE NOTES (from v1.0.40)
+
+**2.0.0 is a MAJOR release.** An unchanged v1.0.40 configuration does not
+upgrade cleanly. The Connect/HTTP wire contract and database schema are additive
+and compatible; the breaks are in configuration and operating behavior. Back up
+the database (db + wal + shm), configuration, worlds and backups, and rehearse on
+disposable copies, before upgrading. Full evidence and the rehearsal record are
+in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-from-v1040).
+
+1. **B1 — OIDC role mapping.** v1.0.40's `role_mapping: {}` example granted raw
+   IdP group names directly. Current main uses raw claims only behind
+   `auth.oidc.allow_raw_claim_roles` (default `false`) and refuses privileged
+   names even then; the default `absent_claim_policy: deny` revokes OIDC roles.
+   Add an explicit `auth.oidc.role_mapping` entry for every retained role,
+   including admin, and verify a test sign-in before opening access. Setting
+   `allow_raw_claim_roles: true` cannot restore a privileged raw-claim role.
+2. **B2 — Explicit admin linking.** There is no implicit first-user admin.
+   Keep a local administrator, explicitly link each admin's OIDC subject, and
+   verify that an unlinked identity cannot gain admin.
+3. **B3 — PROXY protocol trust.** PROXY v2 headers are trusted only from
+   `proxy.trusted_proxy_cidrs` (default `[]` trusts nobody). Add every load
+   balancer source CIDR and confirm real client IPs are preserved after upgrade.
+
+The 1.0 line stays at `1.0.40` as the current rollback path (not a permanent ban
+on future 1.0.x maintenance). The next planned stable is
+**`carbonpanel-v2.0.0` (MAJOR)**: the wire/Connect API and schema are additive,
+but three intentional operator/upgrade changes break an unchanged v1.0.40
+config, so a compatible MINOR would be dishonest. See
+[UPGRADE NOTES](#upgrade-notes-from-v1040) before upgrading. Before changing a
+version convention, evaluate the public API — the Connect-RPC contracts, the HTTP
+compatibility surface, CLI flags, the configuration schema and documented
+operator behavior — against SemVer. `1.0.0` already defines that API; existing
+published versions and Go module endpoints are never renumbered, retargeted or
+unpublished. A tag identifies one source commit. Published releases and their
+assets are not overwritten. Correct a bad release with a new version.
+`web/carbon-panel/package.json` is a private workspace package, not a second
+release-version counter.
 
 ## Version domains and promotion
 
@@ -29,17 +63,33 @@ them in `scripts/test_release.py`.
 
 | Domain | Tag/naming | Immutable identity | Moving aliases |
 | --- | --- | --- | --- |
-| Panel release | `vMAJOR.MINOR.PATCH` | Full version, `release-manifest.json` and its `image_digest` | `MAJOR.MINOR`, `latest` |
-| Panel prerelease | `vMAJOR.MINOR.PATCH-<id>.N` | Full prerelease version | None |
+| Panel release | `carbonpanel-vMAJOR.MINOR.PATCH` | Full SemVer, `release-manifest.json` and its `image_digest` | `MAJOR.MINOR`, `latest` |
+| Panel prerelease | `carbonpanel-vMAJOR.MINOR.PATCH-<alpha\|beta\|rc>.N` | Full prerelease version | None |
+| Plain Go version / inherited panel tag | `vMAJOR.MINOR.PATCH`, `origin`, `rm` | Existing Git/Go proxy history; never a new publication | None |
 | Module image | `mod-vMAJOR.MINOR.PATCH` | `mod-` version tag | `latest` |
+| Documentation version | `docsMAJOR.MINOR.PATCH` | Historical docs tag; no trigger | None |
 | Managed node runtime (reserved) | `runtime-vMAJOR.MINOR.PATCH` | Full version and digest; no workflow yet | `MAJOR.MINOR` only on explicit promotion |
-| Development build | no version tag | Per-commit `sha-<commit>` and OCI revision label | `edge` |
+| Development build | no version tag | Per-commit `sha-<commit>` and OCI revision label | `edge`, `nightly` (Hub only) |
 
 Prereleases keep their full immutable version and never move `latest` or a
 stable minor tag. A stable release publishes its immutable full version first,
 then its documented moving aliases. Tag names are derived in that promotion
 order by `scripts/release.py image-tags`; the GitHub release is exposed only
 after both registries serve a complete multi-architecture index.
+
+An explicit product publication holds ONE global, non-cancelling
+**workflow-level** concurrency group, `carbonpanel-product-publish`, across the
+**entire** flow — immutable image publish, GitHub release/`latest`, and moving
+alias promotion. The lock is not released between phases, so two versions cannot
+interleave phases or strand a run after immutable publication. `cancel-in-progress:
+false` protects the **running** run; with GitHub's default `queue: single` only
+one pending run is retained, and a later request **replaces** that pending run —
+this lane uses **single-operator dispatch**. Do not assume every queued publisher
+waits: after a replacement, the operator must verify the resulting run before
+retrying. Alias decisions are recomputed with live preflight inside the same
+locked run. Build-only rehearsals, tag pushes, pull requests and ordinary main
+CI get a distinct per-run key (`carbonpanel-stage-<run_id>`) and are not
+serialized.
 
 Moving aliases (`latest`, `MAJOR.MINOR`, module `latest`) are conveniences, not
 reproducible references. Consumers that need reproducible rollbacks pin the full
@@ -53,7 +103,10 @@ future artifact; no workflow or registry destination exists for it today.
 
 Download an archive from [GitHub Releases](https://github.com/athNdev/carbonpanel/releases).
 The five targets are Linux amd64/arm64, macOS Intel/Apple Silicon, and Windows
-amd64. For example:
+amd64. The current verified stable is `1.0.40` (Git tag `v1.0.40`); its fixed
+archive set and digests are recorded in [release history](release-history.md).
+A future product release tagged `carbonpanel-v2.0.0` keeps the same archive
+naming convention, derived from its SemVer field. For example:
 
 ```text
 carbon-panel_v3.0.0-alpha.1_linux_amd64.tar.gz
@@ -112,12 +165,14 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 
 | Tag | Meaning |
 | --- | --- |
-| `3.0.0-alpha.1` | The exact prerelease; never moves a stable alias |
-| `3.0.0` | The exact stable release, immutable |
-| `3.0` | Moving minor channel, promoted only with a stable `3.0.x` release |
+| `1.0.40` | The verified historical stable release, immutable; `1.0` is its current rollback alias |
+| `2.0.0-alpha.1` | An exact future prerelease; never moves a stable alias |
+| `2.0.0` | An exact stable release, immutable |
+| `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
 | `latest` | Moving stable channel, promoted only with a stable release |
-| `edge`, `sha-…` | Development builds from CI-verified main commits; not versions |
-| `nightly` | Explicitly promoted development alias; never a stable version |
+| `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
+| `nightly` | Explicitly promoted Docker Hub development alias; never a stable version |
+| GHCR `3.0.0-alpha.1` | Historical GHCR-only preview; not a stable release and not on Docker Hub |
 
 Prereleases never move `latest` or the stable minor tag. `edge` moves only under
 an explicit developer-channel opt-in; an ordinary main merge builds and verifies
@@ -202,21 +257,26 @@ Releases link; they remain correctly marked as prereleases.
 
 1. Update the changelog and upgrade documentation for shipped changes. Merge the
    intended commit and wait for **Continuous Integration** on main to succeed.
-2. Open **Actions → Carbon Panel Release → Run workflow**. Enter the next
-   version and the exact commit (or `main`). Leave **publish** off for a complete
-   build and verification rehearsal. The rehearsal creates no tag or release
-   and pushes no image; its downloads are retained as workflow artifacts.
+2. Open **Actions → Carbon Panel Release → Run workflow**. Enter the canonical
+   product tag (for example `carbonpanel-v2.0.0`) and the exact commit (or
+   `main`). Leave **publish** off for a complete build and verification
+   rehearsal. The rehearsal creates no tag or release and pushes no image; its
+   downloads are retained as workflow artifacts.
 3. Inspect all five native archive jobs, the image assembly job and the
    `verified-release-downloads` artifact. Run the workflow again with the same
-   version and commit, enabling **publish** to publish it.
+   product tag and commit, enabling **publish** to publish it. Publication also
+   requires a trusted `refs/heads/main` dispatch ref and exact-commit main CI,
+   verified read-only by `verify-publication-ref`.
 
-Pushing a `v*` tag — like a branch push, a pull request, a CI run, a documentation
-tag or a rehearsal tag — only stages, builds and verifies. It never writes to a
-registry or a GitHub release. The publication decision is made by
+Pushing a `carbonpanel-v*` tag — like a branch push, a pull request, a CI run, a
+plain `v*` tag, a documentation tag or a rehearsal tag — only stages, builds and
+verifies. It never writes to a registry or a GitHub release. `mod-*` tags belong
+to the separate module workflow. The publication decision is made by
 `publication_allowed()` in `scripts/release.py` and requires an explicit
-`workflow_dispatch` with **publish** on. Before a requested publication, a
-fail-closed preflight confirms that Docker Hub and GHCR credentials are present;
-staging and rehearsals neither need nor read them.
+`workflow_dispatch` with **publish** on and a canonical product tag; inherited,
+source-only, preview, name-collision and unclassified tags are rejected. Before
+a requested publication, a fail-closed preflight confirms that Docker Hub and
+GHCR credentials are present; staging and rehearsals neither need nor read them.
 
 Publication refuses invalid versions, verification/test namespaces, unverified
 or stale commits, moved tags, already-published versions and a second,
@@ -244,11 +304,12 @@ require a new tag. GitHub release publication does not send a Discord message.
 ## Scope of staged-tag safety and pending channel opt-in
 
 Staging a tag guarantees no registry or release write, but it says nothing about
-how current the target is. A `v*` or `mod-*` tag can point at **old commits**; a
-tag-triggered workflow checks out that tag's target and reflects that commit's
-history and configuration. A green staging run is not proof that current `main`
-was verified, and the dispatch `revision` input is a convenience, never the
-trusted publish gate. The authoritative gate is `publication_allowed()` together
+how current the target is. A `carbonpanel-v*`, `v*` or `mod-*` tag can point at
+**old commits**; a tag-triggered workflow checks out that tag's target and
+reflects that commit's history and configuration. A green staging run is not
+proof that current `main` was verified, and the dispatch `revision` input is a
+convenience, never the trusted publish gate. The authoritative gate is
+`publication_allowed()` plus `verify-publication-ref` (trusted main ref) together
 with a successful `ci.yml` run for the exact published commit.
 
 Main `edge` publication and website/Pages effects belong to `cd.yml` and the
@@ -276,6 +337,20 @@ notification. This is a documented deferral, not a failed notification; a dry-ru
 fixture covers it. These scoped gates still need release-auditor review before
 held product merges are unblocked; until that review, product merges stay held.
 
+## Historical tags and migration
+
+All 84 inherited tags are classified with first-party evidence in
+[release history](release-history.md) and [release-history.json](release-history.json).
+The product prefix and that catalog are the only channel discovery mechanism;
+`upstream-identical`, `upstream-name-collision`, `carbonpanel-published-stable`,
+`carbonpanel-source-only`, `carbonpanel-legacy-preview`, `historical-component`
+and `unknown` are separate from the tag's version domain and provenance. The
+1.0 rollback line stays at `1.0.40`. The planned `carbonpanel-v1.0.40` alias
+points at the original peeled commit without a duplicate GitHub release; the
+GHCR-only `3.0.0-alpha.1` preview and the `v3.0.0-beta.4` cross-repository name
+collision are recorded, not republished. No registry alias, ref or release is
+changed by the policy PR.
+
 ## Recover a staged release
 
 If only the final publication job fails, keep the version and its built images.
@@ -287,8 +362,8 @@ Do not move the tag or rebuild a different image under that version.
 2. Download that run's `verified-release-downloads` artifact. Read the version
    and source commit from its `release-manifest.json`. Fetch the existing release
    tag into the local checkout without overwriting any other tag.
-3. Run `python3 scripts/release.py publish --version VERSION --commit COMMIT --output DIRECTORY`,
-   replacing the three values with that artifact's metadata and download directory.
+3. Run `python3 scripts/release.py publish --version carbonpanel-vMAJOR.MINOR.PATCH --commit COMMIT --output DIRECTORY`,
+   using the canonical product tag and the artifact's metadata and download directory.
 
 The publisher verifies exact-commit CI, tag identity, the complete download set,
 local checksums and GitHub's uploaded asset digests before exposing the release.
