@@ -330,6 +330,22 @@ func assertBundleRecovery(t *testing.T, subject, kind, recovery string) {
 	}
 }
 
+func assertBundleRecoveryIntent(t *testing.T, subject, kind, recovery string, wantAction bool) {
+	t.Helper()
+	if !wantAction {
+		if recovery != "" && !strings.Contains(recovery, "No recovery action required") {
+			t.Fatalf("%s kind %s must not suggest recovery, got %q", subject, kind, recovery)
+		}
+		return
+	}
+	if recovery == "" {
+		t.Fatalf("%s kind %s is recoverable but has no guidance", subject, kind)
+	}
+	if strings.Contains(recovery, "No recovery action required") {
+		t.Fatalf("%s kind %s is recoverable but guidance says no action: %q", subject, kind, recovery)
+	}
+}
+
 func TestObservationsBundleFreshnessEvidenceAndSafeRecoveryAcceptance(t *testing.T) {
 	ctx := context.Background()
 	svc := newSupportOperationsService(t)
@@ -419,13 +435,14 @@ func TestObservationsBundleFreshnessEvidenceAndSafeRecoveryAcceptance(t *testing
 		serverByID[s.ID] = s
 	}
 	for _, want := range []struct {
-		id, kind string
-		needJoin bool
-		needGood bool
+		id, kind   string
+		needJoin   bool
+		needGood   bool
+		wantAction bool
 	}{
-		{id: "srv-fresh", kind: string(health.ReadingPlayable), needJoin: true, needGood: true},
-		{id: "srv-stale", kind: string(health.ReadingStale), needGood: true},
-		{id: "srv-unobserved", kind: string(health.ReadingUnobserved)},
+		{id: "srv-fresh", kind: string(health.ReadingPlayable), needJoin: true, needGood: true, wantAction: false},
+		{id: "srv-stale", kind: string(health.ReadingStale), needGood: true, wantAction: true},
+		{id: "srv-unobserved", kind: string(health.ReadingUnobserved), wantAction: true},
 	} {
 		got, ok := serverByID[want.id]
 		if !ok {
@@ -444,6 +461,7 @@ func TestObservationsBundleFreshnessEvidenceAndSafeRecoveryAcceptance(t *testing
 			t.Fatalf("server %s missing last-good evidence timestamp: %+v", want.id, got)
 		}
 		assertBundleRecovery(t, "server", got.Kind, got.Recovery)
+		assertBundleRecoveryIntent(t, "server", got.Kind, got.Recovery, want.wantAction)
 	}
 
 	nodeByID := map[string]struct {
@@ -456,12 +474,13 @@ func TestObservationsBundleFreshnessEvidenceAndSafeRecoveryAcceptance(t *testing
 		nodeByID[n.ID] = n
 	}
 	for _, want := range []struct {
-		id, kind string
-		needHB   bool
+		id, kind   string
+		needHB     bool
+		wantAction bool
 	}{
-		{id: "node-fresh", kind: "fresh", needHB: true},
-		{id: "node-stale", kind: "stale", needHB: true},
-		{id: "node-never", kind: "never"},
+		{id: "node-fresh", kind: "fresh", needHB: true, wantAction: false},
+		{id: "node-stale", kind: "stale", needHB: true, wantAction: true},
+		{id: "node-never", kind: "never", wantAction: true},
 	} {
 		got, ok := nodeByID[want.id]
 		if !ok {
@@ -477,6 +496,7 @@ func TestObservationsBundleFreshnessEvidenceAndSafeRecoveryAcceptance(t *testing
 			t.Fatalf("node %s should not have heartbeat timestamp: %+v", want.id, got)
 		}
 		assertBundleRecovery(t, "node", got.Kind, got.Recovery)
+		assertBundleRecoveryIntent(t, "node", got.Kind, got.Recovery, want.wantAction)
 	}
 }
 
