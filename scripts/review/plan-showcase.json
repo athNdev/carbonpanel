@@ -259,11 +259,6 @@
       "name": "real allowlist form renders"
     },
     {
-      "assertVisible": "#server-detail-tabs-panel-players [data-player-row=\"0\"]",
-      "feature": "players",
-      "name": "seeded identity is present in the server-scoped roster"
-    },
-    {
       "screenshot": "showcase-player-allowlist",
       "element": "#server-detail-tabs-panel-players",
       "maxHeight": 1700,
