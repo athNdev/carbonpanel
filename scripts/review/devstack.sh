@@ -250,23 +250,29 @@ seed_showcase_player() {
 	local token="$1" server_id="$2" count payload response query
 	response="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null || true)"
 	count="$(printf '%s' "${response}" | list_count players || printf '0')"
-	if [ "${count}" -gt 0 ]; then
-		echo "review roster already has ${count} player identity/identities"
-		return 0
+	if [ "${count}" -eq 0 ]; then
+		# Two reserved fixture names: a transient provider failure must not cost
+		# the player captures. Only an authoritative NOT_FOUND creates an
+		# offline identity.
+		for query in ReviewFixture ReviewFixtureTwo; do
+			payload="$(REVIEW_SERVER_ID="${server_id}" REVIEW_PLAYER_QUERY="${query}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-allowlist-"+process.env.REVIEW_PLAYER_QUERY,playerQuery:process.env.REVIEW_PLAYER_QUERY}))')"
+			response="$(rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" 2>&1 || true)"
+			count="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null | list_count players || printf '0')"
+			if [ "${count}" -gt 0 ]; then
+				echo "seeded offline review identity with ${query}; roster count ${count}"
+				break
+			fi
+			echo "review allowlist query ${query} produced no roster identity: $(printf '%s' "${response}" | cut -c1-200)" >&2
+		done
 	fi
-	# Two reserved fixture names: a transient provider failure must not cost the
-	# player captures. Only an authoritative NOT_FOUND creates an offline identity.
-	for query in ReviewFixture ReviewFixtureTwo; do
-		payload="$(REVIEW_SERVER_ID="${server_id}" REVIEW_PLAYER_QUERY="${query}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-allowlist-"+process.env.REVIEW_PLAYER_QUERY,playerQuery:process.env.REVIEW_PLAYER_QUERY}))')"
-		response="$(rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" 2>&1 || true)"
-		response="$(printf '%s' "${response}" | cut -c1-200)"
-		count="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null | list_count players || printf '0')"
-		if [ "${count}" -gt 0 ]; then
-			echo "seeded offline review identity with ${query}; roster count ${count}"
-			return 0
-		fi
-		echo "review allowlist query ${query} produced no roster identity: ${response}" >&2
-	done
+	# A public, non-private fixture UUID already used by this repo's own tests
+	# and UI placeholders. A successful first-party lookup creates an identity
+	# with a PrimaryUUID and a real skinRef, so the canonical detail page can
+	# render a loaded face preview. Provider outages leave the offline fixture.
+	payload="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-skin-fixture-001",playerQuery:"069a79f4-44e9-4726-a5be-fca90e38aaf5"}))')"
+	response="$(rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" 2>&1 || true)"
+	skin_state="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"069a79f4","limit":20}' "${token}" 2>/dev/null | json_path 'players.0.skinAvailable')"
+	echo "review skin fixture skinAvailable: ${skin_state:-false}; add result: $(printf '%s' "${response}" | cut -c1-120)" >&2
 }
 
 # seed_showcase_pack creates a small fabric pack with real mods so studio and
@@ -492,6 +498,8 @@ up)
 	wait_for_health
 	seed
 	token="$(login_token)"
+	rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null |
+		json_path 'servers.0.id' >"${DATA}/server-id" || true
 	if [ -n "${token}" ]; then
 		seed_showcase_bluemap "${token}"
 		if [ -f "${DATA}/config/config.yaml" ] && grep -q 'world_view:' "${DATA}/config/config.yaml"; then

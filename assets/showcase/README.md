@@ -16,24 +16,29 @@ pixel size for every published image.
 These are unretouched browser crops of the packaged application running in an
 isolated disposable installation with seeded fixtures, not mockups or homepage
 sample islands. The stack seeds a first admin, a local node, a running Vanilla
-1.21.1 server, real Packwiz mods, one World Library revision with an honest
-compatibility report, and one offline player identity through the real
-allowlist RPC. Resource figures and logs are observed values, not performance
-claims. No production account, world, log or private player profile is used.
+1.21.1 server, real Packwiz mods, one World Library revision, and an offline
+player identity through the real allowlist RPC. A compatibility verdict is
+computed on demand by the read-only `CheckCompatibility` RPC; a panel that has
+not run that check correctly shows "No compatibility report yet". The expanded
+roster capture shows an offline identity's honest unavailable avatar state,
+not a skin profile. Resource figures and logs are observed values, not
+performance claims. No production account, world, log or private player profile
+is used.
 
 ## Required and optional images
 
-`showcase-dashboard`, `showcase-server-detail`, `showcase-studio` and
-`showcase-modpacks` are the README-canonical set. Publication fails closed if
-any one is missing, corrupt, stale or inconsistent with the manifest.
+`showcase-dashboard`, `showcase-server-detail`, `showcase-studio`,
+`showcase-modpacks`, `showcase-library`, `showcase-library-revisions` and
+`showcase-player-allowlist` are the README-canonical set. Publication fails
+closed if any one is missing, corrupt, stale or inconsistent with the manifest.
 
-The player, world library and world-view screenshots are feature-gated journey
-steps (`--features players,library,worlds`). A feature that cannot be captured
-is skipped rather than fabricated; it is only linked from the README after a
-successful publication. World View is off by default: managed BlueMap discovery
-requires a legacy-local node ID and a genuinely rendered tile set, which the
-review stack's UUID node cannot provide (ADR 0040). Publishing a map image
-without real tiles is not acceptable.
+Feature-gated journey steps (`--features players,library,worldtab,worlds,
+playerdetail`) are mandatory when enabled, so a partial set cannot publish.
+World tab and Worlds list (`worldtab`) are independent of the renderer gate.
+Rendered BlueMap tiles (`worlds`) and a canonical player detail preview
+(`playerdetail`) are off by default and only linked from the README after a
+real capture passes: a visible decoded skin image or rendered map canvas. A
+Worlds list or a renderer status object is never presented as map imagery.
 
 ## Automated path
 

@@ -143,7 +143,9 @@ async function main() {
           await page
             .locator(spec.fill)
             .first()
-            .fill(spec.value ?? "", { timeout: 15000 });
+            .fill(spec.valueEnv ? (process.env[spec.valueEnv] ?? "") : (spec.value ?? ""), {
+              timeout: 15000,
+            });
           break;
         case "press":
           await page.keyboard.press(spec.press);
@@ -157,6 +159,20 @@ async function main() {
         case "wait":
           await page.waitForTimeout(spec.wait);
           break;
+        case "assertImageLoaded": {
+          // A semantic readiness check for a real rendered preview: the image
+          // must be visible AND decoded with non-zero intrinsic size. No fixed
+          // sleep and no reliance on "loading" text going away.
+          const image = page.locator(spec.assertImageLoaded).first();
+          await image.waitFor({ state: "visible", timeout: spec.timeout ?? 30000 });
+          const width = await image.evaluate(
+            (element) => (element.complete ? element.naturalWidth : 0),
+          );
+          if (!width || width < 1) {
+            throw new Error(`skin preview did not decode: naturalWidth=${width}`);
+          }
+          break;
+        }
         case "assertFrameVisible": {
           // The map is a sandboxed same-origin iframe. Require real renderer
           // DOM inside it (canvas/tiles) before calling the capture qualified.
@@ -415,6 +431,7 @@ async function main() {
         "wait",
         "assertVisible",
         "assertFrameVisible",
+        "assertImageLoaded",
         "assertHidden",
         "assertText",
         "assertNoScrollbar",

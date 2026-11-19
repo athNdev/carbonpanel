@@ -202,9 +202,9 @@
       "maxHeight": 720,
       "scroll": false,
       "feature": "players",
-      "name": "player identity and skin state in the real roster",
-      "alt": "Real player roster with the seeded identity expanded, showing its avatar and skin state",
-      "focus": "Observed identity, aliases and the actual skin availability state"
+      "name": "expanded fixture identity in the real roster",
+      "alt": "Cross-server player roster with a seeded offline fixture identity expanded; its avatar preview is unavailable because the offline identity has no Mojang skin",
+      "focus": "Observed identity, aliases and the honest unavailable skin state"
     },
     {
       "goto": "/servers",
@@ -245,6 +245,43 @@
       "name": "server allowlist form and scoped roster",
       "alt": "Server Players tab with the real allowlist form and the seeded identity's scoped access state",
       "focus": "Allowlist form, scoped roster and moderation controls"
+    },
+    {
+      "goto": "/players",
+      "waitFor": "[data-testid=\"showcase-players-content\"]",
+      "feature": "playerdetail",
+      "name": "roster for canonical player detail"
+    },
+    {
+      "assertVisible": "[data-player-row]:has-text(\"069a79f4\")",
+      "feature": "playerdetail",
+      "name": "public fixture identity is present with a primary UUID"
+    },
+    {
+      "gotoIdentityFromTitle": "[data-player-row]:has-text(\"069a79f4\") span[title^=\"pl_\"]",
+      "feature": "playerdetail",
+      "name": "open canonical player detail route"
+    },
+    {
+      "waitFor": "#player-panel-overview",
+      "feature": "playerdetail",
+      "name": "canonical player detail loaded"
+    },
+    {
+      "assertImageLoaded": "div[data-skin-state=\"ready\"] img[alt$=\" skin (face)\"]",
+      "timeout": 30000,
+      "feature": "playerdetail",
+      "name": "skin preview decoded with non-zero intrinsic width"
+    },
+    {
+      "screenshot": "showcase-player-detail",
+      "element": "[data-testid=\"showcase-player-detail-content\"]",
+      "maxHeight": 1000,
+      "scroll": false,
+      "feature": "playerdetail",
+      "name": "canonical player detail with loaded skin preview",
+      "alt": "Canonical player detail route showing the identity and a decoded skin face preview",
+      "focus": "Identity, presence and the loaded skin image"
     },
     {
       "goto": "/library",
@@ -308,44 +345,67 @@
       "name": "compatibility panel renders"
     },
     {
+      "fill": "input[placeholder=\"Server to bind this revision to\"]",
+      "valueEnv": "SHOWCASE_SERVER_ID",
+      "feature": "library",
+      "name": "set compatibility target server"
+    },
+    {
+      "fill": "input[placeholder=\"e.g. 1.21.1\"]",
+      "value": "1.21.1",
+      "feature": "library",
+      "name": "set compatibility target version"
+    },
+    {
+      "click": "button:has-text(\"Check compatibility\")",
+      "feature": "library",
+      "name": "run real read-only compatibility check"
+    },
+    {
+      "assertVisible": "text=Overall verdict",
+      "timeout": 30000,
+      "feature": "library",
+      "name": "actual compatibility verdict rendered"
+    },
+    {
       "screenshot": "showcase-library-compatibility",
       "element": "[data-testid=\"showcase-library-detail-content\"]",
       "maxHeight": 1000,
       "scroll": false,
       "feature": "library",
-      "name": "world library compatibility report",
-      "alt": "Real compatibility report for the seeded revision, including its honest unknown verdict",
-      "focus": "Compatibility findings and the binding gate"
+      "name": "world library compatibility result",
+      "alt": "Real read-only compatibility verdict and findings computed for the seeded revision and server",
+      "focus": "Compatibility verdict, findings and the binding gate"
     },
     {
       "goto": "/servers",
       "waitFor": "a[href^=\"/servers/\"]",
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "open servers for the World tab capture"
     },
     {
       "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "open seeded server for World tab"
     },
     {
       "waitFor": "#server-detail-tabs-tab-world",
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "server World tab renders"
     },
     {
       "click": "#server-detail-tabs-tab-world",
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "open the server World tab"
     },
     {
       "waitFor": "#server-detail-tabs-panel-world",
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "server World panel renders"
     },
     {
       "assertVisible": "#server-world-picker-heading",
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "real world picker heading renders"
     },
     {
@@ -353,7 +413,7 @@
       "element": "#server-detail-tabs-panel-world",
       "maxHeight": 1000,
       "scroll": false,
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "per-server World tab with real world facts",
       "alt": "Per-server World tab showing the actual level, binding and relevant configuration",
       "focus": "Active world, binding and revision for the seeded vanilla server"
@@ -361,20 +421,20 @@
     {
       "goto": "/worlds",
       "waitFor": "[data-testid=\"showcase-worlds-content\"]",
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "world view list loads"
     },
     {
       "assertVisible": "a[href^=\"/worlds/\"]",
-      "feature": "worlds",
-      "name": "a ready renderer target exists"
+      "feature": "worldtab",
+      "name": "a viewable world target exists"
     },
     {
       "screenshot": "showcase-worlds-list",
       "element": "[data-testid=\"showcase-worlds-content\"]",
       "maxHeight": 720,
       "scroll": false,
-      "feature": "worlds",
+      "feature": "worldtab",
       "name": "world list renderer state",
       "alt": "World View list showing the observed renderer state for the seeded world",
       "focus": "Renderer state and target row"
