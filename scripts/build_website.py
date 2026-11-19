@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-from scripts import openapi_version, version_contract
+from scripts import maintained_guides, openapi_version, version_contract
 
 ROOT = _ROOT
 SCHEMA_CACHE = ROOT / ".website-build/schema-cache"
@@ -230,7 +230,8 @@ def render_astro_config(shell_text, pages, route):
     return result
 
 
-def prepare_project(snapshot, shell, index, current, route, base, root_base, site):
+def prepare_project(snapshot, shell, index, current, route, base, root_base, site,
+                    guides, guide_revision, guide_revision_origin, root=ROOT):
     project = snapshot / "docs/carbon-panel"
     for name in SHELL_FILES:
         shutil.copy2(shell / name, project / name)
@@ -265,11 +266,26 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
         "promoted": channel["promotion"]["promoted"],
     }
     (project / "public/source.json").write_text(json.dumps(source, indent=2) + "\n", encoding="utf-8")
+    # Release-independent operational guides are overlaid from their own exact
+    # maintained source before link rebasing. Channel identity above stays on
+    # the product pin; only the declared authored files and a separate
+    # provenance record are replaced.
+    applied = maintained_guides.apply(
+        guides, project / "src/content/docs", project / "public", current["commit"],
+        revision=guide_revision, revision_origin=guide_revision_origin, root=root)
+    # Only a whole-page overlay is wholly from the maintained source. A fragment
+    # overlay lives inside a mixed, versioned file: that file keeps the pinned
+    # revision for link rebasing so unrelated FAQ prose stays pinned.
+    guide_revisions = {
+        f"src/content/docs/{record['target_file']}": record["source_revision"]
+        for record in applied if record["mode"] == "page"
+    }
     for page in (project / "src/content/docs").rglob("*"):
         # versions.mdx is generated from absolute contract routes; rebasing it
         # again would double-prefix every link.
         if page.suffix in (".md", ".mdx") and page.name != "versions.mdx":
-            text = scoped_links(page.read_text(encoding="utf-8"), base, current["commit"])
+            revision = guide_revisions.get(page.relative_to(project).as_posix(), current["commit"])
+            text = scoped_links(page.read_text(encoding="utf-8"), base, revision)
             page.write_text(normalize_mdx(text), encoding="utf-8")
     api_page = project / "src/content/docs/api.mdx"
     api_page.write_text(api_page.read_text(encoding="utf-8").replace(
@@ -371,6 +387,10 @@ def build(root, base, site, promotion=None):
     contract = version_contract.apply_promotion(contract, promotion)
     version_contract.validate(contract, catalog, root)
     index = version_contract.version_index(contract, catalog, root)
+    guides = maintained_guides.load(root)
+    guide_revision, guide_revision_origin = maintained_guides.derive_revision(root)
+    pinned_pages = {version["channel"]: set(version["pages"]) for version in index["versions"]}
+    maintained_guides.validate(guides, root, guide_revision, pinned_pages)
     candidate = bool(promotion and promotion.get("state") == "candidate")
     staging_route = None
     if candidate:
@@ -404,7 +424,8 @@ def build(root, base, site, promotion=None):
             version_base = staging_route if candidate else base + route.lstrip("/")
             project_base = staging_route if candidate else base
             dist = prepare_project(snapshot, shell, index, version, route,
-                                   version_base, project_base, site)
+                                   version_base, project_base, site, guides,
+                                   guide_revision, guide_revision_origin, root)
             target = staged / route.strip("/")
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(dist, target, dirs_exist_ok=True)
