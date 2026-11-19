@@ -241,15 +241,26 @@ wait_for_server_running() {
 # identity. If the provider is unavailable the add is skipped with a warning:
 # player captures are best-effort and never borrow a real player's profile.
 seed_showcase_player() {
-	local token="$1" server_id="$2" count payload response
+	local token="$1" server_id="$2" count payload response query
 	response="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null || true)"
 	count="$(printf '%s' "${response}" | list_count players || printf '0')"
 	if [ "${count}" -gt 0 ]; then
+		echo "review roster already has ${count} player identity/identities"
 		return 0
 	fi
-	payload="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-allowlist-fixture",playerQuery:"ReviewFixture"}))')"
-	rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" >/dev/null 2>&1 ||
-		echo "could not seed the review allowlist identity (identity provider may be unavailable)" >&2
+	# Two reserved fixture names: a transient provider failure must not cost the
+	# player captures. Only an authoritative NOT_FOUND creates an offline identity.
+	for query in ReviewFixture ReviewFixtureTwo; do
+		payload="$(REVIEW_SERVER_ID="${server_id}" REVIEW_PLAYER_QUERY="${query}" node -e 'console.log(JSON.stringify({serverId:process.env.REVIEW_SERVER_ID,identityKey:"",playerName:"",remove:false,requestId:"review-allowlist-"+process.env.REVIEW_PLAYER_QUERY,playerQuery:process.env.REVIEW_PLAYER_QUERY}))')"
+		response="$(rpc /carbonpanel.v1.PlayerService/SetWhitelistEntry "${payload}" "${token}" 2>&1 || true)"
+		response="$(printf '%s' "${response}" | cut -c1-200)"
+		count="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null | list_count players || printf '0')"
+		if [ "${count}" -gt 0 ]; then
+			echo "seeded offline review identity with ${query}; roster count ${count}"
+			return 0
+		fi
+		echo "review allowlist query ${query} produced no roster identity: ${response}" >&2
+	done
 }
 
 # seed_showcase_pack creates a small fabric pack with real mods so studio and
