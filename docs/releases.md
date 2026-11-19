@@ -171,7 +171,7 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
 | `latest` | Moving stable channel, promoted only with a stable release |
 | `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
-| `nightly` | Explicitly promoted Docker Hub development alias; never a stable version |
+| `nightly` | Docker Hub development alias promoted by an explicit opt-in or a verified, default-off scheduled publisher; never a stable version |
 | GHCR `3.0.0-alpha.1` | Historical GHCR-only preview; not a stable release and not on Docker Hub |
 
 Prereleases never move `latest` or the stable minor tag. `edge` moves only under
@@ -234,13 +234,40 @@ publication order), and `nightly` by its own gated step. All publication uses on
 fixed, non-cancellable channel concurrency group; verification builds stay
 per-SHA and cancellable.
 
-There is no scheduled registry write and no infrastructure setting to enable:
-the nightly opt-in is a manual `workflow_dispatch` with `nightly=true` from
-`refs/heads/main` plus exact-commit CI verification. If a scheduled nightly is
-added later it must verify by default and require a separately reviewed,
-default-off operator setting before writing. Seeding a live `nightly` tag is a
-distinct, separately authorized operation; the existing `edge` image predates
-current main and is never relabelled as a fresh nightly.
+Two publication paths exist, and both require exact-commit CI. The manual path
+is an explicit `workflow_dispatch` with `nightly=true` from `refs/heads/main`.
+The unattended path is a native Actions `schedule` (`cd.yml`, 18:00 UTC daily,
+ahead of the 06:30 Australia/Sydney local updater). A schedule **verifies by
+default**: it resolves the CURRENT `main` tip read-only twice (a moving or
+unavailable tip pins nothing), checks out that exact SHA, requires a completed
+successful push CI run for that SHA, then re-reads the live tip and re-verifies
+exact-commit CI again immediately before the buildx push, and a THIRD time
+(fresh result, not the pre-push one) immediately before moving the alias. A
+tip that moved after pinning, or a CI run that stopped being green between the
+push and the alias move, blocks the affected write; verification-only runs
+still build locally without pushing. It may
+move only the `nightly` alias, reusing the verified
+`sha-<commit>` image; a present-but-unverified or unknown sha tag is skipped
+with zero writes. The unattended path alone derives the previous alias binding
+from the alias's own digest-addressed platform configs rather than an operator
+string; manual dispatch keeps its original explicit-binding rule and still
+refuses an absent binding. Both paths refuse an unbound, non-ancestor or
+same-commit-digest move.
+
+A scheduled run writes to the registry only when the separately reviewed,
+**default-off** repository variable `NIGHTLY_SCHEDULE_PUBLISH` is exactly
+`true`. Leaving it unset or `false` keeps every schedule verification-only;
+this repository does not set or mutate that variable. Push, pull_request,
+workflow_run, tag and dispatch events remain verify-only through the schedule
+gate even when the variable is enabled. The schedule joins the same fixed,
+non-cancellable `cd-publish-edge` concurrency group as manual publishes, so
+only one writer can touch the shared sha identity and aliases at a time.
+
+Nightly never writes `latest`, a stable minor tag, `edge`, a GitHub release, a
+release record, GHCR or any MCP/runtime/module image; those lanes have no
+schedule trigger. Seeding a live `nightly` tag is a distinct, separately
+authorized operation; the existing `edge` image predates current main and is
+never relabelled as a fresh nightly.
 
 The GitHub container package links to the source repository, so it appears in
 the repository's Packages sidebar. Verify visibility after first publication;

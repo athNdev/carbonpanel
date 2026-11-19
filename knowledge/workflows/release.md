@@ -147,9 +147,14 @@ resume from the original verified download artifact without rebuilding images.
   commit to the observed alias digest through that same evidence before checking
   ancestry. Buildx writes only the sha reference; an explicitly gated digest-based
   step moves edge so it survives sha reuse in either order. Nightly never moves
-  `latest` or a minor tag, and no scheduled registry write is enabled. Seeding a
-  live nightly is separately authorized; the existing `edge` image is not a fresh
-  nightly.
+  `latest`, a minor tag or `edge`. A native Actions schedule (18:00 UTC) may now
+  publish nightly only from the exact current main tip, with a late main/CI
+  recheck before the buildx push and another before the alias move. It verifies
+  by default and writes only when the separately reviewed, default-off
+  `NIGHTLY_SCHEDULE_PUBLISH` variable is true. It joins the fixed channel-wide
+  publish concurrency group and adds no schedule to the release, module, MCP or
+  runtime lanes. See ADR 0041. Seeding a live nightly is separately authorized;
+  the existing `edge` image is not a fresh nightly.
 - Managed node-runtime artifacts are a separate publication lane, not an
   application release. `runtime-artifacts.yml` is dispatch-only, uses the
   independent `runtime-vMAJOR.MINOR.PATCH` domain, and requires trusted-main
