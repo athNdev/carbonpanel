@@ -80,7 +80,7 @@ SPDX-License-Identifier: MPL-2.0
 	}
 </script>
 
-<div class="space-y-6 font-sans text-foreground">
+<div class="space-y-6 font-sans text-foreground" data-testid="showcase-library-content">
 	<CarbonPageHeader
 		title="World Library"
 		description="Immutable, content-addressed world revisions. Bound servers always receive a private writable clone."

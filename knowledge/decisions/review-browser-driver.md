@@ -14,6 +14,8 @@ code_refs:
   - scripts/review/profile.test.mjs
   - scripts/review/profile-browser.test.mjs
   - scripts/review/journey.mjs
+  - scripts/review/entry-state.mjs
+  - scripts/review/entry-state.test.mjs
   - scripts/manual-review/e2e/run.mjs
   - .github/workflows/review-ownership.yml
 sources:
@@ -46,3 +48,8 @@ base URL; detailed screenshots and reports remain local review artifacts.
 Default artifacts are timestamped beneath the checkout's ignored tmp tree,
 independent of the caller's working directory; explicit output overrides are
 supported for attaching evidence elsewhere.
+
+The login route hydrates after DOMContentLoaded, so bootstrap/login/auth/fatal
+selection waits for one mutually exclusive semantic DOM state instead of an
+immediate pre-hydration `count()`; no reachable state fails closed. A delayed-
+hydration fixture covers the seeded-login regression.

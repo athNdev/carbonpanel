@@ -18,6 +18,7 @@
 
 import { launchReviewBrowser } from "./browser.mjs";
 import { writeReviewReport } from "./report.mjs";
+import { waitForEntryState } from "./entry-state.mjs";
 import {
   mkdirSync,
   readFileSync,
@@ -45,6 +46,16 @@ async function main() {
   }
 
   const plan = JSON.parse(readFileSync(resolve(args.plan), "utf8"));
+  // Feature gates: a step tagged with `feature` only runs when that feature
+  // was explicitly selected. Core steps (no tag) always run. The same list is
+  // passed to the asset gate so a skipped feature cannot leave a hole in the
+  // published set.
+  const features = new Set(
+    (args.features ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+  );
+  const planSteps = (plan.steps ?? []).filter(
+    (step) => !step.feature || features.has(step.feature),
+  );
   const out = resolve(args.out ?? fileURLToPath(new URL(`../../tmp/review-output/single/${new Date().toISOString().replace(/[:.]/g, '-')}/`, import.meta.url)));
   mkdirSync(out, { recursive: true });
   const results = [];
@@ -254,10 +265,11 @@ async function main() {
     }
   }
 
-  // A brand-new review stack shows first-user setup instead of a login form.
-  // Bootstrap only runs when that form is actually on screen, so the same plan
-  // works against a fresh stack and a seeded one.
+  // A brand-new review stack shows first-user setup; a seeded one shows a
+  // login form. Both hydrate after DOMContentLoaded, so detect the semantic
+  // state rather than counting nodes before the app has mounted.
   const bootstrap = plan.bootstrap;
+  let alreadyAuthenticated = false;
   if (bootstrap) {
     // Same credentials as the login step: one account, one place to set it.
     const setupUser = process.env[bootstrap.usernameEnv ?? "PANEL_REVIEW_USER"];
@@ -272,10 +284,31 @@ async function main() {
       goto: bootstrap.path ?? "/login",
       name: "open setup",
     });
-    const hasLoginForm =
-      (await page.locator(bootstrap.detectSelector).count()) > 0;
-    if (hasLoginForm) {
-      record("bootstrap", true, "already set up; skipped");
+    // The login route hydrates after DOMContentLoaded. An immediate count sees
+    // an empty DOM and cannot tell a seeded login page from first-user setup.
+    // Wait for ONE mutually exclusive semantic state instead, so the same plan
+    // works on a fresh and a seeded stack without a fixed sleep.
+    const entrySelectors = {
+      login: bootstrap.detectSelector,
+      bootstrap: bootstrap.usernameSelector,
+      authenticated: bootstrap.authenticatedSelector ?? plan.login?.successSelector,
+      fatal: bootstrap.fatalSelector,
+    };
+    for (const [state, selector] of Object.entries(entrySelectors)) {
+      if (selector === undefined) delete entrySelectors[state];
+    }
+    const entry = await waitForEntryState(
+      page,
+      entrySelectors,
+      bootstrap.entryTimeout ?? 30000,
+    );
+    record("entry state", true, entry.state);
+    if (entry.state === "fatal") {
+      throw new Error("panel reported a fatal state on the login route");
+    }
+    if (entry.state === "login" || entry.state === "authenticated") {
+      record("bootstrap", true, `${entry.state} state; skipped`);
+      alreadyAuthenticated = entry.state === "authenticated";
     } else {
       await step("fill", {
         fill: bootstrap.usernameSelector,
@@ -304,7 +337,7 @@ async function main() {
   }
 
   const login = plan.login;
-  if (login) {
+  if (login && !alreadyAuthenticated) {
     const username = process.env[login.usernameEnv ?? "PANEL_REVIEW_USER"];
     const password = process.env[login.passwordEnv ?? "PANEL_REVIEW_PASSWORD"];
     if (!username || !password) {
@@ -332,7 +365,7 @@ async function main() {
   }
   critical = false;
 
-  for (const spec of plan.steps ?? []) {
+  for (const spec of planSteps) {
     if (spec.screenshot && Object.keys(spec).length === 1) {
       await step("screenshot", spec);
       continue;

@@ -21,7 +21,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 </script>
 
-<div class="h-full flex-1 space-y-6 font-sans">
+<div class="h-full flex-1 space-y-6 font-sans" data-testid="showcase-players-content">
 	<CarbonPageHeader
 		title="Players"
 		description="Search player identities across every server, then inspect observed data and moderate with an audit trail."
