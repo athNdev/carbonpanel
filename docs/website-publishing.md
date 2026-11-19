@@ -48,6 +48,38 @@ OpenAPI plugin. The current branch supplies only the website presentation
 from the pinned commit and the identity page is generated from the contract.
 No build reads application examples from a floating branch.
 
+### Maintained operational guides
+
+A narrow class of release-independent operational pages is maintained on the
+first-party docs source instead of being frozen to a product release. Today that
+is the Proxmox first-party install/update guide and the single Proxmox answer in
+the FAQ. `docs/maintained-guides.json` is only a classification/path/compatibility
+declaration: which slugs are maintained, the exact source path and page mode
+(`page` replaces a whole page; `fragment` replaces one `<details>` answer), and
+the guarantees that every slug exists in each pinned channel and that product
+pins, markers and generated schema stay untouched. It deliberately contains no
+revision and no content hashes; those would recreate the stale pin this model
+exists to avoid.
+
+The exact source revision is the checked-out `git HEAD` of the trusted website
+build, and nothing else: there is no secondary revision input that could
+disclose an older or foreign guide. Guide text is read from those exact
+Git blobs, overlaid onto each exported channel snapshot before link rebasing,
+and attested with its SHA-256 in a generated `maintained-guides.json` beside the
+channel's `source.json`. A whole maintained page also carries a visible
+**Guide source** link to the exact authored blob at that revision, so readers do
+not mistake the `Pinned to` application link for the guide's source. Editing a
+maintained guide in a later commit therefore
+refreshes both channels and their attested digests on the next build with no
+manifest edit. Channel identity, pinned prose outside the declared files, aliases
+and generated schema are never rewritten. An allowlist path, missing or
+duplicate entry, absent source blob, absent pinned slug, floating ref or broken
+fragment anchor aborts the build. `scripts/test_maintained_guides.py` exercises
+the real pinned snapshots for both active channels and the no-manifest-edit
+refresh at the integration seam; Website Checks runs it on every docs change.
+The decision and its rationale are in
+[ADR 0050](adr/0050-maintained-operational-guides.md).
+
 ## Multi-version documentation
 
 The stable default is `/docs/`, with an immutable mirror at
@@ -110,7 +142,7 @@ Bun 1.4.2, npm and Buf 1.50.0. Network access is needed for locked packages and 
 versioned Buf generator. No application, Docker daemon or database is required.
 
 ```sh
-python3 -m unittest scripts.test_website scripts.test_version_contract scripts.test_landing_page scripts.test_design_system_page
+python3 -m unittest scripts.test_website scripts.test_version_contract scripts.test_maintained_guides scripts.test_landing_page scripts.test_design_system_page
 python3 scripts/check_brand_assets.py
 python3 scripts/version_bump.py prepare --check
 python3 scripts/build_website.py

@@ -58,3 +58,4 @@ sources:
 | [0047](../../docs/adr/0047-closure-evidence-guard.md) | Block OSS Done natively and verify acceptance evidence in the repo | [Acceptance evidence](../../docs/acceptance/README.md) |
 | [0048](../../docs/adr/0048-bluemap-asset-routing-and-csp.md) | Exact gzip asset routing and a pinned JIT BlueMap webapp keep the panel CSP unchanged | [World viewing](../architecture/world-viewing.md) |
 | [0049](../../docs/adr/0049-channel-promotion-gates.md) | Exact-revision and dual-registry verification gates for docs and OCI channel moves | [Release](../workflows/release.md), [Website and documentation publication](website-docs.md), [Channel promotion](channel-promotion.md) |
+| [0050](../../docs/adr/0050-maintained-operational-guides.md) | Release-independent operational guides derive an exact source revision at build time instead of pinning it in the manifest | [Website and documentation publication](website-docs.md) |

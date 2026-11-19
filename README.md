@@ -395,6 +395,7 @@ registry entry exists, and no live fresh-install smoke has been run.
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Understand the panel         | [Introduction](https://carbonpanel.dev/docs/introduction/)                                                       |
 | Install it                   | [Docker Compose](https://carbonpanel.dev/docs/getting-started/docker-compose/)                                   |
+| Install in a Proxmox guest   | [Proxmox (existing guest)](docs/carbon-panel/src/content/docs/getting-started/proxmox.mdx) and [first-party installer script](https://github.com/athNdev/carbonpanel/blob/main/scripts/proxmox/install-carbon-panel.sh) |
 | Connect an AI assistant      | [MCP server guide](docs/carbon-panel/src/content/docs/guides/mcp-server.mdx) (build-bound tool compatibility)     |
 | Configure it                 | [Configuration](https://carbonpanel.dev/docs/configuration/) and [config.example.yaml](config.example.yaml)      |
 | Back up a server             | [Server backups](https://carbonpanel.dev/docs/guides/backups/)                                                   |

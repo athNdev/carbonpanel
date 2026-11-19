@@ -27,9 +27,7 @@ sources:
 - The homepage's interactive examples compile from shared Svelte feature
   components with browser-local fixtures; the combined build includes their
   prerendered HTML and hashed assets. See [Homepage UI fragments](homepage-fragments.md).
-- Application prose, imported examples and API schema come from the same full
-  commit in `docs/website-source.json`. Never substitute the current checkout or
-  a floating branch if that commit is unavailable.
+- Application prose, imported examples and API schema come from the same full commit in `docs/website-source.json`; never substitute the current checkout or a floating branch. Exception: release-independent operational guides declared in `docs/maintained-guides.json` derive their exact source revision from the trusted checkout at build time (never pinned in the manifest) and attest blob digests; product pins, aliases and schema stay untouched. See ADR 0050.
 - `docs/website-source.json` is the single build contract; channel and
   availability are derived from the classified catalog
   `docs/release-history.json`, never from a `v` prefix. The generated
