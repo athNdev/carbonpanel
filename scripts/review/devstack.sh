@@ -376,15 +376,32 @@ printf '%s\n' '# Seeded vanilla level, mounted read-only' 'id: "${level}"' 'name
 EOF
 	docker cp "${DATA}/config/setup-bluemap.sh" "${NAME}:/tmp/setup-bluemap.sh" >/dev/null 2>&1 || return 0
 	docker exec -u root "${NAME}" sh /tmp/setup-bluemap.sh >/dev/null 2>&1 || return 0
-	if ! start_bluemap "${host_path}" "${mapdir}" "${level}"; then
+	if ! start_bluemap_renderer "${host_path}" "${mapdir}" "${level}"; then
 		echo "could not start the isolated BlueMap renderer; skipping map capture" >&2
 		return 0
 	fi
+	# Serve the generated web root on the panel's loopback namespace as soon as
+	# possible so renderer readiness probes can reach real assets while rendering
+	# continues in the background.
+	if ! start_map_server "${mapdir}"; then
+		echo "could not start the isolated BlueMap static server; skipping map capture" >&2
+		return 0
+	fi
 	deadline=$((SECONDS + 240))
+	stable=0
+	prev_count=-1
 	while ((SECONDS < deadline)); do
-		if [ -f "${mapdir}/web/settings.json" ] &&
-			[ -d "${mapdir}/web/maps/${level}/tiles" ] &&
-			[ -n "$(find "${mapdir}/web/maps/${level}/tiles" -type f -print -quit 2>/dev/null)" ]; then
+		count=0
+		if [ -f "${mapdir}/web/settings.json" ] && [ -d "${mapdir}/web/maps/${level}/tiles" ]; then
+			count="$(find "${mapdir}/web/maps/${level}/tiles" -type f 2>/dev/null | wc -l | tr -d ' ')"
+		fi
+		if [ "${count}" -ge 12 ] && [ "${count}" = "${prev_count}" ]; then
+			stable=$((stable + 1))
+		else
+			stable=0
+		fi
+		prev_count="${count}"
+		if [ "${stable}" -ge 3 ] && [ "${count}" -ge 12 ]; then
 			break
 		fi
 		sleep 3
@@ -394,6 +411,7 @@ EOF
 		echo "BlueMap did not produce real tiles/settings.json within 240s; map capture will be unavailable" >&2
 		return 0
 	fi
+	echo "review BlueMap tile files before panel restart: ${prev_count}" >&2
 	mkdir -p "${DATA}/config"
 	cat >"${DATA}/config/config.yaml" <<EOF
 # Isolated review fixture: explicit node-local renderer endpoint.
@@ -413,57 +431,64 @@ EOF
 	echo "seeded real BlueMap tiles for ${server_id} on ${node_id}"
 }
 
-# The sidecar is disposable but it is still a container on the host daemon.
+# Review sidecars are disposable but still containers on the host daemon.
 # Never remove a name: inspect, verify the immutable ID and ownership label,
 # then remove exactly that ID. A colliding unowned container is a hard refusal.
 owned_sidecar_id() {
-	local record id owner
-	record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "${NAME}-bluemap" 2>/dev/null)" || return 1
+	local name="$1" record id owner
+	record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "$name" 2>/dev/null)" || return 1
 	id="${record%% *}"; owner="${record#* }"
 	if [[ ! "$id" =~ ^[0-9a-f]{64}$ ]]; then
-		echo "refusing sidecar operation: ${NAME}-bluemap has no immutable container id" >&2
+		echo "refusing sidecar operation: ${name} has no immutable container id" >&2
 		return 1
 	fi
 	if [ "$owner" != "$DATA" ]; then
-		echo "refusing sidecar operation: ${NAME}-bluemap is not owned by this review session" >&2
+		echo "refusing sidecar operation: ${name} is not owned by this review session" >&2
 		return 1
 	fi
 	printf '%s' "$id"
 }
 
 sidecar_exists() {
-	docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "${NAME}-bluemap"
+	local name="$1"
+	docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$name"
 }
 
 remove_owned_sidecar() {
-	if ! sidecar_exists; then
+	local name="$1"
+	if ! sidecar_exists "$name"; then
 		return 0
 	fi
 	assert_owner || return 1
 	local id
-	id="$(owned_sidecar_id)" || return 1
+	id="$(owned_sidecar_id "$name")" || return 1
 	docker rm -f "$id" >/dev/null
 }
 
-start_bluemap() {
+# Real BlueMap renderer: generates genuine tiles/web assets into the bind-mounted
+# web root. No web listener is started; the static server below serves port 8100
+# so the panel can reach the same pre-generated real map on its loopback
+# namespace while rendering continues for tiles the viewport requests later.
+start_bluemap_renderer() {
 	local host_path="$1" mapdir="$2" level="$3"
-	remove_owned_sidecar || return 1
-	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
+	remove_owned_sidecar "${NAME}-bluemap-render" || return 1
+	docker run -d --name "${NAME}-bluemap-render" \
 		--label "carbonpanel.review.owner=${DATA}" \
 		-v "${mapdir}/config:/app/config" \
 		-v "${host_path}/${level}:/app/world:ro" \
 		-v "${mapdir}/data:/app/data" \
 		-v "${mapdir}/web:/app/web" \
-		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1
+		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u >/dev/null 2>&1
 }
 
-# BlueMap produced real tiles above, but its own web listener is not reliably
-# reachable from the panel's loopback namespace. Serve the SAME generated web
-# root (tiles + settings.json + renderer assets) with a bounded static server
-# on the shared network namespace. No map is drawn, faked or regenerated here.
+# Serve the SAME generated web root (real tiles + settings.json + renderer
+# assets) with a bounded static server on the panel's shared network namespace.
+# BlueMap's own web listener is not reliably reachable there. The renderer may
+# still be writing new real tiles into this directory; python http.server serves
+# the current state per request, so no map is drawn, faked or regenerated here.
 start_map_server() {
 	local mapdir="$1"
-	remove_owned_sidecar || return 1
+	remove_owned_sidecar "${NAME}-bluemap" || return 1
 	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
 		--label "carbonpanel.review.owner=${DATA}" \
 		-v "${mapdir}/web:/web:ro" \
@@ -487,9 +512,11 @@ down() {
 	docker info >/dev/null 2>&1 || { echo "Docker is unavailable; refusing teardown" >&2; return 1; }
 	local names
 	names="$(docker ps -a --format '{{.Names}}')" || { echo "cannot list containers; refusing teardown" >&2; return 1; }
-	if printf '%s\n' "$names" | grep -Fxq "${NAME}-bluemap"; then
-		remove_owned_sidecar || return 1
-	fi
+	for sidecar in "${NAME}-bluemap" "${NAME}-bluemap-render"; do
+		if printf '%s\n' "$names" | grep -Fxq "$sidecar"; then
+			remove_owned_sidecar "$sidecar" || return 1
+		fi
+	done
 	if printf '%s\n' "$names" | grep -Fxq "$NAME"; then
 		assert_owner
 		local record id owner
@@ -529,9 +556,9 @@ up)
 			docker rm -f "${NAME}" >/dev/null
 			start_panel
 			wait_for_health
-			# Serve the SAME pre-generated web root (real tiles + settings.json)
-			# with a bounded static server on the panel's loopback namespace.
-			# BlueMap's own web listener is not reliably reachable there.
+			# Serve the SAME generated web root on the panel's loopback namespace.
+			# BlueMap's renderer keeps running in a separate container so tiles
+			# requested after initial paint can appear as real pre-generated assets.
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
 				if start_map_server "${server_path}/modules/bluemap"; then
