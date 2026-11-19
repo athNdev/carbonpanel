@@ -171,7 +171,11 @@ overwriting the existing configuration. See the
 Release images are published to both `atharvnaphade/carbonpanel` on Docker Hub
 and `ghcr.io/athndev/carbonpanel` in GitHub Packages. Both references use the
 same multi-architecture image digest and tested Linux downloads. The manifest
-records both references. Development `edge` images remain on Docker Hub.
+records both references. Development `edge` images remain on Docker Hub; the
+OSS-413 `nightly` channel is published to BOTH registries at one verified digest
+(see below). No redundant rolling image is added: the existing `nightly`,
+`sha-<commit>`, `edge` and release aliases already cover the rolling and pinned
+roles.
 
 The Docker Hub repository name and the GHCR name are normalized in one place:
 `atharvnaphade/carbonpanel` and the lowercased GitHub owner/name,
@@ -189,12 +193,14 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
 | `latest` | Moving stable channel, promoted only with a stable release |
 | `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
-| `nightly` | Docker Hub development alias promoted by an explicit opt-in or a verified, default-off scheduled publisher; never a stable version |
+| `nightly` | Development channel promoted on every successful trusted main CI on BOTH registries at one verified multiarch digest; never a GitHub Release or a stable version |
 | GHCR `3.0.0-alpha.1` | Historical GHCR-only preview; not a stable release and not on Docker Hub |
 
 Prereleases never move `latest` or the stable minor tag. `edge` moves only under
 an explicit developer-channel opt-in; an ordinary main merge builds and verifies
-without a registry write. An older `latest` image may predate this channel
+the immutable `sha-*` image, and the OSS-413 publisher advances `nightly` on
+both registries only after the full qualified transaction below. An older
+`latest` image may predate this channel
 policy; pin an explicit version for upgrades. The image digest in the release
 manifest is the immutable reference for that release. Module images have their
 own publishing workflow.
@@ -214,8 +220,9 @@ additions at existing digests and never move `latest`, a minor tag, `edge`,
 points to the most recent **qualifying** nightly build of a pinned main commit.
 The immutable identity is the existing `sha-<full-commit>` tag; no date alias or
 second digest is created for a nightly. A nightly never moves `latest`, a stable
-minor tag, or `edge`; those remain owned by their own explicit gates. The
-`nightly` alias is Docker Hub only; no GHCR nightly tag is created by this policy.
+minor tag, or `edge`; those remain owned by their own explicit gates. Following
+the OSS-413 correction, `nightly` is published on BOTH Docker Hub and GHCR at
+the SAME digest and OCI revision; the earlier Hub-only wording is superseded.
 
 Both `edge` and `nightly` writers share the `sha-<commit>` tag. Before any build
 or push, the workflow reads that tag with strict lookup classification: only a
@@ -282,10 +289,72 @@ non-cancellable `cd-publish-edge` concurrency group as manual publishes, so
 only one writer can touch the shared sha identity and aliases at a time.
 
 Nightly never writes `latest`, a stable minor tag, `edge`, a GitHub release, a
-release record, GHCR or any MCP/runtime/module image; those lanes have no
-schedule trigger. Seeding a live `nightly` tag is a distinct, separately
-authorized operation; the existing `edge` image predates current main and is
-never relabelled as a fresh nightly.
+release record or any MCP/runtime/module image; those lanes have no schedule
+trigger. Its GHCR write is the verified dual-registry alias move described
+under the OSS-413 gates below, not a separate release lane. Seeding a live
+`nightly` tag is a distinct, separately authorized operation; the existing
+`edge` image predates current main and is never relabelled as a fresh nightly.
+
+## OSS-413 verified channel promotion
+
+Every docs and OCI channel move is gated on an EXACT source revision pinned
+read-only from trusted `refs/heads/main` (full 40-hex commit) plus a successful
+exact-commit main CI result. OCI moves additionally require the immutable
+`sha-<commit>` image at ONE verified multiarch digest with both Linux
+architectures in BOTH registries (`atharvnaphade/carbonpanel` on Docker Hub and
+`ghcr.io/athndev/carbonpanel`), with matching `org.opencontainers.image.revision`
+in each digest-addressed child config. Docs moves additionally require the built
+site's schema_version 3 two-channel contract (`Stable` and `Nightly` only, no
+`1.0.39`/`3.0.0-alpha.1` doc snapshots, full-SHA `/commit/<sha>` links) and
+exact site build validation, so stale docs cannot mask a candidate. A tag ref,
+short SHA, unknown/single-arch/mismatched registry or stale contract fails
+closed with zero writes.
+
+A channel move is ONE qualified transaction, not an alias write: pin the exact
+source revision and qualified stage, reject older/out-of-order candidates
+against the active receipt, stage BOTH immutable registries and the exact docs
+artifact, deploy a candidate docs build and confirm its PUBLIC marker over HTTPS
+before moving aliases, then deploy the final docs and confirm both registry
+aliases and the live marker/dropdown agree on the same revision and digest. A
+full receipt records the revision, both digests, before/after alias state, docs
+artifact hash, public marker URLs/status, run IDs and timestamps. Retry uses the
+exact staged digest, never a rebuild or blind alias move; partial failure
+reconciles or rolls back to the prior verified receipt.
+
+`nightly` advances on each successful main on both registries at one digest and
+produces NO GitHub Release. No redundant `rolling` channel is added — the user-
+facing `nightly` alias and the existing supported release aliases are sufficient.
+Nightly revision belongs in the published artifact/marker and the receipt only;
+no mutable Nightly state is committed to main, which would self-trigger CI.
+Canonical `carbonpanel-v*` builds stay immutable. A reconciliation run re-verifies
+and repairs drift. `latest` and the `stable` alias move only from the verified
+stable digest (`sha256:ead260ef…`, commit `f88748be…`); the planned
+`carbonpanel-v2.0.0` stable is not a channel publication.
+
+The verified current Docker Hub nightly baseline (`sha256:ecc89ba9…`, commit
+`d8597d4e…`) is a fact about today's registry, not a mandatory first revision.
+It seeds nightly only through a bounded, recorded bootstrap that re-verifies
+dual-registry parity and a matching docs marker; no shipped workflow supplies
+`--bootstrap`. All channel and docs moves share ONE fixed non-cancelling
+publication lock (`pages-deploy`, `cancel-in-progress: false`); no job nests a
+second group and no workflow dispatches another publisher that takes the same
+lock. A manual/site-only `landing.yml deploy=true` dispatch may publish ONLY an
+already-active exact channel source from the receipt, never originate a new
+promotion. Each move is digest-anchored and bound to the previously verified
+digest and commit: an
+ancestor check refuses stale/out-of-order moves, an alias already at the target
+is an idempotent no-op, a partial move converges, and a candidate that loses
+qualification rolls back to the previous verified digest. No immutable tag is
+overwritten and no tag is deleted. See ADR 0046.
+
+The trigger/tag-name patterns behind these channels follow the dated primary-
+source research note `container-image-stable-rolling-channels-2026-11-20.md`:
+Docker branch/tag/schedule examples and tag/label patterns, GitHub's
+release-published and release-branch examples, and Grafana's moving `:main` tag
+refreshed after each successful main build alongside immutable per-build tags.
+`latest` is the omitted-tag default and a documentation convention, not an
+implicit stability contract. The corrected Docker tags/labels guide URL is
+`https://docs.docker.com/build/ci/github-actions/manage-tags-labels/`.
 
 The GitHub container package links to the source repository, so it appears in
 the repository's Packages sidebar. Verify visibility after first publication;

@@ -115,6 +115,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMMIT: ${{ steps.plan.outputs.commit }}
           RELEASE_REF: ${{ github.ref }}
+        # GH_TOKEN is required here: `gh run list` in exact_main_ci_verified()
+        # otherwise runs unauthenticated, so the fail-closed CI check could
+        # never pass and the stable publication lane stayed permanently held.
+        # This restores the check; it does not bypass or weaken it.
         # A checkbox is never CI evidence. verify-publication-ref requires the
         # trusted refs/heads/main dispatch ref and a successful completed push
         # CI run for the exact checked-out SHA, including ancestry of main.
@@ -557,6 +561,31 @@ jobs:
           python3 scripts/release.py alias-promotion \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST"
+      # OSS-413: the `stable` alias is a separate compatibility alias that may
+      # ONLY move from the verified stable digest, in BOTH registries. It never
+      # follows a new product version, never touches latest or an immutable tag,
+      # and never creates a release. The gate refuses (soft notice) for any
+      # candidate that is not the verified stable baseline, so a future stable
+      # version cannot accidentally retarget it.
+      - name: Observe the stable baseline and stable alias in both registries
+        id: stable_obs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          IMMUTABLE=$(python3 scripts/release.py channel-observe --reference 1.0.40 | jq -c .observations)
+          ALIASES=$(python3 scripts/release.py channel-observe --reference stable | jq -c .observations)
+          printf 'immutable=%s\n' "$IMMUTABLE" >> "$GITHUB_OUTPUT"
+          printf 'aliases=%s\n' "$ALIASES" >> "$GITHUB_OUTPUT"
+      - name: Promote the stable alias only from the verified stable digest
+        id: stable_alias
+        env:
+          IMMUTABLE_OBS: ${{ steps.stable_obs.outputs.immutable }}
+          ALIAS_OBS: ${{ steps.stable_obs.outputs.aliases }}
+        run: |
+          python3 scripts/release.py promote-stable-alias \
+            --ci-verified "true" --immutable "$IMMUTABLE_OBS" \
+            --aliases "$ALIAS_OBS" --soft --apply
+
       - name: Promote minor channel alias
         if: steps.promotion.outputs.minor != ''
         env:
