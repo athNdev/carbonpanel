@@ -146,12 +146,19 @@ A disposable Linux boot fixture boots the **contributed daemon.json** in a
 pinned `docker:29.3.0-dind` container. Precisely: it is a **PRIVILEGED nested
 ROOTFUL** boot, with a `json-file` log-driver override because the disposable
 container has no journald. It asserted: dockerd starts, the private socket
-exists, a trivial container runs, a game port is reachable both as a published
-port and on the private bridge, memory/pids limits apply, and the data root
-survives a daemon restart. `systemd-analyze verify` was also run on both
-rendered units — this checks **syntax only**, not that they boot. Exact output
-is in the external audit file
-`security-runtime-plans/node-native-boot-evidence.md`.
+exists, a trivial container runs, memory/pids limits apply, and the data root
+survives a daemon restart. The published-port mapping and a matching DNAT rule
+were observed, and a listener on the private bridge answered from a second
+container; **client TCP reachability on the published game port was not
+measured**. `systemd-analyze verify` was also run on both rendered units — this
+checks **syntax only**, not that they boot. Exact output is in the external
+audit file `security-runtime-plans/node-native-boot-evidence.md`.
+
+Separately, the exact shipped ROOTFUL unit was booted with real dockerd 29.1.3
+under systemd 255 on a clean disposable fixture: `active/success`, private
+socket/pidfile/roots, default-cap container, limits and live-restore restart were
+observed. DNAT-rule presence and bridge-side listener success remain distinct
+from measured client reachability on the published host port.
 
 ### Real-defect fixes from exact-unit qualification (2026-11-19)
 
@@ -185,6 +192,10 @@ fixtures; they are contract checks, not boot proof.
   This is a fixture environment limitation, not a claim that the unit works.
 - **Live-host install, real-gameplay, release or deployment** evidence does not
   exist. The re-qualification was fixture-only.
+- **VM guest boot smoke** may use isolated QEMU software emulation only if
+  available without KVM; this host has no `/dev/kvm`, so no VM boot was done.
+- **LXC guest boot** needs its own suitable disposable runtime with real pinned
+  provenance; not attempted here. Both are separate next steps/blockers.
 
 Exact rootful re-qualification output and limits are in the external audit file
 `security-runtime-plans/node-runtime-requalification-20261119.md`.

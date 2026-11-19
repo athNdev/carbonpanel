@@ -323,6 +323,7 @@ def main():
                     "mode": mode,
                     "config_path": "/srv/carbon-node/state/daemon.json",
                     "socket_path": socket,
+                    "pidfile": socket.rsplit("/", 1)[0] + "/docker.pid",
                     "data_root": "/srv/carbon-node/state/docker/data",
                     "exec_root": "/srv/carbon-node/state/docker/exec",
                     "containerd_namespace": "carbon-node-cli",
