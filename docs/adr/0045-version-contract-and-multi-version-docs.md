@@ -1,4 +1,4 @@
-# ADR 0043: One version contract and immutable per-version docs
+# ADR 0045: One version contract and immutable per-version docs
 
 Status: Accepted
 

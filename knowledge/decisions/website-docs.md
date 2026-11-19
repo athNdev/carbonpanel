@@ -9,7 +9,7 @@ code_refs:
   - .github/workflows/docs.yml
   - docs/website-source.json
   - docs/version-index.json
-  - docs/adr/0043-version-contract-and-multi-version-docs.md
+  - docs/adr/0045-version-contract-and-multi-version-docs.md
   - scripts/version_contract.py
   - scripts/version_bump.py
   - scripts/openapi_version.py
@@ -59,7 +59,7 @@ sources:
   `docs/version-index.json` is shared by the banner, version switcher, direct
   URL validation and Pages metadata. Every entry is validated against the
   catalog peel and the real Git tag; a disagreement fails closed before
-  packaging. See ADR 0043.
+  packaging. See ADR 0045.
 - Stable docs default to `/docs/`; immutable per-version routes
   `/docs/versions/<display-version>/` are built from exact peeled commits for
   `1.0.40` (stable), `3.0.0-alpha.1` (GHCR-only legacy preview) and `1.0.39`
