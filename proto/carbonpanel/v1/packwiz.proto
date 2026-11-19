@@ -27,6 +27,16 @@ service PackwizService {
   rpc CheckUpdates(CheckUpdatesRequest) returns (CheckUpdatesResponse);
   // DeletePack removes a pack and its metadata.
   rpc DeletePack(DeletePackRequest) returns (DeletePackResponse);
+  // AddPackMod adds a mod entry to a pack, optionally resolving dependencies.
+  rpc AddPackMod(AddPackModRequest) returns (AddPackModResponse);
+  // AddUrlMod adds a mod from a direct download URL.
+  rpc AddUrlMod(AddUrlModRequest) returns (AddUrlModResponse);
+  // UpdatePackMod changes a mod's side and pinned flag.
+  rpc UpdatePackMod(UpdatePackModRequest) returns (UpdatePackModResponse);
+  // DeletePackMod removes a mod from a pack.
+  rpc DeletePackMod(DeletePackModRequest) returns (DeletePackModResponse);
+  // BatchPackMods applies one action to several mods in a pack.
+  rpc BatchPackMods(BatchPackModsRequest) returns (BatchPackModsResponse);
 }
 
 // PackSummary is one entry of the pack list.
@@ -158,4 +168,88 @@ message DeletePackRequest {
 // DeletePackResponse acknowledges a delete.
 message DeletePackResponse {
   bool success = 1;
+}
+
+// AddPackModRequest adds a mod entry. The optional dependency fields mirror the
+// legacy resolve_dependencies=true query so both transports share one operation.
+message AddPackModRequest {
+  string pack_id = 1;
+  PackMod mod = 2;
+  bool resolve_dependencies = 3;
+  string loader = 4;
+  string mc_version = 5;
+}
+
+// PackDependencyRef is one unresolvable required dependency reported by a
+// dependency-aware add. It mirrors the legacy JSON object field for field.
+message PackDependencyRef {
+  string project_id = 1;
+  string version_id = 2;
+  string title = 3;
+  string dependency_type = 4;
+}
+
+// AddPackModResponse reports an add and, when requested, dependency resolution.
+// A resolver failure is reported as a soft result because the requested mod was
+// already installed, matching the compatibility adapter.
+message AddPackModResponse {
+  bool success = 1;
+  string dependency_error = 2;
+  repeated PackMod added_dependencies = 3;
+  repeated string skipped = 4;
+  repeated PackDependencyRef unresolved = 5;
+}
+
+// AddUrlModRequest adds a mod from a direct download URL.
+message AddUrlModRequest {
+  string pack_id = 1;
+  string name = 2;
+  string file_name = 3;
+  string download_url = 4;
+  string side = 5;
+  bool pinned = 6;
+}
+
+// AddUrlModResponse returns the stored mod entry.
+message AddUrlModResponse {
+  PackMod mod = 1;
+}
+
+// UpdatePackModRequest changes one mod's side and pinned flag.
+message UpdatePackModRequest {
+  string pack_id = 1;
+  string slug = 2;
+  string side = 3;
+  bool pinned = 4;
+}
+
+// UpdatePackModResponse acknowledges a mod update.
+message UpdatePackModResponse {
+  bool success = 1;
+}
+
+// DeletePackModRequest removes one mod from a pack.
+message DeletePackModRequest {
+  string pack_id = 1;
+  string slug = 2;
+}
+
+// DeletePackModResponse acknowledges a mod removal.
+message DeletePackModResponse {
+  bool success = 1;
+}
+
+// BatchPackModsRequest applies one action (set_side, pin, unpin, remove) to a
+// set of mod slugs.
+message BatchPackModsRequest {
+  string pack_id = 1;
+  string action = 2;
+  repeated string slugs = 3;
+  string side = 4;
+}
+
+// BatchPackModsResponse reports how many slugs were processed.
+message BatchPackModsResponse {
+  bool success = 1;
+  int32 count = 2;
 }

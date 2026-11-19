@@ -17,7 +17,7 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_packwiz: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChxjYXJib25wYW5lbC92MS9wYWNrd2l6LnByb3RvEg5jYXJib25wYW5lbC52MSKvAQoLUGFja1N1bW1hcnkSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIOCgZhdXRob3IYAyABKAkSDwoHdmVyc2lvbhgEIAEoCRISCgptY192ZXJzaW9uGAUgASgJEhIKCm1vZF9sb2FkZXIYBiABKAkSFgoObG9hZGVyX3ZlcnNpb24YByABKAkSEQoJbW9kX2NvdW50GAggASgFEhIKCnVwZGF0ZWRfYXQYCSABKAkiuQIKB1BhY2tNb2QSDAoEc2x1ZxgBIAEoCRIMCgRuYW1lGAIgASgJEhEKCWZpbGVfbmFtZRgDIAEoCRIMCgRzaWRlGAQgASgJEhAKCHBsYXRmb3JtGAUgASgJEhIKCnByb2plY3RfaWQYBiABKAkSEgoKdmVyc2lvbl9pZBgHIAEoCRIUCgxkb3dubG9hZF91cmwYCCABKAkSEQoJZmlsZV9zaXplGAkgASgDEg4KBnBpbm5lZBgKIAEoCBIMCgRraW5kGAsgASgJEhAKCG9wdGlvbmFsGAwgASgIEg8KB2RlZmF1bHQYDSABKAgSGgoSb3B0aW9uX2Rlc2NyaXB0aW9uGA4gASgJEgwKBGhhc2gYDyABKAkSEwoLaGFzaF9mb3JtYXQYECABKAkSDgoGc2hhNTEyGBEgASgJIvACCgRQYWNrEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDgoGYXV0aG9yGAMgASgJEg8KB3ZlcnNpb24YBCABKAkSEgoKbWNfdmVyc2lvbhgFIAEoCRISCgptb2RfbG9hZGVyGAYgASgJEhYKDmxvYWRlcl92ZXJzaW9uGAcgASgJEhIKCnVwZGF0ZWRfYXQYCCABKAkSJQoEbW9kcxgJIAMoCzIXLmNhcmJvbnBhbmVsLnYxLlBhY2tNb2QSKgoJZGF0YXBhY2tzGAogAygLMhcuY2FyYm9ucGFuZWwudjEuUGFja01vZBIuCg1yZXNvdXJjZXBhY2tzGAsgAygLMhcuY2FyYm9ucGFuZWwudjEuUGFja01vZBIsCgtzaGFkZXJwYWNrcxgMIAMoCzIXLmNhcmJvbnBhbmVsLnYxLlBhY2tNb2QSFwoPZGF0YXBhY2tfZm9sZGVyGA0gASgJEg8KB29wdGlvbnMYDiABKAkiuwIKClBhY2tVcGRhdGUSDAoEc2x1ZxgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBGtpbmQYAyABKAkSEAoIcGxhdGZvcm0YBCABKAkSGgoSY3VycmVudF92ZXJzaW9uX2lkGAUgASgJEhkKEWxhdGVzdF92ZXJzaW9uX2lkGAYgASgJEhgKEGxhdGVzdF9maWxlX25hbWUYByABKAkSGwoTbGF0ZXN0X2Rvd25sb2FkX3VybBgIIAEoCRIaChJsYXRlc3RfaGFzaF9mb3JtYXQYCSABKAkSEwoLbGF0ZXN0X2hhc2gYCiABKAkSFQoNbGF0ZXN0X3NoYTUxMhgLIAEoCRIRCgljaGFuZ2Vsb2cYDCABKAkSGAoQdXBkYXRlX2F2YWlsYWJsZRgNIAEoCBIOCgZwaW5uZWQYDiABKAgiEgoQTGlzdFBhY2tzUmVxdWVzdCI/ChFMaXN0UGFja3NSZXNwb25zZRIqCgVwYWNrcxgBIAMoCzIbLmNhcmJvbnBhbmVsLnYxLlBhY2tTdW1tYXJ5IiEKDkdldFBhY2tSZXF1ZXN0Eg8KB3BhY2tfaWQYASABKAkiNQoPR2V0UGFja1Jlc3BvbnNlEiIKBHBhY2sYASABKAsyFC5jYXJib25wYW5lbC52MS5QYWNrIjEKEENsb25lUGFja1JlcXVlc3QSDwoHcGFja19pZBgBIAEoCRIMCgRuYW1lGAIgASgJIjcKEUNsb25lUGFja1Jlc3BvbnNlEiIKBHBhY2sYASABKAsyFC5jYXJib25wYW5lbC52MS5QYWNrIiUKElJlZnJlc2hQYWNrUmVxdWVzdBIPCgdwYWNrX2lkGAEgASgJIjcKE1JlZnJlc2hQYWNrUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIjQKE0NoZWNrVXBkYXRlc1JlcXVlc3QSDwoHcGFja19pZBgBIAEoCRIMCgRraW5kGAIgASgJIkMKFENoZWNrVXBkYXRlc1Jlc3BvbnNlEisKB3VwZGF0ZXMYASADKAsyGi5jYXJib25wYW5lbC52MS5QYWNrVXBkYXRlIiQKEURlbGV0ZVBhY2tSZXF1ZXN0Eg8KB3BhY2tfaWQYASABKAkiJQoSRGVsZXRlUGFja1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgyiAQKDlBhY2t3aXpTZXJ2aWNlElAKCUxpc3RQYWNrcxIgLmNhcmJvbnBhbmVsLnYxLkxpc3RQYWNrc1JlcXVlc3QaIS5jYXJib25wYW5lbC52MS5MaXN0UGFja3NSZXNwb25zZRJKCgdHZXRQYWNrEh4uY2FyYm9ucGFuZWwudjEuR2V0UGFja1JlcXVlc3QaHy5jYXJib25wYW5lbC52MS5HZXRQYWNrUmVzcG9uc2USUAoJQ2xvbmVQYWNrEiAuY2FyYm9ucGFuZWwudjEuQ2xvbmVQYWNrUmVxdWVzdBohLmNhcmJvbnBhbmVsLnYxLkNsb25lUGFja1Jlc3BvbnNlElYKC1JlZnJlc2hQYWNrEiIuY2FyYm9ucGFuZWwudjEuUmVmcmVzaFBhY2tSZXF1ZXN0GiMuY2FyYm9ucGFuZWwudjEuUmVmcmVzaFBhY2tSZXNwb25zZRJZCgxDaGVja1VwZGF0ZXMSIy5jYXJib25wYW5lbC52MS5DaGVja1VwZGF0ZXNSZXF1ZXN0GiQuY2FyYm9ucGFuZWwudjEuQ2hlY2tVcGRhdGVzUmVzcG9uc2USUwoKRGVsZXRlUGFjaxIhLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZVBhY2tSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuRGVsZXRlUGFja1Jlc3BvbnNlQkhaRmdpdGh1Yi5jb20vYXRoTmRldi9jYXJib24tcGFuZWwvcGtnL3Byb3RvL2NhcmJvbnBhbmVsL3YxO2NhcmJvbnBhbmVsdjFiBnByb3RvMw'
+		'ChxjYXJib25wYW5lbC92MS9wYWNrd2l6LnByb3RvEg5jYXJib25wYW5lbC52MSKvAQoLUGFja1N1bW1hcnkSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIOCgZhdXRob3IYAyABKAkSDwoHdmVyc2lvbhgEIAEoCRISCgptY192ZXJzaW9uGAUgASgJEhIKCm1vZF9sb2FkZXIYBiABKAkSFgoObG9hZGVyX3ZlcnNpb24YByABKAkSEQoJbW9kX2NvdW50GAggASgFEhIKCnVwZGF0ZWRfYXQYCSABKAkiuQIKB1BhY2tNb2QSDAoEc2x1ZxgBIAEoCRIMCgRuYW1lGAIgASgJEhEKCWZpbGVfbmFtZRgDIAEoCRIMCgRzaWRlGAQgASgJEhAKCHBsYXRmb3JtGAUgASgJEhIKCnByb2plY3RfaWQYBiABKAkSEgoKdmVyc2lvbl9pZBgHIAEoCRIUCgxkb3dubG9hZF91cmwYCCABKAkSEQoJZmlsZV9zaXplGAkgASgDEg4KBnBpbm5lZBgKIAEoCBIMCgRraW5kGAsgASgJEhAKCG9wdGlvbmFsGAwgASgIEg8KB2RlZmF1bHQYDSABKAgSGgoSb3B0aW9uX2Rlc2NyaXB0aW9uGA4gASgJEgwKBGhhc2gYDyABKAkSEwoLaGFzaF9mb3JtYXQYECABKAkSDgoGc2hhNTEyGBEgASgJIvACCgRQYWNrEgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDgoGYXV0aG9yGAMgASgJEg8KB3ZlcnNpb24YBCABKAkSEgoKbWNfdmVyc2lvbhgFIAEoCRISCgptb2RfbG9hZGVyGAYgASgJEhYKDmxvYWRlcl92ZXJzaW9uGAcgASgJEhIKCnVwZGF0ZWRfYXQYCCABKAkSJQoEbW9kcxgJIAMoCzIXLmNhcmJvbnBhbmVsLnYxLlBhY2tNb2QSKgoJZGF0YXBhY2tzGAogAygLMhcuY2FyYm9ucGFuZWwudjEuUGFja01vZBIuCg1yZXNvdXJjZXBhY2tzGAsgAygLMhcuY2FyYm9ucGFuZWwudjEuUGFja01vZBIsCgtzaGFkZXJwYWNrcxgMIAMoCzIXLmNhcmJvbnBhbmVsLnYxLlBhY2tNb2QSFwoPZGF0YXBhY2tfZm9sZGVyGA0gASgJEg8KB29wdGlvbnMYDiABKAkiuwIKClBhY2tVcGRhdGUSDAoEc2x1ZxgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBGtpbmQYAyABKAkSEAoIcGxhdGZvcm0YBCABKAkSGgoSY3VycmVudF92ZXJzaW9uX2lkGAUgASgJEhkKEWxhdGVzdF92ZXJzaW9uX2lkGAYgASgJEhgKEGxhdGVzdF9maWxlX25hbWUYByABKAkSGwoTbGF0ZXN0X2Rvd25sb2FkX3VybBgIIAEoCRIaChJsYXRlc3RfaGFzaF9mb3JtYXQYCSABKAkSEwoLbGF0ZXN0X2hhc2gYCiABKAkSFQoNbGF0ZXN0X3NoYTUxMhgLIAEoCRIRCgljaGFuZ2Vsb2cYDCABKAkSGAoQdXBkYXRlX2F2YWlsYWJsZRgNIAEoCBIOCgZwaW5uZWQYDiABKAgiEgoQTGlzdFBhY2tzUmVxdWVzdCI/ChFMaXN0UGFja3NSZXNwb25zZRIqCgVwYWNrcxgBIAMoCzIbLmNhcmJvbnBhbmVsLnYxLlBhY2tTdW1tYXJ5IiEKDkdldFBhY2tSZXF1ZXN0Eg8KB3BhY2tfaWQYASABKAkiNQoPR2V0UGFja1Jlc3BvbnNlEiIKBHBhY2sYASABKAsyFC5jYXJib25wYW5lbC52MS5QYWNrIjEKEENsb25lUGFja1JlcXVlc3QSDwoHcGFja19pZBgBIAEoCRIMCgRuYW1lGAIgASgJIjcKEUNsb25lUGFja1Jlc3BvbnNlEiIKBHBhY2sYASABKAsyFC5jYXJib25wYW5lbC52MS5QYWNrIiUKElJlZnJlc2hQYWNrUmVxdWVzdBIPCgdwYWNrX2lkGAEgASgJIjcKE1JlZnJlc2hQYWNrUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIjQKE0NoZWNrVXBkYXRlc1JlcXVlc3QSDwoHcGFja19pZBgBIAEoCRIMCgRraW5kGAIgASgJIkMKFENoZWNrVXBkYXRlc1Jlc3BvbnNlEisKB3VwZGF0ZXMYASADKAsyGi5jYXJib25wYW5lbC52MS5QYWNrVXBkYXRlIiQKEURlbGV0ZVBhY2tSZXF1ZXN0Eg8KB3BhY2tfaWQYASABKAkiJQoSRGVsZXRlUGFja1Jlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgijAEKEUFkZFBhY2tNb2RSZXF1ZXN0Eg8KB3BhY2tfaWQYASABKAkSJAoDbW9kGAIgASgLMhcuY2FyYm9ucGFuZWwudjEuUGFja01vZBIcChRyZXNvbHZlX2RlcGVuZGVuY2llcxgDIAEoCBIOCgZsb2FkZXIYBCABKAkSEgoKbWNfdmVyc2lvbhgFIAEoCSJjChFQYWNrRGVwZW5kZW5jeVJlZhISCgpwcm9qZWN0X2lkGAEgASgJEhIKCnZlcnNpb25faWQYAiABKAkSDQoFdGl0bGUYAyABKAkSFwoPZGVwZW5kZW5jeV90eXBlGAQgASgJIrwBChJBZGRQYWNrTW9kUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBIYChBkZXBlbmRlbmN5X2Vycm9yGAIgASgJEjMKEmFkZGVkX2RlcGVuZGVuY2llcxgDIAMoCzIXLmNhcmJvbnBhbmVsLnYxLlBhY2tNb2QSDwoHc2tpcHBlZBgEIAMoCRI1Cgp1bnJlc29sdmVkGAUgAygLMiEuY2FyYm9ucGFuZWwudjEuUGFja0RlcGVuZGVuY3lSZWYieAoQQWRkVXJsTW9kUmVxdWVzdBIPCgdwYWNrX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSEQoJZmlsZV9uYW1lGAMgASgJEhQKDGRvd25sb2FkX3VybBgEIAEoCRIMCgRzaWRlGAUgASgJEg4KBnBpbm5lZBgGIAEoCCI5ChFBZGRVcmxNb2RSZXNwb25zZRIkCgNtb2QYASABKAsyFy5jYXJib25wYW5lbC52MS5QYWNrTW9kIlMKFFVwZGF0ZVBhY2tNb2RSZXF1ZXN0Eg8KB3BhY2tfaWQYASABKAkSDAoEc2x1ZxgCIAEoCRIMCgRzaWRlGAMgASgJEg4KBnBpbm5lZBgEIAEoCCIoChVVcGRhdGVQYWNrTW9kUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCCI1ChREZWxldGVQYWNrTW9kUmVxdWVzdBIPCgdwYWNrX2lkGAEgASgJEgwKBHNsdWcYAiABKAkiKAoVRGVsZXRlUGFja01vZFJlc3BvbnNlEg8KB3N1Y2Nlc3MYASABKAgiVAoUQmF0Y2hQYWNrTW9kc1JlcXVlc3QSDwoHcGFja19pZBgBIAEoCRIOCgZhY3Rpb24YAiABKAkSDQoFc2x1Z3MYAyADKAkSDAoEc2lkZRgEIAEoCSI3ChVCYXRjaFBhY2tNb2RzUmVzcG9uc2USDwoHc3VjY2VzcxgBIAEoCBINCgVjb3VudBgCIAEoBTLJBwoOUGFja3dpelNlcnZpY2USUAoJTGlzdFBhY2tzEiAuY2FyYm9ucGFuZWwudjEuTGlzdFBhY2tzUmVxdWVzdBohLmNhcmJvbnBhbmVsLnYxLkxpc3RQYWNrc1Jlc3BvbnNlEkoKB0dldFBhY2sSHi5jYXJib25wYW5lbC52MS5HZXRQYWNrUmVxdWVzdBofLmNhcmJvbnBhbmVsLnYxLkdldFBhY2tSZXNwb25zZRJQCglDbG9uZVBhY2sSIC5jYXJib25wYW5lbC52MS5DbG9uZVBhY2tSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuQ2xvbmVQYWNrUmVzcG9uc2USVgoLUmVmcmVzaFBhY2sSIi5jYXJib25wYW5lbC52MS5SZWZyZXNoUGFja1JlcXVlc3QaIy5jYXJib25wYW5lbC52MS5SZWZyZXNoUGFja1Jlc3BvbnNlElkKDENoZWNrVXBkYXRlcxIjLmNhcmJvbnBhbmVsLnYxLkNoZWNrVXBkYXRlc1JlcXVlc3QaJC5jYXJib25wYW5lbC52MS5DaGVja1VwZGF0ZXNSZXNwb25zZRJTCgpEZWxldGVQYWNrEiEuY2FyYm9ucGFuZWwudjEuRGVsZXRlUGFja1JlcXVlc3QaIi5jYXJib25wYW5lbC52MS5EZWxldGVQYWNrUmVzcG9uc2USUwoKQWRkUGFja01vZBIhLmNhcmJvbnBhbmVsLnYxLkFkZFBhY2tNb2RSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuQWRkUGFja01vZFJlc3BvbnNlElAKCUFkZFVybE1vZBIgLmNhcmJvbnBhbmVsLnYxLkFkZFVybE1vZFJlcXVlc3QaIS5jYXJib25wYW5lbC52MS5BZGRVcmxNb2RSZXNwb25zZRJcCg1VcGRhdGVQYWNrTW9kEiQuY2FyYm9ucGFuZWwudjEuVXBkYXRlUGFja01vZFJlcXVlc3QaJS5jYXJib25wYW5lbC52MS5VcGRhdGVQYWNrTW9kUmVzcG9uc2USXAoNRGVsZXRlUGFja01vZBIkLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZVBhY2tNb2RSZXF1ZXN0GiUuY2FyYm9ucGFuZWwudjEuRGVsZXRlUGFja01vZFJlc3BvbnNlElwKDUJhdGNoUGFja01vZHMSJC5jYXJib25wYW5lbC52MS5CYXRjaFBhY2tNb2RzUmVxdWVzdBolLmNhcmJvbnBhbmVsLnYxLkJhdGNoUGFja01vZHNSZXNwb25zZUJIWkZnaXRodWIuY29tL2F0aE5kZXYvY2FyYm9uLXBhbmVsL3BrZy9wcm90by9jYXJib25wYW5lbC92MTtjYXJib25wYW5lbHYxYgZwcm90bzM'
 	);
 
 /**
@@ -601,6 +601,351 @@ export const DeletePackResponseSchema: GenMessage<DeletePackResponse> =
 	messageDesc(file_carbonpanel_v1_packwiz, 15);
 
 /**
+ * AddPackModRequest adds a mod entry. The optional dependency fields mirror the
+ * legacy resolve_dependencies=true query so both transports share one operation.
+ *
+ * @generated from message carbonpanel.v1.AddPackModRequest
+ */
+export type AddPackModRequest = Message<'carbonpanel.v1.AddPackModRequest'> & {
+	/**
+	 * @generated from field: string pack_id = 1;
+	 */
+	packId: string;
+
+	/**
+	 * @generated from field: carbonpanel.v1.PackMod mod = 2;
+	 */
+	mod?: PackMod | undefined;
+
+	/**
+	 * @generated from field: bool resolve_dependencies = 3;
+	 */
+	resolveDependencies: boolean;
+
+	/**
+	 * @generated from field: string loader = 4;
+	 */
+	loader: string;
+
+	/**
+	 * @generated from field: string mc_version = 5;
+	 */
+	mcVersion: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.AddPackModRequest.
+ * Use `create(AddPackModRequestSchema)` to create a new message.
+ */
+export const AddPackModRequestSchema: GenMessage<AddPackModRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 16);
+
+/**
+ * PackDependencyRef is one unresolvable required dependency reported by a
+ * dependency-aware add. It mirrors the legacy JSON object field for field.
+ *
+ * @generated from message carbonpanel.v1.PackDependencyRef
+ */
+export type PackDependencyRef = Message<'carbonpanel.v1.PackDependencyRef'> & {
+	/**
+	 * @generated from field: string project_id = 1;
+	 */
+	projectId: string;
+
+	/**
+	 * @generated from field: string version_id = 2;
+	 */
+	versionId: string;
+
+	/**
+	 * @generated from field: string title = 3;
+	 */
+	title: string;
+
+	/**
+	 * @generated from field: string dependency_type = 4;
+	 */
+	dependencyType: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.PackDependencyRef.
+ * Use `create(PackDependencyRefSchema)` to create a new message.
+ */
+export const PackDependencyRefSchema: GenMessage<PackDependencyRef> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 17);
+
+/**
+ * AddPackModResponse reports an add and, when requested, dependency resolution.
+ * A resolver failure is reported as a soft result because the requested mod was
+ * already installed, matching the compatibility adapter.
+ *
+ * @generated from message carbonpanel.v1.AddPackModResponse
+ */
+export type AddPackModResponse = Message<'carbonpanel.v1.AddPackModResponse'> & {
+	/**
+	 * @generated from field: bool success = 1;
+	 */
+	success: boolean;
+
+	/**
+	 * @generated from field: string dependency_error = 2;
+	 */
+	dependencyError: string;
+
+	/**
+	 * @generated from field: repeated carbonpanel.v1.PackMod added_dependencies = 3;
+	 */
+	addedDependencies: PackMod[];
+
+	/**
+	 * @generated from field: repeated string skipped = 4;
+	 */
+	skipped: string[];
+
+	/**
+	 * @generated from field: repeated carbonpanel.v1.PackDependencyRef unresolved = 5;
+	 */
+	unresolved: PackDependencyRef[];
+};
+
+/**
+ * Describes the message carbonpanel.v1.AddPackModResponse.
+ * Use `create(AddPackModResponseSchema)` to create a new message.
+ */
+export const AddPackModResponseSchema: GenMessage<AddPackModResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 18);
+
+/**
+ * AddUrlModRequest adds a mod from a direct download URL.
+ *
+ * @generated from message carbonpanel.v1.AddUrlModRequest
+ */
+export type AddUrlModRequest = Message<'carbonpanel.v1.AddUrlModRequest'> & {
+	/**
+	 * @generated from field: string pack_id = 1;
+	 */
+	packId: string;
+
+	/**
+	 * @generated from field: string name = 2;
+	 */
+	name: string;
+
+	/**
+	 * @generated from field: string file_name = 3;
+	 */
+	fileName: string;
+
+	/**
+	 * @generated from field: string download_url = 4;
+	 */
+	downloadUrl: string;
+
+	/**
+	 * @generated from field: string side = 5;
+	 */
+	side: string;
+
+	/**
+	 * @generated from field: bool pinned = 6;
+	 */
+	pinned: boolean;
+};
+
+/**
+ * Describes the message carbonpanel.v1.AddUrlModRequest.
+ * Use `create(AddUrlModRequestSchema)` to create a new message.
+ */
+export const AddUrlModRequestSchema: GenMessage<AddUrlModRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 19);
+
+/**
+ * AddUrlModResponse returns the stored mod entry.
+ *
+ * @generated from message carbonpanel.v1.AddUrlModResponse
+ */
+export type AddUrlModResponse = Message<'carbonpanel.v1.AddUrlModResponse'> & {
+	/**
+	 * @generated from field: carbonpanel.v1.PackMod mod = 1;
+	 */
+	mod?: PackMod | undefined;
+};
+
+/**
+ * Describes the message carbonpanel.v1.AddUrlModResponse.
+ * Use `create(AddUrlModResponseSchema)` to create a new message.
+ */
+export const AddUrlModResponseSchema: GenMessage<AddUrlModResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 20);
+
+/**
+ * UpdatePackModRequest changes one mod's side and pinned flag.
+ *
+ * @generated from message carbonpanel.v1.UpdatePackModRequest
+ */
+export type UpdatePackModRequest = Message<'carbonpanel.v1.UpdatePackModRequest'> & {
+	/**
+	 * @generated from field: string pack_id = 1;
+	 */
+	packId: string;
+
+	/**
+	 * @generated from field: string slug = 2;
+	 */
+	slug: string;
+
+	/**
+	 * @generated from field: string side = 3;
+	 */
+	side: string;
+
+	/**
+	 * @generated from field: bool pinned = 4;
+	 */
+	pinned: boolean;
+};
+
+/**
+ * Describes the message carbonpanel.v1.UpdatePackModRequest.
+ * Use `create(UpdatePackModRequestSchema)` to create a new message.
+ */
+export const UpdatePackModRequestSchema: GenMessage<UpdatePackModRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 21);
+
+/**
+ * UpdatePackModResponse acknowledges a mod update.
+ *
+ * @generated from message carbonpanel.v1.UpdatePackModResponse
+ */
+export type UpdatePackModResponse = Message<'carbonpanel.v1.UpdatePackModResponse'> & {
+	/**
+	 * @generated from field: bool success = 1;
+	 */
+	success: boolean;
+};
+
+/**
+ * Describes the message carbonpanel.v1.UpdatePackModResponse.
+ * Use `create(UpdatePackModResponseSchema)` to create a new message.
+ */
+export const UpdatePackModResponseSchema: GenMessage<UpdatePackModResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 22);
+
+/**
+ * DeletePackModRequest removes one mod from a pack.
+ *
+ * @generated from message carbonpanel.v1.DeletePackModRequest
+ */
+export type DeletePackModRequest = Message<'carbonpanel.v1.DeletePackModRequest'> & {
+	/**
+	 * @generated from field: string pack_id = 1;
+	 */
+	packId: string;
+
+	/**
+	 * @generated from field: string slug = 2;
+	 */
+	slug: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.DeletePackModRequest.
+ * Use `create(DeletePackModRequestSchema)` to create a new message.
+ */
+export const DeletePackModRequestSchema: GenMessage<DeletePackModRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 23);
+
+/**
+ * DeletePackModResponse acknowledges a mod removal.
+ *
+ * @generated from message carbonpanel.v1.DeletePackModResponse
+ */
+export type DeletePackModResponse = Message<'carbonpanel.v1.DeletePackModResponse'> & {
+	/**
+	 * @generated from field: bool success = 1;
+	 */
+	success: boolean;
+};
+
+/**
+ * Describes the message carbonpanel.v1.DeletePackModResponse.
+ * Use `create(DeletePackModResponseSchema)` to create a new message.
+ */
+export const DeletePackModResponseSchema: GenMessage<DeletePackModResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 24);
+
+/**
+ * BatchPackModsRequest applies one action (set_side, pin, unpin, remove) to a
+ * set of mod slugs.
+ *
+ * @generated from message carbonpanel.v1.BatchPackModsRequest
+ */
+export type BatchPackModsRequest = Message<'carbonpanel.v1.BatchPackModsRequest'> & {
+	/**
+	 * @generated from field: string pack_id = 1;
+	 */
+	packId: string;
+
+	/**
+	 * @generated from field: string action = 2;
+	 */
+	action: string;
+
+	/**
+	 * @generated from field: repeated string slugs = 3;
+	 */
+	slugs: string[];
+
+	/**
+	 * @generated from field: string side = 4;
+	 */
+	side: string;
+};
+
+/**
+ * Describes the message carbonpanel.v1.BatchPackModsRequest.
+ * Use `create(BatchPackModsRequestSchema)` to create a new message.
+ */
+export const BatchPackModsRequestSchema: GenMessage<BatchPackModsRequest> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 25);
+
+/**
+ * BatchPackModsResponse reports how many slugs were processed.
+ *
+ * @generated from message carbonpanel.v1.BatchPackModsResponse
+ */
+export type BatchPackModsResponse = Message<'carbonpanel.v1.BatchPackModsResponse'> & {
+	/**
+	 * @generated from field: bool success = 1;
+	 */
+	success: boolean;
+
+	/**
+	 * @generated from field: int32 count = 2;
+	 */
+	count: number;
+};
+
+/**
+ * Describes the message carbonpanel.v1.BatchPackModsResponse.
+ * Use `create(BatchPackModsResponseSchema)` to create a new message.
+ */
+export const BatchPackModsResponseSchema: GenMessage<BatchPackModsResponse> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_packwiz, 26);
+
+/**
  * PackwizService is the generated control contract for Packwiz pack management.
  * It covers the JSON pack-control operations; binary upload/import, pack file
  * delivery and export archives remain HTTP per ADR 0012. The legacy
@@ -669,5 +1014,55 @@ export const PackwizService: GenService<{
 		methodKind: 'unary';
 		input: typeof DeletePackRequestSchema;
 		output: typeof DeletePackResponseSchema;
+	};
+	/**
+	 * AddPackMod adds a mod entry to a pack, optionally resolving dependencies.
+	 *
+	 * @generated from rpc carbonpanel.v1.PackwizService.AddPackMod
+	 */
+	addPackMod: {
+		methodKind: 'unary';
+		input: typeof AddPackModRequestSchema;
+		output: typeof AddPackModResponseSchema;
+	};
+	/**
+	 * AddUrlMod adds a mod from a direct download URL.
+	 *
+	 * @generated from rpc carbonpanel.v1.PackwizService.AddUrlMod
+	 */
+	addUrlMod: {
+		methodKind: 'unary';
+		input: typeof AddUrlModRequestSchema;
+		output: typeof AddUrlModResponseSchema;
+	};
+	/**
+	 * UpdatePackMod changes a mod's side and pinned flag.
+	 *
+	 * @generated from rpc carbonpanel.v1.PackwizService.UpdatePackMod
+	 */
+	updatePackMod: {
+		methodKind: 'unary';
+		input: typeof UpdatePackModRequestSchema;
+		output: typeof UpdatePackModResponseSchema;
+	};
+	/**
+	 * DeletePackMod removes a mod from a pack.
+	 *
+	 * @generated from rpc carbonpanel.v1.PackwizService.DeletePackMod
+	 */
+	deletePackMod: {
+		methodKind: 'unary';
+		input: typeof DeletePackModRequestSchema;
+		output: typeof DeletePackModResponseSchema;
+	};
+	/**
+	 * BatchPackMods applies one action to several mods in a pack.
+	 *
+	 * @generated from rpc carbonpanel.v1.PackwizService.BatchPackMods
+	 */
+	batchPackMods: {
+		methodKind: 'unary';
+		input: typeof BatchPackModsRequestSchema;
+		output: typeof BatchPackModsResponseSchema;
 	};
 }> = /*@__PURE__*/ serviceDesc(file_carbonpanel_v1_packwiz, 0);

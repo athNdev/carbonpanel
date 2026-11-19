@@ -37,15 +37,15 @@ OSS-370 remains open for supported families still missing.
 ### Current catalogue (superseding note, derived from the generator)
 
 The figures below are read from the checked-in generators and gates, not hand
-counted. `go run ./internal/mcp/cataloggen` reports `entries=235 services=27`
-and `combined tools=211`; `internal/mcp/family_audit_test.go` asserts 245
-declared proto RPCs and a 245/235/10 (declared/mounted/unmounted) matrix split,
-while `internal/mcp/drift_test.go` asserts 27 mounted services and 235 mounted
+counted. `go run ./internal/mcp/cataloggen` reports `entries=240 services=27`
+and `combined tools=211`; `internal/mcp/family_audit_test.go` asserts 250
+declared proto RPCs and a 250/240/10 (declared/mounted/unmounted) matrix split,
+while `internal/mcp/drift_test.go` asserts 27 mounted services and 240 mounted
 RPCs. `scripts/mcp-generated-artifacts-check.sh` reproduces the generated
 artifacts byte-for-byte from checked-in source.
 
-The gateway now mounts the **211-tool combined catalogue**: **245 declared
-RPCs**, of which **235 are mounted/reachable** across **27 mounted services**.
+The gateway now mounts the **211-tool combined catalogue**: **250 declared
+RPCs**, of which **240 are mounted/reachable** across **27 mounted services**.
 The 30-tool first slice is retained as the highest-precedence pinned subset
 inside that combined catalogue; it is not the total tool count. The three
 counts stay deliberately distinct: declared RPCs include 10 `NodeControlService`
