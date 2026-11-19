@@ -258,7 +258,7 @@ func TestSweepRetryAfterPartialSuccessDoesNotRepublish(t *testing.T) {
 			return
 		}
 		closeFailures--
-		tx.AddError(errors.New("injected batch close failure"))
+		_ = tx.AddError(errors.New("injected batch close failure"))
 	}))
 
 	publishes := 0
