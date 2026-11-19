@@ -11,7 +11,7 @@ sources:
   - title: SvelteKit resolve navigation ADR
     resource: ../../docs/adr/0002-sveltekit-resolve-navigation.md
   - title: SvelteKit 3 security migration ADR
-    resource: ../../docs/adr/0041-sveltekit3-security-migration.md
+    resource: ../../docs/adr/0042-sveltekit3-security-migration.md
 ---
 
 # Steps
@@ -34,7 +34,7 @@ bun run test
 # Rules
 
 - SvelteKit 3 rejects any `/server/` directory under `src` as server-only, even
-  for browser components. Keep shared UI in `components/server-ui/`; see ADR 0041.
+  for browser components. Keep shared UI in `components/server-ui/`; see ADR 0042.
 - Keep the Carbon geometry, typography and token usage consistent with the
   existing shell.
 - Start every primary route with `CarbonPageHeader`; do not hand-roll a title,

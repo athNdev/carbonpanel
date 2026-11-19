@@ -1,4 +1,4 @@
-# ADR 0041: SvelteKit 3 security migration with narrow compatibility shims
+# ADR 0042: SvelteKit 3 security migration with narrow compatibility shims
 
 Status: Accepted (OSS-393)
 
