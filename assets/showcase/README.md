@@ -8,9 +8,10 @@ the URLs are stable:
 `https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/<name>.png`
 
 The branch is seeded with the last known-good real captures before any README
-link changes. Main no longer tracks generated PNGs. `manifest.json` on the
-asset branch records the exact source commit, version, data provenance, and a
-SHA256, byte count and pixel size for every published image.
+link changes. The README no longer links to PNGs tracked on main; generated
+captures are published on the asset branch. `manifest.json` there records the
+exact source commit, version, data provenance, and a SHA256, byte count and
+pixel size for every published image.
 
 These are unretouched browser crops of the packaged application running in an
 isolated disposable installation with seeded fixtures, not mockups or homepage

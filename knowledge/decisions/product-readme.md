@@ -46,7 +46,7 @@ the button's own text nodes. Capture CI runs for application UI changes, not
 homepage-only edits, and pins Bun to the frontend CI version for the website build.
 
 Published images live on a single dedicated asset branch so README raw URLs are
-stable; main tracks no generated PNGs. Capture runs in a read-only job against
+stable; the README does not link to generated PNGs tracked on main. Capture runs in a read-only job against
 an isolated seeded stack, and a separate minimal `contents:write` job publishes
 only that branch in one commit. The bundle is validated fail-closed against an
 atomic manifest (exact source commit, per-image SHA256, dimensions, size, PNG

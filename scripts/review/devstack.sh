@@ -194,7 +194,8 @@ seed() {
 # with region files is imported, so no compatibility is invented here.
 seed_showcase_world_library() {
 	local token="$1" server_id="$2" response entry_id revision_id
-	entry_id="$(rpc /carbonpanel.v1.WorldService/ListWorldEntries '{}' "${token}" 2>/dev/null | json_path 'entries.0.id')"
+	response="$(rpc /carbonpanel.v1.WorldService/ListWorldEntries '{}' "${token}" 2>/dev/null || true)"
+	entry_id="$(printf '%s' "${response}" | json_path 'entries.0.id')"
 	if [ -z "${entry_id}" ]; then
 		response="$(rpc /carbonpanel.v1.WorldService/CreateWorldFromConfig \
 			'{"name":"Review Fresh World","edition":"java","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","dataVersion":"3953","values":{"level-name":"world"},"preset":"survival","licenseAttestation":"isolated review fixture","requestId":"review-bootstrap-world"}' \
@@ -207,8 +208,9 @@ seed_showcase_world_library() {
 		return 0
 	fi
 	if [ -z "${revision_id}" ]; then
-		revision_id="$(rpc /carbonpanel.v1.WorldService/ListRevisions \
-			"{\"worldEntryId\":\"${entry_id}\"}" "${token}" 2>/dev/null | json_path 'revisions.0.id')"
+		response="$(rpc /carbonpanel.v1.WorldService/ListRevisions \
+			"{\"worldEntryId\":\"${entry_id}\"}" "${token}" 2>/dev/null || true)"
+		revision_id="$(printf '%s' "${response}" | json_path 'revisions.0.id')"
 	fi
 	if [ -z "${revision_id}" ] || [ -z "${server_id}" ]; then
 		echo "could not resolve the review world revision for compatibility" >&2
@@ -221,9 +223,10 @@ seed_showcase_world_library() {
 }
 
 wait_for_server_running() {
-	local token="$1" deadline=$((SECONDS + 180)) status
+	local token="$1" deadline=$((SECONDS + 180)) status response
 	while ((SECONDS < deadline)); do
-		status="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null | json_path 'servers.0.status')"
+		response="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null || true)"
+		status="$(printf '%s' "${response}" | json_path 'servers.0.status')"
 		case "${status}" in
 			SERVER_STATUS_RUNNING|3) return 0 ;;
 		esac
@@ -233,11 +236,14 @@ wait_for_server_running() {
 }
 
 # Add one offline identity to the cross-server roster by manual allowlist add.
-# The provider returns NOT_FOUND for this reserved fixture name, which creates
-# an offline identity without borrowing any real player's profile or skin.
+# The add goes through the real first-party identity provider; only an
+# authoritative NOT_FOUND for this reserved fixture name yields an offline
+# identity. If the provider is unavailable the add is skipped with a warning:
+# player captures are best-effort and never borrow a real player's profile.
 seed_showcase_player() {
-	local token="$1" server_id="$2" count payload
-	count="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null | list_count players)"
+	local token="$1" server_id="$2" count payload response
+	response="$(rpc /carbonpanel.v1.PlayerService/ListPlayers '{"serverId":"","query":"","limit":200}' "${token}" 2>/dev/null || true)"
+	count="$(printf '%s' "${response}" | list_count players || printf '0')"
 	if [ "${count}" -gt 0 ]; then
 		return 0
 	fi

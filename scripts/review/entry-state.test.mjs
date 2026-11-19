@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { waitForEntryState } from './entry-state.mjs';
 
 // A deterministic delayed-hydration fake. `count()` always reports an empty
@@ -68,6 +69,13 @@ test('delayed hydration: a fatal state is detected and surfaced', async () => {
 test('fail closed: no reachable semantic state rejects instead of guessing bootstrap', async () => {
   const page = delayedHydrationPage({}, 40);
   await assert.rejects(() => waitForEntryState(page, SELECTORS, 40), /no entry state/i);
+});
+
+test('feature-tagged step failures are reported but do not fail the journey', () => {
+  const source = readFileSync(new URL('./journey.mjs', import.meta.url), 'utf8');
+  assert.match(source, /const blockingFailed = failed\.filter\(\(r\) => !r\.feature\)/);
+  assert.match(source, /process\.exit\([^;]*blockingFailed\.length === 0/);
+  assert.match(source, /record\(label, (?:true|false),[^;]*spec\.feature/);
 });
 
 test('config guards: empty or invalid selectors reject before waiting', async () => {

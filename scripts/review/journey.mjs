@@ -91,7 +91,11 @@ async function main() {
   });
 
   const base = args.base.replace(/\/$/, "");
-  const record = (name, ok, detail) => results.push({ name, ok, detail });
+  // A tagged feature is best-effort: it can be skipped by --features, and a
+  // failure there is evidence in the report but must not fail the capture for
+  // the mandatory core screenshots. Untagged (core/setup) failures still fail.
+  const record = (name, ok, detail, feature) =>
+    results.push({ name, ok, detail, ...(feature ? { feature } : {}) });
 
   async function step(kind, spec) {
     const label =
@@ -247,15 +251,16 @@ async function main() {
             fullPage: spec.fullPage ?? false,
           });
         }
-        record(label, true, `screenshot ${file}`);
+        record(label, true, `screenshot ${file}`, spec.feature);
       } else {
-        record(label, true, "");
+        record(label, true, "", spec.feature);
       }
     } catch (error) {
       record(
         label,
         false,
         error instanceof Error ? error.message : String(error),
+        spec.feature,
       );
       if (spec.screenshot) {
         const file = join(out, `FAILED-${spec.screenshot}.png`);
@@ -394,11 +399,12 @@ async function main() {
   activeBrowser = undefined;
 
   const failed = results.filter((r) => !r.ok);
+  const blockingFailed = failed.filter((r) => !r.feature);
   const lines = [
     `# Manual review: ${plan.title ?? plan.name ?? "journey"}`,
     "",
     `Base: \`${base}\``,
-    `Result: ${results.length === 0 ? "INCOMPLETE" : failed.length === 0 ? "PASS" : `FAIL (${failed.length})`}`,
+    `Result: ${results.length === 0 ? "INCOMPLETE" : blockingFailed.length === 0 ? (failed.length === 0 ? "PASS" : "PASS (optional feature findings)") : `FAIL (${blockingFailed.length} required)`}`,
     "",
     "| Step | Result | Detail |",
     "| --- | --- | --- |",
@@ -432,7 +438,7 @@ async function main() {
   writeReviewReport({ out, profile: 'single-seeded', base, driver: browserMetadata, checks: results.map(item => ({ name: item.name, status: item.ok ? 'passed' : 'failed', detail: item.detail })) });
 
   process.stdout.write(lines.join("\n") + "\n");
-  process.exit(results.length === 0 ? 2 : failed.length === 0 ? 0 : 1);
+  process.exit(results.length === 0 ? 2 : blockingFailed.length === 0 ? 0 : 1);
 }
 
 main().catch(async (error) => {
