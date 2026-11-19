@@ -27,10 +27,12 @@ is used.
 
 ## Required and optional images
 
-`showcase-dashboard`, `showcase-server-detail`, `showcase-studio`,
-`showcase-modpacks`, `showcase-library`, `showcase-library-revisions` and
-`showcase-player-allowlist` are the README-canonical set. Publication fails
-closed if any one is missing, corrupt, stale or inconsistent with the manifest.
+`showcase-dashboard`, `showcase-dashboard-full`, `showcase-server-detail`,
+`showcase-studio`, `showcase-modpacks`, `showcase-library`,
+`showcase-library-revisions` and `showcase-player-allowlist` are the
+README-canonical set. Publication fails closed if any one is missing, corrupt,
+stale or inconsistent with the manifest. The `-full` shot is a full-window
+capture with navigation and shell; the others are inline feature crops.
 
 Feature-gated journey steps (`--features players,library,worldtab,worlds,
 playerdetail`) are mandatory when enabled, so a partial set cannot publish.

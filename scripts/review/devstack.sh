@@ -154,15 +154,10 @@ seed() {
 	count="$(rpc /carbonpanel.v1.NodeService/ListNodes '{}' "${token}" | list_count nodes)"
 	[ "$count" -gt 0 ] || { echo "review node was not created" >&2; return 1; }
 
-	count="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" | list_count servers)"
-	if [ "$count" -eq 0 ]; then
-		GAME_PORT="$(free_port "$GAME_PORT")"
-		rpc /carbonpanel.v1.ServerService/CreateServer \
-			'{"name":"review-vanilla","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","memory":2048,"maxPlayers":10,"port":'"$GAME_PORT"',"requestId":"review-bootstrap-server"}' \
-			"${token}" >/dev/null
-	fi
 	# Distinct named servers make the dashboard read as a real fleet. They stay
-	# stopped: no extra game process is needed for a populated capture.
+	# stopped: no extra game process is needed for a populated capture. They are
+	# created before the starter so tooling that inspects the last CreateServer
+	# request still observes the configured REVIEW_GAME_PORT.
 	extra_port=$((GAME_PORT + 1))
 	for extra_name in 'review-paper' 'review-creative'; do
 		extra_payload="$(REVIEW_EXTRA_NAME="${extra_name}" REVIEW_EXTRA_PORT="${extra_port}" node -e 'console.log(JSON.stringify({name:process.env.REVIEW_EXTRA_NAME,mcVersion:"1.21.1",modLoader:"MOD_LOADER_PAPER",memory:1024,maxPlayers:8,port:Number(process.env.REVIEW_EXTRA_PORT),requestId:"review-bootstrap-"+process.env.REVIEW_EXTRA_NAME}))')"
@@ -170,6 +165,13 @@ seed() {
 			echo "could not seed named server ${extra_name}" >&2
 		extra_port=$((extra_port + 1))
 	done
+	count="$(rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" | list_count servers)"
+	if [ "$count" -eq 0 ]; then
+		GAME_PORT="$(free_port "$GAME_PORT")"
+		rpc /carbonpanel.v1.ServerService/CreateServer \
+			'{"name":"review-vanilla","mcVersion":"1.21.1","modLoader":"MOD_LOADER_VANILLA","memory":2048,"maxPlayers":10,"port":'"$GAME_PORT"',"requestId":"review-bootstrap-server"}' \
+			"${token}" >/dev/null
+	fi
 	# A missing or failed starter is a setup failure, not a successful capture.
 	local servers server_id server_status container_id record deadline timeout="${REVIEW_SEED_TIMEOUT_SECONDS:-180}"
 	[[ "$timeout" =~ ^[0-9]+$ ]] && ((10#$timeout >= 1 && 10#$timeout <= 600)) || { echo "review seed timeout must be in 1..600 seconds" >&2; return 1; }
@@ -521,7 +523,7 @@ up)
 	rpc /carbonpanel.v1.ServerService/ListServers '{}' "${token}" 2>/dev/null |
 		json_path 'servers.0.id' >"${DATA}/server-id" || true
 	if [ -n "${token}" ]; then
-		seed_showcase_bluemap "${token}"
+		seed_showcase_bluemap "${token}" || true
 		if [ -f "${DATA}/config/config.yaml" ] && grep -q 'world_view:' "${DATA}/config/config.yaml"; then
 			# Restart the panel so the explicit renderer endpoint is loaded.
 			docker rm -f "${NAME}" >/dev/null
