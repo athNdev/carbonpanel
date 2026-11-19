@@ -402,7 +402,7 @@ start_panel() {
 		-v "${DATA}/data:/app/data" \
 		-v "${DATA}/backups:/app/backups" \
 		-v "${DATA}/tmp:/app/tmp" \
-		-v "${DATA}/config/config.yaml:/app/config.yaml:ro" \
+		-v "${DATA}/config/config.yaml:/etc/carbon-panel/config.yaml:ro" \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		"${IMAGE}" >/dev/null
 }

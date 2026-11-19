@@ -370,6 +370,16 @@
       "name": "a ready renderer target exists"
     },
     {
+      "screenshot": "showcase-worlds-list",
+      "element": "[data-testid=\"showcase-worlds-content\"]",
+      "maxHeight": 720,
+      "scroll": false,
+      "feature": "worlds",
+      "name": "world list renderer state",
+      "alt": "World View list showing the observed renderer state for the seeded world",
+      "focus": "Renderer state and target row"
+    },
+    {
       "click": "a[href^=\"/worlds/\"]",
       "feature": "worlds",
       "name": "open the rendered world map"
