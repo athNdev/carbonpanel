@@ -186,6 +186,7 @@ func dependencyRefToProto(d packwiz.DependencyRef) *v1.PackDependencyRef {
 	return &v1.PackDependencyRef{
 		ProjectId: d.ProjectID, VersionId: d.VersionID,
 		Title: d.Title, DependencyType: d.DependencyType,
+		Platform: d.Platform,
 	}
 }
 

@@ -1241,13 +1241,16 @@ func (x *AddPackModRequest) GetMcVersion() string {
 }
 
 // PackDependencyRef is one unresolvable required dependency reported by a
-// dependency-aware add. It mirrors the legacy JSON object field for field.
+// dependency-aware add. It mirrors the legacy JSON object field for field,
+// including the platform discriminator (modrinth vs curseforge), so a caller
+// can choose the right provider for a follow-up resolution attempt.
 type PackDependencyRef struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ProjectId      string                 `protobuf:"bytes,1,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
 	VersionId      string                 `protobuf:"bytes,2,opt,name=version_id,json=versionId,proto3" json:"version_id,omitempty"`
 	Title          string                 `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
 	DependencyType string                 `protobuf:"bytes,4,opt,name=dependency_type,json=dependencyType,proto3" json:"dependency_type,omitempty"`
+	Platform       string                 `protobuf:"bytes,5,opt,name=platform,proto3" json:"platform,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1306,6 +1309,13 @@ func (x *PackDependencyRef) GetTitle() string {
 func (x *PackDependencyRef) GetDependencyType() string {
 	if x != nil {
 		return x.DependencyType
+	}
+	return ""
+}
+
+func (x *PackDependencyRef) GetPlatform() string {
+	if x != nil {
+		return x.Platform
 	}
 	return ""
 }
@@ -1963,14 +1973,15 @@ const file_carbonpanel_v1_packwiz_proto_rawDesc = "" +
 	"\x14resolve_dependencies\x18\x03 \x01(\bR\x13resolveDependencies\x12\x16\n" +
 	"\x06loader\x18\x04 \x01(\tR\x06loader\x12\x1d\n" +
 	"\n" +
-	"mc_version\x18\x05 \x01(\tR\tmcVersion\"\x90\x01\n" +
+	"mc_version\x18\x05 \x01(\tR\tmcVersion\"\xac\x01\n" +
 	"\x11PackDependencyRef\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12\x1d\n" +
 	"\n" +
 	"version_id\x18\x02 \x01(\tR\tversionId\x12\x14\n" +
 	"\x05title\x18\x03 \x01(\tR\x05title\x12'\n" +
-	"\x0fdependency_type\x18\x04 \x01(\tR\x0edependencyType\"\xfe\x01\n" +
+	"\x0fdependency_type\x18\x04 \x01(\tR\x0edependencyType\x12\x1a\n" +
+	"\bplatform\x18\x05 \x01(\tR\bplatform\"\xfe\x01\n" +
 	"\x12AddPackModResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12)\n" +
 	"\x10dependency_error\x18\x02 \x01(\tR\x0fdependencyError\x12F\n" +

@@ -181,12 +181,15 @@ message AddPackModRequest {
 }
 
 // PackDependencyRef is one unresolvable required dependency reported by a
-// dependency-aware add. It mirrors the legacy JSON object field for field.
+// dependency-aware add. It mirrors the legacy JSON object field for field,
+// including the platform discriminator (modrinth vs curseforge), so a caller
+// can choose the right provider for a follow-up resolution attempt.
 message PackDependencyRef {
   string project_id = 1;
   string version_id = 2;
   string title = 3;
   string dependency_type = 4;
+  string platform = 5;
 }
 
 // AddPackModResponse reports an add and, when requested, dependency resolution.

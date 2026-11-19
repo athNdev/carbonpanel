@@ -166,3 +166,65 @@ func TestPackwizServiceModControlUsesSharedOperation(t *testing.T) {
 		t.Fatal("AddUrlMod entry missing from shared operation")
 	}
 }
+
+// TestPackDependencyRefToProtoIncludesPlatform guards the field-for-field
+// parity claim for dependency-aware adds: the legacy DependencyRef carries a
+// platform discriminator and a generated consumer must be able to read it.
+func TestPackDependencyRefToProtoIncludesPlatform(t *testing.T) {
+	got := dependencyRefToProto(packwiz.DependencyRef{
+		Platform: "curseforge", ProjectID: "12345", VersionID: "v-1",
+		Title: "Dependency", DependencyType: "required",
+	})
+	if got.Platform != "curseforge" || got.ProjectId != "12345" || got.VersionId != "v-1" ||
+		got.Title != "Dependency" || got.DependencyType != "required" {
+		t.Fatalf("dependency ref lost fields in generated contract: %v", got)
+	}
+}
+
+// TestPackwizServiceDependencyResolutionFailureIsSoft covers the resolve branch
+// the plain add test does not exercise. A provider failure is swallowed by the
+// shared resolver into an empty detail report: the RPC must still succeed and
+// keep the already-installed requested mod (ADR 0012 parity with the adapter).
+func TestPackwizServiceDependencyResolutionFailureIsSoft(t *testing.T) {
+	transport := packwizServiceFixtureTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"fixture provider failure"}`)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	mgr := packwiz.NewManager(t.TempDir(), logger.New(), packwiz.ManagerOptions{HTTPClient: &http.Client{Transport: transport}})
+	created, err := mgr.CreatePack(&packwiz.Pack{Name: "Resolve", MCVersion: "1.21.1", ModLoader: "fabric"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewPackwizService(handlers.NewPackwizOperations(mgr))
+
+	resp, err := svc.AddPackMod(context.Background(), connect.NewRequest(&v1.AddPackModRequest{
+		PackId: created.ID, ResolveDependencies: true, Loader: "fabric", McVersion: "1.21.1",
+		Mod: &v1.PackMod{Slug: "root-mod", Name: "Root", FileName: "root.jar", Platform: "modrinth", ProjectId: "root-id"},
+	}))
+	if err != nil {
+		t.Fatalf("resolver failure must be a soft result, got RPC error: %v", err)
+	}
+	if !resp.Msg.Success {
+		t.Fatalf("resolver failure must not fail the request: %v", resp.Msg)
+	}
+	if len(resp.Msg.AddedDependencies) != 0 || len(resp.Msg.Unresolved) != 0 || len(resp.Msg.Skipped) != 0 {
+		t.Fatalf("provider failure should yield an empty resolver detail report: %v", resp.Msg)
+	}
+
+	got, err := svc.GetPack(context.Background(), connect.NewRequest(&v1.GetPackRequest{PackId: created.ID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range got.Msg.Pack.Mods {
+		if m.Slug == "root-mod" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("requested mod was rolled back after a resolver failure")
+	}
+}
