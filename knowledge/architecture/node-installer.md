@@ -73,9 +73,15 @@ shared and lets an unqualified image fall back to a known-guest path.
   service, and that its fixtures assert the one-source-of-options, per-user
   rootless and explicit-rootful-capability rules.
 - The owned Linux systemd fixture (`scripts/qualify-node-installer-systemd.sh`)
-  records real start/restart, XDG reset, canonical roots and temporary-path
-  refusals. It is fixture-only: a no-op daemon stands in for dockerd and no
-  full OS reboot or live host provisioning is claimed.
+  records installer selection/rendering, real start/restart, XDG reset,
+  canonical roots and temporary-path refusals, authenticated enrollment
+  acceptance at the shared production boundary seam (disposable synthetic-key
+  fixtures), and upgrade/rollback for native rootless/rootful and captive
+  rootless profiles, with explicit evidence levels. Captive rootful is recorded
+  as unsupported for unprivileged LXC captive deployment by design. Fixture-only:
+  no-op daemon, no live host/guest boot, no nested captive-docker runtime, no
+  shipped-unit boot with real dockerd, no OS reboot, and no production enrollment
+  or deployment.
 
 # Read next
 
