@@ -50,6 +50,12 @@ MAX_IMAGE_BYTES = 24 * 1024 * 1024
 MIN_DIMENSION = 320
 MAX_DIMENSION = 8192
 
+# The rendered map occupies the left/central portion of the full-panel World
+# View screenshot; the header and side controls are non-black chrome that must
+# not mask a black map (OSS-392). Fractions are relative to image dimensions.
+WORLD_VIEW_MAP_REGION = (0.0, 0.18, 0.72, 0.94)
+MIN_MAP_NONBLACK = 0.05
+
 
 class AssetError(Exception):
     """A fail-closed validation error."""
@@ -116,12 +122,16 @@ def inspect_png(path: Path) -> tuple[int, int, int]:
     return width, height, len(data)
 
 
-def png_nonblack_ratio(data: bytes) -> float:
+def png_nonblack_ratio(
+    data: bytes, region: tuple[float, float, float, float] | None = None
+) -> float:
     """Sample decoded pixels; a map canvas that painted nothing is mostly black.
 
-    Only the common 8-bit RGB/RGBA, non-interlaced PNG layout emitted by the
-    browser screenshot path is handled; anything else is treated as unverifiable
-    and fails closed at the caller.
+    `region` is an optional (left, top, right, bottom) fraction tuple. The
+    whole-image ratio alone is not a map gate: the surrounding panel chrome is
+    non-black and can hide a completely black renderer (OSS-392). Only the
+    common 8-bit RGB/RGBA, non-interlaced PNG layout emitted by the browser
+    screenshot path is handled; anything else fails closed at the caller.
     """
     offset = 8
     width = height = 0
@@ -144,10 +154,19 @@ def png_nonblack_ratio(data: bytes) -> float:
     expected = height * (stride + 1)
     if len(raw) < expected:
         raise AssetError("screenshot PNG pixel data is truncated")
+    if region is None:
+        x0, y0, x1, y1 = 0, 0, width, height
+    else:
+        left, top, right, bottom = region
+        x0, y0 = int(width * left), int(height * top)
+        x1, y1 = int(width * right), int(height * bottom)
+    if not (0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height):
+        raise AssetError("invalid PNG sample region")
+
     previous = bytearray(stride)
     position = 0
     nonblack = sampled = 0
-    for _ in range(height):
+    for row in range(height):
         filter_type = raw[position]
         scanline = bytearray(raw[position + 1 : position + 1 + stride])
         position += 1 + stride
@@ -172,11 +191,12 @@ def png_nonblack_ratio(data: bytes) -> float:
                 scanline[index] = (scanline[index] + chosen) & 0xFF
             elif filter_type != 0:
                 raise AssetError(f"unsupported PNG scanline filter {filter_type}")
-        for column in range(0, width, 37):
-            base = column * channels
-            sampled += 1
-            if max(scanline[base : base + 3]) > 24:
-                nonblack += 1
+        if y0 <= row < y1:
+            for column in range(x0, x1, 37):
+                base = column * channels
+                sampled += 1
+                if max(scanline[base : base + 3]) > 24:
+                    nonblack += 1
         previous = scanline
     return nonblack / sampled if sampled else 0.0
 
@@ -384,6 +404,11 @@ def validate(args: argparse.Namespace) -> None:
             if nonblack < 0.05:
                 raise AssetError(
                     f"rendered map canvas is blank ({nonblack:.1%} non-black pixels); refusing to publish"
+                )
+            map_nonblack = png_nonblack_ratio(data, WORLD_VIEW_MAP_REGION)
+            if map_nonblack < MIN_MAP_NONBLACK:
+                raise AssetError(
+                    f"rendered map region is blank ({map_nonblack:.1%} non-black pixels); refusing to publish"
                 )
         if sha256_bytes(data) != image.get("sha256"):
             raise AssetError(f"{path.name}: SHA256 does not match manifest")

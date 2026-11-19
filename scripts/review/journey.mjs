@@ -194,6 +194,22 @@ async function main() {
           }
           break;
         }
+        case "assertNoMapConsoleErrors": {
+          // A visible canvas and clean HTTP responses are not enough: the
+          // pristine BlueMap webapp calls new Function() for locale strings,
+          // which the unchanged panel CSP blocks and which aborts map loading
+          // after the first tile (ADR 0048). Fail closed on that exact class of
+          // renderer error instead of publishing a near-black map.
+          const rendererErrors = consoleErrors.filter((line) =>
+            /unsafe-eval|new Function|compileToFunction|Failed to load map/i.test(line),
+          );
+          if (rendererErrors.length) {
+            throw new Error(
+              `renderer webapp failed to load: ${rendererErrors.slice(0, 3).join("; ").slice(0, 600)}`,
+            );
+          }
+          break;
+        }
         case "assertImageLoaded": {
           // A semantic readiness check for a real rendered preview: the image
           // must be visible AND decoded with non-zero intrinsic size. No fixed
@@ -471,6 +487,7 @@ async function main() {
         "assertFrameVisible",
         "assertImageLoaded",
         "assertNoFailedTileResponses",
+        "assertNoMapConsoleErrors",
         "assertHidden",
         "assertText",
         "assertNoScrollbar",

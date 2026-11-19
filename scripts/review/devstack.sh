@@ -458,6 +458,42 @@ remove_owned_sidecar() {
 	docker rm -f "$id" >/dev/null
 }
 
+# overlay_csp_safe_webapp replaces only the browser bundle in the generated
+# BlueMap web root with the pinned CSP-safe build (ADR 0048). The pristine
+# upstream bundle calls new Function() during locale translation; the panel's
+# unchanged CSP blocks it and the map fails to load after the first tile. Real
+# settings.json and real rendered maps/ tiles are never touched. Fail closed on
+# digest drift so a stale or substituted bundle cannot qualify a capture.
+overlay_csp_safe_webapp() {
+	local mapdir="$1" fixture="${REPO}/scripts/review/fixtures/bluemap-webapp-jit"
+	local web="${mapdir}/web" i
+	[ -f "${fixture}/manifest.sha256" ] || {
+		echo "review BlueMap CSP-safe fixture is absent; cannot qualify map capture" >&2
+		return 1
+	}
+	# BlueMap writes its own web root when the renderer starts. Wait for it
+	# before overlaying so the pinned files are the ones actually served.
+	for ((i = 0; i < 60; i++)); do
+		[ -f "${web}/index.html" ] && break
+		sleep 1
+	done
+	if [ ! -f "${web}/index.html" ]; then
+		echo "review BlueMap web root was not created; cannot overlay CSP-safe bundle" >&2
+		return 1
+	fi
+	(cd "${fixture}" && sha256sum -c manifest.sha256 >/dev/null 2>&1) || {
+		echo "review BlueMap CSP-safe bundle digest drift; refusing map capture" >&2
+		return 1
+	}
+	cp "${fixture}/index.html" "${web}/index.html"
+	cp -R "${fixture}/assets/." "${web}/assets/"
+	cp -R "${fixture}/lang/." "${web}/lang/"
+	local digest
+	digest="$(sha256sum "${web}/assets/index-BA9KJ4pi.js" | cut -d' ' -f1)"
+	echo "review BlueMap served webapp bundle: ${digest}" >&2
+	[ "${digest}" = "ba940f930de0642acfd2ca8b0eda6aa0914ce02fcf673cee18262b3dd5217da3" ]
+}
+
 # Real BlueMap renderer and web server for the seeded world. BlueMap's own
 # webserver serves hires/lowres tiles, settings and web assets correctly for the
 # generated web root, so it must be the HTTP origin the panel probes and proxies.
@@ -473,7 +509,8 @@ start_bluemap() {
 		-v "${host_path}/${level}:/app/world:ro" \
 		-v "${mapdir}/data:/app/data" \
 		-v "${mapdir}/web:/app/web" \
-		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1
+		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1 || return 1
+	overlay_csp_safe_webapp "${mapdir}" || return 1
 }
 
 start_panel() {

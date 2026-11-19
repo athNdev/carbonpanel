@@ -54,6 +54,24 @@ def fake_png(width: int = 320, height: int = 320, pad: int = 6000, seed: bytes =
     )
 
 
+def fake_png_black_map_with_chrome(
+    width: int = 320, height: int = 320, chrome_fraction: float = 0.2
+) -> bytes:
+    """Non-black right-hand chrome over a black left/central map region."""
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    chrome_start = int(width * (1 - chrome_fraction))
+    row = b"\x00" + bytes(3) * chrome_start + bytes((40, 90, 160)) * (width - chrome_start)
+    idat = zlib.compress(row * height, 6)
+    text = b"Comment\x00" + b"fixture" + b"-" * 6000
+    return (
+        sa.PNG_SIGNATURE
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"tEXt", text[:6000 + len(b"Comment")])
+        + chunk(b"IDAT", idat)
+        + chunk(b"IEND", b"")
+    )
+
+
 def plan_file(root: Path, names: list[str]) -> Path:
     steps = [
         {"screenshot": name, "name": f"Focus {name}", "alt": f"Alt text for {name}"}
@@ -151,6 +169,33 @@ class ShowcaseAssetsTest(unittest.TestCase):
         with self.assertRaisesRegex(sa.AssetError, 'blank'):
             sa.validate(sa.argparse.Namespace(
                 publish_dir=str(self.publish / 'map'), plan=str(self.plan),
+                expected_source_sha='a' * 40, features='worlds', max_age_hours=12,
+            ))
+
+    def test_black_map_region_is_rejected_even_with_nonblack_chrome(self) -> None:
+        # A whole-image 5% gate passes when the panel chrome is coloured even
+        # though the map itself is black. The region gate must still fail
+        # closed (OSS-392).
+        plan = {
+            'steps': [
+                {'screenshot': 'showcase-world-view', 'name': 'rendered map'},
+            ]
+        }
+        self.plan.write_text(json.dumps(plan), encoding='utf-8')
+        (self.images / 'showcase-world-view.png').write_bytes(
+            fake_png_black_map_with_chrome()
+        )
+        sa.build(sa.argparse.Namespace(
+            images_dir=str(self.images), publish_dir=str(self.publish / 'black-region'),
+            plan=str(self.plan), seed_script=str(self.seed), source_sha='a' * 40,
+            source_ref='refs/heads/main', repository='athNdev/carbonpanel',
+            run_id='1', run_url='u', captured_at=datetime.now(timezone.utc).isoformat(),
+            app_version='review', driver_version=REVIEW_DRIVER_VERSION,
+            browser_version='1', features='worlds',
+        ))
+        with self.assertRaisesRegex(sa.AssetError, 'map region is blank'):
+            sa.validate(sa.argparse.Namespace(
+                publish_dir=str(self.publish / 'black-region'), plan=str(self.plan),
                 expected_source_sha='a' * 40, features='worlds', max_age_hours=12,
             ))
 
