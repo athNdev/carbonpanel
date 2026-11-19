@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // Package acceptanceevidence validates that an OSS Done candidate carries the
 // full acceptance chain: merged code, exact CI, and deploy/live evidence where
-// the original acceptance is public. It never calls Jira; the native workflow
-// guard is the blocking boundary and this package is the repository-side
-// verifier and drift detector.
+// the original acceptance is public. It never calls Jira or gates a Jira
+// transition; the native team-managed workflow is that boundary. This package
+// is an opt-in record verifier and scheduled drift auditor only.
 package acceptanceevidence
 
 import (
@@ -74,10 +74,11 @@ func requiredTier(s Surface) (Tier, bool) {
 
 // Contract is the machine-readable acceptance-evidence contract.
 type Contract struct {
-	Version    string      `json:"version"`
-	Project    Project     `json:"project"`
-	Gate       Gate        `json:"gate"`
-	Candidates []Candidate `json:"candidates"`
+	Version       string         `json:"version"`
+	Project       Project        `json:"project"`
+	Gate          Gate           `json:"gate"`
+	Candidates    []Candidate    `json:"candidates"`
+	ReferenceRuns []ReferenceRun `json:"reference_runs"`
 }
 
 type Project struct {
@@ -89,6 +90,17 @@ type Project struct {
 type Gate struct {
 	RequiredPRList     string `json:"required_pr_label"`
 	MaxEvidenceAgeDays int    `json:"max_evidence_age_days"`
+	Scope              string `json:"scope"`
+}
+
+// ReferenceRun is a real, read-only audit fixture. It proves the drift job can
+// reach and verify a deployed revision without re-litigating that item's
+// acceptance or gating its closure.
+type ReferenceRun struct {
+	RunID      int64  `json:"run_id"`
+	Name       string `json:"name"`
+	HeadSHA    string `json:"head_sha"`
+	Conclusion string `json:"conclusion"`
 }
 
 type Candidate struct {
@@ -98,6 +110,7 @@ type Candidate struct {
 	Tier              Tier       `json:"tier"`
 	PR                PRRef      `json:"pr"`
 	CIRunID           int64      `json:"ci_run_id"`
+	TrustedDeploySHA  string     `json:"trusted_deploy_sha,omitempty"`
 	Deploy            *DeployRef `json:"deploy,omitempty"`
 	Live              *LiveRef   `json:"live,omitempty"`
 	Verifier          string     `json:"verifier"`
@@ -112,10 +125,13 @@ type PRRef struct {
 	Repository string `json:"repository"`
 }
 
+// DeployRef identifies the one job that actually publishes the artifact. It is
+// never optional for LIVE-VERIFIED: a build-only run cannot satisfy it.
 type DeployRef struct {
-	Workflow string `json:"workflow"`
-	RunID    int64  `json:"run_id"`
-	Job      string `json:"job"`
+	Workflow    string `json:"workflow"`
+	RunID       int64  `json:"run_id"`
+	Job         string `json:"job"`
+	RevisionSHA string `json:"revision_sha"`
 }
 
 type LiveRef struct {
@@ -161,10 +177,12 @@ type BuildEvidence struct {
 }
 
 type DeployEvidence struct {
-	RunID    int64         `json:"run_id"`
-	Workflow string        `json:"workflow"`
-	Jobs     []JobEvidence `json:"jobs"`
-	URL      string        `json:"url"`
+	RunID       int64         `json:"run_id"`
+	Workflow    string        `json:"workflow"`
+	HeadSHA     string        `json:"head_sha"`
+	RevisionSHA string        `json:"revision_sha,omitempty"`
+	Jobs        []JobEvidence `json:"jobs"`
+	URL         string        `json:"url"`
 }
 
 type JobEvidence struct {
@@ -189,4 +207,14 @@ func parseTime(value string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("expected RFC3339, got %q: %w", value, err)
 	}
 	return t, nil
+}
+
+// acceptedRevisionSHAs are the only commits allowed to stand behind a deploy:
+// the PR merge itself, or a separately recorded trusted descendant.
+func acceptedRevisionSHAs(c Candidate) []string {
+	shas := []string{normalizeSHA(c.PR.MergeSHA)}
+	if c.TrustedDeploySHA != "" {
+		shas = append(shas, normalizeSHA(c.TrustedDeploySHA))
+	}
+	return shas
 }

@@ -42,25 +42,31 @@ before publication; only the project-scoped workflow is modified.
 Each Done candidate names a PR and merge SHA, exact CI run id and, for public or
 live acceptance, a deploy run and fresh live URL status. Evidence is graded into
 six tiers; weaker-than-required tiers need an explicitly recorded exception.
-`internal/acceptanceevidence` fails closed on missing, stale (wrong SHA), skipped
-deploy, unrecorded exception, or a verifier who is also the author.
+`internal/acceptanceevidence` fails closed on missing, stale (wrong SHA), a
+skipped/failed/missing named deploy job at the wrong revision, unrecorded
+exception, an empty candidate set, or a verifier who is also the author. Optional
+deploy jobs may be skipped; the publishing job is strict.
 `.github/workflows/acceptance-evidence.yml` runs the validator on changes and on
-a weekly schedule, and audits PR/CI/deploy references against GitHub.
+a weekly schedule, and audits the recorded PR/CI/deploy references plus a real
+reference run against GitHub. Its declared scope is `record-auditor`: it reads
+GitHub only, never Jira.
 
 ## Consequences
 
-Direct, unreviewed and unevidenced Done transitions are now blocked in Jira;
-this was proved with REST transitions on a disposable QA issue (400 for each
-negative case, 204 for a reviewed close with evidence, 204 for reopen, 400 for
-a stale post-reopen close). The guarantee is **native and blocking**, but it is
-not complete independence: OSS has one human actor, so the role condition shows
-who may close but cannot prove author/reviewer separation. The Description regex
-proves a durable URL was supplied, not that the linked evidence is truthful or
-current; that is what the repository verifier and drift audit cover.
+The native conditions block direct, unreviewed and string-less Done transitions
+in Jira; this was proved with REST transitions on a disposable QA issue (400 for
+each negative case, 204 for a reviewed close with a structured evidence URL, 204
+for reopen, 400 for a stale post-reopen close). The blocking guarantee is
+**native**, but it is not complete independence: OSS has one human actor, so the
+role condition shows who may close but cannot prove author/reviewer separation.
+The Description regex proves a well-formed evidence reference was supplied; a
+fabricated URL can still pass it. Truthfulness and freshness are checked only
+for candidates recorded in the contract and only against the recorded evidence.
 
-GitHub Actions still cannot undo a Done click made directly in Jira. The
-workflow is a merge/label gate and a drift detector, not a Jira gate; claiming
-otherwise would be false. Adding a distinct reviewer actor and a genuine
-project-scoped evidence field are follow-ups that would remove both limitations.
+GitHub Actions cannot read Jira, compare Done closures or undo a Done click.
+The scheduled job is an opt-in record auditor over the contract plus a real
+reference run; it is not a Jira gate and must not be described as one. Adding a
+distinct reviewer actor and a genuine project-scoped evidence field are
+follow-ups that would remove the two native limitations.
 Rollback is a versioned workflow update restoring transition 51 without the
 condition group and validator.

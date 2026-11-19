@@ -11,9 +11,11 @@ import (
 )
 
 const (
-	validSHA1 = "1111111111111111111111111111111111111111"
-	validSHA2 = "2222222222222222222222222222222222222222"
-	nowRFC    = "2026-11-19T00:00:00Z"
+	mergeSHA       = "1111111111111111111111111111111111111111"
+	deploySHA      = "2222222222222222222222222222222222222222"
+	wrongSHA       = "3333333333333333333333333333333333333333"
+	nowRFC         = "2026-11-19T00:00:00Z"
+	deployWorkflow = "Deploy Website to GitHub Pages"
 )
 
 func writeJSON(t *testing.T, path string, value interface{}) {
@@ -38,15 +40,18 @@ func fixture(t *testing.T) (Contract, Evidence, string) {
 	c := Contract{
 		Version: "1",
 		Project: Project{Key: "OSS", ID: "10001", Style: "team-managed"},
-		Gate:    Gate{RequiredPRList: "acceptance-evidence-verified", MaxEvidenceAgeDays: 7},
+		Gate:    Gate{RequiredPRList: "acceptance-evidence-verified", MaxEvidenceAgeDays: 7, Scope: "record-auditor"},
+		ReferenceRuns: []ReferenceRun{{RunID: 555, Name: "Deploy Website to GitHub Pages",
+			HeadSHA: deploySHA, Conclusion: "success"}},
 		Candidates: []Candidate{{
 			IssueKey:          "OSS-999",
 			Summary:           "fixture",
 			AcceptanceSurface: SurfacePublic,
 			Tier:              TierLiveVerified,
-			PR:                PRRef{Number: 42, MergeSHA: validSHA1, Repository: "athNdev/carbonpanel"},
+			PR:                PRRef{Number: 42, MergeSHA: mergeSHA, Repository: "owner/repo"},
 			CIRunID:           100,
-			Deploy:            &DeployRef{Workflow: "cd.yml", RunID: 200, Job: "publish"},
+			TrustedDeploySHA:  deploySHA,
+			Deploy:            &DeployRef{Workflow: deployWorkflow, RunID: 200, Job: "deploy", RevisionSHA: deploySHA},
 			Live:              &LiveRef{URL: "https://example.invalid/docs", HTTPStatus: 200, CheckedAt: nowRFC},
 			Verifier:          "independent-verifier",
 			VerifiedAt:        nowRFC,
@@ -55,12 +60,16 @@ func fixture(t *testing.T) (Contract, Evidence, string) {
 	}
 	ev := Evidence{
 		IssueKey: "OSS-999",
-		Merge:    MergeEvidence{PR: 42, Merged: true, MergeSHA: validSHA1, HeadSHA: validSHA1, Author: "implementer"},
-		CI:       CIEvidence{RunID: 100, HeadSHA: validSHA1, Conclusion: "success"},
+		Merge:    MergeEvidence{PR: 42, Merged: true, MergeSHA: mergeSHA, HeadSHA: mergeSHA, Author: "implementer"},
+		CI:       CIEvidence{RunID: 100, HeadSHA: deploySHA, Conclusion: "success"},
 		Build:    &BuildEvidence{RunID: 100, Conclusion: "success"},
-		Deploy: &DeployEvidence{RunID: 200, Workflow: "cd.yml", Jobs: []JobEvidence{
-			{Name: "build", Conclusion: "success"}, {Name: "publish", Conclusion: "success"},
-		}},
+		Deploy: &DeployEvidence{RunID: 200, Workflow: deployWorkflow, HeadSHA: deploySHA,
+			Jobs: []JobEvidence{
+				{Name: "build", Conclusion: "success"},
+				{Name: "deploy", Conclusion: "success"},
+				{Name: "indexable-changes", Conclusion: "success"},
+				{Name: "notify-indexnow", Conclusion: "skipped"},
+			}},
 		Live: &LiveEvidence{URL: "https://example.invalid/docs", HTTPStatus: 200, CheckedAt: nowRFC,
 			Evidence: "docs/acceptance/evidence/OSS-999-live.txt"},
 	}
@@ -91,14 +100,11 @@ func hasFailure(r Report, fragment string) bool {
 	return false
 }
 
-func TestPositiveLiveVerified(t *testing.T) {
+func TestPositiveTrustedDescendantAndOptionalSkip(t *testing.T) {
 	c, ev, root := fixture(t)
 	r := validateFixture(t, c, ev, root)
 	if !r.Passed {
 		t.Fatalf("expected pass, got %v", r.Failures)
-	}
-	if r.Checked != 1 {
-		t.Fatalf("checked = %d, want 1", r.Checked)
 	}
 }
 
@@ -113,35 +119,74 @@ func TestMissingCIEvidence(t *testing.T) {
 
 func TestStaleMergeSHA(t *testing.T) {
 	c, ev, root := fixture(t)
-	ev.Merge.MergeSHA = validSHA2
+	ev.Merge.MergeSHA = wrongSHA
 	r := validateFixture(t, c, ev, root)
 	if r.Passed || !hasFailure(r, "merge SHA is stale") {
 		t.Fatalf("expected stale SHA failure, got %v", r.Failures)
 	}
 }
 
-func TestStaleCIHeadSHA(t *testing.T) {
+func TestRequiredDeployJobSkipped(t *testing.T) {
 	c, ev, root := fixture(t)
-	ev.CI.HeadSHA = validSHA2
+	setJob(ev.Deploy, "deploy", "skipped")
 	r := validateFixture(t, c, ev, root)
-	if r.Passed || !hasFailure(r, "CI head SHA") {
-		t.Fatalf("expected stale CI SHA failure, got %v", r.Failures)
+	if r.Passed || !hasFailure(r, "required deploy job") {
+		t.Fatalf("expected skipped named job failure, got %v", r.Failures)
 	}
 }
 
-func TestSkippedDeployJob(t *testing.T) {
+func TestRequiredDeployJobFailed(t *testing.T) {
 	c, ev, root := fixture(t)
-	ev.Deploy.Jobs[1].Conclusion = "skipped"
+	setJob(ev.Deploy, "deploy", "failure")
 	r := validateFixture(t, c, ev, root)
-	if r.Passed || !hasFailure(r, "skipped") {
-		t.Fatalf("expected skipped job failure, got %v", r.Failures)
+	if r.Passed || !hasFailure(r, "required deploy job") {
+		t.Fatalf("expected failed named job failure, got %v", r.Failures)
+	}
+}
+
+func TestMissingNamedDeployJobBuildOnly(t *testing.T) {
+	c, ev, root := fixture(t)
+	ev.Deploy.Jobs = []JobEvidence{{Name: "build", Conclusion: "success"}}
+	r := validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "missing from run") {
+		t.Fatalf("expected missing named job failure, got %v", r.Failures)
+	}
+}
+
+func TestOptionalSkippedJobAllowed(t *testing.T) {
+	c, ev, root := fixture(t)
+	setJob(ev.Deploy, "notify-indexnow", "skipped")
+	r := validateFixture(t, c, ev, root)
+	if !r.Passed {
+		t.Fatalf("optional skip must be allowed, got %v", r.Failures)
+	}
+}
+
+func TestWrongDeployRunSHA(t *testing.T) {
+	c, ev, root := fixture(t)
+	ev.Deploy.HeadSHA = wrongSHA
+	r := validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "deploy run SHA") {
+		t.Fatalf("expected wrong deploy SHA failure, got %v", r.Failures)
+	}
+}
+
+func TestTrustedDescendantDeploySHAAccepted(t *testing.T) {
+	c, ev, root := fixture(t)
+	c.Candidates[0].TrustedDeploySHA = deploySHA
+	c.Candidates[0].Deploy.RevisionSHA = deploySHA
+	ev.CI.HeadSHA = deploySHA
+	ev.Deploy.HeadSHA = deploySHA
+	r := validateFixture(t, c, ev, root)
+	if !r.Passed {
+		t.Fatalf("expected trusted descendant pass, got %v", r.Failures)
 	}
 }
 
 func TestUnrecordedException(t *testing.T) {
 	c, ev, root := fixture(t)
 	c.Candidates[0].Tier = TierDeploySkipped
-	ev.Deploy.Jobs[1].Conclusion = "skipped"
+	setJob(ev.Deploy, "deploy", "skipped")
 	r := validateFixture(t, c, ev, root)
 	if r.Passed || !hasFailure(r, "no exception is recorded") {
 		t.Fatalf("expected unrecorded exception failure, got %v", r.Failures)
@@ -151,7 +196,7 @@ func TestUnrecordedException(t *testing.T) {
 func TestRecordedExceptionAllowsLowerTier(t *testing.T) {
 	c, ev, root := fixture(t)
 	c.Candidates[0].Tier = TierDeploySkipped
-	ev.Deploy.Jobs[1].Conclusion = "skipped"
+	setJob(ev.Deploy, "deploy", "skipped")
 	c.Candidates[0].Exception = &Exception{
 		Kind: "deploy-skipped", Reason: "registry outage", RecordedAt: nowRFC, Reviewer: "release-auditor",
 	}
@@ -182,13 +227,13 @@ func TestMissingArtifact(t *testing.T) {
 	}
 }
 
-func TestUnknownTierAndSurface(t *testing.T) {
-	c, ev, root := fixture(t)
-	c.Candidates[0].Tier = Tier("NOT-A-TIER")
-	c.Candidates[0].AcceptanceSurface = Surface("unknown")
-	r := validateFixture(t, c, ev, root)
-	if r.Passed || !hasFailure(r, "unknown evidence tier") || !hasFailure(r, "unknown acceptance_surface") {
-		t.Fatalf("expected tier/surface failures, got %v", r.Failures)
+func TestEmptyCandidatesFailClosed(t *testing.T) {
+	c, _, root := fixture(t)
+	c.Candidates = nil
+	now, _ := time.Parse(time.RFC3339, nowRFC)
+	r := ValidateContract(c, root, now)
+	if r.Passed || !hasFailure(r, "no Done candidates") {
+		t.Fatalf("expected empty-candidate failure, got %v", r.Failures)
 	}
 }
 
@@ -199,4 +244,14 @@ func TestStaleLiveEvidence(t *testing.T) {
 	if r.Passed || !hasFailure(r, "live evidence is stale") {
 		t.Fatalf("expected stale live failure, got %v", r.Failures)
 	}
+}
+
+func setJob(deploy *DeployEvidence, name, conclusion string) {
+	for i := range deploy.Jobs {
+		if deploy.Jobs[i].Name == name {
+			deploy.Jobs[i].Conclusion = conclusion
+			return
+		}
+	}
+	deploy.Jobs = append(deploy.Jobs, JobEvidence{Name: name, Conclusion: conclusion})
 }

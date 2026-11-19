@@ -102,10 +102,10 @@ func verifyGitHub(args []string) {
 		Token:      os.Getenv("GITHUB_TOKEN"),
 		Repository: *repository,
 	}
-	failures := client.VerifyGitHub(context.Background(), c)
-	out, _ := json.MarshalIndent(map[string]interface{}{"passed": len(failures) == 0, "failures": failures}, "", "  ")
+	result := client.VerifyGitHub(context.Background(), c)
+	out, _ := json.MarshalIndent(result, "", "  ")
 	fmt.Println(string(out))
-	if len(failures) > 0 {
+	if result.Audited == 0 || result.ReferenceRuns == 0 || len(result.Failures) > 0 {
 		os.Exit(1)
 	}
 }

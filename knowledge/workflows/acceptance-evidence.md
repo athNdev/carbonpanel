@@ -35,8 +35,10 @@ sources:
 
 # Rules
 
-- GitHub Actions cannot gate a Jira transition. The workflow is a merge/label
-  gate and drift detector, not a Jira gate; the native workflow is authoritative.
+- GitHub Actions cannot gate, read or undo a Jira transition. The workflow is a
+  `record-auditor` over opt-in contract candidates and a real reference run, not
+  a Jira gate; the native workflow is authoritative. An empty candidate set is a
+  failure, never a successful no-op.
 - OSS has one human actor, so the native role condition does not prove
   author/reviewer independence. Do not claim separation until a distinct reviewer
   actor exists.

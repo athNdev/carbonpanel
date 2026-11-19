@@ -13,6 +13,14 @@ import (
 
 var issueKeyPattern = regexp.MustCompile(`^OSS-\d+$`)
 
+var allowedExceptionKinds = map[string]bool{
+	"external-blocker": true,
+	"deploy-skipped":   true,
+	"capture-only":     true,
+	"build-only":       true,
+	"ci-unavailable":   true,
+}
+
 // Report collects every failure; validation is fail-closed, so a candidate with
 // any failure blocks closure. All failures are reported, not just the first.
 type Report struct {
@@ -39,9 +47,18 @@ func ValidateContract(c Contract, root string, now time.Time) Report {
 	if c.Gate.MaxEvidenceAgeDays <= 0 {
 		r.failf("gate.max_evidence_age_days must be positive")
 	}
-	// An empty candidate list is valid: it states that no work item is being
-	// proposed for Done. The gate becomes meaningful as soon as a candidate is
-	// added, at which point every required evidence field is enforced.
+	if c.Gate.Scope != "record-auditor" {
+		r.failf("gate.scope %q must be record-auditor; this layer does not gate Jira", c.Gate.Scope)
+	}
+	// An empty candidate set means the scheduled verifier would audit nothing.
+	// That is a configuration failure, not a successful run.
+	if len(c.Candidates) == 0 {
+		r.failf("contract has no Done candidates; scheduled audit would be a no-op")
+	}
+	if len(c.ReferenceRuns) == 0 {
+		r.failf("contract has no reference runs; scheduled audit has no live proof fixture")
+	}
+
 	seen := make(map[string]bool)
 	for _, cand := range c.Candidates {
 		r.Checked++
@@ -49,6 +66,15 @@ func ValidateContract(c Contract, root string, now time.Time) Report {
 	}
 	r.Passed = len(r.Failures) == 0
 	return r
+}
+
+func isAcceptedRevision(c Candidate, sha string) bool {
+	for _, want := range acceptedRevisionSHAs(c) {
+		if normalizeSHA(sha) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func validateCandidate(r *Report, c Contract, cand Candidate, root string, now time.Time, seen map[string]bool) {
@@ -77,6 +103,10 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 		fail("unknown evidence tier %q", cand.Tier)
 	}
 	rank := cand.Tier.Rank()
+
+	if cand.TrustedDeploySHA != "" && !validSHA(cand.TrustedDeploySHA) {
+		fail("trusted_deploy_sha %q is not a full commit SHA", cand.TrustedDeploySHA)
+	}
 
 	verifiedAt, err := parseTime(cand.VerifiedAt)
 	if err != nil {
@@ -126,7 +156,8 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 		fail("verifier %q is also the merge author %q (not independent)", cand.Verifier, ev.Merge.Author)
 	}
 
-	// CI evidence is required from CI-GREEN upward.
+	// CI evidence is required from CI-GREEN upward. It may run on the PR merge
+	// SHA or on an explicitly recorded trusted descendant.
 	if rank >= TierCIGreen.Rank() {
 		if ev.CI.RunID != cand.CIRunID {
 			fail("CI run id %d does not match contract run id %d", ev.CI.RunID, cand.CIRunID)
@@ -134,8 +165,8 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 		if ev.CI.Conclusion != "success" {
 			fail("CI run %d conclusion is %q, want success", ev.CI.RunID, ev.CI.Conclusion)
 		}
-		if normalizeSHA(ev.CI.HeadSHA) != normalizeSHA(cand.PR.MergeSHA) {
-			fail("CI head SHA %q is stale; expected merged SHA %q", ev.CI.HeadSHA, cand.PR.MergeSHA)
+		if !isAcceptedRevision(cand, ev.CI.HeadSHA) {
+			fail("CI head SHA %q is neither the merge SHA nor the recorded trusted descendant", ev.CI.HeadSHA)
 		}
 	}
 
@@ -174,27 +205,22 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 				if ev.Deploy.Workflow != cand.Deploy.Workflow {
 					fail("deploy workflow %q does not match contract workflow %q", ev.Deploy.Workflow, cand.Deploy.Workflow)
 				}
-			}
-			if len(ev.Deploy.Jobs) == 0 {
-				fail("deploy run has no job conclusions")
-			}
-			for _, job := range ev.Deploy.Jobs {
-				switch job.Conclusion {
-				case "success":
-				case "skipped":
-					if cand.Tier == TierLiveVerified {
-						fail("deploy job %q was skipped but tier claims LIVE-VERIFIED", job.Name)
-					}
-				default:
-					if cand.Tier == TierLiveVerified {
-						fail("deploy job %q concluded %q, want success", job.Name, job.Conclusion)
-					}
-				}
+				validateDeployJobs(fail, cand, ev, rank)
 			}
 		}
 	}
 
 	if cand.Tier == TierLiveVerified {
+		if cand.Deploy == nil || cand.Deploy.Job == "" || cand.Deploy.RevisionSHA == "" {
+			fail("LIVE-VERIFIED requires a named deploy job and an exact revision SHA")
+		} else if ev.Deploy != nil {
+			if !isAcceptedRevision(cand, cand.Deploy.RevisionSHA) {
+				fail("deploy revision SHA %q is neither the merge SHA nor a recorded trusted descendant", cand.Deploy.RevisionSHA)
+			}
+			if !validSHA(ev.Deploy.HeadSHA) || normalizeSHA(ev.Deploy.HeadSHA) != normalizeSHA(cand.Deploy.RevisionSHA) {
+				fail("deploy run SHA %q does not match the qualified revision %q", ev.Deploy.HeadSHA, cand.Deploy.RevisionSHA)
+			}
+		}
 		if ev.Live == nil {
 			fail("LIVE-VERIFIED requires live evidence")
 		} else {
@@ -215,20 +241,6 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 		}
 	}
 
-	if cand.Tier == TierDeploySkipped {
-		hasSkipped := false
-		if ev.Deploy != nil {
-			for _, job := range ev.Deploy.Jobs {
-				if job.Conclusion == "skipped" {
-					hasSkipped = true
-				}
-			}
-		}
-		if !hasSkipped {
-			fail("DEPLOY-SKIPPED tier has no skipped deploy job in the evidence")
-		}
-	}
-
 	// A weaker tier than the surface requires is only legal with an explicit,
 	// well-formed exception. Missing or malformed exceptions fail closed.
 	if rank < required.Rank() {
@@ -239,18 +251,62 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 			if ex.Kind == "" || ex.Reason == "" || ex.RecordedAt == "" || ex.Reviewer == "" {
 				fail("exception is incomplete (kind/reason/recorded_at/reviewer all required)")
 			}
+			if !allowedExceptionKinds[ex.Kind] {
+				fail("exception kind %q is not a recognised exception", ex.Kind)
+			}
 			if _, err := parseTime(ex.RecordedAt); err != nil {
 				fail("exception recorded_at is invalid: %v", err)
 			}
-			if cand.Tier == TierDeploySkipped && ex.Kind != "deploy-skipped" {
-				fail("DEPLOY-SKIPPED exception kind must be deploy-skipped, got %q", ex.Kind)
+			expected := map[Tier]string{
+				TierDeploySkipped: "deploy-skipped",
+				TierCaptureOnly:   "capture-only",
+				TierBuildOnly:     "build-only",
+				TierCodeMerged:    "ci-unavailable",
 			}
-			if cand.Tier == TierCaptureOnly && ex.Kind != "capture-only" {
-				fail("CAPTURE-ONLY exception kind must be capture-only, got %q", ex.Kind)
-			}
-			if cand.Tier == TierBuildOnly && ex.Kind != "build-only" {
-				fail("BUILD-ONLY exception kind must be build-only, got %q", ex.Kind)
+			if want, ok := expected[cand.Tier]; ok && ex.Kind != want {
+				fail("tier %s exception kind must be %q, got %q", cand.Tier, want, ex.Kind)
 			}
 		}
+	}
+}
+
+// validateDeployJobs enforces the named publishing job. Optional jobs may be
+// skipped, but no job may fail, be cancelled or time out. A build-only run has
+// no named deploy job and therefore fails.
+func validateDeployJobs(fail func(string, ...interface{}), cand Candidate, ev Evidence, rank int) {
+	if ev.Deploy == nil {
+		return
+	}
+	if cand.Deploy == nil || cand.Deploy.Job == "" {
+		if rank >= TierDeploySkipped.Rank() {
+			fail("no named deploy job configured; a build-only run cannot satisfy the tier")
+		}
+		return
+	}
+	found := false
+	for _, job := range ev.Deploy.Jobs {
+		if job.Name != cand.Deploy.Job {
+			// Optional jobs may be skipped; other incomplete states are not
+			// silently ignored because they can hide a partial publication.
+			if job.Conclusion == "failure" || job.Conclusion == "cancelled" || job.Conclusion == "timed_out" {
+				fail("optional deploy job %q concluded %q", job.Name, job.Conclusion)
+			}
+			continue
+		}
+		found = true
+		switch job.Conclusion {
+		case "success":
+		case "skipped":
+			// The only legitimate skip is a tier that explicitly declares it;
+			// the exception itself is validated by validateCandidate.
+			if cand.Tier != TierDeploySkipped {
+				fail("required deploy job %q was skipped", job.Name)
+			}
+		default:
+			fail("required deploy job %q concluded %q, want success", job.Name, job.Conclusion)
+		}
+	}
+	if !found {
+		fail("required deploy job %q is missing from run %d (build-only run?)", cand.Deploy.Job, ev.Deploy.RunID)
 	}
 }
