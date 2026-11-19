@@ -1,0 +1,175 @@
+{
+  "schema_version": 2,
+  "repository": "https://github.com/athNdev/carbonpanel",
+  "stable": {
+    "tag": "v1.0.40",
+    "display": "1.0.40",
+    "commit": "f88748be6a216b187e675bbb1f110df07e544148"
+  },
+  "development": {
+    "label": "2.0.0-dev",
+    "channel": "development",
+    "commit": "resolved-from-build-sha",
+    "note": "Working-tree / CI preview only. It never replaces the stable docs route."
+  },
+  "artifacts": {
+    "protocol": {
+      "version": "v1",
+      "source": "proto/carbonpanel/v1",
+      "independent": true,
+      "note": "The Connect/HTTP wire contract is versioned independently of the product release."
+    },
+    "openapi": {
+      "version": "2.x",
+      "source": "proto/carbonpanel/v1/auth.proto",
+      "note": "OpenAPI info.version is declared in the proto and stays independent of protocol v1."
+    },
+    "module": {
+      "version": "mod-v2.0.6",
+      "domain": "module-image",
+      "independent": true
+    },
+    "mcp": {
+      "filesystem_server": "@modelcontextprotocol/server-filesystem@2.0.0",
+      "git_server": "@cyanheads/git-mcp-server@2.15.3",
+      "domain": "developer-tooling"
+    },
+    "node_runtime": {
+      "version": "unreleased",
+      "status": "reserved",
+      "note": "No runtime-v* workflow or registry destination exists yet."
+    },
+    "cli": {
+      "version_source": "embedded build metadata exposed by --version",
+      "flavors": [
+        "carbon-panel",
+        "carbon-storage"
+      ]
+    },
+    "compatibility": {
+      "rollback_version": "1.0.40",
+      "next_stable_boundary": "major",
+      "protocol": "v1",
+      "note": "The 1.0 line stays at 1.0.40; the next planned stable is carbonpanel-v2.0.0 (MAJOR)."
+    }
+  },
+  "versions": [
+    {
+      "tag": "v1.0.40",
+      "display": "1.0.40",
+      "classification": "carbonpanel-published-stable",
+      "channel": "stable",
+      "availability": "published-release",
+      "commit": "f88748be6a216b187e675bbb1f110df07e544148",
+      "source_commit": "f88748be6a216b187e675bbb1f110df07e544148",
+      "cta": true,
+      "download_kind": "github-release",
+      "download_url": "https://github.com/athNdev/carbonpanel/releases/tag/v1.0.40",
+      "default": true,
+      "immutable_route": "/docs/versions/1.0.40/",
+      "route": "/docs/",
+      "home_route": "/docs/",
+      "pages": [
+        "",
+        "api",
+        "changelog",
+        "configuration",
+        "contributing",
+        "faq",
+        "getting-started/build-from-source",
+        "getting-started/docker-compose",
+        "getting-started/prebuilt-binaries",
+        "getting-started/proxmox",
+        "guides/backups",
+        "guides/modpack-studio",
+        "guides/oidc/authelia",
+        "guides/oidc/discord",
+        "guides/oidc/google",
+        "guides/oidc/keycloak",
+        "guides/proxy-routing",
+        "guides/server-datapacks",
+        "guides/sleep-and-wake",
+        "guides/staged-updates",
+        "introduction",
+        "troubleshooting",
+        "versions"
+      ]
+    },
+    {
+      "tag": "v1.0.39",
+      "display": "1.0.39",
+      "classification": "carbonpanel-source-only",
+      "channel": "historical",
+      "availability": "source-only",
+      "commit": "05844203cedfa2ee6d8bd039cfeeddb5ac69714f",
+      "source_commit": "05844203cedfa2ee6d8bd039cfeeddb5ac69714f",
+      "cta": false,
+      "download_kind": "source",
+      "download_url": "https://github.com/athNdev/carbonpanel/tree/v1.0.39",
+      "default": false,
+      "immutable_route": "/docs/versions/1.0.39/",
+      "route": "/docs/versions/1.0.39/",
+      "home_route": "/docs/versions/1.0.39/",
+      "pages": [
+        "",
+        "api",
+        "changelog",
+        "configuration",
+        "contributing",
+        "faq",
+        "getting-started/build-from-source",
+        "getting-started/docker-compose",
+        "getting-started/prebuilt-binaries",
+        "getting-started/proxmox",
+        "guides/backups",
+        "guides/oidc/authelia",
+        "guides/oidc/discord",
+        "guides/oidc/google",
+        "guides/oidc/keycloak",
+        "introduction",
+        "troubleshooting"
+      ]
+    },
+    {
+      "tag": "v3.0.0-alpha.1",
+      "display": "3.0.0-alpha.1",
+      "classification": "carbonpanel-legacy-preview",
+      "channel": "preview",
+      "availability": "ghcr-only-legacy-preview",
+      "commit": "5bbc06fefe5fc0c600672ef8401f9bf7e4495a01",
+      "source_commit": "5bbc06fefe5fc0c600672ef8401f9bf7e4495a01",
+      "cta": true,
+      "download_kind": "ghcr",
+      "download_url": "https://github.com/athNdev/carbonpanel/pkgs/container/carbonpanel",
+      "default": false,
+      "immutable_route": "/docs/versions/3.0.0-alpha.1/",
+      "route": "/docs/versions/3.0.0-alpha.1/",
+      "home_route": "/docs/versions/3.0.0-alpha.1/",
+      "pages": [
+        "",
+        "api",
+        "changelog",
+        "configuration",
+        "contributing",
+        "faq",
+        "getting-started/build-from-source",
+        "getting-started/docker-compose",
+        "getting-started/prebuilt-binaries",
+        "getting-started/proxmox",
+        "guides/backups",
+        "guides/modpack-studio",
+        "guides/oidc/authelia",
+        "guides/oidc/discord",
+        "guides/oidc/google",
+        "guides/oidc/keycloak",
+        "guides/proxy-routing",
+        "guides/server-datapacks",
+        "guides/sleep-and-wake",
+        "guides/staged-updates",
+        "introduction",
+        "troubleshooting",
+        "versions"
+      ]
+    }
+  ]
+}

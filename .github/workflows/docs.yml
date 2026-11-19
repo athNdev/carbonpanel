@@ -13,10 +13,18 @@ on:
       - 'web/carbon-panel/src/routes/servers/**'
       - 'web/carbon-panel/src/routes/modpacks/studio/**'
       - 'docs/website-source.json'
+      - 'docs/version-index.json'
+      - 'docs/release-history.json'
       - 'scripts/*website*'
+      - 'scripts/version_contract.py'
+      - 'scripts/version_bump.py'
+      - 'scripts/test_version_contract.py'
       - 'scripts/test_landing_page.py'
       - 'scripts/test_design_system_page.py'
       - 'scripts/check_brand_assets.py'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'proto/carbonpanel/v1/auth.proto'
       - '.github/workflows/docs.yml'
       - '.github/workflows/landing.yml'
   workflow_dispatch:
@@ -42,9 +50,13 @@ jobs:
         with:
           version: '1.50.0'
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Test snapshot isolation and URL handling
-        run: python3 -m unittest scripts.test_website scripts.test_landing_page scripts.test_design_system_page
-      - name: Build the homepage and pinned docs
+      - name: Test snapshot isolation, URL handling and version contract
+        run: python3 -m unittest scripts.test_website scripts.test_version_contract scripts.test_landing_page scripts.test_design_system_page
+      - name: Validate every version surface on the same commit
+        run: python3 scripts/version_bump.py prepare --check
+      - name: Build the homepage and exact-peel versioned docs
         run: python3 scripts/build_website.py
-      - name: Check every local route and asset
+      - name: Check every local route, asset and version route
         run: python3 scripts/check_website.py
+      - name: Validate rendered and packaged outputs with the atomic check
+        run: python3 scripts/version_bump.py prepare --check --site .website-build/site

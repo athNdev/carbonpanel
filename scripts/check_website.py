@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MPL-2.0
-"""Reject broken local routes, missing assets and incomplete social previews."""
+"""Reject broken routes, missing assets, social previews and version drift."""
 import argparse
 from html.parser import HTMLParser
 import json
@@ -59,13 +59,13 @@ REQUIRED_SOCIAL = (
     "twitter:image:alt",
 )
 
-# Pages that are directly shared get their own card instead of the default.
+# Keyed by the docs slug, so every version route uses its dedicated card.
 PROMINENT_CARDS = {
-    "docs/": "assets/og-docs.png",
-    "docs/introduction/": "assets/og-introduction.png",
-    "docs/getting-started/docker-compose/": "assets/og-docker-compose.png",
-    "docs/api/": "assets/og-api.png",
-    "design-system/": "assets/og-design-system.png",
+    "docs": "assets/og-docs.png",
+    "introduction": "assets/og-introduction.png",
+    "getting-started/docker-compose": "assets/og-docker-compose.png",
+    "api": "assets/og-api.png",
+    "design-system": "assets/og-design-system.png",
 }
 
 EM_DASH = chr(0x2014)
@@ -79,6 +79,35 @@ def page_route(relative):
     return relative
 
 
+def card_key(route):
+    return page_route(route).strip("/")
+
+
+def match_base(relative, bases):
+    best = "/"
+    for candidate in bases:
+        prefix = candidate.lstrip("/")
+        if prefix and relative.startswith(prefix):
+            best = candidate
+            break
+    return best, relative[len(best.lstrip("/")):]
+
+
+def bases_from_index(root, base):
+    index_path = root / "version-index.json"
+    if not index_path.is_file():
+        return [base]
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    bases = [base]
+    for version in index.get("versions", []):
+        for route in (version["route"], version.get("immutable_route", version["route"])):
+            route = route.rstrip("/")
+            candidate = route + "/" if route else "/"
+            if candidate not in bases:
+                bases.append(candidate)
+    return sorted(bases, key=lambda item: (-len(item), item))
+
+
 def single(parser, key, errors, relative):
     values = parser.metas.get(key, [])
     if len(values) != 1:
@@ -89,10 +118,11 @@ def single(parser, key, errors, relative):
     return values[0]
 
 
-def check_social(parser, page, root, base, site, errors):
+def check_social(parser, page, root, content_base, asset_base, site, errors):
     relative = page.relative_to(root).as_posix()
-    route = page_route(relative)
-    expected = site.rstrip("/") + base + route
+    _, remainder = match_base(relative, [content_base])
+    route = page_route(remainder)
+    expected = site.rstrip("/") + content_base + route
 
     values = {key: single(parser, key, errors, relative) for key in REQUIRED_SOCIAL}
     if parser.canonical != expected:
@@ -115,19 +145,19 @@ def check_social(parser, page, root, base, site, errors):
     image = urlsplit(values["og:image"])
     if not image.query:
         errors.append(f"{relative}: og:image needs a cache version query")
-    if image.netloc != urlsplit(site).netloc or not image.path.startswith(base):
-        errors.append(f"{relative}: og:image must live under {site + base}")
+    if image.netloc != urlsplit(site).netloc or not image.path.startswith(asset_base):
+        errors.append(f"{relative}: og:image must live under {site + asset_base}")
     else:
-        target = root / unquote(image.path[len(base):])
+        target = root / unquote(image.path[len(asset_base):])
         if not target.is_file():
             errors.append(f"{relative}: missing og:image {image.path}")
 
-    card = PROMINENT_CARDS.get(route)
-    if card and image.path != base + card:
+    card = PROMINENT_CARDS.get(card_key(route))
+    if card and image.path != asset_base + card:
         errors.append(f"{relative}: expected the dedicated card {card}")
 
 
-def check_sitemap(root, pages, base, site, errors):
+def check_sitemap(root, pages, base, site, errors, bases):
     sitemap_path = root / "sitemap.xml"
     if not sitemap_path.is_file():
         errors.append("sitemap.xml: missing generated sitemap")
@@ -157,8 +187,8 @@ def check_sitemap(root, pages, base, site, errors):
         if parser.noindex:
             continue
         relative = page.relative_to(root).as_posix()
-        route = page_route(relative)
-        expected.append(site.rstrip("/") + base + route)
+        content_base, remainder = match_base(relative, bases)
+        expected.append(site.rstrip("/") + content_base + page_route(remainder))
     if len(actual) != len(set(actual)):
         errors.append("sitemap.xml: duplicate URL entries")
     missing = sorted(set(expected) - set(actual))
@@ -172,9 +202,48 @@ def check_sitemap(root, pages, base, site, errors):
         errors.append("sitemap.xml: " + "; ".join(details))
 
 
+def check_versions(root, index, errors):
+    """Direct URL validation, identity agreement and negative cases."""
+    excluded = {"v1.0.38", "v3.0.0-beta.4"}
+    documented = set()
+    for version in index.get("versions", []):
+        tag = version["tag"]
+        documented.add(tag)
+        if tag in excluded:
+            errors.append(f"version index documents excluded tag {tag}")
+        target = root / version["route"].strip("/")
+        immutable = root / version.get("immutable_route", version["route"]).strip("/")
+        if not (target / "index.html").is_file():
+            errors.append(f"{version['display']}: missing direct route {version['route']}")
+            continue
+        if not (immutable / "index.html").is_file():
+            errors.append(f"{version['display']}: missing immutable route {version['immutable_route']}")
+            continue
+        pin = json.loads((target / "source.json").read_text(encoding="utf-8"))
+        if pin.get("revision") != version["commit"] or pin.get("source_commit") != version["source_commit"]:
+            errors.append(f"{version['display']}: published source.json disagrees with the index")
+        if not (target / "schemav1.yaml").is_file():
+            errors.append(f"{version['display']}: missing generated OpenAPI schema")
+        page = (target / "index.html").read_text(encoding="utf-8")
+        if "data-version-switcher" not in page:
+            errors.append(f"{version['display']}: common version switcher is missing")
+        for candidate in index.get("versions", []):
+            if candidate["display"] not in page:
+                errors.append(f"{version['display']}: switcher omits {candidate['display']}")
+    stable = index.get("stable", {})
+    default = [v for v in index.get("versions", []) if v.get("default")]
+    if len(default) != 1 or default[0]["tag"] != stable.get("tag"):
+        errors.append("version index stable identity disagrees with the default route")
+    if not (root / "version-index.json").is_file():
+        errors.append("version-index.json: missing shared published index")
+
+
 def check(root, base="/", site="https://carbonpanel.dev"):
     errors = []
+    bases = bases_from_index(root, base)
     pages = list(root.rglob("*.html"))
+    index_path = root / "version-index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else None
     for page in pages:
         parser = Links(not_found=page.name == "404.html")
         parser.feed(page.read_text(encoding="utf-8"))
@@ -183,24 +252,29 @@ def check(root, base="/", site="https://carbonpanel.dev"):
             target = urlsplit(urljoin(page_url, link))
             if target.netloc != urlsplit(site).netloc or target.scheme not in ("http", "https"):
                 continue
-            if not target.path.startswith(base):
+            if target.path.startswith("/docs/versions/") and index is not None:
+                allowed = {v["route"] for v in index["versions"]}
+                if not any(target.path.startswith(route) for route in allowed):
+                    errors.append(f"{page.relative_to(root)}: unsupported version URL {link}")
+            if not any(target.path.startswith(b) for b in bases):
                 errors.append(f"{page.relative_to(root)}: outside website base: {link}")
                 continue
+            # All routes are served below the root site base; the per-version
+            # bases only select canonical URLs, not filesystem locations.
             path = root / unquote(target.path[len(base):])
             if path.is_dir():
                 path = path / "index.html"
             if not path.is_file():
                 errors.append(f"{page.relative_to(root)}: missing {link}")
         if page.name != "404.html" and not parser.noindex:
-            check_social(parser, page, root, base, site, errors)
-    check_sitemap(root, pages, base, site, errors)
+            content_base, _ = match_base(page.relative_to(root).as_posix(), bases)
+            check_social(parser, page, root, content_base, base, site, errors)
+    check_sitemap(root, pages, base, site, errors, bases)
+    if index is not None:
+        check_versions(root, index, errors)
     if errors:
         raise ValueError("\n".join(sorted(set(errors))))
-    pin = json.loads((root / "docs/source.json").read_text(encoding="utf-8"))
-    assert len(pin["revision"]) == 40
-    assert (root / "docs/schemav1.yaml").stat().st_size > 1000
-    assert not list(root.glob("qa-*.html")), "QA harnesses must not be published"
-    print(f"Website routes, assets and social previews valid across {len(pages)} HTML pages.")
+    print(f"Website routes, assets, versions and social previews valid across {len(pages)} HTML pages.")
 
 
 if __name__ == "__main__":

@@ -1,12 +1,48 @@
 ---
-import version from '../../../website-source.json';
-const base = import.meta.env.BASE_URL.replace(/\/$/, '') + '/';
+// SPDX-License-Identifier: MPL-2.0
+// The one generated version index drives the banner and the common switcher.
+import index from '../generated/version-index.json';
+
+const base = import.meta.env.BASE_URL;
+const normalize = (value) => '/' + value.replace(/^\/+|\/+$/g, '');
+const pathname = Astro.url.pathname;
+const slug = (pathname.startsWith(base) ? pathname.slice(base.length) : '')
+  .replace(/^\/+|\/+$/g, '');
+const current = index.versions.find((item) => normalize(item.route) === normalize(base))
+  ?? index.versions.find((item) => item.default);
+const dev = import.meta.env.DEV;
+
+// Carry the current page when the target version has it; otherwise land on its home.
+const options = index.versions.map((item) => {
+  const carry = item.pages.includes(slug);
+  const href = carry
+    ? item.route.replace(/\/$/, '') + '/' + slug + '/'
+    : item.route;
+  return { display: item.display, channel: item.channel, href, carry,
+           current: item.tag === current.tag };
+});
 ---
 <div class="version-banner" data-pagefind-ignore>
-  <span>{import.meta.env.DEV ? 'Working-tree preview' : version.label}</span>
-  <a href={base + 'versions/'}>Pinned to {version.revision.slice(0, 7)} <span aria-hidden="true">↗</span></a>
+  <span class="version-label">{dev ? index.development.label : current.display}</span>
+  <span class="version-channel">{dev ? 'development preview' : current.channel + ' / ' + current.availability}</span>
+  <a href={base + 'versions/'}>Pinned to {current.commit.slice(0, 7)} <span aria-hidden="true">↗</span></a>
+  <nav class="version-switcher" data-version-switcher aria-label="Documentation version">
+    {options.map((option) => (
+      <a href={option.href}
+         aria-current={option.current ? 'page' : undefined}
+         title={option.carry ? 'This page in ' + option.display : option.display + ' documentation home'}>
+        {option.display}{option.channel !== 'stable' ? ' · ' + option.channel : ''}
+      </a>
+    ))}
+  </nav>
+  {dev && <span class="version-note">Preview only. It never replaces the stable docs.</span>}
 </div>
 <style>
-  .version-banner { display:flex; justify-content:center; flex-wrap:wrap; gap:8px 18px; padding:9px 20px; background:var(--sl-color-gray-6); color:var(--sl-color-gray-2); font-size:12px; border-bottom:1px solid var(--sl-color-gray-5); }
+  .version-banner { display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:6px 16px; padding:9px 20px; background:var(--sl-color-gray-6); color:var(--sl-color-gray-2); font-size:12px; border-bottom:1px solid var(--sl-color-gray-5); }
+  .version-label { color:var(--sl-color-white); font-weight:600; }
+  .version-channel { color:var(--sl-color-gray-3); text-transform:capitalize; }
   a { color:var(--sl-color-white); text-underline-offset:3px; }
+  .version-switcher { display:inline-flex; flex-wrap:wrap; gap:4px 10px; padding-left:12px; border-left:1px solid var(--sl-color-gray-5); }
+  .version-switcher a[aria-current='page'] { font-weight:700; text-decoration-thickness:2px; }
+  .version-note { color:var(--sl-color-gray-3); font-style:italic; }
 </style>

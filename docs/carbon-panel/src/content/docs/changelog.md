@@ -5,7 +5,15 @@ description: Release history for Carbon Panel.
 
 # Changelog
 
-See the project [CHANGELOG.md](https://github.com/athNdev/carbon-panel/blob/main/CHANGELOG.md) for the full release history.
+See the project [CHANGELOG.md](https://github.com/athNdev/carbonpanel/blob/main/CHANGELOG.md) for the full release history.
+
+:::note[Versioned documentation]
+Published `/docs/` and `/docs/versions/<version>/` pages are built from the exact
+peeled commit named in the shared version index; this working-tree changelog is
+a development preview only. `v3.0.0-beta.4` is an excluded upstream name collision (not a Carbon Panel release) and `v1.0.38` is excluded because its
+local and authoritative remote tag ancestry differ. The verified stable is
+`1.0.40` (`v1.0.40`).
+:::
 
 ## 3.0.0-beta.4 - 2026-11-07
 
