@@ -105,15 +105,16 @@ Download an archive from [GitHub Releases](https://github.com/athNdev/carbonpane
 The five targets are Linux amd64/arm64, macOS Intel/Apple Silicon, and Windows
 amd64. The current verified stable is `1.0.40` (Git tag `v1.0.40`); its fixed
 archive set and digests are recorded in [release history](release-history.md).
-A future product release tagged `carbonpanel-v2.0.0` keeps the same archive
-naming convention, derived from its SemVer field. For example:
+A future, not-yet-published product release tagged `carbonpanel-v2.0.0` keeps
+the same archive naming convention, derived from its SemVer field (`v2.0.0`
+internally for archive names). For example:
 
 ```text
-carbon-panel_v3.0.0-alpha.1_linux_amd64.tar.gz
-carbon-panel_v3.0.0-alpha.1_linux_arm64.tar.gz
-carbon-panel_v3.0.0-alpha.1_darwin_amd64.tar.gz
-carbon-panel_v3.0.0-alpha.1_darwin_arm64.tar.gz
-carbon-panel_v3.0.0-alpha.1_windows_amd64.zip
+carbon-panel_v2.0.0_linux_amd64.tar.gz
+carbon-panel_v2.0.0_linux_arm64.tar.gz
+carbon-panel_v2.0.0_darwin_amd64.tar.gz
+carbon-panel_v2.0.0_darwin_arm64.tar.gz
+carbon-panel_v2.0.0_windows_amd64.zip
 ```
 
 Every archive contains `carbon-panel`, `carbon-storage` (with `.exe` on
@@ -128,18 +129,21 @@ The release also includes `openapi.yaml`, `release-manifest.json`, and
 multi-architecture Docker image digest. Both command-line tools support
 `--version` without starting the service or loading configuration.
 
-Download `checksums.txt` beside the archive and verify before extracting:
+Download `checksums.txt` beside the archive and verify before extracting. The
+concrete commands below use the current stable 1.0.40 asset names — the files
+you can actually download today. A future release uses the same pattern with
+its own version:
 
 ```sh
 # Linux; verifies whichever listed files you downloaded.
 sha256sum --check --ignore-missing checksums.txt
 # macOS: compare this output with the matching line in checksums.txt.
-shasum -a 256 carbon-panel_v3.0.0-alpha.1_darwin_arm64.tar.gz
+shasum -a 256 carbon-panel_v1.0.40_darwin_arm64.tar.gz
 ```
 
 ```powershell
 # Windows: compare this hash with the matching line in checksums.txt.
-Get-FileHash .\carbon-panel_v3.0.0-alpha.1_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\carbon-panel_v1.0.40_windows_amd64.zip -Algorithm SHA256
 ```
 
 Checksums detect changed downloads; they are not a code-signing certificate.
