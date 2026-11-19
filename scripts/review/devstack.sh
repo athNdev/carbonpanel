@@ -541,7 +541,9 @@ up)
 					ready_deadline=$((SECONDS + 120))
 					renderer_state=""
 					while ((SECONDS < ready_deadline)); do
-						if docker exec "${NAME}-bluemap" python -c \
+						if docker exec "${NAME}-bluemap" sh -c \
+							'wget -q -O /dev/null http://127.0.0.1:8100/settings.json' >/dev/null 2>&1 ||
+							docker exec "${NAME}-bluemap" python -c \
 							'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8100/settings.json", timeout=2).read()' >/dev/null 2>&1; then
 							renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | json_path 'targets.0.rendererState')"
 							if [ "${renderer_state}" = "RENDERER_STATE_READY" ]; then
