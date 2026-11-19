@@ -131,7 +131,7 @@ jobs:
             ''|latest|main|edge|dev|master|*' '*|*'/'*|*'@'*) echo "refusing moving version: $MCP_VERSION" >&2; exit 1 ;;
           esac
           printf '%s' "$MCP_VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build both platforms locally (no registry write)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -205,7 +205,7 @@ jobs:
           set -euo pipefail
           test "$ALLOWED" = 'true' || { echo "::error::trusted-main publication gate refused" >&2; exit 1; }
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Strict immutable-tag preflight (shared release.py observation)
         id: preflight
         env:
@@ -323,7 +323,7 @@ jobs:
           printf '{"network":"%s","fixture_container":"%s","image":"%s","fixture_log":"mcp-container-fixture.log","proof":"packaged container reached the scoped read-only fixture by service DNS on an isolated network"}\n' \
             "$network" "$fixture" "${GHCR_IMAGE}@${IMAGE_DIGEST}" > mcp-container-fixture.json
           echo "ok=true" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mcp-stdio-smoke
           path: |
@@ -378,7 +378,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$CI_VERIFIED" = 'true' || { echo "::error::exact main CI not verified" >&2; exit 1; }
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Download and cosign-verify pinned mcp-publisher v1.8.1
         run: |
           set -euo pipefail
@@ -421,7 +421,7 @@ jobs:
           printf '%s' "$body" | jq -e --arg n "$MCP_SERVER_NAME" --arg v "$MCP_VERSION" \
             '[.. | strings | select(. == $n or . == $v)] | length >= 2' > /dev/null
           printf '%s\n' "$body" > mcp-registry-verification.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mcp-registry-verification
           path: mcp-registry-verification.json
