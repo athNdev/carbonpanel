@@ -737,6 +737,29 @@ func (s *ModpackService) ImportUploadedModpack(ctx context.Context, req *connect
 
 var maxRemoteModpackSize int64 = 2 * 1024 * 1024 * 1024 // 2GB limit to prevent disk exhaustion
 
+// safeRemoteDownloadError keeps the useful part of a transport failure without
+// reflecting the request URL. *url.Error keeps the whole URL in its message,
+// including sensitive query values; its innermost cause is usually the dial
+// or timeout detail. If even that still carries a URL, drop it entirely.
+func safeRemoteDownloadError(err error) string {
+	if err == nil {
+		return ""
+	}
+	cause := err
+	for {
+		next := errors.Unwrap(cause)
+		if next == nil {
+			break
+		}
+		cause = next
+	}
+	text := cause.Error()
+	if strings.Contains(text, "://") {
+		return "<redacted-url-error>"
+	}
+	return text
+}
+
 // ImportRemoteModpack imports a modpack from a remote URL (e.g. GitHub release, CDN, static host)
 func (s *ModpackService) ImportRemoteModpack(ctx context.Context, req *connect.Request[v1.ImportRemoteModpackRequest]) (*connect.Response[v1.ImportRemoteModpackResponse], error) {
 	msg := req.Msg
@@ -784,7 +807,11 @@ func (s *ModpackService) ImportRemoteModpack(ctx context.Context, req *connect.R
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		s.log.Error("Failed to download modpack from %s: %v", redactedURL, err)
+		// net/http's *url.Error embeds the full request URL, including any
+		// token/signature query values. Log only the innermost cause and drop
+		// anything that still carries a URL, so a failed download cannot
+		// reflect a secret into the log (ADR 0043).
+		s.log.Error("Failed to download modpack from %s: %v", redactedURL, safeRemoteDownloadError(err))
 		return nil, connect.NewError(connect.CodeUnavailable,
 			fmt.Errorf("failed to download modpack from %s", redactedURL))
 	}

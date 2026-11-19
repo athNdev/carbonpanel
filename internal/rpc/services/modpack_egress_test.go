@@ -77,6 +77,32 @@ func TestImportRemoteModpackRedactsURLCredentials(t *testing.T) {
 	assert.NotContains(t, logOutput.String(), "s3cr3t-token")
 }
 
+// TestImportRemoteModpackFailedDownloadDoesNotLogToken exercises the
+// client.Do failure seam: net/http's *url.Error embeds the full URL, so
+// logging it verbatim leaks a query signature even though the client-facing
+// error is redacted. "sig" is chosen deliberately because the logger's general
+// SanitizeLogMessage does not cover it while RedactURL does.
+func TestImportRemoteModpackFailedDownloadDoesNotLogToken(t *testing.T) {
+	t.Setenv("DISCO_ALLOW_LOOPBACK_TEST", "1")
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+
+	var logOutput bytes.Buffer
+	capturingLog := &logger.Logger{Logger: log.New(&logOutput, "", 0)}
+	svc := NewModpackService(store, &config.Config{Storage: config.StorageConfig{DataDir: t.TempDir()}}, nil, capturingLog)
+
+	const secret = "s3cr3t-download-token"
+	req := &v1.ImportRemoteModpackRequest{
+		Url:  "http://127.0.0.1:1/pack.zip?sig=" + secret,
+		Name: "Failing Pack",
+	}
+	_, err := svc.ImportRemoteModpack(context.Background(), connect.NewRequest(req))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to download modpack")
+	assert.NotContains(t, err.Error(), secret)
+	assert.NotContains(t, logOutput.String(), secret)
+}
+
 // TestImportRemoteModpackLoopbackFixtureStillWorks keeps the documented
 // httptest seam working without any caller override: the test-only loopback
 // opt-in is the only latitude needed, so removing allow_private_network does
