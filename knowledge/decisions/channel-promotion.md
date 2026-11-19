@@ -10,10 +10,10 @@ code_refs:
   - .github/workflows/release.yml
   - scripts/release.py
   - scripts/test_release.py
-  - docs/adr/0048-channel-promotion-gates.md
+  - docs/adr/0049-channel-promotion-gates.md
 sources:
   - title: Channel promotion decision
-    resource: ../../docs/adr/0048-channel-promotion-gates.md
+    resource: ../../docs/adr/0049-channel-promotion-gates.md
   - title: Release operations and versioning
     resource: ../../docs/releases.md
   - title: Website publishing
@@ -79,4 +79,4 @@ sources:
 Separate manual publishers let a channel, the images and the docs selector
 drift apart. One verified revision/digest pairing per move, serialized and
 digest-bound, makes retry and rollback safe and keeps immutable releases exact.
-See ADR 0048 and the dated research note referenced there.
+See ADR 0049 and the dated research note referenced there.
