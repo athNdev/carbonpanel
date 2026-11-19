@@ -1,6 +1,8 @@
 # ADR 0015: First-class world viewing through an authenticated renderer proxy
 
-Status: Proposed (OSS-346 / D0 decision gate)
+Status: Accepted (OSS-346 / D0 decision gate; integration gate OSS-365, 2026-11-19)
+
+Acceptance evidence: PR #505 (`codex/world-viewing-epic`, head `78103b187d376b1a0ec055d9e285449d1b7aa265`, merge `e0136c4a04a5f4dca904d9366e7139cbdf75e503`) implemented the same-origin authenticated proxy, fail-closed node resolution and capability-gated workspace on `origin/main@9e81679b`. The D0 "BluePanel = BlueMap alongside a control panel" interpretation remains an explicitly recorded assumption, not a verified product identity. Measured fixture bounds and their limits are recorded in the OSS-365 acceptance record; no live renderer latency is claimed.
 
 ## Context
 
