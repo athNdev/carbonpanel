@@ -1,0 +1,21 @@
+{
+  "version": "1",
+  "project": {
+    "key": "OSS",
+    "id": "10001",
+    "style": "team-managed"
+  },
+  "gate": {
+    "required_pr_label": "acceptance-evidence-verified",
+    "max_evidence_age_days": 7
+  },
+  "tiers": {
+    "CODE-MERGED": "Merged code only; never sufficient for a public or live acceptance surface",
+    "CI-GREEN": "Merged code plus exact-commit green CI",
+    "BUILD-ONLY": "Build succeeded but deployment/live proof is absent",
+    "CAPTURE-ONLY": "Captured artifact exists but live status was not verified",
+    "DEPLOY-SKIPPED": "Deployment or publication job was explicitly skipped",
+    "LIVE-VERIFIED": "Exact PR merge SHA, green CI, non-skipped deploy, and fresh live URL status"
+  },
+  "candidates": []
+}
