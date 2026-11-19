@@ -287,6 +287,12 @@ seed_showcase_player() {
 		printf '%s\n' "${skin_key}" >"${DATA}/skin-identity-id"
 	fi
 	echo "review skin fixture skinAvailable: ${skin_state:-false}; add result: $(printf '%s' "${response}" | cut -c1-120)" >&2
+	if [ -n "${skin_key}" ]; then
+		skin_probe="$(rpc /carbonpanel.v1.PlayerService/GetPlayerSkin "{\"identityKey\":\"${skin_key}\",\"skinRef\":\"${skin_key}\",\"kind\":\"face\",\"serverId\":\"\"}" "${token}" 2>/dev/null)"
+		skin_data_len="$(printf '%s' "${skin_probe}" | json_path 'asset.data' | wc -c)"
+		skin_type="$(printf '%s' "${skin_probe}" | json_path 'asset.contentType')"
+		echo "review skin RPC: dataChars=${skin_data_len} contentType=${skin_type:-none}" >&2
+	fi
 }
 
 # seed_showcase_pack creates a small fabric pack with real mods so studio and
