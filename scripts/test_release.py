@@ -1874,9 +1874,17 @@ class ReleaseTests(unittest.TestCase):
         # (b) build-only/rehearsal runs get a distinct per-run key, so ordinary
         # CI is not serialized against another version.
         self.assertIn("format('carbonpanel-stage-{0}', github.run_id)", source)
-        # (c) cancel-in-progress is false for both keys: a queued publisher waits.
+        # (c) cancel-in-progress:false protects the RUNNING run only. Default
+        # queue:single retains ONE pending run that a later request replaces;
+        # this lane is single-operator dispatch, never "all queued publishers wait".
         self.assertRegex(source, r"(?m)^  cancel-in-progress: false$")
         self.assertNotIn("cancel-in-progress: true", source)
+        self.assertNotRegex(source, r"(?m)^  queue:")
+        self.assertIn("SINGLE-OPERATOR DISPATCH", source)
+        self.assertIn("REPLACES it", source)
+        ops = (release.ROOT / "docs/releases.md").read_text(encoding="utf-8")
+        self.assertIn("single-operator dispatch", ops)
+        self.assertIn("replaces", ops)
         # (d) no job-level group may release the lock between phases. All jobs,
         # including the three writers, inherit the workflow-level lock.
         for name in ("plan", "frontend", "source-image", "binaries", "image",

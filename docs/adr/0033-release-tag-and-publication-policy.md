@@ -99,7 +99,10 @@ workflow-level, non-cancelling `carbonpanel-product-publish` concurrency group
 across immutable publish, GitHub release and alias promotion, so different
 versions cannot race or interleave phases or strand a run after immutable
 publication; build-only rehearsals and ordinary CI use a distinct per-run key
-and are not serialized.
+and are not serialized. `cancel-in-progress: false` protects the running run
+only: with the default `queue: single` a later dispatch can replace the one
+pending run, so this lane requires single-operator dispatch and the operator
+must verify the resulting run before retrying.
 
 Docker Hub is `atharvnaphade/carbonpanel`; GHCR is the lowercased GitHub
 repository name, `ghcr.io/athndev/carbonpanel`.

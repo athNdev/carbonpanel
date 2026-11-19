@@ -84,8 +84,11 @@ resume from the original verified download artifact without rebuilding images.
   The ENTIRE explicit publication run holds one workflow-level non-cancelling
   `carbonpanel-product-publish` concurrency group across immutable publish,
   GitHub release and alias promotion; build-only rehearsals and ordinary CI use
-  a distinct per-run key and are not serialized. GitHub `latest` follows the same
-  product-only verified stable ordering as registry aliases.
+  a distinct per-run key and are not serialized. `cancel-in-progress: false`
+  protects the running run only; default `queue: single` can replace the pending
+  run, so this is single-operator dispatch and the operator must verify the
+  resulting run before retry. GitHub `latest` follows the same product-only
+  verified stable ordering as registry aliases.
   Staging a tag makes no claim about its target's age: tags can point at old
   commits and tag-triggered runs reflect that history. The dispatch revision is
   a convenience, not the trusted gate; the Python boundary plus exact-commit

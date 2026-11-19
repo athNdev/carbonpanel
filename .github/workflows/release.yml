@@ -56,9 +56,12 @@ permissions:
 # ONE workflow-level concurrency group for the ENTIRE explicit product
 # publication: every phase (immutable image -> GitHub release -> moving aliases)
 # holds the same lock, so a different version cannot interleave phases or strand
-# a run after immutable publication. A queued publication waits; it never cancels
-# an in-flight writer. Build-only rehearsals, tag pushes, PRs and automatic main
-# events get a per-run key instead, so ordinary CI is not serialized.
+# a run after immutable publication. cancel-in-progress:false protects the
+# RUNNING run; with default queue:single only one pending run is retained and a
+# later request REPLACES it. This lane is SINGLE-OPERATOR DISPATCH: do not
+# assume every queued publisher waits; verify the resulting run before retry.
+# Build-only rehearsals, tag pushes, PRs and automatic main events get a per-run
+# key instead, so ordinary CI is not serialized.
 concurrency:
   group: ${{ inputs.publish == true && 'carbonpanel-product-publish' || format('carbonpanel-stage-{0}', github.run_id) }}
   cancel-in-progress: false

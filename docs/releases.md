@@ -81,11 +81,15 @@ An explicit product publication holds ONE global, non-cancelling
 **workflow-level** concurrency group, `carbonpanel-product-publish`, across the
 **entire** flow — immutable image publish, GitHub release/`latest`, and moving
 alias promotion. The lock is not released between phases, so two versions cannot
-interleave phases or strand a run after immutable publication; a queued
-publication waits rather than cancelling an in-flight writer. Alias decisions
-are recomputed with live preflight inside the same locked run. Build-only
-rehearsals, tag pushes, pull requests and ordinary main CI get a distinct
-per-run key (`carbonpanel-stage-<run_id>`) and are not serialized.
+interleave phases or strand a run after immutable publication. `cancel-in-progress:
+false` protects the **running** run; with GitHub's default `queue: single` only
+one pending run is retained, and a later request **replaces** that pending run —
+this lane uses **single-operator dispatch**. Do not assume every queued publisher
+waits: after a replacement, the operator must verify the resulting run before
+retrying. Alias decisions are recomputed with live preflight inside the same
+locked run. Build-only rehearsals, tag pushes, pull requests and ordinary main
+CI get a distinct per-run key (`carbonpanel-stage-<run_id>`) and are not
+serialized.
 
 Moving aliases (`latest`, `MAJOR.MINOR`, module `latest`) are conveniences, not
 reproducible references. Consumers that need reproducible rollbacks pin the full
