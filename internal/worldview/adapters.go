@@ -336,9 +336,13 @@ func doBlueMapTexturesGet(ctx context.Context, url string, hc HTTPDoer) (*http.R
 	return hc.Do(req)
 }
 
-// verifyBlueMapTextures decodes a bounded body and requires a JSON object whose
-// "textures" field is an array. A SPA/HTML fallback or an unrelated JSON
-// document with a 200 is not a rendered map and must not be called READY.
+// verifyBlueMapTextures decodes a bounded body and requires a plausible
+// BlueMap textures document. A SPA/HTML fallback or an unrelated JSON document
+// with a 200 is not a rendered map and must not be called READY.
+//
+// BlueMap v5.29 serves textures as a top-level JSON array of texture objects.
+// Older fixtures and compatible renderers may wrap the array in
+// {"textures":[...]}.
 func verifyBlueMapTextures(resp *http.Response, literalGzip bool) error {
 	reader := io.LimitReader(resp.Body, maxBlueMapTexturesBytes)
 	if literalGzip || strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
@@ -356,18 +360,27 @@ func verifyBlueMapTextures(resp *http.Response, literalGzip bool) error {
 	if len(body) == 0 {
 		return errors.New("textures.json returned an empty body")
 	}
+	// Accept the object-wrapped format: {"textures":[...]}.
 	var doc struct {
 		Textures json.RawMessage `json:"textures"`
 	}
-	if err := json.Unmarshal(body, &doc); err != nil {
-		return errors.New("textures.json is not a JSON document")
+	if err := json.Unmarshal(body, &doc); err == nil {
+		if len(doc.Textures) == 0 {
+			return errors.New("textures.json has no textures field")
+		}
+		var textures []json.RawMessage
+		if err := json.Unmarshal(doc.Textures, &textures); err != nil {
+			return errors.New("textures.json textures field is not an array")
+		}
+		return nil
 	}
-	if len(doc.Textures) == 0 {
-		return errors.New("textures.json has no textures field")
-	}
+	// Accept BlueMap v5.29's top-level textures array.
 	var textures []json.RawMessage
-	if err := json.Unmarshal(doc.Textures, &textures); err != nil {
-		return errors.New("textures.json textures field is not an array")
+	if err := json.Unmarshal(body, &textures); err != nil {
+		return errors.New("textures.json is not a plausible textures document")
+	}
+	if len(textures) == 0 {
+		return errors.New("textures.json returned an empty textures array")
 	}
 	return nil
 }
