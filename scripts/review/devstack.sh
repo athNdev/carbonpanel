@@ -372,7 +372,7 @@ set -eu
 base="${data_path}/modules/bluemap"
 mkdir -p "\${base}/config/maps" "\${base}/data" "\${base}/web"
 printf '%s\n' '# Isolated review fixture' 'accept-download: true' 'render-thread-count: 1' 'region-file-check-interval: 5' > "\${base}/config/core.conf"
-printf '%s\n' '# Seeded vanilla level, mounted read-only' 'id: "${level}"' 'name: "${level}"' 'world: "/app/world"' 'dimension: "minecraft:overworld"' 'storage: file' > "\${base}/config/maps/${level}.conf"
+printf '%s\n' '# Seeded vanilla level, mounted read-only' 'id: "${level}"' 'name: "${level}"' 'world: "/app/world"' 'dimension: "minecraft:overworld"' 'storage: "file"' 'hires: { enabled: true }' 'lowres: { enabled: true }' > "\${base}/config/maps/${level}.conf"
 EOF
 	docker cp "${DATA}/config/setup-bluemap.sh" "${NAME}:/tmp/setup-bluemap.sh" >/dev/null 2>&1 || return 0
 	docker exec -u root "${NAME}" sh /tmp/setup-bluemap.sh >/dev/null 2>&1 || return 0
