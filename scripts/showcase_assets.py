@@ -47,9 +47,7 @@ SECRET_PATTERNS = (
 
 MIN_IMAGE_BYTES = 4 * 1024
 MAX_IMAGE_BYTES = 24 * 1024 * 1024
-# Compact feature crops (for example a short revisions panel) are legitimate
-# at README width; 160px still rejects 1x1 placeholders and broken renders.
-MIN_DIMENSION = 160
+MIN_DIMENSION = 320
 MAX_DIMENSION = 8192
 
 

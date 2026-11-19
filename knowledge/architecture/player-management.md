@@ -59,6 +59,13 @@ proving Bedrock support and are otherwise refused with a capability error.
 through the injected node resolver with caller contexts and bounded reads;
 live NBT is never edited.
 
+# Roster filters
+
+`ListPlayers` accepts the console's `all` sentinel for `state_filter` and
+`access_filter` and treats it as no filter; other non-empty values remain exact
+bands. Without this normalization the default roster hides every observed
+identity, including seeded fixtures.
+
 # Authorization and audit
 
 All `PlayerService` procedures are mapped to `players:*` permissions and

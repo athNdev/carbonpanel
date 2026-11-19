@@ -101,15 +101,12 @@ class ShowcaseAssetsTest(unittest.TestCase):
         kwargs.update(overrides)
         sa.validate(sa.argparse.Namespace(**kwargs))
 
-    def test_short_but_real_crop_is_accepted(self) -> None:
-        # A compact panel crop (e.g. the revisions table) can be shorter than a
-        # full viewport; it must not be rejected as a placeholder.
+    def test_thin_strip_crop_is_rejected(self) -> None:
+        # A heading-less strip is not a meaningful README crop; refuse it
+        # instead of weakening the plausibility floor.
         (self.images / 'showcase-a.png').write_bytes(fake_png(width=2164, height=242))
-        self.build()
-        self.validate()
-        manifest = json.loads((self.publish / 'manifest.json').read_text(encoding='utf-8'))
-        image = next(i for i in manifest['images'] if i['name'] == 'showcase-a')
-        self.assertEqual((image['width'], image['height']), (2164, 242))
+        with self.assertRaisesRegex(sa.AssetError, 'implausible PNG dimensions'):
+            self.build()
 
     def test_build_then_validate_happy_path(self) -> None:
         self.build()

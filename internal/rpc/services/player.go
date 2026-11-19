@@ -559,6 +559,16 @@ func isCanonicalUUID(value string) bool {
 	return strings.Count(value, "-") == 4
 }
 
+// normalizeRosterFilter maps the console's "all" sentinel to an empty filter.
+// An empty filter lists every identity; explicit bands remain exact matches.
+func normalizeRosterFilter(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if strings.EqualFold(trimmed, "all") {
+		return ""
+	}
+	return trimmed
+}
+
 // ListPlayers returns a bounded, sorted roster. Filters are applied over
 // observed identities only; no fabricated zero values are produced.
 func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1.ListPlayersRequest]) (*connect.Response[v1.ListPlayersResponse], error) {
@@ -581,6 +591,10 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to list players"))
 	}
 
+	// The console's default roster filter sends "all" for both dimensions;
+	// "all" means no filter, not a literal presence/access band.
+	stateFilter := normalizeRosterFilter(msg.StateFilter)
+	accessFilter := normalizeRosterFilter(msg.AccessFilter)
 	serverName := map[string]string{}
 	access := map[string]storage.PlayerAccessState{}
 	out := make([]*v1.PlayerSummary, 0, len(identities))
@@ -628,10 +642,10 @@ func (s *PlayerService) ListPlayers(ctx context.Context, req *connect.Request[v1
 			band = "whitelisted"
 		}
 
-		if msg.StateFilter != "" && !strings.EqualFold(msg.StateFilter, presenceStateName(presence)) {
+		if stateFilter != "" && !strings.EqualFold(stateFilter, presenceStateName(presence)) {
 			continue
 		}
-		if msg.AccessFilter != "" && !strings.EqualFold(msg.AccessFilter, band) {
+		if accessFilter != "" && !strings.EqualFold(accessFilter, band) {
 			continue
 		}
 

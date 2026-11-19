@@ -266,7 +266,7 @@ SPDX-License-Identifier: MPL-2.0
 	}
 </script>
 
-<div class="space-y-6 font-sans text-foreground">
+<div class="space-y-6 font-sans text-foreground" data-testid="showcase-library-detail-content">
 	<CarbonPageHeader
 		title={entry?.name || shortId(entryId)}
 		description="Immutable revision history, provenance, bindings and read-only compatibility findings."

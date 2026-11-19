@@ -198,8 +198,8 @@
     },
     {
       "screenshot": "showcase-player-profile",
-      "element": "#player-panel-overview",
-      "maxHeight": 600,
+      "element": "[data-testid=\"showcase-player-detail-content\"]",
+      "maxHeight": 1000,
       "scroll": false,
       "feature": "players",
       "name": "player profile identity and skin state",
@@ -218,8 +218,8 @@
     },
     {
       "screenshot": "showcase-player-allowlist",
-      "element": "#player-panel-access",
-      "maxHeight": 528,
+      "element": "[data-testid=\"showcase-player-detail-content\"]",
+      "maxHeight": 1000,
       "scroll": false,
       "feature": "players",
       "name": "player allowlist column",
@@ -269,8 +269,8 @@
     },
     {
       "screenshot": "showcase-library-revisions",
-      "element": "#world-panel-revisions",
-      "maxHeight": 528,
+      "element": "[data-testid=\"showcase-library-detail-content\"]",
+      "maxHeight": 1000,
       "scroll": false,
       "feature": "library",
       "name": "world library immutable revision",
@@ -289,8 +289,8 @@
     },
     {
       "screenshot": "showcase-library-compatibility",
-      "element": "#world-panel-compatibility",
-      "maxHeight": 528,
+      "element": "[data-testid=\"showcase-library-detail-content\"]",
+      "maxHeight": 1000,
       "scroll": false,
       "feature": "library",
       "name": "world library compatibility report",

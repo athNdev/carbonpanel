@@ -293,7 +293,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{/each}
 {/snippet}
 
-<div class="h-full flex-1 space-y-4 font-sans">
+<div class="h-full flex-1 space-y-4 font-sans" data-testid="showcase-player-detail-content">
 	<CarbonBreadcrumbs
 		items={[{ label: 'Players', href: resolve('/players') }, { label: displayName }]}
 	/>
