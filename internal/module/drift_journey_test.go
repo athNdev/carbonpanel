@@ -22,13 +22,14 @@ import (
 )
 
 // moduleDaemon is a stateful fake Engine for the drift/reconnect journey.
-// It records creates and volume-deleting removes so a pass cannot hide a
+// It records creates, stops, and volume-deleting removes so a pass cannot hide a
 // duplicate sidecar or a casual purge.
 type moduleDaemon struct {
 	mu            sync.Mutex
 	containers    []map[string]any
 	inspect       map[string]string
 	creates       int
+	stops         int
 	volumeDeletes int
 	deletes       int
 	nextCreateID  string
@@ -67,6 +68,12 @@ func (d *moduleDaemon) snapshot() (creates, deletes, volumeDeletes int) {
 	return d.creates, d.deletes, d.volumeDeletes
 }
 
+func (d *moduleDaemon) stopCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stops
+}
+
 func (d *moduleDaemon) handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		d.mu.Lock()
@@ -103,6 +110,7 @@ func (d *moduleDaemon) handler() http.HandlerFunc {
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/start"):
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/stop"):
+			d.stops++
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/containers/"):
 			d.deletes++
@@ -283,6 +291,47 @@ func TestDriftJourneyParentDeleteDoesNotRecreateOrPurge(t *testing.T) {
 	}
 	if volumeDeletes != 0 || deletes != 0 {
 		t.Fatalf("parent-delete race purged volumes: deletes=%d volumeDeletes=%d", deletes, volumeDeletes)
+	}
+	if daemon.stopCount() != 0 {
+		t.Fatalf("stops = %d, want 0 when the container is already gone", daemon.stopCount())
+	}
+	got, err := store.GetModule(context.Background(), mod.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != storage.ModuleStatusStopped {
+		t.Fatalf("status = %s, want stopped", got.Status)
+	}
+	if got.ContainerID != "" {
+		t.Fatalf("container id = %q, want cleared without a Docker remove", got.ContainerID)
+	}
+}
+
+func TestDriftJourneyParentDeleteStopsOrphanContainerWithoutPurge(t *testing.T) {
+	daemon := newModuleDaemon()
+	daemon.setRunning("orphan-live", "/carbon-panel-module-mod-orphan-live", 19132)
+	manager, store := newDriftFixture(t, daemon)
+	server, mod := seedRunningSidecar(t, store, "mod-orphan-live", "orphan-live")
+	if err := store.DB().Delete(server).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	outcome, err := manager.ReconcileModule(context.Background(), mod.ID)
+	if err != nil {
+		t.Fatalf("ReconcileModule: %v", err)
+	}
+	if outcome != ReconcileStopped {
+		t.Fatalf("outcome = %s, want stopped when the parent row is gone", outcome)
+	}
+	creates, deletes, volumeDeletes := daemon.snapshot()
+	if creates != 0 {
+		t.Fatalf("creates = %d, orphan convergence must not recreate the sidecar", creates)
+	}
+	if volumeDeletes != 0 || deletes != 0 {
+		t.Fatalf("orphan convergence purged data: deletes=%d volumeDeletes=%d", deletes, volumeDeletes)
+	}
+	if daemon.stopCount() != 1 {
+		t.Fatalf("stops = %d, want 1 to stop the orphan container", daemon.stopCount())
 	}
 	got, err := store.GetModule(context.Background(), mod.ID)
 	if err != nil {

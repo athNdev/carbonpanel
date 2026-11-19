@@ -61,6 +61,27 @@ func TestDecideModule(t *testing.T) {
 			want:   actionMarkGone,
 		},
 		{
+			name:   "a running orphan sidecar whose parent row is gone is stopped",
+			mod:    &storage.Module{Status: storage.ModuleStatusRunning, ContainerID: "same"},
+			parent: nil,
+			obs:    ModuleObservation{Exists: true, ContainerID: "same", Running: true},
+			want:   actionStopOrphan,
+		},
+		{
+			name:   "a stopped orphan sidecar whose parent row is gone is still retired",
+			mod:    &storage.Module{Status: storage.ModuleStatusStopped, ContainerID: "same"},
+			parent: nil,
+			obs:    ModuleObservation{Exists: true, ContainerID: "same", Running: false},
+			want:   actionStopOrphan,
+		},
+		{
+			name:   "a drifted orphan sidecar whose parent row is gone is stopped",
+			mod:    &storage.Module{Status: storage.ModuleStatusRunning, ContainerID: "old"},
+			parent: nil,
+			obs:    ModuleObservation{Exists: true, ContainerID: "new", Running: true},
+			want:   actionStopOrphan,
+		},
+		{
 			name:   "running module whose container vanished under a starting parent waits",
 			mod:    &storage.Module{Status: storage.ModuleStatusRunning, ContainerID: "old"},
 			parent: &storage.Server{ID: "srv", Status: storage.StatusStarting},
@@ -504,6 +525,56 @@ func TestReconcileModuleWaitsWhenTheParentIsStarting(t *testing.T) {
 	}
 	if action := decideModule(got, parent, ModuleObservation{Exists: false}, reconcileGates{DependenciesReady: true, HostPortsReady: true}); action != actionRecreate {
 		t.Fatalf("action after parent is running = %s, want recreate", action)
+	}
+}
+
+func TestReconcileModuleStopsAnOrphanContainerWhenTheParentIsGone(t *testing.T) {
+	var stopped []string
+	manager, store := newModuleReconcileFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"Id":"orphan-container","Names":["/carbon-panel-module-mod-orphan-live"],"State":"running","Status":"Up 2 minutes"}]`))
+		case strings.Contains(r.URL.Path, "/containers/orphan-container/json"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"Id":"orphan-container","Name":"/carbon-panel-module-mod-orphan-live","State":{"Status":"running","Running":true,"ExitCode":0},"Config":{"Labels":{}}}`))
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/containers/orphan-container/stop"):
+			stopped = append(stopped, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/containers/orphan-container"):
+			t.Fatalf("orphan reconciliation must not remove the container (DELETE %s)", r.URL.Path)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	ctx := context.Background()
+	mod := &storage.Module{
+		ID: "mod-orphan-live", Name: "orphan-sidecar", ServerID: "srv-missing", NodeID: "local",
+		ContainerID: "orphan-container", Status: storage.ModuleStatusRunning,
+	}
+	if err := store.DB().Create(mod).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	outcome, err := manager.ReconcileModule(ctx, mod.ID)
+	if err != nil {
+		t.Fatalf("ReconcileModule: %v", err)
+	}
+	if outcome != ReconcileStopped {
+		t.Fatalf("outcome = %s, want stopped", outcome)
+	}
+	if len(stopped) != 1 {
+		t.Fatalf("stop calls = %d, want 1", len(stopped))
+	}
+	got, err := store.GetModule(ctx, mod.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != storage.ModuleStatusStopped {
+		t.Errorf("status = %s, want stopped", got.Status)
+	}
+	if got.ContainerID != "" {
+		t.Errorf("container id = %q, want cleared", got.ContainerID)
 	}
 }
 

@@ -45,8 +45,10 @@ Identity, status and recorded host ports stay on that one sidecar. A missing
 container under a running parent is restored without `RemoveContainer`,
 because that call always sets `RemoveVolumes`. A failed start hook retries
 against the observed container and does not create a second one. A parent
-row that is already gone marks the child stopped and does not resurrect it.
-The Modules tab renders container id and status from that reconciled
+row that is already gone must not leave a sidecar running: if the container
+is absent the row is marked stopped, and if an orphan container still exists
+it is stopped and the row is marked stopped without removing volumes. The
+sidecar is never resurrected. The Modules tab renders container id and status from that reconciled
 `listModules` record (`moduleIdentityFromRecord`), not from a stale inspect
 helper.
 
