@@ -25,6 +25,17 @@ the database (db + wal + shm), configuration, worlds and backups, and rehearse o
 disposable copies, before upgrading. Full evidence and the rehearsal record are
 in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-from-v1040).
 
+A recurring, read-only rehearsal runs in CI (`upgrade-rehearsal.yml`): weekly,
+on PRs that change migration/config/release surfaces and on manual dispatch. It
+downloads the verified `v1.0.40` archive, builds a candidate from the checkout,
+runs both real `carbon-panel` binaries against seeded disposable DB/world copies
+and asserts integrity, additive 35 → 44 table growth, row/world preservation
+and forced-failure restore/rollback. Exact artifact versions and SHA-256
+digests are emitted in the job's evidence report. This check is not a release
+approval gate: it grants no write scope, touches no live world, host, tag,
+release or registry, and does not replace the OIDC/PROXY migration go/no-go
+steps above. See [ADR 0043](adr/0043-disposable-upgrade-rehearsal-ci.md).
+
 1. **B1 — OIDC role mapping.** v1.0.40's `role_mapping: {}` example granted raw
    IdP group names directly. Current main uses raw claims only behind
    `auth.oidc.allow_raw_claim_roles` (default `false`) and refuses privileged
