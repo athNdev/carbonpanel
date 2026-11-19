@@ -9,6 +9,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
@@ -25,6 +27,7 @@ type DaemonOptions struct {
 	Hosts               []string          `json:"hosts"`
 	DataRoot            string            `json:"data-root"`
 	ExecRoot            string            `json:"exec-root"`
+	Pidfile             string            `json:"pidfile"`
 	ContainerdNamespace string            `json:"containerd-namespace"`
 	BIP                 string            `json:"bip,omitempty"`
 	StorageDriver       string            `json:"storage-driver"`
@@ -83,6 +86,12 @@ func (o DaemonOptions) Validate() []Check {
 	add("OPTIONS_NAMESPACE",
 		o.ContainerdNamespace != "" && o.ContainerdNamespace != "moby" && o.ContainerdNamespace != "default",
 		"containerd namespace is dedicated", "Use a node-specific containerd namespace.")
+	// A private pidfile prevents collision with a preinstalled engine's
+	// /var/run/docker.pid. It must live under the owned runtime root and must
+	// not clobber another owned path.
+	pidOK := o.Pidfile != "" && o.Pidfile != "/var/run/docker.pid" && o.Pidfile != "/run/docker.pid"
+	add("OPTIONS_PRIVATE_PIDFILE", pidOK,
+		"private pidfile, never the shared default", "Use a dedicated *.pid path inside the node runtime directory; never /var/run/docker.pid.")
 	add("OPTIONS_NO_PUBLIC_API", !strings.Contains(strings.Join(o.Hosts, " "), "0.0.0.0"),
 		"no public raw Docker API listener", "Never publish 2375/2376; use the private unix socket only.")
 	add("OPTIONS_LOG_DRIVER", o.LogDriver == "journald" || o.LogDriver == "json-file",
@@ -111,6 +120,7 @@ type DaemonSpec struct {
 	XDG_RUNTIME_DIR     string
 	DataRoot            string
 	ExecRoot            string
+	Pidfile             string // private pidfile under the owned runtime root
 	ContainerdNamespace string
 	BridgeCIDR          string
 	PortRange           string
@@ -131,6 +141,7 @@ func (d DaemonSpec) Options() DaemonOptions {
 		Hosts:               []string{"unix://" + d.SocketPath},
 		DataRoot:            d.DataRoot,
 		ExecRoot:            d.ExecRoot,
+		Pidfile:             d.Pidfile,
 		ContainerdNamespace: d.ContainerdNamespace,
 		BIP:                 d.BridgeCIDR,
 		StorageDriver:       d.StorageDriver,
@@ -159,6 +170,16 @@ func (d DaemonSpec) Validate() []Check {
 		"private bridge and node-local port range are configured", "Choose non-overlapping private ranges excluding raw API ports.")
 	add("DAEMON_CONFIG_PATH", d.ConfigPath != "",
 		"config path is set", "Every mode must reference a canonical daemon.json path.")
+	// The pidfile must be private (under the socket's owned runtime root) and
+	// must not clobber any other owned path. This is the no-clobber gate that
+	// keeps a second dockerd from colliding on /var/run/docker.pid.
+	runtimeDir := filepath.Dir(d.SocketPath)
+	pidPrivate := d.Pidfile != "" && sameOrUnder(d.Pidfile, runtimeDir) &&
+		d.Pidfile != d.SocketPath && d.Pidfile != d.ConfigPath &&
+		d.Pidfile != d.DataRoot && d.Pidfile != d.ExecRoot &&
+		filepath.Ext(d.Pidfile) == ".pid"
+	add("DAEMON_PIDFILE_NO_CLOBBER", pidPrivate,
+		"pidfile is under the owned runtime root and distinct from other paths", "Choose a dedicated *.pid path beside the private socket.")
 	if d.Mode == ModeRootful {
 		// An explicit rootful service runs as root. A non-root User= with an
 		// empty capability set cannot bind/operate dockerd and is refused.
@@ -250,6 +271,7 @@ After=network-online.target
 
 [Service]
 Type=notify
+NotifyAccess=all
 Environment=XDG_RUNTIME_DIR={{.XDG_RUNTIME_DIR}}
 ExecStart=/usr/bin/dockerd-rootless.sh --config-file={{.ConfigPath}}
 Delegate=cpu cpuset io memory pids
@@ -263,13 +285,25 @@ SyslogIdentifier={{.LogIdentifier}}
 WantedBy=default.target
 `))
 
+// rootfulCapabilitySet is the capability set required for a real dockerd to
+// (a) start and (b) launch DEFAULT-capability containers. It is the union of
+// Docker's default container caps (CHOWN, DAC_OVERRIDE, FSETID, FOWNER, MKNOD,
+// NET_RAW, SETGID, SETUID, SETFCAP, SETPCAP, NET_BIND_SERVICE, SYS_CHROOT,
+// KILL, AUDIT_WRITE) plus the daemon caps SYS_ADMIN, NET_ADMIN and
+// SYS_RESOURCE. Omitting FSETID, KILL, NET_BIND_SERVICE or SETFCAP makes
+// default-cap containers fail with "unable to apply caps: operation not
+// permitted" — observed on a real engine qualification, not assumed.
+const rootfulCapabilitySet = "CAP_CHOWN CAP_DAC_OVERRIDE CAP_FSETID CAP_FOWNER CAP_KILL CAP_MKNOD " +
+	"CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SETPCAP CAP_SETFCAP CAP_SETGID CAP_SETUID " +
+	"CAP_SYS_ADMIN CAP_SYS_CHROOT CAP_SYS_RESOURCE CAP_AUDIT_WRITE"
+
 // Rootful: an EXPLICIT dedicated service running as root. dockerd needs
 // CAP_SYS_ADMIN (mounts/overlay/network namespaces), CAP_NET_ADMIN/RAW,
-// CAP_SYS_RESOURCE and the standard file-ownership capabilities, so an empty
-// CapabilityBoundingSet or a non-root User= is refused. ProtectSystem=full
-// keeps /usr, /boot and /etc read-only without making the private data root
-// unwritable, and NoNewPrivileges stays off so the runtime can still apply
-// container capability sets.
+// CAP_SYS_RESOURCE and the full default container capability set so ordinary
+// game containers start. An empty CapabilityBoundingSet or a non-root User=
+// is refused. ProtectSystem=full keeps /usr, /boot and /etc read-only without
+// making the private data root unwritable, and NoNewPrivileges stays off so
+// the runtime can still apply container capability sets.
 var rootfulUnitTemplate = template.Must(template.New("rootfulUnit").Parse(`[Unit]
 Description=Carbon Panel managed node daemon (dedicated rootful)
 Documentation=https://docs.carbonpanel.example/managed-node
@@ -277,9 +311,10 @@ After=network-online.target
 
 [Service]
 Type=notify
+PIDFile={{.Pidfile}}
 ExecStart=/usr/bin/dockerd --config-file={{.ConfigPath}}
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_MKNOD CAP_NET_ADMIN CAP_NET_RAW CAP_SETPCAP CAP_SETGID CAP_SETUID CAP_SYS_ADMIN CAP_SYS_CHROOT CAP_SYS_RESOURCE CAP_AUDIT_WRITE
-AmbientCapabilities=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_MKNOD CAP_NET_ADMIN CAP_NET_RAW CAP_SETPCAP CAP_SETGID CAP_SETUID CAP_SYS_ADMIN CAP_SYS_CHROOT CAP_SYS_RESOURCE CAP_AUDIT_WRITE
+CapabilityBoundingSet={{.Capabilities}}
+AmbientCapabilities={{.Capabilities}}
 NoNewPrivileges=no
 ProtectSystem=full
 ProtectHome=yes
@@ -311,8 +346,12 @@ func (d DaemonSpec) RenderUnit() (string, error) {
 	if d.Mode == ModeRootless {
 		tmpl = rootlessUnitTemplate
 	}
+	data := struct {
+		DaemonSpec
+		Capabilities string
+	}{DaemonSpec: d, Capabilities: rootfulCapabilitySet}
 	var b bytes.Buffer
-	if err := tmpl.Execute(&b, d); err != nil {
+	if err := tmpl.Execute(&b, data); err != nil {
 		return "", err
 	}
 	return b.String(), nil
@@ -342,6 +381,14 @@ func CheckOptionParity(configJSON, unit string) []Check {
 	keys, duplicate, err := jsonConfigKeys(configJSON)
 	add("PARITY_NO_DUPLICATE_KEYS", err == nil && !duplicate,
 		"daemon.json has no duplicate option keys", "Emit daemon options from one Go struct.")
+	hasPidfile := false
+	for _, k := range keys {
+		if k == "pidfile" {
+			hasPidfile = true
+		}
+	}
+	add("PARITY_PRIVATE_PIDFILE", hasPidfile,
+		"daemon.json declares a private pidfile", "Never leave dockerd on the shared /var/run/docker.pid default.")
 	execStart := execStartLine(unit)
 	add("PARITY_EXEC_START_PRESENT", execStart != "",
 		"unit has an ExecStart line", "Render a mode-correct systemd unit.")
@@ -366,6 +413,34 @@ func CheckOptionParity(configJSON, unit string) []Check {
 	}
 	add("PARITY_NO_KEY_CONFLICT", len(conflicts) == 0,
 		"no config key is repeated as a CLI flag", "Remove conflicting CLI flags from ExecStart.")
+	return checks
+}
+
+// CheckUnitContract verifies the qualification-critical properties of a
+// rendered unit. It is exported so the installer lane and fixtures can assert
+// the same contract the real systemd qualification depends on.
+func CheckUnitContract(unit string, mode DaemonMode) []Check {
+	var checks []Check
+	add := func(code string, ok bool, msg, remedy string) {
+		checks = append(checks, Check{Code: code, Passed: ok, Message: msg, Remedy: remedy})
+	}
+	if mode == ModeRootless {
+		add("UNIT_ROOTLESS_NOTIFY_ACCESS", strings.Contains(unit, "NotifyAccess=all"),
+			"rootless Type=notify accepts READY from the child dockerd under rootlesskit",
+			"Add NotifyAccess=all; without it the unit stays activating/start although the socket serves.")
+		add("UNIT_ROOTLESS_USER_SESSION", strings.Contains(unit, "WantedBy=default.target") && !strings.Contains(unit, "User="),
+			"rootless is a per-user unit", "Use a systemd --user unit with no User= override.")
+		return checks
+	}
+	add("UNIT_ROOTFUL_PIDFILE", strings.Contains(unit, "PIDFile="),
+		"rootful unit tracks the private pidfile", "Add PIDFile=<private pidfile> matching daemon.json.")
+	for _, cap := range []string{"CAP_FSETID", "CAP_KILL", "CAP_NET_BIND_SERVICE", "CAP_SETFCAP"} {
+		add("UNIT_ROOTFUL_CAP_"+cap, strings.Contains(unit, cap),
+			"default-container capability "+cap+" is in the unit bound set",
+			"Add the full Docker default container capability set to CapabilityBoundingSet and AmbientCapabilities.")
+	}
+	add("UNIT_ROOTFUL_NO_USER", !strings.Contains(unit, "User="),
+		"rootful service has no User= override", "Run the dedicated unit as root with the documented capability set.")
 	return checks
 }
 
@@ -433,6 +508,8 @@ func SpecFromFacts(nodeID string, f HostFacts, sel Selection) DaemonSpec {
 	if sel.Mode == ModeRootless {
 		configPath = xdg + "/carbon-node/daemon.json"
 	}
+	// Private pidfile beside the private socket, never the shared default.
+	pidfile := path.Join(path.Dir(f.ChosenSocket), "docker.pid")
 	return DaemonSpec{
 		NodeID:              nodeID,
 		Mode:                sel.Mode,
@@ -441,6 +518,7 @@ func SpecFromFacts(nodeID string, f HostFacts, sel Selection) DaemonSpec {
 		XDG_RUNTIME_DIR:     xdg,
 		DataRoot:            f.ChosenDataRoot,
 		ExecRoot:            f.ChosenExecRoot,
+		Pidfile:             pidfile,
 		ContainerdNamespace: f.ContainerdNamespace,
 		BridgeCIDR:          f.BridgeCIDR,
 		PortRange:           f.ChosenPortRange,

@@ -77,6 +77,7 @@ write_spec() {
   "mode": "$mode",
   "config_path": "$STATE_ROOT/$mode/daemon.json",
   "socket_path": "$socket",
+  "pidfile": "${socket%/*}/docker.pid",
   "data_root": "$STATE_ROOT/$mode/data",
   "exec_root": "$STATE_ROOT/$mode/exec",
   "containerd_namespace": "carbon-qual-$mode",

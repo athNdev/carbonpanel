@@ -32,13 +32,23 @@ fields, RPCs, shared DB columns or auth middleware.
   installer lane; it carries config JSON, unit, unit kind (`user`/`system`),
   launcher and canonical options. `LogDriver` defaults to journald; `json-file`
   is only for disposable fixtures without journald.
+- A private `pidfile` is rendered into daemon.json under the owned runtime root
+  (no-clobber validation), and the rootful unit carries the matching `PIDFile=`
+  directive. This prevents collision with a preinstalled engine's
+  `/var/run/docker.pid`.
 - Rootless renders a per-user systemd unit (`WantedBy=default.target`, no
-  `User=`) using `dockerd-rootless.sh` with `XDG_RUNTIME_DIR`, never a direct
+  `User=`) using `dockerd-rootless.sh` with `XDG_RUNTIME_DIR` and
+  **`NotifyAccess=all`** (required because the READY notification comes from the
+  child dockerd under rootlesskit, not the launcher main PID), never a direct
   system dockerd unit. Rootful renders an explicit system unit running as root
-  (no `User=`) with the capability set dockerd needs (`CAP_SYS_ADMIN`,
-  `CAP_NET_ADMIN`, `CAP_NET_RAW`, `CAP_SYS_RESOURCE`, file-ownership caps),
-  `NoNewPrivileges=no`, `ProtectSystem=full`, cgroup delegation and journald.
-  An empty capability set or a non-root `User=` is refused.
+  (no `User=`) with the full capability set dockerd and default-cap containers
+  need: Docker's default container caps plus `CAP_SYS_ADMIN`, `CAP_NET_ADMIN`
+  and `CAP_SYS_RESOURCE`. In particular `CAP_FSETID`, `CAP_KILL`,
+  `CAP_NET_BIND_SERVICE` and `CAP_SETFCAP` are required or ordinary game
+  containers fail with `unable to apply caps`. `NoNewPrivileges=no`,
+  `ProtectSystem=full`, cgroup delegation and journald are retained. An empty
+  capability set or a non-root `User=` is refused. `CheckUnitContract` asserts
+  these properties.
 - Compatibility gates select rootless when user namespaces, subuid/subgid,
   delegated cgroup v2 controllers, a qualified storage driver and a private
   0700 runtime dir are all present. Otherwise a hardened dedicated rootful
@@ -61,13 +71,13 @@ fields, RPCs, shared DB columns or auth middleware.
   paths; it never probes or changes a live host, installs a daemon or writes a
   system unit. Enrollment fixtures use synthetic keys and temp-dir private
   material only.
-- **Qualification limit:** the existing real dockerd evidence is a PRIVILEGED
-  disposable nested **rootful** boot of the contributed daemon.json with a
-  `json-file` log-driver override, plus `systemd-analyze verify` syntax checks
-  of both rendered units. It does **not** prove that the shipped rootless
-  per-user unit or the shipped rootful unit boots on a clean Linux systemd
-  host. Those two unit boots remain unverified; do not claim deployability from
-  the fixture evidence.
+- **Qualification status:** on a clean disposable Ubuntu 24.04 / systemd 255
+  fixture with real dockerd 29.1.3, the EXACT shipped **rootful** unit booted
+  `active/success`: private socket/pidfile/roots, bridge, DNAT, default-cap
+  container, limits and live-restore restart were observed. The **rootless**
+  `NotifyAccess=all` fix is verified by unit contract/syntax only; a real
+  rootless boot to `active/success` is still blocked by nested-userns iptables
+  on the WSL2 fixture kernel. Do not claim rootless deployability from fixtures.
 
 # Why
 
@@ -84,12 +94,12 @@ privilege decision explicit and testable without a live host.
   `docs/plans/host-native-private-daemon.md`.
 - `CheckOptionParity` fixtures fail on duplicate keys, extra CLI flags and
   CLI/config conflicts; `systemd-analyze verify` only checks unit syntax.
-- Disposable dind boot evidence is in the external audit file
-  `security-runtime-plans/node-native-boot-evidence.md`. It is a privileged
-  nested rootful config boot with `json-file` override, **not** a boot of the
-  shipped rootless per-user unit or the shipped rootful unit on a clean systemd
-  host. Those remain unverified. No live-host, install, gameplay or deployment
-  success may be claimed from fixtures.
+- Disposable dind boot evidence is in `node-native-boot-evidence.md`; the exact
+  shipped-unit re-qualification is in `node-runtime-requalification-20261119.md`
+  (both under `security-runtime-plans/`). The rootful unit boots on a clean
+  systemd fixture; rootless active/success remains unverified due to the
+  fixture kernel's nested-userns iptables limitation. No live-host, install,
+  gameplay or deployment success may be claimed from fixtures.
 
 # Read next
 

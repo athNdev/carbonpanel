@@ -25,6 +25,7 @@ func rootlessDaemonSpec() DaemonSpec {
 		Mode:                ModeRootless,
 		ConfigPath:          "/srv/carbon-node/state/daemon.json",
 		SocketPath:          "/run/user/1000/carbon-node/docker.sock",
+		Pidfile:             "/run/user/1000/carbon-node/docker.pid",
 		DataRoot:            "/srv/carbon-node/state/docker/data",
 		ExecRoot:            "/srv/carbon-node/state/docker/exec",
 		ContainerdNamespace: "carbon-node-fixture",
@@ -41,6 +42,7 @@ func rootfulDaemonSpec() DaemonSpec {
 	d := rootlessDaemonSpec()
 	d.Mode = ModeRootful
 	d.SocketPath = "/run/carbon-node/docker.sock"
+	d.Pidfile = "/run/carbon-node/docker.pid"
 	d.RuntimeRoot = "/run/carbon-node"
 	d.RuntimeUID = 0
 	return d
@@ -108,6 +110,37 @@ func TestDaemonOptionsSingleSource(t *testing.T) {
 			}
 			if count != 1 {
 				t.Fatalf("unit has %d ExecStart lines, want 1", count)
+			}
+		})
+	}
+}
+
+// TestDaemonCanonicalPrivatePidfile proves the installer caller passes a
+// caller-owned private pidfile through the shared renderer into both the
+// config and (for rootful) the unit, without weakening the invariant.
+func TestDaemonCanonicalPrivatePidfile(t *testing.T) {
+	for _, spec := range []DaemonSpec{rootlessDaemonSpec(), rootfulDaemonSpec()} {
+		t.Run(string(spec.Mode), func(t *testing.T) {
+			rendered, err := RenderDaemon(spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cfg map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(rendered.Config), &cfg); err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			if err := json.Unmarshal(cfg["pidfile"], &got); err != nil {
+				t.Fatal(err)
+			}
+			if got != spec.Pidfile {
+				t.Fatalf("config pidfile = %q, want caller-owned %q", got, spec.Pidfile)
+			}
+			if strings.Contains(rendered.Config, "/var/run/docker.pid") {
+				t.Fatal("shared default pidfile leaked into config")
+			}
+			if spec.Mode == ModeRootful && !strings.Contains(rendered.Unit, "PIDFile="+spec.Pidfile) {
+				t.Fatal("rootful unit missing caller-owned PIDFile directive")
 			}
 		})
 	}
@@ -186,6 +219,10 @@ func TestDaemonRenderRefusals(t *testing.T) {
 	}{
 		{"global config path", func(d *DaemonSpec) { d.ConfigPath = "/etc/docker/daemon.json" }},
 		{"host socket", func(d *DaemonSpec) { d.SocketPath = "/var/run/docker.sock" }},
+		{"missing pidfile", func(d *DaemonSpec) { d.Pidfile = "" }},
+		{"shared default pidfile", func(d *DaemonSpec) { d.Pidfile = "/var/run/docker.pid" }},
+		{"pidfile clobbers socket", func(d *DaemonSpec) { d.Pidfile = d.SocketPath }},
+		{"pidfile outside runtime root", func(d *DaemonSpec) { d.Pidfile = "/srv/other/docker.pid" }},
 		{"public api", func(d *DaemonSpec) { d.PortRange = "0.0.0.0:2375" }},
 		{"shared roots", func(d *DaemonSpec) { d.DataRoot = d.ExecRoot }},
 		{"shared namespace", func(d *DaemonSpec) { d.ContainerdNamespace = "moby" }},
@@ -264,6 +301,7 @@ func tempSpec(t *testing.T, root string) DaemonSpec {
 		RuntimeRoot: runtimeRoot, StateRoot: filepath.Join(root, "state"),
 		ConfigPath:          filepath.Join(root, "state", "daemon.json"),
 		SocketPath:          filepath.Join(runtimeRoot, "docker.sock"),
+		Pidfile:             filepath.Join(runtimeRoot, "docker.pid"),
 		DataRoot:            filepath.Join(root, "state", "data"),
 		ExecRoot:            filepath.Join(root, "state", "exec"),
 		ContainerdNamespace: "carbon-node-fixture", BridgeCIDR: "10.231.0.1/24",

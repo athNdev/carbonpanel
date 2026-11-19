@@ -43,6 +43,7 @@ type DaemonSpec struct {
 	Mode                DaemonMode `json:"mode"`
 	ConfigPath          string     `json:"config_path"`
 	SocketPath          string     `json:"socket_path"`
+	Pidfile             string     `json:"pidfile"` // private pidfile inside RuntimeRoot
 	DataRoot            string     `json:"data_root"`
 	ExecRoot            string     `json:"exec_root"`
 	ContainerdNamespace string     `json:"containerd_namespace"`
@@ -110,6 +111,7 @@ func (d DaemonSpec) toNative() native.DaemonSpec {
 		Mode:                mode,
 		SocketPath:          d.SocketPath,
 		ConfigPath:          d.ConfigPath,
+		Pidfile:             d.Pidfile,
 		XDG_RUNTIME_DIR:     xdg,
 		DataRoot:            d.DataRoot,
 		ExecRoot:            d.ExecRoot,
@@ -227,6 +229,15 @@ func (d DaemonSpec) validate() error {
 	if d.SocketPath == "" || hasDotDot(d.SocketPath) || isSharedDaemonPath(d.SocketPath) ||
 		!containedIn(d.RuntimeRoot, d.SocketPath) {
 		return fmt.Errorf("%w: daemon must use a private socket inside the runtime root", ErrInvalidInput)
+	}
+	// A private pidfile is mandatory: without it dockerd falls back to the
+	// shared /var/run/docker.pid and a second daemon cannot start on a host
+	// with a preinstalled engine. It must be caller-owned, inside the runtime
+	// root, distinct from the socket and end in .pid.
+	if d.Pidfile == "" || hasDotDot(d.Pidfile) || isSharedDaemonPath(d.Pidfile) ||
+		!containedIn(d.RuntimeRoot, d.Pidfile) || d.Pidfile == d.SocketPath ||
+		!strings.HasSuffix(filepath.ToSlash(d.Pidfile), ".pid") {
+		return fmt.Errorf("%w: daemon needs a private *.pid file inside the runtime root", ErrInvalidInput)
 	}
 	if d.DataRoot == "" || d.ExecRoot == "" || d.DataRoot == d.ExecRoot ||
 		hasDotDot(d.DataRoot) || hasDotDot(d.ExecRoot) ||
