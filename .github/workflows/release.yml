@@ -21,6 +21,11 @@ on:
       - '.github/workflows/release.yml'
       - 'scripts/release.py'
       - 'scripts/test_release.py'
+      - 'scripts/openapi_version.py'
+      - 'scripts/test_openapi_version.py'
+      - 'web/carbon-panel/vite.config.ts'
+      - 'internal/rpc/handlers/openapi.go'
+      - 'internal/rpc/handlers/openapi_parity_test.go'
       - 'internal/buildinfo/**'
       - 'cmd/carbon-panel/main.go'
       - 'cmd/carbon-storage/main.go'
@@ -89,7 +94,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.revision || github.ref }}
       - name: Check release tooling
-        run: python3 -m unittest scripts.test_release
+        run: python3 -m unittest scripts.test_release scripts.test_openapi_version
       - name: Check the checked-in release history catalog
         run: python3 scripts/release.py verify-release-history
       - name: Validate source and version
@@ -140,6 +145,10 @@ jobs:
         run: >-
           buf generate --template
           '{"version":"v2","plugins":[{"remote":"buf.build/community/sudorandom-connect-openapi:v0.21.3","out":".website-build/release-schema","opt":["path=openapi.yaml"]}]}'
+      - name: Stamp the exact product version into the release schema
+        env:
+          RELEASE_SEMVER: ${{ needs.plan.outputs.semver }}
+        run: python3 scripts/openapi_version.py stamp .website-build/release-schema/openapi.yaml "$RELEASE_SEMVER"
       - name: Build the embedded web UI
         env:
           APP_VERSION: ${{ needs.plan.outputs.semver }}
@@ -147,6 +156,14 @@ jobs:
           cd web/carbon-panel
           bun install --frozen-lockfile
           bun run build
+      - name: Stage the stamped schema for the embedded handler
+        run: cp .website-build/release-schema/openapi.yaml web/carbon-panel/build/schemav1.yaml
+      - name: Verify UI, CLI input and OpenAPI version parity
+        env:
+          RELEASE_SEMVER: ${{ needs.plan.outputs.semver }}
+        run: |
+          python3 scripts/openapi_version.py verify-ui web/carbon-panel/build "$RELEASE_SEMVER"
+          python3 scripts/openapi_version.py verify .website-build/release-schema/openapi.yaml "$RELEASE_SEMVER"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-build-inputs
@@ -228,6 +245,16 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_EPOCH: ${{ needs.plan.outputs.epoch }}
         run: python3 scripts/release.py package --version "$RELEASE_VERSION" --epoch "$RELEASE_EPOCH" --goos ${{ matrix.goos }} --goarch ${{ matrix.goarch }} --output dist/bundles
+      - name: Probe the served schema on a running disposable handler
+        if: runner.os != 'Windows'
+        env:
+          CARBONPANEL_EXPECTED_OPENAPI_VERSION: ${{ needs.plan.outputs.semver }}
+        run: go test ./internal/rpc/handlers -run TestServedOpenAPIVersionMatchesBuild -count=1 -v
+      - name: Probe the served schema on a running disposable handler (Windows)
+        if: runner.os == 'Windows'
+        env:
+          CARBONPANEL_EXPECTED_OPENAPI_VERSION: ${{ needs.plan.outputs.semver }}
+        run: go test ./internal/rpc/handlers -run TestServedOpenAPIVersionMatchesBuild -count=1 -v
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-bundle-${{ matrix.goos }}-${{ matrix.goarch }}

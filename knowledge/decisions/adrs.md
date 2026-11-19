@@ -56,6 +56,7 @@ sources:
 | [0042](../../docs/adr/0042-sveltekit3-security-migration.md) | SvelteKit 3 security migration with narrow compatibility shims | [Frontend change](../workflows/frontend-change.md) |
 | [0043](../../docs/adr/0043-egress-policy-enforcement.md) | Enforce egress policy per class, not per boolean | [Named egress classes](../decisions/egress-class-policy.md) |
 | [0044](../../docs/adr/0044-disposable-upgrade-rehearsal-ci.md) | Recurring read-only real-binary upgrade rehearsal on disposable fixtures | [Release](../workflows/release.md) |
+| [0045](../../docs/adr/0045-version-contract-and-multi-version-docs.md) | One fail-closed version contract and immutable per-version docs routes | [Website and documentation publication](website-docs.md) |
 
 # Rule
 
