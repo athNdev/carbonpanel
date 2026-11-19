@@ -67,3 +67,9 @@ test.skipIf(!live)(
 	() => runScenario('snapshot-race'),
 	LIVE_TIMEOUT_MS
 );
+
+test.skipIf(!live)(
+	'transient disconnect reconnects and continues live log delivery (Chromium)',
+	() => runScenario('transient-reconnect'),
+	LIVE_TIMEOUT_MS
+);
