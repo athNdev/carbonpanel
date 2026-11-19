@@ -63,7 +63,7 @@ export interface RowParseResult<T> {
  * `malformed: true`. It is still not validation.
  */
 export function parseEnvVarsDetailed(json: string): RowParseResult<EnvVar> {
-	const raw = json || '{}';
+	const raw = json && json.trim() ? json : '{}';
 	try {
 		return {
 			rows: Object.entries(JSON.parse(raw)).map(([key, value]) => ({
@@ -88,7 +88,7 @@ export function parseEnvVars(json: string): EnvVar[] {
  * failure yields empty rows AND reports `malformed: true`.
  */
 export function parseVolumesDetailed(json: string): RowParseResult<VolumeMount> {
-	const raw = json || '[]';
+	const raw = json && json.trim() ? json : '[]';
 	try {
 		return {
 			rows: JSON.parse(raw).map((v: Record<string, unknown>) => ({

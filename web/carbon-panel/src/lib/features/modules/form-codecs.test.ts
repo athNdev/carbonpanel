@@ -79,9 +79,11 @@ test('detailed codecs report malformed persisted JSON without changing valid row
 			malformed: false
 		}
 	);
-	// Blank fields mean "absent", as before.
+	// Blank fields (including whitespace) mean "absent", as before.
 	assert.deepEqual(parseEnvVarsDetailed(''), { rows: [], malformed: false });
 	assert.deepEqual(parseVolumesDetailed(''), { rows: [], malformed: false });
+	assert.deepEqual(parseEnvVarsDetailed('   '), { rows: [], malformed: false });
+	assert.deepEqual(parseVolumesDetailed('   '), { rows: [], malformed: false });
 	// Non-blank invalid JSON keeps the empty-row fallback AND is now explicit.
 	assert.deepEqual(parseEnvVarsDetailed('{invalid'), { rows: [], malformed: true });
 	assert.deepEqual(parseVolumesDetailed('{invalid'), { rows: [], malformed: true });

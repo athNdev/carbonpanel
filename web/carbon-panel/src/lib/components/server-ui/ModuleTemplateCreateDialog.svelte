@@ -733,8 +733,8 @@ one at https://mozilla.org/MPL/2.0/.
 								</div>
 								{#if envMalformed}
 									<p class="text-sm text-destructive" data-testid="template-env-malformed">
-										Stored environment JSON was unreadable and is shown as empty. No defaults were
-										changed.
+										Stored environment JSON was unreadable, so this form started empty. No defaults
+										were changed.
 									</p>
 								{/if}
 								<Button onclick={addEnvVar} class="gap-2">
@@ -799,7 +799,8 @@ one at https://mozilla.org/MPL/2.0/.
 								</div>
 								{#if volumesMalformed}
 									<p class="text-sm text-destructive" data-testid="template-volumes-malformed">
-										Stored volume JSON was unreadable and is shown as empty. No mounts were changed.
+										Stored volume JSON was unreadable, so this form started empty. No mounts were
+										changed.
 									</p>
 								{/if}
 								<Button onclick={addVolume} class="gap-2">
