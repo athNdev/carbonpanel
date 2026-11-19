@@ -51,6 +51,28 @@ resolution outside `BUILD_SCRIPTS`/`BUILD_DELEGATES`. The offline fixture
 no QEMU, LXC, systemd, host provisioning or publication is executed. This lane
 has built, signed and published no artifact; the announcement stays gated.
 
+Because those wrappers produce offline plans/fixtures (`BUILD-PREFLIGHT.json`
+with `live_build: false`), a fail-closed publication predicate
+(`runtime_artifacts.py publication_predicate`) runs in the workflow before
+checksumming, signing or any draft release, and is also inherited by
+`verify_bundle`. It refuses any offline/fixture marker or fixture-only plan
+record, so the rehearsal outputs stamped by these wrappers are refused before
+checksumming, signing or publication.
+
+A filename suffix or byte count is never a deployable-artifact claim.
+`scripts/artifact_kind_verifiers.py` qualifies each payload with its REAL
+verifier, reusing existing code: QCOW2 header plus `qemu-img info` tool
+inspection with digest/size bound by `scripts/node_vm_verify_image.py`; the
+`packaging/node-lxc/node_lxc_artifact.py` archive/layout inspector for rootfs;
+and `internal/nodeinstall.VerifyArtifact` via the installer `verify` CLI for the
+expected package structure. Provenance is bound to the EXACT payload SHA-256,
+and symlinks or non-regular files are refused. If a native validator is
+unavailable (for example no `qemu-img` on the runner), publication STOPS and the
+lane stays REHEARSAL-ONLY; these are preconditions, not a substitute for the
+consumer's cryptographic verification. The predicate does not gate the offline
+rehearsal reachability seam. Publication remains a manual `workflow_dispatch`
+with `publish=true`, and no real artifact has been published.
+
 # Alternatives
 
 - Publishing converted VHDX/VMDK/VDI images from `qemu-img` output would claim
