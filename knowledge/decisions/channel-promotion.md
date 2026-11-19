@@ -55,6 +55,12 @@ sources:
 - `latest` and the `stable` alias move only from the verified stable digest
   (`f88748beâ€¦`/`sha256:ead260efâ€¦`). The planned `carbonpanel-v2.0.0` stable is
   not a channel publication; arbitrary, inherited and legacy tags never publish.
+- No legacy alias-write step remains: Nightly and Stable aliases move ONLY in
+  the qualified transaction. Stable binds the exact target version to both
+  registry digests and the deployed public docs marker, and GitHub release
+  creation is gated on that synchronized transaction. Rollback runs under
+  `always()` with explicit outcome checks and restores both aliases and docs
+  from the exact prior receipt; retry resumes that digest without rebuilding.
 - All channel and docs moves share ONE fixed non-cancelling publication lock
   (`pages-deploy`, `cancel-in-progress: false`); no nested group and no dispatched
   workflow takes the same lock. A manual/site-only dispatch may publish only an

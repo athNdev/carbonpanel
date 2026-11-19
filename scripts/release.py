@@ -2163,8 +2163,15 @@ def channel_move_decision(channel, candidate_commit, candidate_digest,
 
     # Stable is frozen to the verified baseline; no arbitrary/legacy tag moves it.
     if channel == "stable":
-        if (candidate_commit != STABLE_CHANNEL_BASELINE["commit"]
-                or candidate_digest != STABLE_CHANNEL_BASELINE["digest"]):
+        release_tag = qualification.get("release_tag", "")
+        if release_tag:
+            ok, reason = publication_candidate_decision(release_tag)
+            product = product_release_or_none(release_tag)
+            if (not ok or product is None or product["channel"] != "stable"
+                    or release_tag == NEXT_STABLE_GIT_TAG):
+                return "refuse", "stable aliases require an exact stable product tag: " + reason, ""
+        elif (candidate_commit != STABLE_CHANNEL_BASELINE["commit"]
+              or candidate_digest != STABLE_CHANNEL_BASELINE["digest"]):
             return "refuse", "stable aliases may only move from the verified stable digest", ""
 
     # Docs qualify on the contract + exact site build, not on registry aliases.
@@ -2338,11 +2345,21 @@ def channel_transaction_decision(candidate, previous=None, live=None,
         return "refuse", "exact source revision must be pinned from trusted main", previous or {}, []
     if str(candidate.get("ci_verified", False)).strip().lower() != "true":
         return "refuse", "exact-commit main CI is not verified", previous or {}, []
-    if channel == "stable" and (
-            commit != STABLE_CHANNEL_BASELINE["commit"]
-            or digest != STABLE_CHANNEL_BASELINE["digest"]):
-        return ("refuse",
-                "stable channel moves only from the verified stable digest", previous or {}, [])
+    if channel == "stable":
+        release_tag = candidate.get("release_tag", "")
+        if release_tag:
+            # An exact canonical stable product tag with its verified immutable
+            # digest; the planned 2.0.0 and arbitrary/legacy tags are refused.
+            ok, reason = publication_candidate_decision(release_tag)
+            product = product_release_or_none(release_tag)
+            if (not ok or product is None or product["channel"] != "stable"
+                    or release_tag == NEXT_STABLE_GIT_TAG):
+                return ("refuse", "stable channel requires an exact canonical stable release tag: "
+                        + reason, previous or {}, [])
+        elif (commit != STABLE_CHANNEL_BASELINE["commit"]
+              or digest != STABLE_CHANNEL_BASELINE["digest"]):
+            return ("refuse",
+                    "stable channel moves only from the verified stable digest", previous or {}, [])
 
     previous = previous or {}
     live = live or {}
@@ -2547,6 +2564,117 @@ def channel_active_receipt_cli(args):
     return receipt
 
 
+def channel_resume_plan(receipt, candidate_digest=""):
+    """A retry resumes the EXACT recorded digest; it never rebuilds a new one."""
+    if not receipt or not receipt.get("verified") or not valid_digest(receipt.get("digest", "")):
+        return {"action": "refuse", "reason": "no verified receipt digest to resume"}
+    target = receipt["digest"]
+    if candidate_digest and candidate_digest != target:
+        return {"action": "refuse", "reason": "retry must resume the exact recorded digest"}
+    return {"action": "resume", "digest": target, "commit": receipt.get("revision", ""),
+            "reason": "resuming the exact recorded verified digest"}
+
+
+def channel_transaction_run(candidate, previous, writer=None, docs_publisher=None,
+                            final_probe=None, live=None, event="workflow_run",
+                            ancestry=None):
+    """Execute the qualified transaction with injectable failures (offline).
+
+    `writer(registry, digest) -> (ok, error)`, `docs_publisher(commit, digest) -> bool`
+    and `final_probe(commit, digest) -> bool` are the seams a fixture replaces to
+    simulate a second-registry write failure or a final probe failure. On ANY
+    failure both registry aliases and the docs marker are restored to the prior
+    verified receipt; no immutable artifact is overwritten. Returns an outcome
+    dict, never raises for an injected failure.
+    """
+    writer = writer or (lambda registry, digest: (True, ""))
+    docs_publisher = docs_publisher or (lambda commit, digest: True)
+    final_probe = final_probe or (lambda commit, digest: True)
+    commit, digest = candidate.get("commit"), candidate.get("digest")
+    action, reason, receipt, steps = channel_transaction_decision(
+        candidate, previous, live or {}, event, ancestry=ancestry)
+    if action in ("refuse", "rollback"):
+        return {"outcome": "refused", "reason": reason, "moved": [], "restored": False,
+                "receipt": previous or {}, "steps": list(steps)}
+    if action == "noop":
+        return {"outcome": "noop", "reason": reason, "moved": [], "restored": False,
+                "receipt": previous or {}, "steps": []}
+
+    failure = ""
+    if not docs_publisher(commit, digest):
+        failure = "canonical docs marker publish failed"
+    if not failure:
+        for registry in CHANNEL_REGISTRIES:
+            ok, error = writer(registry, digest)
+            if not ok:
+                failure = f"{registry} alias write failed: {error}"
+                break
+    if not failure and not final_probe(commit, digest):
+        failure = "final public marker/alias probe failed"
+
+    if failure:
+        prior = previous or {}
+        prior_digest = prior.get("digest", "")
+        restored = []
+        if valid_digest(prior_digest):
+            for registry in CHANNEL_REGISTRIES:
+                writer(registry, prior_digest)
+                restored.append(registry)
+            docs_publisher(prior.get("revision", ""), prior_digest)
+        return {"outcome": "rolled_back", "reason": failure, "moved": [],
+                "restored": restored, "receipt": prior, "steps": (
+                    TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_VERIFY_FINAL),
+                "resume": channel_resume_plan(prior)}
+    return {"outcome": "published", "reason": reason,
+            "moved": list(CHANNEL_REGISTRIES), "restored": False,
+            "receipt": receipt, "steps": list(steps)}
+
+
+def channel_rollback(receipt, apply=False):
+    """Roll both registry aliases and the docs marker back to a verified receipt."""
+    if not receipt or not receipt.get("verified") or not valid_digest(receipt.get("digest", "")):
+        raise ValueError("Rollback needs a verified receipt with a valid digest")
+    if not valid_commit(receipt.get("revision", "")):
+        raise ValueError("Rollback needs the full-SHA revision recorded in the receipt")
+    values = {"action": "rollback", "digest": receipt["digest"],
+              "commit": receipt["revision"], "registries": list(CHANNEL_REGISTRIES),
+              "docs_commit": receipt.get("docs_commit", receipt["revision"])}
+    if apply:
+        _apply_channel_alias(receipt.get("channel", "nightly"), receipt["digest"])
+    return values
+
+
+def channel_rollback_cli(args):
+    """CLI: emit/apply the exact-digest rollback to a verified prior receipt."""
+    receipt = json_argument(args.receipt, default={}) or {}
+    values = channel_rollback(receipt, apply=args.apply)
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return values
+
+
+def channel_simulate_cli(args):
+    """CLI: run the transaction with injected failures (fully offline evidence)."""
+    candidate = json_argument(args.candidate, default={}) or {}
+    previous = json_argument(args.previous, default={}) or {}
+    fail_registry = args.fail_registry
+    fail_final = args.fail_final_probe
+    fail_docs = args.fail_docs
+
+    def writer(registry, digest):
+        if registry == fail_registry and digest != previous.get("digest", ""):
+            return False, "injected second-registry write failure"
+        return True, ""
+
+    outcome = channel_transaction_run(
+        candidate, previous, writer=writer,
+        docs_publisher=lambda commit, digest: not fail_docs,
+        final_probe=lambda commit, digest: not fail_final,
+        ancestry=lambda older, newer: True)
+    print(json.dumps(outcome, indent=2, sort_keys=True))
+    return outcome
+
+
 def channel_transaction_cli(args):
     """CLI: emit the qualified-transaction decision (offline, no writes)."""
     candidate = json_argument(args.candidate, default={}) or {}
@@ -2604,6 +2732,7 @@ def channel_promote_cli(args):
         "contract_valid": args.contract_validated == "true",
         "site_validated": args.docs_validated,
         "tag": args.tag,
+        "release_tag": args.release_tag,
     }
     if args.contract:
         qualification["contract"] = json_argument(args.contract)
@@ -2862,6 +2991,7 @@ def build_parser():
     promote.add_argument("--contract-validated", default="false")
     promote.add_argument("--docs-validated", default="false")
     promote.add_argument("--tag", default="")
+    promote.add_argument("--release-tag", default="")
     promote.add_argument("--immutable", default="{}")
     promote.add_argument("--aliases", default="{}")
     promote.add_argument("--previous-commit", default="")
@@ -2897,6 +3027,15 @@ def build_parser():
     marker.add_argument("--commit", required=True)
     marker.add_argument("--digest", required=True)
     marker.add_argument("--canonical", action="store_true")
+    rollback = commands.add_parser("channel-rollback")
+    rollback.add_argument("--receipt", default="{}")
+    rollback.add_argument("--apply", action="store_true")
+    simulate = commands.add_parser("channel-simulate")
+    simulate.add_argument("--candidate", default="{}")
+    simulate.add_argument("--previous", default="{}")
+    simulate.add_argument("--fail-registry", default="")
+    simulate.add_argument("--fail-docs", action="store_true")
+    simulate.add_argument("--fail-final-probe", action="store_true")
     return parser
 
 
@@ -2916,7 +3055,9 @@ def main():
                 "promote-stable-alias": promote_stable_alias_cli,
                 "channel-transaction": channel_transaction_cli,
                 "channel-active-receipt": channel_active_receipt_cli,
-                "stage-channel-marker": stage_channel_marker_cli}
+                "stage-channel-marker": stage_channel_marker_cli,
+                "channel-rollback": channel_rollback_cli,
+                "channel-simulate": channel_simulate_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:

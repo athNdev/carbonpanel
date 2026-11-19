@@ -331,6 +331,14 @@ and repairs drift. `latest` and the `stable` alias move only from the verified
 stable digest (`sha256:ead260efâ€¦`, commit `f88748beâ€¦`); the planned
 `carbonpanel-v2.0.0` stable is not a channel publication.
 
+No legacy alias-write step remains in any workflow: Nightly and Stable aliases
+move only inside the qualified transaction. A stable release binds its exact
+target version, both registry digests and the deployed public docs marker
+together before GitHub release creation. Rollback runs under `always()` with
+explicit outcome checks, restoring both aliases and docs to the prior verified
+receipt; retry resumes that exact digest. Offline fixtures inject a second-
+registry write failure and a final-probe failure to prove the invariant.
+
 The verified current Docker Hub nightly baseline (`sha256:ecc89ba9â€¦`, commit
 `d8597d4eâ€¦`) is a fact about today's registry, not a mandatory first revision.
 It seeds nightly only through a bounded, recorded bootstrap that re-verifies

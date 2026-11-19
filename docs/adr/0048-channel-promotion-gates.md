@@ -114,6 +114,19 @@ paraphrased below rather than duplicated:
    `release.yml` now supplies `GH_TOKEN`; without it `gh run list` is
    unauthenticated and the exact-CI check could never pass. This enables the
    check rather than bypassing it.
+7. **No legacy alias-write bypass.** Every former `nightly-promote`,
+   `edge-promote`, independent stable-alias and bare `latest` write step was
+   removed from the workflows. Both Nightly and Stable aliases move ONLY inside
+   the qualified transaction. Stable binds the exact target product version and
+   the deployed public docs marker together, and GitHub release creation is
+   gated on that synchronized transaction; a stale local manifest is QA-only.
+8. **Genuine failure branch.** Rollback runs under `always()` with explicit
+   outcome checks (default `success()` can never follow a failed alias move or
+   final probe). It restores BOTH registry aliases and the canonical docs marker
+   from the exact prior verified receipt; retry resumes that exact digest and
+   never rebuilds. An offline harness injects a second-registry write failure
+   and a final-probe failure to prove no alias moves without both registries and
+   the docs marker, and that partial failure restores both surfaces.
 
 ## Consequences
 

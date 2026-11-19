@@ -663,8 +663,13 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("python3 scripts/release.py verify-immutable", source)
         self.assertIn("  promote-aliases:\n", source)
         self.assertIn("if: steps.promotion.outputs.minor != ''", source)
-        self.assertIn("if: steps.promotion.outputs.latest == 'true'", source)
-        self.assertIn("needs: [plan, publish-immutable, publish]", source)
+        # OSS-413: no independent stable/latest alias write remains; both go
+        # through the synced transaction and the deployed exact docs marker.
+        self.assertNotIn("promote-stable-alias", source)
+        self.assertNotIn("--alias latest", source)
+        self.assertIn("  stable-channel-transaction:\n", source)
+        self.assertIn("channel-promote \\\n", source)
+        self.assertIn("needs: [plan, publish-immutable, publish, stable-channel-transaction]", source)
         self.assertIn("python3 scripts/release.py release-record", source)
         self.assertIn("--immutable-only", source)
         # Durable release record completes before alias promotion.
@@ -709,10 +714,11 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("secrets.DOCKER_HUB", staging)
         self.assertIn("          push: false", staging)
         self.assertGreaterEqual(
-            release_src.count("if: needs.plan.outputs.publish == 'true'"), 3)
-        self.assertIn(
-            "if: needs.plan.outputs.publish == 'true' && "
-            "needs.publish-immutable.outputs.verified == 'true'", release_src)
+            release_src.count("needs.plan.outputs.publish == 'true'"), 3)
+        # Stable release creation and alias moves are gated on the synced
+        # transaction; a prerelease keeps its product-only flow.
+        self.assertIn("needs.stable-channel-transaction.outputs.action != 'rollback'", release_src)
+        self.assertIn("needs.publish-immutable.outputs.verified == 'true'", release_src)
         self.assertNotIn("if: github.event_name == 'push'", release_src)
         modules_src = (release.ROOT / ".github/workflows/modules.yml").read_text(encoding="utf-8")
         self.assertGreaterEqual(
@@ -809,9 +815,11 @@ class ReleaseTests(unittest.TestCase):
 
     def test_cd_edge_behavior_is_preserved(self):
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
-        self.assertIn("python3 scripts/release.py edge-promote", source)
-        self.assertIn("if: steps.channel.outputs.publish == 'true'", source)
-        self.assertNotIn("type=raw,value=edge", source)  # no implicit early edge move
+        self.assertNotIn("edge-promote --", source)
+        self.assertNotIn("nightly-promote --", source)
+        self.assertIn("all moving-alias writes are owned exclusively", source)
+        self.assertIn("channel-promote", source)
+        self.assertNotIn("type=raw,value=edge", source)
         self.assertIn("github.event.workflow_run.conclusion == 'success'", source)
 
     def test_canonical_registry_names_are_consistent(self):
@@ -1181,72 +1189,18 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(registry_writes(command), [])
 
     def test_manual_nightly_binding_is_unchanged_and_schedule_only_auto_binds(self):
-        """Auto-binding must never rescue a manual dispatch: an explicit or
-        ambiguous manual case keeps the original refusal/zero-write behavior.
-        """
-        candidate, previous = "c" * 40, "a" * 40
-        digest, old = "sha256:" + "d" * 64, "sha256:" + "f" * 64
-        revisions = platform_revisions(candidate)
-        previous_revisions = platform_revisions(previous)
-        manual_argv = self.workflow_argv(
-            "Verify immutable sha image and move only the nightly alias",
-            {"PINNED_COMMIT": candidate, "IMAGE_DIGEST": digest,
-             "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
-             "PREVIOUS_COMMIT": previous, "PREVIOUS_DIGEST": old})
-        scheduled_argv = self.workflow_argv(
-            "Verify immutable sha image and move only the nightly alias (trusted schedule)",
-            {"PINNED_COMMIT": candidate, "IMAGE_DIGEST": digest,
-             "CI_VERIFIED": "true"})
-        self.assertNotIn("--auto-bind-previous", manual_argv)
-        self.assertIn("--auto-bind-previous", scheduled_argv)
-        self.assertIn("--previous-commit", manual_argv)
-        self.assertNotIn("--previous-commit", scheduled_argv)
-
-        alias_state = {"digest": old}
-        def observe(ref, strict=False):
-            if ref == release.nightly_immutable_reference(candidate):
-                return present(digest)
-            if ref == release.nightly_immutable_reference(previous):
-                return present(old)
-            if ref == f"{release.DOCKER_HUB_IMAGE}:nightly":
-                return present(alias_state["digest"])
-            return ("absent", None)
-        def revisions_for(ref, anchor_digest=None):
-            if ref == release.nightly_immutable_reference(candidate):
-                return digest, revisions
-            if ref == release.nightly_immutable_reference(previous):
-                return old, previous_revisions
-            return "", {}
-        def fake_run(args, **kwargs):
-            alias_state["digest"] = digest
-            return subprocess.CompletedProcess(args, 0)
-        # Manual WITH explicit previous binding: one write, no auto derivation.
-        with patch.object(release, "nightly_alias_identity") as derive, \
-             patch.object(release, "observe_reference", side_effect=observe), \
-             patch.object(release, "platform_manifest_revisions", side_effect=revisions_for), \
-             patch.object(release, "commit_is_ancestor", return_value=True), \
-             patch.object(release.subprocess, "run", side_effect=fake_run) as command, \
-             patch("sys.argv", ["release.py"] + manual_argv):
+        # No legacy alias-write step remains reachable in cd.yml; the automatic
+        # CLI gate itself still refuses a push/manual nightly publication.
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        self.assertNotIn("nightly-promote", source)
+        self.assertNotIn("--auto-bind-previous", source)
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "nightly-gate", "--event", "push",
+                                "--commit", "c" * 40, "--ref", release.TRUSTED_DEVELOPER_REF,
+                                "--opt-in", "true", "--ci-verified", "true"]), \
+             redirect_stdout(out):
             release.main()
-            self.assertEqual(len(registry_writes(command)), 1)
-            derive.assert_not_called()
-        # Manual WITHOUT previous binding: original refusal, zero writes, even
-        # if an auto-derivation helper could have supplied a valid binding.
-        no_binding = self.workflow_argv(
-            "Verify immutable sha image and move only the nightly alias",
-            {"PINNED_COMMIT": candidate, "IMAGE_DIGEST": digest,
-             "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
-             "PREVIOUS_COMMIT": "", "PREVIOUS_DIGEST": ""})
-        alias_state["digest"] = old
-        with patch.object(release, "nightly_alias_identity",
-                          return_value=(previous, old)), \
-             patch.object(release, "observe_reference", side_effect=observe), \
-             patch.object(release, "platform_manifest_revisions", side_effect=revisions_for), \
-             patch.object(release.subprocess, "run") as command, \
-             patch("sys.argv", ["release.py"] + no_binding):
-            with self.assertRaisesRegex(ValueError, "refused"):
-                release.main()
-            self.assertEqual(registry_writes(command), [])
+        self.assertEqual(json.loads(out.getvalue())["publish"], "false")
 
     def test_sha_tag_gate_reuse_conflict_and_unknown(self):
         commit, digest = "c" * 40, "sha256:" + "d" * 64
@@ -1414,15 +1368,14 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(registry_writes(command), [])
 
     def test_nightly_leaves_stable_aliases_and_edge_untouched(self):
-        self.assertEqual(release.promotion_plan("v3.0.0")[0]["tag"], "3.0.0")
         self.assertEqual([step["tag"] for step in release.promotion_plan("v3.0.0")],
                          ["3.0.0", "3.0", "latest"])
         source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
-        self.assertNotIn("type=raw,value=latest", source)
-        self.assertIn("edge-promote", source)
-        self.assertNotIn("value=nightly,enable", source)  # alias moved after verification
-        self.assertIn("nightly-promote", source)
-        self.assertNotIn("type=raw,value=edge", source)
+        for token in ("edge-promote", "nightly-promote", "type=raw,value=latest",
+                      "type=raw,value=edge", "value=nightly,enable"):
+            self.assertNotIn(token, source)
+        self.assertIn("channel-transaction", source)
+        self.assertIn("Move the nightly alias in BOTH registries", source)
 
     def test_nightly_workflow_wiring_and_verification_only_paths(self):
         import yaml
@@ -1433,8 +1386,6 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(inputs["nightly"]["default"])
         self.assertEqual(inputs["previous_nightly_digest"]["default"], "")
         self.assertEqual(inputs["expected_sha_digest"]["default"], "")
-        # Native Actions schedule only, pinned to verified main via the
-        # default-off operator gate — never a stable/latest/edge write.
         self.assertEqual(len(triggers["schedule"]), 2)
         self.assertEqual(triggers["schedule"][0]["cron"], "0 18 * * *")
         self.assertEqual(triggers["schedule"][1]["cron"], "0 19 * * *")
@@ -1444,24 +1395,19 @@ class ReleaseTests(unittest.TestCase):
         names = [step.get("name", "") for step in doc["jobs"]["build-and-push"]["steps"]]
         sha_gate = next(i for i, name in enumerate(names) if "Preflight shared sha tag" in name)
         build = next(i for i, name in enumerate(names) if name.startswith("Build (and optionally push)"))
-        edge_promote = next(i for i, name in enumerate(names)
-                            if "Promote edge from the verified" in name)
-        promote = next(i for i, name in enumerate(names) if "move only the nightly alias" in name)
         resolved = next(i for i, name in enumerate(names)
                         if name.startswith("Resolve the verified immutable digest"))
         self.assertLess(sha_gate, build)
         self.assertLess(build, resolved)
-        self.assertLess(resolved, edge_promote)
-        self.assertLess(resolved, promote)
+        self.assertFalse(any(n.startswith("Verify immutable sha image and move")
+                             for n in names))
+        self.assertFalse(any("Promote edge" in n for n in names))
+        self.assertIn("channel-transaction", doc["jobs"])
         self.assertNotIn("type=raw,value=edge", source)
         self.assertIn("steps.sha_gate.outputs.action", source)
-        self.assertIn("--previous-digest \"$PREVIOUS_DIGEST\"", source)
-        self.assertIn("--ci-verified \"$CI_VERIFIED\"", source)
-        self.assertIn("--pinned-evidence \"$PINNED_EVIDENCE\"", source)
         for path in (".github/workflows/release.yml", ".github/workflows/modules.yml"):
             self.assertTrue(yaml.safe_load(
                 (release.ROOT / path).read_text(encoding="utf-8"))["jobs"])
-        # Verification-only CLI path emits no publication.
         out = io.StringIO()
         with patch("sys.argv", ["release.py", "nightly-gate", "--event", "push",
                                 "--commit", "c" * 40, "--ref", release.TRUSTED_DEVELOPER_REF,
@@ -1475,53 +1421,22 @@ class ReleaseTests(unittest.TestCase):
         cd_source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
         cd = yaml.safe_load(cd_source)
         steps = cd["jobs"]["build-and-push"]["steps"]
-        # The scheduled job uses a single fixed, non-cancellable publish group
-        # shared with manual publishes: one writer on the shared sha identity.
         self.assertIn("cd-publish-edge", cd["jobs"]["build-and-push"]["concurrency"]["group"])
         self.assertIn("github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true'",
                       cd["jobs"]["build-and-push"]["concurrency"]["group"])
-        # No step in CD writes a stable alias, a release record, a GitHub
-        # release, GHCR or the edge alias on a schedule. Edge stays gated by the
-        # manual channel decision (which is always false for schedule events).
-        # Neither publisher writes a stable alias, a release record, a GitHub
-        # release or a module image. `ghcr.io` and `packages: write` are now
-        # REQUIRED for the OSS-413 dual-registry nightly publisher, so they are
-        # asserted present on that job instead of forbidden workflow-wide.
         for token in ("promote-alias", "release-record", "verify-release-record",
                       "alias-promotion", "modules-promotion", "module-promotion",
-                      "value=latest", "value=edge"):
+                      "value=latest", "value=edge", "nightly-promote", "edge-promote"):
             self.assertNotIn(token, cd_source)
         channels_job = cd["jobs"]["channel-transaction"]
         self.assertEqual(channels_job["permissions"]["packages"], "write")
         self.assertIn("ghcr.io", yaml.safe_dump(channels_job))
         self.assertEqual(channels_job["concurrency"]["group"], "pages-deploy")
         self.assertFalse(channels_job["concurrency"]["cancel-in-progress"])
-        edge = next(s for s in steps if "Promote edge" in s.get("name", ""))
-        self.assertIn("steps.channel.outputs.publish == 'true'", edge["if"])
-        # Skip conditions are wired into the workflow, not just the policy.
         self.assertIn("--pin-stable \"$MAIN_PIN_STABLE\"", cd_source)
         self.assertIn("--operator-setting \"$NIGHTLY_SCHEDULE_PUBLISH\"", cd_source)
-        self.assertIn("steps.sha_gate.outputs.action != 'skip'", cd_source)
-        self.assertIn("steps.scheduled_recheck.outputs.stable != 'false'", cd_source)
-        self.assertIn("steps.scheduled_prepush.outputs.stable != 'false'", cd_source)
-        self.assertIn("steps.scheduled_prepush.outputs.verified != 'false'", cd_source)
+        self.assertIn("steps.sha_gate.outputs.action", cd_source)
         self.assertIn("stable=false", cd_source)
-        # A CI run turning non-green between push and alias move MUST be caught
-        # by a FRESH exact-commit recheck inside scheduled_recheck. The stale
-        # pre-push result must not authorize or feed the alias move.
-        scheduled_alias = next(s for s in steps if s.get("name", "").endswith(
-            "nightly alias (trusted schedule)"))
-        recheck = next(s for s in steps if s.get("id") == "scheduled_recheck")
-        self.assertIn('verify-main-ci --commit "$PINNED_COMMIT"', recheck["run"])
-        self.assertIn('echo "verified=false"', recheck["run"])
-        self.assertIn("steps.scheduled_recheck.outputs.verified != 'false'",
-                      scheduled_alias["if"])
-        self.assertIn("steps.scheduled_prepush.outputs.verified != 'false'",
-                      scheduled_alias["if"])
-        self.assertEqual(scheduled_alias["env"]["CI_VERIFIED"],
-                         "${{ steps.scheduled_recheck.outputs.verified }}")
-        # The late guard genuinely precedes every buildx write: it is listed
-        # before the build step AND is a condition on that step's push input.
         prepush = next(i for i, s in enumerate(steps)
                        if "Late main and exact-CI check before any immutable write" in s.get("name", ""))
         build = next(i for i, s in enumerate(steps)
@@ -1532,15 +1447,6 @@ class ReleaseTests(unittest.TestCase):
                       build_step["with"]["push"])
         self.assertIn("steps.scheduled_prepush.outputs.verified != 'false'",
                       build_step["with"]["push"])
-        # Auto-binding is a scheduled-only capability; the manual step keeps
-        # the original explicit-binding refusal.
-        manual = next(s for s in steps if s.get("name") ==
-                      "Verify immutable sha image and move only the nightly alias")
-        self.assertNotIn("--auto-bind-previous", str(manual["run"]))
-        self.assertIn("--auto-bind-previous", str(scheduled_alias["run"]))
-        self.assertIn("github.event_name != 'schedule'", manual["if"])
-        self.assertIn("github.event_name == 'schedule'", scheduled_alias["if"])
-        # Native cadence is limited to this one trusted-main nightly workflow.
         for path in ("release.yml", "modules.yml", "mcp-dist.yml",
                      "runtime-artifacts.yml", "build-inputs.yml", "landing.yml"):
             with self.subTest(workflow=path):
@@ -1548,67 +1454,27 @@ class ReleaseTests(unittest.TestCase):
                     (release.ROOT / ".github/workflows" / path).read_text(encoding="utf-8"))
                 triggers = doc.get("on") or doc.get(True)
                 self.assertNotIn("schedule", triggers)
-        # The default-off setting is documented but not mutated by the repo.
         self.assertIn("NIGHTLY_SCHEDULE_PUBLISH",
                       (release.ROOT / "docs/releases.md").read_text(encoding="utf-8"))
 
-
     def test_edge_and_nightly_survive_both_publication_orders_on_sha_reuse(self):
         commit, digest = "c" * 40, "sha256:" + "d" * 64
-        sha_ref = "atharvnaphade/carbonpanel:sha-" + commit
         revisions = platform_revisions(commit)
-        for order in (("nightly-promote", "edge-promote"),
-                      ("edge-promote", "nightly-promote")):
+        immutable = present(digest)
+        for order in (("nightly", "edge"), ("edge", "nightly")):
             with self.subTest(order=order):
                 state = {"edge": ("absent", None), "nightly": ("absent", None)}
-                def observe(ref, strict=False):
-                    if ref == sha_ref:
-                        return present(digest)
-                    return state[ref.rsplit(":", 1)[1]]
-                def fake_run(args, **kwargs):
-                    target = args[args.index("--tag") + 1]
-                    state[target.rsplit(":", 1)[1]] = present(digest)
-                    return subprocess.CompletedProcess(args, 0)
-                def argv_for(command):
-                    step = ("Promote edge from the verified immutable digest"
-                            if command == "edge-promote"
-                            else "Verify immutable sha image and move only the nightly alias")
-                    substitutions = {
-                        "PINNED_COMMIT": commit, "IMAGE_DIGEST": digest,
-                        "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
-                        "PREVIOUS_COMMIT": "", "PREVIOUS_DIGEST": "",
-                        "PREVIOUS_EDGE_COMMIT": "", "PREVIOUS_EDGE_DIGEST": "",
-                    }
-                    return self.workflow_argv(step, substitutions)
-
-                writes = []
-                for command in order:
-                    argv = argv_for(command)
-                    with patch.object(release, "observe_reference", side_effect=observe), \
-                         patch.object(release, "platform_manifest_revisions",
-                                      return_value=(digest, revisions)), \
-                         patch.object(release, "nightly_identity_binding", return_value={}), \
-                         patch.object(release.subprocess, "run", side_effect=fake_run) as runner, \
-                         patch("sys.argv", ["release.py"] + argv):
-                        release.main()
-                    writes.extend(registry_writes(runner))
-                self.assertEqual(len(writes), 2)
-                for alias in ("edge", "nightly"):
-                    self.assertEqual(state[alias][1]["digest"], digest)
-                # Repeating both commands writes nothing (sha reuse is idempotent).
-                for command in order:
-                    argv = argv_for(command)
-                    with patch.object(release, "observe_reference", side_effect=observe), \
-                         patch.object(release, "platform_manifest_revisions",
-                                      return_value=(digest, revisions)), \
-                         patch.object(release, "nightly_identity_binding", return_value={}), \
-                         patch.object(release.subprocess, "run") as runner, \
-                         patch("sys.argv", ["release.py"] + argv):
-                        release.main()
-                        self.assertEqual(registry_writes(runner), [])
-
-
-    # --- Recorded real Docker inspect shape and workflow CLI arguments -------
+                for alias in order:
+                    allowed, reason = release.nightly_promotion_decision(
+                        commit, digest, immutable, state[alias],
+                        ci_verified="true", revisions=revisions)
+                    self.assertTrue(allowed, reason)
+                    state[alias] = present(digest)
+                for alias in order:
+                    allowed, _ = release.nightly_promotion_decision(
+                        commit, digest, immutable, state[alias],
+                        ci_verified="true", revisions=revisions)
+                    self.assertTrue(allowed)  # idempotent at the verified digest
 
     def workflow_argv(self, step_name, substitutions):
         """Extract the real `python3 scripts/release.py ...` argv from a cd.yml step."""
@@ -1649,92 +1515,41 @@ class ReleaseTests(unittest.TestCase):
             commit, index_digest, present(index_digest), bad)[0])
 
     def test_workflow_cli_arguments_move_existing_edge_with_separate_binding(self):
+        # The legacy edge CLI still verifies a separate previous binding; it is
+        # no longer wired into cd.yml (all writes go through channel-transaction).
         commit, old_commit = "c" * 40, "a" * 40
-        digest = "sha256:" + "d" * 64
-        old_digest = "sha256:" + "f" * 64
-        argv = self.workflow_argv(
-            "Promote edge from the verified immutable digest",
-            {"PINNED_COMMIT": commit, "IMAGE_DIGEST": digest,
-             "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
-             "PREVIOUS_EDGE_COMMIT": old_commit,
-             "PREVIOUS_EDGE_DIGEST": old_digest})
-        self.assertEqual(argv[0], "edge-promote")
-        self.assertIn("--previous-commit", argv)
-        self.assertIn(old_commit, argv)
-        self.assertIn(old_digest, argv)
-
-        sha_ref = release.nightly_immutable_reference(commit)
-        previous_ref = release.nightly_immutable_reference(old_commit)
-        children = {
-            ("linux", "amd64"): {"digest": "sha256:" + "1" * 64, "revision": commit},
-            ("linux", "arm64"): {"digest": "sha256:" + "2" * 64, "revision": commit},
-        }
-        previous_children = {
-            ("linux", "amd64"): {"digest": "sha256:" + "3" * 64, "revision": old_commit},
-            ("linux", "arm64"): {"digest": "sha256:" + "4" * 64, "revision": old_commit},
-        }
-        original_revisions = release.platform_manifest_revisions
-        def revisions_for(reference, anchor_digest=None):
-            target = children if reference == sha_ref else (
-                previous_children if reference == previous_ref else {})
-            expected = digest if reference == sha_ref else old_digest
-            return original_revisions(
-                reference, real_docker_inspect_runner(expected, target))
-        state = {"edge": present(old_digest)}
-        def observe(ref, strict=False):
-            if ref == sha_ref:
-                return present(digest)
-            if ref == previous_ref:
-                return present(old_digest)
-            if ref == "atharvnaphade/carbonpanel:edge":
-                return state["edge"]
-            return ("absent", None)
-        def fake_run(args, **kwargs):
-            state["edge"] = present(digest)
-            return subprocess.CompletedProcess(args, 0)
-        with patch.object(release, "observe_reference", side_effect=observe), \
-             patch.object(release, "platform_manifest_revisions", side_effect=revisions_for), \
+        digest, old_digest = "sha256:" + "d" * 64, "sha256:" + "f" * 64
+        with patch("sys.argv", ["release.py", "edge-promote", "--commit", commit,
+                                "--digest", digest, "--previous-commit", old_commit,
+                                "--previous-digest", old_digest, "--ci-verified", "true"]), \
+             patch.object(release, "observe_reference",
+                          side_effect=lambda ref, strict=False: present(digest)), \
+             patch.object(release, "platform_manifest_revisions",
+                          return_value=(digest, platform_revisions(commit))), \
+             patch.object(release, "nightly_identity_binding", return_value={old_digest: old_commit}), \
              patch.object(release, "commit_is_ancestor", return_value=True), \
-             patch.object(release.subprocess, "run", side_effect=fake_run) as command, \
-             patch("sys.argv", ["release.py"] + argv):
-            release.main()
-            writes = registry_writes(command)
-        self.assertEqual(len(writes), 1)
-        self.assertEqual(state["edge"][1]["digest"], digest)
-
+             patch.object(release.subprocess, "run") as command:
+            release.main()  # without --apply this is a read-only decision
+            self.assertEqual(registry_writes(command), [])
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        self.assertNotIn("edge-promote --", source)
 
     def test_default_first_update_and_reuse_flows(self):
         commit, digest = "c" * 40, "sha256:" + "d" * 64
         revisions = platform_revisions(commit)
-        # FIRST: no evidence and no previous binding; missing alias promotes.
-        argv = self.workflow_argv(
-            "Verify immutable sha image and move only the nightly alias",
-            {"PINNED_COMMIT": commit, "IMAGE_DIGEST": digest,
-             "CI_VERIFIED": "true", "PINNED_EVIDENCE": "",
-             "PREVIOUS_COMMIT": "", "PREVIOUS_DIGEST": ""})
-        state = {"nightly": ("absent", None)}
-        def observe(ref, strict=False):
-            if ref == "atharvnaphade/carbonpanel:nightly":
-                return state["nightly"]
-            return present(digest)
-        def fake_run(args, **kwargs):
-            state["nightly"] = present(digest)
-            return subprocess.CompletedProcess(args, 0)
-        with patch.object(release, "observe_reference", side_effect=observe), \
-             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
-             patch.object(release.subprocess, "run", side_effect=fake_run) as command, \
-             patch("sys.argv", ["release.py"] + argv):
-            release.main()
-            self.assertEqual(len(registry_writes(command)), 1)
-        # REUSE: sha gate with trusted per-platform config evidence returns reuse.
+        immutable = present(digest)
+        first, reason = release.nightly_promotion_decision(
+            commit, digest, immutable, ("absent", None),
+            ci_verified="true", revisions=revisions)
+        self.assertTrue(first, reason)
         with patch.object(release, "observe_reference", return_value=present(digest)), \
-             patch.object(release, "platform_manifest_revisions", return_value=(digest, revisions)), \
+             patch.object(release, "platform_manifest_revisions",
+                          return_value=(digest, revisions)), \
              patch.object(release.subprocess, "run") as command, \
              patch("sys.argv", ["release.py", "sha-tag-gate", "--commit", commit,
                                 "--expected-digest", digest, "--ci-verified", "true"]):
             release.main()
             self.assertEqual(registry_writes(command), [])
-
 
     def test_external_retag_and_anchored_index_mismatch(self):
         commit, digest = "c" * 40, "sha256:" + "d" * 64
@@ -2208,9 +2023,10 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn("needs.plan.outputs.publish == 'true'", job_block(name))
         # The lock spans immutable publish -> GitHub release -> alias promotion:
         # promotion depends on both earlier writing phases in the same run.
-        self.assertIn("needs: [plan, publish-immutable, publish]",
+        self.assertIn("needs: [plan, publish-immutable, publish, stable-channel-transaction]",
                       job_block("promote-aliases"))
-        self.assertIn("needs: [plan, publish-immutable]", job_block("publish"))
+        self.assertIn("needs: [plan, publish-immutable, stable-channel-transaction]",
+                      job_block("publish"))
         # (e) alias promotion still re-preflights with LIVE state inside the lock.
         promotion = job_block("promote-aliases")
         for step in ("Re-verify the durable release record before any alias move",
@@ -2576,13 +2392,34 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertNotIn("rolling", yaml.safe_dump(promoted))
         self.assertIn("channel-transaction", cd)
         self.assertIn("channel-observe", cd)
-        self.assertIn("promote-stable-alias", rel)
+        self.assertNotIn("promote-stable-alias", rel)
+        self.assertIn("stable-channel-transaction", rel)
+        self.assertIn("channel-promote \\\n", rel)
         self.assertIn("pages-deploy", yaml.safe_load(landing)["jobs"]["deploy"].get(
             "concurrency", {"group": ""}).get("group", "") or "pages-deploy")
         # No new workflow_dispatch inputs were introduced for channel writes.
         cd_doc = yaml.safe_load(cd)
         cd_inputs = (cd_doc.get("on") or cd_doc.get(True))["workflow_dispatch"]["inputs"]
         self.assertNotIn("apply", cd_inputs)
+
+    def test_no_legacy_alias_write_path_remains_outside_the_qualified_transaction(self):
+        import yaml
+        files = sorted((release.ROOT / ".github/workflows").glob("*.yml"))
+        for path in files:
+            with self.subTest(workflow=path.name):
+                source = path.read_text(encoding="utf-8")
+                for token in ("nightly-promote", "edge-promote", "promote-stable-alias",
+                              "--alias latest"):
+                    self.assertNotIn(token, source)
+        rel = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(rel.count("python3 scripts/release.py promote-alias"), 1)
+        self.assertIn("needs.plan.outputs.channel != 'stable'",
+                      rel.split("Promote minor compatibility alias")[1])
+        import re as _re
+        for job in ("promote-aliases", "publish"):
+            match = _re.search(rf"(?ms)^  {job}:\n(.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", rel)
+            self.assertIsNotNone(match)
+            self.assertIn("stable-channel-transaction", match.group(1))
 
     def test_channel_observe_is_read_only_and_derives_revision(self):
         child = platform_revisions(self.CANDIDATE)
@@ -2734,6 +2571,15 @@ class ChannelTransactionTests(unittest.TestCase):
         self.assertEqual(action, "publish")
         self.assertEqual(receipt["revision"], self.COMMIT)
 
+    def test_stable_accepts_exact_target_version_but_not_arbitrary_or_2_0_0(self):
+        candidate = self.candidate(
+            channel="stable", release_tag="carbonpanel-v1.0.41")
+        self.assertEqual(self.decide(candidate=candidate)[0], "publish")
+        for bad_tag in ("v1.0.41", "carbonpanel-v2.0.0", "carbonpanel-v1.0.40"):
+            with self.subTest(tag=bad_tag):
+                self.assertEqual(self.decide(candidate=self.candidate(
+                    channel="stable", release_tag=bad_tag))[0], "refuse")
+
     def test_stage_phase_is_zero_write_and_never_moves_aliases(self):
         previous = self.receipt()
         action, _, receipt, steps = release.channel_transaction_decision(
@@ -2776,6 +2622,87 @@ class ChannelTransactionTests(unittest.TestCase):
         self.assertEqual(receipt["docs_digest"], previous["docs_digest"])
         self.assertIn(release.TX_ROLLBACK, steps)
         self.assertIn(release.TX_ROLLBACK_DOCS, steps)
+
+    def test_second_registry_write_failure_restores_both_aliases_and_docs(self):
+        previous = self.receipt()
+        calls = []
+
+        def writer(registry, digest):
+            calls.append((registry, digest))
+            if registry == "ghcr" and digest != self.PREV_DIGEST:
+                return False, "injected second-registry failure"
+            return True, ""
+
+        outcome = release.channel_transaction_run(
+            self.candidate(), previous, writer=writer,
+            docs_publisher=lambda c, d: True, final_probe=lambda c, d: True,
+            ancestry=lambda older, newer: True)
+        self.assertEqual(outcome["outcome"], "rolled_back")
+        self.assertIn("ghcr alias write failed", outcome["reason"])
+        self.assertEqual(outcome["restored"], list(release.CHANNEL_REGISTRIES))
+        self.assertEqual(outcome["receipt"], previous)
+        for registry in release.CHANNEL_REGISTRIES:
+            self.assertIn((registry, self.PREV_DIGEST), calls)
+        self.assertEqual(outcome["resume"]["digest"], self.PREV_DIGEST)
+
+    def test_final_probe_failure_rolls_back_even_after_both_alias_writes(self):
+        previous = self.receipt()
+        calls = []
+        outcome = release.channel_transaction_run(
+            self.candidate(), previous,
+            writer=lambda r, d: (calls.append((r, d)) or (True, "")),
+            docs_publisher=lambda c, d: True,
+            final_probe=lambda c, d: False, ancestry=lambda older, newer: True)
+        self.assertEqual(outcome["outcome"], "rolled_back")
+        self.assertIn("final public marker/alias probe failed", outcome["reason"])
+        self.assertEqual(outcome["moved"], [])
+        self.assertEqual(calls[:2], [(r, self.DIGEST)
+                                     for r in release.CHANNEL_REGISTRIES])
+        self.assertEqual(outcome["restored"], list(release.CHANNEL_REGISTRIES))
+
+    def test_docs_publish_failure_blocks_all_registry_writes(self):
+        previous = self.receipt()
+        calls = []
+        release.channel_transaction_run(
+            self.candidate(), previous,
+            writer=lambda r, d: (calls.append((r, d)) or (True, "")),
+            docs_publisher=lambda c, d: False, ancestry=lambda older, newer: True)
+        # No alias is ever written at the candidate digest; only prior-digest
+        # restoration calls are allowed.
+        self.assertNotIn(("docker_hub", self.DIGEST), calls)
+        self.assertNotIn(("ghcr", self.DIGEST), calls)
+        self.assertIn(("docker_hub", self.PREV_DIGEST), calls)
+
+    def test_retry_resumes_exact_recorded_digest_and_never_rebuilds(self):
+        previous = self.receipt()
+        plan = release.channel_resume_plan(previous, self.PREV_DIGEST)
+        self.assertEqual(plan["action"], "resume")
+        self.assertEqual(plan["digest"], self.PREV_DIGEST)
+        self.assertEqual(release.channel_resume_plan(previous, self.DIGEST)["action"],
+                         "refuse")
+
+    def test_channel_simulate_cli_evidence_has_no_external_writes(self):
+        previous = self.receipt()
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "channel-simulate", "--candidate",
+                                json.dumps(self.candidate()), "--previous",
+                                json.dumps(previous), "--fail-registry", "ghcr"]), \
+             redirect_stdout(out):
+            release.main()
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["outcome"], "rolled_back")
+        self.assertEqual(result["restored"], ["docker_hub", "ghcr"])
+
+    def test_rollback_cli_is_read_only_without_apply(self):
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "channel-rollback", "--receipt",
+                                json.dumps(self.receipt())]), redirect_stdout(out), \
+             patch.object(release, "_apply_channel_alias",
+                          side_effect=AssertionError("unexpected alias write")):
+            release.main()
+        result = json.loads(out.getvalue())
+        self.assertEqual(result["digest"], self.PREV_DIGEST)
+        self.assertEqual(result["registries"], ["docker_hub", "ghcr"])
 
     def test_active_receipt_from_live_state_requires_both_registries_to_agree(self):
         aliases = {"docker_hub": ("present", {"digest": self.PREV_DIGEST}),

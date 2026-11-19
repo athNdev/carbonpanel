@@ -448,12 +448,116 @@ jobs:
           short-description: Self-hosted Minecraft server and modpack management with Docker.
           enable-url-completion: true
 
+  # OSS-413 stable channel transaction. The EXACT target version, both immutable
+  # registry digests and the DEPLOYED public docs marker are bound together.
+  # GitHub release creation is gated on this job's synchronized output; no
+  # moving alias is written until the marker is verified over HTTPS.
+  stable-channel-transaction:
+    name: Qualified stable channel transaction (docs marker bound)
+    needs: [plan, publish-immutable]
+    if: >-
+      needs.plan.outputs.publish == 'true' &&
+      needs.publish-immutable.outputs.verified == 'true' &&
+      needs.plan.outputs.channel == 'stable'
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
+    outputs:
+      action: ${{ steps.transaction.outputs.action }}
+      receipt: ${{ steps.transaction.outputs.receipt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
+        with:
+          version: '1.50.0'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and validate docs from the exact release commit
+        run: |
+          python3 scripts/build_website.py
+          python3 scripts/check_website.py
+      - name: Observe the exact immutable version in both registries
+        id: immutable
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
+          OBS=$(python3 scripts/release.py channel-observe --reference "$TAG" | jq -c .observations)
+          printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
+      - name: Stamp the exact stable marker into the built docs artifact
+        env:
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          python3 scripts/release.py stage-channel-marker \
+            --site .website-build/site --channel stable \
+            --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST" --canonical
+          python3 scripts/release.py validate-channel-contract \
+            --path .website-build/site/version-index.json
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: .website-build/site
+      - name: Deploy the synchronized stable docs marker once
+        id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+      - name: Verify the deployed public stable marker matches the exact revision
+        id: marker
+        env:
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
+          test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$RELEASE_COMMIT"
+          test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$IMAGE_DIGEST"
+      - name: Decide the qualified stable transaction before any alias move
+        id: transaction
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          IMMUTABLE_OBS: ${{ steps.immutable.outputs.observations }}
+        run: |
+          CANDIDATE=$(jq -nc \
+            --arg channel stable --arg commit "$RELEASE_COMMIT" --arg digest "$IMAGE_DIGEST" \
+            --arg tag "$RELEASE_VERSION" --argjson seq 1 --arg ref "refs/heads/main" \
+            '{channel:$channel,commit:$commit,digest:$digest,release_tag:$tag,seq:$seq,
+              source_ref:$ref,ci_verified:"true",immutable_ok:true,contract_valid:true,
+              site_validated:true,docs_commit:$commit,docs_digest:$digest,
+              registries:{docker_hub:$digest,ghcr:$digest},
+              candidate_marker_verified:true,canonical_marker_verified:true}')
+          python3 scripts/release.py channel-transaction --phase commit \
+            --candidate "$CANDIDATE" --event workflow_dispatch
+
   # DURABLE RELEASE RECORD. This completes BEFORE any moving alias is promoted,
   # so an interruption cannot leave a newer alias with no recorded provenance.
   publish:
     name: Publish complete GitHub release
-    needs: [plan, publish-immutable]
-    if: needs.plan.outputs.publish == 'true'
+    needs: [plan, publish-immutable, stable-channel-transaction]
+    if: >-
+      needs.plan.outputs.publish == 'true' &&
+      (needs.plan.outputs.channel != 'stable' ||
+       (needs.stable-channel-transaction.outputs.action != '' &&
+        needs.stable-channel-transaction.outputs.action != 'refuse' &&
+        needs.stable-channel-transaction.outputs.action != 'rollback'))
     runs-on: ubuntu-24.04
     # GitHub latest is selected here under product-only verified stable ordering,
     # inside the workflow-level publish lock (never concurrently).
@@ -510,8 +614,14 @@ jobs:
   # and the actual registry alias digest before any move.
   promote-aliases:
     name: Promote moving aliases from the verified digest
-    needs: [plan, publish-immutable, publish]
-    if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
+    needs: [plan, publish-immutable, publish, stable-channel-transaction]
+    if: >-
+      needs.plan.outputs.publish == 'true' &&
+      needs.publish-immutable.outputs.verified == 'true' &&
+      (needs.plan.outputs.channel != 'stable' ||
+       (needs.stable-channel-transaction.outputs.action != '' &&
+        needs.stable-channel-transaction.outputs.action != 'refuse' &&
+        needs.stable-channel-transaction.outputs.action != 'rollback'))
     runs-on: ubuntu-24.04
     # Alias decisions are recomputed with LIVE preflight inside the
     # workflow-level publish lock, so no stale ordering can be applied.
@@ -561,33 +671,32 @@ jobs:
           python3 scripts/release.py alias-promotion \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST"
-      # OSS-413: the `stable` alias is a separate compatibility alias that may
-      # ONLY move from the verified stable digest, in BOTH registries. It never
-      # follows a new product version, never touches latest or an immutable tag,
-      # and never creates a release. The gate refuses (soft notice) for any
-      # candidate that is not the verified stable baseline, so a future stable
-      # version cannot accidentally retarget it.
-      - name: Observe the stable baseline and stable alias in both registries
-        id: stable_obs
+      # OSS-413: the former independent stable-alias and bare latest-alias write
+      # steps were REMOVED. Both aliases now move
+      # together only through the qualified stable transaction, whose deployed
+      # public docs marker was verified above with the exact target revision.
+      - name: Promote stable and latest together from the synced transaction
+        id: stable_aliases
+        if: >-
+          needs.plan.outputs.channel == 'stable' &&
+          needs.stable-channel-transaction.outputs.action != '' &&
+          needs.stable-channel-transaction.outputs.action != 'refuse' &&
+          needs.stable-channel-transaction.outputs.action != 'rollback'
         env:
-          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
         run: |
-          IMMUTABLE=$(python3 scripts/release.py channel-observe --reference 1.0.40 | jq -c .observations)
-          ALIASES=$(python3 scripts/release.py channel-observe --reference stable | jq -c .observations)
-          printf 'immutable=%s\n' "$IMMUTABLE" >> "$GITHUB_OUTPUT"
-          printf 'aliases=%s\n' "$ALIASES" >> "$GITHUB_OUTPUT"
-      - name: Promote the stable alias only from the verified stable digest
-        id: stable_alias
-        env:
-          IMMUTABLE_OBS: ${{ steps.stable_obs.outputs.immutable }}
-          ALIAS_OBS: ${{ steps.stable_obs.outputs.aliases }}
-        run: |
-          python3 scripts/release.py promote-stable-alias \
-            --ci-verified "true" --immutable "$IMMUTABLE_OBS" \
-            --aliases "$ALIAS_OBS" --soft --apply
+          TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
+          IMMUTABLE=$(python3 scripts/release.py channel-observe --reference "$TAG" | jq -c .observations)
+          ALIASES=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
+          python3 scripts/release.py channel-promote \
+            --channel stable --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST" \
+            --release-tag "$RELEASE_VERSION" --ci-verified "true" \
+            --immutable "$IMMUTABLE" --aliases "$ALIASES" --apply
 
-      - name: Promote minor channel alias
-        if: steps.promotion.outputs.minor != ''
+      - name: Promote minor compatibility alias only after the synced transaction
+        if: steps.promotion.outputs.minor != '' && needs.plan.outputs.channel != 'stable'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
@@ -597,13 +706,3 @@ jobs:
         run: |
           python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" \
             --commit "$RELEASE_COMMIT" --alias "$ALIAS" --digest "$IMAGE_DIGEST"
-      - name: Promote latest channel alias
-        if: steps.promotion.outputs.latest == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-        run: |
-          python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" \
-            --commit "$RELEASE_COMMIT" --alias latest --digest "$IMAGE_DIGEST"

@@ -398,49 +398,10 @@ jobs:
           # move. Re-verify the EXACT pinned commit here; the pre-push result is
           # stale by this point and is never reused as CI evidence for a move.
           python3 scripts/release.py verify-main-ci --commit "$PINNED_COMMIT"
-      - name: Promote edge from the verified immutable digest
-        if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true'
-        env:
-          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
-          IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
-          CI_VERIFIED: ${{ steps.ci.outputs.verified }}
-          PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
-          PREVIOUS_EDGE_COMMIT: ${{ inputs.previous_edge_commit }}
-          PREVIOUS_EDGE_DIGEST: ${{ inputs.previous_edge_digest }}
-        run: |
-          python3 scripts/release.py edge-promote \
-            --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
-            --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" \
-            --previous-commit "$PREVIOUS_EDGE_COMMIT" \
-            --previous-digest "$PREVIOUS_EDGE_DIGEST" --apply
-      - name: Verify immutable sha image and move only the nightly alias
-        if: github.event_name != 'schedule' && steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && steps.sha_gate.outputs.action != 'skip'
-        env:
-          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
-          IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
-          PREVIOUS_COMMIT: ${{ inputs.previous_nightly_commit }}
-          PREVIOUS_DIGEST: ${{ inputs.previous_nightly_digest }}
-          CI_VERIFIED: ${{ steps.ci.outputs.verified }}
-          PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
-        # Manual dispatch keeps the ORIGINAL explicit-binding rule: an absent
-        # previous binding is refused, never silently derived from the alias.
-        # Only the trusted schedule below derives it from the live alias, with
-        # every provenance, platform and ancestry check still applied.
-        run: |
-          python3 scripts/release.py nightly-promote \
-            --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
-            --previous-commit "$PREVIOUS_COMMIT" --previous-digest "$PREVIOUS_DIGEST" \
-            --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" --apply
-      - name: Verify immutable sha image and move only the nightly alias (trusted schedule)
-        if: github.event_name == 'schedule' && steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && steps.sha_gate.outputs.action != 'skip' && steps.scheduled_prepush.outputs.stable != 'false' && steps.scheduled_prepush.outputs.verified != 'false' && steps.scheduled_recheck.outputs.stable != 'false' && steps.scheduled_recheck.outputs.verified != 'false'
-        env:
-          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
-          IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
-          CI_VERIFIED: ${{ steps.scheduled_recheck.outputs.verified }}
-        run: |
-          python3 scripts/release.py nightly-promote \
-            --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
-            --ci-verified "$CI_VERIFIED" --auto-bind-previous --apply
+      # OSS-413: all moving-alias writes are owned exclusively by the
+      # `channel-transaction` job below. The former edge/nightly manual and
+      # schedule alias-write steps were REMOVED; this job only builds and
+      # verifies the immutable sha image and never moves a moving alias.
       - name: Sync Docker Hub repository description
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
         if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'
@@ -766,6 +727,7 @@ jobs:
             --ci-verified "true" --immutable "$IMMUTABLE" --aliases "$ALIASES" --apply
 
       - name: Confirm final alias and canonical docs agreement
+        id: final_verify
         if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
@@ -778,15 +740,59 @@ jobs:
           test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$CHANNEL_DIGEST"
           test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$CHANNEL_DIGEST"
 
-      # A partial failure rolls BOTH surfaces back to the prior verified receipt.
-      - name: Reconcile or roll back docs and aliases to the prior receipt
-        if: steps.commit_decision.outputs.action == 'rollback'
+      # Genuine failure branch. default success() can never run after a failed
+      # alias_move / final probe, so this uses always() plus an explicit outcome
+      # check and RESTORES both registry aliases and the docs marker from the
+      # exact prior verified receipt (no rebuild, no immutable overwrite).
+      - name: Restore prior verified aliases after partial failure
+        id: rollback
+        if: >-
+          always() && steps.commit_decision.outcome == 'success' &&
+          (steps.commit_decision.outputs.action == 'rollback' ||
+           steps.deploy.outcome == 'failure' || steps.probe.outcome == 'failure' ||
+           steps.canonical.outcome == 'failure' || steps.alias_move.outcome == 'failure' ||
+           steps.final_verify.outcome == 'failure')
         env:
           PRIOR: ${{ steps.commit_decision.outputs.receipt }}
         run: |
-          echo "::error::transaction not fully qualified; prior verified receipt preserved"
-          printf '%s\n' "$PRIOR" > rollback-receipt.json
-          python3 -c "import json; r=json.load(open('rollback-receipt.json')); assert r['verified'] and r['registries']['docker_hub']==r['registries']['ghcr']"
+          python3 scripts/release.py channel-rollback --receipt "$PRIOR" --apply
+
+      - name: Restore the prior canonical docs marker from the receipt
+        id: rollback_docs
+        if: steps.rollback.outcome == 'success'
+        env:
+          PRIOR: ${{ steps.commit_decision.outputs.receipt }}
+        run: |
+          PRIOR_COMMIT=$(printf '%s' "$PRIOR" | jq -r '.revision')
+          PRIOR_DIGEST=$(printf '%s' "$PRIOR" | jq -r '.digest')
+          python3 scripts/release.py stage-channel-marker \
+            --site .website-build/site --channel nightly \
+            --commit "$PRIOR_COMMIT" --digest "$PRIOR_DIGEST" --canonical
+      - name: Upload restored prior docs artifact
+        if: steps.rollback_docs.outcome == 'success'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: .website-build/site
+      - name: Deploy restored prior docs
+        id: rollback_deploy
+        if: steps.rollback_docs.outcome == 'success'
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+      - name: Verify restored aliases and docs agree with the prior receipt
+        if: steps.rollback_deploy.outcome == 'success'
+        env:
+          PRIOR: ${{ steps.commit_decision.outputs.receipt }}
+        run: |
+          PRIOR_DIGEST=$(printf '%s' "$PRIOR" | jq -r '.digest')
+          OBS=$(python3 scripts/release.py channel-observe --reference nightly | jq -c .observations)
+          test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$PRIOR_DIGEST"
+          test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$PRIOR_DIGEST"
+          LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
+          test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$PRIOR_DIGEST"
+      - name: Fail the run when a rollback was required
+        if: steps.rollback.outcome == 'success'
+        run: |
+          echo "::error::channel transaction rolled back to the prior verified receipt; no success reported"
+          exit 1
 
       - name: Record the verified receipt as a workflow artifact (not main)
         if: steps.commit_decision.outputs.action == 'publish' || steps.commit_decision.outputs.action == 'reconcile'
