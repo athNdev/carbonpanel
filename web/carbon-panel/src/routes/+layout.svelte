@@ -24,6 +24,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import GlobalLoading from '$lib/components/global-loading.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
 	import { prefersReducedMotion } from '$lib/motion';
+	import { settleViewTransition } from '$lib/view-transition';
 
 	let { children } = $props();
 
@@ -49,7 +50,7 @@ one at https://mozilla.org/MPL/2.0/.
 		});
 		const next = document.startViewTransition(() => updated);
 		activeViewTransition = next;
-		void next.finished.finally(() => {
+		settleViewTransition(next, () => {
 			if (activeViewTransition === next) {
 				activeViewTransition = null;
 			}

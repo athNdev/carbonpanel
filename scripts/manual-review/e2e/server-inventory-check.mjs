@@ -27,18 +27,6 @@ try {
     viewport: { width: 1440, height: 1000 },
   });
   const page = await context.newPage();
-  // This harness drives rapid client-side navigations while RPCs are deferred.
-  // +layout.svelte interrupts an in-flight view transition on every navigation,
-  // and Chromium reports that interruption as a pageerror with the message
-  // "Transition was skipped". Motion is unrelated to the inventory/auth
-  // scenarios here, so run this page with reduced motion: the layout then never
-  // starts a view transition and the strict no-page-errors assertion below
-  // still catches every real error.
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  assert.equal(
-    await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches),
-    true,
-  );
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const requests = [];
