@@ -111,3 +111,87 @@ test('editor dialog derives its private browser cache from RUNNER_TEMP in a step
 	);
 	assert.match(source, />>\s*["']?\$GITHUB_ENV["']?/);
 });
+
+// gh CLI authenticates from GH_TOKEN on its OWN step: a token set on another
+// step or job is not inherited. The v2.0.0 publish gate failed closed because
+// verify-publication-ref called gh (via scripts/release.py) without its own
+// GH_TOKEN. Guard every gh-calling publication gate step in both lanes.
+const GH_SUBCOMMANDS = new Set([
+  'plan',
+  'preflight-immutable',
+  'verify-publication-ref',
+  'verify-main-ci',
+  'release-record',
+  'publish',
+  'verify-release-record',
+  'alias-promotion',
+  'promote-alias',
+]);
+
+function parseSteps(source) {
+  const lines = source.split('\n');
+  const steps = [];
+  let current = null;
+  let mode = 'none';
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (/^      - /.test(line)) {
+      if (current) steps.push(current);
+      current = { line: index + 1, name: '', env: new Set(), run: '' };
+      mode = 'none';
+    }
+    if (!current || /^\s*$/.test(line)) continue;
+    const named = line.match(/^      - name:\s*(.+?)\s*$/);
+    if (named) current.name = named[1];
+    if (/^        env:\s*$/.test(line)) {
+      mode = 'env';
+      continue;
+    }
+    if (/^        run:/.test(line)) {
+      mode = 'run';
+      current.run += line.replace(/^        run:\s*/, '') + '\n';
+      continue;
+    }
+    if (mode === 'env') {
+      const key = line.match(/^          ([A-Za-z_][A-Za-z0-9_]*):/);
+      if (key) current.env.add(key[1]);
+      else if (/^\s{0,10}\S/.test(line)) mode = 'none';
+    } else if (mode === 'run') {
+      if (/^ {10,}/.test(line)) current.run += line.trim() + '\n';
+      else mode = 'none';
+    }
+  }
+  if (current) steps.push(current);
+  return steps;
+}
+
+function callsGh(step) {
+  const run = step.run.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+  if (/\bgh\s/.test(run)) return true;
+  return [...run.matchAll(/scripts\/release\.py\s+([a-z0-9-]+)/g)]
+    .some((match) => GH_SUBCOMMANDS.has(match[1]));
+}
+
+test('every gh-calling publication step carries its own GH_TOKEN', () => {
+  const offenders = [];
+  for (const name of ['release.yml', 'cd.yml']) {
+    for (const step of parseSteps(read(name))) {
+      if (callsGh(step) && !step.env.has('GH_TOKEN')) {
+        offenders.push(`${name}:${step.line} (${step.name || 'unnamed'})`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `gh-calling steps without GH_TOKEN: ${offenders.join(', ')}`);
+});
+
+test('verify-publication-ref gate sets GH_TOKEN in its own step env', () => {
+  const step = parseSteps(read('release.yml')).find(
+    (candidate) => candidate.name === 'Verify trusted ref and exact main CI for an explicit publication'
+  );
+  assert.ok(step, 'verify-publication-ref step is missing');
+  assert.match(step.run, /verify-publication-ref/);
+  assert.ok(
+    step.env.has('GH_TOKEN'),
+    'verify-publication-ref calls gh; it must set GH_TOKEN in its own step env'
+  );
+});
