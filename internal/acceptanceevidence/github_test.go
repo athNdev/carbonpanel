@@ -39,15 +39,15 @@ func githubServer(t *testing.T, f deployFixture) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasSuffix(req.URL.Path, "/pulls/42"):
-			fmt.Fprintf(w, `{"merged":true,"merge_commit_sha":%q,"labels":[{"name":"acceptance-evidence-verified"}]}`, mergeSHA)
+			_, _ = fmt.Fprintf(w, `{"merged":true,"merge_commit_sha":%q,"labels":[{"name":"acceptance-evidence-verified"}]}`, mergeSHA)
 		case strings.HasSuffix(req.URL.Path, "/actions/runs/100"):
-			fmt.Fprintf(w, `{"conclusion":"success","head_sha":%q}`, deploySHA)
+			_, _ = fmt.Fprintf(w, `{"conclusion":"success","head_sha":%q}`, deploySHA)
 		case strings.HasSuffix(req.URL.Path, "/actions/runs/200/jobs"):
-			fmt.Fprint(w, f.jobs)
+			_, _ = fmt.Fprint(w, f.jobs)
 		case strings.HasSuffix(req.URL.Path, "/actions/runs/200"):
-			fmt.Fprintf(w, `{"name":%q,"conclusion":%q,"head_sha":%q}`, deployWorkflow, f.runConclusion, f.runSHA)
+			_, _ = fmt.Fprintf(w, `{"name":%q,"conclusion":%q,"head_sha":%q}`, deployWorkflow, f.runConclusion, f.runSHA)
 		case strings.HasSuffix(req.URL.Path, "/actions/runs/555"):
-			fmt.Fprintf(w, `{"name":%q,"conclusion":"success","head_sha":%q}`, deployWorkflow, deploySHA)
+			_, _ = fmt.Fprintf(w, `{"name":%q,"conclusion":"success","head_sha":%q}`, deployWorkflow, deploySHA)
 		default:
 			http.NotFound(w, req)
 		}

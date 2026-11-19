@@ -67,7 +67,7 @@ func (c *GitHubClient) get(ctx context.Context, path string, target interface{})
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("GET %s returned %d", path, resp.StatusCode)
 	}
