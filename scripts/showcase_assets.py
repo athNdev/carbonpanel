@@ -53,7 +53,7 @@ MAX_DIMENSION = 8192
 # The rendered map occupies the left/central portion of the full-panel World
 # View screenshot; the header and side controls are non-black chrome that must
 # not mask a black map (OSS-392). Fractions are relative to image dimensions.
-WORLD_VIEW_MAP_REGION = (0.0, 0.18, 0.72, 0.94)
+WORLD_VIEW_MAP_REGION = (0.02, 0.25, 0.65, 0.90)
 MIN_MAP_NONBLACK = 0.05
 
 

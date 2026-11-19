@@ -491,10 +491,22 @@ overlay_csp_safe_webapp() {
 	docker cp "${fixture}/index.html" "${NAME}-bluemap:/app/web/index.html" >/dev/null || return 1
 	docker cp "${fixture}/assets/." "${NAME}-bluemap:/app/web/assets/" >/dev/null || return 1
 	docker cp "${fixture}/lang/." "${NAME}-bluemap:/app/web/lang/" >/dev/null || return 1
-	local digest
+	local digest start_location settings_tmp
 	digest="$(docker exec "${NAME}-bluemap" sha256sum /app/web/assets/index-BA9KJ4pi.js 2>/dev/null | cut -d' ' -f1)"
 	echo "review BlueMap served webapp bundle: ${digest}" >&2
-	[ "${digest}" = "ba940f930de0642acfd2ca8b0eda6aa0914ce02fcf673cee18262b3dd5217da3" ]
+	[ "${digest}" = "ba940f930de0642acfd2ca8b0eda6aa0914ce02fcf673cee18262b3dd5217da3" ] || return 1
+	# BlueMap's default camera (distance 1500) shows the tiny seeded spawn
+	# area as a few pixels in a black void. Start the map zoomed into the real
+	# generated tiles using BlueMap's own startLocation setting. This changes
+	# only the initial camera, never the real settings.json map list or tiles.
+	start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:45:0:0:0:0:perspective}"
+	settings_tmp="${DATA}/config/bluemap-settings.json"
+	if [ -f "${web}/settings.json" ]; then
+		START_LOCATION="${start_location}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);j.startLocation=process.env.START_LOCATION;process.stdout.write(JSON.stringify(j))}catch(e){process.exit(1)}})' \
+			<"${web}/settings.json" >"${settings_tmp}" || return 1
+		docker cp "${settings_tmp}" "${NAME}-bluemap:/app/web/settings.json" >/dev/null || return 1
+		echo "review BlueMap startLocation: ${start_location}" >&2
+	fi
 }
 
 # Real BlueMap renderer and web server for the seeded world. BlueMap's own
