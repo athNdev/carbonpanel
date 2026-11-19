@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,6 +26,7 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/upload"
+	"github.com/athNdev/carbon-panel/pkg/utils"
 )
 
 // DatapackService manages datapack discovery and installation. Datapacks are
@@ -273,8 +275,16 @@ func (s *DatapackService) InstallDatapack(ctx context.Context, req *connect.Requ
 	defer removeDownload()
 
 	if err := minecraft.DownloadDatapackArchiveFrom(ctx, indexers.DatapackIndexerOrigin(resolved), file.DownloadURL, destPath); err != nil {
-		s.log.Error("Failed to download datapack %s: %v", file.DownloadURL, err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to download datapack: %w", err))
+		// The download URL is indexer-controlled. http.Client wraps transport
+		// failures in url.Error which strips only the password, leaving
+		// presigned query tokens in its text. Keep the underlying cause.
+		cause := err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			cause = urlErr.Err
+		}
+		s.log.Error("Failed to download datapack %s: %v", utils.RedactURL(file.DownloadURL), cause)
+		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to download datapack"))
 	}
 
 	// Reject anything that is not a real datapack before it reaches the world.
