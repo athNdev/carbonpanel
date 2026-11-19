@@ -140,12 +140,20 @@ func TestNilUUIDNoNetwork(t *testing.T) {
 	}
 }
 
+// TestNegativeCacheAndTTL and TestPositiveTTLExpiry advance an injected clock
+// instead of sleeping on wall time. The assertions still cover the live cache,
+// the exact TTL expiry boundary (read treats age >= life as expired), and the
+// refetch counts; only the source of "now" is deterministic. Previously these
+// tests slept for a TTL plus a small slop margin and intermittently failed on
+// loaded CI workers, including PRs whose changes were unrelated to this package.
 func TestNegativeCacheAndTTL(t *testing.T) {
 	f := newSkinFixture(t)
 	f.mu.Lock()
 	f.profileStatus = 204
 	f.mu.Unlock()
-	c := newTestCache(t, 200*time.Millisecond, nil)
+	const ttl = 200 * time.Millisecond
+	clk := newFakeClock(time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC))
+	c := newTestCacheWithClock(t, ttl, nil, clk)
 
 	first, err := c.Get(context.Background(), testUUID, KindFace)
 	if err != nil {
@@ -165,7 +173,21 @@ func TestNegativeCacheAndTTL(t *testing.T) {
 		t.Fatalf("negative cache did not suppress profile calls: %d %d", p, tx)
 	}
 
-	time.Sleep(c.negativeTTL() + 30*time.Millisecond)
+	// The negative entry is still live one nanosecond before its TTL boundary.
+	clk.Advance(c.negativeTTL() - time.Nanosecond)
+	before, err := c.Get(context.Background(), testUUID, KindFace)
+	if err != nil {
+		t.Fatalf("Get(negative before TTL): %v", err)
+	}
+	if !before.FromCache || before.Source != SourcePanelDB {
+		t.Fatalf("negative entry expired before its TTL: %+v", before)
+	}
+	if p, tx, _ := f.counts(); p != 1 || tx != 0 {
+		t.Fatalf("negative entry refetched before its TTL: %d %d", p, tx)
+	}
+
+	// At the exact boundary the entry is expired and must be refetched.
+	clk.Advance(time.Nanosecond)
 	third, err := c.Get(context.Background(), testUUID, KindFace)
 	if err != nil {
 		t.Fatalf("Get(expired negative): %v", err)
@@ -180,7 +202,9 @@ func TestNegativeCacheAndTTL(t *testing.T) {
 
 func TestPositiveTTLExpiry(t *testing.T) {
 	f := newSkinFixture(t)
-	c := newTestCache(t, 120*time.Millisecond, nil)
+	const ttl = 120 * time.Millisecond
+	clk := newFakeClock(time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC))
+	c := newTestCacheWithClock(t, ttl, nil, clk)
 	if _, err := c.Get(context.Background(), testUUID, KindSkin); err != nil {
 		t.Fatalf("first Get: %v", err)
 	}
@@ -188,7 +212,19 @@ func TestPositiveTTLExpiry(t *testing.T) {
 	if err != nil || !hit.FromCache {
 		t.Fatalf("expected fresh cache hit, got %+v, %v", hit, err)
 	}
-	time.Sleep(160 * time.Millisecond)
+
+	// The positive entry is still live one nanosecond before its TTL boundary.
+	clk.Advance(ttl - time.Nanosecond)
+	before, err := c.Get(context.Background(), testUUID, KindSkin)
+	if err != nil || !before.FromCache {
+		t.Fatalf("expected cache hit just before TTL, got %+v, %v", before, err)
+	}
+	if p, tx, _ := f.counts(); p != 1 || tx != 1 {
+		t.Fatalf("positive entry refetched before its TTL: %d %d", p, tx)
+	}
+
+	// At the exact boundary the entry is expired and must be refetched.
+	clk.Advance(time.Nanosecond)
 	miss, err := c.Get(context.Background(), testUUID, KindSkin)
 	if err != nil || miss.FromCache {
 		t.Fatalf("expected expired cache miss, got %+v, %v", miss, err)

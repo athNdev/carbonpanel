@@ -39,14 +39,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <div class="studio-mod-table overflow-x-auto" data-testid="showcase-mods-table">
 	<table class="w-full border-collapse text-left text-xs" aria-label="Mods in this pack">
 		<thead
-			class="border-b border-[#525252] bg-[#393939] font-semibold tracking-wider text-[#f4f4f4] uppercase"
+			class="border-b border-border bg-secondary font-semibold tracking-wider text-foreground uppercase"
 		>
 			<tr>
 				<th scope="col" class="w-8 px-3 py-2.5">
 					<input
 						type="checkbox"
 						aria-label="Select all mods"
-						class="cursor-pointer rounded-none border-[#8d8d8d] bg-[#262626]"
+						class="cursor-pointer rounded-none border-border bg-card"
 						checked={filteredMods.length > 0 &&
 							filteredMods.every((mod) => selectedSlugs.includes(mod.slug))}
 						onchange={(e) => {
@@ -67,18 +67,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<th scope="col" class="px-3 py-2.5 text-right">Actions</th>
 			</tr>
 		</thead>
-		<tbody class="divide-y divide-[#393939] bg-[#262626] text-[#f4f4f4]">
+		<tbody class="divide-y divide-border bg-card text-foreground">
 			{#each filteredMods as mod (mod.slug)}
 				<tr
-					class="transition-colors hover:bg-[#353535] {selectedSlugs.includes(mod.slug)
-						? 'bg-[#0f62fe]/10'
+					class="transition-colors hover:bg-secondary {selectedSlugs.includes(mod.slug)
+						? 'bg-primary/10'
 						: ''}"
 				>
 					<td class="px-3 py-3">
 						<input
 							type="checkbox"
 							aria-label={`Select ${mod.slug}`}
-							class="cursor-pointer rounded-none border-[#8d8d8d] bg-[#262626]"
+							class="cursor-pointer rounded-none border-border bg-card"
 							checked={selectedSlugs.includes(mod.slug)}
 							onchange={(e) => {
 								const checked = (e.target as HTMLInputElement).checked;
@@ -90,13 +90,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							}}
 						/>
 					</td>
-					<td class="px-3 py-3 font-semibold text-white">
+					<td class="px-3 py-3 font-semibold text-foreground">
 						<div class="flex items-center gap-2">
 							<Package class="h-4 w-4 shrink-0 text-accent-text" />
 							<span>{mod.name}</span>
 						</div>
 					</td>
-					<td class="detail max-w-[180px] truncate px-3 py-3 font-mono text-xs text-[#a8a8a8]">
+					<td
+						class="detail max-w-[180px] truncate px-3 py-3 font-mono text-xs text-muted-foreground"
+					>
 						{mod.file_name}
 					</td>
 					<td class="px-3 py-3">
@@ -125,7 +127,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<button
 							type="button"
 							onclick={() => togglePin(mod)}
-							class="cursor-pointer rounded-none p-1 text-[#8d8d8d] transition-colors hover:text-white"
+							class="cursor-pointer rounded-none p-1 text-muted-foreground transition-colors hover:text-foreground"
 							title={mod.pinned ? 'Version pinned' : 'Click to pin version'}
 							aria-label={mod.pinned
 								? `Unpin version for ${mod.name}`
@@ -143,7 +145,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						{#if updatesMap[mod.slug]?.update_available}
 							<CarbonTag type="magenta" size="sm">Update Ready</CarbonTag>
 						{:else}
-							<span class="font-mono text-xs text-[#8d8d8d]">Up to date</span>
+							<span class="font-mono text-xs text-muted-foreground">Up to date</span>
 						{/if}
 					</td>
 					<td class="px-3 py-3 text-right">
@@ -151,7 +153,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							kind="ghost"
 							size="sm"
 							iconOnly
-							class="rounded-none text-[#da1e28] hover:bg-[#da1e28]/20"
+							class="rounded-none text-destructive-text hover:bg-destructive/20"
 							onclick={() => removeMod(mod)}
 							title="Remove mod"
 							aria-label={`Remove ${mod.name}`}

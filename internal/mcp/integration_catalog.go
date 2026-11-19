@@ -219,9 +219,9 @@ var exposedTools = []ToolSpec{
 }
 
 const (
-	IntegrationDeclaredRPCs = 245
-	IntegrationMountedRPCs = 235
-	IntegrationExcludedOps = 72
+	IntegrationDeclaredRPCs = 250
+	IntegrationMountedRPCs = 240
+	IntegrationExcludedOps = 77
 	IntegrationSupportedOps = 201
 	IntegrationCombinedTools = 211
 )

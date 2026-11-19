@@ -89,15 +89,20 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.StagedConfigService/DiscardStagedChange":  {Resource: ResourceServerConfig, Action: ActionCreate, ObjectIDField: "server_id"},
 
 	// PackwizService mirrors the legacy /api/v1/packwiz adapter: list and get
-	// need modpacks/read, clone/refresh/check-updates/delete need modpacks/create.
-	// The legacy handler checked the global "*" object; no ObjectIDField keeps
-	// that exact scope.
-	"/carbonpanel.v1.PackwizService/ListPacks":    {Resource: ResourceModpacks, Action: ActionRead},
-	"/carbonpanel.v1.PackwizService/GetPack":      {Resource: ResourceModpacks, Action: ActionRead},
-	"/carbonpanel.v1.PackwizService/ClonePack":    {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/RefreshPack":  {Resource: ResourceModpacks, Action: ActionCreate},
-	"/carbonpanel.v1.PackwizService/CheckUpdates": {Resource: ResourceModpacks, Action: ActionRead},
-	"/carbonpanel.v1.PackwizService/DeletePack":   {Resource: ResourceModpacks, Action: ActionCreate},
+	// need modpacks/read, clone/refresh/delete and every mod mutation need
+	// modpacks/create. The legacy handler checked the global "*" object for all
+	// of these routes; no ObjectIDField keeps that exact scope.
+	"/carbonpanel.v1.PackwizService/ListPacks":     {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/GetPack":       {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/ClonePack":     {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/RefreshPack":   {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/CheckUpdates":  {Resource: ResourceModpacks, Action: ActionRead},
+	"/carbonpanel.v1.PackwizService/DeletePack":    {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/AddPackMod":    {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/AddUrlMod":     {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/UpdatePackMod": {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/DeletePackMod": {Resource: ResourceModpacks, Action: ActionCreate},
+	"/carbonpanel.v1.PackwizService/BatchPackMods": {Resource: ResourceModpacks, Action: ActionCreate},
 	"/carbonpanel.v1.ConfigService/GetGlobalSettings":           {Resource: ResourceSettings, Action: ActionRead},
 	"/carbonpanel.v1.ConfigService/UpdateGlobalSettings":        {Resource: ResourceSettings, Action: ActionUpdate},
 	"/carbonpanel.v1.ConfigService/SyncGlobalSettingsToServers": {Resource: ResourceSettings, Action: ActionUpdate},

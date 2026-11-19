@@ -15,6 +15,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	} from '$lib/components/carbon';
 	import { Download, Loader2, TriangleAlert } from '@lucide/svelte';
 	import { toast } from 'svelte-sonner';
+	import { apiFetch } from '$lib/api/fetch';
 	import {
 		EXPORT_FORMATS,
 		DEFAULT_EXPORT_OPTIONS,
@@ -23,7 +24,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		formatExportLabel,
 		type PackExportFormat,
 		type PackExportOptions
-	} from './pack-export';
+	} from '$lib/features/modpacks/studio/export';
 
 	interface Props {
 		open: boolean;
@@ -55,12 +56,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		exporting = true;
 		droppedError = [];
 		try {
-			const result = await downloadPackExport(packId, packName, format, {
-				includeClient,
-				optionalMode,
-				overrides,
-				summary
-			});
+			const result = await downloadPackExport(
+				packId,
+				packName,
+				format,
+				{ includeClient, optionalMode, overrides, summary },
+				apiFetch
+			);
 			if (result.ok) {
 				toast.success(`Exported ${formatExportLabel(format)}`);
 				open = false;

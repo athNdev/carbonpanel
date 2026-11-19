@@ -263,6 +263,9 @@ func main() {
 		// constructor decides whether it applies.
 		ContainerWritableMB: cfg.Storage.ContainerWritableMB,
 		WorldQuotaMB:        cfg.Storage.WorldQuotaMB,
+		// B-09: opt-in strict image provenance. Off by default so existing
+		// tag-based version selection keeps working.
+		RequirePinnedImages: cfg.Docker.RequirePinnedDigests,
 	})
 	if err != nil {
 		log.Fatal("Failed to initialize Docker client: %v", err)

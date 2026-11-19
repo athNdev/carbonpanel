@@ -5,24 +5,78 @@
 ## Concepts
 
 - [Host-native private daemon mode](host-native-runtime.md) — Mode-specific Linux runtime that owns a private Docker socket, roots and network; it consumes the shared node-control contract and never falls back to a host engine.
+- [Host-native private daemon mode — Rule](host-native-runtime-rule.md) — internal/noderuntime/native is the HOST-NATIVE LINUX PRIVATE DAEMON mode for
+- [Host-native private daemon mode — Rule (part 2)](host-native-runtime-rule-2.md) — issue-certificate-first atomic consume, controller-derived TLS topology
+- [Host-native private daemon mode — Why + How to check + Read next](host-native-runtime-why.md) — Parallel deployment modes share one enrollment/control contract. Keeping host
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
+- [Map viewing — Invariants](world-viewing-invariants.md) — world_view/read never grants observe_players, overlay edits or admin;
+- [Map viewing — Invariants (part 2)](world-viewing-invariants-2.md) — (no host allocation/publication), read-only /app/world bind of the canonical
+- [Map viewing — Read next](world-viewing-read-next.md) — Fail-closed authorization
+- [Map viewing — Rule](world-viewing-rule.md) — WorldViewService observes worlds; it does not own them. A WorldRef
 - [MCP tool gateway](mcp-server.md) — A stdio gateway exposes bounded, fail-closed operator workflows through generated Connect clients and a shared coverage drift gate.
-- [Module system](module-system.md) — Modules, hooks, packwiz and indexers deliver server content and modpacks.
+- [MCP tool gateway — Read next](mcp-server-read-next.md) — Fail-closed authorization
+- [MCP tool gateway — Rule](mcp-server-rule.md) — cmd/carbonpanel-mcp speaks MCP over stdio. It calls the controller only
+- [MCP tool gateway — Rule (part 2)](mcp-server-rule-2.md) — The tool catalog is stable across controller builds. internal/mcp/catalog.go
+- [MCP tool gateway — Rule (part 3)](mcp-server-rule-3.md) — The nine formerly PENDING operations are now mounted by production
+- [Module system](module-system.md) — Modules, hooks, packwiz and indexers deliver content. Module reconcile adopts an externally replaced sidecar without duplicating it; EXEC hooks use the manager's Docker client for the target node.
+- [Module system — Convergence](module-system-convergence.md) — Module containers are reconciled by the same level-triggered engine as server
+- [Module system — Convergence (part 2)](module-system-convergence-2.md) — Parent deletion has an explicit child policy. A full delete stops and
+- [Module system — Hook execution + Read next](module-system-hook-execution.md) — EXEC hooks resolve the module's NodeID through the Docker Locator with the
+- [Module system — Shape + Rules](module-system-shape.md) — Modules are server-side content units. Hooks run inside the server's runtime;
 - [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
+- [Node control protocol — Rule](node-control-protocol-rule.md) — Managed-node control uses the separate versioned contract in
+- [Node control protocol — Rule (part 2)](node-control-protocol-rule-2.md) — The contract ships without an implementation. New RPCs are denied by default
+- [Node control protocol — Why + How to check + Read next](node-control-protocol-why.md) — A direct Docker endpoint is not an authenticated node principal and has no
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
+- [Node resolution — Current state](node-resolution-current-state.md) — Module, snapshot and deep-sleep helpers were made fail-closed and record the
+- [Node resolution — Current state (part 2)](node-resolution-current-state-2.md) — before the panel row. A remote node with no reachable storage is refused,
+- [Node resolution — How to check + Read next](node-resolution-how-to-check.md) — For any new operation, follow the path from the server record to the Docker
+- [Node resolution — Rule + Why](node-resolution-rule.md) — A server belongs to a node. An operation that targets a remote node must obtain
 - [Node VM artifact](node-vm-artifact.md) — Reproducible, secret-free QCOW2/cloud-init node VM builds with pinned provenance, scoped first-boot enrollment and staged rollback; fixture-only, not published.
+- [Node VM artifact — Rule](node-vm-artifact-rule.md) — The node VM artifact (packaging/node-vm/, drivers in scripts/node_vm_*.py)
+- [Node VM artifact — Rule (part 2)](node-vm-artifact-rule-2.md) — or published; no live VM, enrollment, daemon or deployment success is claimed.
+- [Node VM artifact — Why + How to check + Read next](node-vm-artifact-why.md) — A shared image with baked credentials or an unpinned base would defeat the
 - [Operation journal](operation-journal.md) — Lifecycle mutations are journalled before the Docker call, so an interrupted request leaves evidence and a release path instead of a half-changed server.
+- [Operation journal — Shape + Rules + Read next](operation-journal-shape.md) — Every create, start, stop, restart, delete and migrate is written to
 - [Persistence](persistence.md) — SQLite is the controller's single-writer store, with embedded migrations and durable user data.
 - [Player management](player-management.md) — Player identity, provenance, moderation and capability gates for the PlayerService surface.
+- [Player management — Authorization and audit](player-management-authorization-and-audit.md) — All PlayerService procedures are mapped to players:* permissions and
+- [Player management — Identity and provenance + Sources and capabilities + Skins, identity lookup and deep data + Roster f](player-management-identity-and-provenance.md) — PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,
 - [Portable node installer](node-installer.md) — One guest-side Linux installer shared by the host-native, VM and LXC managed modes; it owns only caller-named directories and produces ADR 0019 enrollment material.
+- [Portable node installer — How to check + Read next](node-installer-how-to-check.md) — go test ./internal/nodeinstall/... and
+- [Portable node installer — Rule + Why](node-installer-rule.md) — The portable installer in internal/nodeinstall and cmd/carbon-node-installer
 - [Remote storage transport](remote-storage-transport.md) — JSON accessor worker and Docker attach path for nodes without shared controller storage.
+- [Remote storage transport — Fail-closed + File RPC coverage + Read next](remote-storage-transport-fail-closed.md) — With no transport configured, transport-only nodes keep ErrUnavailable. Remote
+- [Remote storage transport — When transport is used](remote-storage-transport-when-transport-is-used.md) — A remote node with a declared storage_root and no reachable
+- [Remote storage transport — Worker channel](remote-storage-transport-worker-channel.md) — Bulk access uses protocol v2: 256 KiB acknowledged chunks, per-frame/whole-stream
+- [Remote storage transport — Worker channel (part 2)](remote-storage-transport-worker-channel-2.md) — Accessor backups enumerate metadata and apply exclusions before reading file
 - [RPC contract](rpc-contract.md) — Proto definitions are the single API contract for the backend, console and CLI.
+- [RPC contract — Flow + Invariants + Read next](rpc-contract-flow.md) — Regenerate with make proto (Docker + pinned Buf); generation and formatting
+- [RPC contract — Rule](rpc-contract-rule.md) — Every frontend or CLI call goes through a service defined in
+- [RPC contract — Rule (part 2)](rpc-contract-rule-2.md) — Packwiz pack control and staged config rollout are further compatibility
 - [Runtime lifecycle and world-data seams](runtime-seams.md) — Locator, lifecycle handle, idle-power module, route PlanFor and worldstore are the five stable architecture seams.
-- [Runtime model](runtime.md) — The daemon owns the API, console, proxy, scheduler and SQLite. Effective container limits are qualified before create, and storage-opt size does not bound a bind-mounted world.
+- [Runtime model](runtime.md) — Covers the API, console, proxy and scheduler. Effective container limits are qualified before create; storage-opt size does not bound a bind-mounted world. When storage.world_quota_mb is set and world bytes meet it, create is refused.
+- [Runtime model — Docker boundary](runtime-docker-boundary.md) — The controller holds a Docker client for the local socket or for a remote node.
+- [Runtime model — How to check + Read next](runtime-how-to-check.md) — Detailed guidance on how to check.
+- [Runtime model — Mount boundary + Work temp](runtime-mount-boundary.md) — The daemon interprets a bind source on the host, not inside the panel's
+- [Runtime model — Runtime profile](runtime-runtime-profile.md) — Before the daemon is asked to create a container, docker.PreflightRuntime
+- [Runtime model — Runtime profile (part 2)](runtime-runtime-profile-2.md) — The profile also reports the limits that are actually applied, not the ones
+- [Runtime model — Runtime profile (part 3)](runtime-runtime-profile-3.md) — Server.resource_enforcement carries that view to the console: requested
+- [Runtime model — Shape + Listeners + Build boundary](runtime-shape.md) — cmd/carbon-panel/main.go loads configuration, opens the SQLite database,
 - [Scheduler](scheduler.md) — Cron and lifecycle tasks run in the controller and surface progress over the WebSocket hub.
+- [Scheduler — How to check + Read next](scheduler-how-to-check.md) — Use the scheduler and task tests; for recovery behavior, use the fault harness
+- [Scheduler — Shape + Rules](scheduler-shape.md) — The scheduler owns cron expressions and lifecycle actions such as start, stop,
 - [Server data ownership](server-data-ownership.md) — The panel and the game container share a bind mount but not a uid, so anything the panel writes must be handed to the game container's user. Existing /data matching the game uid sets SKIP_CHOWN so a restart does not recursively chown.
 - [Server lifecycle policy](server-lifecycle.md) — Starts share node admission behind an in-process node gate, and config recreation records canonical container recovery identities.
+- [Server lifecycle policy — Policy](server-lifecycle-policy.md) — Start admission uses the smaller of the daemon memory and positive operator cap,
+- [Server lifecycle policy — Policy (part 2)](server-lifecycle-policy-2.md) — scheduled staged publication retain the AutoCurseForge name-derived slug
 - [Shared enrollment boundary](shared-enrollment-boundary.md) — One mode-agnostic production package owns managed-node enrollment, canonical claim signing, issuance and the three authorization domains.
+- [Shared enrollment boundary — How to check + Read next](shared-enrollment-boundary-how-to-check.md) — go test ./internal/noderuntime/... ./internal/nodeinstall/... ./internal/rpc/... ./internal/db/...
+- [Shared enrollment boundary — Rule + Why](shared-enrollment-boundary-rule.md) — internal/noderuntime/enroll is the SINGLE mode-agnostic production boundary
 - [TCP proxy](proxy.md) — One public TCP port multiplexes Minecraft traffic by inspecting the handshake and routing on hostname.
 - [Unprivileged LXC node artifact lane](node-lxc-artifact.md) — Separate rootfs artifact lane for unprivileged LXC managed nodes; shares the ADR0019 contract and gates on nested-runtime capabilities.
+- [Unprivileged LXC node artifact lane — Qualification and boot evidence](node-lxc-artifact-qual.md) — Fail-closed boot qualification and runtime evidence boundaries for the LXC artifact lane.
+- [Unprivileged LXC node artifact lane — Rule](node-lxc-artifact-rule.md) — The unprivileged LXC / Proxmox rootfs template is a separate artifact lane at
 - [World Library](world-library.md) — Library worlds are immutable content-addressed revisions; servers get private writable clones through journaled, stop-based bindings, never a live folder rename.
+- [World Library — Read next](world-library-read-next.md) — Fail-closed authorization
+- [World Library — Shape + Rules](world-library-shape.md) — A WorldEntry is a logical library identity (wld_*). A WorldRevision is an

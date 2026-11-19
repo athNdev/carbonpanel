@@ -69,6 +69,55 @@ func TestSharedRuntimeContract(t *testing.T) {
 	runtimeprofile.RunContract(t, DescribeRuntime)
 }
 
+// TestStrictDigestModeRequiresPinnedImage proves B-09's opt-in is a real
+// preflight gate: a moving tag is only a warning by default and becomes a
+// fatal, named issue when the operator enables strict provenance.
+func TestStrictDigestModeRequiresPinnedImage(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+
+	defaultProfile := DescribeRuntime(spec)
+	if !hasIssue(defaultProfile, RuntimeIssueImageUnpinned) {
+		t.Fatalf("default profile should warn on a moving tag: %v", issueCodes(defaultProfile))
+	}
+	if err := PreflightProfile(defaultProfile); err != nil {
+		t.Fatalf("default preflight should allow a moving tag: %v", err)
+	}
+
+	spec.RequirePinnedImage = true
+	strictProfile := DescribeRuntime(spec)
+	if !hasIssue(strictProfile, RuntimeIssueImageUnpinnedStrict) {
+		t.Fatalf("strict profile must name %s: %v", RuntimeIssueImageUnpinnedStrict, issueCodes(strictProfile))
+	}
+	err := PreflightProfile(strictProfile)
+	if !errors.Is(err, ErrRuntimeIncompatible) {
+		t.Fatalf("strict preflight = %v, want ErrRuntimeIncompatible", err)
+	}
+	if !strings.Contains(err.Error(), string(RuntimeIssueImageUnpinnedStrict)) {
+		t.Fatalf("strict preflight error %q does not name the issue", err)
+	}
+}
+
+func TestStrictDigestModeAcceptsPinnedImage(t *testing.T) {
+	spec := resolvedMinecraftContainer(nil, false)
+	spec.Image = "itzg/minecraft-server:java21@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	spec.RequirePinnedImage = true
+
+	profile := DescribeRuntime(spec)
+	if hasIssue(profile, RuntimeIssueImageUnpinnedStrict) || !profile.ImagePinned {
+		t.Fatalf("pinned image rejected in strict mode: pinned=%t issues=%v", profile.ImagePinned, issueCodes(profile))
+	}
+	if err := PreflightProfile(profile); err != nil {
+		t.Fatalf("strict preflight for pinned image = %v", err)
+	}
+}
+
+func TestRuntimeSpecForCarriesStrictDigestPolicy(t *testing.T) {
+	spec := runtimeSpecFor("itzg/minecraft-server:java21", "/srv/worlds/world-a", nil, &container.Config{}, &container.HostConfig{}, true)
+	if !spec.RequirePinnedImage {
+		t.Fatal("runtimeSpecFor dropped the require_pinned_digests policy")
+	}
+}
+
 func TestPreflightAcceptsTheDefaultMinecraftContainer(t *testing.T) {
 	spec := resolvedMinecraftContainer(nil, false)
 	profile := DescribeRuntime(spec)

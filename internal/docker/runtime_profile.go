@@ -57,6 +57,7 @@ const (
 	RuntimeIssueRootlessCgroupUnqualified    = runtimeprofile.RuntimeIssueRootlessCgroupUnqualified
 	RuntimeIssueWritableLayerCapUnsupported  = runtimeprofile.RuntimeIssueWritableLayerCapUnsupported
 	RuntimeIssueImageUnpinned                = runtimeprofile.RuntimeIssueImageUnpinned
+	RuntimeIssueImageUnpinnedStrict          = runtimeprofile.RuntimeIssueImageUnpinnedStrict
 	RuntimeIssueRootlessHostRootData         = runtimeprofile.RuntimeIssueRootlessHostRootData
 	RuntimeIssueReadOnlyRootUserMod          = runtimeprofile.RuntimeIssueReadOnlyRootUserMod
 	RuntimeIssueSensitiveMount               = runtimeprofile.RuntimeIssueSensitiveMount
@@ -87,13 +88,14 @@ func hasNoNewPrivileges(opts []string) bool {
 
 // runtimeSpecFor assembles the qualification input for a resolved container
 // request, including the world directory's owner when the platform reports it.
-func runtimeSpecFor(image, dataPath string, server *db.Server, config *container.Config, hostConfig *container.HostConfig) RuntimeSpec {
+func runtimeSpecFor(image, dataPath string, server *db.Server, config *container.Config, hostConfig *container.HostConfig, requirePinnedImage bool) RuntimeSpec {
 	spec := RuntimeSpec{
-		Image:          image,
-		DataPath:       dataPath,
-		MinecraftImage: IsMinecraftImage(image),
-		Config:         config,
-		HostConfig:     hostConfig,
+		Image:              image,
+		DataPath:           dataPath,
+		MinecraftImage:     IsMinecraftImage(image),
+		RequirePinnedImage: requirePinnedImage,
+		Config:             config,
+		HostConfig:         hostConfig,
 	}
 	if uid, ok := dataOwnerUID(dataPath); ok {
 		spec.DataOwnerUID = &uid

@@ -385,44 +385,29 @@ func (h *PackwizHandler) handleAddMod(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
-	if err := h.manager.AddMod(packID, mod); err != nil {
-		http.Error(w, fmt.Sprintf("failed to add mod: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Optional transitive dependency resolution: ?resolve_dependencies=true
-	// installs required (transitive) deps alongside the requested mod.
-	if r.URL.Query().Get("resolve_dependencies") != "true" {
-		writeJSON(w, http.StatusOK, map[string]any{"success": true})
-		return
-	}
-
-	loader := r.URL.Query().Get("loader")
-	mcVersion := r.URL.Query().Get("mc_version")
-	if loader == "" || mcVersion == "" {
-		if pack, err := h.manager.GetPack(packID); err == nil {
-			if loader == "" {
-				loader = pack.ModLoader
-			}
-			if mcVersion == "" {
-				mcVersion = pack.MCVersion
-			}
-		}
-	}
-
-	report, err := h.manager.AddModWithDependencies(packID, mod, loader, mcVersion, h.manager.NewHTTPDependencyFetcherContext(r.Context()))
+	// Compatibility adapter: the shared PackwizOperations owns add and optional
+	// transitive dependency resolution so the generated service cannot drift.
+	resolveDependencies := r.URL.Query().Get("resolve_dependencies") == "true"
+	result, err := h.ops.AddMod(r.Context(), packID, mod, resolveDependencies,
+		r.URL.Query().Get("loader"), r.URL.Query().Get("mc_version"))
 	if err != nil {
-		// The root mod is already installed; surface the resolver failure
-		// without failing the request.
-		writeJSON(w, http.StatusOK, map[string]any{"success": true, "dependency_error": err.Error()})
+		writePackwizError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"success":            true,
-		"added_dependencies": report.Added,
-		"skipped":            report.Skipped,
-		"unresolved":         report.Unresolved,
-	})
+	if result.DependencyError != "" {
+		writeJSON(w, http.StatusOK, map[string]any{"success": true, "dependency_error": result.DependencyError})
+		return
+	}
+	if resolveDependencies {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"success":            true,
+			"added_dependencies": result.AddedDependencies,
+			"skipped":            result.Skipped,
+			"unresolved":         result.Unresolved,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 func (h *PackwizHandler) handleAddModURL(w http.ResponseWriter, r *http.Request, packID string) {
@@ -432,9 +417,9 @@ func (h *PackwizHandler) handleAddModURL(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	mod, err := h.manager.AddModFromURL(packID, req)
+	mod, err := h.ops.AddModFromURL(r.Context(), packID, req)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to add mod from URL: %v", err), http.StatusInternalServerError)
+		writePackwizError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, mod)
@@ -451,19 +436,12 @@ func (h *PackwizHandler) handleBatchMods(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	for _, slug := range req.Slugs {
-		switch req.Action {
-		case "set_side":
-			_ = h.manager.UpdateMod(packID, slug, req.Side, false)
-		case "pin":
-			_ = h.manager.UpdateMod(packID, slug, "", true)
-		case "unpin":
-			_ = h.manager.UpdateMod(packID, slug, "", false)
-		case "remove":
-			_ = h.manager.DeleteMod(packID, slug)
-		}
+	count, err := h.ops.BatchMods(r.Context(), packID, req.Action, req.Slugs, req.Side)
+	if err != nil {
+		writePackwizError(w, err)
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"success": true, "count": len(req.Slugs)})
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "count": count})
 }
 
 func (h *PackwizHandler) handleUpdateMod(w http.ResponseWriter, r *http.Request, packID, slug string) {
@@ -476,16 +454,16 @@ func (h *PackwizHandler) handleUpdateMod(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if err := h.manager.UpdateMod(packID, slug, req.Side, req.Pinned); err != nil {
-		http.Error(w, fmt.Sprintf("failed to update mod: %v", err), http.StatusInternalServerError)
+	if err := h.ops.UpdateMod(r.Context(), packID, slug, req.Side, req.Pinned); err != nil {
+		writePackwizError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 func (h *PackwizHandler) handleDeleteMod(w http.ResponseWriter, r *http.Request, packID, slug string) {
-	if err := h.manager.DeleteMod(packID, slug); err != nil {
-		http.Error(w, fmt.Sprintf("failed to remove mod: %v", err), http.StatusInternalServerError)
+	if err := h.ops.DeleteMod(r.Context(), packID, slug); err != nil {
+		writePackwizError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})

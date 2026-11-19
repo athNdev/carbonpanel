@@ -119,7 +119,7 @@ func (c *Cache) read(uuid, kind string) (cacheEntry, bool) {
 	if e.Negative {
 		life = c.negativeTTL()
 	}
-	now := time.Now().UTC()
+	now := c.clock.Now()
 	if e.ObservedAt.After(now) || now.Sub(e.ObservedAt) >= life {
 		return cacheEntry{}, false
 	}
@@ -223,7 +223,7 @@ func (c *Cache) sweepExpired() {
 	if err != nil {
 		return
 	}
-	now := time.Now().UTC()
+	now := c.clock.Now()
 	for _, de := range entries {
 		if de.IsDir() {
 			continue

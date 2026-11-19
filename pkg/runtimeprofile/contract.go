@@ -79,6 +79,16 @@ func contractCases() []contractCase {
 			codes: []RuntimeIssueCode{RuntimeIssueImageUnpinned},
 		},
 		{
+			// B-09: the resolved digest is recorded for every image; strict
+			// mode is opt-in and must refuse a moving tag at preflight.
+			name: "strict digest mode refuses a moving tag",
+			mutate: func(spec *RuntimeSpec) {
+				spec.RequirePinnedImage = true
+			},
+			fatal: true,
+			codes: []RuntimeIssueCode{RuntimeIssueImageUnpinnedStrict},
+		},
+		{
 			name: "image bootstrap without nsswitch skip",
 			mutate: func(spec *RuntimeSpec) {
 				spec.Config.Env = nil

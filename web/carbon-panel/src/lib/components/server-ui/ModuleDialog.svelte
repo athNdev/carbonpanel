@@ -69,8 +69,8 @@ one at https://mozilla.org/MPL/2.0/.
 		instanceHealthDefaults,
 		envVarsToJson,
 		volumesToJson,
-		parseEnvVars,
-		parseVolumes,
+		parseEnvVarsDetailed,
+		parseVolumesDetailed,
 		parsePorts,
 		parseDependencies,
 		parseEventHooks,
@@ -114,6 +114,10 @@ one at https://mozilla.org/MPL/2.0/.
 	let startImmediately = $state(true);
 	let envVars = $state<EnvVar[]>([]);
 	let volumes = $state<VolumeMount[]>([]);
+	// Explicit, non-blocking report of persisted JSON that could not be decoded.
+	// Blank fields stay "absent"; the historical empty-row interpretation is kept.
+	let envMalformed = $state(false);
+	let volumesMalformed = $state(false);
 	let ports = $state<ModulePort[]>([]);
 	let dependencies = $state<ModuleDependency[]>([]);
 	let healthCheckInterval = $state(30);
@@ -254,6 +258,8 @@ one at https://mozilla.org/MPL/2.0/.
 		restartAfterInit = false;
 		envVars = [];
 		volumes = [];
+		envMalformed = false;
+		volumesMalformed = false;
 		startImmediately = true;
 		ports = [];
 		dependencies = [];
@@ -275,8 +281,12 @@ one at https://mozilla.org/MPL/2.0/.
 				.catch(() => ({ port: 8100 })),
 			loadServerModules()
 		]);
-		envVars = parseEnvVars(template.defaultEnv || '{}');
-		volumes = parseVolumes(template.defaultVolumes || '[]');
+		const decodedEnv = parseEnvVarsDetailed(template.defaultEnv || '{}');
+		const decodedVolumes = parseVolumesDetailed(template.defaultVolumes || '[]');
+		envVars = decodedEnv.rows;
+		volumes = decodedVolumes.rows;
+		envMalformed = decodedEnv.malformed;
+		volumesMalformed = decodedVolumes.malformed;
 		ports = parsePorts(template.ports);
 		memory = template.defaultMemory;
 		uid = template.defaultUid;
@@ -379,8 +389,12 @@ one at https://mozilla.org/MPL/2.0/.
 			initCommand = module.initCommand;
 			initCommandDelay = module.initCommandDelay;
 			restartAfterInit = module.restartAfterInit;
-			envVars = parseEnvVars(module.envOverrides || '{}');
-			volumes = parseVolumes(module.volumeOverrides || '[]');
+			const decodedEnv = parseEnvVarsDetailed(module.envOverrides || '{}');
+			const decodedVolumes = parseVolumesDetailed(module.volumeOverrides || '[]');
+			envVars = decodedEnv.rows;
+			volumes = decodedVolumes.rows;
+			envMalformed = decodedEnv.malformed;
+			volumesMalformed = decodedVolumes.malformed;
 			ports = parsePorts(module.ports);
 			dependencies = parseDependencies(module.dependencies);
 			({ healthCheckInterval, healthCheckTimeout, healthCheckRetries } =
@@ -947,6 +961,12 @@ one at https://mozilla.org/MPL/2.0/.
 											{envVars.length} variable{envVars.length !== 1 ? 's' : ''} defined
 										</p>
 									</div>
+									{#if envMalformed}
+										<p class="text-sm text-destructive" data-testid="module-env-malformed">
+											Stored environment JSON was unreadable, so this form started empty. No values
+											were changed.
+										</p>
+									{/if}
 									<Button onclick={addEnvVar} class="gap-2">
 										<Plus class="h-4 w-4" />
 										Add Variable
@@ -1004,6 +1024,12 @@ one at https://mozilla.org/MPL/2.0/.
 											{volumes.length} volume{volumes.length !== 1 ? 's' : ''} mounted
 										</p>
 									</div>
+									{#if volumesMalformed}
+										<p class="text-sm text-destructive" data-testid="module-volumes-malformed">
+											Stored volume JSON was unreadable, so this form started empty. No mounts were
+											changed.
+										</p>
+									{/if}
 									<Button onclick={addVolume} class="gap-2">
 										<Plus class="h-4 w-4" />
 										Add Volume
