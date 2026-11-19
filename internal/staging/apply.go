@@ -153,7 +153,13 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		}
 		plan := PlanFor(server.Status, len(applied) > 0)
 		plan.ModuleIDs = moduleIDs
-		if plan.NeedsPublish() {
+		// A retry after publication succeeded but finalization failed finds no
+		// staged rows left to publish. PlanFor still describes a running server
+		// as needing a restart, so gate it on work this attempt actually did:
+		// otherwise the retry would restart (or recreate) the container again
+		// and discard the original publication's plan.
+		pendingWork := len(applied) > 0 || len(content) > 0 || len(moduleIDs) > 0
+		if pendingWork && plan.NeedsPublish() {
 			if publish == nil {
 				return errors.Join(errors.New("staged batch needs a container publish"), undoApply(ctx, store, moduleRestore(undoModules, restore), applied, nil))
 			}

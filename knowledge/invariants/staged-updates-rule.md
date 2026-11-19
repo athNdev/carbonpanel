@@ -43,10 +43,10 @@ the time that stretch started is stored on the batch. A player joining clears
 it. Deep sleep commits the batch onto the stopped server and does not start
 the JVM. A running server is saved and restarted once. A frozen server gets a
 real stop and start and is left running. If that publish fails, the previous
-files and config are restored and the batch stays open. Config and content
-rows remain staged for retry; existing open-batch config rows left rolled back
-by a failed publication are reconciled before a later apply. A live config field
-that moved after it was staged stops the publish before anything is written.
+files and config are restored and the batch stays open. Failed publications
+keep rows staged and reconcile rolled-back batch configs; retries after
+completed publication only finish bookkeeping. A live config field that moved
+after it was staged stops the publish before anything is written.
 
 A modpack task can join that batch. The fetched tree is copied into the
 staging directory and the live pack stays as it is until the window. The same
