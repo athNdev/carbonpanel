@@ -153,7 +153,7 @@ def render_versions_page(index, current, site="https://carbonpanel.dev"):
         f"## Current documentation: {html.escape(current['display'])}",
         "",
         f"**{html.escape(current['channel'])}** / {html.escape(current['availability'])}. "
-        f"Application commit: [{current['commit'][:12]}]({index['repository']}/tree/{current['commit']}).",
+        f"Application commit: [{current['commit'][:12]}]({index['repository']}/commit/{current['commit']}).",
         "",
         "The guides, configuration examples, Compose files, identity-provider examples, and generated "
         "API schema are taken from this exact commit. The website navigation and visual theme can "
@@ -180,17 +180,20 @@ def render_versions_page(index, current, site="https://carbonpanel.dev"):
               "reference describes the pinned schema; your running panel remains the authority for "
               "the API it actually serves.", ""]
     for version in index["versions"]:
-        if version["cta"]:
+        if version["download_kind"] == "github-release":
             parts += [f"- **{version['display']}**: [download]({version['download_url']}) "
                       f"({version['download_kind']}).", ""]
+        elif version["download_kind"] == "rolling-image":
+            parts += [f"- **{version['display']}**: rolling `{version['image']['tag']}` image at "
+                      f"`{html.escape(version['image']['digest'])}`; no GitHub release.", ""]
         else:
             parts += [f"- **{version['display']}**: source only, no download. "
                       f"Browse the [source tree]({version['download_url']}).", ""]
     parts += ["## Updating the pin", "",
               "Maintainers regenerate `docs/version-index.json` from `docs/website-source.json` and "
-              "the classified catalog, review the guides against the exact peeled commit, and rebuild "
-              "the complete website. The fail-closed drift checks reject a label, tag, peeled commit "
-              "or channel disagreement before a package is produced.", ""]
+              "the classified catalog, review the guides against the exact pinned commit, and rebuild "
+              "the complete website. The fail-closed drift checks reject a channel, image digest, "
+              "revision, tag or commit disagreement before a package is produced.", ""]
     return "\n".join(parts) + "\n"
 
 
@@ -245,14 +248,21 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
     (generated / "version-index.json").write_text(shared, encoding="utf-8")
     (project / "src/content/docs/versions.mdx").write_text(
         render_versions_page(index, current, site), encoding="utf-8")
+    channel = index["channels"][current["channel"]]
     source = {
         "revision": current["commit"],
         "label": current["display"],
+        "channel_display": current["channel_display"],
         "repository": index["repository"],
         "tag": current["tag"],
         "channel": current["channel"],
         "availability": current["availability"],
         "source_commit": current["source_commit"],
+        "image_digest": channel["image"]["digest"],
+        "docker_hub": channel["image"]["docker_hub"],
+        "ghcr": channel["image"]["ghcr"],
+        "promotion_state": channel["promotion"]["state"],
+        "promoted": channel["promotion"]["promoted"],
     }
     (project / "public/source.json").write_text(json.dumps(source, indent=2) + "\n", encoding="utf-8")
     for page in (project / "src/content/docs").rglob("*"):
@@ -283,11 +293,14 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
         cached.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(generated_schema, cached)
     # The website schema copy carries this version's exact product identity.
+    # Nightly has no product release number, so its schema uses an explicit
+    # non-release semver derived from the pinned revision; the public selector
+    # still says only "Nightly".
     schema = generated_schema.read_text(encoding="utf-8")
     generated_schema.write_text(
-        openapi_version.stamp_text(schema, current["display"]), encoding="utf-8")
+        openapi_version.stamp_text(schema, current["schema_version_label"]), encoding="utf-8")
     openapi_version.verify_text(
-        generated_schema.read_text(encoding="utf-8"), current["display"])
+        generated_schema.read_text(encoding="utf-8"), current["schema_version_label"])
     environment = {**os.environ, "DOCS_BASE_PATH": base,
                    "WEBSITE_BASE_PATH": root_base, "WEBSITE_ORIGIN": site,
                    "ASTRO_TELEMETRY_DISABLED": "1"}
@@ -351,10 +364,11 @@ def build_sitemap(output, base, site, lastmod=None, bases=None):
     ET.ElementTree(sitemap).write(output / "sitemap.xml", encoding="utf-8", xml_declaration=True)
 
 
-def build(root, base, site):
+def build(root, base, site, promotion=None):
     if not base.startswith("/") or not base.endswith("/") or ".." in base:
         raise ValueError("The website base must be an absolute path ending in /.")
     contract, catalog = version_contract.load(root)
+    contract = version_contract.apply_promotion(contract, promotion)
     version_contract.validate(contract, catalog, root)
     index = version_contract.version_index(contract, catalog, root)
     homepage = build_homepage(root)
@@ -386,10 +400,19 @@ def build(root, base, site):
         if output.exists():
             shutil.rmtree(output)
         shutil.copytree(staged, output)
-    # Index is shared by the switcher, banner, direct URL validation and metadata.
+    # Index and marker are shared by the switcher, banner, direct URL validation,
+    # public candidate verification and metadata. The marker is only written to
+    # the generated artifact; promotion inputs never touch a tracked main file.
     (output / "version-index.json").write_text(version_contract.render_index(index), encoding="utf-8")
+    marker = version_contract.channel_marker(index)
+    (output / "channel-marker.json").write_text(
+        json.dumps(marker, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     build_sitemap(output, base, site, bases=bases)
-    print(f"Website built at {output}; {len(index['versions'])} versions from exact peeled commits.", flush=True)
+    print(f"Website built at {output}; {len(index['versions'])} channels from exact pinned commits.",
+          flush=True)
+    print("Channel marker: " + " ".join(
+        f"{name}={entry['revision']}@{entry['digest']} ({entry['state']}, promoted={str(entry['promoted']).lower()})"
+        for name, entry in marker["channels"].items()), flush=True)
     return output
 
 
@@ -397,5 +420,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="/")
     parser.add_argument("--site", default="https://carbonpanel.dev")
+    parser.add_argument("--nightly-revision", help="exact promoted nightly commit (external input)")
+    parser.add_argument("--nightly-digest", help="sha256 digest verified in BOTH registries")
+    parser.add_argument("--promotion-state", default="candidate",
+                        choices=version_contract.PROMOTION_STATES)
+    parser.add_argument("--promotion-receipt", help="promotion receipt id from the gate")
     args = parser.parse_args()
-    build(ROOT, args.base, args.site)
+    promotion = version_contract.promotion_from_env()
+    if args.nightly_revision or args.nightly_digest:
+        if args.nightly_revision and args.nightly_digest:
+            promotion = {
+                "revision": args.nightly_revision,
+                "digest": args.nightly_digest,
+                "state": args.promotion_state,
+                "receipt": args.promotion_receipt or "",
+            }
+        else:
+            raise ValueError("--nightly-revision and --nightly-digest must be supplied together")
+    build(ROOT, args.base, args.site, promotion)
