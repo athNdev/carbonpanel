@@ -350,7 +350,7 @@ jobs:
       - name: Require the full README-canonical image set
         run: |
           for name in \
-            showcase-dashboard showcase-server-detail showcase-studio showcase-modpacks \
+            showcase-dashboard showcase-dashboard-full showcase-server-detail showcase-studio showcase-modpacks \
             showcase-library showcase-library-revisions showcase-player-allowlist
           do
             if [ ! -s "/tmp/showcase-artifact/bundle/${name}.png" ]; then

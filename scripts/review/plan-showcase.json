@@ -50,6 +50,23 @@
       "required": true
     },
     {
+      "assertVisible": "text=review-paper",
+      "name": "named server fleet is populated",
+      "required": true
+    },
+    {
+      "assertVisible": "text=review-creative",
+      "name": "second named server is populated",
+      "required": true
+    },
+    {
+      "screenshot": "showcase-dashboard-full",
+      "fullPage": true,
+      "name": "full-window dashboard with shell and populated cards",
+      "alt": "Full desktop dashboard with navigation, header, populated resource panels and several named seeded servers",
+      "focus": "Shell navigation, cluster overview and the seeded server fleet"
+    },
+    {
       "screenshot": "showcase-dashboard",
       "element": "[data-testid=\"showcase-dashboard-content\"]",
       "scroll": false,
@@ -164,6 +181,11 @@
       "alt": "Modpack browser with provider filters and the first row of real catalog results",
       "focus": "Provider filters and real catalog results",
       "required": true
+    },
+    {
+      "setViewport": { "width": 960, "height": 900 },
+      "feature": "players",
+      "name": "readable inline capture width"
     },
     {
       "goto": "/players",

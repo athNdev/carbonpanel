@@ -18,7 +18,7 @@
 
 import { launchReviewBrowser } from "./browser.mjs";
 import { writeReviewReport } from "./report.mjs";
-import { waitForEntryState } from "./entry-state.mjs";
+import { waitForEntryState, screenshotAllowed } from "./entry-state.mjs";
 import {
   mkdirSync,
   readFileSync,
@@ -59,6 +59,9 @@ async function main() {
   const out = resolve(args.out ?? fileURLToPath(new URL(`../../tmp/review-output/single/${new Date().toISOString().replace(/[:.]/g, '-')}/`, import.meta.url)));
   mkdirSync(out, { recursive: true });
   const results = [];
+  // A failed readiness/data assertion blocks every later screenshot for that
+  // feature. A filename on disk is not proof the prerequisite passed.
+  const blockedFeatures = new Set();
   reportState = { out, profile: 'single-seeded', base: args.base, checks: results };
 
   const { browser, metadata: browserMetadata } = await launchReviewBrowser();
@@ -101,6 +104,10 @@ async function main() {
     const label =
       spec.name ??
       `${kind}:${Object.values(spec).find((v) => typeof v === "string") ?? ""}`;
+    if (kind === "screenshot" && !screenshotAllowed(spec.feature, blockedFeatures)) {
+      record(label, false, `prerequisite failed for feature ${spec.feature}; screenshot blocked`, spec.feature);
+      return;
+    }
     try {
       switch (kind) {
         case "goto":
@@ -112,6 +119,12 @@ async function main() {
             timeout: 30000,
           });
           break;
+        case "setViewport": {
+          // Inline images are legible when the app lays out at roughly their
+          // display width; DPR only controls output sharpness, not text size.
+          await page.setViewportSize(spec.setViewport);
+          break;
+        }
         case "gotoEnv": {
           // Navigate to a real route whose dynamic segment was produced by the
           // disposable fixture (for example an opaque player identity key).
@@ -311,6 +324,7 @@ async function main() {
         record(label, true, "", spec.feature);
       }
     } catch (error) {
+      if (spec.feature && kind !== "screenshot") blockedFeatures.add(spec.feature);
       record(
         label,
         false,
@@ -433,6 +447,7 @@ async function main() {
     const kind = Object.keys(spec).find((key) =>
       [
         "goto",
+        "setViewport",
         "gotoEnv",
         "gotoIdentityFromTitle",
         "click",

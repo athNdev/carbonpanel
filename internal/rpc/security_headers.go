@@ -21,7 +21,10 @@ import (
 const contentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self' 'unsafe-inline'; " +
 	"style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data: https:; " +
+	// Player skin previews are decoded from same-origin object URLs created
+	// from the server-side GetPlayerSkin bytes; blob: is required or the image
+	// never decodes and naturalWidth stays zero.
+	"img-src 'self' blob: data: https:; " +
 	"font-src 'self' data:; " +
 	"connect-src 'self' ws: wss:; " +
 	"frame-ancestors 'self'; " +

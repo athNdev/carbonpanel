@@ -13,6 +13,13 @@
 
 export const ENTRY_STATES = Object.freeze(['login', 'bootstrap', 'authenticated', 'fatal']);
 
+// A feature screenshot may only be written while every earlier readiness/data
+// assertion for that feature passed. A stale or failed prerequisite must never
+// leave qualifying-looking PNG bytes behind.
+export function screenshotAllowed(feature, blockedFeatures) {
+	return !feature || !blockedFeatures.has(feature);
+}
+
 /**
  * Wait for exactly one mutually exclusive entry state to become visible.
  *
