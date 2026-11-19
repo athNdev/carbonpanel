@@ -55,5 +55,6 @@
       "screenshot": "modpacks-library-controls",
       "name": "capture modpacks library controls"
     }
-  ]
+  ],
+  "docs": "Real-application browser journey plan for the existing scripts/review/journey.mjs harness (drives a real Chromium session against a running panel/devstack), not a component fixture. This session added/validated the plan structurally (JSON/selector contract and knowledge-lint) but did not execute it against a live disposable panel; PR CI for this head did not invoke this plan. Assertions target stable /modpacks library shell controls and do not claim indexer/catalog data, import/upload mutations, or permission-state coverage beyond the standard review login/bootstrap path."
 }
