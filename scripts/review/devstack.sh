@@ -466,9 +466,10 @@ remove_owned_sidecar() {
 }
 
 # Real BlueMap renderer: generates genuine tiles/web assets into the bind-mounted
-# web root. No web listener is started; the static server below serves port 8100
-# so the panel can reach the same pre-generated real map on its loopback
-# namespace while rendering continues for tiles the viewport requests later.
+# web root. It runs in its own network namespace (not the panel's) so its built-in
+# web listener cannot conflict with the static server on port 8100; the static
+# server below serves the same pre-generated real map on the panel's loopback
+# namespace while this renderer keeps running and producing real tiles.
 start_bluemap_renderer() {
 	local host_path="$1" mapdir="$2" level="$3"
 	remove_owned_sidecar "${NAME}-bluemap-render" || return 1
@@ -478,7 +479,7 @@ start_bluemap_renderer() {
 		-v "${host_path}/${level}:/app/world:ro" \
 		-v "${mapdir}/data:/app/data" \
 		-v "${mapdir}/web:/app/web" \
-		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u >/dev/null 2>&1
+		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1
 }
 
 # Serve the SAME generated web root (real tiles + settings.json + renderer
@@ -660,6 +661,10 @@ except Exception as e:
 							sleep 3
 						done
 						echo "review BlueMap tile files before journey: ${tile_prev}" >&2
+						tile_sample="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sort | head -12 | tr '\n' ' ' | cut -c1-500)"
+						echo "review BlueMap tile sample: ${tile_sample}" >&2
+						tile_lods="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sed -n 's#.*maps/[^/]*/tiles/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ' | cut -c1-120)"
+						echo "review BlueMap tile lods: ${tile_lods}" >&2
 					fi
 				else
 					echo "review map server container failed to start" >&2
