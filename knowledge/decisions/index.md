@@ -21,7 +21,7 @@
 - [MCP upload/commit family seam](mcp-upload-commit-family.md) — Upload and commit operations are exposed as lane-owned typed tools and a composed bounded-stream path whose descriptors are handed to the integration owner, never wired directly into shared catalog files.
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
-- [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields and staging policy.
+- [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields, staging policy, and explicit malformed-JSON reporting.
 - [Module sidecar confinement parity](module-confinement-parity.md) — Module sidecars inherit the game-container HostConfig baseline; one named, permission-gated profile is the only relaxation.
 - [Named egress classes](egress-class-policy.md) — Provider, webhook and archive outbound requests use class-specific policy objects; loopback is a test-only opt-in and remote saves are staged.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.

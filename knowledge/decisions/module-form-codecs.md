@@ -1,12 +1,14 @@
 ---
 type: Decision
 title: Module form conversions
-description: Module instance and template forms share pure row conversions while preserving separate request fields and staging policy.
+description: Module instance and template forms share pure row conversions while preserving separate request fields, staging policy, and explicit malformed-JSON reporting.
 status: stable
 owners: [oss-runtime]
 code_refs:
   - web/carbon-panel/src/lib/features/modules/form-codecs.ts
   - web/carbon-panel/src/lib/features/modpacks/studio
+  - web/carbon-panel/src/lib/features/modpacks/persisted-json.ts
+  - web/carbon-panel/src/routes/modpacks/+page.svelte
   - scripts/manual-review/e2e/module-forms-check.mjs
   - web/carbon-panel/src/lib/components/server-ui/ModuleDialog.svelte
   - web/carbon-panel/src/lib/components/server-ui/ModuleTemplateCreateDialog.svelte
@@ -62,3 +64,25 @@ id-versus-slug version lookup. Search still parses JSON before checking
 not validation. Outgoing requests stay byte-identical; the route keeps flags,
 dialogs and toasts. Real-browser fixture QA drives these through the actual
 Studio page at 1440 dark.
+
+Malformed persisted JSON is now reported explicitly rather than silently
+discarded. `form-codecs.ts` exposes `parseEnvVarsDetailed` and
+`parseVolumesDetailed`, which return the same rows plus `malformed: true` when a
+non-blank value cannot be parsed; the historical wrappers keep returning rows
+only. Blank fields mean absent, not malformed. Both module dialogs show a
+non-blocking warning on a malformed field, and the modpack library uses
+`features/modpacks/persisted-json.ts` to flag unreadable persisted loader/version
+metadata on the card. This is tolerant decoding with an honest report, not
+validation, repair or rejection; valid values and all outgoing requests are
+unchanged.
+
+The last two Studio workflows follow the same mechanical rule.
+`studio/pack-metadata.ts` owns the project GET, the whole-pack metadata/content
+PUT, the `HTTP <status>` failures, the empty-baseline MC-version change rule,
+content aggregation and the export-tab count breakdown.
+`studio/export.ts` owns launcher formats/options, the exact export query and
+URL, the CurseForge 422 dropped-item interpretation and the blob handoff; the
+transport is injected so both Studio entry points are request-level testable
+without a `$app` alias. Routes remain composition shells for form state, tabs,
+dialogs and toasts. No generic form engine is introduced, and template defaults
+and instance overrides stay distinct.
