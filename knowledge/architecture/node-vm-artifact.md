@@ -9,13 +9,18 @@ code_refs:
   - scripts/node_vm_build.py
   - scripts/node_vm_integrity.py
   - scripts/node_vm_upgrade.py
+  - scripts/node_vm_verify_image.py
   - scripts/test_node_vm_build.py
   - scripts/test_node_vm_integrity.py
   - scripts/test_node_vm_upgrade.py
   - scripts/test_node_vm_enroll.py
+  - scripts/test_node_vm_verify_image.py
+  - packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md
 sources:
   - title: ADR 0035 node VM artifact
     resource: ../../docs/adr/0035-node-vm-artifact.md
+  - title: OSS-377 VM boot qualification evidence
+    resource: ../../packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md
   - title: ADR 0019 node control contract (shared, not forked)
     resource: ../../docs/adr/0019-node-control-contract.md
 ---
@@ -64,10 +69,15 @@ config change, no registry push and no release.
   via environment. No private key, passphrase or token is in the build config
   or any artifact. ADR 0010/0033 publication gates are unchanged.
 - Runtime fixtures are synthetic and offline tests prove determinism, refusal
-  and planner semantics only. The base-image pin is real and signature-backed,
-  but no image bytes were downloaded and no QCOW2 was built; no live VM,
-  enrollment, daemon or deployment success is claimed. Disposable owned-VM
-  acceptance is designed in `packaging/node-vm/qualification/QUALIFICATION.md`.
+  and planner semantics only. The base-image pin is real and signature-backed;
+  `scripts/node_vm_verify_image.py` now verifies that an already-downloaded
+  image's real bytes match the pin and the signed `SHA256SUMS` (amd64/arm64
+  bytes verified 2026-11-19, see `VM-BOOT-QUALIFICATION.md`). No QCOW2 was built
+  or published; no live VM, enrollment, daemon or deployment success is claimed.
+  A real clean boot is blocked where no `qemu-system` binary or `/dev/kvm`
+  exists; record that exact blocker rather than claiming boot evidence.
+  Disposable owned-VM acceptance is designed in
+  `packaging/node-vm/qualification/QUALIFICATION.md`.
 
 # Why
 
@@ -88,6 +98,9 @@ the shared node-control contract without duplicating it.
   CycloneDX SBOM + key-free signing plan)
 - `python scripts/node_vm_upgrade.py --from-revision A --to-revision B
   --batch-id ID` (staged undo plan)
+- `python3 scripts/node_vm_verify_image.py --image <downloaded.img> --ref
+  ubuntu-24.04-amd64 --sha256sums <SHA256SUMS>` (real-byte check, offline and
+  read-only; requires a caller-supplied image file)
 - Never substitute a real key, endpoint or world path for a fixture value, and
   never run these drivers against a live VM from this lane.
 
