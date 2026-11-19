@@ -261,30 +261,10 @@ func (s *Server) setupHandler() {
 	// Register all service handlers
 	s.registerServices(mux, opts)
 
-	// Add reflection for gRPC clients
-	reflector := grpcreflect.NewStaticReflector(
-		carbonpanelv1connect.AuthServiceName,
-		carbonpanelv1connect.ConfigServiceName,
-		carbonpanelv1connect.FileServiceName,
-		carbonpanelv1connect.MinecraftServiceName,
-		carbonpanelv1connect.ModServiceName,
-		carbonpanelv1connect.ModBrowseServiceName,
-		carbonpanelv1connect.ModpackServiceName,
-		carbonpanelv1connect.PackwizServiceName,
-		carbonpanelv1connect.ModuleServiceName,
-		carbonpanelv1connect.NodeServiceName,
-		carbonpanelv1connect.ProxyServiceName,
-		carbonpanelv1connect.RoleServiceName,
-		carbonpanelv1connect.ServerServiceName,
-		carbonpanelv1connect.StagedConfigServiceName,
-		carbonpanelv1connect.SupportServiceName,
-		carbonpanelv1connect.TaskServiceName,
-		carbonpanelv1connect.UploadServiceName,
-		carbonpanelv1connect.UserServiceName,
-		carbonpanelv1connect.PlayerServiceName,
-		carbonpanelv1connect.WorldServiceName,
-		carbonpanelv1connect.WorldViewServiceName,
-	)
+	// Add reflection for gRPC clients. The service list is the same
+	// authoritative set the RBAC enumeration gate consumes, so reflection and
+	// the fail-closed permission gate cannot drift apart (OSS-403).
+	reflector := grpcreflect.NewStaticReflector(RegisteredConnectServices...)
 	mux.Handle(grpcreflect.NewHandlerV1(reflector))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(reflector))
 
@@ -374,8 +354,12 @@ func (s *Server) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) 
 	}
 }
 
-// Registers all Connect RPC service handlers
-func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOption) {
+// Registers all Connect RPC service handlers.
+//
+// The mux is the narrow interface registerServices actually needs, so a test
+// can record every mounted path and verify it against RegisteredConnectServices
+// (OSS-403) without depending on http.ServeMux internals.
+func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerOption) {
 	// Create service instances
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
 	authService.SetTrustProxy(s.config != nil && s.config.Server.TrustProxy)

@@ -6,6 +6,7 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - proto/carbonpanel/v1
+  - internal/rbac
   - internal/rpc
   - web/carbon-panel/src/lib/proto
 ---
@@ -22,11 +23,18 @@ code_refs:
 3. Implement the handler in `internal/rpc/handlers` and the service in
    `internal/rpc/services`.
 4. Map the method to a permission in the RBAC layer. A new method is denied by
-   default until this exists.
-5. Add a positive test and a negative authorization test.
-6. Consume the generated TypeScript client in the console. Do not add a
+   default until this exists. The fail-closed enumeration gate in
+   `internal/rbac/mapping_test.go` walks every RPC of every service in
+   `rpc.RegisteredConnectServices`; a new method without a mapping fails CI.
+5. When adding a new *service* (not just a method), add its `ServiceName` to
+   `rpc.RegisteredConnectServices` in the same change as the handler
+   registration, so the gate and the gRPC reflector cover it. A drift guard in
+   `internal/rpc/registered_services_test.go` fails when the list and the
+   mounted handlers differ.
+6. Add a positive test and a negative authorization test.
+7. Consume the generated TypeScript client in the console. Do not add a
    parallel DTO or an ad-hoc fetch.
-7. Run `go test ./...`, `go vet ./...`, and the frontend checks from
+8. Run `go test ./...`, `go vet ./...`, and the frontend checks from
    [testing](../testing/verification.md).
 
 # Stop conditions
