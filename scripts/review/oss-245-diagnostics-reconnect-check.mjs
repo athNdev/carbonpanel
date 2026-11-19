@@ -289,14 +289,16 @@ async function run(page, base) {
 			null,
 			{ timeout: 15000 }
 		);
+		// state() reports counts for the latest (reconnected) socket instance.
 		await page.waitForFunction(
-			(previous) => globalThis.__oss245Ws.state().subscribeCount > previous,
-			before.subscribeCount,
+			() => globalThis.__oss245Ws.state().subscribeCount >= 1,
+			null,
 			{ timeout: 15000 }
 		);
 
 		const after = await wsState();
-		assert.ok(after.subscribeCount > before.subscribeCount, 'reconnect must resubscribe');
+		assert.ok(after.subscribeCount >= 1, 'reconnect must resubscribe');
+		assert.ok(after.socketCount > before.socketCount, 'reconnect must create a replacement socket');
 		assert.equal(after.error, null);
 		await emitEntry('server-A', 'AFTER-RECONNECT-LIVE');
 		const text = await logText();
