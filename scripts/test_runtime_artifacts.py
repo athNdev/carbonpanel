@@ -53,20 +53,37 @@ def _lxc_rootfs_bytes():
     return buffer.getvalue()
 
 
+def _lxd_metadata_bytes():
+    """A real xz LXD metadata archive."""
+    buffer = io.BytesIO()
+    text = (b'architecture: "x86_64"\nproperties:\n    os: "ubuntu"\n'
+            b'    release: "noble"\n')
+    with tarfile.open(fileobj=buffer, mode="w:xz") as tf:
+        info = tarfile.TarInfo("metadata.yaml")
+        info.size = len(text)
+        tf.addfile(info, io.BytesIO(text))
+    return buffer.getvalue()
+
+
 def available_runner(name):
     """Synthetic PATH fixture: report the native tools as present."""
     return {"qemu-img": "/fixture/qemu-img", "go": "/fixture/go"}.get(name)
 
 
 def fake_process_runner(args, **kwargs):
-    """Synthetic tool result: qemu-img reports qcow2; installer verify passes."""
-    stdout = json.dumps({"format": "qcow2", "virtual-size": 1024})
-    if "verify" in args:
-        stdout = json.dumps({"schema": "carbon-panel-node-artifact/v1",
-                             "name": "carbon-node", "version": "v0.1.0",
-                             "os": "linux", "arch": "amd64",
-                             "files": {"bin/carbon-node": "a" * 64}})
-    return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
+    """Synthetic tool result: qemu-img reports qcow2; installer verify checks the manifest."""
+    if "verify" not in args:
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps({"format": "qcow2", "virtual-size": 1024}), stderr="")
+    artifact_dir = Path(args[args.index("--artifact") + 1])
+    manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("schema") != "carbon-panel-node-artifact/v1" or not manifest.get("files"):
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="artifact manifest is incomplete")
+    for name, digest in manifest["files"].items():
+        target = artifact_dir / name
+        if not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="artifact file hash mismatch")
+    return subprocess.CompletedProcess(args, 0, stdout=json.dumps(manifest), stderr="")
 
 
 def make_bundle(root, artifact, *, marker=None, provenance=True,
@@ -95,12 +112,19 @@ def make_bundle(root, artifact, *, marker=None, provenance=True,
         else:
             payload.write_bytes(content)
             files.append(payload)
+    if artifact == "lxc-rootfs":
+        lxd = root / "ubuntu-lxd.tar.xz"
+        lxd.write_bytes(_lxd_metadata_bytes())
+        files.append(lxd)
     if provenance:
         document = {
             "schema": "carbonpanel.node.provenance/v1",
             "profile": "artifact",
             "synthetic": synthetic_provenance,
-            "images": [{"arch": "amd64", "expected_sha256": digest_override or digest,
+            "images": [{"ref": "fixture-" + artifact, "arch": "amd64",
+                        "image_url": "https://example.invalid/dated/" + payload.name,
+                        "digest_status": "verified",
+                        "expected_sha256": digest_override or digest,
                         "image_content_length": len(content)}],
         }
         (root / "provenance.json").write_text(json.dumps(document), encoding="utf-8")
@@ -580,7 +604,7 @@ class PublicationPredicateTests(unittest.TestCase):
 
     def test_candidate_only_payload_is_refused(self):
         """A correctly named file that fails the native verifier is not an artifact."""
-        with self.subTest("undersized candidate"):
+        with self.subTest("candidate with invalid QCOW2 header"):
             with tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
                 (Path(tmp) / "disk.qcow2").write_bytes(b"QFI")
@@ -602,7 +626,47 @@ class PublicationPredicateTests(unittest.TestCase):
                         digest_override="0" * 64)
             ok, problems = self._predicate(tmp, "qcow2")
             self.assertFalse(ok)
-            self.assertTrue(any("does not match provenance pin" in p for p in problems), problems)
+            self.assertTrue(any("do not match pinned SHA256" in p for p in problems), problems)
+
+    def test_missing_or_wrong_kind_payload_is_refused(self):
+        with self.subTest("wrong kind"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+                ok, problems = self._predicate(tmp, "lxc-rootfs")
+                self.assertFalse(ok)
+                self.assertTrue(any("regular payload" in p for p in problems), problems)
+        with self.subTest("unverified kind"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "qcow2")
+                ok, problems = self._predicate(tmp, "vhdx")
+                self.assertFalse(ok)
+                self.assertTrue(any("unverified" in p for p in problems), problems)
+
+    def test_every_same_kind_candidate_is_verified(self):
+        """A valid file cannot hide an unverified sibling of the same kind."""
+        with tempfile.TemporaryDirectory() as tmp:
+            make_bundle(tmp, "qcow2", marker={"mode": "apply", "live_build": True})
+            (Path(tmp) / "evil.qcow2").write_bytes(b"not-a-qcow2" + b"Q" * 8192)
+            ok, problems = self._predicate(tmp, "qcow2")
+            self.assertFalse(ok)
+            self.assertTrue(any("evil.qcow2" in p and "magic mismatch" in p
+                                for p in problems), problems)
+
+    def test_installer_negative_shapes_are_refused(self):
+        with self.subTest("digest mismatch"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "installer", marker={"mode": "apply", "live_build": True},
+                            digest_override="0" * 64)
+                ok, problems = self._predicate(tmp, "installer")
+                self.assertFalse(ok)
+                self.assertTrue(any("do not match pinned SHA256" in p for p in problems), problems)
+        with self.subTest("bad package manifest"):
+            with tempfile.TemporaryDirectory() as tmp:
+                make_bundle(tmp, "installer", marker={"mode": "apply", "live_build": True})
+                (Path(tmp) / "package" / "manifest.json").write_text(
+                    json.dumps({"schema": "wrong", "files": {}}), encoding="utf-8")
+                ok, problems = self._predicate(tmp, "installer")
+                self.assertFalse(ok)
 
     def test_bypass_shapes_are_refused(self):
         """Fail closed on re-encoded/nested/misnamed/malformed rehearsal markers."""
