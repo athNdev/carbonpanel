@@ -1,7 +1,7 @@
 # OSS-365 — product integration gate re-baseline (2026-11-19)
 
 **Acceptance baseline:** `origin/main@9e81679b346a3e1acbc50f8283b5b3c365769771`.
-**Evidence commit:** `225dfec1896250a14eb9fb43b80e110d51d91195` (branch
+**Evidence commit:** `6c9f430f022a7eeeb91d0013b8e4c8050844a600` (branch
 `codex/product-acceptance-gaps`, PR #555). The full external planning artefact
 is `product-plans/integrated-roadmap.md` in the audit directory
 `C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/`; it
