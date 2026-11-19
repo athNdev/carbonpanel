@@ -119,9 +119,9 @@ func (f *downloadFixture) session(t *testing.T, userID, role string, perms ...rb
 	if err != nil {
 		t.Fatalf("NewClients: %v", err)
 	}
-	s := NewServer(clients)
-	RegisterDownloadTools(s, clients)
-	return connectStdioSession(t, s, context.Background())
+	// Production wiring only: the byte-transport tools must be mounted by
+	// NewServer/registerCombinedTools, not by a fixture-local registration.
+	return connectStdioSession(t, NewServer(clients), context.Background())
 }
 
 func downloadRecord[T proto.Message](t *testing.T, procedure string) T {

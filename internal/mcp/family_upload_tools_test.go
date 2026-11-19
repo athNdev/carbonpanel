@@ -29,18 +29,13 @@ import (
 
 // --- upload-family fixture helpers ------------------------------------------
 
-// newUploadServer is an isolated, deliberately unbound MCP server carrying the
-// upload-family hand-off and the bounded stream tools it composes. It uses the
-// real SDK stdio wire via connectStdioSession; only the shared catalog files are
-// untouched (the integration owner mounts this seam in registerCombinedTools).
+// newUploadServer now returns the PRODUCTION server. The upload-family and
+// bounded-stream tools must be mounted by NewServer/registerCombinedTools; an
+// isolated hand-off server would no longer prove the integrated surface. The
+// real SDK stdio wire is still used via connectStdioSession.
 func newUploadServer(t *testing.T, clients *Clients) *sdkmcp.Server {
 	t.Helper()
-	s := sdkmcp.NewServer(&sdkmcp.Implementation{
-		Name: "carbonpanel-mcp-upload-family", Version: ServerVersion,
-	}, nil)
-	RegisterStreamingTools(s, clients)
-	RegisterUploadFamilyTools(s, clients)
-	return s
+	return NewServer(clients)
 }
 
 func uploadClients(t *testing.T, f *controllerStreamFixture, token string) *Clients {

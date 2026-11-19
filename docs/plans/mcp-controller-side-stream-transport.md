@@ -1,8 +1,10 @@
 # Follow-up plan: authenticated controller-side streaming transport for MCP
 
-Status: **PENDING**, not covered by PR531. This is the committed follow-up
-issue/plan for the path-B hold. No full-coverage or publication claim is made
-while these operations are pending.
+Status: **COMPLETE / VERIFIED** (byte-transport lanes mounted in production by
+the MCP integration lane; STRICT full-coverage gate green with zero pending
+operations). This was the committed follow-up plan for the path-B hold. The
+historical PENDING baseline below is retained for provenance; it no longer
+describes current state. No publication or registry claim is made here.
 
 ## Why pending
 
@@ -14,12 +16,14 @@ prototype held byte data inside the gateway and injected a local
 those tools would mount tools that always fail with `unavailable`, so they are
 absent from the generated catalog and from `NewServer`.
 
-## Exact pending inventory
+## Retired pending inventory (historical)
 
-`internal/mcp/integration_pending.go` is authoritative: 9 operations
-(7 RPCs + 2 non-RPC surfaces) covering `DownloadArchive`, `ExportWorld`,
-`GetFile`, `InitFileDownload`, `SaveUploadedFile`, `InitUpload`,
-`UploadChunk`, `rest_upload_stream`, `rest_download_stream`.
+`internal/mcp/integration_pending.go` is authoritative and now empty. The nine
+retired operations (7 RPCs + 2 non-RPC surfaces) were `DownloadArchive`,
+`ExportWorld`, `GetFile`, `InitFileDownload`, `SaveUploadedFile`, `InitUpload`,
+`UploadChunk`, `rest_upload_stream`, `rest_download_stream`. The file keeps the
+exact retired IDs, the per-tool evidence inventory, and the live hold mechanism
+that re-reds the STRICT gate if an unmounted operation is declared again.
 
 ## Required work
 

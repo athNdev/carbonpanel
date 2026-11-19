@@ -369,8 +369,9 @@ func TestFamilyAudit(t *testing.T) {
 			}
 			pendingByID[pending.ID] = pending
 		}
-		if len(PendingInventory) != 9 || len(pendingByID) != 9 {
-			t.Fatalf("PENDING inventory has %d entries (%d unique ids), want exactly 9", len(PendingInventory), len(pendingByID))
+		if len(PendingInventory) != PendingOperationCount || len(pendingByID) != PendingOperationCount {
+			t.Fatalf("PENDING inventory has %d entries (%d unique ids), want exactly %d",
+				len(PendingInventory), len(pendingByID), PendingOperationCount)
 		}
 
 		// Every PENDING entry must name a real supported operation that is still
@@ -425,7 +426,8 @@ func TestFamilyAudit(t *testing.T) {
 		if inScope == 0 || verified != inScope {
 			t.Fatalf("partial slice: %d/%d non-pending operations verified", verified, inScope)
 		}
-		t.Logf("ORDINARY GATE PASS: %d/%d non-pending operations verified; exact 9-entry PENDING inventory intact", verified, inScope)
+		t.Logf("ORDINARY GATE PASS: %d/%d supported operations verified; PENDING inventory is empty (%d entries)",
+		verified, inScope, len(PendingInventory))
 	})
 
 	t.Run("GateDetectsUnlistedSupportedOperation", func(t *testing.T) {

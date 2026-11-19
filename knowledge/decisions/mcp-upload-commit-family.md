@@ -43,11 +43,13 @@ never by a blind re-upload.
 
 # Consequence
 
-Until every lane's executable `tools/call` evidence is merged and the pending
-inventory is empty, the STRICT full-coverage gate stays RED and no MCP
-publication, GHCR or registry write is permitted. A new upload tool must keep
-its tool name aligned with the OSS-375 coverage matrix and its descriptor
-artifact in sync with the live table; a drift test fails the build otherwise.
+Both lanes' executable `tools/call` evidence is merged into the shared catalog
+and production `registerCombinedTools`; the pending inventory is empty and the
+STRICT full-coverage gate is green. This does not authorize MCP publication,
+GHCR or registry write, which remain separate trusted-branch actions. A new
+upload tool must keep its tool name aligned with the OSS-375 coverage matrix
+and its descriptor artifact in sync with the live table; a drift test fails the
+build otherwise.
 
 # Verification
 

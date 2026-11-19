@@ -25,8 +25,9 @@ by a Connect unary interceptor. Missing credentials stop startup rather than
 falling back to anonymous access, session cookies or the no-auth bypass.
 
 The pinned FIRST SLICE of 30 tools remains unchanged, but the gateway now
-mounts the combined OSS-370 catalog: 202 tools covering 201 SUPPORTED operations (9 PENDING)
-operations from the OSS-375 audit matrix. The 30 first-slice declarations are
+mounts the combined OSS-370 catalog: 211 tools covering 201 SUPPORTED operations
+(0 PENDING) from the OSS-375 audit matrix. The byte-transport lanes add five
+download tools and four upload/commit tools to the earlier combined set. The 30 first-slice declarations are
 the highest-precedence source; family descriptors (server, content, admin),
 stream typed equivalents and integration-owned additions are merged by
 `internal/mcp/cataloggen` into one generated `exposedTools` list. The 61
@@ -83,12 +84,16 @@ never uses a hand-rolled REST client. `download_get_file`,
 `DownloadToolSpecs`/`DownloadToolDescriptors` for the integration owner. See
 [staged-download byte transport](../decisions/mcp-download-byte-transport.md).
 
-The 9 affected operations remain PENDING in the STRICT publication gate with an
-exact inventory in `internal/mcp/integration_pending.go` and the committed plan
-in `docs/plans/mcp-controller-side-stream-transport.md`. The partial-slice
-regression gate is green; the full-coverage gate stays red until every pending
-operation has real production `tools/call` evidence. No enabled-but-unusable
-tool is advertised.
+The nine formerly PENDING operations are now mounted by production
+`NewServer` / `registerCombinedTools` and carry executable `tools/call`
+evidence, so `PendingInventory` is empty and the STRICT publication gate is
+green (201/201 SUPPORTED operations LISTED, REACHABLE and VERIFIED). The exact
+retired inventory and its per-tool evidence map live in
+`internal/mcp/integration_pending.go`; the committed plan is
+`docs/plans/mcp-controller-side-stream-transport.md`. The hold mechanism is
+still live: adding an unmounted operation back to `PendingInventory`
+immediately turns the STRICT gate red again. No enabled-but-unusable tool is
+advertised.
 Registration strings, quoted procedure names and substring-of-JSON checks
 never count. The exclusion policy is bound to the server before any tool is
 added, so audited-out tools are never mounted; go-sdk replaces same-name tools

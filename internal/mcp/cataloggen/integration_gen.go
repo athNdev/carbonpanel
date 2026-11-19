@@ -117,6 +117,32 @@ func combinedToolSpecs() []combinedSpec {
 		byName[s.Name] = s
 		out = append(out, s)
 	}
+	// OSS-370/371-375 byte-transport lanes. These are capability tools that
+	// deliberately SHARE an audited procedure with the canonical first-slice or
+	// content tool (for example download_get_file and download_stream both use
+	// GetFile, and the upload tools use the content family's save/init/chunk
+	// procedures). They are therefore added after the procedure-dedup pass with
+	// a name-only dedup, exactly like the stream capability tools above. The
+	// canonical catalog declaration keeps the first tool's class/confirm flag;
+	// these extra tools are still advertised on the wire and invoked by their
+	// own stdio fixtures. Every procedure must be audit-supported.
+	for _, group := range [][]combinedSpec{
+		specsFrom("download", mcp.DownloadToolSpecs()),
+		specsFrom("upload", mcp.UploadFamilyToolSpecs()),
+	} {
+		for _, s := range group {
+			op, ok := mcp.FamilyAuditOperationByProcedure(s.Procedure)
+			if !ok || !op.Supported() {
+				panic("mcp cataloggen: byte-transport tool has non-audited procedure: " + s.Name + " " + s.Procedure)
+			}
+			if _, dup := byName[s.Name]; dup {
+				fmt.Fprintf(os.Stderr, "cataloggen: duplicate capability tool %s dropped\n", s.Name)
+				continue
+			}
+			byName[s.Name] = s
+			out = append(out, s)
+		}
+	}
 	// Stable final order is by tool name, which is what MCP clients display.
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -130,8 +156,8 @@ func writeIntegrationCatalog(specs []combinedSpec) {
 	b.WriteString("package mcp\n\n")
 	b.WriteString("var exposedTools = []ToolSpec{\n")
 	for _, s := range specs {
-		fmt.Fprintf(&b, "\t{Name: %q, Procedure: %q, Class: Class(%q), Confirm: %t, Description: %q},\n",
-			s.Name, s.Procedure, s.Class, s.Confirm, s.Description)
+		fmt.Fprintf(&b, "\t{Name: %q, Procedure: %q, Class: Class(%q), Confirm: %t, Description: %q, Source: %q},\n",
+			s.Name, s.Procedure, s.Class, s.Confirm, s.Description, s.Source)
 	}
 	b.WriteString("}\n")
 

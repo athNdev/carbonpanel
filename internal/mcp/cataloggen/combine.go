@@ -20,7 +20,7 @@ type combinedSpec struct {
 // sourcePriority defines deterministic precedence for duplicate procedures.
 // The pinned 30-tool first slice always wins; family tools keep their own
 // names and scopes; integration-owned additions are last.
-var sourcePriority = []string{"first_slice", "server", "content", "admin", "stream", "integration", "integration_stream"}
+var sourcePriority = []string{"first_slice", "server", "content", "admin", "stream", "integration", "integration_stream", "download", "upload"}
 
 func priority(source string) int {
 	for i, s := range sourcePriority {
