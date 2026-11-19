@@ -26,6 +26,28 @@ const cache = await fs.mkdtemp(
 let server;
 let browser;
 
+// Vite 8 can discover fixture-only dependencies (icons, protobuf helpers)
+// after the first document load and force a reload whose old optimizer URLs
+// return 504, so the fixture app never mounts. Wait for the fixture's own
+// ready signal; if the document was invalidated, load a fresh one and wait
+// again. Bounded retries on a semantic signal, no fixed sleeps and no
+// weakened form assertions.
+async function waitForFixtureReady(page) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await page.waitForFunction(() => Boolean(globalThis.__moduleUi), null, {
+        timeout: 25_000,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await page.reload();
+    }
+  }
+  throw lastError;
+}
+
 try {
   const viteConfig = {
     configFile: false,
@@ -118,9 +140,10 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   const base = `http://127.0.0.1:${server.httpServer.address().port}/module-forms.html`;
   await page.goto(base);
-  await page.waitForFunction(() => Boolean(globalThis.__moduleUi));
+  await waitForFixtureReady(page);
   await page.evaluate(() => __moduleUi.template());
   await page.getByRole("button", { name: "Volumes", exact: true }).click();
+  await page.getByPlaceholder("/host/path or {{alias}}").waitFor();
   assert.equal(
     await page.getByPlaceholder("/host/path or {{alias}}").inputValue(),
     "/data/fixture",
