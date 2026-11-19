@@ -107,8 +107,17 @@ def run(workspace):
     before_integrity = integrity(connection)
     worlds_before = write_worlds(live, marker)
 
-    # Backup while the WAL connection is open so db + wal + shm are copied.
-    shutil.copytree(live, backup)
+    # Real SQLite online backup API for the database (safe against a live WAL),
+    # plus a copy of the world/backup directories while the service is quiesced.
+    # This is the documented backup primitive, exercised on owned synthetic data.
+    backup.mkdir(parents=True, exist_ok=True)
+    destination = sqlite3.connect(str(backup / "panel.db"))
+    try:
+        connection.backup(destination)
+    finally:
+        destination.close()
+    for name in ("worlds", "backups"):
+        shutil.copytree(live / name, backup / name)
     backup_hashes_before = {str(p.relative_to(backup)): hashlib.sha256(p.read_bytes()).hexdigest()
                             for p in backup.rglob("*") if p.is_file()}
     connection.close()
