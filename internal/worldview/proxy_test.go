@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -355,4 +356,177 @@ func TestProxyClientRefusesAllRedirectsUnit(t *testing.T) {
 	if err := newHealthClient().CheckRedirect(&http.Request{}, nil); err == nil {
 		t.Fatal("renderer health client follows redirects")
 	}
+}
+
+// TestProxyAuthenticatedIframeRootAndRelativeAssetsFixture verifies the canonical
+// keyed trailing-slash root (issued for the iframe src) is admitted through the
+// identical session identity, authorization and cache gates, mapped to the
+// prepared default renderer document, and that relative assets resolve through
+// the same scoped proxy path. Denied and invalid paths remain fail-closed.
+func TestProxyAuthenticatedIframeRootAndRelativeAssetsFixture(t *testing.T) {
+	var (
+		mu    sync.Mutex
+		paths []string
+	)
+	renderer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/index.html":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, "<html><body>bluemap-root</body></html>")
+		case "/assets/app.js":
+			w.Header().Set("Content-Type", "application/javascript")
+			_, _ = io.WriteString(w, "console.log('relative-ok')")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(renderer.Close)
+
+	upstreamHits := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(paths)
+	}
+	upstreamPaths := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]string, len(paths))
+		copy(out, paths)
+		return out
+	}
+
+	store := newFakeStore()
+	store.addServer("srv-a", "default")
+	users := &fakeAuth{users: map[string]*auth.AuthenticatedUser{
+		"tok-a":     {ID: "user-a", Username: "alice", Roles: []string{"user"}},
+		"tok-b":     {ID: "user-b", Username: "bob", Roles: []string{"user"}},
+		"tok-guest": {ID: "guest", Username: "guest", Roles: []string{"guest"}},
+	}}
+	enforcer := &fakeEnforcer{allow: func(roles []string, resource, action, objectID string) (bool, error) {
+		if resource != rbac.ResourceWorldView || action != rbac.ActionRead {
+			return false, nil
+		}
+		return len(roles) > 0 && roles[0] == "user" && objectID == "srv-a", nil
+	}}
+	resolver := NewResolver(
+		Config{Endpoints: []Endpoint{endpointForFixture(t, renderer.URL, "", RendererBlueMap)}},
+		&fakeLocator{local: map[string]bool{"default": true}},
+	)
+	sessions := NewSessionRegistry()
+	key, _ := sessions.Issue("srv-a", "world=srv-a%2Flevel", "user-a", time.Minute)
+	handler := NewProxyHandler(ProxyDeps{
+		Auth: users, Authorizer: enforcer, Subusers: store, Servers: store,
+		Resolver: resolver, Sessions: sessions,
+	})
+
+	rootURL := ProxyPrefix + key + "/"
+	call := func(token, method, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("unauthenticated root denied before upstream", func(t *testing.T) {
+		before := upstreamHits()
+		rec := call("", http.MethodGet, rootURL)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
+		}
+		assertPrivateNoStoreFixture(t, rec.Header())
+		if upstreamHits() != before {
+			t.Fatal("unauthenticated root request contacted the renderer")
+		}
+	})
+
+	t.Run("unauthorized or cross-user root denied before upstream", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			token string
+		}{
+			{"reader role denied", "tok-guest"},
+			{"cross-user session", "tok-b"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				before := upstreamHits()
+				rec := call(tc.token, http.MethodGet, rootURL)
+				if rec.Code != http.StatusForbidden {
+					t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
+				}
+				assertPrivateNoStoreFixture(t, rec.Header())
+				if upstreamHits() != before {
+					t.Fatal("denied root request contacted the renderer")
+				}
+			})
+		}
+	})
+
+	t.Run("authenticated root serves prepared default document", func(t *testing.T) {
+		before := upstreamHits()
+		rec := call("tok-a", http.MethodGet, rootURL)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "bluemap-root") {
+			t.Fatalf("body = %q, want iframe root document", rec.Body.String())
+		}
+		assertPrivateNoStoreFixture(t, rec.Header())
+		if upstreamHits() != before+1 {
+			t.Fatalf("upstream hits = %d, want %d", upstreamHits(), before+1)
+		}
+		gotPaths := upstreamPaths()
+		if got := gotPaths[len(gotPaths)-1]; got != "/index.html" {
+			t.Fatalf("upstream path = %q, want /index.html", got)
+		}
+	})
+
+	t.Run("authenticated HEAD root", func(t *testing.T) {
+		rec := call("tok-a", http.MethodHead, rootURL)
+		if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
+			t.Fatalf("status/body = %d/%q, want 200/empty", rec.Code, rec.Body.String())
+		}
+		assertPrivateNoStoreFixture(t, rec.Header())
+	})
+
+	t.Run("relative asset uses same scoped session gates", func(t *testing.T) {
+		before := upstreamHits()
+		rec := call("tok-a", http.MethodGet, ProxyPrefix+key+"/assets/app.js")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "relative-ok") {
+			t.Fatalf("body = %q, want relative asset", rec.Body.String())
+		}
+		assertPrivateNoStoreFixture(t, rec.Header())
+		if upstreamHits() != before+1 {
+			t.Fatalf("upstream hits = %d, want %d", upstreamHits(), before+1)
+		}
+		gotPaths := upstreamPaths()
+		if got := gotPaths[len(gotPaths)-1]; got != "/assets/app.js" {
+			t.Fatalf("upstream path = %q, want /assets/app.js", got)
+		}
+	})
+
+	t.Run("invalid paths remain fail-closed", func(t *testing.T) {
+		for _, path := range []string{
+			ProxyPrefix + key + "//index.html",
+			ProxyPrefix + key + "/../secret",
+			ProxyPrefix + key + "/%2e%2e/secret",
+		} {
+			before := upstreamHits()
+			rec := call("tok-a", http.MethodGet, path)
+			if rec.Code != http.StatusForbidden && rec.Code != http.StatusBadRequest {
+				t.Fatalf("path %q status = %d, want fail-closed", path, rec.Code)
+			}
+			if upstreamHits() != before {
+				t.Fatalf("invalid path %q contacted the renderer", path)
+			}
+		}
+	})
 }
