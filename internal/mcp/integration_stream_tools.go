@@ -16,9 +16,14 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
+	"path"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
@@ -53,6 +58,47 @@ func (a streamCommitArgs) Confirmation() bool { return a.Confirm }
 // one; see NewClients). It is not a storage-capability error: the gateway
 // never owns panel/node storage.
 var ErrStreamUnavailable = errors.New("scoped streaming controller client is not configured")
+
+// ambiguousSaveOutcome reports Connect codes where SaveUploadedFile may have
+// been DISPATCHED but the reply was lost (timeout, cancel, transport loss or an
+// unknown/unavailable internal state). These must never trigger a blind retry:
+// the destination may already be mutated.
+func ambiguousSaveOutcome(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch connect.CodeOf(err) {
+	case connect.CodeDeadlineExceeded, connect.CodeCanceled, connect.CodeUnavailable,
+		connect.CodeUnknown, connect.CodeInternal:
+		return true
+	default:
+		return false
+	}
+}
+
+// verifyCommittedFile checks the exact destination file identity by reading it
+// back through the authenticated typed RPC and comparing size and SHA-256. A
+// mismatch (including a read failure) is NOT proof of success and is reported
+// as UNKNOWN rather than retried blindly.
+func verifyCommittedFile(ctx context.Context, cl *Clients, serverID, destination, filename string,
+	wantSize int64, wantSHA string) (bool, error) {
+	joined := path.Join(destination, filename)
+	if joined == "." || strings.Contains(joined, "..") {
+		return false, invalidArgument("scoped_stream_commit", "destination", "invalid destination path")
+	}
+	res, err := cl.File.GetFile(ctx, connect.NewRequest(&v1.GetFileRequest{
+		ServerId: serverID, Path: joined,
+	}))
+	if err != nil {
+		return false, err
+	}
+	content := res.Msg.GetContent()
+	if int64(len(content)) != wantSize {
+		return false, nil
+	}
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:]) == wantSHA, nil
+}
 
 // RegisterStreamingTools mounts the bounded scoped-transfer workflow. Every
 // call is authenticated by the same dp_ token all other tools present.
@@ -154,8 +200,11 @@ func RegisterStreamingTools(s *sdkmcp.Server, c *Clients) {
 		if err != nil {
 			return nil, err
 		}
-		committed := false
-		defer func() { transfer.FinishCommit(cl.owner, in.SessionHandle, committed) }()
+		// Retryable is the default: a KNOWN pre-save failure leaves the identical
+		// bytes/digest staged for a safe retry. Ambiguous or successful saves
+		// switch the outcome to terminal below.
+		outcome := CommitRetryable
+		defer func() { transfer.FinishCommit(cl.owner, in.SessionHandle, outcome) }()
 		// The declared size is only a bound. A zero-byte stream has nothing to
 		// commit; refuse explicitly instead of presenting a false success.
 		if len(data) == 0 {
@@ -189,22 +238,43 @@ func RegisterStreamingTools(s *sdkmcp.Server, c *Clients) {
 				return nil, err
 			}
 		}
-		if _, err := cl.File.SaveUploadedFile(uploadCtx, connect.NewRequest(&v1.SaveUploadedFileRequest{
+		_, saveErr := cl.File.SaveUploadedFile(uploadCtx, connect.NewRequest(&v1.SaveUploadedFileRequest{
 			ServerId: session.ServerID(),
 			UploadSessionId: sessionID,
 			DestinationPath: in.Destination,
 			Filename: in.Filename,
-		})); err != nil {
-			return nil, err
+		}))
+		verified := false
+		if saveErr != nil && ambiguousSaveOutcome(saveErr) {
+			// The request may already have mutated the destination. NEVER start a
+			// fresh upload. Decide from the destination itself.
+			ok, verifyErr := verifyCommittedFile(ctx, cl, session.ServerID(), in.Destination,
+				in.Filename, int64(len(data)), digest)
+			if verifyErr == nil && ok {
+				verified = true
+			} else {
+				outcome = CommitUnknown
+				return nil, fmt.Errorf("%w (connect %v): verification=%v; "+
+					"inspect server %q destination %q at %q before any retry; "+
+					"do not blindly retry the same bytes; the upload session %q may already be consumed",
+					ErrCommitOutcomeUnknown, connect.CodeOf(saveErr), verifyErr,
+					session.ServerID(), in.Destination, path.Join(in.Destination, in.Filename), sessionID)
+			}
+		} else if saveErr != nil {
+			// KNOWN pre-save failure (authorization, validation, not-found, etc.):
+			// no mutation happened, so a retry with the staged bytes is safe.
+			return nil, saveErr
 		}
-		// A successful SaveUploadedFile marks the lease successful; the deferred
-		// FinishCommit then frees the pinned budget exactly once.
-		committed = true
+		outcome = CommitSucceeded
 		// len(data) is the ACTUAL transferred byte count (the final frame's
 		// offset), never the declared upper bound returned by scoped_stream_open.
-		return map[string]any{"bytes": len(data), "sha256": digest, "destination": in.Destination,
+		result := map[string]any{"bytes": len(data), "sha256": digest, "destination": in.Destination,
 			"upload_session": sessionID, "actual_size": len(data),
-			"authorization": "production typed upload + server-scoped save"}, nil
+			"authorization": "production typed upload + server-scoped save"}
+		if verified {
+			result["verification"] = "destination verified after ambiguous final-save reply"
+		}
+		return result, nil
 	})
 }
 

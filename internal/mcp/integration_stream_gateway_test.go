@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -354,7 +355,7 @@ func TestGatewayCommitLeaseIsExclusive(t *testing.T) {
 	if _, _, err := transfer.ClaimCommit("u-lease", handle); !errors.Is(err, ErrStreamCommitBusy) {
 		t.Fatalf("parallel claim was not refused as busy: %v", err)
 	}
-	transfer.FinishCommit("u-lease", handle, true)
+	transfer.FinishCommit("u-lease", handle, CommitSucceeded)
 	transfer.mu.Lock()
 	bytesLeft, sessions := transfer.aggregate, len(transfer.sessions)
 	transfer.mu.Unlock()
@@ -362,7 +363,7 @@ func TestGatewayCommitLeaseIsExclusive(t *testing.T) {
 		t.Fatalf("successful commit did not free budget: bytes=%d sessions=%d", bytesLeft, sessions)
 	}
 	// Idempotent finish must not double-free or resurrect a claim.
-	transfer.FinishCommit("u-lease", handle, true)
+	transfer.FinishCommit("u-lease", handle, CommitSucceeded)
 	if _, _, err := transfer.ClaimCommit("u-lease", handle); !errors.Is(err, ErrStreamNotFound) {
 		t.Fatalf("committed handle is still claimable: %v", err)
 	}
@@ -407,8 +408,8 @@ func TestGatewayCommitLeasePinsBudgetDuringTTLAndCancel(t *testing.T) {
 	if !bytes.Equal(held, frame) {
 		t.Fatal("in-flight commit slice was mutated by TTL/cancel")
 	}
-	transfer.FinishCommit("u-pin", handle, false) // terminal: canceled
-	transfer.FinishCommit("u-pin", handle, false) // idempotent
+	transfer.FinishCommit("u-pin", handle, CommitRetryable) // terminal: canceled
+	transfer.FinishCommit("u-pin", handle, CommitRetryable) // idempotent
 	transfer.mu.Lock()
 	finalBytes, finalSessions, pins := transfer.aggregate, len(transfer.sessions), len(transfer.pinned)
 	transfer.mu.Unlock()
@@ -547,7 +548,7 @@ func TestGatewayCommitFailureIsRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	transfer.FinishCommit("u-retry", handle, false) // simulated upload failure
+	transfer.FinishCommit("u-retry", handle, CommitRetryable) // simulated upload failure
 	transfer.mu.Lock()
 	bytesAfterFailure := transfer.aggregate
 	transfer.mu.Unlock()
@@ -561,11 +562,153 @@ func TestGatewayCommitFailureIsRetryable(t *testing.T) {
 	if !bytes.Equal(first, second) || digest != digest2 {
 		t.Fatal("retry did not return identical bytes and digest")
 	}
-	transfer.FinishCommit("u-retry", handle, true)
+	transfer.FinishCommit("u-retry", handle, CommitSucceeded)
 	transfer.mu.Lock()
 	left, sessions := transfer.aggregate, len(transfer.sessions)
 	transfer.mu.Unlock()
 	if left != 0 || sessions != 0 {
 		t.Fatalf("successful retry leaked budget: bytes=%d sessions=%d", left, sessions)
+	}
+}
+
+
+// --- Ambiguous final-save outcomes ------------------------------------------
+
+// ambiguityTransport drops the SaveUploadedFile reply. With dispatchFirst=true
+// the controller processes the mutation but the caller sees only a transport
+// error (lost reply / timeout / cancel). With false the request never reaches
+// the controller, so destination verification must fail.
+type ambiguityTransport struct {
+	base          http.RoundTripper
+	err           error
+	dispatchFirst bool
+	once          sync.Once
+	dispatched    chan struct{}
+}
+
+func (a *ambiguityTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !strings.HasSuffix(req.URL.Path, "/carbonpanel.v1.FileService/SaveUploadedFile") {
+		return a.base.RoundTrip(req)
+	}
+	if a.dispatchFirst {
+		resp, err := a.base.RoundTrip(req) // controller performs the mutation
+		a.once.Do(func() { close(a.dispatched) })
+		if err == nil && resp != nil {
+			_ = resp.Body.Close()
+		}
+		return nil, a.err // reply lost after dispatch
+	}
+	a.once.Do(func() { close(a.dispatched) })
+	return nil, a.err // never dispatched
+}
+
+// TestIntegrationControllerStreamAmbiguousFinalSave proves a post-dispatch
+// unknown outcome is resolved by VERIFYING the destination, never by a blind
+// second upload. A lost reply after the save still succeeds with verification;
+// a save that never reached the controller returns a truthful UNKNOWN result.
+func TestIntegrationControllerStreamAmbiguousFinalSave(t *testing.T) {
+	cases := []struct {
+		name          string
+		err           error
+		dispatchFirst bool
+		wantVerified  bool
+	}{
+		{"lost_reply", errors.New("connection reset after dispatch"), true, true},
+		{"timeout", context.DeadlineExceeded, true, true},
+		{"cancel", context.Canceled, true, true},
+		{"never_dispatched", context.DeadlineExceeded, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newControllerStreamFixture(t)
+			acc, err := nodestorage.NewLocal(f.root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = acc.Close() }()
+			payload := bytes.Repeat([]byte("A"), 300<<10)
+			if err := acc.WriteFile("worlds/ambiguous.bin", payload); err != nil {
+				t.Fatal(err)
+			}
+
+			gate := &ambiguityTransport{
+				base: f.ts.Client().Transport, err: tc.err,
+				dispatchFirst: tc.dispatchFirst, dispatched: make(chan struct{}),
+			}
+			httpClient := &http.Client{Transport: gate}
+			token := seedToken(t, f.store, f.enforcer, "u-ambiguous", "admin", nil)
+			clients, err := NewClients(httpClient, f.ts.URL, token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			session := connectStdioSession(t, NewServer(clients), context.Background())
+
+			opened := callTool(t, session, "scoped_stream_open", map[string]any{
+				"server_id": "srv-1", "path": "worlds/ambiguous.bin", "total_size": len(payload),
+			})
+			assertSuccess(t, opened, "open")
+			handle := resultString(opened, "session_handle")
+			for {
+				out := callTool(t, session, "scoped_stream_chunk", map[string]any{"session_handle": handle})
+				assertSuccess(t, out, "chunk")
+				m, _ := out.Result.(map[string]any)
+				if done, _ := m["done"].(bool); done {
+					break
+				}
+			}
+
+			invocationRecorder.enable()
+			defer invocationRecorder.disable()
+			before := len(invocationRecorder.snapshot())
+			commit := callTool(t, session, "scoped_stream_commit", map[string]any{
+				"session_handle": handle, "destination": "worlds",
+				"filename": "ambiguous-copy.bin", "confirm": true,
+			})
+			select {
+			case <-gate.dispatched:
+			default:
+				t.Fatal("SaveUploadedFile was never dispatched")
+			}
+			if tc.wantVerified {
+				assertSuccess(t, commit, "commit after ambiguous save")
+				if resultString(commit, "verification") == "" {
+					t.Fatalf("commit did not report destination verification: %+v", commit)
+				}
+			} else {
+				assertToolError(t, commit, "never-dispatched save")
+				if commit.Error == nil || !strings.Contains(commit.Error.Message, "UNKNOWN") ||
+					!strings.Contains(commit.Error.Message, "do not blindly retry") {
+					t.Fatalf("UNKNOWN outcome lacks recovery hint: %+v", commit.Error)
+				}
+			}
+
+			// Exactly one commit sequence; verification reads the destination
+			// but NO second InitUpload/UploadChunk/SaveUploadedFile is dispatched.
+			counts := map[string]int{}
+			for _, rec := range invocationRecorder.snapshot()[before:] {
+				counts[rec.Procedure]++
+			}
+			wantChunks := (len(payload) + storageworker.ChunkBytes - 1) / storageworker.ChunkBytes
+			wantSave := 1
+			if !tc.dispatchFirst {
+				wantSave = 0 // the request never reached the controller
+			}
+			if counts["/carbonpanel.v1.UploadService/InitUpload"] != 1 ||
+				counts["/carbonpanel.v1.UploadService/UploadChunk"] != wantChunks ||
+				counts["/carbonpanel.v1.FileService/SaveUploadedFile"] != wantSave {
+				t.Fatalf("ambiguous save caused a second upload sequence: %+v", counts)
+			}
+			if tc.wantVerified && counts["/carbonpanel.v1.FileService/GetFile"] != 1 {
+				t.Fatalf("destination was not verified: %+v", counts)
+			}
+			// The handle is terminal after either outcome; a fresh upload is
+			// impossible because the lease/budget are released exactly once.
+			again := callTool(t, session, "scoped_stream_commit", map[string]any{
+				"session_handle": handle, "destination": "worlds",
+				"filename": "ambiguous-copy.bin", "confirm": true,
+			})
+			assertToolError(t, again, "retry after ambiguous save")
+			t.Logf("ambiguous save %s: verified=%v, one upload sequence, terminal lease", tc.name, tc.wantVerified)
+		})
 	}
 }

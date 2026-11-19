@@ -47,6 +47,18 @@ var (
 	ErrStreamDigestMismatch = errors.New("stream digest does not match the controller's final SHA-256")
 	ErrStreamAdmission      = errors.New("gateway stream admission limit reached")
 	ErrStreamCommitBusy     = errors.New("stream has an in-flight commit; retry after it finishes")
+	ErrCommitOutcomeUnknown = errors.New("SaveUploadedFile outcome UNKNOWN: verify the destination before any retry")
+
+)
+
+// CommitOutcome distinguishes a definitely-safe retry from an ambiguous
+// post-dispatch save whose bytes may already be durable.
+type CommitOutcome int
+
+const (
+	CommitSucceeded CommitOutcome = iota
+	CommitRetryable
+	CommitUnknown
 )
 
 // StreamTransfer is the gateway-side session registry. The real byte handle
@@ -347,7 +359,7 @@ func (t *StreamTransfer) ClaimCommit(owner, handle string) ([]byte, string, erro
 // the staged bytes and registry entry are freed exactly once. On an ordinary
 // upload failure the bytes stay staged and the lease is released so the same
 // handle can be retried deterministically with identical bytes/digest.
-func (t *StreamTransfer) FinishCommit(owner, handle string, success bool) {
+func (t *StreamTransfer) FinishCommit(owner, handle string, outcome CommitOutcome) {
 	t.mu.Lock()
 	s, ok := t.sessions[handle]
 	pinned := t.pinned[handle]
@@ -356,7 +368,9 @@ func (t *StreamTransfer) FinishCommit(owner, handle string, success bool) {
 		return
 	}
 	s.mu.Lock()
-	terminal := success || s.canceled || !time.Now().Before(s.expires)
+	// Retryable keeps the bytes staged; success and UNKNOWN both terminate the
+	// session so an ambiguous save can never be blindly re-dispatched.
+	terminal := outcome != CommitRetryable || s.canceled || !time.Now().Before(s.expires)
 	s.committing = false
 	s.commitPinned = false
 	if terminal {

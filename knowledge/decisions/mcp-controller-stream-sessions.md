@@ -40,7 +40,13 @@ neither memory nor registry entries leak. A one-at-a-time commit lease is
 claimed atomically before any upload mutation: parallel commits of one handle
 get a busy result, the lease pins budget for the whole upload (TTL/cancel cannot
 free bytes still referenced by an in-flight commit), and FinishCommit releases
-exactly once with a deterministic terminal or retryable state.
+exactly once with a deterministic terminal or retryable state. A final
+`SaveUploadedFile` error with a post-dispatch code (timeout, cancel,
+unavailable, unknown, internal) is UNKNOWN: the exact destination file is read
+back and size/SHA compared before any success claim. A verified destination
+succeeds; an unverified one returns a truthful UNKNOWN with a recovery hint and
+a TERMINAL lease, never a blind re-upload. Known pre-save failures stay
+retryable.
 A read that returns bytes together with a non-EOF error, or that would exceed
 the declared/staged cap, terminates the session and closes the handle rather
 than returning a retryable error at an advanced offset. A bounded reaper evicts
