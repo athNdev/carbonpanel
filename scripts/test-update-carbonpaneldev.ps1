@@ -39,7 +39,10 @@ $checks = @(
   'Committed migration is detected', '$Failure.UserVersion -gt $Baseline.UserVersion', $true,
   'Ambiguity fails closed', "Action = 'fail-closed'", $true,
   'No error-text inference for DB safety', '$failureReason -match ''data|SQLite|integrity|database''', $false,
-  'Operator message on ambiguity', 'operator action required', $true
+  'Operator message on ambiguity', 'operator action required', $true,
+  'Forward-only check uses behind_by direction', 'if ([int]$cmp.behind -ne 0)', $true,
+  'Forward-only check is not inverted', 'if ([int]$cmp.ahead -ne 0)', $false,
+  'Rollback data is compared to baseline', '$restoredTables -ne $BaselineState.Tables', $true
 )
 for ($i = 0; $i -lt $checks.Count; $i += 3) {
   $label = $checks[$i]

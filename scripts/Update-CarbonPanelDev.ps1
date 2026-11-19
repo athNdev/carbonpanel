@@ -204,6 +204,10 @@ function Get-RegistryIdentity {
       $Reference, '--format', '{{json .Manifest}}')) -join "`n"
   $index = $indexRaw | ConvertFrom-Json
   $indexDigest = [string]$index.digest
+  # A digest-anchored reference already contains '@'; child manifests must be
+  # addressed from the bare repository, never by appending a second '@'.
+  $baseRef = ($Reference -split '@', 2)[0]
+  if ($baseRef -match '^(.*):[^/]+$') { $baseRef = $Matches[1] }
   $platforms = @{}
   foreach ($child in @($index.manifests)) {
     $key = "$([string]$child.platform.os)/$([string]$child.platform.architecture)"
@@ -211,7 +215,7 @@ function Get-RegistryIdentity {
     $childDigest = [string]$child.digest
     if (-not $childDigest) { continue }
     $childRaw = (Invoke-Docker -Arguments @('buildx', 'imagetools', 'inspect',
-        "$Reference@$childDigest", '--format', '{{json .Image}}')) -join "`n"
+        "$baseRef@$childDigest", '--format', '{{json .Image}}')) -join "`n"
     $image = $childRaw | ConvertFrom-Json
     $labels = $image.config.Labels
     $revision = ''
@@ -222,7 +226,7 @@ function Get-RegistryIdentity {
     # The raw child manifest carries the config digest; buildx's formatted
     # output does not expose it, so read the manifest descriptor directly.
     $manifestRaw = (Invoke-Docker -Arguments @('manifest', 'inspect',
-        "$Reference@$childDigest")) -join "`n"
+        "$baseRef@$childDigest")) -join "`n"
     $manifest = $manifestRaw | ConvertFrom-Json
     $configDigest = [string]$manifest.config.digest
     $platforms[$key] = [pscustomobject]@{
@@ -484,15 +488,19 @@ function Assert-NotDownward {
     }
     return
   }
-  # LOCAL FORWARD-ONLY CHECK. For compare/CURRENT...TARGET GitHub reports
-  # behind_by = commits in TARGET missing from CURRENT: the desired direction.
-  # ahead_by > 0 means CURRENT is ahead of TARGET, i.e. a downward move.
+  # LOCAL FORWARD-ONLY CHECK. For GitHub compare/CURRENT...TARGET, ahead_by is
+  # commits in TARGET (head) missing from CURRENT (base) — the forward move —
+  # and behind_by is commits in CURRENT missing from TARGET — a downward move.
+  # Refuse any behind_by > 0; identical or ahead is safe.
   $raw = (Invoke-Gh -Arguments @('api',
       "repos/$GitHubRepo/compare/$CurrentCommit...$($Target.Commit)",
       '--jq', '{ahead:.ahead_by,behind:.behind_by,status:.status}')) -join "`n"
   $cmp = $raw | ConvertFrom-Json
-  if ([int]$cmp.ahead -ne 0) {
-    Fail "target is behind the running local commit (ahead=$($cmp.ahead)); refusing a downward update"
+  if ([int]$cmp.behind -ne 0) {
+    Fail "target is behind the running local commit (behind=$($cmp.behind)); refusing a downward update"
+  }
+  if (@('ahead', 'identical') -notcontains [string]$cmp.status) {
+    Fail "target is not a forward move from the running commit (status=$($cmp.status))"
   }
 }
 
@@ -711,7 +719,8 @@ function Invoke-Rollback {
   param([Parameter(Mandatory = $true)]$Target, [Parameter(Mandatory = $true)][string]$RollbackTag,
         $Backup, [Parameter(Mandatory = $true)][string]$Container,
         [Parameter(Mandatory = $true)][string]$RollbackDigest,
-        [Parameter(Mandatory = $true)][string]$ComposeImage, [switch]$RestoreDatabase)
+        [Parameter(Mandatory = $true)][string]$ComposeImage, $BaselineState,
+        [switch]$RestoreDatabase)
   Write-Step 'ROLLBACK starting: restoring the scoped controller only'
   # If the database may be damaged, quiesce ONLY this service before restore.
   # No other container, game server or WSL service is stopped or restarted.
@@ -767,6 +776,14 @@ print("MARKER_CLEARED")
   catch { $problems += "health/readiness failed: $($_.Exception.Message)" }
   try {
     $restoredData = Get-DatabaseMetrics -Target $Target
+    if ($BaselineState) {
+      $restoredTables = [int]([regex]::Match($restoredData, 'tables=(\d+)').Groups[1].Value)
+      $restoredServers = [int]([regex]::Match($restoredData, 'servers=(\d+)').Groups[1].Value)
+      if ($restoredTables -ne $BaselineState.Tables -or $restoredServers -ne $BaselineState.Servers) {
+        $problems += ("restored data differs from baseline: tables {0}->{1} servers {2}->{3}" -f `
+          $BaselineState.Tables, $restoredTables, $BaselineState.Servers, $restoredServers)
+      }
+    }
     Write-Step "ROLLBACK data verified: $restoredData"
   } catch { $problems += "database recovery failed: $($_.Exception.Message)" }
   if ($problems.Count -gt 0) {
@@ -968,7 +985,7 @@ print("FIXTURE_MIGRATION_COMMITTED")
     Write-Step "rollback decision: $($decision.Action) - $($decision.Reason)"
     Invoke-Rollback -Target $target -RollbackTag $rollbackTag -Backup $backup `
       -Container $container -RollbackDigest $script:RollbackDigest -ComposeImage $composeImage `
-      -RestoreDatabase:($decision.Action -eq 'restore-and-recreate')
+      -BaselineState $baselineState -RestoreDatabase:($decision.Action -eq 'restore-and-recreate')
     Fail "update failed; rollback verified ($($decision.Reason))"
   }
 } finally {
