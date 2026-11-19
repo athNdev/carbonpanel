@@ -29,6 +29,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -541,6 +543,296 @@ def cmd_validate_provenance(args: argparse.Namespace) -> int:
                   manifest_sha256=prov["fixture"]["manifest_sha256"],
                   note="synthetic fixture profile; not an artifact claim")
     return refuse("UNKNOWN_PROFILE", f"unknown expected profile: {expected}")
+
+
+# --------------------------------------------------------------------------- #
+# end-to-end signed upstream archive verification (real dated release bytes)
+# --------------------------------------------------------------------------- #
+ARCHIVE_ROOT_REQUIRED_DIRS = ("bin", "etc", "lib", "sbin", "usr", "var")
+LXD_ARCH_ALIASES = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
+
+
+def _yaml_value(text: str, key: str) -> str | None:
+    match = re.search(r"(?m)^\s*" + re.escape(key) + r":\s*[\"']?([^\n\"']+)[\"']?\s*$", text)
+    return match.group(1).strip() if match else None
+
+
+def _url_basename(url: str) -> str:
+    return Path(urllib.parse.urlparse(url).path).name
+
+
+def _fetch_url(url: str, dest: Path) -> int:
+    """Streaming direct HTTPS GET into an owned disposable path (no search/proxy)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "carbonpanel-node-lxc-qualification/1.0"})
+    total = 0
+    with urllib.request.urlopen(req, timeout=180) as resp, dest.open("wb") as fh:
+        while True:
+            chunk = resp.read(1024 * 1024)
+            if not chunk:
+                break
+            fh.write(chunk)
+            total += len(chunk)
+    return total
+
+
+def _expected_key_sha256(prov: dict[str, Any]) -> str | None:
+    text = str(prov.get("retrieval_evidence", {}).get("key_get", ""))
+    match = re.search(r"sha256\s+([0-9a-f]{64})", text)
+    return match.group(1) if match else None
+
+
+def _gpg_fingerprint(homedir: Path) -> str | None:
+    # GnuPG for Windows does not accept a drive-letter --homedir; run it with
+    # the work dir as cwd and use the homedir's relative name instead.
+    proc = subprocess.run(
+        ["gpg", "--homedir", homedir.name, "--batch", "--with-colons", "--fingerprint"],
+        cwd=str(homedir.parent), capture_output=True, text=True,
+    )
+    for line in proc.stdout.splitlines():
+        if line.startswith("fpr:"):
+            parts = line.split(":")
+            if len(parts) > 9:
+                return parts[9].strip().upper()
+    return None
+
+
+def _gpg_verify_detached(homedir: Path, key_path: Path, sig: Path, data: Path,
+                         expected_fpr: str) -> tuple[bool, str]:
+    imported = subprocess.run(
+        ["gpg", "--homedir", homedir.name, "--batch", "--import", key_path.name],
+        cwd=str(homedir.parent), capture_output=True, text=True,
+    )
+    if imported.returncode != 0:
+        return False, f"key import failed: {(imported.stderr or imported.stdout).strip()[:200]}"
+    fpr = _gpg_fingerprint(homedir)
+    if fpr != expected_fpr.upper():
+        return False, f"key fingerprint mismatch: imported={fpr} expected={expected_fpr}"
+    verified = subprocess.run(
+        ["gpg", "--homedir", homedir.name, "--batch", "--status-fd", "2",
+         "--verify", sig.name, data.name],
+        cwd=str(homedir.parent), capture_output=True, text=True,
+    )
+    status = (verified.stderr or "") + (verified.stdout or "")
+    good = verified.returncode == 0 and ("VALIDSIG " + expected_fpr.upper()) in status
+    detail = next((line.strip() for line in status.splitlines()
+                   if "VALIDSIG" in line or "Good signature" in line or "BADSIG" in line), "")
+    return good, detail[:300]
+
+
+def _parse_sha256sums(text: str) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        digest, name = parts[0], parts[1].lstrip("*").strip()
+        if SHA256_RE.match(digest):
+            entries[name] = digest
+    return entries
+
+
+def _parse_os_release(data: bytes) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in data.decode("utf-8", "replace").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            out[key.strip()] = value.strip().strip('"').strip("'")
+    return out
+
+
+def _inspect_root_tarball(path: Path) -> tuple[dict[str, Any], str | None]:
+    top: set[str] = set()
+    os_release: dict[str, str] = {}
+    member_count = 0
+    try:
+        with tarfile.open(path, "r:xz") as tf:
+            for member in tf:
+                member_count += 1
+                if member_count > 2_000_000:
+                    return {}, "LAYOUT_TOO_LARGE"
+                name = member.name[2:] if member.name.startswith("./") else member.name
+                parts = name.split("/")
+                if name.startswith("/") or ".." in parts:
+                    return {}, "UNSAFE_TARBALL_PATH"
+                top.add(parts[0])
+                # Ubuntu 24.04 is usrmerged: etc/os-release is a symlink to
+                # ../usr/lib/os-release. Read the regular file at either path.
+                if (not os_release and name in ("etc/os-release", "usr/lib/os-release")
+                        and member.isfile()):
+                    handle = tf.extractfile(member)
+                    if handle is not None:
+                        os_release = _parse_os_release(handle.read())
+    except (tarfile.TarError, OSError, EOFError) as exc:
+        return {}, f"INVALID_ROOT_TARBALL:{type(exc).__name__}"
+    return {
+        "member_count": member_count,
+        "top_level_entries": sorted(top),
+        "os_release": {k: os_release.get(k) for k in ("ID", "VERSION_ID", "VERSION_CODENAME", "NAME")},
+    }, None
+
+
+def _inspect_lxd_metadata(path: Path) -> tuple[dict[str, Any], str | None]:
+    try:
+        with tarfile.open(path, "r:xz") as tf:
+            handle = tf.extractfile("metadata.yaml")
+            if handle is None:
+                return {}, "LXD_METADATA_MISSING"
+            text = handle.read().decode("utf-8", "replace")
+    except (tarfile.TarError, OSError, EOFError, KeyError) as exc:
+        return {}, f"INVALID_LXD_METADATA:{type(exc).__name__}"
+    return {
+        "architecture": _yaml_value(text, "architecture"),
+        "os": _yaml_value(text, "os"),
+        "release": _yaml_value(text, "release"),
+        "description": _yaml_value(text, "description"),
+    }, None
+
+
+def cmd_verify_signed_archive(args: argparse.Namespace) -> int:
+    """Verify the signed upstream archive end-to-end in an owned disposable path."""
+    path = Path(args.provenance)
+    if not path.is_file():
+        return refuse("MISSING_PROVENANCE", f"provenance file not found: {path}")
+    try:
+        prov = read_json(path)
+    except (ValueError, OSError):
+        return refuse("INVALID_PROVENANCE", "provenance is not valid JSON")
+    if prov.get("schema") != PROVENANCE_SCHEMA:
+        return refuse("INVALID_PROVENANCE", "unsupported provenance schema")
+
+    # Fail closed on synthetic / placeholder / moving URL pins before any I/O.
+    rc = validate_artifact_provenance(prov)
+    if rc is not None:
+        return rc
+
+    pin = next((i for i in prov.get("images", []) if i.get("arch") == args.arch), None)
+    if pin is None:
+        return refuse("UNSUPPORTED_PLATFORM", f"no pinned upstream image for arch {args.arch}")
+
+    work = Path(args.work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "checksum": work / "SHA256SUMS",
+        "signature": work / "SHA256SUMS.gpg",
+        "key": work / "signing-key.asc",
+        "root": work / _url_basename(pin["image_url"]),
+        "lxd": work / _url_basename(pin["lxd_metadata_url"]),
+    }
+
+    fetched: list[dict[str, Any]] = []
+    if args.fetch:
+        sources = {
+            "checksum": pin["checksum_url"],
+            "signature": pin["signature_url"],
+            "key": pin["signing_key_source"],
+            "root": pin["image_url"],
+            "lxd": pin["lxd_metadata_url"],
+        }
+        for label, url in sources.items():
+            try:
+                count = _fetch_url(url, paths[label])
+            except Exception as exc:  # direct fetch failure is a refusal, never a fallback
+                return refuse("FETCH_FAILED", f"{label}: {type(exc).__name__}: {exc}"[:300], artifact=label)
+            fetched.append({"artifact": label, "url": url, "bytes": count})
+    else:
+        missing = [label for label, item in paths.items() if not item.is_file()]
+        if missing:
+            return refuse("MISSING_ARCHIVE_FILE", "required local archive file(s) missing", missing=missing)
+
+    control_checks = {
+        "checksum": pin.get("checksum_file_sha256"),
+        "signature": pin.get("signature_file_sha256"),
+    }
+    key_sha = _expected_key_sha256(prov)
+    if key_sha:
+        control_checks["key"] = key_sha
+    for label, expected in control_checks.items():
+        if expected and sha256_file(paths[label]) != expected:
+            return refuse("CONTROL_FILE_DIGEST_MISMATCH", f"{label} does not match the recorded pin", artifact=label)
+
+    gpg_home = Path(tempfile.mkdtemp(prefix="cp-lxc-gpg-", dir=str(work)))
+    try:
+        os.chmod(gpg_home, 0o700)
+    except OSError:
+        pass
+    good, detail = _gpg_verify_detached(
+        gpg_home, paths["key"], paths["signature"], paths["checksum"],
+        str(pin["signing_key_fingerprint"]),
+    )
+    shutil.rmtree(gpg_home, ignore_errors=True)
+    if not good:
+        return refuse("SIGNATURE_INVALID", f"GPG verification of signed SHA256SUMS failed: {detail}",
+                      image=pin["ref"])
+
+    sums = _parse_sha256sums(paths["checksum"].read_text(encoding="utf-8", errors="replace"))
+    root_name = _url_basename(pin["image_url"])
+    lxd_name = _url_basename(pin["lxd_metadata_url"])
+    signed_root = sums.get(root_name)
+    signed_lxd = sums.get(lxd_name)
+    if not signed_root:
+        return refuse("CHECKSUM_ENTRY_MISSING", f"signed SHA256SUMS has no entry for {root_name}")
+    if signed_root != pin["expected_sha256"]:
+        return refuse("SIGNED_SUM_MISMATCH", "pin expected_sha256 differs from the signed SHA256SUMS entry",
+                      image=pin["ref"])
+    if not signed_lxd:
+        return refuse("CHECKSUM_ENTRY_MISSING", f"signed SHA256SUMS has no entry for {lxd_name}")
+    if signed_lxd != pin.get("lxd_metadata_sha256"):
+        return refuse("SIGNED_SUM_MISMATCH", "LXD metadata pin differs from the signed SHA256SUMS entry",
+                      image=pin["ref"])
+
+    bytes_checked: list[dict[str, Any]] = []
+    for label, expected, name in (("root", pin["expected_sha256"], root_name),
+                                  ("lxd", pin["lxd_metadata_sha256"], lxd_name)):
+        actual = sha256_file(paths[label])
+        size = paths[label].stat().st_size
+        bytes_checked.append({"artifact": name, "bytes": size, "sha256": actual})
+        if actual != expected:
+            return refuse("UPSTREAM_DIGEST_MISMATCH",
+                          f"{name} bytes do not match the signed upstream digest",
+                          image=pin["ref"], expected=expected, actual=actual)
+    root_size = paths["root"].stat().st_size
+    if pin.get("image_content_length") and root_size != int(pin["image_content_length"]):
+        return refuse("CONTENT_LENGTH_MISMATCH", "root tarball byte count differs from the pinned content length",
+                      image=pin["ref"], expected=pin["image_content_length"], actual=root_size)
+
+    layout, layout_err = _inspect_root_tarball(paths["root"])
+    if layout_err:
+        return refuse(layout_err.split(":", 1)[0], f"root tarball layout inspection failed: {layout_err}",
+                      image=pin["ref"])
+    missing_dirs = [d for d in ARCHIVE_ROOT_REQUIRED_DIRS if d not in layout["top_level_entries"]]
+    if missing_dirs:
+        return refuse("LAYOUT_INVALID", "root tarball lacks canonical Ubuntu layout directories",
+                      missing_dirs=missing_dirs)
+    osr = layout["os_release"]
+    if osr.get("ID") != "ubuntu" or osr.get("VERSION_ID") != "24.04":
+        return refuse("METADATA_VERSION_MISMATCH", "root tarball is not Ubuntu 24.04 (Noble)",
+                      os_release=osr, image=pin["ref"])
+
+    lxd_meta, lxd_err = _inspect_lxd_metadata(paths["lxd"])
+    if lxd_err:
+        return refuse(lxd_err.split(":", 1)[0], f"LXD metadata inspection failed: {lxd_err}", image=pin["ref"])
+    arch_name = LXD_ARCH_ALIASES.get(str(lxd_meta.get("architecture", "")).lower())
+    if arch_name != args.arch:
+        return refuse("METADATA_ARCH_MISMATCH", "LXD metadata architecture does not match the pin",
+                      metadata=lxd_meta)
+    if (lxd_meta.get("os") != "ubuntu" or lxd_meta.get("release") != "noble"
+            or "24.04" not in str(lxd_meta.get("description"))):
+        return refuse("METADATA_VERSION_MISMATCH", "LXD metadata does not describe Ubuntu 24.04 (Noble)",
+                      metadata=lxd_meta)
+
+    return ok(
+        image=pin["ref"], arch=args.arch, fetch_mode=bool(args.fetch),
+        gpg_signature="GOOD", signing_key_fingerprint=str(pin["signing_key_fingerprint"]).upper(),
+        gpg_status=detail, signed_checksum_entry=signed_root,
+        bytes_checked=bytes_checked, root_tarball_bytes=root_size,
+        layout=layout, lxd_metadata=lxd_meta, fetched=fetched,
+        evidence_scope=("actual tarball bytes rehashed and matched to the GPG-signed SHA256SUMS and pinned "
+                        "digests; canonical layout/metadata/version inspected; NOT live import/boot evidence"),
+        note="no live host, LXC import or guest boot; external blocker preserved",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1111,6 +1403,14 @@ def build_parser() -> argparse.ArgumentParser:
     up.add_argument("--artifact")
     up.add_argument("--public-key")
     up.set_defaults(func=cmd_upgrade)
+
+    sa = sub.add_parser("verify-signed-archive")
+    sa.add_argument("--provenance", default=str(Path(__file__).parent / "config" / "provenance.json"))
+    sa.add_argument("--arch", required=True, choices=("amd64", "arm64"))
+    sa.add_argument("--work-dir", required=True)
+    sa.add_argument("--fetch", action="store_true",
+                    help="direct-GET the pinned artifacts into --work-dir; otherwise verify files already staged there")
+    sa.set_defaults(func=cmd_verify_signed_archive)
 
     return parser
 

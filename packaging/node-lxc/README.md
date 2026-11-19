@@ -31,9 +31,10 @@ decision is recorded in
 
 | Path | Purpose |
 | --- | --- |
-| `node_lxc_artifact.py` | Cross-platform CLI implementing build, verify, capability gate, first-boot identity, volume import/backup/restore and staged upgrade/rollback |
+| `node_lxc_artifact.py` | Cross-platform CLI implementing build, verify, signed-archive end-to-end verification, capability gate, first-boot identity, volume import/backup/restore and staged upgrade/rollback |
 | `build-rootfs.sh`, `verify-artifact.sh`, `validate-provenance.sh` | Reproducible build, fail-closed verification and provenance-profile validation entry points |
 | `qualification/RETRIEVAL-EVIDENCE.md` | Exact dated upstream URLs, digests, GPG signature evidence and retrieval method |
+| `qualification/SIGNED-ARCHIVE-EVIDENCE.md` | End-to-end download, byte rehash, GPG verification and canonical layout/metadata results for both architectures |
 | `qualification/QUALIFICATION.md` | What is qualified, and the precise external guest-boot blocker |
 | `capability-gate.sh` | Read-only nested-runtime capability gate; refuses unsupported hosts with exact reason codes |
 | `first-boot-identity.sh` | Unique first-boot node identity and digest-only ADR0019 enrollment bundle |
@@ -42,7 +43,7 @@ decision is recorded in
 | `config/provenance.fixture.json` | SYNTHETIC fixture profile only; never usable for an artifact claim |
 | `fixtures/rootfs-minimal/` | Synthetic, credential-free rootfs tree used by offline builds |
 | `fixtures/capability-*.json` | Supported and unsupported host capability snapshots |
-| `tests/test_node_lxc.py` | Offline fixture qualification suite (10 scenarios) |
+| `tests/test_node_lxc.py` | Offline fixture qualification suite (22 scenarios, including real-GPG signed-archive checks) |
 | `run-fixtures.sh` | Runs the suite with no host, network, root or live daemon |
 
 ## Verification gates
@@ -53,6 +54,17 @@ decision is recorded in
   the real pins and refuses synthetic profiles, placeholder digests, unverified
   digests, missing signature evidence and moving/undated URLs. A fixture build
   refuses the artifact profile and vice versa.
+- **Signed upstream archive.** `node_lxc_artifact.py verify-signed-archive`
+  verifies the real dated release in an owned disposable path: it refuses
+  synthetic/placeholder/moving-URL pins, checks the staged control-file digests,
+  verifies the detached GPG signature of `SHA256SUMS` against the pinned key
+  fingerprint, matches the signed sum to the pin, rehashes the **full downloaded
+  root and LXD tarballs**, checks the pinned content length, and inspects the
+  usrmerged `os-release` and LXD `metadata.yaml` for Ubuntu 24.04 and the
+  requested architecture. `--fetch` performs the direct HTTPS GET first. Real
+  byte-level results for amd64 and arm64 are in
+  [SIGNED-ARCHIVE-EVIDENCE.md](qualification/SIGNED-ARCHIVE-EVIDENCE.md); this
+  is not boot evidence.
 - **Pinned provenance.** A fixture build accepts a source tree only when its
   canonical digest equals the pinned `fixture.manifest_sha256`. An artifact build
   requires `--base-tarball` whose canonical sha256 matches the dated image's
@@ -97,7 +109,7 @@ decision is recorded in
 sh run-fixtures.sh
 ```
 
-All 14 scenarios pass at the recorded head (10 original offline qualification
-scenarios, the LF/CRLF portability regression, and three real-pin profile
-acceptance/refusal tests). See `qualification/QUALIFICATION.md` and the external
-mode report for exact evidence and limits.
+All 22 scenarios pass at the recorded head (14 original offline qualification
+scenarios and eight real-GPG signed-archive scenarios). See
+`qualification/SIGNED-ARCHIVE-EVIDENCE.md`, `qualification/QUALIFICATION.md` and
+the external mode report for exact evidence and limits.

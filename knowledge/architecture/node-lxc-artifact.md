@@ -10,7 +10,9 @@ code_refs:
   - packaging/node-lxc/config/provenance.json
   - packaging/node-lxc/config/provenance.fixture.json
   - packaging/node-lxc/qualification/QUALIFICATION.md
+  - packaging/node-lxc/qualification/SIGNED-ARCHIVE-EVIDENCE.md
   - packaging/node-lxc/tests/test_node_lxc.py
+  - docs/node-lxc-mode.md
 sources:
   - title: ADR 0036 unprivileged LXC node template
     resource: ../../docs/adr/0036-node-lxc-template.md
@@ -38,6 +40,14 @@ credential type, TLS stack or publication workflow.
   profiles, placeholder/unverified digests, missing signature evidence and
   moving URLs. Artifacts also bind a platform/version matrix, `SHA256SUMS`, an
   operator detached signature and a CycloneDX SBOM; verification fails closed.
+- `verify-signed-archive` checks the real dated release in an owned disposable
+  path: it refuses synthetic/placeholder/moving-URL pins, verifies the detached
+  GPG signature of `SHA256SUMS` against the pinned key fingerprint, matches the
+  signed sum to the pin, rehashes the **full downloaded** root and LXD tarballs,
+  checks content length and inspects usrmerged `os-release` and LXD
+  `metadata.yaml` for Ubuntu 24.04 and the requested architecture. Byte
+  verification is artifact evidence, never guest-boot evidence
+  ([signed-archive evidence](../../packaging/node-lxc/qualification/SIGNED-ARCHIVE-EVIDENCE.md)).
 - First-boot identity and the ADR0019 digest-only enrollment bundle are created
   on the persistent volume; no secret, private key or credential appears in the
   template or provisioning metadata.
@@ -46,6 +56,7 @@ credential type, TLS stack or publication workflow.
   staged slots.
 - Runtime behavior is qualified only by disposable offline fixtures. Real guest
   boot is externally blocked on the authoring host (no `/dev/kvm`, no LXC
-  tooling); live import/boot, effective kernel enforcement and gameplay
-  compatibility are not claimed. Pin verification is evidence about upstream
-  bytes, not boot evidence.
+  tooling; the owned WSL 2 distribution has neither and installing would need
+  elevation/host configuration); live import/boot, effective kernel enforcement
+  and gameplay compatibility are not claimed. Pin and signed-archive byte
+  verification is evidence about upstream artifacts, not boot evidence.
