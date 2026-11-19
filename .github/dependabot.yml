@@ -14,6 +14,13 @@ multi-ecosystem-groups:
     schedule:
       interval: "weekly"
 
+# Dependabot groups are scoped to a manifest DIRECTORY entry: a group defined
+# in one `updates` entry never groups dependencies from another entry, even
+# when the group names are similar. Every directory that has its own manifest
+# therefore carries its own `applies-to: security-updates` group here. Keep
+# these entries and their directories in sync when a new manifest is added.
+# Advisories with no patched release are tracked by the recurring review in
+# docs/dependency-security-review.md, not by an update group that cannot exist.
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -45,5 +52,27 @@ updates:
     multi-ecosystem-group: "routine-dependencies"
     groups:
       security-bun:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
+  - package-ecosystem: "npm"
+    directory: "/docs/carbon-panel"
+    schedule:
+      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-docs-npm:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
+  - package-ecosystem: "bun"
+    directory: "/scripts/manual-review/e2e"
+    schedule:
+      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-e2e-bun:
         applies-to: "security-updates"
         patterns: ["*"]

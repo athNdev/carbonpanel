@@ -6,6 +6,7 @@
 | Connect an AI assistant / MCP server | [MCP server guide](carbon-panel/src/content/docs/guides/mcp-server.mdx), [distribution smoke](runbook-mcp-smoke.md) and [ADR 0034](adr/0034-mcp-server-distribution.md) |
 | Operate or recover an installation | [Deployment modes](deployment-modes.md), [server operations](runbook-server-operations.md), [panel database recovery](runbook-panel-db-restore.md), and other `runbook-*.md` files |
 | Develop and verify a change | [Contributor guide](../AGENTS.md), [development commands](development.md), and [verification](../knowledge/testing/verification.md) |
+| Review advisories with no patched release | [Dependency security review](dependency-security-review.md) — weekly owner/cadence and re-check steps |
 | Understand accepted architecture | [ADR register](../knowledge/decisions/adrs.md) and the records in `adr/` |
 | Find subsystem constraints and code ownership | [Knowledge index](../knowledge/index.md) and [repository map](../knowledge/repo-map.md) |
 | Read a dated proposal or investigation | `plans/`, `research/` and `issues/`; check each document's scope, revision and evidence limits |
