@@ -289,7 +289,8 @@ const (
 	// maxBlueMapProbedMaps bounds the number of network probes performed by a
 	// single health check even if settings.json carries a very large map list.
 	maxBlueMapProbedMaps = 32
-	maxBlueMapTexturesBytes = 1 << 20
+	// BlueMap 5.29 textures.json can exceed 2 MiB decompressed for real worlds.
+	maxBlueMapTexturesBytes = 8 << 20
 )
 
 // blueMapTexturesReady verifies that the map data the webapp actually loads on
