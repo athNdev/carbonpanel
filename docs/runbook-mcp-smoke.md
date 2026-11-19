@@ -159,12 +159,14 @@ that matches where the MCP process runs:
 1. Check `GET /healthz`, `GET /readyz` and `GET /health/detail` **from the MCP
    process location**. Report `healthy`, `degraded`/`unavailable` and `unknown`
    separately; a stored `Running` status is not playable evidence.
-2. Call `tools/list`; retain the tool list.
+2. Call `tools/list`; retain the tool list. It enumerates the generated
+   combined catalogue of 211 tools (245 declared RPCs, 235 mounted/reachable).
 3. On stable `v1.0.40` (`f88748be…`) call only the verified-by-contract
    read-only set matching the core lane's stable smoke path: `list_servers`,
    `get_server`, `list_files`, `get_file`, `list_backups`. Record request/response
-   pairs with timestamps. This is a first-slice catalogue of 30 tools, not full
-   API coverage; OSS-370 remains open.
+   pairs with timestamps. The five player/world/world-view tools are mounted in
+   the catalogue but their backing RPCs are absent from stable v1.0.40; OSS-370
+   tracks the remaining catalogue gaps.
 4. Do not call any mutating tool. No rollback is needed. Stop and report if a
    tool requests a write.
 5. Remove the uniquely named container, temp volume, throwaway network and temp

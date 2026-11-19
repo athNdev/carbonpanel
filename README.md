@@ -196,10 +196,11 @@ prepared here. At the time of this change no image has been pushed to GHCR and
 no MCP Registry entry has been submitted. Do not substitute a locally built or
 preview artifact for the official stable one when it is published.
 
-The implemented catalogue is a **first slice of 30 tools**, not full API
-coverage. Inventory coverage (25 mounted services / 220 RPCs) is not tool
-coverage; supported families still missing remain tracked under **OSS-370**,
-which stays open. Do not infer that every panel RPC has a tool.
+The implemented catalogue mounts the generated **211-tool combined catalogue**.
+It is derived from 245 declared RPCs across 26 services, of which 235 are
+mounted/reachable across 27 mounted services. Tool coverage is not the same as
+RPC coverage; OSS-370 tracks the remaining catalogue gaps. Do not infer that
+every panel RPC has a tool.
 
 A successful client install proves only that the **package is available**. It
 does **not** prove that a tool works against your panel: **server capabilities**
@@ -247,12 +248,12 @@ local/preview image.
    socket. Confirm worlds and the panel database are intact before and after.
 5. Use the read-only tool set qualified for my panel build. On stable, the
    verified minimal set is list_servers, get_server, list_files, get_file and
-   list_backups. The catalogue is a first slice of 30 tools, not full API
-   coverage; OSS-370 stays open for supported families still missing. If I ask
-   for PlayerService, WorldService or WorldViewService
-   tools, return the structured CAPABILITY_UNAVAILABLE error with the required
-   qualified build; do not report success, guess from your client version, or
-   silently skip the call.
+   list_backups. The combined catalogue mounts 211 tools (245 declared / 235
+   mounted RPCs); OSS-370 tracks the remaining gaps. The PlayerService,
+   WorldService and WorldViewService tools are mounted, but their backing RPCs
+   are absent from stable v1.0.40: on that build return the structured
+   CAPABILITY_UNAVAILABLE error with the required qualified build; do not report
+   success, guess from your client version, or silently skip the call.
 6. Check health first: GET /healthz, /readyz and /health/detail on the panel
    from where the MCP process runs. Report healthy, degraded/unavailable and
    unknown separately. A stored Running status alone is not playable evidence.
@@ -327,9 +328,11 @@ Linux is fully supported and tested — Windows installations may have issues.
 
 ### Compatibility: package availability is not server capability
 
-The catalogue is a **first slice of 30 tools**. It is not the full 220-RPC
-inventory: OSS-370 remains open for supported families still missing. Tool names
-below match the implemented catalogue exactly.
+The gateway mounts the generated **211-tool combined catalogue** (245 declared
+RPCs, 235 mounted/reachable). All ten tools below are mounted; the columns
+report whether the panel build behind `CARBONPANEL_URL` implements the RPC that
+backs each tool. OSS-370 tracks the remaining catalogue gaps. Tool names below
+match the implemented catalogue exactly.
 
 | Tool (read-only) | Backing RPC | Stable `v1.0.40` | Pinned post-stable build |
 | --- | --- | --- | --- |
@@ -338,11 +341,11 @@ below match the implemented catalogue exactly.
 | `list_files` | `FileService/ListFiles` | available | available |
 | `get_file` | `FileService/GetFile` | available | available |
 | `list_backups` | `BackupService/ListBackups` | available | available |
-| `list_players` | `PlayerService/ListPlayers` | **unavailable** | pinned, qualification pending |
-| `get_player` | `PlayerService/GetPlayer` | **unavailable** | pinned, qualification pending |
-| `list_world_entries` | `WorldService/ListWorldEntries` | **unavailable** | pinned, qualification pending |
-| `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | **unavailable** | pinned, qualification pending |
-| `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | **unavailable** | pinned, qualification pending |
+| `list_players` | `PlayerService/ListPlayers` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `get_player` | `PlayerService/GetPlayer` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `list_world_entries` | `WorldService/ListWorldEntries` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
 
 The pinned post-stable candidate is
 `fa23a8d73c181f9907633024d9023aead928324e`; "qualification pending" means the
