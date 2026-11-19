@@ -68,7 +68,7 @@ func runPublicStoragePrimitives(t *testing.T, root string) {
 	}
 	_ = w.Abort()
 	if body, err := os.ReadFile(target); err != nil || string(body) != "old" {
-		t.Fatalf("aborted oversized atomic write must preserve target: %q %v", body, err)
+		t.Fatalf("aborted oversized atomic write must preserve target for retry: %q %v", body, err)
 	}
 
 	w, err = files.NewAtomicWriter(target, 64)
@@ -140,13 +140,13 @@ func runPublicStoragePrimitives(t *testing.T, root string) {
 		t.Fatal("broken archive must fail")
 	}
 	if body, err := os.ReadFile(filepath.Join(worldRoot, "precious.txt")); err != nil || string(body) != "keep" {
-		t.Fatalf("failed/interrupted restore must preserve world data: %q %v", body, err)
+		t.Fatalf("failed/interrupted restore must preserve world data for retry: %q %v", body, err)
 	}
 	if err := os.WriteFile(filepath.Join(worldRoot, "stale.txt"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := files.ExtractArchiveAtomic(context.Background(), zipPath, worldRoot); err != nil {
-		t.Fatalf("ExtractArchiveAtomic restore: %v", err)
+		t.Fatalf("retry ExtractArchiveAtomic restore: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(worldRoot, "stale.txt")); !os.IsNotExist(err) {
 		t.Fatalf("successful restore must replace stale world data, stat err=%v", err)
@@ -177,7 +177,8 @@ func TestPublicFileArchiveLogPrimitivesAcrossLocalAndNodeBackedFixtures(t *testi
 		nodeBase := filepath.Join(t.TempDir(), "node-storage")
 		node := NodeInfo{ID: "node-acceptance", Name: "node-acceptance", StorageRoot: nodeBase}
 		serverID := "srv-acceptance"
-		root := nodeDataRoot(node, serverID)
+		controllerDataRoot := filepath.Join(t.TempDir(), "controller-data", "servers", serverID)
+		root := nodeDataRoot(node, controllerDataRoot)
 		if !RequiresRemoteTransport(node) {
 			t.Fatal("fixture must require node-backed transport before the node-side root exists")
 		}
@@ -186,7 +187,7 @@ func TestPublicFileArchiveLogPrimitivesAcrossLocalAndNodeBackedFixtures(t *testi
 		}
 
 		transport := &ProcessTransport{Bin: bin}
-		acc, err := transport.Open(context.Background(), node, serverID)
+		acc, err := transport.Open(context.Background(), node, controllerDataRoot)
 		if err != nil {
 			t.Fatalf("open node-backed accessor: %v", err)
 		}
@@ -194,12 +195,16 @@ func TestPublicFileArchiveLogPrimitivesAcrossLocalAndNodeBackedFixtures(t *testi
 
 		runPublicStoragePrimitives(t, root)
 
+		if _, err := os.Stat(controllerDataRoot); !os.IsNotExist(err) {
+			t.Fatalf("transport-only fixture must not create controller-local data root: %v", err)
+		}
+
 		if got, err := acc.ReadFile("server.properties"); err != nil || string(got) != "motd=node" {
 			t.Fatalf("node-backed accessor sees primitive output: %q %v", got, err)
 		}
 
 		cancelCtx, cancel := context.WithCancel(context.Background())
-		cancelAcc, err := transport.Open(cancelCtx, node, serverID)
+		cancelAcc, err := transport.Open(cancelCtx, node, controllerDataRoot)
 		if err != nil {
 			t.Fatalf("open cancellable accessor: %v", err)
 		}
@@ -213,6 +218,9 @@ func TestPublicFileArchiveLogPrimitivesAcrossLocalAndNodeBackedFixtures(t *testi
 		raw, err := os.ReadFile(filepath.Join(root, "cancel.txt"))
 		if err != nil || string(raw) != "before" {
 			t.Fatalf("cancellation must not corrupt node-backed fixture data: %q %v", raw, err)
+		}
+		if _, err := os.Stat(controllerDataRoot); !os.IsNotExist(err) {
+			t.Fatalf("cancelled node-backed fixture must not fall back to controller-local data root: %v", err)
 		}
 	})
 }
