@@ -71,13 +71,19 @@ fields, RPCs, shared DB columns or auth middleware.
   paths; it never probes or changes a live host, installs a daemon or writes a
   system unit. Enrollment fixtures use synthetic keys and temp-dir private
   material only.
-- **Qualification status:** on a clean disposable Ubuntu 24.04 / systemd 255
-  fixture with real dockerd 29.1.3, the EXACT shipped **rootful** unit booted
-  `active/success`: private socket/pidfile/roots, bridge, DNAT, default-cap
-  container, limits and live-restore restart were observed. The **rootless**
-  `NotifyAccess=all` fix is verified by unit contract/syntax only; a real
-  rootless boot to `active/success` is still blocked by nested-userns iptables
-  on the WSL2 fixture kernel. Do not claim rootless deployability from fixtures.
+- **Qualification status (fixture-only):** on a clean disposable Ubuntu 24.04 /
+  systemd 255 fixture with real dockerd 29.1.3, the EXACT shipped **rootful**
+  unit booted `active/success` with private socket/pidfile/roots, bridge, DNAT,
+  default-cap container, limits and live-restore restart. The EXACT shipped
+  **rootless** per-user unit later also booted `active/success` with real
+  dockerd on a suitable disposable fixture: real non-root `systemd --user`
+  session, private socket/pidfile/roots, `name=rootless`, `vfs`, a real
+  container with a published port, bridge-side listener, **measured client TCP
+  reachability and HTTP 200**, applied memory/pids limits and survival of an
+  ambient `XDG_RUNTIME_DIR` reset. Rootless publishing is slirp4netns builtin
+  userspace forwarding, so no host DNAT rule is claimed for that mode. The
+  earlier WSL2 failure was a fixture layout/kernel limit, not a unit defect.
+  Neither mode has live-host, gameplay, release or deployment evidence.
 
 # Why
 
@@ -95,11 +101,12 @@ privilege decision explicit and testable without a live host.
 - `CheckOptionParity` fixtures fail on duplicate keys, extra CLI flags and
   CLI/config conflicts; `systemd-analyze verify` only checks unit syntax.
 - Disposable dind boot evidence is in `node-native-boot-evidence.md`; the exact
-  shipped-unit re-qualification is in `node-runtime-requalification-20261119.md`
-  (both under `security-runtime-plans/`). The rootful unit boots on a clean
-  systemd fixture; rootless active/success remains unverified due to the
-  fixture kernel's nested-userns iptables limitation. No live-host, install,
-  gameplay or deployment success may be claimed from fixtures.
+  rootful unit re-qualification is in `node-runtime-requalification-20261119.md`
+  and the exact rootless boot in
+  `node-rootless-qualification-20261119.md` (all under `security-runtime-plans/`).
+  Reproducible fixture scripts are under `qualfixtures/rootless/`. Both modes
+  boot on clean disposable systemd fixtures; no live-host, install, gameplay or
+  deployment success may be claimed from fixtures.
 
 # Read next
 
