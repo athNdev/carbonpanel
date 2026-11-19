@@ -569,24 +569,33 @@ up)
 					done
 					echo "review renderer state: ${renderer_state:-unknown}" >&2
 					if [ -n "${fixture_target}" ]; then
-						echo "review fixture target: $(printf '%s' "${fixture_target}" | cut -c1-500)" >&2
+						echo "review fixture target fields: $(printf '%s' "${fixture_target}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s);console.log(JSON.stringify({state:t.rendererState,error:t.error,freshness:t.freshness,rendererType:t.rendererType,name:t.name}))}catch(e){console.log("parse_error")}})' | cut -c1-800)" >&2
 					fi
 					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
 						map_probe="$(docker exec "${NAME}-bluemap" python -c 'import json,urllib.request; d=json.loads(urllib.request.urlopen("http://127.0.0.1:8100/settings.json", timeout=3).read().decode()); print("maps="+str(d.get("maps"))[:220])' 2>&1 || true)"
 						echo "review map settings maps: $(printf '%s' "${map_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
 						tex_probe="$(docker exec "${NAME}-bluemap" sh -c 'for p in /web/maps/*/textures.json /web/maps/*/textures.json.gz; do [ -e "$p" ] && echo "tex:$p"; done | head -n 5' 2>&1 || true)"
 						echo "review textures files: $(printf '%s' "${tex_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
-						http_probe="$(docker exec "${NAME}-bluemap" python -c "import urllib.request; 
+						http_probe="$(docker exec "${NAME}-bluemap" python -c "
+import json,urllib.request,gzip,io
 try:
- r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json', timeout=3); print('plain='+str(r.status))
+ r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json', timeout=3)
+ print('plain='+str(r.status)+' ct='+str(r.headers.get('Content-Type')))
 except Exception as e:
  print('plain='+type(e).__name__)
 try:
- r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json.gz', timeout=3); print('gz='+str(r.status))
+ r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json.gz', timeout=3)
+ b=r.read()
+ print('gz='+str(r.status)+' bytes='+str(len(b))+' ct='+str(r.headers.get('Content-Type'))+' ce='+str(r.headers.get('Content-Encoding')))
+ try:
+  d=json.loads(gzip.decompress(b).decode())
+  print('gz_textures='+str(type(d.get('textures')).__name__))
+ except Exception as e:
+  print('gz_parse='+type(e).__name__)
 except Exception as e:
  print('gz='+type(e).__name__)
 " 2>&1 || true)"
-						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
+						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-500)" >&2
 						echo "review renderer never became READY; worlds capture will fail closed" >&2
 					fi
 				else
