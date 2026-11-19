@@ -139,6 +139,13 @@ jobs:
           VERSION: ${{ inputs.version }}
           COMMIT: ${{ inputs.trusted_sha }}
         run: bash "$BUILD_SCRIPT" --version "$VERSION" --commit "$COMMIT" --output dist/runtime
+      - name: Enforce fail-closed publication predicate (reject offline/fixture output)
+        id: predicate
+        env:
+          ARTIFACT: ${{ inputs.artifact }}
+        run: >-
+          python3 scripts/runtime_artifacts.py publication-predicate
+          --dir dist/runtime --artifact "$ARTIFACT"
       - name: Generate deterministic checksum manifest
         env:
           VERSION: ${{ inputs.version }}

@@ -9,6 +9,7 @@
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
+- [Frontend accessibility coverage](frontend-a11y-coverage.md) — Component accessibility is tested in a real DOM and a real Chromium journey, not by matching source text.
 - [Frontend server inventory ownership](server-inventory.md) — Server reads, lifecycle requests and status presentation share generation guards and account-scoped state.
 - [Geyser safe bind default](geyser-safe-bind.md) — A standalone Geyser entrypoint defaults to a loopback Bedrock bind; an explicit BEDROCK_ADDRESS is the opt-in to wider exposure.
 - [Homepage UI fragments](homepage-fragments.md) — Render real panel feature components as isolated, browser-local homepage examples.
@@ -22,7 +23,7 @@
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
 - [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields and staging policy.
 - [Module sidecar confinement parity](module-confinement-parity.md) — Module sidecars inherit the game-container HostConfig baseline; one named, permission-gated profile is the only relaxation.
-- [Named egress classes](egress-class-policy.md) — Provider, webhook and archive outbound requests use separate egress decisions; URLs are redacted before being logged or returned.
+- [Named egress classes](egress-class-policy.md) — Provider, webhook and archive outbound requests use class-specific policy objects; loopback is a test-only opt-in and remote saves are staged.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.

@@ -3,8 +3,8 @@
   "issue": "OSS-375",
   "head": "7e6b12162ea891c6b5654981c932dd8e298517da",
   "sourceOfTruth": {
-    "proto": "proto/carbonpanel/v1/*.proto (26 services / 230 RPC methods)",
-    "mounts": "internal/rpc/server.go registerServices (25 services / 220 reachable RPCs); reflection list (19) and rbac parity list (24) are stale",
+    "proto": "proto/carbonpanel/v1/*.proto (26 services / 245 RPC methods)",
+    "mounts": "internal/rpc/server.go registerServices (27 services / 235 reachable RPCs); reflection list (19) and rbac parity list (24) are stale",
     "scopes": "internal/rbac/mapping.go PublicProcedures/AuthenticatedOnlyProcedures/ProcedurePermissions",
     "catalog": "internal/mcp/catalog_data.go (generated); internal/mcp/catalog.go (MountedServices, exposedTools)",
     "fixtures": "internal/mcp/mcp_test.go registerToolHandlers/registerAuthHandlers"

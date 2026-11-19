@@ -44,15 +44,19 @@ user. A well-formed token against a no-auth installation is refused, and every
 call uses a bounded HTTP client timeout.
 
 The tool catalog is stable across controller builds. `internal/mcp/catalog.go`
-holds the pinned first-slice declarations and the 25-name mount list mirroring
+holds the pinned first-slice declarations and the 27-name mount list mirroring
 `internal/rpc/server.go registerServices`; `catalog_data.go` is generated from
 proto descriptors and the live RBAC map. The single generator also emits
 `integration_catalog.go`, resolving duplicate tools by source precedence so
 `list_files`/`get_file` and similar collisions are never double-registered. The
-coverage drift test still enumerates the 224 reachable RPCs and fails on a
+coverage drift test still enumerates the 235 reachable RPCs and fails on a
 missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
 a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
-or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and
+or a missing `WorldViewService`. `family_content_descriptors.json` is compared
+byte-for-byte by `TestContentDescriptorArtifact`, so it is pinned to LF in
+`.gitattributes`: without the pin a Windows checkout with `core.autocrlf=true`
+converts it to CRLF and fails the equivalence check with no descriptor drift.
+`family_audit_test.go` recomputes LISTED and
 REACHABLE from live source, but VERIFIED comes only from executable invocation
 evidence: a real `tools/call` over the SDK stdio wire must reach the typed
 Connect method with exact typed-field assertions on ids, booleans, enums,
@@ -87,7 +91,9 @@ never uses a hand-rolled REST client. `download_get_file`,
 The nine formerly PENDING operations are now mounted by production
 `NewServer` / `registerCombinedTools` and carry executable `tools/call`
 evidence, so `PendingInventory` is empty and the STRICT publication gate is
-green (201/201 SUPPORTED operations LISTED, REACHABLE and VERIFIED). The exact
+green (201/201 SUPPORTED operations LISTED, REACHABLE and VERIFIED). The same
+gate now also runs in ordinary CI (`mcp-coverage` job) with a fail-closed
+negative fixture and a real-binary stdio conformance smoke. The exact
 retired inventory and its per-tool evidence map live in
 `internal/mcp/integration_pending.go`; the committed plan is
 `docs/plans/mcp-controller-side-stream-transport.md`. The hold mechanism is

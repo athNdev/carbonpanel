@@ -889,9 +889,16 @@ def cmd_build(args: argparse.Namespace) -> int:
         tarball = Path(args.base_tarball) if args.base_tarball else None
         if tarball is None or not tarball.is_file():
             return refuse("MISSING_BASE_TARBALL", "production build requires --base-tarball")
-        if canonical_file_digest(tarball) != pinned["expected_sha256"]:
+        # The pin is the RAW SHA-256 of the immutable upstream tarball bytes,
+        # exactly as recorded in the GPG-signed SHA256SUMS and checked by
+        # verify-signed-archive (sha256_file) and the control-file digests.
+        # A CRLF-normalized digest here would disagree with those checks for a
+        # tarball whose compressed bytes happen to contain a CRLF sequence, so
+        # build and verify would accept/reject different bytes (OSS-402).
+        tarball_digest = sha256_file(tarball)
+        if tarball_digest != pinned["expected_sha256"]:
             return refuse("UPSTREAM_DIGEST_MISMATCH", "base tarball does not match the signed upstream pin",
-                          expected=pinned["expected_sha256"])
+                          expected=pinned["expected_sha256"], actual=tarball_digest)
         mode = "pinned-upstream"
         base_ref = pinned["image_url"]
 
