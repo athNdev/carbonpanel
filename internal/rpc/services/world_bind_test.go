@@ -300,3 +300,32 @@ func TestUnbindWorldEmitsExactlyOneEventOnSuccess(t *testing.T) {
 		t.Fatalf("events after unbind = %d, want 1", got)
 	}
 }
+
+func TestUnbindWorldReplayEmitsExactlyOneEventWhenBindingAbsent(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, rev := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	svc := newWorldRPCService(t, store, libraryRoot, &worldTestLifecycle{})
+	if _, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-before-unbind-replay",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	req := connect.NewRequest(&v1.UnbindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RequestId: "rpc-unbind-replay-1",
+	})
+	if _, err := svc.UnbindWorld(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetWorldBinding(ctx, server.ID, "world"); err == nil {
+		t.Fatal("expected binding to be absent after unbind")
+	}
+	if _, err := svc.UnbindWorld(ctx, req); err != nil {
+		t.Fatalf("replay with absent binding must be idempotent: %v", err)
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldUnbind, server.ID, "rpc-unbind-replay-1"); got != 1 {
+		t.Fatalf("events after replay with absent binding = %d, want 1", got)
+	}
+}

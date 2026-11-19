@@ -529,7 +529,9 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 
 // Unbind removes the binding row but never deletes world bytes. Admission is
 // taken before the row is read, and the row is deleted only inside a journaled
-// operation, so a replayed request_id cannot interleave with a bind.
+// operation, so a replayed request_id cannot interleave with a bind. A replay
+// of an already completed request is idempotent even when the binding row is no
+// longer present.
 func (b *Binder) Unbind(ctx context.Context, serverID, level, requestID string) (bool, error) {
 	if requestID == "" {
 		requestID = "world-unbind-" + uuid.NewString()
@@ -538,6 +540,7 @@ func (b *Binder) Unbind(ctx context.Context, serverID, level, requestID string) 
 	if err != nil {
 		return false, err
 	}
+	requestKey := operation.StorageKey(requestID, "world-unbind")
 	releaseServer, err := b.admission.Acquire(ctx, "server:"+serverID)
 	if err != nil {
 		return false, err
@@ -545,6 +548,14 @@ func (b *Binder) Unbind(ctx context.Context, serverID, level, requestID string) 
 	defer releaseServer()
 	binding, err := b.store.GetWorldBinding(ctx, serverID, level)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			var op storage.ServerOperation
+			if qerr := b.store.DB().WithContext(ctx).
+				Where("server_id = ? AND request_key = ?", serverID, requestKey).
+				First(&op).Error; qerr == nil && op.Kind == "world-unbind" && op.Phase == storage.ServerOperationComplete {
+				return false, nil
+			}
+		}
 		return false, err
 	}
 	releaseRevision, err := b.admission.Acquire(ctx, "revision:"+binding.RevisionID)
@@ -556,7 +567,14 @@ func (b *Binder) Unbind(ctx context.Context, serverID, level, requestID string) 
 	removed := false
 	_, err = operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-unbind", requestID,
 		func() (bool, error) {
-			if err := b.store.DeleteWorldBinding(ctx, binding.ID); err != nil {
+			current, err := b.store.GetWorldBinding(ctx, serverID, level)
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return false, nil
+				}
+				return false, err
+			}
+			if err := b.store.DeleteWorldBinding(ctx, current.ID); err != nil {
 				return false, err
 			}
 			removed = true
