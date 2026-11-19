@@ -63,9 +63,11 @@ assumed from a template alone.
    only to a verified previous slot.
 6. **No live host provisioning, global host configuration change, registry push
    or release** is part of this decision. Runtime behavior is qualified only by
-   disposable offline fixtures; upstream pins are independently verified but
-   that is not boot evidence. Real guest boot is externally blocked on this
-   host (no `/dev/kvm`, no LXC tooling). Live clean import/boot evidence is a
+   disposable offline fixtures. Upstream pins and the full signed archive bytes
+   are independently verified, but neither is boot evidence. Real guest boot is
+   externally blocked on this host (no `/dev/kvm`, no LXC tooling; the owned WSL
+   2 distribution has neither and installing would require elevation and host
+   configuration). Live clean import/boot evidence is a
    later milestone and is required before any format is advertised.
 
 ## Consequences
@@ -84,7 +86,8 @@ assumed from a template alone.
 
 ## Verification
 
-The 14 offline fixture scenarios and exact evidence are reported in the
+The 22 offline fixture scenarios (including eight real-GPG signed-archive
+scenarios) and exact evidence are reported in the
 external mode report and `packaging/node-lxc/qualification/`. They cover signed
 build and verification; unsigned, tampered, wrong-key, secret-material,
 provenance-digest and platform refusals; real-pin acceptance plus
@@ -92,6 +95,8 @@ synthetic/placeholder/unverified/moving-URL refusals; supported and seven
 unsupported capability snapshots; unique first-boot identity with a verified
 `CSR_PRE` signature and no secret in metadata; volume import/backup/restore
 with tamper refusal; and staged upgrade/rollback with state preserved on
-refusal. Upstream pin verification is recorded separately in
-`packaging/node-lxc/qualification/RETRIEVAL-EVIDENCE.md`; neither is live boot
-evidence.
+refusal. Upstream pin verification is recorded in
+`packaging/node-lxc/qualification/RETRIEVAL-EVIDENCE.md`, and the end-to-end
+signed-archive byte verification in
+`packaging/node-lxc/qualification/SIGNED-ARCHIVE-EVIDENCE.md`; neither is live
+boot evidence.

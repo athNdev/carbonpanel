@@ -25,6 +25,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/indexers/fuego"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/minecraft"
+	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/google/uuid"
 	toml "github.com/pelletier/go-toml/v2"
@@ -248,12 +249,16 @@ type Manager struct {
 	httpClient        *http.Client
 	modrinthBaseURL   string
 	curseForgeBaseURL string
+	importLimits      files.ExtractLimits
 }
 
 type ManagerOptions struct {
 	HTTPClient        *http.Client
 	ModrinthBaseURL   string
 	CurseForgeBaseURL string
+	// ImportLimits bounds every archive import. The zero value uses the
+	// documented generic-archive defaults (see files.DefaultExtractLimits).
+	ImportLimits files.ExtractLimits
 }
 
 func NewManager(baseDir string, log *logger.Logger, options ...ManagerOptions) *Manager {
@@ -272,6 +277,7 @@ func NewManager(baseDir string, log *logger.Logger, options ...ManagerOptions) *
 		httpClient:        client,
 		modrinthBaseURL:   option.ModrinthBaseURL,
 		curseForgeBaseURL: option.CurseForgeBaseURL,
+		importLimits:      option.ImportLimits,
 	}
 }
 

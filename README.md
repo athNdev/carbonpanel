@@ -43,7 +43,7 @@ with your players. **Modpack Studio** keeps the workflow in one place.
 - **Take it with you.** Export `.mrpack`, CurseForge or packwiz formats, share
   with friends, or deploy to a server.
 
-[![Modpack Studio: a real pack, with mod sides, pinned versions and export controls](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-studio.png)](https://github.com/athNdev/carbonpanel/blob/main/assets/showcase/showcase-studio.png)
+[![Modpack Studio: a real pack, with mod sides, pinned versions and export controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-studio.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-studio.png)
 
 [Explore Modpack Studio ↗](https://carbonpanel.dev/docs/guides/modpack-studio/)
 
@@ -53,15 +53,13 @@ Give each server its own Docker container. Keep the console, live logs, files,
 backups and settings within reach. Run on a machine at home, a dedicated host,
 or compatible remote Docker nodes, all through one panel.
 
-[![Live server console with filtered startup logs and command controls](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-server-detail.png)](https://github.com/athNdev/carbonpanel/blob/main/assets/showcase/showcase-server-detail.png)
+[![Live server console with filtered startup logs and command controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-server-detail.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-server-detail.png)
 
 ### The next update. When you're ready.
 
 Prepare compatible configuration and content changes in one batch. Review
 them together, then choose the next restart, a scheduled time or an idle window.
 Staging leaves the live files alone; applying to a running server includes a restart.
-
-[![Staged updates: review a prepared change and choose when to apply it](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-staging.png)](https://github.com/athNdev/carbonpanel/blob/main/assets/showcase/showcase-staging.png)
 
 [Read the update guide ↗](https://carbonpanel.dev/docs/guides/staged-updates/)
 
@@ -94,15 +92,15 @@ depend on the server version, host and idle-mode configuration.
 
 ### Your machines, together
 
-![Cluster dashboard with server state and observed host resources](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-dashboard.png)
+![Cluster dashboard with server state and observed host resources](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-dashboard.png)
 
 ### A home for your packs
 
-![Modpack browser with provider filters and real catalog results](https://raw.githubusercontent.com/athNdev/carbonpanel/main/assets/showcase/showcase-modpacks.png)
+![Modpack browser with provider filters and real catalog results](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-modpacks.png)
 
 </details>
 
-<sub>UI captures come from the current application in an isolated review installation, with seeded review data. [Capture notes and source revision](assets/showcase/README.md).</sub>
+<sub>UI captures come from the current application in an isolated review installation, with seeded review data. Images are published to a dedicated `showcase-assets` branch so these URLs stay stable; [capture notes, manifest and source revision](assets/showcase/README.md).</sub>
 
 ### Considered down to the controls.
 
@@ -135,7 +133,12 @@ For the full walkthrough, see
 
 Prefer a prebuilt download? [GitHub Releases](https://github.com/athNdev/carbonpanel/releases)
 provides versioned archives for Linux, macOS and Windows.
-See [release downloads and checksum verification](docs/releases.md).
+See [release downloads and checksum verification](docs/releases.md) and the
+[release history and tag migration](docs/release-history.md): product releases
+use `carbonpanel-vMAJOR.MINOR.PATCH` tags, while plain `v*` tags remain the
+separate Go/module domain. The verified stable is `1.0.40` (`v1.0.40`), the
+current 1.0 rollback line; see the upgrade notes before moving to the next
+MAJOR release. Prereleases never move `latest` or a minor alias.
 
 ### 1. Download the repository and build or pull the image
 

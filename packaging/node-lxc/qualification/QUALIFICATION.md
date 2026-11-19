@@ -5,6 +5,12 @@
 - **Real upstream pins.** `config/provenance.json` pins immutable, dated Ubuntu
   24.04 root tarballs with SHA-256 values taken from a GPG-signed `SHA256SUMS`
   and locally verified. See [RETRIEVAL-EVIDENCE.md](RETRIEVAL-EVIDENCE.md).
+- **Signed archive bytes verified end to end.** Both per-architecture root
+  tarballs and LXD metadata tarballs were actually downloaded in an owned
+  disposable path, rehashed against the GPG-signed `SHA256SUMS` and the pins,
+  and inspected for canonical layout/`os-release`/`metadata.yaml` version and
+  architecture. See [SIGNED-ARCHIVE-EVIDENCE.md](SIGNED-ARCHIVE-EVIDENCE.md).
+  This is byte-level artifact evidence, not boot evidence.
 - **Offline artifact behavior.** The disposable fixture suite covers signed
   build/verify, checksum/signature/SBOM/secret refusals, the nested-runtime
   capability gate, first-boot identity with digest-only enrollment, volume
@@ -17,10 +23,12 @@
 ## Real blocker — guest boot NOT qualified (external)
 
 The originating host has **no `/dev/kvm`** and **no LXC tooling**
-(`lxc`, `lxc-create`, `lxc-copy`, `pct`), and no privileged access to provision
-one. A real Ubuntu 24.04 LXC rootfs therefore cannot be imported and booted in
-this lane. This is an **external qualification blocker**, not a code defect and
-not a pass:
+(`lxc`, `lxc-create`, `lxc-copy`, `pct`, `systemd-nspawn`), and no privileged
+access to provision one. The task-owned WSL 2 Ubuntu distribution likewise has
+no `/dev/kvm` and no LXC tools; installing them would require elevation and
+host/WSL configuration changes, which are out of scope. A real Ubuntu 24.04 LXC
+rootfs therefore cannot be imported and booted in this lane. This is an
+**external qualification blocker**, not a code defect and not a pass:
 
 - No live Proxmox/LXC import or boot was performed.
 - No nested Docker daemon was started inside a real guest.

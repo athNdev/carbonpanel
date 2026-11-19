@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"strings"
 
 	shellparse "github.com/arkady-emelyanov/go-shellparse"
 	"github.com/athNdev/carbon-panel/internal/alias"
@@ -27,6 +28,48 @@ import (
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 )
+
+// Module sidecars inherit the game-container confinement baseline. A template
+// may opt into exactly one named exception profile; that exception is granted
+// only after the RPC layer checks servers/manage_docker_privileged (see
+// ModuleService.CreateModule). Unknown profiles always fail closed.
+const (
+	ModuleSecurityProfileMetadataKey      = "security_profile"
+	ModuleSecurityCapAddMetadataKey       = "security_cap_add"
+	ModuleSecurityWritableRootMetadataKey = "security_writable_root"
+	ModuleProfileHardened                 = "hardened"
+	ModuleProfileHostExtension            = "host-extension"
+)
+
+// allowedModuleExceptionCaps is the small, named set a host-extension sidecar
+// may request. SYS_ADMIN, NET_ADMIN and a writable Docker socket are not here:
+// those remain operator-only broad grants, not a builtin module profile.
+var allowedModuleExceptionCaps = map[string]bool{
+	"CHOWN":            true,
+	"DAC_OVERRIDE":     true,
+	"SETGID":           true,
+	"SETUID":           true,
+	"NET_BIND_SERVICE": true,
+	"NET_RAW":          true,
+	"SYS_PTRACE":       true,
+	"SYS_RESOURCE":     true,
+}
+
+// ModuleSecurityProfile returns the named confinement profile of a template.
+// Absent, blank and unrecognised values all mean the hardened baseline.
+func ModuleSecurityProfile(template *models.ModuleTemplate) string {
+	if template == nil || template.Metadata == nil {
+		return ModuleProfileHardened
+	}
+	profile := strings.ToLower(strings.TrimSpace(template.Metadata[ModuleSecurityProfileMetadataKey]))
+	if profile == "" {
+		return ModuleProfileHardened
+	}
+	if strings.EqualFold(profile, ModuleProfileHostExtension) {
+		return ModuleProfileHostExtension
+	}
+	return ModuleProfileHardened
+}
 
 // publishModuleHostPort reports whether Docker should publish the port on
 // 0.0.0.0. Proxy-only ports stay unpublished. Public ports, including Geyser
@@ -238,7 +281,7 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		},
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 	}
-	applyModuleConfinement(hostConfig)
+	applyModuleConfinement(hostConfig, template)
 
 	// Apply CPU limit if specified
 	if module.CPULimit > 0 {
@@ -409,15 +452,76 @@ func (c *Client) moduleVolumesToMounts(volumes []ModuleVolumeMount, serverDataPa
 	return mounts
 }
 
-// applyModuleConfinement keeps sidecar HostConfig from being auto-broadened.
-// Privileged host-extension templates are operator features: they must not
-// turn Privileged on as a side effect of create, and bind sources stay
-// confined by ValidateModuleVolumeMounts (docker.sock is outside safe roots).
-func applyModuleConfinement(hc *container.HostConfig) {
+// applyModuleConfinement applies the game-container baseline to a sidecar's
+// effective HostConfig. It is called after resource setup and before create,
+// and deliberately overwrites any broadening fields so a stored or inherited
+// value cannot weaken isolation. Only a named, permission-gated profile may
+// relax the read-only rootfs and add capabilities from the allowlist; the
+// no-new-privileges, CapDrop ALL, pids and zero-swap limits always stay on.
+func applyModuleConfinement(hc *container.HostConfig, template *models.ModuleTemplate) {
 	if hc == nil {
 		return
 	}
 	hc.Privileged = false
+	hc.CapDrop = []string{"ALL"}
+	if !hasModuleSecurityOpt(hc, "no-new-privileges:true") {
+		hc.SecurityOpt = append(hc.SecurityOpt, "no-new-privileges:true")
+	}
+	pidsLimit := int64(512)
+	hc.PidsLimit = &pidsLimit
+	// A memory limit equal to swap means the container cannot use host swap.
+	hc.MemorySwap = hc.Memory
+
+	profile := ModuleSecurityProfile(template)
+	if profile == ModuleProfileHostExtension {
+		hc.CapAdd = allowedModuleCapsFrom(template)
+		hc.ReadonlyRootfs = true
+		if template != nil && template.Metadata != nil &&
+			strings.EqualFold(strings.TrimSpace(template.Metadata[ModuleSecurityWritableRootMetadataKey]), "true") {
+			hc.ReadonlyRootfs = false
+		}
+		ensureModuleTmpfs(hc, "rw,nosuid,size=64m")
+		return
+	}
+
+	hc.CapAdd = nil
+	hc.ReadonlyRootfs = true
+	ensureModuleTmpfs(hc, "rw,noexec,nosuid,size=64m")
+}
+
+func hasModuleSecurityOpt(hc *container.HostConfig, want string) bool {
+	for _, opt := range hc.SecurityOpt {
+		if opt == want {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureModuleTmpfs(hc *container.HostConfig, options string) {
+	if hc.Tmpfs == nil {
+		hc.Tmpfs = map[string]string{}
+	}
+	if _, ok := hc.Tmpfs["/tmp"]; !ok {
+		hc.Tmpfs["/tmp"] = options
+	}
+}
+
+func allowedModuleCapsFrom(template *models.ModuleTemplate) []string {
+	if template == nil || template.Metadata == nil {
+		return nil
+	}
+	var caps []string
+	seen := map[string]bool{}
+	for _, name := range strings.Split(template.Metadata[ModuleSecurityCapAddMetadataKey], ",") {
+		name = strings.ToUpper(strings.TrimSpace(name))
+		if name == "" || seen[name] || !allowedModuleExceptionCaps[name] {
+			continue
+		}
+		seen[name] = true
+		caps = append(caps, name)
+	}
+	return caps
 }
 
 // GetModuleContainerIP gets the IP address of a module container on the Carbon Panel network

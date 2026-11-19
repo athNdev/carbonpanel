@@ -628,8 +628,15 @@ func (h *PackwizHandler) handleSetMCVersion(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]any{"stale": stale, "migration": migration})
 }
 
+// maxImportUploadBytes is the total multipart body ceiling for a modpack
+// import. ParseMultipartForm's argument only sizes the in-memory portion; it
+// does not bound the request. MaxBytesReader below is the real cap. A var (not
+// a const) so the limit harness can lower it without a gigabyte fixture.
+var maxImportUploadBytes int64 = 1 << 30 // 1 GiB
+
 func (h *PackwizHandler) handleImportPack(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, maxImportUploadBytes)
 		if err := r.ParseMultipartForm(64 << 20); err != nil {
 			http.Error(w, "failed to parse multipart form", http.StatusBadRequest)
 			return
@@ -641,9 +648,15 @@ func (h *PackwizHandler) handleImportPack(w http.ResponseWriter, r *http.Request
 		}
 		defer file.Close()
 
-		data, err := io.ReadAll(file)
+		// Read at most one byte past the declared ceiling so an oversized
+		// part is rejected rather than buffered without bound.
+		data, err := io.ReadAll(io.LimitReader(file, maxImportUploadBytes+1))
 		if err != nil {
 			http.Error(w, "failed to read uploaded file", http.StatusInternalServerError)
+			return
+		}
+		if int64(len(data)) > maxImportUploadBytes {
+			http.Error(w, "uploaded archive exceeds the import size limit", http.StatusRequestEntityTooLarge)
 			return
 		}
 		readerAt := bytes.NewReader(data)

@@ -129,7 +129,7 @@
     "signature_get": "GET signature_url -> HTTP 200, 833 bytes, sha256 68aae716a548e466e58afddd8b767c54c791f40f1d20d1d12e27c471edb535e5",
     "key_get": "GET signing_key_source -> HTTP 200, 3325 bytes, sha256 927138de292fac4d861105a052cf56e9c5921987da385c844d88f34d19b39ab0",
     "gpg_verify": "gpg --verify SHA256SUMS.gpg SHA256SUMS -> Good signature from UEC Image Automatic Signing Key <cdimage@ubuntu.com>; primary key fingerprint D2EB 4462 6FDD C30B 513D 5BB7 1A5D 6C4C 7DB8 7C81; exit 0",
-    "image_head": "HEAD each image_url -> HTTP 200; amd64 content-length 227213232, arm64 content-length 216215656; full tarball bytes were NOT downloaded",
+    "image_head": "HEAD each image_url -> HTTP 200; amd64 content-length 227213232, arm64 content-length 216215656; full tarball bytes were later downloaded and rehashed against the signed SHA256SUMS (see qualification/SIGNED-ARCHIVE-EVIDENCE.md)",
     "checksum_lines": "expected_sha256 values were read from the GPG-signed SHA256SUMS for ubuntu-24.04-server-cloudimg-{amd64,arm64}-root.tar.xz and the two -lxd.tar.xz metadata files",
     "full_details": "packaging/node-lxc/qualification/RETRIEVAL-EVIDENCE.md"
   },

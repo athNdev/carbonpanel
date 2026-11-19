@@ -11,6 +11,9 @@ code_refs:
   - landing/assets/showcase
   - scripts/review/plan-showcase.json
   - scripts/review/journey.mjs
+  - scripts/review/entry-state.mjs
+  - scripts/showcase_assets.py
+  - .github/workflows/showcase.yml
 sources:
   - title: Capture provenance and regeneration
     resource: ../../assets/showcase/README.md
@@ -41,3 +44,13 @@ shutdown, and never borrow another installation's data for a public screenshot.
 The capture journey targets stable tab and panel IDs instead of exact text on
 the button's own text nodes. Capture CI runs for application UI changes, not
 homepage-only edits, and pins Bun to the frontend CI version for the website build.
+
+Published images live on a single dedicated asset branch so README raw URLs are
+stable; the README does not link to generated PNGs tracked on main. Capture runs in a read-only job against
+an isolated seeded stack, and a separate minimal `contents:write` job publishes
+only that branch in one commit. The bundle is validated fail-closed against an
+atomic manifest (exact source commit, per-image SHA256, dimensions, size, PNG
+chunk CRCs, alt text, provenance, no credential material, no unexpected files).
+An unchanged content digest is a no-op; a failed capture never removes the
+previous good images. Login-route bootstrap selection must wait for one
+mutually exclusive semantic state rather than counting nodes before hydration.

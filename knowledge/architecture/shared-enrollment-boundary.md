@@ -7,7 +7,9 @@ owners: [oss-runtime]
 code_refs:
   - internal/noderuntime/enroll
   - internal/noderuntime/native/agent.go
+  - internal/nodeinstall
   - internal/rpc/node_control_enrollment_fixture_test.go
+  - internal/rpc/enrollment_integration_test.go
 sources:
   - title: ADR 0019 node control contract
     resource: ../../docs/adr/0019-node-control-contract.md
@@ -24,7 +26,16 @@ claim context, add a second certificate policy or duplicate a domain check.
   server-stored challenge nonce (the shared proto has no client nonce field),
   the signed expiry is the enrollment `expires_at`, and the nonce's shorter TTL
   is server-only. Fields use explicit `0x00` delimiters; capability names are
-  comma-joined proto enum names.
+  comma-joined proto enum names. The node-installer's `ClaimContext` is only a
+  normalising adapter over this encoder (short bundle names become proto enum
+  names); a mode-local encoder is a defect because the controller verifies with
+  this one and a divergent claim is refused.
+- `internal/rpc/enrollment_integration_test.go` proves the seam end-to-end in an
+  owned fixture: real installer-generated proto claims verify at the shared
+  `Boundary`, a divergent node-local encoding cannot bypass it, and Ed25519,
+  approved key, server nonce, atomic consume/rollback and domain separation hold.
+  No production RPC is mounted and no live trust boundary or deployment is
+  claimed.
 - The scheme is Ed25519-only. P-256 is refused at registration; adding a second
   curve needs a new signing domain and a new ADR.
 - Certificate issuance happens BEFORE any ownership mutation. A failed
@@ -48,8 +59,9 @@ atomicity defect independently testable without a live controller.
 
 # How to check
 
-- `go test ./internal/noderuntime/... ./internal/rpc/... ./internal/db/...`
-  and `go vet` on those packages plus `cmd/carbon-node`.
+- `go test ./internal/noderuntime/... ./internal/nodeinstall/... ./internal/rpc/... ./internal/db/...`
+  and `go vet` on those packages plus `cmd/carbon-node`. The integration test
+  must keep the installer context byte-identical to `ClaimContextRaw`.
 - The exact context encoding, curve decision and issue-first rule are in
   [ADR 0019](../../docs/adr/0019-node-control-contract.md).
 

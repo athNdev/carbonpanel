@@ -1,12 +1,12 @@
 {
   "name": "showcase",
-  "title": "Showcase: dashboard, live console, Studio controls and modpack browser",
+  "title": "Showcase: dashboard, live console, Studio, library, players and modpack browser",
   "viewport": {
     "width": 1440,
     "height": 1000
   },
   "deviceScaleFactor": 2,
-  "docs": "Capture the real application from a disposable seeded stack. Use 2x PNGs: the current dashboard, running console with the native Server thread log filter, Studio content tabs and mod controls, and the first complete row of the modpack browser. Do not repaint UI or invent metrics. Staging is an additional manual capture documented in assets/showcase/README.md. Refresh provenance and both PNG directories when the represented UI changes. Credentials come from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD.",
+  "docs": "Capture the real packaged application from a disposable seeded stack. Core images (dashboard, console, Studio, modpacks) are always captured. Feature-tagged images require an explicit --features selection; the same selection gates the published manifest. World View is gated off by default: managed BlueMap discovery requires a legacy-local node and a genuinely rendered tile set, which the devstack node cannot provide (see docs/adr/0040). No repainted UI, mockups or invented metrics. Credentials come from PANEL_REVIEW_USER / PANEL_REVIEW_PASSWORD.",
   "bootstrap": {
     "path": "/login",
     "detectSelector": "input[placeholder=\"Enter your username\"]",
@@ -14,7 +14,10 @@
     "passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
     "confirmSelector": "input[placeholder=\"Confirm your password\"]",
     "submitSelector": "button[type=\"submit\"]",
-    "successSelector": "a[href^=\"/servers/\"]"
+    "successSelector": "a[href^=\"/servers/\"]",
+    "authenticatedSelector": "a[href^=\"/servers/\"]",
+    "fatalSelector": "h1:has-text(\"Something went wrong\"), h1:has-text(\"Page not found\")",
+    "entryTimeout": 30000
   },
   "login": {
     "path": "/login",
@@ -27,109 +30,308 @@
     {
       "goto": "/",
       "waitFor": "text=Cluster Overview",
-      "name": "dashboard loads"
+      "name": "dashboard loads",
+      "required": true
     },
     {
       "waitFor": "text=RUNNING",
       "timeout": 300000,
-      "name": "seeded server reaches running"
+      "name": "seeded server reaches running",
+      "required": true
     },
     {
       "wait": 60000,
-      "name": "let metrics collector tick into the tiles"
+      "name": "let metrics collector tick into the tiles",
+      "required": true
     },
     {
       "assertVisible": "text=System Health",
-      "name": "system health strip renders"
+      "name": "system health strip renders",
+      "required": true
     },
     {
       "screenshot": "showcase-dashboard",
       "element": "[data-testid=\"showcase-dashboard-content\"]",
       "scroll": false,
-      "name": "dashboard content crop"
+      "name": "dashboard content crop",
+      "alt": "Cluster dashboard with server state and observed host resource tiles",
+      "focus": "Server state and observed host resources",
+      "required": true
     },
     {
       "goto": "/servers",
       "waitFor": "a[href^=\"/servers/\"]",
-      "name": "server list loads"
+      "name": "server list loads",
+      "required": true
     },
     {
       "click": "a[href^=\"/servers/\"]:not([href=\"/servers/new\"])",
-      "name": "open first server"
+      "name": "open first server",
+      "required": true
     },
     {
       "waitFor": "[role=\"tab\"]",
-      "name": "server detail tabs render"
+      "name": "server detail tabs render",
+      "required": true
     },
     {
       "wait": 2000,
-      "name": "let detail settle"
+      "name": "let detail settle",
+      "required": true
     },
     {
       "click": "#server-detail-tabs-tab-console",
-      "name": "open live console"
+      "name": "open live console",
+      "required": true
     },
     {
       "waitFor": "#server-detail-tabs-panel-console",
-      "name": "console panel loads"
+      "name": "console panel loads",
+      "required": true
     },
     {
       "fill": "input[placeholder=\"Filter logs...\"]",
       "value": "Server thread",
-      "name": "focus actual startup logs"
+      "name": "focus actual startup logs",
+      "required": true
     },
     {
       "screenshot": "showcase-server-detail",
       "element": "#server-detail-tabs-panel-console",
       "scroll": false,
-      "name": "live console feature crop"
+      "name": "live console feature crop",
+      "alt": "Running server console with its native log filter set to Server thread",
+      "focus": "Live console, filtered startup logs and command controls",
+      "required": true
     },
     {
       "goto": "/modpacks/studio",
       "waitFor": "text=Modpack Studio",
-      "name": "studio loads"
+      "name": "studio loads",
+      "required": true
     },
     {
       "click": "a[href^=\"/modpacks/studio/\"]:has-text(\"Showcase Pack\")",
-      "name": "open the pack with mods"
+      "name": "open the pack with mods",
+      "required": true
     },
     {
       "waitFor": "text=Mods in Modpack",
-      "name": "studio mods render"
+      "name": "studio mods render",
+      "required": true
     },
     {
       "wait": 2000,
-      "name": "let studio settle"
+      "name": "let studio settle",
+      "required": true
     },
     {
       "screenshot": "showcase-studio",
       "element": "[data-testid=\"showcase-studio-workspace\"] .lg\\:col-span-3",
       "scroll": false,
-      "name": "studio content tabs and mod controls"
+      "name": "studio content tabs and mod controls",
+      "alt": "Modpack Studio content tabs and a real mod table with sides and pinned versions",
+      "focus": "Studio content tabs, real mod entries and export controls",
+      "required": true
     },
     {
       "goto": "/modpacks",
       "waitFor": "text=Browse, import and manage modpack packages",
-      "name": "modpacks loads"
+      "name": "modpacks loads",
+      "required": true
     },
     {
       "wait": 10000,
-      "name": "let sync toast dismiss"
+      "name": "let sync toast dismiss",
+      "required": true
     },
     {
       "assertVisible": "[data-testid=\"showcase-modpack-card\"]",
-      "name": "first modpack card renders"
+      "name": "first modpack card renders",
+      "required": true
     },
     {
       "wait": 2000,
-      "name": "let route styles settle"
+      "name": "let route styles settle",
+      "required": true
     },
     {
       "screenshot": "showcase-modpacks",
       "element": "[data-testid=\"showcase-modpacks-content\"]",
       "maxHeight": 528,
       "scroll": false,
-      "name": "modpack browse controls and first row"
+      "name": "modpack browse controls and first row",
+      "alt": "Modpack browser with provider filters and the first row of real catalog results",
+      "focus": "Provider filters and real catalog results",
+      "required": true
+    },
+    {
+      "goto": "/players",
+      "waitFor": "[data-testid=\"showcase-players-content\"]",
+      "feature": "players",
+      "name": "players page loads"
+    },
+    {
+      "assertVisible": "[data-player-row=\"0\"]",
+      "feature": "players",
+      "name": "seeded offline fixture identity is in the roster"
+    },
+    {
+      "screenshot": "showcase-players",
+      "element": "[data-testid=\"showcase-players-content\"]",
+      "maxHeight": 528,
+      "scroll": false,
+      "feature": "players",
+      "name": "player lookup and cross-server roster",
+      "alt": "Player lookup and cross-server roster with a real allowlisted fixture identity",
+      "focus": "Player lookup, roster rows and allowlist state"
+    },
+    {
+      "click": "[data-player-row=\"0\"] button",
+      "feature": "players",
+      "name": "open the seeded player profile"
+    },
+    {
+      "waitFor": "#player-tab-overview",
+      "feature": "players",
+      "name": "player profile tabs render"
+    },
+    {
+      "screenshot": "showcase-player-profile",
+      "element": "#player-panel-overview",
+      "maxHeight": 600,
+      "scroll": false,
+      "feature": "players",
+      "name": "player profile identity and skin state",
+      "alt": "Player profile overview with identity details and the actual skin state",
+      "focus": "Observed identity, aliases and the real skin availability state"
+    },
+    {
+      "click": "#player-tab-access",
+      "feature": "players",
+      "name": "open player access tab"
+    },
+    {
+      "waitFor": "#player-panel-access",
+      "feature": "players",
+      "name": "player access table renders"
+    },
+    {
+      "screenshot": "showcase-player-allowlist",
+      "element": "#player-panel-access",
+      "maxHeight": 528,
+      "scroll": false,
+      "feature": "players",
+      "name": "player allowlist column",
+      "alt": "Player access table showing the allowlist state observed for the fixture identity",
+      "focus": "Allowlist, operator and moderation state from the real backend"
+    },
+    {
+      "goto": "/library",
+      "waitFor": "[data-testid=\"showcase-library-content\"]",
+      "feature": "library",
+      "name": "world library loads"
+    },
+    {
+      "assertVisible": "a[href^=\"/library/\"]:not([href=\"/library/import\"]):not([href=\"/library/new\"])",
+      "feature": "library",
+      "name": "seeded world library entry renders"
+    },
+    {
+      "screenshot": "showcase-library",
+      "element": "[data-testid=\"showcase-library-content\"]",
+      "maxHeight": 528,
+      "scroll": false,
+      "feature": "library",
+      "name": "world library grid",
+      "alt": "World Library list with the seeded real revision entry",
+      "focus": "Library entries, edition filter and revision counts"
+    },
+    {
+      "click": "a[href^=\"/library/\"]:not([href=\"/library/import\"]):not([href=\"/library/new\"])",
+      "feature": "library",
+      "name": "open the seeded world entry"
+    },
+    {
+      "waitFor": "#world-tab-revisions",
+      "feature": "library",
+      "name": "library entry tabs render"
+    },
+    {
+      "click": "#world-tab-revisions",
+      "feature": "library",
+      "name": "open revisions tab"
+    },
+    {
+      "waitFor": "#world-panel-revisions",
+      "feature": "library",
+      "name": "revisions panel renders"
+    },
+    {
+      "screenshot": "showcase-library-revisions",
+      "element": "#world-panel-revisions",
+      "maxHeight": 528,
+      "scroll": false,
+      "feature": "library",
+      "name": "world library immutable revision",
+      "alt": "Immutable world revision created from configuration in the seeded library entry",
+      "focus": "Revision identity, hash, version and provenance"
+    },
+    {
+      "click": "#world-tab-compatibility",
+      "feature": "library",
+      "name": "open compatibility tab"
+    },
+    {
+      "waitFor": "#world-panel-compatibility",
+      "feature": "library",
+      "name": "compatibility panel renders"
+    },
+    {
+      "screenshot": "showcase-library-compatibility",
+      "element": "#world-panel-compatibility",
+      "maxHeight": 528,
+      "scroll": false,
+      "feature": "library",
+      "name": "world library compatibility report",
+      "alt": "Real compatibility report for the seeded revision, including its honest unknown verdict",
+      "focus": "Compatibility findings and the binding gate"
+    },
+    {
+      "goto": "/worlds",
+      "waitFor": "[data-testid=\"showcase-worlds-content\"]",
+      "feature": "worlds",
+      "name": "world view list loads"
+    },
+    {
+      "assertVisible": "a[href^=\"/worlds/\"]",
+      "feature": "worlds",
+      "name": "a ready renderer target exists"
+    },
+    {
+      "click": "a[href^=\"/worlds/\"]",
+      "feature": "worlds",
+      "name": "open the rendered world map"
+    },
+    {
+      "waitFor": "iframe[title^=\"World map for\"]",
+      "timeout": 120000,
+      "feature": "worlds",
+      "name": "BlueMap iframe mounted"
+    },
+    {
+      "wait": 5000,
+      "feature": "worlds",
+      "name": "let real tiles paint"
+    },
+    {
+      "screenshot": "showcase-world-view",
+      "element": "iframe[title^=\"World map for\"]",
+      "scroll": false,
+      "feature": "worlds",
+      "name": "rendered BlueMap world tiles",
+      "alt": "In-app world view showing genuinely rendered BlueMap tiles for the seeded world",
+      "focus": "Rendered map tiles and in-app overlay controls"
     }
   ]
 }

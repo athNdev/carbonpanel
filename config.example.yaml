@@ -133,6 +133,14 @@ upload:
   max_chunk_size: 10485760  # 10MB max chunk size (server enforced)
   max_upload_size: 0  # Max total upload size in bytes (0 = unlimited)
 
+# Outbound egress policy. Provider APIs use a fixed provider allowlist and
+# webhook receivers are an operator-managed list; neither is affected here.
+# Remote archive URLs are user-supplied, so private RFC1918 targets are refused
+# by default. Set the flag only for a trusted LAN archive host you control.
+# Loopback and cloud-metadata (link-local) targets stay blocked regardless.
+security:
+  allow_private_archive_egress: false
+
 # Module configuration
 module:
   enabled: true

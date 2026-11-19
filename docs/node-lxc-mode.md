@@ -62,7 +62,12 @@ Images release `20261017`, with SHA-256 values read from a GPG-signed
 `SHA256SUMS` and locally verified. Exact URLs, dates, checksum-file and
 signature hashes, key fingerprint and retrieval method are recorded in
 [retrieval evidence](../packaging/node-lxc/qualification/RETRIEVAL-EVIDENCE.md).
-Synthetic values exist only in the explicitly marked
+The full root and LXD tarballs for both architectures have since been
+downloaded, rehashed against that signed manifest and inspected for canonical
+layout and version metadata in an owned disposable path; see
+[signed-archive evidence](../packaging/node-lxc/qualification/SIGNED-ARCHIVE-EVIDENCE.md).
+Byte verification of an archive is still not guest-boot evidence. Synthetic
+values exist only in the explicitly marked
 [`provenance.fixture.json`](../packaging/node-lxc/config/provenance.fixture.json),
 which artifact builds refuse. Live import/boot evidence (milestone M5) is still
 required before any format is advertised, and is
@@ -118,11 +123,15 @@ change, and rollback switches only to a verified previous slot.
 ## Real blocker — guest boot not qualified
 
 The host available to this lane has **no `/dev/kvm`** and **no LXC tooling**
-(`lxc`, `lxc-create`, `lxc-copy`, `pct`), without privileged access to install
-them. A real Ubuntu 24.04 LXC rootfs therefore cannot be imported and booted
-here. This is an external qualification blocker, not a code defect and not a
-pass. No live import/boot, no nested daemon start inside a real guest, no
-effective kernel-enforcement observation and no gameplay evidence is claimed.
+(`lxc`, `lxc-create`, `lxc-copy`, `pct`, `systemd-nspawn`), without privileged
+access to install them. The task-owned WSL 2 Ubuntu distribution similarly has
+no `/dev/kvm` and no LXC tools; installing them would require elevation and
+host/WSL configuration changes, which are out of scope. A real Ubuntu 24.04 LXC
+rootfs therefore cannot be imported and booted here. This is an external
+qualification blocker, not a code defect and not a pass. No live import/boot, no
+nested daemon start inside a real guest, no effective kernel-enforcement
+observation and no gameplay evidence is claimed. Verifying the signed archive
+bytes does not remove this blocker.
 The capability gate and fixtures prove refusals and state transitions only.
 See [qualification status](../packaging/node-lxc/qualification/QUALIFICATION.md).
 
@@ -134,10 +143,14 @@ platform gates, real-pin acceptance plus synthetic/placeholder/moving-URL
 refusals, supported and seven unsupported capability snapshots, unique
 first-boot identity with a verified `CSR_PRE` signature and no secret in
 metadata, volume import/backup/restore with tamper refusal, and staged
-upgrade/rollback with state preserved on refusal. Upstream pins themselves were
-verified against a GPG-signed dated `SHA256SUMS`; that is pin evidence, not boot
-evidence. See [`packaging/node-lxc/README.md`](../packaging/node-lxc/README.md)
-and the external mode report for exact commands and results.
+upgrade/rollback with state preserved on refusal, plus eight real-GPG
+signed-archive scenarios. The full upstream tarballs for both architectures were
+downloaded, rehashed against the GPG-signed dated `SHA256SUMS` and inspected for
+Ubuntu 24.04 layout/metadata; that is byte-level artifact evidence, not boot
+evidence. See
+[`packaging/node-lxc/README.md`](../packaging/node-lxc/README.md) and
+[signed-archive evidence](../packaging/node-lxc/qualification/SIGNED-ARCHIVE-EVIDENCE.md)
+for exact commands and results.
 
 These fixtures prove refusal and state-transition behavior only. They do **not**
 claim live container import/boot, effective kernel enforcement, gameplay

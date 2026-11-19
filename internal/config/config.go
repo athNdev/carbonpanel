@@ -33,6 +33,14 @@ type Config struct {
 	Upload    UploadConfig    `mapstructure:"upload" json:"upload"`
 	Auth      AuthConfig      `mapstructure:"auth" json:"auth"`
 	WorldView WorldViewConfig `mapstructure:"world_view" json:"world_view"`
+	Security  SecurityConfig  `mapstructure:"security" json:"security"`
+}
+
+// SecurityConfig holds explicit operator opt-ins for outbound policy. Archive
+// egress defaults to fail-closed: a user-supplied remote archive URL cannot
+// reach an RFC1918 address until an operator sets the flag below.
+type SecurityConfig struct {
+	AllowPrivateArchiveEgress bool `mapstructure:"allow_private_archive_egress" json:"allow_private_archive_egress"`
 }
 
 // WorldViewConfig is the explicit renderer topology for the same-origin map

@@ -182,12 +182,46 @@ func ExtractArchive(ctx context.Context, archivePath string, destPath string, co
 	return ExtractArchiveLimit(ctx, archivePath, destPath, counter, DefaultMaxExtractedBytes)
 }
 
-// ExtractArchiveLimit is ExtractArchive with an explicit aggregate uncompressed
-// budget. It fails rather than writing past maxBytes.
-func ExtractArchiveLimit(ctx context.Context, archivePath string, destPath string, counter *atomic.Int32, maxBytes int64) (int, error) {
-	if maxBytes <= 0 {
-		maxBytes = DefaultMaxExtractedBytes
+// ExtractLimits is the single bounded-extraction policy used by every archive
+// entry point, including modpack imports. MaxBytes is the aggregate uncompressed
+// budget; MaxFileBytes bounds one entry; MaxEntries bounds entry count. Zero or
+// negative fields fall back to the documented defaults, so callers cannot
+// accidentally disable a limit by leaving a field unset.
+type ExtractLimits struct {
+	MaxBytes     int64
+	MaxFileBytes int64
+	MaxEntries   int
+}
+
+// DefaultExtractLimits mirrors the historical generic-archive contract: 20 GiB
+// aggregate, no smaller per-file cap and a generous entry ceiling.
+func DefaultExtractLimits() ExtractLimits {
+	return ExtractLimits{
+		MaxBytes:     DefaultMaxExtractedBytes,
+		MaxFileBytes: DefaultMaxExtractedBytes,
+		MaxEntries:   1 << 20,
 	}
+}
+
+// ExtractArchiveLimit is ExtractArchive with an explicit aggregate uncompressed
+// budget. It fails rather than writing past maxBytes. Per-file and entry-count
+// limits keep their defaults, so existing callers see unchanged behaviour.
+func ExtractArchiveLimit(ctx context.Context, archivePath string, destPath string, counter *atomic.Int32, maxBytes int64) (int, error) {
+	limits := DefaultExtractLimits()
+	if maxBytes > 0 {
+		limits.MaxBytes = maxBytes
+		limits.MaxFileBytes = maxBytes
+	}
+	return ExtractArchiveWithLimits(ctx, archivePath, destPath, counter, limits)
+}
+
+// ExtractArchiveWithLimits extracts an archive with an explicit, complete limit
+// set. It is the one implementation behind both generic extraction and the
+// bounded modpack import path. Unsafe entries (symlink/device, traversal) and
+// any budget overflow are refused with an explicit error before the offending
+// entry is written.
+func ExtractArchiveWithLimits(ctx context.Context, archivePath string, destPath string, counter *atomic.Int32, limits ExtractLimits) (int, error) {
+	limits = normalizeExtractLimits(limits)
 	archiveFile, err := os.Open(archivePath)
 	if err != nil {
 		return 0, fmt.Errorf("failed to open archive file: %w", err)
@@ -237,11 +271,15 @@ func ExtractArchiveLimit(ctx context.Context, archivePath string, destPath strin
 			return os.MkdirAll(targetPath, 0755)
 		}
 
+		if filesExtracted >= limits.MaxEntries {
+			return fmt.Errorf("archive exceeds maximum entry count of %d", limits.MaxEntries)
+		}
+
 		// Extract a single regular file entry. Kept as a separate function so
 		// the output handle and the archive-reader handle are closed when this
 		// entry is done — not held open until the whole extraction finishes
 		// (defer in a loop body only runs at function exit).
-		if err := extractArchiveEntry(destPath, f, &totalBytes, maxBytes); err != nil {
+		if err := extractArchiveEntry(destPath, f, &totalBytes, limits.MaxBytes, limits.MaxFileBytes); err != nil {
 			return err
 		}
 
@@ -259,13 +297,30 @@ func ExtractArchiveLimit(ctx context.Context, archivePath string, destPath strin
 	return filesExtracted, nil
 }
 
+func normalizeExtractLimits(limits ExtractLimits) ExtractLimits {
+	defaults := DefaultExtractLimits()
+	if limits.MaxBytes <= 0 {
+		limits.MaxBytes = defaults.MaxBytes
+	}
+	if limits.MaxFileBytes <= 0 {
+		limits.MaxFileBytes = defaults.MaxFileBytes
+	}
+	if limits.MaxFileBytes > limits.MaxBytes {
+		limits.MaxFileBytes = limits.MaxBytes
+	}
+	if limits.MaxEntries <= 0 {
+		limits.MaxEntries = defaults.MaxEntries
+	}
+	return limits
+}
+
 // extractArchiveEntry extracts one regular-file entry of an archive into
 // destPath. It is a separate function (rather than inline code in the
 // per-entry callback) so the defers below release both handles — the output
 // file and the archive reader — when this entry finishes instead of holding
 // one pair of handles per entry for the whole extraction, which exhausts
 // file descriptors on large or crafted archives.
-func extractArchiveEntry(destPath string, f archives.FileInfo, total *int64, maxBytes int64) error {
+func extractArchiveEntry(destPath string, f archives.FileInfo, total *int64, maxBytes, maxFileBytes int64) error {
 	targetPath := filepath.Join(destPath, f.NameInArchive)
 	if !WithinReal(destPath, targetPath) {
 		return fmt.Errorf("illegal file path in archive: %s", f.NameInArchive)
@@ -305,17 +360,28 @@ func extractArchiveEntry(destPath string, f archives.FileInfo, total *int64, max
 	if remaining <= 0 {
 		return fmt.Errorf("archive exceeds maximum extracted size of %d bytes", maxBytes)
 	}
-	// Write at most `remaining` bytes so a decompression bomb can never push the
-	// on-disk size past the budget, then peek one byte to detect an overshoot.
-	n, err := io.Copy(outFile, io.LimitReader(rc, remaining))
+	// Write at most the smaller of the remaining aggregate budget and the
+	// per-file budget, then peek one byte to detect an overshoot and report
+	// which limit was hit. A decompression bomb can never push the on-disk
+	// size past either budget.
+	budget := remaining
+	aggregateLimited := true
+	if maxFileBytes > 0 && maxFileBytes < budget {
+		budget = maxFileBytes
+		aggregateLimited = false
+	}
+	n, err := io.Copy(outFile, io.LimitReader(rc, budget))
 	if err != nil {
 		return fmt.Errorf("failed to extract file %s: %w", targetPath, err)
 	}
 	*total += n
-	if n == remaining {
+	if n == budget {
 		var peek [1]byte
 		if m, _ := io.ReadFull(rc, peek[:]); m > 0 {
-			return fmt.Errorf("archive exceeds maximum extracted size of %d bytes", maxBytes)
+			if aggregateLimited {
+				return fmt.Errorf("archive exceeds maximum extracted size of %d bytes", maxBytes)
+			}
+			return fmt.Errorf("archive entry %s exceeds maximum file size of %d bytes", f.NameInArchive, maxFileBytes)
 		}
 	}
 
