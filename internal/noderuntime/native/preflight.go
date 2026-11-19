@@ -58,35 +58,46 @@ func preflightReportAt(nodeID string, sel Selection, ts *timestamppb.Timestamp) 
 }
 
 // Capabilities converts qualified facts and the selected mode into the shared
-// capability snapshot. Capabilities are granted only when supported by the
-// observed facts and selection; they are never assumed from mount/path presence
-// alone. Isolation capabilities depend on private socket, dedicated roots and a
-// dedicated containerd namespace being accepted (no corresponding refusal),
-// keeping capability-granted semantics separate from mount presence refusals.
+// capability snapshot. NodeCapability is a USABLE feature grant: the controller
+// gates operations on it, so a grant is withheld unless a captive daemon mode
+// actually qualified (sel.Mode != ModeNone). This is a single boundary guard for
+// every daemon-dependent feature; no individual mount condition is special.
+// Host diagnostics (cgroup_version, storage_driver, systemd, distro, ...) stay
+// in the snapshot even when no mode qualifies, so a fail-closed host is still
+// inspectable. Agent facilities that work independently of a daemon mode
+// (storage worker, drain) remain granted.
 func Capabilities(f HostFacts, sel Selection) *v1.NodeCapabilities {
 	caps := make([]v1.NodeCapability, 0, 8)
-	if !hasFailedCode(sel.Checks, CodePrivateSocketCollision) {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET)
+	qualified := sel.Mode != ModeNone
+	if qualified {
+		// Isolation grants additionally require their own mount/path to be
+		// accepted. A collision refuses that grant without weakening others in
+		// a qualified mode.
+		if !hasFailedCode(sel.Checks, CodePrivateSocketCollision) {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET)
+		}
+		if !hasFailedCode(sel.Checks, CodeDedicatedRootCollision) {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS)
+		}
+		if !hasFailedCode(sel.Checks, CodeNamespaceCollision) {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CONTAINERD_NAMESPACE)
+		}
 	}
-	if !hasFailedCode(sel.Checks, CodeDedicatedRootCollision) {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS)
-	}
-	if !hasFailedCode(sel.Checks, CodeNamespaceCollision) {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CONTAINERD_NAMESPACE)
-	}
-	// Agent/runtime capabilities are independent of host mount/path refusals.
+	// Independently usable agent facilities are retained on a fail-closed host.
 	caps = append(caps,
 		v1.NodeCapability_NODE_CAPABILITY_STORAGE_WORKER,
 		v1.NodeCapability_NODE_CAPABILITY_DRAIN,
 	)
-	if sel.Mode == ModeRootless {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_ROOTLESS)
-	}
-	if f.CgroupVersion == "v2" && hasAll(f.DelegatedControllers, "cpu", "cpuset", "io", "memory", "pids") {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CGROUP_V2)
-	}
-	if f.PrivilegedPortStart <= 1024 {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_PRIVILEGED_PORT)
+	if qualified {
+		if sel.Mode == ModeRootless {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_ROOTLESS)
+		}
+		if f.CgroupVersion == "v2" && hasAll(f.DelegatedControllers, "cpu", "cpuset", "io", "memory", "pids") {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CGROUP_V2)
+		}
+		if f.PrivilegedPortStart <= 1024 {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_PRIVILEGED_PORT)
+		}
 	}
 	return &v1.NodeCapabilities{
 		ProtocolVersion:     ProtocolVersion,

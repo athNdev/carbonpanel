@@ -172,57 +172,79 @@ func TestSharedDaemonIsNeverAFallback(t *testing.T) {
 	}
 }
 
-// Capability-granted semantics are distinct from mount presence refusals:
-// an isolation capability is granted only when its mount/path is accepted,
-// while a refusal on a different mount must not revoke unrelated grants.
-func TestCapabilitiesDistinguishGrantedCapabilitiesFromMountRefusals(t *testing.T) {
-	t.Run("socket collision refuses only private socket capability", func(t *testing.T) {
-		f := qualifiedFacts()
-		f.ChosenSocket = "/var/run/docker.sock"
-		sel := ApplyGates(f)
-		if sel.Mode != ModeNone || !hasCode(sel.Reasons, CodePrivateSocketCollision) {
-			t.Fatalf("expected private socket refusal, got %s", Describe(sel))
-		}
-		caps := capabilitySet(Capabilities(f, sel))
-		if caps["NODE_CAPABILITY_PRIVATE_SOCKET"] {
-			t.Fatalf("private socket capability must not be granted on mount refusal: %v", caps)
-		}
-		if !caps["NODE_CAPABILITY_DEDICATED_ROOTS"] || !caps["NODE_CAPABILITY_CONTAINERD_NAMESPACE"] {
-			t.Fatalf("unrelated isolation capabilities should remain granted when their mounts are present: %v", caps)
-		}
-	})
+// A capability is a usable feature grant, not a raw host fact. No mode means
+// no captive daemon can use any daemon-dependent feature, so every such grant
+// is withheld at one boundary regardless of which universal gate refused.
+// Host diagnostics and daemon-independent agent facilities stay available.
+func TestCapabilitiesWithholdRuntimeGrantsWithoutQualifiedMode(t *testing.T) {
+	runtimeGrants := []string{
+		"NODE_CAPABILITY_PRIVATE_SOCKET",
+		"NODE_CAPABILITY_DEDICATED_ROOTS",
+		"NODE_CAPABILITY_CONTAINERD_NAMESPACE",
+		"NODE_CAPABILITY_ROOTLESS",
+		"NODE_CAPABILITY_CGROUP_V2",
+		"NODE_CAPABILITY_PRIVILEGED_PORT",
+	}
+	for _, tc := range []struct {
+		name string
+		mut  func(*HostFacts)
+		code string
+	}{
+		{"socket collision", func(f *HostFacts) { f.ChosenSocket = "/var/run/docker.sock" }, CodePrivateSocketCollision},
+		{"dedicated root collision", func(f *HostFacts) { f.ChosenDataRoot = "/var/lib/docker" }, CodeDedicatedRootCollision},
+		{"namespace collision", func(f *HostFacts) { f.ContainerdNamespace = "moby" }, CodeNamespaceCollision},
+		{"private network collision", func(f *HostFacts) { f.BridgeOverlapsHost = true }, CodePrivateNetworkCollision},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := qualifiedFacts()
+			tc.mut(&f)
+			sel := ApplyGates(f)
+			if sel.Mode != ModeNone || !hasCode(sel.Reasons, tc.code) {
+				t.Fatalf("expected fail-closed with %s, got %s", tc.code, Describe(sel))
+			}
+			snapshot := Capabilities(f, sel)
+			caps := capabilitySet(snapshot)
+			for _, grant := range runtimeGrants {
+				if caps[grant] {
+					t.Errorf("unusable runtime grant %s advertised without a qualified mode: %v", grant, caps)
+				}
+			}
+			// Independently usable facilities and host diagnostics are preserved.
+			if !caps["NODE_CAPABILITY_STORAGE_WORKER"] || !caps["NODE_CAPABILITY_DRAIN"] {
+				t.Fatalf("daemon-independent facilities must remain granted: %v", caps)
+			}
+			if snapshot.GetCgroupVersion() != "v2" || snapshot.GetStorageDriver() != "overlay2" || !snapshot.GetSystemd() {
+				t.Fatalf("host diagnostics lost on fail-closed snapshot: %+v", snapshot)
+			}
+		})
+	}
+}
 
-	t.Run("dedicated root collision refuses only dedicated roots capability", func(t *testing.T) {
-		f := qualifiedFacts()
-		f.ChosenDataRoot = "/var/lib/docker"
-		sel := ApplyGates(f)
-		if sel.Mode != ModeNone || !hasCode(sel.Reasons, CodeDedicatedRootCollision) {
-			t.Fatalf("expected dedicated root refusal, got %s", Describe(sel))
+// An authorized qualified mode still advertises its grants. Rootful with full
+// cgroup delegation is a qualifying compatibility path and must advertise
+// cgroup v2 resource enforcement (but never the rootless-only grant).
+func TestCapabilitiesQualifiedRootfulModeAdvertisesGrants(t *testing.T) {
+	f := qualifiedFacts()
+	f.UserNamespaces = false // rootless disqualified, rootful explicitly qualified
+	sel := ApplyGates(f)
+	if sel.Mode != ModeRootful {
+		t.Fatalf("expected qualified rootful mode, got %q (%s)", sel.Mode, Describe(sel))
+	}
+	caps := capabilitySet(Capabilities(f, sel))
+	for _, grant := range []string{
+		"NODE_CAPABILITY_PRIVATE_SOCKET",
+		"NODE_CAPABILITY_DEDICATED_ROOTS",
+		"NODE_CAPABILITY_CONTAINERD_NAMESPACE",
+		"NODE_CAPABILITY_CGROUP_V2",
+		"NODE_CAPABILITY_PRIVILEGED_PORT",
+	} {
+		if !caps[grant] {
+			t.Errorf("qualified rootful mode missing grant %s: %v", grant, caps)
 		}
-		caps := capabilitySet(Capabilities(f, sel))
-		if caps["NODE_CAPABILITY_DEDICATED_ROOTS"] {
-			t.Fatalf("dedicated roots capability must not be granted on mount refusal: %v", caps)
-		}
-		if !caps["NODE_CAPABILITY_PRIVATE_SOCKET"] || !caps["NODE_CAPABILITY_CONTAINERD_NAMESPACE"] {
-			t.Fatalf("unrelated isolation capabilities should remain granted when their mounts are present: %v", caps)
-		}
-	})
-
-	t.Run("containerd namespace collision refuses only namespace capability", func(t *testing.T) {
-		f := qualifiedFacts()
-		f.ContainerdNamespace = "moby"
-		sel := ApplyGates(f)
-		if sel.Mode != ModeNone || !hasCode(sel.Reasons, CodeNamespaceCollision) {
-			t.Fatalf("expected namespace refusal, got %s", Describe(sel))
-		}
-		caps := capabilitySet(Capabilities(f, sel))
-		if caps["NODE_CAPABILITY_CONTAINERD_NAMESPACE"] {
-			t.Fatalf("containerd namespace capability must not be granted on refusal: %v", caps)
-		}
-		if !caps["NODE_CAPABILITY_PRIVATE_SOCKET"] || !caps["NODE_CAPABILITY_DEDICATED_ROOTS"] {
-			t.Fatalf("unrelated isolation capabilities should remain granted when their mounts are present: %v", caps)
-		}
-	})
+	}
+	if caps["NODE_CAPABILITY_ROOTLESS"] {
+		t.Fatalf("rootful mode must not advertise rootless: %v", caps)
+	}
 }
 
 func TestPreflightReportIsRedacted(t *testing.T) {

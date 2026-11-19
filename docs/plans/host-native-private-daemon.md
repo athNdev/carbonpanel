@@ -110,6 +110,21 @@ fixtures without journald.
 | `DAEMON_ROOTFUL_NO_USER` | rootful unit sets a non-root `User=` | render refused | Run the dedicated unit as root with the documented capability set. |
 | `PARITY_NO_DUPLICATE_KEYS` / `PARITY_SINGLE_OPTION_SOURCE` / `PARITY_NO_KEY_CONFLICT` | duplicate config key or extra CLI flag | render refused | Emit every option once from `DaemonOptions` and pass only `--config-file`. |
 
+### Capability snapshot contract
+
+`NodeCapability` values are **usable feature grants**, not raw host detections:
+the controller gates operations on them. `Capabilities` therefore withholds
+every daemon-dependent grant (private socket, dedicated roots, containerd
+namespace, rootless, cgroup v2, privileged port) when no captive daemon mode
+qualifies (`sel.Mode == ModeNone`), regardless of which universal gate refused.
+A qualified rootful or rootless mode advertises the grants its facts support.
+Host diagnostics (`cgroup_version`, `storage_driver`, `systemd`, distro,
+architecture, kernel) remain in the snapshot on a fail-closed host so it stays
+inspectable; the redacted preflight checks still carry exact refusal codes and
+remedies. The daemon-independent agent facilities `STORAGE_WORKER` and `DRAIN`
+remain granted because they do not require a captive daemon mode. Unknown
+capability enum values stay ignored-and-reported, never assumed.
+
 ## Live enrollment/auth boundary (shared scheme)
 
 The mode-specific runner composes the shared contract types from
