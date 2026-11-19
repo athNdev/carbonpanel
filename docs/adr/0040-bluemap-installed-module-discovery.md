@@ -125,9 +125,21 @@ real wiring defect: the component cast the grouped `rpcClient` to the flat
 install seam, leaving `listModules`/`createModule` undefined at runtime. The
 fix is an explicit adapter (`adaptBlueMapRpc`) with regression coverage.
 
-Remaining limits: the browser proxy path was a local fixture enforcing the
-session contract (the Go proxy handler is covered by unit tests, not by this
-browser run); ConnectRPC responses and the create/start journal were mocked, so
-no live controller, database or Docker-backed module service was exercised. No
-cross-controller/distributed guarantee, measured latency or production
-deployment is claimed. Do not read the unit fixtures as live evidence.
+A packaged, opt-in controller integration
+(`internal/rpc/worldview_live_integration_test.go`, tag `integration_live`)
+closes the originally reported discovery path against the REAL Go code: it
+uses the real store/auth/RBAC components, a real Docker client pool against the
+task-owned relay, real `bluemapdiscovery.Discovery` metadata inspection and the
+REAL `worldview.NewProxyHandler` mounted on the controller mux. With no
+explicit endpoint it found the installed module, verified all runtime gates,
+and fetched `/settings.json` (target map identity) and a real rendered PNG tile
+through the real proxy under a real granted token; wrong-scope and missing
+tokens were denied before any upstream asset. That integration is NOT a live
+controller-to-renderer install: the container/volumes/network were disposable
+task-owned fixtures and the create/start journal was not driven.
+
+Remaining limits: the browser run mocked ConnectRPC responses and used a local
+same-origin proxy fixture, so it is UI evidence against real map assets, not
+controller-to-renderer evidence. No cross-controller/distributed guarantee,
+measured latency or production deployment is claimed. Do not read the unit
+fixtures as live evidence.
