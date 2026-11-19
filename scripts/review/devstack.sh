@@ -553,13 +553,14 @@ up)
 					echo "review world-view target keys: $(printf '%s' "${first_probe}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).targets||[];if(t[0])console.log(Object.keys(t[0]).sort().join(","))}catch(e){}})')" >&2
 					echo "review world-view target server ids: $(printf '%s' "${first_probe}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).targets||[];console.log(t.map(x=>x.serverId||x.server_id||"none").join(","))}catch(e){}})')" >&2
 					echo "review fixture server id: ${fixture_server_id}" >&2
+					fixture_target=""
 					while ((SECONDS < ready_deadline)); do
 						# The panel's own health check performs the authoritative
 						# upstream probe (map list, keyed root, gzip assets and
 						# CSP-safe bundle). READY is the single semantic signal.
 						probe="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null || true)"
-						renderer_state="$(printf '%s' "${probe}" | REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t)console.log(t.rendererState||"")}catch(e){}})')"
-						renderer_error="$(printf '%s' "${probe}" | REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t&&t.error)console.log(String(t.error).slice(0,240))}catch(e){}})')"
+						fixture_target="$(printf '%s' "${probe}" | REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t)console.log(JSON.stringify(t))}catch(e){}})')"
+						renderer_state="$(printf '%s' "${fixture_target}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s);console.log(t.rendererState||"")}catch(e){}})')"
 						if [ -n "${fixture_server_id}" ] && [ "${renderer_state}" = "RENDERER_STATE_READY" ]; then
 							break
 						fi
@@ -567,12 +568,25 @@ up)
 						sleep 1
 					done
 					echo "review renderer state: ${renderer_state:-unknown}" >&2
-					if [ -n "${renderer_error:-}" ]; then
-						echo "review renderer error: ${renderer_error}" >&2
+					if [ -n "${fixture_target}" ]; then
+						echo "review fixture target: $(printf '%s' "${fixture_target}" | cut -c1-500)" >&2
 					fi
 					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
-						map_probe="$(docker exec "${NAME}-bluemap" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8100/settings.json", timeout=3).read()[:180])' 2>&1 || true)"
-						echo "review map server probe: $(printf '%s' "${map_probe}" | tr '\n' ' ' | cut -c1-240)" >&2
+						map_probe="$(docker exec "${NAME}-bluemap" python -c 'import json,urllib.request; d=json.loads(urllib.request.urlopen("http://127.0.0.1:8100/settings.json", timeout=3).read().decode()); print("maps="+str(d.get("maps"))[:220])' 2>&1 || true)"
+						echo "review map settings maps: $(printf '%s' "${map_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
+						tex_probe="$(docker exec "${NAME}-bluemap" sh -c 'for p in /web/maps/*/textures.json /web/maps/*/textures.json.gz; do [ -e "$p" ] && echo "tex:$p"; done | head -n 5' 2>&1 || true)"
+						echo "review textures files: $(printf '%s' "${tex_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
+						http_probe="$(docker exec "${NAME}-bluemap" python -c "import urllib.request; 
+try:
+ r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json', timeout=3); print('plain='+str(r.status))
+except Exception as e:
+ print('plain='+type(e).__name__)
+try:
+ r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json.gz', timeout=3); print('gz='+str(r.status))
+except Exception as e:
+ print('gz='+type(e).__name__)
+" 2>&1 || true)"
+						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
 						echo "review renderer never became READY; worlds capture will fail closed" >&2
 					fi
 				else
