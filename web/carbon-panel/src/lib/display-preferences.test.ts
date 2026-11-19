@@ -301,7 +301,42 @@ test('migrated surfaces introduce no new hardcoded six-digit hex colors', () => 
 		'./components/logs-settings.svelte',
 		// Datapacks: surface/text/border plus destructive status chips.
 		'./components/datapack-search.svelte',
-		'./components/server-datapacks.svelte'
+		'./components/server-datapacks.svelte',
+		// OSS-384 reopened lane: the remaining measured surfaces. Shared ui/*
+		// primitives come first, then the settings subpanels, file tree, Studio
+		// content panel and login that previously hardcoded the dark palette.
+		'./components/ui/badge/badge.svelte',
+		'./components/ui/dialog/dialog-content.svelte',
+		'./components/ui/input/input.svelte',
+		'./components/ui/select/select-content.svelte',
+		'./components/ui/select/select-item.svelte',
+		'./components/ui/select/select-trigger.svelte',
+		'./components/ui/switch/switch.svelte',
+		'./components/ui/table/table-cell.svelte',
+		'./components/ui/table/table-head.svelte',
+		'./components/ui/table/table-row.svelte',
+		'./components/ui/tabs/tabs-list.svelte',
+		'./components/ui/tabs/tabs-trigger.svelte',
+		'./components/api-keys-settings.svelte',
+		'./components/auth-settings.svelte',
+		'./components/datapack-browser-dialog.svelte',
+		'./components/node-settings.svelte',
+		'./components/pack-content-panel.svelte',
+		'./components/routing-settings.svelte',
+		'./components/scroll-to-top.svelte',
+		'./components/server-mods.svelte',
+		'./components/server-operations.svelte',
+		'./components/staged-config-view.svelte',
+		'./components/support-settings.svelte',
+		'./components/files/file-breadcrumb.svelte',
+		'./components/files/file-bulk-actions.svelte',
+		'./components/files/file-context-menu.svelte',
+		'./components/files/file-tree-row.svelte',
+		'./components/files/file-tree.svelte',
+		'./components/files/server-files.svelte',
+		'./components/fragments/StudioModTable.svelte',
+		'../routes/login/+page.svelte',
+		'../routes/modpacks/studio/[id]/+page.svelte'
 	];
 	for (const file of files) {
 		const source = readFileSync(new URL(file, import.meta.url), 'utf8');

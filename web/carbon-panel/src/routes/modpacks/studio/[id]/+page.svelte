@@ -637,7 +637,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 </svelte:head>
 
 <div
-	class="h-full flex-1 space-y-6 rounded-none font-sans text-[#f4f4f4]"
+	class="h-full flex-1 space-y-6 rounded-none font-sans text-foreground"
 	data-testid="showcase-studio-workspace"
 >
 	{#if loadError}
@@ -649,7 +649,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{/if}
 	<!-- Top Header Bar -->
 	<div
-		class="flex flex-col justify-between gap-4 rounded-none border-b border-[#393939] pb-5 sm:flex-row sm:items-center"
+		class="flex flex-col justify-between gap-4 rounded-none border-b border-border pb-5 sm:flex-row sm:items-center"
 	>
 		<div class="flex items-center gap-4">
 			<CarbonButton
@@ -657,7 +657,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				size="md"
 				iconOnly
 				onclick={() => goto(resolve('/modpacks/studio'))}
-				class="rounded-none text-[#c6c6c6] hover:text-white"
+				class="rounded-none text-muted-foreground hover:text-foreground"
 				title="Back to Studio List"
 				aria-label="Back to Studio List"
 			>
@@ -667,7 +667,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{#if pack}
 				<div class="min-w-0 space-y-0.5">
 					<div class="flex items-center gap-3">
-						<h1 class="truncate text-3xl font-semibold tracking-tight text-white">{pack.name}</h1>
+						<h1 class="truncate text-3xl font-semibold tracking-tight text-foreground">
+							{pack.name}
+						</h1>
 						<CarbonTag type="blue" size="sm" class="uppercase">
 							{pack.mod_loader}
 						</CarbonTag>
@@ -675,7 +677,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							MC {pack.mc_version}
 						</CarbonTag>
 					</div>
-					<p class="text-xs text-[#a8a8a8]">
+					<p class="text-xs text-muted-foreground">
 						Packwiz Studio Project · v{pack.version} by {pack.author || 'Admin'}
 					</p>
 				</div>
@@ -732,10 +734,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- Studio Grid Layout -->
 		<div class="grid grid-cols-1 gap-6 lg:grid-cols-4">
 			<!-- Modpack Settings Sidebar Tile -->
-			<CarbonTile class="h-fit space-y-4 rounded-none border-[#393939] lg:col-span-1">
-				<div class="border-b border-[#393939] pb-3">
-					<h2 class="text-base font-semibold text-white">Modpack Settings</h2>
-					<p class="text-xs text-[#a8a8a8]">Configure runtime parameters</p>
+			<CarbonTile class="h-fit space-y-4 rounded-none border-border lg:col-span-1">
+				<div class="border-b border-border pb-3">
+					<h2 class="text-base font-semibold text-foreground">Modpack Settings</h2>
+					<p class="text-xs text-muted-foreground">Configure runtime parameters</p>
 				</div>
 
 				<div class="space-y-3">
@@ -812,16 +814,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 				<!-- TAB 1: MODS MANAGEMENT -->
 				{#if activeTab === 'mods'}
-					<CarbonTile class="rounded-none border-[#393939] p-0">
+					<CarbonTile class="rounded-none border-border p-0">
 						<div
-							class="flex flex-col justify-between gap-3 border-b border-[#393939] bg-[#262626] p-4 sm:flex-row sm:items-center"
+							class="flex flex-col justify-between gap-3 border-b border-border bg-card p-4 sm:flex-row sm:items-center"
 						>
 							<div class="space-y-0.5">
 								<div class="flex items-center gap-2">
-									<h2 class="text-base font-semibold text-white">Mods in Modpack</h2>
+									<h2 class="text-base font-semibold text-foreground">Mods in Modpack</h2>
 									<CarbonTag type="cyan" size="sm">{pack.mods.length}</CarbonTag>
 								</div>
-								<p class="text-xs text-[#a8a8a8]">
+								<p class="text-xs text-muted-foreground">
 									Manage server/client sides, pinning, dependency versions, and update checks.
 								</p>
 							</div>
@@ -861,7 +863,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 						<!-- Filter bar: Carbon buttons replace the raw filter pills -->
 						<div
-							class="flex flex-wrap items-center gap-1.5 border-b border-[#393939] bg-[#161616] p-3 text-xs"
+							class="flex flex-wrap items-center gap-1.5 border-b border-border bg-background p-3 text-xs"
 						>
 							<CarbonButton
 								size="sm"
@@ -916,9 +918,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<!-- Batch Action Bar -->
 						{#if selectedSlugs.length > 0}
 							<div
-								class="flex items-center justify-between rounded-none border-b border-[#0f62fe] bg-[#0043ce]/20 p-2.5"
+								class="flex items-center justify-between rounded-none border-b border-primary bg-primary/20 p-2.5"
 							>
-								<span class="font-mono text-xs font-semibold text-[#78a9ff]">
+								<span class="font-mono text-xs font-semibold text-accent-text">
 									{selectedSlugs.length} mod(s) selected
 								</span>
 								<div class="flex flex-wrap items-center gap-1.5">
@@ -1040,13 +1042,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 				<!-- TAB 2: OVERRIDES & CONFIGS -->
 				{#if activeTab === 'overrides'}
-					<CarbonTile class="rounded-none border-[#393939] p-0">
-						<div
-							class="flex items-center justify-between border-b border-[#393939] bg-[#262626] p-4"
-						>
+					<CarbonTile class="rounded-none border-border p-0">
+						<div class="flex items-center justify-between border-b border-border bg-card p-4">
 							<div>
-								<h2 class="text-base font-semibold text-white">Overrides & Config Files</h2>
-								<p class="text-xs text-[#a8a8a8]">
+								<h2 class="text-base font-semibold text-foreground">Overrides & Config Files</h2>
+								<p class="text-xs text-muted-foreground">
 									Packwiz overrides bundled with the modpack: server configurations, datapacks, and
 									scripts.
 								</p>
@@ -1117,7 +1117,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<div class="overflow-x-auto">
 								<table class="w-full border-collapse text-left text-xs">
 									<thead
-										class="border-b border-[#525252] bg-[#393939] font-semibold text-[#f4f4f4] uppercase"
+										class="border-b border-border bg-secondary font-semibold text-foreground uppercase"
 									>
 										<tr>
 											<th scope="col" class="px-4 py-2.5">File Path</th>
@@ -1126,10 +1126,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											<th scope="col" class="px-4 py-2.5 text-right">Actions</th>
 										</tr>
 									</thead>
-									<tbody class="divide-y divide-[#393939] bg-[#262626] text-[#f4f4f4]">
+									<tbody class="divide-y divide-border bg-card text-foreground">
 										{#each packFiles as file (file.path)}
-											<tr class="transition-colors hover:bg-[#353535]">
-												<td class="px-4 py-2.5 font-mono text-xs font-semibold text-white">
+											<tr class="transition-colors hover:bg-secondary">
+												<td class="px-4 py-2.5 font-mono text-xs font-semibold text-foreground">
 													{file.path}
 												</td>
 												<td class="px-4 py-2.5">
@@ -1137,7 +1137,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 														{file.category}
 													</CarbonTag>
 												</td>
-												<td class="px-4 py-2.5 font-mono text-[#a8a8a8]">
+												<td class="px-4 py-2.5 font-mono text-muted-foreground">
 													{formatBytes(file.size)}
 												</td>
 												<td class="px-4 py-2.5 text-right">
@@ -1145,7 +1145,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 														kind="ghost"
 														size="sm"
 														iconOnly
-														class="rounded-none text-[#da1e28] hover:bg-[#da1e28]/20"
+														class="rounded-none text-destructive-text hover:bg-destructive/20"
 														onclick={() => handleDeleteFile(file.path)}
 														title="Delete file"
 														aria-label="Delete file"
@@ -1164,12 +1164,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 				<!-- TAB 3: VERSION MIGRATION -->
 				{#if activeTab === 'migrate'}
-					<CarbonTile class="space-y-4 rounded-none border-[#393939]">
-						<div class="border-b border-[#393939] pb-3">
-							<h2 class="text-base font-semibold text-white">
+					<CarbonTile class="space-y-4 rounded-none border-border">
+						<div class="border-b border-border pb-3">
+							<h2 class="text-base font-semibold text-foreground">
 								Minecraft Version Migration Assistant
 							</h2>
-							<p class="text-xs text-[#a8a8a8]">
+							<p class="text-xs text-muted-foreground">
 								Simulate upgrading all pack mods to a newer Minecraft release or loader before
 								applying changes.
 							</p>
@@ -1219,7 +1219,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</div>
 
 						{#if migrationReport}
-							<div class="mt-4 space-y-3 rounded-none border border-[#393939] bg-[#161616] p-4">
+							<div class="mt-4 space-y-3 rounded-none border border-border bg-background p-4">
 								<div class="flex items-center justify-between">
 									<div class="flex items-center gap-2">
 										<CarbonTag type="green" size="md">
@@ -1229,7 +1229,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											{migrationReport.incompatible_count} Missing Version
 										</CarbonTag>
 									</div>
-									<span class="font-mono text-xs text-[#8d8d8d]">
+									<span class="font-mono text-xs text-muted-foreground">
 										Target: MC {migrationReport.target_mc} ({migrationReport.target_loader})
 									</span>
 								</div>
@@ -1245,14 +1245,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 									{#each migrationReport.mods as m (m.slug)}
 										<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
-											<span class="font-medium text-white">{m.name}</span>
+											<span class="font-medium text-foreground">{m.name}</span>
 											{#if m.compatible}
-												<span class="flex items-center gap-1 text-[#6fdc8c]">
+												<span class="flex items-center gap-1 text-success-text">
 													<CheckCircle2 class="h-3.5 w-3.5" />
 													Compatible
 												</span>
 											{:else}
-												<span class="flex items-center gap-1 text-[#ff8389]">
+												<span class="flex items-center gap-1 text-destructive-text">
 													<AlertTriangle class="h-3.5 w-3.5" />
 													No version for {migrationReport.target_mc}
 												</span>
@@ -1267,7 +1267,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 				<!-- TAB 4: EXPORT & MANIFEST -->
 				{#if activeTab === 'export'}
-					<CarbonTile class="space-y-6 rounded-none border-[#393939]">
+					<CarbonTile class="space-y-6 rounded-none border-border">
 						<div class="border-b border-border pb-3">
 							<div class="flex flex-wrap items-center justify-between gap-2">
 								<div>
@@ -1343,7 +1343,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<!-- Raw TOML Inspector -->
 						<div class="space-y-2">
 							<div class="flex items-center justify-between">
-								<span class="text-xs font-semibold text-white">Raw pack.toml Preview</span>
+								<span class="text-xs font-semibold text-foreground">Raw pack.toml Preview</span>
 								<CarbonButton
 									kind="ghost"
 									size="sm"
@@ -1375,18 +1375,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 				<!-- TAB 5: MAINTENANCE -->
 				{#if activeTab === 'maintenance'}
-					<CarbonTile class="space-y-6 rounded-none border-[#393939]">
-						<div class="border-b border-[#393939] pb-3">
-							<h2 class="text-base font-semibold text-white">Packwiz Maintenance & Live Serving</h2>
-							<p class="text-xs text-[#a8a8a8]">
+					<CarbonTile class="space-y-6 rounded-none border-border">
+						<div class="border-b border-border pb-3">
+							<h2 class="text-base font-semibold text-foreground">
+								Packwiz Maintenance & Live Serving
+							</h2>
+							<p class="text-xs text-muted-foreground">
 								Rebuild indices and view live container bootstrap URLs.
 							</p>
 						</div>
 
 						<!-- Live Serving URL Tile -->
-						<div class="space-y-2 rounded-none border border-[#393939] bg-[#161616] p-4">
+						<div class="space-y-2 rounded-none border border-border bg-background p-4">
 							<div class="flex items-center justify-between">
-								<span class="text-xs font-semibold text-white"
+								<span class="text-xs font-semibold text-foreground"
 									>Live Container Bootstrap URL (PACKWIZ_URL)</span
 								>
 								<CarbonButton
@@ -1404,13 +1406,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								</CarbonButton>
 							</div>
 							<div
-								class="rounded-none border border-[#393939] bg-[#262626] p-2.5 font-mono text-xs break-all text-[#6fdc8c] select-all"
+								class="rounded-none border border-border bg-card p-2.5 font-mono text-xs break-all text-success-text select-all"
 							>
 								{typeof window !== 'undefined'
 									? `${window.location.origin}/api/v1/packwiz/${pack?.id}/pack.toml`
 									: `/api/v1/packwiz/${pack?.id}/pack.toml`}
 							</div>
-							<p class="text-xs text-[#8d8d8d]">
+							<p class="text-xs text-muted-foreground">
 								Set this URL in Docker container environments or packwiz-installer to dynamically
 								provision this modpack on startup.
 							</p>
@@ -1418,11 +1420,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 						<!-- Refresh Index -->
 						<div
-							class="flex items-center justify-between rounded-none border border-[#393939] bg-[#161616] p-4"
+							class="flex items-center justify-between rounded-none border border-border bg-background p-4"
 						>
 							<div class="space-y-0.5">
-								<h3 class="text-sm font-semibold text-white">Refresh Packwiz Index</h3>
-								<p class="text-xs text-[#a8a8a8]">
+								<h3 class="text-sm font-semibold text-foreground">Refresh Packwiz Index</h3>
+								<p class="text-xs text-muted-foreground">
 									Recalculate SHA256 hashes for all .pw.toml and override files according to packwiz
 									refresh.
 								</p>
@@ -1495,7 +1497,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<div class="mt-4 max-h-[460px] min-h-[300px] space-y-2.5 overflow-y-auto">
 				{#if searchError}
 					<div
-						class="rounded-none border-l-4 border-[#da1e28] bg-[#da1e28]/10 p-4 text-xs text-[#ff8389]"
+						class="rounded-none border-l-4 border-destructive bg-destructive/10 p-4 text-xs text-destructive-text"
 					>
 						{searchError}
 					</div>
@@ -1511,18 +1513,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{:else}
 					{#each searchResults as item (item.id)}
 						<CarbonTile
-							class="flex items-start justify-between gap-3 rounded-none border-[#393939] p-3 hover:border-[#525252]"
+							class="flex items-start justify-between gap-3 rounded-none border-border p-3 hover:border-border"
 						>
 							<div class="flex min-w-0 flex-1 items-start gap-3">
 								{#if item.icon_url}
 									<img
 										src={item.icon_url}
 										alt={item.title}
-										class="h-10 w-10 shrink-0 rounded-none border border-[#393939] bg-[#161616] object-contain p-1"
+										class="h-10 w-10 shrink-0 rounded-none border border-border bg-background object-contain p-1"
 									/>
 								{:else}
 									<div
-										class="flex h-10 w-10 shrink-0 items-center justify-center rounded-none border border-[#393939] bg-[#161616] text-[#525252]"
+										class="flex h-10 w-10 shrink-0 items-center justify-center rounded-none border border-border bg-background text-muted-foreground"
 									>
 										<Package class="h-5 w-5" />
 									</div>
@@ -1530,10 +1532,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 								<div class="min-w-0 flex-1 space-y-0.5">
 									<div class="flex items-center gap-2">
-										<span class="truncate text-sm font-semibold text-white">{item.title}</span>
-										<span class="text-xs text-[#8d8d8d]">by {item.author}</span>
+										<span class="truncate text-sm font-semibold text-foreground">{item.title}</span>
+										<span class="text-xs text-muted-foreground">by {item.author}</span>
 									</div>
-									<p class="line-clamp-1 text-xs text-[#a8a8a8]">{item.description}</p>
+									<p class="line-clamp-1 text-xs text-muted-foreground">{item.description}</p>
 									<div class="flex items-center gap-1.5 pt-1">
 										<CarbonTag type="cyan" size="sm">
 											<Download class="mr-0.5 h-2.5 w-2.5" />
@@ -1615,9 +1617,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							type="checkbox"
 							id="urlPin"
 							bind:checked={urlModPinned}
-							class="cursor-pointer rounded-none border-[#8d8d8d] bg-[#262626]"
+							class="cursor-pointer rounded-none border-border bg-card"
 						/>
-						<label for="urlPin" class="cursor-pointer text-xs text-[#c6c6c6] select-none"
+						<label for="urlPin" class="cursor-pointer text-xs text-muted-foreground select-none"
 							>Pin version (prevent automatic updates)</label
 						>
 					</div>
@@ -1665,18 +1667,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		/>
 
 		<div class="space-y-1.5">
-			<label class="text-xs font-normal tracking-[0.32px] text-[#c6c6c6]"
+			<label class="text-xs font-normal tracking-[0.32px] text-muted-foreground"
 				>File Content (Text / JSON / YAML)</label
 			>
 			<textarea
 				bind:value={uploadFileContent}
 				rows={8}
-				class="w-full rounded-none border-b border-[#8d8d8d] bg-[#262626] p-3 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+				class="w-full rounded-none border-b border-border bg-card p-3 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 				placeholder="Enter configuration content here..."
 			></textarea>
 		</div>
 
-		<div class="flex items-center justify-end gap-3 border-t border-[#393939] pt-4">
+		<div class="flex items-center justify-end gap-3 border-t border-border pt-4">
 			<CarbonButton
 				kind="secondary"
 				onclick={() => (uploadFileDialogOpen = false)}

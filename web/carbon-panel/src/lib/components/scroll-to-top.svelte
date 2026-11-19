@@ -90,7 +90,7 @@ one at https://mozilla.org/MPL/2.0/.
 			size="icon"
 			onclick={scrollToTop}
 			aria-label="Scroll to top"
-			class="rounded-none border border-[#393939] bg-[#262626] text-[#f4f4f4] shadow-lg transition-colors hover:bg-[#0f62fe] hover:text-white"
+			class="rounded-none border border-border bg-card text-foreground shadow-lg transition-colors hover:bg-primary hover:text-white"
 		>
 			<ArrowUp class="h-5 w-5" />
 		</Button>

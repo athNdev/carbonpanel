@@ -305,13 +305,15 @@ one at https://mozilla.org/MPL/2.0/.
 				class="flex flex-col items-stretch justify-between gap-3 p-3 sm:flex-row sm:items-center"
 			>
 				<div class="relative max-w-md flex-1">
-					<Search class="absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-[#8d8d8d]" />
+					<Search
+						class="absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+					/>
 					<input
 						type="search"
 						placeholder="Search installed mods..."
 						bind:value={searchQuery}
 						onkeydown={(e) => e.key === 'Escape' && (searchQuery = '')}
-						class="h-8 w-full rounded-none border-b border-[#8d8d8d] bg-[#262626] pr-3 pl-8 text-xs text-[#f4f4f4] placeholder-[#6f6f6f] focus:border-b-2 focus:border-[#0f62fe] focus:outline-none"
+						class="h-8 w-full rounded-none border-b border-border bg-card pr-3 pl-8 text-xs text-foreground placeholder-muted-foreground focus:border-b-2 focus:border-primary focus:outline-none"
 					/>
 				</div>
 				<div class="flex items-center gap-1">
@@ -321,8 +323,8 @@ one at https://mozilla.org/MPL/2.0/.
 						aria-pressed={modFilter === 'all'}
 						class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {modFilter ===
 						'all'
-							? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-							: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
+							? 'border-primary bg-primary text-white'
+							: 'border-border bg-card text-muted-foreground hover:bg-secondary'}"
 					>
 						All ({mods.length})
 					</button>
@@ -332,8 +334,8 @@ one at https://mozilla.org/MPL/2.0/.
 						aria-pressed={modFilter === 'enabled'}
 						class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {modFilter ===
 						'enabled'
-							? 'border-[#198038] bg-[#198038] text-white'
-							: 'border-[#198038]/50 bg-[#262626] text-[#6fdc8c] hover:bg-[#353535]'}"
+							? 'border-success bg-success text-white'
+							: 'border-success/50 bg-card text-success-text hover:bg-secondary'}"
 					>
 						Enabled ({mods.filter((m) => m.enabled).length})
 					</button>
@@ -343,8 +345,8 @@ one at https://mozilla.org/MPL/2.0/.
 						aria-pressed={modFilter === 'disabled'}
 						class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {modFilter ===
 						'disabled'
-							? 'border-[#525252] bg-[#525252] text-white'
-							: 'border-[#525252]/60 bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
+							? 'border-border bg-secondary text-foreground'
+							: 'border-border/60 bg-card text-muted-foreground hover:bg-secondary'}"
 					>
 						Disabled ({mods.filter((m) => !m.enabled).length})
 					</button>
@@ -352,17 +354,17 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 		{/if}
 		{#if uploading && uploadProgress}
-			<div class="border-t border-[#393939] bg-[#262626] p-3 text-xs">
+			<div class="border-t border-border bg-card p-3 text-xs">
 				<div class="mb-1 flex items-center justify-between">
-					<span class="truncate font-mono text-[#f4f4f4]">Uploading: {currentUploadFilename}</span>
+					<span class="truncate font-mono text-foreground">Uploading: {currentUploadFilename}</span>
 					<div class="flex items-center gap-2">
-						<span class="font-mono text-[#78a9ff]"
+						<span class="font-mono text-accent-text"
 							>{uploadProgress.percentComplete.toFixed(0)}%</span
 						>
 						<button
 							type="button"
 							onclick={cancelCurrentUpload}
-							class="p-0.5 text-[#ff8389] hover:text-white"
+							class="p-0.5 text-destructive-text hover:text-foreground"
 							title="Cancel upload"
 							aria-label="Cancel upload"
 						>
@@ -370,24 +372,24 @@ one at https://mozilla.org/MPL/2.0/.
 						</button>
 					</div>
 				</div>
-				<div class="h-1.5 w-full rounded-none border border-[#393939] bg-[#161616]">
+				<div class="h-1.5 w-full rounded-none border border-border bg-background">
 					<div
-						class="h-full rounded-none bg-[#0f62fe] transition-all"
+						class="h-full rounded-none bg-primary transition-all"
 						style="width: {uploadProgress.percentComplete}%"
 					></div>
 				</div>
-				<p class="mt-1 font-mono text-xs text-[#8d8d8d]">
+				<p class="mt-1 font-mono text-xs text-muted-foreground">
 					{formatBytes(uploadProgress.bytesUploaded)} / {formatBytes(uploadProgress.totalBytes)}
 				</p>
 			</div>
 		{/if}
 	{/snippet}
-	<div class="min-h-0 flex-1 overflow-auto bg-[#161616]">
+	<div class="min-h-0 flex-1 overflow-auto bg-background">
 		{#if !canHaveMods()}
-			<div class="flex flex-col items-center justify-center p-12 text-center text-[#8d8d8d]">
-				<Package class="mb-3 h-10 w-10 text-[#525252]" />
-				<p class="text-sm font-semibold text-[#f4f4f4]">Mod loader incompatible</p>
-				<p class="mt-1 max-w-sm text-xs text-[#8d8d8d]">
+			<div class="flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
+				<Package class="mb-3 h-10 w-10 text-muted-foreground" />
+				<p class="text-sm font-semibold text-foreground">Mod loader incompatible</p>
+				<p class="mt-1 max-w-sm text-xs text-muted-foreground">
 					To install mods or plugins, configure this server to use Fabric, Forge, NeoForge, Paper,
 					or Purpur.
 				</p>
@@ -397,23 +399,23 @@ one at https://mozilla.org/MPL/2.0/.
 				<CarbonInlineLoading description="Reading {getModsDirectory()}/ directory..." />
 			</div>
 		{:else if mods.length === 0}
-			<div class="flex flex-col items-center justify-center p-12 text-center text-[#8d8d8d]">
-				<Package class="mb-3 h-10 w-10 text-[#525252]" />
-				<p class="text-sm font-semibold text-[#f4f4f4]">No mods installed</p>
-				<p class="mt-1 text-xs text-[#8d8d8d]">
+			<div class="flex flex-col items-center justify-center p-12 text-center text-muted-foreground">
+				<Package class="mb-3 h-10 w-10 text-muted-foreground" />
+				<p class="text-sm font-semibold text-foreground">No mods installed</p>
+				<p class="mt-1 text-xs text-muted-foreground">
 					Browse the repository or upload .jar files directly to get started.
 				</p>
 			</div>
 		{:else if filteredMods.length === 0}
-			<div class="p-8 text-center text-xs text-[#8d8d8d]">
+			<div class="p-8 text-center text-xs text-muted-foreground">
 				No mods match your search query or filter.
 			</div>
 		{:else}
 			<!-- Carbon DataTable rows -->
-			<div class="divide-y divide-[#393939] border-b border-[#393939]">
+			<div class="divide-y divide-border border-b border-border">
 				{#each filteredMods as mod (mod.id)}
 					<div
-						class="group flex items-center justify-between gap-4 rounded-none bg-[#262626] p-3.5 transition-colors hover:bg-[#353535]"
+						class="group flex items-center justify-between gap-4 rounded-none bg-card p-3.5 transition-colors hover:bg-secondary"
 					>
 						<div class="flex min-w-0 items-center gap-3.5">
 							<!-- Enable/Disable Carbon Toggle -->
@@ -421,8 +423,8 @@ one at https://mozilla.org/MPL/2.0/.
 								type="button"
 								onclick={() => toggleMod(mod)}
 								class="flex h-7 cursor-pointer items-center gap-1 rounded-none border px-2 font-mono text-xs transition-colors select-none {mod.enabled
-									? 'border-[#198038] bg-[#198038]/20 text-[#6fdc8c]'
-									: 'border-[#525252] bg-[#161616] text-[#8d8d8d]'}"
+									? 'border-success bg-success/20 text-success-text'
+									: 'border-border bg-background text-muted-foreground'}"
 								title={mod.enabled ? 'Click to disable' : 'Click to enable'}
 							>
 								{#if mod.enabled}
@@ -438,7 +440,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<div class="min-w-0">
 								<div class="flex items-center gap-2">
 									<h4
-										class="truncate text-sm font-medium text-[#f4f4f4] {mod.enabled
+										class="truncate text-sm font-medium text-foreground {mod.enabled
 											? ''
 											: 'line-through opacity-70'}"
 									>
@@ -446,16 +448,16 @@ one at https://mozilla.org/MPL/2.0/.
 									</h4>
 									{#if mod.version}
 										<span
-											class="border border-[#393939] bg-[#161616] px-1.5 py-0 font-mono text-xs text-[#c6c6c6]"
+											class="border border-border bg-background px-1.5 py-0 font-mono text-xs text-muted-foreground"
 										>
 											{mod.version}
 										</span>
 									{/if}
 								</div>
 								<div
-									class="mt-0.5 flex flex-wrap items-center gap-3 font-mono text-xs text-[#8d8d8d]"
+									class="mt-0.5 flex flex-wrap items-center gap-3 font-mono text-xs text-muted-foreground"
 								>
-									<span class="flex items-center gap-1 text-[#c6c6c6]">
+									<span class="flex items-center gap-1 text-muted-foreground">
 										<FileText class="h-3 w-3" />
 										{mod.fileName}
 									</span>
@@ -467,7 +469,7 @@ one at https://mozilla.org/MPL/2.0/.
 									{/if}
 								</div>
 								{#if mod.description}
-									<p class="mt-1 line-clamp-1 font-sans text-xs text-[#a8a8a8]">
+									<p class="mt-1 line-clamp-1 font-sans text-xs text-muted-foreground">
 										{mod.description}
 									</p>
 								{/if}
@@ -475,11 +477,11 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 
 						<!-- Actions -->
-						<div class="flex shrink-0 items-center border border-[#393939] bg-[#161616]">
+						<div class="flex shrink-0 items-center border border-border bg-background">
 							<button
 								type="button"
 								onclick={() => downloadMod(mod)}
-								class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-[#393939] text-[#c6c6c6] transition-colors hover:bg-[#353535] hover:text-white"
+								class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
 								title="Download .jar"
 							>
 								<Download class="h-3.5 w-3.5" />
@@ -487,7 +489,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<button
 								type="button"
 								onclick={() => deleteMod(mod)}
-								class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-[#ff8389] transition-colors hover:bg-[#da1e28]/20"
+								class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-none text-destructive-text transition-colors hover:bg-destructive/20"
 								title="Delete mod"
 							>
 								<Trash2 class="h-3.5 w-3.5" />

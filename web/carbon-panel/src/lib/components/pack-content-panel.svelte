@@ -586,17 +586,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	{/if}
 {/snippet}
 
-<CarbonTile class="rounded-none border-[#393939] p-0">
+<CarbonTile class="rounded-none border-border p-0">
 	<div
-		class="flex flex-col justify-between gap-3 border-b border-[#393939] bg-[#262626] p-4 sm:flex-row sm:items-center"
+		class="flex flex-col justify-between gap-3 border-b border-border bg-card p-4 sm:flex-row sm:items-center"
 	>
 		<div class="min-w-0 space-y-0.5">
 			<div class="flex items-center gap-2">
-				{@render contentIcon('h-4 w-4 text-[#78a9ff]')}
-				<h2 class="text-base font-semibold text-white">{meta.title} in Modpack</h2>
+				{@render contentIcon('h-4 w-4 text-accent-text')}
+				<h2 class="text-base font-semibold text-foreground">{meta.title} in Modpack</h2>
 				<CarbonTag type="cyan" size="sm">{items.length}</CarbonTag>
 			</div>
-			<p class="text-xs text-[#a8a8a8]">{meta.description}</p>
+			<p class="text-xs text-muted-foreground">{meta.description}</p>
 		</div>
 
 		<div class="flex flex-wrap items-center gap-2">
@@ -631,18 +631,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	{#if kind === 'datapack'}
 		<div
-			class="flex flex-col gap-2 border-b border-[#393939] bg-[#161616] p-3 sm:flex-row sm:items-center sm:justify-between"
+			class="flex flex-col gap-2 border-b border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between"
 		>
 			<div class="min-w-0">
-				<p class="font-mono text-[10px] tracking-wider text-[#8d8d8d] uppercase">Install folder</p>
-				<p class="text-xs text-[#a8a8a8]">
+				<p class="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
+					Install folder
+				</p>
+				<p class="text-xs text-muted-foreground">
 					Written to pack.toml as <code class="font-mono">[options] datapack-folder</code>. Changing
 					it moves existing datapack metadata.
 				</p>
 			</div>
 			<div class="flex items-center gap-1.5">
 				<input
-					class="h-8 w-56 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+					class="h-8 w-56 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 					bind:value={folderDraft}
 					aria-label="Datapack install folder"
 					spellcheck="false"
@@ -667,14 +669,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	{#if filtered.length === 0}
 		<div class="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-			<div class="flex h-12 w-12 items-center justify-center border border-[#393939] bg-[#262626]">
-				{@render contentIcon('h-5 w-5 text-[#8d8d8d]')}
+			<div class="flex h-12 w-12 items-center justify-center border border-border bg-card">
+				{@render contentIcon('h-5 w-5 text-muted-foreground')}
 			</div>
 			<div>
-				<p class="text-sm font-semibold text-[#f4f4f4]">
+				<p class="text-sm font-semibold text-foreground">
 					{items.length === 0 ? `No ${meta.title.toLowerCase()} yet` : 'No matches'}
 				</p>
-				<p class="mt-1 text-xs text-[#a8a8a8]">
+				<p class="mt-1 text-xs text-muted-foreground">
 					{items.length === 0
 						? `Add ${kind === 'datapack' ? 'a world datapack' : `a ${meta.singular}`} from Modrinth, a direct URL, or an upload.`
 						: 'Clear the filter to see every entry.'}
@@ -689,7 +691,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</div>
 	{:else}
 		<div
-			class="hidden items-center gap-3 border-b border-[#393939] bg-[#1e1e1e] px-4 py-2 font-mono text-[10px] tracking-wider text-[#8d8d8d] uppercase sm:flex"
+			class="hidden items-center gap-3 border-b border-border bg-card px-4 py-2 font-mono text-[10px] tracking-wider text-muted-foreground uppercase sm:flex"
 		>
 			<span class="min-w-0 flex-1">Name / file</span>
 			<span class="w-16 text-center">Side</span>
@@ -698,26 +700,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<span class="w-16 text-right">Actions</span>
 		</div>
 
-		<div class="divide-y divide-[#2a2a2a]">
+		<div class="divide-y divide-border">
 			{#each filtered as item (item.slug)}
 				{@const update = updates[item.slug]}
 				<div
-					class="group flex flex-col gap-2 px-4 py-3 transition-colors hover:bg-[#202020] sm:flex-row sm:items-center sm:gap-3"
+					class="group flex flex-col gap-2 px-4 py-3 transition-colors hover:bg-card sm:flex-row sm:items-center sm:gap-3"
 				>
 					<div class="flex min-w-0 flex-1 items-start gap-2.5">
 						<div
-							class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+							class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-background"
 						>
-							{@render contentIcon('h-4 w-4 text-[#78a9ff]')}
+							{@render contentIcon('h-4 w-4 text-accent-text')}
 						</div>
 						<div class="min-w-0">
 							<div class="flex flex-wrap items-center gap-1.5">
-								<span class="truncate text-sm font-medium text-[#f4f4f4]">{item.name}</span>
+								<span class="truncate text-sm font-medium text-foreground">{item.name}</span>
 								<CarbonTag type={platformTag(item.platform)} size="sm">
 									{item.platform.toUpperCase()}
 								</CarbonTag>
 								{#if item.pinned}
-									<span class="inline-flex items-center gap-1 font-mono text-[10px] text-[#f1c21b]">
+									<span
+										class="inline-flex items-center gap-1 font-mono text-[10px] text-warning-text"
+									>
 										<Pin class="h-3 w-3" /> PINNED
 									</span>
 								{/if}
@@ -728,11 +732,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									<CarbonTag type="green" size="sm">ON BY DEFAULT</CarbonTag>
 								{/if}
 							</div>
-							<p class="truncate font-mono text-xs text-[#8d8d8d]" title={item.file_name}>
+							<p class="truncate font-mono text-xs text-muted-foreground" title={item.file_name}>
 								{item.file_name}
 							</p>
 							{#if item.option_description}
-								<p class="mt-0.5 line-clamp-2 text-xs text-[#a8a8a8]">{item.option_description}</p>
+								<p class="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+									{item.option_description}
+								</p>
 							{/if}
 						</div>
 					</div>
@@ -741,7 +747,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<CarbonTag type={sideTag(item.side)} size="sm">{sideLabel(item.side)}</CarbonTag>
 					</span>
 
-					<span class="w-24 shrink-0 text-center font-mono text-[10px] text-[#8d8d8d]">
+					<span class="w-24 shrink-0 text-center font-mono text-[10px] text-muted-foreground">
 						{#if item.project_id && item.platform === 'modrinth'}
 							{update?.update_available ? 'UPDATE' : 'TRACKED'}
 						{:else}
@@ -766,16 +772,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<span class="ml-1">Update</span>
 							</CarbonButton>
 						{:else if update}
-							<span class="font-mono text-[10px] text-[#6f6f6f]">UP TO DATE</span>
+							<span class="font-mono text-[10px] text-muted-foreground">UP TO DATE</span>
 						{:else}
-							<span class="font-mono text-[10px] text-[#6f6f6f]" title="Run Check Updates">—</span>
+							<span class="font-mono text-[10px] text-muted-foreground" title="Run Check Updates"
+								>—</span
+							>
 						{/if}
 					</span>
 
 					<span class="flex w-16 shrink-0 items-center justify-end gap-1">
 						<button
 							type="button"
-							class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#8d8d8d] transition-colors hover:bg-[#353535] hover:text-white"
+							class="flex h-7 w-7 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
 							aria-label={`Edit options for ${item.name}`}
 							title="Edit options"
 							onclick={() => openEdit(item)}
@@ -784,7 +792,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</button>
 						<button
 							type="button"
-							class="flex h-7 w-7 cursor-pointer items-center justify-center text-[#8d8d8d] transition-colors hover:bg-[#da1e28]/20 hover:text-[#ff8389]"
+							class="flex h-7 w-7 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-destructive/20 hover:text-destructive-text"
 							aria-label={`Remove ${item.name}`}
 							title="Remove"
 							onclick={() => {
@@ -804,12 +812,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <!-- Add dialog -->
 <CarbonModal bind:open={addOpen} title="Add {meta.title}" size="4xl" hasFooter={false}>
 	<div class="space-y-4">
-		<div class="flex flex-wrap items-center gap-1 border-b border-[#393939] pb-2">
+		<div class="flex flex-wrap items-center gap-1 border-b border-border pb-2">
 			<button
 				type="button"
 				class="border px-3 py-1.5 font-mono text-xs transition-colors {addTab === 'modrinth'
-					? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-					: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
+					? 'border-primary bg-primary text-white'
+					: 'border-border bg-card text-muted-foreground hover:bg-secondary'}"
 				onclick={() => {
 					addTab = 'modrinth';
 					if (searchResults.length === 0) void runSearch();
@@ -820,8 +828,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<button
 				type="button"
 				class="border px-3 py-1.5 font-mono text-xs transition-colors {addTab === 'url'
-					? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-					: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
+					? 'border-primary bg-primary text-white'
+					: 'border-border bg-card text-muted-foreground hover:bg-secondary'}"
 				onclick={() => (addTab = 'url')}
 			>
 				Direct URL
@@ -829,8 +837,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<button
 				type="button"
 				class="border px-3 py-1.5 font-mono text-xs transition-colors {addTab === 'upload'
-					? 'border-[#0f62fe] bg-[#0f62fe] text-white'
-					: 'border-[#393939] bg-[#262626] text-[#c6c6c6] hover:bg-[#353535]'}"
+					? 'border-primary bg-primary text-white'
+					: 'border-border bg-card text-muted-foreground hover:bg-secondary'}"
 				onclick={() => (addTab = 'upload')}
 			>
 				Upload archive
@@ -847,14 +855,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					/>
 				</div>
 				<input
-					class="h-8 w-28 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+					class="h-8 w-28 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 					bind:value={searchVersion}
 					aria-label="Minecraft version"
 					placeholder="MC version"
 				/>
 				{#if kind === 'shaderpack'}
 					<select
-						class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+						class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 						bind:value={searchLoader}
 						aria-label="Shader loader"
 					>
@@ -880,7 +888,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 
 			{#if searchError}
-				<p class="border border-[#da1e28]/50 bg-[#da1e28]/10 p-2 text-xs text-[#ff8389]">
+				<p class="border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive-text">
 					{searchError}
 				</p>
 			{/if}
@@ -893,19 +901,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<img
 									src={selectedProject.icon_url}
 									alt=""
-									class="h-8 w-8 border border-[#393939] object-cover"
+									class="h-8 w-8 border border-border object-cover"
 								/>
 							{/if}
 							<div class="min-w-0">
-								<p class="truncate text-sm font-semibold text-[#f4f4f4]">{selectedProject.title}</p>
-								<p class="truncate font-mono text-[10px] text-[#8d8d8d]">
+								<p class="truncate text-sm font-semibold text-foreground">
+									{selectedProject.title}
+								</p>
+								<p class="truncate font-mono text-[10px] text-muted-foreground">
 									{selectedProject.author}
 								</p>
 							</div>
 						</div>
 						<button
 							type="button"
-							class="flex items-center gap-1 font-mono text-xs text-[#78a9ff] hover:text-white"
+							class="flex items-center gap-1 font-mono text-xs text-accent-text hover:text-foreground"
 							onclick={() => (selectedProject = null)}
 						>
 							<X class="h-3.5 w-3.5" /> Back
@@ -913,18 +923,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</div>
 
 					{#if loadingVersions}
-						<div class="flex items-center justify-center py-8 text-[#8d8d8d]">
+						<div class="flex items-center justify-center py-8 text-muted-foreground">
 							<Loader2 class="h-5 w-5 animate-spin" />
 						</div>
 					{:else if versions.length === 0}
-						<p class="py-6 text-center text-xs text-[#a8a8a8]">
+						<p class="py-6 text-center text-xs text-muted-foreground">
 							No compatible {meta.singular} versions for Minecraft {searchVersion || mcVersion}.
 						</p>
 					{:else}
-						<div class="max-h-56 divide-y divide-[#2a2a2a] overflow-y-auto border border-[#393939]">
+						<div class="max-h-56 divide-y divide-border overflow-y-auto border border-border">
 							{#each versions as version (version.id)}
 								<label
-									class="flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors hover:bg-[#262626]"
+									class="flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors hover:bg-card"
 								>
 									<input
 										type="radio"
@@ -932,13 +942,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										value={version.id}
 										checked={selectedVersionId === version.id}
 										onchange={() => (selectedVersionId = version.id)}
-										class="h-3.5 w-3.5 accent-[#0f62fe]"
+										class="h-3.5 w-3.5 accent-primary"
 									/>
 									<span class="min-w-0 flex-1">
-										<span class="block truncate text-xs font-medium text-[#f4f4f4]">
+										<span class="block truncate text-xs font-medium text-foreground">
 											{version.name || version.version_number}
 										</span>
-										<span class="block truncate font-mono text-[10px] text-[#8d8d8d]">
+										<span class="block truncate font-mono text-[10px] text-muted-foreground">
 											{version.file_name} · {formatBytes(version.file_size)}
 										</span>
 									</span>
@@ -947,13 +957,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							{/each}
 						</div>
 
-						<div class="flex flex-wrap items-end gap-3 border-t border-[#393939] pt-3">
+						<div class="flex flex-wrap items-end gap-3 border-t border-border pt-3">
 							<label
-								class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase"
+								class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
 							>
 								Side
 								<select
-									class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4]"
+									class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground"
 									bind:value={installSide}
 								>
 									<option value="both">Both</option>
@@ -961,19 +971,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									<option value="server">Server only</option>
 								</select>
 							</label>
-							<label class="flex items-center gap-2 pb-1.5 text-xs text-[#c6c6c6]">
+							<label class="flex items-center gap-2 pb-1.5 text-xs text-muted-foreground">
 								<input
 									type="checkbox"
 									bind:checked={installOptional}
-									class="h-3.5 w-3.5 accent-[#0f62fe]"
+									class="h-3.5 w-3.5 accent-primary"
 								/>
 								Optional
 							</label>
-							<label class="flex items-center gap-2 pb-1.5 text-xs text-[#c6c6c6]">
+							<label class="flex items-center gap-2 pb-1.5 text-xs text-muted-foreground">
 								<input
 									type="checkbox"
 									bind:checked={installPinned}
-									class="h-3.5 w-3.5 accent-[#0f62fe]"
+									class="h-3.5 w-3.5 accent-primary"
 								/>
 								Pin version
 							</label>
@@ -1007,11 +1017,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{:else}
 				<div class="max-h-72 space-y-1 overflow-y-auto">
 					{#if searching && searchResults.length === 0}
-						<div class="flex items-center justify-center py-10 text-[#8d8d8d]">
+						<div class="flex items-center justify-center py-10 text-muted-foreground">
 							<Loader2 class="h-5 w-5 animate-spin" />
 						</div>
 					{:else if !searching && searchResults.length === 0}
-						<p class="py-8 text-center text-xs text-[#a8a8a8]">
+						<p class="py-8 text-center text-xs text-muted-foreground">
 							Search Modrinth for {meta.title.toLowerCase()} compatible with Minecraft
 							{searchVersion || mcVersion}.
 						</p>
@@ -1019,31 +1029,32 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						{#each searchResults as result (result.id)}
 							<button
 								type="button"
-								class="flex w-full items-start gap-3 rounded-none border border-transparent p-2 text-left transition-colors hover:border-[#393939] hover:bg-[#262626]"
+								class="flex w-full items-start gap-3 rounded-none border border-transparent p-2 text-left transition-colors hover:border-border hover:bg-card"
 								onclick={() => chooseProject(result)}
 							>
 								{#if result.icon_url}
 									<img
 										src={result.icon_url}
 										alt=""
-										class="h-9 w-9 shrink-0 border border-[#393939] bg-[#161616] object-cover"
+										class="h-9 w-9 shrink-0 border border-border bg-background object-cover"
 									/>
 								{:else}
 									<div
-										class="flex h-9 w-9 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+										class="flex h-9 w-9 shrink-0 items-center justify-center border border-border bg-background"
 									>
-										<Layers class="h-4 w-4 text-[#8d8d8d]" />
+										<Layers class="h-4 w-4 text-muted-foreground" />
 									</div>
 								{/if}
 								<span class="min-w-0 flex-1">
 									<span class="flex items-center gap-2">
-										<span class="truncate text-sm font-medium text-[#f4f4f4]">{result.title}</span>
+										<span class="truncate text-sm font-medium text-foreground">{result.title}</span>
 										<CarbonTag type="gray" size="sm">{result.author}</CarbonTag>
 									</span>
-									<span class="line-clamp-2 block text-xs text-[#a8a8a8]">{result.description}</span
+									<span class="line-clamp-2 block text-xs text-muted-foreground"
+										>{result.description}</span
 									>
 								</span>
-								<span class="shrink-0 font-mono text-[10px] text-[#8d8d8d]">
+								<span class="shrink-0 font-mono text-[10px] text-muted-foreground">
 									{result.downloads.toLocaleString()} DL
 								</span>
 							</button>
@@ -1053,42 +1064,50 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{/if}
 		{:else if addTab === 'url'}
 			<div class="space-y-3">
-				<p class="text-xs text-[#a8a8a8]">
+				<p class="text-xs text-muted-foreground">
 					The panel fetches the file, computes its SHA-512, and stores a packwiz metafile. Direct
 					URLs are not update-tracked.
 				</p>
-				<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+				<label
+					class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+				>
 					Name
 					<input
-						class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+						class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 						bind:value={addForm.name}
 						placeholder="Terralith"
 					/>
 				</label>
-				<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+				<label
+					class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+				>
 					Download URL
 					<input
-						class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+						class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 						bind:value={addForm.download_url}
 						placeholder="https://cdn.example/pack.zip"
 						spellcheck="false"
 					/>
 				</label>
 				<div class="grid gap-3 sm:grid-cols-2">
-					<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+					<label
+						class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+					>
 						File name (optional)
 						<input
-							class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+							class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 							bind:value={addForm.file_name}
 							placeholder="Derived from URL"
 							spellcheck="false"
 						/>
 					</label>
-					<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+					<label
+						class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+					>
 						Hash (optional)
 						<div class="flex gap-1">
 							<select
-								class="h-8 rounded-none border border-[#393939] bg-[#262626] px-1 font-mono text-xs text-[#f4f4f4]"
+								class="h-8 rounded-none border border-border bg-card px-1 font-mono text-xs text-foreground"
 								bind:value={addForm.hash_format}
 							>
 								<option value="sha512">sha512</option>
@@ -1097,7 +1116,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<option value="md5">md5</option>
 							</select>
 							<input
-								class="h-8 min-w-0 flex-1 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+								class="h-8 min-w-0 flex-1 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 								bind:value={addForm.hash}
 								placeholder="Computed if empty"
 								spellcheck="false"
@@ -1105,10 +1124,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</div>
 					</label>
 				</div>
-				<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+				<label
+					class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+				>
 					Side
 					<select
-						class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4]"
+						class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground"
 						bind:value={addForm.side}
 					>
 						<option value="both">Both</option>
@@ -1116,45 +1137,47 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<option value="server">Server only</option>
 					</select>
 				</label>
-				<div class="flex flex-wrap gap-4 border-t border-[#393939] pt-3">
-					<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
+				<div class="flex flex-wrap gap-4 border-t border-border pt-3">
+					<label class="flex items-center gap-2 text-xs text-muted-foreground">
 						<input
 							type="checkbox"
 							bind:checked={addForm.pinned}
-							class="h-3.5 w-3.5 accent-[#0f62fe]"
+							class="h-3.5 w-3.5 accent-primary"
 						/>
 						Pin version
 					</label>
-					<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
+					<label class="flex items-center gap-2 text-xs text-muted-foreground">
 						<input
 							type="checkbox"
 							bind:checked={addForm.optional}
-							class="h-3.5 w-3.5 accent-[#0f62fe]"
+							class="h-3.5 w-3.5 accent-primary"
 						/>
 						Optional
 					</label>
 					{#if addForm.optional}
-						<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
+						<label class="flex items-center gap-2 text-xs text-muted-foreground">
 							<input
 								type="checkbox"
 								bind:checked={addForm.default}
-								class="h-3.5 w-3.5 accent-[#0f62fe]"
+								class="h-3.5 w-3.5 accent-primary"
 							/>
 							Enabled by default
 						</label>
 					{/if}
 				</div>
 				{#if addForm.optional}
-					<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+					<label
+						class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+					>
 						Option description
 						<input
-							class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+							class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 							bind:value={addForm.option_description}
 							placeholder="Shown when the player chooses optional files"
 						/>
 					</label>
 				{/if}
-				<div class="flex justify-end gap-2 border-t border-[#393939] pt-3">
+				<div class="flex justify-end gap-2 border-t border-border pt-3">
 					<CarbonButton
 						kind="secondary"
 						size="sm"
@@ -1181,7 +1204,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 		{:else}
 			<div class="space-y-3">
-				<p class="text-xs text-[#a8a8a8]">
+				<p class="text-xs text-muted-foreground">
 					The archive is validated ({kind === 'datapack'
 						? 'pack.mcmeta'
 						: kind === 'resourcepack'
@@ -1198,38 +1221,44 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				/>
 				<button
 					type="button"
-					class="flex w-full cursor-pointer flex-col items-center justify-center gap-2 border border-dashed border-[#525252] bg-[#161616] px-4 py-8 transition-colors hover:border-[#0f62fe] hover:bg-[#262626]"
+					class="flex w-full cursor-pointer flex-col items-center justify-center gap-2 border border-dashed border-border bg-background px-4 py-8 transition-colors hover:border-primary hover:bg-card"
 					onclick={() => uploadInput?.click()}
 				>
-					<Upload class="h-6 w-6 text-[#78a9ff]" />
-					<span class="text-sm font-medium text-[#f4f4f4]">
+					<Upload class="h-6 w-6 text-accent-text" />
+					<span class="text-sm font-medium text-foreground">
 						{uploadTarget ? uploadTarget.name : `Choose a ${meta.singular} .zip`}
 					</span>
-					<span class="font-mono text-[10px] text-[#8d8d8d]">
+					<span class="font-mono text-[10px] text-muted-foreground">
 						{uploadTarget ? formatBytes(uploadTarget.size) : 'Click to browse'}
 					</span>
 				</button>
-				<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+				<label
+					class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+				>
 					Name
 					<input
-						class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+						class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 						bind:value={addForm.name}
 						placeholder="Display name"
 					/>
 				</label>
 				<div class="grid gap-3 sm:grid-cols-2">
-					<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+					<label
+						class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+					>
 						File name
 						<input
-							class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+							class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 							bind:value={addForm.file_name}
 							spellcheck="false"
 						/>
 					</label>
-					<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+					<label
+						class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+					>
 						Side
 						<select
-							class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4]"
+							class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground"
 							bind:value={addForm.side}
 						>
 							<option value="both">Both</option>
@@ -1238,45 +1267,47 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</select>
 					</label>
 				</div>
-				<div class="flex flex-wrap gap-4 border-t border-[#393939] pt-3">
-					<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
+				<div class="flex flex-wrap gap-4 border-t border-border pt-3">
+					<label class="flex items-center gap-2 text-xs text-muted-foreground">
 						<input
 							type="checkbox"
 							bind:checked={addForm.pinned}
-							class="h-3.5 w-3.5 accent-[#0f62fe]"
+							class="h-3.5 w-3.5 accent-primary"
 						/>
 						Pin version
 					</label>
-					<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
+					<label class="flex items-center gap-2 text-xs text-muted-foreground">
 						<input
 							type="checkbox"
 							bind:checked={addForm.optional}
-							class="h-3.5 w-3.5 accent-[#0f62fe]"
+							class="h-3.5 w-3.5 accent-primary"
 						/>
 						Optional
 					</label>
 					{#if addForm.optional}
-						<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
+						<label class="flex items-center gap-2 text-xs text-muted-foreground">
 							<input
 								type="checkbox"
 								bind:checked={addForm.default}
-								class="h-3.5 w-3.5 accent-[#0f62fe]"
+								class="h-3.5 w-3.5 accent-primary"
 							/>
 							Enabled by default
 						</label>
 					{/if}
 				</div>
 				{#if addForm.optional}
-					<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+					<label
+						class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase"
+					>
 						Option description
 						<input
-							class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+							class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 							bind:value={addForm.option_description}
 							placeholder="Shown when the player chooses optional files"
 						/>
 					</label>
 				{/if}
-				<div class="flex justify-end gap-2 border-t border-[#393939] pt-3">
+				<div class="flex justify-end gap-2 border-t border-border pt-3">
 					<CarbonButton
 						kind="secondary"
 						size="sm"
@@ -1317,30 +1348,30 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}}
 >
 	<div class="space-y-3">
-		<p class="text-xs text-[#a8a8a8]">
+		<p class="text-xs text-muted-foreground">
 			Packwiz options apply to every launcher: side controls who receives the file, optional files
 			can be deselected, and pinning stops update checks.
 		</p>
-		<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+		<label class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase">
 			Name
 			<input
-				class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+				class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 				bind:value={editForm.name}
 			/>
 		</label>
 		<div class="grid gap-3 sm:grid-cols-2">
-			<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+			<label class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase">
 				File name
 				<input
-					class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+					class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 					bind:value={editForm.file_name}
 					spellcheck="false"
 				/>
 			</label>
-			<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+			<label class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase">
 				Side
 				<select
-					class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4]"
+					class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground"
 					bind:value={editForm.side}
 				>
 					<option value="both">Both</option>
@@ -1351,17 +1382,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		</div>
 
 		{#if editTarget?.platform === 'url'}
-			<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+			<label class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase">
 				Download URL
 				<input
-					class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+					class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 					bind:value={editForm.download_url}
 					spellcheck="false"
 				/>
 			</label>
 			<div class="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
 				<select
-					class="h-8 rounded-none border border-[#393939] bg-[#262626] px-1 font-mono text-xs text-[#f4f4f4]"
+					class="h-8 rounded-none border border-border bg-card px-1 font-mono text-xs text-foreground"
 					bind:value={editForm.hash_format}
 					aria-label="Hash format"
 				>
@@ -1371,7 +1402,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<option value="md5">md5</option>
 				</select>
 				<input
-					class="h-8 min-w-0 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+					class="h-8 min-w-0 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 					bind:value={editForm.hash}
 					placeholder="Hash"
 					aria-label="Hash"
@@ -1380,47 +1411,43 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			</div>
 		{/if}
 
-		<div class="flex flex-wrap gap-4 border-t border-[#393939] pt-3">
-			<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
-				<input
-					type="checkbox"
-					bind:checked={editForm.pinned}
-					class="h-3.5 w-3.5 accent-[#0f62fe]"
-				/>
+		<div class="flex flex-wrap gap-4 border-t border-border pt-3">
+			<label class="flex items-center gap-2 text-xs text-muted-foreground">
+				<input type="checkbox" bind:checked={editForm.pinned} class="h-3.5 w-3.5 accent-primary" />
 				Pin version
 			</label>
-			<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
+			<label class="flex items-center gap-2 text-xs text-muted-foreground">
 				<input
 					type="checkbox"
 					bind:checked={editForm.optional}
-					class="h-3.5 w-3.5 accent-[#0f62fe]"
+					class="h-3.5 w-3.5 accent-primary"
 				/>
 				Optional
 			</label>
 			{#if editForm.optional}
-				<label class="flex items-center gap-2 text-xs text-[#c6c6c6]">
+				<label class="flex items-center gap-2 text-xs text-muted-foreground">
 					<input
 						type="checkbox"
 						bind:checked={editForm.default}
-						class="h-3.5 w-3.5 accent-[#0f62fe]"
+						class="h-3.5 w-3.5 accent-primary"
 					/>
 					Enabled by default
 				</label>
 			{/if}
 		</div>
 		{#if editForm.optional}
-			<label class="flex flex-col gap-1 text-[10px] tracking-wider text-[#8d8d8d] uppercase">
+			<label class="flex flex-col gap-1 text-[10px] tracking-wider text-muted-foreground uppercase">
 				Option description
 				<input
-					class="h-8 rounded-none border border-[#393939] bg-[#262626] px-2 font-mono text-xs text-[#f4f4f4] focus:border-[#0f62fe] focus:outline-none"
+					class="h-8 rounded-none border border-border bg-card px-2 font-mono text-xs text-foreground focus:border-primary focus:outline-none"
 					bind:value={editForm.option_description}
 					placeholder="Shown when the player chooses optional files"
 				/>
 			</label>
 		{/if}
 
-		<div class="flex items-center justify-between border-t border-[#393939] pt-3">
-			<span class="font-mono text-[10px] text-[#6f6f6f]">{editTarget?.slug}</span>
+		<div class="flex items-center justify-between border-t border-border pt-3">
+			<span class="font-mono text-[10px] text-muted-foreground">{editTarget?.slug}</span>
 			<div class="flex gap-2">
 				<CarbonButton
 					kind="secondary"

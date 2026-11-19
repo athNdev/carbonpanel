@@ -107,19 +107,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 </script>
 
-<div class="rounded-none border border-[#393939] bg-[#262626] p-6">
+<div class="rounded-none border border-border bg-card p-6">
 	<div class="mb-1 flex flex-wrap items-center justify-between gap-2">
-		<h3 class="text-sm font-medium text-[#f4f4f4]">Lifecycle operations</h3>
+		<h3 class="text-sm font-medium text-foreground">Lifecycle operations</h3>
 		<button
 			type="button"
-			class="inline-flex h-8 items-center rounded-none bg-[#393939] px-4 text-xs text-white transition-colors hover:bg-[#4c4c4c] disabled:opacity-50"
+			class="inline-flex h-8 items-center rounded-none bg-secondary px-4 text-xs text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
 			onclick={load}
 			disabled={loading}
 		>
 			{loading ? 'Loading…' : 'Refresh'}
 		</button>
 	</div>
-	<p class="mb-4 text-xs text-[#a8a8a8]">
+	<p class="mb-4 text-xs text-muted-foreground">
 		Starts, stops, restarts, deletes and migrations are journaled first. Interrupted requests show
 		as unknown with the next step.
 	</p>
@@ -134,20 +134,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	{#if loadError}
 		<div
-			class="mb-4 flex flex-wrap items-center justify-between gap-2 border border-[#da1e28] bg-[#161616] p-3"
+			class="mb-4 flex flex-wrap items-center justify-between gap-2 border border-destructive bg-background p-3"
 			role="alert"
 		>
-			<p class="font-mono text-xs text-[#ff8389]">Could not load operations: {loadError}</p>
+			<p class="font-mono text-xs text-destructive-text">Could not load operations: {loadError}</p>
 			<button
 				type="button"
-				class="inline-flex h-7 items-center rounded-none bg-[#393939] px-3 text-xs text-white hover:bg-[#4c4c4c]"
+				class="inline-flex h-7 items-center rounded-none bg-secondary px-3 text-xs text-foreground hover:bg-secondary"
 				onclick={load}>Retry</button
 			>
 		</div>
 	{/if}
 
 	{#if operations.length === 0}
-		<p class="py-6 text-center font-mono text-xs text-[#a8a8a8]">
+		<p class="py-6 text-center font-mono text-xs text-muted-foreground">
 			{loading
 				? 'Loading operations…'
 				: 'No operations yet. Start, stop or restart to populate this journal.'}
@@ -156,7 +156,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="overflow-x-auto">
 			<table class="w-full min-w-[720px] text-xs" aria-label="Lifecycle operation journal">
 				<thead>
-					<tr class="border-b border-[#393939] text-left text-[#a8a8a8]">
+					<tr class="border-b border-border text-left text-muted-foreground">
 						<th scope="col" class="py-2 pr-4 font-medium">Started</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Operation</th>
 						<th scope="col" class="py-2 pr-4 font-medium">Request ID</th>
@@ -167,8 +167,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</thead>
 				<tbody>
 					{#each operations as op (op.id)}
-						<tr class="border-b border-[#262626] align-top text-[#f4f4f4]">
-							<td class="py-2 pr-4 font-mono whitespace-nowrap text-[#c6c6c6]"
+						<tr class="border-b border-card align-top text-foreground">
+							<td class="py-2 pr-4 font-mono whitespace-nowrap text-muted-foreground"
 								>{formatTimestamp(op.startedAt)}</td
 							>
 							<td class="py-2 pr-4 font-mono whitespace-nowrap">{op.kind}</td>
@@ -179,20 +179,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								<CarbonTag type={outcomeTagType(op.outcome)} size="sm">{op.outcome}</CarbonTag>
 							</td>
 							<td class="max-w-[380px] py-2 pr-4">
-								<p class="text-[#c6c6c6]">{op.reason}</p>
+								<p class="text-muted-foreground">{op.reason}</p>
 								{#if op.lastError}
-									<p class="mt-1 font-mono text-[11px] break-words text-[#a8a8a8]">
+									<p class="mt-1 font-mono text-[11px] break-words text-muted-foreground">
 										{op.lastError}
 									</p>
 								{/if}
 							</td>
 							<td class="py-2">
 								<div class="flex flex-col items-start gap-1">
-									<span class="text-[#c6c6c6]">{operationActionLabel(op.nextAction)}</span>
+									<span class="text-muted-foreground">{operationActionLabel(op.nextAction)}</span>
 									{#if canReleaseLock(op)}
 										<button
 											type="button"
-											class="inline-flex h-7 items-center rounded-none border border-[#393939] px-3 text-xs text-white transition-colors hover:bg-[#393939]"
+											class="inline-flex h-7 items-center rounded-none border border-border px-3 text-xs text-foreground transition-colors hover:bg-secondary"
 											onclick={() => askResolve(op)}
 										>
 											Release lock
@@ -222,10 +222,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}}
 >
 	{#snippet details()}
-		<label class="mb-1 block text-[#c6c6c6]" for="operation-resolve-note">Note (optional)</label>
+		<label class="mb-1 block text-muted-foreground" for="operation-resolve-note"
+			>Note (optional)</label
+		>
 		<input
 			id="operation-resolve-note"
-			class="w-full rounded-none border border-[#393939] bg-[#262626] px-2 py-1 text-[#f4f4f4] outline-none focus:border-[#0f62fe]"
+			class="w-full rounded-none border border-border bg-card px-2 py-1 text-foreground outline-none focus:border-primary"
 			placeholder="What did you check before releasing it?"
 			bind:value={resolveNote}
 			maxlength="500"

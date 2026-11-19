@@ -258,28 +258,30 @@ one at https://mozilla.org/MPL/2.0/.
 </svelte:head>
 
 <div
-	class="flex min-h-screen items-center justify-center rounded-none bg-[#161616] p-4 font-sans text-[#f4f4f4]"
+	class="flex min-h-screen items-center justify-center rounded-none bg-background p-4 font-sans text-foreground"
 >
 	<div
-		class="motion-scale-in w-full max-w-md rounded-none border border-[#393939] bg-[#262626] p-5 shadow-2xl sm:p-8"
+		class="motion-scale-in w-full max-w-md rounded-none border border-border bg-card p-5 shadow-2xl sm:p-8"
 	>
 		<!-- Header -->
 		<div class="mb-8 text-center">
 			<div class="mb-2 flex items-center justify-center gap-3">
 				<img src={asset('brand-mark-light.svg')} alt="" class="h-8 w-8" />
-				<h1 class="text-2xl font-semibold tracking-wide text-white">Carbon Panel</h1>
+				<h1 class="text-2xl font-semibold tracking-wide text-foreground">Carbon Panel</h1>
 			</div>
 			{#if authStatus.firstUserSetup}
-				<p class="text-xs text-[#c6c6c6]">Welcome! Create your initial administrator account.</p>
+				<p class="text-xs text-muted-foreground">
+					Welcome! Create your initial administrator account.
+				</p>
 			{:else}
-				<p class="text-xs text-[#a8a8a8]">Sign in to manage your Minecraft servers</p>
+				<p class="text-xs text-muted-foreground">Sign in to manage your Minecraft servers</p>
 			{/if}
 		</div>
 
 		{#if error}
 			{#key error}
 				<div
-					class="motion-rise-in mb-6 flex items-start gap-2.5 rounded-none border-l-4 border-[#da1e28] bg-[#da1e28]/10 p-4 text-xs text-[#ff8389]"
+					class="motion-rise-in mb-6 flex items-start gap-2.5 rounded-none border-l-4 border-destructive bg-destructive/10 p-4 text-xs text-destructive-text"
 				>
 					<AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
 					<span>{error}</span>
@@ -328,7 +330,7 @@ one at https://mozilla.org/MPL/2.0/.
 				/>
 
 				<div
-					class="rounded-none border-l-4 border-[#0f62fe] bg-[#161616] p-3.5 text-xs text-[#c6c6c6]"
+					class="rounded-none border-l-4 border-primary bg-background p-3.5 text-xs text-muted-foreground"
 				>
 					{#if oidcEnabled}
 						A local admin account is required for initial setup, even with SSO enabled. This ensures
@@ -394,10 +396,10 @@ one at https://mozilla.org/MPL/2.0/.
 						{#if localAuthEnabled}
 							<div class="relative my-6 text-center">
 								<div class="absolute inset-0 flex items-center">
-									<div class="w-full border-t border-[#393939]"></div>
+									<div class="w-full border-t border-border"></div>
 								</div>
 								<span
-									class="relative bg-[#262626] px-3 text-xs tracking-wider text-[#8d8d8d] uppercase"
+									class="relative bg-card px-3 text-xs tracking-wider text-muted-foreground uppercase"
 								>
 									Or
 								</span>
@@ -419,7 +421,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<form onsubmit={handleSubmit} class="motion-fade-in space-y-4">
 					{#if inviteValid && inviteDescription}
 						<div
-							class="flex items-center gap-2 rounded-none border-l-4 border-[#198038] bg-[#198038]/15 p-3 text-xs text-[#6fdc8c]"
+							class="flex items-center gap-2 rounded-none border-l-4 border-success bg-success/15 p-3 text-xs text-success-text"
 						>
 							<TicketCheck class="h-4 w-4 shrink-0" />
 							<span>{inviteDescription}</span>
@@ -486,9 +488,9 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Recovery Drawer / Options -->
 		{#if showRecovery}
-			<div class="mt-6 space-y-4 border-t border-[#393939] pt-6">
+			<div class="mt-6 space-y-4 border-t border-border pt-6">
 				<div
-					class="rounded-none border-l-4 border-[#da1e28] bg-[#da1e28]/10 p-3.5 text-xs text-[#ff8389]"
+					class="rounded-none border-l-4 border-destructive bg-destructive/10 p-3.5 text-xs text-destructive-text"
 				>
 					<div class="mb-1 font-semibold">Warning: Destructive Reset</div>
 					This will reset panel authentication and delete all users, sessions, and invites. Server files
@@ -531,10 +533,10 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 		{:else if !authStatus.firstUserSetup}
-			<div class="mt-6 border-t border-[#393939] pt-4 text-center">
+			<div class="mt-6 border-t border-border pt-4 text-center">
 				<button
 					type="button"
-					class="inline-flex min-h-6 cursor-pointer items-center gap-1.5 rounded-none px-2 py-1 text-xs text-[#8d8d8d] transition-colors hover:text-[#f4f4f4]"
+					class="inline-flex min-h-6 cursor-pointer items-center gap-1.5 rounded-none px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
 					onclick={() => (showRecovery = true)}
 				>
 					<KeyRound class="h-3.5 w-3.5" />
@@ -546,9 +548,9 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if $authStore.anonymousAccessEnabled}
 			<div class="relative my-4 text-center">
 				<div class="absolute inset-0 flex items-center">
-					<div class="w-full border-t border-[#393939]"></div>
+					<div class="w-full border-t border-border"></div>
 				</div>
-				<span class="relative bg-[#262626] px-3 text-xs tracking-wider text-[#8d8d8d] uppercase">
+				<span class="relative bg-card px-3 text-xs tracking-wider text-muted-foreground uppercase">
 					Or
 				</span>
 			</div>

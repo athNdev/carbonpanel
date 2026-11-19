@@ -134,13 +134,13 @@ one at https://mozilla.org/MPL/2.0/.
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="file-row group flex h-[30px] cursor-pointer items-center rounded-none border-b border-l-2 border-[#222222] border-l-transparent pr-3 text-xs transition-colors select-none
+	class="file-row group flex h-[30px] cursor-pointer items-center rounded-none border-b border-l-2 border-border border-l-transparent pr-3 text-xs transition-colors select-none
 		{isSelected
-		? 'border-l-[#0f62fe] bg-[#262626] hover:bg-[#303030]'
+		? 'border-l-primary bg-card hover:bg-accent'
 		: isFocused
-			? 'bg-[#2a2a2a]'
-			: 'bg-[#161616] hover:bg-[#353535]'}
-		{isDragOver && file.isDir ? 'bg-[#0f62fe]/20 ring-1 ring-[#0f62fe]' : ''}"
+			? 'bg-card'
+			: 'bg-background hover:bg-secondary'}
+		{isDragOver && file.isDir ? 'bg-primary/20 ring-1 ring-[var(--ring)]' : ''}"
 	draggable="true"
 	data-path={file.path}
 	onclick={(e) => {
@@ -180,7 +180,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<div class="flex w-4 shrink-0 items-center justify-center">
 		{#if file.isDir}
 			<button
-				class="cursor-pointer rounded-none p-0 text-[#8d8d8d] hover:text-[#f4f4f4]"
+				class="cursor-pointer rounded-none p-0 text-muted-foreground hover:text-foreground"
 				aria-label={isExpanded ? `Collapse ${file.name}` : `Expand ${file.name}`}
 				onclick={(e) => {
 					e.stopPropagation();
@@ -198,21 +198,23 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Icon + Name -->
 	<div class="flex min-w-0 flex-1 items-center gap-1.5 pl-1 font-mono">
-		<Icon class="h-4 w-4 shrink-0 {file.isDir ? 'text-[#78a9ff]' : 'text-[#8d8d8d]'}" />
-		<span class="truncate text-[#f4f4f4]"
+		<Icon class="h-4 w-4 shrink-0 {file.isDir ? 'text-accent-text' : 'text-muted-foreground'}" />
+		<span class="truncate text-foreground"
 			>{file.name}{#if file.isDir}/{/if}</span
 		>
 	</div>
 
 	<!-- Size (right-aligned) -->
-	<span class="w-20 shrink-0 text-right font-mono text-xs text-[#8d8d8d] tabular-nums">
+	<span class="w-20 shrink-0 text-right font-mono text-xs text-muted-foreground tabular-nums">
 		{#if !file.isDir}
 			{formatBytes(Number(file.size))}
 		{/if}
 	</span>
 
 	<!-- Modified (right-aligned) -->
-	<span class="hidden w-24 shrink-0 text-right font-mono text-xs text-[#8d8d8d] sm:inline-block">
+	<span
+		class="hidden w-24 shrink-0 text-right font-mono text-xs text-muted-foreground sm:inline-block"
+	>
 		{formatModified(file.modified)}
 	</span>
 </div>

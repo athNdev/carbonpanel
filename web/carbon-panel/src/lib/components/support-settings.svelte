@@ -194,14 +194,14 @@ one at https://mozilla.org/MPL/2.0/.
 
 <div class="space-y-4">
 	<!-- Section header -->
-	<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+	<CarbonTile class="rounded-none !border-border !bg-card !p-0">
 		<div class="p-5">
 			<div class="min-w-0">
 				<div class="flex items-center gap-2">
-					<AlertCircle class="h-4 w-4 shrink-0 text-[#78a9ff]" />
-					<h2 class="truncate font-sans text-base font-semibold text-[#f4f4f4]">Support Tools</h2>
+					<AlertCircle class="h-4 w-4 shrink-0 text-accent-text" />
+					<h2 class="truncate font-sans text-base font-semibold text-foreground">Support Tools</h2>
 				</div>
-				<p class="mt-1 max-w-2xl font-sans text-xs text-[#8d8d8d]">
+				<p class="mt-1 max-w-2xl font-sans text-xs text-muted-foreground">
 					Generate and upload support bundles to help troubleshoot issues with Carbon Panel.
 				</p>
 			</div>
@@ -209,56 +209,56 @@ one at https://mozilla.org/MPL/2.0/.
 	</CarbonTile>
 
 	<!-- Support Bundle Info -->
-	<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
-		<div class="border-b border-[#393939] px-5 py-4">
-			<h3 class="font-sans text-base font-semibold text-[#f4f4f4]">
+	<CarbonTile class="rounded-none !border-border !bg-card !p-0">
+		<div class="border-b border-border px-5 py-4">
+			<h3 class="font-sans text-base font-semibold text-foreground">
 				What's included in your support bundle?
 			</h3>
-			<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
+			<p class="mt-1 font-sans text-xs text-muted-foreground">
 				We collect essential diagnostic data to help resolve issues quickly.
 			</p>
 		</div>
 
 		<!-- 1px gaps paint the Carbon dividers between cells -->
-		<div class="grid grid-cols-1 gap-px bg-[#393939] md:grid-cols-3">
-			<div class="bg-[#262626] px-5 py-4">
+		<div class="grid grid-cols-1 gap-px bg-secondary md:grid-cols-3">
+			<div class="bg-card px-5 py-4">
 				<div class="flex items-center gap-2">
 					<div
-						class="flex h-8 w-8 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+						class="flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-background"
 					>
-						<ScrollText class="h-4 w-4 text-[#78a9ff]" />
+						<ScrollText class="h-4 w-4 text-accent-text" />
 					</div>
-					<h4 class="font-sans text-sm font-semibold text-[#f4f4f4]">Application Logs</h4>
+					<h4 class="font-sans text-sm font-semibold text-foreground">Application Logs</h4>
 				</div>
-				<p class="mt-2 font-sans text-xs leading-relaxed text-[#8d8d8d]">
+				<p class="mt-2 font-sans text-xs leading-relaxed text-muted-foreground">
 					Recent log entries and error messages to track down issues.
 				</p>
 			</div>
 
-			<div class="bg-[#262626] px-5 py-4">
+			<div class="bg-card px-5 py-4">
 				<div class="flex items-center gap-2">
 					<div
-						class="flex h-8 w-8 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+						class="flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-background"
 					>
-						<Database class="h-4 w-4 text-[#78a9ff]" />
+						<Database class="h-4 w-4 text-accent-text" />
 					</div>
-					<h4 class="font-sans text-sm font-semibold text-[#f4f4f4]">Database Snapshot</h4>
+					<h4 class="font-sans text-sm font-semibold text-foreground">Database Snapshot</h4>
 				</div>
-				<p class="mt-2 font-sans text-xs leading-relaxed text-[#8d8d8d]">
+				<p class="mt-2 font-sans text-xs leading-relaxed text-muted-foreground">
 					Current configuration and server data for analysis.
 				</p>
 			</div>
 
-			<div class="bg-[#262626] px-5 py-4">
+			<div class="bg-card px-5 py-4">
 				<div class="flex items-center gap-2">
 					<div
-						class="flex h-8 w-8 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+						class="flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-background"
 					>
-						<FileArchive class="h-4 w-4 text-[#78a9ff]" />
+						<FileArchive class="h-4 w-4 text-accent-text" />
 					</div>
-					<h4 class="font-sans text-sm font-semibold text-[#f4f4f4]">System Information</h4>
+					<h4 class="font-sans text-sm font-semibold text-foreground">System Information</h4>
 				</div>
-				<p class="mt-2 font-sans text-xs leading-relaxed text-[#8d8d8d]">
+				<p class="mt-2 font-sans text-xs leading-relaxed text-muted-foreground">
 					Version and environment details for compatibility checks.
 				</p>
 			</div>
@@ -266,23 +266,23 @@ one at https://mozilla.org/MPL/2.0/.
 	</CarbonTile>
 
 	<!-- Server Selection -->
-	<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+	<CarbonTile class="rounded-none !border-border !bg-card !p-0">
 		<button
 			type="button"
-			class="focus-ring flex w-full cursor-pointer items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-[#353535]"
+			class="focus-ring flex w-full cursor-pointer items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-secondary"
 			aria-expanded={serverSectionExpanded}
 			aria-controls="support-server-selection"
 			onclick={() => (serverSectionExpanded = !serverSectionExpanded)}
 		>
 			<div class="flex min-w-0 items-start gap-3">
 				<div
-					class="flex h-8 w-8 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+					class="flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-background"
 				>
-					<Server class="h-4 w-4 text-[#78a9ff]" />
+					<Server class="h-4 w-4 text-accent-text" />
 				</div>
 				<div class="min-w-0">
-					<h3 class="font-sans text-base font-semibold text-[#f4f4f4]">Server Selection</h3>
-					<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
+					<h3 class="font-sans text-base font-semibold text-foreground">Server Selection</h3>
+					<p class="mt-1 font-sans text-xs text-muted-foreground">
 						{#if selectedServerIds.size === 0}
 							Include all servers (default)
 						{:else}
@@ -292,30 +292,30 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			</div>
 			<div
-				class="flex h-8 w-8 shrink-0 items-center justify-center border border-[#393939] bg-[#161616]"
+				class="flex h-8 w-8 shrink-0 items-center justify-center border border-border bg-background"
 			>
 				{#if serverSectionExpanded}
-					<ChevronUp class="h-4 w-4 text-[#c6c6c6]" />
+					<ChevronUp class="h-4 w-4 text-muted-foreground" />
 				{:else}
-					<ChevronDown class="h-4 w-4 text-[#c6c6c6]" />
+					<ChevronDown class="h-4 w-4 text-muted-foreground" />
 				{/if}
 			</div>
 		</button>
 
 		{#if serverSectionExpanded}
-			<div id="support-server-selection" class="border-t border-[#393939] px-5 py-4">
+			<div id="support-server-selection" class="border-t border-border px-5 py-4">
 				{#if loadingServers}
 					<div class="flex items-center justify-center py-4">
 						<CarbonInlineLoading description="Loading servers..." />
 					</div>
 				{:else if servers.length === 0}
-					<p class="py-4 text-center font-sans text-xs text-[#8d8d8d]">
+					<p class="py-4 text-center font-sans text-xs text-muted-foreground">
 						No servers found. All available data will be included.
 					</p>
 				{:else}
 					<div class="space-y-3">
 						<div class="flex flex-wrap items-center justify-between gap-2">
-							<p class="min-w-0 flex-1 font-sans text-xs text-[#8d8d8d]">
+							<p class="min-w-0 flex-1 font-sans text-xs text-muted-foreground">
 								Select specific servers to include their logs and configurations.
 							</p>
 							<div class="flex flex-wrap items-center gap-2">
@@ -337,22 +337,22 @@ one at https://mozilla.org/MPL/2.0/.
 							{#each servers as server (server.id)}
 								{@const selected = selectedServerIds.has(server.id)}
 								<label
-									class="flex cursor-pointer items-start gap-3 border bg-[#161616] p-3 transition-colors {selected
-										? 'border-[#0f62fe]'
-										: 'border-[#393939] hover:border-[#525252]'}"
+									class="flex cursor-pointer items-start gap-3 border bg-background p-3 transition-colors {selected
+										? 'border-primary'
+										: 'border-border hover:border-border'}"
 								>
 									<input
 										type="checkbox"
-										class="focus-ring mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-[#0f62fe]"
+										class="focus-ring mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-primary"
 										checked={selected}
 										onchange={() => toggleServer(server.id)}
 									/>
 									<span class="min-w-0 flex-1">
 										<span
-											class="block truncate font-sans text-sm text-[#f4f4f4]"
+											class="block truncate font-sans text-sm text-foreground"
 											title={server.name}>{server.name}</span
 										>
-										<span class="mt-0.5 block truncate font-mono text-[11px] text-[#8d8d8d]">
+										<span class="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
 											{server.mcVersion || 'Unknown version'}
 										</span>
 									</span>
@@ -366,15 +366,15 @@ one at https://mozilla.org/MPL/2.0/.
 	</CarbonTile>
 
 	<!-- User Contact & Issue Information -->
-	<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
-		<div class="border-b border-[#393939] px-5 py-4">
+	<CarbonTile class="rounded-none !border-border !bg-card !p-0">
+		<div class="border-b border-border px-5 py-4">
 			<div class="flex items-center gap-2">
-				<MessageSquare class="h-4 w-4 shrink-0 text-[#78a9ff]" />
-				<h3 class="font-sans text-base font-semibold text-[#f4f4f4]">
+				<MessageSquare class="h-4 w-4 shrink-0 text-accent-text" />
+				<h3 class="font-sans text-base font-semibold text-foreground">
 					Contact &amp; Issue Details
 				</h3>
 			</div>
-			<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
+			<p class="mt-1 font-sans text-xs text-muted-foreground">
 				Optional information to help us respond to your support request.
 			</p>
 		</div>
@@ -386,7 +386,7 @@ one at https://mozilla.org/MPL/2.0/.
 					label="Discord username"
 					placeholder="username#1234"
 					bind:value={discordUsername}
-					class="[&_input]:bg-[#161616]"
+					class="[&_input]:bg-background"
 				/>
 				<CarbonTextInput
 					id="email"
@@ -394,20 +394,20 @@ one at https://mozilla.org/MPL/2.0/.
 					type="email"
 					placeholder="you@example.com"
 					bind:value={email}
-					class="[&_input]:bg-[#161616]"
+					class="[&_input]:bg-background"
 				/>
 				<CarbonTextInput
 					id="github"
 					label="GitHub username"
 					placeholder="username"
 					bind:value={githubUsername}
-					class="[&_input]:bg-[#161616]"
+					class="[&_input]:bg-background"
 				/>
 			</div>
 
 			<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
 				<div class="space-y-1">
-					<label for="description" class="font-sans text-xs tracking-[0.32px] text-[#f4f4f4]">
+					<label for="description" class="font-sans text-xs tracking-[0.32px] text-foreground">
 						Issue Description
 					</label>
 					<textarea
@@ -415,12 +415,12 @@ one at https://mozilla.org/MPL/2.0/.
 						rows={3}
 						placeholder="Describe the issue you're experiencing..."
 						bind:value={issueDescription}
-						class="focus-ring w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-sans text-sm text-[#f4f4f4] transition-colors placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+						class="focus-ring w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-sans text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-border"
 					></textarea>
 				</div>
 
 				<div class="space-y-1">
-					<label for="steps" class="font-sans text-xs tracking-[0.32px] text-[#f4f4f4]">
+					<label for="steps" class="font-sans text-xs tracking-[0.32px] text-foreground">
 						Steps to Reproduce
 					</label>
 					<textarea
@@ -428,7 +428,7 @@ one at https://mozilla.org/MPL/2.0/.
 						rows={3}
 						placeholder="1. Go to...&#10;2. Click on...&#10;3. See error..."
 						bind:value={stepsToReproduce}
-						class="focus-ring w-full resize-none rounded-none border border-[#393939] bg-[#161616] px-4 py-2 font-sans text-sm text-[#f4f4f4] transition-colors placeholder:text-[#6f6f6f] focus:border-[#8d8d8d]"
+						class="focus-ring w-full resize-none rounded-none border border-border bg-background px-4 py-2 font-sans text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-border"
 					></textarea>
 				</div>
 			</div>
@@ -436,9 +436,11 @@ one at https://mozilla.org/MPL/2.0/.
 	</CarbonTile>
 
 	<!-- Action Buttons -->
-	<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
+	<CarbonTile class="rounded-none !border-border !bg-card !p-0">
 		<div class="p-5">
-			<p class="font-mono text-[11px] tracking-wider text-[#8d8d8d] uppercase">Support bundle</p>
+			<p class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">
+				Support bundle
+			</p>
 			<div class="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
 				<CarbonButton
 					kind="secondary"
@@ -468,7 +470,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<span>{uploading ? 'Uploading...' : 'Upload to support'}</span>
 				</CarbonButton>
 			</div>
-			<p class="mt-3 font-sans text-xs text-[#8d8d8d]">
+			<p class="mt-3 font-sans text-xs text-muted-foreground">
 				Generate keeps a local copy of the support data. Upload sends it directly to the support
 				team.
 			</p>
@@ -477,15 +479,15 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Download Ready -->
 	{#if bundlePath}
-		<div
-			class="motion-fade-in flex flex-wrap items-center gap-3 border border-[#24a148] bg-[#262626] p-5"
-		>
-			<CheckCircle2 class="h-4 w-4 shrink-0 text-[#24a148]" />
+		<div class="motion-fade-in flex flex-wrap items-center gap-3 border border-success bg-card p-5">
+			<CheckCircle2 class="h-4 w-4 shrink-0 text-success-text" />
 			<div class="min-w-0 flex-1">
-				<p class="font-sans text-sm font-semibold text-[#f4f4f4]">
+				<p class="font-sans text-sm font-semibold text-foreground">
 					Support bundle ready for download
 				</p>
-				<p class="mt-1 font-sans text-xs text-[#8d8d8d]">Bundle will be deleted after download.</p>
+				<p class="mt-1 font-sans text-xs text-muted-foreground">
+					Bundle will be deleted after download.
+				</p>
 			</div>
 			<CarbonButton
 				kind="secondary"
@@ -501,27 +503,27 @@ one at https://mozilla.org/MPL/2.0/.
 
 	<!-- Upload Success -->
 	{#if referenceId}
-		<div class="motion-fade-in border border-[#24a148] bg-[#262626]">
+		<div class="motion-fade-in border border-success bg-card">
 			<div class="flex items-start gap-3 p-5">
-				<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-[#24a148]" />
+				<CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0 text-success-text" />
 				<div class="min-w-0 flex-1 space-y-4">
 					<div>
-						<p class="font-sans text-sm font-semibold text-[#f4f4f4]">
+						<p class="font-sans text-sm font-semibold text-foreground">
 							Support bundle uploaded successfully
 						</p>
-						<p class="mt-1 font-sans text-xs text-[#8d8d8d]">
+						<p class="mt-1 font-sans text-xs text-muted-foreground">
 							Include this reference ID when you contact support.
 						</p>
 					</div>
 
 					<!-- Reference ID Display -->
 					<div class="space-y-2">
-						<p class="font-mono text-[11px] tracking-wider text-[#8d8d8d] uppercase">
+						<p class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">
 							Reference ID
 						</p>
 						<div class="flex items-center gap-2">
 							<code
-								class="min-w-0 flex-1 truncate border border-[#393939] bg-[#161616] px-3 py-2 font-mono text-sm text-[#f4f4f4]"
+								class="min-w-0 flex-1 truncate border border-border bg-background px-3 py-2 font-mono text-sm text-foreground"
 							>
 								{referenceId}
 							</code>
@@ -538,11 +540,11 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 					</div>
 
-					<div class="border-t border-[#393939] pt-3">
-						<p class="font-sans text-xs font-semibold text-[#f4f4f4]">
+					<div class="border-t border-border pt-3">
+						<p class="font-sans text-xs font-semibold text-foreground">
 							Please include this reference ID when:
 						</p>
-						<ul class="mt-1 space-y-1 font-sans text-xs text-[#a8a8a8]">
+						<ul class="mt-1 space-y-1 font-sans text-xs text-muted-foreground">
 							<li>Requesting help in our Discord server</li>
 							<li>Creating an issue on GitHub</li>
 							<li>Contacting support directly</li>
@@ -553,7 +555,7 @@ one at https://mozilla.org/MPL/2.0/.
 						href="https://github.com/athNdev/carbon-panel"
 						target="_blank"
 						rel="noopener noreferrer"
-						class="focus-ring inline-flex items-center gap-1 font-sans text-xs text-[#78a9ff] hover:text-[#a6c8ff] hover:underline"
+						class="focus-ring inline-flex items-center gap-1 font-sans text-xs text-accent-text hover:text-accent-text hover:underline"
 					>
 						For more info and links to Discord/GitHub, please visit our site!
 						<ExternalLink class="h-3 w-3" />
@@ -564,12 +566,14 @@ one at https://mozilla.org/MPL/2.0/.
 	{/if}
 
 	<!-- Privacy Notice -->
-	<CarbonTile class="rounded-none !border-[#393939] !bg-[#262626] !p-0">
-		<div class="flex items-start gap-3 bg-[#161616] p-5">
-			<AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-[#8d8d8d]" />
+	<CarbonTile class="rounded-none !border-border !bg-card !p-0">
+		<div class="flex items-start gap-3 bg-background p-5">
+			<AlertCircle class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 			<div class="min-w-0 space-y-1">
-				<p class="font-mono text-[11px] tracking-wider text-[#8d8d8d] uppercase">Privacy notice</p>
-				<p class="font-sans text-xs leading-relaxed text-[#a8a8a8]">
+				<p class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">
+					Privacy notice
+				</p>
+				<p class="font-sans text-xs leading-relaxed text-muted-foreground">
 					Support bundles contain server configurations, logs, and database information. While we
 					take privacy seriously and handle your data securely, please review the bundle contents
 					before uploading if you have sensitive information.

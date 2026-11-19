@@ -25,14 +25,14 @@ test('selection never shifts the row (border space is reserved)', () => {
 		row.includes('border-l-transparent'),
 		'rows must reserve the accent-border space when unselected'
 	);
-	assert.ok(row.includes('border-l-[#0f62fe]'), 'selection must use the accent border');
+	assert.ok(row.includes('border-l-primary'), 'selection must use the accent border token');
 });
 
 test('context menu is Carbon-square, not rounded shadcn', () => {
 	assert.ok(menu.includes('rounded-none'), 'menu and items must be square');
 	assert.doesNotMatch(menu, /rounded-md/, 'menu must not use the rounded popover shell');
 	assert.doesNotMatch(menu, /rounded-sm/, 'menu items must not be rounded');
-	assert.ok(menu.includes('bg-[#161616]'), 'menu must sit on the shell surface');
+	assert.ok(menu.includes('bg-background'), 'menu must sit on the themed shell surface');
 });
 
 test('right-click selects the row under the cursor', () => {
@@ -46,7 +46,7 @@ test('right-click selects the row under the cursor', () => {
 
 test('hover keeps the selected row visually selected', () => {
 	assert.ok(
-		row.includes('hover:bg-[#303030]'),
+		row.includes('border-l-primary bg-card hover:bg-accent'),
 		'a selected row needs its own hover shade, not the plain-row shade'
 	);
 });

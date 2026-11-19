@@ -15,10 +15,10 @@ one at https://mozilla.org/MPL/2.0/.
 		base: 'inline-flex w-fit shrink-0 items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-none border px-2 py-0.5 text-xs font-normal tracking-wide transition-colors [&>svg]:pointer-events-none [&>svg]:size-3',
 		variants: {
 			variant: {
-				default: 'bg-[#0043ce]/20 border-[#0f62fe] text-[#78a9ff]',
-				secondary: 'bg-[#393939] border-[#525252] text-[#f4f4f4]',
-				destructive: 'bg-[#da1e28]/20 border-[#da1e28] text-[#ff8389]',
-				outline: 'bg-transparent border-[#525252] text-[#c6c6c6]'
+				default: 'bg-primary/20 border-primary text-accent-text',
+				secondary: 'bg-secondary border-border text-foreground',
+				destructive: 'bg-destructive/20 border-destructive text-destructive-text',
+				outline: 'bg-transparent border-border text-muted-foreground'
 			}
 		},
 		defaultVariants: {
