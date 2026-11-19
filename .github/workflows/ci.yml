@@ -49,6 +49,41 @@ jobs:
       - name: Run Backend Test Suite
         run: make test
 
+  # OSS-406: the STRICT MCP full-coverage gate and the real-binary stdio
+  # conformance harness are ordinary CI, not only the dispatch-only MCP
+  # publication lane. Deliberately NOT path-gated: a newly unmounted supported
+  # operation must make CI RED for every change, so there is no skip path.
+  mcp-coverage:
+    name: MCP Full Coverage & stdio Conformance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: 'go.mod' # pinned to Go 1.26.11 by the repository
+          cache: true
+
+      # Reused verbatim from the publication lane. No continue-on-error: the
+      # gate (and its fail-closed negative fixture) must fail this job.
+      - name: STRICT MCP full-coverage gate (fail-closed)
+        run: bash scripts/mcp-full-coverage-gate.sh
+
+      - name: Assert generated MCP artifacts are byte-reproducible
+        run: bash scripts/mcp-generated-artifacts-check.sh
+
+      - name: Build the real MCP stdio binary
+        run: go build -o "$RUNNER_TEMP/carbonpanel-mcp" ./cmd/carbonpanel-mcp
+
+      # Reuses the existing harness: PUBLIC tools/list + a read-only
+      # tools/call against the compiled cmd/carbonpanel-mcp over real stdio,
+      # with a disposable owned Connect mock (no live panel or real credential).
+      - name: stdio conformance against cmd/carbonpanel-mcp
+        run: python3 scripts/test_mcp_real_binary.py --binary "$RUNNER_TEMP/carbonpanel-mcp" --evidence validation/mcp/mcp-real-binary-smoke.json
+
   test-windows-compile:
     name: Windows Compile Test
     runs-on: ubuntu-latest
