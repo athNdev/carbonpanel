@@ -188,6 +188,22 @@ one at https://mozilla.org/MPL/2.0/.
 				/>
 			{/if}
 		</div>
+
+		<!--
+			Every tab needs a real panel target for aria-controls. Only the
+			selected panel owns content; unselected panels stay hidden so the
+			Settings surface does not mount every form at once.
+		-->
+		{#each settingsTabs as tab (tab.id)}
+			{#if tab.id !== activeTab}
+				<div
+					id={`settings-tabs-panel-${tab.id}`}
+					role="tabpanel"
+					aria-labelledby={`settings-tabs-tab-${tab.id}`}
+					hidden
+				></div>
+			{/if}
+		{/each}
 	</div>
 </div>
 
