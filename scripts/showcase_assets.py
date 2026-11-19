@@ -116,6 +116,71 @@ def inspect_png(path: Path) -> tuple[int, int, int]:
     return width, height, len(data)
 
 
+def png_nonblack_ratio(data: bytes) -> float:
+    """Sample decoded pixels; a map canvas that painted nothing is mostly black.
+
+    Only the common 8-bit RGB/RGBA, non-interlaced PNG layout emitted by the
+    browser screenshot path is handled; anything else is treated as unverifiable
+    and fails closed at the caller.
+    """
+    offset = 8
+    width = height = 0
+    color_type = bit_depth = interlace = 0
+    idat = bytearray()
+    while offset < len(data):
+        (length,) = struct.unpack(">I", data[offset : offset + 4])
+        kind = data[offset + 4 : offset + 8]
+        body = data[offset + 8 : offset + 8 + length]
+        if kind == b"IHDR":
+            width, height, bit_depth, color_type, _, _, interlace = struct.unpack(">IIBBBBB", body)
+        elif kind == b"IDAT":
+            idat.extend(body)
+        offset += 12 + length
+    if bit_depth != 8 or color_type not in (2, 6) or interlace != 0 or not width or not height:
+        raise AssetError("screenshot PNG is not an 8-bit RGB/RGBA non-interlaced image")
+    channels = 3 if color_type == 2 else 4
+    stride = width * channels
+    raw = zlib.decompress(bytes(idat))
+    expected = height * (stride + 1)
+    if len(raw) < expected:
+        raise AssetError("screenshot PNG pixel data is truncated")
+    previous = bytearray(stride)
+    position = 0
+    nonblack = sampled = 0
+    for _ in range(height):
+        filter_type = raw[position]
+        scanline = bytearray(raw[position + 1 : position + 1 + stride])
+        position += 1 + stride
+        for index in range(stride):
+            left = scanline[index - channels] if index >= channels else 0
+            above = previous[index]
+            upper_left = previous[index - channels] if index >= channels else 0
+            if filter_type == 1:
+                scanline[index] = (scanline[index] + left) & 0xFF
+            elif filter_type == 2:
+                scanline[index] = (scanline[index] + above) & 0xFF
+            elif filter_type == 3:
+                scanline[index] = (scanline[index] + ((left + above) // 2)) & 0xFF
+            elif filter_type == 4:
+                predictor = left + above - upper_left
+                distances = (
+                    abs(predictor - left),
+                    abs(predictor - above),
+                    abs(predictor - upper_left),
+                )
+                chosen = (left, above, upper_left)[distances.index(min(distances))]
+                scanline[index] = (scanline[index] + chosen) & 0xFF
+            elif filter_type != 0:
+                raise AssetError(f"unsupported PNG scanline filter {filter_type}")
+        for column in range(0, width, 37):
+            base = column * channels
+            sampled += 1
+            if max(scanline[base : base + 3]) > 24:
+                nonblack += 1
+        previous = scanline
+    return nonblack / sampled if sampled else 0.0
+
+
 def scan_secrets(data: bytes, label: str) -> None:
     for pattern in SECRET_PATTERNS:
         if pattern.search(data):
@@ -314,6 +379,12 @@ def validate(args: argparse.Namespace) -> None:
         width, height, size = inspect_png(path)
         data = path.read_bytes()
         scan_secrets(data, path.name)
+        if image["name"] == "showcase-world-view":
+            nonblack = png_nonblack_ratio(data)
+            if nonblack < 0.05:
+                raise AssetError(
+                    f"rendered map canvas is blank ({nonblack:.1%} non-black pixels); refusing to publish"
+                )
         if sha256_bytes(data) != image.get("sha256"):
             raise AssetError(f"{path.name}: SHA256 does not match manifest")
         if image.get("path") != f"{ASSET_DIR}/{image['name']}.png":

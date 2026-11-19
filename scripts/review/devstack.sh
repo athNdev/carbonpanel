@@ -533,7 +533,7 @@ up)
 			# the newly created container after the restart.
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
-				if start_map_server "${server_path}/modules/bluemap"; then
+				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" world; then
 					# The renderer container and the panel restart are asynchronous.
 					# Only a semantic readiness signal may unblock the worlds
 					# capture: the served web root must answer AND the panel must

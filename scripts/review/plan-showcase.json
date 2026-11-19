@@ -471,9 +471,19 @@
       "name": "renderer canvas with real map tiles is visible"
     },
     {
+      "assertNoFailedTileResponses": true,
+      "feature": "worlds",
+      "name": "all proxied map asset requests succeeded"
+    },
+    {
       "wait": 5000,
       "feature": "worlds",
       "name": "let real tiles paint"
+    },
+    {
+      "assertNoFailedTileResponses": true,
+      "feature": "worlds",
+      "name": "no tile/texture failures after painting"
     },
     {
       "screenshot": "showcase-world-view",
