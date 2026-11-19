@@ -3,18 +3,76 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 version: 2
+
+# Routine version updates across all configured ecosystems are consolidated
+# into one weekly pull request. Security updates are assigned to per-ecosystem
+# groups below so an urgent fix is never held behind the routine bundle.
+# See https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/secure-your-dependencies/configuring-multi-ecosystem-updates
+multi-ecosystem-groups:
+  routine-dependencies:
+    schedule:
+      interval: "weekly"
+
+# Dependabot groups are scoped to a manifest DIRECTORY entry: a group defined
+# in one `updates` entry never groups dependencies from another entry, even
+# when the group names are similar. Every directory that has its own manifest
+# therefore carries its own `applies-to: security-updates` group here. Keep
+# these entries and their directories in sync when a new manifest is added.
+# Advisories with no patched release are tracked by the recurring review in
+# docs/dependency-security-review.md, not by an update group that cannot exist.
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-actions:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-gomod:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
   - package-ecosystem: "bun"
     directory: "/web/carbon-panel"
     schedule:
       interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-bun:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
+  - package-ecosystem: "npm"
+    directory: "/docs/carbon-panel"
+    schedule:
+      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-docs-npm:
+        applies-to: "security-updates"
+        patterns: ["*"]
+
+  - package-ecosystem: "bun"
+    directory: "/scripts/manual-review/e2e"
+    schedule:
+      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "routine-dependencies"
+    groups:
+      security-e2e-bun:
+        applies-to: "security-updates"
+        patterns: ["*"]

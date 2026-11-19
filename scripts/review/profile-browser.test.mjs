@@ -7,6 +7,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { reviewCommand } from './run.mjs';
+import { reviewBrowserVersion } from './browser.mjs';
 
 test('both real-browser profiles fail closed when login stays on the login page', { timeout: 60000 }, async () => {
   const owned = mkdtempSync(join(tmpdir(), 'carbon-review-login-'));
@@ -41,7 +42,7 @@ test('both real-browser profiles fail closed when login stays on the login page'
       assert.equal(report.profile, profile);
       assert.equal(report.status, 'failed');
       assert.equal(report.scope, 'ui-review');
-      assert.equal(report.driver.driverVersion, '1.49.1');
+      assert.equal(report.driver.driverVersion, reviewBrowserVersion);
     }
     assert.equal(postLoginVisits, 0);
     for (const [name, steps, status, exit] of [
