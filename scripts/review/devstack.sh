@@ -534,8 +534,26 @@ up)
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
 				if start_map_server "${server_path}/modules/bluemap"; then
-					renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | json_path 'targets.0.rendererState')"
+					# The renderer container and the panel restart are asynchronous.
+					# Only a semantic readiness signal may unblock the worlds
+					# capture: the served web root must answer AND the panel must
+					# report READY. Fail closed if that never happens.
+					ready_deadline=$((SECONDS + 120))
+					renderer_state=""
+					while ((SECONDS < ready_deadline)); do
+						if docker exec "${NAME}-bluemap" python -c \
+							'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8100/settings.json", timeout=2).read()' >/dev/null 2>&1; then
+							renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | json_path 'targets.0.rendererState')"
+							if [ "${renderer_state}" = "RENDERER_STATE_READY" ]; then
+								break
+							fi
+						fi
+						sleep 1
+					done
 					echo "review renderer state: ${renderer_state:-unknown}" >&2
+					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
+						echo "review renderer never became READY; worlds capture will fail closed" >&2
+					fi
 				else
 					echo "review map server container failed to start" >&2
 				fi
