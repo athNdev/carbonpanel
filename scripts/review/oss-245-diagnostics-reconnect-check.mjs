@@ -24,7 +24,7 @@ const { default: tailwind } = await import(
 
 const scenarioIndex = process.argv.indexOf('--scenario');
 const scenario = scenarioIndex >= 0 ? process.argv[scenarioIndex + 1] : 'all';
-const scenarios = ['stale-listing', 'auth-fail', 'non-idempotent', 'recreation'];
+const scenarios = ['stale-listing', 'auth-fail', 'non-idempotent', 'recreation', 'snapshot-race'];
 if (scenario !== 'all' && !scenarios.includes(scenario)) {
 	throw new Error(`Unknown OSS-245 scenario ${scenario}; expected one of ${scenarios.join(', ')}`);
 }
@@ -121,6 +121,7 @@ async function run(page, base) {
 	}
 
 	if (scenario === 'all' || scenario === 'auth-fail') {
+		await page.addInitScript(() => localStorage.setItem('auth_token', 'seeded-token'));
 		await open(page, base);
 		await page.evaluate(() =>
 			globalThis.__oss245Rpc.resolveListing(0, [{ message: 'BEFORE-AUTH-FAIL' }])
@@ -144,6 +145,11 @@ async function run(page, base) {
 		assert.equal(state.error, 'Authentication failed');
 		assert.ok(state.closeCalls.length >= 1, 'the rejected socket must be dropped');
 		assert.equal(state.socketCount, 1, 'no replacement socket may be created');
+		assert.equal(
+			await page.evaluate(() => localStorage.getItem('auth_token')),
+			null,
+			'the rejected session token must be cleared'
+		);
 		// Wait past the console's five-second fallback poll interval.
 		await page.waitForTimeout(5500);
 		assert.deepEqual(await counts(), before, 'signed-out console must not keep polling');
@@ -215,6 +221,33 @@ async function run(page, base) {
 		assert.ok(!text.includes('OLD-CONTAINER-STALE-LINE'), 'old-container listing must be dropped');
 		assert.ok(text.includes('AFTER-RECREATE-LIVE'), 'the subscription must keep delivering');
 		console.log('PASS: console subscription survives recreation with live delivery (Chromium)');
+	}
+
+	if (scenario === 'all' || scenario === 'snapshot-race') {
+		await open(page, base);
+		await page.evaluate(() =>
+			globalThis.__oss245Rpc.resolveListing(0, [{ message: 'LISTING-BASELINE' }])
+		);
+		await page.waitForFunction(() =>
+			document.querySelector('[role="log"]')?.textContent?.includes('LISTING-BASELINE')
+		);
+		// Leave an RPC listing in flight, then deliver a newer full snapshot.
+		await page.getByRole('button', { name: 'Refresh logs' }).click();
+		await page.waitForFunction(() => globalThis.__oss245Rpc.counts().listings >= 2);
+		await page.evaluate(() => globalThis.__oss245Ws.emitLogs('server-A', ['FRESH-SNAPSHOT']));
+		await flush();
+		await page.waitForFunction(() =>
+			document.querySelector('[role="log"]')?.textContent?.includes('FRESH-SNAPSHOT')
+		);
+		await page.evaluate(() =>
+			globalThis.__oss245Rpc.resolveListing(1, [{ message: 'SLOW-STALE-LISTING' }])
+		);
+		await flush();
+		await page.waitForTimeout(250);
+		const text = await logText();
+		assert.ok(text.includes('FRESH-SNAPSHOT'), 'the newer full snapshot must stay rendered');
+		assert.ok(!text.includes('SLOW-STALE-LISTING'), 'an older listing must not repaint it');
+		console.log('PASS: a full WebSocket snapshot fences an in-flight listing (Chromium)');
 	}
 }
 

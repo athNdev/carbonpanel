@@ -61,3 +61,9 @@ test.skipIf(!live)(
 	() => runScenario('recreation'),
 	LIVE_TIMEOUT_MS
 );
+
+test.skipIf(!live)(
+	'a full WebSocket snapshot fences an in-flight listing (Chromium)',
+	() => runScenario('snapshot-race'),
+	LIVE_TIMEOUT_MS
+);
