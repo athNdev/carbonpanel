@@ -127,6 +127,17 @@ try {
         "@lucide/svelte",
         "@lucide/svelte/icons/x",
         "tailwind-merge",
+        // These are discovered only after the fixture mounts unless they are
+        // pre-bundled; late discovery forces a Vite 8 reload that can wipe the
+        // dialog mid-test.
+        "@bufbuild/protobuf",
+        "@bufbuild/protobuf/codegenv2",
+        "@bufbuild/protobuf/wkt",
+        "@lucide/svelte/icons/check",
+        "@lucide/svelte/icons/chevron-down",
+        "@lucide/svelte/icons/chevron-up",
+        "@lucide/svelte/icons/minus",
+        "tailwind-variants",
       ],
     },
   };
