@@ -10,7 +10,7 @@ import unittest
 
 from scripts import version_contract as vc
 from scripts.build_website import render_versions_page
-from scripts.check_website import check_channels, check_versions
+from scripts.check_website import check_channels, check_marker, check_versions
 
 ROOT = Path(__file__).resolve().parent.parent
 STABLE_SHA = "f88748be6a216b187e675bbb1f110df07e544148"
@@ -94,6 +94,54 @@ class VersionContractTests(unittest.TestCase):
         with self.assertRaises(ValueError) as raised:
             vc.validate(stale, self.catalog, ROOT)
         self.assertIn("stale nightly baseline digest", str(raised.exception))
+
+    def test_candidate_artifact_uses_non_active_staging_path(self):
+        index = vc.version_index(self.contract, self.catalog, ROOT)
+        staging = vc.candidate_route(NIGHTLY_SHA)
+        self.assertEqual(staging, f"/docs/candidate/{NIGHTLY_SHA}/")
+        with self.assertRaises(ValueError):
+            vc.candidate_route("main")
+        expect = {"revision": NIGHTLY_SHA, "digest": "sha256:" + "c" * 64,
+                  "state": "candidate", "receipt": "OSS-413-candidate"}
+        promoted = vc.apply_promotion(self.contract, expect)
+        candidate = vc.candidate_index(
+            vc.version_index(promoted, self.catalog, ROOT), NIGHTLY_SHA, expect["receipt"])
+        marker = vc.channel_marker(candidate)
+        self.assertEqual(marker["channels"]["nightly"]["route"], staging)
+        self.assertEqual(marker["channels"]["nightly"]["revision"], NIGHTLY_SHA)
+        self.assertEqual(marker["promotion"]["state"], "candidate")
+        self.assertEqual(marker["channels"]["stable"]["route"], "/docs/")
+        self.assertEqual(marker["channels"]["stable"]["pinned_url"],
+                         f"{index['repository']}/commit/{STABLE_SHA}")
+        nightly_versions = [v for v in candidate["versions"] if v["channel"] == "nightly"]
+        self.assertEqual(nightly_versions[0]["route"], staging)
+        self.assertNotIn(vc.CHANNEL_ROUTES["nightly"],
+                         [v["route"] for v in candidate["versions"] if v["channel"] == "nightly"])
+
+    def test_candidate_marker_fails_closed_without_exact_input(self):
+        index = vc.version_index(self.contract, self.catalog, ROOT)
+        expect = {"revision": NIGHTLY_SHA, "digest": "sha256:" + "c" * 64,
+                  "state": "candidate", "receipt": "OSS-413-candidate"}
+        promoted = vc.apply_promotion(self.contract, expect)
+        candidate = vc.candidate_index(
+            vc.version_index(promoted, self.catalog, ROOT), NIGHTLY_SHA, expect["receipt"])
+        errors = []
+        check_channels(candidate, errors, expect)
+        self.assertEqual(errors, [])
+        errors = []
+        check_channels(candidate, errors)
+        self.assertTrue(any("route must be" in item and "/docs/nightly/" in item
+                            for item in errors))
+        self.assertTrue(any("promotion claim disagrees" in item for item in errors))
+        with tempfile.TemporaryDirectory() as temporary:
+            site = Path(temporary)
+            (site / "channel-marker.json").write_text(
+                json.dumps(vc.channel_marker(candidate)), encoding="utf-8")
+            self.assertEqual(check_marker(site, candidate, expect), [])
+            self.assertTrue(any("state is not the qualified final" in item
+                                for item in check_marker(site, candidate, {
+                                    "revision": NIGHTLY_SHA,
+                                    "digest": expect["digest"], "state": "final"})))
 
     def test_registry_refs_are_recorded_for_both_channels(self):
         for name in vc.CHANNEL_NAMES:

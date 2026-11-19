@@ -431,6 +431,29 @@ def version_index(contract, catalog=None, root=ROOT):
     }
 
 
+def candidate_route(revision):
+    """Non-active staging path for a candidate probe; never a canonical route."""
+    if not isinstance(revision, str) or not SHA.fullmatch(revision):
+        raise ValueError("candidate revision must be a full 40-hex commit")
+    return f"/docs/candidate/{revision}/"
+
+
+def candidate_index(index, revision, receipt):
+    """Artifact-only index for an uncommitted candidate channel promotion."""
+    updated = copy.deepcopy(index)
+    route = candidate_route(revision)
+    nightly = updated["channels"]["nightly"]
+    nightly["route"] = route
+    nightly["promotion"] = {"state": "candidate", "promoted": True, "receipt": receipt}
+    for version in updated["versions"]:
+        if version["channel"] == "nightly":
+            version["route"] = route
+            version["immutable_route"] = route
+            version["home_route"] = route
+    updated["promotion"] = {"state": "candidate", "promoted": True}
+    return updated
+
+
 def channel_marker(index):
     """Public, verifiable per-channel marker for a candidate/final deployment."""
     channels = {}

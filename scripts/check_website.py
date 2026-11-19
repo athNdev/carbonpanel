@@ -255,11 +255,13 @@ def check_sitemap(root, pages, base, site, errors, bases):
         errors.append("sitemap.xml: " + "; ".join(details))
 
 
-def check_versions(root, index, errors):
+def check_versions(root, index, errors, staging_route=None):
     """Direct URL validation, identity agreement and negative cases."""
     excluded = {"v1.0.38", "v3.0.0-beta.4"}
     documented = set()
     for version in index.get("versions", []):
+        if staging_route and version["route"] != staging_route:
+            continue  # canonical routes remain on the active verified receipt
         tag = version["tag"]
         documented.add(tag)
         if tag in excluded:
@@ -313,6 +315,8 @@ def check_channels(index, errors, expect=None):
         qualified = expect and expect.get("revision") and name == "nightly"
         if qualified:
             expected = copy.deepcopy(expected)
+            if expect.get("state") == "candidate":
+                expected["route"] = vc.candidate_route(expect["revision"])
             expected["commit"] = expect["revision"]
             expected["image"] = dict(expected["image"],
                                      revision=expect["revision"],
@@ -336,8 +340,9 @@ def check_channels(index, errors, expect=None):
             errors.append(f"{name}: mismatched image revision marker")
         if channel.get("display") != vc.CHANNEL_DISPLAY[name]:
             errors.append(f"{name}: public selector may only use {vc.CHANNEL_DISPLAY[name]!r}")
-        if channel.get("route") != vc.CHANNEL_ROUTES[name]:
-            errors.append(f"{name}: canonical route must be {vc.CHANNEL_ROUTES[name]!r}")
+        expected_route = expected.get("route", vc.CHANNEL_ROUTES[name])
+        if channel.get("route") != expected_route:
+            errors.append(f"{name}: route must be {expected_route!r}")
         promotion = channel.get("promotion") or {}
         if promotion.get("promoted") is not expected.get("promotion", {}).get("promoted"):
             errors.append(f"{name}: promotion claim disagrees with the expected channel")
@@ -499,10 +504,19 @@ def check_version_ui(root, page, index, bases, errors, marker=None):
 
 def check(root, base="/", site="https://carbonpanel.dev", expect=None):
     errors = []
-    bases = bases_from_index(root, base)
     pages = list(root.rglob("*.html"))
     index_path = root / "version-index.json"
     index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else None
+    staging_route = None
+    if index is not None:
+        staging_route = next(
+            (channel["route"] for channel in index.get("channels", {}).values()
+             if channel.get("promotion", {}).get("state") == "candidate"
+             and channel.get("promotion", {}).get("promoted")), None)
+        if staging_route and not staging_route.startswith("/docs/candidate/"):
+            errors.append(f"candidate route {staging_route} is not a non-active staging path")
+            staging_route = None
+    bases = [staging_route] if staging_route else bases_from_index(root, base)
     marker_errors = check_marker(root, index, expect) if index is not None else []
     errors.extend(marker_errors)
     marker = None
@@ -521,6 +535,8 @@ def check(root, base="/", site="https://carbonpanel.dev", expect=None):
             target = urlsplit(urljoin(page_url, link))
             if target.netloc != urlsplit(site).netloc or target.scheme not in ("http", "https"):
                 continue
+            if staging_route and not target.path.startswith(staging_route):
+                continue  # canonical paths belong to the active receipt, not this candidate
             if any(f"/docs/versions/{retired}/" in target.path for retired in ("1.0.39", "3.0.0-alpha.1")):
                 errors.append(f"{page.relative_to(root)}: retired snapshot URL {link}")
             if target.path.startswith("/docs/versions/") and target.path != "/docs/versions/" and index is not None:
@@ -539,13 +555,16 @@ def check(root, base="/", site="https://carbonpanel.dev", expect=None):
                 errors.append(f"{page.relative_to(root)}: missing {link}")
         if page.name != "404.html" and not parser.noindex:
             content_base, _ = match_base(page.relative_to(root).as_posix(), bases)
-            check_social(parser, page, root, content_base, base, site, errors)
+            in_staging = bool(staging_route and page.relative_to(root).as_posix().startswith(
+                staging_route.lstrip("/")))
+            check_social(parser, page, root, content_base,
+                         staging_route if in_staging else base, site, errors)
             if index is not None:
                 check_version_ui(root, page, index, bases, errors, marker)
     check_sitemap(root, pages, base, site, errors, bases)
     if index is not None:
         check_channels(index, errors, expect)
-        check_versions(root, index, errors)
+        check_versions(root, index, errors, staging_route)
     if errors:
         raise ValueError("\n".join(sorted(set(errors))))
     print(f"Website routes, assets, versions and social previews valid across {len(pages)} HTML pages.")

@@ -86,9 +86,13 @@ to `docs/website-source.json` or `docs/version-index.json`; only the generated
 site carries them.
 
 Every build writes `channel-marker.json` at the site root and a
-`data-channel-*` marker on each version banner, so a staged candidate can be
-checked over public HTTPS before moving any registry alias, then the final
-deployment can be checked again. `check_website.py --expect-nightly-revision
+`data-channel-*` marker on each version banner. A `candidate` build is emitted
+**only** at the non-active staging route `/docs/candidate/<sha>/` (with its own
+marker and index); it never publishes `/docs/`, `/docs/nightly/` or
+`/docs/versions/1.0.40/`, which stay on the active verified receipt until the
+transaction commits. A candidate is qualified over public HTTPS at that staging
+path before any registry alias moves, then the final deployment is checked at
+the canonical paths again. `check_website.py --expect-nightly-revision
 --expect-nightly-digest --expect-promotion-state --expect-promotion-receipt`
 (and `browser_version_check.py` with the `CARBONPANEL_EXPECT_*` variables) fails
 closed when the published marker, source pin, pinned `/commit/<FULL_SHA>` links

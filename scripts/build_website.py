@@ -371,28 +371,40 @@ def build(root, base, site, promotion=None):
     contract = version_contract.apply_promotion(contract, promotion)
     version_contract.validate(contract, catalog, root)
     index = version_contract.version_index(contract, catalog, root)
+    candidate = bool(promotion and promotion.get("state") == "candidate")
+    staging_route = None
+    if candidate:
+        # A candidate is staged on a NON-ACTIVE path. Canonical channel paths
+        # stay on the active verified receipt until the transaction commits.
+        staging_route = version_contract.candidate_route(promotion["revision"])
+        index = version_contract.candidate_index(index, promotion["revision"],
+                                                 promotion["receipt"])
     homepage = build_homepage(root)
     output = root / ".website-build/site"
     generated_root = (root / ".website-build").resolve()
     if not generated_root.is_relative_to(root.resolve()) or not output.resolve().is_relative_to(generated_root):
         raise ValueError("Build output escaped its generated directory.")
     shell = root / "docs/carbon-panel"
-    bases = bases_from_index(index, base)
+    bases = [staging_route] if candidate else bases_from_index(index, base)
     with tempfile.TemporaryDirectory(prefix="carbon-website-") as temporary:
         work = Path(temporary)
         staged = work / "site"
         shutil.copytree(homepage, staged)
         targets = []
         for version in index["versions"]:
+            if candidate and version["channel"] != "nightly":
+                continue  # only the promoted channel is staged off-path
             targets.append((version, version["route"]))
-            if version["immutable_route"] != version["route"]:
+            if not candidate and version["immutable_route"] != version["route"]:
                 targets.append((version, version["immutable_route"]))
         for position, (version, route) in enumerate(targets):
             snapshot = work / f"v{position}"
             snapshot.mkdir()
             export_snapshot(root, version["commit"], snapshot)
-            version_base = base + route.lstrip("/")
-            dist = prepare_project(snapshot, shell, index, version, route, version_base, base, site)
+            version_base = staging_route if candidate else base + route.lstrip("/")
+            project_base = staging_route if candidate else base
+            dist = prepare_project(snapshot, shell, index, version, route,
+                                   version_base, project_base, site)
             target = staged / route.strip("/")
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(dist, target, dirs_exist_ok=True)
@@ -405,11 +417,20 @@ def build(root, base, site, promotion=None):
     # the generated artifact; promotion inputs never touch a tracked main file.
     (output / "version-index.json").write_text(version_contract.render_index(index), encoding="utf-8")
     marker = version_contract.channel_marker(index)
-    (output / "channel-marker.json").write_text(
-        json.dumps(marker, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    build_sitemap(output, base, site, bases=bases)
-    print(f"Website built at {output}; {len(index['versions'])} channels from exact pinned commits.",
-          flush=True)
+    marker_text = json.dumps(marker, indent=2, ensure_ascii=False) + "\n"
+    (output / "channel-marker.json").write_text(marker_text, encoding="utf-8")
+    if candidate:
+        staging = output / staging_route.strip("/")
+        staging.mkdir(parents=True, exist_ok=True)
+        assets = output / "assets"
+        if assets.is_dir():
+            shutil.copytree(assets, staging / "assets", dirs_exist_ok=True)
+        (staging / "channel-marker.json").write_text(marker_text, encoding="utf-8")
+        (staging / "version-index.json").write_text(
+            version_contract.render_index(index), encoding="utf-8")
+    build_sitemap(output, staging_route if candidate else base, site, bases=bases)
+    print(f"Website built at {output}; {len(index['versions'])} channels from exact pinned commits."
+          + (f" Candidate probe: {staging_route}" if candidate else ""), flush=True)
     print("Channel marker: " + " ".join(
         f"{name}={entry['revision']}@{entry['digest']} ({entry['state']}, promoted={str(entry['promoted']).lower()})"
         for name, entry in marker["channels"].items()), flush=True)
