@@ -452,6 +452,7 @@ up)
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
 				start_bluemap "${server_path}" "${server_path}/modules/bluemap" world >/dev/null 2>&1 || true
+				echo "review world view targets after renderer: $(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null | head -c 1200)" >&2
 			fi
 		fi
 	fi
