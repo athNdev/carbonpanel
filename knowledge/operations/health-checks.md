@@ -58,12 +58,14 @@ was never collected. A running server with no join probe is `unobserved`
 creating past the three-minute startup deadline is `timedOut`
 (`degraded`/`unavailable` with a reason), never silently playable or stopped.
 An unobserved layer is `unknown` as well: a missing check is never reported as
-healthy. `health.ClassifyServer` is the per-row form of that game layer: a
-stale status, a missing join probe and a failed join stay distinct, and a
-last-good join timestamp is kept when the current reading is stale. The
+healthy. `health.ClassifyServer` is the per-row form of that game layer: a stale status,
+a missing join probe and a failed join stay distinct, and last-good join and
+status observation timestamps are kept when the current reading is stale. The
 support bundle carries `observations.json` with that projection so an operator
-can collect last-good evidence without a Docker socket. Player samples, MOTD
-and hostnames are omitted. `GetServer` and `ListServers` use the same
+can collect last-good evidence without a Docker socket. Server and node
+readings in that bundle include safe, actionable recovery guidance without
+paths, hostnames, credentials or other secrets. Player samples, MOTD and
+hostnames are omitted. `GetServer` and `ListServers` use the same
 classification for live SLP fields: last-good join is never copied into
 `slp_available`, `players_online` or `player_sample`. The proto carries
 `join_observation_kind` so stale and unobserved stay distinct from running
