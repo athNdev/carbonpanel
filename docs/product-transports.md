@@ -1,4 +1,4 @@
-# Product transport inventory
+﻿# Product transport inventory
 
 The console's administrative and product JSON contract is generated from
 `proto/carbonpanel/v1`. [ADR 0012](adr/0012-product-transports.md) defines the
@@ -30,7 +30,7 @@ interchangeable.
 | --- | --- |
 | `/api/v1/upload/{session}`, `/api/v1/download/{session}` | Streaming bytes after generated FileService control creates an authorized session. Used by chunked-upload, stream-download and server-files. |
 | `/api/v1/packwiz/{id}/{file}` and pack export archives | Packwiz/client content delivery and binary archives, including Studio's exported manifest URLs. |
-| `/api/v1/auth/oidc/{login,callback}` | Browser redirects and identity-provider callback protocol. |
+| `/api/v1/auth/oidc/{login,callback}` and `/api/v1/auth/oidc/exchange` | Browser redirect/callback and one-time session-token exchange protocol (session token is never placed in a URL). |
 | `/api/v1/openapi.yaml` | Generated API documentation consumed by the API viewer. |
 | `/healthz`, `/readyz`, `/health/detail` | Operational probes with their existing disclosure and readiness rules. |
 

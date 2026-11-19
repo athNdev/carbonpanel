@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT AND MPL-2.0
+﻿# SPDX-License-Identifier: MIT AND MPL-2.0
 # This file includes DiscoPanel material under the MIT License,
 # Copyright (c) 2025 Nicholas W. Heyer. The MIT license text is in LICENSE
 # and still applies to that inherited material.
@@ -113,22 +113,30 @@ auth:
     enabled: true  # Enable local
     allow_registration: false  # Allow new users to register themselves via login
 
-  # OIDC authentication (login via OIDC-compliant provider, ie: keycloak, authelia, authentik, etc.)
+  # OIDC authentication (standards-based confidential RP: Authorization Code + PKCE S256).
+  # Provider profiles/examples: oidc/ and docs guides for Keycloak, Authelia, Okta, authentik, Google, Discord.
   oidc:
     enabled: false
-    issuer_uri: ""  # OIDC Provider url (ie: http://authelia.local:9091, http://localhost:8180/realms/carbon-panel, etc.)
-    client_id: ""  # Client ID registered with your OIDC (like "carbon-panel")
-    client_secret: ""  # Client secret registered with your OIDC
-    redirect_url: ""  # Where OIDC sends users after login (ie: "http://localhost:8080/api/v1/auth/oidc/callback")
+    # Exact issuer URL as published by provider discovery; must match the ID token iss claim.
+    issuer_uri: ""  # e.g. https://dev-123456.okta.com/oauth2/default or https://auth.example.com/application/o/carbon-panel/
+    client_id: ""  # Client ID registered with your OIDC provider
+    client_secret: ""  # Client secret registered with your OIDC provider
+    # Exact redirect URI registered with the provider. Carbon Panel callback: /api/v1/auth/oidc/callback
+    # (session token is redeemed via one-time POST /api/v1/auth/oidc/exchange, never placed in a URL).
+    redirect_url: ""  # e.g. https://panel.example.com/api/v1/auth/oidc/callback
     scopes: ["openid", "profile", "email"]
-    role_claim: "groups"  # The token claim that contains the user's groups (usually "groups")
-    role_mapping: {}  # Mapping to groups if they arent the same name as carbon-panel's (ie: {"my-admins": "admin", "my-users": "user"})
-    skip_tls_verify: false  # Skip TLS certificate verification (for self-signed certs)
+    # Role claim value may be a string, string array, or JSON-encoded string array.
+    role_claim: "groups"  # Claim containing group/role values to evaluate (usually "groups")
+    # Mapping keys are matched case-insensitively against claim values.
+    role_mapping: {}  # e.g. {"carbon-admins": "admin", "carbon-users": "user"}
+    reject_unmapped: false  # If true, deny login when no mapped roles are resolved
+    skip_tls_verify: false  # Development only with explicit process escape hatch; prefer valid TLS
     # Optional hardening defaults (do not put real secrets here)
-    allowed_signing_algs: ["RS256", "ES256"]  # Only HS256 if the IdP has no JWKS and you accept shared-secret signing
-    default_roles: []  # Roles for a brand-new SSO identity; never admin
-    absent_claim_policy: "deny"  # deny (revoke OIDC roles) or defaults_only; no keep_previous
-    allow_raw_claim_roles: false  # Opt-in to "claim value equals role name"; privileged names still refused
+    allowed_signing_algs: ["RS256", "ES256"]  # HS256 requires explicit opt-in; verify JWKS-less/client-secret verification separately
+    default_roles: []  # Roles for a brand-new SSO identity or defaults_only policy; never admin
+    absent_claim_policy: "deny"  # deny (revoke OIDC-sourced roles) or defaults_only; no keep_previous
+    # Raw claim values only apply with explicit opt-in and never grant privileged role names.
+    allow_raw_claim_roles: false
     cookie_secure: false  # Set true behind a TLS-terminating proxy; forwarded headers are never trusted as proof of TLS
 
 # Upload configuration
@@ -174,14 +182,14 @@ proxy:
 
 # Example usage:
 # With proxy enabled and base_url set to "mc.example.com":
-# - Server named "survival" → Connect via: survival.mc.example.com:25565
-# - Server named "creative" → Connect via: creative.mc.example.com:25565
-# - Server named "modded" → Connect via: modded.mc.example.com:25565
+# - Server named "survival" â†’ Connect via: survival.mc.example.com:25565
+# - Server named "creative" â†’ Connect via: creative.mc.example.com:25565
+# - Server named "modded" â†’ Connect via: modded.mc.example.com:25565
 #
 # All servers use the same port (25565) and are routed based on hostname!
 # 
 # DNS Setup Required:
-# Add a wildcard DNS record: *.mc.example.com → Your server's IP
+# Add a wildcard DNS record: *.mc.example.com â†’ Your server's IP
 # Or add individual A records for each server subdomain
 
 
