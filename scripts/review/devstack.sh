@@ -385,10 +385,43 @@ EOF
 	echo "seeded real BlueMap tiles for ${server_id} on ${node_id}"
 }
 
+# The sidecar is disposable but it is still a container on the host daemon.
+# Never remove a name: inspect, verify the immutable ID and ownership label,
+# then remove exactly that ID. A colliding unowned container is a hard refusal.
+owned_sidecar_id() {
+	local record id owner
+	record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "${NAME}-bluemap" 2>/dev/null)" || return 1
+	id="${record%% *}"; owner="${record#* }"
+	if [[ ! "$id" =~ ^[0-9a-f]{64}$ ]]; then
+		echo "refusing sidecar operation: ${NAME}-bluemap has no immutable container id" >&2
+		return 1
+	fi
+	if [ "$owner" != "$DATA" ]; then
+		echo "refusing sidecar operation: ${NAME}-bluemap is not owned by this review session" >&2
+		return 1
+	fi
+	printf '%s' "$id"
+}
+
+sidecar_exists() {
+	docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "${NAME}-bluemap"
+}
+
+remove_owned_sidecar() {
+	if ! sidecar_exists; then
+		return 0
+	fi
+	assert_owner || return 1
+	local id
+	id="$(owned_sidecar_id)" || return 1
+	docker rm -f "$id" >/dev/null
+}
+
 start_bluemap() {
 	local host_path="$1" mapdir="$2" level="$3"
-	docker rm -f "${NAME}-bluemap" >/dev/null 2>&1 || true
+	remove_owned_sidecar || return 1
 	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
+		--label "carbonpanel.review.owner=${DATA}" \
 		-v "${mapdir}/config:/app/config" \
 		-v "${host_path}/${level}:/app/world:ro" \
 		-v "${mapdir}/data:/app/data" \
@@ -414,8 +447,7 @@ down() {
 	local names
 	names="$(docker ps -a --format '{{.Names}}')" || { echo "cannot list containers; refusing teardown" >&2; return 1; }
 	if printf '%s\n' "$names" | grep -Fxq "${NAME}-bluemap"; then
-		assert_owner
-		docker rm -f "${NAME}-bluemap" >/dev/null
+		remove_owned_sidecar || return 1
 	fi
 	if printf '%s\n' "$names" | grep -Fxq "$NAME"; then
 		assert_owner
@@ -426,6 +458,12 @@ down() {
 		docker rm -f "$id" >/dev/null
 	fi
 }
+
+# Unit tests source this file with a fake docker on PATH to exercise the
+# ownership guards without touching a daemon or running the up/down dispatch.
+if [ "${REVIEW_DEVSTACK_SOURCE_ONLY:-}" = "1" ]; then
+	return 0 2>/dev/null || exit 0
+fi
 
 case "${1:-up}" in
 up)

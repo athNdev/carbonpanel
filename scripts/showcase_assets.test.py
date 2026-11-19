@@ -101,6 +101,25 @@ class ShowcaseAssetsTest(unittest.TestCase):
         kwargs.update(overrides)
         sa.validate(sa.argparse.Namespace(**kwargs))
 
+    def test_enabled_feature_screenshot_cannot_be_missing(self) -> None:
+        plan = {
+            'steps': [
+                {'screenshot': 'core-a', 'name': 'core'},
+                {'screenshot': 'feature-a', 'feature': 'players', 'name': 'feature'},
+            ]
+        }
+        self.plan.write_text(json.dumps(plan), encoding='utf-8')
+        (self.images / 'core-a.png').write_bytes(fake_png())
+        with self.assertRaisesRegex(sa.AssetError, 'missing required screenshot'):
+            sa.build(sa.argparse.Namespace(
+                images_dir=str(self.images), publish_dir=str(self.publish / 'x'),
+                plan=str(self.plan), seed_script=str(self.seed), source_sha='a' * 40,
+                source_ref='refs/heads/main', repository='athNdev/carbonpanel',
+                run_id='1', run_url='u', captured_at='2026-11-19T00:00:00Z',
+                app_version='review', driver_version='1', browser_version='1',
+                features='players',
+            ))
+
     def test_thin_strip_crop_is_rejected(self) -> None:
         # A heading-less strip is not a meaningful README crop; refuse it
         # instead of weakening the plausibility floor.
