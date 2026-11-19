@@ -72,7 +72,7 @@ func Capabilities(f HostFacts, sel Selection) *v1.NodeCapabilities {
 	if sel.Mode == ModeRootless {
 		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_ROOTLESS)
 	}
-	if f.CgroupVersion == "v2" && hasAll(f.DelegatedControllers, "cpu", "io", "memory", "pids") {
+	if f.CgroupVersion == "v2" && hasAll(f.DelegatedControllers, "cpu", "cpuset", "io", "memory", "pids") {
 		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CGROUP_V2)
 	}
 	if f.PrivilegedPortStart <= 1024 {

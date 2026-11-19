@@ -99,6 +99,47 @@ func TestApplyGatesRootfulFallback(t *testing.T) {
 	}
 }
 
+// Effective resource enforcement must not be advertised when cgroup v2
+// delegation is incomplete. Missing cpuset refuses rootless qualification and,
+// on a rootful fallback, the captive daemon must not claim CGROUP_V2.
+func TestCapabilitiesRequireFullCgroupV2Delegation(t *testing.T) {
+	f := qualifiedFacts()
+	f.UserNamespaces = false
+	f.DelegatedControllers = []string{"cpu", "io", "memory", "pids"}
+	sel := ApplyGates(f)
+	if sel.Mode != ModeRootful {
+		t.Fatalf("expected dedicated rootful fallback, got %q (%s)", sel.Mode, Describe(sel))
+	}
+	if !hasCode(sel.Checks, "ROOTLESS_CGROUP_V2_NOT_DELEGATED") {
+		t.Fatalf("missing cgroup delegation refusal: %s", Describe(sel))
+	}
+	caps := Capabilities(f, sel)
+	for _, c := range caps.GetCapabilities() {
+		if c.String() == "NODE_CAPABILITY_CGROUP_V2" {
+			t.Fatalf("over-advertised cgroup v2 capability without full delegation: %v", caps.GetCapabilities())
+		}
+		if c.String() == "NODE_CAPABILITY_ROOTLESS" {
+			t.Fatalf("rootful fallback must not advertise rootless: %v", caps.GetCapabilities())
+		}
+	}
+}
+
+// Cgroup v1 hosts cannot claim cgroup v2 effective resource enforcement.
+func TestCapabilitiesDoNotAdvertiseCgroupV2OnCgroupV1(t *testing.T) {
+	f := qualifiedFacts()
+	f.CgroupVersion = "v1"
+	sel := ApplyGates(f)
+	if sel.Mode == ModeRootless {
+		t.Fatal("cgroup v1 host must not qualify as rootless")
+	}
+	caps := Capabilities(f, sel)
+	for _, c := range caps.GetCapabilities() {
+		if c.String() == "NODE_CAPABILITY_CGROUP_V2" {
+			t.Fatalf("advertised cgroup v2 capability on cgroup v1 host: %v", caps.GetCapabilities())
+		}
+	}
+}
+
 func TestApplyGatesFailsClosedWithoutQualifiedPath(t *testing.T) {
 	f := qualifiedFacts()
 	f.UserNamespaces = false
