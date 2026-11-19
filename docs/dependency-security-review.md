@@ -39,6 +39,6 @@ a fix PR in that case, so these alerts need an explicit human review path.
 - `picomatch` 4.0.7 in `docs/carbon-panel/package-lock.json` — GHSA-fc5q-39xc-vjpf
   (HIGH) has no `first_patched_version`; no safe fixed version available at the
   time of the OSS-390 aggregate. Re-check weekly.
-- `@sveltejs/kit` 2.x in `web/carbon-panel/package.json` — five alerts whose fix
+- `@sveltejs/kit` 2.x in `web/carbon-panel/package.json` — four alerts whose fix
   is 3.1.1, which peer-requires vite 8, `@sveltejs/vite-plugin-svelte` 7 and
   TypeScript 6. Re-check weekly until a dedicated major migration is landed.
