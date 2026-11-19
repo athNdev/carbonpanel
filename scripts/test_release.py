@@ -11,6 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 from scripts import release
@@ -2987,6 +2988,78 @@ class ChannelPageStagingTests(unittest.TestCase):
             hint = release.install_prior_pages(candidate, live, target)
             self.assertTrue(hint["hash"].startswith("sha256:"))
             self.assertEqual((target / "version-index.json").read_bytes(), live)
+
+
+class PriorPagesDeploymentTests(unittest.TestCase):
+    """A build artifact sharing the live index hash is not a deployed prior."""
+
+    INDEX = (b'{"schema_version":3,"channels":{"stable":{},"nightly":{}},'
+             b'"versions":[{"route":"/docs/","pages":["getting-started/proxmox"]}]}')
+
+    def artifact(self, artifact_id, head_sha, guide_bytes):
+        tar_bytes = io.BytesIO()
+        with tarfile.open(fileobj=tar_bytes, mode="w") as archive:
+            for name, data in (("./version-index.json", self.INDEX),
+                               ("./docs/getting-started/proxmox/index.html", guide_bytes)):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+        zipped = io.BytesIO()
+        with zipfile.ZipFile(zipped, "w") as bundle:
+            bundle.writestr("artifact.tar", tar_bytes.getvalue())
+        descriptor = {"id": artifact_id, "name": release.PAGES_ARTIFACT_NAME,
+                      "expired": False,
+                      "workflow_run": {"head_sha": head_sha}}
+        return descriptor, zipped.getvalue()
+
+    def test_resolve_prior_deployment_uses_success_status_chain(self):
+        deployments = [{"id": 900, "sha": "b" * 40},   # newer build-only, never deployed
+                       {"id": 800, "sha": "a" * 40}]   # the successful prior
+        statuses = {
+            "900": [{"state": "success", "environment_url": "",
+                     "log_url": "https://github.com/o/r/actions/runs/200/job/1"}],
+            "800": [{"state": "success", "environment_url": "https://carbonpanel.dev/",
+                     "log_url": "https://github.com/o/r/actions/runs/100/job/1"}],
+        }
+        run_artifacts = {
+            "200": [{"id": 2, "name": release.PAGES_ARTIFACT_NAME,
+                     "workflow_run": {"head_sha": "b" * 40}}],
+            "100": [{"id": 1, "name": release.PAGES_ARTIFACT_NAME,
+                     "workflow_run": {"head_sha": "a" * 40}}],
+        }
+        identity = release.resolve_prior_deployment(
+            deployments, statuses, run_artifacts, "https://carbonpanel.dev")
+        self.assertEqual(identity["artifact_id"], "1")
+        self.assertEqual(identity["deployment_id"], "800")
+        self.assertEqual(identity["sha"], "a" * 40)
+
+    def test_equal_index_different_guide_cannot_be_a_prior(self):
+        deployed, deployed_zip = self.artifact(1, "a" * 40, b"<h1>deployed guide</h1>")
+        build_only, build_zip = self.artifact(2, "b" * 40, b"<h1>newer guide</h1>")
+        identity = {"deployment_id": "800", "artifact_id": "1", "sha": "a" * 40,
+                    "artifact_sha": "a" * 40, "run_id": "100"}
+        archives = {1: deployed_zip, 2: build_zip}
+
+        def fetch(destination, live_page_bytes):
+            with patch("scripts.release.urllib.request.urlopen") as urlopen:
+                urlopen.return_value.read.return_value = self.INDEX
+                return release.fetch_prior_pages(
+                    destination, "https://carbonpanel.dev/version-index.json",
+                    "o/r", [build_only, deployed],
+                    lambda artifact: archives[int(artifact["id"])],
+                    identity=identity, live_page=lambda path: live_page_bytes)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "disagrees with the live site"):
+                fetch(Path(directory) / "restored", b"<h1>newer guide</h1>")
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "restored"
+            result = fetch(destination, b"<h1>deployed guide</h1>")
+            self.assertEqual(result["artifact_id"], "1")
+            self.assertEqual(result["deployment_id"], "800")
+            self.assertEqual(
+                (destination / "docs/getting-started/proxmox/index.html").read_bytes(),
+                b"<h1>deployed guide</h1>")
 
 
 if __name__ == "__main__":

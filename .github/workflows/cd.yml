@@ -673,6 +673,8 @@ jobs:
           echo "hash=$(printf '%s' "$RESULT" | jq -r .hash)" >> "$GITHUB_OUTPUT"
           echo "artifact_id=$(printf '%s' "$RESULT" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
           echo "artifact_commit=$(printf '%s' "$RESULT" | jq -r .artifact_commit)" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$(printf '%s' "$RESULT" | jq -r .deployment_id)" >> "$GITHUB_OUTPUT"
+          echo "run_id=$(printf '%s' "$RESULT" | jq -r .run_id)" >> "$GITHUB_OUTPUT"
 
       # Verify the staged artifact before any public write: the canonical
       # Stable/Nightly site must still match the live active receipt (the
