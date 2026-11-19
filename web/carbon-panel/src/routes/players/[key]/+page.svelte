@@ -280,7 +280,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 </script>
 
 {#snippet fieldRows(fields: PlayerField[])}
-	{#each fields as field (field.name + field.observation?.source)}
+	{#each fields as field, fieldIndex (field.name + field.observation?.source + fieldIndex)}
 		<div class="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
 			<div class="min-w-0">
 				<p class="mono-label">{field.name}</p>

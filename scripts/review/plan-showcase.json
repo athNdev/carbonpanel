@@ -187,7 +187,7 @@
       "focus": "Player lookup, roster rows and allowlist state"
     },
     {
-      "click": "[data-player-row=\"0\"] button",
+      "gotoIdentityFromTitle": "[data-player-row=\"0\"] span[title^=\"pl_\"]",
       "feature": "players",
       "name": "open the seeded player profile"
     },

@@ -112,6 +112,24 @@ async function main() {
             timeout: 30000,
           });
           break;
+        case "gotoIdentityFromTitle": {
+          // Read the opaque identity key the real roster renders in its row
+          // title, then open the canonical profile route. This exercises the
+          // real route without the row's server-scoped query, which is not
+          // needed for a cross-server profile capture.
+          const identityKey = await page
+            .locator(spec.gotoIdentityFromTitle)
+            .first()
+            .getAttribute("title", { timeout: 15000 });
+          if (!identityKey || !identityKey.startsWith("pl_")) {
+            throw new Error(`no opaque player identity in ${spec.gotoIdentityFromTitle}`);
+          }
+          await page.goto(base + `/players/${encodeURIComponent(identityKey)}`, {
+            waitUntil: "domcontentloaded",
+            timeout: 30000,
+          });
+          break;
+        }
         case "select":
           await page
             .locator(spec.select)
@@ -378,6 +396,7 @@ async function main() {
     const kind = Object.keys(spec).find((key) =>
       [
         "goto",
+        "gotoIdentityFromTitle",
         "click",
         "fill",
         "select",
