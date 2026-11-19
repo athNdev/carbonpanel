@@ -127,7 +127,7 @@ func TestSecurityHeadersPresent(t *testing.T) {
 		"object-src 'none'",
 		"frame-ancestors 'self'",
 		"connect-src 'self' ws: wss:",
-		"img-src 'self' blob: data: https:",
+		"img-src 'self' data: https:",
 	} {
 		if !strings.Contains(csp, want) {
 			t.Fatalf("CSP %q missing %q", csp, want)
