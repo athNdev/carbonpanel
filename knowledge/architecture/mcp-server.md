@@ -52,7 +52,11 @@ proto descriptors and the live RBAC map. The single generator also emits
 coverage drift test still enumerates the 224 reachable RPCs and fails on a
 missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
 a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
-or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and
+or a missing `WorldViewService`. `family_content_descriptors.json` is compared
+byte-for-byte by `TestContentDescriptorArtifact`, so it is pinned to LF in
+`.gitattributes`: without the pin a Windows checkout with `core.autocrlf=true`
+converts it to CRLF and fails the equivalence check with no descriptor drift.
+`family_audit_test.go` recomputes LISTED and
 REACHABLE from live source, but VERIFIED comes only from executable invocation
 evidence: a real `tools/call` over the SDK stdio wire must reach the typed
 Connect method with exact typed-field assertions on ids, booleans, enums,
