@@ -207,3 +207,40 @@ qemu-img info ubuntu-amd64.img
 # offline fixtures (no network, synthetic keys)
 python -m unittest discover -s scripts -p 'test_node_vm_*.py' -v
 ```
+
+## 12. 2026-11-19 follow-up: disposable container TCG probe (this session)
+
+Environment probe (Windows host, WSL `ubuntu_general`):
+- `qemu-system-x86_64`/`qemu-system-aarch64`: not installed on host or in WSL.
+- `/dev/kvm`: absent in WSL.
+- Docker: available in WSL (`docker-ok`, Docker 29.3.0) and able to pull/run
+  disposable containers (`alpine:3.20` smoke run succeeded). This provides a
+  disposable, isolated execution environment on this machine, but not a host
+  `qemu-system` binary or KVM acceleration.
+
+Tooling improvement (VM packaging paths, build-only/offline): added
+`scripts/node_vm_boot_qual.py` (+ `scripts/test_node_vm_boot_qual.py`) to
+prepare deterministic seed/NoCloud ISO inputs, verify qemu availability, run a
+disposable QEMU boot attempt with serial-console capture, scan for cloud-init
+and first-boot enrollment markers, and optionally perform read-only offline disk
+inspection for bundle/secret persistence when guestfs tools are available. The
+driver reports gates conservatively (PASS/FAIL/BLOCKED/NOT_RUN/OBSERVED/NOT
+OBSERVED) and does not claim live enrollment, daemon health or effective
+network isolation from serial markers alone.
+
+Prepare-only check in this session (Windows Python, no ISO tool/qemu on PATH):
+deterministic seed generation succeeded for `oss377-boot-qual-0001` (`node-label
+oss377boot`) but CIDATA ISO creation and qemu availability were correctly
+reported as blocked/missing in that environment. In WSL, `genisoimage` and
+deterministic seed/ISO creation are available for disposable runs.
+
+TCG boot attempt status: a task-owned download of the verified amd64
+`release-20261017` image and a disposable container-based QEMU TCG boot attempt
+were initiated from WSL as part of this follow-up. At the time of this record,
+no completed clean-boot evidence (first-boot bundle creation, network/health
+probe, or reboot persistence) has been captured from that attempt in this
+document. Any later evidence must be appended with exact command, log/report
+artifacts, elapsed time and explicit gate outcomes; absence of evidence here is
+**not** a boot pass. Prior claims remain unchanged: whole-image byte
+provenance is VERIFIED (section 3); real clean boot on a capable runner
+remains the acceptance gate.

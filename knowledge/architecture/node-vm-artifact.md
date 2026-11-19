@@ -10,11 +10,13 @@ code_refs:
   - scripts/node_vm_integrity.py
   - scripts/node_vm_upgrade.py
   - scripts/node_vm_verify_image.py
+  - scripts/node_vm_boot_qual.py
   - scripts/test_node_vm_build.py
   - scripts/test_node_vm_integrity.py
   - scripts/test_node_vm_upgrade.py
   - scripts/test_node_vm_enroll.py
   - scripts/test_node_vm_verify_image.py
+  - scripts/test_node_vm_boot_qual.py
   - packaging/node-vm/qualification/VM-BOOT-QUALIFICATION.md
 sources:
   - title: ADR 0035 node VM artifact
@@ -101,6 +103,12 @@ the shared node-control contract without duplicating it.
 - `python3 scripts/node_vm_verify_image.py --image <downloaded.img> --ref
   ubuntu-24.04-amd64 --sha256sums <SHA256SUMS>` (real-byte check, offline and
   read-only; requires a caller-supplied image file)
+- `python3 scripts/node_vm_boot_qual.py --work-dir <owned-tmp> --generate-seed`
+  prepares deterministic seed/ISO inputs and reports qemu availability; with
+  `--image <verified.qcow2>` on a capable disposable runner (qemu-system with
+  TCG or KVM) it attempts a boot, captures serial-console evidence and can
+  perform offline disk inspection. Report blocked/unobserved gates honestly;
+  never claim live boot, enrollment or network isolation without evidence.
 - Never substitute a real key, endpoint or world path for a fixture value, and
   never run these drivers against a live VM from this lane.
 
