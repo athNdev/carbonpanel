@@ -302,7 +302,7 @@ def wait_for_process(proc, timeout_seconds, poll=2.0):
 def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=1800,
                      memory_mib=2048, cpus=2, arch="x86_64", accel=None,
                      do_offline_inspect=True, verify_ref=None, profile="artifact",
-                     sha256sums_text=None):
+                     sha256sums_text=None, seed_iso_path=None):
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     report = {
@@ -336,12 +336,17 @@ def run_boot_attempt(image_path, seed_nocloud_dir, work_dir, timeout_seconds=180
         return report
     report["gates"]["seed"] = {"status": "PASS", "path": str(seed_nocloud_dir)}
 
-    try:
-        iso_info = make_seed_iso(seed_nocloud_dir, work_dir / "seed.iso")
+    iso_path = Path(seed_iso_path) if seed_iso_path else (work_dir / "seed.iso")
+    if seed_iso_path and iso_path.is_file():
+        iso_info = {"tool": "prebuilt", "path": str(iso_path)}
         report["gates"]["seed_iso"] = {"status": "PASS", **iso_info}
-    except Exception as e:
-        report["gates"]["seed_iso"] = {"status": "FAIL", "error": str(e)}
-        return report
+    else:
+        try:
+            iso_info = make_seed_iso(seed_nocloud_dir, iso_path)
+            report["gates"]["seed_iso"] = {"status": "PASS", **iso_info}
+        except Exception as e:
+            report["gates"]["seed_iso"] = {"status": "FAIL", "error": str(e)}
+            return report
 
     qemu_bin = which_any("qemu-system-%s" % arch)
     if not qemu_bin:
@@ -494,6 +499,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", help="path to a verified QCOW2 image")
     parser.add_argument("--seed-dir", help="path to nocloud seed directory (contains user-data, meta-data, network-config)")
+    parser.add_argument("--seed-iso", help="use an existing CIDATA seed ISO instead of creating one (requires seed dir for gate reporting)")
     parser.add_argument("--work-dir", required=True, help="owned disposable work directory for disk overlay, ISO, logs, report")
     parser.add_argument("--timeout", type=int, default=1800, help="boot attempt timeout in seconds (default: 1800)")
     parser.add_argument("--memory-mib", type=int, default=2048)
@@ -527,11 +533,15 @@ def main(argv=None):
             "work_dir": str(work_dir),
             "gates": {"seed": {"status": "PASS", "path": seed_dir}},
         }
-        try:
-            iso_info = make_seed_iso(seed_dir, work_dir / "seed.iso")
-            report["gates"]["seed_iso"] = {"status": "PASS", **iso_info}
-        except Exception as e:
-            report["gates"]["seed_iso"] = {"status": "BLOCKED", "error": str(e)}
+        iso_arg = Path(args.seed_iso) if args.seed_iso else None
+        if iso_arg and iso_arg.is_file():
+            report["gates"]["seed_iso"] = {"status": "PASS", "tool": "prebuilt", "path": str(iso_arg)}
+        else:
+            try:
+                iso_info = make_seed_iso(seed_dir, work_dir / "seed.iso")
+                report["gates"]["seed_iso"] = {"status": "PASS", **iso_info}
+            except Exception as e:
+                report["gates"]["seed_iso"] = {"status": "BLOCKED", "error": str(e)}
         qemu_bin = which_any("qemu-system-%s" % args.arch)
         report["gates"]["qemu_available"] = (
             {"status": "PASS", "path": qemu_bin} if qemu_bin else
@@ -550,6 +560,7 @@ def main(argv=None):
         memory_mib=args.memory_mib, cpus=args.cpus, arch=args.arch,
         accel=args.accel, do_offline_inspect=not args.no_offline_inspect,
         verify_ref=args.verify_ref, profile=args.profile, sha256sums_text=sums,
+        seed_iso_path=args.seed_iso,
     )
     print(json.dumps(report, sort_keys=True))
     # Exit non-zero only for hard failures in preparation/verification inputs;
