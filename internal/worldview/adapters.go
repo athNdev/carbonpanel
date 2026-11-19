@@ -169,11 +169,73 @@ func (a *httpRenderer) Health(ctx context.Context) (*Health, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return h, nil
 	}
+
+	// A listening web server is NOT a configured/rendered world (OSS-388). For
+	// the BlueMap adapter, require the renderer's own settings.json map list to
+	// contain at least one map. An HTTP 200 on "/" only proves the listener is
+	// up; BlueMap starts that listener even when a target world is missing and
+	// its map fails to load. No version/last-render fact is fabricated here.
+	if a.ep.Kind == RendererBlueMap {
+		ids, err := blueMapMapIDs(ctx, a.ep.baseURL(), a.hc)
+		if err != nil || len(ids) == 0 {
+			return blueMapNoMapHealth(err), nil
+		}
+	}
+
 	h.State = v1.RendererState_RENDERER_STATE_READY
 	h.Confidence = "detected"
 	h.Detail = "renderer endpoint answered the configured health probe"
 	parseHealthBody(io.LimitReader(resp.Body, 64<<10), h)
 	return h, nil
+}
+
+// blueMapMapIDs reads the renderer's own authoritative map list from
+// /settings.json over the private endpoint. It is not a port probe and the
+// response never reaches a browser. An empty list means the web server is up
+// but no map is configured/rendered for any target world.
+func blueMapMapIDs(ctx context.Context, baseURL string, hc HTTPDoer) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/settings.json", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("settings.json returned HTTP %d", resp.StatusCode)
+	}
+	var payload struct {
+		Maps []struct {
+			ID string `json:"id"`
+		} `json:"maps"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(payload.Maps))
+	for _, m := range payload.Maps {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+// discoveredHealthForExplicitNoMap reports the honest onboarding state for a
+// configured BlueMap endpoint whose web server is up but whose map list is
+// empty. No endpoint address or internal error is echoed to the client.
+func blueMapNoMapHealth(err error) *Health {
+	h := &Health{
+		State: v1.RendererState_RENDERER_STATE_ABSENT, Source: "renderer.http.bluemap",
+		Confidence: "detected", Detail: "BlueMap web server is reachable but has no configured map; configure the target world to finish setup",
+	}
+	if err != nil {
+		h.Confidence = "unknown"
+		h.Detail = "BlueMap web server is reachable but its configured map list could not be read; configure the target world to finish setup"
+	}
+	return h
 }
 
 // parseHealthBody reads optional real fields from the renderer response. A

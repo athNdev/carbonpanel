@@ -217,6 +217,9 @@ func TestModulePublishesHostPort(t *testing.T) {
 	if !modulePublishesHostPort(&v1.ModulePort{HostPort: 19132, ProxyEnabled: true, ExposePublic: true}) {
 		t.Fatal("public proxied port should publish on the host")
 	}
+	if modulePublishesHostPort(&v1.ModulePort{HostPort: -1, ProxyEnabled: true, ExposePublic: true}) {
+		t.Fatal("managed renderer private-port sentinel -1 must not publish or be checked as a host port")
+	}
 }
 
 // newModuleReconcileFixture wires a manager against a fake daemon that answers

@@ -20,13 +20,7 @@ import (
 // GET against its configured loopback base URL and takes version/last-render
 // only from that response. No live renderer is involved.
 func TestBlueMapAdapterHealthFromHTTPFixture(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			t.Errorf("fixture probe path = %q, want /", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"version":"5.29","last_render":"2026-11-18T10:00:00Z"}`))
-	}))
+	ts := httptest.NewServer(http.HandlerFunc(serveBlueMapFixture))
 	defer ts.Close()
 
 	ep := endpointForFixture(t, ts.URL, "", RendererBlueMap)
@@ -50,6 +44,36 @@ func TestBlueMapAdapterHealthFromHTTPFixture(t *testing.T) {
 	}
 	if !strings.Contains(adapter.ProxyBaseURL(), "http://") {
 		t.Fatalf("ProxyBaseURL = %q, want internal http URL (never sent to browser)", adapter.ProxyBaseURL())
+	}
+}
+
+// TestBlueMapWebServerWithoutMapIsNotReadyFixture locks down OSS-388's exact
+// readiness gap: a 2xx from "/" is only a listening web server, not a
+// configured or rendered target world.
+func TestBlueMapWebServerWithoutMapIsNotReadyFixture(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/settings.json" {
+			_, _ = w.Write([]byte(`{"maps":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer ts.Close()
+
+	adapter := newRenderer(endpointForFixture(t, ts.URL, "", RendererBlueMap), ts.Client())
+	h, err := adapter.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if h.State != v1.RendererState_RENDERER_STATE_ABSENT {
+		t.Fatalf("state = %s, want ABSENT (setup needed) for a web server with no map", h.State)
+	}
+	if !strings.Contains(h.Detail, "no configured map") {
+		t.Fatalf("detail = %q, want an actionable next step", h.Detail)
+	}
+	if strings.Contains(h.Detail, ts.URL) {
+		t.Fatalf("detail leaked the renderer address: %q", h.Detail)
 	}
 }
 

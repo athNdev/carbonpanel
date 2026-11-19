@@ -327,10 +327,42 @@ func streamSourceAnchorPresent(t *testing.T, src string) bool {
 		t.Errorf("source %s has %d lines, anchor wants %d", parts[0], len(lines), line)
 		return false
 	}
-	if !strings.Contains(lines[line-1], parts[2]) {
-		t.Errorf("%s:%d does not contain %q (got %q)", parts[0], line, parts[2], strings.TrimSpace(lines[line-1]))
+	anchor := parts[2]
+	if strings.Contains(lines[line-1], anchor) {
+		return true
+	}
+	// Line numbers are audit metadata, not identity. A preceding edit can shift
+	// them without moving the referenced code. Tolerate the shift ONLY when the
+	// EXACT anchor string occurs exactly once in the SAME file; a missing or
+	// ambiguous anchor still fails closed, so a route moved to wrong code is
+	// never accepted as "somewhere in the file".
+	matches := make([]int, 0, 1)
+	for i, text := range lines {
+		idx := strings.Index(text, anchor)
+		if idx < 0 {
+			continue
+		}
+		// A prefix such as NewHandlerV1 must not match NewHandlerV1Alpha.
+		if rest := text[idx+len(anchor):]; len(rest) > 0 {
+			next := rest[0]
+			if next == '_' || next >= 'a' && next <= 'z' || next >= 'A' && next <= 'Z' || next >= '0' && next <= '9' {
+				continue
+			}
+		}
+		matches = append(matches, i+1)
+		if len(matches) > 1 {
+			break
+		}
+	}
+	if len(matches) == 0 {
+		t.Errorf("%s:%d does not contain %q and the anchor is absent from the file", parts[0], line, anchor)
 		return false
 	}
+	if len(matches) > 1 {
+		t.Errorf("%s:%d anchor %q is ambiguous (lines %v); regenerate the audit anchors", parts[0], line, anchor, matches)
+		return false
+	}
+	t.Logf("audit anchor %s shifted from line %d to %d (exact anchor still unique)", parts[0], line, matches[0])
 	return true
 }
 

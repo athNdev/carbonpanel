@@ -107,6 +107,66 @@ func TestBuiltinStatusPanelPublishesReachablePort(t *testing.T) {
 	}
 }
 
+// OSS-388: the built-in BlueMap template must pin its renderer version, keep
+// the world read-only and derived from the actual level folder, expose no
+// browser-facing access URL, and never silently accept Mojang downloads.
+func TestBuiltinBlueMapTemplateSafetyContract(t *testing.T) {
+	store := setupTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	if err := InitBuiltinTemplates(store); err != nil {
+		t.Fatal(err)
+	}
+	templates, err := store.ListModuleTemplates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tpl *storage.ModuleTemplate
+	for _, candidate := range templates {
+		if candidate.ID == "builtin-bluemap" {
+			tpl = candidate
+			break
+		}
+	}
+	if tpl == nil {
+		t.Fatal("builtin-bluemap template missing")
+	}
+	if strings.HasSuffix(tpl.DockerImage, ":latest") {
+		t.Fatalf("image %q is not pinned; upstream requires a specific release", tpl.DockerImage)
+	}
+	if !strings.Contains(tpl.DockerImage, ":v5.29") {
+		t.Fatalf("image %q is not the ADR 0015 verified v5.29 adapter", tpl.DockerImage)
+	}
+	if len(tpl.DefaultAccessUrls) != 0 {
+		t.Fatalf("DefaultAccessUrls = %v, want none: browser must never receive a renderer origin/port", tpl.DefaultAccessUrls)
+	}
+	if tpl.DefaultInitCommand != "" || tpl.DefaultRestartAfterInit || tpl.DefaultInitCommandDelay != 0 {
+		t.Fatalf("template ships silent init/restart consent: cmd=%q delay=%d restart=%v",
+			tpl.DefaultInitCommand, tpl.DefaultInitCommandDelay, tpl.DefaultRestartAfterInit)
+	}
+	if !strings.Contains(tpl.DefaultVolumes, "{{server.config.level}}") {
+		t.Fatalf("world mount is not derived from the actual level folder: %s", tpl.DefaultVolumes)
+	}
+	var vols []docker.ModuleVolumeMount
+	if err := json.Unmarshal([]byte(tpl.DefaultVolumes), &vols); err != nil {
+		t.Fatalf("DefaultVolumes: %v", err)
+	}
+	foundWorld := false
+	for _, v := range vols {
+		if v.Target == "/app/world" {
+			foundWorld = true
+			if !v.ReadOnly {
+				t.Fatal("world mount must stay read-only")
+			}
+		}
+	}
+	if !foundWorld {
+		t.Fatal("missing /app/world read-only mount")
+	}
+	if len(tpl.Ports) != 1 || tpl.Ports[0].ContainerPort != 8100 || tpl.Ports[0].ExposePublic {
+		t.Fatalf("renderer port must stay private container-only 8100: %+v", tpl.Ports)
+	}
+}
+
 func TestBuiltinTemplatesAreNotPrivilegedHostExtensions(t *testing.T) {
 	store := setupTestStore(t)
 	t.Cleanup(func() { _ = store.Close() })

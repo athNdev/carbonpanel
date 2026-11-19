@@ -79,6 +79,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		overlayKindLabel
 	} from '$lib/features/worldview/overlays';
 	import { adminActions, buildAdminRequest, type AdminAction } from '$lib/features/worldview/admin';
+	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
 	import { prefersReducedMotion } from '$lib/motion';
 
 	const store = createWorldViewStore({
@@ -486,9 +487,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								Open modules
 							</CarbonButton>
 						</div>
-						<p class="text-xs text-muted-foreground">
-							Setup documentation (docs/world-viewing.md) is not linked in this build yet.
-						</p>
+						<BlueMapInstall
+							{serverId}
+							target={statusTarget}
+							can={(resource, action) =>
+								checkPermission(auth.permissions, resource, action, serverId)}
+							oncomplete={() => void retry()}
+						/>
 					</div>
 				{:else if view === 'installing'}
 					<div class="space-y-3 border border-border bg-card p-8" role="status">
