@@ -288,6 +288,20 @@ test('editor theme effects never bootstrap Monaco and clear active runtimes', ()
 	assert.match(dialog, /activeRuntime = null/, 'disposal must release the active runtime');
 });
 
+test('login hydrates preferences outside the shell and switches the brand mark', () => {
+	const login = readFileSync(new URL('../routes/login/+page.svelte', import.meta.url), 'utf8');
+	assert.match(
+		login,
+		/displayPreferences\.hydrate\(\)/,
+		'login renders without CarbonShell and must hydrate the shared owner itself'
+	);
+	assert.match(
+		login,
+		/\$theme === 'dark' \? 'brand-mark-light\.svg' : 'brand-mark-dark\.svg'/,
+		'the mark must follow the theme so it stays visible on the tokenized card'
+	);
+});
+
 // Per-feature new-debt ratchet: only files actually migrated to semantic tokens
 // are listed. Purposeful third-party/status colors are kept as semantic tokens
 // (destructive/success/accent) rather than reintroduced as raw hex. This is not
@@ -324,7 +338,6 @@ test('migrated surfaces introduce no new hardcoded six-digit hex colors', () => 
 		'./components/pack-content-panel.svelte',
 		'./components/routing-settings.svelte',
 		'./components/scroll-to-top.svelte',
-		'./components/server-mods.svelte',
 		'./components/server-operations.svelte',
 		'./components/staged-config-view.svelte',
 		'./components/support-settings.svelte',

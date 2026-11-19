@@ -15,7 +15,8 @@ one at https://mozilla.org/MPL/2.0/.
 		base: 'inline-flex w-fit shrink-0 items-center justify-center gap-1.5 overflow-hidden whitespace-nowrap rounded-none border px-2 py-0.5 text-xs font-normal tracking-wide transition-colors [&>svg]:pointer-events-none [&>svg]:size-3',
 		variants: {
 			variant: {
-				default: 'bg-primary/20 border-primary text-accent-text',
+				default:
+					'bg-[var(--tag-blue-bg)] border-[var(--tag-blue-text)] text-[var(--tag-blue-text)]',
 				secondary: 'bg-secondary border-border text-foreground',
 				destructive: 'bg-destructive/20 border-destructive text-destructive-text',
 				outline: 'bg-transparent border-border text-muted-foreground'

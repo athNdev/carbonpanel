@@ -25,7 +25,7 @@ one at https://mozilla.org/MPL/2.0/.
 	bind:checked
 	data-slot="switch"
 	class={cn(
-		'peer inline-flex h-6 w-12 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-40 data-[state=checked]:bg-success data-[state=unchecked]:bg-secondary',
+		'peer inline-flex h-6 w-12 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)] disabled:cursor-not-allowed disabled:opacity-40 data-[state=checked]:bg-success data-[state=unchecked]:bg-[var(--input)]',
 		className
 	)}
 	{...restProps}

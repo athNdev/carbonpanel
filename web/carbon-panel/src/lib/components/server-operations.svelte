@@ -112,7 +112,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<h3 class="text-sm font-medium text-foreground">Lifecycle operations</h3>
 		<button
 			type="button"
-			class="inline-flex h-8 items-center rounded-none bg-secondary px-4 text-xs text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+			class="inline-flex h-8 items-center rounded-none bg-secondary px-4 text-xs text-foreground transition-colors hover:bg-[var(--button-secondary-hover)] disabled:opacity-50"
 			onclick={load}
 			disabled={loading}
 		>
@@ -140,7 +140,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			<p class="font-mono text-xs text-destructive-text">Could not load operations: {loadError}</p>
 			<button
 				type="button"
-				class="inline-flex h-7 items-center rounded-none bg-secondary px-3 text-xs text-foreground hover:bg-secondary"
+				class="inline-flex h-7 items-center rounded-none bg-secondary px-3 text-xs text-foreground hover:bg-[var(--button-secondary-hover)]"
 				onclick={load}>Retry</button
 			>
 		</div>

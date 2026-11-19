@@ -704,7 +704,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{#each filtered as item (item.slug)}
 				{@const update = updates[item.slug]}
 				<div
-					class="group flex flex-col gap-2 px-4 py-3 transition-colors hover:bg-card sm:flex-row sm:items-center sm:gap-3"
+					class="group flex flex-col gap-2 px-4 py-3 transition-colors hover:bg-accent sm:flex-row sm:items-center sm:gap-3"
 				>
 					<div class="flex min-w-0 flex-1 items-start gap-2.5">
 						<div
@@ -934,7 +934,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<div class="max-h-56 divide-y divide-border overflow-y-auto border border-border">
 							{#each versions as version (version.id)}
 								<label
-									class="flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors hover:bg-card"
+									class="flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors hover:bg-accent"
 								>
 									<input
 										type="radio"

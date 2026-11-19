@@ -457,7 +457,7 @@ one at https://mozilla.org/MPL/2.0/.
 													>
 													{#if listener.isDefault}
 														<span
-															class="inline-flex items-center gap-1 rounded-none border border-primary bg-primary/20 px-1.5 py-0.5 font-mono text-xs text-accent-text"
+															class="inline-flex items-center gap-1 rounded-none border border-[var(--tag-blue-text)] bg-[var(--tag-blue-bg)] px-1.5 py-0.5 font-mono text-xs text-[var(--tag-blue-text)]"
 														>
 															<Star class="h-3 w-3" />
 															Default

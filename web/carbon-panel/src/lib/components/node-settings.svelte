@@ -672,7 +672,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					pingInfo?.status === NodeStatus.ERROR || pingInfo?.status === NodeStatus.OFFLINE}
 
 				<CarbonTile
-					class="flex h-full flex-col rounded-none !border-border !bg-card !p-0 transition-colors hover:!border-border"
+					class="flex h-full flex-col rounded-none !border-border !bg-card !p-0 transition-colors hover:!border-[var(--button-secondary-hover)]"
 				>
 					<!-- Identity -->
 					<div class="px-5 pt-4">

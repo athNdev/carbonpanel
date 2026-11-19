@@ -339,7 +339,7 @@ one at https://mozilla.org/MPL/2.0/.
 								<label
 									class="flex cursor-pointer items-start gap-3 border bg-background p-3 transition-colors {selected
 										? 'border-primary'
-										: 'border-border hover:border-border'}"
+										: 'border-border hover:border-[var(--button-secondary-hover)]'}"
 								>
 									<input
 										type="checkbox"

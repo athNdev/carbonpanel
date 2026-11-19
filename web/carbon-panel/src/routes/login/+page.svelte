@@ -13,6 +13,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { goto } from '$app/navigation';
 	import { asset, resolve } from '$app/paths';
 	import { create } from '@bufbuild/protobuf';
+	import { displayPreferences, theme } from '$lib/display-preferences.svelte';
 	import { authStore } from '$lib/stores/auth';
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { silentCallOptions } from '$lib/api/rpc-client';
@@ -48,6 +49,9 @@ one at https://mozilla.org/MPL/2.0/.
 	let invitePin = $state('');
 
 	onMount(() => {
+		// The login route renders outside CarbonShell, so hydrate the shared
+		// preference owner here before choosing a theme-aware brand mark.
+		displayPreferences.hydrate();
 		const urlParams = new URLSearchParams(window.location.search);
 
 		// Canonical OIDC error states from the callback. Never render raw IdP text.
@@ -266,7 +270,11 @@ one at https://mozilla.org/MPL/2.0/.
 		<!-- Header -->
 		<div class="mb-8 text-center">
 			<div class="mb-2 flex items-center justify-center gap-3">
-				<img src={asset('brand-mark-light.svg')} alt="" class="h-8 w-8" />
+				<img
+					src={asset($theme === 'dark' ? 'brand-mark-light.svg' : 'brand-mark-dark.svg')}
+					alt=""
+					class="h-8 w-8"
+				/>
 				<h1 class="text-2xl font-semibold tracking-wide text-foreground">Carbon Panel</h1>
 			</div>
 			{#if authStatus.firstUserSetup}

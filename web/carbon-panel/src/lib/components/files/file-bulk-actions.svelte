@@ -44,10 +44,12 @@ one at https://mozilla.org/MPL/2.0/.
 >
 	{#if active}
 		<div class="flex items-center gap-2">
-			<span class="font-mono text-xs font-medium text-accent-text">{selectedCount} selected</span>
+			<span class="font-mono text-xs font-medium text-[var(--tag-blue-text)]"
+				>{selectedCount} selected</span
+			>
 			<button
 				type="button"
-				class="flex h-6 cursor-pointer items-center gap-1 rounded-none bg-secondary px-2 text-xs text-foreground hover:bg-secondary"
+				class="flex h-6 cursor-pointer items-center gap-1 rounded-none bg-secondary px-2 text-xs text-foreground hover:bg-[var(--button-secondary-hover)]"
 				onclick={onClear}
 			>
 				<X class="h-3 w-3" />

@@ -918,9 +918,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<!-- Batch Action Bar -->
 						{#if selectedSlugs.length > 0}
 							<div
-								class="flex items-center justify-between rounded-none border-b border-primary bg-primary/20 p-2.5"
+								class="flex items-center justify-between rounded-none border-b border-[var(--tag-blue-text)] bg-[var(--tag-blue-bg)] p-2.5"
 							>
-								<span class="font-mono text-xs font-semibold text-accent-text">
+								<span class="font-mono text-xs font-semibold text-[var(--tag-blue-text)]">
 									{selectedSlugs.length} mod(s) selected
 								</span>
 								<div class="flex flex-wrap items-center gap-1.5">
@@ -1513,7 +1513,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				{:else}
 					{#each searchResults as item (item.id)}
 						<CarbonTile
-							class="flex items-start justify-between gap-3 rounded-none border-border p-3 hover:border-border"
+							class="flex items-start justify-between gap-3 rounded-none border-border p-3 hover:border-[var(--button-secondary-hover)]"
 						>
 							<div class="flex min-w-0 flex-1 items-start gap-3">
 								{#if item.icon_url}

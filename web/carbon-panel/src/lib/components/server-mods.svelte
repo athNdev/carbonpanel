@@ -334,7 +334,7 @@ one at https://mozilla.org/MPL/2.0/.
 						aria-pressed={modFilter === 'enabled'}
 						class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {modFilter ===
 						'enabled'
-							? 'border-success bg-success text-white'
+							? 'border-[#198038] bg-[#198038] text-white'
 							: 'border-success/50 bg-card text-success-text hover:bg-secondary'}"
 					>
 						Enabled ({mods.filter((m) => m.enabled).length})

@@ -462,7 +462,8 @@ one at https://mozilla.org/MPL/2.0/.
 							href="https://docs.carbon-panel.app/introduction/"
 							target="_blank"
 							rel="noopener noreferrer"
-							class="text-accent-text underline hover:text-accent-text">carbon-panel docs</a
+							class="text-accent-text underline hover:text-[var(--tag-blue-text)]"
+							>carbon-panel docs</a
 						>.
 					</p>
 				{/if}
