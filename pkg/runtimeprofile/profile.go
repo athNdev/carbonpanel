@@ -174,6 +174,9 @@ const (
 	// tag. It is a warning: the container can still boot, but a rebuilt tag
 	// can change what the next recreate runs.
 	RuntimeIssueImageUnpinned RuntimeIssueCode = "image_unpinned"
+	// RuntimeIssueImageUnpinnedStrict is the fatal form of RuntimeIssueImageUnpinned
+	// when the operator enabled docker.require_pinned_digests.
+	RuntimeIssueImageUnpinnedStrict RuntimeIssueCode = "image_unpinned_strict"
 	// RuntimeIssueRootlessHostRootData is raised when a rootless daemon must run
 	// the root-then-drop bootstrap but the world directory is still owned by
 	// host uid 0. The entrypoint cannot chown it into the user namespace.
@@ -220,6 +223,10 @@ type RuntimeSpec struct {
 	// contract: start as root, prepare /data, rewrite /etc/nsswitch.conf, then
 	// drop to the unprivileged game user through gosu.
 	MinecraftImage bool
+	// RequirePinnedImage makes an unpinned Minecraft image fatal instead of a
+	// warning. It is the opt-in docker.require_pinned_digests policy; the
+	// default stays false because version selection relies on mutable tags.
+	RequirePinnedImage bool
 	// RequestedMemoryMB is the memory the server record asked for, which the
 	// effective container limit is derived from.
 	RequestedMemoryMB int64
@@ -669,12 +676,19 @@ func runtimeIssues(spec RuntimeSpec, profile RuntimeProfile) []RuntimeIssue {
 	}
 
 	if profile.MinecraftImage && !profile.ImagePinned {
-		issues = append(issues, RuntimeIssue{
+		issue := RuntimeIssue{
 			Code:     RuntimeIssueImageUnpinned,
 			Severity: RuntimeWarning,
 			Detail:   fmt.Sprintf("image %q is not pinned to a digest", profile.Image),
 			Remedy:   "record the image as name@sha256:<digest> so a rebuilt tag cannot change the server; do not broaden privileges to compensate",
-		})
+		}
+		if spec.RequirePinnedImage {
+			issue.Code = RuntimeIssueImageUnpinnedStrict
+			issue.Severity = RuntimeFatal
+			issue.Detail = fmt.Sprintf("image %q is not pinned to a digest while strict digest mode is enabled", profile.Image)
+			issue.Remedy = "record the image as name@sha256:<digest>, or disable the docker.require_pinned_digests opt-in; do not broaden privileges to compensate"
+		}
+		issues = append(issues, issue)
 	}
 
 	issues = append(issues, limitIssues(profile)...)

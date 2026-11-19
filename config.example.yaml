@@ -68,6 +68,11 @@ docker:
   # startup. Disabled by default: they are reported and left running (quarantined),
   # and containers from another installation are never touched.
   reconcile_purge_orphans: false
+  # Opt-in strict image provenance (B-09). The resolved registry digest is
+  # recorded for every image regardless; enabling this makes an unpinned
+  # Minecraft tag fail runtime preflight instead of only warning. Existing
+  # tag-based version selection keeps working while this stays false.
+  require_pinned_digests: false
 
 # Storage configuration
 storage:
