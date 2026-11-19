@@ -56,6 +56,12 @@ type ProxyDeps struct {
 	Client     HTTPDoer
 }
 
+// defaultRendererDocument is the prepared upstream document served for the
+// canonical keyed iframe root (ProxyPrefix + key + "/"). It is fetched through
+// the same auth, session, authorization, path-validation and cache gates as any
+// other proxied renderer asset.
+const defaultRendererDocument = "index.html"
+
 // NewProxyHandler mounts GET/HEAD /api/v1/worldview/map/{key}/... . The key is
 // an opaque session identifier, not a credential; each request re-authenticates
 // with cp_session or an Authorization bearer token and re-checks
@@ -115,7 +121,17 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key, asset, ok := strings.Cut(rel, "/")
-	if !ok || key == "" || asset == "" || !validAssetPath(asset) {
+	if !ok || key == "" {
+		http.Error(w, "invalid map session path", http.StatusForbidden)
+		return
+	}
+	upstreamAsset := asset
+	if asset == "" {
+		// Canonical keyed slash root issued by GetWorldViewSession. Admitted
+		// through the identical session identity, authorization and cache gates
+		// below, then mapped to the prepared default renderer document.
+		upstreamAsset = defaultRendererDocument
+	} else if !validAssetPath(asset) {
 		http.Error(w, "invalid map session path", http.StatusForbidden)
 		return
 	}
@@ -154,7 +170,7 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.proxyAsset(w, r, renderer.ProxyBaseURL(), asset)
+	h.proxyAsset(w, r, renderer.ProxyBaseURL(), upstreamAsset)
 }
 
 // authorized mirrors the RPC interceptor: role grant first, then the

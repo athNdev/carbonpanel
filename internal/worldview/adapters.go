@@ -193,6 +193,12 @@ func (a *httpRenderer) Health(ctx context.Context) (*Health, error) {
 // /settings.json over the private endpoint. It is not a port probe and the
 // response never reaches a browser. An empty list means the web server is up
 // but no map is configured/rendered for any target world.
+//
+// BlueMap v5.29 serializes maps as a JSON array of map ID strings
+// ({"maps":["world"]}); earlier fixtures and compatible renderers may use
+// objects with an "id" field. Accept both without relaxing the configured
+// map ID safeguard enforced by callers. Malformed or mixed/invalid entry
+// shapes remain parse errors, preserving the previous fail-closed behavior.
 func blueMapMapIDs(ctx context.Context, baseURL string, hc HTTPDoer) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/settings.json", nil)
 	if err != nil {
@@ -206,19 +212,43 @@ func blueMapMapIDs(ctx context.Context, baseURL string, hc HTTPDoer) ([]string, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("settings.json returned HTTP %d", resp.StatusCode)
 	}
-	var payload struct {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+
+	// Legacy/fixture-compatible format: {"maps":[{"id":"world"}]}.
+	// Try this first to preserve existing parse semantics exactly.
+	var legacy struct {
 		Maps []struct {
 			ID string `json:"id"`
 		} `json:"maps"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+	if err := json.Unmarshal(body, &legacy); err == nil {
+		ids := make([]string, 0, len(legacy.Maps))
+		for _, m := range legacy.Maps {
+			if id := strings.TrimSpace(m.ID); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		return ids, nil
+	}
+
+	// Upstream BlueMap v5.29 format: {"maps":["world"]}.
+	// Only a pure string array is accepted here; any other shape stays an error.
+	var stringIDs struct {
+		Maps []string `json:"maps"`
+	}
+	if err := json.Unmarshal(body, &stringIDs); err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(payload.Maps))
-	for _, m := range payload.Maps {
-		if id := strings.TrimSpace(m.ID); id != "" {
-			ids = append(ids, id)
+	ids := make([]string, 0, len(stringIDs.Maps))
+	for _, id := range stringIDs.Maps {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
+			return nil, fmt.Errorf("settings.json contains an empty map id")
 		}
+		ids = append(ids, trimmed)
 	}
 	return ids, nil
 }
