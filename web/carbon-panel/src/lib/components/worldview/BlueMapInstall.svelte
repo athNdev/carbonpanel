@@ -8,6 +8,7 @@ SPDX-License-Identifier: MPL-2.0
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { formatRpcError } from '$lib/api/rpc-error';
 	import {
+		adaptBlueMapRpc,
 		blueMapInstallEligibility,
 		installBlueMap,
 		type BlueMapInstallRpc,
@@ -15,6 +16,10 @@ SPDX-License-Identifier: MPL-2.0
 	} from '$lib/features/worldview/bluemap-install';
 	import { ListNodesRequestSchema } from '$lib/proto/carbonpanel/v1/node_pb';
 	import type { WorldViewTarget } from '$lib/proto/carbonpanel/v1/worldview_pb';
+
+	// rpcClient groups RPCs by service; adapt to the flat install seam so a
+	// bare type cast cannot leave listModules/createModule undefined at runtime.
+	const installRpc: BlueMapInstallRpc = adaptBlueMapRpc(rpcClient);
 
 	interface Props {
 		serverId: string;
@@ -54,7 +59,7 @@ SPDX-License-Identifier: MPL-2.0
 		message = '';
 		outcome = 'idle';
 		try {
-			const result = await installBlueMap(rpcClient as unknown as BlueMapInstallRpc, serverId, {
+			const result = await installBlueMap(installRpc, serverId, {
 				accepted: true
 			});
 			outcome = result.outcome;

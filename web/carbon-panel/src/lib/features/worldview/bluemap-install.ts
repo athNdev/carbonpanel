@@ -16,10 +16,12 @@ import {
 	CreateModuleRequestSchema,
 	ListModulesRequestSchema,
 	type CreateModuleRequest,
+	type CreateModuleResponse,
 	type ListModulesRequest,
+	type ListModulesResponse,
 	type Module
 } from '$lib/proto/carbonpanel/v1/module_pb';
-import type { ListNodesRequest, Node } from '$lib/proto/carbonpanel/v1/node_pb';
+import type { ListNodesRequest, ListNodesResponse, Node } from '$lib/proto/carbonpanel/v1/node_pb';
 import type { WorldViewTarget } from '$lib/proto/carbonpanel/v1/worldview_pb';
 
 export const BLUEMAP_TEMPLATE_ID = 'builtin-bluemap';
@@ -34,6 +36,32 @@ export interface BlueMapInstallRpc {
 	listModules(request: ListModulesRequest): Promise<{ modules: Module[] }>;
 	createModule(request: CreateModuleRequest): Promise<{ module: Module }>;
 	listNodes(request: ListNodesRequest): Promise<{ nodes: Node[] }>;
+}
+
+/** The grouped `rpcClient` exposes module/node calls as `rpcClient.module.*`
+ * and `rpcClient.node.*`, not as flat methods. Adapt explicitly: casting the
+ * grouped client to BlueMapInstallRpc leaves the methods undefined at runtime
+ * and makes the in-view install fail before any RPC is sent (OSS-388). */
+export interface GroupedBlueMapRpc {
+	module: {
+		listModules(request: ListModulesRequest): Promise<ListModulesResponse>;
+		createModule(request: CreateModuleRequest): Promise<CreateModuleResponse>;
+	};
+	node: {
+		listNodes(request: ListNodesRequest): Promise<ListNodesResponse>;
+	};
+}
+
+export function adaptBlueMapRpc(grouped: GroupedBlueMapRpc): BlueMapInstallRpc {
+	return {
+		listModules: (request) => grouped.module.listModules(request),
+		createModule: async (request) => {
+			const response = await grouped.module.createModule(request);
+			if (!response.module) throw new Error('CreateModule returned no module');
+			return { module: response.module };
+		},
+		listNodes: (request) => grouped.node.listNodes(request)
+	};
 }
 
 export type InstallEligibility = { eligible: boolean; reason: string };

@@ -4,14 +4,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { create } from '@bufbuild/protobuf';
 import {
+	CreateModuleResponseSchema,
+	ListModulesRequestSchema,
+	ListModulesResponseSchema,
 	ModuleSchema,
 	type CreateModuleRequest,
 	type ListModulesRequest,
 	type Module
 } from '$lib/proto/carbonpanel/v1/module_pb';
-import { NodeSchema } from '$lib/proto/carbonpanel/v1/node_pb';
+import { ListNodesResponseSchema, NodeSchema } from '$lib/proto/carbonpanel/v1/node_pb';
 import { WorldViewTargetSchema, WorldRef_Kind } from '$lib/proto/carbonpanel/v1/worldview_pb';
 import {
+	adaptBlueMapRpc,
 	BLUEMAP_TEMPLATE_ID,
 	blueMapInstallEligibility,
 	installBlueMap,
@@ -46,6 +50,43 @@ const target = () =>
 	});
 
 const consent = { accepted: true };
+
+test('grouped rpcClient is adapted to the flat install seam', async () => {
+	// The production rpcClient groups calls as .module.* / .node.*. A bare cast
+	// used to leave listModules undefined and the in-view install always failed.
+	let lists = 0;
+	let creates = 0;
+	const grouped = {
+		module: {
+			listModules: async () => {
+				lists++;
+				return create(ListModulesResponseSchema, { modules: [] });
+			},
+			createModule: async () => {
+				creates++;
+				return create(CreateModuleResponseSchema, {
+					module: create(ModuleSchema, { id: 'new-mod', name: 'BlueMap' })
+				});
+			}
+		},
+		node: {
+			listNodes: async () =>
+				create(ListNodesResponseSchema, {
+					nodes: [create(NodeSchema, { id: 'default', isLocal: true })]
+				})
+		}
+	};
+	const flat = adaptBlueMapRpc(grouped);
+	assert.equal(typeof flat.listModules, 'function');
+	assert.equal(typeof flat.createModule, 'function');
+	assert.equal(typeof flat.listNodes, 'function');
+	const result = await installBlueMap(flat, 'srv-blue', consent);
+	assert.equal(result.outcome, 'installed');
+	assert.equal(lists, 1);
+	assert.equal(creates, 1);
+	assert.equal((await flat.listModules(create(ListModulesRequestSchema, {}))).modules.length, 0);
+	assert.equal(lists, 2);
+});
 
 test('eligibility requires local node, module permissions and a known level', () => {
 	const nodes = [create(NodeSchema, { id: 'default', isLocal: true })];

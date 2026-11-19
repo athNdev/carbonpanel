@@ -27,7 +27,7 @@ map config per target world plus explicit `accept-download` acknowledgement.
    inspected owned-network **IP** (not a Docker DNS alias) — host-network and
    native-binary deployments cannot resolve container names, so the private
    base URL is built from the container address observed by the node-scoped
-   inspect; an empty/invalid IP fails closed.
+   inspect; an empty/invalid IP fails closed. Discovery also verifies
    node-scoped container metadata: module/server/node/template labels, the
    pinned image (`v5.29`), unprivileged configuration, owned-network membership
    and the effective read-only `/app/world` bind whose source is the server's
@@ -108,11 +108,26 @@ map config per target world plus explicit `accept-download` acknowledgement.
 
 ## Evidence limits
 
-Tests use owned config fixtures, in-memory module registries and local HTTP
-responders; no live BlueMap container, browser-rendered map or measured latency
-is claimed. Runtime container metadata is verified through the existing
-node-scoped Docker client seam; no live daemon was mutated. A real disposable
-BlueMap container boot / pinned-image / read-only-mount / config-and-tiles
-initialization journey and an owned-browser end-to-end run remain unverified:
-this environment has no reachable Docker daemon (`docker info` cannot connect)
-and live WSL mutation is out of scope. Do not read the fixtures as live evidence.
+Unit tests use owned config fixtures, in-memory module registries and local
+HTTP responders. The disposable live-Docker qualification separately verified,
+on task-owned containers/volumes/networks only, a real Java 1.20.4 world
+(`level.dat` plus real region files, EULA accepted), a real BlueMap v5.29 render
+that produced actual map tiles, `/settings.json` reporting the target map
+identity, a live pinned-image install and a legacy `:latest` adoption with
+exact labels, owned-network IP, exposed port, read-only level bind and
+unprivileged config. All of those fixtures were disposed after capture; no live
+WSL module, server, world, network or host port was touched.
+
+An owned-Chromium run drove the authenticated same-origin map path with those
+real rendered assets and exercised the in-view install, idempotency and legacy
+adoption journeys (4/4 scenarios, zero page/console errors). That run exposed a
+real wiring defect: the component cast the grouped `rpcClient` to the flat
+install seam, leaving `listModules`/`createModule` undefined at runtime. The
+fix is an explicit adapter (`adaptBlueMapRpc`) with regression coverage.
+
+Remaining limits: the browser proxy path was a local fixture enforcing the
+session contract (the Go proxy handler is covered by unit tests, not by this
+browser run); ConnectRPC responses and the create/start journal were mocked, so
+no live controller, database or Docker-backed module service was exercised. No
+cross-controller/distributed guarantee, measured latency or production
+deployment is claimed. Do not read the unit fixtures as live evidence.
