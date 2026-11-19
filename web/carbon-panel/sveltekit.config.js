@@ -6,7 +6,7 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 /** @type {import('@sveltejs/kit/vite').Config} */
 const config = {
 	// Kit 3 removed the built-in `$lib`; keep the existing app-wide imports
-	// working without rewriting every module. See docs/adr/0041.
+	// working without rewriting every module. See docs/adr/0042.
 	alias: { $lib: 'src/lib' },
 	preprocess: [vitePreprocess()],
 	onwarn: (warning, handler) => {

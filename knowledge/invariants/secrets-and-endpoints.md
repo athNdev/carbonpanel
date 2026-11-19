@@ -32,6 +32,11 @@ credential is not fixed by deleting the line; it is already in history.
   for real values.
 - The knowledge linter rejects common secret and private-path patterns; it is a
   backstop, not permission to be careless.
+- `internal/docscheck` runs a fail-closed `TestNoAbsoluteWorkstationPaths` over
+  every git-tracked file: a Windows drive-letter home path or a WSL
+  `/mnt/<drive>/Users/<name>` path fails `go test ./...`. External evidence
+  locations belong behind an environment override (for example
+  `CARBONPANEL_AUDIT_DIR`), never as literal paths in tracked source.
 
 # Review
 

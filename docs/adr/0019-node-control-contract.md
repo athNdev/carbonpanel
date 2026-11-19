@@ -163,14 +163,19 @@ bytes need no delimiter. There is no length prefix and no canonical-JSON step.
   would change the context on every challenge and break the binding; signing a
   client-supplied expiry would let a caller extend the enrollment.
 
-**Known fixture divergence (route to the VM lane).** The checked-in VM
-first-boot fixture `packaging/node-vm/cloud-init/firstboot/enroll.py` still
-builds its context with canonical JSON (`CONTEXT_PREFIX + 0x00 + json.dumps`)
-instead of the table above. It uses the server nonce, not a client nonce, so it
-does not reintroduce that specific flaw, but its bytes will not verify against
-this package. That lane must switch to the exact NUL-delimited encoding before
-any production mount; this OSS-385 change deliberately does not edit the VM
-lane. No conformance or interoperability with that fixture is claimed here.
+**VM lane first-boot fixture conformance (resolved).** The checked-in VM
+first-boot fixture `packaging/node-vm/cloud-init/firstboot/enroll.py` now uses
+the exact shared `ClaimContextRaw` encoding from the table above, not canonical
+JSON. Its `canonical_context()` joins the domain separator, node/enrollment/
+challenge IDs, server nonce, RFC3339Nano expiry, comma-joined proto capability
+names and channel context with single NUL bytes (no trailing separator), and
+`verify_claim()` recomputes that context and compares it byte-for-byte. The
+nonce is always the server-stored challenge nonce; the fixture has no client
+nonce field. `sign_claim()` explicitly refuses a canonical-JSON context
+(`{`-prefixed remainder or `"node_id"` fields), so the old encoding cannot be
+reintroduced silently. The earlier `CONTEXT_PREFIX + 0x00 + json.dumps(...)`
+divergence no longer applies: no second encoder or interoperability caveat
+remains for this fixture.
 
 ### Curve decision: Ed25519 only
 
