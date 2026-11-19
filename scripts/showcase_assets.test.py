@@ -20,6 +20,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import showcase_assets as sa  # noqa: E402
 
+# Derive the browser driver version from the authoritative pin so this fixture
+# cannot silently drift behind scripts/manual-review/e2e/package.json again.
+_DRIVER_PACKAGE = (
+    Path(__file__).resolve().parent
+    / "manual-review"
+    / "e2e"
+    / "package.json"
+)
+REVIEW_DRIVER_VERSION = json.loads(_DRIVER_PACKAGE.read_text(encoding="utf-8"))["dependencies"]["playwright"]
+
 
 def chunk(kind: bytes, body: bytes) -> bytes:
     return (
@@ -86,7 +96,7 @@ class ShowcaseAssetsTest(unittest.TestCase):
                 run_url="https://github.com/athNdev/carbonpanel/actions/runs/123",
                 captured_at=captured_at or datetime.now(timezone.utc).isoformat(),
                 app_version="review",
-                driver_version="1.49.1",
+                driver_version=REVIEW_DRIVER_VERSION,
                 browser_version="1148",
             )
         )
