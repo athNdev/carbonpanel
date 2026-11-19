@@ -21,6 +21,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/google/uuid"
@@ -37,6 +38,7 @@ type Engine struct {
 	retentionDays   int
 	log             *logger.Logger
 	storageResolver *nodestorage.Resolver
+	admission       *serverruntime.AdmissionCoordinator
 }
 
 // Config holds configuration for the SnapshotEngine
@@ -47,6 +49,11 @@ type Config struct {
 	// StorageResolver is the instance-owned node storage resolver. A nil
 	// resolver still serves local/shared nodes and refuses remote-only nodes.
 	StorageResolver *nodestorage.Resolver
+	// Admission is the shared in-process start gate. A rollback restarts a
+	// container, so it contends with other starts on the same node. A nil
+	// config keeps standalone engines serialised on their own coordinator;
+	// the composition root passes the shared one.
+	Admission *serverruntime.AdmissionCoordinator
 }
 
 // NewEngine creates a new SnapshotEngine
@@ -77,8 +84,12 @@ func NewEngineWithPool(store *storage.Store, dockerClient *docker.Client, pool *
 	}
 
 	var resolver *nodestorage.Resolver
+	admission := serverruntime.NewAdmissionCoordinator()
 	if len(cfg) > 0 {
 		resolver = cfg[0].StorageResolver
+		if cfg[0].Admission != nil {
+			admission = cfg[0].Admission
+		}
 	}
 	return &Engine{
 		store:           store,
@@ -90,6 +101,7 @@ func NewEngineWithPool(store *storage.Store, dockerClient *docker.Client, pool *
 		retentionDays:   retentionDays,
 		log:             log,
 		storageResolver: resolver,
+		admission:       admission,
 	}
 }
 
@@ -322,6 +334,14 @@ func (e *Engine) Rollback(ctx context.Context, server *storage.Server, snapshotI
 			return fmt.Errorf("cannot safely rollback: server %s is currently undergoing another transition", server.ID)
 		}
 		defer transition.Release()
+
+		// A rollback restarts the container if it was running before the
+		// snapshot, so it must contend with other starts on that node (OSS-405).
+		release, err := e.admission.Acquire(ctx, server.NodeID)
+		if err != nil {
+			return fmt.Errorf("cannot safely rollback: node %s start admission: %w", server.NodeID, err)
+		}
+		defer release()
 
 		dockerCli, err := e.resolveDocker(server.NodeID)
 		if err != nil {
