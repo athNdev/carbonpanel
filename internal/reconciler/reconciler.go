@@ -34,6 +34,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/internal/events"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
@@ -168,6 +169,12 @@ type Reconciler struct {
 	cfg Config
 	deb *debouncer
 
+	// admission is the shared in-process start gate. Self-heal starts a
+	// recreated container, so it contends with ordinary starts on that node.
+	// A default instance keeps standalone tests serialised; the composition
+	// root replaces it with the shared coordinator.
+	admission *serverruntime.AdmissionCoordinator
+
 	// modules converges module containers. It is nil when the panel runs
 	// without the module system, which disables the module pass entirely.
 	modules ModuleReconciler
@@ -216,12 +223,22 @@ func New(store Store, clients ClientResolver, proxy ProxyRouter, bus EventEmitte
 		log:         log,
 		cfg:         cfg,
 		deb:         newDebouncer(cfg.DebounceWindow),
+		admission:   serverruntime.NewAdmissionCoordinator(),
 		work:        make(chan string, workQueueDepth),
 		queued:      make(map[string]bool),
 		moduleWork:  make(chan string, workQueueDepth),
 		moduleQueue: make(map[string]bool),
 		backends:    make(map[string]backendRef),
 		stop:        make(chan struct{}),
+	}
+}
+
+// SetAdmissionCoordinator supplies the shared in-process start gate. The
+// composition root calls this before Start so self-heal contends with RPC and
+// scheduler starts on the same node.
+func (r *Reconciler) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) {
+	if c != nil {
+		r.admission = c
 	}
 }
 
@@ -894,6 +911,14 @@ func (r *Reconciler) rememberBackend(serverID string, ref backendRef) {
 // RecreateContainer only auto-starts when the previous container was running —
 // which is never the case in this path.
 func (r *Reconciler) selfHealRecreate(ctx context.Context, cli Client, server *db.Server) error {
+	// The replacement is started below, so self-heal must contend with other
+	// starts on this node rather than admit against a stale persisted total.
+	release, err := r.admission.Acquire(ctx, server.NodeID)
+	if err != nil {
+		return fmt.Errorf("node %s start admission: %w", server.NodeID, err)
+	}
+	defer release()
+
 	cfg, err := r.store.GetServerConfig(ctx, server.ID)
 	if err != nil {
 		return fmt.Errorf("load server config: %w", err)

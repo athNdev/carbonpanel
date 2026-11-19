@@ -110,6 +110,10 @@ type Server struct {
 	// serverService backs SetAdmissionCoordinator. It is created in
 	// registerServices, so it may be nil on a server that never registered.
 	serverService *services.ServerService
+	// configService and proxyService also start containers (recreation) and
+	// receive the shared gate in SetAdmissionCoordinator (OSS-405).
+	configService *services.ConfigService
+	proxyService  *services.ProxyService
 }
 
 // Creates new Connect RPC server
@@ -362,6 +366,12 @@ func (s *Server) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) 
 	if s.serverService != nil {
 		s.serverService.SetAdmissionCoordinator(c)
 	}
+	if s.configService != nil {
+		s.configService.SetAdmissionCoordinator(c)
+	}
+	if s.proxyService != nil {
+		s.proxyService.SetAdmissionCoordinator(c)
+	}
 }
 
 // Registers all Connect RPC service handlers
@@ -370,6 +380,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	authService := services.NewAuthService(s.store, s.authManager, s.enforcer, s.oidcHandler, s.log)
 	authService.SetTrustProxy(s.config != nil && s.config.Server.TrustProxy)
 	configService := services.NewConfigService(s.store, s.config, s.docker, s.clientPool, s.log)
+	s.configService = configService
 	configService.SetStorageResolver(s.storageResolver)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	fileService.SetStorageResolver(s.storageResolver)
@@ -388,6 +399,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	datapackService.SetStorageResolver(s.storageResolver)
 	nodeService := services.NewNodeService(s.store, s.clientPool, s.log)
 	proxyService := services.NewProxyService(s.store, s.docker, s.clientPool, s.proxyManager, s.config, s.logStreamer, s.log)
+	s.proxyService = proxyService
 	serverService := services.NewServerService(s.store, s.docker, s.sender, s.config, s.proxyManager, s.logStreamer, s.metricsCollector, s.moduleManager, s.bus, s.log, s.clientPool, s.placementEngine, s.enforcer)
 	s.serverService = serverService
 	if s.admission != nil {

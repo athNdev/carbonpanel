@@ -26,7 +26,7 @@ func TestDeepSleepManager_WakeRefusesStoppedAutoDeepSleep(t *testing.T) {
 	store.servers["srv-sleep"].Status = db.StatusStopped
 	store.servers["srv-sleep"].AutoDeepSleep = true
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	err := mgr.WakeServer(ctx, "srv-sleep")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "non-deepsleep status stopped")
@@ -58,7 +58,7 @@ func TestDeepSleepManager_UnknownRemoteNodeDoesNotUseDefaultController(t *testin
 		DeepSleepTimeoutMinutes: 1,
 	}
 
-	mgr := NewDeepSleepManager(defaultCtrl, store, &mockSleepCommander{}, nil, nil)
+	mgr := newTestDeepSleepManager(defaultCtrl, store, &mockSleepCommander{}, nil, nil)
 	mgr.SetControllerResolver(func(nodeID string) SleepController {
 		if nodeID == "node-unknown" {
 			return nil // remote node cannot be resolved
@@ -112,7 +112,7 @@ func TestDeepSleepManager_MultiNodeResolver(t *testing.T) {
 		},
 	}
 
-	mgr := NewDeepSleepManager(defaultCtrl, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(defaultCtrl, store, commander, nil, nil)
 	mgr.SetControllerResolver(func(nodeID string) SleepController {
 		if nodeID == "node-remote" {
 			return remoteCtrl
@@ -143,7 +143,7 @@ func TestDeepSleepManager_StopFromDeepSleepSkipsDockerStop(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	srv, err := store.GetServer(ctx, "srv-sleep")

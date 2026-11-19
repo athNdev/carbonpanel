@@ -141,6 +141,7 @@ func NewScheduler(store *storage.Store, docker *docker.Client, sender *command.S
 			MaxSnapshots:    appCfg.Storage.MaxSnapshots,
 			RetentionDays:   appCfg.Storage.SnapshotRetentionDays,
 			StorageResolver: cfg.StorageResolver,
+			Admission:       admission,
 		})
 	}
 

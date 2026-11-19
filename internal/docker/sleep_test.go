@@ -173,7 +173,7 @@ func TestDeepSleepWakeRefusesAnActiveOperation(t *testing.T) {
 		mockFreezerStore: store,
 		err:              errors.New("server operation op-delete (delete, phase executing) requires completion or recovery"),
 	}
-	mgr := NewDeepSleepManager(controller, guard, nil, nil, nil)
+	mgr := newTestDeepSleepManager(controller, guard, nil, nil, nil)
 
 	err := mgr.WakeServer(context.Background(), "srv-sleep")
 	if err == nil || !strings.Contains(err.Error(), "delete") {
@@ -192,7 +192,7 @@ func TestDeepSleepManager_SleepAndWake(t *testing.T) {
 	controller, commander, store := newDeepSleepHarness()
 
 	var refreshed []string
-	mgr := NewDeepSleepManager(controller, store, commander, func(id string) {
+	mgr := newTestDeepSleepManager(controller, store, commander, func(id string) {
 		refreshed = append(refreshed, id)
 	}, nil)
 
@@ -251,7 +251,7 @@ func TestDeepSleepManager_SleepRollbackPersistenceFailureMarksError(t *testing.T
 	store.updateStatusErrFor = db.StatusRunning
 	store.mu.Unlock()
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	err := mgr.SleepServer(ctx, "srv-sleep")
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Contains(t, err.Error(), "injected running status persistence failure")
@@ -271,7 +271,7 @@ func TestDeepSleepManager_PreparesReplacementBeforeWakeAndRecordsStart(t *testin
 	controller, commander, store := newDeepSleepHarness()
 	store.servers["srv-sleep"].Status = db.StatusDeepSleep
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	mgr.SetWakePreparer(func(ctx context.Context, server *db.Server) error {
 		server.ContainerID = "replacement-container"
 		return store.UpdateServer(ctx, server)
@@ -295,7 +295,7 @@ func TestDeepSleepManager_PlayersBlockSleep(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	mgr.SetPlayerCountProvider(func(serverID string) int { return 2 })
 
 	require.NoError(t, mgr.CheckIdleServers(ctx))
@@ -316,7 +316,7 @@ func TestDeepSleepManager_WakeSingleFlight(t *testing.T) {
 	controller, commander, store := newDeepSleepHarness()
 	controller.startGate = make(chan struct{})
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	firstDone := make(chan error, 1)
@@ -363,7 +363,7 @@ func TestDeepSleepManager_WakeWaitsForConcurrentSleep(t *testing.T) {
 		entered:  make(chan struct{}),
 		release:  make(chan struct{}),
 	}
-	mgr := NewDeepSleepManager(controller, store, blockingCommander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, blockingCommander, nil, nil)
 
 	sleepDone := make(chan error, 1)
 	go func() { sleepDone <- mgr.SleepServer(ctx, "srv-sleep") }()
@@ -399,7 +399,7 @@ func TestDeepSleepManager_SleepRejectsNonRunning(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	require.NoError(t, store.UpdateServerStatus(ctx, "srv-sleep", db.StatusStopped))
 
 	err := mgr.SleepServer(ctx, "srv-sleep")
@@ -416,7 +416,7 @@ func TestDeepSleepManager_WakeContainerStartFailure_RollsBackToError(t *testing.
 		refreshed = append(refreshed, serverID)
 	}
 
-	mgr := NewDeepSleepManager(controller, store, commander, refresher, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, refresher, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	controller.mu.Lock()
@@ -436,7 +436,7 @@ func TestDeepSleepManager_WakeContainerStartFailure_RollsBackToError(t *testing.
 func TestDeepSleepManager_WakePersistenceFailureStopsContainer(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	store.mu.Lock()
@@ -464,7 +464,7 @@ func TestDeepSleepManager_WakePersistenceFailureStopsContainer(t *testing.T) {
 func TestDeepSleepManager_WakePersistenceAndRollbackFailureMarksError(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	store.mu.Lock()
@@ -492,7 +492,7 @@ func TestDeepSleepManager_WakeContainerPrematureExit_AbortsFast(t *testing.T) {
 		refreshed = append(refreshed, serverID)
 	}
 
-	mgr := NewDeepSleepManager(controller, store, commander, refresher, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, refresher, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	controller.mu.Lock()
@@ -526,7 +526,7 @@ func TestDeepSleepManager_RollbackSleep_NilControllerMarksError(t *testing.T) {
 	}
 
 	// Create manager with nil controller and resolver returning nil
-	mgr := NewDeepSleepManager(nil, store, commander, refresher, nil)
+	mgr := newTestDeepSleepManager(nil, store, commander, refresher, nil)
 	mgr.SetControllerResolver(func(nodeID string) SleepController {
 		return nil
 	})
@@ -548,7 +548,7 @@ func TestDeepSleepManager_RollbackSleep_NilControllerMarksError(t *testing.T) {
 func TestDeepSleepManager_NilStoreGuards(t *testing.T) {
 	ctx := context.Background()
 	controller := newMockSleepController()
-	mgr := NewDeepSleepManager(controller, nil, nil, nil, nil)
+	mgr := newTestDeepSleepManager(controller, nil, nil, nil, nil)
 
 	err := mgr.SleepServer(ctx, "srv-sleep")
 	require.Error(t, err)

@@ -280,7 +280,7 @@ func (s *ServerService) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordi
 // through runtime mutation and status persistence. A refusal or cancellation
 // uses the same typed-to-Connect mapping as the shared capacity check.
 func (s *ServerService) acquireNodeAdmission(ctx context.Context, server *storage.Server) (func(), error) {
-	release, err := s.admission.Acquire(ctx, server.NodeID)
+	release, err := s.acquireNodeAdmissionRaw(ctx, server.NodeID)
 	if err == nil {
 		return release, nil
 	}
@@ -299,6 +299,13 @@ func (s *ServerService) acquireNodeAdmission(ctx context.Context, server *storag
 		return nil, connect.NewError(connect.CodeDeadlineExceeded, err)
 	}
 	return nil, connect.NewError(connect.CodeUnavailable, err)
+}
+
+// acquireNodeAdmissionRaw claims the shared per-node gate for an explicit node
+// id. Migration starts a container on the target node, so it must contend on
+// the target's key rather than the source server's current NodeID.
+func (s *ServerService) acquireNodeAdmissionRaw(ctx context.Context, nodeID string) (func(), error) {
+	return s.admission.Acquire(ctx, nodeID)
 }
 
 // checkServerStartCapacity ensures starting a server does not exceed the node's

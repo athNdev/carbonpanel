@@ -23,7 +23,7 @@ func TestScenario1_IdleDetectionAndTransition(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	require.NoError(t, mgr.CheckIdleServers(ctx))
 
 	mgr.idle.markIdleSince("srv-sleep", time.Now().Add(-2*time.Minute))
@@ -60,7 +60,7 @@ func TestScenario2_DBStatusPreSet_ProtectsAgainstDieEvent(t *testing.T) {
 		}
 	}
 
-	mgr := NewDeepSleepManager(customController, store, originalCommander, nil, nil)
+	mgr := newTestDeepSleepManager(customController, store, originalCommander, nil, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	assert.True(t, statusChecked, "DB status should be checked during container stop")
@@ -114,7 +114,7 @@ func TestScenario3_StopFailure_RollsBackStatus(t *testing.T) {
 	failingCommander := &mockSleepCommander{}
 
 	var refreshedID string
-	mgr := NewDeepSleepManager(failingController, store, failingCommander, func(id string) {
+	mgr := newTestDeepSleepManager(failingController, store, failingCommander, func(id string) {
 		refreshedID = id
 	}, nil)
 
@@ -138,7 +138,7 @@ func TestDeepSleep_StatusReadFailureDoesNotClaimAsleep(t *testing.T) {
 		err:                 errors.New("temporary Docker inspect failure"),
 	}
 	refreshed := false
-	mgr := NewDeepSleepManager(controller, store, nil, func(string) { refreshed = true }, nil)
+	mgr := newTestDeepSleepManager(controller, store, nil, func(string) { refreshed = true }, nil)
 
 	err := mgr.SleepServer(ctx, "srv-status-error")
 	assert.Error(t, err, "SleepServer must report an unknown container state")
@@ -167,7 +167,7 @@ func TestScenario4_IsTransitioning_StateFlag(t *testing.T) {
 		}
 	}
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 
 	done := make(chan error, 1)
 	go func() {
@@ -200,7 +200,7 @@ func TestScenario5_GracefulRCONStopPrecedesForceStop(t *testing.T) {
 		}
 	}
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	require.Len(t, commandOrder, 2)
@@ -214,7 +214,7 @@ func TestScenario6_WakeOperation_StartsContainerAndRestoresRunning(t *testing.T)
 	controller, commander, store := newDeepSleepHarness()
 
 	var refreshedID string
-	mgr := NewDeepSleepManager(controller, store, commander, func(id string) {
+	mgr := newTestDeepSleepManager(controller, store, commander, func(id string) {
 		refreshedID = id
 	}, nil)
 
@@ -233,7 +233,7 @@ func TestScenario7_WakeSingleFlight_Deduplication(t *testing.T) {
 	controller, commander, store := newDeepSleepHarness()
 	controller.startGate = make(chan struct{})
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	require.NoError(t, mgr.SleepServer(ctx, "srv-sleep"))
 
 	var wg sync.WaitGroup
@@ -266,7 +266,7 @@ func TestScenario8_PlayerActivity_PostponesSleep(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	mgr.SetPlayerCountProvider(func(serverID string) int {
 		return 1
 	})
@@ -286,7 +286,7 @@ func TestScenario9_RefresherInvoked_MaintainsDownRoute(t *testing.T) {
 	controller, commander, store := newDeepSleepHarness()
 
 	refresherCalled := false
-	mgr := NewDeepSleepManager(controller, store, commander, func(id string) {
+	mgr := newTestDeepSleepManager(controller, store, commander, func(id string) {
 		if id == "srv-sleep" {
 			refresherCalled = true
 		}
@@ -301,7 +301,7 @@ func TestScenario10_WakeRejectsUnknownServer(t *testing.T) {
 	ctx := context.Background()
 	controller, commander, store := newDeepSleepHarness()
 
-	mgr := NewDeepSleepManager(controller, store, commander, nil, nil)
+	mgr := newTestDeepSleepManager(controller, store, commander, nil, nil)
 	err := mgr.WakeServer(ctx, "nonexistent-server")
 	assert.Error(t, err, "Waking nonexistent server must return error")
 }
@@ -324,7 +324,7 @@ func TestScenario11_ContextCancel_RollsBackPreSetStatus(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(context.Background())
 
 	var refreshedID string
-	mgr := NewDeepSleepManager(controller, store, stubCommander, func(id string) {
+	mgr := newTestDeepSleepManager(controller, store, stubCommander, func(id string) {
 		refreshedID = id
 	}, nil)
 
@@ -351,7 +351,7 @@ func TestScenario12_RollbackSleep_IsSafeOnCancelledContext(t *testing.T) {
 	controller, commander, store := newDeepSleepHarness()
 
 	var refreshedID string
-	mgr := NewDeepSleepManager(controller, store, commander, func(id string) {
+	mgr := newTestDeepSleepManager(controller, store, commander, func(id string) {
 		refreshedID = id
 	}, nil)
 
