@@ -18,6 +18,7 @@
 //   The packaged-route half requires `bun run build` in web/carbon-panel first.
 
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { launchReviewBrowser, reviewBrowserPath, reviewDriver } from '../../review/browser.mjs';
@@ -37,13 +38,17 @@ async function launchEngine(engine) {
 		throw new Error(`Unsupported engine '${engine}' (chromium, firefox or webkit)`);
 	}
 	process.env.PLAYWRIGHT_BROWSERS_PATH = reviewBrowserPath();
-	const driver = reviewDriver();
-	const browser = await driver[engine].launch({ headless: true });
+	// The shared reviewDriver() validates the pinned driver version and owns the
+	// cache path, but intentionally exposes only Chromium. Load the same locked
+	// package directly for the optional engines instead of broadening it.
+	const { version } = reviewDriver();
+	const playwright = createRequire(new URL('./package.json', import.meta.url))('playwright');
+	const browser = await playwright[engine].launch({ headless: true });
 	return {
 		browser,
 		metadata: {
 			driver: 'playwright',
-			driverVersion: driver.version,
+			driverVersion: version,
 			browserVersion: browser.version(),
 			engine,
 			browserCache: reviewBrowserPath()
