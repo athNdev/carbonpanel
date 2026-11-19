@@ -577,7 +577,7 @@ up)
 						tex_probe="$(docker exec "${NAME}-bluemap" sh -c 'for p in /web/maps/*/textures.json /web/maps/*/textures.json.gz; do [ -e "$p" ] && echo "tex:$p"; done | head -n 5' 2>&1 || true)"
 						echo "review textures files: $(printf '%s' "${tex_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
 						http_probe="$(docker exec "${NAME}-bluemap" python -c "
-import json,urllib.request,gzip,io
+import json,urllib.request,gzip
 try:
  r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json', timeout=3)
  print('plain='+str(r.status)+' ct='+str(r.headers.get('Content-Type')))
@@ -586,12 +586,26 @@ except Exception as e:
 try:
  r=urllib.request.urlopen('http://127.0.0.1:8100/maps/world/textures.json.gz', timeout=3)
  b=r.read()
- print('gz='+str(r.status)+' bytes='+str(len(b))+' ct='+str(r.headers.get('Content-Type'))+' ce='+str(r.headers.get('Content-Encoding')))
+ dec=gzip.decompress(b)
+ print('gz='+str(r.status)+' bytes='+str(len(b))+' dec='+str(len(dec))+' ct='+str(r.headers.get('Content-Type'))+' ce='+str(r.headers.get('Content-Encoding')))
  try:
-  d=json.loads(gzip.decompress(b).decode())
-  print('gz_textures='+str(type(d.get('textures')).__name__))
+  d=json.loads(dec.decode())
+  if isinstance(d, dict):
+   print('json=dict keys='+str(sorted(list(d.keys()))[:8]))
+   t=d.get('textures')
+   print('textures_type='+str(type(t).__name__))
+   if isinstance(t, dict):
+    print('textures_len='+str(len(t)))
+   elif isinstance(t, list):
+    print('textures_len='+str(len(t)))
+  elif isinstance(d, list):
+   print('json=list len='+str(len(d)))
+  else:
+   print('json='+str(type(d).__name__))
+  print('head='+dec[:120].decode('utf-8','replace').replace('\\n',' '))
  except Exception as e:
-  print('gz_parse='+type(e).__name__)
+  print('gz_parse='+type(e).__name__+':'+str(e)[:80])
+  print('head='+dec[:120].decode('utf-8','replace').replace('\\n',' '))
 except Exception as e:
  print('gz='+type(e).__name__)
 " 2>&1 || true)"
