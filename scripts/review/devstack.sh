@@ -387,7 +387,7 @@ EOF
 		echo "could not start the isolated BlueMap static server; skipping map capture" >&2
 		return 0
 	fi
-	deadline=$((SECONDS + 240))
+	deadline=$((SECONDS + 300))
 	stable=0
 	prev_count=-1
 	while ((SECONDS < deadline)); do
@@ -395,13 +395,13 @@ EOF
 		if [ -f "${mapdir}/web/settings.json" ] && [ -d "${mapdir}/web/maps/${level}/tiles" ]; then
 			count="$(find "${mapdir}/web/maps/${level}/tiles" -type f 2>/dev/null | wc -l | tr -d ' ')"
 		fi
-		if [ "${count}" -ge 12 ] && [ "${count}" = "${prev_count}" ]; then
+		if [ "${count}" -ge 40 ] && [ "${count}" = "${prev_count}" ]; then
 			stable=$((stable + 1))
 		else
 			stable=0
 		fi
 		prev_count="${count}"
-		if [ "${stable}" -ge 3 ] && [ "${count}" -ge 12 ]; then
+		if [ "${stable}" -ge 5 ] && [ "${count}" -ge 40 ]; then
 			break
 		fi
 		sleep 3
@@ -638,6 +638,28 @@ except Exception as e:
 " 2>&1 || true)"
 						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-500)" >&2
 						echo "review renderer never became READY; worlds capture will fail closed" >&2
+					else
+						# READY means textures/settings are valid, but the viewport may
+						# still request lowres tiles the renderer has not produced yet.
+						# Let the real renderer continue filling the shared web root.
+						tile_deadline=$((SECONDS + 120))
+						tile_stable=0
+						tile_prev=-1
+						while ((SECONDS < tile_deadline)); do
+							tile_count="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | wc -l | tr -d ' ')"
+							tile_count="${tile_count:-0}"
+							if [ "${tile_count}" -ge 60 ] && [ "${tile_count}" = "${tile_prev}" ]; then
+								tile_stable=$((tile_stable + 1))
+							else
+								tile_stable=0
+							fi
+							tile_prev="${tile_count}"
+							if [ "${tile_stable}" -ge 4 ] && [ "${tile_count}" -ge 60 ]; then
+								break
+							fi
+							sleep 3
+						done
+						echo "review BlueMap tile files before journey: ${tile_prev}" >&2
 					fi
 				else
 					echo "review map server container failed to start" >&2
