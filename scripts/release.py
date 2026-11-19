@@ -15,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 from datetime import datetime, timezone
+import urllib.request
 import zipfile
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -2214,11 +2215,12 @@ def channel_move_decision(channel, candidate_commit, candidate_digest,
 
     return _channel_alias_transition(
         channel, candidate_commit, candidate_digest,
-        alias_observations or {}, previous, ancestry)
+        alias_observations or {}, previous, ancestry, bootstrap=bootstrap)
 
 
 def _channel_alias_transition(channel, candidate_commit, candidate_digest,
-                              alias_observations, previous, ancestry):
+                              alias_observations, previous, ancestry,
+                              bootstrap=False):
     """Digest-anchored alias state machine shared by OCI and docs moves."""
     present = {}
     for registry, observation in alias_observations.items():
@@ -2231,6 +2233,17 @@ def _channel_alias_transition(channel, candidate_commit, candidate_digest,
         return "publish", "first publish: no verified alias holds a digest", candidate_digest
     if set(present.values()) == {candidate_digest}:
         return "noop", "alias already at the verified digest; no overwrite", candidate_digest
+    # Bounded bootstrap: the FIRST qualified nightly may advance an alias that
+    # still holds ONLY the documented Hub-only baseline digest, when no verified
+    # receipt exists yet (the public docs contract predates the channel). Any
+    # other unbound digest is refused; nothing is relabelled blindly.
+    if (bootstrap and channel == "nightly"
+            and not (previous and previous.get("verified"))
+            and all(digest == NIGHTLY_HUB_BASELINE["digest"]
+                    for digest in present.values())):
+        return ("publish",
+                "bounded bootstrap advances the documented Hub-only nightly baseline",
+                candidate_digest)
 
     # A partial move leaves one registry at the candidate and the other at the
     # previous digest. Converge only when the other digest is verifiably bound.
@@ -2578,11 +2591,255 @@ def channel_active_receipt_cli(args):
     return receipt
 
 
+def channel_bootstrap_plan(channel, alias_observations=None, previous=None):
+    """Read-only: may the FIRST nightly move advance the documented baseline?
+
+    The public docs contract can precede the channel, so there may be no
+    verified receipt while Docker Hub `nightly` still holds the single
+    documented Hub-only baseline digest and GHCR has no nightly. That ONE
+    transition is allowed only as a recorded bounded bootstrap: every present
+    alias must hold exactly that baseline digest, no verified receipt may
+    exist, and the channel must be nightly. Any other unbound digest refuses.
+    """
+    if channel != "nightly":
+        return {"bootstrap": False,
+                "reason": "bounded bootstrap applies only to the nightly channel"}
+    if previous and previous.get("verified"):
+        return {"bootstrap": False,
+                "reason": "a verified prior receipt already anchors the alias"}
+    present = {}
+    for registry, observation in (alias_observations or {}).items():
+        state, info = observation
+        if state == "unknown":
+            return {"bootstrap": False, "reason": f"{registry} alias state is unknown"}
+        if state == "present":
+            digest = (info or {}).get("digest", "")
+            if not valid_digest(digest):
+                return {"bootstrap": False,
+                        "reason": f"{registry} alias digest is not a verified sha256 digest"}
+            present[registry] = digest
+    if not present:
+        return {"bootstrap": False,
+                "reason": "no alias holds a digest; this is an ordinary first publish"}
+    for registry, digest in present.items():
+        if digest != NIGHTLY_HUB_BASELINE["digest"]:
+            return {"bootstrap": False,
+                    "reason": f"{registry} alias holds an unbound digest that is not "
+                              "the documented nightly baseline"}
+    return {"bootstrap": True,
+            "reason": "bounded bootstrap advances the documented Hub-only nightly baseline"}
+
+
+def channel_bootstrap_plan_cli(args):
+    """CLI: emit the read-only bounded-bootstrap decision (no writes)."""
+    plan = channel_bootstrap_plan(
+        args.channel, _observation_map(args.aliases),
+        json_argument(args.previous, default={}) or {})
+    values = {"bootstrap": str(plan["bootstrap"]).lower(), "reason": plan["reason"]}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return plan
+
+
+PAGES_ARTIFACT_NAME = "github-pages"
+
+
+def sha256_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _extract_pages_artifact(archive, destination):
+    """Extract an Actions artifact (zip, optionally wrapping a site tar)."""
+    with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+        bundle.extractall(destination)
+    site = Path(destination)
+    tarball = next((path for path in site.rglob("artifact.tar")), None)
+    if tarball is not None:
+        staging = site / "_artifact"
+        staging.mkdir()
+        with tarfile.open(tarball) as source:
+            source.extractall(staging, filter="data")
+        return staging
+    if not (site / "version-index.json").is_file():
+        nested = next((path.parent for path in site.rglob("version-index.json")), None)
+        if nested is not None:
+            return nested
+    return site
+
+
+def install_prior_pages(candidate, live_version_index, destination):
+    """Install the artifact bytes whose version-index.json equals the live one.
+
+    `candidate` is the extracted site directory. Returns the verified hint or
+    None when the bytes are not the currently deployed public artifact.
+    """
+    index = Path(candidate) / "version-index.json"
+    if not index.is_file():
+        return None
+    if sha256_bytes(index.read_bytes()) != sha256_bytes(live_version_index):
+        return None
+    target = Path(destination)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(candidate, target)
+    return {"hash": "sha256:" + sha256_bytes((target / "version-index.json").read_bytes())}
+
+
+def fetch_prior_pages(destination, live_url, repository, artifacts, download,
+                      limit=6):
+    """Download the CURRENTLY DEPLOYED Pages artifact and verify it byte-exactly.
+
+    `artifacts` returns the artifact list newest-first; `download(artifact)`
+    returns the zip bytes. The first non-expired artifact whose
+    version-index.json hash equals the live public file is the prior deployed
+    site, and only then is it copied to `destination`. A rebuild is never
+    substituted for the real prior bytes.
+    """
+    live = urllib.request.urlopen(live_url, timeout=60).read()
+    live_hash = sha256_bytes(live)
+    considered = 0
+    for artifact in artifacts:
+        if artifact.get("expired"):
+            continue
+        if considered >= limit:
+            break
+        considered += 1
+        with tempfile.TemporaryDirectory(prefix="carbon-prior-pages-") as temporary:
+            staging = Path(temporary) / "artifact"
+            staging.mkdir()
+            site = _extract_pages_artifact(download(artifact), staging)
+            verified = install_prior_pages(site, live, destination)
+            if verified:
+                return {"verified": True, "hash": verified["hash"],
+                        "artifact_id": artifact.get("id", ""),
+                        "artifact_commit": (artifact.get("workflow_run") or {}).get(
+                            "head_sha", ""), "live_hash": "sha256:" + live_hash,
+                        "considered": considered}
+    raise ValueError(
+        "No non-expired Pages artifact matches the live version-index.json; "
+        "the exact prior docs bytes cannot be verified or restored")
+
+
+def fetch_prior_pages_cli(args):
+    """CLI: download and verify the deployed Pages artifact before any write."""
+    token = os.environ.get("GH_TOKEN", "")
+    headers = {"Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28",
+               "User-Agent": "carbonpanel-release-gate"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    def api(url):
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=120) as response:
+            return response.read()
+
+    listing = json.loads(api(
+        f"https://api.github.com/repos/{args.repository}/actions/artifacts"
+        f"?name={PAGES_ARTIFACT_NAME}&per_page=40"))
+    artifacts = listing.get("artifacts") or []
+
+    def download(artifact):
+        return api(artifact["archive_download_url"])
+
+    result = fetch_prior_pages(args.site, args.live_url, args.repository,
+                               artifacts, download, limit=args.limit)
+    values = {key: str(value).lower() if isinstance(value, bool) else value
+              for key, value in result.items()}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return result
+
+
+def verify_channel_docs(document, channel, commit, digest, page_texts=(),
+                        contains=(), excludes=(), stable_source=None):
+    """Prove the SERVED pages belong to the channel's exact pinned revision.
+
+    Checks the channel entry, every page, the compiled `source.json` revision
+    (the page is built from that commit, not merely stamped), required content
+    and forbidden content. With `stable_source` the stable entry must still
+    match the checked-in contract, so a nightly move cannot repin Stable.
+    """
+    channels = (document or {}).get("channels") or {}
+    entry = channels.get(channel) or {}
+    problems = []
+    if entry.get("commit") != commit:
+        problems.append(f"{channel} commit is {entry.get('commit')!r}, expected {commit}")
+    image = entry.get("image") or {}
+    if image.get("digest") != digest:
+        problems.append(f"{channel} digest is {image.get('digest')!r}, expected {digest}")
+    route = entry.get("route") or ""
+    if not route.startswith("/docs/"):
+        problems.append(f"{channel} route must be a /docs/ path")
+    for text in page_texts:
+        for needle in contains:
+            if needle not in text:
+                problems.append(f"{channel} page is missing required content {needle!r}")
+        for needle in excludes:
+            if needle in text:
+                problems.append(f"{channel} page still contains forbidden content {needle!r}")
+    if stable_source is not None:
+        source = stable_source.get("channels", {}).get("stable", {})
+        stable = channels.get("stable", {})
+        if (stable.get("commit") != source.get("commit")
+                or (stable.get("image") or {}).get("digest")
+                != (source.get("image") or {}).get("digest")):
+            problems.append("stable identity no longer matches the checked-in contract")
+    return (not problems), problems
+
+
+def verify_channel_docs_cli(args):
+    """CLI: verify local built pages or the public served pages."""
+    if bool(args.site) == bool(args.base_url):
+        raise ValueError("Supply exactly one of --site or --base-url")
+    if args.site:
+        root = Path(args.site)
+
+        def get_bytes(path):
+            target = root / path.lstrip("/")
+            if not target.is_file():
+                raise ValueError(f"Missing built file: {path}")
+            return target.read_bytes()
+    else:
+        base = args.base_url.rstrip("/")
+
+        def get_bytes(path):
+            request = urllib.request.Request(base + path,
+                                             headers={"User-Agent": "carbonpanel-release-gate"})
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.read()
+
+    index = json.loads(get_bytes("/version-index.json").decode("utf-8"))
+    route = index["channels"][args.channel]["route"].strip("/")
+    source = json.loads(get_bytes(f"/{route}/source.json").decode("utf-8"))
+    if source.get("revision") != args.commit:
+        raise ValueError(
+            f"{args.channel} source.json revision {source.get('revision')!r} "
+            f"does not match the served channel commit {args.commit}")
+    page_texts = []
+    for page in args.page:
+        page_texts.append(
+            get_bytes(f"/{route}/{page.strip('/')}/index.html").decode("utf-8", "replace"))
+    stable_source = None
+    if args.stable_source:
+        stable_source = json.loads(Path(args.stable_source).read_text(encoding="utf-8"))
+    ok, problems = verify_channel_docs(
+        index, args.channel, args.commit, args.digest, page_texts,
+        tuple(args.contains), tuple(args.excludes), stable_source)
+    values = {"verified": str(ok).lower(), "problems": json.dumps(problems)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Channel docs verification failed: " + "; ".join(problems))
+    return ok
+
+
 # Commands an older target's release.py must contain before any trusted gate
 # may run against it; otherwise the workflow would silently use the wrong script.
 REQUIRED_GATE_COMMANDS = ("channel-transaction", "channel-active-receipt",
                           "channel-rollback", "channel-observe",
-                          "stage-channel-marker")
+                          "stage-channel-marker", "channel-bootstrap-plan",
+                          "fetch-prior-pages", "verify-channel-docs")
 
 
 def verify_gate_script(path):
@@ -2683,14 +2940,27 @@ def channel_transaction_run(candidate, previous, writer=None, docs_publisher=Non
             "receipt": receipt, "steps": list(steps)}
 
 
-def channel_rollback(receipt, apply=False):
-    """Roll both registry aliases and the docs marker back to a verified receipt."""
+def channel_rollback(receipt, apply=False, bounded_baseline=False):
+    """Roll both registry aliases and the docs marker back to a verified receipt.
+
+    `bounded_baseline` covers the recorded first-nightly bootstrap, where no
+    verified receipt exists yet but the ONLY prior alias state is the
+    documented Hub-only baseline constant. It can restore only that exact
+    constant, never an arbitrary digest.
+    """
+    if bounded_baseline:
+        if (receipt or {}).get("channel", "nightly") != "nightly":
+            raise ValueError("The bounded baseline rollback applies only to nightly")
+        receipt = {"channel": "nightly", "revision": NIGHTLY_HUB_BASELINE["commit"],
+                   "digest": NIGHTLY_HUB_BASELINE["digest"], "verified": True,
+                   "bounded_baseline": True}
     if not receipt or not receipt.get("verified") or not valid_digest(receipt.get("digest", "")):
         raise ValueError("Rollback needs a verified receipt with a valid digest")
     if not valid_commit(receipt.get("revision", "")):
         raise ValueError("Rollback needs the full-SHA revision recorded in the receipt")
     values = {"action": "rollback", "digest": receipt["digest"],
               "commit": receipt["revision"], "registries": list(CHANNEL_REGISTRIES),
+              "bounded_baseline": bool(receipt.get("bounded_baseline")),
               "docs_commit": receipt.get("docs_commit", receipt["revision"])}
     if apply:
         _apply_channel_alias(receipt.get("channel", "nightly"), receipt["digest"])
@@ -2700,7 +2970,8 @@ def channel_rollback(receipt, apply=False):
 def channel_rollback_cli(args):
     """CLI: emit/apply the exact-digest rollback to a verified prior receipt."""
     receipt = json_argument(args.receipt, default={}) or {}
-    values = channel_rollback(receipt, apply=args.apply)
+    values = channel_rollback(receipt, apply=args.apply,
+                              bounded_baseline=args.bounded_baseline)
     print(json.dumps(values, indent=2))
     write_output(values)
     return values
@@ -3087,6 +3358,27 @@ def build_parser():
     rollback = commands.add_parser("channel-rollback")
     rollback.add_argument("--receipt", default="{}")
     rollback.add_argument("--apply", action="store_true")
+    rollback.add_argument("--bounded-baseline", action="store_true")
+    bootstrap = commands.add_parser("channel-bootstrap-plan")
+    bootstrap.add_argument("--channel", default="nightly")
+    bootstrap.add_argument("--aliases", default="{}")
+    bootstrap.add_argument("--previous", default="{}")
+    prior = commands.add_parser("fetch-prior-pages")
+    prior.add_argument("--site", required=True)
+    prior.add_argument("--live-url",
+                       default="https://carbonpanel.dev/version-index.json")
+    prior.add_argument("--repository", required=True)
+    prior.add_argument("--limit", type=int, default=6)
+    docs = commands.add_parser("verify-channel-docs")
+    docs.add_argument("--site", default="")
+    docs.add_argument("--base-url", default="")
+    docs.add_argument("--channel", required=True)
+    docs.add_argument("--commit", required=True)
+    docs.add_argument("--digest", required=True)
+    docs.add_argument("--page", action="append", default=[])
+    docs.add_argument("--contains", action="append", default=[])
+    docs.add_argument("--excludes", action="append", default=[])
+    docs.add_argument("--stable-source", default="")
     simulate = commands.add_parser("channel-simulate")
     simulate.add_argument("--candidate", default="{}")
     simulate.add_argument("--previous", default="{}")
@@ -3122,7 +3414,10 @@ def main():
                 "channel-rollback": channel_rollback_cli,
                 "channel-simulate": channel_simulate_cli,
                 "verify-gate-script": verify_gate_script_cli,
-                "verify-channel-parity": verify_channel_parity_cli}
+                "verify-channel-parity": verify_channel_parity_cli,
+                "channel-bootstrap-plan": channel_bootstrap_plan_cli,
+                "fetch-prior-pages": fetch_prior_pages_cli,
+                "verify-channel-docs": verify_channel_docs_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:

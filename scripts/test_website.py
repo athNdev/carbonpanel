@@ -74,6 +74,26 @@ class WebsiteTests(unittest.TestCase):
             self.assertEqual((export / "config.example.yaml").read_text(), "pinned")
             self.assertEqual((export / "docs/carbon-panel/src/content/docs/intro.md").read_text(), "pinned")
 
+    def test_nightly_candidate_sources_first_party_proxmox_page(self):
+        # The Nightly candidate renders its Proxmox guide from the qualified
+        # first-party revision and never at a canonical route.
+        root = Path(__file__).resolve().parent.parent
+        revision = "08a67f306c249a36dc742d7b166d13e2eb905d1f"  # origin/main: first-party Proxmox page
+        probe = subprocess.run(["git", "cat-file", "-e", revision], cwd=root,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if probe.returncode != 0:
+            self.skipTest(f"qualified revision {revision} is not in this checkout")
+        first_party_link = ("https://raw.githubusercontent.com/athNdev/carbonpanel/"
+                            "main/scripts/proxmox/install-carbon-panel.sh")
+        with tempfile.TemporaryDirectory() as temporary:
+            export_snapshot(root, revision, Path(temporary))
+            page = (Path(temporary)
+                    / "docs/carbon-panel/src/content/docs/getting-started/proxmox.mdx")
+            self.assertTrue(page.is_file())
+            self.assertIn(first_party_link, page.read_text(encoding="utf-8"))
+            self.assertEqual(vc.candidate_route(revision),
+                             "/docs/candidate/" + revision + "/")
+
     def test_subpath_links_and_source_links(self):
         source = '[Config](/configuration/) <iframe src="/api-reference.html"></iframe> ' + \
                  '[External](https://example.com/) git clone https://example.com/repo ' + \
