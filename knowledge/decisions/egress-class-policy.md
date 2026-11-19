@@ -8,6 +8,8 @@ code_refs:
   - pkg/utils/ssrf.go
   - internal/rpc/services/file.go
   - internal/webhook/webhook.go
+  - internal/minecraft/datapack.go
+  - internal/rpc/handlers/packwiz_datapacks.go
   - internal/config/config.go
   - config.example.yaml
 sources:
@@ -17,16 +19,20 @@ sources:
 
 # Choice
 
-`pkg/utils` exposes three `EgressClass` values. Provider egress never permits
-private targets (the provider adapter owns the host allowlist). Webhook egress
-permits private receivers only when the operator has granted them. Archive
-egress permits RFC1918 targets only behind the explicit
+`pkg/utils` exposes three `EgressClass` values. The provider class carries the
+fixed decision computed by the provider adapter from its trusted indexer/host
+policy (`minecraft.DownloadAllowsPrivate`), not a caller-supplied flag; a public
+indexer still forces public-only downloads. Webhook egress permits private
+receivers because the receiver itself is operator configured. Archive egress
+permits RFC1918 targets only behind the explicit
 `security.allow_private_archive_egress` flag; loopback and link-local stay
 blocked for every class. `ValidateURLForEgress` and
 `NewSafeHTTPClientForEgress` bind the same class policy to dial-time and
 redirect-time checks, so a redirect cannot inherit a looser policy. URLs with
 userinfo are rejected, and `RedactURL` strips credentials and sensitive query
-values before any log line or client-facing error.
+values before any log line or client-facing error. `url.Parse` errors are never
+chained into a diagnostic: they embed the raw URL, so the policy returns
+`ErrInvalidURL` with only the redacted form.
 
 # Alternatives
 

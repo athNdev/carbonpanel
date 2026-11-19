@@ -68,7 +68,8 @@ func (h *PackwizHandler) handleAddDatapack(w http.ResponseWriter, r *http.Reques
 		name = filepath.Base(file.Filename)
 	}
 
-	client := utils.NewSafeHTTPClient(5*time.Minute, minecraft.DownloadAllowsPrivate(indexers.DatapackIndexerOrigin(resolved)))
+	client := utils.NewSafeHTTPClientForEgress(5*time.Minute, utils.EgressClassProvider,
+		minecraft.DownloadAllowsPrivate(indexers.DatapackIndexerOrigin(resolved)))
 	dlReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, file.DownloadURL, nil)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("invalid download URL: %v", err), http.StatusBadGateway)

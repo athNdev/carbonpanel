@@ -6,6 +6,7 @@
 package handlers
 
 import (
+	"archive/zip"
 	"bytes"
 	"mime/multipart"
 	"net/http"
@@ -49,6 +50,32 @@ func TestImportPackMultipartCap(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, importMultipartRequest(t, "evil.mrpack", strings.Repeat("A", 4096)))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// TestImportPackDoesNotReflectCredentials covers the full HTTP seam: a
+// malformed downloads[] URL carrying userinfo must not leak the secret into
+// the client-facing error response.
+func TestImportPackDoesNotReflectCredentials(t *testing.T) {
+	manager, enforcer := testNoAuthPolicy(t)
+	mgr := packwiz.NewManager(filepath.Join(t.TempDir(), "packs"), logger.New())
+	h := NewPackwizHandler(mgr, nil, nil, logger.New(), manager, enforcer, nil)
+
+	const secret = "handler-secret-token"
+	bad := "https://alice:" + secret + "@example.test/mod%zz.jar"
+	idx := `{"formatVersion":1,"game":"minecraft","name":"p","versionId":"1.0.0","dependencies":{"minecraft":"1.20.1"},"files":[{"path":"mods/x.jar","hashes":{"sha256":"abc"},"downloads":["` + bad + `"],"fileSize":1}]}`
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	w, err := zw.Create("modrinth.index.json")
+	require.NoError(t, err)
+	_, err = w.Write([]byte(idx))
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, importMultipartRequest(t, "p.mrpack", archive.String()))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.NotContains(t, rec.Body.String(), secret)
+	require.NotContains(t, rec.Body.String(), "alice")
 }
 
 // TestImportPackRequiresEnforcer keeps the import route fail-closed: an

@@ -115,6 +115,45 @@ func TestImportMrpackUnsafeArchiveRegression(t *testing.T) {
 		}
 	})
 
+	t.Run("malformed downloads URL does not reflect credentials", func(t *testing.T) {
+		m, _ := makeManager(t)
+		secret := "import-secret-token"
+		bad := "https://alice:" + secret + "@example.test/mod%zz.jar"
+		idx := strings.Replace(harmlessMRIndex, `"files":[]`,
+			`"files":[{"path":"mods/x.jar","hashes":{"sha256":"abc"},"downloads":["`+bad+`"],"fileSize":1}]`, 1)
+		r := zipWith(t, map[string]string{"modrinth.index.json": idx})
+		_, err := m.ImportMrpack(r, int64(r.Len()), ImportOptions{Name: "p"})
+		if err == nil {
+			t.Fatal("malformed credentialed URL must be rejected")
+		}
+		if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "alice") {
+			t.Fatalf("import error reflected a credential: %v", err)
+		}
+	})
+
+	t.Run("curseforge traversal is rejected", func(t *testing.T) {
+		m, _ := makeManager(t)
+		const manifest = `{"manifestType":"minecraftModpack","manifestVersion":1,"name":"p","version":"1.0.0","overrides":"overrides","minecraft":{"version":"1.20.1","modLoaders":[]},"files":[]}`
+		r := zipWith(t, map[string]string{
+			"manifest.json":                  manifest,
+			"overrides/../../escape-cf.txt": "pwned",
+		})
+		if _, err := m.ImportCurseForge(r, int64(r.Len()), ImportOptions{Name: "p"}); err == nil {
+			t.Fatal("curseforge traversal must be rejected")
+		}
+	})
+
+	t.Run("native packwiz traversal is rejected", func(t *testing.T) {
+		m, _ := makeManager(t)
+		r := zipWith(t, map[string]string{
+			"pack.toml":         "name = \"p\"\n",
+			"../../escape-pw.txt": "pwned",
+		})
+		if _, err := m.ImportPackwizZip(r, int64(r.Len()), ImportOptions{Name: "p"}); err == nil {
+			t.Fatal("native packwiz traversal must be rejected")
+		}
+	})
+
 	t.Run("legitimate large pack still imports", func(t *testing.T) {
 		m, _ := makeManager(t)
 		idx := strings.Replace(harmlessMRIndex, `"files":[]`,

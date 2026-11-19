@@ -22,7 +22,21 @@ var (
 	ErrBlockedIP     = errors.New("connection blocked by SSRF guard")
 	ErrInvalidScheme = errors.New("invalid URL scheme: must be http or https")
 	ErrMissingHost   = errors.New("url is missing host")
+	// ErrInvalidURL is returned instead of chaining url.Parse's error, which
+	// embeds the entire raw URL (including userinfo credentials) in its text.
+	ErrInvalidURL = errors.New("invalid URL")
 )
+
+// parseURLForPolicy parses a URL for an SSRF decision without ever reflecting
+// the raw input. url.Error contains the whole URL, so it is replaced by a
+// sentinel and the caller's redacted form.
+func parseURLForPolicy(rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidURL, RedactURL(rawURL))
+	}
+	return parsed, nil
+}
 
 // ValidateIP checks whether an IP address belongs to denied ranges (loopback, link-local, private RFC1918)
 func ValidateIP(ip net.IP, allowPrivate bool) error {
@@ -66,9 +80,9 @@ func ValidateIP(ip net.IP, allowPrivate bool) error {
 // Use it where a DNS lookup must not happen (e.g. saving configuration);
 // ValidateURL remains the resolving variant for actual outbound requests.
 func ValidateURLStatic(rawURL string, allowPrivate bool) (*url.URL, error) {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := parseURLForPolicy(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse url: %w", err)
+		return nil, err
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return nil, ErrInvalidScheme
@@ -87,9 +101,9 @@ func ValidateURLStatic(rawURL string, allowPrivate bool) (*url.URL, error) {
 
 // ValidateURL performs static and DNS resolution validation on a URL
 func ValidateURL(rawURL string, allowPrivate bool) (*url.URL, error) {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := parseURLForPolicy(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse url: %w", err)
+		return nil, err
 	}
 
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
@@ -134,8 +148,10 @@ func ValidateURL(rawURL string, allowPrivate bool) (*url.URL, error) {
 type EgressClass string
 
 const (
-	// EgressClassProvider is a fixed provider allowlist. Private targets are
-	// never permitted here; the provider adapter owns the host allowlist.
+	// EgressClassProvider is the fixed provider-adapter allowlist. The boolean
+	// passed with this class is computed by the provider adapter from its own
+	// trusted indexer/host policy (for example minecraft.DownloadAllowsPrivate),
+	// never from a user-supplied "allow private" field.
 	EgressClassProvider EgressClass = "provider"
 	// EgressClassWebhook targets an operator-configured receiver list. Private
 	// receivers are permitted only when the operator explicitly allows them.
@@ -148,10 +164,8 @@ const (
 // allowsPrivate resolves the effective private-network decision for a class.
 func (c EgressClass) allowsPrivate(requested bool) bool {
 	switch c {
-	case EgressClassWebhook, EgressClassArchive:
+	case EgressClassProvider, EgressClassWebhook, EgressClassArchive:
 		return requested
-	case EgressClassProvider:
-		return false
 	default:
 		return false
 	}
@@ -189,9 +203,9 @@ func RedactURL(rawURL string) string {
 // outbound decision; import-time validation uses ValidateURLStatic instead.
 func ValidateURLForEgress(rawURL string, class EgressClass, allowPrivate bool) (*url.URL, error) {
 	redacted := RedactURL(rawURL)
-	parsed, err := url.Parse(rawURL)
+	parsed, err := parseURLForPolicy(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse url %s: %w", redacted, err)
+		return nil, err
 	}
 	if parsed.User != nil {
 		return nil, fmt.Errorf("url %s must not contain credentials", redacted)

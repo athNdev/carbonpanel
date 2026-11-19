@@ -81,4 +81,20 @@ func TestDownloadRemoteArchiveDoesNotReflectCredentials(t *testing.T) {
 	if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "alice") {
 		t.Fatalf("RPC error reflected a credential: %v", err)
 	}
+
+	// url.Parse errors include the raw URL; a malformed credentialed URL must
+	// still not leak through the RPC error or the server log line.
+	malformed := "https://alice:" + secret + "@example.test/mod%zz.jar"
+	malformedReq := connect.NewRequest(&v1.DownloadRemoteArchiveRequest{
+		ServerId:        server,
+		Url:             malformed,
+		DestinationPath: "imports",
+	})
+	_, err = svc.DownloadRemoteArchive(context.Background(), malformedReq)
+	if err == nil {
+		t.Fatal("malformed URL with credentials must be refused")
+	}
+	if strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "alice") {
+		t.Fatalf("RPC error reflected a credential from a parse failure: %v", err)
+	}
 }

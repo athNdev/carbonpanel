@@ -123,6 +123,26 @@ func copyStagedEntries(staging, pDir, prefix string) error {
 	})
 }
 
+// maxImportMetadataBytes caps index/manifest JSON reads. These files are
+// decoded from the archive before bounded extraction runs, so without a read
+// cap a small compressed entry could expand into a multi-GiB JSON document and
+// exhaust memory before any extraction limit is consulted.
+const maxImportMetadataBytes int64 = 8 << 20
+
+func decodeImportMetadata(rc io.Reader, target any) error {
+	data, err := io.ReadAll(io.LimitReader(rc, maxImportMetadataBytes+1))
+	if err != nil {
+		return fmt.Errorf("failed to read import metadata: %w", err)
+	}
+	if int64(len(data)) > maxImportMetadataBytes {
+		return fmt.Errorf("import metadata exceeds maximum size of %d bytes", maxImportMetadataBytes)
+	}
+	if err := json.Unmarshal(data, target); err != nil {
+		return fmt.Errorf("failed to parse import metadata: %w", err)
+	}
+	return nil
+}
+
 // validateImportDownloadURLs applies the provider egress policy at import time,
 // without DNS resolution. Credentials in a URL and non-http(s) schemes are
 // rejected, and no raw URL (which may embed a secret) is reflected in an error.
@@ -194,7 +214,7 @@ func (m *Manager) ImportMrpack(r io.ReaderAt, size int64, opts ImportOptions) (*
 	}
 
 	var mrIdx mrpackIndex
-	if err := json.NewDecoder(rc).Decode(&mrIdx); err != nil {
+	if err := decodeImportMetadata(rc, &mrIdx); err != nil {
 		return nil, fmt.Errorf("failed to parse modrinth.index.json: %w", err)
 	}
 
@@ -435,7 +455,7 @@ func (m *Manager) ImportCurseForge(r io.ReaderAt, size int64, opts ImportOptions
 	}
 
 	var manifest cfManifest
-	if err := json.NewDecoder(rc).Decode(&manifest); err != nil {
+	if err := decodeImportMetadata(rc, &manifest); err != nil {
 		return nil, fmt.Errorf("failed to parse manifest.json: %w", err)
 	}
 
