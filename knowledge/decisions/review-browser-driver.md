@@ -56,4 +56,5 @@ selection waits for one mutually exclusive semantic DOM state instead of an
 immediate pre-hydration `count()`; no reachable state fails closed. A delayed-
 hydration fixture covers the seeded-login regression. The frontend accessibility
 journey reuses this same driver and owned cache; it drives a self-contained
-component fixture and claims Chromium behavior only.
+component fixture and real routes from the production static build, and claims
+Chromium behavior only.

@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MPL-2.0
 //
-// Real-Chromium keyboard/accessibility journey over the shared fixture that
-// mounts the actual Carbon components. Uses the existing owned review browser
-// (scripts/review/browser.mjs) and the locked Playwright package in this
-// directory. Nothing here claims coverage of Firefox, WebKit or mobile
-// engines: the only engine exercised is Chromium.
+// Real-Chromium keyboard/accessibility journeys over (1) the shared component
+// fixture that mounts the actual Carbon components and (2) REAL APPLICATION
+// ROUTES served from the SvelteKit PRODUCTION STATIC BUILD (the same assets the
+// Go binary embeds) with ConnectRPC responses seeded at the network boundary.
+// Both use the existing owned review browser (scripts/review/browser.mjs) and
+// the locked Playwright package in this directory. Nothing here claims coverage
+// of Firefox, WebKit, mobile engines, screen readers or 400% zoom: the only
+// engine exercised is Chromium, and only public UI seams are driven.
 //
 // Usage: node a11y-check.mjs
 //   REVIEW_CHROME may point at an explicit owned Chromium executable.
+//   The packaged-route half requires `bun run build` in web/carbon-panel first.
 
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -33,17 +37,13 @@ async function check(name, fn) {
 	}
 }
 
-function startFixture() {
-	const child = spawn('bun', ['test/a11y-fixture/serve.mjs'], {
-		cwd: webDir,
-		stdio: ['ignore', 'pipe', 'pipe']
-	});
-	const url = new Promise((resolveUrl, reject) => {
-		const timer = setTimeout(() => reject(new Error('Fixture server did not start in 30s')), 30000);
+function watchServer(child, marker, label, timeoutMs = 30000) {
+	return new Promise((resolveUrl, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${label} did not start in ${timeoutMs / 1000}s`)), timeoutMs);
 		let stderr = '';
 		child.stderr.on('data', (chunk) => (stderr += chunk.toString()));
 		child.stdout.on('data', (chunk) => {
-			const match = chunk.toString().match(/A11Y_FIXTURE_URL=(\S+)/);
+			const match = chunk.toString().match(marker);
 			if (match) {
 				clearTimeout(timer);
 				resolveUrl(match[1].trim());
@@ -51,20 +51,137 @@ function startFixture() {
 		});
 		child.once('exit', (code) => {
 			clearTimeout(timer);
-			reject(new Error(`Fixture server exited ${code}: ${stderr.slice(0, 500)}`));
+			reject(new Error(`${label} exited ${code}: ${stderr.slice(0, 500)}`));
 		});
 	});
-	return { child, url };
 }
 
-const fixture = startFixture();
-let browser;
-try {
-	const base = await fixture.url;
-	const launched = await launchReviewBrowser();
-	browser = launched.browser;
-	console.log(JSON.stringify({ check: 'a11y-browser', ...launched.metadata }));
+function startFixture() {
+	const child = spawn('bun', ['test/a11y-fixture/serve.mjs'], {
+		cwd: webDir,
+		stdio: ['ignore', 'pipe', 'pipe']
+	});
+	return { child, url: watchServer(child, /A11Y_FIXTURE_URL=(\S+)/, 'Fixture server') };
+}
 
+function startPackagedServer() {
+	const child = spawn('node', ['test/a11y-routes/serve.mjs'], {
+		cwd: webDir,
+		stdio: ['ignore', 'pipe', 'pipe']
+	});
+	return { child, url: watchServer(child, /A11Y_ROUTES_URL=(\S+)/, 'Packaged route server') };
+}
+
+// Public-seam seeds. Only network responses at the external API boundary are
+// stubbed; no source module, store or component internal is imported or driven.
+const FLEET = [
+	{
+		id: 'srv-1',
+		name: 'Alpha Server',
+		status: 'SERVER_STATUS_RUNNING',
+		modLoader: 'MOD_LOADER_VANILLA',
+		version: '1.21.1',
+		port: 25565,
+		memory: 2048,
+		maxPlayers: 20
+	},
+	{
+		id: 'srv-2',
+		name: 'Beta Server',
+		status: 'SERVER_STATUS_STOPPED',
+		modLoader: 'MOD_LOADER_FABRIC',
+		version: '1.20.4',
+		port: 25566,
+		memory: 1024,
+		maxPlayers: 10
+	}
+];
+
+// The shell focus prefix is stable; the sidebar nav collapses below 768, so
+// only its first three stops are asserted at the narrowest viewport.
+const SHELL_FOCUS = [
+	'Toggle Navigation',
+	'Carbon Panel',
+	'A1 A11y Reviewer',
+	'Overview',
+	/^Servers\b/,
+	'Create Server'
+];
+const FOCUSABLE = 'button:not([disabled]), [role="radio"], input:not([disabled]), a[href]';
+
+function matches(actual, expected) {
+	return expected instanceof RegExp ? expected.test(actual) : actual === expected;
+}
+
+async function seedPackagedRoutes(page, state, authMode) {
+	await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
+		const method = new URL(route.request().url()).pathname.split('/').at(-1);
+		const reply = (body, status = 200) =>
+			route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+		const fail = (message) => reply({ code: 'unavailable', message }, 503);
+		if (method === 'GetAuthStatus') {
+			return reply(
+				authMode === 'login-failure'
+					? {
+							localAuthEnabled: true,
+							oidcEnabled: false,
+							firstUserSetup: false,
+							allowRegistration: false,
+							anonymousAccessEnabled: false
+						}
+					: { localAuthEnabled: false, oidcEnabled: false, anonymousAccessEnabled: true, firstUserSetup: false }
+			);
+		}
+		if (method === 'GetCurrentUser') {
+			return reply(
+				authMode === 'login-failure'
+					? {}
+					: {
+							user: { id: 'a11y', username: 'A11y Reviewer' },
+							permissions: [{ resource: '*', action: '*', objectId: '*' }]
+						}
+			);
+		}
+		if (method === 'Login' && authMode === 'login-failure') {
+			return reply({ code: 'unauthenticated', message: 'Invalid username or password' }, 401);
+		}
+		if (method === 'ListServers') {
+			if (state.servers === 'error') return fail('Fixture servers unavailable');
+			return reply({ servers: state.servers === 'empty' ? [] : FLEET });
+		}
+		if (method === 'GetServer') {
+			if (state.detail === 'error') return fail('Fixture server unavailable');
+			return reply({ server: FLEET.find((server) => server.id === 'srv-1') });
+		}
+		if (method === 'ListNodes') return reply({ nodes: [] });
+		if (method === 'GetMinecraftVersions') return reply({ versions: ['1.21.1', '1.20.4'], latest: '1.21.1' });
+		if (method === 'GetModLoaders') return reply({ modloaders: ['vanilla', 'fabric'] });
+		if (method === 'GetDockerImages') return reply({ images: [] });
+		if (method === 'GetNextAvailablePort') return reply({ port: 25567 });
+		return reply({});
+	});
+	// OIDC exchange and REST downloads are not part of these journeys.
+	await page.route('**/api/v1/**', (route) =>
+		route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+	);
+}
+
+async function focusNames(page, count) {
+	const names = [];
+	for (let i = 0; i < count; i += 1) {
+		await page.keyboard.press('Tab');
+		names.push(
+			await page.evaluate(() => {
+				const el = document.activeElement;
+				if (!el) return '';
+				return (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim();
+			})
+		);
+	}
+	return names;
+}
+
+async function runComponentJourney(browser, base) {
 	for (const width of [1440, 768, 360]) {
 		const page = await browser.newPage({ viewport: { width, height: 900 } });
 		try {
@@ -224,16 +341,287 @@ try {
 			await page.close();
 		}
 	}
+}
+
+const PACKAGED_ROUTES = [
+	{
+		path: '/',
+		h1: 'Cluster Overview',
+		controls: [
+			['heading', 'Cluster Overview'],
+			['button', 'Refresh'],
+			['link', 'Create Server']
+		]
+	},
+	{
+		path: '/servers',
+		h1: 'Servers',
+		controls: [
+			['searchbox', 'Search servers'],
+			['button', 'All (2)'],
+			['button', 'Table View'],
+			['link', 'Alpha Server']
+		]
+	},
+	{
+		path: '/servers/new',
+		h1: 'Create New Server',
+		controls: [
+			['radio', /^Manual Configuration/],
+			['link', 'Back to Servers'],
+			['button', 'Next Step']
+		]
+	},
+	{
+		path: '/servers/srv-1',
+		h1: 'Alpha Server',
+		controls: [
+			['tablist', 'Sections'],
+			['button', 'More server actions'],
+			['button', 'Copy Address']
+		]
+	}
+];
+
+async function runPackagedRouteJourney(browser, base) {
+	const root = base.replace(/\/$/, '');
+	const state = { servers: 'populated', detail: 'populated' };
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	try {
+		const page = await context.newPage();
+		await seedPackagedRoutes(page, state, 'anonymous');
+
+		for (const width of [1440, 768, 360]) {
+			await page.setViewportSize({ width, height: 900 });
+			for (const route of PACKAGED_ROUTES) {
+				await page.goto(root + route.path, { waitUntil: 'domcontentloaded' });
+				await page.getByRole('heading', { name: route.h1, level: 1 }).waitFor();
+
+				await check(`route ${route.path} @${width}: no horizontal page scroll`, async () => {
+					const metrics = await page.evaluate(() => ({
+						scrollWidth: document.documentElement.scrollWidth,
+						innerWidth: window.innerWidth
+					}));
+					if (metrics.scrollWidth > metrics.innerWidth + 1) {
+						throw new Error(`document scrollWidth ${metrics.scrollWidth} > viewport ${metrics.innerWidth}`);
+					}
+					return metrics;
+				});
+
+				await check(`route ${route.path} @${width}: landmark and heading semantics`, async () => {
+					const info = await page.evaluate(() => ({
+						h1: document.querySelectorAll('h1').length,
+						main: document.querySelectorAll('main').length,
+						navigation: document.querySelectorAll('nav[aria-label="Main Navigation"]').length
+					}));
+					if (info.h1 !== 1 || info.main !== 1 || info.navigation !== 1) {
+						throw new Error(`landmarks incomplete: ${JSON.stringify(info)}`);
+					}
+					return info;
+				});
+
+				await check(`route ${route.path} @${width}: primary controls have accessible names`, async () => {
+					for (const [role, name] of route.controls) {
+						await page.getByRole(role, { name }).first().waitFor();
+					}
+					return route.controls.map(([role, name]) => `${role}:${name}`);
+				});
+			}
+
+			for (const path of ['/servers', '/servers/srv-1']) {
+				await page.goto(root + path, { waitUntil: 'domcontentloaded' });
+				await page.locator('h1').first().waitFor();
+				await check(`route ${path} @${width}: keyboard focus order`, async () => {
+					await page.locator('body').click({ position: { x: 2, y: 2 } });
+					const expected = width === 360 ? SHELL_FOCUS.slice(0, 3) : SHELL_FOCUS;
+					const order = await focusNames(page, expected.length);
+					if (!order.every((name, index) => matches(name, expected[index]))) {
+						throw new Error(`focus order was ${JSON.stringify(order)}, expected ${JSON.stringify(expected)}`);
+					}
+					return order;
+				});
+			}
+
+			await page.goto(root + '/servers', { waitUntil: 'domcontentloaded' });
+			const deleteTrigger = page.getByRole('button', { name: 'Delete server Alpha Server' });
+			await deleteTrigger.waitFor();
+			await check(`route /servers @${width}: delete dialog semantics, focus trap and Escape`, async () => {
+				await deleteTrigger.click();
+				const dialog = page.getByRole('dialog');
+				await dialog.waitFor();
+				const semantics = await dialog.evaluate((el) => ({
+					modal: el.getAttribute('aria-modal'),
+					labelledBy: el.getAttribute('aria-labelledby'),
+					label: document.getElementById(el.getAttribute('aria-labelledby') ?? '')?.textContent?.trim()
+				}));
+				if (semantics.modal !== 'true' || !semantics.labelledBy || semantics.label !== 'Delete server?') {
+					throw new Error(`dialog semantics incomplete: ${JSON.stringify(semantics)}`);
+				}
+				await page.waitForFunction(
+					() => {
+						const el = document.querySelector('[role="dialog"]');
+						return Boolean(el && el.contains(document.activeElement));
+					},
+					null,
+					{ timeout: 5000 }
+				);
+				const focusables = dialog.locator(FOCUSABLE);
+				await focusables.last().focus();
+				await page.keyboard.press('Tab');
+				const wrapped = await dialog.evaluate((el, selector) => {
+					const items = [...el.querySelectorAll(selector)];
+					return document.activeElement === items[0] && el.contains(document.activeElement);
+				}, FOCUSABLE);
+				if (!wrapped) throw new Error('Tab did not wrap to the first dialog control');
+				await page.keyboard.press('Escape');
+				await dialog.waitFor({ state: 'detached' });
+				await page.waitForFunction(
+					() => document.activeElement?.getAttribute('aria-label') === 'Delete server Alpha Server',
+					null,
+					{ timeout: 5000 }
+				);
+				return { ...semantics, restored: true, wrapped: true };
+			});
+
+			await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+			const overviewTab = page.locator('#server-detail-tabs-tab-overview');
+			await overviewTab.waitFor();
+			await check(`route /servers/srv-1 @${width}: tabs roles, names and arrow-key navigation`, async () => {
+				const semantics = await page.evaluate(() => {
+					const list = document.querySelector('[role="tablist"]');
+					const tabs = [...document.querySelectorAll('[role="tab"]')];
+					return {
+						label: list?.getAttribute('aria-label'),
+						count: tabs.length,
+						first: tabs[0]?.id,
+						selected: tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true').map((tab) => tab.id),
+						panels: document.querySelectorAll('[role="tabpanel"]').length
+					};
+				});
+				if (
+					semantics.label !== 'Sections' ||
+					semantics.count < 10 ||
+					semantics.first !== 'server-detail-tabs-tab-overview' ||
+					semantics.selected.length !== 1 ||
+					semantics.selected[0] !== 'server-detail-tabs-tab-overview' ||
+					semantics.panels !== 1
+				) {
+					throw new Error(`tab semantics incomplete: ${JSON.stringify(semantics)}`);
+				}
+				await overviewTab.focus();
+				await page.keyboard.press('ArrowRight');
+				const focused = await page.evaluate(() => document.activeElement?.id);
+				if (focused !== 'server-detail-tabs-tab-console') {
+					throw new Error(`ArrowRight did not move tab focus (got ${focused})`);
+				}
+				const selected = await page.evaluate(() =>
+					[...document.querySelectorAll('[role="tab"]')]
+						.filter((tab) => tab.getAttribute('aria-selected') === 'true')
+						.map((tab) => tab.id)
+				);
+				if (selected.length !== 1 || selected[0] !== 'server-detail-tabs-tab-console') {
+					throw new Error(`ArrowRight did not move tab selection: ${JSON.stringify(selected)}`);
+				}
+				await page.keyboard.press('ArrowLeft');
+				return { ...semantics, focused, selectedAfter: selected };
+			});
+		}
+
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await check('route /servers: empty state is exposed', async () => {
+			state.servers = 'empty';
+			await page.goto(root + '/servers', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('heading', { name: 'No servers configured' }).waitFor();
+			state.servers = 'populated';
+			return { empty: true };
+		});
+		await check('route /servers: error state is exposed', async () => {
+			state.servers = 'error';
+			await page.goto(root + '/servers', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('alert').waitFor();
+			await page.getByRole('heading', { name: 'Failed to load servers' }).waitFor();
+			state.servers = 'populated';
+			return { error: true };
+		});
+		await check('route /: error state is exposed', async () => {
+			state.servers = 'error';
+			await page.goto(root + '/', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('alert').waitFor();
+			await page.getByRole('heading', { name: 'Failed to load dashboard' }).waitFor();
+			state.servers = 'populated';
+			return { error: true };
+		});
+		await check('route /servers/srv-1: error state is exposed', async () => {
+			// An empty inventory forces the real detail loader to call GetServer;
+			// a cached row can render the detail without that request.
+			state.servers = 'empty';
+			state.detail = 'error';
+			await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+			const alert = page.getByRole('alert').filter({ hasText: 'Failed to load server' });
+			await alert.waitFor();
+			state.detail = 'populated';
+			state.servers = 'populated';
+			return { error: (await alert.textContent())?.trim().slice(0, 80) };
+		});
+	} finally {
+		await context.close();
+	}
+
+	// The login route needs a separate context: with authentication disabled the
+	// shell correctly redirects /login to the dashboard.
+	const loginContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	try {
+		const page = await loginContext.newPage();
+		await seedPackagedRoutes(page, { servers: 'populated', detail: 'populated' }, 'login-failure');
+		for (const width of [1440, 768, 360]) {
+			await page.setViewportSize({ width, height: 900 });
+			await page.goto(root + '/login', { waitUntil: 'domcontentloaded' });
+			await check(`route /login @${width}: form semantics, names and error state`, async () => {
+				await page.getByRole('heading', { name: 'Carbon Panel', level: 1 }).waitFor();
+				await page.getByLabel('Username', { exact: true }).waitFor();
+				await page.getByLabel('Password', { exact: true }).waitFor();
+				await page.getByRole('button', { name: 'Show password' }).waitFor();
+				await page.getByRole('button', { name: 'Sign In', exact: true }).waitFor();
+				const metrics = await page.evaluate(() => ({
+					scrollWidth: document.documentElement.scrollWidth,
+					innerWidth: window.innerWidth
+				}));
+				if (metrics.scrollWidth > metrics.innerWidth + 1) {
+					throw new Error(`login overflow ${metrics.scrollWidth} > ${metrics.innerWidth}`);
+				}
+				await page.getByLabel('Username', { exact: true }).fill('review');
+				await page.getByLabel('Password', { exact: true }).fill('wrong-password');
+				await page.getByRole('button', { name: 'Sign In', exact: true }).click();
+				await page.getByText('Invalid username or password', { exact: false }).first().waitFor();
+				return { path: await page.evaluate(() => location.pathname), error: true, metrics };
+			});
+		}
+	} finally {
+		await loginContext.close();
+	}
+}
+
+const fixture = startFixture();
+const packaged = startPackagedServer();
+let browser;
+try {
+	const [fixtureBase, packagedBase] = await Promise.all([fixture.url, packaged.url]);
+	const launched = await launchReviewBrowser();
+	browser = launched.browser;
+	console.log(JSON.stringify({ check: 'a11y-browser', ...launched.metadata }));
+	await runComponentJourney(browser, fixtureBase);
+	await runPackagedRouteJourney(browser, packagedBase);
 } catch (error) {
 	failures += 1;
 	checks.push({ name: 'journey-setup', status: 'failed', detail: String(error?.message ?? error) });
 	console.error(`FAIL journey-setup: ${error?.message ?? error}`);
 } finally {
-	// Always stop the fixture even if browser shutdown fails.
+	// Always stop both servers even if browser shutdown fails.
 	try {
 		if (browser) await browser.close();
 	} finally {
 		fixture.child.kill('SIGTERM');
+		packaged.child.kill('SIGTERM');
 	}
 	console.log(JSON.stringify({ check: 'a11y-browser-summary', total: checks.length, failures, checks }));
 	process.exitCode = failures === 0 ? 0 : 1;
