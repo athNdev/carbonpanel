@@ -219,7 +219,7 @@ func DownloadAllowsPrivate(indexerURL string) bool {
 // SSRF-guarded client whose private-network allowance is scoped to the
 // indexer that supplied the URL. It does not trust Content-Length.
 func DownloadDatapackArchiveFrom(ctx context.Context, indexerURL, rawURL, destPath string) error {
-	return DownloadDatapackArchiveWithClient(utils.NewSafeHTTPClient(5*time.Minute, DownloadAllowsPrivate(indexerURL)), ctx, rawURL, destPath)
+	return DownloadDatapackArchiveWithClient(utils.NewSafeHTTPClientForEgress(5*time.Minute, utils.EgressClassProvider, DownloadAllowsPrivate(indexerURL)), ctx, rawURL, destPath)
 }
 
 // DownloadDatapackArchiveWithClient is DownloadDatapackArchive with an explicit

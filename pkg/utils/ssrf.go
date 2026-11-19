@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package utils
 
 import (
@@ -14,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -22,7 +22,21 @@ var (
 	ErrBlockedIP     = errors.New("connection blocked by SSRF guard")
 	ErrInvalidScheme = errors.New("invalid URL scheme: must be http or https")
 	ErrMissingHost   = errors.New("url is missing host")
+	// ErrInvalidURL is returned instead of chaining url.Parse's error, which
+	// embeds the entire raw URL (including userinfo credentials) in its text.
+	ErrInvalidURL = errors.New("invalid URL")
 )
+
+// parseURLForPolicy parses a URL for an SSRF decision without ever reflecting
+// the raw input. url.Error contains the whole URL, so it is replaced by a
+// sentinel and the caller's redacted form.
+func parseURLForPolicy(rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidURL, RedactURL(rawURL))
+	}
+	return parsed, nil
+}
 
 // ValidateIP checks whether an IP address belongs to denied ranges (loopback, link-local, private RFC1918)
 func ValidateIP(ip net.IP, allowPrivate bool) error {
@@ -66,9 +80,9 @@ func ValidateIP(ip net.IP, allowPrivate bool) error {
 // Use it where a DNS lookup must not happen (e.g. saving configuration);
 // ValidateURL remains the resolving variant for actual outbound requests.
 func ValidateURLStatic(rawURL string, allowPrivate bool) (*url.URL, error) {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := parseURLForPolicy(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse url: %w", err)
+		return nil, err
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return nil, ErrInvalidScheme
@@ -87,9 +101,9 @@ func ValidateURLStatic(rawURL string, allowPrivate bool) (*url.URL, error) {
 
 // ValidateURL performs static and DNS resolution validation on a URL
 func ValidateURL(rawURL string, allowPrivate bool) (*url.URL, error) {
-	parsed, err := url.Parse(rawURL)
+	parsed, err := parseURLForPolicy(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse url: %w", err)
+		return nil, err
 	}
 
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
@@ -127,9 +141,102 @@ func ValidateURL(rawURL string, allowPrivate bool) (*url.URL, error) {
 	return parsed, nil
 }
 
+// EgressClass names the three distinct outbound-policy decisions. Keeping
+// them explicit prevents one class (an archive URL supplied by a user) from
+// inheriting the private-network latitude of another (an operator-configured
+// webhook receiver). Unknown classes fail closed.
+type EgressClass string
+
+const (
+	// EgressClassProvider is the fixed provider-adapter allowlist. The boolean
+	// passed with this class is computed by the provider adapter from its own
+	// trusted indexer/host policy (for example minecraft.DownloadAllowsPrivate),
+	// never from a user-supplied "allow private" field.
+	EgressClassProvider EgressClass = "provider"
+	// EgressClassWebhook targets an operator-configured receiver list. Private
+	// receivers are permitted only when the operator explicitly allows them.
+	EgressClassWebhook EgressClass = "webhook"
+	// EgressClassArchive is a user-supplied remote archive URL. Private targets
+	// are permitted only behind an explicit operator flag and a named node.
+	EgressClassArchive EgressClass = "archive"
+)
+
+// allowsPrivate resolves the effective private-network decision for a class.
+func (c EgressClass) allowsPrivate(requested bool) bool {
+	switch c {
+	case EgressClassProvider, EgressClassWebhook, EgressClassArchive:
+		return requested
+	default:
+		return false
+	}
+}
+
+// RedactURL removes credentials and sensitive query values so a URL can be
+// logged or returned in an error without reflecting a secret. The raw URL is
+// never used in a diagnostic message.
+func RedactURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	hadUser := parsed.User != nil
+	parsed.User = nil
+	query := parsed.Query()
+	for key := range query {
+		lower := strings.ToLower(key)
+		if strings.Contains(lower, "token") || strings.Contains(lower, "key") ||
+			strings.Contains(lower, "secret") || strings.Contains(lower, "password") ||
+			strings.Contains(lower, "sig") || strings.Contains(lower, "auth") {
+			query.Set(key, "<redacted>")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	if hadUser {
+		return "[redacted-userinfo] " + parsed.String()
+	}
+	return parsed.String()
+}
+
+// ValidateURLForEgress applies the named egress policy. It never echoes the
+// supplied URL: credentials are stripped, and URLs carrying userinfo are
+// rejected outright. DNS is still resolved by ValidateURL for the actual
+// outbound decision; import-time validation uses ValidateURLStatic instead.
+func ValidateURLForEgress(rawURL string, class EgressClass, allowPrivate bool) (*url.URL, error) {
+	redacted := RedactURL(rawURL)
+	parsed, err := parseURLForPolicy(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.User != nil {
+		return nil, fmt.Errorf("url %s must not contain credentials", redacted)
+	}
+	if _, err := ValidateURL(rawURL, class.allowsPrivate(allowPrivate)); err != nil {
+		return nil, fmt.Errorf("%s rejected by %s egress policy: %w", redacted, class, err)
+	}
+	return parsed, nil
+}
+
 // NewSafeHTTPClient returns an http.Client equipped with SSRF guards at connection time,
-// socket dialing, and redirect following.
+// socket dialing, and redirect following. It retains the historical provider
+// behaviour (private targets only when explicitly requested).
 func NewSafeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
+	return newSafeHTTPClient(timeout, allowPrivate, func(rawURL string) error {
+		_, err := ValidateURL(rawURL, allowPrivate)
+		return err
+	})
+}
+
+// NewSafeHTTPClientForEgress builds the same guarded client but binds both the
+// dial-time and redirect-time decisions to a named egress class. A redirect
+// cannot escape into a private network by inheriting a looser policy.
+func NewSafeHTTPClientForEgress(timeout time.Duration, class EgressClass, allowPrivate bool) *http.Client {
+	return newSafeHTTPClient(timeout, class.allowsPrivate(allowPrivate), func(rawURL string) error {
+		_, err := ValidateURLForEgress(rawURL, class, allowPrivate)
+		return err
+	})
+}
+
+func newSafeHTTPClient(timeout time.Duration, allowPrivate bool, checkRedirectURL func(string) error) *http.Client {
 	dialer := &net.Dialer{
 		Timeout:   15 * time.Second,
 		KeepAlive: 30 * time.Second,
@@ -163,8 +270,7 @@ func NewSafeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 			if len(via) >= 10 {
 				return errors.New("too many redirects")
 			}
-			_, err := ValidateURL(req.URL.String(), allowPrivate)
-			return err
+			return checkRedirectURL(req.URL.String())
 		},
 	}
 }

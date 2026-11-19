@@ -365,6 +365,7 @@ func (s *Server) registerServices(mux *http.ServeMux, opts []connect.HandlerOpti
 	configService.SetStorageResolver(s.storageResolver)
 	fileService := services.NewFileService(s.store, s.docker, s.uploadManager, s.downloadManager, s.log)
 	fileService.SetStorageResolver(s.storageResolver)
+	fileService.SetAllowPrivateArchiveEgress(s.config != nil && s.config.Security.AllowPrivateArchiveEgress)
 	s.fileService = fileService
 	minecraftService := services.NewMinecraftService(s.store, s.docker, s.log)
 	modService := services.NewModService(s.store, s.docker, s.uploadManager, s.log)
