@@ -171,7 +171,14 @@ func TestRestorePanelDatabaseReportsUnremovableStaleSidecar(t *testing.T) {
 		t.Fatalf("restore error = %v, want installed-but-unremovable-sidecar report", err)
 	}
 
-	rows := readRows(t, dbPath)
+	// The restored file is installed at dbPath, but the unremovable sidecar path
+	// can prevent SQLite from opening the database in place; verify contents via a
+	// copy to prove the snapshot was installed despite cleanup failure.
+	verifyPath := filepath.Join(dir, "restored-verify.sqlite")
+	if copyErr := copyFileContents(dbPath, verifyPath); copyErr != nil {
+		t.Fatalf("copy restored database for verification: %v", copyErr)
+	}
+	rows := readRows(t, verifyPath)
 	if !rows["before"] || rows["after"] {
 		t.Fatalf("restored rows = %v, want snapshot contents installed despite sidecar cleanup failure", rows)
 	}
