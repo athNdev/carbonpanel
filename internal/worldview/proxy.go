@@ -249,14 +249,35 @@ func (h *proxyHandler) proxyAsset(w http.ResponseWriter, r *http.Request, baseUR
 		return
 	}
 
-	buf := make([]byte, 32*1024)
-	limited := &io.LimitedReader{R: resp.Body, N: MaxAssetBytes + 1}
-	n, _ := io.CopyBuffer(w, limited, buf)
-	if n > MaxAssetBytes {
-		// Content-Length was absent or wrong; truncate at the hard cap rather
-		// than buffering an unbounded renderer response.
-		h.logWarn("worldview proxy: asset exceeded %d bytes and was truncated", MaxAssetBytes)
+	copyAsset(w, resp.Body, h.deps.Log)
+}
+
+// proxyCopyBufferSize is the fixed panel-side streaming buffer. It is bounded
+// independently of the renderer asset size so a large tile can never require a
+// matching allocation on the controller.
+const proxyCopyBufferSize = 32 * 1024
+
+// copyAsset streams at most MaxAssetBytes from src to dst. It never buffers a
+// whole asset in panel memory; the only allocation is the fixed-size copy
+// buffer. Kept as a seam so the memory and bandwidth bounds are measurable by
+// an owned fixture without a live renderer.
+func copyAsset(dst io.Writer, src io.Reader, log Logger) int64 {
+	buf := make([]byte, proxyCopyBufferSize)
+	// Limit reads to the hard cap; the +1 probe below only DETECTS an oversize
+	// response and is never forwarded to the browser.
+	limited := &io.LimitedReader{R: src, N: MaxAssetBytes}
+	n, _ := io.CopyBuffer(dst, limited, buf)
+	if n == MaxAssetBytes {
+		var probe [1]byte
+		if got, err := src.Read(probe[:]); got > 0 && err == nil {
+			if log != nil {
+				// Content-Length was absent or wrong; the response was capped
+				// at MaxAssetBytes rather than buffered without bound.
+				log.Warn("worldview proxy: asset exceeded %d bytes and was truncated", MaxAssetBytes)
+			}
+		}
 	}
+	return n
 }
 
 func validAssetPath(asset string) bool {

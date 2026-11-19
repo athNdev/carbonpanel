@@ -7,7 +7,7 @@ owners: [oss-runtime]
 code_refs: [cmd, internal, pkg, proto, web, docs, docker, scripts, oidc, packaging]
 sources:
   - title: Design specification
-    resource: ../../DESIGN.md
+    resource: ../DESIGN.md
   - title: Documentation ownership
     resource: ../docs/README.md
 ---

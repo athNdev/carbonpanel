@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -394,5 +395,37 @@ func TestVerificationStale(t *testing.T) {
 	}
 	if isVerificationStale(changed, verified) {
 		t.Fatal("expected verification to be fresh")
+	}
+}
+
+// Relative source resources are resolved against the concept's own directory.
+// A link that points outside the tracked tree must be reported, even though
+// the link parser itself accepts any string.
+func TestSourceResourceMustResolve(t *testing.T) {
+	root := baseBundle(t)
+	const header = `---
+type: Overview
+title: Overview
+description: Entry point for the knowledge base.
+status: stable
+owners: [oss-runtime]
+sources:
+  - title: Broken
+    resource: %s
+---
+See [runtime](architecture/runtime.md).
+`
+	writeFile(t, root, "knowledge/overview.md", fmt.Sprintf(header, "../../missing.md"))
+	broken := lint(root, false)
+	if !hasSubstring(broken.Errors, "sources[") {
+		t.Fatalf("expected a broken source error, got %v", broken.Errors)
+	}
+
+	writeFile(t, root, "docs/valid-source.md", "valid source\n")
+	writeFile(t, root, "knowledge/overview.md", fmt.Sprintf(header, "../docs/valid-source.md"))
+	_ = lint(root, true) // regenerate indexes for this fresh fixture
+	valid := lint(root, false)
+	if len(valid.Errors) != 0 {
+		t.Fatalf("valid source reported as broken: %v", valid.Errors)
 	}
 }
