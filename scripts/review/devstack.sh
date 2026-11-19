@@ -541,6 +541,16 @@ up)
 					ready_deadline=$((SECONDS + 120))
 					renderer_state=""
 					fixture_server_id="$(cat "${DATA}/server-id" 2>/dev/null || true)"
+					if [ -z "${fixture_server_id}" ]; then
+						echo "review fixture server-id is empty; cannot scope renderer readiness" >&2
+						return 0
+					fi
+					# Status-only evidence: the target id field and count actually
+					# returned by the backend. No response bodies or secrets.
+					first_probe="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null || true)"
+					echo "review world-view target count: $(printf '%s' "${first_probe}" | list_count targets)" >&2
+					echo "review world-view first target server: $(printf '%s' "${first_probe}" | json_path 'targets.0.serverId')" >&2
+					echo "review fixture server id: ${fixture_server_id}" >&2
 					while ((SECONDS < ready_deadline)); do
 						# The panel's own health check performs the authoritative
 						# upstream probe (map list, keyed root, gzip assets and
