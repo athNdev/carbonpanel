@@ -339,6 +339,8 @@ explicit outcome checks, restoring both aliases and docs to the prior verified
 receipt; retry resumes that exact digest. Offline fixtures inject a second-
 registry write failure and a final-probe failure to prove the invariant.
 
+Rollback uses the separately verified prior receipt captured before any write, never the candidate receipt, and redeploys the exact prior docs bytes from a distinct Pages artifact (byte hash checked). The stable gate consumes observed dual-registry digests and compensates a failed alias write; older release targets without the trusted gate script are refused explicitly.
+
 The verified current Docker Hub nightly baseline (`sha256:ecc89ba9â€¦`, commit
 `d8597d4eâ€¦`) is a fact about today's registry, not a mandatory first revision.
 It seeds nightly only through a bounded, recorded bootstrap that re-verifies

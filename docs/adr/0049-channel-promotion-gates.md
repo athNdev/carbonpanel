@@ -121,12 +121,21 @@ paraphrased below rather than duplicated:
    the deployed public docs marker together, and GitHub release creation is
    gated on that synchronized transaction; a stale local manifest is QA-only.
 8. **Genuine failure branch.** Rollback runs under `always()` with explicit
-   outcome checks (default `success()` can never follow a failed alias move or
-   final probe). It restores BOTH registry aliases and the canonical docs marker
-   from the exact prior verified receipt; retry resumes that exact digest and
-   never rebuilds. An offline harness injects a second-registry write failure
-   and a final-probe failure to prove no alias moves without both registries and
-   the docs marker, and that partial failure restores both surfaces.
+   outcome checks and NO `commit_decision` success guard (a failed deploy/probe
+   skips that step). The receipt it uses is the separately VERIFIED prior
+   receipt captured in phase 1 before any write, never the candidate receipt
+   returned by the commit decision. Rollback restores BOTH aliases and the
+   EXACT prior docs BYTES from a distinct Pages artifact; a re-stamp cannot
+   restore byte identity. Retry resumes that exact digest and never rebuilds.
+9. **Gate evidence and target guard.** The stable transaction validates the
+   OBSERVED digests and revisions in both registries and feeds them into the
+   gate; no hardcoded digest is accepted as evidence. A failed dual-registry
+   stable alias write is compensated by restoring the prior aliases and docs.
+   Both release jobs refuse an older release target whose checked-out
+   `scripts/release.py` lacks the trusted gate commands, instead of silently
+   using the wrong script. Offline injection covers a second-registry write
+   failure, final-probe failure, prior-receipt rollback, bounded bootstrap,
+   an older target and a prerelease candidate.
 
 ## Consequences
 

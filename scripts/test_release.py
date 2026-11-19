@@ -2402,6 +2402,45 @@ class ChannelPromotionTests(unittest.TestCase):
         cd_inputs = (cd_doc.get("on") or cd_doc.get(True))["workflow_dispatch"]["inputs"]
         self.assertNotIn("apply", cd_inputs)
 
+    def test_cd_rollback_uses_prior_receipt_and_restores_exact_docs_bytes(self):
+        import yaml
+        doc = yaml.safe_load((release.ROOT / ".github/workflows/cd.yml").read_text(
+            encoding="utf-8"))
+        steps = {step.get("id"): step
+                 for step in doc["jobs"]["channel-transaction"]["steps"] if step.get("id")}
+        rollback = steps["rollback"]
+        self.assertIn("steps.stage_decision.outputs.prior_receipt", rollback["env"]["PRIOR"])
+        self.assertNotIn("commit_decision.outputs.receipt", str(rollback))
+        self.assertIn("always()", rollback["if"])
+        self.assertNotIn("steps.commit_decision.outcome == 'success'", rollback["if"])
+        self.assertIn("steps.deploy.outcome == 'failure'", rollback["if"])
+        self.assertIn("steps.probe.outcome == 'failure'", rollback["if"])
+        self.assertEqual(steps["rollback_docs"]["with"]["name"], "github-pages-prior")
+        self.assertEqual(steps["rollback_docs"]["with"]["path"], ".website-build/prior-site")
+        self.assertEqual(steps["rollback_deploy"]["with"]["artifact_name"],
+                         "github-pages-prior")
+        self.assertIn("steps.preserve_prior.outputs.hash",
+                      str(doc["jobs"]["channel-transaction"]["steps"]))
+
+    def test_release_stable_gate_uses_observed_digests_and_compensates(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        doc = yaml.safe_load(source)
+        job = doc["jobs"]["stable-channel-transaction"]
+        steps = job["steps"]
+        self.assertTrue(any("verify-gate-script" in str(step.get("run", "")) for step in steps))
+        self.assertTrue(any("verify-channel-parity" in str(step.get("run", ""))
+                            for step in steps))
+        transaction = next(step for step in steps if step.get("id") == "transaction")
+        self.assertIn("--argjson registries \"$OBSERVED\"", transaction["run"])
+        self.assertNotIn("registries:{docker_hub:$digest,ghcr:$digest}", transaction["run"])
+        self.assertIn("prior_receipt", str(job["outputs"]))
+        promote = doc["jobs"]["promote-aliases"]["steps"]
+        self.assertTrue(any(step.get("id") == "stable_compensate" for step in promote))
+        self.assertTrue(any(step.get("id") == "stable_compensate_docs"
+                            and step.get("with", {}).get("artifact_name")
+                            == "github-pages-prior-stable" for step in promote))
+
     def test_no_legacy_alias_write_path_remains_outside_the_qualified_transaction(self):
         import yaml
         files = sorted((release.ROOT / ".github/workflows").glob("*.yml"))
@@ -2570,6 +2609,77 @@ class ChannelTransactionTests(unittest.TestCase):
             action, _, receipt, _ = self.decide()
         self.assertEqual(action, "publish")
         self.assertEqual(receipt["revision"], self.COMMIT)
+
+    def test_prior_receipt_is_preserved_not_the_candidate_receipt(self):
+        previous = self.receipt()
+        outcome = release.channel_transaction_run(
+            self.candidate(), previous,
+            writer=lambda r, d: (False, "injected") if r == "ghcr" and d != self.PREV_DIGEST
+            else (True, ""),
+            ancestry=lambda older, newer: True)
+        self.assertEqual(outcome["outcome"], "rolled_back")
+        self.assertEqual(outcome["receipt"]["revision"], self.PREV_COMMIT)
+        self.assertNotEqual(outcome["receipt"]["revision"], self.COMMIT)
+        self.assertEqual(outcome["receipt"]["digest"], self.PREV_DIGEST)
+
+    def test_bootstrap_requires_recorded_flag_and_dual_registry_parity(self):
+        baseline = release.NIGHTLY_HUB_BASELINE
+        candidate = self.candidate(
+            commit=baseline["commit"], digest=baseline["digest"],
+            docs_commit=baseline["commit"], docs_digest=baseline["digest"],
+            registries={"docker_hub": baseline["digest"], "ghcr": baseline["digest"]})
+        self.assertEqual(self.decide(candidate=candidate)[0], "refuse")
+        self.assertEqual(self.decide(candidate=self.candidate(
+            **{"bootstrap": True}))[0], "publish")  # normal candidate unaffected
+        bootstrapped = dict(candidate)
+        bootstrapped["bootstrap"] = True
+        self.assertEqual(self.decide(candidate=bootstrapped)[0], "publish")
+
+    def test_prerelease_target_is_refused_for_stable_channel(self):
+        candidate = self.candidate(channel="stable",
+                                   release_tag="carbonpanel-v2.0.0-alpha.1")
+        action, reason, _, _ = self.decide(candidate=candidate)
+        self.assertEqual(action, "refuse")
+        self.assertIn("stable", reason)
+
+    def test_older_release_target_without_trusted_gate_script_is_refused(self):
+        ok, missing = release.verify_gate_script(release.ROOT / "scripts/release.py")
+        self.assertTrue(ok, missing)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "release.py"
+            path.write_text("#!/usr/bin/env python3\n# older target\n", encoding="utf-8")
+            ok, missing = release.verify_gate_script(path)
+            self.assertFalse(ok)
+            for command in release.REQUIRED_GATE_COMMANDS:
+                self.assertIn(command, missing)
+            out = io.StringIO()
+            with patch("sys.argv", ["release.py", "verify-gate-script",
+                                    "--path", str(path)]), redirect_stdout(out):
+                with self.assertRaisesRegex(ValueError, "Older release target"):
+                    release.main()
+            self.assertEqual(json.loads(out.getvalue())["verified"], "false")
+
+    def test_gate_uses_observed_duals_registry_digests_not_hardcoded_values(self):
+        commit, digest = self.COMMIT, self.DIGEST
+        info = {"digest": digest,
+                "platforms": [["linux", "amd64"], ["linux", "arm64"]],
+                "revision": commit}
+        observations = json.dumps({"docker_hub": ["present", info], "ghcr": ["present", info]})
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "verify-channel-parity", "--observations",
+                                observations, "--digest", digest, "--commit", commit]), \
+             redirect_stdout(out):
+            release.main()
+        self.assertEqual(json.loads(out.getvalue())["parity"], "true")
+        bad = json.dumps({"docker_hub": ["present", info],
+                          "ghcr": ["present", {**info, "digest": self.PREV_DIGEST}]})
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "verify-channel-parity", "--observations",
+                                bad, "--digest", digest, "--commit", commit]), \
+             redirect_stdout(out):
+            with self.assertRaisesRegex(ValueError, "parity"):
+                release.main()
+        self.assertEqual(json.loads(out.getvalue())["parity"], "false")
 
     def test_stable_accepts_exact_target_version_but_not_arbitrary_or_2_0_0(self):
         candidate = self.candidate(

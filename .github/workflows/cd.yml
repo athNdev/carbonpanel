@@ -604,6 +604,9 @@ jobs:
             --channel nightly --aliases "$ALIASES" \
             --docs-commit "$LIVE_COMMIT" --docs-digest "$LIVE_DIGEST")
           PREV_JSON=$(printf '%s' "$PREVIOUS" | jq -c .receipt)
+          # The verified prior receipt is captured BEFORE any write and kept
+          # separate from the candidate receipt returned by the commit decision.
+          printf 'prior_receipt=%s\n' "$PREV_JSON" >> "$GITHUB_OUTPUT"
           SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
           CANDIDATE=$(jq -nc \
             --arg commit "$CHANNEL_COMMIT" --arg digest "$CHANNEL_DIGEST" \
@@ -622,13 +625,24 @@ jobs:
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
             --event "$CHANNEL_EVENT"
 
+      # Preserve the exact bytes of the currently published docs artifact before
+      # any candidate write. Rollback redeploys THESE bytes, never a re-stamp.
+      - name: Preserve the exact prior docs artifact before any candidate write
+        id: preserve_prior
+        if: steps.stage_decision.outputs.action == 'stage'
+        run: |
+          rm -rf .website-build/prior-site
+          cp -a .website-build/site .website-build/prior-site
+          PRIOR_HASH=$(sha256sum .website-build/prior-site/version-index.json | cut -d' ' -f1)
+          echo "hash=sha256:$PRIOR_HASH" >> "$GITHUB_OUTPUT"
+
       # The candidate revision and digest are EXTERNAL INPUTS to the built site:
       # the probe is written at /docs/candidate/<sha>/ and the canonical marker
       # is stamped only inside this qualified transaction. Both go into ONE
       # Pages artifact, deployed once under the shared lock.
       - name: Stamp candidate and canonical markers into the built artifact
         id: markers
-        if: steps.stage_decision.outputs.action == 'stage'
+        if: steps.preserve_prior.outcome == 'success'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
@@ -639,20 +653,20 @@ jobs:
           python3 scripts/release.py validate-channel-contract \
             --path .website-build/site/version-index.json
       - name: Upload the single candidate/canonical Pages artifact
-        if: steps.stage_decision.outputs.action == 'stage'
+        if: steps.markers.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: .website-build/site
       - name: Deploy the candidate/canonical artifact once
         id: deploy
-        if: steps.stage_decision.outputs.action == 'stage'
+        if: steps.markers.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
       # Probe the NON-ACTIVE staging route only. Canonical routes are never used
       # for the candidate probe.
       - name: Confirm the public candidate probe marker (non-active path)
         id: probe
-        if: steps.stage_decision.outputs.action == 'stage'
+        if: steps.deploy.outcome == 'success'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
@@ -665,7 +679,7 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
       - name: Confirm the public canonical marker before any alias move
         id: canonical
-        if: steps.stage_decision.outputs.action == 'stage'
+        if: steps.probe.outcome == 'success'
         env:
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
           CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
@@ -676,7 +690,7 @@ jobs:
 
       - name: PHASE 2 - commit decision, then move both registry aliases
         id: commit_decision
-        if: steps.stage_decision.outputs.action == 'stage'
+        if: steps.canonical.outcome == 'success'
         env:
           CHANNEL_EVENT: ${{ github.event_name }}
           CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
@@ -740,52 +754,52 @@ jobs:
           test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$CHANNEL_DIGEST"
           test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$CHANNEL_DIGEST"
 
-      # Genuine failure branch. default success() can never run after a failed
-      # alias_move / final probe, so this uses always() plus an explicit outcome
-      # check and RESTORES both registry aliases and the docs marker from the
-      # exact prior verified receipt (no rebuild, no immutable overwrite).
+      # Genuine failure branch. always() with explicit outcome checks and NO
+      # commit_decision success guard (a deploy/probe failure skips that step).
+      # PRIOR is the receipt captured by phase 1 BEFORE any write, never the
+      # candidate receipt returned by the commit decision.
       - name: Restore prior verified aliases after partial failure
         id: rollback
         if: >-
-          always() && steps.commit_decision.outcome == 'success' &&
-          (steps.commit_decision.outputs.action == 'rollback' ||
-           steps.deploy.outcome == 'failure' || steps.probe.outcome == 'failure' ||
-           steps.canonical.outcome == 'failure' || steps.alias_move.outcome == 'failure' ||
-           steps.final_verify.outcome == 'failure')
+          always() && steps.stage_decision.outputs.action == 'stage' &&
+          (steps.markers.outcome == 'failure' || steps.deploy.outcome == 'failure' ||
+           steps.probe.outcome == 'failure' || steps.canonical.outcome == 'failure' ||
+           steps.commit_decision.outcome == 'failure' ||
+           steps.commit_decision.outputs.action == 'rollback' ||
+           steps.alias_move.outcome == 'failure' || steps.final_verify.outcome == 'failure')
         env:
-          PRIOR: ${{ steps.commit_decision.outputs.receipt }}
+          PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
         run: |
+          test -n "$PRIOR" || { echo "::error::no verified prior receipt to restore"; exit 1; }
           python3 scripts/release.py channel-rollback --receipt "$PRIOR" --apply
 
-      - name: Restore the prior canonical docs marker from the receipt
+      # Restore the EXACT prior docs bytes saved before any candidate write.
+      # A re-stamp cannot restore byte identity, so a distinct artifact is used.
+      - name: Upload the exact prior docs bytes as a distinct Pages artifact
         id: rollback_docs
         if: steps.rollback.outcome == 'success'
-        env:
-          PRIOR: ${{ steps.commit_decision.outputs.receipt }}
-        run: |
-          PRIOR_COMMIT=$(printf '%s' "$PRIOR" | jq -r '.revision')
-          PRIOR_DIGEST=$(printf '%s' "$PRIOR" | jq -r '.digest')
-          python3 scripts/release.py stage-channel-marker \
-            --site .website-build/site --channel nightly \
-            --commit "$PRIOR_COMMIT" --digest "$PRIOR_DIGEST" --canonical
-      - name: Upload restored prior docs artifact
-        if: steps.rollback_docs.outcome == 'success'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: .website-build/site
-      - name: Deploy restored prior docs
+          name: github-pages-prior
+          path: .website-build/prior-site
+      - name: Deploy the exact prior docs bytes
         id: rollback_deploy
         if: steps.rollback_docs.outcome == 'success'
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
-      - name: Verify restored aliases and docs agree with the prior receipt
+        with:
+          artifact_name: github-pages-prior
+      - name: Verify restored aliases and public docs bytes/marker
         if: steps.rollback_deploy.outcome == 'success'
         env:
-          PRIOR: ${{ steps.commit_decision.outputs.receipt }}
+          PRIOR: ${{ steps.stage_decision.outputs.prior_receipt }}
+          PRIOR_HASH: ${{ steps.preserve_prior.outputs.hash }}
         run: |
           PRIOR_DIGEST=$(printf '%s' "$PRIOR" | jq -r '.digest')
           OBS=$(python3 scripts/release.py channel-observe --reference nightly | jq -c .observations)
           test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$PRIOR_DIGEST"
           test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$PRIOR_DIGEST"
+          LIVE_HASH=$(curl -fsSL https://carbonpanel.dev/version-index.json | sha256sum | cut -d' ' -f1)
+          test "sha256:$LIVE_HASH" = "$PRIOR_HASH"
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
           test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$PRIOR_DIGEST"
       - name: Fail the run when a rollback was required

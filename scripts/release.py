@@ -2345,6 +2345,20 @@ def channel_transaction_decision(candidate, previous=None, live=None,
         return "refuse", "exact source revision must be pinned from trusted main", previous or {}, []
     if str(candidate.get("ci_verified", False)).strip().lower() != "true":
         return "refuse", "exact-commit main CI is not verified", previous or {}, []
+    # A verified Hub-only baseline is not a mandatory first revision; it may
+    # seed nightly only via a recorded bounded bootstrap with dual-registry
+    # parity and a matching docs marker (both verified below).
+    if (channel == "nightly"
+            and (commit, digest) == (NIGHTLY_HUB_BASELINE["commit"],
+                                     NIGHTLY_HUB_BASELINE["digest"])
+            and not candidate.get("bootstrap")):
+        prior = previous or {}
+        if prior.get("verified"):
+            return ("rollback",
+                    "Hub-only baseline needs a recorded bootstrap; preserving prior receipt",
+                    prior, (TX_ROLLBACK, TX_ROLLBACK_DOCS, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL))
+        return ("refuse",
+                "the Hub-only nightly baseline needs a recorded bounded bootstrap", prior, [])
     if channel == "stable":
         release_tag = candidate.get("release_tag", "")
         if release_tag:
@@ -2564,6 +2578,45 @@ def channel_active_receipt_cli(args):
     return receipt
 
 
+# Commands an older target's release.py must contain before any trusted gate
+# may run against it; otherwise the workflow would silently use the wrong script.
+REQUIRED_GATE_COMMANDS = ("channel-transaction", "channel-active-receipt",
+                          "channel-rollback", "channel-observe",
+                          "stage-channel-marker")
+
+
+def verify_gate_script(path):
+    """Fail closed when a checked-out target lacks the trusted gate commands."""
+    text = Path(path).read_text(encoding="utf-8")
+    missing = [command for command in REQUIRED_GATE_COMMANDS
+               if f'"{command}"' not in text]
+    return (not missing), missing
+
+
+def verify_gate_script_cli(args):
+    ok, missing = verify_gate_script(args.path)
+    values = {"verified": str(ok).lower(), "missing": json.dumps(missing)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Older release target lacks the trusted gate script; "
+                         "missing commands: " + ", ".join(missing))
+    return ok
+
+
+def verify_channel_parity_cli(args):
+    """CLI: prove the OBSERVED digests in both registries match the candidate."""
+    observations = _coerce_observation_map(json_argument(args.observations, default={}) or {})
+    ok, reason = channel_oci_parity(observations, args.digest, args.commit)
+    values = {"parity": str(ok).lower(), "reason": reason,
+              "digest": args.digest, "commit": args.commit}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Immutable digest parity failed: " + reason)
+    return ok
+
+
 def channel_resume_plan(receipt, candidate_digest=""):
     """A retry resumes the EXACT recorded digest; it never rebuilds a new one."""
     if not receipt or not receipt.get("verified") or not valid_digest(receipt.get("digest", "")):
@@ -2751,17 +2804,21 @@ def channel_promote_cli(args):
     return action
 
 
-def _observation_map(raw):
-    """Parse a JSON map of registry -> [state, info] observations."""
-    document = json_argument(raw, default={}) or {}
+def _coerce_observation_map(document):
+    """Normalise a registry -> [state, info] map from JSON or a parsed dict."""
     result = {}
     for registry, value in document.items():
         state, info = value
-        if state == "present":
+        if state == "present" and info:
             info = dict(info)
             info["platforms"] = {tuple(item) for item in info.get("platforms", ())}
         result[registry] = (state, info)
     return result
+
+
+def _observation_map(raw):
+    """Parse a JSON map of registry -> [state, info] observations."""
+    return _coerce_observation_map(json_argument(raw, default={}) or {})
 
 
 def channel_observe(reference):
@@ -3036,6 +3093,12 @@ def build_parser():
     simulate.add_argument("--fail-registry", default="")
     simulate.add_argument("--fail-docs", action="store_true")
     simulate.add_argument("--fail-final-probe", action="store_true")
+    gate_script = commands.add_parser("verify-gate-script")
+    gate_script.add_argument("--path", required=True)
+    parity = commands.add_parser("verify-channel-parity")
+    parity.add_argument("--observations", default="{}")
+    parity.add_argument("--digest", required=True)
+    parity.add_argument("--commit", required=True)
     return parser
 
 
@@ -3057,7 +3120,9 @@ def main():
                 "channel-active-receipt": channel_active_receipt_cli,
                 "stage-channel-marker": stage_channel_marker_cli,
                 "channel-rollback": channel_rollback_cli,
-                "channel-simulate": channel_simulate_cli}
+                "channel-simulate": channel_simulate_cli,
+                "verify-gate-script": verify_gate_script_cli,
+                "verify-channel-parity": verify_channel_parity_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:

@@ -476,11 +476,15 @@ jobs:
     outputs:
       action: ${{ steps.transaction.outputs.action }}
       receipt: ${{ steps.transaction.outputs.receipt }}
+      prior_receipt: ${{ steps.prior.outputs.prior_receipt }}
+      prior_hash: ${{ steps.prior.outputs.hash }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 0
+      - name: Refuse an older target that lacks the trusted gate script
+        run: python3 scripts/release.py verify-gate-script --path scripts/release.py
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.22.1'
@@ -503,6 +507,43 @@ jobs:
           TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
           OBS=$(python3 scripts/release.py channel-observe --reference "$TAG" | jq -c .observations)
           printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
+      - name: Verify the OBSERVED digests, not a hardcoded literal
+        id: parity
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          OBS: ${{ steps.immutable.outputs.observations }}
+        run: |
+          python3 scripts/release.py verify-channel-parity \
+            --observations "$OBS" --digest "$IMAGE_DIGEST" --commit "$RELEASE_COMMIT"
+          HUB=$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')
+          GHCR=$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')
+          test "$HUB" = "$IMAGE_DIGEST"
+          test "$GHCR" = "$IMAGE_DIGEST"
+          printf 'observed=%s\n' "$(jq -nc --arg h "$HUB" --arg g "$GHCR" \
+            '{docker_hub:$h,ghcr:$g}')" >> "$GITHUB_OUTPUT"
+      - name: Capture the verified prior receipt and exact prior docs bytes
+        id: prior
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          ALIASES=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
+          LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
+          PRIOR_COMMIT=$(printf '%s' "$LIVE" | jq -r '.commit // empty')
+          PRIOR_DIGEST=$(printf '%s' "$LIVE" | jq -r '.image.digest // empty')
+          RECEIPT=$(python3 scripts/release.py channel-active-receipt \
+            --channel stable --aliases "$ALIASES" \
+            --docs-commit "$PRIOR_COMMIT" --docs-digest "$PRIOR_DIGEST" 2>/dev/null || echo '{"receipt":{}}')
+          printf 'prior_receipt=%s\n' "$(printf '%s' "$RECEIPT" | jq -c .receipt)" >> "$GITHUB_OUTPUT"
+          rm -rf .website-build/prior-site
+          cp -a .website-build/site .website-build/prior-site
+          PRIOR_HASH=$(sha256sum .website-build/prior-site/version-index.json | cut -d' ' -f1)
+          echo "hash=sha256:$PRIOR_HASH" >> "$GITHUB_OUTPUT"
+      - name: Keep the exact prior docs bytes for alias-write compensation
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: github-pages-prior-stable
+          path: .website-build/prior-site
       - name: Stamp the exact stable marker into the built docs artifact
         env:
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
@@ -534,15 +575,16 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-          IMMUTABLE_OBS: ${{ steps.immutable.outputs.observations }}
+          OBSERVED: ${{ steps.parity.outputs.observed }}
         run: |
           CANDIDATE=$(jq -nc \
             --arg channel stable --arg commit "$RELEASE_COMMIT" --arg digest "$IMAGE_DIGEST" \
             --arg tag "$RELEASE_VERSION" --argjson seq 1 --arg ref "refs/heads/main" \
+            --argjson registries "$OBSERVED" \
             '{channel:$channel,commit:$commit,digest:$digest,release_tag:$tag,seq:$seq,
               source_ref:$ref,ci_verified:"true",immutable_ok:true,contract_valid:true,
               site_validated:true,docs_commit:$commit,docs_digest:$digest,
-              registries:{docker_hub:$digest,ghcr:$digest},
+              registries:$registries,
               candidate_marker_verified:true,canonical_marker_verified:true}')
           python3 scripts/release.py channel-transaction --phase commit \
             --candidate "$CANDIDATE" --event workflow_dispatch
@@ -628,7 +670,11 @@ jobs:
     permissions:
       contents: read
       packages: write
+      pages: write
+      id-token: write
       actions: read
+    environment:
+      name: github-pages
     env:
       DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
       GHCR_IMAGE: ghcr.io/${{ github.repository }}
@@ -636,6 +682,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.commit }}
+      - name: Refuse an older target that lacks the trusted gate script
+        run: python3 scripts/release.py verify-gate-script --path scripts/release.py
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Sign in to Docker Hub
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
@@ -694,6 +742,42 @@ jobs:
             --channel stable --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST" \
             --release-tag "$RELEASE_VERSION" --ci-verified "true" \
             --immutable "$IMMUTABLE" --aliases "$ALIASES" --apply
+
+      # Compensation for a failed dual-registry stable alias write: restore
+      # BOTH aliases and the EXACT prior docs bytes, then fail the run.
+      - name: Restore prior stable aliases after a failed dual-registry write
+        id: stable_compensate
+        if: always() && steps.stable_aliases.outcome == 'failure'
+        env:
+          PRIOR: ${{ needs.stable-channel-transaction.outputs.prior_receipt }}
+        run: |
+          test -n "$PRIOR" || { echo "::error::no prior stable receipt to restore"; exit 1; }
+          python3 scripts/release.py channel-rollback --receipt "$PRIOR" --apply
+      - name: Deploy the exact prior stable docs bytes
+        id: stable_compensate_docs
+        if: steps.stable_compensate.outcome == 'success'
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        with:
+          artifact_name: github-pages-prior-stable
+      - name: Verify the compensated stable aliases and docs marker
+        if: steps.stable_compensate_docs.outcome == 'success'
+        env:
+          PRIOR: ${{ needs.stable-channel-transaction.outputs.prior_receipt }}
+          PRIOR_HASH: ${{ needs.stable-channel-transaction.outputs.prior_hash }}
+        run: |
+          PRIOR_DIGEST=$(printf '%s' "$PRIOR" | jq -r '.digest')
+          for ref in latest stable; do
+            OBS=$(python3 scripts/release.py channel-observe --reference "$ref" | jq -c .observations)
+            test "$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')" = "$PRIOR_DIGEST"
+            test "$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')" = "$PRIOR_DIGEST"
+          done
+          LIVE_HASH=$(curl -fsSL https://carbonpanel.dev/version-index.json | sha256sum | cut -d' ' -f1)
+          test "sha256:$LIVE_HASH" = "$PRIOR_HASH"
+      - name: Fail the run when stable compensation was required
+        if: steps.stable_compensate.outcome == 'success'
+        run: |
+          echo "::error::stable alias write failed and was compensated; no success reported"
+          exit 1
 
       - name: Promote minor compatibility alias only after the synced transaction
         if: steps.promotion.outputs.minor != '' && needs.plan.outputs.channel != 'stable'
