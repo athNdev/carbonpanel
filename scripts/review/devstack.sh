@@ -491,22 +491,31 @@ overlay_csp_safe_webapp() {
 	docker cp "${fixture}/index.html" "${NAME}-bluemap:/app/web/index.html" >/dev/null || return 1
 	docker cp "${fixture}/assets/." "${NAME}-bluemap:/app/web/assets/" >/dev/null || return 1
 	docker cp "${fixture}/lang/." "${NAME}-bluemap:/app/web/lang/" >/dev/null || return 1
-	local digest start_location settings_tmp
+	local digest
 	digest="$(docker exec "${NAME}-bluemap" sha256sum /app/web/assets/index-BA9KJ4pi.js 2>/dev/null | cut -d' ' -f1)"
 	echo "review BlueMap served webapp bundle: ${digest}" >&2
 	[ "${digest}" = "ba940f930de0642acfd2ca8b0eda6aa0914ce02fcf673cee18262b3dd5217da3" ] || return 1
-	# BlueMap's default camera (distance 1500) shows the tiny seeded spawn
-	# area as a few pixels in a black void. Start the map zoomed into the real
-	# generated tiles using BlueMap's own startLocation setting. This changes
-	# only the initial camera, never the real settings.json map list or tiles.
-	start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:15:0:0:0:0:perspective}"
-	settings_tmp="${DATA}/config/bluemap-settings.json"
-	if [ -f "${web}/settings.json" ]; then
-		START_LOCATION="${start_location}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);j.startLocation=process.env.START_LOCATION;process.stdout.write(JSON.stringify(j))}catch(e){process.exit(1)}})' \
-			<"${web}/settings.json" >"${settings_tmp}" || return 1
-		docker cp "${settings_tmp}" "${NAME}-bluemap:/app/web/settings.json" >/dev/null || return 1
-		echo "review BlueMap startLocation: ${start_location}" >&2
-	fi
+	set_bluemap_start_location "${mapdir}"
+}
+
+# BlueMap's default camera (distance 1500) shows the tiny seeded spawn area as
+# a few pixels in a black void. Start the map zoomed into the real generated
+# tiles using BlueMap's own startLocation setting: only the initial camera
+# changes, never the real settings.json map list or rendered tile tree. The
+# renderer rewrites settings.json while rendering, so apply this last, after
+# the tile-coverage wait and immediately before the journey.
+set_bluemap_start_location() {
+	local mapdir="$1" web="${1}/web"
+	local start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:15:0:0:0:0:perspective}"
+	local settings_tmp="${DATA}/config/bluemap-settings.json"
+	[ -f "${web}/settings.json" ] || return 1
+	START_LOCATION="${start_location}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);j.startLocation=process.env.START_LOCATION;process.stdout.write(JSON.stringify(j))}catch(e){process.exit(1)}})' \
+		<"${web}/settings.json" >"${settings_tmp}" || return 1
+	docker cp "${settings_tmp}" "${NAME}-bluemap:/app/web/settings.json" >/dev/null || return 1
+	local root_keys
+	root_keys="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(Object.keys(JSON.parse(s)).sort().join(","))}catch(e){console.log("parse_error")}})' <"${web}/settings.json")"
+	echo "review BlueMap root settings keys: ${root_keys}" >&2
+	echo "review BlueMap startLocation: ${start_location}" >&2
 }
 
 # Real BlueMap renderer and web server for the seeded world. BlueMap's own
@@ -684,6 +693,11 @@ except Exception as e:
  print('settings_err='+type(e).__name__)
 " 2>&1 || true)"
 						echo "review BlueMap settings: $(printf '%s' "${settings_info}" | tr '\n' ' ' | cut -c1-700)" >&2
+						# Apply last: the renderer rewrites settings.json as tiles
+						# land, so an earlier overlay is silently lost by now.
+						set_bluemap_start_location "${server_path}/modules/bluemap" || {
+							echo "review camera startLocation could not be applied; capture would stay black" >&2
+						}
 					fi
 				else
 					echo "review map server container failed to start" >&2
