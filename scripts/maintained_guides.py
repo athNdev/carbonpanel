@@ -272,9 +272,15 @@ def apply(declaration, docs_dir, public_dir, channel_commit, revision=None,
             "channel_commit": channel_commit,
             "provenance": dict(guide["provenance"]),
         })
+    # Canonical declaration hash is derived from the tracked declaration, not
+    # from the source HEAD. A selector-only edit changes it; a later commit with
+    # identical declaration and blobs does not.
+    declaration_sha256 = hashlib.sha256(
+        json.dumps(declaration, sort_keys=True).encode("utf-8")).hexdigest()
     public_dir.mkdir(parents=True, exist_ok=True)
     document = {
         "schema_version": declaration["schema_version"],
+        "declaration_sha256": declaration_sha256,
         "repository": declaration["repository"],
         "compatibility": dict(declaration["compatibility"]),
         "source": {

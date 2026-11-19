@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: python3 -m unittest scripts.test_release scripts.test_go_mod_download scripts.test_runtime_artifacts
+      - run: python3 -m unittest scripts.test_release scripts.test_docs_publication_gate scripts.test_go_mod_download scripts.test_runtime_artifacts
 
   proxmox-installer:
     name: Proxmox installer fixtures
@@ -226,6 +226,10 @@ jobs:
   test-race:
     name: Go Race Detector
     runs-on: ubuntu-latest
+    # internal/rpc/services takes ~513s under -race, close to Go's 10m default
+    # per-binary timeout. Keep every package and test, raise only the package
+    # timeout, and bound the overall job.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout Repository
@@ -245,7 +249,7 @@ jobs:
         run: python3 scripts/go_mod_download.py
 
       - name: Run race detector
-        run: go test -race -count=1 ./internal/rpc/... ./internal/auth/ ./internal/reconciler/ ./internal/scheduler/ ./internal/docker/ ./internal/activity/ ./internal/metrics/ ./internal/proxy/ ./internal/db/ ./internal/ws/ ./internal/s3/ ./internal/snapshot/ ./internal/module/
+        run: go test -race -timeout 20m -count=1 ./internal/rpc/... ./internal/auth/ ./internal/reconciler/ ./internal/scheduler/ ./internal/docker/ ./internal/activity/ ./internal/metrics/ ./internal/proxy/ ./internal/db/ ./internal/ws/ ./internal/s3/ ./internal/snapshot/ ./internal/module/
 
   lint-proto:
     name: Proto Lint
