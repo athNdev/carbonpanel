@@ -46,12 +46,26 @@ Per-family evidence includes `FileService=17/17`, `UploadService=4/4`,
 `surface=3/3`. The hold mechanism remains live: adding an unmounted operation
 back to `PendingInventory` re-reds both gates.
 
-## 3. Publication blocking
+## 3. Publication blocking and ordinary CI
 
 `.github/workflows/mcp-dist.yml` runs the strict command in the `verify` job with
 `continue-on-error: true`, then fails the job unless the outcome is `success`.
 GHCR and MCP-registry writes therefore cannot proceed while the strict gate is
 RED. The generated-artifact reproducibility check runs in the same job.
+
+The same strict command now also runs in **ordinary CI** as the `mcp-coverage`
+job in `.github/workflows/ci.yml`, on the Go version pinned by `go.mod`
+(1.26.11), with no `continue-on-error`. The job reuses
+`scripts/mcp-full-coverage-gate.sh` and
+`scripts/mcp-generated-artifacts-check.sh`, then builds `cmd/carbonpanel-mcp`
+and drives `scripts/test_mcp_real_binary.py`: a real stdio `initialize`,
+PUBLIC `tools/list` and a read-only `tools/call` (`list_servers`) against a
+disposable owned Connect mock. No publication, registry or GHCR write was added.
+`TestFamilyAuditFullCoverageFailClosed` is the OSS-406 negative fixture: it
+injects a supported-but-unmounted NodeControlService RPC into a test-only copy
+of the matrix, requires the shared evaluator to reject it, then removes the
+overlay and requires GREEN again. A newly unmounted supported operation
+therefore makes ordinary CI RED with no waiver or tolerance change.
 
 ## 4. Regeneration
 
