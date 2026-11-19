@@ -52,6 +52,7 @@ sources:
 | [0040](../../docs/adr/0040-bluemap-installed-module-discovery.md) | Private identity-bound BlueMap discovery, explicit consent and server-side singleton install | [World viewing](../architecture/world-viewing.md), [Runtime seams](../architecture/runtime-seams.md) |
 | [0041](../../docs/adr/0041-bounded-trusted-main-nightly.md) | Native scheduled nightly publishes only a verified current-main commit, default-off | [Release](../workflows/release.md) |
 | [0042](../../docs/adr/0042-sveltekit3-security-migration.md) | SvelteKit 3 security migration with narrow compatibility shims | [Frontend change](../workflows/frontend-change.md) |
+| [0043](../../docs/adr/0043-egress-policy-enforcement.md) | Enforce egress policy per class, not per boolean | [Named egress classes](../decisions/egress-class-policy.md) |
 
 # Rule
 

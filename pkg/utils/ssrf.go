@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"syscall"
+	"testing"
 	"time"
 )
 
@@ -38,15 +39,29 @@ func parseURLForPolicy(rawURL string) (*url.URL, error) {
 	return parsed, nil
 }
 
+// loopbackTestAllowed is the whole test-only loopback escape hatch, kept as a
+// pure predicate so its fail-closed production branch is directly testable.
+//
+// The historical DISCO_ALLOW_LOOPBACK_TEST switch is honoured ONLY in a Go test
+// binary: testing.Testing() is false in every production build, regardless of
+// the process environment. Loopback httptest fixtures opt in explicitly with
+// t.Setenv. This satisfies the hardening spec's "explicit test configuration"
+// requirement without a mutable production variable or a build tag that could
+// be omitted from a release build.
+func loopbackTestAllowed(isTestBinary bool, envValue string) bool {
+	return isTestBinary && envValue == "1"
+}
+
 // ValidateIP checks whether an IP address belongs to denied ranges (loopback, link-local, private RFC1918)
 func ValidateIP(ip net.IP, allowPrivate bool) error {
 	if ip == nil {
 		return fmt.Errorf("%w: invalid IP", ErrBlockedIP)
 	}
 
-	// Always deny loopback (127.0.0.0/8, ::1) unless explicitly permitted for tests
+	// Always deny loopback (127.0.0.0/8, ::1) unless an explicit test binary
+	// fixture opted in. Production builds can never take this branch.
 	if ip.IsLoopback() {
-		if os.Getenv("DISCO_ALLOW_LOOPBACK_TEST") == "1" {
+		if loopbackTestAllowed(testing.Testing(), os.Getenv("DISCO_ALLOW_LOOPBACK_TEST")) {
 			return nil
 		}
 		return fmt.Errorf("%w: loopback address %s is prohibited", ErrBlockedIP, ip)
@@ -141,34 +156,118 @@ func ValidateURL(rawURL string, allowPrivate bool) (*url.URL, error) {
 	return parsed, nil
 }
 
-// EgressClass names the three distinct outbound-policy decisions. Keeping
-// them explicit prevents one class (an archive URL supplied by a user) from
-// inheriting the private-network latitude of another (an operator-configured
-// webhook receiver). Unknown classes fail closed.
+// EgressClass names the three distinct outbound-policy families. It is kept
+// exported for logging and audits, but the decision itself lives in
+// EgressPolicy: a bare class plus a boolean was not enough to keep a
+// user-supplied archive URL from inheriting a webhook receiver's latitude.
 type EgressClass string
 
 const (
-	// EgressClassProvider is the fixed provider-adapter allowlist. The boolean
-	// passed with this class is computed by the provider adapter from its own
-	// trusted indexer/host policy (for example minecraft.DownloadAllowsPrivate),
-	// never from a user-supplied "allow private" field.
+	// EgressClassProvider uses a fixed host allowlist. allowPrivate is derived
+	// from the trusted indexer policy, never from the URL being fetched.
 	EgressClassProvider EgressClass = "provider"
-	// EgressClassWebhook targets an operator-configured receiver list. Private
-	// receivers are permitted only when the operator explicitly allows them.
+	// EgressClassWebhook uses an explicit origin list of operator-configured
+	// receivers. A redirect to any other origin is refused.
 	EgressClassWebhook EgressClass = "webhook"
-	// EgressClassArchive is a user-supplied remote archive URL. Private targets
-	// are permitted only behind an explicit operator flag and a named node.
+	// EgressClassArchive is a user-supplied remote archive URL. RFC1918 targets
+	// require both the operator flag and a named destination node.
 	EgressClassArchive EgressClass = "archive"
 )
 
-// allowsPrivate resolves the effective private-network decision for a class.
-func (c EgressClass) allowsPrivate(requested bool) bool {
-	switch c {
-	case EgressClassProvider, EgressClassWebhook, EgressClassArchive:
-		return requested
+// EgressPolicy is the complete, class-specific outbound decision. Its zero
+// value fails closed. Construct one with ProviderEgressPolicy,
+// WebhookEgressPolicy or ArchiveEgressPolicy; fields are unexported so a
+// caller cannot confuse one family's grant with another's.
+type EgressPolicy struct {
+	class            EgressClass
+	providerHosts    []string
+	webhookReceivers []string
+	allowPrivate     bool
+	namedNode        string
+}
+
+// ProviderEgressPolicy binds a fixed allowlist of provider hosts. Private
+// targets are permitted only when allowPrivate comes from the trusted indexer
+// policy (a self-hosted indexer), and only for a host in the allowlist.
+func ProviderEgressPolicy(allowPrivate bool, hosts ...string) EgressPolicy {
+	normalized := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		if h := normalizeHost(host); h != "" {
+			normalized = append(normalized, h)
+		}
+	}
+	return EgressPolicy{class: EgressClassProvider, allowPrivate: allowPrivate, providerHosts: normalized}
+}
+
+// WebhookEgressPolicy binds the explicit operator-configured receiver origins.
+// An empty or malformed list permits nothing.
+func WebhookEgressPolicy(receiverOrigins ...string) EgressPolicy {
+	normalized := make([]string, 0, len(receiverOrigins))
+	for _, origin := range receiverOrigins {
+		if o := normalizeOrigin(origin); o != "" {
+			normalized = append(normalized, o)
+		}
+	}
+	return EgressPolicy{class: EgressClassWebhook, allowPrivate: true, webhookReceivers: normalized}
+}
+
+// ArchiveEgressPolicy binds the archive flag to a named node. Private RFC1918
+// targets are refused unless BOTH the operator flag is set and a node name is
+// supplied; loopback and link-local targets stay blocked in every case.
+func ArchiveEgressPolicy(allowPrivate bool, namedNode string) EgressPolicy {
+	return EgressPolicy{class: EgressClassArchive, allowPrivate: allowPrivate, namedNode: strings.TrimSpace(namedNode)}
+}
+
+// Class returns the policy family for audit messages.
+func (p EgressPolicy) Class() EgressClass { return p.class }
+
+// dialAllowPrivate is the coarse connection-time decision. The URL-time policy
+// is always re-applied by CheckRedirect, so a redirect cannot widen this grant.
+func (p EgressPolicy) dialAllowPrivate() bool {
+	switch p.class {
+	case EgressClassProvider:
+		return p.allowPrivate && len(p.providerHosts) > 0
+	case EgressClassWebhook:
+		return len(p.webhookReceivers) > 0
+	case EgressClassArchive:
+		return p.allowPrivate && p.namedNode != ""
 	default:
 		return false
 	}
+}
+
+func normalizeHost(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if parsed, err := url.Parse(raw); err == nil && parsed.Hostname() != "" {
+		raw = parsed.Hostname()
+	}
+	return strings.ToLower(strings.Trim(raw, "."))
+}
+
+// normalizeOrigin reduces a URL (or bare origin) to a comparable
+// scheme://host:port form. It never returns raw userinfo or path material.
+func normalizeOrigin(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	host := strings.ToLower(strings.Trim(parsed.Hostname(), "."))
+	port := parsed.Port()
+	if port == "" {
+		if scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(host, port)
 }
 
 // RedactURL removes credentials and sensitive query values so a URL can be
@@ -197,11 +296,11 @@ func RedactURL(rawURL string) string {
 	return parsed.String()
 }
 
-// ValidateURLForEgress applies the named egress policy. It never echoes the
-// supplied URL: credentials are stripped, and URLs carrying userinfo are
-// rejected outright. DNS is still resolved by ValidateURL for the actual
-// outbound decision; import-time validation uses ValidateURLStatic instead.
-func ValidateURLForEgress(rawURL string, class EgressClass, allowPrivate bool) (*url.URL, error) {
+// ValidateURLForEgress applies the complete class-specific egress policy. It
+// never echoes the supplied URL: credentials are stripped and URLs carrying
+// userinfo are rejected outright. DNS is still resolved by ValidateURL for the
+// actual outbound decision; import-time validation uses ValidateURLStatic.
+func ValidateURLForEgress(rawURL string, policy EgressPolicy) (*url.URL, error) {
 	redacted := RedactURL(rawURL)
 	parsed, err := parseURLForPolicy(rawURL)
 	if err != nil {
@@ -210,8 +309,47 @@ func ValidateURLForEgress(rawURL string, class EgressClass, allowPrivate bool) (
 	if parsed.User != nil {
 		return nil, fmt.Errorf("url %s must not contain credentials", redacted)
 	}
-	if _, err := ValidateURL(rawURL, class.allowsPrivate(allowPrivate)); err != nil {
-		return nil, fmt.Errorf("%s rejected by %s egress policy: %w", redacted, class, err)
+
+	host := normalizeHost(parsed.Hostname())
+	switch policy.class {
+	case EgressClassProvider:
+		if len(policy.providerHosts) == 0 {
+			return nil, fmt.Errorf("%s rejected by provider egress policy: no fixed host allowlist", redacted)
+		}
+		allowed := false
+		for _, candidate := range policy.providerHosts {
+			if host == candidate {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, fmt.Errorf("%s rejected by provider egress policy: host is not in the fixed allowlist", redacted)
+		}
+	case EgressClassWebhook:
+		if len(policy.webhookReceivers) == 0 {
+			return nil, fmt.Errorf("%s rejected by webhook egress policy: no explicit receiver list", redacted)
+		}
+		origin := normalizeOrigin(parsed.Scheme + "://" + parsed.Host)
+		allowed := false
+		for _, receiver := range policy.webhookReceivers {
+			if origin == receiver {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, fmt.Errorf("%s rejected by webhook egress policy: origin is not an explicit receiver", redacted)
+		}
+	case EgressClassArchive:
+		// No host allowlist: the only private-network latitude is the flag
+		// bound to a named node, applied by ValidateURL below.
+	default:
+		return nil, fmt.Errorf("%s rejected by unrecognised egress class %q", redacted, policy.class)
+	}
+
+	if _, err := ValidateURL(rawURL, policy.dialAllowPrivate()); err != nil {
+		return nil, fmt.Errorf("%s rejected by %s egress policy: %w", redacted, policy.class, err)
 	}
 	return parsed, nil
 }
@@ -227,11 +365,12 @@ func NewSafeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 }
 
 // NewSafeHTTPClientForEgress builds the same guarded client but binds both the
-// dial-time and redirect-time decisions to a named egress class. A redirect
-// cannot escape into a private network by inheriting a looser policy.
-func NewSafeHTTPClientForEgress(timeout time.Duration, class EgressClass, allowPrivate bool) *http.Client {
-	return newSafeHTTPClient(timeout, class.allowsPrivate(allowPrivate), func(rawURL string) error {
-		_, err := ValidateURLForEgress(rawURL, class, allowPrivate)
+// dial-time and redirect-time decisions to a complete EgressPolicy. A redirect
+// is revalidated against the same class-specific allowlist, so it cannot escape
+// into a private network or onto an unlisted host by inheriting a looser grant.
+func NewSafeHTTPClientForEgress(timeout time.Duration, policy EgressPolicy) *http.Client {
+	return newSafeHTTPClient(timeout, policy.dialAllowPrivate(), func(rawURL string) error {
+		_, err := ValidateURLForEgress(rawURL, policy)
 		return err
 	})
 }

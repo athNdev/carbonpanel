@@ -11,6 +11,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,6 +57,87 @@ func createTestZip(t *testing.T, filename, content string) ([]byte, string) {
 	data := buf.Bytes()
 	h := sha256.Sum256(data)
 	return data, hex.EncodeToString(h[:])
+}
+
+// faultingReader emits a prefix and then fails, modelling a download stream
+// that dies partway through the staged copy.
+type faultingReader struct {
+	prefix []byte
+	err    error
+	failed bool
+}
+
+func (r *faultingReader) Read(p []byte) (int, error) {
+	if len(r.prefix) > 0 {
+		n := copy(p, r.prefix)
+		r.prefix = r.prefix[n:]
+		return n, nil
+	}
+	if !r.failed {
+		r.failed = true
+		return 0, r.err
+	}
+	return 0, io.EOF
+}
+
+// TestSaveRemoteArchiveAtomicallyKeepsTargetOnFailedCopy is the A2 regression:
+// a failed copy must leave the previous target intact and leave no staging
+// file behind. The production download path uses this exact seam.
+func TestSaveRemoteArchiveAtomicallyKeepsTargetOnFailedCopy(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "mods", "pack.jar")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const original = "original-intact-content"
+	if err := os.WriteFile(target, []byte(original), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	originalInfo, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMode := originalInfo.Mode().Perm()
+
+	injected := errors.New("injected copy failure")
+	err = saveRemoteArchiveAtomically(target,
+		&faultingReader{prefix: []byte("partial-new-content"), err: injected}, 64)
+	if !errors.Is(err, injected) {
+		t.Fatalf("copy failure not reported: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("failed copy truncated the target: got %q, want %q", got, original)
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".atomic-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("failed copy left staging files: %v", matches)
+	}
+
+	// A successful publish replaces the target and preserves its mode.
+	if err := saveRemoteArchiveAtomically(target, bytes.NewReader([]byte("new-content")), 64); err != nil {
+		t.Fatalf("successful staged save failed: %v", err)
+	}
+	got, err = os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new-content" {
+		t.Fatalf("successful save published wrong content: %q", got)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != wantMode {
+		t.Fatalf("staged save did not preserve target mode: got %o, want %o", perm, wantMode)
+	}
 }
 
 func TestFileService_DownloadRemoteArchive_AutoExtract(t *testing.T) {

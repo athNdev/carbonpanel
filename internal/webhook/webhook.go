@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package webhook
 
 import (
@@ -220,12 +219,13 @@ func deliverOnce(ctx context.Context, cfg Config, payload *Payload) Result {
 		req.Header.Set(k, v)
 	}
 
-	// Use the SSRF-guarded client: loopback, link-local (cloud metadata) and
-	// unspecified targets are always refused, while RFC1918 LAN webhooks stay
-	// usable for homelab receivers like Home Assistant. This closes a
-	// post-auth SSRF where an arbitrary webhook URL could reach panel-internal
-	// or metadata endpoints.
-	client := utils.NewSafeHTTPClientForEgress(timeout, utils.EgressClassWebhook, true)
+	// The receiver URL comes from the operator-configured webhook task, so it
+	// is the explicit receiver grant. Loopback, link-local (cloud metadata) and
+	// unspecified targets are always refused; RFC1918 LAN receivers stay usable
+	// for homelab devices like Home Assistant. The class policy also pins every
+	// redirect to the same origin, so a receiver cannot bounce the request into
+	// panel-internal or metadata endpoints.
+	client := utils.NewSafeHTTPClientForEgress(timeout, utils.WebhookEgressPolicy(cfg.URL))
 	resp, err := client.Do(req)
 	result.DurationMs = time.Since(start).Milliseconds()
 	if err != nil {

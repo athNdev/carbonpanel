@@ -215,11 +215,35 @@ func DownloadAllowsPrivate(indexerURL string) bool {
 	return false
 }
 
+// providerDownloadHosts is the fixed set of known public provider download
+// hosts. It is returned as a fresh slice so no production code can mutate a
+// package-level allowlist at runtime. A trusted indexer origin is added by the
+// caller when it is self-hosted or otherwise not in this fixed set.
+func ProviderDownloadHosts(indexerURL string) []string {
+	hosts := []string{
+		"api.modrinth.com", "cdn.modrinth.com", "modrinth.com",
+		"api.curseforge.com", "edge.forgecdn.net", "mediafile.forgecdn.net",
+		"www.curseforge.com", "curseforge.com",
+	}
+	if parsed, err := url.Parse(indexerURL); err == nil && parsed.Hostname() != "" {
+		host := strings.ToLower(strings.Trim(parsed.Hostname(), "."))
+		for _, existing := range hosts {
+			if existing == host {
+				return hosts
+			}
+		}
+		hosts = append(hosts, host)
+	}
+	return hosts
+}
+
 // DownloadDatapackArchiveFrom streams a datapack to destPath with an
-// SSRF-guarded client whose private-network allowance is scoped to the
-// indexer that supplied the URL. It does not trust Content-Length.
+// SSRF-guarded client whose private-network allowance is scoped to a fixed
+// host allowlist: the known public provider hosts plus the trusted indexer
+// origin that supplied the URL. It does not trust Content-Length.
 func DownloadDatapackArchiveFrom(ctx context.Context, indexerURL, rawURL, destPath string) error {
-	return DownloadDatapackArchiveWithClient(utils.NewSafeHTTPClientForEgress(5*time.Minute, utils.EgressClassProvider, DownloadAllowsPrivate(indexerURL)), ctx, rawURL, destPath)
+	policy := utils.ProviderEgressPolicy(DownloadAllowsPrivate(indexerURL), ProviderDownloadHosts(indexerURL)...)
+	return DownloadDatapackArchiveWithClient(utils.NewSafeHTTPClientForEgress(5*time.Minute, policy), ctx, rawURL, destPath)
 }
 
 // DownloadDatapackArchiveWithClient is DownloadDatapackArchive with an explicit

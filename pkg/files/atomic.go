@@ -27,11 +27,14 @@ type AtomicWriter struct {
 	tmp      *os.File
 	maxBytes int64
 	written  int64
+	mode     os.FileMode
 	done     bool
 }
 
 // NewAtomicWriter creates a temp file in the destination directory.
 // maxBytes is the most Write will accept. The destination directory must exist.
+// When dest is an existing regular file, its permission bits and ownership are
+// carried to the replacement; otherwise the published file is mode 0644.
 func NewAtomicWriter(dest string, maxBytes int64) (*AtomicWriter, error) {
 	if dest == "" {
 		return nil, ErrEmptyRoot
@@ -39,12 +42,18 @@ func NewAtomicWriter(dest string, maxBytes int64) (*AtomicWriter, error) {
 	if maxBytes < 0 {
 		return nil, fmt.Errorf("files: negative size")
 	}
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(dest); err == nil && info.Mode().IsRegular() {
+		mode = info.Mode().Perm()
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
 	dir := filepath.Dir(dest)
 	tmp, err := os.CreateTemp(dir, ".atomic-*")
 	if err != nil {
 		return nil, err
 	}
-	return &AtomicWriter{dest: dest, tmp: tmp, maxBytes: maxBytes}, nil
+	return &AtomicWriter{dest: dest, tmp: tmp, maxBytes: maxBytes, mode: mode}, nil
 }
 
 // Write rejects a chunk that would pass maxBytes and writes none of that chunk.
@@ -78,18 +87,31 @@ func (w *AtomicWriter) Abort() error {
 	return errors.Join(closeErr, removeErr)
 }
 
-// Close publishes the temp file as dest, replacing an existing file.
+// Close publishes the temp file as dest, replacing an existing file. The
+// destination keeps its previous permission bits and (best effort) owner, so a
+// staged save cannot silently make a world/mods file unwritable to the game
+// container. Any failure before publish aborts the temp file and leaves dest
+// untouched.
 func (w *AtomicWriter) Close() error {
 	if w.done {
 		return ErrClosed
 	}
 	w.done = true
-	if err := w.tmp.Sync(); err != nil {
+	name := w.tmp.Name()
+	// Ownership adoption is best effort for parity with the streaming writer:
+	// a non-root controller cannot chown, but a root controller must preserve
+	// the uid/gid the game container expects.
+	_ = AdoptOwnership(w.dest, name, false)
+	if err := w.tmp.Chmod(w.mode); err != nil {
 		_ = w.tmp.Close()
-		_ = os.Remove(w.tmp.Name())
+		_ = os.Remove(name)
 		return err
 	}
-	name := w.tmp.Name()
+	if err := w.tmp.Sync(); err != nil {
+		_ = w.tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
 	if err := w.tmp.Close(); err != nil {
 		_ = os.Remove(name)
 		return err
