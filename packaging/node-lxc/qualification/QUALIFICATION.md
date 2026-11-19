@@ -36,10 +36,18 @@ rootfs therefore cannot be imported and booted in this lane. This is an
   AppArmor, `/dev` nesting) was observed on a real guest.
 - No gameplay compatibility or performance evidence exists.
 
-The capability gate validates a host-provided capability snapshot and the
-fixtures prove refusals and state transitions only. Live clean import/boot
-evidence (epic milestone M5) remains outstanding and must be produced on an
-equipped host before this format is advertised.
+`node_lxc_artifact.py boot-qualify` provides the fail-closed import/boot
+verification path: it verifies real signed upstream archive bytes in an owned
+disposable path (or consumes a staged verified archive) and then probes for an
+unprivileged LXC-capable disposable runner. It records explicit prerequisite
+blockers and writes a JSON report; it returns `status: ok` only when an actual
+unprivileged import and boot are performed and evidenced. The manual workflow
+`.github/workflows/lxc-boot-qualification.yml` runs this command on a disposable
+runner and uploads the report as evidence (fail-closed on blocked/unqualified
+runs). Real byte-level archive evidence remains in
+[SIGNED-ARCHIVE-EVIDENCE.md](SIGNED-ARCHIVE-EVIDENCE.md). Live clean
+import/boot evidence (epic milestone M5) remains outstanding until a capable
+runner produces it.
 
 ## Not claimed
 
