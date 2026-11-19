@@ -3,10 +3,10 @@
 **Acceptance baseline:** `origin/main@9e81679b346a3e1acbc50f8283b5b3c365769771`.
 **Evidence commit:** `6c9f430f022a7eeeb91d0013b8e4c8050844a600` (branch
 `codex/product-acceptance-gaps`, PR #555). The full external planning artefact
-is `product-plans/integrated-roadmap.md` in the audit directory
-`C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/`; it
-is deliberately not tracked in this repository. This page is the reviewable,
-in-repository record of the same gate.
+is `product-plans/integrated-roadmap.md` in the external audit workspace
+(`$CARBONPANEL_AUDIT_DIR`, for example an out-of-tree
+`carbonpanel-main-audit/` checkout); it is deliberately not tracked in this
+repository. This page is the reviewable, in-repository record of the same gate.
 
 This replaces the earlier planning pin `518b64b8` and the intermediate
 re-baseline target `d8597d4e`. No live host, deployment, release or registry

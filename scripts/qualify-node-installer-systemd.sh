@@ -27,7 +27,9 @@ if [[ "${1:-}" == "--preflight" ]]; then
 	exit 0
 fi
 
-REPO="${CARBON_INSTALLER_REPO:-/mnt/c/Users/Daybreak8458/.codex/worktrees/node-installer/carbonpanel}"
+# Default to this checkout (resolved relative to this script); the env override
+# points at another owned checkout without embedding a workstation path.
+REPO="${CARBON_INSTALLER_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BIN="${CARBON_NODE_INSTALLER_BIN:-$REPO/carbon-node-installer-linux}"
 FIXTURE_ROOT="$(mktemp -d /tmp/carbon-installer-qual.XXXXXX)"
 UID_NUM="$(id -u)"
