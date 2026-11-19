@@ -557,16 +557,22 @@ up)
 						# The panel's own health check performs the authoritative
 						# upstream probe (map list, keyed root, gzip assets and
 						# CSP-safe bundle). READY is the single semantic signal.
-						renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null |
-							REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t)console.log(t.rendererState||"")}catch(e){}})')"
+						probe="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null || true)"
+						renderer_state="$(printf '%s' "${probe}" | REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t)console.log(t.rendererState||"")}catch(e){}})')"
+						renderer_error="$(printf '%s' "${probe}" | REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t&&t.error)console.log(String(t.error).slice(0,240))}catch(e){}})')"
 						if [ -n "${fixture_server_id}" ] && [ "${renderer_state}" = "RENDERER_STATE_READY" ]; then
 							break
 						fi
-						renderer_state=""
+						renderer_state="${renderer_state:-}"
 						sleep 1
 					done
 					echo "review renderer state: ${renderer_state:-unknown}" >&2
+					if [ -n "${renderer_error:-}" ]; then
+						echo "review renderer error: ${renderer_error}" >&2
+					fi
 					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
+						map_probe="$(docker exec "${NAME}-bluemap" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8100/settings.json", timeout=3).read()[:180])' 2>&1 || true)"
+						echo "review map server probe: $(printf '%s' "${map_probe}" | tr '\n' ' ' | cut -c1-240)" >&2
 						echo "review renderer never became READY; worlds capture will fail closed" >&2
 					fi
 				else
