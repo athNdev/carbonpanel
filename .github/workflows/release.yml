@@ -531,6 +531,8 @@ jobs:
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
           PRIOR_COMMIT=$(printf '%s' "$LIVE" | jq -r '.commit // empty')
           PRIOR_DIGEST=$(printf '%s' "$LIVE" | jq -r '.image.digest // empty')
+          printf 'live_commit=%s\n' "$PRIOR_COMMIT" >> "$GITHUB_OUTPUT"
+          printf 'live_digest=%s\n' "$PRIOR_DIGEST" >> "$GITHUB_OUTPUT"
           RECEIPT=$(python3 scripts/release.py channel-active-receipt \
             --channel stable --aliases "$ALIASES" \
             --docs-commit "$PRIOR_COMMIT" --docs-digest "$PRIOR_DIGEST" 2>/dev/null || echo '{"receipt":{}}')
@@ -576,18 +578,28 @@ jobs:
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
           OBSERVED: ${{ steps.parity.outputs.observed }}
+          PRIOR: ${{ steps.prior.outputs.prior_receipt }}
+          LIVE_COMMIT: ${{ steps.prior.outputs.live_commit }}
+          LIVE_DIGEST: ${{ steps.prior.outputs.live_digest }}
+          RUN_ID: ${{ github.run_id }}
         run: |
+          PREV_JSON=$(printf '%s' "${PRIOR:-{}}" | jq -c '. // {}')
+          SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
           CANDIDATE=$(jq -nc \
             --arg channel stable --arg commit "$RELEASE_COMMIT" --arg digest "$IMAGE_DIGEST" \
-            --arg tag "$RELEASE_VERSION" --argjson seq 1 --arg ref "refs/heads/main" \
-            --argjson registries "$OBSERVED" \
+            --arg tag "$RELEASE_VERSION" --argjson seq "$((SEQ + 1))" --arg ref "refs/heads/main" \
+            --argjson registries "$OBSERVED" --arg run_id "$RUN_ID" \
             '{channel:$channel,commit:$commit,digest:$digest,release_tag:$tag,seq:$seq,
               source_ref:$ref,ci_verified:"true",immutable_ok:true,contract_valid:true,
               site_validated:true,docs_commit:$commit,docs_digest:$digest,
               registries:$registries,
-              candidate_marker_verified:true,canonical_marker_verified:true}')
+              candidate_marker_verified:true,canonical_marker_verified:true,
+              run_ids:{release:$run_id}}')
+          LIVE=$(jq -nc --arg c "$LIVE_COMMIT" --arg d "$LIVE_DIGEST" \
+            '{registries:{},docs_commit:$c,docs_digest:$d}')
           python3 scripts/release.py channel-transaction --phase commit \
-            --candidate "$CANDIDATE" --event workflow_dispatch
+            --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
+            --event release
 
   # DURABLE RELEASE RECORD. This completes BEFORE any moving alias is promoted,
   # so an interruption cannot leave a newer alias with no recorded provenance.

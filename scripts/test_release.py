@@ -2434,6 +2434,13 @@ class ChannelPromotionTests(unittest.TestCase):
         transaction = next(step for step in steps if step.get("id") == "transaction")
         self.assertIn("--argjson registries \"$OBSERVED\"", transaction["run"])
         self.assertNotIn("registries:{docker_hub:$digest,ghcr:$digest}", transaction["run"])
+        # A stable publication is not a site-only landing dispatch; the commit
+        # phase must not be refused as "manual/site-only deploy..." for a new
+        # exact tag/release target.
+        self.assertIn("--event release", transaction["run"])
+        self.assertNotIn("--event workflow_dispatch", transaction["run"])
+        self.assertIn("--previous \"$PREV_JSON\"", transaction["run"])
+        self.assertIn("--live \"$LIVE\"", transaction["run"])
         self.assertIn("prior_receipt", str(job["outputs"]))
         promote = doc["jobs"]["promote-aliases"]["steps"]
         self.assertTrue(any(step.get("id") == "stable_compensate" for step in promote))
