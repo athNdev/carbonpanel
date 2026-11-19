@@ -224,6 +224,7 @@ one at https://mozilla.org/MPL/2.0/.
 				rotateLogBuffer(currentServerId);
 				logEntries = [];
 				command = '';
+				loading = false;
 
 				// Re-register handlers for the new owner, not just the socket
 				// subscription: a captured owner makes stale callbacks inert.
@@ -233,6 +234,7 @@ one at https://mozilla.org/MPL/2.0/.
 			(currentContainerId !== previousContainerId || currentStatus !== previousStatus) &&
 			active
 		) {
+			const containerChanged = currentContainerId !== previousContainerId;
 			const hadNoContainer = !previousContainerId && !!currentContainerId;
 			const transitionedToActive =
 				previousStatus === ServerStatus.CREATING &&
@@ -241,7 +243,10 @@ one at https://mozilla.org/MPL/2.0/.
 			previousContainerId = currentContainerId;
 			previousStatus = currentStatus;
 
-			if (hadNoContainer || transitionedToActive) {
+			// A new container id always starts a new log stream, even when the
+			// status stays RUNNING. Fence the old stream and re-register rather
+			// than letting a delayed response repaint the recreated view.
+			if (containerChanged || hadNoContainer || transitionedToActive) {
 				untrack(() => {
 					// A recreated container starts a new log stream; drop any
 					// in-flight listing from the previous stream before refetch.
@@ -263,6 +268,8 @@ one at https://mozilla.org/MPL/2.0/.
 		const unsubLogs = wsClient.onLogs((serverId, logs) => {
 			if (!ownsLogBuffer(owner) || serverId !== owner.serverId) return;
 			logEntries = logs.length > MAX_LOG_ENTRIES ? logs.slice(-MAX_LOG_ENTRIES) : logs;
+			// The live snapshot is newer than any listing still in flight.
+			logListingSeq.next();
 		});
 
 		const unsubLogEntry = wsClient.onLogEntry((serverId, logs) => {

@@ -51,7 +51,7 @@ test.skipIf(!live)(
 );
 
 test.skipIf(!live)(
-	'a failed non-idempotent request is not blindly retried (Chromium)',
+	'a failed non-idempotent command is not blindly retried (Chromium)',
 	() => runScenario('non-idempotent'),
 	LIVE_TIMEOUT_MS
 );

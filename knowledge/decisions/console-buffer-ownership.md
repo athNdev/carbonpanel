@@ -37,7 +37,8 @@ label rather than presenting a rejected token as a transport outage.
 
 A deferred-response Chromium fixture drives the real console component: a
 stale A listing cannot paint B, a superseded same-server listing cannot
-overwrite newer lines, `AUTH_FAIL` shows signed-out without retry, a failed
-non-idempotent clear is dispatched once, and the log subscription keeps
-delivering after container recreation. The fake-socket suite covers the
-websocket generation and terminal auth transition.
+overwrite newer lines, a real `AUTH_FAIL` frame drops the production socket and
+shows signed-out without retry, a failed non-idempotent command is dispatched
+once, and the log subscription is re-established and keeps delivering after
+container recreation. The fake-socket suite covers the websocket generation and
+terminal auth transition without a browser.

@@ -6,6 +6,7 @@
 const listings = [];
 const actions = [];
 let failNextClear = false;
+let failNextCommand = false;
 
 function deferred() {
 	let resolve;
@@ -22,13 +23,11 @@ export const rpcClient = {
 		getServerLogs(request) {
 			const item = { id: request.id, tail: request.tail, ...deferred() };
 			listings.push(item);
-			globalThis.__oss245Notify?.();
 			return item.promise;
 		},
 		clearServerLogs(request) {
 			const item = { kind: 'clear', id: request.id, ...deferred() };
 			actions.push(item);
-			globalThis.__oss245Notify?.();
 			if (failNextClear) {
 				failNextClear = false;
 				item.reject(new Error('seeded clear failure'));
@@ -38,11 +37,19 @@ export const rpcClient = {
 		sendCommand(request) {
 			const item = { kind: 'command', id: request.id, command: request.command, ...deferred() };
 			actions.push(item);
-			globalThis.__oss245Notify?.();
+			if (failNextCommand) {
+				failNextCommand = false;
+				item.reject(new Error('seeded command failure'));
+			}
 			return item.promise;
 		},
 		uploadToMCLogs() {
 			return Promise.resolve({ url: '' });
+		}
+	},
+	auth: {
+		logout() {
+			return Promise.resolve();
 		}
 	}
 };
@@ -58,6 +65,9 @@ globalThis.__oss245Rpc = {
 	},
 	failNextClear() {
 		failNextClear = true;
+	},
+	failNextCommand() {
+		failNextCommand = true;
 	},
 	counts() {
 		return { listings: listings.length, actions: actions.length };
