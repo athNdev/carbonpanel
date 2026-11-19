@@ -19,9 +19,10 @@ const require = createRequire(path.join(project, "package.json"));
 process.chdir(project);
 const { createServer } = await import(pathToFileURL(require.resolve("vite")).href);
 
+// Default stays inside the checkout; OSS382_EVIDENCE can point at an
+// out-of-tree evidence workspace without baking a workstation path into source.
 const evidence = path.resolve(
-  process.env.OSS382_EVIDENCE ||
-    "C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/opencode-evidence/oss-382",
+  process.env.OSS382_EVIDENCE || path.resolve(here, "../../../tmp/review-evidence/oss-382"),
 );
 await fs.mkdir(evidence, { recursive: true });
 

@@ -15,7 +15,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, '../app.css'), 'utf8').replace(/\r\n/g, '\n');
 const shell = readFileSync(join(here, 'components/carbon/CarbonShell.svelte'), 'utf8');
 const serverPage = readFileSync(join(here, '../routes/servers/[id]/+page.svelte'), 'utf8');
-const panel = readFileSync(join(here, 'components/server/ServerTabPanel.svelte'), 'utf8');
+const panel = readFileSync(join(here, 'components/server-ui/ServerTabPanel.svelte'), 'utf8');
 
 function source(rel: string): string {
 	return readFileSync(join(here, rel), 'utf8');
@@ -80,7 +80,7 @@ test('every server-detail tab uses ServerTabPanel', () => {
 		['server-mods', source('components/server-mods.svelte')],
 		['server-datapacks', source('components/server-datapacks.svelte')],
 		['server-files', source('components/files/server-files.svelte')],
-		['server-modules', source('components/server/ServerModules.svelte')],
+		['server-modules', source('components/server-ui/ServerModules.svelte')],
 		['server-tasks', source('components/server-tasks.svelte')],
 		['server-backups', source('components/server-backups.svelte')],
 		['server-players', source('components/server-players.svelte')],
@@ -97,7 +97,7 @@ test('working panes fill instead of capping at a fixed height', () => {
 		['server-mods', source('components/server-mods.svelte')],
 		['server-datapacks', source('components/server-datapacks.svelte')],
 		['server-files', source('components/files/server-files.svelte')],
-		['server-modules', source('components/server/ServerModules.svelte')],
+		['server-modules', source('components/server-ui/ServerModules.svelte')],
 		['server-tasks', source('components/server-tasks.svelte')],
 		['server-backups', source('components/server-backups.svelte')],
 		['server-players', source('components/server-players.svelte')]

@@ -40,12 +40,18 @@ const (
 // bound. A declared size of 0 is valid for opening but yields no committable
 // bytes.
 type OpenStreamRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
-	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
-	TotalSize     int64                  `protobuf:"varint,3,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	ServerId  string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	Path      string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	TotalSize int64                  `protobuf:"varint,3,opt,name=total_size,json=totalSize,proto3" json:"total_size,omitempty"`
+	// OSS-370: when set, open the bounded frame stream over the controller-owned
+	// staged file of this download session instead of a server-relative path.
+	// The session's own server_id must equal server_id, and every frame remains
+	// re-authorized to files/read[server_id] by the production interceptor. The
+	// gateway never sees a storage path or holds a storage handle.
+	DownloadSessionId string `protobuf:"bytes,4,opt,name=download_session_id,json=downloadSessionId,proto3" json:"download_session_id,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *OpenStreamRequest) Reset() {
@@ -97,6 +103,13 @@ func (x *OpenStreamRequest) GetTotalSize() int64 {
 		return x.TotalSize
 	}
 	return 0
+}
+
+func (x *OpenStreamRequest) GetDownloadSessionId() string {
+	if x != nil {
+		return x.DownloadSessionId
+	}
+	return ""
 }
 
 // Opaque controller session id plus the admission upper bound echoed back to
@@ -2428,12 +2441,13 @@ var File_carbonpanel_v1_file_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_file_proto_rawDesc = "" +
 	"\n" +
-	"\x19carbonpanel/v1/file.proto\x12\x0ecarbonpanel.v1\"c\n" +
+	"\x19carbonpanel/v1/file.proto\x12\x0ecarbonpanel.v1\"\x93\x01\n" +
 	"\x11OpenStreamRequest\x12\x1b\n" +
 	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x1d\n" +
 	"\n" +
-	"total_size\x18\x03 \x01(\x03R\ttotalSize\"G\n" +
+	"total_size\x18\x03 \x01(\x03R\ttotalSize\x12.\n" +
+	"\x13download_session_id\x18\x04 \x01(\tR\x11downloadSessionId\"G\n" +
 	"\x12OpenStreamResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +

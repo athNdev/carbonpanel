@@ -9,6 +9,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
+	import type { ResolvedPathname } from '$app/types';
 	import { SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
 	import { ChevronDown, ChevronRight, RefreshCw } from '@lucide/svelte';
 	import {
@@ -133,7 +134,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	function writeUrl(patch: Partial<RosterFilter>, push: boolean) {
 		filter = { ...filter, ...patch };
 		if (!syncUrl || typeof window === 'undefined') return;
-		const params = new SvelteURLSearchParams(page.url.searchParams);
+		const params = new SvelteURLSearchParams(page.url.searchParams.toString());
 		const set = (key: string, value: string) => {
 			if (value) params.set(key, value);
 			else params.delete(key);
@@ -147,7 +148,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const query = params.toString();
 		const url = `${resolve('/players')}?${query}`;
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- URL is resolve('/players') plus an encoded query string
-		if (push) void goto(url, { replaceState: false, noScroll: true, keepFocus: true });
+		if (push) void goto(url, { reset: false });
 		// eslint-disable-next-line svelte/no-navigation-without-resolve -- URL is resolve('/players') plus an encoded query string
 		else replaceState(url, page.state);
 	}
@@ -214,7 +215,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		// server_id-scoped, so dropping it would deny scoped grants.
 		const scope = player.serverId || serverId;
 		const query = scope ? `?server=${encodeURIComponent(scope)}` : '';
-		void goto(resolve(`/players/${encodeURIComponent(key)}${query}`), { keepFocus: true });
+		// Kit 3's typed resolve() cannot carry a dynamic query suffix; append it
+		// to the resolved route and keep the branded pathname type.
+		const href = (resolve('/players/[key]', { key: encodeURIComponent(key) }) +
+			query) as ResolvedPathname;
+		void goto(href, { reset: false });
 	}
 
 	function handleGlobalKeydown(event: KeyboardEvent) {

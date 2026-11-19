@@ -49,6 +49,41 @@ jobs:
       - name: Run Backend Test Suite
         run: make test
 
+  # OSS-406: the STRICT MCP full-coverage gate and the real-binary stdio
+  # conformance harness are ordinary CI, not only the dispatch-only MCP
+  # publication lane. Deliberately NOT path-gated: a newly unmounted supported
+  # operation must make CI RED for every change, so there is no skip path.
+  mcp-coverage:
+    name: MCP Full Coverage & stdio Conformance
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: 'go.mod' # pinned to Go 1.26.11 by the repository
+          cache: true
+
+      # Reused verbatim from the publication lane. No continue-on-error: the
+      # gate (and its fail-closed negative fixture) must fail this job.
+      - name: STRICT MCP full-coverage gate (fail-closed)
+        run: bash scripts/mcp-full-coverage-gate.sh
+
+      - name: Assert generated MCP artifacts are byte-reproducible
+        run: bash scripts/mcp-generated-artifacts-check.sh
+
+      - name: Build the real MCP stdio binary
+        run: go build -o "$RUNNER_TEMP/carbonpanel-mcp" ./cmd/carbonpanel-mcp
+
+      # Reuses the existing harness: PUBLIC tools/list + a read-only
+      # tools/call against the compiled cmd/carbonpanel-mcp over real stdio,
+      # with a disposable owned Connect mock (no live panel or real credential).
+      - name: stdio conformance against cmd/carbonpanel-mcp
+        run: python3 scripts/test_mcp_real_binary.py --binary "$RUNNER_TEMP/carbonpanel-mcp" --evidence validation/mcp/mcp-real-binary-smoke.json
+
   test-windows-compile:
     name: Windows Compile Test
     runs-on: ubuntu-latest
@@ -202,7 +237,7 @@ jobs:
         run: python3 scripts/go_mod_download.py
 
       - name: Run race detector
-        run: go test -race -count=1 ./internal/rpc/... ./internal/reconciler/ ./internal/scheduler/ ./internal/docker/ ./internal/activity/ ./internal/metrics/ ./internal/proxy/ ./internal/db/ ./internal/ws/ ./internal/s3/ ./internal/snapshot/ ./internal/module/
+        run: go test -race -count=1 ./internal/rpc/... ./internal/auth/ ./internal/reconciler/ ./internal/scheduler/ ./internal/docker/ ./internal/activity/ ./internal/metrics/ ./internal/proxy/ ./internal/db/ ./internal/ws/ ./internal/s3/ ./internal/snapshot/ ./internal/module/
 
   lint-proto:
     name: Proto Lint
@@ -272,6 +307,48 @@ jobs:
 
       - name: Production Vite Build
         run: bun run build
+
+  # Real-Chromium keyboard/accessibility journey over the shared component
+  # fixture. Kept as its own job so the ordinary unit/build gate above stays
+  # fast; this job uses the repository's existing owned review-browser harness
+  # and an owned runner-temp browser cache (no global install or GC).
+  test-frontend-a11y:
+    name: Frontend Accessibility Journey (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Configure private browser cache
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/carbonpanel-a11y-browsers" >> "$GITHUB_ENV"
+
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+
+      - name: Install frontend dependencies
+        working-directory: web/carbon-panel
+        run: bun install --frozen-lockfile
+
+      - name: Install browser harness
+        working-directory: scripts/manual-review/e2e
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium into the owned cache
+        working-directory: scripts/manual-review/e2e
+        run: bunx playwright install --with-deps chromium
+
+      - name: Exercise keyboard, focus and reflow in Chromium
+        working-directory: scripts/manual-review/e2e
+        run: node a11y-check.mjs
 
   test-landing:
     name: Landing Page Checks

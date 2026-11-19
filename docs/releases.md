@@ -25,6 +25,20 @@ the database (db + wal + shm), configuration, worlds and backups, and rehearse o
 disposable copies, before upgrading. Full evidence and the rehearsal record are
 in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-from-v1040).
 
+A recurring, read-only rehearsal runs in CI (`upgrade-rehearsal.yml`): weekly,
+on PRs that change migration/config/release surfaces and on manual dispatch. It
+runs two fail-closed cases on seeded disposable DB/world copies: the explicit
+`v1.0.40` legacy baseline (35 → 44 → 35 tables) and the current published
+stable derived from the authoritative release record by the product version
+contract, so the weekly check follows new stables without a hardcoded version.
+Both use real `carbon-panel` binaries and assert integrity, additive table
+growth, row/world preservation, forced-failure refusal and both restore paths.
+Exact artifact versions and SHA-256 digests are emitted in the job's evidence
+report. This check is not a release approval gate: it grants no write scope,
+touches no live world, host, tag, release or registry, and does not replace the
+OIDC/PROXY migration go/no-go steps above. See
+[ADR 0044](adr/0044-disposable-upgrade-rehearsal-ci.md).
+
 1. **B1 — OIDC role mapping.** v1.0.40's `role_mapping: {}` example granted raw
    IdP group names directly. Current main uses raw claims only behind
    `auth.oidc.allow_raw_claim_roles` (default `false`) and refuses privileged
@@ -105,15 +119,16 @@ Download an archive from [GitHub Releases](https://github.com/athNdev/carbonpane
 The five targets are Linux amd64/arm64, macOS Intel/Apple Silicon, and Windows
 amd64. The current verified stable is `1.0.40` (Git tag `v1.0.40`); its fixed
 archive set and digests are recorded in [release history](release-history.md).
-A future product release tagged `carbonpanel-v2.0.0` keeps the same archive
-naming convention, derived from its SemVer field. For example:
+A future, not-yet-published product release tagged `carbonpanel-v2.0.0` keeps
+the same archive naming convention, derived from its SemVer field (`v2.0.0`
+internally for archive names). For example:
 
 ```text
-carbon-panel_v3.0.0-alpha.1_linux_amd64.tar.gz
-carbon-panel_v3.0.0-alpha.1_linux_arm64.tar.gz
-carbon-panel_v3.0.0-alpha.1_darwin_amd64.tar.gz
-carbon-panel_v3.0.0-alpha.1_darwin_arm64.tar.gz
-carbon-panel_v3.0.0-alpha.1_windows_amd64.zip
+carbon-panel_v2.0.0_linux_amd64.tar.gz
+carbon-panel_v2.0.0_linux_arm64.tar.gz
+carbon-panel_v2.0.0_darwin_amd64.tar.gz
+carbon-panel_v2.0.0_darwin_arm64.tar.gz
+carbon-panel_v2.0.0_windows_amd64.zip
 ```
 
 Every archive contains `carbon-panel`, `carbon-storage` (with `.exe` on
@@ -128,18 +143,21 @@ The release also includes `openapi.yaml`, `release-manifest.json`, and
 multi-architecture Docker image digest. Both command-line tools support
 `--version` without starting the service or loading configuration.
 
-Download `checksums.txt` beside the archive and verify before extracting:
+Download `checksums.txt` beside the archive and verify before extracting. The
+concrete commands below use the current stable 1.0.40 asset names — the files
+you can actually download today. A future release uses the same pattern with
+its own version:
 
 ```sh
 # Linux; verifies whichever listed files you downloaded.
 sha256sum --check --ignore-missing checksums.txt
 # macOS: compare this output with the matching line in checksums.txt.
-shasum -a 256 carbon-panel_v3.0.0-alpha.1_darwin_arm64.tar.gz
+shasum -a 256 carbon-panel_v1.0.40_darwin_arm64.tar.gz
 ```
 
 ```powershell
 # Windows: compare this hash with the matching line in checksums.txt.
-Get-FileHash .\carbon-panel_v3.0.0-alpha.1_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\carbon-panel_v1.0.40_windows_amd64.zip -Algorithm SHA256
 ```
 
 Checksums detect changed downloads; they are not a code-signing certificate.
@@ -171,7 +189,7 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
 | `latest` | Moving stable channel, promoted only with a stable release |
 | `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
-| `nightly` | Explicitly promoted Docker Hub development alias; never a stable version |
+| `nightly` | Docker Hub development alias promoted by an explicit opt-in or a verified, default-off scheduled publisher; never a stable version |
 | GHCR `3.0.0-alpha.1` | Historical GHCR-only preview; not a stable release and not on Docker Hub |
 
 Prereleases never move `latest` or the stable minor tag. `edge` moves only under
@@ -234,13 +252,40 @@ publication order), and `nightly` by its own gated step. All publication uses on
 fixed, non-cancellable channel concurrency group; verification builds stay
 per-SHA and cancellable.
 
-There is no scheduled registry write and no infrastructure setting to enable:
-the nightly opt-in is a manual `workflow_dispatch` with `nightly=true` from
-`refs/heads/main` plus exact-commit CI verification. If a scheduled nightly is
-added later it must verify by default and require a separately reviewed,
-default-off operator setting before writing. Seeding a live `nightly` tag is a
-distinct, separately authorized operation; the existing `edge` image predates
-current main and is never relabelled as a fresh nightly.
+Two publication paths exist, and both require exact-commit CI. The manual path
+is an explicit `workflow_dispatch` with `nightly=true` from `refs/heads/main`.
+The unattended path is a native Actions `schedule` (`cd.yml`, 18:00 UTC daily,
+ahead of the 06:30 Australia/Sydney local updater). A schedule **verifies by
+default**: it resolves the CURRENT `main` tip read-only twice (a moving or
+unavailable tip pins nothing), checks out that exact SHA, requires a completed
+successful push CI run for that SHA, then re-reads the live tip and re-verifies
+exact-commit CI again immediately before the buildx push, and a THIRD time
+(fresh result, not the pre-push one) immediately before moving the alias. A
+tip that moved after pinning, or a CI run that stopped being green between the
+push and the alias move, blocks the affected write; verification-only runs
+still build locally without pushing. It may
+move only the `nightly` alias, reusing the verified
+`sha-<commit>` image; a present-but-unverified or unknown sha tag is skipped
+with zero writes. The unattended path alone derives the previous alias binding
+from the alias's own digest-addressed platform configs rather than an operator
+string; manual dispatch keeps its original explicit-binding rule and still
+refuses an absent binding. Both paths refuse an unbound, non-ancestor or
+same-commit-digest move.
+
+A scheduled run writes to the registry only when the separately reviewed,
+**default-off** repository variable `NIGHTLY_SCHEDULE_PUBLISH` is exactly
+`true`. Leaving it unset or `false` keeps every schedule verification-only;
+this repository does not set or mutate that variable. Push, pull_request,
+workflow_run, tag and dispatch events remain verify-only through the schedule
+gate even when the variable is enabled. The schedule joins the same fixed,
+non-cancellable `cd-publish-edge` concurrency group as manual publishes, so
+only one writer can touch the shared sha identity and aliases at a time.
+
+Nightly never writes `latest`, a stable minor tag, `edge`, a GitHub release, a
+release record, GHCR or any MCP/runtime/module image; those lanes have no
+schedule trigger. Seeding a live `nightly` tag is a distinct, separately
+authorized operation; the existing `edge` image predates current main and is
+never relabelled as a fresh nightly.
 
 The GitHub container package links to the source repository, so it appears in
 the repository's Packages sidebar. Verify visibility after first publication;

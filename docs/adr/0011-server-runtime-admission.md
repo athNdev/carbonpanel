@@ -14,7 +14,10 @@ keep transport presentation outside the shared policy.
 
 This extraction preserves the existing running/starting accounting and performs
 no state mutation. It is an admission check rather than an atomic capacity
-reservation; concurrent starts require a separately designed reservation policy.
+reservation. Concurrent same-node starts are now serialized by the in-process
+coordinator in [ADR 0014](0014-in-process-admission.md), which holds this check
+and the container mutation under one keyed gate; that is still a process-local
+serialization, not a distributed reservation or a durable lease.
 Config RPC and scheduled staged recreation also share `serverruntime.Recreate`
 for canonical container identity persistence. Docker owns reversible replacement;
 the shared policy records its result before callers proceed. It records partial

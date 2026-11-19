@@ -46,7 +46,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonSearch,
 		CarbonTag
 	} from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import { theme as preferenceTheme } from '$lib/display-preferences.svelte';
 
 	// ANSI defaults must follow the active theme: they are emitted as inline

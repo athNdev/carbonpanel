@@ -8,6 +8,7 @@ code_refs:
   - internal/rpc/services/file_stream.go
   - internal/mcp/integration_stream_transfer.go
   - internal/mcp/integration_stream_tools.go
+  - internal/mcp/family_download_tools.go
 sources:
   - title: Controller-side MCP stream transport
     resource: https://carbonpanel.atlassian.net/browse/OSS-387
@@ -66,6 +67,11 @@ open admission caps, and clean `Stop` release. A runtime fixture drives a real
 read unblock, handle close and session eviction. The tools/call fixture proves
 307 KiB framed transfer with SHA equality and read-only/revoked/cross-owner/
 cross-server refusals with zero writes.
+
+Staged downloads reuse this machinery: `OpenStreamRequest.download_session_id`
+opens the controller temp file through the same registry, owner/server binding
+and frame/SHA contract instead of a node path. See
+[staged-download byte transport](mcp-download-byte-transport.md).
 
 # Read next
 

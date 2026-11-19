@@ -47,7 +47,7 @@ try {
 			]
 		},
 		plugins: [
-			svelte({ configFile: path.join(project, 'svelte.config.js') }),
+			svelte({ configFile: path.join(project, 'sveltekit.config.js') }),
 			tailwind(),
 			{
 				name: 'player-lookup-qa',

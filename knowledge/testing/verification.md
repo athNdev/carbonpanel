@@ -27,6 +27,13 @@ go test ./...
 `make test` is the same suite. CI also compiles every package for Windows,
 and executes the disk, config, proxy and module tests on native Windows.
 
+# MCP coverage gate
+
+Ordinary CI runs the STRICT full-coverage gate on the Go version pinned by
+`go.mod` (1.26.11), with a fail-closed negative fixture, a byte-reproducible
+catalog check and a real-binary stdio `tools/list`/`tools/call` smoke. See
+[MCP gate separation evidence](../../docs/evidence/mcp-gate-separation.md).
+
 The pinned JSON vulnerability scanner must exit successfully and emit its
 supported configuration and populated scan roots. Tool, database, typecheck
 or malformed-output failure fails the gate. Reachable findings with fixes fail;

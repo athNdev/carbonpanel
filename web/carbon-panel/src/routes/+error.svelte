@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { CarbonButton } from '$lib/components/carbon';
 	import { RefreshCw, Home } from '@lucide/svelte';
@@ -19,10 +19,10 @@
 		tabindex="-1"
 		class="text-2xl font-semibold text-foreground focus:outline-none"
 	>
-		{$page.status === 404 ? 'Page not found' : 'Something went wrong'}
+		{page.status === 404 ? 'Page not found' : 'Something went wrong'}
 	</h1>
 	<p class="max-w-md text-sm text-muted-foreground">
-		{$page.error?.message ?? 'An unexpected error occurred while loading this page.'}
+		{page.error?.message ?? 'An unexpected error occurred while loading this page.'}
 	</p>
 	<div class="flex gap-2">
 		<CarbonButton kind="secondary" size="sm" onclick={() => location.reload()}>

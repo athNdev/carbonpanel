@@ -17,6 +17,15 @@ on:
     workflows: ["Continuous Integration"]
     types:
       - completed
+  # Native Actions cadence only. This is a NIGHTLY-ONLY development alias
+  # publisher: it resolves and pins the current main tip, verifies exact-commit
+  # main CI, and reuses the verified sha-<commit> image. It never writes latest,
+  # a stable minor tag, edge, a release record or any MCP/runtime/module image.
+  # A schedule VERIFIES BY DEFAULT: the write is separately gated by the
+  # default-off repository variable NIGHTLY_SCHEDULE_PUBLISH (see releases.md).
+  # 18:00 UTC is 04:00 AEST / 05:00 AEDT, ahead of the 06:30 Sydney local updater.
+  schedule:
+    - cron: '0 18 * * *'
   # Version tags are owned by release.yml. Main builds are development images.
   workflow_dispatch:
     inputs:
@@ -79,10 +88,13 @@ jobs:
     # a separate group that routine main builds cannot cancel mid-write.
     concurrency:
       # Publication is serialized channel-wide, with no SHA, so edge, nightly
-      # and shared sha-<commit> writes from different commits cannot race. It
-      # never cancels an in-flight write. Verification stays per-SHA cancellable.
-      group: ${{ github.event_name == 'workflow_dispatch' && (inputs.push || inputs.nightly) && 'cd-publish-edge' || format('cd-verify-{0}', github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha) }}
-      cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || !(inputs.push || inputs.nightly) }}
+      # and shared sha-<commit> writes from different commits cannot race. An
+      # enabled scheduled nightly joins the SAME fixed group, giving a
+      # single-writer proof against manual publishes. It never cancels an
+      # in-flight write. Verification stays per-SHA cancellable; a schedule
+      # with the default-off setting unset is verification-only.
+      group: ${{ ((github.event_name == 'workflow_dispatch' && (inputs.push || inputs.nightly)) || (github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true')) && 'cd-publish-edge' || format('cd-verify-{0}', github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha) }}
+      cancel-in-progress: ${{ !((github.event_name == 'workflow_dispatch' && (inputs.push || inputs.nightly)) || (github.event_name == 'schedule' && vars.NIGHTLY_SCHEDULE_PUBLISH == 'true')) }}
 
     steps:
       - name: Resolve the pinned verified commit
@@ -90,18 +102,36 @@ jobs:
         env:
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           EVENT_SHA: ${{ github.sha }}
-        run: echo "sha=${RUN_SHA:-$EVENT_SHA}" >> "$GITHUB_OUTPUT"
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            # Never trust the schedule event SHA. Read the CURRENT main tip
+            # twice; a moving or unavailable tip pins nothing and is skipped.
+            first=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+            second=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+            if [ -z "$first" ] || [ "$first" != "$second" ]; then
+              echo "stable=false" >> "$GITHUB_OUTPUT"
+              echo "::warning::main tip could not be pinned; scheduled nightly is skipped"
+              exit 0
+            fi
+            echo "sha=$first" >> "$GITHUB_OUTPUT"
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${RUN_SHA:-$EVENT_SHA}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Checkout the pinned commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Never check out a moving branch tip: the tree must match the SHA
-          # verified by CI and used for tags, labels and provenance.
-          ref: ${{ steps.pinned.outputs.sha }}
+          # verified by CI and used for tags, labels and provenance. An unpinned
+          # schedule falls back to the event SHA for verification only.
+          ref: ${{ steps.pinned.outputs.sha || github.sha }}
           # Ancestry verification needs main's history for merge-base.
           fetch-depth: 0
 
       - name: Assert checked-out HEAD equals the pinned commit
+        if: steps.pinned.outputs.sha != ''
         env:
           EXPECTED_SHA: ${{ steps.pinned.outputs.sha }}
         run: |
@@ -114,9 +144,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Verify exact main CI for the dispatch commit
+      - name: Verify exact main CI for the dispatch or schedule commit
         id: ci
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
           CI_COMMIT: ${{ steps.pinned.outputs.sha }}
@@ -135,7 +165,7 @@ jobs:
             --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
             --run-event "$CHANNEL_RUN_EVENT" --conclusion "$CHANNEL_CONCLUSION" \
             --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED"
-      - name: Decide nightly publication (explicit opt-in only)
+      - name: Decide nightly publication (explicit opt-in or trusted schedule)
         id: nightly
         env:
           CHANNEL_EVENT: ${{ github.event_name }}
@@ -145,27 +175,45 @@ jobs:
           CHANNEL_REF: ${{ github.ref }}
           CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
           PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+          MAIN_PIN_STABLE: ${{ steps.pinned.outputs.stable }}
+          NIGHTLY_SCHEDULE_PUBLISH: ${{ vars.NIGHTLY_SCHEDULE_PUBLISH }}
         run: |
-          python3 scripts/release.py nightly-gate \
-            --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
-            --run-event "$CHANNEL_RUN_EVENT" --conclusion "$CHANNEL_CONCLUSION" \
-            --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED" \
-            --commit "$PINNED_COMMIT"
+          if [ "$CHANNEL_EVENT" = "schedule" ]; then
+            python3 scripts/release.py nightly-schedule-gate \
+              --event "$CHANNEL_EVENT" --commit "$PINNED_COMMIT" \
+              --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED" \
+              --pin-stable "$MAIN_PIN_STABLE" \
+              --operator-setting "$NIGHTLY_SCHEDULE_PUBLISH"
+          else
+            python3 scripts/release.py nightly-gate \
+              --event "$CHANNEL_EVENT" --opt-in "$CHANNEL_OPT_IN" \
+              --run-event "$CHANNEL_RUN_EVENT" --conclusion "$CHANNEL_CONCLUSION" \
+              --ref "$CHANNEL_REF" --ci-verified "$CHANNEL_CI_VERIFIED" \
+              --commit "$PINNED_COMMIT"
+          fi
 
       - name: Preflight shared sha tag identity before any build or push
         id: sha_gate
         if: steps.channel.outputs.publish == 'true' || steps.nightly.outputs.publish == 'true'
         env:
+          CHANNEL_EVENT: ${{ github.event_name }}
           PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
           EXPECTED_DIGEST: ${{ inputs.expected_sha_digest }}
           CI_VERIFIED: ${{ steps.ci.outputs.verified }}
           PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
         # Reuse a verified existing sha image only with trusted pinned evidence;
         # conflict, unknown lookup or missing digest fails here with zero writes.
+        # The schedule branch reuses a verified tag or SKIPS a present-but-
+        # unverified/unknown one without any registry write.
         run: |
-          python3 scripts/release.py sha-tag-gate \
-            --commit "$PINNED_COMMIT" --expected-digest "$EXPECTED_DIGEST" \
-            --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE"
+          if [ "$CHANNEL_EVENT" = "schedule" ]; then
+            python3 scripts/release.py nightly-schedule-sha-gate \
+              --commit "$PINNED_COMMIT" --ci-verified "$CI_VERIFIED"
+          else
+            python3 scripts/release.py sha-tag-gate \
+              --commit "$PINNED_COMMIT" --expected-digest "$EXPECTED_DIGEST" \
+              --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE"
+          fi
 
       - name: Docker Hub Credentials & Login Check
         id: check-creds
@@ -256,6 +304,26 @@ jobs:
             exit $LOGIN_STATUS
           fi
 
+      # A schedule may reach buildx with push=true. Re-read the live main tip
+      # and re-verify exact-commit CI HERE, before any immutable sha write, so
+      # a run that started qualified cannot publish a stale/moving target.
+      - name: Late main and exact-CI check before any immutable write (schedule)
+        id: scheduled_prepush
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: |
+          current=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+          if [ "$current" != "$PINNED_COMMIT" ]; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::main moved after pinning; no immutable write"
+            exit 0
+          fi
+          echo "stable=true" >> "$GITHUB_OUTPUT"
+          python3 scripts/release.py verify-main-ci --commit "$PINNED_COMMIT"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -287,7 +355,7 @@ jobs:
           context: .
           file: docker/Dockerfile.carbon-panel
           platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ (steps.channel.outputs.publish == 'true' || steps.nightly.outputs.publish == 'true') && steps.sha_gate.outputs.action == 'push' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' }}
+          push: ${{ (steps.channel.outputs.publish == 'true' || steps.nightly.outputs.publish == 'true') && steps.sha_gate.outputs.action == 'push' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request' && steps.scheduled_prepush.outputs.stable != 'false' && steps.scheduled_prepush.outputs.verified != 'false' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -307,6 +375,25 @@ jobs:
           else
             echo "digest=$PUSHED_DIGEST" >> "$GITHUB_OUTPUT"
           fi
+      - name: Re-check the scheduled main pin before moving the nightly alias
+        id: scheduled_recheck
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+        run: |
+          current=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+          if [ "$current" != "$PINNED_COMMIT" ]; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::main moved after pinning; skipping the nightly alias move"
+            exit 0
+          fi
+          echo "stable=true" >> "$GITHUB_OUTPUT"
+          # A CI run can turn non-green between the buildx push and this alias
+          # move. Re-verify the EXACT pinned commit here; the pre-push result is
+          # stale by this point and is never reused as CI evidence for a move.
+          python3 scripts/release.py verify-main-ci --commit "$PINNED_COMMIT"
       - name: Promote edge from the verified immutable digest
         if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true'
         env:
@@ -323,7 +410,7 @@ jobs:
             --previous-commit "$PREVIOUS_EDGE_COMMIT" \
             --previous-digest "$PREVIOUS_EDGE_DIGEST" --apply
       - name: Verify immutable sha image and move only the nightly alias
-        if: steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true'
+        if: github.event_name != 'schedule' && steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && steps.sha_gate.outputs.action != 'skip'
         env:
           PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
           IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
@@ -331,11 +418,25 @@ jobs:
           PREVIOUS_DIGEST: ${{ inputs.previous_nightly_digest }}
           CI_VERIFIED: ${{ steps.ci.outputs.verified }}
           PINNED_EVIDENCE: ${{ inputs.pinned_evidence }}
+        # Manual dispatch keeps the ORIGINAL explicit-binding rule: an absent
+        # previous binding is refused, never silently derived from the alias.
+        # Only the trusted schedule below derives it from the live alias, with
+        # every provenance, platform and ancestry check still applied.
         run: |
           python3 scripts/release.py nightly-promote \
             --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
             --previous-commit "$PREVIOUS_COMMIT" --previous-digest "$PREVIOUS_DIGEST" \
             --ci-verified "$CI_VERIFIED" --pinned-evidence "$PINNED_EVIDENCE" --apply
+      - name: Verify immutable sha image and move only the nightly alias (trusted schedule)
+        if: github.event_name == 'schedule' && steps.nightly.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && steps.sha_gate.outputs.action != 'skip' && steps.scheduled_prepush.outputs.stable != 'false' && steps.scheduled_prepush.outputs.verified != 'false' && steps.scheduled_recheck.outputs.stable != 'false' && steps.scheduled_recheck.outputs.verified != 'false'
+        env:
+          PINNED_COMMIT: ${{ steps.pinned.outputs.sha }}
+          IMAGE_DIGEST: ${{ steps.verified_digest.outputs.digest }}
+          CI_VERIFIED: ${{ steps.scheduled_recheck.outputs.verified }}
+        run: |
+          python3 scripts/release.py nightly-promote \
+            --commit "$PINNED_COMMIT" --digest "$IMAGE_DIGEST" \
+            --ci-verified "$CI_VERIFIED" --auto-bind-previous --apply
       - name: Sync Docker Hub repository description
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
         if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'

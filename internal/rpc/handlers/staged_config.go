@@ -8,6 +8,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -28,23 +29,27 @@ import (
 //   - DELETE /api/v1/staged-config/{serverID}/staged/{id}             discard
 //
 // Staging records the change regardless of the instance's operational state.
-// "on_restart" changes are picked up by ApplyOnRestartStagedConfigs (call it
-// from the server start/restart path); "scheduled" changes are picked up by
-// the scheduler cron tick (see scheduler/staged_config.go).
+// "on_restart" changes are picked up by ApplyOnRestartStagedConfigs;
+// "scheduled" changes are picked up by the scheduler cron tick.
+//
+// The HTTP adapter delegates every storage operation to StagedConfigOperations,
+// the same shared operation the generated StagedConfigService calls.
 type StagedConfigHandler struct {
-	store       *storage.Store
+	ops         *StagedConfigOperations
 	log         *logger.Logger
 	authManager *auth.Manager
 	enforcer    *rbac.Enforcer
 }
 
 func NewStagedConfigHandler(store *storage.Store, log *logger.Logger, authManager *auth.Manager, enforcer *rbac.Enforcer) *StagedConfigHandler {
-	return &StagedConfigHandler{
-		store:       store,
-		log:         log,
-		authManager: authManager,
-		enforcer:    enforcer,
-	}
+	return NewStagedConfigHandlerWithOperations(NewStagedConfigOperations(store), log, authManager, enforcer)
+}
+
+// NewStagedConfigHandlerWithOperations builds the compatibility adapter over a
+// shared operation instance so the controller can give the generated service
+// the exact same operation.
+func NewStagedConfigHandlerWithOperations(ops *StagedConfigOperations, log *logger.Logger, authManager *auth.Manager, enforcer *rbac.Enforcer) *StagedConfigHandler {
+	return &StagedConfigHandler{ops: ops, log: log, authManager: authManager, enforcer: enforcer}
 }
 
 // stagedServerID resolves the owning server of a staged change. Apply,
@@ -52,18 +57,11 @@ func NewStagedConfigHandler(store *storage.Store, log *logger.Logger, authManage
 // from the path alone would let a caller with access to server A act on a
 // staged change belonging to server B.
 func (h *StagedConfigHandler) stagedServerID(ctx context.Context, stagedID string) (string, bool) {
-	if h.store == nil || stagedID == "" {
-		return "", false
-	}
-	change, err := h.store.GetStagedConfigChange(ctx, stagedID)
-	if err != nil || change == nil || change.ServerID == "" {
-		return "", false
-	}
-	return change.ServerID, true
+	return h.ops.Owner(ctx, stagedID)
 }
 
 func (h *StagedConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.store == nil {
+	if !h.ops.Ready() {
 		http.Error(w, "store not initialized", http.StatusInternalServerError)
 		return
 	}
@@ -122,15 +120,21 @@ func (h *StagedConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (h *StagedConfigHandler) handleList(w http.ResponseWriter, r *http.Request, serverID string) {
-	status := storage.StagedStatus(strings.TrimSpace(r.URL.Query().Get("status")))
-	changes, err := h.store.ListStagedConfigChanges(r.Context(), serverID, status)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to list staged changes: %v", err), http.StatusInternalServerError)
+func writeStagedConfigError(w http.ResponseWriter, err error) {
+	var opErr *StagedConfigError
+	if errors.As(err, &opErr) {
+		http.Error(w, opErr.Message, opErr.Status)
 		return
 	}
-	if changes == nil {
-		changes = []*storage.StagedConfigChange{}
+	http.Error(w, fmt.Sprintf("staged config operation failed: %v", err), http.StatusInternalServerError)
+}
+
+func (h *StagedConfigHandler) handleList(w http.ResponseWriter, r *http.Request, serverID string) {
+	status := storage.StagedStatus(strings.TrimSpace(r.URL.Query().Get("status")))
+	changes, err := h.ops.List(r.Context(), serverID, status)
+	if err != nil {
+		writeStagedConfigError(w, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"changes": changes, "count": len(changes)})
 }
@@ -146,40 +150,35 @@ func (h *StagedConfigHandler) handleStage(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	mode := storage.StagedApplyMode(strings.TrimSpace(req.ApplyMode))
-	if mode == "" {
-		mode = storage.StagedApplyOnRestart
-	}
-
-	staged, err := h.store.StageConfigChange(r.Context(), serverID, req.Changes, mode, strings.TrimSpace(req.CronExpr))
+	staged, err := h.ops.Stage(r.Context(), serverID, req.Changes, storage.StagedApplyMode(req.ApplyMode), req.CronExpr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to stage config change: %v", err), http.StatusBadRequest)
+		writeStagedConfigError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, staged)
 }
 
 func (h *StagedConfigHandler) handleApply(w http.ResponseWriter, r *http.Request, stagedID string) {
-	applied, err := h.store.ApplyStagedConfigChange(r.Context(), stagedID)
+	applied, err := h.ops.Apply(r.Context(), stagedID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to apply staged change: %v", err), http.StatusBadRequest)
+		writeStagedConfigError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "change": applied})
 }
 
 func (h *StagedConfigHandler) handleRollback(w http.ResponseWriter, r *http.Request, stagedID string) {
-	rolledBack, err := h.store.RollbackStagedConfigChange(r.Context(), stagedID)
+	rolledBack, err := h.ops.Rollback(r.Context(), stagedID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to rollback staged change: %v", err), http.StatusBadRequest)
+		writeStagedConfigError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true, "change": rolledBack})
 }
 
 func (h *StagedConfigHandler) handleDiscard(w http.ResponseWriter, r *http.Request, stagedID string) {
-	if err := h.store.DiscardStagedConfigChange(r.Context(), stagedID); err != nil {
-		http.Error(w, fmt.Sprintf("failed to discard staged change: %v", err), http.StatusBadRequest)
+	if err := h.ops.Discard(r.Context(), stagedID); err != nil {
+		writeStagedConfigError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})

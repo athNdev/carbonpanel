@@ -8,7 +8,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { CarbonButton, CarbonErrorState, CarbonTag } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import PlayerRoster from '$lib/features/players/PlayerRoster.svelte';
 	import AddAllowlistEntry from '$lib/features/players/AddAllowlistEntry.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';

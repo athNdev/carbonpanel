@@ -40,6 +40,7 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/auth"
+	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/storageworker"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -155,8 +157,14 @@ func cleanupSession(session *controllerStreamSession) {
 		return
 	}
 	session.closed = true
-	_ = session.handle.Close()
-	_ = session.accessor.Close()
+	if session.handle != nil {
+		_ = session.handle.Close()
+	}
+	// A staged-download stream owns a controller temp file handle, not a node
+	// storage accessor. Only node-path streams have an accessor to release.
+	if session.accessor != nil {
+		_ = session.accessor.Close()
+	}
 }
 
 // terminateSession permanently fails a session after a read consumed bytes but
@@ -225,11 +233,19 @@ func (s *FileService) OpenStream(ctx context.Context, req *connect.Request[v1.Op
 		return nil, err
 	}
 	msg := req.Msg
-	if msg.GetServerId() == "" || msg.GetPath() == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("server_id and path are required"))
+	if msg.GetServerId() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("server_id is required"))
 	}
-	if strings.Contains(msg.GetPath(), "..") || filepath.IsAbs(msg.GetPath()) {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path must be server-relative and bounded"))
+	// A staged-download stream carries a download_session_id instead of a
+	// server-relative path. The controller opens the download's owned temp file;
+	// no node path is ever accepted from the gateway for that flow.
+	if msg.GetDownloadSessionId() == "" {
+		if msg.GetPath() == "" {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path is required"))
+		}
+		if strings.Contains(msg.GetPath(), "..") || filepath.IsAbs(msg.GetPath()) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("path must be server-relative and bounded"))
+		}
 	}
 	if msg.GetTotalSize() < 0 || msg.GetTotalSize() > storageworker.MaxStreamBytes {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errStreamCap)
@@ -237,6 +253,9 @@ func (s *FileService) OpenStream(ctx context.Context, req *connect.Request[v1.Op
 	server, err := s.store.GetServer(ctx, msg.GetServerId())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
+	}
+	if dsid := msg.GetDownloadSessionId(); dsid != "" {
+		return s.openStagedDownloadStream(ctx, owner, server, dsid, msg.GetTotalSize())
 	}
 
 	state := s.streamState()
@@ -295,6 +314,86 @@ func (s *FileService) OpenStream(ctx context.Context, req *connect.Request[v1.Op
 	}
 	state.mu.Unlock()
 	return connect.NewResponse(&v1.OpenStreamResponse{SessionId: id, Size: msg.GetTotalSize()}), nil
+}
+
+// openStagedDownloadStream opens a bounded frame stream over a download session
+// staged by InitFileDownload, DownloadArchive or ExportWorld. The bytes live in
+// the controller's owned temp directory; the gateway only ever sends the opaque
+// download session id and reads framed bytes through ReadStreamFrame. Authorization
+// is unchanged: the production interceptor scopes OpenStream to
+// files/read[server_id], and the session's immutable server binding is checked
+// here before a handle is opened. There is no remote->controller fallback and no
+// gateway-visible storage path.
+func (s *FileService) openStagedDownloadStream(ctx context.Context, owner string, server *storage.Server,
+	downloadSessionID string, declared int64) (*connect.Response[v1.OpenStreamResponse], error) {
+	if s.downloadManager == nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("download manager is not configured"))
+	}
+	download, err := s.downloadManager.GetSession(downloadSessionID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("download session not found or expired"))
+	}
+	if download.ServerID == "" || download.ServerID != server.ID {
+		return nil, connect.NewError(connect.CodePermissionDenied, errStreamCrossServer)
+	}
+	// The staged file is bound to the principal that created it. A legacy
+	// session without a recorded creator keeps the historical server-scoped
+	// behavior; a recorded creator is enforced fail-closed here.
+	if download.CreatorUserID != "" && download.CreatorUserID != owner {
+		return nil, connect.NewError(connect.CodePermissionDenied, errStreamCrossOwner)
+	}
+	if declared < 0 || declared > download.TotalSize || download.TotalSize > storageworker.MaxStreamBytes {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errStreamCap)
+	}
+
+	state := s.streamState()
+	// Reserve before opening the owned file. In-flight opens count against the
+	// same per-owner/global caps as node-path streams so concurrent opens cannot
+	// over-admit the registry.
+	state.mu.Lock()
+	perPrincipal, total := 0, len(state.sessions)
+	for _, session := range state.sessions {
+		if session.owner == owner {
+			perPrincipal++
+		}
+	}
+	if perPrincipal+state.openingByOwner[owner] >= streamMaxPerPrincipal ||
+		total+state.opening >= streamMaxTotal {
+		state.mu.Unlock()
+		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("too many open stream sessions"))
+	}
+	state.opening++
+	state.openingByOwner[owner]++
+	state.mu.Unlock()
+	releaseReservation := func() {
+		state.mu.Lock()
+		state.opening--
+		state.openingByOwner[owner]--
+		state.mu.Unlock()
+	}
+
+	sessionCtx, cancel := context.WithTimeout(s.jobCtx, streamSessionTTL)
+	file, err := os.Open(download.FilePath)
+	if err != nil {
+		releaseReservation()
+		cancel()
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("download file not available"))
+	}
+
+	state.mu.Lock()
+	state.opening--
+	state.openingByOwner[owner]--
+	id := newStreamID()
+	// accessor stays nil: this session owns a controller temp file, not a node
+	// storage transport. cleanupSession nil-guards the accessor release.
+	state.sessions[id] = &controllerStreamSession{
+		owner: owner, serverID: server.ID, path: download.Filename,
+		handle: file, ctx: sessionCtx, cancel: cancel,
+		expires: time.Now().Add(streamSessionTTL), hash: sha256.New(), total: declared,
+		frames: make(map[int32]cachedFrame, streamFrameCache),
+	}
+	state.mu.Unlock()
+	return connect.NewResponse(&v1.OpenStreamResponse{SessionId: id, Size: declared}), nil
 }
 
 // ReadStreamFrame returns at most one W17-bounded frame. It never re-reads the

@@ -49,6 +49,17 @@ func registerCombinedTools(s *sdkmcp.Server, c *Clients) error {
 	// allowlist, so a tool is mounted only when the generated catalog declares
 	// it. Never remove this call to re-take the path-B hold.
 	RegisterStreamingTools(s, c)
+	// OSS-370/371-375 byte-transport lanes. Both are now mounted from the
+	// production constructor (previously they were only called in isolated
+	// fixtures). Every call reaches the controller through a generated Connect
+	// client behind the production auth interceptor: download stages a file and
+	// reads bounded controller frames; upload stages owned sessions and commits
+	// through a fresh server-scoped files:create[server_id] check. No REST client
+	// and no context-value transport is involved. bindRegistrationPolicy above
+	// is the single allowlist, so a tool is mounted only when the generated
+	// catalog declares it (see the policy guard in addDownloadTool/uploadTool).
+	RegisterDownloadTools(s, c)
+	RegisterUploadFamilyTools(s, c)
 	RegisterFamilyAdminTools(s, adminFam)
 	registerContentTools(s, contentFam)
 	RegisterFamilyServerTools(s, serverFam)

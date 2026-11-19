@@ -36,11 +36,11 @@ try {
   vite = await createServer({
     configFile: false, root: project, cacheDir: cache,
     resolve: { dedupe: ['svelte'], alias: [
-      { find: '$app/environment', replacement: path.join(fixture, 'environment.js') },
+      { find: '$app/env', replacement: path.join(fixture, 'environment.js') },
       { find: '$lib/stores/auth', replacement: path.join(fixture, 'auth.js') },
       { find: '$lib', replacement: path.join(project, 'src/lib') }
     ] },
-    plugins: [svelte({ configFile: path.join(project, 'svelte.config.js') }), {
+    plugins: [svelte({ configFile: path.join(project, 'sveltekit.config.js') }), {
       name: 'websocket-browser-regression',
       configureServer(server) {
         server.middlewares.use(async (req, res, next) => {

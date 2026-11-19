@@ -24,6 +24,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/module"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/proxy"
+	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -64,6 +65,23 @@ type ModuleAuthorizer interface {
 // SetEnforcer supplies the RBAC seam used for managed-install authorization.
 func (s *ModuleService) SetEnforcer(enforcer ModuleAuthorizer) {
 	s.enforcer = enforcer
+}
+
+// requireModuleSecurityException gates a named sidecar confinement exception
+// behind the existing elevated Docker permission. Missing identity or enforcer
+// fails closed: a broadened profile is never granted by default.
+func (s *ModuleService) requireModuleSecurityException(ctx context.Context) error {
+	user := auth.GetUserFromContext(ctx)
+	if user == nil || s.enforcer == nil {
+		return connect.NewError(connect.CodePermissionDenied,
+			errors.New("named module security profile requires servers/manage_docker_privileged"))
+	}
+	allowed, err := s.enforcer.Enforce(user.Roles, rbac.ResourceServers, rbac.ActionManageDockerPrivileged, "*")
+	if err != nil || !allowed {
+		return connect.NewError(connect.CodePermissionDenied,
+			errors.New("named module security profile requires servers/manage_docker_privileged"))
+	}
+	return nil
 }
 
 // SetStorageResolver supplies the instance-owned node storage resolver.
@@ -597,6 +615,15 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 	template, err := s.store.GetModuleTemplate(ctx, msg.TemplateId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("template not found"))
+	}
+
+	// A named confinement exception is only granted to callers holding the
+	// existing elevated Docker permission. The Docker layer still applies the
+	// baseline; this gate decides whether the exception may be requested.
+	if docker.ModuleSecurityProfile(template) == docker.ModuleProfileHostExtension {
+		if err := s.requireModuleSecurityException(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	// OSS-388: the built-in renderer is a server-side singleton. Adoption and

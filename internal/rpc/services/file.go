@@ -165,11 +165,29 @@ type FileService struct {
 	jobCancel   context.CancelFunc
 	jobWait     sync.WaitGroup
 	jobWaitDone sync.Once
+
+	// allowPrivateArchiveEgress is the explicit operator opt-in for remote
+	// archive URLs that target RFC1918 addresses. It defaults to false so a
+	// user-supplied URL cannot reach a private network without configuration.
+	allowPrivateArchiveEgress bool
 }
 
 // SetStorageResolver selects the storage transport before the service starts.
 func (s *FileService) SetStorageResolver(resolver *nodestorage.Resolver) {
 	s.storageResolver = resolver
+}
+
+// SetAllowPrivateArchiveEgress grants the explicit archive egress exception
+// from operator configuration. Loopback and link-local targets stay blocked
+// by the SSRF guard regardless of this flag.
+func (s *FileService) SetAllowPrivateArchiveEgress(allow bool) {
+	s.allowPrivateArchiveEgress = allow
+}
+
+// archiveEgressPolicy binds the operator flag to the named node that owns the
+// destination server. An empty/unknown node can never unlock private egress.
+func (s *FileService) archiveEgressPolicy(nodeID string) utils.EgressPolicy {
+	return utils.ArchiveEgressPolicy(s.allowPrivateArchiveEgress, nodeID)
 }
 
 // NewFileService creates a new file service
@@ -864,6 +882,25 @@ func (s *FileService) GetExtractionStatus(ctx context.Context, req *connect.Requ
 // bytes, and ContentLength may be absent or simply wrong.
 const maxRemoteDownloadBytes = 1024 * 1024 * 1024 // 1 GiB
 
+// saveRemoteArchiveAtomically stages a verified download beside its destination
+// and publishes it only after the entire copy succeeds. A failed copy aborts
+// the staging file, so a pre-existing target is never truncated. The size cap
+// is the authoritative byte count from the download stream, not a remote header.
+func saveRemoteArchiveAtomically(destPath string, src io.Reader, downloaded int64) error {
+	writer, err := files.NewAtomicWriter(destPath, downloaded)
+	if err != nil {
+		return fmt.Errorf("stage download: %w", err)
+	}
+	if _, err := io.Copy(writer, src); err != nil {
+		_ = writer.Abort()
+		return fmt.Errorf("copy download: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("publish download: %w", err)
+	}
+	return nil
+}
+
 func remoteArchiveFilename(rawURL string) string {
 	parsedURL, err := url.Parse(rawURL)
 	if err == nil {
@@ -891,11 +928,15 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
 
-	// Validate URL against SSRF (allow homelab private network if needed)
-	_, err = utils.ValidateURL(rawURL, true)
-	if err != nil {
-		s.log.Warn("SSRF check blocked remote archive URL %s: %v", rawURL, err)
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("SSRF guard blocked URL: %w", err))
+	// Archive egress is its own policy: private RFC1918 targets require the
+	// explicit operator opt-in. No raw URL (which may embed credentials) is
+	// logged or returned to the caller.
+	redactedURL := utils.RedactURL(rawURL)
+	archivePolicy := s.archiveEgressPolicy(server.NodeID)
+	if _, err = utils.ValidateURLForEgress(rawURL, archivePolicy); err != nil {
+		s.log.Warn("archive egress policy blocked URL %s: %v", redactedURL, err)
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("archive egress policy blocked URL %s", redactedURL))
 	}
 
 	info, err := storageNodeInfo(ctx, s.store, server.NodeID)
@@ -938,7 +979,7 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 		defer op.markCompletedAt()
 		defer release()
 
-		client := utils.NewSafeHTTPClient(15*time.Minute, true)
+		client := utils.NewSafeHTTPClientForEgress(15*time.Minute, archivePolicy)
 		httpReq, err := http.NewRequestWithContext(detachedCtx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			op.fail(fmt.Sprintf("failed to create HTTP request: %v", err))
@@ -1050,20 +1091,10 @@ func (s *FileService) DownloadRemoteArchive(ctx context.Context, req *connect.Re
 				op.fail(fmt.Sprintf("failed to rewind downloaded archive: %v", err))
 				return
 			}
-			out, err := os.Create(targetPath)
-			if err != nil {
-				op.fail(fmt.Sprintf("failed to save file to destination: %v", err))
-				return
-			}
-			if _, err := out.ReadFrom(tmpFile); err != nil {
-				// A partial copy must never be reported as a completed
-				// download: the caller would treat a truncated file as intact.
-				_ = out.Close()
-				op.fail(fmt.Sprintf("failed to write downloaded file: %v", err))
-				return
-			}
-			if err := out.Close(); err != nil {
-				op.fail(fmt.Sprintf("failed to close downloaded file: %v", err))
+			if err := saveRemoteArchiveAtomically(targetPath, tmpFile, downloaded); err != nil {
+				// The staged writer aborts on a failed copy, so an existing
+				// target is never left truncated by a partial download.
+				op.fail(fmt.Sprintf("failed to save downloaded file: %v", err))
 				return
 			}
 		}
@@ -1121,13 +1152,14 @@ func (s *FileService) downloadRemoteArchiveViaAccessor(ctx context.Context, serv
 	}
 	s.remoteDownloads.Store(taskID, op)
 
+	archivePolicy := s.archiveEgressPolicy(server.NodeID)
 	handedOff = true
 	go func() {
 		defer op.markCompletedAt()
 		defer release()
 		defer func() { _ = acc.Close() }()
 
-		client := utils.NewSafeHTTPClient(15*time.Minute, true)
+		client := utils.NewSafeHTTPClientForEgress(15*time.Minute, archivePolicy)
 		httpReq, err := http.NewRequestWithContext(detachedCtx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			op.fail(fmt.Sprintf("failed to create HTTP request: %v", err))

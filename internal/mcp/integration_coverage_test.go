@@ -11,6 +11,25 @@ import (
 	"testing"
 )
 
+// isCapabilityTool reports whether a tool is a deliberately procedure-sharing
+// capability hand-off rather than a canonical catalog tool. The set is explicit:
+// a prefix match would also exempt future canonical tools such as
+// download_archive from the duplicate-procedure guard. Each listed tool has a
+// distinct name and its own executable stdio fixture.
+func isCapabilityTool(name string) bool {
+	if strings.HasPrefix(name, "scoped_stream_") {
+		return true
+	}
+	switch name {
+	case "download_get_file", "download_init_file", "download_archive_bundle",
+		"download_export_world_bundle", "download_stream",
+		UploadToolSaveUploadedFile, UploadToolInitUpload, UploadToolUploadChunk, UploadToolStreamCommit:
+		return true
+	default:
+		return false
+	}
+}
+
 // TestIntegrationCombinedCatalog pins the honest coverage counts of the
 // combined OSS-370 catalog. The three signals stay separate: a catalog
 // declaration is not a mounted tool, and a mounted tool is not a fixture
@@ -18,14 +37,14 @@ import (
 // artifact; LISTED/REACHABLE/VERIFIED are recomputed from live source.
 func TestIntegrationCombinedCatalog(t *testing.T) {
 	matrix := FamilyAudit()
-	if matrix.Counts.DeclaredRPCs != IntegrationDeclaredRPCs || IntegrationDeclaredRPCs != 234 {
-		t.Fatalf("declared RPCs: matrix=%d generated=%d want 234", matrix.Counts.DeclaredRPCs, IntegrationDeclaredRPCs)
+	if matrix.Counts.DeclaredRPCs != IntegrationDeclaredRPCs || IntegrationDeclaredRPCs != 245 {
+		t.Fatalf("declared RPCs: matrix=%d generated=%d want 245", matrix.Counts.DeclaredRPCs, IntegrationDeclaredRPCs)
 	}
-	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 224 {
-		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 224", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
+	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 235 {
+		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 235", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
 	}
-	if matrix.Counts.ExcludedByReason != IntegrationExcludedOps || IntegrationExcludedOps != 61 {
-		t.Fatalf("excluded ops: matrix=%d generated=%d want 61", matrix.Counts.ExcludedByReason, IntegrationExcludedOps)
+	if matrix.Counts.ExcludedByReason != IntegrationExcludedOps || IntegrationExcludedOps != 72 {
+		t.Fatalf("excluded ops: matrix=%d generated=%d want 72", matrix.Counts.ExcludedByReason, IntegrationExcludedOps)
 	}
 	if IntegrationSupportedOps != 201 {
 		t.Fatalf("supported ops: got %d want 201", IntegrationSupportedOps)
@@ -34,20 +53,23 @@ func TestIntegrationCombinedCatalog(t *testing.T) {
 		t.Fatalf("generated tool count: got %d want %d", len(exposedTools), IntegrationCombinedTools)
 	}
 
-	// Single registration: no duplicate tool name or procedure in the
-	// combined catalog (the first-slice list_files/get_file collisions are
-	// resolved by generator precedence).
+	// Single registration: no duplicate tool name. Capability tools from the
+	// stream, download and upload lanes deliberately share a typed RPC's
+	// procedure with a canonical tool (for example get_file and
+	// download_get_file both use GetFile), so procedure sharing is expected for
+	// those names only; any other duplicate would be a double registration.
 	names := map[string]bool{}
 	procs := map[string]bool{}
+	canonicalProcs := map[string]string{}
 	for _, spec := range exposedTools {
 		if names[spec.Name] {
 			t.Errorf("duplicate tool name %s", spec.Name)
 		}
-		// Scoped-streaming capability tools deliberately share their typed
-		// RPC's procedure but have distinct tool names; only non-streaming
-			// duplicates would be a double registration.
-		if procs[spec.Procedure] && !strings.HasPrefix(spec.Name, "scoped_stream_") {
-			t.Errorf("duplicate tool procedure %s", spec.Procedure)
+		if !isCapabilityTool(spec.Name) {
+			if previous, dup := canonicalProcs[spec.Procedure]; dup {
+				t.Errorf("duplicate canonical tool procedure %s: %s and %s", spec.Procedure, previous, spec.Name)
+			}
+			canonicalProcs[spec.Procedure] = spec.Name
 		}
 		names[spec.Name] = true
 		procs[spec.Procedure] = true
@@ -82,8 +104,9 @@ func TestIntegrationCombinedCatalog(t *testing.T) {
 			t.Errorf("%s: live coverage incomplete: %+v", op.ID, cov)
 		}
 	}
-	if listedN != 201 || reachableN != 201 || verifiedN != 192 {
-		t.Fatalf("live coverage: LISTED=%d REACHABLE=%d VERIFIED=%d; want 201/201/192 (9 PENDING)", listedN, reachableN, verifiedN)
+	if listedN != 201 || reachableN != 201 || verifiedN != 201 {
+		t.Fatalf("live coverage: LISTED=%d REACHABLE=%d VERIFIED=%d; want 201/201/201 (PENDING inventory empty)",
+			listedN, reachableN, verifiedN)
 	}
 
 	// Every audited exclusion stays out of the combined tool set, with its

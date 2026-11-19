@@ -1,6 +1,6 @@
 <script>
-import ModuleDialog from '$lib/components/server/ModuleDialog.svelte';
-import ModuleTemplateCreateDialog from '$lib/components/server/ModuleTemplateCreateDialog.svelte';
+import ModuleDialog from '$lib/components/server-ui/ModuleDialog.svelte';
+import ModuleTemplateCreateDialog from '$lib/components/server-ui/ModuleTemplateCreateDialog.svelte';
 import {create} from '@bufbuild/protobuf';
 import {ServerSchema} from '$lib/proto/carbonpanel/v1/common_pb';
 import {ModuleTemplateSchema,ModuleSchema,ModulePortSchema,ModuleEventHookSchema,ModuleEventAction} from '$lib/proto/carbonpanel/v1/module_pb';

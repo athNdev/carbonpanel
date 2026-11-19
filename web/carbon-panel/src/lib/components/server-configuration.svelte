@@ -33,7 +33,7 @@ one at https://mozilla.org/MPL/2.0/.
 	} from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { CarbonButton, CarbonInlineLoading } from '$lib/components/carbon';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
 		ConfigApplyWindow,

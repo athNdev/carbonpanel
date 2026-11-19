@@ -17,7 +17,7 @@ code_refs:
   - internal/rpc/services/server.go
   - web/carbon-panel/src/lib/module-identity.ts
   - web/carbon-panel/src/routes/modules/ActiveModules.svelte
-  - web/carbon-panel/src/lib/components/server/ServerModules.svelte
+  - web/carbon-panel/src/lib/components/server-ui/ServerModules.svelte
   - web/carbon-panel/src/routes/servers/new/+page.svelte
 sources:
   - title: Module delivery checksum issue

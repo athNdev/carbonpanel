@@ -25,8 +25,9 @@ by a Connect unary interceptor. Missing credentials stop startup rather than
 falling back to anonymous access, session cookies or the no-auth bypass.
 
 The pinned FIRST SLICE of 30 tools remains unchanged, but the gateway now
-mounts the combined OSS-370 catalog: 202 tools covering 201 SUPPORTED operations (9 PENDING)
-operations from the OSS-375 audit matrix. The 30 first-slice declarations are
+mounts the combined OSS-370 catalog: 211 tools covering 201 SUPPORTED operations
+(0 PENDING) from the OSS-375 audit matrix. The byte-transport lanes add five
+download tools and four upload/commit tools to the earlier combined set. The 30 first-slice declarations are
 the highest-precedence source; family descriptors (server, content, admin),
 stream typed equivalents and integration-owned additions are merged by
 `internal/mcp/cataloggen` into one generated `exposedTools` list. The 61
@@ -43,15 +44,19 @@ user. A well-formed token against a no-auth installation is refused, and every
 call uses a bounded HTTP client timeout.
 
 The tool catalog is stable across controller builds. `internal/mcp/catalog.go`
-holds the pinned first-slice declarations and the 25-name mount list mirroring
+holds the pinned first-slice declarations and the 27-name mount list mirroring
 `internal/rpc/server.go registerServices`; `catalog_data.go` is generated from
 proto descriptors and the live RBAC map. The single generator also emits
 `integration_catalog.go`, resolving duplicate tools by source precedence so
 `list_files`/`get_file` and similar collisions are never double-registered. The
-coverage drift test still enumerates the 224 reachable RPCs and fails on a
+coverage drift test still enumerates the 235 reachable RPCs and fails on a
 missing or extra declared tuple, a scope that no longer matches `internal/rbac`,
 a changed descriptor fingerprint, an accidentally mounted `NodeControlService`,
-or a missing `WorldViewService`. `family_audit_test.go` recomputes LISTED and
+or a missing `WorldViewService`. `family_content_descriptors.json` is compared
+byte-for-byte by `TestContentDescriptorArtifact`, so it is pinned to LF in
+`.gitattributes`: without the pin a Windows checkout with `core.autocrlf=true`
+converts it to CRLF and fails the equivalence check with no descriptor drift.
+`family_audit_test.go` recomputes LISTED and
 REACHABLE from live source, but VERIFIED comes only from executable invocation
 evidence: a real `tools/call` over the SDK stdio wire must reach the typed
 Connect method with exact typed-field assertions on ids, booleans, enums,
@@ -72,12 +77,29 @@ index, partial/over-cap reads terminate the session, and a bounded reaper plus
 `Server.Shutdown -> FileService.Stop -> StopStreams` release handles on expiry
 and shutdown. See [controller stream session semantics](../decisions/mcp-controller-stream-sessions.md).
 
-The 9 affected operations remain PENDING in the STRICT publication gate with an
-exact inventory in `internal/mcp/integration_pending.go` and the committed plan
-in `docs/plans/mcp-controller-side-stream-transport.md`. The partial-slice
-regression gate is green; the full-coverage gate stays red until every pending
-operation has real production `tools/call` evidence. No enabled-but-unusable
-tool is advertised.
+The download lane adds the staged-download byte path for the four FileService
+download RPCs and `surface:rest_download_stream`. `OpenStreamRequest.download_session_id`
+lets the same controller-owned, bounded `ReadStreamFrame`/`CloseStream` RPCs
+carry bytes from a file that `InitFileDownload`, `DownloadArchive` or
+`ExportWorld` staged on the controller; the gateway holds no storage handle and
+never uses a hand-rolled REST client. `download_get_file`,
+`download_init_file`, `download_archive_bundle`,
+`download_export_world_bundle` and `download_stream` are exported through
+`DownloadToolSpecs`/`DownloadToolDescriptors` for the integration owner. See
+[staged-download byte transport](../decisions/mcp-download-byte-transport.md).
+
+The nine formerly PENDING operations are now mounted by production
+`NewServer` / `registerCombinedTools` and carry executable `tools/call`
+evidence, so `PendingInventory` is empty and the STRICT publication gate is
+green (201/201 SUPPORTED operations LISTED, REACHABLE and VERIFIED). The same
+gate now also runs in ordinary CI (`mcp-coverage` job) with a fail-closed
+negative fixture and a real-binary stdio conformance smoke. The exact
+retired inventory and its per-tool evidence map live in
+`internal/mcp/integration_pending.go`; the committed plan is
+`docs/plans/mcp-controller-side-stream-transport.md`. The hold mechanism is
+still live: adding an unmounted operation back to `PendingInventory`
+immediately turns the STRICT gate red again. No enabled-but-unusable tool is
+advertised.
 Registration strings, quoted procedure names and substring-of-JSON checks
 never count. The exclusion policy is bound to the server before any tool is
 added, so audited-out tools are never mounted; go-sdk replaces same-name tools

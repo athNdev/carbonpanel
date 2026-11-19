@@ -72,7 +72,7 @@ test('PlayerRoster has accessible sortable headers, keyboard map and scoped stat
 	assert.match(s, /CarbonEmptyState/, 'empty results surface an empty state');
 	assert.match(s, /CarbonInlineLoading/, 'initial loading is announced');
 	assert.match(s, /Stale results/, 'a failed refresh marks rows stale');
-	assert.match(s, /resolve\(`\/players\//, 'navigation uses resolve()');
+	assert.match(s, /resolve\('\/players\/\[key\]'/, 'navigation uses typed resolve()');
 	assert.doesNotMatch(
 		s,
 		/#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?\b/,

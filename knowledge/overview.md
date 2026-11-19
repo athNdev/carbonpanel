@@ -10,9 +10,9 @@ code_refs:
   - web/carbon-panel
 sources:
   - title: README
-    resource: ../../README.md
+    resource: ../README.md
   - title: Design specification
-    resource: ../../DESIGN.md
+    resource: ../DESIGN.md
 ---
 
 # What it is

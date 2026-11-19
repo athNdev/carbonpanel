@@ -511,7 +511,7 @@ one at https://mozilla.org/MPL/2.0/.
 			}
 
 			toast.success(`Server "${response.server?.name}" created successfully!`);
-			goto(resolve(`/servers/${serverId}`));
+			goto(resolve('/servers/[id]', { id: serverId }));
 		} catch (error) {
 			toast.error(
 				`Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`

@@ -48,6 +48,12 @@ func NewAdmissionCoordinator() *AdmissionCoordinator {
 	return &AdmissionCoordinator{keys: make(map[string]*nodeAdmission)}
 }
 
+// CanonicalNodeKey folds legacy local aliases and case differences into one
+// key so alias-based and canonical callers contend on the same node. Callers
+// that must dedupe gate keys (for example a migration's two nodes) use this to
+// avoid acquiring the same key twice and self-deadlocking.
+func CanonicalNodeKey(nodeID string) string { return canonicalNodeKey(nodeID) }
+
 // canonicalNodeKey folds legacy local aliases and case differences into one
 // key so alias-based and canonical callers contend on the same node.
 func canonicalNodeKey(nodeID string) string {

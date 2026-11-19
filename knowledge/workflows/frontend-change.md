@@ -10,11 +10,13 @@ code_refs:
 sources:
   - title: SvelteKit resolve navigation ADR
     resource: ../../docs/adr/0002-sveltekit-resolve-navigation.md
+  - title: SvelteKit 3 security migration ADR
+    resource: ../../docs/adr/0042-sveltekit3-security-migration.md
 ---
 
 # Steps
 
-1. Work in `web/carbon-panel` (SvelteKit 2, Svelte 5, IBM Carbon tokens).
+1. Work in `web/carbon-panel` (SvelteKit 3, Svelte 5, IBM Carbon tokens).
 2. Use the generated Connect client from `src/lib/proto`; do not add a second
    API layer.
 3. Run:
@@ -31,6 +33,8 @@ bun run test
 
 # Rules
 
+- SvelteKit 3 rejects any `/server/` directory under `src` as server-only, even
+  for browser components. Keep shared UI in `components/server-ui/`; see ADR 0042.
 - Keep the Carbon geometry, typography and token usage consistent with the
   existing shell.
 - Start every primary route with `CarbonPageHeader`; do not hand-roll a title,
@@ -85,6 +89,10 @@ bun run test
   motion. Animate color/opacity/transform only; do not `transition: all`. Cloud
   visual verification of the same states is out of this repository.
 - Loading, empty and error states are part of the change, not follow-up work.
+  Interactive components add DOM tests through their public props/events, and
+  whole-page keyboard or reflow behavior is exercised by the owned-Chromium
+  journey in `ci.yml`. Both use real components; see
+  [Frontend accessibility coverage](../decisions/frontend-a11y-coverage.md).
 - Reused file-editor dialogs keep content and async requests under one
   `FileEditorSession` identity (generation, server ID and path). Closing or
   selecting another file invalidates earlier load/save completions, including
@@ -147,6 +155,11 @@ outranks an explicit theme; do not 'simplify' it back to `:root`.
   hydrates it on boot, the dialog and toast host consume its stores, and code
   editors take their initial theme from it and follow live changes through an
   already-loaded runtime (never bootstrapping Monaco for a preference change).
-  See `display-preferences.test.ts`.
+  See `display-preferences.test.ts`. Per-feature token migrations extend the
+  new-debt ratchet in that test one surface at a time; a listed file must have
+  zero six-digit hex. Purposeful status colors become semantic tokens
+  (`--destructive-text`, `--success-text`, `--accent-text`), not raw hex. The
+  ratchet is not a whole-panel claim, and Cloud's content-pinned token snapshot
+  is not edited by a Panel token migration.
 
 See [ADR 0009](../../docs/adr/0009-shared-design-system.md).

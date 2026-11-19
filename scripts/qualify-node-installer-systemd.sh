@@ -18,7 +18,18 @@
 
 set -euo pipefail
 
-REPO="${CARBON_INSTALLER_REPO:-/mnt/c/Users/Daybreak8458/.codex/worktrees/node-installer/carbonpanel}"
+# Non-mutating preflight for the runtime-artifact build wrapper: resolve this
+# entry point and exit before mktemp, transient units or any /run write. It is
+# used to prove the installer build step is reachable without a live systemd
+# fixture or host provisioning. No daemon binary is built or started.
+if [[ "${1:-}" == "--preflight" ]]; then
+	printf 'PASS  preflight: node-installer systemd qualification entry point resolved (no units started, no /run writes)\n'
+	exit 0
+fi
+
+# Default to this checkout (resolved relative to this script); the env override
+# points at another owned checkout without embedding a workstation path.
+REPO="${CARBON_INSTALLER_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BIN="${CARBON_NODE_INSTALLER_BIN:-$REPO/carbon-node-installer-linux}"
 FIXTURE_ROOT="$(mktemp -d /tmp/carbon-installer-qual.XXXXXX)"
 UID_NUM="$(id -u)"

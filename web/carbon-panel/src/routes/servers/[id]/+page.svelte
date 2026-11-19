@@ -82,9 +82,9 @@ one at https://mozilla.org/MPL/2.0/.
 	import ServerActivity from '$lib/components/server-activity.svelte';
 	import ServerOperations from '$lib/components/server-operations.svelte';
 	import ServerPlayers from '$lib/components/server-players.svelte';
-	import ServerModules from '$lib/components/server/ServerModules.svelte';
-	import ServerWorld from '$lib/components/server/ServerWorld.svelte';
-	import ServerTabPanel from '$lib/components/server/ServerTabPanel.svelte';
+	import ServerModules from '$lib/components/server-ui/ServerModules.svelte';
+	import ServerWorld from '$lib/components/server-ui/ServerWorld.svelte';
+	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 
 	let serverId = $derived(page.params.id);
 	let server = $derived($serversStore.find((entry) => entry.id === serverId) ?? null);

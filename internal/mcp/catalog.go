@@ -62,12 +62,44 @@ type CatalogEntry struct {
 }
 
 // ToolSpec describes a tool that is actually registered with the MCP server.
+// Source is the generator's source tag. Capability tools from different lanes
+// may share one typed procedure (for example get_file and download_get_file),
+// so Source is what decides which spec is the canonical catalog declaration.
 type ToolSpec struct {
 	Name        string
 	Procedure   string
 	Class       Class
 	Confirm     bool
 	Description string
+	Source      string
+}
+
+// sourcePriority mirrors internal/mcp/cataloggen.sourcePriority. A lower value
+// is the canonical declaration for a procedure; capability tools from later
+// lanes share the procedure but never replace the catalog's tool/class/confirm.
+func sourcePriority(source string) int {
+	switch source {
+	case "first_slice", "":
+		return 0
+	case "server":
+		return 1
+	case "content":
+		return 2
+	case "admin":
+		return 3
+	case "stream":
+		return 4
+	case "integration":
+		return 5
+	case "integration_stream":
+		return 6
+	case "download":
+		return 7
+	case "upload":
+		return 8
+	default:
+		return 9
+	}
 }
 
 // MountedServices mirrors the 25 mux.Handle registrations in
@@ -77,6 +109,7 @@ type ToolSpec struct {
 var MountedServices = []string{
 	"AuthService", "ConfigService", "FileService", "MinecraftService", "ModService",
 	"ModBrowseService", "ModpackService", "DatapackService", "ProxyService", "ServerService",
+	"PackwizService", "StagedConfigService",
 	"NodeService", "SupportService", "TaskService", "ActivityService", "OperationService",
 	"SubuserService", "BlueprintService", "BackupService", "UserService", "RoleService",
 	"ModuleService", "UploadService", "PlayerService", "WorldViewService", "WorldService",
@@ -150,19 +183,22 @@ var Tools = exposedTools
 func init() {
 	Catalog = make(map[string]CatalogEntry, len(rawCatalogEntries))
 	exposed := make(map[string]ToolSpec, len(exposedTools))
-	// Keep the FIRST spec for a procedure. Scoped capability tools deliberately
-	// share their typed RPC's procedure but must not replace the canonical
-	// catalog tool declaration.
+	// Keep the highest-precedence spec for a procedure. Capability tools from
+	// the stream/download/upload lanes deliberately share their typed RPC's
+	// procedure but must not replace the canonical catalog tool declaration.
+	// Precedence is explicit (not alphabetical: download_get_file sorts before
+	// the canonical get_file) so regeneration cannot silently flip the winner.
 	for _, spec := range exposedTools {
-		if _, seen := exposed[spec.Procedure]; !seen {
+		current, seen := exposed[spec.Procedure]
+		if !seen || sourcePriority(spec.Source) < sourcePriority(current.Source) {
 			exposed[spec.Procedure] = spec
 		}
 	}
 	for _, e := range rawCatalogEntries {
-		// Several registered capability tools can share one audited procedure
-		// (for example the scoped stream tools). The canonical first-slice tool
-		// is generated first, so keep the first match and never let a later
-		// capability tool overwrite the catalog's declared tool name.
+		// `exposed` already holds the highest-precedence spec for each procedure
+		// (see sourcePriority above). Capability tools from the stream, download
+		// and upload lanes share a procedure but never overwrite the catalog's
+		// declared tool, class or confirmation flag.
 		if spec, ok := exposed[e.Procedure]; ok && e.Tool == "" {
 			e.Tool = spec.Name
 			e.Class = spec.Class

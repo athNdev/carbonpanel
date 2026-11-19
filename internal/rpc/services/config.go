@@ -38,12 +38,22 @@ type ConfigService struct {
 	docker          *docker.Client
 	pool            *docker.ClientPool
 	storageResolver *nodestorage.Resolver
+	admission       *serverruntime.AdmissionCoordinator
 	log             *logger.Logger
 }
 
 // SetStorageResolver supplies the instance-owned node storage resolver.
 func (s *ConfigService) SetStorageResolver(resolver *nodestorage.Resolver) {
 	s.storageResolver = resolver
+}
+
+// SetAdmissionCoordinator supplies the shared in-process start gate. Config
+// recreation can start a replacement container, so it contends with ordinary
+// starts on the same node (OSS-405).
+func (s *ConfigService) SetAdmissionCoordinator(c *serverruntime.AdmissionCoordinator) {
+	if c != nil {
+		s.admission = c
+	}
 }
 
 type configContainerRecreator interface {
@@ -56,11 +66,12 @@ func NewConfigService(store *storage.Store, cfg *config.Config, dockerCli *docke
 		pool = docker.NewClientPool(store, dockerCli, log)
 	}
 	return &ConfigService{
-		store:  store,
-		config: cfg,
-		docker: dockerCli,
-		pool:   pool,
-		log:    log,
+		store:     store,
+		config:    cfg,
+		docker:    dockerCli,
+		pool:      pool,
+		admission: serverruntime.NewAdmissionCoordinator(),
+		log:       log,
 	}
 }
 
@@ -146,6 +157,20 @@ func (s *ConfigService) UpdateServerConfig(ctx context.Context, req *connect.Req
 	if server.ContainerID != "" {
 		if err := s.recreateContainer(ctx, server, config); err != nil {
 			s.log.Error("Config saved but container recreation failed: %v", err)
+			var refusal *serverruntime.AdmissionError
+			if errors.As(err, &refusal) {
+				code := connect.CodeUnavailable
+				if refusal.Kind == serverruntime.InvalidNode {
+					code = connect.CodeFailedPrecondition
+				}
+				return nil, connect.NewError(code, err)
+			}
+			if errors.Is(err, context.Canceled) {
+				return nil, connect.NewError(connect.CodeCanceled, fmt.Errorf("node %s start admission: %w", server.NodeID, err))
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, connect.NewError(connect.CodeDeadlineExceeded, fmt.Errorf("node %s start admission: %w", server.NodeID, err))
+			}
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("configuration saved but container recreation failed: %w", err))
 		}
 	}
@@ -382,6 +407,12 @@ func configStageWindow(msg *v1.UpdateServerConfigRequest) (storage.UpdateWindow,
 }
 
 func (s *ConfigService) recreateContainer(ctx context.Context, server *storage.Server, config *storage.ServerConfig) error {
+	release, err := s.admission.Acquire(ctx, server.NodeID)
+	if err != nil {
+		return fmt.Errorf("node %s start admission: %w", server.NodeID, err)
+	}
+	defer release()
+
 	if s.pool == nil {
 		return fmt.Errorf("docker client pool not configured")
 	}

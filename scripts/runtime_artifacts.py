@@ -15,7 +15,12 @@ image. Every write is gated by :func:`publication_gate`, which requires all of:
   * a full 40-hex source SHA whose exact commit is an ancestor of main and has
     green push CI (``verify_main_ci``; never a checkbox),
   * an identity assertion bound to that exact version, commit, artifact and
-    project owner.
+    project owner, and
+  * a real, non-fixture payload of the declared kind, qualified by its native
+    verifier with the provenance pin bound to the exact file digest and
+    non-synthetic provenance, enforced by :func:`publication_predicate` before
+    any signing or publication. A missing native verifier stops publication and
+    keeps the lane REHEARSAL-ONLY.
 
 Home-hypervisor disk formats (VHDX/VDI/VMDK/OVA/OVF/bhyve) are intentionally
 NOT in the publishable set: primary-source research found no real clean
@@ -38,6 +43,11 @@ import sys
 import uuid
 from pathlib import Path
 
+try:  # module import from repo root and direct CLI execution both work
+    from scripts import artifact_kind_verifiers as kind_verifiers
+except ImportError:  # pragma: no cover - direct `python3 scripts/runtime_artifacts.py`
+    import artifact_kind_verifiers as kind_verifiers
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # --- Independent version / ownership domains --------------------------------
@@ -48,14 +58,28 @@ FULL_SHA = re.compile(r"[0-9a-f]{40}")
 TRUSTED_REF = "refs/heads/main"
 DEFAULT_REPOSITORY = "athNdev/carbonpanel"
 
-# Publishable kinds. These map to build scripts owned by the QCOW2/LXC/installer
-# artifact lanes; this lane publishes their outputs under one independent
-# version and does not reimplement their build logic.
+# Publishable kinds. These map to thin, allowlisted wrapper scripts that
+# delegate to the REAL entry points owned by the QCOW2/LXC/installer artifact
+# lanes; this lane publishes their outputs under one independent version and
+# does not reimplement their build logic. The wrappers exist because the
+# real entry points have heterogeneous interfaces (a Python module, a bash
+# ``build`` subcommand and a host-mutating systemd qualification fixture)
+# while this workflow invokes one uniform ``bash <script> --version --commit
+# --output`` contract. Both the wrapper and its delegate MUST exist on disk or
+# the build step fails closed (see ``preflight_build``). No wrapper resolves to
+# a script outside these explicit maps.
 VERIFIED_ARTIFACTS = ("qcow2", "lxc-rootfs", "installer")
 BUILD_SCRIPTS = {
     "qcow2": "scripts/build-runtime-qcow2.sh",
     "lxc-rootfs": "scripts/build-runtime-lxc.sh",
     "installer": "scripts/build-runtime-installer.sh",
+}
+# The real, checked-in entry points on main that each wrapper delegates to.
+# ADR 0035/0036 and knowledge/architecture/node-installer.md own these lanes.
+BUILD_DELEGATES = {
+    "qcow2": "scripts/node_vm_build.py",
+    "lxc-rootfs": "packaging/node-lxc/build-rootfs.sh",
+    "installer": "scripts/qualify-node-installer-systemd.sh",
 }
 # Documented but UNSUPPORTED until real clean import/boot evidence exists.
 UNSUPPORTED_FORMATS = ("vhdx", "vdi", "vmdk", "ova", "ovf", "bhyve", "vhd")
@@ -74,6 +98,15 @@ INTEGRITY_RECORDS = frozenset({
     "SHA256SUMS", "sbom.cdx.json", "signature.json",
     "signature.sig", "signature.bundle",
 })
+
+# OSS-400 publication predicate. The three allowlisted offline rehearsal
+# wrappers stamp every staged bundle with BUILD-PREFLIGHT.json
+# (live_build=false, an offline/fixture/preflight-only mode), and the real
+# delegates emit plan records with fixture_only/no_qcow2_built. Those outputs
+# must never be checksummed, signed or published as qualified artifacts.
+BUILD_PREFLIGHT_RECORD = "BUILD-PREFLIGHT.json"
+OFFLINE_MODES = frozenset({"offline-plan", "offline-fixture", "delegate-preflight-only"})
+OFFLINE_MODE_MARKERS = ("offline", "fixture", "preflight-only", "dry-run", "dryrun")
 WORKFLOW_PATH = ".github/workflows/runtime-artifacts.yml"
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
 
@@ -105,11 +138,55 @@ def valid_runtime_version(value):
     return True, "independent runtime version"
 
 
-def build_script_for(artifact):
-    """Allowlisted build entry point for a publishable artifact kind."""
+def build_script_for(artifact, root=None):
+    """Allowlisted build wrapper for a publishable artifact kind.
+
+    Fail closed if the wrapper is missing on disk: a resolved-but-absent script
+    must never be handed to the workflow's build step. ``root`` is injectable
+    so offline fixtures can exercise the failure path without touching main.
+    """
     if artifact not in BUILD_SCRIPTS:
         raise ValueError(f"No verified build script for artifact {artifact!r}")
-    return BUILD_SCRIPTS[artifact]
+    relative = BUILD_SCRIPTS[artifact]
+    base = Path(root) if root is not None else ROOT
+    if not (base / relative).is_file():
+        raise ValueError(f"Allowlisted build script is missing: {relative}")
+    return relative
+
+
+def resolve_build_delegate(artifact, root=None):
+    """The real main entry point a wrapper delegates to; fail closed if absent.
+
+    Resolution is read-only: it never imports, executes or mutates the delegate.
+    """
+    if artifact not in BUILD_DELEGATES:
+        raise ValueError(f"No verified build delegate for artifact {artifact!r}")
+    relative = BUILD_DELEGATES[artifact]
+    base = Path(root) if root is not None else ROOT
+    if not (base / relative).is_file():
+        raise ValueError(f"Build delegate is missing on main: {relative}")
+    return relative
+
+
+def preflight_build(artifact, root=None):
+    """Prove the build step is REACHABLE without executing any live tool.
+
+    Resolves both the allowlisted wrapper and its real delegate and checks that
+    both files exist. No QEMU, LXC, systemd, host provisioning, network or
+    release operation is performed. Returns (ok, reason, decision).
+    """
+    decision = {"artifact": artifact}
+    try:
+        decision["build_script"] = build_script_for(artifact, root=root)
+    except ValueError as error:
+        return False, str(error), decision
+    try:
+        decision["delegate"] = resolve_build_delegate(artifact, root=root)
+    except ValueError as error:
+        return False, str(error), decision
+    decision["build_script_exists"] = True
+    decision["delegate_exists"] = True
+    return True, "build entry point and delegate resolved offline", decision
 
 
 # --- Identity assertion ------------------------------------------------------
@@ -475,14 +552,104 @@ def verify_signature_binding(document, manifest_text, expected_identity):
     return True, "signature record is bound to the manifest and workflow identity"
 
 
+def real_provenance(document):
+    """True only for a non-synthetic artifact-provenance record with real pins."""
+    if not isinstance(document, dict) or document.get("synthetic") is not False:
+        return False
+    profile = str(document.get("profile") or document.get("provenance_profile") or "").lower()
+    if profile != "artifact":
+        return False
+    pins = document.get("images") or document.get("base_image")
+    return isinstance(pins, (list, dict)) and bool(pins)
+
+
+def publication_predicate(directory, artifact, *, runner=None, process_runner=None):
+    """Fail-closed OSS-400 gate: a staged bundle must be a REAL artifact.
+
+    Rehearsal outputs are refused even if they are complete, signed and bound
+    to a valid identity: an offline marker (``BUILD-PREFLIGHT.json`` with
+    live_build != true or an offline/fixture mode), a fixture-only plan record
+    (``fixture_only``/``no_qcow2_built``), a synthetic build, missing
+    non-synthetic provenance, or a payload that fails its kind's REAL verifier
+    each refuse the bundle. Candidate filename/size heuristics never qualify a
+    payload: :mod:`artifact_kind_verifiers` binds the provenance pin to the exact
+    file digest and rejects symlinks/non-regular files, and publication stops
+    (REHEARSAL-ONLY) when a native validator is unavailable. The offline
+    rehearsal reachability seam (``preflight-build`` and wrapper ``--preflight``)
+    is intentionally NOT gated by this predicate.
+
+    Returns (ok, problems). No file is written or network/host call made.
+    """
+    root = Path(directory)
+    if artifact not in VERIFIED_ARTIFACTS:
+        return False, [f"unverified artifact {artifact!r} cannot pass the publication predicate"]
+    problems = []
+    all_files = [path for path in root.rglob("*") if path.is_file()]
+    # Integrity records are excluded from payload/provenance accounting (they
+    # are generated by the integrity steps), but NOT from marker scanning: a
+    # rehearsal marker hidden in one of those filenames must still refuse.
+    files = [path for path in all_files if path.name not in INTEGRITY_RECORDS]
+    documents = {}
+
+    # 1. Refuse any offline / fixture-only / synthetic marker in the bundle.
+    for path in all_files:
+        if path.name.lower() == BUILD_PREFLIGHT_RECORD.lower():
+            try:
+                marker = json.loads(path.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                problems.append("offline marker is not valid JSON")
+                continue
+            if not isinstance(marker, dict):
+                problems.append("offline marker is not an object")
+                continue
+            if marker.get("live_build") is not True:
+                problems.append("offline marker declares live_build != true")
+            mode = str(marker.get("mode", "")).lower()
+            if mode in OFFLINE_MODES or any(word in mode for word in OFFLINE_MODE_MARKERS):
+                problems.append(f"offline marker mode {mode!r} is a rehearsal")
+        if path.suffix.lower() != ".json":
+            continue
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        if path in files:
+            documents[path] = document
+        if not isinstance(document, dict):
+            continue
+        # Fail closed on truthy non-boolean values (e.g. 1 or "true"), not just
+        # literal True, so a re-encoded marker cannot slip through the scan.
+        if any(document.get(key) for key in ("fixture_only", "no_qcow2_built", "synthetic")):
+            problems.append(f"{path.name} declares a fixture-only/synthetic build")
+        if "live_build" in document and document["live_build"] is not True:
+            problems.append(f"{path.name} declares a non-live build")
+
+    # 2. Require a non-synthetic provenance record with actual pins; the native
+    #    verifier binds those pins to the EXACT file digest in step 3.
+    if not any(real_provenance(document) for document in documents.values()):
+        problems.append("no non-synthetic artifact provenance in staged bundle")
+
+    # 3. Qualify the payload with the kind's REAL, existing verifier. A filename
+    #    suffix or a byte count never qualifies an artifact. Rehearsal-only
+    #    bundles remain refused even if they carry a candidate-looking file.
+    ok_kind, kind_problems, _digest = kind_verifiers.verify_kind_payload(
+        root, artifact, list(documents.values()),
+        runner=runner, process_runner=process_runner)
+    problems.extend(kind_problems)
+
+    return (not problems), problems
+
+
 def verify_bundle(directory, version, artifact, commit, identity=None,
                   repository=None, manifest_name="SHA256SUMS",
-                  sbom_name="sbom.cdx.json", signature_name="signature.json"):
+                  sbom_name="sbom.cdx.json", signature_name="signature.json",
+                  runner=None, process_runner=None):
     """Full offline precondition gate for a staged artifact bundle.
 
     Cryptographic signature verification is NOT performed here; it is the
-    consumer's step (see the install guide). This only checks integrity records
-    and their binding to the trusted OIDC workflow identity.
+    consumer's step (see the install guide). This only checks integrity records,
+    their binding to the trusted OIDC workflow identity, and the OSS-400
+    publication predicate (a real kind payload with non-fixture provenance).
     """
     root = Path(directory)
     problems = []
@@ -520,6 +687,9 @@ def verify_bundle(directory, version, artifact, commit, identity=None,
             ok_sig, issue = verify_signature_binding(signature, manifest_text, oidc_identity)
             if not ok_sig:
                 problems.append(issue)
+    ok_pred, predicate_problems = publication_predicate(
+        root, artifact, runner=runner, process_runner=process_runner)
+    problems.extend(predicate_problems)
     return (not problems), problems
 
 
@@ -570,6 +740,9 @@ def build_parser():
     script = commands.add_parser("build-script")
     script.add_argument("--artifact", required=True)
 
+    preflight = commands.add_parser("preflight-build")
+    preflight.add_argument("--artifact", required=True)
+
     independent = commands.add_parser("assert-no-app-release")
     independent.add_argument("--version", required=True)
     independent.add_argument("--artifact")
@@ -598,6 +771,10 @@ def build_parser():
     bundle.add_argument("--assertion")
     bundle.add_argument("--assertion-file")
     bundle.add_argument("--owner")
+
+    predicate = commands.add_parser("publication-predicate")
+    predicate.add_argument("--dir", required=True)
+    predicate.add_argument("--artifact", required=True)
     return parser
 
 
@@ -646,6 +823,12 @@ def main(argv=None):
         print(build_script_for(args.artifact))
         return 0
 
+    if args.command == "preflight-build":
+        ok, reason, decision = preflight_build(args.artifact)
+        _print_json({"reachable": str(ok).lower(), "reason": reason,
+                     "decision": decision})
+        return 0 if ok else 1
+
     if args.command == "assert-no-app-release":
         assert_no_app_release(args.version, args.artifact)
         print("independent runtime version confirmed; no app release touched")
@@ -687,6 +870,15 @@ def main(argv=None):
         ok, problems = verify_bundle(args.dir, args.version, args.artifact,
                                      args.commit, fields)
         _print_json({"verified": str(ok).lower(), "problems": problems})
+        return 0 if ok else 1
+
+    if args.command == "publication-predicate":
+        ok, problems = publication_predicate(args.dir, args.artifact)
+        available = {kind: {"available": present, "reason": reason}
+                     for kind, (present, reason)
+                     in kind_verifiers.verifier_availability().items()}
+        _print_json({"verified": str(ok).lower(), "problems": problems,
+                     "native_verifiers": available})
         return 0 if ok else 1
     return 2
 

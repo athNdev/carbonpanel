@@ -679,6 +679,9 @@ func main() {
 		log,
 		reconciler.Config{},
 	)
+	// Self-heal can start a replacement container, so it shares the same
+	// in-process node gate as RPC and scheduler starts (OSS-405).
+	reconcilerEngine.SetAdmissionCoordinator(admission)
 	// Module containers get the same level-triggered convergence as server
 	// containers: an externally removed or recreated sidecar is adopted or
 	// recorded as stopped instead of drifting away from its row.

@@ -159,12 +159,14 @@ that matches where the MCP process runs:
 1. Check `GET /healthz`, `GET /readyz` and `GET /health/detail` **from the MCP
    process location**. Report `healthy`, `degraded`/`unavailable` and `unknown`
    separately; a stored `Running` status is not playable evidence.
-2. Call `tools/list`; retain the tool list.
+2. Call `tools/list`; retain the tool list. It enumerates the generated
+   combined catalogue of 211 tools (245 declared RPCs, 235 mounted/reachable).
 3. On stable `v1.0.40` (`f88748be…`) call only the verified-by-contract
    read-only set matching the core lane's stable smoke path: `list_servers`,
    `get_server`, `list_files`, `get_file`, `list_backups`. Record request/response
-   pairs with timestamps. This is a first-slice catalogue of 30 tools, not full
-   API coverage; OSS-370 remains open.
+   pairs with timestamps. The five player/world/world-view tools are mounted in
+   the catalogue but their backing RPCs are absent from stable v1.0.40; OSS-370
+   tracks the remaining catalogue gaps.
 4. Do not call any mutating tool. No rollback is needed. Stop and report if a
    tool requests a write.
 5. Remove the uniquely named container, temp volume, throwaway network and temp
@@ -235,8 +237,10 @@ the README, the published guide and the registry entry.
 The copyable instructions were exercised on a disposable owned fixture without
 a Docker daemon: an in-process mock panel bound to `127.0.0.1` on an ephemeral
 port, with health endpoints, a read-only `ListServers` path and a shutdown
-assertion. Evidence:
-`C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/mcp-plans/mcp-dist-fixture-evidence.json`.
+assertion. Evidence paths in this section are relative to the external audit
+workspace (`$CARBONPANEL_AUDIT_DIR`, e.g. an out-of-tree
+`carbonpanel-main-audit/` checkout); set that variable to locate them:
+`$CARBONPANEL_AUDIT_DIR/mcp-plans/mcp-dist-fixture-evidence.json`.
 It proves the host-installed URL case and prompt content; the Docker-network
 container case remains a documented, unexecuted step in this authoring
 environment because no Docker daemon is available. Do not upgrade that to a
@@ -245,13 +249,13 @@ claim of container smoke.
 The stdio smoke driver was exercised against a separate disposable mock MCP
 server (initialize, `tools/list`, one scoped read-only call, clean EOF,
 stdout-noise rejection, missing-capability rejection). Evidence:
-`C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/mcp-plans/mcp-dist-stdio-smoke-evidence.json`.
+`$CARBONPANEL_AUDIT_DIR/mcp-plans/mcp-dist-stdio-smoke-evidence.json`.
 
 The **actual compiled `cmd/carbonpanel-mcp` binary** from core head `7e6b1216`
 was then driven against an owned Connect mock on `127.0.0.1`: auth readiness
 (`GetAuthStatus` + `GetCurrentUser`), `tools/list`, and one real `list_servers`
 call returning `isError: false`. Evidence:
-`C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/mcp-plans/mcp-dist-real-binary-scoped-smoke.json`.
+`$CARBONPANEL_AUDIT_DIR/mcp-plans/mcp-dist-real-binary-scoped-smoke.json`.
 No image was built or pushed, no live panel was contacted and no real credential
 was used. The **packaged container entrypoint on the isolated fixture network**
 (section 3) is unexecuted in this authoring environment: no Docker daemon is
@@ -260,5 +264,5 @@ dispatch before any registry listing or advertisement. Do not substitute the
 host-binary evidence for that container proof.
 
 The read-only GHCR first-tag probes are recorded in
-`C:/Users/Daybreak8458/Documents/Codex/2026-11-12/carbonpanel-main-audit/mcp-plans/mcp-ghcr-first-tag-probe.json`.
+`$CARBONPANEL_AUDIT_DIR/mcp-plans/mcp-ghcr-first-tag-probe.json`.
 They created no package, tag or release.

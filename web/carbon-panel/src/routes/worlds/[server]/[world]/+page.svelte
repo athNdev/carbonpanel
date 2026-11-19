@@ -151,7 +151,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	function writeQuery(patch: Record<string, string | null>, mode: 'push' | 'replace' = 'push') {
 		if (typeof window === 'undefined') return;
-		const url = new URL(resolve(`/worlds/${serverId}/${worldKey}`), window.location.origin);
+		const url = new URL(
+			resolve('/worlds/[server]/[world]', { server: serverId, world: worldKey }),
+			window.location.origin
+		);
 		for (const [key, value] of page.url.searchParams) url.searchParams.set(key, value);
 		for (const [key, value] of Object.entries(patch)) {
 			if (value === null || value === '') url.searchParams.delete(key);

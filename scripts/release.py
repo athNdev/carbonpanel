@@ -11,12 +11,18 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 from datetime import datetime, timezone
 import zipfile
 
-ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from scripts.openapi_version import verify_protocol_v1, verify_text
+
+ROOT = _ROOT
 IMAGE = "atharvnaphade/carbonpanel"
 TARGETS = (("linux", "amd64"), ("linux", "arm64"), ("darwin", "amd64"),
            ("darwin", "arm64"), ("windows", "amd64"))
@@ -989,15 +995,41 @@ NIGHTLY_ALIAS = "nightly"
 
 def nightly_channel_decision(event_name, opt_in=False, run_event="", conclusion="",
                              ref="", ci_verified=False):
-    """Nightly writes require an explicit trusted-main dispatch opt-in and a
-    read-only exact-commit main CI verification. Every automatic event — main
-    push, CI workflow_run, PR, schedule, tag — stages only.
+    """Trusted-main dispatch writes require an explicit opt-in and a read-only
+    exact-commit main CI verification. Every other event — main push, CI
+    workflow_run, PR, tag — stages only. Native schedules use the separate,
+    default-off nightly_schedule_decision() path below.
     """
     allowed, reason = developer_channel_decision(
         event_name, opt_in, run_event, conclusion, ref, ci_verified)
     if not allowed:
         return False, "nightly " + reason
     return True, "nightly opt-in with verified exact main CI"
+
+
+def nightly_schedule_decision(event_name, ref="", ci_verified=False,
+                              pin_stable=False, operator_setting=False):
+    """Native Actions schedule gate for the nightly-only development alias.
+
+    A scheduled run verifies by default. It may publish only when all of the
+    following hold: this is a native `schedule` event, the ref is the trusted
+    default branch, exact main CI is green for the pinned commit, the main tip
+    was stable across reads (it did not move mid-run), and a separately
+    reviewed, default-off operator setting is enabled. `push`, `pull_request`,
+    `workflow_run`, `workflow_dispatch` and tag events never take this path;
+    the stable/latest/edge aliases and release records are not touched here.
+    """
+    if event_name != "schedule":
+        return False, "scheduled nightly path is schedule-only"
+    if not ref or ref != TRUSTED_DEVELOPER_REF:
+        return False, "scheduled nightly requires the trusted default branch"
+    if str(ci_verified).strip().lower() != "true":
+        return False, "scheduled nightly requires exact main CI verification"
+    if str(pin_stable).strip().lower() != "true":
+        return False, "scheduled nightly requires a stable main pin"
+    if str(operator_setting).strip().lower() != "true":
+        return False, "scheduled nightly is verify-only until the operator setting is enabled"
+    return True, "scheduled trusted-main nightly authorized"
 
 
 def nightly_immutable_reference(commit):
@@ -1071,6 +1103,36 @@ def nightly_identity_binding(previous_commit, previous_digest, observer=None,
     if not ok:
         return {}
     return {previous_digest: previous_commit}
+
+
+def nightly_alias_identity(alias_observation, revisions=None, index_digest=None):
+    """Read the commit pinned by the LIVE nightly alias from its own
+    digest-addressed platform configs. This is an identity READ, not an
+    authorization decision: it lets an unattended run derive the previous
+    binding without an operator-supplied commit string. Both required
+    platforms must agree on a full 40-hex revision, or no commit is returned.
+    """
+    state, info = alias_observation
+    if state != "present" or not valid_digest(info["digest"]):
+        return "", ""
+    digest = info["digest"]
+    if revisions is None:
+        index_digest, revisions = platform_manifest_revisions(
+            f"{DOCKER_HUB_IMAGE}:{NIGHTLY_ALIAS}", anchor_digest=digest)
+    if index_digest not in (None, "") and index_digest != digest:
+        return "", digest
+    if not REQUIRED_PLATFORMS <= set(revisions):
+        return "", digest
+    commits = set()
+    for platform in sorted(REQUIRED_PLATFORMS):
+        value = revisions.get(platform)
+        revision = value.get("revision") if isinstance(value, dict) else None
+        if not revision or not re.fullmatch(r"[0-9a-f]{40}", revision):
+            return "", digest
+        commits.add(revision)
+    if len(commits) != 1:
+        return "", digest
+    return commits.pop(), digest
 
 
 def nightly_promotion_decision(commit, digest, immutable_observation,
@@ -1286,6 +1348,15 @@ def package(args):
     if not any(display.encode() in asset.read_bytes() or tag.encode() in asset.read_bytes()
                for asset in (frontend / "_app").rglob("*.js")):
         raise ValueError("The embedded web UI does not contain the release version")
+    # The handler serves the schema embedded at build/schemav1.yaml. Derive it
+    # from the SAME stamped input used for the bundled and website copies so a
+    # running packaged panel reports the exact product version.
+    stamped_schema = ROOT / ".website-build/release-schema/openapi.yaml"
+    if not stamped_schema.is_file():
+        raise ValueError("Missing stamped release OpenAPI input")
+    verify_text(stamped_schema.read_text(encoding="utf-8"), display)
+    verify_protocol_v1(stamped_schema.read_text(encoding="utf-8"))
+    shutil.copyfile(stamped_schema, frontend / "schemav1.yaml")
     epoch = int(args.epoch)
     date = datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     info = {"version": tag, "commit": commit, "built": date,
@@ -1360,7 +1431,13 @@ def collect(args):
                 (platform / program).write_bytes(members[program])
                 (platform / program).chmod(0o755)
     shutil.copyfile(ROOT / "config.example.yaml", image / "config.example.yaml")
-    shutil.copyfile(ROOT / ".website-build/release-schema/openapi.yaml", output / "openapi.yaml")
+    # The bundled schema must carry the exact product version, never the proto's
+    # independent 2.x placeholder. CLI/UI use the same normalized version.
+    semver = product["semver"] if product else tag[1:]
+    release_schema = ROOT / ".website-build/release-schema/openapi.yaml"
+    verify_text(release_schema.read_text(encoding="utf-8"), semver)
+    verify_protocol_v1(release_schema.read_text(encoding="utf-8"))
+    shutil.copyfile(release_schema, output / "openapi.yaml")
     (output / "release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     finalize(argparse.Namespace(output=str(output), digest=None))
 
@@ -1601,6 +1678,62 @@ def nightly_gate(args):
     return allowed
 
 
+def nightly_schedule_gate(args):
+    """Emit the nightly-only decision for the native Actions schedule path.
+
+    This never authorizes a stable/latest/edge write; it only records whether
+    the trusted-main nightly alias may move, and is verify-only by default.
+    """
+    allowed, reason = nightly_schedule_decision(
+        args.event, args.ref, args.ci_verified, args.pin_stable,
+        args.operator_setting)
+    values = {"publish": str(allowed).lower(), "reason": reason,
+              "immutable_ref": nightly_immutable_reference(args.commit),
+              "commit": args.commit, "event": args.event}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return allowed
+
+
+def nightly_schedule_sha_gate(args):
+    """Read-only sha identity gate for the unattended schedule path.
+
+    `push` only when the shared immutable sha tag is absent; `reuse` only with
+    independently verified pinned evidence; `skip` (zero writes) when the tag
+    is present-but-unverified or its lookup is unknown. A present-but-verified
+    tag for the pinned commit is reused, so a repeat schedule is a no-op rather
+    than a failed run.
+    """
+    reference = nightly_immutable_reference(args.commit)
+    revisions = {}
+    observation = observe_reference(reference, strict=True)
+    state, info = observation
+    if state == "unknown":
+        action, digest, reason = "skip", "", "sha tag lookup is unknown; skipping"
+    elif state == "absent":
+        action, digest, reason = "push", "", "sha tag is absent; an immutable image may be built"
+    else:
+        digest = info["digest"]
+        index_digest, revisions = platform_manifest_revisions(
+            reference, anchor_digest=digest)
+        ok, detail = trusted_pinned_evidence(
+            args.commit, digest, args.ci_verified, observation, revisions,
+            index_digest)
+        if ok:
+            action, reason = "reuse", "sha tag verified by pinned evidence; reuse"
+        else:
+            action, digest, reason = "skip", "", "sha tag present but unverified: " + detail
+    values = {"action": action, "digest": digest, "reason": reason,
+              "reference": reference,
+              "platform_revisions": json.dumps(
+                  {f"{os_}/{arch}": value
+                   for (os_, arch), value in revisions.items()},
+                  sort_keys=True)}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return action
+
+
 def json_argument(value, default=None):
     """Parse an optional JSON workflow input; empty means the default."""
     if not value:
@@ -1650,28 +1783,37 @@ def dev_alias_promote(args, alias):
     alias_observation = observe_reference(
         f"{DOCKER_HUB_IMAGE}:{alias}", strict=True)
     evidence = json_argument(args.pinned_evidence)
+    # An unattended schedule has no operator-supplied previous binding: derive
+    # it from the LIVE alias's own digest-addressed configs, then verify that
+    # identity independently against its sha-<commit> reference below. Manual
+    # dispatch keeps the explicit operator binding and is never auto-derived.
+    previous_commit, previous_digest = args.previous_commit, args.previous_digest
+    if (getattr(args, "auto_bind_previous", False)
+            and (not previous_commit or not previous_digest)):
+        previous_commit, previous_digest = nightly_alias_identity(alias_observation)
     # Independent evidence: the previous identity is verified from its OWN
     # digest-addressed platform configs, never from the candidate's CI result
     # or the candidate's evidence digest.
     previous_revisions, previous_index = {}, ""
-    if args.previous_commit and args.previous_digest:
+    if previous_commit and previous_digest:
         previous_index, previous_revisions = platform_manifest_revisions(
-            nightly_immutable_reference(args.previous_commit),
-            anchor_digest=args.previous_digest)
+            nightly_immutable_reference(previous_commit),
+            anchor_digest=previous_digest)
     binding = nightly_identity_binding(
-        args.previous_commit, args.previous_digest,
+        previous_commit, previous_digest,
         revisions=previous_revisions, index_digest=previous_index)
     candidate_anchor = immutable[1]["digest"] if immutable[0] == "present" else None
     candidate_index, candidate_revisions = platform_manifest_revisions(
         reference, anchor_digest=candidate_anchor)
     allowed, reason = nightly_promotion_decision(
         args.commit, args.digest, immutable, alias_observation,
-        args.previous_commit, identity_binding=binding,
+        previous_commit, identity_binding=binding,
         ci_verified=args.ci_verified, revisions=candidate_revisions,
         evidence=evidence, index_digest=candidate_index)
     values = {"alias": alias, "allowed": str(allowed).lower(), "reason": reason,
               "digest": args.digest, "immutable_state": immutable[0],
               "alias_state": alias_observation[0],
+              "previous_commit": previous_commit, "previous_digest": previous_digest,
               "identity_bound": str(bool(binding)).lower()}
     print(json.dumps(values, indent=2))
     write_output(values)
@@ -1893,8 +2035,10 @@ def build_parser():
     sha_gate_cmd.add_argument("--expected-digest", default="")
     sha_gate_cmd.add_argument("--ci-verified", default="")
     sha_gate_cmd.add_argument("--pinned-evidence", default="")
+    promote_cmds = {}
     for command_name in ("nightly-promote", "edge-promote"):
         promote_cmd = commands.add_parser(command_name)
+        promote_cmds[command_name] = promote_cmd
         promote_cmd.add_argument("--commit", required=True)
         promote_cmd.add_argument("--digest", required=True)
         promote_cmd.add_argument("--previous-commit", default="")
@@ -1902,6 +2046,16 @@ def build_parser():
         promote_cmd.add_argument("--ci-verified", default="")
         promote_cmd.add_argument("--pinned-evidence", default="")
         promote_cmd.add_argument("--apply", action="store_true")
+    promote_cmds["nightly-promote"].add_argument(
+        "--auto-bind-previous", action="store_true")
+    schedule_gate = commands.add_parser("nightly-schedule-gate")
+    for name in ("event", "commit", "ref"):
+        schedule_gate.add_argument("--" + name, required=True)
+    for name in ("ci-verified", "pin-stable", "operator-setting"):
+        schedule_gate.add_argument("--" + name, default="")
+    schedule_sha = commands.add_parser("nightly-schedule-sha-gate")
+    schedule_sha.add_argument("--commit", required=True)
+    schedule_sha.add_argument("--ci-verified", default="")
     module_resolver = commands.add_parser("module-version")
     module_resolver.add_argument("--version", required=True)
     ci_checker = commands.add_parser("verify-main-ci")

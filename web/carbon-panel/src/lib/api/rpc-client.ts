@@ -32,6 +32,8 @@ import { FileService } from '$lib/proto/carbonpanel/v1/file_pb';
 import { MinecraftService } from '$lib/proto/carbonpanel/v1/minecraft_pb';
 import { ModService } from '$lib/proto/carbonpanel/v1/mod_pb';
 import { ModBrowseService } from '$lib/proto/carbonpanel/v1/mod_browse_pb';
+import { PackwizService } from '$lib/proto/carbonpanel/v1/packwiz_pb';
+import { StagedConfigService } from '$lib/proto/carbonpanel/v1/staged_config_pb';
 import { ModpackService } from '$lib/proto/carbonpanel/v1/modpack_pb';
 import { ProxyService } from '$lib/proto/carbonpanel/v1/proxy_pb';
 import { ServerService } from '$lib/proto/carbonpanel/v1/server_pb';
@@ -152,6 +154,8 @@ export class RpcClient {
 	public readonly modpack: Client<typeof ModpackService>;
 	public readonly proxy: Client<typeof ProxyService>;
 	public readonly server: Client<typeof ServerService>;
+	public readonly packwiz: Client<typeof PackwizService>;
+	public readonly stagedConfig: Client<typeof StagedConfigService>;
 	public readonly support: Client<typeof SupportService>;
 	public readonly task: Client<typeof TaskService>;
 	public readonly upload: Client<typeof UploadService>;
@@ -178,6 +182,8 @@ export class RpcClient {
 		this.modpack = createClient(ModpackService, transport);
 		this.proxy = createClient(ProxyService, transport);
 		this.server = createClient(ServerService, transport);
+		this.packwiz = createClient(PackwizService, transport);
+		this.stagedConfig = createClient(StagedConfigService, transport);
 		this.support = createClient(SupportService, transport);
 		this.task = createClient(TaskService, transport);
 		this.upload = createClient(UploadService, transport);

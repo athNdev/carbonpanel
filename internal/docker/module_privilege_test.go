@@ -14,11 +14,11 @@ import (
 
 func TestApplyModuleConfinementNeverAutoBroadensPrivilege(t *testing.T) {
 	hc := &container.HostConfig{Privileged: true}
-	applyModuleConfinement(hc)
+	applyModuleConfinement(hc, nil)
 	if hc.Privileged {
 		t.Fatal("module create must not leave Privileged true; host-extension privilege is an operator feature, not a default")
 	}
-	applyModuleConfinement(nil)
+	applyModuleConfinement(nil, nil)
 }
 
 func TestHostExtensionDockerSocketIsRefused(t *testing.T) {

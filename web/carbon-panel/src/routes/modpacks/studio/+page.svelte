@@ -193,7 +193,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			const created = await res.json();
 			toast.success(`Created modpack project "${created.name}"`);
 			createDialogOpen = false;
-			goto(resolve(`/modpacks/studio/${created.id}`));
+			goto(resolve('/modpacks/studio/[id]', { id: created.id }));
 		} catch (err) {
 			console.error('Failed to create pack:', err);
 			toast.error((err instanceof Error ? err.message : undefined) || 'Failed to create pack');
@@ -235,7 +235,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			importFile = null;
 			importName = '';
 			await loadPacks();
-			goto(resolve(`/modpacks/studio/${imported.id}`));
+			goto(resolve('/modpacks/studio/[id]', { id: imported.id }));
 		} catch (err) {
 			console.error('Import failed:', err);
 			toast.error((err instanceof Error ? err.message : undefined) || 'Failed to import modpack');
@@ -255,7 +255,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			const cloned = await res.json();
 			toast.success(`Duplicated "${pack.name}"`);
 			await loadPacks();
-			goto(resolve(`/modpacks/studio/${cloned.id}`));
+			goto(resolve('/modpacks/studio/[id]', { id: cloned.id }));
 		} catch (err) {
 			console.error('Clone failed:', err);
 			toast.error((err instanceof Error ? err.message : undefined) || 'Failed to duplicate pack');
@@ -417,7 +417,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<div class="min-w-0 flex-1 space-y-1">
 								<h3 class="truncate text-lg font-semibold">
 									<a
-										href={resolve(`/modpacks/studio/${pack.id}`)}
+										href={resolve('/modpacks/studio/[id]', { id: pack.id })}
 										class="text-foreground transition-colors hover:text-accent-text"
 									>
 										{pack.name}
@@ -521,7 +521,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								kind="primary"
 								size="sm"
 								class="h-8 text-xs"
-								onclick={() => goto(resolve(`/modpacks/studio/${pack.id}`))}
+								onclick={() => goto(resolve('/modpacks/studio/[id]', { id: pack.id }))}
 							>
 								Open Studio
 							</CarbonButton>

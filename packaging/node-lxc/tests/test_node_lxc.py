@@ -403,7 +403,10 @@ class SignedArchiveFixtureTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls._tmp.cleanup()
 
-    def _make_archive(self, tag: str, *, arch: str = "amd64", version: str = "24.04") -> tuple[Path, Path]:
+    def _make_archive(self, tag: str, *, arch: str = "amd64", version: str = "24.04",
+                      crlf: bool = False) -> tuple[Path, Path]:
+        import hashlib as _hashlib
+        import io
         import tarfile
         import node_lxc_artifact as tool
 
@@ -420,9 +423,32 @@ class SignedArchiveFixtureTests(unittest.TestCase):
         root_name = f"ubuntu-24.04-server-cloudimg-{arch}-root.tar.xz"
         lxd_name = f"ubuntu-24.04-server-cloudimg-{arch}-lxd.tar.xz"
         root_tar = base / root_name
-        with tarfile.open(root_tar, "w:xz") as tf:
-            for p in sorted(src.rglob("*")):
-                tf.add(p, arcname=p.relative_to(src).as_posix())
+        if crlf:
+            # OSS-402: produce a real xz tarball whose *raw compressed bytes*
+            # contain a literal CRLF byte sequence. The pinned upstream digest
+            # is the raw SHA-256 of these bytes, so verify-signed-archive and a
+            # production build must compare the same raw bytes. The CRLF-normalized
+            # digest differs, which is exactly the disagreement this fixture pins.
+            for nonce in range(200):
+                pad = bytearray()
+                block = _hashlib.sha256(f"crlf-fixture-{nonce}".encode()).digest()
+                while len(pad) < 16384:
+                    block = _hashlib.sha256(block).digest()
+                    pad.extend(block)
+                with tarfile.open(root_tar, "w:xz") as tf:
+                    for p in sorted(src.rglob("*")):
+                        tf.add(p, arcname=p.relative_to(src).as_posix())
+                    pad_info = tarfile.TarInfo("usr/lib/crlf-pad.bin")
+                    pad_info.size = len(pad)
+                    tf.addfile(pad_info, io.BytesIO(bytes(pad)))
+                if b"\r\n" in root_tar.read_bytes():
+                    break
+            else:
+                self.fail("could not construct an xz tarball with CRLF bytes")
+        else:
+            with tarfile.open(root_tar, "w:xz") as tf:
+                for p in sorted(src.rglob("*")):
+                    tf.add(p, arcname=p.relative_to(src).as_posix())
 
         meta_dir = base / "meta"
         meta_dir.mkdir()
@@ -559,6 +585,57 @@ class SignedArchiveFixtureTests(unittest.TestCase):
         empty.mkdir()
         refused("MISSING_ARCHIVE_FILE", "verify-signed-archive", "--provenance", str(prov),
                 "--arch", "amd64", "--work-dir", str(empty))
+
+    def test_19_crlf_tarball_raw_digest_consistent_between_verify_and_build(self) -> None:
+        """OSS-402 regression: build and verify-signed-archive must pin the SAME bytes.
+
+        A pinned upstream tarball whose raw compressed bytes contain a CRLF
+        sequence has a raw SHA-256 different from its CRLF-normalized digest.
+        Both commands must accept the raw-pinned bytes and reject a byte flip.
+        """
+        import node_lxc_artifact as tool
+        work, prov = self._make_archive("signed-crlf", crlf=True)
+        root = next(work.glob("*-root.tar.xz"))
+        raw = root.read_bytes()
+        self.assertIn(b"\r\n", raw, "fixture must contain a literal CRLF sequence")
+        raw_digest = tool.sha256_file(root)
+        canonical_digest = tool.canonical_file_digest(root)
+        self.assertNotEqual(raw_digest, canonical_digest,
+                            "the CRLF sequence must make the normalized digest diverge")
+        pin = json.loads(prov.read_text())
+        amd = next(i for i in pin["images"] if i["arch"] == "amd64")
+        self.assertEqual(amd["expected_sha256"], raw_digest)
+        self.assertNotEqual(amd["expected_sha256"], canonical_digest)
+
+        # verify-signed-archive accepts the raw-pinned bytes (real gpg check).
+        result = self._verify(work, prov)
+        self.assertEqual(result["gpg_signature"], "GOOD")
+        self.assertEqual(result["bytes_checked"][0]["sha256"], raw_digest)
+
+        # build accepts the SAME bytes against the SAME raw pin.
+        built = self.work / "crlf-build"
+        ok("build", "--source-dir", str(FIXTURES / "rootfs-minimal"),
+           "--out-dir", str(built), "--provenance", str(prov),
+           "--version", "runtime-v6.0.0", "--platform", "amd64",
+           "--base-tarball", str(root))
+        build_info = json.loads((built / "BUILD_INFO.json").read_text())
+        self.assertEqual(build_info["build_mode"], "pinned-upstream")
+
+        # A one-byte flip is rejected by BOTH commands against the same pin.
+        tampered_work = self.work / "signed-crlf-tampered"
+        if tampered_work.exists():
+            shutil.rmtree(tampered_work)
+        shutil.copytree(work, tampered_work)
+        tampered_root = next(tampered_work.glob("*-root.tar.xz"))
+        with tampered_root.open("ab") as fh:
+            fh.write(b"X")
+        refused("UPSTREAM_DIGEST_MISMATCH", "verify-signed-archive",
+                "--provenance", str(prov), "--arch", "amd64", "--work-dir", str(tampered_work))
+        refused("UPSTREAM_DIGEST_MISMATCH", "build",
+                "--source-dir", str(FIXTURES / "rootfs-minimal"),
+                "--out-dir", str(self.work / "crlf-build-refuse"),
+                "--provenance", str(prov), "--version", "runtime-v6.0.0",
+                "--platform", "amd64", "--base-tarball", str(tampered_root))
 
 
 if __name__ == "__main__":

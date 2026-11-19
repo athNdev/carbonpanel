@@ -32,12 +32,20 @@ canonical node key from before that check through container mutation and status
 persistence, so same-node starts cannot both admit against the same persisted
 total; different nodes proceed in parallel. Covered paths are RPC start,
 restart and recreate; scheduler start, restart and boot auto-start; staged
-publication with `StartAfter`; and deep-sleep wake, where `WakeServer` holds the
+publication with `StartAfter`; deep-sleep wake (where `WakeServer` holds the
 gate across the wake preparer, `StartContainer`, the bounded running wait and
-status persistence (the preparer itself must not re-acquire). It is an in-process
-gate for one controller process, not a distributed lease: a crash releases it
-and a persistent lease with TTL, renewal and uncertain outcomes was rejected
-(ADR 0014). Persisted running and starting counts remain the source of truth.
+status persistence, and the preparer itself must not re-acquire); both migration
+node starts (target container and source rollback, acquired in sorted key
+order); config and routing recreation; reconciler self-heal;
+the scheduler's post-backup restart; and snapshot-rollback restart. Those last
+three restore a server the database already counts as running/starting, but are
+gated anyway so no container mutation that can change that total escapes the
+same keyed window. `DeepSleepManager`'s constructor installs a fail-closed gate
+and refuses to wake until the composition root wires the shared coordinator;
+wiring nil cannot remove it. It is an in-process gate for one controller
+process, not a distributed lease: a crash releases it and a persistent lease
+with TTL, renewal and uncertain outcomes was rejected (ADR 0014). Persisted
+running and starting counts remain the source of truth.
 Cancelled waiters never reach Docker; the gate owns no journal kinds, events,
 staged rollback or LastStarted.
 Server/config/routing RPC and scheduled staged recreation share canonical identity persistence

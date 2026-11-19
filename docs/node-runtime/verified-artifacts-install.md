@@ -112,6 +112,24 @@ this consumer-side `cosign verify-blob` step; the Python checks and
 `verify-bundle` are only offline integrity/binding preconditions, not a substitute
 for it.
 
+The publication lane also enforces a fail-closed publication predicate before
+checksumming or signing: a staged bundle must carry a payload of the declared
+artifact kind and a non-synthetic provenance record. Any offline rehearsal
+marker (`BUILD-PREFLIGHT.json` with `live_build: false`, or a fixture-only plan
+record, including re-encoded, nested or case-variant forms) refuses the bundle.
+`verify-bundle` now inherits this predicate, so verifying a rehearsal bundle
+fails too. Offline planning and `--preflight` fixtures remain reachable for
+rehearsal, but their stamped output is refused by the publication lane.
+
+A filename suffix or byte count is never a deployable-artifact claim. The
+predicate qualifies the payload through its native verifier — QCOW2 header and
+`qemu-img` format inspection, the real xz rootfs/layout inspector for LXC, or
+the installer package manifest contract — and requires the provenance pin to
+match the payload's exact SHA-256. Symlinks and non-regular files are refused.
+If a native verifier is unavailable on the runner (for example no `qemu-img`),
+publication stops and the lane remains REHEARSAL-ONLY. These are preconditions,
+not a substitute for the cryptographic step above.
+
 ## Accurate announcement (publish only after verification)
 
 The following text is a template, not a claim of completed testing. Publish it

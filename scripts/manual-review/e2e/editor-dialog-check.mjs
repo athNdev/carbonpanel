@@ -27,7 +27,7 @@ try {
       { find: /^\$lib\/components\/carbon$/, replacement: path.join(fixture, 'carbon.js') },
       { find: '$lib', replacement: path.join(project, 'src/lib') }
     ] },
-    plugins: [svelte({ configFile: path.join(project, 'svelte.config.js') }), tailwind(), {
+    plugins: [svelte({ configFile: path.join(project, 'sveltekit.config.js') }), tailwind(), {
       name: 'editor-dialog-regression',
       configureServer(vite) {
         vite.middlewares.use(async (req, res, next) => {

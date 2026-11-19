@@ -21,10 +21,10 @@ Carbon Panel can expose a read-first [Model Context Protocol](https://modelconte
 versioned and owned: it does not move a panel release tag, a Docker Hub panel
 image or a GitHub Release. See [ADR 0034](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md).
 
-The implemented catalogue is a **first slice of 30 tools**, not full API
-coverage. Inventory coverage (25 mounted services / 220 RPCs) is not tool
-coverage; supported families still missing remain tracked under **OSS-370**,
-which stays open.
+The gateway mounts the generated **211-tool combined catalogue**. It is derived
+from 245 declared RPCs across 26 services, of which 235 are mounted/reachable
+across 27 mounted services. Tool coverage is not the same as RPC coverage;
+OSS-370 tracks the remaining catalogue gaps.
 
 ## Two different claims: available versus compatible
 
@@ -163,9 +163,11 @@ session is the liveness signal.
 
 ## Compatibility matrix
 
-Tool names match the implemented **first-slice catalogue of 30 tools** exactly.
-This is not full API coverage; OSS-370 stays open for supported families still
-missing. Evidence basis: the RPC list at tag `v1.0.40` (`f88748be…`) and at the
+Tool names match the implemented **combined 211-tool catalogue** exactly
+(245 declared RPCs, 235 mounted/reachable). All ten tools below are mounted; the
+columns report whether the panel build behind `CARBONPANEL_URL` implements the
+RPC that backs each tool. OSS-370 tracks the remaining catalogue gaps.
+Evidence basis: the RPC list at tag `v1.0.40` (`f88748be…`) and at the
 pinned post-stable build `fa23a8d73c181f9907633024d9023aead928324e`, read from
 the checked-in protos. "Qualification pending" means the RPC exists in that
 build but no passing smoke evidence has been recorded for it yet.
@@ -177,15 +179,15 @@ build but no passing smoke evidence has been recorded for it yet.
 | `list_files` | `FileService/ListFiles` | available | available |
 | `get_file` | `FileService/GetFile` | available | available |
 | `list_backups` | `BackupService/ListBackups` | available | available |
-| `list_players` | `PlayerService/ListPlayers` | **unavailable** | pinned, qualification pending |
-| `get_player` | `PlayerService/GetPlayer` | **unavailable** | pinned, qualification pending |
-| `list_world_entries` | `WorldService/ListWorldEntries` | **unavailable** | pinned, qualification pending |
-| `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | **unavailable** | pinned, qualification pending |
-| `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | **unavailable** | pinned, qualification pending |
+| `list_players` | `PlayerService/ListPlayers` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `get_player` | `PlayerService/GetPlayer` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `list_world_entries` | `WorldService/ListWorldEntries` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `list_world_view_targets` | `WorldViewService/ListWorldViewTargets` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
+| `get_world_view_status` | `WorldViewService/GetWorldViewStatus` | RPC absent (tool mounted) | mounted; pinned, qualification pending |
 
 A tool is qualified only after its RPC is present in an explicitly pinned build
 and a smoke result for that build is retained. Until then it must be reported as
-unavailable rather than attempted optimistically.
+not qualified on that build rather than attempted optimistically.
 
 ## Verified minimal smoke on stable
 

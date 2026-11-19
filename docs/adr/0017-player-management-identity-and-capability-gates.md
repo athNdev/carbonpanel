@@ -1,6 +1,8 @@
 # ADR 0017: Player identity, provenance and capability gates
 
-Status: Proposed
+Status: Accepted (OSS-345; integration gate OSS-365, 2026-11-19)
+
+Acceptance evidence: PR #506 (`codex/player-management-epic`, head `4e2671213813d37433f5b45d5a7eac5290d17b24`, merge `15816bf5057ce4f4e7e63383c82f0fd7c814dae2`) implemented the `pl_*` identity model, `Observation` provenance, `players:*` capability gates, typed moderation and the node-owned read path on `origin/main@9e81679b`. Optional bridges and full Bedrock parity remain decision-pending capabilities reported as such, not implementation promises.
 
 ## Context
 

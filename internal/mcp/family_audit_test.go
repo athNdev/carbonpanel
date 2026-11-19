@@ -32,8 +32,8 @@ func everyDeclaredProcedure(t *testing.T) map[string]bool {
 		}
 		return true
 	})
-	if len(out) != 234 {
-		t.Fatalf("declared proto RPCs: got %d, want 234", len(out))
+	if len(out) != 245 {
+		t.Fatalf("declared proto RPCs: got %d, want 245", len(out))
 	}
 	return out
 }
@@ -226,14 +226,14 @@ func TestFamilyAudit(t *testing.T) {
 				t.Errorf("declared RPC %s is missing from the matrix", procedure)
 			}
 		}
-		if declaredOps != 234 || mountedOps != 224 || unmountedOps != 10 || nonRPC != 28 {
-			t.Fatalf("matrix row counts: declared=%d mounted=%d unmounted=%d nonRPC=%d; want 234/224/10/28",
+		if declaredOps != 245 || mountedOps != 235 || unmountedOps != 10 || nonRPC != 28 {
+			t.Fatalf("matrix row counts: declared=%d mounted=%d unmounted=%d nonRPC=%d; want 245/235/10/28",
 				declaredOps, mountedOps, unmountedOps, nonRPC)
 		}
 
 		want := FamilyAuditCounts{
-			DeclaredRPCs:              234,
-			MountedReachable:          224,
+			DeclaredRPCs:              245,
+			MountedReachable:          235,
 			ListedInToolCatalog:       recordedListed,
 			ReachableByToolOrComposed: recordedReachable,
 			VerifiedByFixture:         recordedVerified,
@@ -369,8 +369,9 @@ func TestFamilyAudit(t *testing.T) {
 			}
 			pendingByID[pending.ID] = pending
 		}
-		if len(PendingInventory) != 9 || len(pendingByID) != 9 {
-			t.Fatalf("PENDING inventory has %d entries (%d unique ids), want exactly 9", len(PendingInventory), len(pendingByID))
+		if len(PendingInventory) != PendingOperationCount || len(pendingByID) != PendingOperationCount {
+			t.Fatalf("PENDING inventory has %d entries (%d unique ids), want exactly %d",
+				len(PendingInventory), len(pendingByID), PendingOperationCount)
 		}
 
 		// Every PENDING entry must name a real supported operation that is still
@@ -425,7 +426,8 @@ func TestFamilyAudit(t *testing.T) {
 		if inScope == 0 || verified != inScope {
 			t.Fatalf("partial slice: %d/%d non-pending operations verified", verified, inScope)
 		}
-		t.Logf("ORDINARY GATE PASS: %d/%d non-pending operations verified; exact 9-entry PENDING inventory intact", verified, inScope)
+		t.Logf("ORDINARY GATE PASS: %d/%d supported operations verified; PENDING inventory is empty (%d entries)",
+		verified, inScope, len(PendingInventory))
 	})
 
 	t.Run("GateDetectsUnlistedSupportedOperation", func(t *testing.T) {

@@ -6,9 +6,10 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - web/carbon-panel/src/lib/features/modules/form-codecs.ts
+  - web/carbon-panel/src/lib/features/modpacks/studio
   - scripts/manual-review/e2e/module-forms-check.mjs
-  - web/carbon-panel/src/lib/components/server/ModuleDialog.svelte
-  - web/carbon-panel/src/lib/components/server/ModuleTemplateCreateDialog.svelte
+  - web/carbon-panel/src/lib/components/server-ui/ModuleDialog.svelte
+  - web/carbon-panel/src/lib/components/server-ui/ModuleTemplateCreateDialog.svelte
 sources:
   - title: Module and Studio extraction
     resource: https://carbonpanel.atlassian.net/browse/OSS-341
@@ -46,3 +47,18 @@ returns the compatibility report unchanged; the route keeps the form state,
 toasts and post-apply reload. Both moves are mechanical and preserve outgoing
 requests byte-for-byte; neither claims stricter validation of malformed persisted
 JSON. The route keeps presentation and toasts.
+
+The same mechanical rule governs four further extracted workflows:
+`studio/loader-versions.ts` owns the lowercased loader URL, current-version
+prepend and `['latest']` fallback (returning `null` for an empty loader means
+"leave the list unchanged"); `studio/pack-resources.ts` owns override-file
+fetch/save/delete, indexed datapack install and the raw `pack.toml` read, which
+returns `null` on failure so the route keeps the last good text;
+`studio/pack-maintenance.ts` owns the slug-keyed update map, the
+`update_available` count and the refresh POST; `studio/mod-actions.ts` owns side
+rotation, PATCH/DELETE/batch requests, online search and CurseForge
+id-versus-slug version lookup. Search still parses JSON before checking
+`res.ok`; the malformed-JSON-to-empty fallback remains lossy legacy behavior,
+not validation. Outgoing requests stay byte-identical; the route keeps flags,
+dialogs and toasts. Real-browser fixture QA drives these through the actual
+Studio page at 1440 dark.

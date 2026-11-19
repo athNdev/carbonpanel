@@ -1,0 +1,161 @@
+// SPDX-License-Identifier: MPL-2.0
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+syntax = "proto3";
+
+package carbonpanel.v1;
+
+option go_package = "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1;carbonpanelv1";
+
+// PackwizService is the generated control contract for Packwiz pack management.
+// It covers the JSON pack-control operations; binary upload/import, pack file
+// delivery and export archives remain HTTP per ADR 0012. The legacy
+// /api/v1/packwiz/packs routes remain compatibility adapters during the
+// deprecation window and share one PackwizOperations instance with this service.
+service PackwizService {
+  // ListPacks lists available Packwiz projects.
+  rpc ListPacks(ListPacksRequest) returns (ListPacksResponse);
+  // GetPack returns one pack with its content lists.
+  rpc GetPack(GetPackRequest) returns (GetPackResponse);
+  // ClonePack copies a pack under a new name.
+  rpc ClonePack(ClonePackRequest) returns (ClonePackResponse);
+  // RefreshPack re-indexes a pack's content lists.
+  rpc RefreshPack(RefreshPackRequest) returns (RefreshPackResponse);
+  // CheckUpdates lists available content updates for a pack.
+  rpc CheckUpdates(CheckUpdatesRequest) returns (CheckUpdatesResponse);
+  // DeletePack removes a pack and its metadata.
+  rpc DeletePack(DeletePackRequest) returns (DeletePackResponse);
+}
+
+// PackSummary is one entry of the pack list.
+message PackSummary {
+  string id = 1;
+  string name = 2;
+  string author = 3;
+  string version = 4;
+  string mc_version = 5;
+  string mod_loader = 6;
+  string loader_version = 7;
+  int32 mod_count = 8;
+  string updated_at = 9;
+}
+
+// PackMod is one content entry stored in a pack.
+message PackMod {
+  string slug = 1;
+  string name = 2;
+  string file_name = 3;
+  string side = 4;
+  string platform = 5;
+  string project_id = 6;
+  string version_id = 7;
+  string download_url = 8;
+  int64 file_size = 9;
+  bool pinned = 10;
+  string kind = 11;
+  bool optional = 12;
+  bool default = 13;
+  string option_description = 14;
+  string hash = 15;
+  string hash_format = 16;
+  string sha512 = 17;
+}
+
+// Pack is a full Packwiz project.
+message Pack {
+  string id = 1;
+  string name = 2;
+  string author = 3;
+  string version = 4;
+  string mc_version = 5;
+  string mod_loader = 6;
+  string loader_version = 7;
+  string updated_at = 8;
+  repeated PackMod mods = 9;
+  repeated PackMod datapacks = 10;
+  repeated PackMod resourcepacks = 11;
+  repeated PackMod shaderpacks = 12;
+  string datapack_folder = 13;
+  string options = 14;
+}
+
+// PackUpdate describes an available content update.
+message PackUpdate {
+  string slug = 1;
+  string name = 2;
+  string kind = 3;
+  string platform = 4;
+  string current_version_id = 5;
+  string latest_version_id = 6;
+  string latest_file_name = 7;
+  string latest_download_url = 8;
+  string latest_hash_format = 9;
+  string latest_hash = 10;
+  string latest_sha512 = 11;
+  string changelog = 12;
+  bool update_available = 13;
+  bool pinned = 14;
+}
+
+// ListPacksRequest is empty; pack control is globally authorized.
+message ListPacksRequest {}
+
+// ListPacksResponse is the pack list.
+message ListPacksResponse {
+  repeated PackSummary packs = 1;
+}
+
+// GetPackRequest identifies a pack by id.
+message GetPackRequest {
+  string pack_id = 1;
+}
+
+// GetPackResponse returns the requested pack.
+message GetPackResponse {
+  Pack pack = 1;
+}
+
+// ClonePackRequest carries the source pack and the new name.
+message ClonePackRequest {
+  string pack_id = 1;
+  string name = 2;
+}
+
+// ClonePackResponse returns the cloned pack.
+message ClonePackResponse {
+  Pack pack = 1;
+}
+
+// RefreshPackRequest identifies a pack to re-index.
+message RefreshPackRequest {
+  string pack_id = 1;
+}
+
+// RefreshPackResponse acknowledges a refresh.
+message RefreshPackResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// CheckUpdatesRequest identifies a pack and an optional content kind filter.
+message CheckUpdatesRequest {
+  string pack_id = 1;
+  string kind = 2;
+}
+
+// CheckUpdatesResponse lists available updates after filtering.
+message CheckUpdatesResponse {
+  repeated PackUpdate updates = 1;
+}
+
+// DeletePackRequest identifies a pack to delete.
+message DeletePackRequest {
+  string pack_id = 1;
+}
+
+// DeletePackResponse acknowledges a delete.
+message DeletePackResponse {
+  bool success = 1;
+}
