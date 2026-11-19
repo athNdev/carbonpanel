@@ -124,8 +124,14 @@ one at https://mozilla.org/MPL/2.0/.
 	/>
 
 	<div class="space-y-6">
-		<CarbonTabs tabs={settingsTabs} bind:selectedTab={activeTab} />
+		<CarbonTabs tabs={settingsTabs} bind:selectedTab={activeTab} idPrefix="settings-tabs" />
 
+		<div
+			id={activeTab ? `settings-tabs-panel-${activeTab}` : undefined}
+			role="tabpanel"
+			aria-labelledby={activeTab ? `settings-tabs-tab-${activeTab}` : undefined}
+			class="min-w-0"
+		>
 		{#if activeTab === 'server-config' && showSettings}
 			<div class="motion-fade-in space-y-4">
 				{#if loading}
@@ -181,6 +187,7 @@ one at https://mozilla.org/MPL/2.0/.
 				onretry={() => window.location.reload()}
 			/>
 		{/if}
+		</div>
 	</div>
 </div>
 
