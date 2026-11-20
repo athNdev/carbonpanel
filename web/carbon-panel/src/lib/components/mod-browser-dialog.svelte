@@ -38,7 +38,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { formatBytes } from '$lib/utils';
 	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { createRequestSequence } from '$lib/utils/request-sequence';
-	import { resolveWizardMod, type QueuedServerMod } from '$lib/features/servers/create-content';
+	import { resolveWizardMods, type QueuedServerMod } from '$lib/features/servers/create-content';
 	import type {
 		BrowseModResult as RpcBrowseMod,
 		ModVersion as RpcModVersion,
@@ -49,8 +49,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		open: boolean;
 		server: Pick<Server, 'id' | 'mcVersion' | 'modLoader' | 'modpackLoader'>;
 		onInstalled?: () => void;
-		onQueue?: (mod: QueuedServerMod) => void;
-		queuedProjects?: string[];
+		onQueue?: (mods: QueuedServerMod[]) => void;
+		queuedMods?: QueuedServerMod[];
 	}
 
 	interface SearchMod {
@@ -133,13 +133,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		};
 	}
 
-	let {
-		open = $bindable(false),
-		server,
-		onInstalled,
-		onQueue,
-		queuedProjects = []
-	}: Props = $props();
+	let { open = $bindable(false), server, onInstalled, onQueue, queuedMods = [] }: Props = $props();
 
 	let searchQuery = $state('');
 	let platform = $state<'modrinth' | 'curseforge'>('modrinth');
@@ -425,14 +419,21 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				const version = versionRecords.find((entry) => entry.id === selectedVersion?.id);
 				if (!version) return;
 				const { loader, mcVersion } = browseTarget();
-				const mod = await resolveWizardMod(
-					{ loader, mcVersion, platform: project.platform },
-					{ id: project.id, name: project.title, version },
+				const key = `${project.platform}:${project.id}`;
+				const selections = queuedMods
+					.filter((mod) => mod.project !== key)
+					.map((mod) => mod.selection);
+				const plan = await resolveWizardMods(
+					{ loader, mcVersion },
+					[
+						...selections,
+						{ id: project.id, name: project.title, platform: project.platform, version }
+					],
 					async (target) =>
 						(await rpcClient.modBrowse.getModVersions(target, silentCallOptions)).versions
 				);
 				if (!open || selectedMod !== project || selectedVersion?.id !== version.id) return;
-				onQueue(mod);
+				onQueue(plan);
 				selectedMod = null;
 				return;
 			}
@@ -762,7 +763,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 													<span class="truncate text-xs text-muted-foreground">by {mod.author}</span
 													>
 												{/if}
-												{#if mod.installed || queuedProjects.includes(`${mod.platform}:${mod.id}`)}
+												{#if mod.installed || queuedMods.some((entry) => entry.project === `${mod.platform}:${mod.id}`)}
 													<Badge
 														variant="default"
 														class="h-4 bg-emerald-600 px-1.5 py-0 text-xs text-white"
@@ -890,7 +891,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							</p>
 							<div class="space-y-1.5 pt-1">
 								{#each selectedVersion.dependencies as dep (dep.project_id ?? dep.title)}
-									{#if dep.project_id}
+									{#if dep.project_id && dep.dependency_type.toLowerCase() !== 'incompatible'}
 										<label class="flex cursor-pointer items-center gap-2 text-xs">
 											<input
 												type="checkbox"
@@ -913,7 +914,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 											<Badge variant="outline" class="font-mono text-xs">
 												{dep.dependency_type}
 											</Badge>
-											<span>{dep.title || 'Unresolvable dependency (no project id)'}</span>
+											<span
+												>{dep.title ||
+													dep.project_id ||
+													dep.version_id ||
+													'Dependency identity unavailable'}</span
+											>
 										</div>
 									{/if}
 								{/each}

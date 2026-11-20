@@ -114,7 +114,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	const visible = $derived(filterAndSortPlayers(rosterState.players, filter));
 	const hasFilters = $derived(
-		!!filter.query || filter.stateFilter !== 'all' || filter.accessFilter !== 'all'
+		filter.serverId !== serverId ||
+			!!filter.query ||
+			filter.stateFilter !== 'all' ||
+			filter.accessFilter !== 'all'
 	);
 
 	function keyOf(player: PlayerSummary): string {
@@ -225,6 +228,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	function handleGlobalKeydown(event: KeyboardEvent) {
 		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
 		const target = event.target as HTMLElement | null;
+		if (
+			target instanceof Element &&
+			target.closest('dialog[open], [role="dialog"], [role="alertdialog"]')
+		)
+			return;
+		// Native controls own Enter even when a roster row was highlighted earlier.
+		if (event.key === 'Enter' && target instanceof Element && target.closest('button, a[href]'))
+			return;
 		const typing =
 			!!target &&
 			(target.tagName === 'INPUT' ||

@@ -1332,12 +1332,21 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
 				await roster.waitFor();
 
+				await page.keyboard.press('j');
+				await page.keyboard.press('x');
+				assert(await roster.getByRole('checkbox').isChecked(), 'test requires a selected roster row');
 				const trigger = page.getByRole('button', { name: 'Add player to allowlist' });
 				await trigger.focus();
 				await trigger.press('Enter');
 				const dialog = page.getByRole('dialog', { name: 'Add player to allowlist' });
 				await dialog.getByRole('textbox', { name: 'Exact UUID or username' }).fill('ReviewGuest');
-				await dialog.getByRole('button', { name: 'Add to allowlist', exact: true }).click();
+				const submit = dialog.getByRole('button', { name: 'Add to allowlist', exact: true });
+				await submit.focus();
+				await submit.press('x');
+				assert(await roster.getByRole('checkbox').isChecked(), 'dialog shortcuts must leave the roster selection intact');
+				await submit.press('/');
+				assert(await submit.evaluate((el) => el === document.activeElement), 'dialog must retain keyboard focus');
+				await submit.press('Enter');
 				await dialog.getByText('Review guest added.', { exact: true }).waitFor();
 				await page.keyboard.press('Escape');
 				await dialog.waitFor({ state: 'hidden' });
@@ -1348,6 +1357,17 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.keyboard.press('Escape');
 				await dialog.waitFor({ state: 'hidden' });
 				return 'roster remains visible, and closing the scoped dialog preserves its undo action';
+			});
+
+			await check(`cross-server roster @${width} ${theme}: an empty server filter remains reversible`, async () => {
+				await page.goto(root + '/players', { waitUntil: 'domcontentloaded' });
+				const selector = page.getByRole('combobox', { name: 'Server', exact: true });
+				await selector.selectOption('srv-2');
+				await page.getByText('No players match these filters.').waitFor();
+				assert.equal(await selector.inputValue(), 'srv-2');
+				await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+				assert.equal(await selector.inputValue(), '');
+				await page.getByRole('button', { name: 'SolarFox', exact: true }).waitFor();
 			});
 
 			await page.goto(root + '/settings', { waitUntil: 'domcontentloaded' });

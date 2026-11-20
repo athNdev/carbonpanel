@@ -28,9 +28,10 @@ describe a server's desired configuration.
   redirects. The CurseForge adapter owns fallback policy; see
   [provider credentials](../decisions/provider-http-policy.md).
 - A hook failure must be attributable to the module and the server.
-- Create Server attaches selected modules stopped. Mod and datapack failures
-  stay visible on the created server's setup results and hold a requested first
-  start until the selected content has been added.
+- Create Server confirms each selected module has a stopped container. Setup
+  failures hold a requested first start. A retry may recreate an errored module
+  without a container on the same record, and a failed start follows the
+  matching lifecycle journal receipt.
 - The Resource Pack Host serves a dedicated read-only folder. Docker prepares
   explicitly requested bind sources within mapped, symlink-checked safe roots.
 - Create-path blueprints are Java/tag seeds resolved to image, env and

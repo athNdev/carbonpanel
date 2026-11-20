@@ -49,7 +49,11 @@ one at https://mozilla.org/MPL/2.0/.
 		type ProxyListener,
 		type Server
 	} from '$lib/proto/carbonpanel/v1/common_pb';
-	import { ModuleTemplateType, type ModuleTemplate } from '$lib/proto/carbonpanel/v1/module_pb';
+	import {
+		ModuleStatus,
+		ModuleTemplateType,
+		type ModuleTemplate
+	} from '$lib/proto/carbonpanel/v1/module_pb';
 	import type { ServerBlueprint } from '$lib/proto/carbonpanel/v1/blueprint_pb';
 	import { resolveCreateBlueprint } from '$lib/utils/server-blueprint';
 	import type { ModLoaderInfo, DockerImage } from '$lib/proto/carbonpanel/v1/minecraft_pb';
@@ -290,11 +294,9 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	});
 
-	function queueMod(mod: QueuedServerMod) {
-		const next = [...selectedMods.filter((item) => item.project !== mod.project), mod];
-		mergeWizardModFiles(next.flatMap((item) => item.files));
+	function queueMods(mods: QueuedServerMod[]) {
 		modSelectionTarget = modTarget;
-		selectedMods = next;
+		selectedMods = mods;
 	}
 
 	function moduleRestriction(template: ModuleTemplate): string {
@@ -726,34 +728,68 @@ one at https://mozilla.org/MPL/2.0/.
 			});
 		}
 		for (const template of selectedModules) {
+			let moduleId = '';
 			add(template.name, async (serverId, retry) => {
-				if (retry) {
+				if (retry && !moduleId) {
 					const existing = await rpcClient.module.listModules({
 						serverId,
 						templateId: template.id
 					});
-					if (
-						existing.modules.some(
-							(module) => module.serverId === serverId && module.templateId === template.id
-						)
-					)
-						return;
+					const matching = existing.modules.filter(
+						(module) => module.serverId === serverId && module.templateId === template.id
+					);
+					if (matching.length > 1)
+						throw new Error(
+							'Several modules match this template. Open Modules to choose the intended one.'
+						);
+					moduleId = matching[0]?.id || '';
 				}
-				const response = await rpcClient.module.createModule({
-					serverId,
-					templateId: template.id,
-					name: template.name,
-					envOverrides: template.defaultEnv,
-					volumeOverrides: template.defaultVolumes,
-					eventHooks: template.defaultHooks,
-					autoStart: false,
-					startImmediately: false,
-					followServerLifecycle: true
-				});
-				if (!response.module?.id) throw new Error('The panel returned no module.');
+				if (!moduleId) {
+					const response = await rpcClient.module.createModule({
+						serverId,
+						templateId: template.id,
+						name: template.name,
+						envOverrides: template.defaultEnv,
+						volumeOverrides: template.defaultVolumes,
+						eventHooks: template.defaultHooks,
+						autoStart: false,
+						startImmediately: false,
+						followServerLifecycle: true
+					});
+					moduleId = response.module?.id || '';
+					if (!moduleId) throw new Error('The panel returned no module.');
+					retry = false;
+				}
+				await waitForSetupModule(moduleId, retry);
 			});
 		}
 		return tasks;
+	}
+
+	async function waitForSetupModule(id: string, retry: boolean) {
+		const deadline = Date.now() + 45_000;
+		while (Date.now() < deadline) {
+			const { module } = await rpcClient.module.getModule(
+				{ id },
+				{ ...silentCallOptions, timeoutMs: 5_000 }
+			);
+			if (!module) throw new Error('The panel returned no module.');
+			if (module.status === ModuleStatus.STOPPED && module.containerId) return;
+			if (module.status === ModuleStatus.RUNNING || module.status === ModuleStatus.STARTING) {
+				throw new Error('This module is already active. Open Modules to check its status.');
+			}
+			if (module.status === ModuleStatus.ERROR) {
+				if (!retry || module.containerId)
+					throw new Error(
+						'The module container failed to initialize. Check the module from the server page.'
+					);
+				retry = false;
+				await rpcClient.module.recreateModule({ id }, { ...silentCallOptions, timeoutMs: 40_000 });
+				continue;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 1_000));
+		}
+		throw new Error('The module container is still being prepared. Retry when it is ready.');
 	}
 
 	async function waitForPreparedServer(server: Server, starting = false) {
@@ -763,6 +799,7 @@ one at https://mozilla.org/MPL/2.0/.
 				{ id: server.id },
 				silentCallOptions
 			);
+			if (current?.status === ServerStatus.ERROR && starting && startRequestId) return current;
 			if (!current || current.status === ServerStatus.ERROR)
 				throw new Error(
 					'The server container could not be created. Open the server to check its status.'
@@ -780,7 +817,8 @@ one at https://mozilla.org/MPL/2.0/.
 	async function startPreparedServer(server: Server) {
 		if (!deferredStart) return;
 		const current = await waitForPreparedServer(server, true);
-		if (current.status !== ServerStatus.STOPPED) return;
+		if (current.status === ServerStatus.RUNNING || current.status === ServerStatus.STARTING) return;
+		let permittedErrorRetry = false;
 		if (startRequestId) {
 			// A transport failure does not tell us whether Docker was called. Same
 			// key is safe until a durable receipt says this attempt can be retried.
@@ -790,10 +828,17 @@ one at https://mozilla.org/MPL/2.0/.
 			const matching = journal?.operations.find(
 				(entry) => entry.requestId === startRequestId && entry.kind === 'start'
 			);
-			if (matching?.outcome === 'success') return;
-			if (matching?.nextAction === 'retry_with_new_request_id') startRequestId = '';
-			else if (matching?.holdsLock)
+			if (matching?.outcome === 'success' && current.status !== ServerStatus.ERROR) return;
+			if (matching?.nextAction === 'retry_with_new_request_id') {
+				startRequestId = '';
+				permittedErrorRetry = true;
+			} else if (matching?.holdsLock)
 				throw new Error(matching.reason || 'The previous start needs to finish before retrying.');
+		}
+		if (current.status === ServerStatus.ERROR && !permittedErrorRetry) {
+			throw new Error(
+				'The server reports an error and the previous start has no retryable receipt. Open the server to check its status.'
+			);
 		}
 		if (!startRequestId) {
 			const attempt = beginLifecycleRequest(server.id, 'start');
@@ -2342,8 +2387,8 @@ one at https://mozilla.org/MPL/2.0/.
 				mcVersion: formData.mcVersion,
 				modpackLoader: ModLoader.UNSPECIFIED
 			}}
-			onQueue={queueMod}
-			queuedProjects={selectedMods.map((mod) => mod.project)}
+			onQueue={queueMods}
+			queuedMods={selectedMods}
 		/>
 	{/key}
 {/if}

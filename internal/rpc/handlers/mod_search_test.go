@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package handlers
 
 import (
@@ -13,9 +12,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/athNdev/carbon-panel/internal/indexers/fuego"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestCurseForgePreservesIncompatibleDependencies(t *testing.T) {
+	items := curseForgeModDependencies([]fuego.Dependency{
+		{ModID: 1, RelationType: 3}, {ModID: 2, RelationType: 5}, {ModID: 3, RelationType: 2},
+	})
+	assert.Equal(t, []ModDependencyItem{
+		{ProjectID: "1", DependencyType: "required"},
+		{ProjectID: "2", DependencyType: "incompatible"},
+		{ProjectID: "3", DependencyType: "optional"},
+	}, items)
+}
 
 func TestModOnlineManager_NotFound(t *testing.T) {
 	log := logger.New()

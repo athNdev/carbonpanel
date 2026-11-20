@@ -5,6 +5,9 @@
 import { Code, ConnectError } from '@connectrpc/connect';
 
 const calls = [];
+let moduleStatus = 1;
+let moduleInitialPoll = false;
+let failedStart = false;
 const libraryPack = {
 	id: 'existing-pack',
 	indexer: 'modrinth',
@@ -92,7 +95,7 @@ export const rpcClient = {
 				return Promise.resolve({ server: { id: payload.id, status: 1 } });
 			}
 			return Promise.resolve({
-				server: { id: payload.id, containerId: 'fixture-container', status: 5 }
+				server: { id: payload.id, containerId: 'fixture-container', status: failedStart ? 7 : 5 }
 			});
 		},
 		startServer(payload) {
@@ -101,8 +104,10 @@ export const rpcClient = {
 				globalThis.__wizardFailStart &&
 				calls.filter((call) => call.method === 'startServer').length === 1
 			) {
+				failedStart = true;
 				return Promise.reject(new ConnectError('Fixture start failed.', Code.Internal));
 			}
+			failedStart = false;
 			return Promise.resolve({ status: 'starting' });
 		}
 	},
@@ -116,7 +121,9 @@ export const rpcClient = {
 						kind: 'start',
 						requestId: firstStart.payload.requestId,
 						outcome: 'failed',
-						nextAction: 'retry_with_new_request_id'
+						nextAction: globalThis.__wizardJournalLocked ? 'wait' : 'retry_with_new_request_id',
+						holdsLock: Boolean(globalThis.__wizardJournalLocked),
+						reason: 'Fixture previous start still holds its lock.'
 					}
 				]
 			});
@@ -242,7 +249,44 @@ export const rpcClient = {
 		},
 		createModule(payload) {
 			record('createModule', payload);
-			return Promise.resolve({ module: { id: 'fixture-module' } });
+			moduleStatus = globalThis.__wizardModuleMode ? 5 : 1;
+			moduleInitialPoll = globalThis.__wizardModuleMode === 'error';
+			if (globalThis.__wizardModuleMode === 'lost') {
+				return Promise.reject(
+					new ConnectError('Fixture module response lost.', Code.DeadlineExceeded)
+				);
+			}
+			return Promise.resolve({ module: { id: 'fixture-module', status: 1 } });
+		},
+		listModules(payload) {
+			record('listModules', payload);
+			return Promise.resolve({
+				modules: [
+					{
+						id: 'fixture-module',
+						status: moduleStatus,
+						serverId: payload.serverId,
+						templateId: resourcePackHost.id
+					}
+				]
+			});
+		},
+		getModule(payload) {
+			const status = moduleInitialPoll ? 6 : moduleStatus;
+			moduleInitialPoll = false;
+			record('getModule', { ...payload, status });
+			return Promise.resolve({
+				module: {
+					id: payload.id,
+					status,
+					containerId: status === 1 ? 'fixture-sidecar-container' : ''
+				}
+			});
+		},
+		recreateModule(payload) {
+			record('recreateModule', payload);
+			moduleStatus = 1;
+			return Promise.resolve({ status: 'recreated' });
 		}
 	},
 	datapack: {

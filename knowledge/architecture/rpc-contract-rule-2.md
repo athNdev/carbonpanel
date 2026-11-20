@@ -43,3 +43,6 @@ window.
 Online mod installs stream to confined node-local staging. Completion publishes
 the whole JAR into the mapped mods directory, so an interrupted retry leaves the
 previous file usable.
+ModBrowse preserves required and incompatible declarations from its providers.
+Create Server resolves exact requirements across the selected mod set and
+rejects provider-declared incompatibilities before applying it.

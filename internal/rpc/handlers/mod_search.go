@@ -48,7 +48,7 @@ type SearchModResult struct {
 type ModDependencyItem struct {
 	ProjectID      string `json:"project_id"`
 	VersionID      string `json:"version_id,omitempty"`
-	DependencyType string `json:"dependency_type"` // "required", "optional"
+	DependencyType string `json:"dependency_type"` // "required", "optional", "incompatible"
 	Title          string `json:"title,omitempty"`
 }
 
@@ -688,18 +688,6 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 			vType = "alpha"
 		}
 
-		var deps []ModDependencyItem
-		for _, d := range f.Dependencies {
-			depType := "optional"
-			if d.RelationType == 3 {
-				depType = "required"
-			}
-			deps = append(deps, ModDependencyItem{
-				ProjectID:      fmt.Sprintf("%d", d.ModID),
-				DependencyType: depType,
-			})
-		}
-
 		downloadURL := f.DownloadURL
 
 		versions = append(versions, ModVersionItem{
@@ -710,7 +698,7 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 			FileName:      f.FileName,
 			DownloadURL:   downloadURL,
 			FileSize:      f.FileLength,
-			Dependencies:  deps,
+			Dependencies:  curseForgeModDependencies(f.Dependencies),
 		})
 	}
 
@@ -724,17 +712,6 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 			case 3:
 				vType = "alpha"
 			}
-			var deps []ModDependencyItem
-			for _, d := range f.Dependencies {
-				depType := "optional"
-				if d.RelationType == 3 {
-					depType = "required"
-				}
-				deps = append(deps, ModDependencyItem{
-					ProjectID:      fmt.Sprintf("%d", d.ModID),
-					DependencyType: depType,
-				})
-			}
 			downloadURL := f.DownloadURL
 			versions = append(versions, ModVersionItem{
 				ID:            fmt.Sprintf("%d", f.ID),
@@ -744,7 +721,7 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 				FileName:      f.FileName,
 				DownloadURL:   downloadURL,
 				FileSize:      f.FileLength,
-				Dependencies:  deps,
+				Dependencies:  curseForgeModDependencies(f.Dependencies),
 			})
 		}
 	}
@@ -752,6 +729,24 @@ func (m *ModOnlineManager) curseForgeVersions(ctx context.Context, apiKey, modID
 	m.enrichCurseForgeDependencyTitles(ctx, apiKey, versions)
 
 	return versions, nil
+}
+
+func curseForgeModDependencies(dependencies []fuego.Dependency) []ModDependencyItem {
+	var items []ModDependencyItem
+	for _, dependency := range dependencies {
+		kind := "optional"
+		switch dependency.RelationType {
+		case 3: // RequiredDependency
+			kind = "required"
+		case 5: // Incompatible
+			kind = "incompatible"
+		}
+		items = append(items, ModDependencyItem{
+			ProjectID:      strconv.Itoa(dependency.ModID),
+			DependencyType: kind,
+		})
+	}
+	return items
 }
 
 // auditModInstall records an online mod install in the Activity tab, failures

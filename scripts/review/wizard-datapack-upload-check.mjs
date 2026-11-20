@@ -361,6 +361,8 @@ try {
     globalThis.__wizardPreparingPolls = 1;
     globalThis.__wizardHoldCreate = true;
     globalThis.__wizardFailStart = true;
+    globalThis.__wizardModuleMode = "error";
+    globalThis.__wizardJournalLocked = true;
   });
   await page
     .getByRole("button", { name: "Create Server", exact: true })
@@ -389,6 +391,9 @@ try {
     .waitFor();
   await page
     .getByText("Fixture download interrupted.", { exact: true })
+    .waitFor();
+  await page
+    .getByText("The module container failed to initialize.", { exact: false })
     .waitFor();
   calls = await page.evaluate(() => globalThis.__wizardCalls);
   assert.equal(
@@ -433,6 +438,14 @@ try {
     .getByRole("button", { name: "Retry failed add-ons", exact: true })
     .click();
   await page.getByRole("button", { name: "Retry start", exact: true }).click();
+  await page.getByText("Fixture previous start still holds its lock.").waitFor();
+  assert.equal(
+    await page.evaluate(() => globalThis.__wizardCalls.filter((call) => call.method === "startServer").length),
+    1,
+    "an errored server with an in-flight journal receipt must not start again",
+  );
+  await page.evaluate(() => { globalThis.__wizardJournalLocked = false; });
+  await page.getByRole("button", { name: "Retry start", exact: true }).click();
   await page.getByRole("link", { name: "Open server", exact: true }).waitFor();
   calls = await page.evaluate(() => globalThis.__wizardCalls);
   assert.equal(
@@ -442,6 +455,15 @@ try {
   assert.equal(
     calls.filter((call) => call.method === "createModule").length,
     1,
+  );
+  assert.deepEqual(
+    calls.filter((call) => call.method === "getModule").map((call) => call.payload.status),
+    [6, 5, 5, 1],
+    "the module must be observed preparing, errored, and finally stopped",
+  );
+  assert.deepEqual(
+    calls.filter((call) => call.method === "recreateModule").map((call) => call.payload.id),
+    ["fixture-module"],
   );
   assert.deepEqual(
     calls
@@ -459,9 +481,29 @@ try {
   );
   summaries.push({
     scenario:
-      "compatible mod, pinned dependency, module, partial failure and retry",
+      "compatible mod, pinned dependency, failed sidecar and JAR, locked start refusal and journal-authorized retry from ERROR",
     calls,
   });
+
+  await page.reload();
+  await waitForFixtureReady(page);
+  await goToDatapackStep(page);
+  await page.getByRole("button", { name: "Modules", exact: true }).click();
+  await page.getByRole("button", { name: "Add Resource Pack Host", exact: true }).click();
+  await page.evaluate(() => { globalThis.__wizardModuleMode = "lost"; });
+  await page.getByRole("button", { name: "Create Server", exact: true }).click();
+  await page.getByText("Fixture module response lost.", { exact: false }).waitFor();
+  await page.getByRole("button", { name: "Retry failed add-ons", exact: true }).click();
+  await page.getByRole("link", { name: "Open server", exact: true }).waitFor();
+  await page.getByText("Added", { exact: true }).waitFor();
+  calls = await page.evaluate(() => globalThis.__wizardCalls);
+  assert.deepEqual(
+    calls.filter((call) => ["createModule", "listModules", "getModule", "recreateModule"].includes(call.method))
+      .map((call) => call.method),
+    ["createModule", "listModules", "getModule", "recreateModule", "getModule"],
+    "retry must inspect and repair the existing error row after a lost create response",
+  );
+  summaries.push({ scenario: "lost module response recovers its existing errored record", calls });
 
   assert.deepEqual(errors, [], "the fixture page must not throw");
   await page.screenshot({ path: path.join(out, "result.png") });
