@@ -199,6 +199,7 @@ seed() {
 	seed_showcase_pack "${token}"
 	seed_showcase_world_library "${token}" "${server_id}"
 	if wait_for_server_running "${token}"; then
+		seed_showcase_terrain "${token}" "${server_id}"
 		seed_showcase_player "${token}" "${server_id}"
 	else
 		echo "review server did not reach RUNNING; skipping player allowlist fixture" >&2
@@ -337,6 +338,75 @@ seed_showcase_pack() {
 	create_extra_pack 'Adventure Kit' '1.2.4' '1.20.1' 'quilt'
 }
 
+# Resolve a disposable server's host data root from the panel's authoritative
+# GetServer.dataPath. Shared by the terrain-readiness and BlueMap lanes so a
+# slug+ID directory (review-vanilla_<id>) is never guessed as a bare id.
+review_server_host_path() {
+	local token="$1" server_id="$2" data_path host_path
+	data_path="$(rpc /carbonpanel.v1.ServerService/GetServer "{\"id\":\"${server_id}\"}" "${token}" 2>/dev/null | json_path 'server.dataPath')"
+	case "${data_path}" in
+		/app/data/*) host_path="${DATA}/data/${data_path#/app/data/}" ;;
+		*) host_path="${DATA}/data/servers/${server_id}" ;;
+	esac
+	printf '%s' "${host_path}"
+}
+
+# Guarantee real terrain under the fixed initial camera. A fresh Minecraft
+# world has a random seed, so relying on whatever chunks happen to exist at
+# origin makes the map capture intermittently black. Force-load a small grid
+# around spawn through the panel's own console RPC, let it generate, and flush
+# saves before the renderer reads the world. This only generates disposable
+# fixture terrain; no external world or live server is touched.
+seed_showcase_terrain() {
+	local token="$1" server_id="$2" response success range
+	local -a ranges=(
+		"-256 -256 -1 -1"
+		"0 -256 255 -1"
+		"-256 0 -1 255"
+		"0 0 255 255"
+	)
+	# Minecraft /forceload takes BLOCK coordinates and refuses more than 256
+	# chunks per command. Each range covers 16x16 = 256 chunks (256 blocks per
+	# side); four ranges cover a 512x512 block landscape around spawn.
+	for range in "${ranges[@]}"; do
+		response="$(REVIEW_SERVER_ID="${server_id}" REVIEW_RANGE="${range}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"forceload add " + process.env.REVIEW_RANGE,silent:true}))')"
+		response="$(rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" 2>/dev/null)" || {
+			echo "review terrain batch ${range} was refused; map capture may be clipped" >&2
+			return 0
+		}
+		success="$(printf '%s' "${response}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success?"true":"false")}catch(e){console.log("false")}})')"
+		echo "review terrain batch ${range}: success=${success}" >&2
+		[ "${success}" = "true" ] || return 0
+	done
+	# Four 256-chunk batches cover chunks x=-16..15, z=-16..15, i.e. four
+	# region files r.{-1,0}.{-1,0}.mca with 256 chunks each. Wait for real
+	# headers in those files, not just a stable size: a small spawn region can
+	# otherwise look settled while most of the landscape is still missing.
+	local host_path region_dir coverage_line coverage bytes stable=0 prev_coverage=-1 deadline
+	host_path="$(review_server_host_path "${token}" "${server_id}")"
+	region_dir="${host_path}/world/region"
+	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"save-all flush",silent:true}))')"
+	rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
+	deadline=$((SECONDS + 180))
+	while ((SECONDS < deadline)); do
+		# Flush before each sample so the header we read is persisted.
+		rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
+		coverage_line="$(python3 "${REPO}/scripts/review/region_coverage.py" --region-dir "${region_dir}" 2>/dev/null || printf '0:0')"
+		coverage_line="${coverage_line:-0:0}"
+		coverage="${coverage_line%%:*}"
+		bytes="${coverage_line##*:}"
+		if [ "${coverage}" -ge 900 ] && [ "${coverage}" = "${prev_coverage}" ]; then
+			stable=$((stable + 1))
+		else
+			stable=0
+		fi
+		prev_coverage="${coverage}"
+		[ "${stable}" -ge 2 ] && break
+		sleep 3
+	done
+	echo "review persisted region coverage: ${prev_coverage}/1024 chunks, ${bytes} bytes (stable checks: ${stable})" >&2
+}
+
 # A real BlueMap renderer for the gated World View capture. Managed install is
 # unavailable on this stack because CreateNode mints a UUID node id, so the
 # explicit world_view endpoint path is used instead: the renderer container
@@ -352,10 +422,7 @@ seed_showcase_bluemap() {
 		echo "could not resolve seeded server/node facts for BlueMap; skipping renderer" >&2
 		return 0
 	fi
-	case "${data_path}" in
-		/app/data/*) host_path="${DATA}/data/${data_path#/app/data/}" ;;
-		*) host_path="${DATA}/data/servers/${server_id}" ;;
-	esac
+	host_path="$(review_server_host_path "${token}" "${server_id}")"
 	DATA_PATH_FOR_BLUEMAP="${host_path}"
 	echo "review BlueMap world path: ${data_path} -> ${host_path}" >&2
 	if [ ! -d "${host_path}/${level}" ]; then
@@ -372,7 +439,7 @@ set -eu
 base="${data_path}/modules/bluemap"
 mkdir -p "\${base}/config/maps" "\${base}/data" "\${base}/web"
 printf '%s\n' '# Isolated review fixture' 'accept-download: true' 'render-thread-count: 1' 'region-file-check-interval: 5' > "\${base}/config/core.conf"
-printf '%s\n' '# Seeded vanilla level, mounted read-only' 'id: "${level}"' 'name: "${level}"' 'world: "/app/world"' 'dimension: "minecraft:overworld"' 'storage: file' > "\${base}/config/maps/${level}.conf"
+printf '%s\n' '# Seeded vanilla level, mounted read-only' 'id: "${level}"' 'name: "${level}"' 'world: "/app/world"' 'dimension: "minecraft:overworld"' 'storage: "file"' 'hires: { enabled: true }' 'lowres: { enabled: true }' > "\${base}/config/maps/${level}.conf"
 EOF
 	docker cp "${DATA}/config/setup-bluemap.sh" "${NAME}:/tmp/setup-bluemap.sh" >/dev/null 2>&1 || return 0
 	docker exec -u root "${NAME}" sh /tmp/setup-bluemap.sh >/dev/null 2>&1 || return 0
@@ -380,20 +447,31 @@ EOF
 		echo "could not start the isolated BlueMap renderer; skipping map capture" >&2
 		return 0
 	fi
-	deadline=$((SECONDS + 240))
+	deadline=$((SECONDS + 300))
+	stable=0
+	prev_count=-1
 	while ((SECONDS < deadline)); do
-		if [ -f "${mapdir}/web/settings.json" ] &&
-			[ -d "${mapdir}/web/maps/${level}/tiles" ] &&
-			[ -n "$(find "${mapdir}/web/maps/${level}/tiles" -type f -print -quit 2>/dev/null)" ]; then
+		count=0
+		if [ -f "${mapdir}/web/settings.json" ] && [ -d "${mapdir}/web/maps/${level}/tiles" ]; then
+			count="$(find "${mapdir}/web/maps/${level}/tiles" -type f 2>/dev/null | wc -l | tr -d ' ')"
+		fi
+		if [ "${count}" -ge 250 ] && [ "${count}" = "${prev_count}" ]; then
+			stable=$((stable + 1))
+		else
+			stable=0
+		fi
+		prev_count="${count}"
+		if [ "${stable}" -ge 4 ] && [ "${count}" -ge 250 ]; then
 			break
 		fi
 		sleep 3
 	done
 	if [ ! -f "${mapdir}/web/settings.json" ] ||
 		[ -z "$(find "${mapdir}/web/maps/${level}/tiles" -type f -print -quit 2>/dev/null)" ]; then
-		echo "BlueMap did not produce real tiles/settings.json within 240s; map capture will be unavailable" >&2
+		echo "BlueMap did not produce real tiles/settings.json within 300s; map capture will be unavailable" >&2
 		return 0
 	fi
+	echo "review BlueMap tile files before panel restart: ${prev_count}" >&2
 	mkdir -p "${DATA}/config"
 	cat >"${DATA}/config/config.yaml" <<EOF
 # Isolated review fixture: explicit node-local renderer endpoint.
@@ -413,61 +491,117 @@ EOF
 	echo "seeded real BlueMap tiles for ${server_id} on ${node_id}"
 }
 
-# The sidecar is disposable but it is still a container on the host daemon.
+# Review sidecars are disposable but still containers on the host daemon.
 # Never remove a name: inspect, verify the immutable ID and ownership label,
 # then remove exactly that ID. A colliding unowned container is a hard refusal.
 owned_sidecar_id() {
-	local record id owner
-	record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "${NAME}-bluemap" 2>/dev/null)" || return 1
+	local name="${1:-${NAME}-bluemap}" record id owner
+	record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "$name" 2>/dev/null)" || return 1
 	id="${record%% *}"; owner="${record#* }"
 	if [[ ! "$id" =~ ^[0-9a-f]{64}$ ]]; then
-		echo "refusing sidecar operation: ${NAME}-bluemap has no immutable container id" >&2
+		echo "refusing sidecar operation: ${name} has no immutable container id" >&2
 		return 1
 	fi
 	if [ "$owner" != "$DATA" ]; then
-		echo "refusing sidecar operation: ${NAME}-bluemap is not owned by this review session" >&2
+		echo "refusing sidecar operation: ${name} is not owned by this review session" >&2
 		return 1
 	fi
 	printf '%s' "$id"
 }
 
 sidecar_exists() {
-	docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "${NAME}-bluemap"
+	local name="${1:-${NAME}-bluemap}"
+	docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$name"
 }
 
 remove_owned_sidecar() {
-	if ! sidecar_exists; then
+	local name="${1:-${NAME}-bluemap}"
+	if ! sidecar_exists "$name"; then
 		return 0
 	fi
 	assert_owner || return 1
 	local id
-	id="$(owned_sidecar_id)" || return 1
+	id="$(owned_sidecar_id "$name")" || return 1
 	docker rm -f "$id" >/dev/null
 }
 
+# overlay_csp_safe_webapp replaces only the browser bundle in the generated
+# BlueMap web root with the pinned CSP-safe build (ADR 0048). The pristine
+# upstream bundle calls new Function() during locale translation; the panel's
+# unchanged CSP blocks it and the map fails to load after the first tile. Real
+# settings.json and real rendered maps/ tiles are never touched. Fail closed on
+# digest drift so a stale or substituted bundle cannot qualify a capture.
+overlay_csp_safe_webapp() {
+	local mapdir="$1" fixture="${REPO}/scripts/review/fixtures/bluemap-webapp-jit"
+	local web="${mapdir}/web" i
+	[ -f "${fixture}/manifest.sha256" ] || {
+		echo "review BlueMap CSP-safe fixture is absent; cannot qualify map capture" >&2
+		return 1
+	}
+	# BlueMap writes its own web root when the renderer starts. Wait for it
+	# before overlaying so the pinned files are the ones actually served.
+	for ((i = 0; i < 60; i++)); do
+		[ -f "${web}/index.html" ] && break
+		sleep 1
+	done
+	if [ ! -f "${web}/index.html" ]; then
+		echo "review BlueMap web root was not created; cannot overlay CSP-safe bundle" >&2
+		return 1
+	fi
+	(cd "${fixture}" && sha256sum -c manifest.sha256 >/dev/null 2>&1) || {
+		echo "review BlueMap CSP-safe bundle digest drift; refusing map capture" >&2
+		return 1
+	}
+	# BlueMap owns the mounted web root inside its container. Copy through
+	# docker cp (not the host filesystem) so the runner does not need write
+	# permission on container-owned files; only the owned sidecar is touched.
+	docker cp "${fixture}/index.html" "${NAME}-bluemap:/app/web/index.html" >/dev/null || return 1
+	docker cp "${fixture}/assets/." "${NAME}-bluemap:/app/web/assets/" >/dev/null || return 1
+	docker cp "${fixture}/lang/." "${NAME}-bluemap:/app/web/lang/" >/dev/null || return 1
+	local digest
+	digest="$(docker exec "${NAME}-bluemap" sha256sum /app/web/assets/index-BA9KJ4pi.js 2>/dev/null | cut -d' ' -f1)"
+	echo "review BlueMap served webapp bundle: ${digest}" >&2
+	[ "${digest}" = "ba940f930de0642acfd2ca8b0eda6aa0914ce02fcf673cee18262b3dd5217da3" ] || return 1
+	set_bluemap_start_location "${mapdir}"
+}
+
+# BlueMap's default camera (distance 1500) shows the tiny seeded spawn area as
+# a few pixels in a black void. Start the map zoomed into the real generated
+# tiles using BlueMap's own startLocation setting: only the initial camera
+# changes, never the real settings.json map list or rendered tile tree. The
+# renderer rewrites settings.json while rendering, so apply this last, after
+# the tile-coverage wait and immediately before the journey.
+set_bluemap_start_location() {
+	local mapdir="$1" web="${1}/web"
+	local start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:120:0:0:0:0:perspective}"
+	local settings_tmp="${DATA}/config/bluemap-settings.json"
+	[ -f "${web}/settings.json" ] || return 1
+	START_LOCATION="${start_location}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);j.startLocation=process.env.START_LOCATION;process.stdout.write(JSON.stringify(j))}catch(e){process.exit(1)}})' \
+		<"${web}/settings.json" >"${settings_tmp}" || return 1
+	docker cp "${settings_tmp}" "${NAME}-bluemap:/app/web/settings.json" >/dev/null || return 1
+	local root_keys
+	root_keys="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(Object.keys(JSON.parse(s)).sort().join(","))}catch(e){console.log("parse_error")}})' <"${web}/settings.json")"
+	echo "review BlueMap root settings keys: ${root_keys}" >&2
+	echo "review BlueMap startLocation: ${start_location}" >&2
+}
+
+# Real BlueMap renderer and web server for the seeded world. BlueMap's own
+# webserver serves hires/lowres tiles, settings and web assets correctly for the
+# generated web root, so it must be the HTTP origin the panel probes and proxies.
+# It shares the panel's network namespace to be reachable at 127.0.0.1:8100.
+# Because network namespace sharing is tied to the panel container, this sidecar
+# must be recreated after the panel container is recreated.
 start_bluemap() {
 	local host_path="$1" mapdir="$2" level="$3"
-	remove_owned_sidecar || return 1
+	remove_owned_sidecar "${NAME}-bluemap" || return 1
 	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
 		--label "carbonpanel.review.owner=${DATA}" \
 		-v "${mapdir}/config:/app/config" \
 		-v "${host_path}/${level}:/app/world:ro" \
 		-v "${mapdir}/data:/app/data" \
 		-v "${mapdir}/web:/app/web" \
-		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1
-}
-
-# BlueMap produced real tiles above, but its own web listener is not reliably
-# reachable from the panel's loopback namespace. Serve the SAME generated web
-# root (tiles + settings.json + renderer assets) with a bounded static server
-# on the shared network namespace. No map is drawn, faked or regenerated here.
-start_map_server() {
-	local mapdir="$1"
-	remove_owned_sidecar || return 1
-	docker run -d --name "${NAME}-bluemap" --network "container:${NAME}" \
-		--label "carbonpanel.review.owner=${DATA}" \
-		-v "${mapdir}/web:/web:ro" \
-		python:3.13-alpine python -m http.server 8100 --bind 0.0.0.0 --directory /web >/dev/null 2>&1
+		ghcr.io/bluemap-minecraft/bluemap:v5.29 -r -u -w >/dev/null 2>&1 || return 1
+	overlay_csp_safe_webapp "${mapdir}" || return 1
 }
 
 start_panel() {
@@ -487,9 +621,11 @@ down() {
 	docker info >/dev/null 2>&1 || { echo "Docker is unavailable; refusing teardown" >&2; return 1; }
 	local names
 	names="$(docker ps -a --format '{{.Names}}')" || { echo "cannot list containers; refusing teardown" >&2; return 1; }
-	if printf '%s\n' "$names" | grep -Fxq "${NAME}-bluemap"; then
-		remove_owned_sidecar || return 1
-	fi
+	for sidecar in "${NAME}-bluemap" "${NAME}-bluemap-render"; do
+		if printf '%s\n' "$names" | grep -Fxq "$sidecar"; then
+			remove_owned_sidecar "$sidecar" || return 1
+		fi
+	done
 	if printf '%s\n' "$names" | grep -Fxq "$NAME"; then
 		assert_owner
 		local record id owner
@@ -513,7 +649,11 @@ up)
 	PORT="$(free_port "${PORT}")"
 	mkdir -p "${DATA}/data" "${DATA}/backups" "${DATA}/tmp" "${DATA}/config"
 	echo "${PORT}" >"${DATA}/port"
-	[ -f "${DATA}/config/config.yaml" ] || printf '{}\n' >"${DATA}/config/config.yaml"
+	# Fresh fixtures only: pin a deterministic world seed in the initial
+	# config (JSON is valid YAML). Existing review configs are never touched.
+	if [ ! -f "${DATA}/config/config.yaml" ]; then
+		REVIEW_WORLD_SEED="${REVIEW_WORLD_SEED:-carbonpanel-showcase-416}" node -e 'console.log(JSON.stringify({minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}}))' >"${DATA}/config/config.yaml"
+	fi
 	docker build -q -f "${REPO}/docker/Dockerfile.carbon-panel" \
 		-t "${IMAGE}" --build-arg APP_VERSION=review "${REPO}" >/dev/null
 	start_panel
@@ -529,33 +669,106 @@ up)
 			docker rm -f "${NAME}" >/dev/null
 			start_panel
 			wait_for_health
-			# The renderer shares the panel's loopback namespace; rebind it to
-			# the newly created container after the restart.
+			# BlueMap shares the panel's network namespace, so recreating the panel
+			# drops that namespace. Restart BlueMap on the new panel container; it
+			# serves the same real generated web root and rendered tiles from disk.
 			server_path="${DATA_PATH_FOR_BLUEMAP:-}"
 			if [ -n "${server_path}" ]; then
-				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" world; then
-					# The renderer container and the panel restart are asynchronous.
+				if start_bluemap "${server_path}" "${server_path}/modules/bluemap" "${REVIEW_BLUEMAP_LEVEL:-world}"; then
+					# BlueMap startup/rendering and the panel restart are asynchronous.
 					# Only a semantic readiness signal may unblock the worlds
 					# capture. Match the SEEDED server, never a positional row:
 					# another target in the list must not mask this fixture.
 					ready_deadline=$((SECONDS + 120))
 					renderer_state=""
 					fixture_server_id="$(cat "${DATA}/server-id" 2>/dev/null || true)"
+					if [ -z "${fixture_server_id}" ]; then
+						echo "review fixture server-id is empty; cannot scope renderer readiness" >&2
+						return 0
+					fi
+					# Status-only evidence: the target id field and count actually
+					# returned by the backend. No response bodies or secrets.
+					first_probe="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null || true)"
+					echo "review world-view target count: $(printf '%s' "${first_probe}" | list_count targets)" >&2
+					echo "review world-view target keys: $(printf '%s' "${first_probe}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).targets||[];if(t[0])console.log(Object.keys(t[0]).sort().join(","))}catch(e){}})')" >&2
+					echo "review world-view target server ids: $(printf '%s' "${first_probe}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s).targets||[];console.log(t.map(x=>x.serverId||x.server_id||"none").join(","))}catch(e){}})')" >&2
+					echo "review fixture server id: ${fixture_server_id}" >&2
+					fixture_target=""
 					while ((SECONDS < ready_deadline)); do
 						# The panel's own health check performs the authoritative
 						# upstream probe (map list, keyed root, gzip assets and
 						# CSP-safe bundle). READY is the single semantic signal.
-						renderer_state="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null |
-							REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t)console.log(t.rendererState||"")}catch(e){}})')"
+						probe="$(rpc /carbonpanel.v1.WorldViewService/ListWorldViewTargets '{}' "${token}" 2>/dev/null || true)"
+						fixture_target="$(printf '%s' "${probe}" | REVIEW_SERVER_ID="${fixture_server_id}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=(JSON.parse(s).targets||[]).find(x=>x.serverId===process.env.REVIEW_SERVER_ID);if(t)console.log(JSON.stringify(t))}catch(e){}})')"
+						renderer_state="$(printf '%s' "${fixture_target}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s);console.log(t.rendererState||"")}catch(e){}})')"
 						if [ -n "${fixture_server_id}" ] && [ "${renderer_state}" = "RENDERER_STATE_READY" ]; then
 							break
 						fi
-						renderer_state=""
+						renderer_state="${renderer_state:-}"
 						sleep 1
 					done
 					echo "review renderer state: ${renderer_state:-unknown}" >&2
+					if [ -n "${fixture_target}" ]; then
+						echo "review fixture target fields: $(printf '%s' "${fixture_target}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const t=JSON.parse(s);console.log(JSON.stringify({state:t.rendererState,error:t.error,freshness:t.freshness,rendererType:t.rendererType,name:t.name}))}catch(e){console.log("parse_error")}})' | cut -c1-800)" >&2
+					fi
 					if [ "${renderer_state}" != "RENDERER_STATE_READY" ]; then
+						map_probe="$(curl -fsS --max-time 3 'http://127.0.0.1:8100/settings.json' 2>&1 || true)"
+						echo "review map settings maps: $(printf '%s' "${map_probe}" | tr '\n' ' ' | cut -c1-260)" >&2
+						tex_probe="$(find "${server_path}/modules/bluemap/web/maps" -maxdepth 3 -name 'textures.json*' 2>/dev/null | head -n 5 | tr '\n' ' ' | cut -c1-260)"
+						echo "review textures files: ${tex_probe}" >&2
+						http_probe="$(curl -sS --max-time 3 -D - -o /dev/null 'http://127.0.0.1:8100/maps/world/textures.json.gz' 2>&1 || true)"
+						echo "review textures http: $(printf '%s' "${http_probe}" | tr '\n' ' ' | cut -c1-300)" >&2
 						echo "review renderer never became READY; worlds capture will fail closed" >&2
+					else
+						# READY means textures/settings are valid, but the viewport may
+						# still request lowres tiles the renderer has not produced yet.
+						# Let the real renderer continue filling the shared web root.
+						tile_deadline=$((SECONDS + 300))
+						tile_stable=0
+						tile_prev=-1
+						while ((SECONDS < tile_deadline)); do
+							tile_count="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | wc -l | tr -d ' ')"
+							tile_count="${tile_count:-0}"
+							if [ "${tile_count}" -ge 250 ] && [ "${tile_count}" = "${tile_prev}" ]; then
+								tile_stable=$((tile_stable + 1))
+							else
+								tile_stable=0
+							fi
+							tile_prev="${tile_count}"
+							if [ "${tile_stable}" -ge 4 ] && [ "${tile_count}" -ge 60 ]; then
+								break
+							fi
+							sleep 3
+						done
+						echo "review BlueMap tile files before journey: ${tile_prev}" >&2
+						tile_sample="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sort | head -12 | tr '\n' ' ' | cut -c1-500)"
+						echo "review BlueMap tile sample: ${tile_sample}" >&2
+						tile_lods="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | sed -n 's#.*maps/[^/]*/tiles/\([^/]*\)/.*#\1#p' | sort -u | tr '\n' ' ' | cut -c1-120)"
+						echo "review BlueMap tile lods: ${tile_lods}" >&2
+						settings_info="$(BLUEMAP_WEB="${server_path}/modules/bluemap/web" python3 -c "
+import json,os
+try:
+ web=os.environ['BLUEMAP_WEB']
+ d=json.load(open(os.path.join(web,'settings.json')))
+ m=d.get('maps')
+ print('maps='+str(m)[:300])
+ if isinstance(m,list) and m:
+  mid=m[0] if isinstance(m[0],str) else str(m[0])
+  sp=os.path.join(web,'maps',mid,'settings.json')
+  if os.path.exists(sp):
+   ms=json.load(open(sp))
+   print('map_keys='+str(sorted(ms.keys()))[:300])
+   for k in ('hires','lowres','views','startPos','sorting'):
+    if k in ms: print(k+'='+str(ms[k])[:180])
+except Exception as e:
+ print('settings_err='+type(e).__name__)
+" 2>&1 || true)"
+						echo "review BlueMap settings: $(printf '%s' "${settings_info}" | tr '\n' ' ' | cut -c1-700)" >&2
+						# Apply last: the renderer rewrites settings.json as tiles
+						# land, so an earlier overlay is silently lost by now.
+						set_bluemap_start_location "${server_path}/modules/bluemap" || {
+							echo "review camera startLocation could not be applied; capture would stay black" >&2
+						}
 					fi
 				else
 					echo "review map server container failed to start" >&2

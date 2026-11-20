@@ -1,0 +1,43 @@
+{
+  "schema": "carbonpanel.proxmox-controller-ct.manifest/v1",
+  "artifact_family": "carbonpanel-controller-ct",
+  "version_domain": "controller-ct-v",
+  "scope": "Traditional amd64 unprivileged Proxmox system CT rootfs for the Carbon Panel CONTROLLER. Debian 13 trixie base avoids redistributing a modified Canonical-branded image. Not a managed-node LXC, not an OCI application CT, and not a Carbon Panel product release.",
+  "base": {
+    "distro": "debian",
+    "version": "13 (trixie)",
+    "suite": "trixie",
+    "arch": "amd64",
+    "variant": "minbase",
+    "archive_url": "https://deb.debian.org/debian",
+    "sig_verification": "debootstrap --force-check-gpg with all three official keys: Noble-packaged archive-key-12 (B8B80B5B623EAB6AD8775C45B7C5D7D6350947F8), pinned archive-key-13 (04B54C3CDCA79751B16BC6B5225629DF75B188BD) and pinned release-13 (41587F7DB8C774BCCF131416762F67A0B2C39DE4)",
+    "archive_key_url": "https://ftp-master.debian.org/keys/archive-key-13.asc",
+    "archive_key_fingerprint": "04B54C3CDCA79751B16BC6B5225629DF75B188BD",
+    "release_key_url": "https://ftp-master.debian.org/keys/release-13.asc",
+    "release_key_fingerprint": "41587F7DB8C774BCCF131416762F67A0B2C39DE4",
+    "keyring_package": "debian-archive-keyring",
+    "release_sha256_requirement": "Build receipt must record the exact signed Release file SHA-256 actually used; no guessed or unpinned base bytes are accepted.",
+    "copyright_policy": "Upstream package copyright metadata under /usr/share/doc is retained in the shipped rootfs."
+  },
+  "controller": {
+    "channel": "stable",
+    "version": "1.0.40",
+    "commit": "f88748be6a216b187e675bbb1f110df07e544148",
+    "source": "docs/version-index.json",
+    "image": "atharvnaphade/carbonpanel@sha256:ead260ef33c9a9fa8929097e4e50db02243e8889a74efeb95c8fda622862c001",
+    "ghcr_digest": "sha256:ead260ef33c9a9fa8929097e4e50db02243e8889a74efeb95c8fda622862c001",
+    "amd64_manifest_digest": "sha256:181e71bfd0bb3f79b711e66c328aadaeacd063e4b1409c114ba52546d3d140b2"
+  },
+  "runtime": {
+    "apt_repo": "https://download.docker.com/linux/debian",
+    "apt_suite": "trixie",
+    "apt_key_url": "https://download.docker.com/linux/debian/gpg",
+    "apt_key_fingerprint": "9DC858229FC7DD38854AE2D88D81803C0EBFCD88",
+    "packages_file": "packaging/proxmox-controller-ct/docker-packages.json"
+  },
+  "archive": {
+    "filename": "carbonpanel-controller-ct.tar.zst",
+    "compression": "zstd",
+    "checksum_suffix": ".sha256"
+  }
+}

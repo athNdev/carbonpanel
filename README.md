@@ -68,6 +68,14 @@ provenance before binding it to a server.
 
 [![Immutable world revision with version, size and provenance](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-library-revisions.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-library-revisions.png)
 
+### Look inside a world.
+
+Open a rendered map of a world in the panel, with real terrain tiles and the renderer's own pan and zoom controls.
+
+[![In-app World View with real rendered BlueMap terrain and renderer controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-world-view.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-world-view.png)
+
+[View the full-resolution World View capture ↗](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-world-view.png)
+
 ### Decide who connects.
 
 Add a player to a server's allowlist before they have joined, with a typed,
@@ -217,10 +225,11 @@ no MCP Registry entry has been submitted. Do not substitute a locally built or
 preview artifact for the official stable one when it is published.
 
 The implemented catalogue mounts the generated **211-tool combined catalogue**.
-It is derived from 245 declared RPCs across 26 services, of which 235 are
+It is derived from 250 declared RPCs across 26 proto services, of which 240 are
 mounted/reachable across 27 mounted services. Tool coverage is not the same as
-RPC coverage; OSS-370 tracks the remaining catalogue gaps. Do not infer that
-every panel RPC has a tool.
+RPC coverage; the audit matrix records 201 supported operations (all listed,
+reachable and verified) and 77 excluded operations with exact reasons and
+equivalent flows. Do not infer that every panel RPC has a tool.
 
 A successful client install proves only that the **package is available**. It
 does **not** prove that a tool works against your panel: **server capabilities**
@@ -268,8 +277,8 @@ local/preview image.
    socket. Confirm worlds and the panel database are intact before and after.
 5. Use the read-only tool set qualified for my panel build. On stable, the
    verified minimal set is list_servers, get_server, list_files, get_file and
-   list_backups. The combined catalogue mounts 211 tools (245 declared / 235
-   mounted RPCs); OSS-370 tracks the remaining gaps. The PlayerService,
+   list_backups. The combined catalogue mounts 211 tools (250 declared / 240
+   mounted RPCs). The PlayerService,
    WorldService and WorldViewService tools are mounted, but their backing RPCs
    are absent from stable v1.0.40: on that build return the structured
    CAPABILITY_UNAVAILABLE error with the required qualified build; do not report
@@ -348,11 +357,11 @@ Linux is fully supported and tested — Windows installations may have issues.
 
 ### Compatibility: package availability is not server capability
 
-The gateway mounts the generated **211-tool combined catalogue** (245 declared
-RPCs, 235 mounted/reachable). All ten tools below are mounted; the columns
+The gateway mounts the generated **211-tool combined catalogue** (250 declared
+RPCs, 240 mounted/reachable). All ten tools below are mounted; the columns
 report whether the panel build behind `CARBONPANEL_URL` implements the RPC that
-backs each tool. OSS-370 tracks the remaining catalogue gaps. Tool names below
-match the implemented catalogue exactly.
+backs each tool. Exclusions and policy boundaries are recorded in the OSS-375
+audit matrix. Tool names below match the implemented catalogue exactly.
 
 | Tool (read-only) | Backing RPC | Stable `v1.0.40` | Pinned post-stable build |
 | --- | --- | --- | --- |
@@ -395,6 +404,7 @@ registry entry exists, and no live fresh-install smoke has been run.
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Understand the panel         | [Introduction](https://carbonpanel.dev/docs/introduction/)                                                       |
 | Install it                   | [Docker Compose](https://carbonpanel.dev/docs/getting-started/docker-compose/)                                   |
+| Install on Proxmox           | [Proxmox guide (prepared CT preview / existing guest)](docs/carbon-panel/src/content/docs/getting-started/proxmox.mdx) and [CT archive preview](https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/carbonpanel-controller-ct.tar.zst) |
 | Connect an AI assistant      | [MCP server guide](docs/carbon-panel/src/content/docs/guides/mcp-server.mdx) (build-bound tool compatibility)     |
 | Configure it                 | [Configuration](https://carbonpanel.dev/docs/configuration/) and [config.example.yaml](config.example.yaml)      |
 | Back up a server             | [Server backups](https://carbonpanel.dev/docs/guides/backups/)                                                   |

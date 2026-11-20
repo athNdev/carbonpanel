@@ -173,6 +173,56 @@ const WORLD_ENTRIES = [
 		updatedAt: ISO(1_700_000_000)
 	}
 ];
+// Representative existing modpack rows, seeded only at the SearchModpacks
+// network boundary. Field names are the generated client's camelCase keys and
+// the JSON-array columns are valid JSON, so the real page renders them.
+const MODPACKS = [
+	{
+		id: 'seed-pack-1',
+		indexerId: 'seed-modrinth',
+		indexer: 'modrinth',
+		name: 'Seeded Fabric Pack',
+		slug: 'seeded-fabric-pack',
+		summary: 'Representative catalog entry for the recurring modpack journey',
+		description: 'Seeded at the RPC boundary; no network indexer is contacted.',
+		logoUrl: '',
+		websiteUrl: '',
+		downloadCount: 1234,
+		categories: '["fabric"]',
+		gameVersions: '["1.21.1"]',
+		modLoaders: '["fabric"]',
+		latestFileId: 'seed-file-1',
+		mcVersion: '1.21.1',
+		javaVersion: 21,
+		dockerImage: '',
+		recommendedRam: 2048,
+		isFavorited: false,
+		indexError: ''
+	},
+	{
+		id: 'seed-pack-2',
+		indexerId: 'seed-modrinth',
+		indexer: 'modrinth',
+		name: 'Seeded Forge Pack',
+		slug: 'seeded-forge-pack',
+		summary: 'Second representative catalog entry',
+		description: 'Seeded at the RPC boundary; no network indexer is contacted.',
+		logoUrl: '',
+		websiteUrl: '',
+		downloadCount: 987,
+		categories: '["forge"]',
+		gameVersions: '["1.20.4"]',
+		modLoaders: '["forge"]',
+		latestFileId: 'seed-file-2',
+		mcVersion: '1.20.4',
+		javaVersion: 17,
+		dockerImage: '',
+		recommendedRam: 2048,
+		isFavorited: false,
+		indexError: ''
+	}
+];
+
 const WORLD_TARGETS = [
 	{
 		serverId: 'srv-1',
@@ -251,6 +301,15 @@ async function seedPackagedRoutes(page, state, authMode) {
 		if (method === 'GetModLoaders') return reply({ modloaders: ['vanilla', 'fabric'] });
 		if (method === 'GetDockerImages') return reply({ images: [] });
 		if (method === 'GetNextAvailablePort') return reply({ port: 25567 });
+		if (method === 'GetIndexerStatus') {
+			return reply({ indexersAvailable: { modrinth: true }, modpacksByIndexer: { modrinth: 2 } });
+		}
+		if (method === 'ListFavorites') return reply({ modpacks: [] });
+		if (method === 'SearchModpacks') {
+			if (state.modpacks === 'refused') return fail('Fixture modpack search refused');
+			return reply({ modpacks: MODPACKS, total: MODPACKS.length, page: 1, pageSize: 20 });
+		}
+		if (method === 'GetGlobalSettings') return reply({ categories: [] });
 		return reply({});
 	});
 	// OIDC exchange and REST downloads are not part of these journeys.
@@ -506,6 +565,15 @@ const PACKAGED_ROUTES = [
 			['button', 'More server actions'],
 			['button', 'Copy Address']
 		]
+	},
+	{
+		path: '/settings',
+		h1: 'Settings',
+		controls: [
+			['heading', 'Settings'],
+			['tablist', 'Sections'],
+			['tab', 'Server Defaults']
+		]
 	}
 ];
 
@@ -675,6 +743,73 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.keyboard.press('ArrowLeft');
 				return { ...semantics, focused, selectedAfter: selected };
 			});
+
+			await page.goto(root + '/settings', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor();
+			await check(`route /settings @${width} ${theme}: tabs, tabpanel relationships, hidden panels and arrow-key navigation`, async () => {
+				await page.locator('[role="tablist"]').waitFor();
+				const readState = () => page.evaluate(() => {
+					const tabs = [...document.querySelectorAll('[role="tab"]')];
+					const selected = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+					const panels = [...document.querySelectorAll('[role="tabpanel"]')].map((panel) => ({
+						id: panel.id,
+						labelledBy: panel.getAttribute('aria-labelledby'),
+						hidden: panel.hasAttribute('hidden') || getComputedStyle(panel).display === 'none',
+						height: panel.getBoundingClientRect().height
+					}));
+					return {
+						label: document.querySelector('[role="tablist"]')?.getAttribute('aria-label'),
+						tabCount: tabs.length,
+						firstTabId: tabs[0]?.id ?? null,
+						selectedId: selected?.id ?? null,
+						selectedControls: selected?.getAttribute('aria-controls') ?? null,
+						panels,
+						visiblePanels: panels.filter((panel) => !panel.hidden).map((panel) => panel.id),
+						hiddenPanels: panels.filter((panel) => panel.hidden).map((panel) => panel.id)
+					};
+				});
+				const panelIdFor = (tabId) => `settings-tabs-panel-${tabId?.replace('settings-tabs-tab-', '') ?? ''}`;
+				const hiddenPanelContract = (state) =>
+					state.panels.length === state.tabCount &&
+					state.visiblePanels.length === 1 &&
+					state.visiblePanels[0] === state.selectedControls &&
+					state.hiddenPanels.length === state.tabCount - 1 &&
+					state.panels.every(
+						(panel) =>
+							panel.labelledBy === panel.id.replace('settings-tabs-panel-', 'settings-tabs-tab-') &&
+							(!panel.hidden || panel.height === 0)
+					);
+				const initial = await readState();
+				if (
+					initial.label !== 'Sections' ||
+					initial.tabCount < 1 ||
+					initial.firstTabId !== 'settings-tabs-tab-server-config' ||
+					initial.selectedId !== 'settings-tabs-tab-server-config' ||
+					initial.selectedControls !== 'settings-tabs-panel-server-config' ||
+					!hiddenPanelContract(initial)
+				) {
+					throw new Error(`settings tab semantics incomplete: ${JSON.stringify(initial)}`);
+				}
+				const secondTabId = await page.evaluate(() => document.querySelectorAll('[role="tab"]')[1]?.id ?? null);
+				await page.locator('#settings-tabs-tab-server-config').focus();
+				await page.keyboard.press('ArrowRight');
+				const focused = await page.evaluate(() => document.activeElement?.id);
+				if (!secondTabId || focused !== secondTabId) {
+					throw new Error(`ArrowRight did not move settings tab focus (got ${focused}, expected ${secondTabId})`);
+				}
+				const after = await readState();
+				if (
+					after.selectedId !== secondTabId ||
+					after.selectedControls !== panelIdFor(secondTabId) ||
+					!hiddenPanelContract(after) ||
+					!after.hiddenPanels.includes('settings-tabs-panel-server-config') ||
+					after.panels.find((panel) => panel.id === 'settings-tabs-panel-server-config')?.height !== 0
+				) {
+					throw new Error(`settings ArrowRight did not update tab/tabpanel relationship: ${JSON.stringify(after)}`);
+				}
+				await page.keyboard.press('ArrowLeft');
+				return { initial, focusedAfterArrowRight: focused, after };
+			});
 		}
 
 		await page.setViewportSize({ width: 1440, height: 900 });
@@ -751,6 +886,78 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 	}
 }
 
+// OSS-406 named recurring modpack journey, driven on the real packaged build.
+// It executes the same selectors as scripts/review/plan-modpacks-library.json
+// and plan-modpacks-studio-library.json: the library shell, its tab strip and
+// search control, then a public-seam refusal (SearchModpacks -> 503) followed
+// by reconciliation (Retry -> seeded catalog). No world, credential or indexer
+// state is mutated; the only stub is the external RPC response.
+async function runModpacksJourney(browser, base, theme = 'light') {
+	const root = base.replace(/\/$/, '');
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	await context.addInitScript((mode) => {
+		try {
+			localStorage.setItem('carbon-theme', mode);
+			localStorage.setItem('mode-watcher-mode', mode);
+		} catch {
+			// The per-route theme check reports the effective theme from the DOM.
+		}
+	}, theme);
+	try {
+		const page = await context.newPage();
+		const state = { servers: 'populated', detail: 'populated', modpacks: 'populated' };
+		await seedPackagedRoutes(page, state, 'anonymous');
+
+		await check(`modpacks ${theme}: library shell and tab controls render`, async () => {
+			await page.goto(root + '/modpacks', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('heading', { name: 'Modpacks', level: 1 }).waitFor();
+			await page.getByText('Browse, import and manage modpack packages').first().waitFor();
+			await page.getByTestId('showcase-modpacks-content').first().waitFor();
+			for (const tab of ['Browse', 'Imported', 'Favorites']) {
+				await page.getByRole('tab', { name: new RegExp(tab) }).first().waitFor({ timeout: 10000 });
+			}
+			await page.getByPlaceholder('Search modpacks by name or description...').waitFor();
+			return 'description, content area, three tabs and search control visible';
+		});
+
+		await check(`modpacks ${theme}: seeded catalog renders from the RPC boundary`, async () => {
+			await page.getByTestId('showcase-modpack-card').first().waitFor({ timeout: 10000 });
+			return page.getByTestId('showcase-modpack-card').count();
+		});
+
+		await check(`modpacks ${theme}: refused search exposes the error state and Retry`, async () => {
+			state.modpacks = 'refused';
+			await page.getByPlaceholder('Search modpacks by name or description...').fill('refusal-probe');
+			await page.getByRole('button', { name: 'Search', exact: true }).first().click();
+			await page.getByText('Failed to search modpacks').first().waitFor({ timeout: 10000 });
+			await page.getByRole('button', { name: 'Retry', exact: true }).first().waitFor();
+			return 'error title and Retry control visible';
+		});
+
+		await check(`modpacks ${theme}: Retry reconciles back to the populated catalog`, async () => {
+			state.modpacks = 'populated';
+			await page.getByRole('button', { name: 'Retry', exact: true }).first().click();
+			await page.getByText('Failed to search modpacks').first().waitFor({ state: 'hidden', timeout: 10000 });
+			await page.getByTestId('showcase-modpack-card').first().waitFor({ timeout: 10000 });
+			return 'error cleared and seeded card restored';
+		});
+
+		await check(`modpacks ${theme}: studio library shell controls render`, async () => {
+			state.modpacks = 'populated';
+			await page.goto(root + '/modpacks/studio', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('heading', { name: 'Modpack Studio', level: 1 }).waitFor();
+			await page.getByText('Visual workspace for custom modpacks:', { exact: false }).first().waitFor();
+			await page.getByRole('button', { name: 'Create Modpack' }).first().waitFor();
+			await page.getByRole('button', { name: 'Import Modpack' }).first().waitFor();
+			await page.getByRole('link', { name: 'Browse Modpacks' }).first().waitFor();
+			await page.getByPlaceholder('Search modpack projects...').waitFor();
+			return 'studio heading, description, three controls and project search visible';
+		});
+	} finally {
+		await context.close();
+	}
+}
+
 // Cross-engine smoke: a deliberately small slice of the packaged-route journey
 // (the three high-value routes, both themes, two widths) run in Firefox or
 // WebKit when CI has installed those browsers into the owned cache.
@@ -822,6 +1029,7 @@ try {
 	} else {
 		await runComponentJourney(browser, fixtureBase);
 		await runPackagedRouteJourney(browser, packagedBase, 'light');
+		await runModpacksJourney(browser, packagedBase, 'light');
 		await runPackagedRouteJourney(browser, packagedBase, 'dark');
 		await check('route themes: light and dark paint different backgrounds', async () => {
 			if (!themeBackgrounds.light || !themeBackgrounds.dark) {

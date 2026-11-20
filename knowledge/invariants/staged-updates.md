@@ -8,7 +8,7 @@ code_refs: [internal/db/staged_config.go, internal/db/staged_content.go, interna
 sources:
   - title: Staged update research
     resource: ../../docs/research/staged-update-application.md
-verified: { by: agent:codex, at: 2026-11-13 }
+verified: { by: agent:opencode, at: 2026-11-20 }
 review_after: 2027-01-28
 ---
 

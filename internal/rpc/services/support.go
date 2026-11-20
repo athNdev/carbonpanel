@@ -827,6 +827,7 @@ type nodeReading struct {
 	Kind               string     `json:"kind"`
 	LastHeartbeat      *time.Time `json:"lastHeartbeat,omitempty"`
 	EndpointGeneration int64      `json:"endpointGeneration,omitempty"`
+	Recovery           string     `json:"recovery,omitempty"`
 }
 
 // addDiagnosticEvidence attaches the journal projection and last-good
@@ -931,9 +932,23 @@ func (s *SupportService) nodeReadings(ctx context.Context, now time.Time) []node
 				reading.Kind = "stale"
 			}
 		}
+		reading.Recovery = nodeReadingRecovery(reading.Kind)
 		out = append(out, reading)
 	}
 	return out
+}
+
+func nodeReadingRecovery(kind string) string {
+	switch kind {
+	case "fresh":
+		return "No recovery action required; node heartbeat evidence is fresh."
+	case "stale":
+		return "Node heartbeat is stale; verify node connectivity and heartbeat reporting before relying on this node's evidence. Do not treat stale evidence as a current outage or as healthy."
+	case "never":
+		return "No heartbeat has been recorded for this node; verify the node is enrolled, enabled, and able to report heartbeats."
+	default:
+		return "Node evidence is incomplete; collect fresh node observations before taking destructive action."
+	}
 }
 
 // supportJoinProbe copies already-collected SLP or RCON freshness. It never

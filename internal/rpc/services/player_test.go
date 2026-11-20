@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+﻿// SPDX-License-Identifier: MPL-2.0
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -134,7 +134,7 @@ func (f *fakeDeep) Read(context.Context, *storage.Server, string, string) (deepR
 			Name: "play_time", Value: "12h", Unit: "", Source: "on_disk_json",
 			Confidence: "detected", ObservedAt: time.Now().UTC(),
 		}},
-		SnapshotNote: "server stopped — safe snapshot",
+		SnapshotNote: "server stopped â€” safe snapshot",
 	}, nil
 }
 
@@ -493,5 +493,61 @@ func TestSkinProxyRejectsArbitraryKind(t *testing.T) {
 	}))
 	if err == nil || connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("arbitrary skin kind not rejected: %v", err)
+	}
+}
+
+type transientUnavailableSkin struct{}
+
+func (transientUnavailableSkin) Get(context.Context, string, string) (skinAsset, error) {
+	return skinAsset{
+		Data:        []byte{137, 80, 78, 71, 13, 10, 26, 10},
+		ContentType: "image/png",
+		FromCache:   false,
+		Source:      "identity_service",
+		Confidence:  "unknown",
+		Note:        "skin unavailable: identity or texture service request failed",
+		ObservedAt:  time.Now().UTC(),
+	}, nil
+}
+func (transientUnavailableSkin) Refresh(context.Context, string, string) (skinAsset, error) {
+	return skinAsset{}, nil
+}
+func (transientUnavailableSkin) Lookup(context.Context, string) (identityLookup, error) {
+	return identityLookup{Status: "not_found"}, nil
+}
+func (transientUnavailableSkin) Close() {}
+
+func TestGetPlayerSkin_TransientUnavailableRetainsIdentityAndDecorates(t *testing.T) {
+	svc, store, _, _ := newPlayerTestService(t)
+	svc.SetSkinProvider(transientUnavailableSkin{})
+	identity := seedIdentity(t, store, "SkinTimeoutUser", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "srv-1", time.Now())
+	res, err := svc.GetPlayerSkin(context.Background(), connect.NewRequest(&v1.GetPlayerSkinRequest{
+		IdentityKey: identity.ID,
+		Kind:        "face",
+	}))
+	if err != nil {
+		t.Fatalf("GetPlayerSkin (transient unavailable): %v", err)
+	}
+	asset := res.Msg.Asset
+	if asset == nil {
+		t.Fatal("expected decorated skin asset")
+	}
+	if len(asset.Data) == 0 || strings.TrimSpace(asset.ContentType) == "" {
+		t.Fatalf("expected image payload for decorated unavailable skin: %+v", asset)
+	}
+	if asset.Observation == nil {
+		t.Fatal("expected provenance observation")
+	}
+	if asset.Observation.Confidence != v1.PlayerConfidence_PLAYER_CONFIDENCE_UNKNOWN {
+		t.Fatalf("confidence = %v, want unknown", asset.Observation.Confidence)
+	}
+	if asset.Observation.Source != v1.PlayerDataSource_PLAYER_DATA_SOURCE_IDENTITY_SERVICE {
+		t.Fatalf("source = %v, want identity service", asset.Observation.Source)
+	}
+	if !strings.Contains(strings.ToLower(asset.Observation.ConflictNote), "skin unavailable") {
+		t.Fatalf("expected unavailable decoration note, got %q", asset.Observation.ConflictNote)
+	}
+	if asset.FromCache {
+		t.Fatal("transient unavailable skin must not be reported as cache hit")
 	}
 }

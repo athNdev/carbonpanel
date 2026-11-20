@@ -1,0 +1,21 @@
+{
+  "schema": "carbonpanel.proxmox-controller-ct.docker-packages/v1",
+  "signed_repo_required": true,
+  "apt_source": "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian trixie stable",
+  "keyring_path": "/etc/apt/keyrings/docker.gpg",
+  "key_fingerprint": "9DC858229FC7DD38854AE2D88D81803C0EBFCD88",
+  "packages": [
+    "docker-ce",
+    "docker-ce-cli",
+    "containerd.io",
+    "docker-buildx-plugin",
+    "docker-compose-plugin",
+    "systemd-sysv",
+    "ifupdown",
+    "dhcpcd-base",
+    "iproute2",
+    "openssh-server",
+    "ca-certificates"
+  ],
+  "version_policy": "Resolve exact versions and per-file SHA-256 from the signed upstream Release/Packages indexes at build time and write them to the artifact receipt. Fixture builds use a synthetic receipt only and are never publishable. Upstream /usr/share/doc copyright metadata is retained."
+}

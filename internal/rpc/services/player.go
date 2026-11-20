@@ -410,11 +410,11 @@ func (s *PlayerService) LookupPlayer(ctx context.Context, req *connect.Request[v
 
 	var provider identityLookup
 	if s.skins == nil {
-		provider = identityLookup{Status: "unavailable", Note: "Identity provider is not configured."}
+		provider = identityLookup{Status: "unavailable", Note: "Identity provider is not available; try again later."}
 	} else {
 		resolved, err := s.skins.Lookup(ctx, query)
 		if err != nil {
-			provider = identityLookup{Status: "unavailable", Note: err.Error()}
+			provider = identityLookup{Status: "unavailable", Note: "Identity service unavailable; try again later."}
 		} else {
 			provider = resolved
 		}
@@ -1331,11 +1331,11 @@ func (s *PlayerService) resolveManualAllowlistTarget(ctx context.Context, server
 	// queries, and preferred for names so the allowlist uses the online name).
 	var looked identityLookup
 	if s.skins == nil {
-		looked = identityLookup{Status: "unavailable", Note: "identity provider is not configured"}
+		looked = identityLookup{Status: "unavailable", Note: "Identity provider is not available; try again later."}
 	} else {
 		looked, err = s.skins.Lookup(ctx, query)
 		if err != nil {
-			looked = identityLookup{Status: "unavailable", Note: err.Error()}
+			looked = identityLookup{Status: "unavailable", Note: "Identity service unavailable; try again later."}
 		}
 	}
 

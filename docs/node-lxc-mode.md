@@ -132,8 +132,16 @@ qualification blocker, not a code defect and not a pass. No live import/boot, no
 nested daemon start inside a real guest, no effective kernel-enforcement
 observation and no gameplay evidence is claimed. Verifying the signed archive
 bytes does not remove this blocker.
-The capability gate and fixtures prove refusals and state transitions only.
-See [qualification status](../packaging/node-lxc/qualification/QUALIFICATION.md).
+
+`packaging/node-lxc/node_lxc_artifact.py boot-qualify` and the manual workflow
+`.github/workflows/lxc-boot-qualification.yml` provide a fail-closed
+import/boot verification path: they verify real signed upstream archive bytes in
+an owned disposable path, probe or attempt unprivileged LXC import and boot on
+the runner, and emit/upload an evidence report. Qualification is reported only
+on actual evidenced import and boot; blocked or failed runs remain refused with
+explicit blockers. The capability gate and fixtures prove refusals and state
+transitions only. See
+[qualification status](../packaging/node-lxc/qualification/QUALIFICATION.md).
 
 ## Verification evidence and limits
 

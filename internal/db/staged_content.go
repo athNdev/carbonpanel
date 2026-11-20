@@ -141,10 +141,17 @@ func (s *Store) MarkStagedContentApplied(ctx context.Context, id string) error {
 	if res.Error != nil {
 		return res.Error
 	}
-	if res.RowsAffected != 1 {
+	if res.RowsAffected == 1 {
+		return nil
+	}
+	var row StagedContentChange
+	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&row).Error; err != nil {
 		return fmt.Errorf("staged content %s is not waiting to be applied", id)
 	}
-	return nil
+	if row.Status == StagedStatusApplied {
+		return nil
+	}
+	return fmt.Errorf("staged content %s is not waiting to be applied", id)
 }
 
 // MarkStagedContentStaged returns an applied content row to staged after a failed publish.
@@ -155,8 +162,15 @@ func (s *Store) MarkStagedContentStaged(ctx context.Context, id string) error {
 	if res.Error != nil {
 		return res.Error
 	}
-	if res.RowsAffected != 1 {
+	if res.RowsAffected == 1 {
+		return nil
+	}
+	var row StagedContentChange
+	if err := s.db.WithContext(ctx).Where("id = ?", id).First(&row).Error; err != nil {
 		return fmt.Errorf("staged content %s is not applied", id)
 	}
-	return nil
+	if row.Status == StagedStatusStaged {
+		return nil
+	}
+	return fmt.Errorf("staged content %s is not applied", id)
 }

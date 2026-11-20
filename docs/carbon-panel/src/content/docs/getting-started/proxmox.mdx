@@ -1,6 +1,6 @@
 ---
-title: Proxmox LXC
-description: Deploy Carbon Panel in a Proxmox LXC container using the community helper script.
+title: Proxmox (prepared CT or existing guest)
+description: Install the Carbon Panel controller in an existing Proxmox LXC or VM or in a prepared Debian system CT, using the first-party installer script.
 ---
 {/*
 SPDX-License-Identifier: MIT AND MPL-2.0
@@ -12,35 +12,172 @@ If a copy of the MPL was not distributed with this file, You can obtain
 one at https://mozilla.org/MPL/2.0/.
 */}
 
+This guide covers two paths: a **prepared Debian 13 system CT** that you import and boot, and an **existing Linux guest** (Proxmox LXC or VM, including Ubuntu) where you run Carbon Panel's first-party installer script yourself. Both use the same installer and the same data-preserving update flow. This guide does **not** provision a Proxmox host, create the guest, or change host security settings; you prepare and secure the guest yourself.
 
 ## Prerequisites
 
-- A [Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview) host
+- A [Proxmox VE](https://www.proxmox.com/en/proxmox-virtual-environment/overview) host where you can create and manage a guest
+- An existing Debian or Ubuntu LXC/VM (or another compatible Linux guest) with:
+  - [Docker Engine](https://docs.docker.com/engine/install/) and Docker Compose v2 (`docker compose`)
+  - Network access to pull `atharvnaphade/carbonpanel` images
+  - Persistent storage for `/opt/carbon-panel` (or your chosen install directory)
+  - Permission to run Docker commands (typically root or a user in the `docker` group)
 
-## Installation
+:::note[Docker inside LXC]
+Running Docker inside an LXC depends on your Proxmox/LXC configuration and kernel features. Carbon Panel does not require or apply privileged LXC settings, nesting changes, or AppArmor/seccomp relaxations. Use a guest configuration that meets your security requirements and supports Docker.
+:::
 
-The [Proxmox VE Community Scripts](https://community-scripts.github.io/ProxmoxVE/) project maintains a [Carbon Panel helper script](https://community-scripts.github.io/ProxmoxVE/scripts?id=carbon-panel) that creates a Debian 13 LXC container with everything pre-installed (Docker, Go, Node.js, Carbon Panel built from source) and managed as a systemd service.
+:::caution[Guest-local Docker socket]
+The generated `compose.yml` mounts `/var/run/docker.sock` because Carbon Panel manages Minecraft server containers through the guest-local Docker daemon. Control of the panel container therefore implies control of Docker on that guest. Keep the panel on a trusted network, set strong credentials, and treat the guest as dedicated to Carbon Panel.
+:::
 
-From your **Proxmox host shell**:
+## Prepared Debian 13 system CT (controller-ct)
+
+A prebuilt **system container template** is an ordinary Debian 13 amd64 LXC root filesystem archive, not an OCI application image. The current controller CT ships with a **pinned Stable controller image**, not a moving tag. The embedded `metadata.json` records the exact controller image digest and the CT artifact version; it does not declare a Stable release number field. Read that receipt for the build you downloaded instead of relying on a digest copied into a guide. A VM remains the stronger-isolation choice when you need live migration, a different kernel or storage layout, or maximum separation. Docker and Proxmox configurations vary — verify the feature requirements below against your own host rather than assuming every combination is supported.
+
+:::note[Template availability]
+This is a **preview** artifact under the [`controller-ct-v0.1.0` release](https://github.com/athNdev/carbonpanel/releases/tag/controller-ct-v0.1.0); native Proxmox boot qualification is pending. Download these assets from that release before importing:
+
+- [Template archive](https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/carbonpanel-controller-ct.tar.zst)
+- [SHA-256 sidecar](https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/carbonpanel-controller-ct.tar.zst.sha256)
+- [Package receipt](https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/package-receipt.json) — Debian/Docker package provenance for the guest
+
+Use only these tagged assets; do not substitute an unversioned or locally built file for a published release. This guide does not claim that a native `pct` import or boot was tested — verify the checksum, the package receipt and the CT yourself on your Proxmox host. Source and general downloads remain on the [repository](https://github.com/athNdev/carbonpanel).
+:::
+
+### Verify and import the template
+
+Check the archive against its sidecar on the Proxmox host before importing anything. Run this from the directory containing both files; do not import a template whose checksum is missing or disagrees.
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/carbon-panel.sh)"
+sha256sum -c carbonpanel-controller-ct.tar.zst.sha256
 ```
 
-The interactive wizard lets you adjust the default container resources. Set these based on what you expect your servers to need.
+Read the embedded receipt to confirm the exact controller pin this build ships. This reads one file from the archive without extracting it:
+
+```bash
+tar --zstd -xOf carbonpanel-controller-ct.tar.zst ./usr/share/carbon-panel/metadata.json
+```
+
+Import the archive into a Proxmox storage. The easiest GUI path is *Datacenter → storage → CT Templates → Download from URL*: paste the verified release asset URL
+
+```text
+https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/carbonpanel-controller-ct.tar.zst
+```
+
+Expand the advanced options, select **SHA-256**, and paste the digest from the sidecar (for example, `cut -d' ' -f1 carbonpanel-controller-ct.tar.zst.sha256`) rather than a digest copied from prose. Proxmox implements URL download for CT template content and the SHA-256 checksum field in its storage UI/API ([ContentView.js](https://github.com/proxmox/pve-manager/blob/master/www/manager6/storage/ContentView.js), [Storage/Status.pm](https://github.com/proxmox/pve-storage/blob/master/src/PVE/API2/Storage/Status.pm)). If manual transfer is required, use *CT Templates → Upload* with the same archive and sidecar instead. There is no `pvesm download-url` CLI subcommand.
+
+In the GUI create a CT from that template with **Unprivileged** enabled and **Nesting** and **keyctl** enabled in *Options → Features* before first start, set an SSH public key for root, attach the network, then start the CT. These two features are required for Docker inside an unprivileged LXC; do not enable privileged mode, do not disable AppArmor or seccomp, and do not add broad mount or FUSE permissions.
+
+Equivalent CLI. Assign the four variables for your site, then the commands are pasteable:
+
+```bash
+CTID=100                       # your unique, cluster-wide CT ID (>= 100)
+CT_STORAGE=local-lvm           # storage that holds the CT root disk
+CT_BRIDGE=vmbr0                # your Proxmox host bridge
+CT_SSH_KEY=/root/.ssh/id_rsa.pub   # public key installed for root
+
+pct create "$CTID" local:vztmpl/carbonpanel-controller-ct.tar.zst \
+  --ostype debian --unprivileged 1 \
+  --features keyctl=1,nesting=1 \
+  --ssh-public-keys "$CT_SSH_KEY" \
+  --rootfs "${CT_STORAGE}:16" --memory 2048 --swap 512 \
+  --net0 "name=eth0,bridge=${CT_BRIDGE},ip=dhcp" \
+  --hostname carbon-panel --start 1
+pct status "$CTID"
+```
+
+`--ostype debian` must match the guest's `/etc/os-release`; Proxmox refuses to start a CT when the configured OS type disagrees with the detected one.
+
+### First boot and readiness
+
+The built CT's first boot runs `carbon-panel-ct-firstboot.service`, which installs the controller from the bundled first-party installer and pins the verified Stable image reference in `/opt/carbon-panel/compose.yml`. Check the unit, then the controller:
+
+```bash
+pct exec "$CTID" -- systemctl status carbon-panel-ct-firstboot.service
+pct exec "$CTID" -- journalctl -u carbon-panel-ct-firstboot.service -n 50 --no-pager
+pct exec "$CTID" -- docker compose -f /opt/carbon-panel/compose.yml ps carbon-panel
+curl -fsS "http://${CT_GUEST_IP}:8080/"   # set CT_GUEST_IP to the CT address
+```
+
+Confirm that the `image:` value in `compose.yml` matches the digest in the receipt you verified before first boot. Keep the controller's data on the CT's storage-backed root filesystem or a managed mount point with `backup=1`. Proxmox `vzdump` does not back up bind or device mount points, and their host source paths must not contain symlinks.
+
+### Upgrade and preservation
+
+Controller upgrades stay version-neutral and data-preserving, but the first-party updater **preserves an existing `compose.yml`** and only pulls/recreates the `carbon-panel` service. To move to a newer verified pin, you must intentionally replace the image reference yourself. Take a controller database snapshot first, then:
+
+```bash
+pct exec "$CTID" -- cp /opt/carbon-panel/compose.yml /opt/carbon-panel/compose.yml.bak
+# Edit /opt/carbon-panel/compose.yml inside the CT: set image: to the verified pin in the new receipt.
+pct exec "$CTID" -- sudo bash /usr/local/share/carbon-panel/install-carbon-panel.sh update --dir /opt/carbon-panel
+```
+
+The bundled installer is the same first-party script used by the existing-guest path; the prepared CT ships it at `/usr/local/share/carbon-panel/install-carbon-panel.sh`. The updater preserves `data/`, `backups/`, `tmp/`, your compose file and `config.yaml`; only the `carbon-panel` service is recreated. If the edited pin is wrong, restore `compose.yml.bak` and re-run the updater. For a guest-level rollback, take a Proxmox snapshot when the storage supports it (`pct snapshot "$CTID" <name>`, `pct rollback "$CTID" <name>`). Do not delete volumes or bind mounts to "reset" an install.
+
+## Install (inspect, then run)
+
+Run these commands **inside the guest**, not on the Proxmox host shell. Download the script, inspect it, then run it:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh
+less install-carbon-panel.sh
+sudo bash install-carbon-panel.sh
+```
+
+By default the script:
+
+- Installs to `/opt/carbon-panel`
+- Creates `data`, `backups`, and `tmp` directories if they do not exist
+- Writes `compose.yml` **only if no standard Compose file already exists** in the install directory (`compose.yml`, `compose.yaml`, `docker-compose.yml`, `docker-compose.yaml`); existing compose/config are preserved
+- Uses the shipped controller image `atharvnaphade/carbonpanel:latest` with host networking and bind mounts for `/app/data`, `/app/backups`, and `/app/tmp`
+- Pulls the image and starts the `carbon-panel` container with `docker compose pull` then `docker compose up -d`
+
+Once complete, Carbon Panel is accessible at **http://\<guest-ip\>:8080** (default port).
+
+To use a different install directory or image:
+
+```bash
+sudo bash install-carbon-panel.sh --dir /srv/carbon-panel --image atharvnaphade/carbonpanel:latest
+```
+
+## Update
+
+To update the controller while preserving existing deployment data, compose customizations, and config, run in the guest from the directory that holds the script:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/athNdev/carbonpanel/main/scripts/proxmox/install-carbon-panel.sh
+less install-carbon-panel.sh
+sudo bash install-carbon-panel.sh update --dir /opt/carbon-panel
+```
+
+The script detects the standard Compose names in `--dir` (`compose.yml`, `compose.yaml`, `docker-compose.yml`, `docker-compose.yaml`), including the `docker-compose.yml` shipped in this repository. It requires the `carbon-panel` service to be defined in the selected file before pulling or recreating it, and refuses when several standard names are present rather than guessing which deployment to touch.
+
+If your Compose file lives elsewhere, select it explicitly; the config may sit outside the data directory and relative paths resolve from `--dir`:
+
+```bash
+sudo bash install-carbon-panel.sh update --dir /opt/carbon-panel --compose /etc/carbon/docker-compose.yml
+```
+
+`--dir` defaults to `/opt/carbon-panel` (or `$CARBON_PANEL_DIR`), so you can omit it if you used the default install directory. You can also re-download and inspect the script before running `update`.
+
+The update path pulls the selected image and recreates only the `carbon-panel` service (`docker compose pull && docker compose up -d`) without deleting bind-mounted data, backups, or tmp files. Before upgrading, consider a controller database snapshot as described in [Docker Compose](/getting-started/docker-compose/).
+
+If no Compose config is found but a native `carbon-panel` systemd unit is evidenced, the script stops with a diagnostic pointing to the controller's [Prebuilt binaries](/getting-started/prebuilt-binaries/) guide and the repository [Releases](https://github.com/athNdev/carbonpanel/releases) page. It does not install, migrate, or run a third-party updater for a native install. The former third-party Proxmox VE Community Scripts `carbon-panel.sh` helper is no longer available (its download returns HTTP 404); do not download or execute it.
+
+## Existing deployments and data
+
+- **Preserved:** `data/`, `backups/`, `tmp/`, and any existing standard-name Compose file (`compose.yml`, `compose.yaml`, `docker-compose.yml`, `docker-compose.yaml`) or `config.yaml` in the install directory.
+- **Not overwritten:** re-running `install` leaves an existing standard-name Compose file unchanged.
+- **Not touched:** this script does not delete Docker volumes or bind mounts, and does not modify Proxmox host configuration.
+
+If you previously used the third-party Proxmox VE Community Scripts helper, your existing container/data remain where that helper placed them. Its `carbon-panel.sh` download now returns HTTP 404, so do not fetch or run it. This first-party script is a supported path for **existing prepared guests** and for future installs you manage with this repository's script; a native systemd install is updated through the controller's Prebuilt binaries guide and repository Releases instead.
 
 ## Sizing guidance
 
-**CPU** — A single Minecraft server (vanilla or modded) rarely exceeds 400% (4 cores). While up to 4 cores per server is recommended for optimal performance, you can start with the default of `4` and increase as needed.
+**CPU** — A single Minecraft server (vanilla or modded) rarely exceeds 400% (4 cores). While up to 4 cores per server is recommended for optimal performance, you can start with 4 cores and increase as needed.
 
-**RAM** — Vanilla servers may only need a few GB, but heavily modded servers average 10 GB+ per instance, especially with multiple players. You can safely allocate most of your available RAM — Proxmox doesn't strictly reserve it, so other LXCs and the host OS can still use whatever Carbon Panel isn't actively consuming.
+**RAM** — Vanilla servers may only need a few GB, but heavily modded servers average 10 GB+ per instance, especially with multiple players. Size the guest for the panel plus the Minecraft servers you plan to run.
 
-**Disk** — Entirely depends on what you plan to run and for how long. 40–80 GB is a reasonable starting point and can be expanded later.
-
-## Paths
-
-Since Carbon Panel runs directly on the host here (not inside a Docker container), file paths are straightforward: the panel and the Docker daemon see the same filesystem, so no translation or extra variable is involved. The default `./data` relative to `/opt/carbon-panel` works out of the box.
-
-Once complete, Carbon Panel is accessible at **http://\<container-ip\>:8080**.
+**Disk** — Depends on what you plan to run and for how long. 40–80 GB is a reasonable starting point for a small setup and can be expanded later.
 
 For all available configuration options, see [Configuration](/configuration/).

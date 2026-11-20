@@ -1,0 +1,59 @@
+{
+  "name": "modpacks-studio-library",
+  "title": "Modpacks Studio: recurring project library controls",
+  "docs": "Real-application browser journey plan for scripts/review/journey.mjs against a running panel/devstack (not a component fixture). Validated structurally in this session; not executed against a live disposable panel in this environment and not invoked by PR CI for this head. Asserts stable /modpacks/studio library shell controls only; does not claim loaded project data, seeded packs, or create/import mutations.",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "bootstrap": {
+    "path": "/login",
+    "detectSelector": "input[placeholder=\"Enter your username\"]",
+    "usernameSelector": "input[placeholder=\"Choose admin username\"]",
+    "passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
+    "confirmSelector": "input[placeholder=\"Confirm your password\"]",
+    "submitSelector": "button[type=\"submit\"]",
+    "successSelector": "a[href^=\"/servers/\"]"
+  },
+  "login": {
+    "path": "/login",
+    "usernameSelector": "input[placeholder=\"Enter your username\"]",
+    "passwordSelector": "input[placeholder=\"Enter your password\"]",
+    "submitSelector": "button[type=\"submit\"]",
+    "successSelector": "a[href^=\"/servers/\"]"
+  },
+  "steps": [
+    {
+      "goto": "/modpacks/studio",
+      "name": "navigate to modpacks studio"
+    },
+    {
+      "waitFor": "text=Visual workspace for custom modpacks: create, import (.mrpack, CurseForge, Packwiz), edit overrides, and deploy.",
+      "name": "modpacks studio library loads"
+    },
+    {
+      "assertVisible": "h1:has-text(\"Modpack Studio\")",
+      "name": "modpacks studio heading is present"
+    },
+    {
+      "assertVisible": "button:has-text(\"Create Modpack\")",
+      "name": "create modpack control is present"
+    },
+    {
+      "assertVisible": "button:has-text(\"Import Modpack\")",
+      "name": "import modpack control is present"
+    },
+    {
+      "assertVisible": "a:has-text(\"Browse Modpacks\")",
+      "name": "browse modpacks navigation control is present"
+    },
+    {
+      "assertVisible": "input[placeholder=\"Search modpack projects...\"]",
+      "name": "modpack project search control is present"
+    },
+    {
+      "screenshot": "modpacks-studio-library-controls",
+      "name": "capture modpacks studio library controls"
+    }
+  ]
+}

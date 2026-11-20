@@ -45,6 +45,9 @@
 - [Portable node installer](node-installer.md) — One guest-side Linux installer shared by the host-native, VM and LXC managed modes; it owns only caller-named directories and produces ADR 0019 enrollment material.
 - [Portable node installer — How to check + Read next](node-installer-how-to-check.md) — go test ./internal/nodeinstall/... and
 - [Portable node installer — Rule + Why](node-installer-rule.md) — The portable installer in internal/nodeinstall and cmd/carbon-node-installer
+- [Proxmox controller CT](proxmox-controller-ct.md) — Importable Debian 13 system CT rootfs for the Carbon Panel controller
+- [Proxmox controller CT — How to check](proxmox-controller-ct-how-to-check.md) — Verification entry points for the controller CT artifact
+- [Proxmox controller CT — Rule](proxmox-controller-ct-rule.md) — Invariants for the controller CT artifact and publication
 - [Remote storage transport](remote-storage-transport.md) — JSON accessor worker and Docker attach path for nodes without shared controller storage.
 - [Remote storage transport — Fail-closed + File RPC coverage + Read next](remote-storage-transport-fail-closed.md) — With no transport configured, transport-only nodes keep ErrUnavailable. Remote
 - [Remote storage transport — When transport is used](remote-storage-transport-when-transport-is-used.md) — A remote node with a declared storage_root and no reachable
@@ -75,6 +78,7 @@
 - [Shared enrollment boundary — Rule + Why](shared-enrollment-boundary-rule.md) — internal/noderuntime/enroll is the SINGLE mode-agnostic production boundary
 - [TCP proxy](proxy.md) — One public TCP port multiplexes Minecraft traffic by inspecting the handshake and routing on hostname.
 - [Unprivileged LXC node artifact lane](node-lxc-artifact.md) — Separate rootfs artifact lane for unprivileged LXC managed nodes; shares the ADR0019 contract and gates on nested-runtime capabilities.
+- [Unprivileged LXC node artifact lane — Qualification and boot evidence](node-lxc-artifact-qual.md) — Fail-closed boot qualification and runtime evidence boundaries for the LXC artifact lane.
 - [Unprivileged LXC node artifact lane — Rule](node-lxc-artifact-rule.md) — The unprivileged LXC / Proxmox rootfs template is a separate artifact lane at
 - [World Library](world-library.md) — Library worlds are immutable content-addressed revisions; servers get private writable clones through journaled, stop-based bindings, never a live folder rename.
 - [World Library — Read next](world-library-read-next.md) — Fail-closed authorization

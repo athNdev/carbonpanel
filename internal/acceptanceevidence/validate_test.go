@@ -269,6 +269,62 @@ func TestRecordedObservableCannotDrift(t *testing.T) {
 	}
 }
 
+func TestReferenceRunMustBeWellFormed(t *testing.T) {
+	c, ev, root := fixture(t)
+	c.ReferenceRuns[0].HeadSHA = "not-a-sha"
+	r := validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "reference run 555: head_sha") {
+		t.Fatalf("expected malformed reference run SHA failure, got %v", r.Failures)
+	}
+
+	c, ev, root = fixture(t)
+	c.ReferenceRuns[0].RunID = 0
+	r = validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "run_id must be positive") {
+		t.Fatalf("expected reference run id failure, got %v", r.Failures)
+	}
+
+	c, ev, root = fixture(t)
+	c.ReferenceRuns[0].Name = "   "
+	r = validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "name is empty") {
+		t.Fatalf("expected reference run name failure, got %v", r.Failures)
+	}
+
+	c, ev, root = fixture(t)
+	c.ReferenceRuns[0].Conclusion = "failure"
+	r = validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "conclusion \"failure\" must be success") {
+		t.Fatalf("expected reference run conclusion failure, got %v", r.Failures)
+	}
+}
+
+func TestLiveVerifiedRequiresDurableLiveURLs(t *testing.T) {
+	c, ev, root := fixture(t)
+	c.Candidates[0].Live.URL = "ftp://example.invalid/docs"
+	ev.Live.URL = "ftp://example.invalid/docs"
+	r := validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "durable http(s) live URL") {
+		t.Fatalf("expected contract live URL durability failure, got %v", r.Failures)
+	}
+
+	c, ev, root = fixture(t)
+	ev.Live.URL = "file:///tmp/docs"
+	r = validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "live evidence URL") {
+		t.Fatalf("expected evidence live URL durability failure, got %v", r.Failures)
+	}
+}
+
+func TestDeployEvidenceURLMustBeDurableWhenPresent(t *testing.T) {
+	c, ev, root := fixture(t)
+	ev.Deploy.URL = "not-a-url"
+	r := validateFixture(t, c, ev, root)
+	if r.Passed || !hasFailure(r, "deploy evidence URL") {
+		t.Fatalf("expected deploy evidence URL durability failure, got %v", r.Failures)
+	}
+}
+
 func setJob(deploy *DeployEvidence, name, conclusion string) {
 	for i := range deploy.Jobs {
 		if deploy.Jobs[i].Name == name {

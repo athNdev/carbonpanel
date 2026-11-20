@@ -27,16 +27,17 @@ sources:
 - The homepage's interactive examples compile from shared Svelte feature
   components with browser-local fixtures; the combined build includes their
   prerendered HTML and hashed assets. See [Homepage UI fragments](homepage-fragments.md).
-- Application prose, imported examples and API schema come from the same full
-  commit in `docs/website-source.json`. Never substitute the current checkout or
-  a floating branch if that commit is unavailable.
+- Application prose, imported examples and API schema come from the same full commit in `docs/website-source.json`; never substitute the current checkout or a floating branch. Exception: release-independent operational guides declared in `docs/maintained-guides.json` derive their exact source revision from the trusted checkout at build time (never pinned in the manifest) and attest blob digests; product pins, aliases and schema stay untouched. See ADR 0050.
+- Maintained operational guides publish automatically on trusted main CI; see
+  [maintained guide publication](maintained-guide-publication.md) and the
+  [website publishing runbook](../../docs/website-publishing.md).
 - `docs/website-source.json` is the single build contract; channel and
   availability are derived from the classified catalog
   `docs/release-history.json`, never from a `v` prefix. The generated
   `docs/version-index.json` is shared by the banner, version switcher, direct
   URL validation and Pages metadata. Every entry is validated against the
-  catalog peel and the real Git tag; a disagreement fails closed before
-  packaging. See ADR 0045.
+  catalog peel and the real Git tag; a disagreement fails closed before packaging.
+  See ADR 0045. One byte-identical index serves both URLs; mirror loss fails closed.
 - Stable docs default to `/docs/`; immutable per-version routes
   `/docs/versions/<display-version>/` are built from exact peeled commits for
   `1.0.40` (stable), `3.0.0-alpha.1` (GHCR-only legacy preview) and `1.0.39`
