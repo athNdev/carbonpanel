@@ -34,6 +34,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"golang.org/x/oauth2"
+	"gorm.io/gorm"
 )
 
 var ErrLinkRequired = errors.New("oidc identity requires explicit local admin linking")
@@ -64,7 +65,7 @@ type OIDCHandler struct {
 	storesOnce       sync.Once
 	txStore          *oidcTxStore
 	exchangeStore    *oidcExchangeStore
-	linkStore        *OIDCLinkStore
+	linkStore        *oidcLinkStore
 	loginThrottle    *LoginThrottle
 	callbackThrottle *LoginThrottle
 }
@@ -78,7 +79,7 @@ type oidcTransaction struct {
 	CreatedAt    time.Time
 	Issuer       string
 	RedirectURL  string
-	LinkUserID   string // set only for an explicit local-admin link flow
+	Link         *oidcLinkIntent
 }
 
 // oidcTxStore is a bounded, TTL'd, single-use transaction store. consume is a
@@ -188,78 +189,6 @@ func (s *oidcExchangeStore) consume(code, remoteIP string) (string, bool) {
 		return "", false
 	}
 	return entry.Token, true
-}
-
-// OIDCLinkIntent is a short-lived intent created by an authenticated local
-// admin. It authorises one OIDC sign-in to bind the verified (issuer, subject)
-// pair to that admin's existing account. No IdP-provided identity value is
-// accepted from the operator; those are proven only by the callback.
-type OIDCLinkIntent struct {
-	UserID    string
-	CreatedAt time.Time
-}
-
-// OIDCLinkStore is a bounded, TTL'd, single-use intent store. The token is an
-// opaque capability, not a session credential, and is never logged.
-type OIDCLinkStore struct {
-	mu      sync.Mutex
-	intents map[string]*OIDCLinkIntent
-	max     int
-	ttl     time.Duration
-	now     func() time.Time
-}
-
-func newOIDCLinkStore() *OIDCLinkStore {
-	return &OIDCLinkStore{intents: make(map[string]*OIDCLinkIntent), max: 100, ttl: 5 * time.Minute, now: time.Now}
-}
-
-// CreateIntent records a local admin's consent to link exactly one verified
-// OIDC identity to their own account.
-func (s *OIDCLinkStore) CreateIntent(userID string) (string, error) {
-	if s == nil || userID == "" {
-		return "", errors.New("oidc link target is required")
-	}
-	token, err := generateState()
-	if err != nil {
-		return "", err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	for key, intent := range s.intents {
-		if now.Sub(intent.CreatedAt) > s.ttl {
-			delete(s.intents, key)
-		}
-	}
-	if len(s.intents) >= s.max {
-		return "", errors.New("oidc link store at capacity")
-	}
-	s.intents[token] = &OIDCLinkIntent{UserID: userID, CreatedAt: now}
-	return token, nil
-}
-
-// consume atomically redeems a link token once and only while it is fresh.
-func (s *OIDCLinkStore) consume(token string) (*OIDCLinkIntent, bool) {
-	if s == nil || token == "" {
-		return nil, false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	intent, ok := s.intents[token]
-	if !ok {
-		return nil, false
-	}
-	delete(s.intents, token)
-	if s.now().Sub(intent.CreatedAt) > s.ttl {
-		return nil, false
-	}
-	return intent, true
-}
-
-// LinkStore exposes the process-local intent store for the admin RPC seam.
-func (h *OIDCHandler) LinkStore() *OIDCLinkStore {
-	h.ensureStores()
-	return h.linkStore
 }
 
 // oidcInsecureSkipVerify reports whether config skip_tls_verify may disable
@@ -382,74 +311,6 @@ func subjectHash(subject string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// consumeLinkToken redeems an explicit local-admin intent. The token carries
-// no identity claims; it only names an already authenticated local admin.
-func (h *OIDCHandler) consumeLinkToken(ctx context.Context, token string) (string, error) {
-	if token == "" {
-		return "", nil
-	}
-	intent, ok := h.linkStore.consume(token)
-	if !ok {
-		return "", errors.New("invalid or expired oidc link token")
-	}
-	user, err := h.store.GetUser(ctx, intent.UserID)
-	if err != nil || !user.IsActive || user.AuthProvider != "local" || !userHasRoleFromSource(ctx, h.store, user.ID, "admin", "local") {
-		return "", errors.New("oidc link target is no longer an active local admin")
-	}
-	return user.ID, nil
-}
-
-func userHasRoleFromSource(ctx context.Context, store *db.Store, userID, role, source string) bool {
-	got, err := store.GetUserRoleSource(ctx, userID, role)
-	return err == nil && got == source
-}
-
-// linkVerifiedOIDCIdentity binds a verified (issuer, subject) pair to the
-// existing local admin named by an explicit intent. It never links by email,
-// display name or locally unique subject, and never changes AuthProvider or
-// existing role ownership.
-func (h *OIDCHandler) linkVerifiedOIDCIdentity(ctx context.Context, userID, issuer, sub string) (*db.User, error) {
-	if userID == "" || issuer == "" || sub == "" {
-		return nil, errors.New("verified link identity is incomplete")
-	}
-	user, err := h.store.GetUser(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if !user.IsActive || user.AuthProvider != "local" || !userHasRoleFromSource(ctx, h.store, user.ID, "admin", "local") {
-		return nil, errors.New("oidc link target is not an active local admin")
-	}
-	if user.OIDCSubject != "" || user.OIDCIssuer != "" {
-		return nil, ErrLinkRequired
-	}
-	if existing, err := h.store.GetUserByOIDCIssuerAndSubject(ctx, issuer, sub); err == nil && existing != nil {
-		return nil, ErrLinkRequired
-	}
-	if existing, err := h.store.GetUserByOIDCSubject(ctx, sub); err == nil && existing != nil {
-		return nil, ErrLinkRequired
-	}
-	user.OIDCIssuer = issuer
-	user.OIDCSubject = sub
-	if err := h.store.UpdateUser(ctx, user); err != nil {
-		return nil, err
-	}
-	h.emitAudit("oidc.link.completed", "ok", issuer, subjectHash(sub), user.ID, "local_admin_explicit")
-	return user, nil
-}
-
-func withoutRole(roles []string, role string) []string {
-	// Allocate a fresh backing array: the caller removes roles while ranging
-	// over the original slice, so in-place compaction would skip following
-	// privileged roles and leave an unreconciled OIDC grant behind.
-	out := make([]string, 0, len(roles))
-	for _, item := range roles {
-		if item != role {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
 func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	h.ensureStores()
 	if !h.IsEnabled() {
@@ -463,11 +324,18 @@ func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	linkUserID, err := h.consumeLinkToken(r.Context(), r.URL.Query().Get(oidcLinkQuery))
-	if err != nil {
-		h.emitAudit("oidc.link.started", "rejected", h.config.IssuerURI, "", "", "invalid_or_ineligible_intent")
-		writeCanonicalError(w, r, "link_invalid")
-		return
+	var link *oidcLinkIntent
+	if r.URL.Query().Has(oidcLinkQuery) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		link = h.linkStore.consume(r.URL.Query().Get(oidcLinkQuery), linkBrowser(r))
+		if !h.liveLink(r.Context(), link) {
+			h.emitAudit("oidc.link.started", "rejected", h.config.IssuerURI, "", "", "invalid_or_ineligible_intent")
+			writeCanonicalError(w, r, "link_invalid")
+			return
+		}
+	} else if linkBrowser(r) != "" {
+		http.SetCookie(w, h.ClearLinkCookie())
 	}
 
 	state, err := generateState()
@@ -494,7 +362,7 @@ func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now(),
 		Issuer:       h.config.IssuerURI,
 		RedirectURL:  h.config.RedirectURL,
-		LinkUserID:   linkUserID,
+		Link:         link,
 	}
 	if err := h.txStore.create(tx); err != nil {
 		h.emitAudit("oidc.login.started", "rejected", h.config.IssuerURI, "", "", "transaction_store_full")
@@ -513,7 +381,11 @@ func (h *OIDCHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, cookie)
 
-	authURL := h.oauth2Config.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier))
+	options := []oauth2.AuthCodeOption{oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)}
+	if link != nil {
+		options = append(options, oauth2.SetAuthURLParam("prompt", "login"))
+	}
+	authURL := h.oauth2Config.AuthCodeURL(state, options...)
 	h.emitAudit("oidc.login.started", "ok", h.config.IssuerURI, "", "", "")
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
@@ -554,19 +426,35 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// atomic transaction consume above is.
 	http.SetCookie(w, &http.Cookie{Name: oidcStateCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil || h.config.CookieSecure})
 
+	reject := func(code string) {
+		if tx.Link != nil {
+			writeLinkResult(w, r, code)
+			return
+		}
+		writeCanonicalError(w, r, code)
+	}
+	if tx.Link != nil {
+		if !sameOIDCState(linkBrowser(r), tx.Link.browser) || !h.liveLink(r.Context(), tx.Link) {
+			h.emitAudit("oidc.link.completed", "rejected", h.config.IssuerURI, "", tx.Link.userID, "invalid_or_ineligible_intent")
+			writeCanonicalError(w, r, "link_invalid")
+			return
+		}
+		http.SetCookie(w, h.linkCookie("", -1, r.TLS != nil))
+	}
+
 	if idpErr := r.URL.Query().Get("error"); idpErr != "" {
 		code := "access_denied"
 		if idpErr == "temporarily_unavailable" {
 			code = "oidc_degraded"
 		}
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "idp_error")
-		writeCanonicalError(w, r, code)
+		reject(code)
 		return
 	}
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "missing_code")
-		writeCanonicalError(w, r, "invalid_state")
+		reject("invalid_state")
 		return
 	}
 
@@ -578,44 +466,44 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	oauth2Token, err := h.oauth2Config.Exchange(ctx, code, oauth2.VerifierOption(tx.CodeVerifier))
 	if err != nil {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "code_exchange_failed")
-		writeCanonicalError(w, r, "oidc_degraded")
+		reject("oidc_degraded")
 		return
 	}
 
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "missing_id_token")
-		writeCanonicalError(w, r, "oidc_degraded")
+		reject("oidc_degraded")
 		return
 	}
 
 	idToken, err := h.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "id_token_verification_failed")
-		writeCanonicalError(w, r, "access_denied")
+		reject("access_denied")
 		return
 	}
 	// go-oidc's Verify does not check nonce (oidc/verify.go:183); the RP must.
 	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(tx.Nonce)) != 1 {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "nonce_mismatch")
-		writeCanonicalError(w, r, "access_denied")
+		reject("access_denied")
 		return
 	}
 	if idToken.Issuer != h.config.IssuerURI {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "issuer_mismatch")
-		writeCanonicalError(w, r, "invalid_issuer")
+		reject("invalid_issuer")
 		return
 	}
 
 	var claims map[string]any
 	if err := idToken.Claims(&claims); err != nil {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "claims_parse_failed")
-		writeCanonicalError(w, r, "access_denied")
+		reject("access_denied")
 		return
 	}
 
 	tokenSource := h.oauth2Config.TokenSource(ctx, oauth2Token)
-	if userInfo, err := h.provider.UserInfo(ctx, tokenSource); err == nil {
+	if userInfo, err := h.provider.UserInfo(ctx, tokenSource); err == nil && userInfo.Subject == idToken.Subject {
 		var uiClaims map[string]any
 		if err := userInfo.Claims(&uiClaims); err == nil {
 			for k, v := range uiClaims {
@@ -630,7 +518,7 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		extra, err := h.fetchExtraClaims(ctx, oauth2Token.AccessToken)
 		if err != nil {
 			h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "extra_claims_failed")
-			writeCanonicalError(w, r, "membership_check_failed")
+			reject("membership_check_failed")
 			return
 		}
 		mergeExtraClaims(claims, extra, h.config.RoleClaim)
@@ -638,14 +526,14 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	if h.config.RequiredClaim != "" && len(h.config.RequiredValues) > 0 && !h.checkRequiredClaim(claims) {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "required_claim_unsatisfied")
-		writeCanonicalError(w, r, "access_denied")
+		reject("access_denied")
 		return
 	}
 
 	sub := idToken.Subject
 	if sub == "" {
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, "", "", "missing_subject")
-		writeCanonicalError(w, r, "access_denied")
+		reject("access_denied")
 		return
 	}
 	hash := subjectHash(sub)
@@ -663,8 +551,15 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	desired := h.resolveClaimRoles(claims)
 	if len(desired) == 0 && h.config.RejectUnmapped {
+		if tx.Link == nil {
+			if err := h.revokeUnmappedAccess(ctx, idToken.Issuer, sub); err != nil {
+				h.emitAudit("oidc.roles.reconciled", "failed", idToken.Issuer, hash, "", "unmapped_revocation_failed")
+				reject("oidc_degraded")
+				return
+			}
+		}
 		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, "", "no_mapped_roles")
-		writeCanonicalError(w, r, "no_mapped_roles")
+		reject("no_mapped_roles")
 		return
 	}
 	if len(desired) == 0 {
@@ -677,49 +572,62 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var user *db.User
-	linkedLocalAdmin := tx.LinkUserID != ""
-	if linkedLocalAdmin {
-		user, err = h.linkVerifiedOIDCIdentity(ctx, tx.LinkUserID, h.config.IssuerURI, sub)
-	} else {
-		user, err = h.findOrCreateOIDCUser(ctx, h.config.IssuerURI, sub, username, email)
+	privileged := make([]string, 0, len(desired))
+	for _, role := range desired {
+		if isPrivilegedRole(role) {
+			privileged = append(privileged, role)
+		}
 	}
-	if err != nil {
-		if errors.Is(err, ErrLinkRequired) {
-			h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, "", "link_required")
-			writeCanonicalError(w, r, "link_required")
+
+	if tx.Link != nil {
+		// Recheck expiry here because IdP calls can take time. The write also
+		// checks the live session and local grant inside the transaction.
+		if !h.liveLink(ctx, tx.Link) {
+			writeCanonicalError(w, r, "link_invalid")
 			return
 		}
-		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, "", "user_resolution_failed")
-		writeCanonicalError(w, r, "account_disabled")
+		linked, added, removed, err := h.store.LinkOIDCIdentity(ctx, tx.Link.userID, idToken.Issuer, sub, tx.Link.sessionID, desired, privileged)
+		if err != nil {
+			h.emitAudit("oidc.link.completed", "rejected", idToken.Issuer, hash, tx.Link.userID, "link_transaction_failed")
+			switch {
+			case errors.Is(err, db.ErrOIDCLinkRequired):
+				reject("link_required")
+			case errors.Is(err, db.ErrOIDCLinkIneligible):
+				writeCanonicalError(w, r, "link_invalid")
+			case errors.Is(err, db.ErrOIDCRoleConflict):
+				reject("role_conflict")
+			default:
+				reject("oidc_degraded")
+			}
+			return
+		}
+		h.emitAudit("oidc.link.completed", "ok", idToken.Issuer, hash, linked.ID,
+			fmt.Sprintf("added=%d removed=%d", len(added), len(removed)))
+		writeLinkResult(w, r, "success")
 		return
 	}
 
-	for _, role := range desired {
-		if !isPrivilegedRole(role) {
-			continue
-		}
-		source, srcErr := h.store.GetUserRoleSource(ctx, user.ID, role)
-		if srcErr == nil && source != "" && source != oidcSource {
-			// An explicitly linked local admin keeps local ownership of their
-			// privileged grant. The OIDC mapping is accepted as proof of the
-			// sign-in, but it does not silently reattribute or revoke that
-			// break-glass grant.
-			if linkedLocalAdmin && user.AuthProvider == "local" && source == "local" &&
-				user.OIDCIssuer == h.config.IssuerURI && user.OIDCSubject == sub {
-				desired = withoutRole(desired, role)
-				continue
-			}
-			h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, user.ID, "privileged_role_conflict")
-			writeCanonicalError(w, r, "role_conflict")
+	user, err := h.findOrCreateOIDCUser(ctx, idToken.Issuer, sub, username, email)
+	if err != nil {
+		if errors.Is(err, ErrLinkRequired) {
+			h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, "", "link_required")
+			reject("link_required")
 			return
 		}
+		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, "", "user_resolution_failed")
+		reject("account_disabled")
+		return
 	}
 
-	added, removed, err := h.store.SetUserRolesBySource(ctx, user.ID, oidcSource, desired)
+	added, removed, err := h.store.ReconcileOIDCUserRoles(ctx, user.ID, idToken.Issuer, sub, email, desired, privileged)
+	if errors.Is(err, db.ErrOIDCRoleConflict) {
+		h.emitAudit("oidc.login.callback", "rejected", h.config.IssuerURI, hash, user.ID, "privileged_role_conflict")
+		reject("role_conflict")
+		return
+	}
 	if err != nil {
 		h.emitAudit("oidc.roles.reconciled", "failed", h.config.IssuerURI, hash, user.ID, "transaction_failed")
-		writeCanonicalError(w, r, "oidc_degraded")
+		reject("oidc_degraded")
 		return
 	}
 
@@ -727,25 +635,26 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// working before the new one is issued.
 	if err := h.manager.InvalidateUserSessions(ctx, user.ID, ""); err != nil {
 		h.emitAudit("oidc.session.rotated", "failed", h.config.IssuerURI, hash, user.ID, "")
-		writeCanonicalError(w, r, "oidc_degraded")
+		reject("oidc_degraded")
 		return
 	}
 
-	roleNames, err := h.store.GetUserRoleNames(ctx, user.ID)
+	roleNames, err := h.manager.roleNamesForCredential(ctx, user, oidcSource)
 	if err != nil {
-		roleNames = []string{}
+		reject("oidc_degraded")
+		return
 	}
 	expiresAt := time.Now().Add(time.Duration(h.sessionTimeout()) * time.Second)
 	token, err := h.manager.generateJWT(user.ID, user.Username, roleNames, expiresAt)
 	if err != nil {
 		h.emitAudit("oidc.session.issued", "failed", h.config.IssuerURI, hash, user.ID, "")
-		writeCanonicalError(w, r, "oidc_degraded")
+		reject("oidc_degraded")
 		return
 	}
-	session := &db.Session{ID: uuid.New().String(), UserID: user.ID, Token: token, ExpiresAt: expiresAt}
+	session := &db.Session{ID: uuid.New().String(), UserID: user.ID, Token: token, ExpiresAt: expiresAt, AuthProvider: oidcSource}
 	if err := h.store.CreateSession(ctx, session); err != nil {
 		h.emitAudit("oidc.session.issued", "failed", h.config.IssuerURI, hash, user.ID, "")
-		writeCanonicalError(w, r, "oidc_degraded")
+		reject("oidc_degraded")
 		return
 	}
 
@@ -753,13 +662,30 @@ func (h *OIDCHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		_ = h.store.DeleteSession(ctx, token)
 		h.emitAudit("oidc.session.issued", "failed", h.config.IssuerURI, hash, user.ID, "exchange_store_full")
-		writeCanonicalError(w, r, "oidc_degraded")
+		reject("oidc_degraded")
 		return
 	}
 
 	h.emitAudit("oidc.login.succeeded", "ok", h.config.IssuerURI, hash, user.ID,
 		fmt.Sprintf("added=%d removed=%d", len(added), len(removed)))
 	http.Redirect(w, r, "/login?code="+exchangeCode, http.StatusFound)
+}
+
+func (h *OIDCHandler) revokeUnmappedAccess(ctx context.Context, issuer, sub string) error {
+	user, err := h.store.GetUserByOIDCIssuerAndSubject(ctx, issuer, sub)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil || !user.IsActive {
+		return err
+	}
+	if _, _, err := h.store.SetUserRolesBySource(ctx, user.ID, oidcSource, nil); err != nil {
+		return err
+	}
+	if isLinkedLocalAccount(user) {
+		return h.store.DeleteUserSessionsByProvider(ctx, user.ID, oidcSource)
+	}
+	return h.manager.InvalidateUserSessions(ctx, user.ID, "")
 }
 
 // HandleExchange redeems a one-time OIDC exchange code for the session token.
@@ -803,13 +729,11 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, issuer, sub, use
 		if !user.IsActive {
 			return nil, ErrUserNotActive
 		}
-		if email != "" {
-			user.Email = &email
-		}
-		now := time.Now()
-		user.LastLogin = &now
-		_ = h.store.UpdateUser(ctx, user)
+
 		return user, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
 	// A subject is unique only within an issuer. Any pre-existing row with the
@@ -817,6 +741,8 @@ func (h *OIDCHandler) findOrCreateOIDCUser(ctx context.Context, issuer, sub, use
 	// this (issuer, subject) pair: refuse and require explicit admin linking.
 	if _, lerr := h.store.GetUserByOIDCSubject(ctx, sub); lerr == nil {
 		return nil, ErrLinkRequired
+	} else if !errors.Is(lerr, gorm.ErrRecordNotFound) {
+		return nil, lerr
 	}
 
 	var emailPtr *string

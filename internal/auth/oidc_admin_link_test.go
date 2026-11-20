@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 	"time"
 
 	"github.com/athNdev/carbon-panel/internal/config"
@@ -26,7 +28,6 @@ import (
 // real manager/store state.
 type linkEnv struct {
 	fixture    *fullOIDCFixture
-	idp        *httptest.Server
 	manager    *Manager
 	store      *db.Store
 	server     *httptest.Server
@@ -62,6 +63,20 @@ func newLinkEnv(t *testing.T, groups []string) *linkEnv {
 	mux.HandleFunc("/api/v1/auth/oidc/login", func(w http.ResponseWriter, r *http.Request) { h.HandleLogin(w, r) })
 	mux.HandleFunc("/api/v1/auth/oidc/callback", func(w http.ResponseWriter, r *http.Request) { h.HandleCallback(w, r) })
 	mux.HandleFunc("/api/v1/auth/oidc/exchange", func(w http.ResponseWriter, r *http.Request) { h.HandleExchange(w, r) })
+	mux.HandleFunc("POST /test/begin-link", func(w http.ResponseWriter, r *http.Request) {
+		caller, err := m.AuthenticateFromHeader(r.Context(), r.Header.Get("Authorization"))
+		if err != nil {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		token, cookie, err := h.BeginLink(r.Context(), caller)
+		if err != nil {
+			http.Error(w, "link refused", http.StatusForbidden)
+			return
+		}
+		http.SetCookie(w, cookie)
+		_, _ = w.Write([]byte(token))
+	})
 	ts := httptest.NewServer(mux)
 
 	handler, err := NewOIDCHandler(m, store, &config.OIDCConfig{
@@ -86,7 +101,7 @@ func newLinkEnv(t *testing.T, groups []string) *linkEnv {
 		t.Fatalf("cookiejar: %v", err)
 	}
 	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	env := &linkEnv{fixture: f, idp: idp, manager: m, store: store, server: ts, client: client, handler: h, adminID: admin.ID, adminName: admin.Username, adminToken: adminToken, password: password}
+	env := &linkEnv{fixture: f, manager: m, store: store, server: ts, client: client, handler: h, adminID: admin.ID, adminName: admin.Username, adminToken: adminToken, password: password}
 	t.Cleanup(func() {
 		client.CloseIdleConnections()
 		ts.Close()
@@ -118,11 +133,56 @@ func (e *linkEnv) loginWithToken(t *testing.T, token string) *url.URL {
 
 func (e *linkEnv) beginIntent(t *testing.T) string {
 	t.Helper()
-	token, err := e.handler.LinkStore().CreateIntent(e.adminID)
-	if err != nil {
-		t.Fatalf("CreateIntent: %v", err)
+	req, err := http.NewRequest(http.MethodPost, e.server.URL+"/test/begin-link", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+e.adminToken)
+	resp, err := e.client.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, resp.Cookies(), 1)
+	require.True(t, resp.Cookies()[0].HttpOnly)
+	require.Equal(t, http.SameSiteLaxMode, resp.Cookies()[0].SameSite)
+	return readOIDCHTTPBody(t, resp)
+}
+
+func (e *linkEnv) callback(t *testing.T, authorize *url.URL, client *http.Client) *url.URL {
+	t.Helper()
+	e.fixture.nonce = authorize.Query().Get("nonce")
+	state := authorize.Query().Get("state")
+	resp, err := client.Get(e.server.URL + "/api/v1/auth/oidc/callback?" + oidcCallbackQuery("fixture-code", state).Encode())
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusFound, resp.StatusCode)
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	require.NoError(t, err)
+	return loc
+}
+
+func (e *linkEnv) signInOIDC(t *testing.T) (*AuthenticatedUser, string) {
+	t.Helper()
+	result := e.callback(t, e.loginWithToken(t, ""), e.client)
+	require.Equal(t, "/login", result.Path)
+	require.Empty(t, result.Query().Get("error"))
+	require.NotEmpty(t, result.Query().Get("code"))
+	resp, body := e.exchange(t, result.Query().Get("code"))
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var payload struct {
+		Token string `json:"token"`
 	}
-	return token
+	require.NoError(t, json.Unmarshal([]byte(body), &payload))
+	user, err := e.manager.AuthenticateFromHeader(context.Background(), "Bearer "+payload.Token)
+	require.NoError(t, err)
+	return user, payload.Token
+}
+
+func (e *linkEnv) assertUnlinked(t *testing.T) {
+	t.Helper()
+	user, err := e.store.GetUser(context.Background(), e.adminID)
+	require.NoError(t, err)
+	require.Empty(t, user.OIDCIssuer)
+	require.Empty(t, user.OIDCSubject)
 }
 
 func (e *linkEnv) exchange(t *testing.T, code string) (*http.Response, string) {
@@ -134,269 +194,153 @@ func (e *linkEnv) exchange(t *testing.T, code string) (*http.Response, string) {
 	return resp, readOIDCHTTPBody(t, resp)
 }
 
-func assertOnlyLocalAdminGrant(t *testing.T, store *db.Store, userID string) {
-	t.Helper()
-	assertOnlyLocalGrant(t, store, userID, "admin")
-}
-
-func assertOnlyLocalGrant(t *testing.T, store *db.Store, userID, role string) {
-	t.Helper()
-	var grants []db.UserRole
-	if err := store.DB().Where("user_id = ? AND role_name = ?", userID, role).Find(&grants).Error; err != nil {
-		t.Fatalf("%s grants: %v", role, err)
-	}
-	if len(grants) != 1 || grants[0].Source != "local" {
-		t.Fatalf("%s grant must remain single and local-owned, got %+v", role, grants)
-	}
-}
-
-func TestOIDCExplicitLocalAdminLinkAndSessionRotation(t *testing.T) {
-	env := newLinkEnv(t, []string{"carbon-admins"})
+func TestOIDCExplicitLocalAdminLinkAndCredentialRoles(t *testing.T) {
+	env := newLinkEnv(t, []string{"carbon-admins", "carbon-users"})
 	ctx := context.Background()
-
-	if _, err := env.manager.AuthenticateFromHeader(ctx, "Bearer "+env.adminToken); err != nil {
-		t.Fatalf("pre-link local session invalid: %v", err)
-	}
-
+	require.NoError(t, env.store.AssignRole(ctx, env.adminID, "owner", "local"))
 	token := env.beginIntent(t)
 	authorize := env.loginWithToken(t, token)
-	if authorize.Query().Get("link_token") != "" || strings.Contains(authorize.String(), token) {
-		t.Fatalf("link token must not be forwarded to the IdP: %s", authorize)
-	}
-	if authorize.Query().Get("code_challenge_method") != "S256" || authorize.Query().Get("state") == "" || authorize.Query().Get("nonce") == "" {
-		t.Fatalf("explicit link flow lost PKCE/state/nonce: %s", authorize)
+	require.NotContains(t, authorize.String(), token)
+	require.Equal(t, "S256", authorize.Query().Get("code_challenge_method"))
+	require.Equal(t, "login", authorize.Query().Get("prompt"))
+	require.NotEmpty(t, authorize.Query().Get("state"))
+	require.NotEmpty(t, authorize.Query().Get("nonce"))
+
+	result := env.callback(t, authorize, env.client)
+	require.Equal(t, "/settings", result.Path)
+	require.Equal(t, "success", result.Query().Get("oidc_link"))
+	require.Empty(t, result.Query().Get("code"))
+	local, err := env.manager.AuthenticateFromHeader(ctx, "Bearer "+env.adminToken)
+	require.NoError(t, err)
+	require.Equal(t, "local", local.SessionProvider)
+	require.ElementsMatch(t, []string{"admin", "owner"}, local.Roles)
+
+	user, err := env.store.GetUser(ctx, env.adminID)
+	require.NoError(t, err)
+	require.Equal(t, "local", user.AuthProvider)
+	require.Equal(t, "fixture-subject", user.OIDCSubject)
+	require.Equal(t, env.fixture.issuer, user.OIDCIssuer)
+	require.Equal(t, "admin@example.test", *user.Email)
+	for source, expected := range map[string][]string{
+		"local": {"admin", "owner"}, "oidc": {"admin", "user"},
+	} {
+		roles, err := env.store.GetUserRoleNamesBySource(ctx, env.adminID, source)
+		require.NoError(t, err)
+		require.ElementsMatch(t, expected, roles)
 	}
 
-	state := authorize.Query().Get("state")
-	env.fixture.nonce = authorize.Query().Get("nonce")
-	cbResp, err := env.client.Get(env.server.URL + "/api/v1/auth/oidc/callback?" + oidcCallbackQuery("fixture-code", state).Encode())
-	if err != nil {
-		t.Fatalf("GET callback: %v", err)
-	}
-	cbBody := readOIDCHTTPBody(t, cbResp)
-	_ = cbResp.Body.Close()
-	cbLocHeader := cbResp.Header.Get("Location")
-	if cbLocHeader == "" {
-		t.Fatalf("callback returned no redirect: %s", cbBody)
-	}
-	cbLoc, err := url.Parse(cbLocHeader)
-	if err != nil {
-		t.Fatalf("parse callback redirect: %v", err)
-	}
-	if cbLoc.Query().Get("error") != "" {
-		t.Fatalf("callback rejected: %s", cbLoc)
-	}
-	code := cbLoc.Query().Get("code")
-	if code == "" {
-		t.Fatal("callback must issue a one-time exchange code")
-	}
+	oidcUser, _ := env.signInOIDC(t)
+	require.Equal(t, env.adminID, oidcUser.ID)
+	require.Equal(t, "oidc", oidcUser.SessionProvider)
+	require.ElementsMatch(t, []string{"admin", "user"}, oidcUser.Roles)
+	_, _, err = env.manager.GenerateAPIToken(WithUser(ctx, oidcUser), env.adminID, "fixture-token", nil)
+	require.ErrorIs(t, err, ErrLocalAPITokenSession)
+	_, err = env.manager.AuthenticateFromHeader(ctx, "Bearer "+env.adminToken)
+	require.Error(t, err)
 
-	resp, body := env.exchange(t, code)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("exchange status=%d body=%s", resp.StatusCode, body)
-	}
-	var payload struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal([]byte(body), &payload); err != nil || payload.Token == "" {
-		t.Fatalf("exchange payload err=%v body=%s", err, body)
-	}
-	_ = resp.Body.Close()
+	env.fixture.claimsOverride = map[string]any{"groups": []string{"carbon-users"}}
+	oidcUser, _ = env.signInOIDC(t)
+	require.Equal(t, env.adminID, oidcUser.ID)
+	require.Equal(t, []string{"user"}, oidcUser.Roles)
+	_, roles, localToken, _, err := env.manager.Login(ctx, env.adminName, env.password)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"admin", "owner"}, roles)
+	local, err = env.manager.ValidateSession(ctx, localToken)
+	require.NoError(t, err)
+	require.False(t, env.handler.CanLinkOIDC(ctx, local))
+}
 
-	user, err := env.store.GetUser(context.Background(), env.adminID)
-	if err != nil {
-		t.Fatalf("linked admin lookup: %v", err)
-	}
-	if user.AuthProvider != "local" || user.OIDCSubject != "fixture-subject" || user.OIDCIssuer != env.fixture.issuer {
-		t.Fatalf("link changed identity or local provider: %+v", user)
-	}
-	assertOnlyLocalAdminGrant(t, env.store, env.adminID)
+func TestOIDCRejectUnmappedRevokesLinkedSSOSession(t *testing.T) {
+	env := newLinkEnv(t, []string{"carbon-admins"})
+	ctx := context.Background()
+	env.handler.config.RejectUnmapped = true
+	result := env.callback(t, env.loginWithToken(t, env.beginIntent(t)), env.client)
+	require.Equal(t, "success", result.Query().Get("oidc_link"))
+	_, oidcToken := env.signInOIDC(t)
+	_, _, localToken, _, err := env.manager.Login(ctx, env.adminName, env.password)
+	require.NoError(t, err)
 
-	authenticated, err := env.manager.AuthenticateFromHeader(ctx, "Bearer "+payload.Token)
-	if err != nil || authenticated == nil || !hasRole(authenticated.Roles, "admin") {
-		t.Fatalf("linked OIDC session not admin: user=%+v err=%v", authenticated, err)
-	}
-	if _, err := env.manager.AuthenticateFromHeader(ctx, "Bearer "+env.adminToken); err == nil {
-		t.Fatal("stale local session survived OIDC sign-in rotation")
-	}
-	if _, _, _, _, err := env.manager.Login(ctx, env.adminName, env.password); err != nil {
-		t.Fatalf("local break-glass login no longer works after link: %v", err)
-	}
-
-	replay := env.loginWithToken(t, token)
-	if replay.Query().Get("error") != "link_invalid" {
-		t.Fatalf("link token replay must be refused: %s", replay)
-	}
+	env.fixture.claimsOverride = map[string]any{"groups": []string{}}
+	result = env.callback(t, env.loginWithToken(t, ""), env.client)
+	require.Equal(t, "no_mapped_roles", result.Query().Get("error"))
+	_, err = env.manager.ValidateSession(ctx, oidcToken)
+	require.ErrorIs(t, err, ErrSessionExpired)
+	local, err := env.manager.ValidateSession(ctx, localToken)
+	require.NoError(t, err)
+	require.Equal(t, []string{"admin"}, local.Roles)
+	roles, err := env.store.GetUserRoleNamesBySource(ctx, env.adminID, "oidc")
+	require.NoError(t, err)
+	require.Empty(t, roles)
 }
 
 func TestOIDCExplicitLinkFailClosed(t *testing.T) {
-	t.Run("invalid token", func(t *testing.T) {
-		env := newLinkEnv(t, []string{"carbon-admins"})
-		loc := env.loginWithToken(t, "not-a-real-token")
-		if loc.Query().Get("error") != "link_invalid" {
-			t.Fatalf("invalid link token accepted: %s", loc)
-		}
-	})
-
-	t.Run("non-admin local user", func(t *testing.T) {
-		env := newLinkEnv(t, []string{"carbon-admins"})
-		user, err := env.manager.CreateLocalUser(context.Background(), "plain-user", "", "PlainPass!2345")
-		if err != nil {
-			t.Fatalf("CreateLocalUser: %v", err)
-		}
-		token, err := env.handler.LinkStore().CreateIntent(user.ID)
-		if err != nil {
-			t.Fatalf("CreateIntent: %v", err)
-		}
-		loc := env.loginWithToken(t, token)
-		if loc.Query().Get("error") != "link_invalid" {
-			t.Fatalf("non-admin local intent accepted: %s", loc)
-		}
-	})
-
-	t.Run("expired token", func(t *testing.T) {
+	t.Run("start browser differs", func(t *testing.T) {
 		env := newLinkEnv(t, []string{"carbon-admins"})
 		token := env.beginIntent(t)
-		realNow := env.handler.LinkStore().now
-		env.handler.LinkStore().now = func() time.Time { return realNow().Add(6 * time.Minute) }
-		loc := env.loginWithToken(t, token)
-		if loc.Query().Get("error") != "link_invalid" {
-			t.Fatalf("expired link token accepted: %s", loc)
-		}
+		sameBrowser := env.client
+		env.client = &http.Client{CheckRedirect: sameBrowser.CheckRedirect}
+		result := env.loginWithToken(t, token)
+		require.Equal(t, "link_invalid", result.Query().Get("error"))
+		env.client = sameBrowser
+		require.NotEmpty(t, env.loginWithToken(t, token).Query().Get("state"))
+		require.Equal(t, "link_invalid", env.loginWithToken(t, token).Query().Get("error"))
+		env.assertUnlinked(t)
+	})
+
+	t.Run("callback browser binding missing", func(t *testing.T) {
+		env := newLinkEnv(t, []string{"carbon-admins"})
+		authorize := env.loginWithToken(t, env.beginIntent(t))
+		jar, err := cookiejar.New(nil)
+		require.NoError(t, err)
+		base, err := url.Parse(env.server.URL)
+		require.NoError(t, err)
+		jar.SetCookies(base, []*http.Cookie{{Name: oidcStateCookie, Value: authorize.Query().Get("state"), Path: "/"}})
+		other := &http.Client{Jar: jar, CheckRedirect: env.client.CheckRedirect}
+		require.Equal(t, "link_invalid", env.callback(t, authorize, other).Query().Get("error"))
+		require.Equal(t, "invalid_state", env.callback(t, authorize, env.client).Query().Get("error"))
+		env.assertUnlinked(t)
+	})
+
+	t.Run("revoked session even after fresh password login", func(t *testing.T) {
+		env := newLinkEnv(t, []string{"carbon-admins"})
+		ctx := context.Background()
+		authorize := env.loginWithToken(t, env.beginIntent(t))
+		require.NoError(t, env.manager.Logout(ctx, env.adminToken))
+		_, _, replacement, _, err := env.manager.Login(ctx, env.adminName, env.password)
+		require.NoError(t, err)
+		require.NotEqual(t, env.adminToken, replacement)
+		require.Equal(t, "link_invalid", env.callback(t, authorize, env.client).Query().Get("error"))
+		env.assertUnlinked(t)
+	})
+
+	t.Run("expired intent between start and callback", func(t *testing.T) {
+		env := newLinkEnv(t, []string{"carbon-admins"})
+		authorize := env.loginWithToken(t, env.beginIntent(t))
+		now := env.handler.linkStore.now()
+		env.handler.linkStore.now = func() time.Time { return now.Add(oidcLinkTTL) }
+		require.Equal(t, "link_invalid", env.callback(t, authorize, env.client).Query().Get("error"))
+		env.assertUnlinked(t)
 	})
 
 	t.Run("subject collision refuses without binding", func(t *testing.T) {
 		env := newLinkEnv(t, []string{"carbon-admins"})
 		other := &db.User{ID: "other-issuer-user", Username: "other", AuthProvider: "oidc", OIDCIssuer: "https://other.example", OIDCSubject: "fixture-subject", IsActive: true}
-		if err := env.store.CreateUser(context.Background(), other); err != nil {
-			t.Fatalf("seed other identity: %v", err)
-		}
-		token := env.beginIntent(t)
-		authorize := env.loginWithToken(t, token)
-		state := authorize.Query().Get("state")
-		env.fixture.nonce = authorize.Query().Get("nonce")
-		resp, err := env.client.Get(env.server.URL + "/api/v1/auth/oidc/callback?" + oidcCallbackQuery("fixture-code", state).Encode())
-		if err != nil {
-			t.Fatalf("GET callback: %v", err)
-		}
-		body := readOIDCHTTPBody(t, resp)
-		_ = resp.Body.Close()
-		loc, err := url.Parse(resp.Header.Get("Location"))
-		if err != nil {
-			t.Fatalf("parse callback: %v (%s)", err, body)
-		}
-		if loc.Query().Get("error") != "link_required" || loc.Query().Get("code") != "" {
-			t.Fatalf("subject collision must fail closed: %s", loc)
-		}
-		admin, err := env.store.GetUser(context.Background(), env.adminID)
-		if err != nil || admin.OIDCSubject != "" || admin.OIDCIssuer != "" {
-			t.Fatalf("refused link must not bind identity: %+v err=%v", admin, err)
-		}
+		require.NoError(t, env.store.CreateUser(context.Background(), other))
+		authorize := env.loginWithToken(t, env.beginIntent(t))
+		result := env.callback(t, authorize, env.client)
+		require.Equal(t, "link_required", result.Query().Get("oidc_link"))
+		require.Empty(t, result.Query().Get("code"))
+		env.assertUnlinked(t)
 	})
 
 	t.Run("unlinked privileged conflict still refused", func(t *testing.T) {
 		env := newLinkEnv(t, []string{"carbon-admins"})
+		ctx := context.Background()
 		legacy := &db.User{ID: "legacy-oidc-admin", Username: "legacy-admin", AuthProvider: "oidc", OIDCIssuer: env.fixture.issuer, OIDCSubject: "fixture-subject", IsActive: true}
-		if err := env.store.CreateUser(context.Background(), legacy); err != nil {
-			t.Fatalf("seed legacy OIDC admin: %v", err)
-		}
-		if err := env.store.AssignRole(context.Background(), legacy.ID, "admin", "local"); err != nil {
-			t.Fatalf("AssignRole: %v", err)
-		}
-		authorize := env.loginWithToken(t, "")
-		state := authorize.Query().Get("state")
-		env.fixture.nonce = authorize.Query().Get("nonce")
-		resp, err := env.client.Get(env.server.URL + "/api/v1/auth/oidc/callback?" + oidcCallbackQuery("fixture-code", state).Encode())
-		if err != nil {
-			t.Fatalf("GET callback: %v", err)
-		}
-		body := readOIDCHTTPBody(t, resp)
-		_ = resp.Body.Close()
-		loc, err := url.Parse(resp.Header.Get("Location"))
-		if err != nil {
-			t.Fatalf("parse callback: %v (%s)", err, body)
-		}
-		if loc.Query().Get("error") != "role_conflict" || loc.Query().Get("code") != "" {
-			t.Fatalf("unlinked privileged conflict must stay refused: %s", loc)
-		}
+		require.NoError(t, env.store.CreateUser(ctx, legacy))
+		require.NoError(t, env.store.AssignRole(ctx, legacy.ID, "admin", "local"))
+		result := env.callback(t, env.loginWithToken(t, ""), env.client)
+		require.Equal(t, "role_conflict", result.Query().Get("error"))
+		require.Empty(t, result.Query().Get("code"))
 	})
-}
-
-func hasRole(roles []string, want string) bool {
-	for _, role := range roles {
-		if role == want {
-			return true
-		}
-	}
-	return false
-}
-
-func TestOIDCExplicitLinkPreservesAllLocalPrivilegedGrants(t *testing.T) {
-	env := newLinkEnv(t, []string{"carbon-admins", "carbon-owners"})
-	ctx := context.Background()
-	if err := env.store.AssignRole(ctx, env.adminID, "owner", "local"); err != nil {
-		t.Fatalf("AssignRole owner: %v", err)
-	}
-
-	token := env.beginIntent(t)
-	authorize := env.loginWithToken(t, token)
-	state := authorize.Query().Get("state")
-	env.fixture.nonce = authorize.Query().Get("nonce")
-	resp, err := env.client.Get(env.server.URL + "/api/v1/auth/oidc/callback?" + oidcCallbackQuery("fixture-code", state).Encode())
-	if err != nil {
-		t.Fatalf("GET callback: %v", err)
-	}
-	body := readOIDCHTTPBody(t, resp)
-	_ = resp.Body.Close()
-	loc, err := url.Parse(resp.Header.Get("Location"))
-	if err != nil {
-		t.Fatalf("parse callback: %v (%s)", err, body)
-	}
-	if loc.Query().Get("error") != "" {
-		t.Fatalf("callback rejected: %s", loc)
-	}
-	code := loc.Query().Get("code")
-	if code == "" {
-		t.Fatal("callback must issue one-time exchange code")
-	}
-	ex, exBody := env.exchange(t, code)
-	if ex.StatusCode != http.StatusOK {
-		t.Fatalf("exchange status=%d body=%s", ex.StatusCode, exBody)
-	}
-	_ = ex.Body.Close()
-
-	// Both mapped privileged roles were held locally before the link. Removing
-	// one while ranging over desired must not skip the next, or it would be
-	// re-granted from OIDC and duplicate the break-glass grant.
-	assertOnlyLocalGrant(t, env.store, env.adminID, "admin")
-	assertOnlyLocalGrant(t, env.store, env.adminID, "owner")
-	authenticated, err := env.manager.AuthenticateFromHeader(ctx, "Bearer "+mustTokenFromExchange(t, exBody))
-	if err != nil {
-		t.Fatalf("AuthenticateFromHeader: %v", err)
-	}
-	if !hasRole(authenticated.Roles, "admin") || !hasRole(authenticated.Roles, "owner") {
-		t.Fatalf("linked session lost local privileged roles: %v", authenticated.Roles)
-	}
-}
-
-func mustTokenFromExchange(t *testing.T, body string) string {
-	t.Helper()
-	var payload struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal([]byte(body), &payload); err != nil || payload.Token == "" {
-		t.Fatalf("exchange payload err=%v body=%s", err, body)
-	}
-	return payload.Token
-}
-
-func TestWithoutRoleDoesNotMutateOriginal(t *testing.T) {
-	original := []string{"admin", "owner", "user"}
-	got := withoutRole(original, "admin")
-	if len(got) != 2 || got[0] != "owner" || got[1] != "user" {
-		t.Fatalf("withoutRole result = %v", got)
-	}
-	if original[0] != "admin" || original[1] != "owner" || original[2] != "user" {
-		t.Fatalf("withoutRole mutated the ranged slice: %v", original)
-	}
 }

@@ -37,11 +37,11 @@ func TestSetUserRolesBySourcePreservesOtherSources(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(names, []string{"admin", "viewer"}) {
 		t.Fatalf("roles=%v err=%v", names, err)
 	}
-	if src, err := store.GetUserRoleSource(ctx, "u1", "admin"); err != nil || src != "local" {
-		t.Fatalf("admin source=%q err=%v", src, err)
+	if roles, err := store.GetUserRoleNamesBySource(ctx, "u1", "local"); err != nil || !reflect.DeepEqual(roles, []string{"admin"}) {
+		t.Fatalf("local roles=%v err=%v", roles, err)
 	}
-	if src, err := store.GetUserRoleSource(ctx, "u1", "viewer"); err != nil || src != "oidc" {
-		t.Fatalf("viewer source=%q err=%v", src, err)
+	if roles, err := store.GetUserRoleNamesBySource(ctx, "u1", "oidc"); err != nil || !reflect.DeepEqual(roles, []string{"viewer"}) {
+		t.Fatalf("oidc roles=%v err=%v", roles, err)
 	}
 }
 
@@ -75,11 +75,11 @@ func TestSetUserRolesBySourceIdempotentAndEmpty(t *testing.T) {
 	}
 }
 
-func TestGetUserRoleSourceMissing(t *testing.T) {
+func TestGetUserRoleNamesBySourceMissing(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 	defer func() { _ = store.Close() }()
-	if _, err := store.GetUserRoleSource(ctx, "ghost", "admin"); err == nil {
-		t.Fatal("missing grant must return an error")
+	if roles, err := store.GetUserRoleNamesBySource(ctx, "ghost", "local"); err != nil || len(roles) != 0 {
+		t.Fatalf("roles=%v err=%v", roles, err)
 	}
 }

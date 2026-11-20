@@ -24,10 +24,10 @@ import (
 var _ carbonpanelv1connect.UserServiceHandler = (*UserService)(nil)
 
 type UserService struct {
-	store         *storage.Store
-	authManager   *auth.Manager
-	log           *logger.Logger
-	oidcLinkStore *auth.OIDCLinkStore
+	store       *storage.Store
+	authManager *auth.Manager
+	log         *logger.Logger
+	oidcHandler *auth.OIDCHandler
 }
 
 func NewUserService(store *storage.Store, authManager *auth.Manager, log *logger.Logger) *UserService {
@@ -38,10 +38,8 @@ func NewUserService(store *storage.Store, authManager *auth.Manager, log *logger
 	}
 }
 
-// SetOIDCLinkStore injects the process-local link intent store owned by the
-// OIDC handler. Without it explicit linking fails closed.
-func (s *UserService) SetOIDCLinkStore(store *auth.OIDCLinkStore) {
-	s.oidcLinkStore = store
+func (s *UserService) SetOIDCHandler(handler *auth.OIDCHandler) {
+	s.oidcHandler = handler
 }
 
 // BeginOIDCLink records an authenticated local admin's intent to bind their
@@ -52,24 +50,21 @@ func (s *UserService) BeginOIDCLink(ctx context.Context, _ *connect.Request[v1.B
 	if caller == nil || caller.ID == "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("local admin sign-in required"))
 	}
-	user, err := s.store.GetUser(ctx, caller.ID)
-	if err != nil || !user.IsActive || user.AuthProvider != "local" {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("explicit OIDC linking requires an active local admin"))
+	if s.oidcHandler == nil || !s.oidcHandler.IsEnabled() {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("OIDC linking is unavailable"))
 	}
-	source, err := s.store.GetUserRoleSource(ctx, user.ID, "admin")
-	if err != nil || source != "local" {
-		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("explicit OIDC linking requires a local admin grant"))
+	token, cookie, err := s.oidcHandler.BeginLink(ctx, caller)
+	if errors.Is(err, auth.ErrOIDCLinkIneligible) {
+		return nil, connect.NewError(connect.CodePermissionDenied, err)
 	}
-	if s.oidcLinkStore == nil {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("OIDC link store unavailable"))
-	}
-	token, err := s.oidcLinkStore.CreateIntent(user.ID)
 	if err != nil {
 		s.log.Error("OIDC link intent rejected: %v", err)
 		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("unable to start OIDC link"))
 	}
-	s.log.Info("security_audit event=oidc.link.begin outcome=ok user_id=%s detail=local_admin_explicit", user.ID)
-	return connect.NewResponse(&v1.BeginOIDCLinkResponse{LinkToken: token}), nil
+	resp := connect.NewResponse(&v1.BeginOIDCLinkResponse{LinkToken: token})
+	resp.Header().Set("Cache-Control", "no-store")
+	resp.Header().Set("Set-Cookie", cookie.String())
+	return resp, nil
 }
 
 func (s *UserService) ListUsers(ctx context.Context, req *connect.Request[v1.ListUsersRequest]) (*connect.Response[v1.ListUsersResponse], error) {
@@ -165,7 +160,7 @@ func (s *UserService) UpdateUser(ctx context.Context, req *connect.Request[v1.Up
 		user.IsActive = *msg.IsActive
 	}
 
-	if err := s.store.UpdateUser(ctx, user); err != nil {
+	if err := s.store.UpdateUserProfile(ctx, user); err != nil {
 		s.log.Error("Failed to update user: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, errors.New("failed to update user"))
 	}

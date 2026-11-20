@@ -2,59 +2,51 @@
 
 Status: accepted
 
-ADR 0024 requires an authenticated local-admin-mediated link before an OIDC
-identity can bind to an existing privileged account. That path was documented
-but missing at `e8245faa`; an unchanged v1.0.40 local admin would otherwise get
-a new role-less OIDC identity on first sign-in. This ADR defines the smallest
-implementation that closes that gap without weakening issuer+subject binding.
+ADR 0024 requires an authenticated local admin to authorize binding an OIDC
+identity to their existing account. The account must retain local access
+independently of the provider and its group policy.
 
 ## Decision
 
-1. An active local admin with a `local`-sourced `admin` grant calls
-   `UserService.BeginOIDCLink`. The interceptor requires `users/update`; the
-   service additionally verifies the caller is authenticated, active,
-   `auth_provider='local'`, and locally admin. The RPC takes no issuer, subject,
-   email or target user ID: intent is always self-service.
-2. The OIDC handler owns a bounded, TTL'd, single-use in-memory intent store.
-   `BeginOIDCLink` returns an opaque token that names only that intent. It is
-   not a session credential, is never logged, and contains no identity claim.
-3. The admin opens `/api/v1/auth/oidc/login?link_token=<token>`. The token is
-   consumed once at login start; the IdP redirect still receives only state,
-   nonce and S256 PKCE challenge. An invalid, expired, replayed or ineligible
-   token produces `link_invalid` and no state transaction.
-4. Only after the callback has consumed state, verified nonce and signature,
-   and pinned issuer can the verified `(issuer, subject)` pair bind to the
-   intent's local admin. Binding refuses if the account is already linked, if
-   the issuer+subject pair already exists, if only the subject is already known,
-   or if the target stopped being an active local admin. Email, name and
-   preferred username are never link keys. `auth_provider` remains `local`.
-5. A mapped privileged role already held from `local` on an explicitly linked
-   account is accepted for that sign-in but is **not** reconciled into the OIDC
-   source. It remains a single local-owned break-glass grant; OIDC does not
-   reattribute or revoke it. Every other provenance conflict still refuses the
-   sign-in with `role_conflict`. Raw privileged claim values remain refused
-   unless explicitly mapped, exactly as in ADR 0025.
-6. Normal OIDC session rotation applies after a successful link sign-in: prior
-   sessions for that user are invalidated, and `ValidateSession` keeps applying
-   the persisted role set per request. Local password access remains available.
+1. An active admin with a current local session and a locally sourced
+   `admin` grant selects **Link SSO account** in Settings. The self-service
+   `UserService.BeginOIDCLink` RPC requires `users/update` and accepts no
+   target user ID or identity claims.
+2. The controller creates a five-minute, single-use intent bound to the
+   exact local session and an independent HttpOnly browser cookie.
+   Login start consumes the intent. The IdP receives state, nonce, an
+   S256 PKCE challenge and a request for fresh authentication.
+3. The callback verifies state, nonce, signature, audience and issuer. The
+   verified issuer and subject bind only while the browser and exact
+   initiating session still qualify. The database checks the session and
+   local admin grant in the same write transaction that binds the identity
+   and reconciles OIDC grants. A failure rolls back both writes. An existing
+   binding or a subject already known under another or unknown issuer
+   requires operator review.
+4. A successful link returns to Settings in the initiating local session.
+   A subsequent ordinary OIDC sign-in resolves the same account by issuer
+   and subject. The account keeps its local credentials and profile.
+5. Local and OIDC role grants have independent provenance, including
+   overlaps on a linked account. Each request reloads current grants.
+   A linked OIDC session receives OIDC-sourced roles. Local sign-in and
+   existing local API credentials receive locally owned roles. Creating an
+   API token for the linked local account requires local access. Legacy
+   untyped sessions on a linked account require a fresh sign-in.
 
 ## Consequences
 
-- Operators can migrate v1.0.40 local admins without email-based merging or a
-  temporary implicit-admin grant.
-- Link state is process-local and short-lived; a controller restart requires a
-  new intent. This is preferable to persisting a capability that could outlive
-  the admin session it represents.
-- The local-admin privilege is intentionally not moved into the OIDC source;
-  that would let an absent group claim revoke break-glass access.
-- Live IdP interoperability is not claimed. Evidence comes from local
-  discovery/token/JWKS fixtures and real REST/session/store seams only.
+- An existing local admin can sign in through both providers. IdP group
+  removal revokes the mapped SSO grant while preserving local access.
+- Restarting the controller, changing browser sessions, or expiring the
+  original local session cancels a pending link. Start again from Settings.
+- OIDC role mappings still require the controls in ADR 0025. The link provides
+  a verified identity and does not grant a role by itself.
 
-## Evidence
+## Verification
 
-`internal/auth/oidc_admin_link_test.go` exercises the real login/callback/
-exchange routes with a local IdP fixture: explicit mapping success, retained
-local role ownership, stale-session rotation, local login preservation, link
-token replay/expiry/ineligibility, subject collision and unchanged
-`role_conflict` refusal. `internal/rpc/services/oidc_link_test.go` covers RPC
-authentication/authorization and fail-closed link-store injection.
+The authenticated Connect fixture exercises login, RBAC, link eligibility
+and the start request with a browser cookie jar. Callback fixtures exercise
+exact-session and browser checks, replay and expiry, account conflicts,
+separate sign-ins and group removal. Storage tests cover upgrade inputs,
+competing link attempts and rollback. Provider-specific results belong in
+release acceptance evidence for the tested build.

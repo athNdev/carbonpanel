@@ -370,6 +370,10 @@ jobs:
         working-directory: scripts/manual-review/e2e
         run: node a11y-check.mjs
 
+      - name: Local administrator OIDC linking (Chromium)
+        working-directory: web/carbon-panel
+        run: node e2e/oidc-admin-linking.mjs
+
       # OSS-245/OSS-185 named diagnostics fixture: stale console responses,
       # AUTH_FAIL sign-out, non-idempotent requests and recreated subscriptions.
       - name: Diagnostics reconnect fixture (Chromium)

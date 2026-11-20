@@ -247,6 +247,7 @@ one at https://mozilla.org/MPL/2.0/.
 		membership_check_failed: 'Could not verify your group membership. Please try again.',
 		oidc_degraded: 'SSO is temporarily unavailable. A local administrator can still sign in.',
 		locked_out: 'Too many sign-in attempts. Please wait before retrying.',
+		link_invalid: 'The link request expired or your session changed. Sign in locally to try again.',
 		link_required: 'This identity requires an administrator to link it to an account.',
 		role_conflict: 'A role conflict blocked sign-in. Ask an administrator to review role mapping.',
 		account_disabled: 'This account is disabled.'

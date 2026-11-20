@@ -12,94 +12,45 @@ If a copy of the MPL was not distributed with this file, You can obtain
 one at https://mozilla.org/MPL/2.0/.
 */}
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Steps } from '@astrojs/starlight/components';
 
-Carbon Panel never creates the first OIDC admin implicitly and never links by
-email, name or preferred username. To keep an existing local break-glass admin
-usable after enabling OIDC, that admin must explicitly bind the OIDC identity
-they intend to use.
-
-<Aside type="caution">
-This guide describes a local-fixture-backed control path, not live Okta,
-authentik or any other tenant interoperability evidence. The link token is a
-short-lived single-use capability; treat it like a one-time setup value and do
-not paste it into tickets, chat or logs.
-</Aside>
+Use this flow to sign in with SSO on an existing local admin account while
+keeping its local break-glass access.
 
 ## Prerequisites
 
-- OIDC is configured and the provider discovery/ID-token checks are working.
-- You are signed in as an **active local admin** with an `admin` grant whose
-  source is `local`. OIDC-only admins cannot start this flow.
-- `CARBONPANEL_AUTH_OIDC_ROLE_MAPPING` already contains an explicit reviewed
-  entry for every privileged role you expect OIDC to assert, for example
-  `{"carbon-admins":"admin"}`. Raw claim values such as `admin` are not enough.
+- Configure OIDC and verify that discovery and ID-token validation work.
+- Sign in locally as an active admin with a locally assigned `admin` grant.
+  API tokens and SSO sessions cannot start a link.
+- Use `role_mapping` to map the provider group to each role that should be
+  available through SSO. For example, map `carbon-admins` to `admin` after
+  reviewing who belongs to that group.
 
-## Operator steps
+## Link your account
 
 <Steps>
-1. Call `BeginOIDCLink` with your current local admin session. The RPC takes no
-   identity claims; it records only your authenticated intent.
-
-   ```bash
-   curl -fsS \
-     -H "Authorization: Bearer $LOCAL_ADMIN_TOKEN" \
-     -H 'Content-Type: application/json' \
-     -d '{}' \
-     https://panel.example.com/carbonpanel.v1.UserService/BeginOIDCLink
-   ```
-
-   The response contains `linkToken`. It expires after five minutes and is
-   consumed by the first sign-in attempt.
-
-2. In a browser, open the OIDC login URL with that token:
-
-   ```text
-   https://panel.example.com/api/v1/auth/oidc/login?link_token=LINK_TOKEN
-   ```
-
-   Replace `LINK_TOKEN` with the returned value. Complete sign-in at your IdP.
-   The token is consumed at login start; the IdP redirect still carries only
-   state, nonce and S256 PKCE challenge.
-
-3. Sign out and sign in again through OIDC. Confirm the intended account has the
-   expected roles. A successful link binds the verified issuer and subject to
-   your existing local account; your password login remains available.
+1. Open **Settings → Auth → OIDC / Single Sign-On** and select **Link SSO account**.
+2. Sign in at the identity provider using the account you intend to link.
+   Complete the flow within five minutes in the same browser. Keep the
+   initiating local session active until you return to Settings.
+3. Confirm the success message. Sign out and use **Sign in with SSO** to
+   verify the linked account and its mapped roles.
 </Steps>
 
-## What the link does and does not change
+The link binds the issuer and subject from the verified ID token to your
+existing account. Your password and local grants stay available. Local
+sign-ins use locally owned roles, and SSO sign-ins use provider-mapped roles.
+Removing a mapped group revokes its SSO grant at the next verified sign-in.
 
-- It binds the exact `(issuer, subject)` pair from the verified ID token. It
-  never uses email, name or preferred username to merge accounts.
-- It leaves `auth_provider=local` unchanged and preserves the account's local
-  `admin` grant. OIDC does not reattribute or revoke that break-glass grant.
-- A mapped privileged role that is already local-owned is accepted for the link
-  sign-in but excluded from OIDC role reconciliation. An absent group claim
-  cannot remove it.
-- Other privileged provenance conflicts still refuse sign-in with
-  `role_conflict`; review the role mapping before retrying.
-- Link tokens are single-use. A replay, expiry, ineligible caller or already
-  linked account produces `link_invalid` or `link_required` and creates no
-  session.
-- Normal session rotation applies: prior sessions for that account stop working
-  when the linked OIDC sign-in issues a new session. `ValidateSession` continues
-  to re-read persisted roles on every request.
+## If linking fails
 
-## Failure codes
-
-| Code | Meaning |
+| Result | What to check |
 | --- | --- |
-| `link_invalid` | Missing, expired, replayed or ineligible link intent. Start a new `BeginOIDCLink` from an active local admin session. |
-| `link_required` | The verified identity is already known under an unmatched issuer or is bound elsewhere. Do not force an email-based merge; use the documented admin recovery path. |
-| `role_conflict` | A desired privileged role is owned by another source. Add or correct the explicit `role_mapping`; do not enable raw privileged claims. |
+| Link expired or no longer valid | Sign in locally and start again from Settings. Another sign-in, a restart, or an expired session can cancel a pending link. |
+| Identity requires review | The identity is already linked, or the subject matches a record under another or unknown issuer. Review the stored identity and use the documented recovery path. |
+| Role conflict | Check the explicit role mapping and existing role grants before retrying. |
+| Provider declined the request | Check account selection and the provider's app assignment or sign-in policy. |
 
-## Security notes
-
-- The link token is not a session token and grants no API access by itself. It
-  only authorizes one OIDC callback to bind a verified identity to the admin who
-  created it. It is a bearer capability for a short window, so configure reverse
-  proxies not to retain full query strings in access logs.
-- Do not set `allow_raw_claim_roles=true` to recover admin. Privileged names are
-  refused from raw claims even with that opt-in.
-- Auditing records `oidc.link.begin` and `oidc.link.completed` with issuer and a
-  subject hash, never the raw subject, authorization code or token.
+Audit records contain an issuer and, after identity verification, a subject
+hash. Keep browser link URLs, authorization codes and tokens out of logs
+and support tickets.

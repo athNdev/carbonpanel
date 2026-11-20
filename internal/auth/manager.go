@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package auth
 
 import (
@@ -43,6 +42,7 @@ var (
 	ErrSessionTimeoutMin    = errors.New("session timeout must be at least 300 seconds (5 minutes)")
 	ErrAPITokenExpired      = errors.New("api token has expired")
 	ErrAPITokenNotFound     = errors.New("api token not found")
+	ErrLocalAPITokenSession = errors.New("sign in locally to create API tokens for this account")
 	ErrInvalidRecoveryKey   = errors.New("invalid recovery key")
 	// ErrNoAuthProvider is returned when the configuration would leave the
 	// panel with no authentication provider and no explicit opt-in to run
@@ -138,7 +138,7 @@ func (m *Manager) Login(ctx context.Context, username, password string) (*db.Use
 	}
 
 	// Get user roles
-	roleNames, err := m.store.GetUserRoleNames(ctx, user.ID)
+	roleNames, err := m.roleNamesForCredential(ctx, user, "local")
 	if err != nil {
 		return nil, nil, "", time.Time{}, fmt.Errorf("failed to get user roles: %w", err)
 	}
@@ -152,10 +152,11 @@ func (m *Manager) Login(ctx context.Context, username, password string) (*db.Use
 
 	// Create session
 	session := &db.Session{
-		ID:        uuid.New().String(),
-		UserID:    user.ID,
-		Token:     token,
-		ExpiresAt: expiresAt,
+		ID:           uuid.New().String(),
+		UserID:       user.ID,
+		Token:        token,
+		ExpiresAt:    expiresAt,
+		AuthProvider: "local",
 	}
 	if err := m.store.CreateSession(ctx, session); err != nil {
 		return nil, nil, "", time.Time{}, err
@@ -164,7 +165,7 @@ func (m *Manager) Login(ctx context.Context, username, password string) (*db.Use
 	// Update last login
 	now := time.Now()
 	user.LastLogin = &now
-	_ = m.store.UpdateUser(ctx, user)
+	_ = m.store.UpdateUserLastLogin(ctx, user.ID, now)
 
 	return user, roleNames, token, expiresAt, nil
 }
@@ -202,22 +203,49 @@ func (m *Manager) ValidateSession(ctx context.Context, token string) (*Authentic
 	}
 
 	// Get roles
-	roleNames, err := m.store.GetUserRoleNames(ctx, user.ID)
+	roleNames, err := m.roleNamesForCredential(ctx, user, session.AuthProvider)
 	if err != nil {
 		return nil, err
 	}
 
+	provider := session.AuthProvider
+	if provider == "" {
+		provider = user.AuthProvider
+	}
 	authUser := &AuthenticatedUser{
-		ID:       user.ID,
-		Username: user.Username,
-		Roles:    roleNames,
-		Provider: user.AuthProvider,
+		ID:              user.ID,
+		Username:        user.Username,
+		Roles:           roleNames,
+		Provider:        provider,
+		SessionID:       session.ID,
+		SessionProvider: session.AuthProvider,
 	}
 	if user.Email != nil {
 		authUser.Email = *user.Email
 	}
 
 	return authUser, nil
+}
+
+func (m *Manager) roleNamesForCredential(ctx context.Context, user *db.User, provider string) ([]string, error) {
+	if user.AuthProvider != "local" {
+		return m.store.GetUserRoleNames(ctx, user.ID)
+	}
+	switch provider {
+	case oidcSource:
+		return m.store.GetUserRoleNamesBySource(ctx, user.ID, oidcSource)
+	case "":
+		// Older sessions on a linked account cannot prove which side issued
+		// them. A fresh sign-in restores the appropriate role boundary.
+		if isLinkedLocalAccount(user) {
+			return nil, ErrSessionExpired
+		}
+	}
+	return m.store.GetUserLocalRoleNames(ctx, user.ID)
+}
+
+func isLinkedLocalAccount(user *db.User) bool {
+	return user.AuthProvider == "local" && user.OIDCSubject != "" && user.OIDCIssuer != ""
 }
 
 func (m *Manager) Logout(ctx context.Context, token string) error {
@@ -278,8 +306,7 @@ func (m *Manager) ChangePassword(ctx context.Context, userID, oldPassword, newPa
 		return err
 	}
 
-	user.PasswordHash = hashedPassword
-	return m.store.UpdateUser(ctx, user)
+	return m.store.UpdateUserPassword(ctx, user.ID, hashedPassword)
 }
 
 // InvalidateUserSessions deletes every stored session for userID except the one
@@ -431,6 +458,17 @@ func (m *Manager) UpdateSettings(ctx context.Context, localEnabled, allowReg, an
 
 // Creates a new API token for a user. Plaintext is returned, SHA-256 hash is stored
 func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, expiresInDays *int32) (string, *db.APIToken, error) {
+	// Tokens tied to a local account authenticate with locally owned grants.
+	// A linked OIDC session cannot turn its IdP grant into a local credential.
+	if caller := GetUserFromContext(ctx); caller != nil && caller.ID == userID && caller.SessionProvider == oidcSource {
+		user, err := m.store.GetUser(ctx, userID)
+		if err != nil {
+			return "", nil, err
+		}
+		if isLinkedLocalAccount(user) {
+			return "", nil, ErrLocalAPITokenSession
+		}
+	}
 	// Generate 32 random bytes
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
@@ -513,7 +551,7 @@ func (m *Manager) ValidateAPIToken(ctx context.Context, rawToken string) (*Authe
 	}
 
 	// Get roles
-	roleNames, err := m.store.GetUserRoleNames(ctx, user.ID)
+	roleNames, err := m.roleNamesForCredential(ctx, user, "local")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user roles: %w", err)
 	}
