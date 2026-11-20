@@ -25,7 +25,8 @@ sources:
   authoritative release record via the OSS-395 product version contract (no
   hardcoded stable literal; no hardcoded count for the current case). Both
   assert integrity, additive table growth, row/world preservation, forced-
-  failure refusal and app-level plus copy-back rollback. Disposable artifacts
+  failure refusal and both rollback paths. Rollback restores the exact Stable
+  table set and removes only tables observed in the candidate delta. Disposable artifacts
   stay under `$RUNNER_TEMP` (build caches excepted); a missing or mismatched
   fixture, or any failed check, fails closed with no silent skip and still
   writes a failing evidence report. It grants no write scope and never touches

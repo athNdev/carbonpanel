@@ -24,6 +24,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		CarbonConfirm,
 		CarbonEmptyState
 	} from '$lib/components/carbon';
+	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import {
 		ArrowLeft,
 		Save,
@@ -780,6 +781,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				<div class="sticky top-0 z-10 bg-background/95 backdrop-blur">
 					<CarbonTabs
 						tabs={studioTabs}
+						idPrefix="studio-workspace"
 						selectedTab={activeTab}
 						onselect={(id) => {
 							if (
@@ -798,296 +800,276 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					/>
 				</div>
 
-				<!-- TAB 1: MODS MANAGEMENT -->
-				{#if activeTab === 'mods'}
-					<CarbonTile class="rounded-none border-border p-0">
-						<div
-							class="flex flex-col justify-between gap-3 border-b border-border bg-card p-4 sm:flex-row sm:items-center"
-						>
-							<div class="space-y-0.5">
-								<div class="flex items-center gap-2">
-									<h2 class="text-base font-semibold text-foreground">Mods in Modpack</h2>
-									<CarbonTag type="cyan" size="sm">{pack.mods.length}</CarbonTag>
-								</div>
-								<p class="text-xs text-muted-foreground">
-									Manage server/client sides, pinning, dependency versions, and update checks.
-								</p>
-							</div>
+				<CarbonInactiveTabPanels
+					tabs={studioTabs}
+					selectedTab={activeTab}
+					idPrefix="studio-workspace"
+				/>
 
-							<div class="flex flex-wrap items-center gap-2">
-								<div class="w-44 sm:w-56">
-									<CarbonSearch placeholder="Filter mods..." bind:value={modFilter} size="sm" />
-								</div>
-
-								<CarbonButton
-									kind="tertiary"
-									size="sm"
-									class="rounded-none"
-									onclick={checkUpdates}
-									disabled={checkingUpdates}
-									title="Check Modrinth for newer mod releases"
-								>
-									{#if checkingUpdates}
-										<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-									{:else}
-										<Sparkles class="mr-1.5 h-3.5 w-3.5 text-amber-500" />
-									{/if}
-									Check Updates
-								</CarbonButton>
-
-								<CarbonButton
-									kind="primary"
-									size="sm"
-									class="rounded-none"
-									onclick={() => (searchDrawerOpen = true)}
-								>
-									<Plus class="mr-1.5 h-4 w-4" />
-									Add Mods
-								</CarbonButton>
-							</div>
-						</div>
-
-						<!-- Filter bar: Carbon buttons replace the raw filter pills -->
-						<div
-							class="flex flex-wrap items-center gap-1.5 border-b border-border bg-background p-3 text-xs"
-						>
-							<CarbonButton
-								size="sm"
-								kind={sideFilter === 'all' ? 'primary' : 'secondary'}
-								class="rounded-none"
-								onclick={() => (sideFilter = 'all')}
-							>
-								All ({pack.mods.length})
-							</CarbonButton>
-							<CarbonButton
-								size="sm"
-								kind={sideFilter === 'both' ? 'primary' : 'secondary'}
-								class="rounded-none"
-								onclick={() => (sideFilter = 'both')}
-							>
-								Both ({pack.mods.filter((m) => m.side === 'both').length})
-							</CarbonButton>
-							<CarbonButton
-								size="sm"
-								kind={sideFilter === 'client' ? 'primary' : 'secondary'}
-								class="rounded-none"
-								onclick={() => (sideFilter = 'client')}
-							>
-								Client Only ({pack.mods.filter((m) => m.side === 'client').length})
-							</CarbonButton>
-							<CarbonButton
-								size="sm"
-								kind={sideFilter === 'server' ? 'primary' : 'secondary'}
-								class="rounded-none"
-								onclick={() => (sideFilter = 'server')}
-							>
-								Server Only ({pack.mods.filter((m) => m.side === 'server').length})
-							</CarbonButton>
-							<CarbonButton
-								size="sm"
-								kind={sideFilter === 'pinned' ? 'primary' : 'secondary'}
-								class="rounded-none"
-								onclick={() => (sideFilter = 'pinned')}
-							>
-								Pinned ({pack.mods.filter((m) => m.pinned).length})
-							</CarbonButton>
-							<CarbonButton
-								size="sm"
-								kind={sideFilter === 'updates' ? 'primary' : 'secondary'}
-								class="rounded-none"
-								onclick={() => (sideFilter = 'updates')}
-							>
-								Updates ({Object.values(updatesMap).filter((u) => u.update_available).length})
-							</CarbonButton>
-						</div>
-
-						<!-- Batch Action Bar -->
-						{#if selectedSlugs.length > 0}
+				<div
+					id="studio-workspace-panel-{activeTab}"
+					role="tabpanel"
+					aria-labelledby="studio-workspace-tab-{activeTab}"
+					class="focus-ring min-w-0 space-y-4"
+					tabindex="0"
+				>
+					<!-- TAB 1: MODS MANAGEMENT -->
+					{#if activeTab === 'mods'}
+						<CarbonTile class="rounded-none border-border p-0">
 							<div
-								class="flex items-center justify-between rounded-none border-b border-[var(--tag-blue-text)] bg-[var(--tag-blue-bg)] p-2.5"
+								class="flex flex-col justify-between gap-3 border-b border-border bg-card p-4 sm:flex-row sm:items-center"
 							>
-								<span class="font-mono text-xs font-semibold text-[var(--tag-blue-text)]">
-									{selectedSlugs.length} mod(s) selected
-								</span>
-								<div class="flex flex-wrap items-center gap-1.5">
+								<div class="space-y-0.5">
+									<div class="flex items-center gap-2">
+										<h2 class="text-base font-semibold text-foreground">Mods in Modpack</h2>
+										<CarbonTag type="cyan" size="sm">{pack.mods.length}</CarbonTag>
+									</div>
+									<p class="text-xs text-muted-foreground">
+										Manage server/client sides, pinning, dependency versions, and update checks.
+									</p>
+								</div>
+
+								<div class="flex flex-wrap items-center gap-2">
+									<div class="w-44 sm:w-56">
+										<CarbonSearch placeholder="Filter mods..." bind:value={modFilter} size="sm" />
+									</div>
+
 									<CarbonButton
+										kind="tertiary"
 										size="sm"
-										kind="secondary"
-										class="h-7 rounded-none text-xs"
-										onclick={() => runBatchAction('set_side', 'both')}
+										class="rounded-none"
+										onclick={checkUpdates}
+										disabled={checkingUpdates}
+										title="Check Modrinth for newer mod releases"
 									>
-										Set Both
+										{#if checkingUpdates}
+											<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
+										{:else}
+											<Sparkles class="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+										{/if}
+										Check Updates
 									</CarbonButton>
+
 									<CarbonButton
+										kind="primary"
 										size="sm"
-										kind="secondary"
-										class="h-7 rounded-none text-xs"
-										onclick={() => runBatchAction('set_side', 'server')}
+										class="rounded-none"
+										onclick={() => (searchDrawerOpen = true)}
 									>
-										Set Server
-									</CarbonButton>
-									<CarbonButton
-										size="sm"
-										kind="secondary"
-										class="h-7 rounded-none text-xs"
-										onclick={() => runBatchAction('set_side', 'client')}
-									>
-										Set Client
-									</CarbonButton>
-									<CarbonButton
-										size="sm"
-										kind="secondary"
-										class="h-7 rounded-none text-xs"
-										onclick={() => runBatchAction('pin')}
-									>
-										Pin
-									</CarbonButton>
-									<CarbonButton
-										size="sm"
-										kind="secondary"
-										class="h-7 rounded-none text-xs"
-										onclick={() => runBatchAction('unpin')}
-									>
-										Unpin
-									</CarbonButton>
-									<CarbonButton
-										size="sm"
-										kind="danger"
-										class="h-7 rounded-none text-xs"
-										onclick={() => runBatchAction('remove')}
-									>
-										Remove
-									</CarbonButton>
-									<CarbonButton
-										size="sm"
-										kind="ghost"
-										class="h-7 rounded-none text-xs"
-										onclick={() => (selectedSlugs = [])}
-									>
-										Clear
+										<Plus class="mr-1.5 h-4 w-4" />
+										Add Mods
 									</CarbonButton>
 								</div>
 							</div>
-						{/if}
 
-						{#if filteredMods.length === 0}
-							<div class="p-4">
-								<CarbonEmptyState
-									title="No mods match current filter"
-									description="Adjust the side filter or search, or browse the catalog to add mods."
-									actionLabel="Browse & Add Mods"
-									onaction={() => (searchDrawerOpen = true)}
-								/>
-							</div>
-						{:else}
-							<StudioModTable
-								{filteredMods}
-								bind:selectedSlugs
-								{updatesMap}
-								{toggleSide}
-								{togglePin}
-								{removeMod}
-							/>
-						{/if}
-					</CarbonTile>
-				{/if}
-
-				<!-- TAB: DATAPACKS -->
-				{#if activeTab === 'datapacks'}
-					<PackContentPanel
-						packId={packId ?? ''}
-						kind="datapack"
-						items={pack.datapacks ?? []}
-						mcVersion={pack.mc_version}
-						datapackFolder={pack.datapack_folder ?? 'datapacks'}
-						onchanged={loadPack}
-					/>
-				{/if}
-
-				<!-- TAB: RESOURCE PACKS -->
-				{#if activeTab === 'resourcepacks'}
-					<PackContentPanel
-						packId={packId ?? ''}
-						kind="resourcepack"
-						items={pack.resourcepacks ?? []}
-						mcVersion={pack.mc_version}
-						onchanged={loadPack}
-					/>
-				{/if}
-
-				<!-- TAB: SHADER PACKS -->
-				{#if activeTab === 'shaderpacks'}
-					<PackContentPanel
-						packId={packId ?? ''}
-						kind="shaderpack"
-						items={pack.shaderpacks ?? []}
-						mcVersion={pack.mc_version}
-						onchanged={loadPack}
-					/>
-				{/if}
-
-				<!-- TAB 2: OVERRIDES & CONFIGS -->
-				{#if activeTab === 'overrides'}
-					<CarbonTile class="rounded-none border-border p-0">
-						<div class="flex items-center justify-between border-b border-border bg-card p-4">
-							<div>
-								<h2 class="text-base font-semibold text-foreground">Overrides & Config Files</h2>
-								<p class="text-xs text-muted-foreground">
-									Packwiz overrides bundled with the modpack: server configurations, datapacks, and
-									scripts.
-								</p>
-							</div>
-							<div class="flex items-center gap-2">
-								<input
-									bind:this={datapackFileInput}
-									type="file"
-									accept=".zip,application/zip"
-									class="hidden"
-									onchange={handleDatapackUpload}
-								/>
+							<!-- Filter bar: Carbon buttons replace the raw filter pills -->
+							<div
+								class="flex flex-wrap items-center gap-1.5 border-b border-border bg-background p-3 text-xs"
+							>
 								<CarbonButton
 									size="sm"
-									kind="secondary"
+									kind={sideFilter === 'all' ? 'primary' : 'secondary'}
 									class="rounded-none"
-									disabled={uploadingDatapack}
-									onclick={() => datapackFileInput?.click()}
+									onclick={() => (sideFilter = 'all')}
 								>
-									<Upload class="mr-1.5 h-4 w-4" />
-									{#if uploadingDatapack}Uploading...{:else}Upload Datapack{/if}
+									All ({pack.mods.length})
 								</CarbonButton>
 								<CarbonButton
 									size="sm"
-									kind="secondary"
+									kind={sideFilter === 'both' ? 'primary' : 'secondary'}
 									class="rounded-none"
-									onclick={() => (datapackBrowseOpen = true)}
+									onclick={() => (sideFilter = 'both')}
 								>
-									<Package class="mr-1.5 h-4 w-4" />
-									Browse Datapacks
+									Both ({pack.mods.filter((m) => m.side === 'both').length})
 								</CarbonButton>
 								<CarbonButton
 									size="sm"
+									kind={sideFilter === 'client' ? 'primary' : 'secondary'}
 									class="rounded-none"
-									onclick={() => (uploadFileDialogOpen = true)}
+									onclick={() => (sideFilter = 'client')}
 								>
-									<Plus class="mr-1.5 h-4 w-4" />
-									Add Override File
+									Client Only ({pack.mods.filter((m) => m.side === 'client').length})
+								</CarbonButton>
+								<CarbonButton
+									size="sm"
+									kind={sideFilter === 'server' ? 'primary' : 'secondary'}
+									class="rounded-none"
+									onclick={() => (sideFilter = 'server')}
+								>
+									Server Only ({pack.mods.filter((m) => m.side === 'server').length})
+								</CarbonButton>
+								<CarbonButton
+									size="sm"
+									kind={sideFilter === 'pinned' ? 'primary' : 'secondary'}
+									class="rounded-none"
+									onclick={() => (sideFilter = 'pinned')}
+								>
+									Pinned ({pack.mods.filter((m) => m.pinned).length})
+								</CarbonButton>
+								<CarbonButton
+									size="sm"
+									kind={sideFilter === 'updates' ? 'primary' : 'secondary'}
+									class="rounded-none"
+									onclick={() => (sideFilter = 'updates')}
+								>
+									Updates ({Object.values(updatesMap).filter((u) => u.update_available).length})
 								</CarbonButton>
 							</div>
-						</div>
 
-						{#if loadingFiles}
-							<div class="flex items-center justify-center py-16">
-								<CarbonInlineLoading description="Scanning override files..." />
-							</div>
-						{:else if packFiles.length === 0}
-							<div class="space-y-3 p-4">
-								<CarbonEmptyState
-									title="No override files found"
-									description="Add custom server configs, datapacks, or options to bundle them directly into the modpack."
-									actionLabel="Add Config File"
-									onaction={() => (uploadFileDialogOpen = true)}
+							<!-- Batch Action Bar -->
+							{#if selectedSlugs.length > 0}
+								<div
+									class="flex items-center justify-between rounded-none border-b border-[var(--tag-blue-text)] bg-[var(--tag-blue-bg)] p-2.5"
+								>
+									<span class="font-mono text-xs font-semibold text-[var(--tag-blue-text)]">
+										{selectedSlugs.length} mod(s) selected
+									</span>
+									<div class="flex flex-wrap items-center gap-1.5">
+										<CarbonButton
+											size="sm"
+											kind="secondary"
+											class="h-7 rounded-none text-xs"
+											onclick={() => runBatchAction('set_side', 'both')}
+										>
+											Set Both
+										</CarbonButton>
+										<CarbonButton
+											size="sm"
+											kind="secondary"
+											class="h-7 rounded-none text-xs"
+											onclick={() => runBatchAction('set_side', 'server')}
+										>
+											Set Server
+										</CarbonButton>
+										<CarbonButton
+											size="sm"
+											kind="secondary"
+											class="h-7 rounded-none text-xs"
+											onclick={() => runBatchAction('set_side', 'client')}
+										>
+											Set Client
+										</CarbonButton>
+										<CarbonButton
+											size="sm"
+											kind="secondary"
+											class="h-7 rounded-none text-xs"
+											onclick={() => runBatchAction('pin')}
+										>
+											Pin
+										</CarbonButton>
+										<CarbonButton
+											size="sm"
+											kind="secondary"
+											class="h-7 rounded-none text-xs"
+											onclick={() => runBatchAction('unpin')}
+										>
+											Unpin
+										</CarbonButton>
+										<CarbonButton
+											size="sm"
+											kind="danger"
+											class="h-7 rounded-none text-xs"
+											onclick={() => runBatchAction('remove')}
+										>
+											Remove
+										</CarbonButton>
+										<CarbonButton
+											size="sm"
+											kind="ghost"
+											class="h-7 rounded-none text-xs"
+											onclick={() => (selectedSlugs = [])}
+										>
+											Clear
+										</CarbonButton>
+									</div>
+								</div>
+							{/if}
+
+							{#if filteredMods.length === 0}
+								<div class="p-4">
+									<CarbonEmptyState
+										title="No mods match current filter"
+										description="Adjust the side filter or search, or browse the catalog to add mods."
+										actionLabel="Browse & Add Mods"
+										onaction={() => (searchDrawerOpen = true)}
+									/>
+								</div>
+							{:else}
+								<StudioModTable
+									{filteredMods}
+									bind:selectedSlugs
+									{updatesMap}
+									{toggleSide}
+									{togglePin}
+									{removeMod}
 								/>
-								<div class="flex justify-center">
+							{/if}
+						</CarbonTile>
+					{/if}
+
+					<!-- TAB: DATAPACKS -->
+					{#if activeTab === 'datapacks'}
+						<PackContentPanel
+							packId={packId ?? ''}
+							kind="datapack"
+							items={pack.datapacks ?? []}
+							mcVersion={pack.mc_version}
+							datapackFolder={pack.datapack_folder ?? 'datapacks'}
+							onchanged={loadPack}
+						/>
+					{/if}
+
+					<!-- TAB: RESOURCE PACKS -->
+					{#if activeTab === 'resourcepacks'}
+						<PackContentPanel
+							packId={packId ?? ''}
+							kind="resourcepack"
+							items={pack.resourcepacks ?? []}
+							mcVersion={pack.mc_version}
+							onchanged={loadPack}
+						/>
+					{/if}
+
+					<!-- TAB: SHADER PACKS -->
+					{#if activeTab === 'shaderpacks'}
+						<PackContentPanel
+							packId={packId ?? ''}
+							kind="shaderpack"
+							items={pack.shaderpacks ?? []}
+							mcVersion={pack.mc_version}
+							onchanged={loadPack}
+						/>
+					{/if}
+
+					<!-- TAB 2: OVERRIDES & CONFIGS -->
+					{#if activeTab === 'overrides'}
+						<CarbonTile class="rounded-none border-border p-0">
+							<div class="flex items-center justify-between border-b border-border bg-card p-4">
+								<div>
+									<h2 class="text-base font-semibold text-foreground">Overrides & Config Files</h2>
+									<p class="text-xs text-muted-foreground">
+										Packwiz overrides bundled with the modpack: server configurations, datapacks,
+										and scripts.
+									</p>
+								</div>
+								<div class="flex items-center gap-2">
+									<input
+										bind:this={datapackFileInput}
+										type="file"
+										accept=".zip,application/zip"
+										class="hidden"
+										onchange={handleDatapackUpload}
+									/>
+									<CarbonButton
+										size="sm"
+										kind="secondary"
+										class="rounded-none"
+										disabled={uploadingDatapack}
+										onclick={() => datapackFileInput?.click()}
+									>
+										<Upload class="mr-1.5 h-4 w-4" />
+										{#if uploadingDatapack}Uploading...{:else}Upload Datapack{/if}
+									</CarbonButton>
 									<CarbonButton
 										size="sm"
 										kind="secondary"
@@ -1097,340 +1079,374 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 										<Package class="mr-1.5 h-4 w-4" />
 										Browse Datapacks
 									</CarbonButton>
-								</div>
-							</div>
-						{:else}
-							<div class="overflow-x-auto">
-								<table class="w-full border-collapse text-left text-xs">
-									<thead
-										class="border-b border-border bg-secondary font-semibold text-foreground uppercase"
-									>
-										<tr>
-											<th scope="col" class="px-4 py-2.5">File Path</th>
-											<th scope="col" class="px-4 py-2.5">Category</th>
-											<th scope="col" class="px-4 py-2.5">Size</th>
-											<th scope="col" class="px-4 py-2.5 text-right">Actions</th>
-										</tr>
-									</thead>
-									<tbody class="divide-y divide-border bg-card text-foreground">
-										{#each packFiles as file (file.path)}
-											<tr class="transition-colors hover:bg-secondary">
-												<td class="px-4 py-2.5 font-mono text-xs font-semibold text-foreground">
-													{file.path}
-												</td>
-												<td class="px-4 py-2.5">
-													<CarbonTag type="gray" size="sm" class="capitalize">
-														{file.category}
-													</CarbonTag>
-												</td>
-												<td class="px-4 py-2.5 font-mono text-muted-foreground">
-													{formatBytes(file.size)}
-												</td>
-												<td class="px-4 py-2.5 text-right">
-													<CarbonButton
-														kind="ghost"
-														size="sm"
-														iconOnly
-														class="rounded-none text-destructive-text hover:bg-destructive/20"
-														onclick={() => handleDeleteFile(file.path)}
-														title="Delete file"
-														aria-label="Delete file"
-													>
-														<Trash2 class="h-3.5 w-3.5" />
-													</CarbonButton>
-												</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						{/if}
-					</CarbonTile>
-				{/if}
-
-				<!-- TAB 3: VERSION MIGRATION -->
-				{#if activeTab === 'migrate'}
-					<CarbonTile class="space-y-4 rounded-none border-border">
-						<div class="border-b border-border pb-3">
-							<h2 class="text-base font-semibold text-foreground">
-								Minecraft Version Migration Assistant
-							</h2>
-							<p class="text-xs text-muted-foreground">
-								Simulate upgrading all pack mods to a newer Minecraft release or loader before
-								applying changes.
-							</p>
-						</div>
-
-						<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-							<CarbonSelect label="Target Minecraft Version" bind:value={migrateMC}>
-								{#each MC_VERSIONS as v (v)}
-									<option value={v}>{v}</option>
-								{/each}
-							</CarbonSelect>
-
-							<CarbonSelect label="Target Mod Loader" bind:value={migrateLoader}>
-								<option value="fabric">Fabric</option>
-								<option value="neoforge">NeoForge</option>
-								<option value="forge">Forge</option>
-								<option value="quilt">Quilt</option>
-							</CarbonSelect>
-						</div>
-
-						<div class="flex items-center gap-3 pt-2">
-							<CarbonButton
-								kind="secondary"
-								size="sm"
-								class="rounded-none"
-								onclick={() => simulateMigration(false)}
-								disabled={migrating}
-							>
-								{#if migrating}
-									<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-								{:else}
-									<Sparkles class="mr-1.5 h-3.5 w-3.5 text-accent-text" />
-								{/if}
-								Simulate Compatibility
-							</CarbonButton>
-
-							<CarbonButton
-								kind="primary"
-								size="sm"
-								class="rounded-none"
-								onclick={() => simulateMigration(true)}
-								disabled={migrating}
-							>
-								<ArrowRightLeft class="mr-1.5 h-3.5 w-3.5" />
-								Apply Migration
-							</CarbonButton>
-						</div>
-
-						{#if migrationReport}
-							<div class="mt-4 space-y-3 rounded-none border border-border bg-background p-4">
-								<div class="flex items-center justify-between">
-									<div class="flex items-center gap-2">
-										<CarbonTag type="green" size="md">
-											{migrationReport.compatible_count} Compatible
-										</CarbonTag>
-										<CarbonTag type="red" size="md">
-											{migrationReport.incompatible_count} Missing Version
-										</CarbonTag>
-									</div>
-									<span class="font-mono text-xs text-muted-foreground">
-										Target: MC {migrationReport.target_mc} ({migrationReport.target_loader})
-									</span>
-								</div>
-
-								<!-- Carbon Structured List for Migration Details -->
-								<CarbonStructuredList class="mt-3">
-									{#snippet header()}
-										<div class="flex w-full justify-between">
-											<span>Mod Slug / Name</span>
-											<span>Target Compatibility Status</span>
-										</div>
-									{/snippet}
-
-									{#each migrationReport.mods as m (m.slug)}
-										<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
-											<span class="font-medium text-foreground">{m.name}</span>
-											{#if m.compatible}
-												<span class="flex items-center gap-1 text-success-text">
-													<CheckCircle2 class="h-3.5 w-3.5" />
-													Compatible
-												</span>
-											{:else}
-												<span class="flex items-center gap-1 text-destructive-text">
-													<AlertTriangle class="h-3.5 w-3.5" />
-													No version for {migrationReport.target_mc}
-												</span>
-											{/if}
-										</div>
-									{/each}
-								</CarbonStructuredList>
-							</div>
-						{/if}
-					</CarbonTile>
-				{/if}
-
-				<!-- TAB 4: EXPORT & MANIFEST -->
-				{#if activeTab === 'export'}
-					<CarbonTile class="space-y-6 rounded-none border-border">
-						<div class="border-b border-border pb-3">
-							<div class="flex flex-wrap items-center justify-between gap-2">
-								<div>
-									<h2 class="text-base font-semibold">Export & Manifest</h2>
-									<p class="text-xs text-muted-foreground">
-										Launcher exports, manifest breakdown, raw TOML, and manifest inspection.
-									</p>
-								</div>
-								<div class="flex flex-wrap items-center gap-2">
-									<CarbonButton
-										size="sm"
-										kind="secondary"
-										class="rounded-none"
-										onclick={() => (inspectorOpen = true)}
-									>
-										Inspect Manifest
-									</CarbonButton>
 									<CarbonButton
 										size="sm"
 										class="rounded-none"
-										onclick={() => (exportDialogOpen = true)}
+										onclick={() => (uploadFileDialogOpen = true)}
 									>
-										<Download class="mr-1.5 h-3.5 w-3.5" />
-										Export Pack
+										<Plus class="mr-1.5 h-4 w-4" />
+										Add Override File
 									</CarbonButton>
 								</div>
 							</div>
-						</div>
 
-						<!-- Manifest breakdown -->
-						<div class="space-y-2">
-							<div class="flex flex-wrap items-center gap-2">
-								<CarbonTag type="cyan" size="sm">Total {contentBreakdown?.total ?? 0}</CarbonTag>
-								<CarbonTag type="blue" size="sm">
-									Both {contentBreakdown?.both ?? 0}
-								</CarbonTag>
-								<CarbonTag type="purple" size="sm">
-									Client {contentBreakdown?.client ?? 0}
-								</CarbonTag>
-								<CarbonTag type="green" size="sm">
-									Server {contentBreakdown?.server ?? 0}
-								</CarbonTag>
-								<CarbonTag type="gray" size="sm">
-									Pinned {contentBreakdown?.pinned ?? 0}
-								</CarbonTag>
-							</div>
-							<CarbonStructuredList>
-								{#snippet header()}
-									<div class="flex w-full justify-between">
-										<span>Side</span>
-										<span>Count</span>
+							{#if loadingFiles}
+								<div class="flex items-center justify-center py-16">
+									<CarbonInlineLoading description="Scanning override files..." />
+								</div>
+							{:else if packFiles.length === 0}
+								<div class="space-y-3 p-4">
+									<CarbonEmptyState
+										title="No override files found"
+										description="Add custom server configs, datapacks, or options to bundle them directly into the modpack."
+										actionLabel="Add Config File"
+										onaction={() => (uploadFileDialogOpen = true)}
+									/>
+									<div class="flex justify-center">
+										<CarbonButton
+											size="sm"
+											kind="secondary"
+											class="rounded-none"
+											onclick={() => (datapackBrowseOpen = true)}
+										>
+											<Package class="mr-1.5 h-4 w-4" />
+											Browse Datapacks
+										</CarbonButton>
 									</div>
-								{/snippet}
-								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
-									<span class="text-foreground">Client-only (excluded with server export)</span>
-									<span>{contentBreakdown?.clientOnly ?? 0}</span>
 								</div>
-								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
-									<span class="text-foreground">CurseForge-ready (numeric IDs)</span>
-									<span
-										>{contentBreakdown?.curseforgeReady ?? 0} of {contentBreakdown?.total ??
-											0}</span
-									>
-								</div>
-								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
-									<span class="text-foreground">Override files bundled</span>
-									<span>{contentBreakdown?.overrides ?? 0}</span>
-								</div>
-							</CarbonStructuredList>
-						</div>
-
-						<!-- Raw TOML Inspector -->
-						<div class="space-y-2">
-							<div class="flex items-center justify-between">
-								<span class="text-xs font-semibold text-foreground">Raw pack.toml Preview</span>
-								<CarbonButton
-									kind="ghost"
-									size="sm"
-									class="rounded-none text-xs"
-									onclick={loadRawTomls}
-									disabled={loadingRaw}
-								>
-									Reload TOML
-								</CarbonButton>
-							</div>
-							{#if loadingRaw}
-								<div class="flex items-center justify-center py-8">
-									<CarbonInlineLoading description="Loading pack.toml..." />
-								</div>
-							{:else if rawPackToml}
-								<pre
-									class="max-h-48 overflow-y-auto rounded-none border border-border bg-muted p-3 font-mono text-xs">{rawPackToml}</pre>
 							{:else}
-								<CarbonEmptyState
-									title="No TOML preview"
-									description="Reload to fetch the generated pack.toml for this project."
-									actionLabel="Reload TOML"
-									onaction={loadRawTomls}
-								/>
+								<div class="overflow-x-auto">
+									<table class="w-full border-collapse text-left text-xs">
+										<thead
+											class="border-b border-border bg-secondary font-semibold text-foreground uppercase"
+										>
+											<tr>
+												<th scope="col" class="px-4 py-2.5">File Path</th>
+												<th scope="col" class="px-4 py-2.5">Category</th>
+												<th scope="col" class="px-4 py-2.5">Size</th>
+												<th scope="col" class="px-4 py-2.5 text-right">Actions</th>
+											</tr>
+										</thead>
+										<tbody class="divide-y divide-border bg-card text-foreground">
+											{#each packFiles as file (file.path)}
+												<tr class="transition-colors hover:bg-secondary">
+													<td class="px-4 py-2.5 font-mono text-xs font-semibold text-foreground">
+														{file.path}
+													</td>
+													<td class="px-4 py-2.5">
+														<CarbonTag type="gray" size="sm" class="capitalize">
+															{file.category}
+														</CarbonTag>
+													</td>
+													<td class="px-4 py-2.5 font-mono text-muted-foreground">
+														{formatBytes(file.size)}
+													</td>
+													<td class="px-4 py-2.5 text-right">
+														<CarbonButton
+															kind="ghost"
+															size="sm"
+															iconOnly
+															class="rounded-none text-destructive-text hover:bg-destructive/20"
+															onclick={() => handleDeleteFile(file.path)}
+															title="Delete file"
+															aria-label="Delete file"
+														>
+															<Trash2 class="h-3.5 w-3.5" />
+														</CarbonButton>
+													</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
 							{/if}
-						</div>
-					</CarbonTile>
-				{/if}
+						</CarbonTile>
+					{/if}
 
-				<!-- TAB 5: MAINTENANCE -->
-				{#if activeTab === 'maintenance'}
-					<CarbonTile class="space-y-6 rounded-none border-border">
-						<div class="border-b border-border pb-3">
-							<h2 class="text-base font-semibold text-foreground">
-								Packwiz Maintenance & Live Serving
-							</h2>
-							<p class="text-xs text-muted-foreground">
-								Rebuild indices and view live container bootstrap URLs.
-							</p>
-						</div>
-
-						<!-- Live Serving URL Tile -->
-						<div class="space-y-2 rounded-none border border-border bg-background p-4">
-							<div class="flex items-center justify-between">
-								<span class="text-xs font-semibold text-foreground"
-									>Live Container Bootstrap URL (PACKWIZ_URL)</span
-								>
-								<CarbonButton
-									kind="ghost"
-									size="sm"
-									class="rounded-none text-xs"
-									onclick={() => {
-										const u = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/packwiz/${pack?.id}/pack.toml`;
-										navigator.clipboard.writeText(u);
-										toast.success('Copied PACKWIZ_URL to clipboard!');
-									}}
-								>
-									<Copy class="mr-1.5 h-3.5 w-3.5" />
-									Copy URL
-								</CarbonButton>
-							</div>
-							<div
-								class="rounded-none border border-border bg-card p-2.5 font-mono text-xs break-all text-success-text select-all"
-							>
-								{typeof window !== 'undefined'
-									? `${window.location.origin}/api/v1/packwiz/${pack?.id}/pack.toml`
-									: `/api/v1/packwiz/${pack?.id}/pack.toml`}
-							</div>
-							<p class="text-xs text-muted-foreground">
-								Set this URL in Docker container environments or packwiz-installer to dynamically
-								provision this modpack on startup.
-							</p>
-						</div>
-
-						<!-- Refresh Index -->
-						<div
-							class="flex items-center justify-between rounded-none border border-border bg-background p-4"
-						>
-							<div class="space-y-0.5">
-								<h3 class="text-sm font-semibold text-foreground">Refresh Packwiz Index</h3>
+					<!-- TAB 3: VERSION MIGRATION -->
+					{#if activeTab === 'migrate'}
+						<CarbonTile class="space-y-4 rounded-none border-border">
+							<div class="border-b border-border pb-3">
+								<h2 class="text-base font-semibold text-foreground">
+									Minecraft Version Migration Assistant
+								</h2>
 								<p class="text-xs text-muted-foreground">
-									Recalculate SHA256 hashes for all .pw.toml and override files according to packwiz
-									refresh.
+									Simulate upgrading all pack mods to a newer Minecraft release or loader before
+									applying changes.
 								</p>
 							</div>
-							<CarbonButton
-								kind="secondary"
-								size="sm"
-								class="rounded-none"
-								onclick={handleRefreshPack}
-								disabled={refreshing}
-							>
-								{#if refreshing}
-									<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
+
+							<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+								<CarbonSelect label="Target Minecraft Version" bind:value={migrateMC}>
+									{#each MC_VERSIONS as v (v)}
+										<option value={v}>{v}</option>
+									{/each}
+								</CarbonSelect>
+
+								<CarbonSelect label="Target Mod Loader" bind:value={migrateLoader}>
+									<option value="fabric">Fabric</option>
+									<option value="neoforge">NeoForge</option>
+									<option value="forge">Forge</option>
+									<option value="quilt">Quilt</option>
+								</CarbonSelect>
+							</div>
+
+							<div class="flex items-center gap-3 pt-2">
+								<CarbonButton
+									kind="secondary"
+									size="sm"
+									class="rounded-none"
+									onclick={() => simulateMigration(false)}
+									disabled={migrating}
+								>
+									{#if migrating}
+										<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
+									{:else}
+										<Sparkles class="mr-1.5 h-3.5 w-3.5 text-accent-text" />
+									{/if}
+									Simulate Compatibility
+								</CarbonButton>
+
+								<CarbonButton
+									kind="primary"
+									size="sm"
+									class="rounded-none"
+									onclick={() => simulateMigration(true)}
+									disabled={migrating}
+								>
+									<ArrowRightLeft class="mr-1.5 h-3.5 w-3.5" />
+									Apply Migration
+								</CarbonButton>
+							</div>
+
+							{#if migrationReport}
+								<div class="mt-4 space-y-3 rounded-none border border-border bg-background p-4">
+									<div class="flex items-center justify-between">
+										<div class="flex items-center gap-2">
+											<CarbonTag type="green" size="md">
+												{migrationReport.compatible_count} Compatible
+											</CarbonTag>
+											<CarbonTag type="red" size="md">
+												{migrationReport.incompatible_count} Missing Version
+											</CarbonTag>
+										</div>
+										<span class="font-mono text-xs text-muted-foreground">
+											Target: MC {migrationReport.target_mc} ({migrationReport.target_loader})
+										</span>
+									</div>
+
+									<!-- Carbon Structured List for Migration Details -->
+									<CarbonStructuredList class="mt-3">
+										{#snippet header()}
+											<div class="flex w-full justify-between">
+												<span>Mod Slug / Name</span>
+												<span>Target Compatibility Status</span>
+											</div>
+										{/snippet}
+
+										{#each migrationReport.mods as m (m.slug)}
+											<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
+												<span class="font-medium text-foreground">{m.name}</span>
+												{#if m.compatible}
+													<span class="flex items-center gap-1 text-success-text">
+														<CheckCircle2 class="h-3.5 w-3.5" />
+														Compatible
+													</span>
+												{:else}
+													<span class="flex items-center gap-1 text-destructive-text">
+														<AlertTriangle class="h-3.5 w-3.5" />
+														No version for {migrationReport.target_mc}
+													</span>
+												{/if}
+											</div>
+										{/each}
+									</CarbonStructuredList>
+								</div>
+							{/if}
+						</CarbonTile>
+					{/if}
+
+					<!-- TAB 4: EXPORT & MANIFEST -->
+					{#if activeTab === 'export'}
+						<CarbonTile class="space-y-6 rounded-none border-border">
+							<div class="border-b border-border pb-3">
+								<div class="flex flex-wrap items-center justify-between gap-2">
+									<div>
+										<h2 class="text-base font-semibold">Export & Manifest</h2>
+										<p class="text-xs text-muted-foreground">
+											Launcher exports, manifest breakdown, raw TOML, and manifest inspection.
+										</p>
+									</div>
+									<div class="flex flex-wrap items-center gap-2">
+										<CarbonButton
+											size="sm"
+											kind="secondary"
+											class="rounded-none"
+											onclick={() => (inspectorOpen = true)}
+										>
+											Inspect Manifest
+										</CarbonButton>
+										<CarbonButton
+											size="sm"
+											class="rounded-none"
+											onclick={() => (exportDialogOpen = true)}
+										>
+											<Download class="mr-1.5 h-3.5 w-3.5" />
+											Export Pack
+										</CarbonButton>
+									</div>
+								</div>
+							</div>
+
+							<!-- Manifest breakdown -->
+							<div class="space-y-2">
+								<div class="flex flex-wrap items-center gap-2">
+									<CarbonTag type="cyan" size="sm">Total {contentBreakdown?.total ?? 0}</CarbonTag>
+									<CarbonTag type="blue" size="sm">
+										Both {contentBreakdown?.both ?? 0}
+									</CarbonTag>
+									<CarbonTag type="purple" size="sm">
+										Client {contentBreakdown?.client ?? 0}
+									</CarbonTag>
+									<CarbonTag type="green" size="sm">
+										Server {contentBreakdown?.server ?? 0}
+									</CarbonTag>
+									<CarbonTag type="gray" size="sm">
+										Pinned {contentBreakdown?.pinned ?? 0}
+									</CarbonTag>
+								</div>
+								<CarbonStructuredList>
+									{#snippet header()}
+										<div class="flex w-full justify-between">
+											<span>Side</span>
+											<span>Count</span>
+										</div>
+									{/snippet}
+									<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
+										<span class="text-foreground">Client-only (excluded with server export)</span>
+										<span>{contentBreakdown?.clientOnly ?? 0}</span>
+									</div>
+									<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
+										<span class="text-foreground">CurseForge-ready (numeric IDs)</span>
+										<span
+											>{contentBreakdown?.curseforgeReady ?? 0} of {contentBreakdown?.total ??
+												0}</span
+										>
+									</div>
+									<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
+										<span class="text-foreground">Override files bundled</span>
+										<span>{contentBreakdown?.overrides ?? 0}</span>
+									</div>
+								</CarbonStructuredList>
+							</div>
+
+							<!-- Raw TOML Inspector -->
+							<div class="space-y-2">
+								<div class="flex items-center justify-between">
+									<span class="text-xs font-semibold text-foreground">Raw pack.toml Preview</span>
+									<CarbonButton
+										kind="ghost"
+										size="sm"
+										class="rounded-none text-xs"
+										onclick={loadRawTomls}
+										disabled={loadingRaw}
+									>
+										Reload TOML
+									</CarbonButton>
+								</div>
+								{#if loadingRaw}
+									<div class="flex items-center justify-center py-8">
+										<CarbonInlineLoading description="Loading pack.toml..." />
+									</div>
+								{:else if rawPackToml}
+									<pre
+										class="max-h-48 overflow-y-auto rounded-none border border-border bg-muted p-3 font-mono text-xs">{rawPackToml}</pre>
 								{:else}
-									<RefreshCw class="mr-1.5 h-3.5 w-3.5 text-accent-text" />
+									<CarbonEmptyState
+										title="No TOML preview"
+										description="Reload to fetch the generated pack.toml for this project."
+										actionLabel="Reload TOML"
+										onaction={loadRawTomls}
+									/>
 								{/if}
-								Run Refresh
-							</CarbonButton>
-						</div>
-					</CarbonTile>
-				{/if}
+							</div>
+						</CarbonTile>
+					{/if}
+
+					<!-- TAB 5: MAINTENANCE -->
+					{#if activeTab === 'maintenance'}
+						<CarbonTile class="space-y-6 rounded-none border-border">
+							<div class="border-b border-border pb-3">
+								<h2 class="text-base font-semibold text-foreground">
+									Packwiz Maintenance & Live Serving
+								</h2>
+								<p class="text-xs text-muted-foreground">
+									Rebuild indices and view live container bootstrap URLs.
+								</p>
+							</div>
+
+							<!-- Live Serving URL Tile -->
+							<div class="space-y-2 rounded-none border border-border bg-background p-4">
+								<div class="flex items-center justify-between">
+									<span class="text-xs font-semibold text-foreground"
+										>Live Container Bootstrap URL (PACKWIZ_URL)</span
+									>
+									<CarbonButton
+										kind="ghost"
+										size="sm"
+										class="rounded-none text-xs"
+										onclick={() => {
+											const u = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/packwiz/${pack?.id}/pack.toml`;
+											navigator.clipboard.writeText(u);
+											toast.success('Copied PACKWIZ_URL to clipboard!');
+										}}
+									>
+										<Copy class="mr-1.5 h-3.5 w-3.5" />
+										Copy URL
+									</CarbonButton>
+								</div>
+								<div
+									class="rounded-none border border-border bg-card p-2.5 font-mono text-xs break-all text-success-text select-all"
+								>
+									{typeof window !== 'undefined'
+										? `${window.location.origin}/api/v1/packwiz/${pack?.id}/pack.toml`
+										: `/api/v1/packwiz/${pack?.id}/pack.toml`}
+								</div>
+								<p class="text-xs text-muted-foreground">
+									Set this URL in Docker container environments or packwiz-installer to dynamically
+									provision this modpack on startup.
+								</p>
+							</div>
+
+							<!-- Refresh Index -->
+							<div
+								class="flex items-center justify-between rounded-none border border-border bg-background p-4"
+							>
+								<div class="space-y-0.5">
+									<h3 class="text-sm font-semibold text-foreground">Refresh Packwiz Index</h3>
+									<p class="text-xs text-muted-foreground">
+										Recalculate SHA256 hashes for all .pw.toml and override files according to
+										packwiz refresh.
+									</p>
+								</div>
+								<CarbonButton
+									kind="secondary"
+									size="sm"
+									class="rounded-none"
+									onclick={handleRefreshPack}
+									disabled={refreshing}
+								>
+									{#if refreshing}
+										<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
+									{:else}
+										<RefreshCw class="mr-1.5 h-3.5 w-3.5 text-accent-text" />
+									{/if}
+									Run Refresh
+								</CarbonButton>
+							</div>
+						</CarbonTile>
+					{/if}
+				</div>
 			</div>
 		</div>
 	{/if}
@@ -1450,6 +1466,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<!-- Add Mod Source Tabs -->
 		<CarbonTabs
 			tabs={addModSourceTabs}
+			idPrefix="studio-add-mod"
 			selectedTab={addTab}
 			onselect={(id) => {
 				if (id === 'modrinth' || id === 'curseforge' || id === 'url') {
@@ -1459,172 +1476,193 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			}}
 		/>
 
-		{#if addTab !== 'url'}
-			<div class="flex items-center gap-2">
-				<div class="flex-1">
-					<CarbonSearch
-						placeholder="Search online mods..."
-						bind:value={searchQuery}
-						onkeydown={(e) => e.key === 'Enter' && searchMods()}
-						size="md"
-					/>
-				</div>
-				<CarbonButton kind="primary" onclick={searchMods} disabled={searching} class="rounded-none">
-					{#if searching}
-						<Loader2 class="h-4 w-4 animate-spin" />
-					{:else}
-						Search
-					{/if}
-				</CarbonButton>
-			</div>
+		<CarbonInactiveTabPanels
+			tabs={addModSourceTabs}
+			selectedTab={addTab}
+			idPrefix="studio-add-mod"
+		/>
 
-			<!-- Search Results List -->
-			<div class="mt-4 max-h-[460px] min-h-[300px] space-y-2.5 overflow-y-auto">
-				{#if searchError}
-					<div
-						class="rounded-none border-l-4 border-destructive bg-destructive/10 p-4 text-xs text-destructive-text"
+		<div
+			id="studio-add-mod-panel-{addTab}"
+			role="tabpanel"
+			aria-labelledby="studio-add-mod-tab-{addTab}"
+			class="focus-ring min-w-0 space-y-4"
+			tabindex="0"
+		>
+			{#if addTab !== 'url'}
+				<div class="flex items-center gap-2">
+					<div class="flex-1">
+						<CarbonSearch
+							placeholder="Search online mods..."
+							bind:value={searchQuery}
+							onkeydown={(e) => e.key === 'Enter' && searchMods()}
+							size="md"
+						/>
+					</div>
+					<CarbonButton
+						kind="primary"
+						onclick={searchMods}
+						disabled={searching}
+						class="rounded-none"
 					>
-						{searchError}
-					</div>
-				{:else if searching}
-					<div class="flex items-center justify-center py-16">
-						<CarbonInlineLoading description="Searching mods..." />
-					</div>
-				{:else if searchResults.length === 0}
-					<CarbonEmptyState
-						title="Enter a search query"
-						description="Search the online catalog to add mods to this pack."
-					/>
-				{:else}
-					{#each searchResults as item (item.id)}
-						<CarbonTile
-							class="flex items-start justify-between gap-3 rounded-none border-border p-3 hover:border-[var(--button-secondary-hover)]"
-						>
-							<div class="flex min-w-0 flex-1 items-start gap-3">
-								{#if item.icon_url}
-									<img
-										src={item.icon_url}
-										alt={item.title}
-										class="h-10 w-10 shrink-0 rounded-none border border-border bg-background object-contain p-1"
-									/>
-								{:else}
-									<div
-										class="flex h-10 w-10 shrink-0 items-center justify-center rounded-none border border-border bg-background text-muted-foreground"
-									>
-										<Package class="h-5 w-5" />
-									</div>
-								{/if}
+						{#if searching}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							Search
+						{/if}
+					</CarbonButton>
+				</div>
 
-								<div class="min-w-0 flex-1 space-y-0.5">
-									<div class="flex items-center gap-2">
-										<span class="truncate text-sm font-semibold text-foreground">{item.title}</span>
-										<span class="text-xs text-muted-foreground">by {item.author}</span>
-									</div>
-									<p class="line-clamp-1 text-xs text-muted-foreground">{item.description}</p>
-									<div class="flex items-center gap-1.5 pt-1">
-										<CarbonTag type="cyan" size="sm">
-											<Download class="mr-0.5 h-2.5 w-2.5" />
-											{formatDownloads(item.downloads)}
-										</CarbonTag>
-										{#each (item.categories || []).slice(0, 2) as cat (cat)}
-											<CarbonTag type="gray" size="sm">{cat}</CarbonTag>
-										{/each}
+				<!-- Search Results List -->
+				<div class="mt-4 max-h-[460px] min-h-[300px] space-y-2.5 overflow-y-auto">
+					{#if searchError}
+						<div
+							class="rounded-none border-l-4 border-destructive bg-destructive/10 p-4 text-xs text-destructive-text"
+						>
+							{searchError}
+						</div>
+					{:else if searching}
+						<div class="flex items-center justify-center py-16">
+							<CarbonInlineLoading description="Searching mods..." />
+						</div>
+					{:else if searchResults.length === 0}
+						<CarbonEmptyState
+							title="Enter a search query"
+							description="Search the online catalog to add mods to this pack."
+						/>
+					{:else}
+						{#each searchResults as item (item.id)}
+							<CarbonTile
+								class="flex items-start justify-between gap-3 rounded-none border-border p-3 hover:border-[var(--button-secondary-hover)]"
+							>
+								<div class="flex min-w-0 flex-1 items-start gap-3">
+									{#if item.icon_url}
+										<img
+											src={item.icon_url}
+											alt={item.title}
+											class="h-10 w-10 shrink-0 rounded-none border border-border bg-background object-contain p-1"
+										/>
+									{:else}
+										<div
+											class="flex h-10 w-10 shrink-0 items-center justify-center rounded-none border border-border bg-background text-muted-foreground"
+										>
+											<Package class="h-5 w-5" />
+										</div>
+									{/if}
+
+									<div class="min-w-0 flex-1 space-y-0.5">
+										<div class="flex items-center gap-2">
+											<span class="truncate text-sm font-semibold text-foreground"
+												>{item.title}</span
+											>
+											<span class="text-xs text-muted-foreground">by {item.author}</span>
+										</div>
+										<p class="line-clamp-1 text-xs text-muted-foreground">{item.description}</p>
+										<div class="flex items-center gap-1.5 pt-1">
+											<CarbonTag type="cyan" size="sm">
+												<Download class="mr-0.5 h-2.5 w-2.5" />
+												{formatDownloads(item.downloads)}
+											</CarbonTag>
+											{#each (item.categories || []).slice(0, 2) as cat (cat)}
+												<CarbonTag type="gray" size="sm">{cat}</CarbonTag>
+											{/each}
+										</div>
 									</div>
 								</div>
-							</div>
 
-							<div class="flex shrink-0 items-center gap-1.5">
-								<CarbonButton
-									size="sm"
-									kind="tertiary"
-									class="rounded-none px-2 text-xs"
-									onclick={() => addModToPack(item, 'client')}
-									title="Add as client-only"
-								>
-									+ Client
-								</CarbonButton>
-								<CarbonButton
-									size="sm"
-									kind="tertiary"
-									class="rounded-none px-2 text-xs"
-									onclick={() => addModToPack(item, 'server')}
-									title="Add as server-only"
-								>
-									+ Server
-								</CarbonButton>
-								<CarbonButton
-									size="sm"
-									kind="primary"
-									class="rounded-none px-2.5 text-xs"
-									onclick={() => addModToPack(item, 'both')}
-									title="Add for both"
-								>
-									<Plus class="mr-1 h-3.5 w-3.5" />
-									Add (Both)
-								</CarbonButton>
-							</div>
-						</CarbonTile>
-					{/each}
-				{/if}
-			</div>
-		{:else}
-			<!-- Direct URL Tab -->
-			<div class="space-y-4 py-2">
-				<CarbonTextInput
-					label="Direct Download URL (*.jar) *"
-					placeholder="https://example.com/mods/my-custom-mod.jar"
-					bind:value={urlModDownloadUrl}
-					helperText="Direct download link. Packwiz will download and compute SHA256 hashes automatically."
-				/>
-
-				<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-					<CarbonTextInput
-						label="Mod Name (Optional)"
-						placeholder="Custom Mod"
-						bind:value={urlModName}
-					/>
-					<CarbonTextInput
-						label="File Name (Optional)"
-						placeholder="mod.jar"
-						bind:value={urlModFileName}
-					/>
-				</div>
-
-				<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-					<CarbonSelect label="Side" bind:value={urlModSide}>
-						<option value="both">Both (Client & Server)</option>
-						<option value="server">Server Only</option>
-						<option value="client">Client Only</option>
-					</CarbonSelect>
-
-					<div class="flex items-center gap-2 pt-6">
-						<input
-							type="checkbox"
-							id="urlPin"
-							bind:checked={urlModPinned}
-							class="cursor-pointer rounded-none border-border bg-card"
-						/>
-						<label for="urlPin" class="cursor-pointer text-xs text-muted-foreground select-none"
-							>Pin version (prevent automatic updates)</label
-						>
-					</div>
-				</div>
-
-				<CarbonButton
-					class="mt-2 w-full justify-center rounded-none"
-					onclick={handleAddUrlMod}
-					disabled={addingUrlMod}
-				>
-					{#if addingUrlMod}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-						Fetching & Hashing...
-					{:else}
-						<Plus class="mr-1.5 h-4 w-4" />
-						Add Mod from URL
+								<div class="flex shrink-0 items-center gap-1.5">
+									<CarbonButton
+										size="sm"
+										kind="tertiary"
+										class="rounded-none px-2 text-xs"
+										onclick={() => addModToPack(item, 'client')}
+										title="Add as client-only"
+									>
+										+ Client
+									</CarbonButton>
+									<CarbonButton
+										size="sm"
+										kind="tertiary"
+										class="rounded-none px-2 text-xs"
+										onclick={() => addModToPack(item, 'server')}
+										title="Add as server-only"
+									>
+										+ Server
+									</CarbonButton>
+									<CarbonButton
+										size="sm"
+										kind="primary"
+										class="rounded-none px-2.5 text-xs"
+										onclick={() => addModToPack(item, 'both')}
+										title="Add for both"
+									>
+										<Plus class="mr-1 h-3.5 w-3.5" />
+										Add (Both)
+									</CarbonButton>
+								</div>
+							</CarbonTile>
+						{/each}
 					{/if}
-				</CarbonButton>
-			</div>
-		{/if}
+				</div>
+			{:else}
+				<!-- Direct URL Tab -->
+				<div class="space-y-4 py-2">
+					<CarbonTextInput
+						label="Direct Download URL (*.jar) *"
+						placeholder="https://example.com/mods/my-custom-mod.jar"
+						bind:value={urlModDownloadUrl}
+						helperText="Direct download link. Packwiz will download and compute SHA256 hashes automatically."
+					/>
+
+					<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<CarbonTextInput
+							label="Mod Name (Optional)"
+							placeholder="Custom Mod"
+							bind:value={urlModName}
+						/>
+						<CarbonTextInput
+							label="File Name (Optional)"
+							placeholder="mod.jar"
+							bind:value={urlModFileName}
+						/>
+					</div>
+
+					<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+						<CarbonSelect label="Side" bind:value={urlModSide}>
+							<option value="both">Both (Client & Server)</option>
+							<option value="server">Server Only</option>
+							<option value="client">Client Only</option>
+						</CarbonSelect>
+
+						<div class="flex items-center gap-2 pt-6">
+							<input
+								type="checkbox"
+								id="urlPin"
+								bind:checked={urlModPinned}
+								class="cursor-pointer rounded-none border-border bg-card"
+							/>
+							<label for="urlPin" class="cursor-pointer text-xs text-muted-foreground select-none"
+								>Pin version (prevent automatic updates)</label
+							>
+						</div>
+					</div>
+
+					<CarbonButton
+						class="mt-2 w-full justify-center rounded-none"
+						onclick={handleAddUrlMod}
+						disabled={addingUrlMod}
+					>
+						{#if addingUrlMod}
+							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+							Fetching & Hashing...
+						{:else}
+							<Plus class="mr-1.5 h-4 w-4" />
+							Add Mod from URL
+						{/if}
+					</CarbonButton>
+				</div>
+			{/if}
+		</div>
 	</div>
 </CarbonModal>
 

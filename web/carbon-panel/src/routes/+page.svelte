@@ -45,6 +45,7 @@ one at https://mozilla.org/MPL/2.0/.
 		serverActions,
 		sortServersByActivity
 	} from '$lib/stores/servers';
+	import { summarizeDashboardTelemetry } from '$lib/features/servers/dashboard-telemetry';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import {
 		CarbonButton,
@@ -108,20 +109,14 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	let telemetry = $derived(summarizeDashboardTelemetry(dashboardServers));
+	let memoryUsageMiB = $derived(telemetry.memory.usageMiB);
 	let stats = $derived({
 		total: dashboardServers.length,
-		running: dashboardServers.filter((s) => s.status === ServerStatus.RUNNING).length,
+		running: telemetry.running,
 		stopped: dashboardServers.filter((s) => s.status === ServerStatus.STOPPED).length,
 		error: dashboardServers.filter((s) => s.status === ServerStatus.ERROR).length,
 		warning: dashboardServers.filter((s) => s.status === ServerStatus.UNHEALTHY).length,
-		totalMemory: dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0),
-		usedMemory: dashboardServers
-			.filter((s) => s.status === ServerStatus.RUNNING)
-			.reduce((acc, s) => acc + Number(s.memoryUsage || s.memory || 0), 0),
-		totalPlayers: dashboardServers
-			.filter((s) => joinIsPlayable(s))
-			.reduce((acc, s) => acc + (s.playersOnline || 0), 0),
-		totalMaxPlayers: dashboardServers.reduce((acc, s) => acc + (s.maxPlayers || 0), 0),
 		avgTps: dashboardServers
 			.filter((s) => s.tps && s.tps > 0)
 			.reduce((acc, s, _, arr) => acc + (s.tps || 0) / arr.length, 0),
@@ -133,27 +128,9 @@ one at https://mozilla.org/MPL/2.0/.
 		avgCpu: dashboardServers
 			.filter((s) => s.cpuPercent && s.cpuPercent > 0)
 			.reduce((acc, s, _, arr) => acc + (s.cpuPercent || 0) / arr.length, 0),
-		activeRatio:
-			dashboardServers.length > 0
-				? Math.round(
-						(dashboardServers.filter((s) => s.status === ServerStatus.RUNNING).length /
-							dashboardServers.length) *
-							100
-					)
-				: 0,
-		memUsagePercent:
-			dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0) > 0
-				? Math.min(
-						100,
-						Math.round(
-							(dashboardServers
-								.filter((s) => s.status === ServerStatus.RUNNING)
-								.reduce((acc, s) => acc + Number(s.memoryUsage || s.memory || 0), 0) /
-								dashboardServers.reduce((acc, s) => acc + (s.memory || 0), 0)) *
-								100
-						)
-					)
-				: 0
+		activeRatio: dashboardServers.length
+			? Math.round((telemetry.running / dashboardServers.length) * 100)
+			: 0
 	});
 
 	let recentActivity = $derived(
@@ -454,24 +431,27 @@ one at https://mozilla.org/MPL/2.0/.
 					<div
 						class="mt-3 font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
 					>
-						<span use:countUp={{ value: stats.totalPlayers, decimals: 0 }}></span>
+						{#if telemetry.players.online === null}
+							<span class="text-muted-foreground">—</span>
+						{:else}
+							<span use:countUp={{ value: telemetry.players.online, decimals: 0 }}></span>
+						{/if}
 					</div>
 				</div>
 				<div
 					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
-					{#if stats.totalPlayers > 0}
-						<div class="flex items-center gap-1.5 text-success-text">
-							<span class="h-1.5 w-1.5 bg-success"></span>
-							<span
-								>{stats.totalPlayers === 1 ? '1 PLAYER' : `${stats.totalPlayers} PLAYERS`} ONLINE</span
-							>
-						</div>
+					{#if telemetry.running === 0}
+						<span>No running servers</span>
+					{:else if telemetry.players.online === null}
+						<span>Player count unavailable</span>
+					{:else if telemetry.players.reporting < telemetry.running}
+						<span>{telemetry.players.reporting} of {telemetry.running} servers reporting</span>
 					{:else}
-						<span class="text-muted-foreground">0 PLAYERS ONLINE</span>
+						<span>All running servers reporting</span>
 					{/if}
-					{#if stats.totalMaxPlayers > 0}
-						<span class="text-muted-foreground">MAX: {stats.totalMaxPlayers}</span>
+					{#if telemetry.players.capacity > 0}
+						<span>{telemetry.players.capacity} slots configured</span>
 					{/if}
 				</div>
 			</div>
@@ -484,50 +464,68 @@ one at https://mozilla.org/MPL/2.0/.
 					<div
 						class="flex items-center justify-between font-sans text-xs font-semibold tracking-wider text-muted-foreground uppercase"
 					>
-						<span>Memory Allocation</span>
+						<span>Memory Usage</span>
 						<MemoryStick class="h-4 w-4 text-muted-foreground" />
 					</div>
 					<div class="mt-3 flex items-baseline gap-1.5">
-						<span
-							class="font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
-							use:countUp={{
-								value: stats.totalMemory > 0 ? stats.usedMemory / 1024 : 0,
-								decimals: 1
-							}}
-						></span>
-						<span class="font-sans text-sm text-muted-foreground">
-							/ {stats.totalMemory > 0 ? (stats.totalMemory / 1024).toFixed(1) : '0.0'} GB
-						</span>
+						{#if memoryUsageMiB === null}
+							<span class="font-sans text-[32px] leading-none font-semibold text-muted-foreground"
+								>—</span
+							>
+						{:else}
+							{#key memoryUsageMiB >= 1024}
+								<span
+									class="font-sans text-[32px] leading-none font-semibold tracking-tight text-foreground tabular-nums"
+									use:countUp={{
+										value: memoryUsageMiB >= 1024 ? memoryUsageMiB / 1024 : memoryUsageMiB,
+										decimals: memoryUsageMiB >= 1024 ? 1 : 0
+									}}
+								></span>
+								<span class="font-sans text-sm text-muted-foreground"
+									>{memoryUsageMiB >= 1024 ? 'GiB' : 'MiB'}</span
+								>
+							{/key}
+						{/if}
 					</div>
-					<!-- Sharp Carbon Progress Bar -->
-					<div class="mt-3 h-1.5 w-full overflow-hidden rounded-none bg-secondary">
+					{#if telemetry.memory.reportedUtilization !== null}
 						<div
-							class="h-full bg-primary transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
-							style="width: {stats.memUsagePercent}%"
-						></div>
-					</div>
+							class="mt-3 h-1.5 w-full overflow-hidden rounded-none bg-secondary"
+							aria-hidden="true"
+						>
+							<div
+								class="h-full bg-primary transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
+								style="width: {Math.min(telemetry.memory.reportedUtilization, 100)}%"
+							></div>
+						</div>
+					{/if}
 				</div>
 				<div
 					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
-					<div
-						class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 {stats.memUsagePercent >
-						85
-							? 'text-destructive-text'
-							: stats.memUsagePercent > 70
-								? 'text-warning-text'
-								: 'text-success-text'}"
-					>
+					{#if telemetry.memory.reportedUtilization !== null}
 						<span
-							class="h-1.5 w-1.5 {stats.memUsagePercent > 85
-								? 'bg-destructive'
-								: stats.memUsagePercent > 70
-									? 'bg-warning'
-									: 'bg-success'}"
-						></span>
-						<span>{stats.memUsagePercent}% UTILIZED</span>
-					</div>
-					<span class="text-muted-foreground">RAM POOL</span>
+							class={telemetry.memory.reportedUtilization > 85
+								? 'text-destructive-text'
+								: telemetry.memory.reportedUtilization > 70
+									? 'text-warning-text'
+									: 'text-success-text'}
+							>{telemetry.memory.reportedUtilization}% of reporting limits</span
+						>
+					{:else if telemetry.memory.usageMiB === null}
+						<span>{telemetry.running ? 'Usage unavailable' : 'No running servers'}</span>
+					{:else}
+						<span>Reporting limits unavailable</span>
+					{/if}
+					{#if telemetry.memory.reporting > 0 && telemetry.memory.reporting < telemetry.running}
+						<span>{telemetry.memory.reporting} of {telemetry.running} servers reporting</span>
+					{/if}
+					{#if telemetry.memory.allocatedMiB > 0}
+						<span>
+							{telemetry.memory.allocatedMiB >= 1024
+								? `${(telemetry.memory.allocatedMiB / 1024).toFixed(1)} GiB`
+								: `${telemetry.memory.allocatedMiB} MiB`} allocated
+						</span>
+					{/if}
 				</div>
 			</div>
 

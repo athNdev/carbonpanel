@@ -7,10 +7,14 @@ package metrics
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -376,5 +380,75 @@ func TestCollectDiskUsageMeasuresTheSharedStorageMount(t *testing.T) {
 	}
 	if got.DiskUsage < 4 {
 		t.Fatalf("DiskUsage = %d, want the mapped world", got.DiskUsage)
+	}
+}
+
+func TestDockerStatsAgeIgnoresFailedPollAndDiskRefresh(t *testing.T) {
+	const serverID, containerID = "ram-fixture", "running-container"
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "level.dat"), []byte("fixture"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := newDiskStore(t)
+	if err := store.CreateServer(context.Background(), &db.Server{
+		ID: serverID, Name: "Fixture", DataPath: root, ContainerID: containerID, Status: db.StatusRunning,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var statsCalls atomic.Int32
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/_ping":
+			w.Header().Set("Api-Version", "1.45")
+		case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/json"):
+			_, _ = w.Write([]byte(`{"State":{"Status":"running"}}`))
+		case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/stats"):
+			if statsCalls.Add(1) == 1 {
+				_, _ = w.Write([]byte(`{"memory_stats":{"usage":1073741824}}`))
+				return
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"message":"fixture stats unavailable"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(api.Close)
+	log := logger.New()
+	client, err := docker.NewClient(strings.Replace(api.URL, "http://", "tcp://", 1), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	cfg := &config.Config{}
+	cfg.Storage.DataDir = root
+	schedule := DefaultConfig()
+	schedule.StatsInterval = 3 * time.Second
+	c := NewCollector(store, client, nil, cfg, nil, log, schedule)
+
+	c.collectDockerStats()
+	first := c.GetMetrics(serverID)
+	if first == nil || first.MemoryUsage != 1024 || first.DockerStats.ObservedAt.IsZero() {
+		t.Fatalf("successful Docker poll did not record RAM and provenance: %+v", first)
+	}
+	sample := first.DockerStats
+	if sample.ExpiresAt.Sub(sample.ObservedAt) != 2*schedule.StatsInterval ||
+		!sample.CurrentFor(containerID, nil, sample.ExpiresAt.Add(-time.Nanosecond)) {
+		t.Fatalf("poll interval was not reflected in the freshness window: %+v", sample)
+	}
+
+	c.collectDockerStats()
+	c.collectDiskUsage()
+	latest := c.GetMetrics(serverID)
+	if statsCalls.Load() != 2 || latest.DiskUsage <= 0 || !latest.LastUpdated.After(first.LastUpdated) {
+		t.Fatalf("fixture did not run a failed poll and a separate disk refresh: %+v", latest)
+	}
+	if latest.MemoryUsage != 1024 || latest.DockerStats != sample {
+		t.Fatalf("failed Docker poll or disk refresh altered the cached sample: %+v", latest)
+	}
+	if latest.DockerStats.CurrentFor(containerID, nil, sample.ExpiresAt) {
+		t.Fatal("generic cache activity renewed a timed-out Docker sample")
 	}
 }

@@ -70,6 +70,7 @@ one at https://mozilla.org/MPL/2.0/.
 		CarbonErrorState,
 		CarbonPageHeader
 	} from '$lib/components/carbon';
+	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import { memoryUsagePercent } from '$lib/utils/safe-percent';
 	import { exitFailureCopy, memoryLimitCopy, worldDiskCopy } from '$lib/utils/resource-enforcement';
@@ -679,11 +680,18 @@ one at https://mozilla.org/MPL/2.0/.
 			/>
 
 			<!-- Tab Content Areas -->
+			<CarbonInactiveTabPanels
+				tabs={subViewTabs}
+				selectedTab={activeTab}
+				idPrefix="server-detail-tabs"
+			/>
+
 			<div
 				id={`server-detail-tabs-panel-${activeTab}`}
 				role="tabpanel"
 				aria-labelledby={`server-detail-tabs-tab-${activeTab}`}
-				class="motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
+				class="focus-ring motion-fade-in flex min-h-0 flex-1 flex-col overflow-hidden"
+				tabindex="0"
 			>
 				<!--
 						A throw while a tab panel renders must never be able to wedge the
@@ -705,9 +713,7 @@ one at https://mozilla.org/MPL/2.0/.
 								description="Modify runtime container settings and server parameters"
 								mode="form"
 							>
-								<div class="p-4 sm:p-6">
-									<ServerSettings {server} onUpdate={loadServer} />
-								</div>
+								<ServerSettings {server} onUpdate={loadServer} />
 							</ServerTabPanel>
 						{:else if activeTab === 'console'}
 							<ServerConsole {server} active={activeTab === 'console'} />
