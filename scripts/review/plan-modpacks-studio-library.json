@@ -1,7 +1,7 @@
 {
   "name": "modpacks-studio-library",
   "title": "Modpacks Studio: recurring project library controls",
-  "docs": "Real-application browser journey plan for scripts/review/journey.mjs against a running panel/devstack (not a component fixture). Validated structurally in this session; not executed against a live disposable panel in this environment and not invoked by PR CI for this head. Asserts stable /modpacks/studio library shell controls only; does not claim loaded project data, seeded packs, or create/import mutations.",
+  "docs": "Run with scripts/review/journey.mjs against an owned panel review stack. Covers the Studio library heading, project search, and create, import, and browse entry controls.",
   "viewport": {
     "width": 1440,
     "height": 900
@@ -13,14 +13,14 @@
     "passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
     "confirmSelector": "input[placeholder=\"Confirm your password\"]",
     "submitSelector": "button[type=\"submit\"]",
-    "successSelector": "a[href^=\"/servers/\"]"
+    "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks/studio\"]"
   },
   "login": {
     "path": "/login",
     "usernameSelector": "input[placeholder=\"Enter your username\"]",
     "passwordSelector": "input[placeholder=\"Enter your password\"]",
     "submitSelector": "button[type=\"submit\"]",
-    "successSelector": "a[href^=\"/servers/\"]"
+    "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks/studio\"]"
   },
   "steps": [
     {

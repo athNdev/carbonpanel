@@ -10,10 +10,10 @@ code_refs:
   - .github/workflows/stable-recover.yml
   - scripts/stable_recovery.py
   - scripts/release.py
-  - docs/adr/0049-channel-promotion-gates.md
+  - docs/adr/0051-channel-promotion-gates.md
 sources:
   - title: Channel promotion decision
-    resource: ../../docs/adr/0049-channel-promotion-gates.md
+    resource: ../../docs/adr/0051-channel-promotion-gates.md
   - title: Release operations and versioning
     resource: ../../docs/releases.md
 ---
@@ -47,9 +47,7 @@ sources:
   channel changes. A trusted interrupted-run journal binds the private release
   ID, prior deployment and both retained Pages archives. Recovery requires the
   original unpublished draft and rechecks both public registries.
-- The stable gate consumes OBSERVED dual-registry digests, not a hardcoded
-  literal. An older release target whose checkout lacks the trusted gate script
-  is refused with an explicit blocker rather than silently using the wrong code.
+- Stable requires observed dual-registry digests and trusted gate commands.
 - All channel and docs moves share ONE non-cancelling `pages-deploy` lock; no
   nested group and no dispatched workflow takes the same lock. A manual/site-only
   dispatch publishes only an already-active source from the receipt. A partial

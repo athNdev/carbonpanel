@@ -2196,7 +2196,7 @@ def publish(args):
 # schema_version 3 contract plus exact site build (docs). Every move is
 # digest-anchored and bound to the previously verified digest so a retry or a
 # partial failure can converge or roll back without ever overwriting an
-# immutable version tag. See ADR 0049 and docs/releases.md.
+# immutable version tag. See ADR 0051 and docs/releases.md.
 
 CHANNEL_CONTRACT_SCHEMA = 3
 CHANNEL_NAMES = ("stable", "nightly")

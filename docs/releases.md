@@ -369,7 +369,7 @@ digest and commit: an
 ancestor check refuses stale/out-of-order moves, an alias already at the target
 is an idempotent no-op, a partial move converges, and a candidate that loses
 qualification rolls back to the previous verified digest. No immutable tag is
-overwritten and no tag is deleted. See ADR 0049.
+overwritten and no tag is deleted. See ADR 0051.
 
 The trigger/tag-name patterns behind these channels follow the dated primary-
 source research note `container-image-stable-rolling-channels-2026-11-20.md`:

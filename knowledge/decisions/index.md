@@ -6,6 +6,7 @@
 
 - [Architecture decisions](adrs.md) — Index of the accepted ADRs and the concept each one governs.
 - [Architecture decisions — Decision records](adrs-decision-records.md) — / ADR / Decision / Governs /
+- [Architecture decisions — Decision records (part 2)](adrs-decision-records-2.md) — ADR index continuation from 0048 onward.
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
@@ -44,7 +45,6 @@
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.
 - [README artwork and product captures](product-readme.md) — Separate the README's decorative brand artwork from accurate, focused captures of the current application.
-- [Recent architecture decisions — Decision records](adrs-decision-records-recent.md) — The latest ADR rows appended to the bounded decision index.
 - [Request and session limits](request-session-limits.md) — Upload sessions bind to their authenticated owner, the panel listener pins a header bound, and one command sender enforces length and rate limits.
 - [Review browser driver](review-browser-driver.md) — Both review profiles use the same locked driver and an owned browser cache.
 - [Review browser driver — Choice + Evidence](review-browser-driver-choice.md) — Both browser review profiles load the exact Playwright version locked in the

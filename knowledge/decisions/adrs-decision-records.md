@@ -56,5 +56,5 @@ sources:
 | [0045](../../docs/adr/0045-version-contract-and-multi-version-docs.md) | One fail-closed version contract and immutable per-version docs routes | [Website and documentation publication](website-docs.md) |
 | [0046](../../docs/adr/0046-image-digest-provenance.md) | Record resolved image digests; opt-in strict pinned-digest preflight | [Image digest provenance](../decisions/image-digest-provenance.md), [Container privileges](../invariants/container-privileges.md) |
 | [0047](../../docs/adr/0047-closure-evidence-guard.md) | Block OSS Done natively and verify acceptance evidence in the repo | [Acceptance evidence](../../docs/acceptance/README.md) |
-| [0048](../../docs/adr/0048-bluemap-asset-routing-and-csp.md) | Exact gzip asset routing and a pinned JIT BlueMap webapp keep the panel CSP unchanged | [World viewing](../architecture/world-viewing.md) |
-The two newest rows live in [Recent decision records](adrs-decision-records-recent.md).
+Later records (0048 onward) are in
+[Decision records (part 2)](adrs-decision-records-2.md).
