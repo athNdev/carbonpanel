@@ -582,7 +582,7 @@ one at https://mozilla.org/MPL/2.0/.
 								{disabled}
 								class="h-8 text-xs"
 							/>
-							<p class="text-xs text-muted-foreground">
+							<p class="text-xs [overflow-wrap:anywhere] text-muted-foreground">
 								Advisory until the engine reports the cap as enforced; ignored when
 								memory_limit_unsupported.
 							</p>

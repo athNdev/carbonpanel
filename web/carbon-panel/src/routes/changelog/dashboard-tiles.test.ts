@@ -31,7 +31,7 @@ test('tile values are sans semibold 32px tabular-nums (mono numerals only)', () 
 test('tile footers are 11px muted with mt-3 pt-3 border-t', () => {
 	assert.match(
 		source,
-		/mt-3 flex items-center justify-between[^"]*border-t border-border pt-3 font-sans text-\[11px\]/
+		/mt-3 flex flex-wrap items-start justify-between[^"]*border-t border-border pt-3 font-sans text-\[11px\]/
 	);
 });
 

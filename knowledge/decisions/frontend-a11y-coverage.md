@@ -34,7 +34,7 @@ world library and world view — are additionally checked in both the light and
 dark Carbon themes at each width. Theme is selected through the persisted
 `carbon-theme` preference, so the assertions observe the real
 `data-carbon-theme` attribute and painted background rather than toggling a
-class from the test.
+class from the test. The shell skip link and profile controls restore keyboard focus to the owning trigger. Dashboard and inventory fleet tables keep the horizontal scroll region on the labelled wrapper at every width. Long KPI values and status footers wrap when the expanded navigation reduces available space.
 
 # Alternatives
 
