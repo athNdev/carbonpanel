@@ -22,6 +22,15 @@ func readRepoFile(t *testing.T, rel string) string {
 	return string(b)
 }
 
+func normalizeDocNewlines(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\r", "\n")
+}
+
+func containsDocClaim(content, want string) bool {
+	return strings.Contains(normalizeDocNewlines(content), normalizeDocNewlines(want))
+}
+
 func TestMCPDocsCatalogueCountsMatchSourceOfTruth(t *testing.T) {
 	declared := fmt.Sprintf("%d declared RPCs", IntegrationDeclaredRPCs)
 	mounted := fmt.Sprintf("%d mounted/reachable", IntegrationMountedRPCs)
@@ -72,14 +81,14 @@ func TestMCPDocsCatalogueCountsMatchSourceOfTruth(t *testing.T) {
 	for _, c := range checks {
 		content := readRepoFile(t, c.file)
 		for _, want := range c.want {
-			if !strings.Contains(content, want) {
+			if !containsDocClaim(content, want) {
 				t.Errorf("%s: missing source-of-truth count/claim %q", c.file, want)
 			}
 		}
 		if len(c.any) > 0 {
 			found := false
 			for _, want := range c.any {
-				if strings.Contains(content, want) {
+				if containsDocClaim(content, want) {
 					found = true
 					break
 				}
@@ -88,5 +97,28 @@ func TestMCPDocsCatalogueCountsMatchSourceOfTruth(t *testing.T) {
 				t.Errorf("%s: missing any of source-of-truth claims %q", c.file, c.any)
 			}
 		}
+	}
+}
+
+func TestContainsDocClaimLineEndingIndependent(t *testing.T) {
+	want := "**250 declared\nRPCs**"
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{name: "lf", content: "prefix **250 declared\nRPCs** suffix"},
+		{name: "crlf", content: "prefix **250 declared\r\nRPCs** suffix"},
+		{name: "cr", content: "prefix **250 declared\rRPCs** suffix"},
+		{name: "mixed", content: "prefix **250 declared\r\nRPCs** suffix\nand **240 are mounted/reachable**"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !containsDocClaim(tc.content, want) {
+				t.Fatalf("expected claim %q in %q", want, tc.content)
+			}
+		})
+	}
+
+	if containsDocClaim("prefix **250 declared RPCs** suffix", want) {
+		t.Fatal("must not match altered count/claim text without the expected line break")
 	}
 }
