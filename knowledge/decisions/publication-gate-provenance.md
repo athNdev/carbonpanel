@@ -28,6 +28,11 @@ sources:
   because each module derives its root from its own `__file__`. Rendering tools
   may stay on the candidate checkout; trust decisions may not. A corrected gate
   can qualify an already-staged candidate without re-staging the product.
+- Module invocation uses `python -P` with `PYTHONPATH=.trusted-release`: the
+  candidate CWD otherwise wins module resolution even with PYTHONPATH set. The
+  worked example test proves both resolutions. The maintained-guides policy
+  declaration also comes from the trusted checkout while the candidate data
+  root stays explicit.
 - Registry platform evidence has one validator for in-process and CLI JSON
   observations: only well-formed two-string OS/architecture pairs qualify.
   Malformed entries are refused deterministically at every CLI boundary, never

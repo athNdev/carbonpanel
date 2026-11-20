@@ -148,7 +148,7 @@ jobs:
           [[ "$STAGED_RUN" =~ ^[0-9]+$ && "$EXPECTED_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$STAGED_RUN" > "$RUNNER_TEMP/run.json"
           gh run download "$STAGED_RUN" --name qualified-stable-stage --dir "$RUNNER_TEMP/stage"
-          python3 -m scripts.stable_recovery verify-stage --source-run "$RUNNER_TEMP/run.json" \
+          PYTHONPATH=.trusted-release python3 -P -m scripts.stable_recovery verify-stage --source-run "$RUNNER_TEMP/run.json" \
             --journal "$RUNNER_TEMP/stage/stage.json"
           echo "run=$STAGED_RUN" >> "$GITHUB_OUTPUT"
 
@@ -816,7 +816,7 @@ jobs:
           GATE=.trusted-release/scripts/docs_publication_gate.py
           SITE=.website-build/site
           INDEX=$SITE/version-index.json
-          python3 "$GATE" guide-fingerprint --declaration docs/maintained-guides.json --root . \
+          python3 "$GATE" guide-fingerprint --declaration .trusted-release/docs/maintained-guides.json --root . \
             --revision "$CARBONPANEL_STABLE_REVISION" > .website-build/guides.json
           python3 "$GATE" stamp-publication-receipt --site "$SITE" --candidate .website-build/guides.json \
             --live "$INDEX" --revision "$CARBONPANEL_STABLE_REVISION"
@@ -888,7 +888,7 @@ jobs:
           PRIOR_ARTIFACT: ${{ steps.prior.outputs.prior_artifact }}
           RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
         run: |
-          PYTHONPATH=.trusted-release python3 -m scripts.stable_recovery journal --prior .website-build/prior-site \
+          PYTHONPATH=.trusted-release python3 -P -m scripts.stable_recovery journal --prior .website-build/prior-site \
             --candidate .website-build/site --journal .website-build/transaction.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

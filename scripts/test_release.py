@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
+import os
 import re
 import shlex
 import subprocess
@@ -2278,6 +2279,32 @@ class ChannelPromotionTests(unittest.TestCase):
                                 "--commit", self.CANDIDATE]), redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(ValueError, "platform evidence"):
                 release.main()
+
+    def test_trusted_module_provenance_requires_safe_path(self):
+        # Two checkouts with the same module name: plain PYTHONPATH still lets
+        # the candidate CWD win, so the release workflow must use python -P.
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            for name, marker in (("trusted", "trusted"), ("candidate", "candidate")):
+                scripts = root / name / "scripts"
+                scripts.mkdir(parents=True)
+                (scripts / "__init__.py").write_text("", encoding="utf-8")
+                (scripts / "probe.py").write_text(
+                    "MARKER = " + repr(marker) + "\n", encoding="utf-8")
+            env = {**os.environ, "PYTHONPATH": str(root / "trusted")}
+            code = "import scripts.probe; print(scripts.probe.MARKER)"
+            plain = subprocess.run(["python", "-c", code], cwd=root / "candidate",
+                                   env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(plain.stdout.strip(), "candidate")
+            safe = subprocess.run(["python", "-P", "-c", code], cwd=root / "candidate",
+                                  env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(safe.stdout.strip(), "trusted")
+
+    def test_release_uses_trusted_policy_declaration_and_safe_path(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("PYTHONPATH=.trusted-release python3 -P -m scripts.stable_recovery",
+                      source)
+        self.assertIn("--declaration .trusted-release/docs/maintained-guides.json", source)
 
     # --- Move state machine (first publish / retry / stale / rollback) -------
 
