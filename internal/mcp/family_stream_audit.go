@@ -105,7 +105,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 			"/carbonpanel.v1.FileService/SaveUploadedFile",
 		},
 		Sources: []string{
-			"internal/rpc/server.go:296:mux.Handle(\"/api/v1/upload/\"",
+			"internal/rpc/server.go:291:mux.Handle(\"/api/v1/upload/\"",
 			"internal/rpc/handlers/upload.go:70:rbac.ResourceUploads, rbac.ActionCreate",
 			"internal/rpc/handlers/upload.go:124:Deliberately NOT returning the server-local temp path",
 		},
@@ -120,7 +120,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 			"/carbonpanel.v1.FileService/InitFileDownload", "/carbonpanel.v1.FileService/GetFile",
 		},
 		Sources: []string{
-			"internal/rpc/server.go:299:mux.Handle(\"/api/v1/download/\"",
+			"internal/rpc/server.go:294:mux.Handle(\"/api/v1/download/\"",
 			"internal/rpc/handlers/download.go:65:authorizeDownload(enforcer, user, session)",
 			"internal/rpc/handlers/download.go:117:rbac.ResourceFiles, rbac.ActionRead",
 		},
@@ -132,7 +132,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		ACL:             "settings/read on global object *",
 		TypedEquivalent: []string{"/carbonpanel.v1.ConfigService/ValidateProviderKey"},
 		Sources: []string{
-			"internal/rpc/server.go:305:mux.Handle(\"/api/v1/settings/validate-key\"",
+			"internal/rpc/server.go:300:mux.Handle(\"/api/v1/settings/validate-key\"",
 			"internal/rpc/handlers/key_validator.go:35:generated ConfigService.ValidateProviderKey RPC",
 			"internal/rpc/handlers/key_validator.go:45:rbac.ResourceSettings, rbac.ActionRead",
 		},
@@ -144,7 +144,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		ACL:             "nodes/read on global object *",
 		TypedEquivalent: []string{"/carbonpanel.v1.NodeService/PingNode"},
 		Sources: []string{
-			"internal/rpc/server.go:308:mux.Handle(\"/api/v1/nodes/scan\"",
+			"internal/rpc/server.go:303:mux.Handle(\"/api/v1/nodes/scan\"",
 			"internal/rpc/handlers/node_scan.go:50:rbac.ResourceNodes, rbac.ActionRead",
 		},
 	},
@@ -155,7 +155,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		ACL:             "mods/read on server_id (global * when id is 'none')",
 		TypedEquivalent: []string{"/carbonpanel.v1.ModBrowseService/SearchMods"},
 		Sources: []string{
-			"internal/rpc/server.go:313:mux.Handle(\"/api/v1/servers/\"",
+			"internal/rpc/server.go:308:mux.Handle(\"/api/v1/servers/\"",
 			"internal/rpc/handlers/mod_search.go:120:legacy JSON adapter and the generated ModBrowseService",
 			"internal/rpc/handlers/mod_search.go:209:rbac.ResourceMods, rbacAction, objectID",
 		},
@@ -167,7 +167,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		ACL:             "mods/read on server_id (global * when id is 'none')",
 		TypedEquivalent: []string{"/carbonpanel.v1.ModBrowseService/GetModVersions"},
 		Sources: []string{
-			"internal/rpc/server.go:313:mux.Handle(\"/api/v1/servers/\"",
+			"internal/rpc/server.go:308:mux.Handle(\"/api/v1/servers/\"",
 			"internal/rpc/handlers/mod_search.go:209:rbac.ResourceMods, rbacAction, objectID",
 		},
 	},
@@ -178,7 +178,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		ACL:             "mods/create on server_id (global * when id is 'none')",
 		TypedEquivalent: []string{"/carbonpanel.v1.ModBrowseService/InstallMods"},
 		Sources: []string{
-			"internal/rpc/server.go:313:mux.Handle(\"/api/v1/servers/\"",
+			"internal/rpc/server.go:308:mux.Handle(\"/api/v1/servers/\"",
 			"internal/rpc/handlers/mod_search.go:209:rbac.ResourceMods, rbacAction, objectID",
 		},
 	},
@@ -188,8 +188,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Modpack Studio authoring and deployment uses global modpacks grants. The generated PackwizService shares the migrated JSON operations, while multipart import, export archives, raw assets and other adapter-only operations stay on HTTP.",
 		ACL:    "modpacks/read or modpacks/create on global object *",
 		Sources: []string{
-			"internal/rpc/server.go:320:mux.Handle(\"/api/v1/packwiz/\"",
-			"internal/rpc/handlers/packwiz.go:106:rbac.ResourceModpacks, action",
+			"internal/rpc/server.go:314:mux.Handle(\"/api/v1/packwiz/\"",
+			"internal/rpc/handlers/packwiz.go:133:rbac.ResourceModpacks, action",
 		},
 	},
 	{
@@ -199,8 +199,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		ACL:             "none (public Studio metadata bootstrap)",
 		TypedEquivalent: []string{"/carbonpanel.v1.MinecraftService/GetLoaderVersions"},
 		Sources: []string{
-			"internal/rpc/server.go:320:mux.Handle(\"/api/v1/packwiz/\"",
-			"internal/rpc/handlers/packwiz.go:72:Route /api/v1/packwiz/loaders",
+			"internal/rpc/server.go:314:mux.Handle(\"/api/v1/packwiz/\"",
+			"internal/rpc/handlers/packwiz.go:99:Route /api/v1/packwiz/loaders",
 		},
 	},
 	{
@@ -212,9 +212,9 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 			"/carbonpanel.v1.ModpackService/GetModpackConfig", "/carbonpanel.v1.ModpackService/GetModpackFiles",
 		},
 		Sources: []string{
-			"internal/rpc/server.go:320:mux.Handle(\"/api/v1/packwiz/\"",
-			"internal/rpc/handlers/packwiz.go:67:Raw pack file serving for container bootstrapping",
-			"internal/rpc/handlers/packwiz.go:88:ServePackFile(packID, relPath)",
+			"internal/rpc/server.go:314:mux.Handle(\"/api/v1/packwiz/\"",
+			"internal/rpc/handlers/packwiz.go:94:Raw pack file serving for container bootstrapping",
+			"internal/rpc/handlers/packwiz.go:115:ServePackFile(packID, relPath)",
 		},
 	},
 	{
@@ -223,8 +223,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Legacy staged-diff reader shares the operation with StagedConfigService.ListStagedChanges. Use the panel staged changes workflow.",
 		ACL:    "server_config/read on serverID",
 		Sources: []string{
-			"internal/rpc/server.go:323:mux.Handle(\"/api/v1/staged-config/\"",
-			"internal/rpc/handlers/staged_config.go:87:rbac.ResourceServerConfig, action, serverID",
+			"internal/rpc/server.go:317:mux.Handle(\"/api/v1/staged-config/\"",
+			"internal/rpc/handlers/staged_config.go:85:rbac.ResourceServerConfig, action, serverID",
 		},
 	},
 	{
@@ -233,8 +233,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "The adapter and StagedConfigService.StageConfigChange stage a diff under the same server_config/create grant. ConfigService.UpdateServerConfig uses a different operation and grant.",
 		ACL:    "server_config/create on serverID",
 		Sources: []string{
-			"internal/rpc/server.go:323:mux.Handle(\"/api/v1/staged-config/\"",
-			"internal/rpc/handlers/staged_config.go:87:rbac.ResourceServerConfig, action, serverID",
+			"internal/rpc/server.go:317:mux.Handle(\"/api/v1/staged-config/\"",
+			"internal/rpc/handlers/staged_config.go:85:rbac.ResourceServerConfig, action, serverID",
 		},
 	},
 	{
@@ -243,9 +243,9 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Apply, rollback and discard are shared with StagedConfigService. Both adapters check the record's owner before attempting the change. Use the panel staged changes workflow.",
 		ACL:    "server_config/create on serverID and on the staged record's owner",
 		Sources: []string{
-			"internal/rpc/server.go:323:mux.Handle(\"/api/v1/staged-config/\"",
-			"internal/rpc/handlers/staged_config.go:101:rbac.ResourceServerConfig, action, ownerID",
-			"internal/rpc/handlers/staged_config.go:114:parts[3] == \"apply\"",
+			"internal/rpc/server.go:317:mux.Handle(\"/api/v1/staged-config/\"",
+			"internal/rpc/handlers/staged_config.go:99:rbac.ResourceServerConfig, action, ownerID",
+			"internal/rpc/handlers/staged_config.go:112:parts[3] == \"apply\"",
 		},
 	},
 	{
@@ -254,7 +254,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Prometheus exposition for monitoring. Use an authenticated host metrics scrape for telemetry.",
 		ACL:    "servers/read on global object * (fail-closed via requireRequestObject)",
 		Sources: []string{
-			"internal/rpc/server.go:331:mux.Handle(\"/api/v2/metrics/\"",
+			"internal/rpc/server.go:325:mux.Handle(\"/api/v2/metrics/\"",
 			"internal/rpc/handlers/metrics.go:65:\"/api/v2/metrics/host\"",
 			"internal/rpc/handlers/metrics.go:75:rbac.ResourceServers, rbac.ActionRead, objectID",
 		},
@@ -265,7 +265,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Per-server Prometheus exposition for monitoring. GetServer provides server status and metadata.",
 		ACL:    "servers/read on id",
 		Sources: []string{
-			"internal/rpc/server.go:331:mux.Handle(\"/api/v2/metrics/\"",
+			"internal/rpc/server.go:325:mux.Handle(\"/api/v2/metrics/\"",
 			"internal/rpc/handlers/metrics.go:61:/api/v2/metrics/servers/",
 			"internal/rpc/handlers/metrics.go:75:rbac.ResourceServers, rbac.ActionRead, objectID",
 		},
@@ -276,7 +276,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Public generated documentation and discovery spec (openapi.go:25-28,152-170). The catalog source is the proto descriptor table, never this spec; there is no product data and no tool to expose.",
 		ACL:    "none (public documentation)",
 		Sources: []string{
-			"internal/rpc/server.go:302:mux.HandleFunc(\"/api/v1/openapi.yaml\"",
+			"internal/rpc/server.go:297:mux.HandleFunc(\"/api/v1/openapi.yaml\"",
 			"internal/rpc/handlers/openapi.go:28:func NewOpenAPIHandler(",
 		},
 	},
@@ -293,22 +293,22 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 			"/carbonpanel.v1.WorldViewService/ListMapOverlays",
 		},
 		Sources: []string{
-			"internal/rpc/server.go:337:mux.Handle(worldview.ProxyPrefix",
+			"internal/rpc/server.go:331:mux.Handle(worldview.ProxyPrefix",
 			"internal/worldview/config.go:28:ProxyPrefix = \"/api/v1/worldview/map/\"",
-			"internal/worldview/proxy.go:134:h.deps.Sessions.Resolve(key)",
-			"internal/worldview/proxy.go:166:rbac.ResourceWorldView, rbac.ActionRead, serverID",
+			"internal/worldview/proxy.go:152:h.deps.Sessions.Resolve(key)",
+			"internal/worldview/proxy.go:184:rbac.ResourceWorldView, rbac.ActionRead, serverID",
 		},
 	},
 	{
 		Route: "GET|POST /api/v1/auth/oidc/{login,callback,exchange}", Mount: "internal/rpc/server.go:290-292",
 		MountCondition: "mounted only when OIDC is enabled",
 		Decision:       FamilyStreamDecisionPrivate, ReasonCode: StreamReasonBrowserHandshake,
-		Reason: "Browser IdP handshake; the exchange redeems a one-time code for a SPA session token with Cache-Control: no-store (oidc.go:596-627). A session token is not an MCP credential and must never be a tool argument or result.",
+		Reason: "Browser IdP handshake; the exchange redeems a one-time code for a SPA session token with Cache-Control: no-store (oidc.go HandleExchange). A session token is not an MCP credential and must never be a tool argument or result.",
 		ACL:    "none (browser enrollment / session bootstrap)",
 		Sources: []string{
-			"internal/rpc/server.go:292:mux.HandleFunc(\"/api/v1/auth/oidc/exchange\"",
-			"internal/auth/oidc.go:600:Cache-Control\", \"no-store",
-			"internal/auth/oidc.go:618:h.exchangeStore.consume(req.Code, clientIP(r))",
+			"internal/rpc/server.go:287:mux.HandleFunc(\"/api/v1/auth/oidc/exchange\"",
+			"internal/auth/oidc.go:693:func (h *OIDCHandler) HandleExchange",
+			"internal/auth/oidc.go:713:h.exchangeStore.consume(req.Code, clientIP(r))",
 		},
 	},
 	{
@@ -317,7 +317,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Browser console/log/event hub WebSocket upgrade. Private handshake; agents use typed RPC reads and events instead of a raw upgrade socket.",
 		ACL:    "authenticated WebSocket upgrade and refresh; servers/read and servers/command on the subscribed or commanded server",
 		Sources: []string{
-			"internal/rpc/server.go:278:mux.Handle(\"/ws\"",
+			"internal/rpc/server.go:273:mux.Handle(\"/ws\"",
 		},
 	},
 	{
@@ -326,8 +326,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Unauthenticated liveness/readiness and layered health probes (health.go:17-69). Read-only deployment signals with no product data and no typed client; no tool is needed.",
 		ACL:    "none (public probes)",
 		Sources: []string{
-			"internal/rpc/server.go:282:mux.HandleFunc(\"/healthz\"",
-			"internal/rpc/server.go:284:mux.HandleFunc(\"/health/detail\"",
+			"internal/rpc/server.go:277:mux.HandleFunc(\"/healthz\"",
+			"internal/rpc/server.go:279:mux.HandleFunc(\"/health/detail\"",
 			"internal/rpc/handlers/health.go:23:func NewHealthHandler(",
 		},
 	},
@@ -337,8 +337,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Reflection describes the same registered Connect service list the server checks against its mounted handlers.",
 		ACL:    "none (discovery endpoint)",
 		Sources: []string{
-			"internal/rpc/server.go:274:grpcreflect.NewHandlerV1",
-			"internal/rpc/server.go:275:grpcreflect.NewHandlerV1Alpha",
+			"internal/rpc/server.go:269:grpcreflect.NewHandlerV1",
+			"internal/rpc/server.go:270:grpcreflect.NewHandlerV1Alpha",
 		},
 	},
 	{
@@ -347,8 +347,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Reason: "Static SvelteKit assets served for non-RPC routes (server.go:340-341,551-615). It is a transport fallback, not product data; raw arbitrary URLs are never exposed to the model.",
 		ACL:    "none (static assets)",
 		Sources: []string{
-			"internal/rpc/server.go:341:s.setupFrontend(mux)",
-			"internal/rpc/server.go:616:mux.Handle(\"/\", s.createFrontendHandler(fs))",
+			"internal/rpc/server.go:335:s.setupFrontend(mux)",
+			"internal/rpc/server.go:639:mux.Handle(\"/\", s.createFrontendHandler(fs))",
 		},
 	},
 }
