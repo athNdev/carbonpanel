@@ -1,6 +1,6 @@
 ---
-title: Proxmox (existing guest)
-description: Install the Carbon Panel controller in an existing Proxmox LXC or VM using the first-party installer script.
+title: Proxmox (prepared CT or existing guest)
+description: Install the Carbon Panel controller in an existing Proxmox LXC or VM or in a prepared Debian system CT, using the first-party installer script.
 ---
 {/*
 SPDX-License-Identifier: MIT AND MPL-2.0
@@ -12,7 +12,7 @@ If a copy of the MPL was not distributed with this file, You can obtain
 one at https://mozilla.org/MPL/2.0/.
 */}
 
-This guide uses Carbon Panel's first-party installer script to deploy the **Carbon Panel controller** inside an **existing** Linux guest (Proxmox LXC or VM). It does **not** provision a Proxmox host, create the guest, or change host security settings. You prepare and secure the guest yourself, then run the script inside it.
+This guide covers two paths: a **prepared Debian 13 system CT** that you import and boot, and an **existing Linux guest** (Proxmox LXC or VM, including Ubuntu) where you run Carbon Panel's first-party installer script yourself. Both use the same installer and the same data-preserving update flow. This guide does **not** provision a Proxmox host, create the guest, or change host security settings; you prepare and secure the guest yourself.
 
 ## Prerequisites
 
@@ -30,6 +30,69 @@ Running Docker inside an LXC depends on your Proxmox/LXC configuration and kerne
 :::caution[Guest-local Docker socket]
 The generated `compose.yml` mounts `/var/run/docker.sock` because Carbon Panel manages Minecraft server containers through the guest-local Docker daemon. Control of the panel container therefore implies control of Docker on that guest. Keep the panel on a trusted network, set strong credentials, and treat the guest as dedicated to Carbon Panel.
 :::
+
+## Prepared Debian 13 system CT (controller-ct)
+
+A prebuilt **system container template** is an ordinary Debian 13 amd64 LXC root filesystem archive, not an OCI application image. The current controller CT ships with a **pinned Stable controller image**, not a moving tag. The exact Stable version and image digest are recorded in the release receipt/manifest that accompanies the `controller-ct-v*` artifact; read that receipt for the build you downloaded instead of relying on a digest copied into a guide. A VM remains the stronger-isolation choice when you need live migration, a different kernel or storage layout, or maximum separation. Docker and Proxmox configurations vary — verify the feature requirements below against your own host rather than assuming every combination is supported.
+
+:::note[Template availability]
+No public template URL is claimed here. The project's [Releases](https://github.com/athNdev/carbonpanel/releases) page is an interim discoverability link, not proof that a specific CT asset is published or bootable. Until the exact `controller-ct-v*` asset is live, use a locally built template. The expected filenames are `carbonpanel-controller-ct.tar.zst` and `carbonpanel-controller-ct.tar.zst.sha256`. Source and general downloads are on the [repository](https://github.com/athNdev/carbonpanel).
+:::
+
+### Verify and import the template
+
+Check the archive against its sidecar on the Proxmox host before importing anything. Run this from the directory containing both files; do not import a template whose checksum is missing or disagrees.
+
+```bash
+sha256sum -c carbonpanel-controller-ct.tar.zst.sha256
+```
+
+Import the archive into a Proxmox storage (GUI: *Datacenter → storage → CT Templates → Upload*). In the GUI create a CT from that template with **Unprivileged** enabled and **Nesting** and **keyctl** enabled in *Options → Features* before first start, set an SSH public key for root, attach the network, then start the CT. These two features are required for Docker inside an unprivileged LXC; do not enable privileged mode, do not disable AppArmor or seccomp, and do not add broad mount or FUSE permissions.
+
+Equivalent CLI. Assign the four variables for your site, then the commands are pasteable:
+
+```bash
+CTID=100                       # your unique, cluster-wide CT ID (>= 100)
+CT_STORAGE=local-lvm           # storage that holds the CT root disk
+CT_BRIDGE=vmbr0                # your Proxmox host bridge
+CT_SSH_KEY=/root/.ssh/id_rsa.pub   # public key installed for root
+
+pct create "$CTID" local:vztmpl/carbonpanel-controller-ct.tar.zst \
+  --ostype debian --unprivileged 1 \
+  --features keyctl=1,nesting=1 \
+  --ssh-public-keys "$CT_SSH_KEY" \
+  --rootfs "${CT_STORAGE}:16" --memory 2048 --swap 512 \
+  --net0 "name=eth0,bridge=${CT_BRIDGE},ip=dhcp" \
+  --hostname carbon-panel --start 1
+pct status "$CTID"
+```
+
+`--ostype debian` must match the guest's `/etc/os-release`; Proxmox refuses to start a CT when the configured OS type disagrees with the detected one.
+
+### First boot and readiness
+
+The built CT's first boot runs `carbon-panel-ct-firstboot.service`, which installs the controller from the bundled first-party installer and pins the verified Stable image reference in `/opt/carbon-panel/compose.yml`. Check the unit, then the controller:
+
+```bash
+pct exec "$CTID" -- systemctl status carbon-panel-ct-firstboot.service
+pct exec "$CTID" -- journalctl -u carbon-panel-ct-firstboot.service -n 50 --no-pager
+pct exec "$CTID" -- docker compose -f /opt/carbon-panel/compose.yml ps carbon-panel
+curl -fsS "http://${CT_GUEST_IP}:8080/"   # set CT_GUEST_IP to the CT address
+```
+
+Confirm that the `image:` value in `compose.yml` matches the digest in the receipt you verified before first boot. Keep the controller's data on the CT's storage-backed root filesystem or a managed mount point with `backup=1`. Proxmox `vzdump` does not back up bind or device mount points, and their host source paths must not contain symlinks.
+
+### Upgrade and preservation
+
+Controller upgrades stay version-neutral and data-preserving, but the first-party updater **preserves an existing `compose.yml`** and only pulls/recreates the `carbon-panel` service. To move to a newer verified pin, you must intentionally replace the image reference yourself. Take a controller database snapshot first, then:
+
+```bash
+pct exec "$CTID" -- cp /opt/carbon-panel/compose.yml /opt/carbon-panel/compose.yml.bak
+# Edit /opt/carbon-panel/compose.yml inside the CT: set image: to the verified pin in the new receipt.
+pct exec "$CTID" -- sudo bash /usr/local/share/carbon-panel/install-carbon-panel.sh update --dir /opt/carbon-panel
+```
+
+The bundled installer is the same first-party script used by the existing-guest path; the prepared CT ships it at `/usr/local/share/carbon-panel/install-carbon-panel.sh`. The updater preserves `data/`, `backups/`, `tmp/`, your compose file and `config.yaml`; only the `carbon-panel` service is recreated. If the edited pin is wrong, restore `compose.yml.bak` and re-run the updater. For a guest-level rollback, take a Proxmox snapshot when the storage supports it (`pct snapshot "$CTID" <name>`, `pct rollback "$CTID" <name>`). Do not delete volumes or bind mounts to "reset" an install.
 
 ## Install (inspect, then run)
 

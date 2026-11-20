@@ -1,0 +1,20 @@
+[Unit]
+Description=Carbon Panel controller first boot (guest-local Docker)
+Requires=docker.service
+After=network-online.target docker.service
+Wants=network-online.target
+ConditionPathExists=!/var/lib/carbon-panel-ct/firstboot.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/carbon-panel-ct-firstboot
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=900
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/carbon-panel /var/lib/carbon-panel-ct /var/log
+
+[Install]
+WantedBy=multi-user.target
