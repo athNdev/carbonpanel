@@ -145,7 +145,8 @@ one at https://mozilla.org/MPL/2.0/.
 	data-path={file.path}
 	onclick={(e) => {
 		// Move real focus to the tree so arrow keys work right after a click.
-		(e.currentTarget as HTMLElement | null)?.closest<HTMLElement>('[role="tree"]')?.focus();
+		const tree = (e.currentTarget as HTMLElement | null)?.closest('[role="tree"]');
+		(tree as HTMLElement | null | undefined)?.focus();
 		onSelect(file, e);
 	}}
 	oncontextmenu={(e) => {

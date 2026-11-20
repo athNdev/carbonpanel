@@ -62,13 +62,7 @@ export function shouldAcceptCompatibility(input: {
 }
 
 export type ServerWorldManagement =
-	| 'loading'
-	| 'bound'
-	| 'unmanaged'
-	| 'unbound'
-	| 'none'
-	| 'denied'
-	| 'error';
+	'loading' | 'bound' | 'unmanaged' | 'unbound' | 'none' | 'denied' | 'error';
 
 export const MANAGEMENT_PRESENTATION: Record<ServerWorldManagement, WorldPresentation> = {
 	loading: {
