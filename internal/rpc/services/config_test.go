@@ -8,6 +8,8 @@ package services
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/docker"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 )
 
 func setupConfigTestService(t *testing.T) (*ConfigService, *storage.Store) {
@@ -42,6 +45,16 @@ func setupConfigTestService(t *testing.T) (*ConfigService, *storage.Store) {
 		t.Fatalf("failed to migrate: %v", err)
 	}
 	return NewConfigService(store, &config.Config{}, nil, nil, logger.New()), store
+}
+
+func mountConfigTestClient(t *testing.T, svc *ConfigService) carbonpanelv1connect.ConfigServiceClient {
+	t.Helper()
+	pattern, handler := carbonpanelv1connect.NewConfigServiceHandler(svc)
+	mux := http.NewServeMux()
+	mux.Handle(pattern, handler)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return carbonpanelv1connect.NewConfigServiceClient(server.Client(), server.URL)
 }
 
 type configRecreatorFake struct {
@@ -165,6 +178,89 @@ func TestConfigService_GetGlobalSettings(t *testing.T) {
 	res, err := svc.GetGlobalSettings(context.Background(), connect.NewRequest(&v1.GetGlobalSettingsRequest{}))
 	require.NoError(t, err)
 	assert.NotEmpty(t, res.Msg.Categories)
+}
+
+func TestMountedGlobalConfigSyncPreservesWorldBindTarget(t *testing.T) {
+	ctx := context.Background()
+	svc, store := setupConfigTestService(t)
+	global, _, err := store.GetGlobalSettings(ctx)
+	require.NoError(t, err)
+	level, props, motd := "global-level", "level-name=global-override", "global message"
+	global.Level, global.CustomServerProperties, global.MOTD = &level, &props, &motd
+	require.NoError(t, store.UpdateGlobalSettings(ctx, global))
+
+	locked, available := "global-sync-world-owner", "global-sync-available"
+	for i, id := range []string{locked, available} {
+		require.NoError(t, store.CreateServer(ctx, &storage.Server{
+			ID: id, Name: id, Port: 27000 + i, Status: storage.StatusStopped,
+		}))
+	}
+	cfg, err := store.GetServerConfig(ctx, locked)
+	require.NoError(t, err)
+	oldLevel, oldProps := "local-level", "level-name=local-override"
+	cfg.Level, cfg.CustomServerProperties = &oldLevel, &oldProps
+	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+	op, _, err := store.BeginServerOperation(ctx, locked, "", "", "test-world-owner", "world-bind", "test-digest")
+	require.NoError(t, err)
+
+	client := mountConfigTestClient(t, svc)
+	res, err := client.SyncGlobalSettingsToServers(ctx, connect.NewRequest(&v1.SyncGlobalSettingsToServersRequest{}))
+	require.NoError(t, err)
+	require.EqualValues(t, 2, res.Msg.GetUpdatedServersCount())
+	protected, err := store.GetServerConfig(ctx, locked)
+	require.NoError(t, err)
+	require.Equal(t, &oldLevel, protected.Level)
+	require.Equal(t, &oldProps, protected.CustomServerProperties)
+	require.Equal(t, &motd, protected.MOTD)
+	unlocked, err := store.GetServerConfig(ctx, available)
+	require.NoError(t, err)
+	require.Equal(t, &level, unlocked.Level)
+	require.Equal(t, &props, unlocked.CustomServerProperties)
+
+	// A sync limited to the protected fields performs no write for the owner.
+	require.NoError(t, store.UpdateGlobalSettings(ctx, &storage.ServerConfig{
+		Level: &level, CustomServerProperties: &props,
+	}))
+	res, err = client.SyncGlobalSettingsToServers(ctx, connect.NewRequest(&v1.SyncGlobalSettingsToServersRequest{}))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, res.Msg.GetUpdatedServersCount())
+
+	require.NoError(t, store.AdvanceServerOperation(ctx, op.ID, storage.ServerOperationPrepared, storage.ServerOperationFailed, "fixture released"))
+	_, err = client.SyncGlobalSettingsToServers(ctx, connect.NewRequest(&v1.SyncGlobalSettingsToServersRequest{}))
+	require.NoError(t, err)
+	released, err := store.GetServerConfig(ctx, locked)
+	require.NoError(t, err)
+	require.Equal(t, &level, released.Level)
+	require.Equal(t, &props, released.CustomServerProperties)
+}
+
+func TestMountedGlobalConfigSyncRestoresOnlyMissingDefaults(t *testing.T) {
+	ctx := context.Background()
+	svc, store := setupConfigTestService(t)
+	require.NoError(t, store.UpdateGlobalSettings(ctx, &storage.ServerConfig{}))
+	existing, missing := "global-sync-existing", "global-sync-missing"
+	for i, id := range []string{existing, missing} {
+		require.NoError(t, store.CreateServer(ctx, &storage.Server{
+			ID: id, Name: id, Port: 27100 + i, Status: storage.StatusStopped,
+		}))
+	}
+	before, err := store.GetServerConfig(ctx, existing)
+	require.NoError(t, err)
+	require.NoError(t, store.DB().Where("server_id = ?", missing).Delete(&storage.ServerConfig{}).Error)
+	_, err = store.GetServerConfig(ctx, missing)
+	require.ErrorIs(t, err, storage.ErrServerConfigNotFound)
+
+	client := mountConfigTestClient(t, svc)
+	res, err := client.SyncGlobalSettingsToServers(ctx, connect.NewRequest(&v1.SyncGlobalSettingsToServersRequest{}))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, res.Msg.GetUpdatedServersCount())
+	restored, err := store.GetServerConfig(ctx, missing)
+	require.NoError(t, err)
+	require.NotNil(t, restored.RCONPassword)
+	require.NotEmpty(t, *restored.RCONPassword)
+	after, err := store.GetServerConfig(ctx, existing)
+	require.NoError(t, err)
+	require.Equal(t, before.UpdatedAt, after.UpdatedAt)
 }
 
 func TestConfigService_GetServerConfig_NotFound(t *testing.T) {

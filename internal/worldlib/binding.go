@@ -23,6 +23,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/snapshot"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/google/uuid"
@@ -118,6 +119,9 @@ func (a *KeyedAdmission) Acquire(ctx context.Context, keys ...string) (func(), e
 // ErrBindRequestConflict identifies a request ID that cannot prove the requested binding.
 var ErrBindRequestConflict = errors.New("world bind request ID conflicts with the requested binding")
 
+// ErrBindLevelUnknown identifies an invalid configured world level.
+var ErrBindLevelUnknown = errors.New("server actual level name is unknown")
+
 // BindRequest is the pure input to a bind or swap.
 type BindRequest struct {
 	ServerID      string
@@ -187,12 +191,10 @@ func (b *Binder) SetCompatibility(engine *Engine) { b.compat = engine }
 // Bind executes a bind or swap. No live bytes are touched before admission,
 // strict node resolution and cancellation checks have all succeeded.
 func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error) {
-	if req.ServerID == "" || req.LevelName == "" || req.RevisionID == "" {
-		return nil, errors.New("bind requires a server, level and revision")
+	if req.ServerID == "" || req.RevisionID == "" {
+		return nil, errors.New("bind requires a server and revision")
 	}
-	if strings.ContainsAny(req.LevelName, `/\:`) || req.LevelName == "." || req.LevelName == ".." {
-		return nil, fmt.Errorf("%w: invalid level name", ErrArchiveRejected)
-	}
+	req.LevelName = strings.TrimSpace(req.LevelName)
 	if req.Window != "" && req.Window != "now" && req.Window != "next_restart" && req.Window != "idle" {
 		return nil, fmt.Errorf("unknown bind window %q", req.Window)
 	}
@@ -212,7 +214,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		return nil, fmt.Errorf("%w: requested node %q does not own server %q", ErrRemoteUnavailable, req.NodeID, server.ID)
 	}
 	req.NodeID = server.NodeID
-	_, generation, err := b.resolveNode(ctx, req.NodeID)
+	node, generation, err := b.resolveNode(ctx, req.NodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -223,13 +225,6 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		return nil, fmt.Errorf("%w: request generation %d does not match node generation %d",
 			ErrStaleGeneration, req.Generation, generation)
 	}
-	revision, err := b.store.GetWorldRevision(ctx, req.RevisionID)
-	if err != nil {
-		return nil, err
-	}
-	if revision.NodeID != "" && revision.NodeID != req.NodeID {
-		return nil, fmt.Errorf("%w: revision is stored on node %q", ErrRemoteUnavailable, revision.NodeID)
-	}
 	release, err := b.admission.Acquire(ctx, "server:"+req.ServerID, "revision:"+req.RevisionID)
 	if err != nil {
 		return nil, err
@@ -239,16 +234,41 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Read both records under admission. Check any reuse before considering an
-	// already-matching binding: it may come from a different operation.
+	// A completed operation is proved against the installed binding before
+	// checking current world config or opening the revision archive.
+	if replay, err := b.replayBind(ctx, server, req); replay != nil || err != nil {
+		return replay, err
+	}
+	if err := b.canonicalLevel(ctx, &req); err != nil {
+		return nil, err
+	}
+	levelAtAdmission := req.LevelName
+	revision, err := b.store.GetWorldRevision(ctx, req.RevisionID)
+	if err != nil {
+		return nil, err
+	}
+	if revision.NodeID != "" && revision.NodeID != req.NodeID {
+		return nil, fmt.Errorf("%w: revision is stored on node %q", ErrRemoteUnavailable, revision.NodeID)
+	}
+	if !node.IsLocal && b.resolver == nil {
+		return nil, fmt.Errorf("%w: no storage resolver for node %q", ErrRemoteUnavailable, req.NodeID)
+	}
+	archivePath, err := ResolveRevisionArchive(b.libraryRoot, revision.StoragePath)
+	if err != nil {
+		return nil, err
+	}
+	layout, err := ValidateRevisionArchive(ctx, archivePath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := layout.SelectFamilies(req.LevelName); err != nil {
+		return nil, err
+	}
 	existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 	payloadHash := worldBindPayloadHash(server, req)
-	if replay, err := b.replayBind(ctx, server, req, payloadHash, existing); replay != nil || err != nil {
-		return replay, err
-	}
 	if existing != nil {
 		if !existing.MatchesOwner(req.NodeID, req.Generation) {
 			return nil, fmt.Errorf("%w: existing binding belongs to another node generation", ErrStaleGeneration)
@@ -275,6 +295,19 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		}
 		defer releaseTransition()
 	}
+	// Completed replays returned above never reach the transition. For a fresh
+	// operation the shared server transition is now held, so config can no
+	// longer change underneath this bind. Re-read and require the SAME level
+	// chosen under admission; a change is refused before stop, journal or any
+	// live-world mutation.
+	currentLevel, err := b.configuredLevel(ctx, req.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	if currentLevel != levelAtAdmission {
+		return nil, fmt.Errorf("%w: server level changed before world bind acquired the shared transition",
+			ErrUnsupportedWorldLayout)
+	}
 	current, err := b.store.GetServer(ctx, server.ID)
 	if err != nil {
 		return nil, err
@@ -285,7 +318,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	}
 	server = current
 
-	node, generation, err := b.resolveNode(ctx, server.NodeID)
+	node, generation, err = b.resolveNode(ctx, server.NodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -316,10 +349,6 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 
 	// Compatibility and disk-budget preflight happen before the journal and
 	// before any byte is written. Dry-run never mutates a world.
-	archivePath, err := ResolveRevisionArchive(b.libraryRoot, revision.StoragePath)
-	if err != nil {
-		return nil, err
-	}
 	if err := b.preflight(ctx, server, revision, req, node.IsLocal, archivePath); err != nil {
 		return nil, err
 	}
@@ -328,6 +357,18 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	var cleanup []string
 	journal, err := operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-bind", req.RequestID, payloadHash,
 		func(ownedCtx context.Context) (bool, error) {
+			// The journal now owns the server. A scheduler ApplyBatch can finish
+			// under its own journal between preflight and this callback, so
+			// recheck the target before Stop or any file effect. Replays never
+			// reach this point.
+			ownedLevel, err := b.configuredLevel(ownedCtx, req.ServerID)
+			if err != nil {
+				return false, err
+			}
+			if ownedLevel != levelAtAdmission {
+				return false, fmt.Errorf("%w: server level changed before world bind owned the operation",
+					ErrUnsupportedWorldLayout)
+			}
 			out, roots, err := b.publish(ownedCtx, acc, server, req, archivePath)
 			cleanup = roots
 			if out != nil {
@@ -379,11 +420,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	}
 	if result == nil {
 		// Another controller may have recorded this operation after our initial read.
-		current, readErr := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName)
-		if readErr != nil && !errors.Is(readErr, gorm.ErrRecordNotFound) {
-			return nil, readErr
-		}
-		replay, replayErr := b.replayBind(ctx, server, req, payloadHash, current)
+		replay, replayErr := b.replayBind(ctx, server, req)
 		if replay != nil || replayErr != nil {
 			return replay, replayErr
 		}
@@ -407,10 +444,41 @@ func worldBindPayloadHash(server *storage.Server, req BindRequest) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// canonicalLevel resolves the authoritative target level from server config and
+// normalises the request to it. Callers must hold the relevant ownership (Binder
+// admission and, for a fresh operation, the shared server transition).
+func (b *Binder) configuredLevel(ctx context.Context, serverID string) (string, error) {
+	cfg, err := b.store.GetServerConfig(ctx, serverID)
+	if err != nil {
+		return "", fmt.Errorf("server world configuration not found: %w", err)
+	}
+	if cfg == nil {
+		return "", storage.ErrServerConfigNotFound
+	}
+	level := worldview.ActualLevelName(cfg)
+	if level == "" {
+		return "", ErrBindLevelUnknown
+	}
+	return level, nil
+}
+
+func (b *Binder) canonicalLevel(ctx context.Context, req *BindRequest) error {
+	level, err := b.configuredLevel(ctx, req.ServerID)
+	if err != nil {
+		return err
+	}
+	if requested := strings.TrimSpace(req.LevelName); requested != "" && requested != level {
+		return fmt.Errorf("%w: bind level %q does not match configured level %q",
+			ErrUnsupportedWorldLayout, requested, level)
+	}
+	req.LevelName = level
+	return nil
+}
+
 // replayBind only returns success when the installed binding is attributable
 // to this operation. Before payload hashes were recorded, the binding and its
 // publication time are the available evidence.
-func (b *Binder) replayBind(ctx context.Context, server *storage.Server, req BindRequest, payloadHash string, binding *storage.WorldBinding) (*BindResult, error) {
+func (b *Binder) replayBind(ctx context.Context, server *storage.Server, req BindRequest) (*BindResult, error) {
 	var op storage.ServerOperation
 	err := b.store.DB().WithContext(ctx).
 		Where("server_id = ? AND request_key = ?", server.ID, operation.StorageKey(req.RequestID, "world-bind")).
@@ -421,18 +489,43 @@ func (b *Binder) replayBind(ctx context.Context, server *storage.Server, req Bin
 	if err != nil {
 		return nil, err
 	}
-	if op.Kind != "world-bind" || (op.PayloadHash != payloadHash && op.PayloadHash != operation.Digest(op.Kind, server)) {
+	if op.Kind != "world-bind" {
 		return nil, ErrBindRequestConflict
 	}
-	switch op.Phase {
-	case storage.ServerOperationComplete:
-		if binding == nil || binding.RevisionID != req.RevisionID ||
+	legacy := op.PayloadHash == operation.Digest(op.Kind, server)
+	if op.Phase == storage.ServerOperationComplete {
+		bindings, err := b.store.ListWorldBindings(ctx, req.ServerID, req.RevisionID)
+		if err != nil {
+			return nil, err
+		}
+		if len(bindings) != 1 {
+			return nil, ErrBindRequestConflict
+		}
+		binding := &bindings[0]
+		if (req.LevelName != "" && req.LevelName != binding.LevelName) ||
 			!binding.MatchesOwner(req.NodeID, req.Generation) ||
 			binding.BoundAt.Before(op.CreatedAt) || binding.BoundAt.After(op.UpdatedAt) {
 			return nil, ErrBindRequestConflict
 		}
+		req.LevelName = binding.LevelName
+		if !legacy && op.PayloadHash != worldBindPayloadHash(server, req) {
+			return nil, ErrBindRequestConflict
+		}
 		return &BindResult{Binding: binding, Outcome: string(operation.OutcomeSuccess),
 			OperationID: op.ID, RequestID: req.RequestID, Consistency: binding.Consistency}, nil
+	}
+	if !legacy {
+		if req.LevelName == "" {
+			req.LevelName, err = b.configuredLevel(ctx, req.ServerID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if op.PayloadHash != worldBindPayloadHash(server, req) {
+			return nil, ErrBindRequestConflict
+		}
+	}
+	switch op.Phase {
 	case storage.ServerOperationPrepared, storage.ServerOperationExecuting:
 		return &BindResult{Outcome: string(operation.OutcomeUnknown), OperationID: op.ID, RequestID: req.RequestID},
 			fmt.Errorf("%w: operation %s owns the server", ErrUncertainOutcome, op.ID)
@@ -562,6 +655,7 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	stageID := uuid.NewString()
 	stageRoot := path.Join(".world-library", "stage-"+stageID)
 	oldRoot := path.Join(".world-library", "old-"+stageID)
+	extractRoot := path.Join(stageRoot, "extracted")
 	if err := acc.MkdirAll(stageRoot); err != nil {
 		return nil, nil, err
 	}
@@ -570,7 +664,7 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		_ = acc.RemoveAll(stageRoot)
 		return nil, nil, err
 	}
-	if _, err := nodestorage.ExtractZip(ctx, acc, archiveRel, stageRoot, nil); err != nil {
+	if _, err := nodestorage.ExtractZip(ctx, acc, archiveRel, extractRoot, nil); err != nil {
 		_ = acc.RemoveAll(stageRoot)
 		return nil, nil, fmt.Errorf("%w: %v", ErrArchiveRejected, err)
 	}
@@ -579,14 +673,14 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		return nil, nil, err
 	}
 
-	families, err := stageFamilies(acc, stageRoot, req.LevelName)
+	families, err := stageFamilies(acc, extractRoot, req.LevelName)
 	if err != nil {
 		_ = acc.RemoveAll(stageRoot)
 		return nil, nil, err
 	}
 	if len(families) == 0 {
 		_ = acc.RemoveAll(stageRoot)
-		return nil, nil, fmt.Errorf("%w: archive has no level.dat family", ErrArchiveRejected)
+		return nil, nil, fmt.Errorf("%w: archive has no usable level.dat family", ErrArchiveRejected)
 	}
 
 	next := &storage.WorldBinding{
@@ -742,7 +836,7 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 			}
 			movedOld = append(movedOld, family)
 		}
-		staged := path.Join(stageRoot, family)
+		staged := path.Join(extractRoot, family)
 		if err := acc.Rename(staged, family); err != nil {
 			return renameFailed(staged, family, err)
 		}
@@ -940,6 +1034,9 @@ func copyLocalArchiveToAccessor(ctx context.Context, acc nodestorage.Accessor, l
 	return err
 }
 
+// stageFamilies uses WorldFamilyFromMarker, the single bounded definition of a
+// publishable level family shared with import and preview. It also resolves the
+// configured target BEFORE the caller swaps the binding or moves live data.
 func stageFamilies(acc nodestorage.Accessor, stageRoot, levelName string) ([]string, error) {
 	entries, err := acc.ReadDir(stageRoot)
 	if err != nil {
@@ -947,20 +1044,31 @@ func stageFamilies(acc nodestorage.Accessor, stageRoot, levelName string) ([]str
 	}
 	families := []string{}
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+		if !entry.IsDir() || WorldFamilyFromMarker(path.Join(entry.Name(), "level.dat")) == "" {
 			continue
 		}
-		if _, err := acc.Stat(path.Join(stageRoot, entry.Name(), "level.dat")); err == nil {
-			families = append(families, entry.Name())
+		// A directory is a world family only when its actual direct marker is a
+		// regular, non-empty file. Ordinary backup companions (config/, mods/)
+		// must never be published as worlds.
+		marker, err := acc.Stat(path.Join(stageRoot, entry.Name(), "level.dat"))
+		if err != nil || !marker.Mode().IsRegular() || marker.Size() == 0 {
+			continue
 		}
+		families = append(families, entry.Name())
 	}
 	if len(families) == 0 {
-		if _, err := acc.Stat(path.Join(stageRoot, levelName, "level.dat")); err == nil {
-			families = append(families, levelName)
+		// Preserve the legacy exact-name fallback: a configured level folder
+		// with an actual direct level.dat is usable even if the directory
+		// listing was unavailable at extraction time.
+		if WorldFamilyFromMarker(path.Join(levelName, "level.dat")) != "" {
+			if marker, err := acc.Stat(path.Join(stageRoot, levelName, "level.dat")); err == nil &&
+				marker.Mode().IsRegular() && marker.Size() > 0 {
+				families = append(families, levelName)
+			}
 		}
 	}
 	sort.Strings(families)
-	return families, nil
+	return SelectWorldFamilies(families, levelName)
 }
 
 // levelFamilyDigest fingerprints the optional level.dat for rollback verification.

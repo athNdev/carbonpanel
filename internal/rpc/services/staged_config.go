@@ -47,6 +47,8 @@ func stagedConnectError(err error) error {
 	switch opErr.Status {
 	case http.StatusBadRequest:
 		code = connect.CodeInvalidArgument
+	case http.StatusConflict:
+		code = connect.CodeFailedPrecondition
 	case http.StatusNotFound:
 		code = connect.CodeNotFound
 	case http.StatusUnauthorized, http.StatusForbidden:

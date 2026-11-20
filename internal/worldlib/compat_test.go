@@ -228,6 +228,26 @@ func TestCompatCheckInferredLoaderFromTarget(t *testing.T) {
 	}
 }
 
+func TestCompatCheckNormalizesZIPWorldPaths(t *testing.T) {
+	world := compatWorld(t, 3953, "1.21", "fabric.mod.json")
+	target := compatJavaTarget("1.20.4")
+	engine := NewEngine()
+	for _, prefix := range []string{"world/", "world//", "world/./"} {
+		t.Run(prefix, func(t *testing.T) {
+			archive := compatZip(t, world, prefix)
+			report, err := engine.Check(context.Background(), archive, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			compatRequireConfidence(t, compatFinding(t, report, "edition"), Detected, "java")
+			compatRequireConfidence(t, compatFinding(t, report, "data_version"), Detected, "3953")
+			if report.Overall != VerdictBlocked {
+				t.Fatalf("downgrade verdict = %q, want %q", report.Overall, VerdictBlocked)
+			}
+		})
+	}
+}
+
 func TestCompatCheckUnknownLoaderGates(t *testing.T) {
 	world := compatWorld(t, 3953, "1.21")
 	target := compatJavaTarget("1.21")

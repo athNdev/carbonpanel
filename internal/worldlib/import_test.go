@@ -164,6 +164,26 @@ func TestImportUploadStoresImmutableRevisionWithProvenance(t *testing.T) {
 	assertLibraryOnlyRevisionArchive(t, root, result.Revision.ID)
 }
 
+// TestImportRefusesFlatRootLayout proves an unsupported flat archive is refused
+// at import with an actionable message and never becomes a stored revision.
+func TestImportRefusesFlatRootLayout(t *testing.T) {
+	importer, _, store := newTestImporter(t)
+	archive := writeTestZip(t, filepath.Join(t.TempDir(), "flat.zip"),
+		zipEntry{name: "level.dat", data: []byte("nbt")},
+		zipEntry{name: "region/r.0.0.mca", data: []byte("region")},
+	)
+	result, err := importer.Import(context.Background(), uploadRequest(archive, checksumOf(t, archive), "req-flat-layout"))
+	if err == nil || !errors.Is(err, ErrUnsupportedWorldLayout) || !strings.Contains(err.Error(), "named world folder") {
+		t.Fatalf("Import flat layout = %v, want actionable unsupported-layout error", err)
+	}
+	if result == nil || result.Revision != nil || result.Entry != nil {
+		t.Fatalf("flat archive produced a revision/entry: %+v", result)
+	}
+	if countRows(t, store, &db.WorldRevision{}) != 0 || countRows(t, store, &db.WorldEntry{}) != 0 {
+		t.Fatal("flat archive must not create revision or entry rows")
+	}
+}
+
 func readFile(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)

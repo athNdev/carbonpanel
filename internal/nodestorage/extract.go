@@ -262,6 +262,14 @@ func zipMemberRel(destRel, nameInArchive string) (string, error) {
 	return joined, nil
 }
 
+// CanonicalZipMember returns the extraction-canonical relative path for a ZIP
+// member using exactly the rules the extractor applies. Layout classification
+// uses it so preflight cannot accept an archive whose members collide after
+// extraction.
+func CanonicalZipMember(name string) (string, error) {
+	return zipMemberRel("", name)
+}
+
 // DestRelFromArchive returns the extraction folder next to the archive, named
 // after the archive without its extension (including .tar.gz).
 func DestRelFromArchive(archiveRel string) string {
