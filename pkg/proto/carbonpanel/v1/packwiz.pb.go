@@ -1811,18 +1811,91 @@ func (x *BatchPackModsRequest) GetSide() string {
 	return ""
 }
 
-// BatchPackModsResponse reports how many slugs were processed.
+// BatchPackModResult reports the outcome of one slug in a batch mutation.
+// A failure on one slug never stops the remaining entries, so callers must
+// inspect every result instead of trusting an aggregate count.
+type BatchPackModResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Slug          string                 `protobuf:"bytes,1,opt,name=slug,proto3" json:"slug,omitempty"`
+	Success       bool                   `protobuf:"varint,2,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	ErrorCode     string                 `protobuf:"bytes,4,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BatchPackModResult) Reset() {
+	*x = BatchPackModResult{}
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BatchPackModResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BatchPackModResult) ProtoMessage() {}
+
+func (x *BatchPackModResult) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BatchPackModResult.ProtoReflect.Descriptor instead.
+func (*BatchPackModResult) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *BatchPackModResult) GetSlug() string {
+	if x != nil {
+		return x.Slug
+	}
+	return ""
+}
+
+func (x *BatchPackModResult) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *BatchPackModResult) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *BatchPackModResult) GetErrorCode() string {
+	if x != nil {
+		return x.ErrorCode
+	}
+	return ""
+}
+
+// BatchPackModsResponse reports per-slug outcomes. count is the number of
+// successful entries; results carries one entry per requested slug in order.
 type BatchPackModsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	Count         int32                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	Results       []*BatchPackModResult  `protobuf:"bytes,3,rep,name=results,proto3" json:"results,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *BatchPackModsResponse) Reset() {
 	*x = BatchPackModsResponse{}
-	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1834,7 +1907,7 @@ func (x *BatchPackModsResponse) String() string {
 func (*BatchPackModsResponse) ProtoMessage() {}
 
 func (x *BatchPackModsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[26]
+	mi := &file_carbonpanel_v1_packwiz_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1847,7 +1920,7 @@ func (x *BatchPackModsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchPackModsResponse.ProtoReflect.Descriptor instead.
 func (*BatchPackModsResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{26}
+	return file_carbonpanel_v1_packwiz_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *BatchPackModsResponse) GetSuccess() bool {
@@ -1862,6 +1935,13 @@ func (x *BatchPackModsResponse) GetCount() int32 {
 		return x.Count
 	}
 	return 0
+}
+
+func (x *BatchPackModsResponse) GetResults() []*BatchPackModResult {
+	if x != nil {
+		return x.Results
+	}
+	return nil
 }
 
 var File_carbonpanel_v1_packwiz_proto protoreflect.FileDescriptor
@@ -2015,10 +2095,17 @@ const file_carbonpanel_v1_packwiz_proto_rawDesc = "" +
 	"\apack_id\x18\x01 \x01(\tR\x06packId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x14\n" +
 	"\x05slugs\x18\x03 \x03(\tR\x05slugs\x12\x12\n" +
-	"\x04side\x18\x04 \x01(\tR\x04side\"G\n" +
+	"\x04side\x18\x04 \x01(\tR\x04side\"{\n" +
+	"\x12BatchPackModResult\x12\x12\n" +
+	"\x04slug\x18\x01 \x01(\tR\x04slug\x12\x18\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x1d\n" +
+	"\n" +
+	"error_code\x18\x04 \x01(\tR\terrorCode\"\x85\x01\n" +
 	"\x15BatchPackModsResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x05R\x05count2\xc9\a\n" +
+	"\x05count\x18\x02 \x01(\x05R\x05count\x12<\n" +
+	"\aresults\x18\x03 \x03(\v2\".carbonpanel.v1.BatchPackModResultR\aresults2\xc9\a\n" +
 	"\x0ePackwizService\x12P\n" +
 	"\tListPacks\x12 .carbonpanel.v1.ListPacksRequest\x1a!.carbonpanel.v1.ListPacksResponse\x12J\n" +
 	"\aGetPack\x12\x1e.carbonpanel.v1.GetPackRequest\x1a\x1f.carbonpanel.v1.GetPackResponse\x12P\n" +
@@ -2046,7 +2133,7 @@ func file_carbonpanel_v1_packwiz_proto_rawDescGZIP() []byte {
 	return file_carbonpanel_v1_packwiz_proto_rawDescData
 }
 
-var file_carbonpanel_v1_packwiz_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_carbonpanel_v1_packwiz_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_carbonpanel_v1_packwiz_proto_goTypes = []any{
 	(*PackSummary)(nil),           // 0: carbonpanel.v1.PackSummary
 	(*PackMod)(nil),               // 1: carbonpanel.v1.PackMod
@@ -2074,7 +2161,8 @@ var file_carbonpanel_v1_packwiz_proto_goTypes = []any{
 	(*DeletePackModRequest)(nil),  // 23: carbonpanel.v1.DeletePackModRequest
 	(*DeletePackModResponse)(nil), // 24: carbonpanel.v1.DeletePackModResponse
 	(*BatchPackModsRequest)(nil),  // 25: carbonpanel.v1.BatchPackModsRequest
-	(*BatchPackModsResponse)(nil), // 26: carbonpanel.v1.BatchPackModsResponse
+	(*BatchPackModResult)(nil),    // 26: carbonpanel.v1.BatchPackModResult
+	(*BatchPackModsResponse)(nil), // 27: carbonpanel.v1.BatchPackModsResponse
 }
 var file_carbonpanel_v1_packwiz_proto_depIdxs = []int32{
 	1,  // 0: carbonpanel.v1.Pack.mods:type_name -> carbonpanel.v1.PackMod
@@ -2089,33 +2177,34 @@ var file_carbonpanel_v1_packwiz_proto_depIdxs = []int32{
 	1,  // 9: carbonpanel.v1.AddPackModResponse.added_dependencies:type_name -> carbonpanel.v1.PackMod
 	17, // 10: carbonpanel.v1.AddPackModResponse.unresolved:type_name -> carbonpanel.v1.PackDependencyRef
 	1,  // 11: carbonpanel.v1.AddUrlModResponse.mod:type_name -> carbonpanel.v1.PackMod
-	4,  // 12: carbonpanel.v1.PackwizService.ListPacks:input_type -> carbonpanel.v1.ListPacksRequest
-	6,  // 13: carbonpanel.v1.PackwizService.GetPack:input_type -> carbonpanel.v1.GetPackRequest
-	8,  // 14: carbonpanel.v1.PackwizService.ClonePack:input_type -> carbonpanel.v1.ClonePackRequest
-	10, // 15: carbonpanel.v1.PackwizService.RefreshPack:input_type -> carbonpanel.v1.RefreshPackRequest
-	12, // 16: carbonpanel.v1.PackwizService.CheckUpdates:input_type -> carbonpanel.v1.CheckUpdatesRequest
-	14, // 17: carbonpanel.v1.PackwizService.DeletePack:input_type -> carbonpanel.v1.DeletePackRequest
-	16, // 18: carbonpanel.v1.PackwizService.AddPackMod:input_type -> carbonpanel.v1.AddPackModRequest
-	19, // 19: carbonpanel.v1.PackwizService.AddUrlMod:input_type -> carbonpanel.v1.AddUrlModRequest
-	21, // 20: carbonpanel.v1.PackwizService.UpdatePackMod:input_type -> carbonpanel.v1.UpdatePackModRequest
-	23, // 21: carbonpanel.v1.PackwizService.DeletePackMod:input_type -> carbonpanel.v1.DeletePackModRequest
-	25, // 22: carbonpanel.v1.PackwizService.BatchPackMods:input_type -> carbonpanel.v1.BatchPackModsRequest
-	5,  // 23: carbonpanel.v1.PackwizService.ListPacks:output_type -> carbonpanel.v1.ListPacksResponse
-	7,  // 24: carbonpanel.v1.PackwizService.GetPack:output_type -> carbonpanel.v1.GetPackResponse
-	9,  // 25: carbonpanel.v1.PackwizService.ClonePack:output_type -> carbonpanel.v1.ClonePackResponse
-	11, // 26: carbonpanel.v1.PackwizService.RefreshPack:output_type -> carbonpanel.v1.RefreshPackResponse
-	13, // 27: carbonpanel.v1.PackwizService.CheckUpdates:output_type -> carbonpanel.v1.CheckUpdatesResponse
-	15, // 28: carbonpanel.v1.PackwizService.DeletePack:output_type -> carbonpanel.v1.DeletePackResponse
-	18, // 29: carbonpanel.v1.PackwizService.AddPackMod:output_type -> carbonpanel.v1.AddPackModResponse
-	20, // 30: carbonpanel.v1.PackwizService.AddUrlMod:output_type -> carbonpanel.v1.AddUrlModResponse
-	22, // 31: carbonpanel.v1.PackwizService.UpdatePackMod:output_type -> carbonpanel.v1.UpdatePackModResponse
-	24, // 32: carbonpanel.v1.PackwizService.DeletePackMod:output_type -> carbonpanel.v1.DeletePackModResponse
-	26, // 33: carbonpanel.v1.PackwizService.BatchPackMods:output_type -> carbonpanel.v1.BatchPackModsResponse
-	23, // [23:34] is the sub-list for method output_type
-	12, // [12:23] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	26, // 12: carbonpanel.v1.BatchPackModsResponse.results:type_name -> carbonpanel.v1.BatchPackModResult
+	4,  // 13: carbonpanel.v1.PackwizService.ListPacks:input_type -> carbonpanel.v1.ListPacksRequest
+	6,  // 14: carbonpanel.v1.PackwizService.GetPack:input_type -> carbonpanel.v1.GetPackRequest
+	8,  // 15: carbonpanel.v1.PackwizService.ClonePack:input_type -> carbonpanel.v1.ClonePackRequest
+	10, // 16: carbonpanel.v1.PackwizService.RefreshPack:input_type -> carbonpanel.v1.RefreshPackRequest
+	12, // 17: carbonpanel.v1.PackwizService.CheckUpdates:input_type -> carbonpanel.v1.CheckUpdatesRequest
+	14, // 18: carbonpanel.v1.PackwizService.DeletePack:input_type -> carbonpanel.v1.DeletePackRequest
+	16, // 19: carbonpanel.v1.PackwizService.AddPackMod:input_type -> carbonpanel.v1.AddPackModRequest
+	19, // 20: carbonpanel.v1.PackwizService.AddUrlMod:input_type -> carbonpanel.v1.AddUrlModRequest
+	21, // 21: carbonpanel.v1.PackwizService.UpdatePackMod:input_type -> carbonpanel.v1.UpdatePackModRequest
+	23, // 22: carbonpanel.v1.PackwizService.DeletePackMod:input_type -> carbonpanel.v1.DeletePackModRequest
+	25, // 23: carbonpanel.v1.PackwizService.BatchPackMods:input_type -> carbonpanel.v1.BatchPackModsRequest
+	5,  // 24: carbonpanel.v1.PackwizService.ListPacks:output_type -> carbonpanel.v1.ListPacksResponse
+	7,  // 25: carbonpanel.v1.PackwizService.GetPack:output_type -> carbonpanel.v1.GetPackResponse
+	9,  // 26: carbonpanel.v1.PackwizService.ClonePack:output_type -> carbonpanel.v1.ClonePackResponse
+	11, // 27: carbonpanel.v1.PackwizService.RefreshPack:output_type -> carbonpanel.v1.RefreshPackResponse
+	13, // 28: carbonpanel.v1.PackwizService.CheckUpdates:output_type -> carbonpanel.v1.CheckUpdatesResponse
+	15, // 29: carbonpanel.v1.PackwizService.DeletePack:output_type -> carbonpanel.v1.DeletePackResponse
+	18, // 30: carbonpanel.v1.PackwizService.AddPackMod:output_type -> carbonpanel.v1.AddPackModResponse
+	20, // 31: carbonpanel.v1.PackwizService.AddUrlMod:output_type -> carbonpanel.v1.AddUrlModResponse
+	22, // 32: carbonpanel.v1.PackwizService.UpdatePackMod:output_type -> carbonpanel.v1.UpdatePackModResponse
+	24, // 33: carbonpanel.v1.PackwizService.DeletePackMod:output_type -> carbonpanel.v1.DeletePackModResponse
+	27, // 34: carbonpanel.v1.PackwizService.BatchPackMods:output_type -> carbonpanel.v1.BatchPackModsResponse
+	24, // [24:35] is the sub-list for method output_type
+	13, // [13:24] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_packwiz_proto_init() }
@@ -2129,7 +2218,7 @@ func file_carbonpanel_v1_packwiz_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_packwiz_proto_rawDesc), len(file_carbonpanel_v1_packwiz_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

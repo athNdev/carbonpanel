@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package handlers
 
 import (
@@ -88,6 +87,38 @@ func TestPackwizHandler_ExtendedFeatures(t *testing.T) {
 	rr = httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
+	var batchResponse struct {
+		Success bool `json:"success"`
+		Count   int  `json:"count"`
+		Results []struct {
+			Slug      string `json:"slug"`
+			Success   bool   `json:"success"`
+			Message   string `json:"message"`
+			ErrorCode string `json:"error_code"`
+		} `json:"results"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &batchResponse))
+	assert.True(t, batchResponse.Success)
+	assert.Equal(t, 1, batchResponse.Count)
+	require.Len(t, batchResponse.Results, 1)
+	assert.Equal(t, "sodium", batchResponse.Results[0].Slug)
+	assert.True(t, batchResponse.Results[0].Success)
+
+	// A missing slug must be reported per entry instead of inflating count.
+	batchBody, _ = json.Marshal(map[string]any{
+		"action": "pin", "slugs": []string{"sodium", "missing"},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/packwiz/packs/handler-pack/mods/batch", bytes.NewReader(batchBody))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &batchResponse))
+	assert.Equal(t, 1, batchResponse.Count, "count must reflect successes, not requested slugs")
+	require.Len(t, batchResponse.Results, 2)
+	assert.True(t, batchResponse.Results[0].Success)
+	assert.False(t, batchResponse.Results[1].Success)
+	assert.Equal(t, "missing", batchResponse.Results[1].Slug)
+	assert.Equal(t, "not_found", batchResponse.Results[1].ErrorCode)
 
 	// 5. Save & List Override Files
 	fileBody, _ := json.Marshal(map[string]string{

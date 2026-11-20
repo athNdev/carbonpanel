@@ -242,12 +242,30 @@ func (s *PackwizService) DeletePackMod(ctx context.Context, req *connect.Request
 	return connect.NewResponse(&v1.DeletePackModResponse{Success: true}), nil
 }
 
-// BatchPackMods applies one action to several mods.
+// BatchPackMods applies one action to several mods. count is the number of
+// successful entries; results preserves the outcome of every requested slug.
 func (s *PackwizService) BatchPackMods(ctx context.Context, req *connect.Request[v1.BatchPackModsRequest]) (*connect.Response[v1.BatchPackModsResponse], error) {
 	msg := req.Msg
-	count, err := s.ops.BatchMods(ctx, msg.PackId, msg.Action, msg.Slugs, msg.Side)
+	entries, err := s.ops.BatchMods(ctx, msg.PackId, msg.Action, msg.Slugs, msg.Side)
 	if err != nil {
 		return nil, packwizConnectError(err)
 	}
-	return connect.NewResponse(&v1.BatchPackModsResponse{Success: true, Count: int32(count)}), nil
+	results := make([]*v1.BatchPackModResult, 0, len(entries))
+	var succeeded int32
+	for _, entry := range entries {
+		results = append(results, &v1.BatchPackModResult{
+			Slug:      entry.Slug,
+			Success:   entry.Success,
+			Message:   entry.Message,
+			ErrorCode: entry.ErrorCode,
+		})
+		if entry.Success {
+			succeeded++
+		}
+	}
+	return connect.NewResponse(&v1.BatchPackModsResponse{
+		Success: true,
+		Count:   succeeded,
+		Results: results,
+	}), nil
 }
