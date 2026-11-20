@@ -19,8 +19,8 @@
   "fixture": {
     "description": "synthetic unprivileged-LXC rootfs fixture; offline qualification only",
     "source_dir": "fixtures/rootfs-minimal",
-    "manifest_sha256": "0c1adcb1cb616ff7bfe72d681a06c8f4165781ac771fd307a7afe1f54228afab",
-    "digest_note": "canonical content digest: CRLF normalized to LF for bytes and size, so the pin is independent of git checkout line-ending policy"
+    "manifest_sha256": "7b6c9da04d146cd447e2f6c9cbbf3191eb59842ada00db2ca31c746099123b2f",
+    "digest_note": "synthetic source paths, hash and size with CRLF normalized to LF and checkout permission bits omitted; signed output records its own modes"
   },
   "platform_matrix": {
     "amd64": {

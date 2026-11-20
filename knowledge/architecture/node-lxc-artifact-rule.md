@@ -27,7 +27,9 @@ credential type, TLS stack or publication workflow.
   `SHA256SUMS`; retrieval evidence is in `qualification/`. Synthetic pins exist
   only in `config/provenance.fixture.json`. Artifact mode refuses synthetic
   profiles, placeholder/unverified digests, missing signature evidence and
-  moving URLs. Artifacts also bind a platform/version matrix, `SHA256SUMS`, an
+  moving URLs. The synthetic source pin normalizes line endings and ignores
+  checkout permission bits. The signed payload manifest still binds actual
+  artifact modes. Artifacts also bind a platform/version matrix, `SHA256SUMS`, an
   operator detached signature and a CycloneDX SBOM; verification fails closed.
 - `verify-signed-archive` checks the real dated release in an owned disposable
   path: it refuses synthetic/placeholder/moving-URL pins, verifies the detached

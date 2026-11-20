@@ -225,10 +225,10 @@ no MCP Registry entry has been submitted. Do not substitute a locally built or
 preview artifact for the official stable one when it is published.
 
 The implemented catalogue mounts the generated **211-tool combined catalogue**.
-It is derived from 250 declared RPCs across 26 proto services, of which 240 are
+It is derived from 250 declared RPCs across 28 proto services, of which 240 are
 mounted/reachable across 27 mounted services. Tool coverage is not the same as
-RPC coverage; the audit matrix records 201 supported operations (all listed,
-reachable and verified) and 77 excluded operations with exact reasons and
+RPC coverage; the audit matrix records 200 supported operations (all listed,
+reachable and verified) and 78 excluded operations with exact reasons and
 equivalent flows. Do not infer that every panel RPC has a tool.
 
 A successful client install proves only that the **package is available**. It

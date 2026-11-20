@@ -12,14 +12,14 @@
     "passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
     "confirmSelector": "input[placeholder=\"Confirm your password\"]",
     "submitSelector": "button[type=\"submit\"]",
-    "successSelector": "a[href^=\"/servers/\"]"
+    "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks\"]"
   },
   "login": {
     "path": "/login",
     "usernameSelector": "input[placeholder=\"Enter your username\"]",
     "passwordSelector": "input[placeholder=\"Enter your password\"]",
     "submitSelector": "button[type=\"submit\"]",
-    "successSelector": "a[href^=\"/servers/\"]"
+    "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks\"]"
   },
   "steps": [
     {
@@ -55,6 +55,11 @@
       "name": "modpacks library tabs do not scroll vertically"
     },
     {
+      "assertVisible": "[data-testid=\"showcase-modpack-card\"]",
+      "name": "initial modpack catalog is populated",
+      "timeout": 45000
+    },
+    {
       "screenshot": "modpacks-library-controls",
       "name": "capture modpacks library controls"
     },
@@ -68,8 +73,7 @@
       "name": "submit the unmatched search"
     },
     {
-      "assertText": "main",
-      "contains": "No modpacks matching",
+      "assertVisible": "main :text-is('No modpacks matching \"carbonpanel-no-such-modpack-refusal-fixture\"')",
       "name": "empty state refuses the unmatched query"
     },
     {
@@ -89,5 +93,5 @@
       "name": "capture reconciled catalog"
     }
   ],
-  "docs": "Real-application browser journey plan for the existing scripts/review/journey.mjs harness (drives a real Chromium session against a running panel/devstack), not a component fixture. This session validated the plan structurally (JSON/selector contract and knowledge-lint); it did not run this plan against a live disposable panel because this checkout pins Playwright 1.61.0 with no local driver/browser and no install/build was permitted. PR CI for this head does not invoke this plan: its packaged-route fixture (scripts/manual-review/e2e/a11y-check.mjs) has no /modpacks route. Representative real-execution evidence comes from the exact showcase CI artifact (run 44651279419, Playwright 1.61.0, seeded disposable stack): report.md PASS with 'modpacks loads' and 'first modpack card renders', and showcase-modpacks.png showing the same shell controls asserted here. That artifact executed plan-showcase.json, not this plan. The explicit refusal case here types an unmatched modpack query, asserts the 'No modpacks matching' empty state, then clicks 'Clear search & filters' and asserts the populated card returns: a public-seam refusal/reconciliation requiring no world or credential change. Asserts stable /modpacks library shell controls plus that one non-mutating search state; does not claim indexer/catalog correctness, import/upload mutations, or permission variants."
+  "docs": "Run with scripts/review/journey.mjs against an owned panel review stack. Wait for the initial catalog before submitting an unmatched search. Wait for the query-specific empty state, then clear the search and verify the catalog returns. Coverage includes the browse controls and this non-mutating search flow."
 }

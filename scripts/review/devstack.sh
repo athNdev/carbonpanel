@@ -13,6 +13,7 @@
 # touches another panel's containers, worlds or database.
 #
 #   scripts/review/devstack.sh up      # build, start, seed, print the URL
+#   scripts/review/devstack.sh up-controller # build, start and seed only the admin
 #   scripts/review/devstack.sh down    # stop and remove the container
 #   scripts/review/devstack.sh clean   # also delete its data (worlds, backups)
 #
@@ -126,9 +127,7 @@ login_token() {
 	rpc /carbonpanel.v1.AuthService/Login "${payload}" 2>/dev/null | json_path 'token'
 }
 
-# seed makes a fresh stack usable: the first admin account, a local Docker node
-# and a stopped starter server. Every step is safe to repeat.
-seed() {
+seed_admin() {
 	local auth_payload
 	auth_payload="$(REVIEW_SEED_USER="$USER_NAME" REVIEW_SEED_PASS="$USER_PASS" node -e 'console.log(JSON.stringify({username:process.env.REVIEW_SEED_USER,password:process.env.REVIEW_SEED_PASS}))')"
 	rpc /carbonpanel.v1.AuthService/Register \
@@ -142,6 +141,13 @@ seed() {
 		echo "could not sign in as ${USER_NAME}; create the account by hand" >&2
 		return 1
 	fi
+	printf '%s' "${token}"
+}
+
+# Seed a local Docker node and the starter server in the showcase profile.
+seed() {
+	local token
+	token="$(seed_admin)"
 
 	# Without a node the panel has nowhere to place a server and every create
 	# fails with "no reachable Docker node has capacity".
@@ -649,6 +655,10 @@ start_bluemap() {
 }
 
 start_panel() {
+	local docker_socket=()
+	if [ "${1:-up}" != "up-controller" ]; then
+		docker_socket=(-v /var/run/docker.sock:/var/run/docker.sock)
+	fi
 	docker run -d --name "${NAME}" \
 		--label "carbonpanel.review.owner=${DATA}" \
 		--restart unless-stopped \
@@ -657,8 +667,13 @@ start_panel() {
 		-v "${DATA}/backups:/app/backups" \
 		-v "${DATA}/tmp:/app/tmp" \
 		-v "${DATA}/config/config.yaml:/etc/carbon-panel/config.yaml:ro" \
-		-v /var/run/docker.sock:/var/run/docker.sock \
+		"${docker_socket[@]}" \
 		"${IMAGE}" >/dev/null
+}
+
+report_ready() {
+	echo "review panel: http://127.0.0.1:${PORT}  (data: ${DATA})"
+	echo "account: ${USER_NAME} (password from PANEL_REVIEW_PASSWORD or the local default)"
 }
 
 down() {
@@ -686,28 +701,38 @@ if [ "${REVIEW_DEVSTACK_SOURCE_ONLY:-}" = "1" ]; then
 	return 0 2>/dev/null || exit 0
 fi
 
-case "${1:-up}" in
-up)
+mode="${1:-up}"
+case "${mode}" in
+up|up-controller)
 	init_owner
 	down
 	PORT="$(free_port "${PORT}")"
 	mkdir -p "${DATA}/data" "${DATA}/backups" "${DATA}/tmp" "${DATA}/config"
 	echo "${PORT}" >"${DATA}/port"
-	# Fresh fixtures only: pin a deterministic world seed in the initial
-	# config (JSON is valid YAML). Existing review configs are never touched.
+	# Create the canonical config only for fresh fixtures. The showcase
+	# profile pins its world seed; the controller-only profile uses defaults.
 	if [ ! -f "${DATA}/config/config.yaml" ]; then
-		REVIEW_WORLD_SEED="${REVIEW_WORLD_SEED:-carbonpanel-showcase-416}" REVIEW_OBSERVED_PLAYER="$OBSERVED_PLAYER" node -e '
-			const config = {minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}};
-			if (process.env.REVIEW_OBSERVED_PLAYER === "1") {
-				config.proxy = {enabled:true, bind_host:"127.0.0.1"};
-			}
-			console.log(JSON.stringify(config));
-		' >"${DATA}/config/config.yaml"
+		if [ "${mode}" = "up-controller" ]; then
+			printf '{}\n' >"${DATA}/config/config.yaml"
+		else
+			REVIEW_WORLD_SEED="${REVIEW_WORLD_SEED:-carbonpanel-showcase-416}" REVIEW_OBSERVED_PLAYER="$OBSERVED_PLAYER" node -e '
+				const config = {minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}};
+				if (process.env.REVIEW_OBSERVED_PLAYER === "1") {
+					config.proxy = {enabled:true, bind_host:"127.0.0.1"};
+				}
+				console.log(JSON.stringify(config));
+			' >"${DATA}/config/config.yaml"
+		fi
 	fi
 	docker build -q -f "${REPO}/docker/Dockerfile.carbon-panel" \
 		-t "${IMAGE}" --build-arg APP_VERSION=review "${REPO}" >/dev/null
-	start_panel
+	start_panel "${mode}"
 	wait_for_health
+	if [ "${mode}" = "up-controller" ]; then
+		seed_admin >/dev/null
+		report_ready
+		exit 0
+	fi
 	seed
 	token="$(login_token)"
 	if [ -n "${token}" ]; then
@@ -825,8 +850,7 @@ except Exception as e:
 			fi
 		fi
 	fi
-	echo "review panel: http://127.0.0.1:${PORT}  (data: ${DATA})"
-	echo "account: ${USER_NAME} (password from PANEL_REVIEW_PASSWORD or the local default)"
+	report_ready
 	;;
 down)
 	down

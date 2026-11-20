@@ -27,14 +27,17 @@ DEFAULT_DOCKERFILE = ROOT / "docker" / "Dockerfile.mcp"
 
 EXPECTED_SCHEMA = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 EXPECTED_NAME = "io.github.athNdev/carbon-panel"
+EXPECTED_IMAGE = "ghcr.io/athndev/carbonpanel-mcp"
+EXPECTED_REPO_URL = "https://github.com/athNdev/carbonpanel"
 EXPECTED_REPO_ID = "1369132627"
+OFFICIAL_REGISTRY_METADATA = "io.modelcontextprotocol.registry/official"
 PLACEHOLDER_DIGEST = "sha256:" + "0" * 64
 
 NAME_RE = re.compile(r"^[a-zA-Z0-9.-]+/[a-zA-Z0-9._-]+\Z")
 SEMVER_RE = re.compile(r"^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\Z")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}\Z")
 IDENTIFIER_RE = re.compile(
-    r"^ghcr\.io/[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*:([^@\s]+)@(sha256:[0-9a-f]{64})\Z"
+    rf"^{re.escape(EXPECTED_IMAGE)}:([^@\s]+)@(sha256:[0-9a-f]{{64}})\Z"
 )
 LABEL_RE = re.compile(r'io\.modelcontextprotocol\.server\.name="([^"]+)"')
 MOVING_REFS = {"latest", "main", "master", "edge", "dev", "head"}
@@ -88,8 +91,8 @@ def validate(
 
     repository = doc.get("repository")
     if isinstance(repository, dict):
-        if not repository.get("url"):
-            errors.append("repository.url is required")
+        if repository.get("url") != EXPECTED_REPO_URL:
+            errors.append(f"repository.url must be {EXPECTED_REPO_URL!r}")
         if repository.get("source") != "github":
             errors.append("repository.source must be 'github'")
         if str(repository.get("id", "")) != EXPECTED_REPO_ID:
@@ -98,8 +101,8 @@ def validate(
         errors.append("repository must be an object")
 
     packages = doc.get("packages")
-    if not isinstance(packages, list) or not packages:
-        errors.append("packages must contain one OCI entry")
+    if not isinstance(packages, list) or len(packages) != 1:
+        errors.append("packages must contain exactly one OCI entry")
     else:
         for index, package in enumerate(packages):
             where = f"packages[{index}]"
@@ -108,7 +111,9 @@ def validate(
                 continue
             if package.get("registryType") != "oci":
                 errors.append(f"{where}: registryType must be 'oci'")
-            errors.extend(_version_errors(package.get("version"), f"{where}.version"))
+            for field in ("registryBaseUrl", "version", "fileSha256"):
+                if field in package:
+                    errors.append(f"{where}: OCI packages forbid {field!r} outside the identifier")
 
             identifier = package.get("identifier")
             if not isinstance(identifier, str):
@@ -117,12 +122,14 @@ def validate(
                 match = IDENTIFIER_RE.match(identifier)
                 if not match:
                     errors.append(
-                        f"{where}: identifier must be ghcr.io/<owner>/<repo>:<tag>@sha256:<64 hex>"
+                        f"{where}: identifier must be {EXPECTED_IMAGE}:<tag>@sha256:<64 hex>"
                     )
                 else:
                     tag, digest = match.groups()
                     if tag.lower() in MOVING_REFS or not SEMVER_RE.match(tag):
                         errors.append(f"{where}: identifier tag must be pinned, got {tag!r}")
+                    elif tag != doc.get("version"):
+                        errors.append(f"{where}: identifier tag must equal the server version")
                     if digest == PLACEHOLDER_DIGEST:
                         message = f"{where}: digest is still the all-zero placeholder"
                         if require_real_digest:
@@ -169,9 +176,27 @@ def read_dockerfile_label(path: Path) -> str | None:
     return match.group(1) if match else None
 
 
+def verify_listing(response: Any, expected: dict) -> list[str]:
+    """Compare the exact-version Registry response with the validated manifest."""
+    if not isinstance(response, dict) or not isinstance(response.get("server"), dict):
+        return ["Registry response must contain a server object"]
+    server = response["server"]
+    errors, _ = validate(server, require_real_digest=True)
+    if server.get("version") != expected["version"]:
+        errors.append("Registry server version does not match the submitted version")
+    if not errors and server["packages"][0]["identifier"] != expected["packages"][0]["identifier"]:
+        errors.append("Registry OCI identifier does not match the submitted image digest")
+    metadata = response.get("_meta")
+    official = metadata.get(OFFICIAL_REGISTRY_METADATA) if isinstance(metadata, dict) else None
+    if not isinstance(official, dict) or official.get("status") != "active":
+        errors.append("Registry server status must be active")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--file", type=Path, default=DEFAULT_MANIFEST)
+    parser.add_argument("--listing", type=Path, help="read-only exact-version Registry response to compare")
     parser.add_argument(
         "--require-real-digest",
         action="store_true",
@@ -203,15 +228,25 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     errors, warnings = validate(
-        doc, dockerfile_label=label, require_real_digest=args.require_real_digest
+        doc, dockerfile_label=label, require_real_digest=args.require_real_digest or args.listing is not None
     )
+    if args.listing is not None and not errors:
+        try:
+            listing = json.loads(args.listing.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"error: cannot read {args.listing}: {error}", file=sys.stderr)
+            return 1
+        errors.extend(verify_listing(listing, doc))
     for warning in warnings:
         print(f"WARNING: {warning}")
     for error in errors:
         print(f"ERROR: {error}", file=sys.stderr)
     if errors:
         return 1
-    print(f"OK: {args.file} satisfies the local MCP manifest contract")
+    if args.listing is not None:
+        print(f"OK: {args.listing} confirms the active listing for the submitted OCI package")
+    else:
+        print(f"OK: {args.file} satisfies the local MCP manifest contract")
     return 0
 
 

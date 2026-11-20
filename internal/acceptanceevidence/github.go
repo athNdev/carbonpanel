@@ -109,6 +109,27 @@ func (c *GitHubClient) verifyCandidate(ctx context.Context, contract Contract, c
 		}
 	}
 
+	mergeSHA := normalizeSHA(cand.PR.MergeSHA)
+	descendant := normalizeSHA(cand.TrustedDeploySHA)
+	if cand.TrustedDeploySHA != "" && descendant != mergeSHA {
+		if !validSHA(mergeSHA) || !validSHA(descendant) {
+			fail("%s: cannot verify ancestry without full commit SHAs", cand.IssueKey)
+			return
+		}
+		var comparison struct {
+			Status    string `json:"status"`
+			MergeBase struct {
+				SHA string `json:"sha"`
+			} `json:"merge_base_commit"`
+		}
+		path := fmt.Sprintf("%s/compare/%s...%s?per_page=1", base, mergeSHA, descendant)
+		if err := c.get(ctx, path, &comparison); err != nil {
+			fail("%s: cannot verify ancestry of trusted SHA %s: %v", cand.IssueKey, descendant, err)
+		} else if comparison.Status != "ahead" || normalizeSHA(comparison.MergeBase.SHA) != mergeSHA {
+			fail("%s: trusted SHA %s is not a descendant of PR merge SHA %s", cand.IssueKey, descendant, mergeSHA)
+		}
+	}
+
 	var ci ghRun
 	if err := c.get(ctx, fmt.Sprintf("%s/actions/runs/%d", base, cand.CIRunID), &ci); err != nil {
 		fail("%s: cannot read CI run %d: %v", cand.IssueKey, cand.CIRunID, err)
@@ -128,6 +149,9 @@ func (c *GitHubClient) verifyCandidate(ctx context.Context, contract Contract, c
 	if err := c.get(ctx, fmt.Sprintf("%s/actions/runs/%d", base, cand.Deploy.RunID), &run); err != nil {
 		fail("%s: cannot read deploy run %d: %v", cand.IssueKey, cand.Deploy.RunID, err)
 		return
+	}
+	if strings.TrimSpace(cand.Deploy.Workflow) == "" || run.Name != cand.Deploy.Workflow {
+		fail("%s: deploy run %d workflow is %q, want declared workflow %q", cand.IssueKey, cand.Deploy.RunID, run.Name, cand.Deploy.Workflow)
 	}
 	if run.Conclusion != "success" {
 		fail("%s: deploy run %d conclusion is %q", cand.IssueKey, cand.Deploy.RunID, run.Conclusion)
@@ -167,8 +191,9 @@ func (c *GitHubClient) verifyCandidate(ctx context.Context, contract Contract, c
 }
 
 // VerifyGitHub checks live GitHub facts referenced by the contract: PR merge
-// SHA, required label, exact CI run, and the named deploy job at the qualified
-// revision. Reference runs prove the audit path is live even when candidates
+// SHA, required label, CI run, trusted descendant ancestry, and the named
+// workflow and deploy job at the qualified revision. Reference runs prove the
+// audit path is live even when candidates
 // are few. It reports drift as failures.
 func (c *GitHubClient) VerifyGitHub(ctx context.Context, contract Contract) DriftResult {
 	result := DriftResult{}

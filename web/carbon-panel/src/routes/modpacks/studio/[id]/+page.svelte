@@ -1308,18 +1308,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									</div>
 								{/snippet}
 								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
-									<span class="text-white">Client-only (excluded with server export)</span>
+									<span class="text-foreground">Client-only (excluded with server export)</span>
 									<span>{contentBreakdown?.clientOnly ?? 0}</span>
 								</div>
 								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
-									<span class="text-white">CurseForge-ready (numeric IDs)</span>
+									<span class="text-foreground">CurseForge-ready (numeric IDs)</span>
 									<span
 										>{contentBreakdown?.curseforgeReady ?? 0} of {contentBreakdown?.total ??
 											0}</span
 									>
 								</div>
 								<div class="flex items-center justify-between px-4 py-2.5 font-mono text-xs">
-									<span class="text-white">Override files bundled</span>
+									<span class="text-foreground">Override files bundled</span>
 									<span>{contentBreakdown?.overrides ?? 0}</span>
 								</div>
 							</CarbonStructuredList>

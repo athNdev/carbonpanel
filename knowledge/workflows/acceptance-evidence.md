@@ -28,8 +28,9 @@ sources:
    requires, and add the matching evidence artifact.
 3. Run `go run ./cmd/acceptance-evidence validate`. Missing, stale, skipped or
    unrecorded-exception evidence fails closed.
-4. Let the scheduled drift job re-check PR merge SHA, CI run and deploy jobs
-   against GitHub. It uses only the built-in token.
+4. Let the scheduled drift job verify the PR merge SHA, CI run, trusted commit
+   ancestry, and the named deploy workflow and job against GitHub. It uses only
+   the built-in token.
 5. Record a weaker tier only with an explicit exception and the linked remaining
    work. Never describe a merged PR or a build capture as live verification.
 

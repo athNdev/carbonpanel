@@ -30,6 +30,8 @@ live only on owning node storage.
   `request_id` idempotency, an operator-resolution path for unknown outcomes,
   and an idempotent request-keyed activity event on successful bind/unbind.
   A folder rename is not a hot swap. Never auto-retry an uncertain outcome.
+  Rollback data preservation is in
+  [World Library — Rollback rules](world-library-shape-2.md).
 - Node resolution is strict and fail-closed: remote-without-transport returns
   `ErrUnavailable`; there is no controller-local fallback. Work that outlives
   the request uses an owned context with cancel-and-wait on shutdown; mutation

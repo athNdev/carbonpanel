@@ -117,7 +117,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					{/if}
 					<div class="min-w-0 flex-1">
 						<div class="flex items-center gap-2">
-							<span class="truncate font-medium text-white">{d.name}</span>
+							<span class="truncate font-medium text-foreground">{d.name}</span>
 							<Badge class="border-border bg-muted whitespace-nowrap text-foreground"
 								>datapack</Badge
 							>
