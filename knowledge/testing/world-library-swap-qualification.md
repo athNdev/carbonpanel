@@ -30,26 +30,18 @@ after checking `stage.json.commit` against the staged SHA and finding the OCI
 index blob named by `stage.json.digest`; the sample config belongs at the
 context root. Never fall back to a different run or an unstaged image.
 
-Connect JSON serializes `int64` fields such as upload byte counts as decimal
-strings. The harness normalizes those wire values with `BigInt` before comparing
-them to Node buffer lengths, and `scripts/test-qualify-world-swap.mjs` covers a
-serialized `GetUploadStatus` response so a strict-equality regression is caught
-offline.
-
 The optional phase reuses the live candidate JVM from the upgrade leg. It
 packages a distinct disposable world from a second server, imports two
 revisions through `UploadService` and `ImportWorld`, previews compatibility,
 creates a supported pre-swap backup, binds the first revision to the running
-level, and rejoins an actual Minecraft client. The binder stops and restarts
-the existing owned container, so verify the restart with Docker's start time,
-not a new container id. Prove preserved data through the pre-swap backup
-record surviving unchanged: the binder retires its internal temporary old-world
-tree after the journal commits and the live JVM may rewrite `level.dat`.
-Failed-swap automatic rollback is covered by repository world-binding tests,
-not by this hosted leg. The harness asserts the new world marker, exact
-revision binding, exactly one `world.bind` event for the request key, and
-refusal of a replay with that key and a different revision. The second revision
-exists only so the replay cannot hide behind an identical revision id.
+level and rejoins an actual Minecraft client. The binder stops and restarts the
+existing owned container, so verify the restart with Docker's start time, not a
+new container id. Prove preserved data through the actual archived bytes, not
+an internal retired tree that the binder removes after the journal commits.
+The harness asserts the new world marker, exact revision binding, exactly one
+`world.bind` event for the request key, and refusal of a replay with that key
+and a different revision. The second revision exists only so the replay cannot
+hide behind an identical revision id.
 
 The Compose leg rebuilds the candidate image from verified release binaries and
 labels that provenance explicitly; it does not claim to have exercised the
@@ -58,3 +50,7 @@ staged OCI image digest. Exact-image evidence is a separate release gate.
 This is evidence for the release matrix, not a production operation. The
 fixture uses disposable hosted data and a loopback registry; the Stable lead
 alone publishes after all gates pass.
+
+# Read next
+
+- [Wire and fixture constraints](world-library-swap-wire-and-fixtures.md)

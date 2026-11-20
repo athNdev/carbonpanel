@@ -23,10 +23,18 @@ workflow_head=$(jq -er --arg repo "$GITHUB_REPOSITORY" '
 printf 'release_workflow_head=%s\n' "$workflow_head" | tee -a "$evidence"
 gh api "$repo/actions/runs/$STAGED_RUN/artifacts?per_page=100" > "$work/artifacts.json"
 
-artifact_present() {
-  jq -e --arg name "$1" '[.artifacts[] | select(.name == $name and .expired == false)] | length == 1' \
-    "$work/artifacts.json" >/dev/null
+artifact_count() {
+  jq -r --arg name "$1" '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
+    "$work/artifacts.json"
 }
+
+# An ambiguous primary artifact is a hard failure, never a reason to take the
+# fallback path: two unexpired candidates cannot prove which bytes were staged.
+primary_count=$(artifact_count release-image-context)
+if (( primary_count > 1 )); then
+  echo "ambiguous unexpired release-image-context artifacts: $primary_count" >&2
+  exit 1
+fi
 
 fetch_artifact() {
   local name=$1 record id digest zip
@@ -53,7 +61,7 @@ tar -xzf "$bundle" -C "$work/bundle"
 # inputs and stage.json instead. Accept both, but bind the new path to the
 # exact stage identity and the OCI index digest before using it.
 context="$work/release-image-context"
-if artifact_present release-image-context; then
+if (( primary_count == 1 )); then
   fetch_artifact release-image-context
 else
   fetch_artifact qualified-stable-stage

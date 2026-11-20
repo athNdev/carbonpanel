@@ -14,3 +14,4 @@
 - [Verification](verification.md) — The commands that define a verified change in this repository.
 - [Verification — Backend + MCP coverage gate + Frontend + Production frontend build](verification-backend.md) — make test is the same suite. CI also compiles every package for Windows,
 - [Verification — Landing page + Proto + Knowledge + Local note](verification-landing-page.md) — python3 -m unittest scripts.test_landing_page
+- [World swap harness wire and fixture constraints](world-library-swap-wire-and-fixtures.md) — Connect JSON int64 handling, node-owned fixture reads, real backup-byte verification and staging artifact ambiguity rules for the world swap qualification harness.

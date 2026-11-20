@@ -22,9 +22,20 @@ let token;
 async function rpc(service, method, body = {}) {
   const headers = { "Content-Type": "application/json", "Connect-Protocol-Version": "1" };
   if (token) headers.Authorization = "Bearer " + token;
-  const response = await fetch(base + "/carbonpanel.v1." + service + "/" + method, {
-    method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20000),
-  });
+  let response;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      response = await fetch(base + "/carbonpanel.v1." + service + "/" + method, {
+        method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20000),
+      });
+      break;
+    } catch (error) {
+      const transient = /UND_ERR_SOCKET|ECONNRESET|socket closed/i.test(String(error));
+      if (!transient || attempt === 2) throw error;
+      console.log("Transient controller socket close on " + service + "/" + method + "; retrying");
+      await sleep(1000);
+    }
+  }
   if (!response.ok) throw new Error(service + "/" + method + ": " + response.status + " " + await response.text());
   return response.json();
 }

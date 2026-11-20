@@ -33,7 +33,10 @@ cleanup() {
   if [[ -n "$registry_pid" ]]; then kill "$registry_pid" || true; fi
   if mountpoint -q "$fault/data"; then sudo umount "$fault/data"; fi
   if mountpoint -q "$fault"; then sudo umount "$fault"; fi
-  if [[ -f "$compose_file" ]]; then compose down --timeout 20 || true; fi
+  if [[ -f "$compose_file" ]]; then
+    docker compose -f "$compose_file" logs --no-color carbon-panel > "$out/controller.log" 2>&1 || true
+    compose down --timeout 20 || true
+  fi
 }
 trap cleanup EXIT
 
