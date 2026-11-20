@@ -153,9 +153,13 @@ func (t *StreamTransfer) OpenWithSize(ctx context.Context, owner, serverID, path
 	// Re-check after the RPC so concurrent opens cannot over-admit.
 	if len(t.sessions) >= maxGatewaySessions || t.aggregate >= maxGatewayAggregateBytes {
 		t.mu.Unlock()
-		_, _ = t.client.CloseStream(ctx, connect.NewRequest(&v1.CloseStreamRequest{
+		// Cleanup is independent of a canceled/expired tools/call context so the
+		// controller-owned handle is not leaked on an admission race.
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_, _ = t.client.CloseStream(closeCtx, connect.NewRequest(&v1.CloseStreamRequest{
 			SessionId: res.Msg.GetSessionId(), Cancel: true, ServerId: serverID,
 		}))
+		cancel()
 		return "", ErrStreamAdmission
 	}
 	s := &streamSession{
@@ -264,10 +268,22 @@ func (t *StreamTransfer) ReadChunk(ctx context.Context, owner, handle string) ([
 		return nil, "", 0, err
 	}
 	var failed bool
+	var closeOnFail bool
 	defer func() {
 		if failed {
+			cid, sid := s.controllerID, s.serverID
 			s.mu.Unlock()
 			t.release(handle)
+			if closeOnFail {
+				// Best-effort cleanup independent of the caller's context: a
+				// terminal gateway-side failure must not leave a controller-owned
+				// handle open until TTL expiry.
+				closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_, _ = t.client.CloseStream(closeCtx, connect.NewRequest(&v1.CloseStreamRequest{
+					SessionId: cid, Cancel: true, ServerId: sid,
+				}))
+				cancel()
+			}
 			return
 		}
 		s.mu.Unlock()
@@ -284,13 +300,20 @@ func (t *StreamTransfer) ReadChunk(ctx context.Context, owner, handle string) ([
 	frame := res.Msg.GetData()
 	if int64(len(frame)) > storageworker.ChunkBytes {
 		failed = true
+		closeOnFail = true
 		return nil, "", 0, fmt.Errorf("%w: frame %d", ErrStreamTooLarge, len(frame))
+	}
+	if len(s.data)+len(frame) > maxGatewaySessionBytes {
+		failed = true
+		closeOnFail = true
+		return nil, "", 0, ErrStreamTooLarge
 	}
 
 	t.mu.Lock()
 	if t.staged[handle]+len(frame) > maxGatewayAggregateBytes {
 		t.mu.Unlock()
 		failed = true
+		closeOnFail = true
 		return nil, "", 0, ErrStreamTooLarge
 	}
 	t.staged[handle] += len(frame)
@@ -307,11 +330,13 @@ func (t *StreamTransfer) ReadChunk(ctx context.Context, owner, handle string) ([
 		actual := res.Msg.GetOffset()
 		if actual != s.offset {
 			failed = true
+			closeOnFail = true
 			return nil, "", 0, fmt.Errorf("%w: controller offset %d, local %d", ErrStreamTooLarge, actual, s.offset)
 		}
 		local := hex.EncodeToString(s.hash.Sum(nil))
 		if res.Msg.GetSha256() != local {
 			failed = true
+			closeOnFail = true
 			return nil, "", 0, fmt.Errorf("%w: controller %q local %q", ErrStreamDigestMismatch, res.Msg.GetSha256(), local)
 		}
 		s.controllerSHA = local
