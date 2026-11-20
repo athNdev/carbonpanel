@@ -25,7 +25,7 @@
 - [Module system — Shape + Rules](module-system-shape.md) — Modules are server-side content units. Hooks run inside the server's runtime;
 - [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
 - [Node control protocol — Rule](node-control-protocol-rule.md) — Managed-node control uses the separate versioned contract in
-- [Node control protocol — Rule (part 2)](node-control-protocol-rule-2.md) — The contract ships without an implementation. New RPCs are denied by default
+- [Node control protocol — Rule (part 2)](node-control-protocol-rule-2.md) — Node control stays separate from the panel RPC surface and uses explicit enrollment domains.
 - [Node control protocol — Why + How to check + Read next](node-control-protocol-why.md) — A direct Docker endpoint is not an authenticated node principal and has no
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
 - [Node resolution — Current state](node-resolution-current-state.md) — Module, snapshot and deep-sleep helpers were made fail-closed and record the
