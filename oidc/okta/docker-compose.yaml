@@ -1,0 +1,57 @@
+﻿# SPDX-License-Identifier: MIT AND MPL-2.0
+# This file includes DiscoPanel material under the MIT License,
+# Copyright (c) 2025 Nicholas W. Heyer. The MIT license text is in LICENSE
+# and still applies to that inherited material.
+# Maintainer changes are licensed under the Mozilla Public License, v. 2.0.
+# If a copy of the MPL was not distributed with this file, You can obtain
+# one at https://mozilla.org/MPL/2.0/.
+
+# Carbon Panel + Okta (OIDC) example
+#
+# External identity provider example (no IdP container). Replace placeholders
+# with values from your own Okta application. Do not commit real credentials.
+#
+# Okta setup (high level):
+#   1. Create an OIDC Web Application in your Okta org/admin console.
+#   2. Set Sign-in redirect URI to your Carbon Panel callback URL.
+#   3. Assign users/groups as required by your Okta policy.
+#   4. If you use group claims, configure a Groups claim in the authorization
+#      server/token settings and map it with CARBONPANEL_AUTH_OIDC_ROLE_*.
+
+services:
+  carbon-panel:
+    build:
+      context: ../../
+      dockerfile: docker/Dockerfile.carbon-panel
+    #image: athNdev/carbon-panel:dev
+    container_name: carbon-panel
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/carbon-panel:/app/data
+    environment:
+      - TZ=UTC
+
+      - CARBONPANEL_AUTH_LOCAL_ENABLED=true
+      - CARBONPANEL_AUTH_OIDC_ENABLED=true
+
+      # Use the exact issuer value from your Okta authorization server metadata,
+      # for example: https://dev-123456.okta.com/oauth2/default
+      - CARBONPANEL_AUTH_OIDC_ISSUER_URI=https://REPLACE_ME.okta.com/oauth2/default
+
+      - CARBONPANEL_AUTH_OIDC_CLIENT_ID=REPLACE_ME
+      - CARBONPANEL_AUTH_OIDC_CLIENT_SECRET=REPLACE_ME
+
+      # Must exactly match the redirect URI registered in Okta.
+      - CARBONPANEL_AUTH_OIDC_REDIRECT_URL=http://localhost:8080/api/v1/auth/oidc/callback
+
+      - CARBONPANEL_AUTH_OIDC_SCOPES=openid,profile,email
+      # Set when Okta emits a groups/roles claim you want to map.
+      - CARBONPANEL_AUTH_OIDC_ROLE_CLAIM=groups
+      # Example mapping: {"carbon-admins":"admin","carbon-users":"user"}
+      - CARBONPANEL_AUTH_OIDC_ROLE_MAPPING={}
+
+      # Recommended hardening defaults.
+      - CARBONPANEL_AUTH_OIDC_ABSENT_CLAIM_POLICY=deny
+      - CARBONPANEL_AUTH_OIDC_ALLOW_RAW_CLAIM_ROLES=false

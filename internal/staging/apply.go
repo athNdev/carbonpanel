@@ -97,6 +97,9 @@ func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now ti
 func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, server *storage.Server, batch storage.ServerUpdateBatch, publish Publisher, resolvers ...*nodestorage.Resolver) error {
 	resolver := firstResolver(resolvers)
 	return operation.RunJournaled(ctx, store, log, server, "apply-batch", "", func() error {
+		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
+			return err
+		}
 		if err := store.StagedConfigConflict(ctx, server.ID, batch.ID); err != nil {
 			return err
 		}
@@ -150,7 +153,13 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		}
 		plan := PlanFor(server.Status, len(applied) > 0)
 		plan.ModuleIDs = moduleIDs
-		if plan.NeedsPublish() {
+		// A retry after publication succeeded but finalization failed finds no
+		// staged rows left to publish. PlanFor still describes a running server
+		// as needing a restart, so gate it on work this attempt actually did:
+		// otherwise the retry would restart (or recreate) the container again
+		// and discard the original publication's plan.
+		pendingWork := len(applied) > 0 || len(content) > 0 || len(moduleIDs) > 0
+		if pendingWork && plan.NeedsPublish() {
 			if publish == nil {
 				return errors.Join(errors.New("staged batch needs a container publish"), undoApply(ctx, store, moduleRestore(undoModules, restore), applied, nil))
 			}
@@ -168,6 +177,13 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		}
 		return cleanupBatchRecovery(ctx, store, server, batch.ID, resolver)
 	})
+}
+
+func reconcileOpenBatchState(ctx context.Context, store *storage.Store, batchID string) error {
+	if store == nil || batchID == "" {
+		return nil
+	}
+	return store.RestageOpenBatchRolledBackConfigs(ctx, batchID)
 }
 
 // CommitNextRestartFiles copies content for a next-restart batch onto the live
@@ -313,7 +329,7 @@ func undoApply(ctx context.Context, store *storage.Store, restore func() error, 
 		failed = restore()
 	}
 	for _, cfg := range configs {
-		if _, err := store.RollbackStagedConfigChange(ctx, cfg.ID); err != nil {
+		if _, err := store.RevertStagedConfigApplyToStaged(ctx, cfg.ID); err != nil {
 			failed = errors.Join(failed, err)
 		}
 	}

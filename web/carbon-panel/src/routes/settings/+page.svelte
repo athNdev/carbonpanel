@@ -124,63 +124,86 @@ one at https://mozilla.org/MPL/2.0/.
 	/>
 
 	<div class="space-y-6">
-		<CarbonTabs tabs={settingsTabs} bind:selectedTab={activeTab} />
+		<CarbonTabs tabs={settingsTabs} bind:selectedTab={activeTab} idPrefix="settings-tabs" />
 
-		{#if activeTab === 'server-config' && showSettings}
-			<div class="motion-fade-in space-y-4">
-				{#if loading}
-					<div class="flex items-center justify-center border border-border bg-card p-16">
-						<CarbonInlineLoading description="Loading settings..." />
-					</div>
-				{:else if globalSettingsError}
-					<CarbonErrorState
-						title="Failed to load settings"
-						message={globalSettingsError}
-						onretry={loadGlobalSettings}
-					/>
-				{:else}
-					<ServerConfiguration config={globalConfig} onSave={saveGlobalSettings} {saving} />
-				{/if}
-			</div>
-		{:else if activeTab === 'api-keys' && showSettings}
-			<div class="motion-fade-in space-y-4">
-				<ApiKeysSettings />
-			</div>
-		{:else if activeTab === 'routing' && showSettings}
-			<div class="motion-fade-in space-y-4">
-				<RoutingSettings />
-			</div>
-		{:else if activeTab === 'nodes' && showSettings}
-			<div class="motion-fade-in space-y-4">
-				<NodeSettings />
-			</div>
-		{:else if activeTab === 'auth' && showSettings}
-			<div class="motion-fade-in space-y-4">
-				<AuthSettings />
-			</div>
-		{:else if activeTab === 'logs' && showSettings}
-			<div class="motion-fade-in space-y-4">
-				<LogsSettings />
-			</div>
-		{:else if activeTab === 'support' && showSettings}
-			<div class="motion-fade-in space-y-4">
-				<SupportSettings />
-			</div>
-		{:else if activeTab === 'users' && showUsers}
-			<div class="motion-fade-in space-y-4">
-				<UserSettings />
-			</div>
-		{:else if activeTab === 'roles' && showRoles}
-			<div class="motion-fade-in space-y-4">
-				<RoleSettings />
-			</div>
-		{:else}
-			<CarbonErrorState
-				title="Settings unavailable"
-				message="This section needs permissions that are not loaded, or the page data failed to load. Retry, or contact an administrator if you lack access."
-				onretry={() => window.location.reload()}
-			/>
-		{/if}
+		<div
+			id={activeTab ? `settings-tabs-panel-${activeTab}` : undefined}
+			role="tabpanel"
+			aria-labelledby={activeTab ? `settings-tabs-tab-${activeTab}` : undefined}
+			class="min-w-0"
+		>
+			{#if activeTab === 'server-config' && showSettings}
+				<div class="motion-fade-in space-y-4">
+					{#if loading}
+						<div class="flex items-center justify-center border border-border bg-card p-16">
+							<CarbonInlineLoading description="Loading settings..." />
+						</div>
+					{:else if globalSettingsError}
+						<CarbonErrorState
+							title="Failed to load settings"
+							message={globalSettingsError}
+							onretry={loadGlobalSettings}
+						/>
+					{:else}
+						<ServerConfiguration config={globalConfig} onSave={saveGlobalSettings} {saving} />
+					{/if}
+				</div>
+			{:else if activeTab === 'api-keys' && showSettings}
+				<div class="motion-fade-in space-y-4">
+					<ApiKeysSettings />
+				</div>
+			{:else if activeTab === 'routing' && showSettings}
+				<div class="motion-fade-in space-y-4">
+					<RoutingSettings />
+				</div>
+			{:else if activeTab === 'nodes' && showSettings}
+				<div class="motion-fade-in space-y-4">
+					<NodeSettings />
+				</div>
+			{:else if activeTab === 'auth' && showSettings}
+				<div class="motion-fade-in space-y-4">
+					<AuthSettings />
+				</div>
+			{:else if activeTab === 'logs' && showSettings}
+				<div class="motion-fade-in space-y-4">
+					<LogsSettings />
+				</div>
+			{:else if activeTab === 'support' && showSettings}
+				<div class="motion-fade-in space-y-4">
+					<SupportSettings />
+				</div>
+			{:else if activeTab === 'users' && showUsers}
+				<div class="motion-fade-in space-y-4">
+					<UserSettings />
+				</div>
+			{:else if activeTab === 'roles' && showRoles}
+				<div class="motion-fade-in space-y-4">
+					<RoleSettings />
+				</div>
+			{:else}
+				<CarbonErrorState
+					title="Settings unavailable"
+					message="This section needs permissions that are not loaded, or the page data failed to load. Retry, or contact an administrator if you lack access."
+					onretry={() => window.location.reload()}
+				/>
+			{/if}
+		</div>
+
+		<!--
+			Every tab needs a real panel target for aria-controls. Only the
+			selected panel owns content; unselected panels stay hidden so the
+			Settings surface does not mount every form at once.
+		-->
+		{#each settingsTabs as tab (tab.id)}
+			{#if tab.id !== activeTab}
+				<div
+					id={`settings-tabs-panel-${tab.id}`}
+					role="tabpanel"
+					aria-labelledby={`settings-tabs-tab-${tab.id}`}
+					hidden
+				></div>
+			{/if}
+		{/each}
 	</div>
 </div>
 

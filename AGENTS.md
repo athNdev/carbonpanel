@@ -17,6 +17,13 @@ Run the narrowest relevant checks while iterating, then run the checks for every
 affected surface before merging. Add regression coverage for fixed bugs at the
 closest practical integration seam.
 
+**Merge gate.** At the exact head, review the scoped diff, exercise the normal
+entry point over representative pre-existing data and refusal cases, inspect
+promised rendered output, and require applicable checks to pass on that head.
+Record head, commands, results and receipt in the PR. Name fixture-only limits
+plainly; isolate unrelated failures. Claim live acceptance only from the
+intended channel, and move Jira to Done after that evidence exists.
+
 ## Project boundaries
 
 - Keep developer workstation configuration, credentials, generated state, and
