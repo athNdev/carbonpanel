@@ -48,9 +48,12 @@ ARG MCP_ARTIFACT_VERSION
 ARG MCP_ARTIFACT_COMMIT
 ARG MCP_ARTIFACT_BUILDDATE=unknown
 ENV CGO_ENABLED=0
-RUN go build -trimpath \
+RUN GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -trimpath \
       -ldflags="-s -w -X main.version=${MCP_ARTIFACT_VERSION} -X main.commit=${MCP_ARTIFACT_COMMIT} -X main.buildDate=${MCP_ARTIFACT_BUILDDATE}" \
       -o /out/carbonpanel-mcp ./cmd/carbonpanel-mcp
+
+FROM --platform=$BUILDPLATFORM ${ALPINE_IMAGE} AS certificates
+RUN apk add --no-cache ca-certificates
 
 FROM ${ALPINE_IMAGE} AS runtime
 
@@ -70,16 +73,13 @@ LABEL io.modelcontextprotocol.server.name="io.github.athNdev/carbon-panel" \
       org.opencontainers.image.documentation="https://carbonpanel.dev/docs/guides/mcp-server/" \
       org.opencontainers.image.licenses="MPL-2.0"
 
-RUN apk add --no-cache ca-certificates \
- && addgroup -S mcp \
- && adduser -S -G mcp mcp
-
+COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /out/carbonpanel-mcp /usr/local/bin/carbonpanel-mcp
 
 # The stdio session is the liveness signal: JSON-RPC on stdin/stdout, all
 # diagnostics on stderr, clean exit on stdin EOF. There is deliberately no
 # HEALTHCHECK and no listening port; a health probe would corrupt stdout.
-USER mcp
+USER 10001:10001
 WORKDIR /home/mcp
 ENV CARBONPANEL_MCP_TRANSPORT=stdio
 ENTRYPOINT ["/usr/local/bin/carbonpanel-mcp"]

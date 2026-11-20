@@ -26,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 -m unittest scripts.test_release scripts.test_docs_publication_gate scripts.test_go_mod_download scripts.test_runtime_artifacts
+      - run: python3 -m unittest scripts.test_validate_mcp_server_json
 
   proxmox-installer:
     name: Proxmox installer fixtures

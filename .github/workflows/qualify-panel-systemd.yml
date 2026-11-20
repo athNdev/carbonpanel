@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Qualify packaged Panel under systemd
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run:
+        description: Successful Carbon Panel Release run ID containing verified-release-downloads
+        type: string
+        required: true
+      candidate_commit:
+        description: Full product commit of the release run
+        type: string
+        required: true
+      baseline_tag:
+        description: Published Stable release tag used for the in-place upgrade
+        type: string
+        required: true
+        default: v1.0.40
+      baseline_commit:
+        description: Full published Stable commit
+        type: string
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  systemd:
+    name: Panel archive install and upgrade (Linux ${{ matrix.arch }})
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the exact verified Actions archive and published baseline
+        id: packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN: ${{ inputs.release_run }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          BASELINE_TAG: ${{ inputs.baseline_tag }}
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$BASELINE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$BASELINE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          api="repos/$GITHUB_REPOSITORY/actions"
+          workflow_head=$(gh api "$api/runs/$RELEASE_RUN" |
+            jq -er --arg repo "$GITHUB_REPOSITORY" '
+              select(.path == ".github/workflows/release.yml" and
+                .head_repository.full_name == $repo and .conclusion == "success") |
+              .head_sha | select(test("^[a-f0-9]{40}$"))
+            ')
+          reference=$(gh api "$api/runs/$RELEASE_RUN/artifacts" |
+            jq -er '[.artifacts[] | select(.name == "verified-release-downloads" and .expired == false)] |
+              if length == 1 then .[0] else error("expected one verified download archive") end')
+          artifact_id=$(jq -er '.id | numbers' <<< "$reference")
+          digest=$(jq -er '.digest | select(test("^sha256:[a-f0-9]{64}$"))' <<< "$reference")
+          artifact_zip="$RUNNER_TEMP/verified-release-downloads.zip"
+          gh api "$api/artifacts/$artifact_id/zip" > "$artifact_zip"
+          printf '%s  %s\n' "${digest#sha256:}" "$artifact_zip" | sha256sum --check --strict
+          unzip -q "$artifact_zip" -d "$RUNNER_TEMP/candidate-release"
+
+          gh release download "$BASELINE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "*_linux_${PACKAGE_ARCH}.tar.gz" --pattern checksums.txt \
+            --pattern release-manifest.json --dir "$RUNNER_TEMP/baseline-release"
+          {
+            printf 'artifact_id=%s\n' "$artifact_id"
+            printf 'artifact_digest=%s\n' "$digest"
+            printf 'workflow_head=%s\n' "$workflow_head"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install, restart and replace the packaged programs in an isolated service
+        env:
+          RELEASE_RUN: ${{ inputs.release_run }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          BASELINE_TAG: ${{ inputs.baseline_tag }}
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          ARTIFACT_ID: ${{ steps.packages.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ steps.packages.outputs.artifact_digest }}
+          WORKFLOW_HEAD: ${{ steps.packages.outputs.workflow_head }}
+        run: |
+          python3 -m scripts.qualify_panel_systemd \
+            --workspace "$RUNNER_TEMP/panel-systemd" \
+            --candidate "$RUNNER_TEMP/candidate-release" --baseline "$RUNNER_TEMP/baseline-release" \
+            --candidate-commit "$CANDIDATE_COMMIT" --baseline-commit "$BASELINE_COMMIT" \
+            --release-run "$RELEASE_RUN" --baseline-tag "$BASELINE_TAG" \
+            --release-workflow-head "$WORKFLOW_HEAD" \
+            --actions-artifact-id "$ARTIFACT_ID" --actions-artifact-digest "$ARTIFACT_DIGEST"
+
+      - name: Retain package hashes, checks and systemd journals
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: panel-systemd-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/panel-systemd/evidence
+          if-no-files-found: error
+          retention-days: 30
