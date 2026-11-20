@@ -66,12 +66,7 @@ open admission caps, and clean `Stop` release. A runtime fixture drives a real
 `Server.Shutdown` with a blocked remote read and observes the context cancel,
 read unblock, handle close and session eviction. The tools/call fixture proves
 307 KiB framed transfer with SHA equality and read-only/revoked/cross-owner/
-cross-server refusals with zero writes. Gateway fixtures also record the
-controller `CloseStream(cancel=true)` after a post-Open admission rejection and
-a terminal frame/SHA failure while the caller context is already canceled:
-the close uses an independent bounded context, staged bytes and registry
-entries return to zero, and a fresh session can open, read and commit with the
-correct digest.
+cross-server refusals with zero writes.
 
 Staged downloads reuse this machinery: `OpenStreamRequest.download_session_id`
 opens the controller temp file through the same registry, owner/server binding
