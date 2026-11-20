@@ -3287,11 +3287,13 @@ class PriorPagesDeploymentTests(unittest.TestCase):
             "800": [{"state": "success",
                      "target_url": "https://github.com/o/r/actions/runs/100/job/1"}],
         }
-        run_artifacts = {
-            "100": [{"id": 1, "name": gate.PAGES_ARTIFACT_NAME, "expired": False}],
-        }
-        baseline, reason = gate.pages_baseline_from_deployments(
-            deployments, statuses, run_artifacts)
+        job = {"id": 1, "run_id": 100, "head_sha": "a" * 40, "steps": [
+            {"number": 1, "name": "Deploy the final canonical artifact", "conclusion": "success"},
+        ]}
+        identity, reason = gate.pages_deployment_identity(deployments, statuses, lambda _: job)
+        self.assertTrue(identity, reason)
+        baseline, reason = gate.pages_baseline_artifact(
+            identity, [{"id": 1, "name": gate.PAGES_ARTIFACT_NAME, "expired": False}])
         self.assertTrue(baseline, reason)
         self.assertEqual(baseline["artifact_id"], "1")
         self.assertEqual(baseline["deployment_id"], "800")

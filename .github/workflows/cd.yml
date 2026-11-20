@@ -442,6 +442,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      deployments: read
       packages: write
       pages: write
       id-token: write
@@ -708,7 +709,7 @@ jobs:
           # and real live-byte qualification all live in docs_publication_gate.
           BASE=$(python3 scripts/docs_publication_gate.py pages-baseline \
             --repository "$GITHUB_REPOSITORY")
-          test "$(printf '%s' "$BASE" | jq -r .verified)" = "true"
+          test "$(printf '%s' "$BASE" | jq -r .artifact_verified)" = "true"
           RESULT=$(python3 scripts/docs_publication_gate.py fetch-prior-pages \
             --site .website-build/prior-site --repository "$GITHUB_REPOSITORY" \
             --artifact-id "$(printf '%s' "$BASE" | jq -r .artifact_id)" \
