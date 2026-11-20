@@ -2213,6 +2213,21 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertFalse(release.channel_oci_parity(
             wrong_revision, self.DIGEST, self.CANDIDATE)[0])
 
+    def test_oci_parity_accepts_json_round_tripped_platform_lists(self):
+        # channel-observe -> JSON -> stable-alias-decision turns platform tuples
+        # into lists of lists. The gate must normalise them instead of raising
+        # TypeError on an unhashable list (observed in publish run 44760231606).
+        observations = self.immutable()
+        for registry in observations:
+            state, info = observations[registry]
+            observations[registry] = (state, {
+                **info,
+                "platforms": [list(pair) for pair in info["platforms"]],
+            })
+        ok, reason = release.channel_oci_parity(
+            observations, self.DIGEST, self.CANDIDATE)
+        self.assertTrue(ok, reason)
+
     # --- Move state machine (first publish / retry / stale / rollback) -------
 
     def make_move(self, **overrides):

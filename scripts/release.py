@@ -2478,7 +2478,12 @@ def channel_oci_parity(observations, digest, commit, registries=CHANNEL_REGISTRI
             return False, f"{registry} immutable image is absent"
         if info.get("digest") != digest:
             return False, f"{registry} digest differs from the verified digest"
-        if not REQUIRED_PLATFORMS <= set(info.get("platforms", ())):
+        # channel-observe serialises through JSON, so platform pairs arrive
+        # as lists of lists. Normalise them to the tuple form used by the
+        # frozenset; otherwise set() raises on an unhashable inner list.
+        observed_platforms = {tuple(platform)
+                              for platform in info.get("platforms", ())}
+        if not REQUIRED_PLATFORMS <= observed_platforms:
             return False, f"{registry} lacks both required Linux architectures"
         if info.get("revision") != commit:
             return False, f"{registry} OCI revision does not match the pinned commit"

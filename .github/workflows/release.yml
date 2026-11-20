@@ -684,6 +684,19 @@ jobs:
           fetch-depth: 0
       - name: Refuse an older target that lacks the trusted gate script
         run: python3 scripts/release.py verify-gate-script --path scripts/release.py
+      # The trusted workflow revision owns publication gate logic; the pinned
+      # candidate owns only the release artifacts and docs. Check out the
+      # dispatch SHA separately and use its gate script for this job's decisions
+      # so a fixed gate can qualify an already-staged candidate without
+      # re-staging or changing the product identity.
+      - name: Check out the trusted workflow gate revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: .trusted-release
+      - name: Use the trusted gate script for publication decisions
+        run: cp .trusted-release/scripts/release.py scripts/release.py
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.22.1'
