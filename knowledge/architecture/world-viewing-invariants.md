@@ -33,7 +33,8 @@ sources:
 - Both discovered and explicit BlueMap adapters require a bounded JSON
   textures document for every map listed by the renderer before reporting
   READY. The health check and proxy both retry the exact `.gz` sibling on a
-  plain-path 404. Missing or invalid textures leave the map session unavailable.
+  plain-path 404. Missing or invalid textures leave the map session unavailable
+  and surface an actionable error for a discovered module.
 - BlueMap web assets keep the panel CSP unchanged. The proxy forwards
   `Accept-Encoding`/`Content-Encoding` for every renderer; only for BlueMap map
   `textures.json`/tile payloads it retries exactly the `.gz` sibling of a 404

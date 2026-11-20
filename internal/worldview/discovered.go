@@ -160,7 +160,7 @@ func (d *discoveredRenderer) probe(ctx context.Context) (*Health, error) {
 			"BlueMap is installed but does not serve a configured map for this server's world; configure the target world to finish setup"), nil
 	}
 	if !blueMapAssetsReady(ctx, d.facts.BaseURL, ids, d.hc) {
-		return discoveredHealth(v1.RendererState_RENDERER_STATE_ABSENT, "unknown", blueMapNoAssetsDetail), nil
+		return discoveredHealth(v1.RendererState_RENDERER_STATE_ERROR, "unknown", blueMapNoAssetsDetail), nil
 	}
 
 	h := discoveredHealth(v1.RendererState_RENDERER_STATE_READY, "detected",

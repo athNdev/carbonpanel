@@ -112,11 +112,12 @@ func TestDiscoveredBlueMapChecksEveryServedMapTextureFixture(t *testing.T) {
 				}
 				return
 			}
-			if target.GetRendererState() != v1.RendererState_RENDERER_STATE_ABSENT || session.Msg.GetProxyPath() != "" {
-				t.Fatalf("expected ABSENT without a session, got state=%s session=%v", target.GetRendererState(), session.Msg)
+			if target.GetRendererState() != v1.RendererState_RENDERER_STATE_ERROR ||
+				session.Msg.GetState() != v1.RendererState_RENDERER_STATE_ERROR || session.Msg.GetProxyPath() != "" {
+				t.Fatalf("expected renderer ERROR without a session, got state=%s session=%v", target.GetRendererState(), session.Msg)
 			}
-			if note := target.GetFreshness().GetNote(); !strings.Contains(note, "map textures could not be read") {
-				t.Fatalf("expected an actionable textures diagnostic, got %q", note)
+			if detail := target.GetError(); !strings.Contains(detail, "map textures could not be read") || session.Msg.GetReason() != detail {
+				t.Fatalf("expected the same actionable textures diagnostic for the target and session, got %q and %q", detail, session.Msg.GetReason())
 			}
 		})
 	}

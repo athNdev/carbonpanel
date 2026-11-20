@@ -40,7 +40,8 @@ A discovered module reaches READY after the renderer's `/settings.json` lists
 the configured map for the server's actual level and the node data accessor
 finds a scoped tile. Both discovered modules and explicit BlueMap endpoints
 also need to serve textures for every map they list, including secondary
-dimensions. The renderer status reports a next step when these checks fail.
+dimensions. A discovered renderer with unavailable textures shows an error
+and a retry action in World View.
 The in-context **Install BlueMap** action uses the existing
 ModuleService create/start RPCs; it is a server-side singleton per server,
 records explicit operator consent (actor and time from the authenticated
