@@ -70,7 +70,12 @@ paraphrased below rather than duplicated:
    `atharvnaphade/carbonpanel` and GHCR `ghcr.io/athndev/carbonpanel`), each
    child config carrying the same OCI revision. Docs additionally require the
    built contract to validate and pin that same revision plus exact site build
-   validation, so stale docs can never mask a candidate. A tag ref, a short SHA,
+   validation, so stale docs can never mask a candidate. Rendered candidate and
+   final artifacts must pass `scripts/check_website.py`, which resolves every
+   internal link under the pinned route. Authored cross-page links must resolve
+   there: site-root paths are rebased by the renderer, while a lone `../` on a
+   nested page resolves inside its own directory and fails validation.
+   A tag ref, a short SHA,
    an unknown registry, a single-arch image or a mismatched revision fails
    closed with zero writes.
 3. **One qualified transaction per channel.** A move is not an alias write:
