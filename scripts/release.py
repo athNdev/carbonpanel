@@ -2120,7 +2120,7 @@ def valid_commit(value):
     return bool(value and re.fullmatch(r"[0-9a-f]{40}", value))
 
 
-def validate_channel_contract(document):
+def validate_channel_contract(document, stable_commit=None, stable_digest=None):
     """Fail-closed validation of the docs schema_version 3 channel contract.
 
     Rejects a wrong schema, extra/missing channels, non-40-hex commits, missing
@@ -2129,6 +2129,11 @@ def validate_channel_contract(document):
     of the two removed legacy DOC snapshots. Source tags and historical records
     in docs/release-history.json are unaffected; this validates only the public
     channel contract artifact.
+
+    ``stable_commit``/``stable_digest`` default to the frozen verified stable
+    baseline. A qualified stable release transaction may stamp the canonical
+    marker to an exact release revision/digest and validate against those values
+    (the pre-stamp contract must still satisfy the baseline).
     """
     problems = []
     if not isinstance(document, dict):
@@ -2175,13 +2180,19 @@ def validate_channel_contract(document):
                 problems.append(f"{name}.{key} must be the full-SHA commit URL")
     stable = channels["stable"]
     simage = stable.get("image", {}) if isinstance(stable, dict) else {}
+    expected_stable_commit = (
+        stable_commit if valid_commit(stable_commit)
+        else STABLE_CHANNEL_BASELINE["commit"])
+    expected_stable_digest = (
+        stable_digest if valid_digest(stable_digest)
+        else STABLE_CHANNEL_BASELINE["digest"])
     if simage.get("tag") != STABLE_CHANNEL_BASELINE["tag"]:
         problems.append("stable image tag must be latest")
     if simage.get("stable_alias") != STABLE_CHANNEL_BASELINE["stable_alias"]:
         problems.append("stable must define the stable alias")
-    if simage.get("digest") != STABLE_CHANNEL_BASELINE["digest"]:
+    if simage.get("digest") != expected_stable_digest:
         problems.append("stable digest must be the verified stable baseline")
-    if stable.get("commit") != STABLE_CHANNEL_BASELINE["commit"]:
+    if stable.get("commit") != expected_stable_commit:
         problems.append("stable commit must be the verified stable baseline")
     nightly = channels["nightly"]
     nimage = nightly.get("image", {}) if isinstance(nightly, dict) else {}
@@ -3292,7 +3303,10 @@ def channel_transaction_cli(args):
 def validate_channel_contract_cli(args):
     """CLI: validate a generated channel contract artifact (offline)."""
     document = json.loads(Path(args.path).read_text(encoding="utf-8"))
-    ok, problems = validate_channel_contract(document)
+    ok, problems = validate_channel_contract(
+        document,
+        stable_commit=getattr(args, "stable_commit", None),
+        stable_digest=getattr(args, "stable_digest", None))
     values = {"verified": str(ok).lower(), "problems": json.dumps(problems)}
     print(json.dumps(values, indent=2))
     write_output(values)
@@ -3578,6 +3592,8 @@ def build_parser():
         publisher.add_argument("--" + name, required=True)
     contract_checker = commands.add_parser("validate-channel-contract")
     contract_checker.add_argument("--path", required=True)
+    contract_checker.add_argument("--stable-commit", default="")
+    contract_checker.add_argument("--stable-digest", default="")
     source_gate = commands.add_parser("channel-source-gate")
     for name in ("event", "ref", "commit", "ci-verified"):
         source_gate.add_argument("--" + name, required=True)

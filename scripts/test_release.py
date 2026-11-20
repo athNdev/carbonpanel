@@ -2445,11 +2445,42 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertIn("--previous \"$PREV_JSON\"", transaction["run"])
         self.assertIn("--live \"$LIVE\"", transaction["run"])
         self.assertIn("prior_receipt", str(job["outputs"]))
+        self.assertIn("prior_hash", str(job["outputs"]))
+        # Stamping validates the exact release revision, not the frozen baseline.
+        self.assertIn("--stable-commit \"$RELEASE_COMMIT\"", source)
+        self.assertIn("--stable-digest \"$IMAGE_DIGEST\"", source)
+        # If the new marker was deployed but qualification/decision did not
+        # authorize alias promotion, restore the exact prior docs bytes inside
+        # the stable transaction so the public marker cannot stay ahead.
+        by_id = {step.get("id"): step for step in steps if step.get("id")}
+        docs_compensate = by_id["docs_compensate"]
+        self.assertEqual(docs_compensate.get("with", {}).get("artifact_name"),
+                         "github-pages-prior-stable")
+        self.assertIn("steps.deploy.outcome == 'success'", docs_compensate["if"])
+        self.assertIn("steps.marker.outcome != 'success'", docs_compensate["if"])
+        self.assertIn("steps.transaction.outcome != 'success'", docs_compensate["if"])
+        self.assertIn("steps.transaction.outputs.action == 'refuse'", docs_compensate["if"])
+        self.assertIn("steps.transaction.outputs.action == 'rollback'", docs_compensate["if"])
+        self.assertIn("steps.transaction.outputs.action == ''", docs_compensate["if"])
+        verify_restore = next(step for step in steps
+                              if "Verify the restored prior stable docs marker" in step.get("name", ""))
+        self.assertIn("steps.prior.outputs.hash", str(verify_restore))
+        self.assertIn("PRIOR_HASH", verify_restore["run"])
+        fail_step = next(step for step in steps
+                         if step.get("id") != "docs_compensate"
+                         and "stable docs compensation was required" in step.get("name", ""))
+        self.assertIn("steps.docs_compensate.outcome == 'success'", fail_step["if"])
         promote = doc["jobs"]["promote-aliases"]["steps"]
         self.assertTrue(any(step.get("id") == "stable_compensate" for step in promote))
         self.assertTrue(any(step.get("id") == "stable_compensate_docs"
                             and step.get("with", {}).get("artifact_name")
                             == "github-pages-prior-stable" for step in promote))
+        for job_name in ("publish", "promote-aliases"):
+            job_block = doc["jobs"][job_name]
+            self.assertIn("stable-channel-transaction", job_block["needs"])
+            condition = str(job_block.get("if", ""))
+            self.assertIn("stable-channel-transaction.outputs.action != 'refuse'", condition)
+            self.assertIn("stable-channel-transaction.outputs.action != 'rollback'", condition)
 
     def test_no_legacy_alias_write_path_remains_outside_the_qualified_transaction(self):
         import yaml
@@ -2893,6 +2924,35 @@ class ChannelMarkerStagingTests(unittest.TestCase):
             self.assertEqual(nightly["image"]["revision"], self.COMMIT)
             self.assertEqual(nightly["image"]["digest"], self.DIGEST)
             self.assertTrue(release.validate_channel_contract(document)[0])
+
+    def test_canonical_stable_stamping_validates_against_exact_release_revision(self):
+        release_commit = "b" * 40
+        release_digest = "sha256:" + "f" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory, ChannelPromotionTests().contract())
+            result = release.stage_channel_marker(
+                root, "stable", release_commit, release_digest, include_canonical=True)
+            self.assertTrue(result["canonical_stamped"])
+            document = json.loads((root / "version-index.json").read_text(encoding="utf-8"))
+            stable = document["channels"]["stable"]
+            self.assertEqual(stable["commit"], release_commit)
+            self.assertEqual(stable["image"]["revision"], release_commit)
+            self.assertEqual(stable["image"]["digest"], release_digest)
+            ok, problems = release.validate_channel_contract(document)
+            self.assertFalse(ok)
+            self.assertTrue(any("stable" in problem and "baseline" in problem
+                                for problem in problems))
+            self.assertTrue(release.validate_channel_contract(
+                document, stable_commit=release_commit,
+                stable_digest=release_digest)[0])
+            out = io.StringIO()
+            with patch("sys.argv", ["release.py", "validate-channel-contract",
+                                    "--path", str(root / "version-index.json"),
+                                    "--stable-commit", release_commit,
+                                    "--stable-digest", release_digest]), \
+                 redirect_stdout(out):
+                release.main()
+            self.assertEqual(json.loads(out.getvalue())["verified"], "true")
 
     def test_stage_channel_marker_cli_is_offline_and_reports_paths(self):
         with tempfile.TemporaryDirectory() as directory:
