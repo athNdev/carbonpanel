@@ -17,6 +17,16 @@ import (
 	"github.com/athNdev/carbon-panel/internal/worldterrain"
 )
 
+// nativeEndUnavailable describes an optional End failure after the active
+// level was opened. The level identity still participates in revalidation.
+type nativeEndUnavailable struct {
+	levelID fs.FileInfo
+	cause   error
+}
+
+func (e *nativeEndUnavailable) Error() string { return "optional End terrain is unavailable" }
+func (e *nativeEndUnavailable) Unwrap() error { return e.cause }
+
 func qualifiesNativeEnd(facts map[string]any) bool {
 	version, ok := worldlib.FactInt(facts, "DataVersion")
 	if !ok || !worldlib.SupportsJavaEndDataVersion(version) {
@@ -81,21 +91,28 @@ func openNativeEnd(ctx context.Context, scope nativeScope) (*endSource, error) {
 		return nil, err
 	}
 	if !qualifiesNativeEnd(facts) {
-		return nil, worldterrain.ErrTerrainUnsupported
+		return nil, &nativeEndUnavailable{levelID: levelID, cause: worldterrain.ErrTerrainUnsupported}
 	}
-	dimension, _, err := openNativeDirectory(level, "DIM1")
+	regions, regionsID, err := openNativeEndRegions(level)
 	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = dimension.Close() }()
-	regions, regionsID, err := openNativeDirectory(dimension, "region")
-	if err != nil {
-		return nil, err
+		if errors.Is(err, errNativeWorldMismatch) {
+			return nil, err
+		}
+		return nil, &nativeEndUnavailable{levelID: levelID, cause: err}
 	}
 	return &endSource{
 		regions: regions, levelID: levelID, regionsID: regionsID,
 		prefix: path.Join(scope.level, "DIM1", "region") + "/",
 	}, nil
+}
+
+func openNativeEndRegions(level *os.Root) (*os.Root, fs.FileInfo, error) {
+	dimension, _, err := openNativeDirectory(level, "DIM1")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = dimension.Close() }()
+	return openNativeDirectory(dimension, "region")
 }
 
 func openNativeDirectory(parent *os.Root, name string) (*os.Root, fs.FileInfo, error) {
@@ -111,7 +128,11 @@ func openNativeDirectory(parent *os.Root, name string) (*os.Root, fs.FileInfo, e
 		return nil, nil, err
 	}
 	opened, err := dir.Stat(".")
-	if err != nil || !os.SameFile(info, opened) {
+	if err != nil {
+		_ = dir.Close()
+		return nil, nil, err
+	}
+	if !os.SameFile(info, opened) {
 		_ = dir.Close()
 		return nil, nil, errNativeWorldMismatch
 	}
@@ -172,6 +193,10 @@ func (m *NativeMap) recheckEnd(ctx context.Context, scope nativeScope, resolver 
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		var unavailable *nativeEndUnavailable
+		if errors.As(err, &unavailable) && os.SameFile(source.levelID, unavailable.levelID) {
+			return err
+		}
 		return errNativeWorldMismatch
 	}
 	defer func() { _ = fresh.regions.Close() }()
@@ -184,6 +209,13 @@ func (m *NativeMap) recheckEnd(ctx context.Context, scope nativeScope, resolver 
 			info.Size() != source.tileFileID.Size() || !info.ModTime().Equal(source.tileFileID.ModTime()) {
 			return worldterrain.ErrRegionChanged
 		}
+	}
+	return m.recheckNativeRenderer(ctx, scope, resolver)
+}
+
+func (m *NativeMap) recheckNativeRenderer(ctx context.Context, scope nativeScope, resolver *Resolver) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	current := m.currentNativeServer(ctx, scope)
 	if current == nil {
@@ -200,14 +232,17 @@ func (m *NativeMap) endDimensions(ctx context.Context, server *storage.Server, s
 		return nil, err
 	}
 	source, err := openNativeEnd(ctx, scope)
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, worldterrain.ErrTerrainUnsupported) {
-		return nil, nil
+	if err == nil {
+		defer func() { _ = source.regions.Close() }()
+		err = m.recheckEnd(ctx, scope, resolver, source)
+	}
+	var unavailable *nativeEndUnavailable
+	if errors.As(err, &unavailable) {
+		// Only the optional dimension may be dropped. The shared manifest
+		// still needs the current world and native renderer to agree.
+		return nil, m.recheckNativeRenderer(ctx, scope, resolver)
 	}
 	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = source.regions.Close() }()
-	if err := m.recheckEnd(ctx, scope, resolver, source); err != nil {
 		return nil, err
 	}
 	return []nativeDimension{nativeOverworld, nativeEnd}, nil
@@ -233,6 +268,10 @@ func (m *NativeMap) renderEndTile(ctx context.Context, server *storage.Server, s
 		return worldterrain.Tile{}, err
 	}
 	if err := m.recheckEnd(ctx, scope, resolver, source); err != nil {
+		var unavailable *nativeEndUnavailable
+		if errors.As(err, &unavailable) {
+			err = errNativeWorldMismatch
+		}
 		return worldterrain.Tile{}, err
 	}
 	return tile, nil

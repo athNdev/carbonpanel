@@ -26,7 +26,8 @@ the source identity, active world and renderer precedence before publication.
 The optional manifest dimensions describe only qualified saved sources.
 The viewport offers only those dimensions and opens the Overworld by default.
 The active native dimension also scopes panel-owned marker reads and copied
-coordinate links.
+coordinate links. If optional End storage is unavailable, retain an Overworld
+manifest only after checking the same world and renderer again.
 
 # Alternatives
 

@@ -16,9 +16,11 @@ The End uses a separate profile for controller-local Vanilla Java 1.21.9 saves
 (DataVersion 4554) with the built-in generator, the vanilla datapack, and a
 saved `DIM1/region/` directory. The map keeps the Overworld as the default.
 For a qualified save, choose **The End** under **Map dimension**. The End
-uses the same elevation shading and starts at X 0, Z 0. Missing terrain is
-transparent. LZ4, unsupported versions, nonstandard world heights, Nether,
-custom End generators, and Bedrock are outside the supported profiles.
+uses the same elevation shading and starts at X 0, Z 0. If End storage is
+unavailable, the map can still show the Overworld from the current save.
+Missing terrain is transparent. LZ4, unsupported versions, nonstandard world
+heights, Nether, custom End generators, and Bedrock are outside the supported
+profiles.
 
 Each request reads one 128 × 128 block tile at one pixel per block. X increases
 right and Z increases down. It reads at most 64 selected chunks from a single
