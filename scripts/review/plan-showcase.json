@@ -211,7 +211,7 @@
       "required": true
     },
     {
-      "setViewport": { "width": 960, "height": 900 },
+      "setViewport": { "width": 1256, "height": 1040 },
       "feature": "players",
       "name": "readable inline capture width"
     },
@@ -257,7 +257,7 @@
       "focus": "Observed identity, aliases and the honest unavailable skin state"
     },
     {
-      "setViewport": { "width": 960, "height": 1450 },
+      "setViewport": { "width": 1256, "height": 1450 },
       "feature": "players",
       "name": "fit the server allowlist form and its roster"
     },
@@ -297,22 +297,21 @@
       "name": "allowlist submit control renders"
     },
     {
-      "fill": "#server-detail-tabs-panel-players section[aria-label=\"Add allowlist entry\"] input",
-      "value": "ReviewFixture",
+      "waitFor": "#server-detail-tabs-panel-players [data-player-row]:has-text(\"ReviewGuest\")",
       "feature": "players",
-      "name": "show the actual allowlist form with a fixture name entered"
+      "name": "actual game client appears in the server-scoped roster"
     },
     {
       "screenshot": "showcase-player-allowlist",
-      "element": "#server-detail-tabs-panel-players section[aria-label=\"Add allowlist entry\"]",
+      "element": "#server-detail-tabs-panel-players",
       "scroll": false,
       "feature": "players",
-      "name": "allowlist form before applying a change",
-      "alt": "Server Players tab allowlist form with the review fixture name entered",
-      "focus": "Exact player identity input and the Add to allowlist control"
+      "name": "server-scoped observed player and allowlist form",
+      "alt": "Server Players tab with the observed gameplay fixture and allowlist controls",
+      "focus": "The server-scoped ReviewGuest session and the add-player form"
     },
     {
-      "setViewport": { "width": 960, "height": 900 },
+      "setViewport": { "width": 1256, "height": 1040 },
       "feature": "players",
       "name": "restore the compact player capture viewport"
     },

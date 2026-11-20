@@ -162,9 +162,15 @@ jobs:
       - name: Install review driver
         run: node scripts/review/setup-browser.mjs --with-deps
 
+      - name: Install the review game client
+        if: env.FEATURES_PLAYERS == 'true'
+        run: bun install --cwd scripts/review/fixtures/minecraft-player --frozen-lockfile --ignore-scripts
+
       - name: Boot disposable seeded stack
         run: bash scripts/review/devstack.sh up
         env:
+          REVIEW_OBSERVED_PLAYER: ${{ env.FEATURES_PLAYERS == 'true' && '1' || '0' }}
+          REVIEW_SHOWCASE_PLAYER_DETAIL: ${{ env.FEATURES_PLAYERDETAIL == 'true' && '1' || '0' }}
           # Isolated fixture credentials; never used outside this stack.
           PANEL_REVIEW_USER: reviewer
           PANEL_REVIEW_PASSWORD: Review-Panel-2026

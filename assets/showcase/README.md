@@ -16,12 +16,12 @@ pixel size for every published image.
 These are unretouched browser crops of the packaged application running in an
 isolated disposable installation with seeded fixtures, not mockups or homepage
 sample islands. The stack seeds a first admin, a local node, a running Vanilla
-1.21.1 server, real Packwiz mods, one World Library revision, and an offline
-player identity through the real allowlist RPC. The allowlist form capture
-shows a fixture name entered in the form before submission. A compatibility verdict is
+1.21.1 server, real Packwiz mods, one World Library revision, and a player session from a
+headless Minecraft client connecting to the disposable server. The panel
+creates the server-scoped roster row through its normal player observation
+path. The review game port must be bound to loopback before the game starts. A compatibility verdict is
 computed on demand by the read-only `CheckCompatibility` RPC; a panel that has
-not run that check correctly shows "No compatibility report yet". The expanded
-roster capture shows the seeded offline identity and its observed provenance. Resource figures and logs are observed values, not
+not run that check correctly shows "No compatibility report yet". The expanded roster capture shows the observed fixture identity and its provenance. Resource figures and logs are observed values, not
 performance claims. No production account, world, log or private player profile
 is used.
 
@@ -64,6 +64,9 @@ Any failure leaves the previous good screenshots untouched.
 ## Regeneration
 
 ```sh
+bun install --cwd scripts/review/fixtures/minecraft-player --frozen-lockfile --ignore-scripts
+
+REVIEW_OBSERVED_PLAYER=1 \
 REVIEW_STACK_NAME=carbon-readme-review \
 REVIEW_PORT=18267 \
   bash scripts/review/devstack.sh up

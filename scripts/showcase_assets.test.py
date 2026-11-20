@@ -375,6 +375,17 @@ class ShowcasePipelineTest(unittest.TestCase):
         ):
             self.assertIn(name, section, f"canonical publish set may drop {name}")
 
+    def test_server_players_capture_requires_a_scoped_observation(self) -> None:
+        plan = Path(__file__).resolve().parent / "review" / "plan-showcase.json"
+        steps = json.loads(plan.read_text(encoding="utf-8"))["steps"]
+        capture = next(i for i, step in enumerate(steps) if step.get("screenshot") == "showcase-player-allowlist")
+        self.assertEqual("#server-detail-tabs-panel-players", steps[capture]["element"])
+        self.assertEqual("players", steps[capture - 1]["feature"])
+        self.assertIn(
+            '#server-detail-tabs-panel-players [data-player-row]:has-text("ReviewGuest")',
+            steps[capture - 1]["waitFor"],
+        )
+
     def test_fixture_changes_trigger_a_routine_capture(self) -> None:
         self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])
 

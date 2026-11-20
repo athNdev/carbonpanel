@@ -81,7 +81,7 @@ Open a rendered map of a world in the panel, with real terrain tiles and the ren
 Add a player to a server's allowlist before they have joined, with a typed,
 auditable action.
 
-[![Server Players allowlist form with the review fixture name entered](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-player-allowlist.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-player-allowlist.png)
+[![Server Players tab showing an observed player and the allowlist controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-player-allowlist.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-player-allowlist.png)
 
 ### The next update. When you're ready.
 

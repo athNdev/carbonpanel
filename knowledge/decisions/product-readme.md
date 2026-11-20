@@ -40,6 +40,9 @@ full-window PNG so readers can inspect the surrounding shell at native scale.
 
 The standard journey maintains the canonical captures. Local review stacks
 preserve worlds and databases during shutdown and use their own fixture data.
+When the Players feature is enabled, a headless game client joins the fresh
+review server on a verified loopback binding. Capture requires the scoped
+player row observed by the packaged player service.
 The journey targets stable tab and panel IDs and pins Bun to the frontend CI
 version. Relevant main pushes run capture automatically, with a weekly backstop
 for missed changes. Default dispatch includes the full set. Subset and non-main
