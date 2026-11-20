@@ -25,7 +25,7 @@ sources:
   accessor. The renderer is dialed at the inspected IP, not a Docker DNS alias
   (host/native modes cannot resolve container names); no port probing,
   host-port binding, public listener or cross-server fallback. No HTTP is sent
-  when a runtime gate fails.
+  when a runtime gate fails, even using a previously issued map session.
 - A listening web server is not a configured or rendered world. READY requires
   the exact target world in the module config, a rendered scoped tile and the
   renderer's own map list (`/settings.json`); missing facts report setup,
