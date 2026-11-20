@@ -123,7 +123,8 @@ func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, "nightly", valueOf(current.MOTD))
 
-	// Its own trigger still applies it later.
+	// The row remains applicable through the existing staged-config path.
+	// The fixture calls the store directly; this PR wires no new cron poller.
 	_, err = store.ApplyStagedConfigChange(ctx, cron.ID)
 	require.NoError(t, err)
 	current, err = store.GetServerConfig(ctx, server.ID)
@@ -136,6 +137,57 @@ func valueOf(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func TestStaleCronBaseCannotBlockDueModPublication(t *testing.T) {
+	ctx := context.Background()
+	store, data := newStageStore(t)
+	server := &storage.Server{ID: "stale-cron", Name: "stale-cron", DataPath: data, Status: storage.StatusRunning}
+	require.NoError(t, store.CreateServer(ctx, server))
+	cfg := store.CreateDefaultServerConfig(server.ID)
+	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+	cron, err := store.StageConfigChange(ctx, server.ID,
+		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
+
+	// The live base moved after the cron row was staged: its base is stale.
+	cfg, err = store.GetServerConfig(ctx, server.ID)
+	require.NoError(t, err)
+	changed := "changed-since-cron-stage"
+	cfg.MOTD = &changed
+	require.NoError(t, store.SaveServerConfig(ctx, cfg))
+
+	when := time.Now().Add(-time.Minute).UTC()
+	_, err = store.SetOpenBatchWindow(ctx, server.ID, storage.UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+	live := filepath.Join(data, "mods", "mod.jar")
+	require.NoError(t, os.MkdirAll(filepath.Dir(live), 0o700))
+	require.NoError(t, os.WriteFile(live, []byte("installed"), 0o600))
+	_, err = store.AddStagedContent(ctx, &storage.StagedContentChange{
+		ID: uuid.NewString(), ServerID: server.ID, Kind: storage.StagedKindMod,
+		Action: storage.StagedActionReplace, TargetPath: "mods/mod.jar",
+		StagePath: ".carbon-panel/staged/candidate/mod.jar", FileName: "mod.jar",
+		ExpectedLiveSha512: digest512("installed"),
+	})
+	require.NoError(t, err)
+	acc, err := nodestorage.NewLocal(data)
+	require.NoError(t, err)
+	require.NoError(t, acc.MkdirAll(".carbon-panel/staged/candidate"))
+	require.NoError(t, acc.WriteFile(".carbon-panel/staged/candidate/mod.jar", []byte("candidate")))
+	require.NoError(t, acc.Close())
+
+	require.NoError(t, Sweep(ctx, store, nil, time.Now(), nil,
+		func(context.Context, *storage.Server, Plan) error { return nil }))
+	published, err := os.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "candidate", string(published), "a stale cron base must not block the due mod batch")
+	staged, err := store.GetStagedConfigChange(ctx, cron.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, staged.Status)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Equal(t, string(storage.UpdateWindowNextRestart), batch.Window)
 }
 
 func TestPublishAcceptsUnchangedLiveFile(t *testing.T) {

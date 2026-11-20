@@ -70,7 +70,9 @@ request.
    config cannot join an open batch that already holds staged content. For
    legacy mixed data, `ApplyBatch` excludes scheduled config rows from timed
    publication, parks the batch on next restart and keeps the cron row on its
-   own trigger. Discard serialization preserves typed Connect refusals and
+   staged with its own cron mode and batch; no new cron poller is wired here.
+   Applying it later stays with the existing staged-config application path.
+   Discard serialization preserves typed Connect refusals and
    records the discard operation under its own name.
 10. Cron timezone is resolved only for cron schedules; if an existing task's
    schedule cannot be advanced, dispatch is refused and the task is disabled so

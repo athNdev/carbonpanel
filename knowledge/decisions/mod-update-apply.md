@@ -1,4 +1,4 @@
----
+﻿---
 type: Decision
 title: Reviewed mod update application
 description: Manual and scheduled mod updates share one staged-batch planner; bytes are checked before staging and never published by the planner.
@@ -50,10 +50,9 @@ The scheduler invokes the same planner through an injected interface.
   the lock, cron config rows keep their schedule, and rejected transfers still
   consume the byte budget. A batch with a cron config row is refused by both
   mod-staging entry points, preserving that row's batch and trigger; a cron
-  row likewise cannot join an existing timed mod batch, and legacy mixed data
-  is isolated by the publisher. Discard keeps typed Connect refusals and its
-  own operation name. The guarded World
-  Library download client is reused and transient provider failures stay
-  retryable.
+   row cannot join a timed mod batch via transactional admission; legacy mixed
+   data is isolated by the publisher (cron stays staged; no new poller). Discard
+   keeps typed Connect refusals and its own operation name. The guarded World
+   Library client is reused and transient provider failures stay retryable.
 - The scheduler installs the planner before starting, applies timezone only to
   cron, and refuses to dispatch a task whose next run cannot be advanced.

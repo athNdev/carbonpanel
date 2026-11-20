@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -304,6 +305,40 @@ func TestStageServerConfigUpdateSharesOneWindow(t *testing.T) {
 
 	_, err = store.StageServerConfigUpdate(ctx, "srv-window", map[string]any{"motd": "idle"}, UpdateWindowIdle, nil, 0)
 	require.Error(t, err)
+}
+
+func TestConcurrentCronAdmissionCannotJoinTimedModBatch(t *testing.T) {
+	ctx := context.Background()
+	store := newStagedTestStore(t, "srv-cron-race")
+	batch, err := store.SetOpenBatchWindow(ctx, "srv-cron-race", UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	// Existing reviewed mod content in the open batch.
+	_, err = store.AddStagedContent(ctx, &StagedContentChange{
+		ID: uuid.NewString(), ServerID: "srv-cron-race", BatchID: batch.ID,
+		Kind: StagedKindMod, Action: StagedActionReplace,
+		TargetPath: "mods/a.jar", StagePath: ".carbon-panel/staged/a/a.jar", FileName: "a.jar",
+		Status: StagedStatusStaged,
+	})
+	require.NoError(t, err)
+
+	const attempts = 6
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = store.StageConfigChange(ctx, "srv-cron-race",
+				map[string]any{"motd": "nightly"}, StagedApplyScheduled, "0 3 * * *")
+		}(i)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		require.Error(t, err, "every concurrent cron admission must be refused")
+	}
+	configs, err := store.ListBatchConfig(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Empty(t, configs, "no cron row may be committed into the timed mod batch")
 }
 
 func TestSetOpenBatchWindowPreservesCronScheduledConfigRow(t *testing.T) {

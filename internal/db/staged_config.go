@@ -254,19 +254,27 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 	if err != nil {
 		return nil, err
 	}
-	if mode == StagedApplyScheduled {
-		// A due-batch publisher applies every config in a timed batch. Keep
-		// independently cron-scheduled work out of a batch that already holds
-		// staged content (for example a reviewed mod update).
-		content, err := s.ListBatchContent(ctx, batch.ID)
-		if err != nil {
-			return nil, err
-		}
-		if len(content) > 0 {
-			return nil, fmt.Errorf("open batch %s has staged content; schedule config changes in a separate batch", batch.ID)
+	// A reviewed mod batch has a committed window and may also carry an
+	// independent cron row. A normal ConfigService save must not retarget it
+	// or rewrite those modes.
+	preserveWindow := false
+	content, err := s.ListBatchContent(ctx, batch.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(content) > 0 {
+		preserveWindow = true
+	}
+	batchConfigs, err := s.ListBatchConfig(ctx, batch.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, config := range batchConfigs {
+		if config.ApplyMode == StagedApplyScheduled {
+			preserveWindow = true
 		}
 	}
-	if opts.SetBatchWindow {
+	if opts.SetBatchWindow && !preserveWindow {
 		batch.Window = string(opts.Window)
 		batch.ApplyAt = opts.ApplyAt
 		batch.IdleMinutes = opts.IdleMinutes
@@ -296,10 +304,37 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		IdleMinutes: opts.IdleMinutes,
 		Status:      StagedStatusStaged,
 	}
-	if err := s.db.WithContext(ctx).Create(staged).Error; err != nil {
+	if mode == StagedApplyScheduled {
+		if err := s.createScheduledConfigAtomic(ctx, serverID, batch.ID, staged); err != nil {
+			return nil, err
+		}
+	} else if err := s.db.WithContext(ctx).Create(staged).Error; err != nil {
 		return nil, err
 	}
 	return staged, nil
+}
+
+// createScheduledConfigAtomic performs the counterpart admission and insert in
+// one write transaction, so two racing config requests cannot both observe an
+// empty mod batch and commit a cron row into a timed batch.
+func (s *Store) createScheduledConfigAtomic(ctx context.Context, serverID, batchID string, staged *StagedConfigChange) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch ServerUpdateBatch
+		if err := tx.Where("id = ? AND status = ?", batchID, UpdateBatchOpen).First(&batch).Error; err != nil {
+			return err
+		}
+		var content int64
+		if err := tx.Model(&StagedContentChange{}).
+			Where("batch_id = ? AND status = ?", batchID, StagedStatusStaged).Count(&content).Error; err != nil {
+			return err
+		}
+		if content > 0 {
+			return fmt.Errorf("open batch %s has staged content; schedule config changes in a separate batch", batchID)
+		}
+		staged.BatchID = batchID
+		staged.ServerID = serverID
+		return tx.Create(staged).Error
+	})
 }
 
 func (s *Store) ensureOpenBatch(ctx context.Context, serverID, window string) (*ServerUpdateBatch, error) {
@@ -373,6 +408,41 @@ func (s *Store) StagedConfigConflict(ctx context.Context, serverID, batchID stri
 	var rows []StagedConfigChange
 	if err := s.db.WithContext(ctx).
 		Where("server_id = ? AND batch_id = ? AND status = ?", serverID, batchID, StagedStatusStaged).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	live := &ServerConfig{}
+	err := s.db.WithContext(ctx).Where("server_id = ?", serverID).First(live).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		live = s.CreateDefaultServerConfig(serverID)
+	} else if err != nil {
+		return err
+	}
+	base, err := ServerConfigToMap(live)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		if err := stagedConfigStillMatches(base, rows[i].BasePayload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// StagedConfigConflictForIDs validates only the config rows this operation will
+// actually publish. An independently scheduled row in the same batch owns a
+// different base and must not block a due mod update.
+func (s *Store) StagedConfigConflictForIDs(ctx context.Context, serverID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var rows []StagedConfigChange
+	if err := s.db.WithContext(ctx).
+		Where("server_id = ? AND id IN ? AND status = ?", serverID, ids, StagedStatusStaged).
 		Find(&rows).Error; err != nil {
 		return err
 	}

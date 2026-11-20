@@ -100,11 +100,17 @@ func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, s
 		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
 			return err
 		}
-		if err := store.StagedConfigConflict(ctx, server.ID, batch.ID); err != nil {
-			return err
-		}
 		configs, err := store.ListBatchConfig(ctx, batch.ID)
 		if err != nil {
+			return err
+		}
+		dueConfigIDs := make([]string, 0, len(configs))
+		for _, config := range configs {
+			if config.ApplyMode != storage.StagedApplyScheduled {
+				dueConfigIDs = append(dueConfigIDs, config.ID)
+			}
+		}
+		if err := store.StagedConfigConflictForIDs(ctx, server.ID, dueConfigIDs); err != nil {
 			return err
 		}
 		content, err := store.ListBatchContent(ctx, batch.ID)
