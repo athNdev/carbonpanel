@@ -32,20 +32,22 @@ const (
 
 // Server mod metadata
 type Mod struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	ServerId      string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
-	FileName      string                 `protobuf:"bytes,3,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
-	DisplayName   string                 `protobuf:"bytes,4,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
-	Version       string                 `protobuf:"bytes,6,opt,name=version,proto3" json:"version,omitempty"`
-	ModId         string                 `protobuf:"bytes,7,opt,name=mod_id,json=modId,proto3" json:"mod_id,omitempty"` // External mod ID (e.g., CurseForge ID)
-	Author        string                 `protobuf:"bytes,8,opt,name=author,proto3" json:"author,omitempty"`
-	Website       string                 `protobuf:"bytes,9,opt,name=website,proto3" json:"website,omitempty"`
-	FileSize      int64                  `protobuf:"varint,10,opt,name=file_size,json=fileSize,proto3" json:"file_size,omitempty"`
-	UploadedAt    *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	Enabled       bool                   `protobuf:"varint,13,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ServerId    string                 `protobuf:"bytes,2,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	FileName    string                 `protobuf:"bytes,3,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
+	DisplayName string                 `protobuf:"bytes,4,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Description string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	Version     string                 `protobuf:"bytes,6,opt,name=version,proto3" json:"version,omitempty"`
+	ModId       string                 `protobuf:"bytes,7,opt,name=mod_id,json=modId,proto3" json:"mod_id,omitempty"` // External mod ID (e.g., CurseForge ID)
+	Author      string                 `protobuf:"bytes,8,opt,name=author,proto3" json:"author,omitempty"`
+	Website     string                 `protobuf:"bytes,9,opt,name=website,proto3" json:"website,omitempty"`
+	FileSize    int64                  `protobuf:"varint,10,opt,name=file_size,json=fileSize,proto3" json:"file_size,omitempty"`
+	UploadedAt  *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
+	UpdatedAt   *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	Enabled     bool                   `protobuf:"varint,13,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// Present only when the caller explicitly checks this installed file for updates.
+	UpdatePreview *InstalledModUpdate `protobuf:"bytes,14,opt,name=update_preview,json=updatePreview,proto3" json:"update_preview,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -171,17 +173,151 @@ func (x *Mod) GetEnabled() bool {
 	return false
 }
 
+func (x *Mod) GetUpdatePreview() *InstalledModUpdate {
+	if x != nil {
+		return x.UpdatePreview
+	}
+	return nil
+}
+
+// A read-only observation about the exact server file and the provider release.
+type InstalledModUpdate struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	State              string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"` // available, current, unknown_source, review_required, unavailable
+	Reason             string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	InstalledSha512    string                 `protobuf:"bytes,3,opt,name=installed_sha512,json=installedSha512,proto3" json:"installed_sha512,omitempty"`
+	Provider           string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
+	ProjectId          string                 `protobuf:"bytes,5,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	InstalledVersionId string                 `protobuf:"bytes,6,opt,name=installed_version_id,json=installedVersionId,proto3" json:"installed_version_id,omitempty"`
+	InstalledVersion   string                 `protobuf:"bytes,7,opt,name=installed_version,json=installedVersion,proto3" json:"installed_version,omitempty"`
+	CandidateVersionId string                 `protobuf:"bytes,8,opt,name=candidate_version_id,json=candidateVersionId,proto3" json:"candidate_version_id,omitempty"`
+	CandidateVersion   string                 `protobuf:"bytes,9,opt,name=candidate_version,json=candidateVersion,proto3" json:"candidate_version,omitempty"`
+	CandidateSha512    string                 `protobuf:"bytes,10,opt,name=candidate_sha512,json=candidateSha512,proto3" json:"candidate_sha512,omitempty"`
+	CandidateFilename  string                 `protobuf:"bytes,11,opt,name=candidate_filename,json=candidateFilename,proto3" json:"candidate_filename,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *InstalledModUpdate) Reset() {
+	*x = InstalledModUpdate{}
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstalledModUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstalledModUpdate) ProtoMessage() {}
+
+func (x *InstalledModUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstalledModUpdate.ProtoReflect.Descriptor instead.
+func (*InstalledModUpdate) Descriptor() ([]byte, []int) {
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *InstalledModUpdate) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetInstalledSha512() string {
+	if x != nil {
+		return x.InstalledSha512
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetProjectId() string {
+	if x != nil {
+		return x.ProjectId
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetInstalledVersionId() string {
+	if x != nil {
+		return x.InstalledVersionId
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetInstalledVersion() string {
+	if x != nil {
+		return x.InstalledVersion
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetCandidateVersionId() string {
+	if x != nil {
+		return x.CandidateVersionId
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetCandidateVersion() string {
+	if x != nil {
+		return x.CandidateVersion
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetCandidateSha512() string {
+	if x != nil {
+		return x.CandidateSha512
+	}
+	return ""
+}
+
+func (x *InstalledModUpdate) GetCandidateFilename() string {
+	if x != nil {
+		return x.CandidateFilename
+	}
+	return ""
+}
+
 // Server mods request
 type ListModsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ServerId      string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	ServerId string                 `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
+	// Hash installed bytes and check the provider for compatible release versions.
+	CheckUpdates  bool `protobuf:"varint,2,opt,name=check_updates,json=checkUpdates,proto3" json:"check_updates,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListModsRequest) Reset() {
 	*x = ListModsRequest{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[1]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -193,7 +329,7 @@ func (x *ListModsRequest) String() string {
 func (*ListModsRequest) ProtoMessage() {}
 
 func (x *ListModsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[1]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -206,7 +342,7 @@ func (x *ListModsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModsRequest.ProtoReflect.Descriptor instead.
 func (*ListModsRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{1}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ListModsRequest) GetServerId() string {
@@ -214,6 +350,13 @@ func (x *ListModsRequest) GetServerId() string {
 		return x.ServerId
 	}
 	return ""
+}
+
+func (x *ListModsRequest) GetCheckUpdates() bool {
+	if x != nil {
+		return x.CheckUpdates
+	}
+	return false
 }
 
 // All server mods
@@ -226,7 +369,7 @@ type ListModsResponse struct {
 
 func (x *ListModsResponse) Reset() {
 	*x = ListModsResponse{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -238,7 +381,7 @@ func (x *ListModsResponse) String() string {
 func (*ListModsResponse) ProtoMessage() {}
 
 func (x *ListModsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[2]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -251,7 +394,7 @@ func (x *ListModsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListModsResponse.ProtoReflect.Descriptor instead.
 func (*ListModsResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{2}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListModsResponse) GetMods() []*Mod {
@@ -272,7 +415,7 @@ type GetModRequest struct {
 
 func (x *GetModRequest) Reset() {
 	*x = GetModRequest{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -284,7 +427,7 @@ func (x *GetModRequest) String() string {
 func (*GetModRequest) ProtoMessage() {}
 
 func (x *GetModRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[3]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -297,7 +440,7 @@ func (x *GetModRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetModRequest.ProtoReflect.Descriptor instead.
 func (*GetModRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{3}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetModRequest) GetServerId() string {
@@ -324,7 +467,7 @@ type GetModResponse struct {
 
 func (x *GetModResponse) Reset() {
 	*x = GetModResponse{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -336,7 +479,7 @@ func (x *GetModResponse) String() string {
 func (*GetModResponse) ProtoMessage() {}
 
 func (x *GetModResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[4]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -349,7 +492,7 @@ func (x *GetModResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetModResponse.ProtoReflect.Descriptor instead.
 func (*GetModResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{4}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetModResponse) GetMod() *Mod {
@@ -374,7 +517,7 @@ type ImportUploadedModRequest struct {
 
 func (x *ImportUploadedModRequest) Reset() {
 	*x = ImportUploadedModRequest{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -386,7 +529,7 @@ func (x *ImportUploadedModRequest) String() string {
 func (*ImportUploadedModRequest) ProtoMessage() {}
 
 func (x *ImportUploadedModRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[5]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -399,7 +542,7 @@ func (x *ImportUploadedModRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportUploadedModRequest.ProtoReflect.Descriptor instead.
 func (*ImportUploadedModRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{5}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ImportUploadedModRequest) GetServerId() string {
@@ -449,7 +592,7 @@ type ImportUploadedModResponse struct {
 
 func (x *ImportUploadedModResponse) Reset() {
 	*x = ImportUploadedModResponse{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -461,7 +604,7 @@ func (x *ImportUploadedModResponse) String() string {
 func (*ImportUploadedModResponse) ProtoMessage() {}
 
 func (x *ImportUploadedModResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[6]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -474,7 +617,7 @@ func (x *ImportUploadedModResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportUploadedModResponse.ProtoReflect.Descriptor instead.
 func (*ImportUploadedModResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{6}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ImportUploadedModResponse) GetMod() *Mod {
@@ -512,7 +655,7 @@ type UpdateModRequest struct {
 
 func (x *UpdateModRequest) Reset() {
 	*x = UpdateModRequest{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -524,7 +667,7 @@ func (x *UpdateModRequest) String() string {
 func (*UpdateModRequest) ProtoMessage() {}
 
 func (x *UpdateModRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[7]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -537,7 +680,7 @@ func (x *UpdateModRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateModRequest.ProtoReflect.Descriptor instead.
 func (*UpdateModRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{7}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *UpdateModRequest) GetServerId() string {
@@ -585,7 +728,7 @@ type UpdateModResponse struct {
 
 func (x *UpdateModResponse) Reset() {
 	*x = UpdateModResponse{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -597,7 +740,7 @@ func (x *UpdateModResponse) String() string {
 func (*UpdateModResponse) ProtoMessage() {}
 
 func (x *UpdateModResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[8]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -610,7 +753,7 @@ func (x *UpdateModResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateModResponse.ProtoReflect.Descriptor instead.
 func (*UpdateModResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{8}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateModResponse) GetMod() *Mod {
@@ -631,7 +774,7 @@ type DeleteModRequest struct {
 
 func (x *DeleteModRequest) Reset() {
 	*x = DeleteModRequest{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -643,7 +786,7 @@ func (x *DeleteModRequest) String() string {
 func (*DeleteModRequest) ProtoMessage() {}
 
 func (x *DeleteModRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[9]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -656,7 +799,7 @@ func (x *DeleteModRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteModRequest.ProtoReflect.Descriptor instead.
 func (*DeleteModRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{9}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DeleteModRequest) GetServerId() string {
@@ -683,7 +826,7 @@ type DeleteModResponse struct {
 
 func (x *DeleteModResponse) Reset() {
 	*x = DeleteModResponse{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[10]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +838,7 @@ func (x *DeleteModResponse) String() string {
 func (*DeleteModResponse) ProtoMessage() {}
 
 func (x *DeleteModResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[10]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +851,7 @@ func (x *DeleteModResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteModResponse.ProtoReflect.Descriptor instead.
 func (*DeleteModResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{10}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DeleteModResponse) GetMessage() string {
@@ -736,7 +879,7 @@ type FabricOptimizationMod struct {
 
 func (x *FabricOptimizationMod) Reset() {
 	*x = FabricOptimizationMod{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[11]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -748,7 +891,7 @@ func (x *FabricOptimizationMod) String() string {
 func (*FabricOptimizationMod) ProtoMessage() {}
 
 func (x *FabricOptimizationMod) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[11]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -761,7 +904,7 @@ func (x *FabricOptimizationMod) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FabricOptimizationMod.ProtoReflect.Descriptor instead.
 func (*FabricOptimizationMod) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{11}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *FabricOptimizationMod) GetModId() string {
@@ -837,7 +980,7 @@ type GetFabricOptimizationStackRequest struct {
 
 func (x *GetFabricOptimizationStackRequest) Reset() {
 	*x = GetFabricOptimizationStackRequest{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -849,7 +992,7 @@ func (x *GetFabricOptimizationStackRequest) String() string {
 func (*GetFabricOptimizationStackRequest) ProtoMessage() {}
 
 func (x *GetFabricOptimizationStackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[12]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -862,7 +1005,7 @@ func (x *GetFabricOptimizationStackRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use GetFabricOptimizationStackRequest.ProtoReflect.Descriptor instead.
 func (*GetFabricOptimizationStackRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{12}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *GetFabricOptimizationStackRequest) GetServerId() string {
@@ -884,7 +1027,7 @@ type GetFabricOptimizationStackResponse struct {
 
 func (x *GetFabricOptimizationStackResponse) Reset() {
 	*x = GetFabricOptimizationStackResponse{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -896,7 +1039,7 @@ func (x *GetFabricOptimizationStackResponse) String() string {
 func (*GetFabricOptimizationStackResponse) ProtoMessage() {}
 
 func (x *GetFabricOptimizationStackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[13]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -909,7 +1052,7 @@ func (x *GetFabricOptimizationStackResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use GetFabricOptimizationStackResponse.ProtoReflect.Descriptor instead.
 func (*GetFabricOptimizationStackResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{13}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *GetFabricOptimizationStackResponse) GetIsFabric() bool {
@@ -944,7 +1087,7 @@ type InstallFabricOptimizationStackRequest struct {
 
 func (x *InstallFabricOptimizationStackRequest) Reset() {
 	*x = InstallFabricOptimizationStackRequest{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -956,7 +1099,7 @@ func (x *InstallFabricOptimizationStackRequest) String() string {
 func (*InstallFabricOptimizationStackRequest) ProtoMessage() {}
 
 func (x *InstallFabricOptimizationStackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[14]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -969,7 +1112,7 @@ func (x *InstallFabricOptimizationStackRequest) ProtoReflect() protoreflect.Mess
 
 // Deprecated: Use InstallFabricOptimizationStackRequest.ProtoReflect.Descriptor instead.
 func (*InstallFabricOptimizationStackRequest) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{14}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *InstallFabricOptimizationStackRequest) GetServerId() string {
@@ -998,7 +1141,7 @@ type InstallFabricOptimizationStackResponse struct {
 
 func (x *InstallFabricOptimizationStackResponse) Reset() {
 	*x = InstallFabricOptimizationStackResponse{}
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1010,7 +1153,7 @@ func (x *InstallFabricOptimizationStackResponse) String() string {
 func (*InstallFabricOptimizationStackResponse) ProtoMessage() {}
 
 func (x *InstallFabricOptimizationStackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_carbonpanel_v1_mod_proto_msgTypes[15]
+	mi := &file_carbonpanel_v1_mod_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1023,7 +1166,7 @@ func (x *InstallFabricOptimizationStackResponse) ProtoReflect() protoreflect.Mes
 
 // Deprecated: Use InstallFabricOptimizationStackResponse.ProtoReflect.Descriptor instead.
 func (*InstallFabricOptimizationStackResponse) Descriptor() ([]byte, []int) {
-	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{15}
+	return file_carbonpanel_v1_mod_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *InstallFabricOptimizationStackResponse) GetInstalledMods() []*FabricOptimizationMod {
@@ -1051,7 +1194,7 @@ var File_carbonpanel_v1_mod_proto protoreflect.FileDescriptor
 
 const file_carbonpanel_v1_mod_proto_rawDesc = "" +
 	"\n" +
-	"\x18carbonpanel/v1/mod.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa6\x03\n" +
+	"\x18carbonpanel/v1/mod.proto\x12\x0ecarbonpanel.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf1\x03\n" +
 	"\x03Mod\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
 	"\tserver_id\x18\x02 \x01(\tR\bserverId\x12\x1b\n" +
@@ -1068,9 +1211,25 @@ const file_carbonpanel_v1_mod_proto_rawDesc = "" +
 	"uploadedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x18\n" +
-	"\aenabled\x18\r \x01(\bR\aenabled\".\n" +
+	"\aenabled\x18\r \x01(\bR\aenabled\x12I\n" +
+	"\x0eupdate_preview\x18\x0e \x01(\v2\".carbonpanel.v1.InstalledModUpdateR\rupdatePreview\"\xc0\x03\n" +
+	"\x12InstalledModUpdate\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12)\n" +
+	"\x10installed_sha512\x18\x03 \x01(\tR\x0finstalledSha512\x12\x1a\n" +
+	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x1d\n" +
+	"\n" +
+	"project_id\x18\x05 \x01(\tR\tprojectId\x120\n" +
+	"\x14installed_version_id\x18\x06 \x01(\tR\x12installedVersionId\x12+\n" +
+	"\x11installed_version\x18\a \x01(\tR\x10installedVersion\x120\n" +
+	"\x14candidate_version_id\x18\b \x01(\tR\x12candidateVersionId\x12+\n" +
+	"\x11candidate_version\x18\t \x01(\tR\x10candidateVersion\x12)\n" +
+	"\x10candidate_sha512\x18\n" +
+	" \x01(\tR\x0fcandidateSha512\x12-\n" +
+	"\x12candidate_filename\x18\v \x01(\tR\x11candidateFilename\"S\n" +
 	"\x0fListModsRequest\x12\x1b\n" +
-	"\tserver_id\x18\x01 \x01(\tR\bserverId\";\n" +
+	"\tserver_id\x18\x01 \x01(\tR\bserverId\x12#\n" +
+	"\rcheck_updates\x18\x02 \x01(\bR\fcheckUpdates\";\n" +
 	"\x10ListModsResponse\x12'\n" +
 	"\x04mods\x18\x01 \x03(\v2\x13.carbonpanel.v1.ModR\x04mods\"C\n" +
 	"\rGetModRequest\x12\x1b\n" +
@@ -1153,54 +1312,56 @@ func file_carbonpanel_v1_mod_proto_rawDescGZIP() []byte {
 	return file_carbonpanel_v1_mod_proto_rawDescData
 }
 
-var file_carbonpanel_v1_mod_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_carbonpanel_v1_mod_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_carbonpanel_v1_mod_proto_goTypes = []any{
 	(*Mod)(nil),                                    // 0: carbonpanel.v1.Mod
-	(*ListModsRequest)(nil),                        // 1: carbonpanel.v1.ListModsRequest
-	(*ListModsResponse)(nil),                       // 2: carbonpanel.v1.ListModsResponse
-	(*GetModRequest)(nil),                          // 3: carbonpanel.v1.GetModRequest
-	(*GetModResponse)(nil),                         // 4: carbonpanel.v1.GetModResponse
-	(*ImportUploadedModRequest)(nil),               // 5: carbonpanel.v1.ImportUploadedModRequest
-	(*ImportUploadedModResponse)(nil),              // 6: carbonpanel.v1.ImportUploadedModResponse
-	(*UpdateModRequest)(nil),                       // 7: carbonpanel.v1.UpdateModRequest
-	(*UpdateModResponse)(nil),                      // 8: carbonpanel.v1.UpdateModResponse
-	(*DeleteModRequest)(nil),                       // 9: carbonpanel.v1.DeleteModRequest
-	(*DeleteModResponse)(nil),                      // 10: carbonpanel.v1.DeleteModResponse
-	(*FabricOptimizationMod)(nil),                  // 11: carbonpanel.v1.FabricOptimizationMod
-	(*GetFabricOptimizationStackRequest)(nil),      // 12: carbonpanel.v1.GetFabricOptimizationStackRequest
-	(*GetFabricOptimizationStackResponse)(nil),     // 13: carbonpanel.v1.GetFabricOptimizationStackResponse
-	(*InstallFabricOptimizationStackRequest)(nil),  // 14: carbonpanel.v1.InstallFabricOptimizationStackRequest
-	(*InstallFabricOptimizationStackResponse)(nil), // 15: carbonpanel.v1.InstallFabricOptimizationStackResponse
-	(*timestamppb.Timestamp)(nil),                  // 16: google.protobuf.Timestamp
+	(*InstalledModUpdate)(nil),                     // 1: carbonpanel.v1.InstalledModUpdate
+	(*ListModsRequest)(nil),                        // 2: carbonpanel.v1.ListModsRequest
+	(*ListModsResponse)(nil),                       // 3: carbonpanel.v1.ListModsResponse
+	(*GetModRequest)(nil),                          // 4: carbonpanel.v1.GetModRequest
+	(*GetModResponse)(nil),                         // 5: carbonpanel.v1.GetModResponse
+	(*ImportUploadedModRequest)(nil),               // 6: carbonpanel.v1.ImportUploadedModRequest
+	(*ImportUploadedModResponse)(nil),              // 7: carbonpanel.v1.ImportUploadedModResponse
+	(*UpdateModRequest)(nil),                       // 8: carbonpanel.v1.UpdateModRequest
+	(*UpdateModResponse)(nil),                      // 9: carbonpanel.v1.UpdateModResponse
+	(*DeleteModRequest)(nil),                       // 10: carbonpanel.v1.DeleteModRequest
+	(*DeleteModResponse)(nil),                      // 11: carbonpanel.v1.DeleteModResponse
+	(*FabricOptimizationMod)(nil),                  // 12: carbonpanel.v1.FabricOptimizationMod
+	(*GetFabricOptimizationStackRequest)(nil),      // 13: carbonpanel.v1.GetFabricOptimizationStackRequest
+	(*GetFabricOptimizationStackResponse)(nil),     // 14: carbonpanel.v1.GetFabricOptimizationStackResponse
+	(*InstallFabricOptimizationStackRequest)(nil),  // 15: carbonpanel.v1.InstallFabricOptimizationStackRequest
+	(*InstallFabricOptimizationStackResponse)(nil), // 16: carbonpanel.v1.InstallFabricOptimizationStackResponse
+	(*timestamppb.Timestamp)(nil),                  // 17: google.protobuf.Timestamp
 }
 var file_carbonpanel_v1_mod_proto_depIdxs = []int32{
-	16, // 0: carbonpanel.v1.Mod.uploaded_at:type_name -> google.protobuf.Timestamp
-	16, // 1: carbonpanel.v1.Mod.updated_at:type_name -> google.protobuf.Timestamp
-	0,  // 2: carbonpanel.v1.ListModsResponse.mods:type_name -> carbonpanel.v1.Mod
-	0,  // 3: carbonpanel.v1.GetModResponse.mod:type_name -> carbonpanel.v1.Mod
-	0,  // 4: carbonpanel.v1.ImportUploadedModResponse.mod:type_name -> carbonpanel.v1.Mod
-	0,  // 5: carbonpanel.v1.UpdateModResponse.mod:type_name -> carbonpanel.v1.Mod
-	11, // 6: carbonpanel.v1.GetFabricOptimizationStackResponse.mods:type_name -> carbonpanel.v1.FabricOptimizationMod
-	11, // 7: carbonpanel.v1.InstallFabricOptimizationStackResponse.installed_mods:type_name -> carbonpanel.v1.FabricOptimizationMod
-	1,  // 8: carbonpanel.v1.ModService.ListMods:input_type -> carbonpanel.v1.ListModsRequest
-	3,  // 9: carbonpanel.v1.ModService.GetMod:input_type -> carbonpanel.v1.GetModRequest
-	5,  // 10: carbonpanel.v1.ModService.ImportUploadedMod:input_type -> carbonpanel.v1.ImportUploadedModRequest
-	7,  // 11: carbonpanel.v1.ModService.UpdateMod:input_type -> carbonpanel.v1.UpdateModRequest
-	9,  // 12: carbonpanel.v1.ModService.DeleteMod:input_type -> carbonpanel.v1.DeleteModRequest
-	12, // 13: carbonpanel.v1.ModService.GetFabricOptimizationStack:input_type -> carbonpanel.v1.GetFabricOptimizationStackRequest
-	14, // 14: carbonpanel.v1.ModService.InstallFabricOptimizationStack:input_type -> carbonpanel.v1.InstallFabricOptimizationStackRequest
-	2,  // 15: carbonpanel.v1.ModService.ListMods:output_type -> carbonpanel.v1.ListModsResponse
-	4,  // 16: carbonpanel.v1.ModService.GetMod:output_type -> carbonpanel.v1.GetModResponse
-	6,  // 17: carbonpanel.v1.ModService.ImportUploadedMod:output_type -> carbonpanel.v1.ImportUploadedModResponse
-	8,  // 18: carbonpanel.v1.ModService.UpdateMod:output_type -> carbonpanel.v1.UpdateModResponse
-	10, // 19: carbonpanel.v1.ModService.DeleteMod:output_type -> carbonpanel.v1.DeleteModResponse
-	13, // 20: carbonpanel.v1.ModService.GetFabricOptimizationStack:output_type -> carbonpanel.v1.GetFabricOptimizationStackResponse
-	15, // 21: carbonpanel.v1.ModService.InstallFabricOptimizationStack:output_type -> carbonpanel.v1.InstallFabricOptimizationStackResponse
-	15, // [15:22] is the sub-list for method output_type
-	8,  // [8:15] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	17, // 0: carbonpanel.v1.Mod.uploaded_at:type_name -> google.protobuf.Timestamp
+	17, // 1: carbonpanel.v1.Mod.updated_at:type_name -> google.protobuf.Timestamp
+	1,  // 2: carbonpanel.v1.Mod.update_preview:type_name -> carbonpanel.v1.InstalledModUpdate
+	0,  // 3: carbonpanel.v1.ListModsResponse.mods:type_name -> carbonpanel.v1.Mod
+	0,  // 4: carbonpanel.v1.GetModResponse.mod:type_name -> carbonpanel.v1.Mod
+	0,  // 5: carbonpanel.v1.ImportUploadedModResponse.mod:type_name -> carbonpanel.v1.Mod
+	0,  // 6: carbonpanel.v1.UpdateModResponse.mod:type_name -> carbonpanel.v1.Mod
+	12, // 7: carbonpanel.v1.GetFabricOptimizationStackResponse.mods:type_name -> carbonpanel.v1.FabricOptimizationMod
+	12, // 8: carbonpanel.v1.InstallFabricOptimizationStackResponse.installed_mods:type_name -> carbonpanel.v1.FabricOptimizationMod
+	2,  // 9: carbonpanel.v1.ModService.ListMods:input_type -> carbonpanel.v1.ListModsRequest
+	4,  // 10: carbonpanel.v1.ModService.GetMod:input_type -> carbonpanel.v1.GetModRequest
+	6,  // 11: carbonpanel.v1.ModService.ImportUploadedMod:input_type -> carbonpanel.v1.ImportUploadedModRequest
+	8,  // 12: carbonpanel.v1.ModService.UpdateMod:input_type -> carbonpanel.v1.UpdateModRequest
+	10, // 13: carbonpanel.v1.ModService.DeleteMod:input_type -> carbonpanel.v1.DeleteModRequest
+	13, // 14: carbonpanel.v1.ModService.GetFabricOptimizationStack:input_type -> carbonpanel.v1.GetFabricOptimizationStackRequest
+	15, // 15: carbonpanel.v1.ModService.InstallFabricOptimizationStack:input_type -> carbonpanel.v1.InstallFabricOptimizationStackRequest
+	3,  // 16: carbonpanel.v1.ModService.ListMods:output_type -> carbonpanel.v1.ListModsResponse
+	5,  // 17: carbonpanel.v1.ModService.GetMod:output_type -> carbonpanel.v1.GetModResponse
+	7,  // 18: carbonpanel.v1.ModService.ImportUploadedMod:output_type -> carbonpanel.v1.ImportUploadedModResponse
+	9,  // 19: carbonpanel.v1.ModService.UpdateMod:output_type -> carbonpanel.v1.UpdateModResponse
+	11, // 20: carbonpanel.v1.ModService.DeleteMod:output_type -> carbonpanel.v1.DeleteModResponse
+	14, // 21: carbonpanel.v1.ModService.GetFabricOptimizationStack:output_type -> carbonpanel.v1.GetFabricOptimizationStackResponse
+	16, // 22: carbonpanel.v1.ModService.InstallFabricOptimizationStack:output_type -> carbonpanel.v1.InstallFabricOptimizationStackResponse
+	16, // [16:23] is the sub-list for method output_type
+	9,  // [9:16] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_carbonpanel_v1_mod_proto_init() }
@@ -1208,14 +1369,14 @@ func file_carbonpanel_v1_mod_proto_init() {
 	if File_carbonpanel_v1_mod_proto != nil {
 		return
 	}
-	file_carbonpanel_v1_mod_proto_msgTypes[7].OneofWrappers = []any{}
+	file_carbonpanel_v1_mod_proto_msgTypes[8].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_carbonpanel_v1_mod_proto_rawDesc), len(file_carbonpanel_v1_mod_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
