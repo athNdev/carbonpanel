@@ -448,7 +448,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							>{primaryNodeStatus.label}</span
 						>
 					</div>
-					<div class="mt-1 text-xs text-muted-foreground">PORT {appPort || '···'} · CARBON V11</div>
+					<div class="mt-1 text-xs text-muted-foreground">PORT {appPort || '···'}</div>
 				</a>
 			{/if}
 		</aside>
