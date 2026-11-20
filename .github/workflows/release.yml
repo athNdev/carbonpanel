@@ -1328,6 +1328,8 @@ jobs:
       - name: Fail when a required phase was skipped, failed or unverified
         working-directory: .trusted-release
         env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          REQUEST_PUBLISH: ${{ inputs.publish }}
           RELEASE_PUBLISH: ${{ needs.plan.outputs.publish }}
           RELEASE_CHANNEL: ${{ needs.plan.outputs.channel }}
           RESULT_PLAN: ${{ needs.plan.result }}
@@ -1345,6 +1347,7 @@ jobs:
           OUT_ALIASES_VERIFIED: ${{ needs.promote-aliases.outputs.aliases_verified }}
         run: |
           python3 scripts/release.py verify-publication-phases \
+            --event "$RELEASE_EVENT" --request-publish "$REQUEST_PUBLISH" \
             --publish "$RELEASE_PUBLISH" --channel "$RELEASE_CHANNEL" \
             --result-plan "$RESULT_PLAN" --result-image "$RESULT_IMAGE" \
             --result-immutable "$RESULT_IMMUTABLE" --result-draft "$RESULT_DRAFT" \

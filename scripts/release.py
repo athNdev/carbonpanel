@@ -1827,26 +1827,55 @@ def verify_publication_ref(args):
     return allowed
 
 
+PHASE_RESULTS = ("success", "failure", "cancelled", "skipped", "")
+KNOWN_CHANNELS = ("stable", "prerelease")
+POSITIVE_TRANSACTION_ACTIONS = ("publish", "noop")
+
+
 def publication_phases_decision(state):
     """Decide whether every side-effect phase of a Release run really ran.
 
     GitHub job ``if`` expressions can silently skip a phase when an ancestor was
     deliberately skipped (for example the staged publish path skips the whole
     build DAG). A green run with every write phase skipped is NOT a publication.
-    This pure function is the fail-closed terminal check: it consumes the actual
-    job results/outputs of one run and returns ``(ok, reason)``.
 
-    ``state`` keys: publish/channel ('true'/'false', 'stable'/...), result_<job>
-    and out_<job>_<output> for each phase.
+    Operator intent and the Python plan decision are deliberately separate:
+    ``event``/``request_publish`` come from the trusted dispatch, while
+    ``publish``/``channel`` are the plan's computed outputs. A false or missing
+    plan output can never turn an explicit publish request into a green
+    rehearsal. Unknown job results fail closed. No credential is read here.
     """
-    publish = str(state.get("publish", "false")).lower() == "true"
+    event = str(state.get("event", ""))
+    requested = (event == "workflow_dispatch"
+                 and str(state.get("request_publish", "")).lower() == "true")
+    decision = str(state.get("publish", "")).lower() == "true"
     channel = str(state.get("channel", ""))
-    staged = publish and channel == "stable"
     results = {k[len("result_"):]: str(v)
                for k, v in state.items() if k.startswith("result_")}
     outputs = {k[len("out_"):]: str(v)
                for k, v in state.items() if k.startswith("out_")}
 
+    # Unknown results are never silently treated as rehearsal or success.
+    for job, result in results.items():
+        if result not in PHASE_RESULTS:
+            return False, "unknown result for " + job + ": " + result
+    plan_result = results.get("plan", "")
+    if requested:
+        if plan_result != "success":
+            return False, "explicit publish requires plan result success, got " + (plan_result or "missing")
+        if not decision:
+            return False, "explicit publish requires an affirmative plan decision"
+        if channel not in KNOWN_CHANNELS:
+            return False, "unrecognized publication channel: " + (channel or "missing")
+    else:
+        # Automatic events and dry dispatches can only stage. A plan that says
+        # publish=true without a trusted dispatch request is a contradiction.
+        if decision:
+            return False, "plan decided publish without a trusted explicit request"
+        if plan_result not in ("success", "skipped", ""):
+            return False, "plan result not usable: " + plan_result
+
+    staged = requested and channel == "stable"
     side_effect = ("publish-immutable", "prepare-draft", "promote-aliases",
                    "publish")
     required = list(side_effect)
@@ -1857,11 +1886,9 @@ def publication_phases_decision(state):
         # image in this run; only Stable may consume a pinned staged run.
         required.append("image")
 
-    if not publish:
-        # Rehearsal / staging: no write phase may report success. This catches
-        # an accidental publication from an automatic or dry event.
+    if not requested:
         for job in side_effect + ("stable-channel-transaction", "publish-minor"):
-            if results.get(job, "skipped") not in ("skipped", "", "not_run"):
+            if results.get(job, "skipped") not in ("skipped", ""):
                 return False, "rehearsal ran side-effect phase " + job
         return True, "rehearsal: no side-effect phase ran"
 
@@ -1880,8 +1907,8 @@ def publication_phases_decision(state):
         return False, "private draft release id missing"
     if staged:
         action = outputs.get("stable-channel-transaction_action", "")
-        if not action or action in ("refuse", "rollback"):
-            return False, "stable transaction action=" + (action or "missing")
+        if action not in POSITIVE_TRANSACTION_ACTIONS:
+            return False, "stable transaction action not allowlisted: " + (action or "missing")
         if outputs.get("promote-aliases_aliases_verified") != "true":
             return False, "alias verification output missing"
     return True, "all required publication phases ran and verified"
@@ -1890,6 +1917,8 @@ def publication_phases_decision(state):
 def verify_publication_phases_cli(args):
     """Terminal workflow gate for one explicit Release run."""
     state = {
+        "event": args.event,
+        "request_publish": args.request_publish,
         "publish": args.publish,
         "channel": args.channel,
         "result_plan": args.result_plan,
@@ -1908,6 +1937,7 @@ def verify_publication_phases_cli(args):
     }
     ok, reason = publication_phases_decision(state)
     values = {"allow": str(ok).lower(), "reason": reason,
+              "event": args.event, "request_publish": args.request_publish,
               "publish": args.publish, "channel": args.channel}
     print(json.dumps(values, indent=2))
     write_output(values)
@@ -3885,6 +3915,8 @@ def build_parser():
     ref_checker.add_argument("--ref", required=True)
     ref_checker.add_argument("--event", default="workflow_dispatch")
     phase_checker = commands.add_parser("verify-publication-phases")
+    phase_checker.add_argument("--event", default="")
+    phase_checker.add_argument("--request-publish", default="")
     for name in ("publish", "channel", "result-plan", "result-image",
                  "result-immutable", "result-draft", "result-transaction",
                  "result-aliases", "result-publish", "result-minor",

@@ -35,6 +35,13 @@ sources:
   action, alias verification) is missing. Rehearsals must have no successful
   write phase. The gate runs from the trusted workflow SHA, never from the
   pinned candidate commit, so the candidate cannot select its own trust logic.
+- Operator intent is the trusted dispatch event plus the raw `publish` input;
+  the Python plan's `publish`/`channel` outputs are only a decision. An explicit
+  request requires plan result `success`, an affirmative decision and a
+  recognized channel (`stable`/`prerelease`); a blank/false decision or unknown
+  job result can never be reported as a green rehearsal. Stable transaction
+  outcomes are allowlisted to `publish`/`noop`; `reconcile`, `rollback`,
+  `refuse`, `stage` and empty are not positive publication results.
 - No registry, Pages, tag or release write is added or bypassed by this fix; it
   only makes a silent no-op publication impossible to report as success.
 

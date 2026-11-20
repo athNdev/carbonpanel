@@ -3645,7 +3645,8 @@ class PublicationDagPathTests(unittest.TestCase):
         "out_promote-aliases_aliases_verified": "true",
     }
 
-    def state(self, publish="true", channel="stable", staged=True, **overrides):
+    def state(self, publish="true", channel="stable", staged=True,
+              event="workflow_dispatch", request_publish="true", **overrides):
         results = {
             "result_plan": "success",
             "result_image": "skipped" if staged else "success",
@@ -3657,7 +3658,9 @@ class PublicationDagPathTests(unittest.TestCase):
             "result_publish-minor": "success" if channel == "stable" else "skipped",
         }
         results.update({k: v for k, v in overrides.items() if k.startswith("result_")})
-        values = {"publish": publish, "channel": channel, **results, **self.OK_OUTPUTS}
+        values = {"event": event, "request_publish": request_publish,
+                  "publish": publish, "channel": channel,
+                  **results, **self.OK_OUTPUTS}
         values.update({k: v for k, v in overrides.items() if not k.startswith("result_")})
         return values
 
@@ -3667,10 +3670,10 @@ class PublicationDagPathTests(unittest.TestCase):
 
     def test_ordinary_non_stable_publish_requires_real_image(self):
         ok, reason = release.publication_phases_decision(
-            self.state(channel="beta", staged=False))
+            self.state(channel="prerelease", staged=False))
         self.assertTrue(ok, reason)
         ok, reason = release.publication_phases_decision(
-            self.state(channel="beta", staged=False, **{"result_image": "skipped"}))
+            self.state(channel="prerelease", staged=False, **{"result_image": "skipped"}))
         self.assertFalse(ok)
         self.assertIn("image", reason)
 
@@ -3694,7 +3697,7 @@ class PublicationDagPathTests(unittest.TestCase):
             self.assertFalse(ok, (key, reason))
 
     def test_rehearsal_cannot_run_any_write_phase(self):
-        state = self.state(publish="false")
+        state = self.state(publish="false", request_publish="false")
         for phase in ("publish-immutable", "prepare-draft", "promote-aliases",
                       "publish", "stable-channel-transaction", "publish-minor"):
             state["result_" + phase] = "skipped"
@@ -3704,6 +3707,73 @@ class PublicationDagPathTests(unittest.TestCase):
         ok, reason = release.publication_phases_decision(state)
         self.assertFalse(ok)
         self.assertIn("prepare-draft", reason)
+
+    def test_explicit_request_never_trusts_a_blank_or_false_plan_decision(self):
+        for decision in ("", "false", "unknown"):
+            ok, reason = release.publication_phases_decision(
+                self.state(publish=decision))
+            self.assertFalse(ok, (decision, reason))
+            self.assertIn("affirmative", reason)
+
+    def test_explicit_request_requires_plan_success_and_known_channel(self):
+        for result in ("", "skipped", "failure", "cancelled"):
+            ok, reason = release.publication_phases_decision(
+                self.state(**{"result_plan": result}))
+            self.assertFalse(ok, (result, reason))
+            self.assertIn("plan result", reason)
+        for channel in ("", "v1.0.40", "preview", "mod-v2.0.6"):
+            ok, reason = release.publication_phases_decision(self.state(channel=channel))
+            self.assertFalse(ok, (channel, reason))
+            self.assertIn("channel", reason)
+        ok, reason = release.publication_phases_decision(
+            self.state(event="push", request_publish="true", publish="true"))
+        self.assertFalse(ok)
+        self.assertIn("explicit request", reason)
+        ok, reason = release.publication_phases_decision(
+            self.state(**{"result_prepare-draft": "not_a_status"}))
+        self.assertFalse(ok)
+        self.assertIn("unknown result", reason)
+
+    def test_transaction_action_allowlist(self):
+        for action in ("publish", "noop"):
+            ok, reason = release.publication_phases_decision(
+                self.state(**{"out_stable-channel-transaction_action": action}))
+            self.assertTrue(ok, (action, reason))
+        for action in ("", "reconcile", "rollback", "refuse", "stage"):
+            ok, reason = release.publication_phases_decision(
+                self.state(**{"out_stable-channel-transaction_action": action}))
+            self.assertFalse(ok, (action, reason))
+            self.assertIn("allowlist", reason)
+
+    def test_terminal_cli_rejects_blank_plan_on_explicit_request(self):
+        # Real CLI path, not just the pure decision function: a blank plan
+        # decision with an explicit trusted request must fail closed.
+        argv = ["release.py", "verify-publication-phases",
+                "--event", "workflow_dispatch", "--request-publish", "true",
+                "--publish", "", "--channel", "stable",
+                "--result-plan", "success", "--result-image", "skipped",
+                "--result-immutable", "success", "--result-draft", "success",
+                "--result-transaction", "success", "--result-aliases", "success",
+                "--result-publish", "success", "--result-minor", "success",
+                "--verified", "true", "--digest", "sha256:" + "a" * 64,
+                "--release-id", "123", "--transaction-action", "publish",
+                "--aliases-verified", "true"]
+        out = io.StringIO()
+        with patch("sys.argv", argv), redirect_stdout(out):
+            with self.assertRaisesRegex(ValueError, "affirmative plan decision"):
+                release.main()
+
+    def test_terminal_gate_receives_raw_event_and_request_from_workflow(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        terminal = yaml.safe_load(source)["jobs"]["verify-publication-phases"]
+        step = next(s for s in terminal["steps"]
+                    if "verify-publication-phases" in str(s.get("run", "")))
+        env = step["env"]
+        self.assertEqual(env["RELEASE_EVENT"], "${{ github.event_name }}")
+        self.assertEqual(env["REQUEST_PUBLISH"], "${{ inputs.publish }}")
+        self.assertEqual(env["RESULT_PLAN"], "${{ needs.plan.result }}")
+        self.assertEqual(env["RELEASE_PUBLISH"], "${{ needs.plan.outputs.publish }}")
 
     def test_workflow_uses_explicit_phase_guards_and_trusted_terminal_gate(self):
         import yaml
