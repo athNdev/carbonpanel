@@ -257,6 +257,13 @@ trusted-proxy attestation. It is never trusted on its own. Panel TLS and
 reverse-proxy artifacts are owned by Track A/B; Track C does not invent a
 second TLS stack and must refuse topologies it cannot verify.
 
+The direct TLS bootstrap uses the shared `TLSChannelBinding` function. The
+controller and node derive 32 bytes from their own TLS 1.3 connection using
+the exporter label `EXPORTER-CarbonPanel-Node-Enrollment-v1` and empty exporter
+context. The controller stores this binding with the challenge. The claim
+must arrive on the issuing connection and match that binding. The synthetic
+in-process fixture entry point refuses challenges issued over TLS.
+
 ### Three authorization domains — no implicit privilege crossing
 
 | Domain | Actor and credential | Permitted | Explicitly forbidden |

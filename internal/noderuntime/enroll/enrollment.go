@@ -110,6 +110,7 @@ type Enrollment struct {
 	Revoked              bool
 	CertSerial           string
 	ChallengeID          string
+	ChallengeBinding     []byte
 	Nonce                []byte
 	NonceExpiresAt       time.Time
 	NonceUsed            bool
@@ -207,7 +208,7 @@ func (a *EnrollmentAuthority) CreateEnrollment(cred Credential, req *v1.CreateEn
 	if err := a.AuthorizeOperator(cred); err != nil {
 		return nil, err
 	}
-	if req == nil || req.GetNodeId() == "" || len(req.GetApprovedPublicKeySpki()) == 0 ||
+	if req == nil || req.GetNodeId() == "" || strings.ContainsRune(req.GetNodeId(), 0) || len(req.GetApprovedPublicKeySpki()) == 0 ||
 		len(req.GetApprovedKeyFingerprint()) == 0 || len(req.GetEnrollmentSecretDigest()) == 0 ||
 		len(req.GetEnrollmentSalt()) == 0 || len(req.GetCsrPre()) == 0 {
 		return nil, ErrMissingProof
@@ -237,17 +238,17 @@ func (a *EnrollmentAuthority) CreateEnrollment(cred Credential, req *v1.CreateEn
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	id := fmt.Sprintf("enroll-%d", len(a.enrollments)+1)
+	id := "enroll-" + rand.Text()
 	e := &Enrollment{
 		ID: id, NodeID: req.GetNodeId(), Label: req.GetNodeLabel(),
 		State: "pending", ExpiresAt: a.clock().Add(ttl),
-		Salt: append([]byte{}, req.GetEnrollmentSalt()...),
-		Digest: append([]byte{}, req.GetEnrollmentSecretDigest()...),
-		ApprovedSPKI: append([]byte{}, req.GetApprovedPublicKeySpki()...),
+		Salt:                append([]byte{}, req.GetEnrollmentSalt()...),
+		Digest:              append([]byte{}, req.GetEnrollmentSecretDigest()...),
+		ApprovedSPKI:        append([]byte{}, req.GetApprovedPublicKeySpki()...),
 		ApprovedFingerprint: append([]byte{}, req.GetApprovedKeyFingerprint()...),
-		CSRPre: append([]byte{}, req.GetCsrPre()...),
-		Capabilities: append([]v1.NodeCapability{}, req.GetRequiredCapabilities()...),
-		ProtocolVersion: req.GetProtocolVersion(),
+		CSRPre:              append([]byte{}, req.GetCsrPre()...),
+		Capabilities:        append([]v1.NodeCapability{}, req.GetRequiredCapabilities()...),
+		ProtocolVersion:     req.GetProtocolVersion(),
 	}
 	a.enrollments[id] = e
 	return &v1.CreateEnrollmentResponse{Enrollment: enrollmentView(e)}, nil
@@ -259,11 +260,15 @@ func (a *EnrollmentAuthority) CreateEnrollment(cred Credential, req *v1.CreateEn
 // field. The returned expires_at is the ENROLLMENT expiry bound into SIG_CLAIM;
 // the nonce has its own shorter internal TTL used only for staleness rejection.
 func (a *EnrollmentAuthority) BeginEnrollmentChallenge(req *v1.BeginEnrollmentChallengeRequest) (*v1.BeginEnrollmentChallengeResponse, error) {
-	if req == nil || req.GetEnrollmentId() == "" {
-		return nil, ErrRefused
-	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.beginEnrollmentChallengeLocked(req, a.channelContextLocked(), false)
+}
+
+func (a *EnrollmentAuthority) beginEnrollmentChallengeLocked(req *v1.BeginEnrollmentChallengeRequest, binding []byte, bound bool) (*v1.BeginEnrollmentChallengeResponse, error) {
+	if req.GetEnrollmentId() == "" {
+		return nil, ErrRefused
+	}
 	e := a.enrollments[req.GetEnrollmentId()]
 	if e == nil || e.State != "pending" || a.clock().After(e.ExpiresAt) {
 		return nil, ErrRefused
@@ -271,20 +276,26 @@ func (a *EnrollmentAuthority) BeginEnrollmentChallenge(req *v1.BeginEnrollmentCh
 	if e.challengeCount >= 3 {
 		return nil, ErrRateLimited
 	}
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, ErrRefused
+	}
 	e.challengeCount++
-	e.ChallengeID = fmt.Sprintf("challenge-%s-%d", e.ID, e.challengeCount)
-	nonceInput := sha256.Sum256([]byte("nonce:" + e.ChallengeID + ":" + string(e.Nonce) + ":" + fmt.Sprint(a.clock().UnixNano())))
-	e.Nonce = nonceInput[:]
+	e.ChallengeID = "challenge-" + rand.Text()
+	e.ChallengeBinding = nil
+	if bound {
+		e.ChallengeBinding = append([]byte{}, binding...)
+	}
+	e.Nonce = nonce
 	e.NonceExpiresAt = a.clock().Add(2 * time.Minute)
 	e.NonceUsed = false
-	ctx := a.channelContextLocked()
 	return &v1.BeginEnrollmentChallengeResponse{
-		ChallengeId: e.ChallengeID,
-		ServerNonce: append([]byte{}, e.Nonce...),
-		ExpiresAt:   timestamppb.New(e.ExpiresAt),
-		NodeId:      e.NodeID,
-		EnrollmentId: e.ID,
-		ChannelContext: append([]byte{}, ctx...),
+		ChallengeId:    e.ChallengeID,
+		ServerNonce:    append([]byte{}, e.Nonce...),
+		ExpiresAt:      timestamppb.New(e.ExpiresAt),
+		NodeId:         e.NodeID,
+		EnrollmentId:   e.ID,
+		ChannelContext: append([]byte{}, binding...),
 	}, nil
 }
 
@@ -296,6 +307,10 @@ func (a *EnrollmentAuthority) BeginEnrollmentChallenge(req *v1.BeginEnrollmentCh
 func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*v1.ClaimEnrollmentResponse, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	return a.claimEnrollmentLocked(req, a.channelContextLocked(), false)
+}
+
+func (a *EnrollmentAuthority) claimEnrollmentLocked(req *v1.ClaimEnrollmentRequest, binding []byte, bound bool) (*v1.ClaimEnrollmentResponse, error) {
 	if req == nil {
 		return nil, ErrRefused
 	}
@@ -308,6 +323,12 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 	}
 	if len(e.ApprovedSPKI) == 0 || len(e.ApprovedFingerprint) == 0 || len(e.CSRPre) == 0 {
 		return nil, ErrMissingProof
+	}
+	// A bound challenge is redeemable only on the connection that issued it.
+	// The offline fixture entry point cannot complete a bound challenge.
+	if bound != (len(e.ChallengeBinding) != 0) ||
+		(bound && subtle.ConstantTimeCompare(binding, e.ChallengeBinding) != 1) {
+		return nil, ErrTopology
 	}
 	// CSR_PRE is registration material: its key must be the approved key.
 	csr, err := x509.ParseCertificateRequest(e.CSRPre)
@@ -329,7 +350,7 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 	claimedCaps := req.GetCapabilities().GetCapabilities()
 	if !ok || !ed25519.Verify(pub, ClaimContext(
 		e.NodeID, e.ID, req.GetChallengeId(), e.Nonce,
-		e.ExpiresAt, claimedCaps, a.channelContextLocked(),
+		e.ExpiresAt, claimedCaps, binding,
 	), req.GetFreshClaimSignature()) {
 		return nil, ErrMismatchedKey
 	}
@@ -344,11 +365,7 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 		return nil, ErrStaleNonce
 	}
 	// TLS topology support/refusal, controller-derived only.
-	ctx := a.channelContextLocked()
-	if ctx == nil {
-		return nil, ErrTopology
-	}
-	if subtle.ConstantTimeCompare(ctx, req.GetChannelBindingEvidence()) != 1 {
+	if binding == nil || subtle.ConstantTimeCompare(binding, req.GetChannelBindingEvidence()) != 1 {
 		return nil, ErrTopology
 	}
 	// Fault seam: after verification but before issuance or any mutation.
@@ -373,7 +390,8 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 	e.NonceUsed = true
 	e.State = "active"
 	e.ConsumedAt = &now
-	e.ChannelBinding = append([]byte{}, ctx...)
+	e.ChannelBinding = append([]byte{}, binding...)
+	e.ChallengeBinding = nil
 	e.CredentialGeneration = 1
 	e.CertSerial = certSerial
 	a.serialCounter = nextCounter
@@ -386,7 +404,7 @@ func (a *EnrollmentAuthority) ClaimEnrollment(req *v1.ClaimEnrollmentRequest) (*
 		},
 		Claims: &v1.NodeAuthorizationClaims{
 			NodeId: e.NodeID, ObjectId: e.NodeID,
-			Scopes: []string{"node:heartbeat", "node:report", "node:ack"},
+			Scopes:               []string{"node:heartbeat", "node:report", "node:ack"},
 			CredentialGeneration: 1, IssuedAt: timestamppb.New(now),
 			ExpiresAt: timestamppb.New(now.Add(24 * time.Hour)),
 		},
@@ -460,9 +478,9 @@ func enrollmentView(e *Enrollment) *v1.OneTimeEnrollment {
 	return &v1.OneTimeEnrollment{
 		EnrollmentId: e.ID, NodeLabel: e.Label,
 		TokenFingerprint: fmt.Sprintf("sha256:%x", e.Digest[:4]),
-		CreatedAt: timestamppb.New(e.ExpiresAt.Add(-time.Hour)),
-		ExpiresAt: timestamppb.New(e.ExpiresAt),
-		State: state, RequiredCapabilities: e.Capabilities,
+		CreatedAt:        timestamppb.New(e.ExpiresAt.Add(-time.Hour)),
+		ExpiresAt:        timestamppb.New(e.ExpiresAt),
+		State:            state, RequiredCapabilities: e.Capabilities,
 		ProtocolVersion: e.ProtocolVersion, NodeId: e.NodeID,
 		ApprovedKeyFingerprint: append([]byte{}, e.ApprovedFingerprint...),
 	}
@@ -708,12 +726,12 @@ func GenerateNodeBundle(runtimeDir, nodeID, label string) (*NodeBundle, *v1.Crea
 			v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET,
 			v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS,
 		},
-		ProtocolVersion: ProtocolVersion,
-		ApprovedPublicKeySpki: spki,
+		ProtocolVersion:        ProtocolVersion,
+		ApprovedPublicKeySpki:  spki,
 		ApprovedKeyFingerprint: fp[:],
 		EnrollmentSecretDigest: digest[:],
-		EnrollmentSalt: salt,
-		CsrPre: csrDER,
+		EnrollmentSalt:         salt,
+		CsrPre:                 csrDER,
 	}
 	return bundle, req, nil
 }
@@ -730,11 +748,11 @@ func (b *NodeBundle) BuildClaim(enrollmentID string, challenge *v1.BeginEnrollme
 		challenge.GetServerNonce(), expires, capabilities, challenge.GetChannelContext())
 	sig := ed25519.Sign(b.key, ctx)
 	return &v1.ClaimEnrollmentRequest{
-		EnrollmentId: enrollmentID,
-		EnrollmentToken: string(b.secret),
-		ChallengeId: challenge.GetChallengeId(),
-		FreshClaimSignature: sig,
-		Capabilities:        &v1.NodeCapabilities{Capabilities: capabilities},
+		EnrollmentId:           enrollmentID,
+		EnrollmentToken:        string(b.secret),
+		ChallengeId:            challenge.GetChallengeId(),
+		FreshClaimSignature:    sig,
+		Capabilities:           &v1.NodeCapabilities{Capabilities: capabilities},
 		ChannelBindingEvidence: append([]byte{}, challenge.GetChannelContext()...),
 	}, nil
 }

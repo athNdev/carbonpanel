@@ -44,6 +44,10 @@ claim context, add a second certificate policy or duplicate a domain check.
   deploys anything. Keys and CAs are owned/synthetic; fixtures prove refusal
   and state-machine outcomes only.
 
+- Direct TLS bootstrap binds its stored challenge to the actual TLS 1.3
+  connection through the shared exporter. A different connection, missing TLS
+  state or caller-provided context fails closed. See [ADR 0019](../../docs/adr/0019-node-control-contract.md).
+
 # Why
 
 Parallel deployment modes previously each risked reimplementing proof of
