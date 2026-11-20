@@ -62,9 +62,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import {
 		deriveViewState,
 		formatAge,
+		timestampToMs,
 		canMountEmbed,
 		liveOverlaysEnabled,
-		timestampToMs,
 		VIEW_STATE_LABEL,
 		VIEW_STATE_TONE
 	} from '$lib/features/worldview/state';
@@ -105,16 +105,16 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let serverId = $derived(page.params.server ?? '');
 	let worldKey = $derived(page.params.world ?? '');
 	let worldRef = $derived<WorldRef | null>(decodeWorldKey(worldKey));
-	let statusKey = $derived(`${serverId}:${worldKey}`);
+	let statusKey = $derived((auth.user?.id ?? '') + ':' + serverId + ':' + worldKey);
 	let snapshot = $derived($store);
 	let statusTarget = $derived(snapshot.statuses[statusKey]);
 	let view = $derived(deriveViewState(statusTarget));
 	let statusError = $derived(snapshot.statusErrors[statusKey]);
 	let statusUnavailable = $derived(
-		Boolean(statusError) || (!statusTarget && snapshot.statusLoading[statusKey] === false)
+		!statusTarget && (Boolean(statusError) || snapshot.statusLoading[statusKey] === false)
 	);
 	let rendererControlsAvailable = $derived(
-		!statusUnavailable && (view === 'ready' || view === 'stale')
+		view === 'ready' || view === 'stale' || view === 'saved'
 	);
 
 	let canRead = $derived(checkPermission(auth.permissions, 'world_view', 'read', serverId));
@@ -123,13 +123,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	);
 	let canUpdate = $derived(checkPermission(auth.permissions, 'world_view', 'update', serverId));
 	let canCommand = $derived(checkPermission(auth.permissions, 'servers', 'command', serverId));
-	let denied = $state(false);
+	let deniedByRead = $state(false);
+	let denied = $derived(deniedByRead || isReadDenied(statusError));
+	let canBrowseAll = $derived(checkPermission(auth.permissions, 'world_view', 'read', '*'));
+	let worldListHref = $derived(
+		canBrowseAll
+			? resolve('/worlds')
+			: resolve('/worlds') + '?' + new URLSearchParams({ server: serverId })
+	);
 	let worldTitle = $derived(
 		canRead && !denied ? statusTarget?.name || worldRef?.levelName || 'World map' : 'World map'
 	);
 
 	let session = $state<GetWorldViewSessionResponse | undefined>(undefined);
 	let sessionError = $state<unknown>(null);
+	let sessionOwner = $state('');
+	let scopeVersion = 0;
+	let sessionAttempt = 0;
+	let refreshAttempt = 0;
+	let overlaysAttempt = 0;
+	let refreshWarning = $derived(
+		Boolean(statusTarget && (statusError || (session && sessionError)))
+	);
 	let capabilities = $state<Capability[]>([]);
 	let capabilitiesRenderer = $derived(statusTarget?.renderer?.type ?? statusTarget?.rendererType);
 	let matrix = $derived<CapabilityMatrix>(
@@ -185,37 +200,64 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		return error instanceof ConnectError && error.code === Code.PermissionDenied;
 	}
 
+	function isReadDenied(error: unknown): boolean {
+		return (
+			isPermissionDenied(error) ||
+			(error instanceof ConnectError && error.code === Code.Unauthenticated)
+		);
+	}
+
+	function scopeGuard() {
+		const key = statusKey;
+		const version = scopeVersion;
+		return () => key === statusKey && version === scopeVersion && canRead;
+	}
+
+	function clearSession() {
+		sessionAttempt++;
+		sessionOwner = '';
+		session = undefined;
+	}
+
 	function handleError(error: unknown) {
-		if (isPermissionDenied(error)) denied = true;
+		if (!isReadDenied(error)) return;
+		deniedByRead = true;
+		clearSession();
 	}
 
 	async function loadSession() {
 		if (!worldRef) return;
+		const current = scopeGuard();
 		const key = statusKey;
+		const attempt = ++sessionAttempt;
 		try {
 			const response = await rpcClient.worldView.getWorldViewSession(
 				create(GetWorldViewSessionRequestSchema, { serverId, worldRef }),
 				silentCallOptions
 			);
-			if (key !== statusKey) return;
+			if (!current() || attempt !== sessionAttempt || denied) return;
+			sessionOwner = key;
 			session = response;
 			sessionError = null;
 		} catch (error) {
-			if (key !== statusKey) return;
+			if (!current() || attempt !== sessionAttempt) return;
 			handleError(error);
-			session = undefined;
+			const expiry = timestampToMs(session?.expiresAt);
+			if (expiry !== null && expiry <= Date.now()) clearSession();
 			sessionError = error;
 		}
 	}
 
 	async function loadCapabilities() {
+		const current = scopeGuard();
 		try {
 			const response = await rpcClient.worldView.listCapabilities(
 				create(ListCapabilitiesRequestSchema, { serverId }),
 				silentCallOptions
 			);
-			capabilities = response.capabilities;
+			if (current()) capabilities = response.capabilities;
 		} catch (error) {
+			if (!current()) return;
 			handleError(error);
 			capabilities = [];
 		}
@@ -223,42 +265,64 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	async function loadOverlays() {
 		if (!worldRef) return;
+		const current = scopeGuard();
+		const attempt = ++overlaysAttempt;
 		try {
 			const response = await rpcClient.worldView.listMapOverlays(
 				create(ListMapOverlaysRequestSchema, { serverId, worldRef, dimension }),
 				silentCallOptions
 			);
+			if (!current() || attempt !== overlaysAttempt) return;
 			overlays = response.overlays;
 			overlaysError = null;
 		} catch (error) {
+			if (!current() || attempt !== overlaysAttempt) return;
 			handleError(error);
 			overlaysError = error;
 		}
 	}
 
 	async function retry() {
-		denied = false;
-		sessionError = null;
-		overlaysError = null;
-		if (!worldRef) return;
+		if (!worldRef || !canRead) return;
 		const wasAvailable = rendererControlsAvailable;
-		const key = statusKey;
-		await Promise.allSettled([
-			store.loadStatus(key, serverId, worldRef).catch(handleError),
+		const current = scopeGuard();
+		const attempt = ++refreshAttempt;
+		const [status] = await Promise.allSettled([
+			store.loadStatus(statusKey, serverId, worldRef),
 			loadCapabilities(),
 			loadOverlays()
 		]);
-		if (key === statusKey && !denied && wasAvailable && rendererControlsAvailable) {
+		if (
+			current() &&
+			attempt === refreshAttempt &&
+			!denied &&
+			status.status === 'fulfilled' &&
+			wasAvailable &&
+			rendererControlsAvailable
+		)
 			await loadSession();
-		}
 	}
 
-	// Status polling is owned by this page and refcounted in the store.
+	// Each page scope owns its polling and rendered state. Store reset makes
+	// an outstanding request from a departed route unable to write status.
 	$effect(() => {
-		if (!canRead || !worldRef) return;
-		const close = store.watchStatus(statusKey, serverId, worldRef, 5_000);
-		void store.loadStatus(statusKey, serverId, worldRef).catch(handleError);
-		return close;
+		if (!canRead || !worldRef || auth.isLoading) return;
+		const key = statusKey;
+		const close = store.watchStatus(key, serverId, worldRef, 5_000);
+		void store.loadStatus(key, serverId, worldRef).catch(() => {});
+		return () => {
+			close();
+			scopeVersion++;
+			store.reset();
+			deniedByRead = false;
+			clearSession();
+			sessionError = null;
+			capabilities = [];
+			overlays = [];
+			overlaysError = null;
+			playerVisible = false;
+			visibilityNote = '';
+		};
 	});
 
 	$effect(() => {
@@ -272,20 +336,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
-		session = undefined;
-		sessionError = null;
-		if (
-			canRead &&
-			worldRef &&
-			!statusUnavailable &&
-			(view === 'ready' || view === 'stale' || view === 'saved')
-		) {
-			void loadSession();
+		if (!canRead || !worldRef || denied || !rendererControlsAvailable) {
+			clearSession();
+			return;
 		}
+		void loadSession();
 	});
 
 	$effect(() => {
-		if (!canRead || denied || view !== 'saved') return;
+		if (!canRead || denied || view !== 'saved' || sessionOwner !== statusKey) return;
 		const expiresAt = timestampToMs(session?.expiresAt);
 		if (expiresAt === null) return;
 		const refresh = setTimeout(
@@ -296,10 +355,15 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	let embed = $derived(
-		evaluateSession(view === 'saved' || canMountEmbed(view, session?.proxyPath), session)
+		evaluateSession(
+			!denied &&
+				sessionOwner === statusKey &&
+				(view === 'saved' || canMountEmbed(view, session?.proxyPath)),
+			session
+		)
 	);
 	let visibleOverlays = $derived(
-		liveOverlaysEnabled(view)
+		!statusError && liveOverlaysEnabled(view)
 			? filterOverlays(overlays, dimension, playerVisible && canObserve)
 			: []
 	);
@@ -313,7 +377,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			? 'This world link is invalid.'
 			: statusUnavailable
 				? 'Map status unavailable.'
-				: 'Map state: ' + VIEW_STATE_LABEL[view]
+				: refreshWarning
+					? 'Map status refresh failed. Showing the last known state.'
+					: 'Map state: ' + VIEW_STATE_LABEL[view]
 	);
 
 	function handleMapKeydown(event: KeyboardEvent) {
@@ -458,7 +524,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	data-testid="showcase-world-map-content"
 >
 	<CarbonBreadcrumbs
-		items={[{ label: 'World View', href: resolve('/worlds') }, { label: worldTitle }]}
+		items={[{ label: 'World View', href: worldListHref }, { label: worldTitle }]}
 	/>
 
 	<CarbonPageHeader title={worldTitle}>
@@ -466,18 +532,20 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{#if canRead && !denied && worldRef}
 				{#if statusUnavailable}
 					<CarbonTag type="red" size="sm">STATUS UNAVAILABLE</CarbonTag>
+				{:else if refreshWarning}
+					<CarbonTag type="yellow" size="sm">LAST KNOWN</CarbonTag>
 				{:else}
 					<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
 				{/if}
 			{/if}
 		{/snippet}
 		{#snippet actions()}
-			<CarbonButton kind="tertiary" size="sm" href={resolve('/worlds')}>
+			<CarbonButton kind="tertiary" size="sm" href={worldListHref} class="gap-2">
 				<ArrowLeft class="h-3.5 w-3.5" />
-				<span>All worlds</span>
+				<span>{canBrowseAll ? 'All worlds' : 'Server maps'}</span>
 			</CarbonButton>
-			{#if canRead && !denied && worldRef && !statusUnavailable}
-				<CarbonButton kind="secondary" size="sm" onclick={retry}>
+			{#if canRead && !denied && worldRef && !statusUnavailable && view !== 'unknown'}
+				<CarbonButton kind="secondary" size="sm" class="gap-2" onclick={retry}>
 					<RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />
 					<span>Refresh</span>
 				</CarbonButton>
@@ -513,12 +581,23 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					<span class="text-xs break-all text-muted-foreground">{worldChip}</span>
 				</div>
 
+				{#if refreshWarning}
+					<p
+						role="alert"
+						class="border-l-4 border-warning bg-warning/10 px-3 py-2 text-xs text-foreground"
+					>
+						Could not refresh the map. Showing the last known state.
+					</p>
+				{/if}
+
 				{#if statusUnavailable || view === 'unknown'}
 					<CarbonErrorState
 						title="Map status unavailable"
 						message={statusError
 							? formatRpcError(statusError, 'Could not check the map status.')
-							: 'Carbon Panel received no map status for this world.'}
+							: view === 'unknown'
+								? 'Carbon Panel received an unrecognized renderer state.'
+								: 'Carbon Panel received no map status for this world.'}
 						onretry={retry}
 					/>
 				{:else if view === 'loading'}
@@ -636,9 +715,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<div
 							class="focus-ring relative min-h-[24rem] border border-border bg-card"
 							role="region"
-							aria-label="World map, {VIEW_STATE_LABEL[
-								view
-							].toLowerCase()}. Map navigation is provided by the renderer; tab into the map to use its controls."
+							aria-label="World map, {refreshWarning
+								? 'last known'
+								: VIEW_STATE_LABEL[
+										view
+									].toLowerCase()}. Map navigation is provided by the renderer; tab into the map to use its controls."
 							tabindex="0"
 							onkeydown={handleMapKeydown}
 						>
@@ -655,7 +736,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<div class="space-y-3 border border-border bg-card p-8">
 							<h2 class="text-base font-semibold">Map not available</h2>
 							<p class="text-sm text-muted-foreground">
-								{embed.reason || 'No safe map path was returned.'}
+								{sessionError
+									? formatRpcError(sessionError, 'Could not start a map session.')
+									: embed.reason || 'No safe map path was returned.'}
 							</p>
 							<CarbonButton kind="secondary" size="sm" onclick={retry}>Retry</CarbonButton>
 						</div>
