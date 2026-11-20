@@ -148,9 +148,9 @@ func TestPackwizReadsGlobalScope(t *testing.T) {
 			t.Errorf("Packwiz read disclosed %q in %s", secret, data)
 		}
 	}
-	assertStructuredError(t, callTool(t, reader, packwizGetTool, map[string]any{"pack_id": "missing"}), packwizGetTool, ErrKindNotFound)
-	assertStructuredError(t, callTool(t, reader, packwizGetTool, map[string]any{"pack_id": "../pack-alpha"}), packwizGetTool, ErrKindInvalidArguments)
-	assertStructuredError(t, callTool(t, reader, packwizListTool, map[string]any{"limit": 51}), packwizListTool, ErrKindInvalidArguments)
+	_ = assertStructuredError(t, callTool(t, reader, packwizGetTool, map[string]any{"pack_id": "missing"}), packwizGetTool, ErrKindNotFound)
+	_ = assertStructuredError(t, callTool(t, reader, packwizGetTool, map[string]any{"pack_id": "../pack-alpha"}), packwizGetTool, ErrKindInvalidArguments)
+	_ = assertStructuredError(t, callTool(t, reader, packwizListTool, map[string]any{"limit": 51}), packwizListTool, ErrKindInvalidArguments)
 
 	if _, err := manager.CreatePack(&packwiz.Pack{
 		ID: "large-pack", Options: map[string]any{"large": strings.Repeat("x", packwizReadMaxBytes)},
