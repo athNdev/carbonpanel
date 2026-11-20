@@ -41,7 +41,7 @@ same command passes. The exact nine operations above have production
 `tools/call` evidence through the generated upload/download tool sets; the gate
 was not weakened. `PendingInventory` is empty (0 entries) and the ordinary
 gate reports `200/200 supported operations verified`. Live counts are
-`supported=200 listed=200 reachable=200 verified=200 excluded=78`.
+`supported=200 listed=200 reachable=200 verified=200 excluded=79`.
 Per-family evidence includes `FileService=17/17`, `UploadService=4/4` and `surface=2/2`.
 The two supported byte transfers are exercised through their mounted MCP tools.
 Prometheus scrapes are classified among the excluded HTTP surfaces. The hold mechanism remains live: adding an unmounted operation
