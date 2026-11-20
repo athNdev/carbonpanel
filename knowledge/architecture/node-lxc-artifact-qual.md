@@ -11,15 +11,13 @@ sources:
 ---
 # Qualification and boot evidence
 
-- `boot-qualify` is the fail-closed import/boot verification path: it verifies
-  real signed upstream archive bytes in an owned disposable path, probes for a
-  capable unprivileged LXC runner, and reports qualification as `status: ok`
-  only when actual import and boot are performed and evidenced; blocked or
-  failed runs are refused with explicit blockers and a JSON report. The manual
-  workflow `.github/workflows/lxc-boot-qualification.yml` runs this on a
-  disposable runner and uploads the report.
-- Runtime behavior beyond signed-archive byte evidence is qualified only when a
-  capable runner produces actual import/boot evidence. Without that evidence,
-  live import/boot, effective kernel enforcement and gameplay compatibility are
-  not claimed. Pin and signed-archive byte verification is evidence about
-  upstream artifacts, not boot evidence.
+- `boot-qualify` verifies signed upstream archive bytes in an owned disposable
+  path and records read-only Proxmox prerequisite checks. Finding guest
+  management tools never authorizes provisioning. The command retains
+  `BOOT_QUALIFICATION_BLOCKED` and `attempted: false` after archive verification.
+  The manual `.github/workflows/lxc-boot-qualification.yml` workflow uploads
+  the report.
+- Live qualification requires a separately authorized disposable Proxmox
+  fixture and observed unprivileged import, boot and reboot, effective
+  confinement, shared enrollment and nested runtime evidence. See
+  [Disposable Proxmox qualification](../../docs/node-lxc-mode.md#disposable-proxmox-qualification).
