@@ -1078,6 +1078,8 @@ export const ListServerPlayersResponseSchema: GenMessage<ListServerPlayersRespon
 	messageDesc(file_carbonpanel_v1_server, 33);
 
 /**
+ * ExportServerArchiveRequest requests a consistent export of one stopped server.
+ *
  * @generated from message carbonpanel.v1.ExportServerArchiveRequest
  */
 export type ExportServerArchiveRequest = Message<'carbonpanel.v1.ExportServerArchiveRequest'> & {
@@ -1106,6 +1108,8 @@ export const ExportServerArchiveRequestSchema: GenMessage<ExportServerArchiveReq
 	messageDesc(file_carbonpanel_v1_server, 34);
 
 /**
+ * ExportServerArchiveResponse identifies the authorized download session for a prepared archive.
+ *
  * @generated from message carbonpanel.v1.ExportServerArchiveResponse
  */
 export type ExportServerArchiveResponse = Message<'carbonpanel.v1.ExportServerArchiveResponse'> & {
@@ -1134,6 +1138,8 @@ export const ExportServerArchiveResponseSchema: GenMessage<ExportServerArchiveRe
 	messageDesc(file_carbonpanel_v1_server, 35);
 
 /**
+ * PreviewServerArchiveRequest validates a caller-owned completed upload without creating a server.
+ *
  * @generated from message carbonpanel.v1.PreviewServerArchiveRequest
  */
 export type PreviewServerArchiveRequest = Message<'carbonpanel.v1.PreviewServerArchiveRequest'> & {
@@ -1157,6 +1163,8 @@ export const PreviewServerArchiveRequestSchema: GenMessage<PreviewServerArchiveR
 	messageDesc(file_carbonpanel_v1_server, 36);
 
 /**
+ * ServerArchiveFinding is a typed compatibility or capacity finding from preview.
+ *
  * @generated from message carbonpanel.v1.ServerArchiveFinding
  */
 export type ServerArchiveFinding = Message<'carbonpanel.v1.ServerArchiveFinding'> & {
@@ -1185,6 +1193,8 @@ export const ServerArchiveFindingSchema: GenMessage<ServerArchiveFinding> =
 	messageDesc(file_carbonpanel_v1_server, 37);
 
 /**
+ * PreviewServerArchiveResponse reports verified metadata, runtime defaults, capacity and findings.
+ *
  * @generated from message carbonpanel.v1.PreviewServerArchiveResponse
  */
 export type PreviewServerArchiveResponse =
@@ -1264,6 +1274,8 @@ export const PreviewServerArchiveResponseSchema: GenMessage<PreviewServerArchive
 	messageDesc(file_carbonpanel_v1_server, 38);
 
 /**
+ * ServerArchiveFormat selects the container encoding for a native server archive.
+ *
  * @generated from enum carbonpanel.v1.ServerArchiveFormat
  */
 export enum ServerArchiveFormat {
@@ -1291,6 +1303,8 @@ export const ServerArchiveFormatSchema: GenEnum<ServerArchiveFormat> =
 	enumDesc(file_carbonpanel_v1_server, 0);
 
 /**
+ * ServerArchiveConsistency declares the consistency policy used during export.
+ *
  * @generated from enum carbonpanel.v1.ServerArchiveConsistency
  */
 export enum ServerArchiveConsistency {
@@ -1313,6 +1327,8 @@ export const ServerArchiveConsistencySchema: GenEnum<ServerArchiveConsistency> =
 	enumDesc(file_carbonpanel_v1_server, 1);
 
 /**
+ * ServerArchiveFindingSeverity ranks a preview finding as advisory or blocking.
+ *
  * @generated from enum carbonpanel.v1.ServerArchiveFindingSeverity
  */
 export enum ServerArchiveFindingSeverity {
@@ -1340,6 +1356,8 @@ export const ServerArchiveFindingSeveritySchema: GenEnum<ServerArchiveFindingSev
 	enumDesc(file_carbonpanel_v1_server, 2);
 
 /**
+ * ServerArchiveFindingCode identifies the reason a preview finding was reported.
+ *
  * @generated from enum carbonpanel.v1.ServerArchiveFindingCode
  */
 export enum ServerArchiveFindingCode {

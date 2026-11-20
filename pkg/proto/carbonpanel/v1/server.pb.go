@@ -30,6 +30,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ServerArchiveFormat selects the container encoding for a native server archive.
 type ServerArchiveFormat int32
 
 const (
@@ -79,6 +80,7 @@ func (ServerArchiveFormat) EnumDescriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{0}
 }
 
+// ServerArchiveConsistency declares the consistency policy used during export.
 type ServerArchiveConsistency int32
 
 const (
@@ -125,6 +127,7 @@ func (ServerArchiveConsistency) EnumDescriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{1}
 }
 
+// ServerArchiveFindingSeverity ranks a preview finding as advisory or blocking.
 type ServerArchiveFindingSeverity int32
 
 const (
@@ -174,6 +177,7 @@ func (ServerArchiveFindingSeverity) EnumDescriptor() ([]byte, []int) {
 	return file_carbonpanel_v1_server_proto_rawDescGZIP(), []int{2}
 }
 
+// ServerArchiveFindingCode identifies the reason a preview finding was reported.
 type ServerArchiveFindingCode int32
 
 const (
@@ -2325,6 +2329,7 @@ func (x *ListServerPlayersResponse) GetOnlineCount() int32 {
 	return 0
 }
 
+// ExportServerArchiveRequest requests a consistent export of one stopped server.
 type ExportServerArchiveRequest struct {
 	state         protoimpl.MessageState   `protogen:"open.v1"`
 	ServerId      string                   `protobuf:"bytes,1,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
@@ -2385,6 +2390,7 @@ func (x *ExportServerArchiveRequest) GetConsistency() ServerArchiveConsistency {
 	return ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED
 }
 
+// ExportServerArchiveResponse identifies the authorized download session for a prepared archive.
 type ExportServerArchiveResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -2445,6 +2451,7 @@ func (x *ExportServerArchiveResponse) GetTotalSize() int64 {
 	return 0
 }
 
+// PreviewServerArchiveRequest validates a caller-owned completed upload without creating a server.
 type PreviewServerArchiveRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UploadId      string                 `protobuf:"bytes,1,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
@@ -2497,6 +2504,7 @@ func (x *PreviewServerArchiveRequest) GetNodeId() string {
 	return ""
 }
 
+// ServerArchiveFinding is a typed compatibility or capacity finding from preview.
 type ServerArchiveFinding struct {
 	state         protoimpl.MessageState       `protogen:"open.v1"`
 	Severity      ServerArchiveFindingSeverity `protobuf:"varint,1,opt,name=severity,proto3,enum=carbonpanel.v1.ServerArchiveFindingSeverity" json:"severity,omitempty"`
@@ -2557,6 +2565,7 @@ func (x *ServerArchiveFinding) GetMessage() string {
 	return ""
 }
 
+// PreviewServerArchiveResponse reports verified metadata, runtime defaults, capacity and findings.
 type PreviewServerArchiveResponse struct {
 	state           protoimpl.MessageState  `protogen:"open.v1"`
 	Format          ServerArchiveFormat     `protobuf:"varint,1,opt,name=format,proto3,enum=carbonpanel.v1.ServerArchiveFormat" json:"format,omitempty"`

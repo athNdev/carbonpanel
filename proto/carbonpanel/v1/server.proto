@@ -304,40 +304,47 @@ message ListServerPlayersResponse {
 }
 
 
+// ServerArchiveFormat selects the container encoding for a native server archive.
 enum ServerArchiveFormat {
   SERVER_ARCHIVE_FORMAT_UNSPECIFIED = 0;
   SERVER_ARCHIVE_FORMAT_ZIP = 1;
   SERVER_ARCHIVE_FORMAT_TAR_GZ = 2;
 }
 
+// ServerArchiveConsistency declares the consistency policy used during export.
 enum ServerArchiveConsistency {
   SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED = 0;
   SERVER_ARCHIVE_CONSISTENCY_STOPPED = 1;
 }
 
+// ExportServerArchiveRequest requests a consistent export of one stopped server.
 message ExportServerArchiveRequest {
   string server_id = 1;
   ServerArchiveFormat format = 2;
   ServerArchiveConsistency consistency = 3;
 }
 
+// ExportServerArchiveResponse identifies the authorized download session for a prepared archive.
 message ExportServerArchiveResponse {
   string session_id = 1;
   string filename = 2;
   int64 total_size = 3;
 }
 
+// PreviewServerArchiveRequest validates a caller-owned completed upload without creating a server.
 message PreviewServerArchiveRequest {
   string upload_id = 1;
   string node_id = 2;
 }
 
+// ServerArchiveFindingSeverity ranks a preview finding as advisory or blocking.
 enum ServerArchiveFindingSeverity {
   SERVER_ARCHIVE_FINDING_SEVERITY_UNSPECIFIED = 0;
   SERVER_ARCHIVE_FINDING_SEVERITY_WARNING = 1;
   SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER = 2;
 }
 
+// ServerArchiveFindingCode identifies the reason a preview finding was reported.
 enum ServerArchiveFindingCode {
   SERVER_ARCHIVE_FINDING_CODE_UNSPECIFIED = 0;
   SERVER_ARCHIVE_FINDING_CODE_CUSTOM_RUNTIME = 1;
@@ -347,12 +354,14 @@ enum ServerArchiveFindingCode {
   SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER = 5;
 }
 
+// ServerArchiveFinding is a typed compatibility or capacity finding from preview.
 message ServerArchiveFinding {
   ServerArchiveFindingSeverity severity = 1;
   ServerArchiveFindingCode code = 2;
   string message = 3;
 }
 
+// PreviewServerArchiveResponse reports verified metadata, runtime defaults, capacity and findings.
 message PreviewServerArchiveResponse {
   ServerArchiveFormat format = 1;
   int32 schema_version = 2;
