@@ -367,6 +367,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-image-context
@@ -467,9 +468,41 @@ jobs:
   # registry digests and the DEPLOYED public docs marker are bound together.
   # GitHub release creation is gated on this job's synchronized output; no
   # moving alias is written until the marker is verified over HTTPS.
+  prepare-draft:
+    name: Prepare and verify the private release downloads before channel writes
+    needs: [plan, publish-immutable]
+    if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
+    runs-on: ubuntu-24.04
+    # GitHub latest is selected here under product-only verified stable ordering,
+    # inside the workflow-level publish lock (never concurrently).
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-release-downloads
+          path: dist/release
+      - name: Record the verified image digest and final checksums
+        env:
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: python3 scripts/release.py finalize --output dist/release --digest "$IMAGE_DIGEST"
+      - name: Verify the private GitHub draft matches the tested release files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          python3 scripts/release.py publish --draft-only --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --output dist/release
+
   stable-channel-transaction:
     name: Qualified stable channel transaction (docs marker bound)
-    needs: [plan, publish-immutable]
+    needs: [plan, publish-immutable, prepare-draft]
     if: >-
       needs.plan.outputs.publish == 'true' &&
       needs.publish-immutable.outputs.verified == 'true' &&
@@ -481,6 +514,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      packages: write
       actions: read
       deployments: read
       pages: write
@@ -620,6 +654,29 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: .website-build/site
+      - name: Sign in to Docker Hub for first-time Stable alias setup
+        if: steps.stable_aliases.outputs.first_publication == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+      - name: Sign in to GHCR for first-time Stable alias setup
+        if: steps.stable_aliases.outputs.first_publication == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Establish any missing Stable alias at the verified already-public release
+        if: steps.stable_aliases.outputs.first_publication == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIOR: ${{ steps.prior.outputs.prior_receipt }}
+        run: |
+          PRIOR_TAG=$(jq -er '.channels.stable.tag' .website-build/prior-site/version-index.json)
+          python3 scripts/release.py verify-release-record --version "$PRIOR_TAG" \
+            --commit "$(jq -er .revision <<< "$PRIOR")" --digest "$(jq -er .digest <<< "$PRIOR")"
+          python3 scripts/release.py establish-stable-baseline --receipt "$PRIOR"
       - name: Stage the candidate probe alongside the exact prior canonical site
         run: |
           cp -a .website-build/prior-site .website-build/probe-site
@@ -785,20 +842,20 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
-        # A matching published release means retry only needs alias promotion;
+        # A matching published release is read-only;
         # an absent record is published here. Any conflict or unknown state
         # refuses, so no asset is re-uploaded or overwritten.
         run: |
           python3 scripts/release.py release-record \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST"
-      - name: Upload assets to a draft, then publish
+      - name: Verify and expose the prepared private downloads
         if: steps.record.outputs.action == 'publish'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
-        run: python3 scripts/release.py publish --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --output dist/release
+        run: python3 scripts/release.py publish --expose-prepared --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --output dist/release
       - name: Verify an existing durable record (alias-only retry)
         if: steps.record.outputs.action == 'verified'
         env:
@@ -816,7 +873,7 @@ jobs:
   # failed alias write can never leave a published release contradicting aliases.
   promote-aliases:
     name: Promote moving aliases from the verified digest
-    needs: [plan, publish-immutable, stable-channel-transaction]
+    needs: [plan, publish-immutable, prepare-draft, stable-channel-transaction]
     if: >-
       needs.plan.outputs.publish == 'true' &&
       needs.publish-immutable.outputs.verified == 'true' &&

@@ -3286,6 +3286,29 @@ class StableReleasePublicationTests(unittest.TestCase):
         return (state, {"digest": digest, "revision": revision,
                         "platforms": release.REQUIRED_PLATFORMS})
 
+    def test_exposing_a_prepared_release_never_uploads_assets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            make_publish_fixture(directory, self.VERSION, "2.0.1", self.COMMIT)
+            output = Path(directory)
+            args = argparse.Namespace(version=self.VERSION, commit=self.COMMIT,
+                                      output=directory, expose_prepared=True)
+            remote = {"draft": True, "assets": [
+                {"name": file.name, "digest": "sha256:" + release.sha256(file)}
+                for file in output.iterdir()]}
+            with patch.object(release, "guard_publishing"), \
+                 patch.object(release, "get_release", return_value=remote), \
+                 patch.object(release, "published_stable_versions", return_value=["v1.0.40"]), \
+                 patch.object(release, "github") as github:
+                remote["assets"][0]["digest"] = "sha256:" + "0" * 64
+                with self.assertRaisesRegex(ValueError, "assets"):
+                    release.publish(args)
+                github.assert_not_called()
+                asset = remote["assets"][0]
+                asset["digest"] = "sha256:" + release.sha256(output / asset["name"])
+                release.publish(args)
+                github.assert_called_once_with("release", "edit", self.VERSION, "--draft=false",
+                                               "--prerelease=false", "--latest=true")
+
     def test_first_publication_requires_verified_latest_pair(self):
         latest = {"docker_hub": self.alias("present", self.DIGEST, self.COMMIT),
                   "ghcr": self.alias("present", self.DIGEST, self.COMMIT)}
@@ -3295,7 +3318,7 @@ class StableReleasePublicationTests(unittest.TestCase):
         self.assertTrue(result["first_publication"])
         mixed = {"docker_hub": self.alias("present", self.DIGEST, self.COMMIT),
                  "ghcr": self.alias("absent")}
-        self.assertEqual(release.stable_alias_decision(mixed, latest)["action"], "refuse")
+        self.assertEqual(release.stable_alias_decision(mixed, latest)["missing"], ["ghcr"])
         self.assertEqual(release.stable_alias_decision(absent, mixed)["action"], "refuse")
         active = {"docker_hub": self.alias("present", self.DIGEST, self.COMMIT),
                   "ghcr": self.alias("present", self.DIGEST, self.COMMIT)}
@@ -3306,6 +3329,32 @@ class StableReleasePublicationTests(unittest.TestCase):
         self.assertEqual(release.stable_alias_decision(active, stale)["action"], "refuse")
         half = {**active, "ghcr": ("present", {**active["ghcr"][1], "platforms": set()})}
         self.assertEqual(release.stable_alias_decision(half, latest)["action"], "refuse")
+
+    def test_first_alias_interruption_resumes_only_the_missing_verified_baseline(self):
+        ok = self.alias("present", self.DIGEST, self.COMMIT)
+        latest = {name: ok for name in release.CHANNEL_REGISTRIES}
+        stable = {name: self.alias("absent") for name in release.CHANNEL_REGISTRIES}
+        receipt = {"channel": "stable", "revision": self.COMMIT, "digest": self.DIGEST,
+                   "verified": True}
+        observed = lambda ref: latest if ref == "latest" else stable
+        calls = []
+
+        def write(registry, digest):
+            self.assertEqual(digest, self.DIGEST)
+            calls.append(registry)
+            stable[registry] = ok
+            if len(calls) == 1:
+                raise RuntimeError("connection lost after first write")
+
+        with self.assertRaises(RuntimeError):
+            release.establish_stable_baseline(receipt, observed, write)
+        release.establish_stable_baseline(receipt, observed, write)
+        release.establish_stable_baseline(receipt, observed, write)
+        self.assertEqual(calls, list(release.CHANNEL_REGISTRIES))
+        stable["ghcr"] = self.alias("present", "sha256:" + "e" * 64, self.COMMIT)
+        with self.assertRaises(ValueError):
+            release.establish_stable_baseline(receipt, observed, write)
+        self.assertEqual(len(calls), 2)
 
     def test_channel_cli_stdout_has_typed_observations_and_verified_receipt(self):
         info = {"digest": self.DIGEST, "revision": self.COMMIT,

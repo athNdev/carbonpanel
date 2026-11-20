@@ -36,6 +36,13 @@ sources:
   immutable routes with the release version before deployment. Nightly retains
   its verified live identity. Both channels' rendered OpenAPI versions are
   checked, and an off-path HTTPS probe precedes the canonical deployment.
+- When a Stable alias is absent, establish it at the already-public release
+  verified against its GitHub manifest, both latest tags and the live docs.
+  Re-read both registries before filling each absent alias. An interrupted
+  setup resumes the missing alias; a conflicting present tag blocks the move.
+  The candidate transaction then has an observed previous digest for every alias.
+- Release downloads are staged and checksum-verified on a private draft before
+  channel changes. Exposing the draft rechecks the hosted asset digests.
 - The stable gate consumes OBSERVED dual-registry digests, not a hardcoded
   literal. An older release target whose checkout lacks the trusted gate script
   is refused with an explicit blocker rather than silently using the wrong code.

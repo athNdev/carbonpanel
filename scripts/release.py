@@ -814,7 +814,8 @@ def published_module_versions(tags=None):
         return None
 
 
-def release_provenance(tag, commit, expected_digest, releases_json=None, git_tag=None):
+def release_provenance(tag, commit, expected_digest, releases_json=None, git_tag=None,
+                       allow_prepared_draft=False):
     """Prove from a verified release manifest that an existing image digest is
     the build of this exact version and source commit. Returns (ok, reason,
     manifest). Unknown or mismatched provenance always fails closed.
@@ -828,7 +829,7 @@ def release_provenance(tag, commit, expected_digest, releases_json=None, git_tag
             for item in page:
                 if item.get("tag_name") != release_tag:
                     continue
-                if item.get("draft"):
+                if item.get("draft") and not allow_prepared_draft:
                     return False, "release is still a draft; not a durable record", None
                 assets = {asset["name"]: asset for asset in item.get("assets", [])}
                 manifest_asset = assets.get("release-manifest.json")
@@ -838,6 +839,15 @@ def release_provenance(tag, commit, expected_digest, releases_json=None, git_tag
                              + str(manifest_asset["id"]),
                              "-H", "Accept: application/octet-stream")
                 manifest = json.loads(raw)
+                if item.get("draft"):
+                    product = product_release_or_none(release_tag)
+                    expected_names = ({archive_name(tag, *target) for target in TARGETS}
+                                      | {"openapi.yaml", "release-manifest.json", "checksums.txt"})
+                    if (not product or manifest.get("git_tag") != release_tag
+                            or manifest.get("semver") != product["semver"]
+                            or set(assets) != expected_names
+                            or any(not valid_digest(asset.get("digest", "")) for asset in assets.values())):
+                        return False, "incomplete or conflicting private draft provenance", manifest
                 if manifest.get("version") != tag:
                     return False, "release manifest version mismatch", manifest
                 if manifest.get("commit") != commit:
@@ -952,7 +962,10 @@ def resume_provenance(tag, commit, expected_digest, releases_json=None, git_tag=
             return False, "version tag points at a different commit"
     except subprocess.CalledProcessError:
         return False, "version tag identity cannot be determined"
-    return release_provenance(tag, commit, expected_digest, releases_json, release_tag)[:2]
+    if not local:
+        return False, "resuming immutable publication requires the recorded exact Git tag"
+    return release_provenance(tag, commit, expected_digest, releases_json, release_tag,
+                              allow_prepared_draft=True)[:2]
 
 
 TRUSTED_DEVELOPER_REF = "refs/heads/main"
@@ -2014,6 +2027,14 @@ def module_promotion(args):
     write_output(values)
 
 
+def verify_draft_assets(git_tag, output, filenames):
+    uploaded = get_release(git_tag)
+    remote = {asset["name"]: asset.get("digest") for asset in uploaded["assets"]}
+    if not uploaded["draft"] or set(remote) != filenames or any(
+            remote[name] != "sha256:" + sha256(output / name) for name in filenames):
+        raise ValueError("Uploaded draft assets do not match the verified local release")
+
+
 def publish(args):
     tag = resolve_panel_version(args.version)
     git_tag = args.version
@@ -2035,6 +2056,14 @@ def publish(args):
     recorded = dict((line.split("  ", 1)[1], line.split("  ", 1)[0]) for line in lines)
     if set(recorded) != expected or any(sha256(output / name) != digest for name, digest in recorded.items()):
         raise ValueError("Release files do not match their checksums")
+    complete = expected | {"checksums.txt"}
+    if getattr(args, "expose_prepared", False):
+        verify_draft_assets(git_tag, output, complete)
+        latest, reason = github_latest_decision(tag, published_stable_versions())
+        github("release", "edit", git_tag, "--draft=false",
+               f"--prerelease={str('-' in tag).lower()}", f"--latest={str(latest).lower()}")
+        print(json.dumps({"git_tag": git_tag, "published": True, "reason": reason}))
+        return
     if not run("git", "tag", "--list", git_tag):
         github("api", "repos/{owner}/{repo}/git/refs", "-f", f"ref=refs/tags/{git_tag}", "-f", f"sha={args.commit}")
     # GitHub latest uses the same product-only verified stable ordering as the
@@ -2069,12 +2098,10 @@ def publish(args):
                    "--title", f"Carbon Panel {display_version(args.version)}", "--notes-file", str(notes))
         github("release", "edit", git_tag, "--notes-file", str(notes))
         github("release", "upload", git_tag, *(str(output / name) for name in sorted(expected | {"checksums.txt"})), "--clobber")
-        uploaded = get_release(git_tag)
-        remote = {asset["name"]: asset.get("digest") for asset in uploaded["assets"]}
-        complete = expected | {"checksums.txt"}
-        if not uploaded["draft"] or set(remote) != complete or any(
-                remote[name] != "sha256:" + sha256(output / name) for name in complete):
-            raise ValueError("Uploaded draft assets do not match the verified local release")
+        verify_draft_assets(git_tag, output, complete)
+    if getattr(args, "draft_only", False):
+        print(json.dumps({"git_tag": git_tag, "draft_verified": True, "digest": manifest["image_digest"]}))
+        return
     github("release", "edit", git_tag, "--draft=false",
            f"--prerelease={str('-' in tag).lower()}", f"--latest={str(latest).lower()}")
     print(json.dumps({"git_tag": git_tag, "semver": product["semver"] if product else tag[1:],
@@ -3079,22 +3106,51 @@ def nightly_activation_decision_cli(args):
 
 
 def stable_alias_decision(stable, latest):
-    """Fail-closed alias decision from ACTUAL observations, including first publish."""
-    first = all((stable.get(name) or [None])[0] == "absent"
-                for name in CHANNEL_REGISTRIES)
+    """Classify each alias independently, including interrupted first-time setup."""
     info = (latest.get("docker_hub") or ("unknown", {}))[1] or {}
     digest, revision = info.get("digest", ""), info.get("revision", "")
     if not valid_digest(digest) or not valid_commit(revision):
         return {"action": "refuse", "reason": "latest has no verified digest/revision"}
-    for label, observations in [("latest", latest), ("stable", stable)]:
-        if label == "stable" and first:
+    ok, reason = channel_oci_parity(latest, digest, revision)
+    if not ok:
+        return {"action": "refuse", "reason": "latest: " + reason}
+    missing = []
+    for name in CHANNEL_REGISTRIES:
+        observation = stable.get(name)
+        if observation and observation[0] == "absent":
+            missing.append(name)
             continue
-        ok, reason = channel_oci_parity(observations, digest, revision)
+        ok, reason = channel_oci_parity(stable, digest, revision, registries=(name,))
         if not ok:
-            return {"action": "refuse", "reason": label + ": " + reason}
-    return {"action": "first-publish" if first else "promote",
-            "reason": "both registries agree on the active release",
-            "digest": digest, "revision": revision, "first_publication": first}
+            return {"action": "refuse", "reason": "stable: " + reason}
+    return {"action": "first-publish" if missing else "promote",
+            "reason": "latest is verified; each stable alias is absent or matches latest",
+            "digest": digest, "revision": revision, "first_publication": bool(missing),
+            "missing": missing}
+
+
+def establish_stable_baseline(receipt, observe, write_alias):
+    """Fill only missing stable aliases from the independently verified active release."""
+    if (receipt.get("channel") != "stable" or receipt.get("verified") is not True
+            or not valid_commit(receipt.get("revision")) or not valid_digest(receipt.get("digest"))):
+        raise ValueError("Initial stable alias setup requires the verified prior receipt")
+    for _ in range(1 + len(CHANNEL_REGISTRIES)):
+        decision = stable_alias_decision(observe("stable"), observe("latest"))
+        if (decision["action"] == "refuse" or decision["revision"] != receipt["revision"]
+                or decision["digest"] != receipt["digest"]):
+            raise ValueError("Stable setup refused: " + decision["reason"])
+        if not decision["missing"]:
+            return
+        write_alias(decision["missing"][0], receipt["digest"])
+    raise ValueError("Stable aliases did not converge to the verified prior release")
+
+
+def establish_stable_baseline_cli(args):
+    def write_alias(registry, digest):
+        repository = {"docker_hub": DOCKER_HUB_IMAGE, "ghcr": "ghcr.io/" + ghcr_repository()}[registry]
+        subprocess.run(["docker", "buildx", "imagetools", "create", "--tag",
+                        repository + ":stable", repository + "@" + digest], check=True, cwd=ROOT)
+    establish_stable_baseline(json_argument(args.receipt), channel_observe, write_alias)
 
 
 def verify_stable_release_site(site, commit, digest, version, repository):
@@ -3624,6 +3680,11 @@ def build_parser():
     reference_verifier.add_argument("--reference", required=True)
     reference_verifier.add_argument("--digest", required=True)
     publisher = commands.add_parser("publish")
+    publish_phase = publisher.add_mutually_exclusive_group()
+    publish_phase.add_argument("--expose-prepared", action="store_true",
+                               help="verify every prepared asset and expose the existing draft")
+    publish_phase.add_argument("--draft-only", action="store_true",
+                           help="stage and verify every private draft asset without exposing the release")
     for name in ("version", "commit", "output"):
         publisher.add_argument("--" + name, required=True)
     contract_checker = commands.add_parser("validate-channel-contract")
@@ -3667,6 +3728,8 @@ def build_parser():
     transaction.add_argument("--event", default="workflow_run")
     transaction.add_argument("--phase", default=TX_COMMIT,
                              choices=(TX_STAGE, TX_COMMIT))
+    baseline = commands.add_parser("establish-stable-baseline")
+    baseline.add_argument("--receipt", required=True)
     active = commands.add_parser("channel-active-receipt")
     active.add_argument("--channel", required=True)
     active.add_argument("--aliases", default="{}")
@@ -3767,6 +3830,7 @@ def main():
                 "verify-staged-page-site": verify_staged_page_site_cli,
                 "local-oci-candidate": local_oci_candidate_cli,
                 "stable-alias-decision": stable_alias_decision_cli,
+                "establish-stable-baseline": establish_stable_baseline_cli,
                 "verify-stable-release-site": verify_stable_release_site_cli,
                 "nightly-activation-decision": nightly_activation_decision_cli}
     handler = handlers.get(args.command,
