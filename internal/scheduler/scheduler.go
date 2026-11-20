@@ -57,6 +57,14 @@ type ModUpdatePlanner interface {
 // config must never reach it unchecked.
 const maxAutomaticModUpdatesPerRun = 50
 
+// DefaultModUpdatesPerRun is the budget used when a policy omits its limit.
+const DefaultModUpdatesPerRun = 10
+
+type modUpdateRunBudget struct {
+	staged    int
+	exhausted bool
+}
+
 // Scheduler manages scheduled tasks for all servers
 type Scheduler struct {
 	store         *storage.Store
@@ -412,9 +420,19 @@ func (s *Scheduler) checkAndRunDueTasks() {
 		// task must not run: a still-due row would otherwise be claimed again
 		// on every tick. Disable it with the reason in the log.
 		if err := s.updateNextRun(task); err != nil {
+			if errors.Is(err, storage.ErrModUpdateScheduleChanged) {
+				s.releaseTask(task.ID)
+				continue
+			}
 			s.log.Error("Task %s: cannot advance schedule, refusing dispatch: %v", task.Name, err)
-			if dbErr := s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
-				Where("id = ?", task.ID).Update("status", storage.TaskStatusDisabled).Error; dbErr != nil {
+			var dbErr error
+			if task.TaskType == storage.TaskTypeModUpdate {
+				dbErr = s.store.DisableInvalidModUpdateSchedule(ctx, task)
+			} else {
+				dbErr = s.store.DB().WithContext(ctx).Model(&storage.ScheduledTask{}).
+					Where("id = ?", task.ID).Update("status", storage.TaskStatusDisabled).Error
+			}
+			if dbErr != nil {
 				s.log.Error("Task %s: failed to disable task after schedule error: %v", task.Name, dbErr)
 			}
 			s.releaseTask(task.ID)
@@ -640,9 +658,10 @@ func (s *Scheduler) executeTaskAtDepth(ctx context.Context, task *storage.Schedu
 		retries = 0
 	}
 
+	var modBudget modUpdateRunBudget
 	for attempt := 0; ; attempt++ {
-		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData)
-		if execErr == nil || attempt >= retries || execCtx.Err() != nil {
+		output, execErr = s.runTaskType(execCtx, server, task, eventType, eventData, &modBudget)
+		if execErr == nil || attempt >= retries || execCtx.Err() != nil || modBudget.exhausted {
 			break
 		}
 
@@ -763,7 +782,7 @@ func (s *Scheduler) recordChainStop(ctx context.Context, execution *storage.Task
 }
 
 // runTaskType dispatches a single execution attempt to the type-specific executor
-func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any) (string, error) {
+func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, eventType v1.TriggeredEventType, eventData map[string]any, modBudget *modUpdateRunBudget) (string, error) {
 	switch task.TaskType {
 	case storage.TaskTypeCommand:
 		return s.executeCommandTask(ctx, server, task)
@@ -782,7 +801,7 @@ func (s *Scheduler) runTaskType(ctx context.Context, server *storage.Server, tas
 	case storage.TaskTypeModpackUpdate:
 		return s.executeModpackUpdateTask(ctx, server, task)
 	case storage.TaskTypeModUpdate:
-		return s.executeModUpdateTask(ctx, server, task)
+		return s.executeModUpdateTask(ctx, server, task, modBudget)
 	case storage.TaskTypeChunkyPregen:
 		return s.executeChunkyPregen(ctx, server, task)
 	default:
@@ -831,8 +850,14 @@ func (s *Scheduler) CancelExecution(executionID string) error {
 func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	ctx := context.Background()
 	now := time.Now()
+	advance := func(nextRun *time.Time) error {
+		if task.TaskType == storage.TaskTypeModUpdate {
+			return s.store.AdvanceModUpdateSchedule(ctx, task, nextRun, now)
+		}
+		return s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now)
+	}
 	if task.Schedule == storage.ScheduleTypeOnce || task.Schedule == storage.ScheduleTypeEvent {
-		if err := s.store.UpdateTaskNextRun(ctx, task.ID, nil, &now); err != nil {
+		if err := advance(nil); err != nil {
 			return fmt.Errorf("clear next run: %w", err)
 		}
 		if task.Schedule == storage.ScheduleTypeOnce {
@@ -844,7 +869,7 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) error {
 	if err != nil {
 		return err
 	}
-	if err := s.store.UpdateTaskNextRun(ctx, task.ID, nextRun, &now); err != nil {
+	if err := advance(nextRun); err != nil {
 		return fmt.Errorf("store next run: %w", err)
 	}
 	return nil
@@ -1491,7 +1516,7 @@ func ValidateModUpdateConfig(cfg storage.ModUpdateTaskConfig) error {
 // executeModUpdateTask runs an opt-in mod update policy through the shared
 // planner. It never publishes bytes itself: the existing journaled batch apply
 // remains the only path that writes the live mods directory.
-func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask) (string, error) {
+func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Server, task *storage.ScheduledTask, budget *modUpdateRunBudget) (string, error) {
 	var cfg storage.ModUpdateTaskConfig
 	if task.Config != "" {
 		if err := json.Unmarshal([]byte(task.Config), &cfg); err != nil {
@@ -1510,11 +1535,15 @@ func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Se
 	if s.modUpdatePlanner == nil {
 		return "", errors.New("mod update planner is not installed")
 	}
-	staged, refused, reasons, err := s.modUpdatePlanner.StageAvailableUpdates(ctx, server.ID, cfg)
-	if err != nil {
-		return "", err
+	limit := cfg.MaxUpdatesPerRun
+	if limit == 0 {
+		limit = DefaultModUpdatesPerRun
 	}
-	output := fmt.Sprintf("staged %d compatible update(s); %d refused and left untouched", staged, refused)
+	cfg.MaxUpdatesPerRun = limit - budget.staged
+	staged, refused, reasons, err := s.modUpdatePlanner.StageAvailableUpdates(ctx, server.ID, cfg)
+	budget.staged += staged
+	budget.exhausted = budget.staged >= limit
+	output := fmt.Sprintf("staged %d compatible update(s); %d refused and left untouched", budget.staged, refused)
 	if len(reasons) > 0 {
 		shown := reasons
 		if len(shown) > 3 {
@@ -1522,7 +1551,7 @@ func (s *Scheduler) executeModUpdateTask(ctx context.Context, server *storage.Se
 		}
 		output += "; reasons: " + strings.Join(shown, " | ")
 	}
-	return output, nil
+	return output, err
 }
 
 // ModpackUpdateTaskConfig matches the configuration for periodic modpack updates

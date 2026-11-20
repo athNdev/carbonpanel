@@ -50,8 +50,9 @@ request.
    a different window is refused, not silently retargeted.
 7. Downloads use the connection-guarded HTTP client shared with World Library
    imports. The fetcher and staging loop enforce per-file and total byte
-   limits. Scheduled provider and inventory access failures are returned as
-   retryable errors, including when other items staged successfully.
+   limits. Scheduled provider failures remain retryable after partial staging.
+   Directory scan and entry metadata errors other than missing paths also fail
+   the run. All retry attempts share the execution's update budget.
 8. The complete window tuple (mode, timestamp, idle interval) is compared
    before any provider work or persistent write; a differing window on a batch
    with reviewed changes is refused. Selections are deduplicated by live target
@@ -90,7 +91,8 @@ request.
   An enabled scheduled policy selects compatible updates using its saved window.
   New opted-out policies are disabled at creation. The Mods tab waits for the
   current server's task list and preserves paused or disabled schedules during
-  config-only saves. An explicit opt-in change can also change schedule status.
+  config-only saves and keep the scheduler's deadline until timing changes.
+  An explicit opt-in change completes for the selected task across navigation.
   Staging alone never restarts a server.
 - Backup, rollback, per-server serialization and apply-window semantics are
   exactly the staged-batch semantics already used for config and content.

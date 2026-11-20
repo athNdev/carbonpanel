@@ -118,6 +118,54 @@ func TestModUpdatePolicyEditCannotOverwriteConcurrentPause(t *testing.T) {
 	require.Nil(t, updated.Msg.GetTask().GetNextRun())
 }
 
+func TestModUpdatePolicyEditPreservesConcurrentDeadline(t *testing.T) {
+	svc, server := setupTaskTestService(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	created, err := svc.CreateTask(ctx, connect.NewRequest(&v1.CreateTaskRequest{
+		ServerId: server.ID, Name: "Automatic mod updates", TaskType: v1.TaskType_TASK_TYPE_MOD_UPDATE,
+		Schedule: v1.ScheduleType_SCHEDULE_TYPE_INTERVAL, IntervalSecs: 60, Config: `{"enabled":true}`,
+	}))
+	require.NoError(t, err)
+	before, err := svc.store.GetScheduledTask(ctx, created.Msg.GetTask().GetId())
+	require.NoError(t, err)
+	run := time.Now().UTC().Truncate(time.Second)
+	next := run.Add(2 * time.Hour)
+	var advanced bool
+	require.NoError(t, svc.store.DB().Callback().Update().Before("gorm:update").Register("fixture:advance-before-policy-update", func(tx *gorm.DB) {
+		if advanced {
+			return
+		}
+		if _, ok := tx.Statement.Dest.(*storage.ScheduledTask); !ok {
+			return
+		}
+		advanced = true
+		require.NoError(t, svc.store.AdvanceModUpdateSchedule(ctx, before, &next, run))
+	}))
+	config := `{"enabled":true,"window":"idle","idle_minutes":18}`
+	unchangedInterval := int32(60)
+	response, err := svc.UpdateTask(ctx, connect.NewRequest(&v1.UpdateTaskRequest{
+		Id: before.ID, IntervalSecs: &unchangedInterval, Config: &config,
+	}))
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.True(t, next.Equal(response.Msg.GetTask().GetNextRun().AsTime()))
+	require.True(t, run.Equal(response.Msg.GetTask().GetLastRun().AsTime()))
+	require.Equal(t, config, response.Msg.GetTask().GetConfig())
+
+	newInterval := int32(900)
+	response, err = svc.UpdateTask(ctx, connect.NewRequest(&v1.UpdateTaskRequest{
+		Id: before.ID, IntervalSecs: &newInterval,
+	}))
+	require.NoError(t, err)
+	recalculated := response.Msg.GetTask().GetNextRun().AsTime()
+	require.WithinDuration(t, time.Now().Add(15*time.Minute), recalculated, time.Minute)
+	require.ErrorIs(t, svc.store.AdvanceModUpdateSchedule(ctx, before, &next, run), storage.ErrModUpdateScheduleChanged)
+	stored, err := svc.store.GetScheduledTask(ctx, before.ID)
+	require.NoError(t, err)
+	require.True(t, recalculated.Equal(*stored.NextRun))
+}
+
 func TestTaskService_CreateTask_CronValidation(t *testing.T) {
 	svc, server := setupTaskTestService(t)
 	ctx := context.Background()

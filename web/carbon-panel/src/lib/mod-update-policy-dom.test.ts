@@ -191,20 +191,20 @@ test('mounted policy ignores an old response after navigating away and back', as
 	}
 });
 
-test('a save that returns after navigation cannot toggle the old schedule', async () => {
+test('a save finishes the captured schedule change without altering the new view', async () => {
 	const old = policy('old', 'a', TaskStatus.DISABLED, false);
 	const pendingSave = deferred<TaskResponse>();
 	let saves = 0;
-	let toggles = 0;
+	const toggles: { id: string; status: TaskStatus }[] = [];
 	taskClient.listTasks = async ({ serverId }) => ({ tasks: serverId === 'a' ? [old] : [] });
 	taskClient.updateTask = ({ id }) => {
 		assert.equal(id, old.id);
 		saves++;
 		return pendingSave.promise;
 	};
-	taskClient.toggleTask = async () => {
-		toggles++;
-		return {};
+	taskClient.toggleTask = async (request) => {
+		toggles.push(request);
+		return { task: policy(old.id, 'a', TaskStatus.ENABLED) };
 	};
 	const ui = renderPolicy('a');
 	try {
@@ -217,7 +217,7 @@ test('a save that returns after navigation cannot toggle the old schedule', asyn
 		await settle();
 		pendingSave.resolve({ task: old });
 		await settle();
-		assert.equal(toggles, 0);
+		assert.deepEqual(toggles, [{ id: old.id, status: TaskStatus.ENABLED }]);
 		assert.equal(ui.save().disabled, false);
 		assert.match(ui.target.textContent ?? '', /Schedule:\s*Not scheduled/);
 	} finally {

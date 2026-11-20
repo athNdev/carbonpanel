@@ -181,6 +181,61 @@ func TestPersistedInvalidModUpdatePolicyFailsBeforePlanner(t *testing.T) {
 	require.Equal(t, storage.ExecutionStatusFailed, executions[0].Status)
 }
 
+type retryBudgetPlanner struct {
+	limits []int
+	err    error
+}
+
+func (p *retryBudgetPlanner) StageAvailableUpdates(_ context.Context, _ string, cfg storage.ModUpdateTaskConfig) (int, int, []string, error) {
+	p.limits = append(p.limits, cfg.MaxUpdatesPerRun)
+	if len(p.limits) == 1 {
+		return 1, 1, nil, p.err
+	}
+	return 1, 0, nil, nil
+}
+
+func TestModUpdateTaskRetriesUseRemainingExecutionBudget(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		limit      string
+		wantLimits []int
+		wantError  bool
+	}{
+		{"explicit cap", "2", []int{2, 1}, false},
+		{"default cap", "0", []int{10, 9}, false},
+		{"exhausted", "1", []int{1}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, store := newTriggerTestScheduler(t)
+			interrupted := errors.New("provider response lost")
+			planner := &retryBudgetPlanner{err: interrupted}
+			s.SetModUpdatePlanner(planner)
+			ctx := context.Background()
+			server := &storage.Server{ID: "srv-budget", Name: "budget", Status: storage.StatusStopped}
+			require.NoError(t, store.CreateServer(ctx, server))
+			task := &storage.ScheduledTask{
+				ID: "task-budget", ServerID: server.ID, Name: "bounded update task",
+				TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+				Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", RetryCount: 1, RetryDelay: 1,
+				Config: `{"enabled":true,"max_updates_per_run":` + test.limit + `}`,
+			}
+			require.NoError(t, store.CreateScheduledTask(ctx, task))
+			execution, err := s.TriggerTask(ctx, task.ID)
+			require.Equal(t, test.wantLimits, planner.limits)
+			if test.wantError {
+				require.ErrorIs(t, err, interrupted)
+				require.Equal(t, storage.ExecutionStatusFailed, execution.Status)
+				require.Contains(t, execution.Output, "staged 1")
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, storage.ExecutionStatusCompleted, execution.Status)
+				require.Equal(t, 1, execution.RetryNum)
+				require.Contains(t, execution.Output, "staged 2")
+			}
+		})
+	}
+}
+
 func TestValidateModUpdateConfigJSON(t *testing.T) {
 	require.NoError(t, ValidateModUpdateConfigJSON(`{"enabled":true}`))
 	require.NoError(t, ValidateModUpdateConfigJSON(`{"enabled":true,"window":"idle","idle_minutes":15,"max_updates_per_run":3}`))
@@ -200,7 +255,7 @@ func TestExecuteModUpdateTaskUsesSharedPlannerAndOptInPolicy(t *testing.T) {
 		Config:   `{"enabled":true,"excluded_projects":["excluded"],"max_updates_per_run":2,"skip_when_running":true}`,
 	}
 
-	out, err := s.executeModUpdateTask(ctx, server, task)
+	out, err := s.executeModUpdateTask(ctx, server, task, &modUpdateRunBudget{})
 	require.NoError(t, err)
 	require.Contains(t, out, "staged 2")
 	require.Contains(t, out, "mod.jar: provider lookup failed", "the operator must see the refusal cause")
@@ -218,13 +273,13 @@ func TestExecuteModUpdateTaskDisabledAndRunningPoliciesDoNotPlan(t *testing.T) {
 	s := &Scheduler{log: logger.New(), modUpdatePlanner: planner}
 
 	disabled := &storage.ScheduledTask{ServerID: server.ID, Config: `{"enabled":false}`}
-	out, err := s.executeModUpdateTask(ctx, server, disabled)
+	out, err := s.executeModUpdateTask(ctx, server, disabled, &modUpdateRunBudget{})
 	require.NoError(t, err)
 	require.Contains(t, out, "disabled")
 	require.Zero(t, planner.calls)
 
 	running := &storage.ScheduledTask{ServerID: server.ID, Config: `{"enabled":true,"skip_when_running":true}`}
-	out, err = s.executeModUpdateTask(ctx, server, running)
+	out, err = s.executeModUpdateTask(ctx, server, running, &modUpdateRunBudget{})
 	require.NoError(t, err)
 	require.True(t, strings.Contains(out, "running"), out)
 	require.Zero(t, planner.calls, "a running-server policy must not stage")
@@ -236,15 +291,15 @@ func TestExecuteModUpdateTaskFailsClosedWithoutPlannerOrWithBadConfig(t *testing
 	task := &storage.ScheduledTask{ServerID: server.ID, Config: `{"enabled":true}`}
 
 	noPlanner := &Scheduler{log: logger.New()}
-	_, err := noPlanner.executeModUpdateTask(ctx, server, task)
+	_, err := noPlanner.executeModUpdateTask(ctx, server, task, &modUpdateRunBudget{})
 	require.Error(t, err, "a missing planner must fail closed")
 
 	badConfig := &Scheduler{log: logger.New(), modUpdatePlanner: &fakeModPlanner{}}
-	_, err = badConfig.executeModUpdateTask(ctx, server, &storage.ScheduledTask{ServerID: server.ID, Config: `not-json`})
+	_, err = badConfig.executeModUpdateTask(ctx, server, &storage.ScheduledTask{ServerID: server.ID, Config: `not-json`}, &modUpdateRunBudget{})
 	require.Error(t, err)
 
 	failing := &fakeModPlanner{err: errors.New("provider outage")}
 	withFailure := &Scheduler{log: logger.New(), modUpdatePlanner: failing}
-	_, err = withFailure.executeModUpdateTask(ctx, server, task)
+	_, err = withFailure.executeModUpdateTask(ctx, server, task, &modUpdateRunBudget{})
 	require.ErrorContains(t, err, "provider outage")
 }

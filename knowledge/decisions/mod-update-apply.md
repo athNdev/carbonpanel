@@ -29,7 +29,7 @@ bytes with a SHA-512 check, and stages them into the server's open batch. The
 planner never writes the live mods directory or restarts the server.
 
 JSON-backed `mod_update` policies use the same planner. Save waits for the
-current task list, preserves status on config edits, and creates opt-outs disabled.
+task list. Policy edits preserve schedule state and opt-outs start disabled.
 
 # Consequences
 
@@ -55,6 +55,6 @@ current task list, preserves status on config edits, and creates opt-outs disabl
   trigger stay intact. Discard shares the operation lock, keeps its typed
   Connect refusals and records its own operation name.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
-  bound candidate and total bytes. Scheduled inventory and provider access
-  failures remain retryable when other items staged.
+  bound candidate and total bytes. Retries share the run's update budget and
+  keep the failure if that budget is exhausted.
 - The scheduler installs its planner first and refuses invalid policy windows.

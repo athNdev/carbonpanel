@@ -210,6 +210,7 @@ one at https://mozilla.org/MPL/2.0/.
 		});
 		try {
 			policySaving = true;
+			let savedTask: ScheduledTask | null;
 			if (task) {
 				const updated = await rpcClient.task.updateTask({
 					id: task.id,
@@ -217,14 +218,13 @@ one at https://mozilla.org/MPL/2.0/.
 					timezone: policyTimezone,
 					config
 				});
-				if (!current()) return;
-				policyTask = updated.task ?? task;
+				savedTask = updated.task ?? task;
+				// Finish the mutation on the captured task even after navigation.
 				if (explicitOptInChange) {
 					const status = enabled ? TaskStatus.ENABLED : TaskStatus.DISABLED;
-					if (policyTask.status !== status) {
+					if (savedTask.status !== status) {
 						const toggled = await rpcClient.task.toggleTask({ id: task.id, status });
-						if (!current()) return;
-						policyTask = toggled.task ?? policyTask;
+						savedTask = toggled.task ?? savedTask;
 					}
 				}
 			} else {
@@ -240,9 +240,10 @@ one at https://mozilla.org/MPL/2.0/.
 					retryCount: 1,
 					retryDelay: 60
 				});
-				if (!current()) return;
-				policyTask = created.task ?? null;
+				savedTask = created.task ?? null;
 			}
+			if (!current()) return;
+			policyTask = savedTask;
 			loadedPolicyOptIn = enabled;
 			toast.success('Mod update policy saved');
 			await loadPolicy();

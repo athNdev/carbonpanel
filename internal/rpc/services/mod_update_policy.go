@@ -15,8 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const defaultAutomaticModUpdatesPerRun = 10
-
 // StageAvailableUpdates implements the scheduler-facing half of OSS-425. It
 // reuses the exact preview and staging operations as the manual review flow;
 // nothing here publishes bytes or restarts a server.
@@ -87,8 +85,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	}
 	limit := cfg.MaxUpdatesPerRun
 	if limit <= 0 {
-		limit = defaultAutomaticModUpdatesPerRun
-
+		limit = scheduler.DefaultModUpdatesPerRun
 	}
 
 	selections := make([]*v1.ModUpdateSelection, 0, limit)
@@ -139,9 +136,6 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 		window = v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_IDLE
 	}
 	results, _, transient, err := s.stageReviewedModUpdates(ctx, serverID, selections, window, 0, int32(cfg.IdleMinutes))
-	if err != nil {
-		return 0, refused, reasons, err
-	}
 	staged := 0
 	for _, result := range results {
 		if result.Outcome == "staged" {
@@ -151,7 +145,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 			reasons = append(reasons, result.FileName+": "+result.Outcome+" — "+result.Reason)
 		}
 	}
-	return staged, refused, reasons, errors.Join(providerFailure, transient)
+	return staged, refused, reasons, errors.Join(providerFailure, transient, err)
 }
 
 // installedModRows mirrors the deterministic IDs used by ListMods so a policy

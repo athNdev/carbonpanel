@@ -427,6 +427,7 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
 	}
+	previous := *task
 
 	// Update fields if provided
 	if msg.Name != nil {
@@ -534,26 +535,31 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 		}
 	}
 
-	// Recalculate next run
-	nextRun, err := s.scheduler.CalculateNextRun(task)
-	if err != nil && task.Schedule != storage.ScheduleTypeEvent {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid schedule configuration: %w", err))
-	}
-	task.NextRun = nextRun
-
-	// Config-only policy edits must not restore a status that changed after
-	// this request read it.
-	if task.TaskType == storage.TaskTypeModUpdate {
-		if task.Status != storage.TaskStatusEnabled {
+	policy := task.TaskType == storage.TaskTypeModUpdate
+	scheduleChanged := !sameTaskTiming(&previous, task)
+	if !policy || scheduleChanged {
+		nextRun, err := s.scheduler.CalculateNextRun(task)
+		if err != nil && task.Schedule != storage.ScheduleTypeEvent {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid schedule configuration: %w", err))
+		}
+		task.NextRun = nextRun
+		if policy && task.Status != storage.TaskStatusEnabled {
 			task.NextRun = nil
 		}
-		saved, err := s.store.UpdateModUpdatePolicy(ctx, task)
+	}
+
+	if policy {
+		saved, err := s.store.UpdateModUpdatePolicy(ctx, &previous, task, scheduleChanged)
 		if err != nil {
 			s.log.Error("Failed to update mod policy: %v", err)
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update task"))
 		}
 		if !saved {
 			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("the task changed while saving its policy; reload and try again"))
+		}
+		task, err = s.store.GetScheduledTask(ctx, msg.Id)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
 		}
 	} else if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
 		s.log.Error("Failed to update task: %v", err)
@@ -565,6 +571,25 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	return connect.NewResponse(&v1.UpdateTaskResponse{
 		Task: dbTaskToProto(task),
 	}), nil
+}
+
+func sameTaskTiming(a, b *storage.ScheduledTask) bool {
+	if a.Schedule != b.Schedule {
+		return false
+	}
+	switch a.Schedule {
+	case storage.ScheduleTypeCron:
+		return a.CronExpr == b.CronExpr && a.Timezone == b.Timezone
+	case storage.ScheduleTypeInterval:
+		return a.IntervalSecs == b.IntervalSecs
+	case storage.ScheduleTypeOnce:
+		if a.RunAt == nil || b.RunAt == nil {
+			return a.RunAt == b.RunAt
+		}
+		return a.RunAt.Equal(*b.RunAt)
+	default:
+		return true
+	}
 }
 
 // DeleteTask deletes a task
@@ -591,15 +616,30 @@ func (s *TaskService) ToggleTask(ctx context.Context, req *connect.Request[v1.To
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
 	}
 
+	previous := *task
 	task.Status = protoTaskStatusToDB(req.Msg.Status)
 
 	// Recalculate next run if enabling
 	if task.Status == storage.TaskStatusEnabled {
 		nextRun, _ := s.scheduler.CalculateNextRun(task)
 		task.NextRun = nextRun
+	} else if task.TaskType == storage.TaskTypeModUpdate {
+		task.NextRun = nil
 	}
 
-	if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
+	if task.TaskType == storage.TaskTypeModUpdate {
+		saved, err := s.store.ToggleModUpdateSchedule(ctx, &previous, task)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to toggle task"))
+		}
+		if !saved {
+			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("the task schedule changed while toggling; reload and try again"))
+		}
+		task, err = s.store.GetScheduledTask(ctx, task.ID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("task not found"))
+		}
+	} else if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
 		s.log.Error("Failed to toggle task: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to toggle task"))
 	}
