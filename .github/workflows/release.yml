@@ -58,17 +58,17 @@ permissions:
   contents: read
   actions: read
 
-# ONE workflow-level concurrency group for the ENTIRE explicit product
+# ONE shared pages-deploy concurrency group for the ENTIRE explicit product
 # publication: every phase (immutable image -> GitHub release -> moving aliases)
-# holds the same lock, so a different version cannot interleave phases or strand
-# a run after immutable publication. cancel-in-progress:false protects the
-# RUNNING run; with default queue:single only one pending run is retained and a
-# later request REPLACES it. This lane is SINGLE-OPERATOR DISPATCH: do not
-# assume every queued publisher waits; verify the resulting run before retry.
-# Build-only rehearsals, tag pushes, PRs and automatic main events get a per-run
-# key instead, so ordinary CI is not serialized.
+# holds the SAME lock as the CD channel transaction and the docs-only publisher.
+# A stable/latest alias can never move while a Pages or Nightly writer is active.
+# cancel-in-progress:false protects the RUNNING run; with default queue:single only
+# one pending run is retained and a later request REPLACES it. This lane is
+# SINGLE-OPERATOR DISPATCH: do not assume every queued publisher waits; verify
+# the resulting run before retry. Build-only rehearsals, tag pushes, PRs and
+# automatic main events get a per-run key instead, so ordinary CI is not serialized.
 concurrency:
-  group: ${{ inputs.publish == true && 'carbonpanel-product-publish' || format('carbonpanel-stage-{0}', github.run_id) }}
+  group: ${{ inputs.publish == true && 'pages-deploy' || format('carbonpanel-stage-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -753,8 +753,9 @@ jobs:
         needs.stable-channel-transaction.outputs.action != 'refuse' &&
         needs.stable-channel-transaction.outputs.action != 'rollback'))
     runs-on: ubuntu-24.04
-    # Alias decisions are recomputed with LIVE preflight inside the
-    # workflow-level publish lock, so no stale ordering can be applied.
+    # Alias decisions are recomputed with LIVE preflight inside the ONE shared
+    # pages-deploy lock inherited from the workflow level: the same lock held
+    # by cd.yml and the docs-only publisher, so Pages and aliases move serially.
     permissions:
       contents: read
       packages: write

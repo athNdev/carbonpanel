@@ -92,9 +92,12 @@ order by `scripts/release.py image-tags`; the GitHub release is exposed only
 after both registries serve a complete multi-architecture index.
 
 An explicit product publication holds ONE global, non-cancelling
-**workflow-level** concurrency group, `carbonpanel-product-publish`, across the
+**workflow-level** concurrency group, `pages-deploy`, across the
 **entire** flow — immutable image publish, GitHub release/`latest`, and moving
-alias promotion. The lock is not released between phases, so two versions cannot
+alias promotion. This is the SAME shared lock used by the CD channel transaction
+and the docs-only publisher: every Pages write and every moving-alias write is
+serialized through it, so a stable alias cannot move while a docs/CD writer holds
+the Pages slot. The lock is not released between phases, so two versions cannot
 interleave phases or strand a run after immutable publication. `cancel-in-progress:
 false` protects the **running** run; with GitHub's default `queue: single` only
 one pending run is retained, and a later request **replaces** that pending run —

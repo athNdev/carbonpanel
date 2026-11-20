@@ -1732,6 +1732,8 @@ def verify_main_ci(args):
               "commit": args.commit}
     print(json.dumps(values, indent=2))
     write_output(values)
+    if not verified:
+        raise ValueError("Exact trusted main CI did not verify: " + reason)
     return verified
 
 
@@ -3342,8 +3344,8 @@ def channel_transaction_cli(args):
               "steps": json.dumps(list(steps))}
     print(json.dumps(values, indent=2))
     write_output(values)
-    if action == "refuse":
-        raise ValueError("Channel transaction refused: " + reason)
+    if action in ("refuse", "rollback"):
+        raise ValueError(f"Channel transaction did not qualify ({action}): " + reason)
     return action
 
 

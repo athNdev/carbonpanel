@@ -1998,8 +1998,8 @@ class ReleaseTests(unittest.TestCase):
         # (a) ONE workflow-level concurrency group, keyed to the explicit trusted
         # publish path; every job of that run inherits it.
         self.assertRegex(source, r"(?m)^concurrency:\n")
-        self.assertIn("inputs.publish == true && 'carbonpanel-product-publish'", source)
-        self.assertEqual(source.count("carbonpanel-product-publish"), 1)
+        self.assertIn("inputs.publish == true && 'pages-deploy'", source)
+        self.assertNotIn("carbonpanel-product-publish", source)
         # (b) build-only/rehearsal runs get a distinct per-run key, so ordinary
         # CI is not serialized against another version.
         self.assertIn("format('carbonpanel-stage-{0}', github.run_id)", source)
@@ -2518,6 +2518,31 @@ class ChannelPromotionTests(unittest.TestCase):
             self.assertEqual(observations[registry][1]["revision"], self.CANDIDATE)
 
 
+class ReviewerHighHardeningTests(unittest.TestCase):
+    """Independent review HIGHs: observed parity, shared lock, real browser QA."""
+
+    def test_cd_uses_observed_registry_map_and_browser_gate(self):
+        import yaml
+        source = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
+        doc = yaml.safe_load(source)
+        steps = doc["jobs"]["channel-transaction"]["steps"]
+        run_text = "\n".join(str(step.get("run", "")) for step in steps)
+        self.assertIn('--argjson registries "$OBSERVED"', run_text)
+        self.assertNotIn("registries:{docker_hub:$digest,ghcr:$digest}", run_text)
+        self.assertNotIn('IMMUTABLE=$(printf \'%s\' "$ALIASES"', run_text)
+        self.assertIn("--immutable \"$IMMUTABLE\"", run_text)
+        by_id = {step.get("id"): step for step in steps if step.get("id")}
+        self.assertIn("observed=", by_id["stage"]["run"])
+        self.assertEqual(by_id["browser_ui"]["run"],
+                         "python3 scripts/browser_version_check.py")
+        self.assertIn("steps.browser_ui.outcome == 'success'", by_id["final_deploy"]["if"])
+
+    def test_release_lock_is_shared_pages_deploy(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("inputs.publish == true && 'pages-deploy'", source)
+        self.assertNotIn("carbonpanel-product-publish", source)
+
+
 class ChannelTransactionTests(unittest.TestCase):
     """OSS-413 one-transaction-per-channel fixtures (fully offline)."""
 
@@ -2730,6 +2755,16 @@ class ChannelTransactionTests(unittest.TestCase):
             with self.subTest(tag=bad_tag):
                 self.assertEqual(self.decide(candidate=self.candidate(
                     channel="stable", release_tag=bad_tag))[0], "refuse")
+
+    def test_transaction_cli_fails_on_rollback_not_silent_success(self):
+        previous = self.receipt()
+        candidate = self.candidate(candidate_marker_verified=False)
+        with patch("sys.argv", ["release.py", "channel-transaction", "--phase", "commit",
+                                "--candidate", json.dumps(candidate),
+                                "--previous", json.dumps(previous),
+                                "--event", "workflow_run"]), redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, "did not qualify"):
+                release.main()
 
     def test_stage_phase_is_zero_write_and_never_moves_aliases(self):
         previous = self.receipt()
