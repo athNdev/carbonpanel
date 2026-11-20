@@ -10,8 +10,9 @@ image. Every write is gated by :func:`publication_gate`, which requires all of:
   * the trusted default-branch ref,
   * ``publish=true`` opt-in,
   * a valid, independent runtime version (never a ``v*``/``mod-*`` app ref),
-  * an artifact kind that has real clean import/boot evidence in a sibling lane
-    (QCOW2 VM, unprivileged LXC rootfs or portable installer),
+  * a recognized kind (QCOW2 VM, unprivileged LXC rootfs or portable installer),
+    with a reviewed qualification record on main for the exact version, kind,
+    source commit and SHA256SUMS digest,
   * a full 40-hex source SHA whose exact commit is an ancestor of main and has
     green push CI (``verify_main_ci``; never a checkbox),
   * an identity assertion bound to that exact version, commit, artifact and
@@ -55,10 +56,12 @@ ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_VERSION = re.compile(
     r"runtime-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
+SHA256 = re.compile(r"[0-9a-f]{64}")
+QUALIFICATION_RECORDS = ROOT / "scripts/runtime_artifact_qualification.json"
 TRUSTED_REF = "refs/heads/main"
 DEFAULT_REPOSITORY = "athNdev/carbonpanel"
 
-# Publishable kinds. These map to thin, allowlisted wrapper scripts that
+# Candidate kinds. These map to thin, allowlisted wrapper scripts that
 # delegate to the REAL entry points owned by the QCOW2/LXC/installer artifact
 # lanes; this lane publishes their outputs under one independent version and
 # does not reimplement their build logic. The wrappers exist because the
@@ -68,7 +71,7 @@ DEFAULT_REPOSITORY = "athNdev/carbonpanel"
 # --output`` contract. Both the wrapper and its delegate MUST exist on disk or
 # the build step fails closed (see ``preflight_build``). No wrapper resolves to
 # a script outside these explicit maps.
-VERIFIED_ARTIFACTS = ("qcow2", "lxc-rootfs", "installer")
+ARTIFACT_KINDS = ("qcow2", "lxc-rootfs", "installer")
 BUILD_SCRIPTS = {
     "qcow2": "scripts/build-runtime-qcow2.sh",
     "lxc-rootfs": "scripts/build-runtime-lxc.sh",
@@ -290,9 +293,33 @@ def verify_main_ci(commit, runs_json=None, ancestor_checker=None, ci_reader=None
 
 # --- The single publication boundary ----------------------------------------
 
+def reviewed_qualification(version, artifact, commit, records=None):
+    """Return the qualification record from the workflow's main checkout."""
+    if records is None:
+        try:
+            records = json.loads(QUALIFICATION_RECORDS.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise ValueError("reviewed qualification records are unavailable") from error
+    if not isinstance(records, list) or any(not isinstance(row, dict) for row in records):
+        raise ValueError("reviewed qualification records must be a list of objects")
+    matching = [row for row in records if
+                (row.get("version"), row.get("artifact"), row.get("commit"))
+                == (version, artifact, commit)]
+    if len(matching) != 1:
+        raise ValueError("expected one reviewed qualification for this version, kind and commit")
+    record = matching[0]
+    digest = record.get("manifest_sha256")
+    evidence = record.get("evidence")
+    if not isinstance(digest, str) or SHA256.fullmatch(digest) is None:
+        raise ValueError("reviewed qualification has an invalid SHA256SUMS digest")
+    if not isinstance(evidence, str) or re.fullmatch(r"https://[^\s]+", evidence) is None:
+        raise ValueError("reviewed qualification has no HTTPS evidence link")
+    return digest, evidence
+
+
 def publication_gate(event_name, publish_requested, version, artifact, trusted_sha,
                      identity_assertion, ci_verified, ref,
-                     owner=None, identity_checker=None):
+                     owner=None, identity_checker=None, qualification_records=None):
     """Return (allowed, reason, decision) for any runtime-artifact write.
 
     Every condition is fail-closed. ``ci_verified`` must be the output of
@@ -309,8 +336,8 @@ def publication_gate(event_name, publish_requested, version, artifact, trusted_s
     ok, reason = valid_runtime_version(version)
     if not ok:
         return False, reason, decision
-    if artifact not in VERIFIED_ARTIFACTS:
-        return False, f"{artifact!r} has no verified import/boot evidence; use the portable installer", decision
+    if artifact not in ARTIFACT_KINDS:
+        return False, f"{artifact!r} is outside the candidate artifact kinds", decision
     if FULL_SHA.fullmatch(trusted_sha or "") is None:
         return False, "trusted SHA must be a full 40-hex commit", decision
     if str(ci_verified).strip().lower() != "true":
@@ -320,9 +347,16 @@ def publication_gate(event_name, publish_requested, version, artifact, trusted_s
     ok, reason, fields = checker(identity_assertion, version, artifact, trusted_sha, owner or project_owner())
     if not ok:
         return False, reason, decision
+    try:
+        digest, evidence = reviewed_qualification(
+            version, artifact, trusted_sha, records=qualification_records)
+    except ValueError as error:
+        return False, str(error), decision
     decision["identity"] = fields
     decision["build_script"] = build_script_for(artifact)
-    return True, "explicit trusted dispatch with verified SHA, CI and bound identity", decision
+    decision["manifest_sha256"] = digest
+    decision["qualification_evidence"] = evidence
+    return True, "trusted dispatch with exact CI, bound identity and reviewed qualification", decision
 
 
 def runtime_publication_allowed(event_name, publish_requested, version):
@@ -342,7 +376,7 @@ def assert_no_app_release(version, artifact=None):
     ok, reason = valid_runtime_version(version)
     if not ok:
         raise ValueError(reason)
-    if artifact is not None and artifact not in VERIFIED_ARTIFACTS:
+    if artifact is not None and artifact not in ARTIFACT_KINDS:
         raise ValueError(f"unverified artifact {artifact!r} cannot be published")
 
 
@@ -417,7 +451,7 @@ def build_sbom(version, artifact, commit, paths, root=None, owner=None, reposito
     ok, reason = valid_runtime_version(version)
     if not ok:
         raise ValueError(reason)
-    if artifact not in VERIFIED_ARTIFACTS:
+    if artifact not in ARTIFACT_KINDS:
         raise ValueError(f"unverified artifact {artifact!r}")
     if FULL_SHA.fullmatch(commit or "") is None:
         raise ValueError("SBOM requires a full 40-hex source commit")
@@ -581,7 +615,7 @@ def publication_predicate(directory, artifact, *, runner=None, process_runner=No
     Returns (ok, problems). No file is written or network/host call made.
     """
     root = Path(directory)
-    if artifact not in VERIFIED_ARTIFACTS:
+    if artifact not in ARTIFACT_KINDS:
         return False, [f"unverified artifact {artifact!r} cannot pass the publication predicate"]
     problems = []
     all_files = [path for path in root.rglob("*") if path.is_file()]
@@ -814,7 +848,9 @@ def main(argv=None):
             args.trusted_sha, _assertion_text(args), args.ci_verified,
             args.ref, args.owner)
         values = {"allowed": str(allowed).lower(), "reason": reason,
-                  "decision": json.dumps(decision, sort_keys=True)}
+                  "decision": json.dumps(decision, sort_keys=True),
+                  "manifest_sha256": decision.get("manifest_sha256", ""),
+                  "qualification_evidence": decision.get("qualification_evidence", "")}
         _print_json(values)
         write_output(values)
         return 0  # a refusal is a clean, auditable dry run, not a crash
