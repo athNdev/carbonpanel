@@ -16,6 +16,7 @@ import unittest
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import showcase_assets as sa  # noqa: E402
@@ -70,6 +71,13 @@ def fake_png_black_map_with_chrome(
         + chunk(b"IDAT", idat)
         + chunk(b"IEND", b"")
     )
+
+
+def workflow_text() -> str:
+    return (
+        Path(__file__).resolve().parent.parent
+        / ".github" / "workflows" / "showcase.yml"
+    ).read_text(encoding="utf-8")
 
 
 def plan_file(root: Path, names: list[str]) -> Path:
@@ -293,6 +301,41 @@ class ShowcaseAssetsTest(unittest.TestCase):
         self.build()
         digest_after = json.loads((self.publish / "manifest.json").read_text())["contentDigest"]
         self.assertNotEqual(digest_before, digest_after)
+
+
+class ShowcasePipelineTest(unittest.TestCase):
+    """The routine main-refresh workflow must never drop the proven map image."""
+
+    def test_every_feature_gate_is_on_for_main_push(self) -> None:
+        workflow = workflow_text()
+        for feature in ("players", "playerdetail", "worlds", "worldtab", "library"):
+            pattern = re.compile(
+                r"FEATURES_" + feature.upper() + r": \$?\{\{([^\n]*)\}\}"
+            )
+            matches = pattern.findall(workflow)
+            self.assertGreaterEqual(len(matches), 1, f"no gate for {feature}")
+            for expression in matches:
+                self.assertIn(
+                    "github.event_name == 'push' || inputs." + feature,
+                    expression,
+                    f"{feature} can be dropped on a routine main push",
+                )
+
+    def test_publish_requires_the_real_world_view_asset(self) -> None:
+        workflow = workflow_text()
+        section = workflow.split("Require the full README-canonical image set", 1)[1]
+        section = section.split("Guard provenance monotonicity", 1)[0]
+        for name in (
+            "showcase-world-view",
+            "showcase-world-tab",
+            "showcase-worlds-list",
+            "showcase-dashboard-full",
+            "showcase-player-allowlist",
+        ):
+            self.assertIn(name, section, f"canonical publish set may drop {name}")
+
+    def test_fixture_changes_trigger_a_routine_capture(self) -> None:
+        self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])
 
 
 if __name__ == "__main__":
