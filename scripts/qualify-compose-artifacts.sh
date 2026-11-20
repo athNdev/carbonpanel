@@ -23,6 +23,19 @@ workflow_head=$(jq -er --arg repo "$GITHUB_REPOSITORY" '
 printf 'release_workflow_head=%s\n' "$workflow_head" | tee -a "$evidence"
 gh api "$repo/actions/runs/$STAGED_RUN/artifacts?per_page=100" > "$work/artifacts.json"
 
+artifact_count() {
+  jq -r --arg name "$1" '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
+    "$work/artifacts.json"
+}
+
+# An ambiguous primary artifact is a hard failure, never a reason to take the
+# fallback path: two unexpired candidates cannot prove which bytes were staged.
+primary_count=$(artifact_count release-image-context)
+if (( primary_count > 1 )); then
+  echo "ambiguous unexpired release-image-context artifacts: $primary_count" >&2
+  exit 1
+fi
+
 fetch_artifact() {
   local name=$1 record id digest zip
   record=$(jq -ec --arg name "$name" '[.artifacts[] | select(.name == $name and .expired == false)] |
@@ -36,14 +49,44 @@ fetch_artifact() {
   unzip -q "$zip" -d "$work/$name"
 }
 
-fetch_artifact release-image-context
 fetch_artifact release-bundle-linux-amd64
 mapfile -t bundles < <(find "$work/release-bundle-linux-amd64" -name 'carbon-panel*_linux_amd64.tar.gz' -type f)
 [[ "${#bundles[@]}" == 1 ]]
 bundle="${bundles[0]}"
 mkdir "$work/bundle"
 tar -xzf "$bundle" -C "$work/bundle"
+
+# The older release workflow retained a ready-made image context. Newer
+# publish=false staging retains the verified downloads, the assembled OCI
+# inputs and stage.json instead. Accept both, but bind the new path to the
+# exact stage identity and the OCI index digest before using it.
 context="$work/release-image-context"
+if (( primary_count == 1 )); then
+  fetch_artifact release-image-context
+else
+  fetch_artifact qualified-stable-stage
+  stage_commit=$(jq -er '.commit | select(test("^[0-9a-f]{40}$"))' "$work/qualified-stable-stage/stage.json")
+  stage_sha=$(jq -er '.commit' "$work/qualified-stable-stage/stage.json")
+  [[ "$stage_commit" == "$STAGED_SHA" ]]
+  stage_digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' "$work/qualified-stable-stage/stage.json")
+  fetch_artifact verified-release-oci
+  oci_tar=$(find "$work/verified-release-oci" -maxdepth 1 -name 'image.oci.tar' -type f | head -n1)
+  [[ -n "$oci_tar" ]]
+  tar -tf "$oci_tar" | grep -qx "blobs/sha256/${stage_digest#sha256:}"
+  # A matching blob name in the archive is provenance evidence only. The
+  # Compose leg below builds from the verified Linux bundle, so do not claim
+  # that it ran the staged OCI image digest.
+  printf 'stage_commit=%s\nstage_digest=%s\noci_index_blob_present=true\n' \
+    "$stage_sha" "$stage_digest" | tee -a "$evidence"
+  # The shipped Dockerfile only needs the exact Linux binaries and the sample
+  # config; reconstruct the context from the verified bundle rather than
+  # inventing inputs. The comparison below still guards those bytes.
+  mkdir -p "$context/linux_amd64"
+  cp "$work/bundle/carbon-panel" "$work/bundle/carbon-storage" \
+    "$context/linux_amd64/"
+  cp "$work/bundle/config.example.yaml" "$context/"
+fi
+
 for program in carbon-panel carbon-storage; do
   cmp "$work/bundle/$program" "$context/linux_amd64/$program"
 done
@@ -82,5 +125,16 @@ docker push "$tag"
 candidate=$(docker image inspect "$tag" --format '{{json .RepoDigests}}' |
   jq -er '.[] | select(test("^127\\.0\\.0\\.1:5000/carbonpanel@sha256:[0-9a-f]{64}$"))')
 printf 'candidate_image=%s\n' "$candidate" | tee -a "$evidence"
+# The matrix image is rebuilt by the shipped Dockerfile from verified release
+# binaries. This qualifies the exact packaged binaries and operator scripts;
+# it is not an assertion that Compose ran the staged OCI image digest. That
+# digest needs its own exact-image evidence and is recorded separately by the
+# release qualification ledger.
+if (( primary_count == 1 )); then
+  printf 'candidate_image_provenance=local-build-from-release-image-context\n' | tee -a "$evidence"
+else
+  printf 'candidate_image_provenance=local-build-from-verified-linux-bundle\n' | tee -a "$evidence"
+fi
+printf 'staged_oci_image_digest_exercised_by_compose=false\n' | tee -a "$evidence"
 printf 'baseline_image=%s\nbaseline_commit=%s\ncandidate_image=%s\ncandidate_version=%s\n' \
   "$baseline" "$baseline_commit" "$candidate" "$candidate_version" >> "$GITHUB_OUTPUT"
