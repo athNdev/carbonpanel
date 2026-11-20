@@ -29,15 +29,14 @@ const (
 	chunksPerTile  = TileBlocks / chunkBlocks
 	tilesPerRegion = regionChunks / chunksPerTile
 	worldLimit     = 30_000_000 / TileBlocks
-	noSurface      = worldlib.JavaOverworldMinY - 1
 )
 
 var (
 	ErrTileCoordinate     = errors.New("terrain tile coordinate is outside the Java world bounds")
 	ErrTileLevel          = errors.New("terrain level must be a single relative world directory")
 	ErrTerrainMissing     = errors.New("no saved terrain is available in this tile")
-	ErrTerrainUnsupported = errors.New("this tile has no supported Java Overworld chunks")
-	ErrTerrainUnreadable  = errors.New("this tile has no readable Java Overworld chunks")
+	ErrTerrainUnsupported = errors.New("this tile has no supported Java terrain chunks")
+	ErrTerrainUnreadable  = errors.New("this tile has no readable Java terrain chunks")
 	ErrRegionChanged      = errors.New("region changed while reading the Anvil tile")
 	ErrTileBudget         = errors.New("tile exceeds the Anvil read or decode budget")
 )
@@ -48,7 +47,7 @@ type ReadStorage interface {
 	OpenRead(context.Context, string) (storageworker.ReadHandle, error)
 }
 
-// TileCoord addresses a TileBlocks-square tile of the vanilla-height Overworld.
+// TileCoord addresses a TileBlocks-square tile in the selected dimension.
 type TileCoord struct{ X, Z int }
 
 // Tile contains a height-shaded PNG and its source coverage. Unavailable
@@ -66,10 +65,34 @@ func SupportsDataVersion(version int64) bool {
 	return worldlib.SupportsJavaOverworldDataVersion(version)
 }
 
+type tileProfile struct {
+	regionDir string
+	minY      int
+	decode    func([]byte) (worldlib.JavaChunkSurface, error)
+}
+
 // RenderOverworldTile reads one vanilla-height Java region through the
 // owning server's confined storage. It neither changes the save nor requests
 // game assets. The caller owns concurrency, authorization and cache policy.
 func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, coord TileCoord) (Tile, error) {
+	return renderJavaTile(ctx, store, level, coord, tileProfile{
+		regionDir: "region",
+		minY:      worldlib.JavaOverworldMinY,
+		decode:    worldlib.ParseJavaChunkSurface,
+	})
+}
+
+// RenderVanillaEndTile reads one tile from the Java 1.21.9 Vanilla End.
+// The caller must check the level's version and authorize the canonical save.
+func RenderVanillaEndTile(ctx context.Context, store ReadStorage, level string, coord TileCoord) (Tile, error) {
+	return renderJavaTile(ctx, store, level, coord, tileProfile{
+		regionDir: "DIM1/region",
+		minY:      worldlib.JavaEndMinY,
+		decode:    worldlib.ParseJavaEndChunkSurface,
+	})
+}
+
+func renderJavaTile(ctx context.Context, store ReadStorage, level string, coord TileCoord, profile tileProfile) (Tile, error) {
 	var tile Tile
 	if err := ctx.Err(); err != nil {
 		return tile, err
@@ -85,7 +108,7 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 	}
 	rx, rz := floorDiv(coord.X, tilesPerRegion), floorDiv(coord.Z, tilesPerRegion)
 	name := fmt.Sprintf("r.%d.%d.mca", rx, rz)
-	source, err := store.OpenRead(ctx, path.Join(level, "region", name))
+	source, err := store.OpenRead(ctx, path.Join(level, profile.regionDir, name))
 	if errors.Is(err, fs.ErrNotExist) {
 		return tile, ErrTerrainMissing
 	}
@@ -102,9 +125,10 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 		return tile, fmt.Errorf("%w: read Anvil header: %w", ErrTerrainUnreadable, err)
 	}
 
+	noSurface := profile.minY - 1
 	grid := make([]int16, TileBlocks*TileBlocks)
 	for i := range grid {
-		grid[i] = noSurface
+		grid[i] = int16(noSurface)
 	}
 	startX := (coord.X - rx*tilesPerRegion) * chunksPerTile
 	startZ := (coord.Z - rz*tilesPerRegion) * chunksPerTile
@@ -120,7 +144,7 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 				tile.MissingChunks++
 				continue
 			}
-			chunk, err := readSurface(ctx, source, entry, &budget)
+			chunk, err := readSurface(ctx, source, entry, &budget, profile.decode)
 			if ctx.Err() != nil {
 				return Tile{}, ctx.Err()
 			}
@@ -165,7 +189,7 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 
 	var out bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := encoder.Encode(&out, shadeGrid(grid)); err != nil {
+	if err := encoder.Encode(&out, shadeGrid(grid, noSurface)); err != nil {
 		return Tile{}, fmt.Errorf("encode terrain tile: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -224,7 +248,7 @@ var elevation = [...]struct {
 	{worldlib.JavaOverworldMaxY, 239, 235, 221},
 }
 
-func shadeGrid(grid []int16) *image.NRGBA {
+func shadeGrid(grid []int16, noSurface int) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, TileBlocks, TileBlocks))
 	for z := 0; z < TileBlocks; z++ {
 		for x := 0; x < TileBlocks; x++ {
@@ -232,10 +256,10 @@ func shadeGrid(grid []int16) *image.NRGBA {
 			if height == noSurface {
 				continue
 			}
-			l := neighborHeight(grid, x-1, z, height)
-			r := neighborHeight(grid, x+1, z, height)
-			n := neighborHeight(grid, x, z-1, height)
-			s := neighborHeight(grid, x, z+1, height)
+			l := neighborHeight(grid, x-1, z, height, noSurface)
+			r := neighborHeight(grid, x+1, z, height, noSurface)
+			n := neighborHeight(grid, x, z-1, height, noSurface)
+			s := neighborHeight(grid, x, z+1, height, noSurface)
 			shade := max(-38, min(38, (l-r)*4+(n-s)*3))
 			img.SetNRGBA(x, z, terrainColor(height, shade))
 		}
@@ -243,7 +267,7 @@ func shadeGrid(grid []int16) *image.NRGBA {
 	return img
 }
 
-func neighborHeight(grid []int16, x, z, fallback int) int {
+func neighborHeight(grid []int16, x, z, fallback, noSurface int) int {
 	if x >= 0 && x < TileBlocks && z >= 0 && z < TileBlocks {
 		v := int(grid[z*TileBlocks+x])
 		if v != noSurface {

@@ -8,22 +8,25 @@ import (
 )
 
 const (
-	JavaOverworldMinY = -64
-	JavaOverworldMaxY = 319
-	javaChunkWidth    = 16
-	maxChunkNBTValues = 32_768
-	firstModernJava   = 2860 // Java 1.18
-	lastSupportedJava = 4554 // Java 1.21.9
+	JavaOverworldMinY   = -64
+	JavaOverworldMaxY   = 319
+	JavaEndMinY         = 0
+	JavaEndMaxY         = 255
+	javaChunkWidth      = 16
+	maxChunkNBTValues   = 32_768
+	firstModernJava     = 2860 // Java 1.18
+	java1219DataVersion = 4554
+	lastSupportedJava   = java1219DataVersion
 )
 
 var (
-	ErrJavaChunkUnsupported = errors.New("unsupported Java Overworld chunk format")
-	ErrJavaChunkUnfinished  = errors.New("incomplete Java Overworld chunk")
+	ErrJavaChunkUnsupported = errors.New("unsupported Java terrain chunk format")
+	ErrJavaChunkUnfinished  = errors.New("incomplete Java terrain chunk")
 )
 
-// JavaChunkSurface is the vanilla-height Overworld's saved surface. Highest
-// block coordinates are indexed with X increasing first, then Z. A column
-// with no surface has JavaOverworldMinY - 1.
+// JavaChunkSurface contains saved heightmap values indexed with X increasing
+// first, then Z. A column without a surface is one block below the dimension's
+// minimum block height.
 type JavaChunkSurface struct {
 	X, Z    int32
 	Heights [javaChunkWidth * javaChunkWidth]int16
@@ -35,9 +38,29 @@ func SupportsJavaOverworldDataVersion(version int64) bool {
 	return version >= firstModernJava && version <= lastSupportedJava
 }
 
-// ParseJavaChunkSurface reads saved terrain heights from one decompressed
-// modern Java Anvil chunk. It shares the World Library's bounded NBT decoder.
+type javaSurfaceProfile struct {
+	minY, maxY                     int
+	minDataVersion, maxDataVersion int32
+}
+
+// ParseJavaChunkSurface reads saved heights from an Overworld Anvil chunk.
 func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
+	return parseJavaChunkSurface(raw, javaSurfaceProfile{
+		minY: JavaOverworldMinY, maxY: JavaOverworldMaxY,
+		minDataVersion: firstModernJava, maxDataVersion: lastSupportedJava,
+	})
+}
+
+// ParseJavaEndChunkSurface reads the standard-height Java 1.21.9 End profile.
+// The caller owns the dimension's storage identity.
+func ParseJavaEndChunkSurface(raw []byte) (JavaChunkSurface, error) {
+	return parseJavaChunkSurface(raw, javaSurfaceProfile{
+		minY: JavaEndMinY, maxY: JavaEndMaxY,
+		minDataVersion: java1219DataVersion, maxDataVersion: java1219DataVersion,
+	})
+}
+
+func parseJavaChunkSurface(raw []byte, profile javaSurfaceProfile) (JavaChunkSurface, error) {
 	var surface JavaChunkSurface
 	if len(raw) > maxNBTDecompressed {
 		return surface, errors.New("chunk NBT exceeds the Java decoder limit")
@@ -51,7 +74,7 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 		return surface, errors.New("trailing bytes in Java chunk NBT")
 	}
 	version, ok := root["DataVersion"].(int32)
-	if !ok || !SupportsJavaOverworldDataVersion(int64(version)) {
+	if !ok || version < profile.minDataVersion || version > profile.maxDataVersion {
 		return surface, ErrJavaChunkUnsupported
 	}
 	status, ok := root["Status"].(string)
@@ -62,7 +85,7 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 		return surface, ErrJavaChunkUnfinished
 	}
 	minSection, ok := root["yPos"].(int32)
-	if !ok || minSection != JavaOverworldMinY/16 {
+	if !ok || minSection != int32(profile.minY/16) {
 		return surface, ErrJavaChunkUnsupported
 	}
 	x, hasX := root["xPos"].(int32)
@@ -76,14 +99,15 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 		return surface, errors.New("missing saved surface heightmap in Java chunk")
 	}
 	packed, ok := heights.([]int64)
-	// 384 blocks plus the empty value fit in 9 bits. Modern Java never
-	// straddles long boundaries, so seven values fit in one 64-bit entry.
+	// Both the 384-block Overworld and 256-block End profiles need nine
+	// bits for the relative height and empty value. Modern Java stores seven
+	// whole values in each 64-bit entry.
 	const (
-		bits       = 9
-		perLong    = 64 / bits
-		valueMask  = (1 << bits) - 1
-		heightSpan = JavaOverworldMaxY - JavaOverworldMinY + 1
+		bits      = 9
+		perLong   = 64 / bits
+		valueMask = (1 << bits) - 1
 	)
+	heightSpan := profile.maxY - profile.minY + 1
 	if !ok || len(packed) != (len(surface.Heights)+perLong-1)/perLong {
 		return surface, ErrJavaChunkUnsupported
 	}
@@ -92,7 +116,7 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 		if relative > heightSpan {
 			return surface, fmt.Errorf("out-of-range Java surface height at column %d", i)
 		}
-		surface.Heights[i] = int16(JavaOverworldMinY + relative - 1)
+		surface.Heights[i] = int16(profile.minY + relative - 1)
 	}
 	return surface, nil
 }
