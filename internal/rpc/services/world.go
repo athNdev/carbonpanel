@@ -238,7 +238,7 @@ func (s *WorldService) ImportWorld(ctx context.Context, req *connect.Request[v1.
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source must be url or upload"))
 	}
 	if err != nil {
-		return nil, importError(err)
+		return nil, worldError(err)
 	}
 	out := &v1.ImportWorldResponse{Job: importJobProto(*result.Job)}
 	if result.Revision != nil {
@@ -359,7 +359,7 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 			}
 			return connect.NewResponse(out), nil
 		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if isRecordNotFound(err) {
 			return nil, connect.NewError(connect.CodeNotFound, err)
 		}
 		return nil, worldError(err)
@@ -669,6 +669,9 @@ func notFoundOrInternal(err error, message string) error {
 	if isRecordNotFound(err) {
 		return connect.NewError(connect.CodeNotFound, errors.New(message))
 	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return worldError(err)
+	}
 	return connect.NewError(connect.CodeInternal, errors.New(message))
 }
 
@@ -680,11 +683,11 @@ func authoritativeLevelName(ctx context.Context, store *storage.Store, serverID 
 		return "", connect.NewError(connect.CodeInvalidArgument, errors.New("server_id is required"))
 	}
 	cfg, err := store.GetServerConfig(ctx, serverID)
+	if errors.Is(err, storage.ErrServerConfigNotFound) || (err == nil && cfg == nil) {
+		return "", worldError(storage.ErrServerConfigNotFound)
+	}
 	if err != nil {
 		return "", notFoundOrInternal(err, "server world configuration not found")
-	}
-	if cfg == nil {
-		return "", connect.NewError(connect.CodeFailedPrecondition, errors.New("server world configuration is missing"))
 	}
 	level := worldview.ActualLevelName(cfg)
 	if level == "" {
@@ -699,6 +702,12 @@ func worldError(err error) error {
 		return rpcErr
 	}
 	switch {
+	case errors.Is(err, context.Canceled):
+		return connect.NewError(connect.CodeCanceled, err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return connect.NewError(connect.CodeDeadlineExceeded, err)
+	case errors.Is(err, storage.ErrServerConfigNotFound):
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("server world configuration is missing"))
 	case errors.Is(err, worldlib.ErrRemoteUnavailable), errors.Is(err, nodestorage.ErrUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 	case errors.Is(err, worldlib.ErrTwoWriters), errors.Is(err, worldlib.ErrStaleGeneration),
@@ -717,18 +726,9 @@ func worldError(err error) error {
 	case errors.Is(err, worldlib.ErrArchiveRejected), errors.Is(err, worldlib.ErrChecksumMismatch),
 		errors.Is(err, worldlib.ErrCredentialBoundary), errors.Is(err, providers.ErrCredentialBoundary):
 		return connect.NewError(connect.CodeInvalidArgument, err)
-	case errors.Is(err, context.Canceled):
-		return connect.NewError(connect.CodeCanceled, err)
 	default:
 		return connect.NewError(connect.CodeInternal, err)
 	}
-}
-
-func importError(err error) error {
-	if errors.Is(err, worldlib.ErrChecksumMismatch) || errors.Is(err, worldlib.ErrArchiveRejected) || errors.Is(err, worldlib.ErrCredentialBoundary) {
-		return connect.NewError(connect.CodeInvalidArgument, err)
-	}
-	return worldError(err)
 }
 
 func sha256Hex(data []byte) string {
@@ -737,7 +737,7 @@ func sha256Hex(data []byte) string {
 }
 
 func isRecordNotFound(err error) bool {
-	return errors.Is(err, gorm.ErrRecordNotFound)
+	return errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, storage.ErrServerNotFound)
 }
 
 // nodeGenerationForServer reads the real endpoint generation from the owning

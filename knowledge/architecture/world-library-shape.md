@@ -45,10 +45,10 @@ live only on owning node storage.
   inventing a level, and reuses these binding gates for pick/swap. See
   [Library adoption fencing](../decisions/library-adoption-fencing.md).
 - Imports verify operator SHA-256 against the whole archive in node-local
-  staging; `archive/zip` CRC checks entries, no per-file manifest. Inspection
-  rejects unsafe paths, symlinks/special/encrypted entries, deep nesting and
-  size/entry/manifest caps; executables are detected, never installed, and
-  privileges unchanged. A supported archive keeps the world in a named folder
+  staging. ZIP CRCs are the only per-file integrity check. Cancellable
+  inspection rejects unsafe paths, symlinks, special or encrypted entries, and
+  nesting, size, entry or manifest limit violations. It only detects executables.
+  A supported archive keeps the world in a named folder
   (`world/level.dat`); root-level or unusable layouts are refused at import,
   preview and bind. See [Import layout](../../docs/world-library-import-layout.md).
 - Platform support has two axes: API-backed artifact support (Modrinth,

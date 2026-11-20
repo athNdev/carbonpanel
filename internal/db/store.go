@@ -123,12 +123,15 @@ func (s *Store) CreateServer(ctx context.Context, server *Server) error {
 	return s.SyncServerConfigWithServer(ctx, server)
 }
 
+// ErrServerNotFound indicates that no server exists with the requested ID.
+var ErrServerNotFound = errors.New("server not found")
+
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	var server Server
 	err := s.db.WithContext(ctx).First(&server, "id = ?", id).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, fmt.Errorf("server not found")
+			return nil, ErrServerNotFound
 		}
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -191,7 +192,7 @@ func inspectZipCtx(ctx context.Context, zr *zip.Reader, depth int, report *Archi
 			var buf bytes.Buffer
 			n, err := copyEntry(ctx, &buf, f, maxNestedInspectBytes)
 			if err != nil {
-				return rejected("unreadable entry %q: %v", f.Name, err)
+				return entryInspectionError(f.Name, err)
 			}
 			if n > maxNestedInspectBytes {
 				return rejected("nested archive candidate %q exceeds the %d byte inspection limit", f.Name, maxNestedInspectBytes)
@@ -212,10 +213,17 @@ func inspectZipCtx(ctx context.Context, zr *zip.Reader, depth int, report *Archi
 		}
 
 		if _, err := copyEntry(ctx, io.Discard, f, maxEntryUncompressed); err != nil {
-			return rejected("unreadable entry %q: %v", f.Name, err)
+			return entryInspectionError(f.Name, err)
 		}
 	}
 	return nil
+}
+
+func entryInspectionError(name string, err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return rejected("unreadable entry %q: %v", name, err)
 }
 
 // contextReader checks cancellation on every Read, including long inflation of
@@ -242,7 +250,7 @@ func copyEntry(ctx context.Context, dst io.Writer, f *zip.File, max int64) (int6
 		return 0, err
 	}
 	n, copyErr := io.Copy(dst, io.LimitReader(contextReader{ctx: ctx, r: rc}, max+1))
-	closeErr := rc.Close() // zip CRC mismatch is reported on Close.
+	closeErr := rc.Close()
 	if copyErr != nil {
 		return n, copyErr
 	}

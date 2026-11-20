@@ -40,10 +40,10 @@ sources:
   and node generation. A completed replay must still name the binding installed
   by that operation, before current config or layout is read. An omitted
   level can replay only when one retained binding proves the request. Legacy
-  journal rows rely on the binding and timestamps. Replay audit records the
-  proved binding's level and revision.
-- Fresh bind resolves the configured level and refuses a different explicit
-  level before creating a journal. Bind checks the level again after acquiring
+  journal rows rely on binding and timestamps; the activation window is
+  unverifiable. Replay audit uses the proved binding's level and revision.
+- Fresh bind requires persisted config and refuses a different explicit level
+  before creating a journal. Bind checks the level again after acquiring
   the lifecycle transition and after the operation journal admits the bind.
   Staged level and custom server properties writes check for an active bind
   within the same transaction, including rollback.

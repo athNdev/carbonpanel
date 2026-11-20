@@ -326,8 +326,13 @@ func TestStagedWorldLevelWritesRespectActiveWorldBind(t *testing.T) {
 			}
 
 			op := begin("apply")
+			before, err := store.GetServerConfig(ctx, serverID)
+			require.NoError(t, err)
 			_, err = store.ApplyStagedConfigChange(ctx, change.ID)
 			require.ErrorIs(t, err, ErrActiveOperation)
+			after, err := store.GetServerConfig(ctx, serverID)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
 			unapplied, err := store.GetStagedConfigChange(ctx, change.ID)
 			require.NoError(t, err)
 			require.Equal(t, StagedStatusStaged, unapplied.Status)

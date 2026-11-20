@@ -692,6 +692,60 @@ func TestMountedConnectBindsNamedBackupWithRootCompanions(t *testing.T) {
 
 }
 
+func TestMountedWorldOperationsDistinguishMissingConfigAndServer(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, revision := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	life := &worldTestLifecycle{}
+	svc := newWorldRPCService(t, store, libraryRoot, life)
+	pattern, handler := carbonpanelv1connect.NewWorldServiceHandler(svc)
+	mux := http.NewServeMux()
+	mux.Handle(pattern, handler)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	client := carbonpanelv1connect.NewWorldServiceClient(ts.Client(), ts.URL)
+	bind := func(serverID, requestID string) (*connect.Response[v1.BindWorldResponse], error) {
+		return client.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+			ServerId: serverID, RevisionId: revision.ID, RequestId: requestID,
+		}))
+	}
+	first, err := bind(server.ID, "retained-bind")
+	if err != nil || first.Msg.GetOutcome() != "success" {
+		t.Fatalf("initial bind = %+v, %v", first, err)
+	}
+	if err := store.DB().Where("server_id = ?", server.ID).Delete(&storage.ServerConfig{}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	for _, target := range []struct {
+		serverID string
+		want     connect.Code
+	}{
+		{server.ID, connect.CodeFailedPrecondition},
+		{"missing-server", connect.CodeNotFound},
+	} {
+		if _, err := client.CheckCompatibility(ctx, connect.NewRequest(&v1.CheckCompatibilityRequest{
+			ServerId: target.serverID, RevisionId: revision.ID,
+		})); connect.CodeOf(err) != target.want {
+			t.Fatalf("preview for %s = %v, want %v", target.serverID, err, target.want)
+		}
+		if _, err := bind(target.serverID, "fresh-bind"); connect.CodeOf(err) != target.want {
+			t.Fatalf("fresh bind for %s = %v, want %v", target.serverID, err, target.want)
+		}
+	}
+	replay, err := bind(server.ID, "retained-bind")
+	if err != nil || replay.Msg.GetOperationId() != first.Msg.GetOperationId() ||
+		replay.Msg.GetBinding().GetId() != first.Msg.GetBinding().GetId() {
+		t.Fatalf("retained replay without config = %+v, %v", replay, err)
+	}
+	ops, err := store.ListServerOperations(ctx)
+	if err != nil || len(ops) != 1 || life.stops != 0 || life.starts != 0 {
+		t.Fatalf("refusal or replay changed lifecycle or journal: %+v, %+v, %v", life, ops, err)
+	}
+}
+
 func readFileBytes(t *testing.T, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -914,8 +968,8 @@ func TestBindWorldCancellationBeforeMutationEmitsNoEvent(t *testing.T) {
 	_, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
 		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-cancel-1",
 	}))
-	if err == nil {
-		t.Fatal("expected cancellation error")
+	if connect.CodeOf(err) != connect.CodeCanceled {
+		t.Fatalf("bind cancellation = %v, want canceled", err)
 	}
 	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-cancel-1"); got != 0 {
 		t.Fatalf("events after cancelled bind = %d, want 0", got)

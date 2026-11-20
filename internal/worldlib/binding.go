@@ -453,7 +453,7 @@ func (b *Binder) configuredLevel(ctx context.Context, serverID string) (string, 
 		return "", fmt.Errorf("server world configuration not found: %w", err)
 	}
 	if cfg == nil {
-		return "", errors.New("server world configuration is missing")
+		return "", storage.ErrServerConfigNotFound
 	}
 	level := worldview.ActualLevelName(cfg)
 	if level == "" {
