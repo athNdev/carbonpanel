@@ -545,7 +545,11 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div class="md:col-span-2">
-					<CarbonSelect bind:value={searchParams.gameVersion} disabled={loading}>
+					<CarbonSelect
+						aria-label="Minecraft version"
+						bind:value={searchParams.gameVersion}
+						disabled={loading}
+					>
 						<option value="">All MC Versions</option>
 						{#each gameVersions as version (version)}
 							<option value={version}>{version}</option>
@@ -554,7 +558,11 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 
 				<div class="md:col-span-2">
-					<CarbonSelect bind:value={searchParams.modLoader} disabled={loading}>
+					<CarbonSelect
+						aria-label="Mod loader"
+						bind:value={searchParams.modLoader}
+						disabled={loading}
+					>
 						{#each modLoaders as loader (loader.value)}
 							<option value={loader.value}>{loader.label}</option>
 						{/each}
@@ -563,6 +571,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 				<div class="md:col-span-2">
 					<CarbonSelect
+						aria-label="Modpack provider"
 						bind:value={selectedIndexer}
 						disabled={syncing}
 						onchange={() => syncModpacks()}

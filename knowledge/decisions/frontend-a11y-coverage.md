@@ -50,8 +50,8 @@ locked Playwright package and owned cache the review harness already provides.
 
 Chromium is the primary gate. Firefox and WebKit run smoke checks. Screen
 readers, 400% zoom and mobile-device emulation are outside the coverage. Seeded
-SPA checks exercise the frontend boundary, including refused `SearchModpacks`
-and Retry. Extend DOM and page journey tests for new interactive controls.
+SPA checks cover search refusal and Retry at 1440 CSS pixels and Modpacks
+filter names at 360 and 1440 in both themes. Add tests for interactive controls.
 
 On relevant PRs and main changes, the Modpacks browser review runs both plans
 against an owned authenticated controller. It checks the Modrinth-backed
