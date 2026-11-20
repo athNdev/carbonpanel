@@ -212,8 +212,14 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			results = append(results, result)
 			continue
 		}
-		if _, err := root.Lstat(installed); err != nil {
-			installed, err = modInstallPath(base+"_disabled", sel.GetFileName())
+		if _, statErr := root.Lstat(installed); statErr != nil {
+			disabled, pathErr := modInstallPath(base+"_disabled", sel.GetFileName())
+			if pathErr != nil {
+				result.Outcome, result.Reason = "refused_drift", "the reviewed file is not a valid installed mod"
+				results = append(results, result)
+				continue
+			}
+			installed = disabled
 		}
 		hash, _, err := installedModHash(ctx, root, installed, maxModUpdateBytes)
 		if err != nil || !strings.EqualFold(hash, sel.GetInstalledSha512()) {

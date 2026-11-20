@@ -819,11 +819,15 @@ func (s *Scheduler) updateNextRun(task *storage.ScheduledTask) {
 	now := time.Now()
 	if task.Schedule == storage.ScheduleTypeOnce {
 		task.Status = storage.TaskStatusDisabled
-		s.store.UpdateTaskNextRun(ctx, task.ID, nil, &now)
+		if err := s.store.UpdateTaskNextRun(ctx, task.ID, nil, &now); err != nil {
+			s.log.Error("Task %s: failed to clear next run: %v", task.Name, err)
+		}
 		return
 	}
 	if task.Schedule == storage.ScheduleTypeEvent {
-		s.store.UpdateTaskNextRun(ctx, task.ID, nil, &now)
+		if err := s.store.UpdateTaskNextRun(ctx, task.ID, nil, &now); err != nil {
+			s.log.Error("Task %s: failed to clear next run: %v", task.Name, err)
+		}
 		return
 	}
 	nextRun, err := s.CalculateNextRun(task)
