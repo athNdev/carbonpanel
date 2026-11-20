@@ -35,7 +35,7 @@ const (
 // exact bytes. It is injected so the RPC and the scheduled-policy executor can
 // share one operation without either owning a global provider client.
 type modCandidateFetcher interface {
-	Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string, limit int64) ([]byte, string, error)
+	Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string, limit int64) ([]byte, int64, string, error)
 }
 
 // modUpdateVersionLookup is the narrow provider capability the fetcher needs.
@@ -53,36 +53,36 @@ type providerModCandidateFetcher struct {
 	client   *http.Client
 }
 
-func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string, limit int64) ([]byte, string, error) {
+func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string, limit int64) ([]byte, int64, string, error) {
 	lookup := f.versions
 	if lookup == nil {
 		lookup = modUpdateProvider(settings)
 	}
 	version, err := lookup.GetVersion(ctx, versionID)
 	if err != nil || version == nil || version.ID == "" {
-		return nil, "refused_provider", fmt.Errorf("provider did not confirm release %s", versionID)
+		return nil, 0, "refused_provider", fmt.Errorf("provider did not confirm release %s", versionID)
 	}
 	if version.Status != "listed" || version.VersionType != "release" ||
 		version.ProjectID != projectID ||
 		!slices.Contains(version.Loaders, loader) || !slices.Contains(version.GameVersions, game) {
-		return nil, "refused_provider", errors.New("release is no longer listed, from the reviewed project and compatible")
+		return nil, 0, "refused_provider", errors.New("release is no longer listed, from the reviewed project and compatible")
 	}
 	want, err := hex.DecodeString(sha512Hex)
 	if err != nil || len(want) != sha512.Size {
-		return nil, "refused_provider", errors.New("reviewed checksum is not a SHA-512 digest")
+		return nil, 0, "refused_provider", errors.New("reviewed checksum is not a SHA-512 digest")
 	}
 	var target *modrinth.File
 	for i := range version.Files {
 		file := &version.Files[i]
 		if filepath.Base(file.Filename) == filename && strings.EqualFold(file.Hashes.SHA512, sha512Hex) {
 			if target != nil {
-				return nil, "refused_provider", errors.New("release has ambiguous reviewed files")
+				return nil, 0, "refused_provider", errors.New("release has ambiguous reviewed files")
 			}
 			target = file
 		}
 	}
 	if target == nil || !providers.DownloadURLIsAllowed(target.URL) {
-		return nil, "refused_download", errors.New("no allowed download URL for the reviewed file")
+		return nil, 0, "refused_download", errors.New("no allowed download URL for the reviewed file")
 	}
 	// Static URL validation alone is not a connection-time SSRF guard. Reuse
 	// the guarded client that World Library imports use so DNS/private targets
@@ -93,38 +93,39 @@ func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storag
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
 	if err != nil {
-		return nil, "refused_download", err
+		return nil, 0, "refused_download", err
 	}
 	if agent := providerUserAgent(settings); agent != "" {
 		req.Header.Set("User-Agent", agent)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, "transient_download", err
+		return nil, 0, "transient_download", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode >= 500 {
-			return nil, "transient_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
+			return nil, 0, "transient_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
 		}
-		return nil, "refused_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
+		return nil, 0, "refused_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
 	}
 	readLimit := int64(maxModUpdateBytes)
 	if limit > 0 && limit < readLimit {
 		readLimit = limit
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, readLimit+1))
+	consumed := int64(len(data))
 	if err != nil {
-		return nil, "transient_download", err
+		return nil, consumed, "transient_download", err
 	}
-	if int64(len(data)) > readLimit || len(data) == 0 {
-		return nil, "refused_download", fmt.Errorf("candidate file exceeds the %d-byte update limit or is empty", readLimit)
+	if consumed > readLimit || consumed == 0 {
+		return nil, consumed, "refused_download", fmt.Errorf("candidate file exceeds the %d-byte update limit or is empty", readLimit)
 	}
 	sum := sha512.Sum512(data)
 	if !bytes.Equal(sum[:], want) {
-		return nil, "refused_checksum", errors.New("candidate bytes do not match the reviewed SHA-512")
+		return nil, consumed, "refused_checksum", errors.New("candidate bytes do not match the reviewed SHA-512")
 	}
-	return data, "", nil
+	return data, consumed, "", nil
 }
 
 func providerUserAgent(settings *storage.ServerConfig) string {
@@ -239,15 +240,11 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		return nil, nil, nil, err
 	}
 	if existing != nil && !batchWindowEquals(existing, windowName, applyAt, idle) {
-		configs, err := s.store.ListBatchConfig(ctx, existing.ID)
+		reviewed, err := batchHasWindowBoundRows(ctx, s.store, existing.ID)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		rows, err := s.store.ListBatchContent(ctx, existing.ID)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if len(configs) > 0 || len(rows) > 0 {
+		if reviewed {
 			return nil, nil, nil, fmt.Errorf(
 				"open batch %s has window %q (at %v, idle %d) with reviewed changes; refusing conflicting window %q (at %v, idle %d)",
 				existing.ID, existing.Window, existing.ApplyAt, existing.IdleMinutes,
@@ -329,8 +326,12 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			results = append(results, result)
 			continue
 		}
-		data, outcome, fetchErr := fetcher.Fetch(ctx, settings, sel.GetCandidateVersionId(),
+		data, consumed, outcome, fetchErr := fetcher.Fetch(ctx, settings, sel.GetCandidateVersionId(),
 			preview.GetProjectId(), sel.GetCandidateFilename(), sel.GetCandidateSha512(), loader, server.MCVersion, remaining)
+		// Count every transferred byte, including a rejected candidate: a
+		// provider that keeps sending bad bytes must not burn the budget for
+		// free.
+		totalBytes += consumed
 		if fetchErr != nil {
 			result.Outcome, result.Reason = outcome, fetchErr.Error()
 			if outcome == "transient_download" {
@@ -344,7 +345,6 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			results = append(results, result)
 			continue
 		}
-		totalBytes += int64(len(data))
 		ready = append(ready, readyModUpdate{
 			selection: sel, targetPath: filepath.ToSlash(installed),
 			liveHash: preview.GetInstalledSha512(), bytes: data,
@@ -362,18 +362,15 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		if err != nil {
 			return err
 		}
-		if existing != nil && existing.Window != string(windowName) {
-			content, err := s.store.ListBatchContent(ctx, existing.ID)
+		if existing != nil && !batchWindowEquals(existing, windowName, applyAt, idle) {
+			reviewed, err := batchHasWindowBoundRows(ctx, s.store, existing.ID)
 			if err != nil {
 				return err
 			}
-			configs, err := s.store.ListBatchConfig(ctx, existing.ID)
-			if err != nil {
-				return err
-			}
-			if len(content) > 0 || len(configs) > 0 {
-				return fmt.Errorf("open batch %s has window %q and already-reviewed changes; refusing to retarget to %q",
-					existing.ID, existing.Window, windowName)
+			if reviewed {
+				return fmt.Errorf("open batch %s has window %q (at %v, idle %d) with reviewed changes; refusing conflicting window %q (at %v, idle %d)",
+					existing.ID, existing.Window, existing.ApplyAt, existing.IdleMinutes,
+					windowName, applyAt, idle)
 			}
 		}
 		// Commit the window before the first staged byte becomes visible.
@@ -399,8 +396,8 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 				outcome.Outcome, outcome.Reason = "already_staged", "this file already has an update in the open batch"
 				continue
 			}
-			row, err := stageContentBytesWithPrecondition(ctx, s.store, server, s.storageResolver,
-				storage.StagedKindMod, storage.StagedActionReplace,
+			row, err := stageModContentToBatch(ctx, s.store, server, s.storageResolver,
+				batch.ID, windowName, applyAt, idle,
 				item.targetPath, sel.GetFileName(), item.bytes, item.liveHash)
 			if err != nil {
 				outcome.Outcome, outcome.Reason = "error", err.Error()
@@ -434,6 +431,29 @@ func installedModLocation(root *os.Root, base, fileName string) (string, bool, e
 		return "", false, err
 	}
 	return disabled, false, nil
+}
+
+// batchHasWindowBoundRows reports whether an open batch already carries work
+// whose schedule would change if its window were retargeted. Independently
+// scheduled config rows (cron) are not window-bound and must be preserved.
+func batchHasWindowBoundRows(ctx context.Context, store *storage.Store, batchID string) (bool, error) {
+	content, err := store.ListBatchContent(ctx, batchID)
+	if err != nil {
+		return false, err
+	}
+	if len(content) > 0 {
+		return true, nil
+	}
+	configs, err := store.ListBatchConfig(ctx, batchID)
+	if err != nil {
+		return false, err
+	}
+	for _, config := range configs {
+		if config.ApplyMode != storage.StagedApplyScheduled {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // batchWindowEquals compares the complete window tuple, not just the enum, so

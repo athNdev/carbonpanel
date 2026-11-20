@@ -122,15 +122,16 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 
 	t.Run("verified download", func(t *testing.T) {
 		fetcher := fetcherAgainstServer(t, "next", candidateVersion(allowedURL, candidateHash("next")))
-		data, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		data, consumed, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
 		require.NoError(t, err)
 		require.Empty(t, outcome)
+		require.Equal(t, int64(len("next")), consumed)
 		require.Equal(t, "next", string(data))
 	})
 
 	t.Run("real checksum mismatch is refused", func(t *testing.T) {
 		fetcher := fetcherAgainstServer(t, "tampered", candidateVersion(allowedURL, candidateHash("next")))
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
 		require.Error(t, err)
 		require.Equal(t, "refused_checksum", outcome)
 	})
@@ -138,7 +139,7 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 	t.Run("literal-IP download URL is refused", func(t *testing.T) {
 		version := candidateVersion("http://127.0.0.1:65534/mod-2.jar", candidateHash("next"))
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
 		require.Error(t, err)
 		require.Equal(t, "refused_download", outcome)
 	})
@@ -147,7 +148,7 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 		version := candidateVersion(allowedURL, candidateHash("next"))
 		version.Status = "draft"
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
 		require.Error(t, err)
 		require.Equal(t, "refused_provider", outcome)
 	})
@@ -156,14 +157,14 @@ func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {
 		version := candidateVersion(allowedURL, candidateHash("next"))
 		version.Files = append(version.Files, version.Files[0])
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: version}}
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", candidateHash("next"), "fabric", "1.21.1", maxModUpdateBytes)
 		require.Error(t, err)
 		require.Equal(t, "refused_provider", outcome)
 	})
 
 	t.Run("reviewed checksum must be a SHA-512 digest", func(t *testing.T) {
 		fetcher := providerModCandidateFetcher{versions: versionLookupFixture{version: candidateVersion(allowedURL, "short")}}
-		_, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", "short", "fabric", "1.21.1", maxModUpdateBytes)
+		_, _, outcome, err := fetcher.Fetch(ctx, nil, "update", "project", "mod-2.jar", "short", "fabric", "1.21.1", maxModUpdateBytes)
 		require.Error(t, err)
 		require.True(t, strings.Contains(outcome, "refused_provider"), outcome)
 	})

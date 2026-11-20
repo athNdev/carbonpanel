@@ -108,6 +108,31 @@ func (s *Store) OpenUpdateBatch(ctx context.Context, serverID string) (*ServerUp
 	return &batch, nil
 }
 
+// AddStagedContentToBatch inserts a staged row only while the chosen batch is
+// still open with the exact window that was reviewed. A concurrent discard or
+// retarget therefore fails the insert instead of silently placing the payload
+// in a different batch.
+func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentChange, batchID string, window UpdateWindow, applyAt *time.Time, idleMinutes int) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var batch ServerUpdateBatch
+		if err := tx.Where("id = ? AND status = ? AND window = ?", batchID, UpdateBatchOpen, string(window)).First(&batch).Error; err != nil {
+			return err
+		}
+		sameApplyAt := (batch.ApplyAt == nil) == (applyAt == nil)
+		if sameApplyAt && batch.ApplyAt != nil && applyAt != nil {
+			sameApplyAt = batch.ApplyAt.Equal(*applyAt)
+		}
+		if batch.IdleMinutes != idleMinutes || !sameApplyAt {
+			return fmt.Errorf("chosen batch %s window changed before staging", batchID)
+		}
+		row.BatchID = batchID
+		if row.Status == "" {
+			row.Status = StagedStatusStaged
+		}
+		return tx.Create(row).Error
+	})
+}
+
 // SetBatchIdleSince records when the current idle stretch started.
 // A nil value clears it, which is what a player joining does.
 func (s *Store) SetBatchIdleSince(ctx context.Context, id string, since *time.Time) error {
@@ -142,6 +167,11 @@ func (s *Store) SetOpenBatchWindow(ctx context.Context, serverID string, window 
 		}
 		stale := false
 		for _, config := range configs {
+			// A cron-scheduled config row owns its own schedule; staging a mod
+			// must not move it into this batch's apply window.
+			if config.ApplyMode == StagedApplyScheduled {
+				continue
+			}
 			if config.ApplyMode != mode || config.IdleMinutes != idleMinutes || !sameInstant(config.ApplyAt, applyAt) {
 				stale = true
 				break
@@ -162,7 +192,8 @@ func (s *Store) SetOpenBatchWindow(ctx context.Context, serverID string, window 
 			return err
 		}
 		return tx.Model(&StagedConfigChange{}).
-			Where("batch_id = ? AND status = ?", batch.ID, string(StagedStatusStaged)).
+			Where("batch_id = ? AND status = ? AND apply_mode <> ?",
+				batch.ID, string(StagedStatusStaged), StagedApplyScheduled).
 			Updates(map[string]any{
 				"apply_mode":   string(mode),
 				"apply_at":     applyAt,

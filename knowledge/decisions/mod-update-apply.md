@@ -45,7 +45,10 @@ The scheduler invokes the same planner through an injected interface.
 - Window, staged rows and target uniqueness are journaled together; unrelated
   reviewed batches are not retargeted. The whole window tuple is compared
   before work, duplicate targets and cumulative bytes are bounded, and the
-  batch/config window transition is transactional. The guarded World Library
-  download client is reused and transient provider failures stay retryable.
+  batch/config window transition is transactional. The full tuple is rechecked
+  under the operation, inserts name the still-open chosen batch, discard shares
+  the lock, cron config rows keep their schedule, and rejected transfers still
+  consume the byte budget. The guarded World Library download client is reused
+  and transient provider failures stay retryable.
 - The scheduler installs the planner before starting, applies timezone only to
   cron, and refuses to dispatch a task whose next run cannot be advanced.

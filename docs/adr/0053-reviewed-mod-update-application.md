@@ -57,7 +57,14 @@ request.
    and total candidate bytes are bounded so repeated or large requests cannot
    exhaust controller memory. The batch-plus-config window transition is one
    transaction and an unchanged window is not rewritten.
-9. Cron timezone is resolved only for cron schedules; if an existing task's
+9. The full window tuple is also rechecked inside the per-server operation, so
+   two same-mode requests with different times cannot both pass preflight and
+   reschedule a reviewed batch. Staged rows name the reviewed batch and window
+   and are inserted conditionally; discard shares the same operation ownership.
+   Cron-scheduled config rows keep their own schedule when a mod update joins a
+   batch. Every transferred byte is charged to the budget, including rejected
+   downloads.
+10. Cron timezone is resolved only for cron schedules; if an existing task's
    schedule cannot be advanced, dispatch is refused and the task is disabled so
    it cannot run on every tick. The planner is installed before the scheduler
    starts so cold boot sees the real implementation.

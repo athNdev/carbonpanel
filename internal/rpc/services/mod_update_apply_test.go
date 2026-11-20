@@ -8,10 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/stretchr/testify/require"
@@ -24,9 +28,9 @@ type modUpdateFetchFixture struct {
 	calls   int
 }
 
-func (f *modUpdateFetchFixture) Fetch(context.Context, *storage.ServerConfig, string, string, string, string, string, string, int64) ([]byte, string, error) {
+func (f *modUpdateFetchFixture) Fetch(context.Context, *storage.ServerConfig, string, string, string, string, string, string, int64) ([]byte, int64, string, error) {
 	f.calls++
-	return f.data, f.outcome, f.err
+	return f.data, int64(len(f.data)), f.outcome, f.err
 }
 
 func installedModDigest(data string) string {
@@ -48,6 +52,300 @@ func modUpdateRequest(serverID, installedHash string) *v1.UpdateModRequest {
 	}
 }
 
+// twoModPreviewFixture serves two installed files so service tests can exercise
+// racing or cumulative requests through the real preview and staging paths.
+type twoModPreviewFixture struct {
+	onLookup func(string)
+}
+
+func versionFor(project, hash, filename string) modrinth.Version {
+	return modrinth.Version{
+		ID: "v-" + project, ProjectID: project, VersionType: "release", Status: "listed",
+		Loaders: []string{"fabric"}, GameVersions: []string{"1.21.1"},
+		Files: []modrinth.File{{Filename: filename, Hashes: modrinth.Hashes{SHA512: hash}}},
+	}
+}
+
+func (f twoModPreviewFixture) VersionsByFileHash(_ context.Context, hashes []string) (map[string]modrinth.Version, error) {
+	if f.onLookup != nil {
+		for _, hash := range hashes {
+			f.onLookup(hash)
+		}
+	}
+	out := make(map[string]modrinth.Version, len(hashes))
+	for _, hash := range hashes {
+		switch hash {
+		case installedModDigest("installed-a"):
+			v := versionFor("project-a", hash, "a.jar")
+			v.DatePublished = "2025-01-01T00:00:00Z"
+			out[hash] = v
+		case installedModDigest("installed-b"):
+			v := versionFor("project-b", hash, "b.jar")
+			v.DatePublished = "2025-01-01T00:00:00Z"
+			out[hash] = v
+		}
+	}
+	return out, nil
+}
+
+func (twoModPreviewFixture) CompatibleUpdatesByFileHash(_ context.Context, hashes []string, _, _ string) (map[string]modrinth.Version, error) {
+	out := make(map[string]modrinth.Version, len(hashes))
+	for _, hash := range hashes {
+		switch hash {
+		case installedModDigest("installed-a"):
+			v := versionFor("project-a", installedModDigest("next-a"), "a.jar")
+			v.ID = "v2-project-a"
+			v.DatePublished = "2025-02-01T00:00:00Z"
+			out[hash] = v
+		case installedModDigest("installed-b"):
+			v := versionFor("project-b", installedModDigest("next-b"), "b.jar")
+			v.ID = "v2-project-b"
+			v.DatePublished = "2025-02-01T00:00:00Z"
+			out[hash] = v
+		}
+	}
+	return out, nil
+}
+
+func (twoModPreviewFixture) GetProjects(_ context.Context, _ []string) ([]modrinth.ProjectDetails, error) {
+	return []modrinth.ProjectDetails{
+		{ID: "project-a", ServerSide: "required"},
+		{ID: "project-b", ServerSide: "required"},
+	}, nil
+}
+
+type modUpdateFetchByFileFixture struct {
+	mu      sync.Mutex
+	data    map[string][]byte
+	bad     map[string]bool
+	delay   time.Duration
+	onFetch func(string)
+	calls   int
+}
+
+func (f *modUpdateFetchByFileFixture) Fetch(ctx context.Context, _ *storage.ServerConfig, _, _, filename, _, _, _ string, _ int64) ([]byte, int64, string, error) {
+	if f.onFetch != nil {
+		f.onFetch(filename)
+	}
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	data := f.data[filename]
+	if f.bad[filename] {
+		return data, int64(len(data)), "refused_checksum", errors.New("checksum mismatch")
+	}
+	return data, int64(len(data)), "", nil
+}
+
+func twoModRequest(serverID, fileName, installed string, window v1.ConfigApplyWindow, atUnix int64) *v1.UpdateModRequest {
+	return &v1.UpdateModRequest{
+		ServerId: serverID,
+		UpdateSelections: []*v1.ModUpdateSelection{{
+			ModId: "mod-" + fileName, FileName: fileName,
+			InstalledSha512:    installedModDigest(installed),
+			CandidateVersionId: "v2-project-" + fileName[:1],
+			CandidateSha512:    installedModDigest("next-" + fileName[:1]),
+			CandidateFilename:  fileName,
+		}},
+		UpdateWindow:      window,
+		UpdateApplyAtUnix: atUnix,
+	}
+}
+
+func TestTwoModPreviewFixtureProducesAvailableUpdates(t *testing.T) {
+	root := t.TempDir()
+	modsDir := filepath.Join(root, "mods")
+	require.NoError(t, os.MkdirAll(modsDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(modsDir, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(modsDir, "b.jar"), []byte("installed-b"), 0o600))
+	mods := []*v1.Mod{{FileName: "a.jar", Enabled: true}, {FileName: "b.jar", Enabled: true}}
+	server := &storage.Server{ModLoader: storage.ModLoaderFabric, MCVersion: "1.21.1"}
+	require.NoError(t, previewServerModUpdates(context.Background(), root, modsDir, server, mods, twoModPreviewFixture{}))
+	for _, mod := range mods {
+		t.Logf("%s: %s %s", mod.FileName, mod.UpdatePreview.GetState(), mod.UpdatePreview.GetReason())
+		require.Equal(t, "available", mod.UpdatePreview.GetState())
+	}
+}
+
+func TestSameModeWindowRaceCannotRescheduleReviewedBatch(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-window-race", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
+
+	firstLookup := make(chan struct{})
+	secondLookup := make(chan struct{})
+	releaseLookups := make(chan struct{})
+	lookup := twoModPreviewFixture{onLookup: func(hash string) {
+		if hash == installedModDigest("installed-a") {
+			close(firstLookup)
+			<-releaseLookups
+		} else {
+			close(secondLookup)
+			<-releaseLookups
+		}
+	}}
+	fetcher := &modUpdateFetchByFileFixture{
+		data: map[string][]byte{"a.jar": []byte("next-a"), "b.jar": []byte("next-b")},
+	}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(lookup)
+	svc.SetModCandidateFetcher(fetcher)
+
+	firstTime := time.Now().Add(time.Hour).Unix()
+	secondTime := time.Now().Add(2 * time.Hour).Unix()
+	requests := []*v1.UpdateModRequest{
+		twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_AT_TIME, firstTime),
+		twoModRequest(server.ID, "b.jar", "installed-b", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_AT_TIME, secondTime),
+	}
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range requests {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = svc.UpdateMod(ctx, connect.NewRequest(requests[i]))
+		}(i)
+	}
+	// Both requests pass preflight and reach provider lookup before either can
+	// commit a window; only the in-operation full-window recheck can reject the
+	// second one.
+	select {
+	case <-firstLookup:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("first request never reached lookup: errs=%v %v", errs[0], errs[1])
+	}
+	select {
+	case <-secondLookup:
+	case <-time.After(10 * time.Second):
+		t.Fatal("second request never reached lookup")
+	}
+	close(releaseLookups)
+	wg.Wait()
+
+	succeeded, refused := 0, 0
+	for _, err := range errs {
+		if err == nil {
+			succeeded++
+		} else {
+			refused++
+			require.Condition(t, func() bool {
+				return strings.Contains(err.Error(), "conflicting window") ||
+					strings.Contains(err.Error(), "in progress") ||
+					strings.Contains(err.Error(), "database is locked")
+			}, "race must be refused by the operation or window check: %v", err)
+		}
+	}
+	require.Equal(t, 1, succeeded, "exactly one same-mode window may win")
+	require.Equal(t, 1, refused)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Equal(t, string(storage.UpdateWindowAtTime), batch.Window)
+	require.True(t, batch.ApplyAt.Equal(time.Unix(firstTime, 0).UTC()) ||
+		batch.ApplyAt.Equal(time.Unix(secondTime, 0).UTC()))
+}
+
+func TestCumulativeBudgetCountsRejectedDownloads(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-budget-failures", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
+
+	fetcher := &modUpdateFetchByFileFixture{
+		data: map[string][]byte{"a.jar": []byte("bad"), "b.jar": []byte("next-b")},
+		bad:  map[string]bool{"a.jar": true},
+	}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(twoModPreviewFixture{})
+	svc.SetModCandidateFetcher(fetcher)
+	svc.SetModUpdateBatchBudget(int64(len("bad") + len("next-b") - 1))
+
+	request := twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)
+	request.UpdateSelections = append(request.UpdateSelections, &v1.ModUpdateSelection{
+		ModId:              "mod-b.jar",
+		FileName:           "b.jar",
+		InstalledSha512:    installedModDigest("installed-b"),
+		CandidateVersionId: "v2-project-b",
+		CandidateSha512:    installedModDigest("next-b"),
+		CandidateFilename:  "b.jar",
+	})
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(request))
+	require.NoError(t, err)
+	outcomes := map[string]int{}
+	for _, row := range res.Msg.GetStagedUpdates() {
+		outcomes[row.GetOutcome()]++
+	}
+	require.Equal(t, 1, outcomes["refused_checksum"])
+	require.Equal(t, 1, outcomes["refused_limit"], "bytes from the rejected download must consume budget")
+	require.Empty(t, res.Msg.GetUpdateBatchId())
+	require.Empty(t, stagedFiles(t, server.DataPath))
+}
+
+func TestRacedDiscardCannotOrphanStagedModPayload(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-discard-race", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(twoModPreviewFixture{})
+	svc.SetModCandidateFetcher(&modUpdateFetchByFileFixture{
+		data:  map[string][]byte{"a.jar": []byte("next-a"), "b.jar": []byte("next-b")},
+		delay: 100 * time.Millisecond,
+	})
+	configSvc := NewConfigService(store, nil, nil, nil, logger.New())
+	request := twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)
+
+	type stageResult struct {
+		batchID string
+		err     error
+	}
+	result := make(chan stageResult, 1)
+	go func() {
+		res, err := svc.UpdateMod(ctx, connect.NewRequest(request))
+		if err != nil {
+			result <- stageResult{err: err}
+			return
+		}
+		result <- stageResult{batchID: res.Msg.GetUpdateBatchId()}
+	}()
+	_, discardErr := configSvc.DiscardUpdateBatch(ctx, connect.NewRequest(&v1.DiscardUpdateBatchRequest{ServerId: server.ID}))
+	staged := <-result
+
+	if staged.err != nil {
+		// A discard that won the ownership race must leave no orphan payload.
+		require.Empty(t, stagedFiles(t, server.DataPath))
+		return
+	}
+	require.NoError(t, discardErr)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Equal(t, staged.batchID, batch.ID, "the reply must name the batch that actually holds the bytes")
+	rows, err := store.ListBatchContent(ctx, batch.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, rows)
+	for _, row := range rows {
+		require.Equal(t, staged.batchID, row.BatchID)
+	}
+	phase, err := store.GetStagedContent(ctx, rows[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, phase.Status)
+}
+
 func TestStageReviewedModUpdateKeepsLiveBytesAndStagesExactCandidate(t *testing.T) {
 	ctx := context.Background()
 	store, server, um := newContentStageFixture(t, "mod-update-apply", storage.StatusStopped)
@@ -64,7 +362,7 @@ func TestStageReviewedModUpdateKeepsLiveBytesAndStagesExactCandidate(t *testing.
 	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
 	require.NoError(t, err)
 	require.Len(t, res.Msg.GetStagedUpdates(), 1)
-	require.Equal(t, "staged", res.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.Equal(t, "staged", res.Msg.GetStagedUpdates()[0].GetOutcome(), res.Msg.GetStagedUpdates()[0].GetReason())
 	require.NotEmpty(t, res.Msg.GetStagedUpdates()[0].GetStagedId())
 	require.NotEmpty(t, res.Msg.GetUpdateBatchId())
 	require.Equal(t, 1, fetcher.calls)

@@ -14,6 +14,7 @@ import (
 
 	"connectrpc.com/connect"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/operation"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"gorm.io/gorm"
 )
@@ -52,16 +53,22 @@ func (s *ConfigService) DiscardUpdateBatch(ctx context.Context, req *connect.Req
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("server not found"))
 	}
-	if req.Msg.GetItemId() == "" {
-		if err := s.discardWholeBatch(ctx, server); err != nil {
-			return nil, err
+	// Mod-update staging holds the same per-server operation while it commits
+	// a window and staged rows. Sharing the ownership prevents a discard from
+	// closing the chosen batch halfway through a staging write.
+	err = operation.RunJournaled(ctx, s.store, s.log, server, "stage-mod-updates", "", func() error {
+		if req.Msg.GetItemId() == "" {
+			return s.discardWholeBatch(ctx, server)
 		}
-		return connect.NewResponse(&v1.DiscardUpdateBatchResponse{}), nil
-	}
-	if err := s.discardBatchItem(ctx, server, req.Msg.GetItemId()); err != nil {
-		return nil, err
-	}
-	if err := s.closeBatchIfEmpty(ctx, server.ID); err != nil {
+		if err := s.discardBatchItem(ctx, server, req.Msg.GetItemId()); err != nil {
+			return err
+		}
+		if err := s.closeBatchIfEmpty(ctx, server.ID); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&v1.DiscardUpdateBatchResponse{}), nil

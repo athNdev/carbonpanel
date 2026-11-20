@@ -306,6 +306,52 @@ func TestStageServerConfigUpdateSharesOneWindow(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSetOpenBatchWindowPreservesCronScheduledConfigRow(t *testing.T) {
+	ctx := context.Background()
+	store := newStagedTestStore(t, "srv-cron-preserve")
+	scheduled, err := store.StageConfigChange(ctx, "srv-cron-preserve",
+		map[string]any{"motd": "nightly"}, StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
+	batch, err := store.OpenUpdateBatch(ctx, "srv-cron-preserve")
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+	require.Equal(t, batch.ID, scheduled.BatchID)
+
+	_, err = store.SetOpenBatchWindow(ctx, "srv-cron-preserve", UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	rows, err := store.ListBatchConfig(ctx, batch.ID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, StagedApplyScheduled, rows[0].ApplyMode, "a cron row owns its own schedule")
+	assert.Equal(t, "0 3 * * *", rows[0].CronExpr)
+}
+
+func TestAddStagedContentToBatchRefusesChangedOrClosedBatch(t *testing.T) {
+	ctx := context.Background()
+	store := newStagedTestStore(t, "srv-conditional-insert")
+	batch, err := store.SetOpenBatchWindow(ctx, "srv-conditional-insert", UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	row := &StagedContentChange{
+		ID: uuid.NewString(), ServerID: "srv-conditional-insert",
+		Kind: StagedKindMod, Action: StagedActionReplace,
+		TargetPath: "mods/a.jar", StagePath: ".carbon-panel/staged/a/a.jar", FileName: "a.jar",
+	}
+	require.NoError(t, store.AddStagedContentToBatch(ctx, row, batch.ID, UpdateWindowNextRestart, nil, 0))
+
+	// A changed window must fail the conditional insert.
+	other := &StagedContentChange{
+		ID: uuid.NewString(), ServerID: "srv-conditional-insert",
+		Kind: StagedKindMod, Action: StagedActionReplace,
+		TargetPath: "mods/b.jar", StagePath: ".carbon-panel/staged/b/b.jar", FileName: "b.jar",
+	}
+	err = store.AddStagedContentToBatch(ctx, other, batch.ID, UpdateWindowIdle, nil, 5)
+	require.Error(t, err, "a batch whose window changed must refuse the row")
+
+	require.NoError(t, store.CloseUpdateBatch(ctx, batch.ID, UpdateBatchDiscarded))
+	err = store.AddStagedContentToBatch(ctx, other, batch.ID, UpdateWindowNextRestart, nil, 0)
+	require.Error(t, err, "a discarded batch must refuse the row")
+}
+
 func TestSetOpenBatchWindowKeepsMixedConfigAndModBatchTogether(t *testing.T) {
 	ctx := context.Background()
 	store := newStagedTestStore(t, "srv-mod-window")
