@@ -16,3 +16,4 @@ sources:
 | [0049](../../docs/adr/0049-world-swap-data-preserving-rollback.md) | Quarantine promoted worlds and prove bytes plus the binding row before a rollback is reported | [World Library](../architecture/world-library.md) |
 | [0050](../../docs/adr/0050-maintained-operational-guides.md) | Release-independent operational guides derive an exact source revision at build time instead of pinning it in the manifest | [Website and documentation publication](website-docs.md) |
 | [0051](../../docs/adr/0051-explicit-local-admin-oidc-linking.md) | Bind a verified provider identity to its initiating local admin session and retain role origin | [SSO identity](../invariants/sso-identity.md) |
+| [0052](../../docs/adr/0052-channel-promotion-gates.md) | Exact-revision and dual-registry verification gates for docs and OCI channel moves | [Release](../workflows/release.md), [Website and documentation publication](website-docs.md), [Channel promotion](channel-promotion.md) |

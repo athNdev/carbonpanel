@@ -55,6 +55,9 @@ jobs:
     # explicit dispatch opt-in; the workflow itself stays active.
     outputs:
       publish: ${{ steps.channel.outputs.publish }}
+      contract: ${{ steps.contract.outputs.verified }}
+      docs_qualified: ${{ steps.docs_gate.outputs.qualified }}
+      transaction_action: ${{ steps.transaction.outputs.action }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,6 +104,95 @@ jobs:
           python3 scripts/build_website.py
           python3 scripts/check_website.py
 
+      # OSS-413 docs promotion gate. The BUILT site's public version-index.json
+      # must satisfy the schema_version 3 two-channel contract (Stable +
+      # Nightly only, no legacy doc snapshots, full-SHA pinned links) and pin
+      # the exact trusted-main source revision. Stale docs never mask a
+      # candidate; these steps fail the build closed before any deploy.
+      - name: Validate the built channel contract
+        id: contract
+        if: github.event_name == 'workflow_dispatch'
+        run: python3 scripts/release.py validate-channel-contract --path .website-build/site/version-index.json
+
+      - name: Gate docs source revision and qualified stage
+        id: docs_gate
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CHANNEL_EVENT: ${{ github.event_name }}
+          CHANNEL_REF: ${{ github.ref }}
+          CHANNEL_COMMIT: ${{ github.sha }}
+          CHANNEL_CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+        run: |
+          CONTRACT=$(cat .website-build/site/version-index.json)
+          python3 scripts/release.py channel-source-gate \
+            --event "$CHANNEL_EVENT" --ref "$CHANNEL_REF" --commit "$CHANNEL_COMMIT" \
+            --ci-verified "$CHANNEL_CI_VERIFIED" --contract "$CONTRACT" \
+            --docs-validated "true"
+
+      # A manual/site-only deploy never originates a channel promotion. It may
+      # republish ONLY the exact source already active in both registries and
+      # the public docs marker, reconstructed from the live state as a receipt.
+      - name: Reconstruct the active channel source from live state
+        id: active_source
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ALIASES=$(python3 scripts/release.py channel-observe --reference nightly | jq -c .observations)
+          LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.nightly')
+          printf 'aliases=%s\n' "$ALIASES" >> "$GITHUB_OUTPUT"
+          echo "commit=$(printf '%s' "$LIVE" | jq -r '.commit // empty')" >> "$GITHUB_OUTPUT"
+          echo "digest=$(printf '%s' "$LIVE" | jq -r '.image.digest // empty')" >> "$GITHUB_OUTPUT"
+      - name: Preserve the already-active Nightly in a site-only artifact
+        id: active_site
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          steps.active_source.outputs.commit != '' &&
+          steps.active_source.outputs.digest != ''
+        env:
+          ACTIVE_COMMIT: ${{ steps.active_source.outputs.commit }}
+          ACTIVE_DIGEST: ${{ steps.active_source.outputs.digest }}
+        run: |
+          # A site-only dispatch is not a promotion: rebuild the full canonical
+          # site from the ACTIVE receipt so the aliases and docs cannot disagree.
+          python3 scripts/build_website.py --nightly-revision "$ACTIVE_COMMIT" \
+            --nightly-digest "$ACTIVE_DIGEST" --promotion-state final \
+            --promotion-receipt "site-only-$ACTIVE_COMMIT"
+          python3 scripts/release.py validate-channel-contract \
+            --path .website-build/site/version-index.json
+          python3 scripts/release.py verify-channel-docs \
+            --site .website-build/site --channel nightly \
+            --commit "$ACTIVE_COMMIT" --digest "$ACTIVE_DIGEST" \
+            --stable-source docs/website-source.json
+          test -s .website-build/site/docs/index.html
+          test -s .website-build/site/docs/nightly/index.html
+          echo "active_site=preserved" >> "$GITHUB_OUTPUT"
+
+      - name: Gate site-only dispatch to an already-active exact source
+        id: transaction
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ALIASES: ${{ steps.active_source.outputs.aliases }}
+          COMMIT: ${{ steps.active_source.outputs.commit }}
+          DIGEST: ${{ steps.active_source.outputs.digest }}
+        run: |
+          PREVIOUS=$(python3 scripts/release.py channel-active-receipt \
+            --channel nightly --aliases "$ALIASES" \
+            --docs-commit "$COMMIT" --docs-digest "$DIGEST")
+          PREV_JSON=$(printf '%s' "$PREVIOUS" | jq -c .receipt)
+          CANDIDATE=$(printf '%s' "$PREV_JSON" | jq -c \
+            '{channel:"nightly",commit:.revision,digest:.digest,seq:(.seq+1),
+              source_ref:"refs/heads/main",ci_verified:"true",immutable_ok:true,
+              contract_valid:true,site_validated:true,docs_commit:.docs_commit,
+              docs_digest:.docs_digest,registries:.registries,
+              candidate_marker_verified:true,marker_urls:.marker_urls}')
+          LIVE=$(jq -nc --arg c "$COMMIT" --arg d "$DIGEST" --argjson a "$ALIASES" \
+            '{registries:{docker_hub:$a.docker_hub[1].digest,ghcr:$a.ghcr[1].digest},
+              docs_commit:$c,docs_digest:$d}')
+          python3 scripts/release.py channel-transaction \
+            --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
+            --event workflow_dispatch
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
@@ -108,7 +200,7 @@ jobs:
 
   deploy:
     needs: build
-    if: needs.build.outputs.publish == 'true'
+    if: needs.build.outputs.publish == 'true' && needs.build.outputs.docs_qualified == 'true' && needs.build.outputs.contract == 'true' && needs.build.outputs.transaction_action == 'noop'
     runs-on: ubuntu-latest
     permissions:
       contents: read
