@@ -1273,6 +1273,7 @@ try {
 		await runComponentJourney(browser, fixtureBase);
 		await runPackagedRouteJourney(browser, packagedBase, 'light');
 		await runModpacksJourney(browser, packagedBase, 'light');
+		await runModpacksJourney(browser, packagedBase, 'dark');
 		await runPackagedRouteJourney(browser, packagedBase, 'dark');
 		await check('route themes: light and dark paint different backgrounds', async () => {
 			if (!themeBackgrounds.light || !themeBackgrounds.dark) {
