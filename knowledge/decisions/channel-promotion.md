@@ -43,7 +43,7 @@ sources:
 - The Hub-only nightly baseline is not a mandatory first revision; it seeds only
   through a recorded bounded bootstrap with dual-registry parity and a matching
   docs marker. No shipped workflow supplies `--bootstrap`.
-- `latest` and `stable` move only from the verified stable digest; the planned
+- `latest` and `stable` move only from the verified stable digest; the occupied
   `carbonpanel-v2.0.0` and arbitrary/legacy tags never publish.
 
 # Read next

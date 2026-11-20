@@ -45,8 +45,8 @@ sources:
   The candidate transaction then has an observed previous digest for every alias.
 - Release downloads are staged and checksum-verified on a private draft before
   channel changes. A trusted interrupted-run journal binds the private release
-  ID, prior deployment and both retained Pages archives. Recovery requires the
-  original unpublished draft and rechecks both public registries.
+  ID, prior deployment and retained Pages archives. Recovery requires the same
+  private draft. The minor alias advances only after public download verification.
 - Stable requires observed dual-registry digests and trusted gate commands.
 - All channel and docs moves share ONE non-cancelling `pages-deploy` lock; no
   nested group and no dispatched workflow takes the same lock. A manual/site-only

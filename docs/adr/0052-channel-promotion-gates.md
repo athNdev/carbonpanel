@@ -106,8 +106,8 @@ paraphrased below rather than duplicated:
    already-correct alias is an idempotent no-op, a partial move converges, and a
    candidate that loses qualification rolls back to the previous verified
    receipt. Immutable version tags are never overwritten and no tag is deleted.
-   No publication occurs from arbitrary, inherited or legacy tags; the planned
-   `carbonpanel-v2.0.0` stable is not a channel publication. A registry-only PR
+   No publication occurs from arbitrary, inherited or legacy tags; the occupied
+   `carbonpanel-v2.0.0` product tag stays at its recorded commit. A registry-only PR
    without a synchronized docs deploy and receipt remains opt-off staging and
    does not complete OSS-413.
 6. **Fail-closed ref check repaired.** The `verify-publication-ref` step of

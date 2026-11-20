@@ -122,8 +122,9 @@ and `origin`/`rm` stay outside channel discovery. No ref deletion, image rebuild
 or invented historical alias is part of this decision; ADR 0039 still governs
 the 19 immutable readable build aliases.
 
-The first new stable is deliberately `carbonpanel-v2.0.0` (MAJOR), not a
-compatible `1.1.0`: the wire/Connect contract and database schema are additive,
+The first new stable requires a major upgrade from v1.0.40. The original
+`carbonpanel-v2.0.0` tag already exists at its recorded commit. The catalog
+selects `carbonpanel-v2.0.1` for publication. The wire/Connect contract and database schema are additive,
 but three operator-facing changes (OIDC raw-claim role mapping locked out by
 default and no implicit first-user admin; explicit local admin linking;
 PROXY v2 trusted only from `trusted_proxy_cidrs`) require migration from an

@@ -78,7 +78,7 @@ PRODUCT_TAG = re.compile(
 
 # The only verified historical stable release in athNdev/carbonpanel. It is
 # recognised for monotonic promotion and rollback, never republished or
-# retargeted. The next planned stable is the MAJOR 2.0.0 (see UPGRADE NOTES in
+# retargeted. The next planned stable is the major upgrade 2.0.1 (see UPGRADE NOTES in
 # docs/releases.md): three intentional operator changes break an unchanged
 # v1.0.40 config, so a compatible MINOR would be dishonest. The 1.0 alias stays
 # at 1.0.40 today; a future 1.0.x maintenance patch is not permanently banned
@@ -1745,29 +1745,37 @@ def promote_alias(args):
     if not valid_digest(args.digest):
         raise ValueError("Missing or invalid verified digest")
     minor = ".".join(tag[1:].split("-", 1)[0].split(".")[:2])
-    if args.alias not in (minor, "latest"):
-        raise ValueError("Unsupported moving alias: " + args.alias)
-    verified, detail, _ = release_provenance(
-        tag, args.commit, args.digest, git_tag=args.version)
+    if args.alias != minor:
+        raise ValueError("Only the release's minor compatibility alias can move here")
+    check_only = getattr(args, "check_only", False)
+    verified, detail, _ = release_provenance(tag, args.commit, args.digest, git_tag=args.version,
+                                            allow_prepared_draft=check_only)
     if not verified:
-        raise ValueError("Durable release record refused alias promotion: " + detail)
-    refs = {"docker_hub": f"{DOCKER_HUB_IMAGE}:{args.alias}",
-            "ghcr": f"ghcr.io/{ghcr_repository()}:{args.alias}"}
-    observations = {name: observe_reference(ref) for name, ref in refs.items()}
+        raise ValueError("Release record refused compatibility alias promotion: " + detail)
+    refs = {"docker_hub": f"{DOCKER_HUB_IMAGE}:{minor}", "ghcr": f"ghcr.io/{ghcr_repository()}:{minor}"}
+    observations = {name: observe_reference(ref, strict=True) for name, ref in refs.items()}
     if any(state == "unknown" for state, _ in observations.values()):
-        raise ValueError("Alias promotion refused: registry alias state is unknown")
-    allowed, reason = alias_move_decision(
-        tag, args.digest, observations, durable_release_records())
+        raise ValueError("Compatibility alias state is unknown")
+    records = {digest: observed_tag for digest, observed_tag in durable_release_records().items()
+               if observed_tag.startswith(f"v{minor}.")}
+    allowed, reason = alias_move_decision(tag, args.digest, observations, records)
     if not allowed:
-        raise ValueError("Alias promotion refused: " + reason)
+        raise ValueError("Compatibility alias promotion refused: " + reason)
+    if check_only:
+        return
+    verify_live_stable(args.version, args.commit, args.digest)
     for name, ref in refs.items():
-        state, info = observations[name]
+        state, info = observe_reference(ref, strict=True)
         if state == "present" and info["digest"] == args.digest:
-            continue  # idempotent retry: no re-upload and no overwrite
+            continue
+        if (state, info) != observations[name]:
+            raise ValueError("Compatibility alias changed after preflight: " + ref)
         source = ref.rsplit(":", 1)[0] + "@" + args.digest
         subprocess.run(["docker", "buildx", "imagetools", "create", "--tag", ref, source],
                        check=True, cwd=ROOT)
-        verify_tag_digest(observe_reference(ref), args.digest)
+    ok, reason = channel_oci_parity(_coerce_observation_map(channel_observe(minor)), args.digest, args.commit)
+    if not ok:
+        raise ValueError("Promoted compatibility alias failed verification: " + reason)
     print(json.dumps({"alias": args.alias, "digest": args.digest,
                       "moved": True, "reason": reason}, indent=2))
 
@@ -3728,6 +3736,7 @@ def build_parser():
     alias_planner.add_argument("--commit", required=True)
     alias_planner.add_argument("--digest", required=True)
     alias_mover = commands.add_parser("promote-alias")
+    alias_mover.add_argument("--check-only", action="store_true")
     alias_mover.add_argument("--version", required=True)
     alias_mover.add_argument("--commit", required=True)
     alias_mover.add_argument("--alias", required=True)

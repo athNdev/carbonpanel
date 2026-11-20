@@ -543,14 +543,18 @@ class ReleaseTests(unittest.TestCase):
     def test_promote_alias_preflights_record_registries_and_avoids_overwrite(self):
         digest = "sha256:" + "a" * 64
         other = "sha256:" + "d" * 64
-        def call(alias="latest"):
+        verified_minor = {name: ["present", {"digest": digest, "revision": "b" * 40,
+                          "platforms": list(release.REQUIRED_PLATFORMS)}] for name in release.CHANNEL_REGISTRIES}
+        def call(alias="3.1"):
             return argparse.Namespace(version="v3.1.0", commit="b" * 40,
                                       alias=alias, digest=digest)
 
         with patch.object(release.subprocess, "run") as command, \
              patch.object(release, "release_provenance", return_value=(True, "verified", None)), \
              patch.object(release, "observe_reference", side_effect=[
-                 ("absent", None), ("absent", None), present(digest), present(digest)]), \
+                 ("absent", None)] * 4), \
+             patch.object(release, "verify_live_stable"), \
+             patch.object(release, "channel_observe", return_value=verified_minor), \
              patch.object(release, "durable_release_records", return_value={}):
             release.promote_alias(call())
             writes = registry_writes(command)
@@ -562,6 +566,8 @@ class ReleaseTests(unittest.TestCase):
         # Interruption then retry: alias already at the verified digest => no overwrite.
         with patch.object(release.subprocess, "run") as command, \
              patch.object(release, "release_provenance", return_value=(True, "verified", None)), \
+             patch.object(release, "channel_observe", return_value=verified_minor), \
+             patch.object(release, "verify_live_stable"), \
              patch.object(release, "observe_reference", return_value=present(digest)), \
              patch.object(release, "durable_release_records", return_value={}):
             release.promote_alias(call())
@@ -580,10 +586,10 @@ class ReleaseTests(unittest.TestCase):
              patch.object(release, "release_provenance", return_value=(True, "verified", None)), \
              patch.object(release, "observe_reference", return_value=present(other)), \
              patch.object(release, "durable_release_records",
-                          return_value={other: "v3.2.0"}):
+                          return_value={other: "v3.1.2"}):
             with self.assertRaisesRegex(ValueError, "backwards"):
                 release.promote_alias(argparse.Namespace(
-                    version="v3.0.0", commit="b" * 40, alias="latest", digest="sha256:" + "e" * 64))
+                    version="v3.1.0", commit="b" * 40, alias="3.1", digest="sha256:" + "e" * 64))
             self.assertEqual(registry_writes(command), [])
 
         # An untraceable alias digest is uncertainty: refuse, do not guess.
@@ -598,7 +604,7 @@ class ReleaseTests(unittest.TestCase):
         # No durable release record => no alias move at all.
         with patch.object(release.subprocess, "run") as command, \
              patch.object(release, "release_provenance", return_value=(False, "no manifest", None)):
-            with self.assertRaisesRegex(ValueError, "Durable release record"):
+            with self.assertRaisesRegex(ValueError, "Release record"):
                 release.promote_alias(call())
             self.assertEqual(registry_writes(command), [])
 
@@ -665,7 +671,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("if: steps.preflight.outputs.action == 'publish'", source)
         self.assertIn("python3 scripts/release.py verify-immutable", source)
         self.assertIn("  promote-aliases:\n", source)
-        self.assertIn("if: steps.promotion.outputs.minor != ''", source)
+        self.assertIn("needs: [plan, publish-immutable, publish]", source)
         # OSS-413: no independent stable/latest alias write remains; both go
         # through the synced transaction and the deployed exact docs marker.
         self.assertNotIn("promote-stable-alias", source)
@@ -1813,9 +1819,11 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release.subprocess, "run") as command, \
              patch.object(release, "release_provenance",
                           return_value=(True, "verified", None)) as provenance, \
-             patch.object(release, "observe_reference",
-                          side_effect=[("absent", None), ("absent", None),
-                                       present(digest), present(digest)]), \
+             patch.object(release, "verify_live_stable"), \
+             patch.object(release, "channel_observe", return_value={name: ["present", {
+                 "digest": digest, "revision": "b" * 40, "platforms": list(release.REQUIRED_PLATFORMS)}]
+                 for name in release.CHANNEL_REGISTRIES}), \
+             patch.object(release, "observe_reference", return_value=("absent", None)), \
              patch.object(release, "durable_release_records", return_value={}):
             release.promote_alias(argparse.Namespace(
                 version=product, commit="b" * 40, alias="2.0", digest=digest))
@@ -1825,7 +1833,7 @@ class ReleaseTests(unittest.TestCase):
                 self.assertIn("imagetools", item.args[0])
                 self.assertIn("create", item.args[0])
             provenance.assert_called_once_with(
-                "v2.0.0", "b" * 40, digest, git_tag=product)
+                "v2.0.0", "b" * 40, digest, git_tag=product, allow_prepared_draft=False)
         # A prerelease product tag promotes no stable alias at all.
         out = io.StringIO()
         with patch.object(release, "published_stable_versions",
@@ -2038,7 +2046,7 @@ class ReleaseTests(unittest.TestCase):
         promotion = job_block("promote-aliases")
         for step in ("Decide which aliases may advance",
                      "Verify promoted aliases by live observation before publication",
-                     "alias_verify", "alias-promotion", "promote-alias"):
+                     "alias_verify", "alias-promotion", "channel-promote"):
             self.assertIn(step, promotion)
         # (f) stranded-after-immutable is impossible: one run holds the lock for
         # all phases, and recovery for a resumed immutable version is inside that
@@ -2499,9 +2507,9 @@ class ChannelPromotionTests(unittest.TestCase):
                               "--alias latest"):
                     self.assertNotIn(token, source)
         rel = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        self.assertEqual(rel.count("python3 scripts/release.py promote-alias"), 1)
-        self.assertIn("needs.plan.outputs.channel != 'stable'",
-                      rel.split("Promote minor compatibility alias")[1])
+        self.assertEqual(rel.count("python3 scripts/release.py promote-alias --check-only"), 1)
+        self.assertEqual(rel.count("python3 scripts/release.py promote-alias --version"), 1)
+        self.assertIn("needs: [plan, publish-immutable, publish]", rel.split("  publish-minor:")[1])
         import re as _re
         for job in ("promote-aliases", "publish"):
             match = _re.search(rf"(?ms)^  {job}:\n(.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", rel)
