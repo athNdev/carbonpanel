@@ -435,14 +435,21 @@ func TestKeyedAdmissionReleasesOnCancel(t *testing.T) {
 // target a promotion or a restore without changing production behaviour.
 type faultyAccessor struct {
 	nodestorage.Accessor
-	failRename func(oldRel, newRel string) bool
+	failRename      func(oldRel, newRel string) bool
+	loseRenameReply func(oldRel, newRel string) bool
 }
 
 func (f *faultyAccessor) Rename(oldRel, newRel string) error {
 	if f.failRename != nil && f.failRename(oldRel, newRel) {
 		return errors.New("injected rename fault")
 	}
-	return f.Accessor.Rename(oldRel, newRel)
+	if err := f.Accessor.Rename(oldRel, newRel); err != nil {
+		return err
+	}
+	if f.loseRenameReply != nil && f.loseRenameReply(oldRel, newRel) {
+		return errors.New("injected lost rename reply")
+	}
+	return nil
 }
 
 func multiFamilyTestArchive(t *testing.T, families []string) []byte {
@@ -617,11 +624,10 @@ func TestBindRollbackBindingRefusalKeepsOldDataAndUncertainBinding(t *testing.T)
 		}}
 	})
 	called := false
-	RollbackBindingHook = func() error {
+	binder.rollbackBindingHook = func() error {
 		called = true
 		return errors.New("binding store unavailable")
 	}
-	defer func() { RollbackBindingHook = nil }()
 
 	_, err := binder.Bind(ctx, BindRequest{
 		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
@@ -683,5 +689,77 @@ func TestRecoverPreservesQuarantineAndRestoresOnlyMissingOldFamily(t *testing.T)
 	got, err = os.ReadFile(filepath.Join(quarantineFamily, "level.dat"))
 	if err != nil || string(got) != "new-world" {
 		t.Fatalf("quarantine was not preserved for operator inspection: %q, %v", got, err)
+	}
+}
+
+func TestBindMultiFamilyLostRenameReplyPreservesRecoveryAndRefusesRetry(t *testing.T) {
+	for _, transition := range []string{"retain", "promote"} {
+		t.Run(transition, func(t *testing.T) {
+			ctx := context.Background()
+			store := newWorldTestStore(t)
+			families := []string{"world", "world_nether"}
+			server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, families)
+			binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+			binder.SetAccessorDecorator(func(acc nodestorage.Accessor) nodestorage.Accessor {
+				return &faultyAccessor{Accessor: acc, loseRenameReply: func(src, dst string) bool {
+					if transition == "retain" {
+						return src == "world_nether" && strings.Contains(dst, "old-")
+					}
+					return dst == "world_nether" && strings.Contains(src, "stage-")
+				}}
+			})
+			req := BindRequest{ServerID: server.ID, LevelName: "world", RevisionID: rev.ID, RequestID: "lost-reply"}
+			first, err := binder.Bind(ctx, req)
+			if !errors.Is(err, ErrUncertainOutcome) || first == nil || first.OperationID == "" {
+				t.Fatalf("outcome = %+v, %v; want journaled uncertainty", first, err)
+			}
+			// A fresh binder is used on startup, with the same durable database.
+			restarted := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+			_, err = restarted.Recover(ctx, server.ID, dataRoot, "local", 1)
+			if !errors.Is(err, ErrUncertainOutcome) {
+				t.Fatalf("startup recovery = %v; want an unresolved operation", err)
+			}
+			req.RequestID = "retry-lost-reply"
+			retry, err := restarted.Bind(ctx, req)
+			if !errors.Is(err, ErrUncertainOutcome) || retry == nil || retry.OperationID != first.OperationID {
+				t.Fatalf("retry = %+v, %v; want original unresolved operation", retry, err)
+			}
+			oldRoot := libraryEntryWithPrefix(t, dataRoot, "old-")
+			for _, family := range families {
+				got, err := os.ReadFile(filepath.Join(oldRoot, family, "level.dat"))
+				if err != nil || string(got) != "old-"+family {
+					t.Fatalf("retained %s = %q, %v", family, got, err)
+				}
+			}
+		})
+	}
+}
+
+func TestBindPreservesOldFamiliesUntilJournalCompletion(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	families := []string{"world", "world_nether"}
+	server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, families)
+	// Force the journal update to fail after the storage mutation has finished.
+	if err := store.DB().Exec(`CREATE TRIGGER refuse_world_completion BEFORE UPDATE ON server_operations
+		WHEN NEW.phase = 'complete' BEGIN SELECT RAISE(ABORT, 'injected journal write failure'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+	req := BindRequest{ServerID: server.ID, LevelName: "world", RevisionID: rev.ID, RequestID: "journal-write-failure"}
+	result, err := binder.Bind(ctx, req)
+	if !errors.Is(err, ErrUncertainOutcome) || result == nil || result.Outcome != "unknown" {
+		t.Fatalf("bind = %+v, %v; want unknown", result, err)
+	}
+	op, err := store.GetServerOperation(ctx, result.OperationID)
+	if err != nil || op.ActiveServer == nil || op.Phase != storage.ServerOperationExecuting {
+		t.Fatalf("operation = %+v, %v; want active executing", op, err)
+	}
+	oldRoot := libraryEntryWithPrefix(t, dataRoot, "old-")
+	for _, family := range families {
+		got, err := os.ReadFile(filepath.Join(oldRoot, family, "level.dat"))
+		if err != nil || string(got) != "old-"+family {
+			t.Fatalf("retained %s = %q, %v", family, got, err)
+		}
 	}
 }

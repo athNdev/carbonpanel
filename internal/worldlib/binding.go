@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"sort"
@@ -154,7 +155,8 @@ type Binder struct {
 	FreeBytes func(ctx context.Context, nodeID, dataRoot string) (int64, error)
 	// accessorDecorator is a test-only seam for injecting I/O faults at the
 	// real node-accessor boundary. Production leaves it nil.
-	accessorDecorator func(nodestorage.Accessor) nodestorage.Accessor
+	accessorDecorator   func(nodestorage.Accessor) nodestorage.Accessor
+	rollbackBindingHook func() error
 }
 
 // SetAccessorDecorator installs a test-only accessor decorator. Production
@@ -163,11 +165,6 @@ type Binder struct {
 func (b *Binder) SetAccessorDecorator(fn func(nodestorage.Accessor) nodestorage.Accessor) {
 	b.accessorDecorator = fn
 }
-
-// RollbackBindingHook is a test-only seam that can refuse the durable binding
-// restore. Production leaves it nil. It exists so a failed binding decision
-// can be proven to keep retained old bytes and an uncertain outcome.
-var RollbackBindingHook func() error
 
 // NewBinder constructs a binder. A nil resolver is legal for local-only nodes
 // but remote nodes fail closed with nodestorage.ErrUnavailable.
@@ -224,14 +221,6 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	if revision.NodeID != "" && revision.NodeID != req.NodeID {
 		return nil, fmt.Errorf("%w: revision is stored on node %q", ErrRemoteUnavailable, revision.NodeID)
 	}
-	if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
-		if existing.RevisionID == req.RevisionID {
-			return &BindResult{Binding: existing, RequestID: req.RequestID, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
-		}
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
 	release, err := b.admission.Acquire(ctx, "server:"+req.ServerID, "revision:"+req.RevisionID)
 	if err != nil {
 		return nil, err
@@ -241,6 +230,29 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Read the binding under admission. A row from an unfinished swap is
+	// not proof that the requested world was published.
+	if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
+		if existing.RevisionID == req.RevisionID {
+			var active storage.ServerOperation
+			err := b.store.DB().WithContext(ctx).Where("active_server = ?", req.ServerID).First(&active).Error
+			switch {
+			case err == nil:
+				return &BindResult{Outcome: string(operation.OutcomeUnknown), OperationID: active.ID, RequestID: req.RequestID},
+					fmt.Errorf("%w: operation %s owns the server", ErrUncertainOutcome, active.ID)
+			case !errors.Is(err, gorm.ErrRecordNotFound):
+				return nil, err
+			}
+			return &BindResult{Binding: existing, RequestID: req.RequestID, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
+		}
+		if !existing.MatchesOwner(req.NodeID, req.Generation) {
+			return nil, fmt.Errorf("%w: existing binding belongs to another node generation", ErrStaleGeneration)
+		}
+		req.Previous = existing
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
 	node := nodestorage.NodeInfo{
 		ID: req.NodeID, Name: req.NodeID,
 		IsLocal: nodestorage.IsLegacyLocalNodeID(req.NodeID),
@@ -273,24 +285,12 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		return nil, err
 	}
 
-	// Capture the binding again under the admission lock so a concurrent swap
-	// cannot be overwritten by a stale read from the first preflight check.
-	if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
-		if existing.RevisionID == req.RevisionID {
-			return &BindResult{Binding: existing, RequestID: req.RequestID, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
-		}
-		if !existing.MatchesOwner(req.NodeID, req.Generation) {
-			return nil, fmt.Errorf("%w: existing binding belongs to another node generation", ErrStaleGeneration)
-		}
-		req.Previous = existing
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-
 	var result *BindResult
+	var cleanup []string
 	journal, err := operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-bind", req.RequestID,
 		func() (bool, error) {
-			out, err := b.publish(ctx, acc, server, req, revision)
+			out, roots, err := b.publish(ctx, acc, server, req, revision)
+			cleanup = roots
 			if out != nil {
 				result = out
 			}
@@ -299,6 +299,26 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 			}
 			return false, nil
 		})
+	// Only retire the recovery trees after the journal records the decision.
+	// RunJournaledOutcome can leave the lock active when finalization fails.
+	if len(cleanup) > 0 {
+		checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		op, readErr := b.store.GetServerOperation(checkCtx, journal.OperationID)
+		cancel()
+		wantPhase := storage.ServerOperationComplete
+		if err != nil {
+			wantPhase = storage.ServerOperationFailed
+		}
+		if readErr != nil || op.Phase != wantPhase {
+			return &BindResult{Outcome: string(operation.OutcomeUnknown), OperationID: journal.OperationID, RequestID: req.RequestID},
+				fmt.Errorf("%w: world swap decision was not confirmed in the journal; recovery trees preserved", ErrUncertainOutcome)
+		}
+		for _, root := range cleanup {
+			if cleanupErr := acc.RemoveAll(root); cleanupErr != nil && b.log != nil {
+				b.log.Warn("world bind: could not retire %s: %v", root, cleanupErr)
+			}
+		}
+	}
 	if err != nil {
 		if errors.Is(err, operation.ErrInProgress) {
 			return nil, fmt.Errorf("%w: another world operation is active", ErrUncertainOutcome)
@@ -406,13 +426,13 @@ func (b *Binder) preflight(ctx context.Context, server *storage.Server, revision
 	return nil
 }
 
-func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *storage.Server, req BindRequest, revision *storage.WorldRevision) (*BindResult, error) {
+func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *storage.Server, req BindRequest, revision *storage.WorldRevision) (*BindResult, []string, error) {
 	wasRunning := false
 	var err error
 	if b.lifecycle != nil {
 		wasRunning, err = b.lifecycle.IsRunning(ctx, req.ServerID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -429,11 +449,11 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	}
 	if wasRunning && b.lifecycle != nil {
 		if err := b.lifecycle.StopServer(ctx, req.ServerID); err != nil {
-			return nil, fmt.Errorf("stop before world swap: %w", err)
+			return nil, nil, fmt.Errorf("stop before world swap: %w", err)
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Stage on the owning node through its accessor. For remote nodes this is
@@ -442,30 +462,30 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	stageRoot := path.Join(".world-library", "stage-"+stageID)
 	oldRoot := path.Join(".world-library", "old-"+stageID)
 	if err := acc.MkdirAll(stageRoot); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	archiveRel := path.Join(stageRoot, "revision.zip")
 	if err := copyLocalArchiveToAccessor(ctx, acc, revision.StoragePath, archiveRel); err != nil {
 		_ = acc.RemoveAll(stageRoot)
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := nodestorage.ExtractZip(ctx, acc, archiveRel, stageRoot, nil); err != nil {
 		_ = acc.RemoveAll(stageRoot)
-		return nil, fmt.Errorf("%w: %v", ErrArchiveRejected, err)
+		return nil, nil, fmt.Errorf("%w: %v", ErrArchiveRejected, err)
 	}
 	if err := ctx.Err(); err != nil {
 		_ = acc.RemoveAll(stageRoot)
-		return nil, err
+		return nil, nil, err
 	}
 
 	families, err := stageFamilies(acc, stageRoot, req.LevelName)
 	if err != nil {
 		_ = acc.RemoveAll(stageRoot)
-		return nil, err
+		return nil, nil, err
 	}
 	if len(families) == 0 {
 		_ = acc.RemoveAll(stageRoot)
-		return nil, fmt.Errorf("%w: archive has no level.dat family", ErrArchiveRejected)
+		return nil, nil, fmt.Errorf("%w: archive has no level.dat family", ErrArchiveRejected)
 	}
 
 	next := &storage.WorldBinding{
@@ -474,28 +494,33 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		Consistency: string(consistency), BoundAt: time.Now().UTC(),
 	}
 	if req.Generation <= 0 || req.NodeID == "" {
-		return nil, fmt.Errorf("%w: node generation must be known before publish", ErrStaleGeneration)
+		return nil, nil, fmt.Errorf("%w: node generation must be known before publish", ErrStaleGeneration)
 	}
-	// Capture the identity bytes of every live family BEFORE any external
-	// mutation. Compensation compares against these digests; a retained tree
-	// is never deleted on an ambiguous comparison.
-	oldDigests := map[string]string{}
+	// Record which live folders exist before the first rename. Hash an old
+	// level.dat if it exists, without reading the file into memory.
+	oldDigests := make(map[string]string, len(families))
 	for _, family := range families {
-		if _, statErr := acc.Stat(path.Join(family, "level.dat")); statErr == nil {
-			digest, digestErr := levelFamilyDigest(acc, family)
-			if digestErr != nil {
-				_ = acc.RemoveAll(stageRoot)
-				return nil, digestErr
-			}
-			oldDigests[family] = digest
+		info, err := acc.Stat(family)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
 		}
+		if err != nil || !info.IsDir() {
+			_ = acc.RemoveAll(stageRoot)
+			return nil, nil, fmt.Errorf("cannot inspect live world family %s: %v", family, err)
+		}
+		digest, err := levelFamilyDigest(ctx, acc, family)
+		if err != nil {
+			_ = acc.RemoveAll(stageRoot)
+			return nil, nil, fmt.Errorf("cannot fingerprint live world family %s: %w", family, err)
+		}
+		oldDigests[family] = digest
 	}
 
 	// One transaction swaps the binding row, so there is no window where the
 	// (server_id, level_name) unique index blocks the new revision.
 	if err := b.store.SwapWorldBinding(ctx, req.Previous, next); err != nil {
 		_ = acc.RemoveAll(stageRoot)
-		return nil, err
+		return nil, nil, err
 	}
 	binding := next
 
@@ -509,10 +534,10 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	quarantineRoot := path.Join(".world-library", "quarantine-"+stageID)
 	movedOld := []string{}
 	movedNew := []string{}
-	compensate := func(cause error) error {
-		uncertain := func(detail string, args ...any) error {
+	compensate := func(cause error) (*BindResult, []string, error) {
+		uncertain := func(detail string, args ...any) (*BindResult, []string, error) {
 			reason := fmt.Sprintf(detail, args...)
-			return fmt.Errorf("%w: %s; retained old tree %s and quarantined new tree %s are preserved for operator recovery: %v",
+			return nil, nil, fmt.Errorf("%w: %s; retained old tree %s and quarantined new tree %s are preserved for operator recovery: %v",
 				ErrUncertainOutcome, reason, oldRoot, quarantineRoot, cause)
 		}
 
@@ -537,20 +562,20 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 			}
 		}
 
-		// 3. Prove the bytes before any durable decision or cleanup.
+		// 3. Verify the restored paths and identity files before changing the binding.
+		checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		for _, family := range movedOld {
 			info, err := acc.Stat(family)
 			if err != nil || !info.IsDir() {
 				return uncertain("restored family %s is missing", family)
 			}
-			if want, ok := oldDigests[family]; ok {
-				got, err := levelFamilyDigest(acc, family)
-				if err != nil || got != want {
-					return uncertain("restored family %s bytes differ from the retained original", family)
-				}
+			got, err := levelFamilyDigest(checkCtx, acc, family)
+			if err != nil || got != oldDigests[family] {
+				return uncertain("restored family %s level.dat differs from the retained original", family)
 			}
-			if _, err := acc.Stat(path.Join(oldRoot, family)); err == nil {
-				return uncertain("retained copy of family %s is still present", family)
+			if _, err := acc.Stat(path.Join(oldRoot, family)); !errors.Is(err, os.ErrNotExist) {
+				return uncertain("cannot confirm that %s moved out of the retained tree", family)
 			}
 		}
 		for _, family := range movedNew {
@@ -562,8 +587,8 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		// 4. Persist the rollback binding decision in a bounded independent
 		// context. A refused hook or store error is ambiguous: the binding row
 		// stays on the new revision and the old bytes stay retained.
-		if RollbackBindingHook != nil {
-			if err := RollbackBindingHook(); err != nil {
+		if b.rollbackBindingHook != nil {
+			if err := b.rollbackBindingHook(); err != nil {
 				return uncertain("binding restore was refused: %v", err)
 			}
 		}
@@ -582,60 +607,62 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 		// 5. Re-read the durable decision. Never report a rollback before the
 		// row is proven to name the prior binding again.
 		if req.Previous != nil {
-			current, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName)
+			current, err := b.store.GetWorldBinding(restoreCtx, req.ServerID, req.LevelName)
 			if err != nil || current.ID != req.Previous.ID || current.RevisionID != req.Previous.RevisionID {
 				return uncertain("binding row does not name the prior binding after restore")
 			}
-		} else if _, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); !errors.Is(err, gorm.ErrRecordNotFound) {
+		} else if _, err := b.store.GetWorldBinding(restoreCtx, req.ServerID, req.LevelName); !errors.Is(err, gorm.ErrRecordNotFound) {
 			return uncertain("binding row is still present after rollback")
 		}
 
-		// 6. Only now, with bytes and binding proven, may temporary trees go.
-		// Cleanup errors are logged, never treated as proof of failure: the old
-		// bytes are already live and the binding is already restored.
-		_ = acc.RemoveAll(quarantineRoot)
-		_ = acc.RemoveAll(stageRoot)
-		_ = acc.RemoveAll(oldRoot)
-		return cause
+		return nil, []string{quarantineRoot, stageRoot, oldRoot}, cause
 	}
 
-	for _, family := range families {
-		if _, statErr := acc.Stat(family); statErr == nil {
-			if err := acc.MkdirAll(oldRoot); err != nil {
-				return nil, compensate(err)
+	// A lost reply can be reported as a rename error after the owning node
+	// applied it. Compensate only when both endpoints still show the prior
+	// state. Otherwise retain every known copy for recovery under the lock.
+	renameFailed := func(src, dst string, cause error) (*BindResult, []string, error) {
+		if _, srcErr := acc.Stat(src); srcErr == nil {
+			if _, dstErr := acc.Stat(dst); errors.Is(dstErr, os.ErrNotExist) {
+				return compensate(cause)
 			}
-			if err := acc.Rename(family, path.Join(oldRoot, family)); err != nil {
-				return nil, compensate(err)
+		}
+		return nil, nil, fmt.Errorf("%w: cannot confirm rename %s to %s; recovery trees preserved: %v",
+			ErrUncertainOutcome, src, dst, cause)
+	}
+	for _, family := range families {
+		if _, existed := oldDigests[family]; existed {
+			if err := acc.MkdirAll(oldRoot); err != nil {
+				return compensate(err)
+			}
+			retained := path.Join(oldRoot, family)
+			if err := acc.Rename(family, retained); err != nil {
+				return renameFailed(family, retained, err)
 			}
 			movedOld = append(movedOld, family)
 		}
-		if err := acc.Rename(path.Join(stageRoot, family), family); err != nil {
-			return nil, compensate(err)
+		staged := path.Join(stageRoot, family)
+		if err := acc.Rename(staged, family); err != nil {
+			return renameFailed(staged, family, err)
 		}
 		movedNew = append(movedNew, family)
 	}
 
 	if err := verifyFamilies(acc, families); err != nil {
-		return nil, compensate(err)
+		return compensate(err)
 	}
 
 	// An ambiguous outcome after an external mutation must not be auto-retried.
 	// Keep the old tree until the restart and verification have been observed.
 	if wasRunning && b.lifecycle != nil {
 		if err := b.lifecycle.StartServer(ctx, req.ServerID); err != nil {
-			return &BindResult{Binding: binding, RequestID: req.RequestID, Outcome: string(operation.OutcomeUnknown), Consistency: string(consistency)},
+			return &BindResult{Binding: binding, RequestID: req.RequestID, Outcome: string(operation.OutcomeUnknown), Consistency: string(consistency)}, nil,
 				fmt.Errorf("%w: restart after swap failed; retained recovery tree at %s: %v", ErrUncertainOutcome, oldRoot, err)
 		}
 	}
 
-	// Success cleanup happens only after promotion, verification and restart
-	// were all observed; retained old bytes are released at that point.
-	_ = acc.RemoveAll(stageRoot)
-	if len(movedOld) > 0 {
-		_ = acc.RemoveAll(oldRoot)
-	}
-
-	return &BindResult{Binding: binding, RequestID: req.RequestID, Outcome: "success", Consistency: string(consistency)}, nil
+	return &BindResult{Binding: binding, RequestID: req.RequestID, Outcome: "success", Consistency: string(consistency)},
+		[]string{stageRoot, oldRoot}, nil
 }
 
 // Unbind removes the binding row but never deletes world bytes. Admission is
@@ -726,6 +753,11 @@ func (b *Binder) Recover(ctx context.Context, serverID, dataRoot, nodeID string,
 		}
 		return "", err
 	}
+	if len(entries) > 0 {
+		if err := b.store.AssertNoServerOperation(ctx, serverID); err != nil {
+			return "", fmt.Errorf("%w: %v; preserve world recovery trees until the operation is resolved", ErrUncertainOutcome, err)
+		}
+	}
 	restored := 0
 	preserved := 0
 	ambiguous := []string{}
@@ -747,13 +779,15 @@ func (b *Binder) Recover(ctx context.Context, serverID, dataRoot, nodeID string,
 				_, liveErr := acc.Stat(familyName)
 				_, oldErr := acc.Stat(path.Join(oldRoot, familyName))
 				switch {
-				case liveErr != nil && oldErr == nil:
+				case errors.Is(liveErr, os.ErrNotExist) && oldErr == nil:
 					if renameErr := acc.Rename(path.Join(oldRoot, familyName), familyName); renameErr != nil {
 						return "", fmt.Errorf("restore %s from %s: %w", familyName, name, renameErr)
 					}
 					restored++
 				case liveErr == nil && oldErr == nil:
 					ambiguous = append(ambiguous, name+"/"+familyName+": both live and recovery trees exist")
+				default:
+					ambiguous = append(ambiguous, name+"/"+familyName+": cannot verify live and retained paths")
 				}
 			}
 		case strings.HasPrefix(name, "stage-"), strings.HasPrefix(name, "quarantine-"):
@@ -826,19 +860,21 @@ func stageFamilies(acc nodestorage.Accessor, stageRoot, levelName string) ([]str
 	return families, nil
 }
 
-// levelFamilyDigest fingerprints the identity file of one live level family.
-// It is used only to prove that a restored family is byte-identical to the
-// retained original; a mismatch makes compensation ambiguous and stops.
-func levelFamilyDigest(acc nodestorage.Accessor, family string) (string, error) {
-	data, err := acc.ReadFile(path.Join(family, "level.dat"))
+// levelFamilyDigest fingerprints the optional level.dat for rollback verification.
+func levelFamilyDigest(ctx context.Context, acc nodestorage.Accessor, family string) (string, error) {
+	file, err := acc.OpenRead(ctx, path.Join(family, "level.dat"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
-	if len(data) == 0 {
-		return "", fmt.Errorf("%w: level.dat is empty", ErrArchiveRejected)
+	defer func() { _ = file.Close() }()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return "", err
 	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 func verifyFamilies(acc nodestorage.Accessor, families []string) error {
