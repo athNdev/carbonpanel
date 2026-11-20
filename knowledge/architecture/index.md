@@ -73,6 +73,7 @@
 - [Server lifecycle policy](server-lifecycle.md) — Starts share node admission behind an in-process node gate, and config recreation records canonical container recovery identities.
 - [Server lifecycle policy — Policy](server-lifecycle-policy.md) — Start admission uses the smaller of the daemon memory and positive operator cap,
 - [Server lifecycle policy — Policy (part 2)](server-lifecycle-policy-2.md) — scheduled staged publication retain the AutoCurseForge name-derived slug
+- [Server portability archive](server-portability.md) — Native ZIP and tar.gz containers share a versioned server manifest and per-file SHA-256 validation.
 - [Shared enrollment boundary](shared-enrollment-boundary.md) — One mode-agnostic production package owns managed-node enrollment, canonical claim signing, issuance and the three authorization domains.
 - [Shared enrollment boundary — How to check + Read next](shared-enrollment-boundary-how-to-check.md) — go test ./internal/noderuntime/... ./internal/nodeinstall/... ./internal/rpc/... ./internal/db/...
 - [Shared enrollment boundary — Rule + Why](shared-enrollment-boundary-rule.md) — internal/noderuntime/enroll is the SINGLE mode-agnostic production boundary
