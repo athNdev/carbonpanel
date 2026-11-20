@@ -23,12 +23,14 @@ stop may need 60 seconds. Use its own bounded deadline and reconcile an
 interrupted call by replaying the same `request_id`; the journal returns the
 original operation rather than starting a second swap.
 
-World bind needs the owning node's storage adapter. Leave `node_id` unset so
-the server uses the controller's own daemon, which
-`nodestorage.IsLegacyLocalNodeID` recognizes for `""`/`local`/`default`. Do not
-create a harness-owned node: it is treated as remote with no storage transport
-and BindWorld is refused with `remote node storage unavailable`. This shipped
-Compose fixture has no separately registered `is_local` DB node.
+Shipped Compose has no auto-registered local node row. The fixture registers a
+node for `unix:///var/run/docker.sock` if absent and places both servers on its
+real UUID via `node_id`, so the supported node-id and endpoint-generation path
+is exercised. Do not bypass normal node IDs or endpoint-generation checks, and
+do not edit world binding source from this harness. If BindWorld reports
+`remote node storage unavailable` for that real node UUID, the defect is in the
+product's storage resolution (binder must resolve the node row, not only legacy
+string IDs) and belongs to a separate product branch, not this qualification PR.
 
 Node-owned server fixture directories are deliberately not world-writable.
 Archive them with narrowly scoped fixture `sudo` reads and restore the archive
