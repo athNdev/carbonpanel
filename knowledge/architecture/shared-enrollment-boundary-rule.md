@@ -43,10 +43,14 @@ claim context, add a second certificate policy or duplicate a domain check.
 - Nothing here mounts a production RPC, probes a host, installs a daemon or
   deploys anything. Keys and CAs are owned/synthetic; fixtures prove refusal
   and state-machine outcomes only.
-
 - Direct TLS bootstrap binds its stored challenge to the actual TLS 1.3
   connection through the shared exporter. A different connection, missing TLS
   state or caller-provided context fails closed. See [ADR 0019](../../docs/adr/0019-node-control-contract.md).
+
+- The production authority requires an operator-owned CA and a migrated
+  versioned store. Mutating enrollment requests reply only after durable
+  commit. Verified mTLS certificate DER resolves to its current persisted
+  node grant. See [Node enrollment state](../decisions/node-enrollment-state.md).
 
 # Why
 

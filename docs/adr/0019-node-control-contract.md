@@ -387,6 +387,22 @@ success. OSS-385 adds the shared mode-agnostic production package with the
 issue-first/commit-once rule, exact-context test and Ed25519-only decision; it
 does not mount a handler or touch a live host.
 
+### Durable enrollment authority
+
+Production composition supplies the operator-owned signing CA certificate
+and signer, the controller's migrated SQLite store and a supported TLS
+topology. The authority uses the wall clock and binds its state to the CA
+certificate digest. The persisted record includes challenge rate state,
+enrollment ownership, credential generation, certificate SHA-256 and
+revocation. The signer and the node's plaintext secret stay outside that
+record.
+
+Create, challenge, claim, revoke and rotate each commit a version-checked
+snapshot before returning success. Failed issuance or persistence leaves the
+previous revision authoritative. Verified mTLS connections resolve to a
+current active grant by exact certificate digest and serial. A mismatched
+issuer after restart or an unavailable state store fails closed.
+
 ### P0 contract verification (shipped; denial and shape only)
 
 - `buf lint` and `buf format -d` are clean for the new file;
