@@ -24,6 +24,7 @@ import (
 	"unicode"
 
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"gopkg.in/yaml.v3"
 )
 
 type Format string
@@ -174,18 +175,21 @@ func writeFile(
 	defer handle.Close()
 	size := handle.Size()
 	var r io.Reader = handle
-	if strings.EqualFold(rel, "server.properties") {
+	if isManagedSettings(rel) {
 		if size > maxPropertiesBytes {
-			return File{}, fmt.Errorf("server.properties exceeds the portability limit")
+			return File{}, fmt.Errorf("managed settings exceed the portability limit")
 		}
 		data, err := io.ReadAll(io.LimitReader(handle, maxPropertiesBytes+1))
 		if err != nil {
 			return File{}, err
 		}
 		if int64(len(data)) != size {
-			return File{}, fmt.Errorf("server.properties changed during export")
+			return File{}, fmt.Errorf("managed settings changed during export")
 		}
-		safe := portableProperties(data)
+		safe, err := portableSettings(rel, data)
+		if err != nil {
+			return File{}, err
+		}
 		r, size = bytes.NewReader(safe), int64(len(safe))
 	}
 	if size < 0 || size > remaining {
@@ -209,7 +213,10 @@ func Inspect(ctx context.Context, f *os.File) (Archive, error) {
 
 // CopyTo rechecks the archive while streaming into a newly allocated, private
 // directory. The caller owns rollback of that directory on any error.
-func CopyTo(ctx context.Context, f *os.File, verified Archive, destination nodestorage.Accessor) error {
+func CopyTo(ctx context.Context, f *os.File, verified Archive, destination nodestorage.Accessor, directory string) error {
+	if directory != "." && (!portablePath(directory) || path.Base(directory) != directory) {
+		return fmt.Errorf("invalid destination directory")
+	}
 	if verified.Manifest.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("server archive was not inspected")
 	}
@@ -222,7 +229,7 @@ func CopyTo(ctx context.Context, f *os.File, verified Archive, destination nodes
 		if !ok || old.Size != file.Size {
 			return fmt.Errorf("server archive changed after inspection")
 		}
-		_, err := nodestorage.WriteFrom(ctx, destination, file.Path, contents, max(file.Size, 1))
+		_, err := nodestorage.WriteFrom(ctx, destination, path.Join(directory, file.Path), contents, max(file.Size, 1))
 		return err
 	})
 	if err != nil {
@@ -284,16 +291,20 @@ func scan(ctx context.Context, f *os.File, consume func(File, io.Reader) error) 
 
 		hash := sha256.New()
 		record := File{Path: rel, Size: size}
-		if strings.EqualFold(rel, "server.properties") {
+		if isManagedSettings(rel) {
 			if size > maxPropertiesBytes {
-				return fmt.Errorf("server.properties exceeds the portability limit")
+				return fmt.Errorf("managed settings exceed the portability limit")
 			}
 			var body bytes.Buffer
 			if err := copySized(ctx, &body, r, size); err != nil {
 				return err
 			}
-			if !bytes.Equal(body.Bytes(), portableProperties(body.Bytes())) {
-				return fmt.Errorf("server.properties contains nonportable or credential-bearing settings")
+			safe, err := portableSettings(rel, body.Bytes())
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(body.Bytes(), safe) {
+				return fmt.Errorf("archive contains nonportable or credential-bearing settings")
 			}
 			r = bytes.NewReader(body.Bytes())
 		}
@@ -607,7 +618,7 @@ func excluded(rel string) bool {
 // Copy only recognized game settings. Java properties allow escaped keys and
 // logical line continuation, so require simple literal keys and omit continued
 // records. Drop comments to keep operator notes out of the archive.
-func portableProperties(data []byte) []byte {
+func portableProperties(data []byte) ([]byte, error) {
 	var safe bytes.Buffer
 	continued := false
 	for _, line := range bytes.SplitAfter(data, []byte("\n")) {
@@ -618,9 +629,15 @@ func portableProperties(data []byte) []byte {
 		if wasContinued || continued || bytes.IndexByte(trimmed, '\r') >= 0 {
 			continue
 		}
-		key, _, ok := bytes.Cut(bytes.TrimLeft(trimmed, " \t\f"), []byte("="))
+		key, value, ok := bytes.Cut(bytes.TrimLeft(trimmed, " \t\f"), []byte("="))
 		if !ok {
 			continue
+		}
+		if string(key) == "level-name" {
+			name := string(value)
+			if !portablePath(name) || path.Base(name) != name {
+				return nil, fmt.Errorf("level-name is not a portable world directory name")
+			}
 		}
 		switch string(key) {
 		case "allow-flight", "allow-nether", "broadcast-console-to-ops", "broadcast-rcon-to-ops",
@@ -636,5 +653,50 @@ func portableProperties(data []byte) []byte {
 			safe.Write(line)
 		}
 	}
-	return safe.Bytes()
+	return safe.Bytes(), nil
+}
+
+func isManagedSettings(rel string) bool {
+	switch strings.ToLower(rel) {
+	case "server.properties", "paper.yml", "config/paper-global.yml":
+		return true
+	default:
+		return false
+	}
+}
+
+func portableSettings(rel string, data []byte) ([]byte, error) {
+	switch strings.ToLower(rel) {
+	case "server.properties":
+		return portableProperties(data)
+	case "paper.yml":
+		return withoutPaperForwarding(data, "settings", "velocity-support")
+	case "config/paper-global.yml":
+		return withoutPaperForwarding(data, "proxies", "velocity")
+	default:
+		return data, nil
+	}
+}
+
+func withoutPaperForwarding(data []byte, section, key string) ([]byte, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	var root map[string]any
+	if err := decoder.Decode(&root); err != nil {
+		if err == io.EOF {
+			return data, nil
+		}
+		return nil, fmt.Errorf("could not validate Paper settings")
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return nil, fmt.Errorf("unexpected data after Paper settings")
+	}
+	config, _ := root[section].(map[string]any)
+	if config == nil {
+		return data, nil
+	}
+	if _, exists := config[key]; !exists {
+		return data, nil
+	}
+	delete(config, key)
+	return yaml.Marshal(root)
 }

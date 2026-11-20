@@ -29,6 +29,7 @@ func TestNativeRoundTrip(t *testing.T) {
 		"world/region/r.0.0.mca":    strings.Repeat("chunk\x00", 50_000),
 		"mods/fixture.jar":          "mod contents",
 		"plugins/fixture.jar":       "plugin contents",
+		"config/paper-global.yml":   "fixture: retained\nproxies: {}\n",
 		"config/fixture.toml":       "setting = true\n",
 		"plugins/fixture/empty.txt": "",
 		"server.properties":         "motd=Portable world\r\nlevel-name=world\r\n",
@@ -38,6 +39,9 @@ func TestNativeRoundTrip(t *testing.T) {
 		t.Run(string(format), func(t *testing.T) {
 			source, destination := t.TempDir(), t.TempDir()
 			for rel, content := range want {
+				if rel == "config/paper-global.yml" {
+					content = "fixture: retained\nproxies:\n  velocity:\n    enabled: true\n    secret: fixture-secret\n"
+				}
 				if rel == "server.properties" {
 					content += "rcon.password=fixture-secret\r\nmanagement-server-secret=fixture-token\r\n"
 				}
@@ -73,7 +77,7 @@ func TestNativeRoundTrip(t *testing.T) {
 			if verified.Format != format || verified.Manifest.Runtime != fixtureRuntime || len(verified.Manifest.Files) != len(want) {
 				t.Fatalf("unexpected archive report: %+v", verified)
 			}
-			if err := CopyTo(ctx, f, verified, target); err != nil {
+			if err := CopyTo(ctx, f, verified, target, "."); err != nil {
 				t.Fatal(err)
 			}
 			for rel, content := range want {

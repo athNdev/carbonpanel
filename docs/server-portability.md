@@ -31,7 +31,8 @@ settings and credentials must be supplied there.
 World files, mods, plugins and game configuration under the managed data
 directory are portable. Each captured file retains its bytes. The export
 copies recognized gameplay settings from the root `server.properties` and
-omits credentials, endpoint settings and comments from that file.
+omits credentials, endpoint settings and comments from that file. It also
+removes the Velocity forwarding configuration from Paper configuration.
 
 The archive omits panel state, Docker overrides, node or host paths, panel and
 RCON credentials, recognized key and credential files, logs, crash reports,
