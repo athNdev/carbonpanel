@@ -29,7 +29,9 @@ Maintain the current Stable minor line. Keep earlier releases available for
 pinned installs and documented rollback. A previous line gets a maintenance
 branch when there is a specific support need and a maintainer can own its
 backports, validation and end date. An older-line exception must preserve the
-newer Stable aliases.
+newer Stable aliases. The current publisher requires an ancestor of `main`
+with exact-commit main CI. A divergent branch needs an approved qualification
+path before it can publish.
 
 Review release readiness each month. Ship compatible fixes when they are
 qualified and prioritize urgent security or regression patches through the

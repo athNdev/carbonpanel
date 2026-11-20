@@ -108,7 +108,8 @@ Retaining prior artifacts gives users a reproducible upgrade and recovery
 path. Each additional maintained line would require its own backports and
 qualification matrix. Open an older-line maintenance exception only with a
 named owner, scope and end date. Preserve the newer Stable aliases if such
-an exception ships.
+an exception ships. A divergent maintenance branch needs its own explicitly
+qualified source path before it can publish.
 
 A monthly readiness review gives maintainers a checkpoint for grouping
 compatible features and deciding whether an upgrade needs an opt-in RC.
