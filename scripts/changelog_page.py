@@ -27,8 +27,28 @@ PINNED_PAGE = "src/content/docs/changelog.md"
 BANNER_SOURCE = "docs/carbon-panel/src/components/VersionBanner.astro"
 
 
+def _stable_bytes(data):
+    """Normalize text sources to LF so a checkout's CRLF cannot change a hash."""
+    return data.replace(b"\r\n", b"\n")
+
+
 def _sha256(data):
-    return hashlib.sha256(data).hexdigest()
+    return hashlib.sha256(_stable_bytes(data)).hexdigest()
+
+
+# Windows-1252 mojibake from a UTF-8 source (for example an em dash copied as
+# "â€”") must never be presented or attested as the exact published body.
+_MOJIBAKE = ("\ufffd", "\u00e2\u20ac", "\u00e2\u0080", "\u00c3\u0083",
+             "\u00c2\u00a0")
+
+
+def _utf8_body(data):
+    """Decode strict UTF-8 and refuse encoding damage before attesting text."""
+    text = data.decode("utf-8")  # strict: invalid UTF-8 fails closed
+    for marker in _MOJIBAKE:
+        if marker in text:
+            raise ValueError("release notes carry mojibake; re-copy from the raw GitHub API")
+    return text
 
 
 def load_source(root=ROOT):
@@ -81,7 +101,7 @@ def load_notes(root=ROOT, declaration=None):
         actual = _sha256(data)
         if actual != record["sha256"]:
             raise ValueError(f"release notes for {tag} disagree with the attested digest")
-        notes[tag] = data.decode("utf-8")
+        notes[tag] = _utf8_body(_stable_bytes(data))
     return notes
 
 
@@ -108,9 +128,20 @@ def presentation_fingerprint(root=ROOT):
             "schema_version": 1, "inputs": payload}
 
 
-def render(index, current, declaration, notes, site="https://carbonpanel.dev"):
-    """Render one channel-correct changelog page; caller writes it as MDX."""
+def render(index, current, declaration, notes, site="https://carbonpanel.dev", base="/"):
+    """Render one channel-correct changelog page; caller writes it as MDX.
+
+    Counterpart links honour the deployment subpath (`--base`): a root-relative
+    URL would point outside a subpath installation.
+    """
+    if not base.startswith("/") or not base.endswith("/") or ".." in base:
+        raise ValueError("changelog deployment base must be an absolute path ending in /")
     origin = site.rstrip("/")
+    prefix = origin + base.rstrip("/")
+
+    def counterpart_url(route):
+        return prefix + "/" + route.strip("/") + "/changelog/"
+
     stable = index["versions"][0]
     nightly = index["versions"][1]
     if stable["channel"] != "stable" or nightly["channel"] != "nightly":
@@ -153,7 +184,7 @@ def render(index, current, declaration, notes, site="https://carbonpanel.dev"):
             f"## Current Stable: {entry['display']}", "",
             f"- Product tag: `{notes_tag}`",
             f"- Image digest: `{index['channels']['stable']['image']['digest']}`",
-            f"- Nightly counterpart: [{nightly['display']} changelog]({origin}{nightly['route']}changelog/)",
+            f"- Nightly counterpart: [{nightly['display']} changelog]({counterpart_url(nightly['route'])})",
             "", "## Published release notes", "",
         ]
         parts += release_block(notes_tag, entry)
@@ -170,7 +201,7 @@ def render(index, current, declaration, notes, site="https://carbonpanel.dev"):
             f"- Image digest: `{index['channels']['nightly']['image']['digest']}`",
             f"- Promotion state: `{index['channels']['nightly']['promotion']['state']}`",
             f"- Compare to Stable `{stable_tag}` (`{stable['commit'][:12]}`): [revision comparison]({compare})",
-            f"- Stable counterpart: [{stable['display']} changelog]({origin}{stable['route']}changelog/)",
+            f"- Stable counterpart: [{stable['display']} changelog]({counterpart_url(stable['route'])})",
             "", "## Baseline Stable release notes", "",
             f"Nightly builds on `{stable_tag}`; the exact published notes for that release are "
             "linked and reproduced locally only when attested, without claiming any retired "

@@ -378,13 +378,17 @@ def guide_fingerprint(declaration, revision, blobs, presentation=None):
         if not re.fullmatch(r"[0-9a-f]{64}", presentation_hash):
             raise ValueError("presentation fingerprint must be a SHA-256")
         payload["presentation_fingerprint"] = presentation_hash
-    return {"fingerprint": hashlib.sha256(
+    result = {"fingerprint": hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest(),
         "revision": revision, "declaration_sha256": declaration_hash,
-        "presentation_fingerprint": presentation_hash,
         "manifest_identity": identity,
         "manifest_identity_hash": manifest_identity_hash(identity),
         "guides": records}
+    # Legacy candidates predate presentation; omit the field entirely so their
+    # candidate JSON bytes are unchanged.
+    if presentation_hash:
+        result["presentation_fingerprint"] = presentation_hash
+    return result
 
 
 def candidate_guide_fingerprint(declaration_path, revision, root, presentation=None):
@@ -830,10 +834,14 @@ def stamp_publication_receipt(site, candidate, live_index, source_revision):
                "nightly_promotion_receipt": (nightly.get("promotion") or {}).get("receipt", ""),
                "declaration_sha256": candidate.get("declaration_sha256", ""),
                "guide_fingerprint": candidate.get("fingerprint", ""),
-               "presentation_fingerprint": candidate.get("presentation_fingerprint", ""),
                "manifest_identity_hash": candidate.get("manifest_identity_hash", ""),
                "channels": channels, "page_hashes": page_hashes,
                "baseline_mode": "exact-artifact"}
+    # Legacy candidates have NO presentation input. Omit the field entirely so
+    # their historical receipt bytes stay identical (bots flagged the extra
+    # empty field as a byte regression). New candidates keep the explicit key.
+    if presentation_hash:
+        receipt["presentation_fingerprint"] = presentation_hash
     path = Path(site) / "publication-receipt.json"
     path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return receipt

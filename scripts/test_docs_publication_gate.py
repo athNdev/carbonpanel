@@ -1009,6 +1009,37 @@ class ChannelPresentationReceiptTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any("missing the presentation fingerprint" in p for p in problems))
 
+    def test_legacy_stamp_omits_presentation_key_and_keeps_bytes(self):
+        """Pre-presentation receipts must keep their historical bytes exactly."""
+        with tempfile.TemporaryDirectory() as directory:
+            site = Path(directory)
+            legacy_index = LiveStateTests().index()
+            (site / "version-index.json").write_text(
+                json.dumps(legacy_index), encoding="utf-8")
+            candidate = GuideLivenessTests().candidate()
+            self.assertNotIn("presentation_fingerprint", candidate)
+            receipt = gate.stamp_publication_receipt(
+                site, candidate, legacy_index, GuideLivenessTests.REVISION)
+            self.assertNotIn("presentation_fingerprint", receipt)
+            raw = (site / "publication-receipt.json").read_bytes()
+            self.assertNotIn(b"presentation_fingerprint", raw)
+            ok, problems = gate.verify_publication_receipt(
+                receipt, candidate, legacy_index, GuideLivenessTests.REVISION,
+                gate._local_get(site))
+            self.assertTrue(ok, problems)
+
+    def test_pre_presentation_reconstruct_has_no_presentation_input(self):
+        candidate = GuideLivenessTests().candidate()
+        self.assertNotIn("presentation_fingerprint", candidate)
+        manifests = GuideLivenessTests().evidence(
+            sha256=candidate["guides"][0]["source_sha256"])
+        evidence = {channel: {"channels": manifests[channel]["channels"],
+                              "declaration_sha256": manifests[channel]["declaration_sha256"],
+                              "published_routes": {}, "published_route_problems": []}
+                    for channel in gate.CHANNELS}
+        decision = gate.guide_change_decision(candidate, evidence)
+        self.assertFalse(decision["publish"], decision)
+
     def test_guide_change_decision_notices_presentation_only_change(self):
         candidate = self.base_candidate(presentation=self.HASH)
         candidate["guides"] = []

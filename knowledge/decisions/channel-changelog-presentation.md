@@ -9,6 +9,9 @@ code_refs:
   - scripts/build_website.py
   - scripts/docs_publication_gate.py
   - scripts/test_website.py
+  - scripts/changelog_browser_check.py
+  - scripts/manual-review/e2e/changelog-switcher-dom.mjs
+  - .github/workflows/docs.yml
   - docs/changelog-source.json
   - docs/release-notes/carbonpanel-v2.0.1.md
   - docs/carbon-panel/src/components/VersionBanner.astro
@@ -41,8 +44,12 @@ sources:
   `presentation.json` and compared by the docs-only publication gate, so a
   switcher-only fix reconciles Pages. It is never folded into the maintained
   operational guide declaration or receipt (ADR 0050).
+- Text inputs are normalized to LF before hashing so a checkout's line endings
+  cannot change the fingerprint; the tab label shows the tag verbatim with no
+  CSS truncation. Notes come from the raw GitHub API as strict UTF-8.
 
 # Read next
 
+- [Channel presentation integrity](channel-presentation-integrity.md)
 - [Website and documentation publication](website-docs.md)
 - [Maintained guide publication](maintained-guide-publication.md)

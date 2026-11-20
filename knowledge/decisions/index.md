@@ -11,6 +11,7 @@
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
 - [Channel changelog is generated presentation, not pinned prose](channel-changelog-presentation.md) — The public changelog is rendered from the one version contract plus hash-attested GitHub release notes, with a separate channel-presentation fingerprint for docs-only publication.
+- [Channel presentation integrity is proven from built bytes](channel-presentation-integrity.md) — The docs-only gate reads real presentation and changelog bytes at canonical and archive paths, omits legacy fields, and leaves channel authority with the verified promotion path.
 - [Channel promotion gates](channel-promotion.md) — Exact-revision, dual-registry and qualified-stage gates for docs and OCI channel moves.
 - [Channel promotion recovery and serialization](channel-promotion-recovery.md) — Prior-receipt rollback, exact docs restore, shared lock and target guard for channel promotion.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.

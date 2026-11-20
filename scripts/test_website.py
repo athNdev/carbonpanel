@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 import copy
 import json
 from pathlib import Path
+import re
 from urllib.parse import urlsplit
 import subprocess
 import tempfile
@@ -447,13 +448,82 @@ class ChannelChangelogTests(unittest.TestCase):
     def test_banner_shows_actual_release_and_matching_page_options(self):
         banner = (Path(__file__).resolve().parent.parent
                   / "docs/carbon-panel/src/components/VersionBanner.astro").read_text(encoding="utf-8")
-        self.assertIn("current.display", banner)
-        self.assertIn("current.tag", banner)
+        self.assertIn("const tabLabel = current.tag || current.display;", banner)
+        self.assertIn("current.version", banner)
         self.assertIn("rolling ", banner)
+        self.assertIn("{dev ? index.development.label : tabLabel}", banner)
         # Provenance markers and matching-page switcher are retained.
         self.assertIn("data-channel-revision={current.commit}", banner)
         self.assertIn("item.pages?.includes(slug)", banner)
         self.assertNotIn("current.channel + ' / ' + current.availability", banner)
+        # No CSS truncation cap was introduced to hide part of the tab label.
+        label_rule = re.search(r"\.version-label\s*\{[^}]*\}", banner).group(0)
+        self.assertNotIn("text-overflow", label_rule)
+        self.assertNotIn("max-width", label_rule)
+        self.assertNotIn("overflow", label_rule)
+
+    def test_counterpart_links_honour_deployment_subpath(self):
+        for channel, expected in (("stable", "/docs/nightly/changelog/"),
+                                  ("nightly", "/docs/changelog/")):
+            page = self.render(channel)
+            self.assertIn(f"https://carbonpanel.dev{expected}", page)
+            sub = changelog_page.render(
+                self.index,
+                next(v for v in self.index["versions"] if v["channel"] == channel),
+                self.declaration, self.notes, base="/panel/")
+            self.assertIn(f"https://carbonpanel.dev/panel{expected}", sub)
+            self.assertNotIn(f"https://carbonpanel.dev{expected})", sub)
+
+    def test_presentation_hash_is_lf_stable_and_notes_are_utf8_clean(self):
+        root = Path(__file__).resolve().parent.parent
+        notes_rel = self.declaration["release_notes"]["carbonpanel-v2.0.1"]["path"]
+        body = (root / notes_rel).read_bytes()
+        self.assertEqual(changelog_page._sha256(body),
+                         changelog_page._sha256(body.replace(b"\r\n", b"\n")))
+        notes = changelog_page.load_notes()
+        self.assertIn("\u2014", notes["carbonpanel-v2.0.1"])
+        self.assertNotIn("\ufffd", notes["carbonpanel-v2.0.1"])
+        self.assertNotIn("\u00e2\u20ac", notes["carbonpanel-v2.0.1"])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            copy_root = Path(temporary)
+            for rel in (changelog_page.SOURCE_PATH, notes_rel, changelog_page.BANNER_SOURCE):
+                target = copy_root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((root / rel).read_bytes().replace(b"\n", b"\r\n"))
+            crlf = changelog_page.presentation_fingerprint(copy_root)["fingerprint"]
+            for rel in (notes_rel, changelog_page.BANNER_SOURCE):
+                target = copy_root / rel
+                target.write_bytes(target.read_bytes().replace(b"\r\n", b"\n"))
+            lf = changelog_page.presentation_fingerprint(copy_root)["fingerprint"]
+            self.assertEqual(crlf, lf)
+
+    def test_mojibake_release_notes_are_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            notes_rel = self.declaration["release_notes"]["carbonpanel-v2.0.1"]["path"]
+            target = root / notes_rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            damaged = "## Notes \u2014 exact\n".encode("utf-8").decode("utf-8")
+            damaged = damaged.replace("\u2014", "\u00e2\u20ac\u201d")
+            target.write_bytes(damaged.encode("utf-8"))
+            declaration = copy.deepcopy(self.declaration)
+            declaration["release_notes"]["carbonpanel-v2.0.1"]["sha256"] = \
+                changelog_page._sha256(target.read_bytes())
+            source = root / changelog_page.SOURCE_PATH
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text(json.dumps(declaration), encoding="utf-8")
+            with self.assertRaises(ValueError) as raised:
+                changelog_page.load_notes(root)
+            self.assertIn("mojibake", str(raised.exception))
+
+    def test_presentation_fingerprint_excludes_channel_contract_identity(self):
+        """Channel state stays with the verified promotion authority, not this gate."""
+        payload = changelog_page.presentation_fingerprint()["inputs"]
+        self.assertEqual(set(payload), {"declaration", "notes", "generator_sha256",
+                                        "banner_sha256"})
+        self.assertNotIn("index", payload)
+        self.assertNotIn("version", payload)
 
     def test_browser_gate_is_wired_into_normal_website_validation(self):
         root = Path(__file__).resolve().parent.parent

@@ -1,4 +1,4 @@
-## UPGRADE NOTES â€” read before upgrading from v1.0.40
+## UPGRADE NOTES — read before upgrading from v1.0.40
 
 **User-facing migration guide: https://github.com/athNdev/carbonpanel/blob/carbonpanel-v2.0.1/docs/releases.md#upgrade-notes-from-v1040** (full provenance and evidence: https://github.com/athNdev/carbonpanel/blob/carbonpanel-v2.0.1/docs/release-history.md#upgrade-notes--read-before-upgrading-from-v1040).
 
