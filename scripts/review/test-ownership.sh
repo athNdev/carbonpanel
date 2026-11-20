@@ -71,10 +71,11 @@ case "$*" in
   *ServerService/ListServers*)
     count=$(cat "$FAKE_CURL_STATE" 2>/dev/null || echo 0); count=$((count + 1)); echo "$count" > "$FAKE_CURL_STATE"
     if [ "$count" = 1 ]; then printf '{"servers":[]}'
-    elif [ "${FAKE_CURL_MODE:-}" = starter-error ]; then printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_ERROR"}]}'
-    elif [ "${FAKE_CURL_MODE:-}" = starter-timeout ] || [ "$count" = 2 ]; then printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_CREATING"}]}'
-    else printf '{"servers":[{"id":"starter","status":"SERVER_STATUS_STOPPED","containerId":"container"}]}'
+    elif [ "${FAKE_CURL_MODE:-}" = starter-error ]; then printf '{"servers":[{"id":"starter","name":"review-vanilla","status":"SERVER_STATUS_ERROR"}]}'
+    elif [ "${FAKE_CURL_MODE:-}" = starter-timeout ] || [ "$count" = 2 ]; then printf '{"servers":[{"id":"starter","name":"review-vanilla","status":"SERVER_STATUS_CREATING"}]}'
+    else printf '{"servers":[{"id":"starter","name":"review-vanilla","status":"SERVER_STATUS_STOPPED","containerId":"container"}]}'
     fi ;;
+  *ServerService/GetServer*) printf '{"server":{"id":"starter","name":"review-vanilla","status":"SERVER_STATUS_RUNNING"}}' ;;
   *ServerService/StartServer*)
     [ "$(cat "$FAKE_CURL_STATE")" -ge 3 ] || exit 1
     echo start > "$FAKE_CURL_START"; printf '{}' ;;
