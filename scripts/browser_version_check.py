@@ -30,7 +30,6 @@ from scripts import version_contract as vc  # noqa: E402
 SITE = ROOT / ".website-build/site"
 BASE = "https://carbonpanel.dev"
 RETIRED = ("1.0.39", "3.0.0-alpha.1")
-ACTIVE_ROUTES = ("/docs/", "/docs/nightly/", "/docs/versions/1.0.40/")
 
 
 def chrome_path():
@@ -74,6 +73,16 @@ def main():
     if index.get("schema_version") != 3 or sorted(index.get("channels", {})) != ["nightly", "stable"]:
         raise RuntimeError("packaged site does not have the schema 3 Stable/Nightly channels")
     channels = index["channels"]
+    stable_version = channels["stable"]["version"]
+    stable_route = f"/docs/versions/{stable_version}/"
+    active_routes = ("/docs/", "/docs/nightly/", stable_route)
+    for key, wanted in (("commit", os.environ.get("CARBONPANEL_STABLE_REVISION")),
+                        ("tag", os.environ.get("CARBONPANEL_STABLE_TAG"))):
+        if wanted and channels["stable"].get(key) != wanted:
+            raise RuntimeError(f"public Stable {key} differs from the release input")
+    digest = os.environ.get("CARBONPANEL_STABLE_DIGEST")
+    if digest and channels["stable"]["image"]["digest"] != digest:
+        raise RuntimeError("public Stable image digest differs from the release input")
     if marker != vc.channel_marker(index):
         raise RuntimeError("public channel marker disagrees with the version index")
     nightly_marker = marker["channels"]["nightly"]
@@ -180,13 +189,13 @@ def main():
             served = urlopen(origin + staging + "channel-marker.json", timeout=5).read().decode()
             if json.loads(served) != marker:
                 failures.append("public staging marker differs from the packaged marker")
-            for route in ACTIVE_ROUTES:
+            for route in active_routes:
                 absent(route)
             locations = sitemap_locations(
                 urlopen(origin + "/sitemap.xml", timeout=5).read().decode())
             if f"{BASE}{staging}" not in locations:
                 failures.append(f"sitemap.xml: missing staging route {staging}")
-            for route in ACTIVE_ROUTES:
+            for route in active_routes:
                 if f"{BASE}{route}" in locations:
                     failures.append(f"sitemap.xml: candidate published active route {route}")
             if not published(staging.lstrip("/") + "pagefind/pagefind-entry.json"):
@@ -206,14 +215,14 @@ def main():
                     else version["route"]
                 if f'value="{href}"' not in deep:
                     failures.append(f"deep link: missing canonical option {href}")
-            expect("/docs/versions/1.0.40/", [
+            expect(stable_route, [
                 "data-version-switcher",
                 f"{index['repository']}/commit/{channels['stable']['commit']}",
-                f'<link rel="canonical" href="{BASE}/docs/versions/1.0.40/">',
+                f'<link rel="canonical" href="{BASE}{stable_route}">',
             ])
             for page, sha in (("/docs/", channels["stable"]["commit"]),
                               ("/docs/nightly/", channels["nightly"]["commit"]),
-                              ("/docs/versions/1.0.40/", channels["stable"]["commit"])):
+                              (stable_route, channels["stable"]["commit"])):
                 reject(page, [f'/commit/{sha[:7]}"'] + list(RETIRED))
             for bad in ("/docs/versions/1.0.39/", "/docs/versions/3.0.0-alpha.1/",
                         "/docs/versions/v3.0.0-beta.4/", "/docs/versions/1.0.38/",
@@ -221,7 +230,7 @@ def main():
                 absent(bad)
             locations = sitemap_locations(
                 urlopen(origin + "/sitemap.xml", timeout=5).read().decode())
-            for route in ACTIVE_ROUTES:
+            for route in active_routes:
                 if f"{BASE}{route}" not in locations:
                     failures.append(f"sitemap.xml: missing {route}")
             for retired in RETIRED:

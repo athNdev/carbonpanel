@@ -31,6 +31,11 @@ sources:
   registry digests and the deployed public docs marker, and GitHub release
   creation is gated on that synchronized transaction. A failed stable alias
   write is compensated by restoring aliases and docs to the prior receipt.
+- The active receipt requires the docs commit and digest to match the observed
+  multi-architecture image in each registry. Stable renders its canonical and
+  immutable routes with the release version before deployment. Nightly retains
+  its verified live identity. Both channels' rendered OpenAPI versions are
+  checked, and an off-path HTTPS probe precedes the canonical deployment.
 - The stable gate consumes OBSERVED dual-registry digests, not a hardcoded
   literal. An older release target whose checkout lacks the trusted gate script
   is refused with an explicit blocker rather than silently using the wrong code.

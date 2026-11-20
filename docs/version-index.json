@@ -1,5 +1,6 @@
 {
   "schema_version": 3,
+  "catalog": "docs/release-history.json",
   "repository": "https://github.com/athNdev/carbonpanel",
   "channels": {
     "stable": {

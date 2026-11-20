@@ -2145,7 +2145,7 @@ def validate_channel_contract(document, stable_commit=None, stable_digest=None):
     repository = document.get("repository", "")
     if not isinstance(repository, str) or not repository.startswith("https://github.com/"):
         problems.append("repository must be an https GitHub URL")
-    if not isinstance(document.get("catalog"), str) or not document["catalog"]:
+    if document.get("catalog") != "docs/release-history.json":
         problems.append("catalog path is required")
     channels = document.get("channels")
     if not isinstance(channels, dict) or set(channels) != set(CHANNEL_NAMES):
@@ -2589,7 +2589,8 @@ def channel_transaction_decision(candidate, previous=None, live=None,
     alias_digests = {k: v for k, v in (live.get("registries") or {}).items()
                      if v and k in CHANNEL_REGISTRIES}
     live_docs = (live.get("docs_commit"), live.get("docs_digest"))
-    fully_live = (set(alias_digests.values()) == {digest}
+    fully_live = (set(alias_digests) == set(CHANNEL_REGISTRIES)
+                  and set(alias_digests.values()) == {digest}
                   and live_docs == (commit, digest))
     if fully_live:
         return "noop", "both registries and the live docs marker already match the candidate", previous, []
@@ -2606,7 +2607,7 @@ def channel_transaction_decision(candidate, previous=None, live=None,
             TX_MOVE_ALIASES, TX_DEPLOY_CANONICAL, TX_VERIFY_FINAL, TX_WRITE_RECEIPT)
 
     receipt = channel_receipt(
-        channel, commit, digest, candidate.get("docs_hash", ""), commit, digest,
+        channel, commit, digest, candidate.get("docs_artifact_hash", candidate.get("docs_hash", "")), commit, digest,
         registries, live.get("registries") or {}, candidate.get("marker_urls") or {},
         candidate.get("run_ids") or {}, seq or prev_seq + 1,
         candidate.get("timestamp", ""))
@@ -2686,18 +2687,13 @@ def channel_active_receipt(channel, alias_observations, docs_commit, docs_digest
     already active in both registries and the public docs marker. A mixed or
     unknown alias state yields {} and the dispatch refuses.
     """
-    registries = {}
-    for name, (state, info) in alias_observations.items():
-        if name not in CHANNEL_REGISTRIES:
-            continue
-        if state != "present" or not info or not valid_digest(info.get("digest", "")):
-            return {}
-        registries[name] = info["digest"]
-    if set(registries) != set(CHANNEL_REGISTRIES) or len(set(registries.values())) != 1:
-        return {}
     if not valid_commit(docs_commit) or not valid_digest(docs_digest):
         return {}
-    digest = registries["docker_hub"]
+    verified, _ = channel_oci_parity(alias_observations, docs_digest, docs_commit)
+    if not verified:
+        return {}
+    digest = docs_digest
+    registries = {name: digest for name in CHANNEL_REGISTRIES}
     return channel_receipt(channel, docs_commit, digest, "", docs_commit, docs_digest,
                            registries, registries, {}, {}, seq, timestamp)
 
@@ -2707,9 +2703,8 @@ def channel_active_receipt_cli(args):
     receipt = channel_active_receipt(
         args.channel, _observation_map(args.aliases), args.docs_commit,
         args.docs_digest, args.seq, args.timestamp)
-    values = {"receipt": json.dumps(receipt, sort_keys=True)}
-    print(json.dumps(values, indent=2))
-    write_output(values)
+    print(json.dumps({"receipt": receipt}, indent=2))
+    write_output({"receipt": json.dumps(receipt, sort_keys=True)})
     if not receipt:
         raise ValueError("No single verified active channel receipt could be reconstructed")
     return receipt
@@ -3085,40 +3080,21 @@ def nightly_activation_decision_cli(args):
 
 def stable_alias_decision(stable, latest):
     """Fail-closed alias decision from ACTUAL observations, including first publish."""
-    def pair(state, name):
-        value = (state or {}).get(name) or ("absent", {})
-        return value if isinstance(value, (list, tuple)) and len(value) >= 2 else ("unknown", {})
-
-    def present(value):
-        return value[0] == "present"
-
-    states = {name: pair(stable, name) for name in CHANNEL_REGISTRIES}
-    active = [name for name in CHANNEL_REGISTRIES if present(states[name])]
-    if any(not present(value) and value[0] == "unknown" for value in states.values()):
-        return {"action": "refuse", "reason": "stable alias state is unknown"}
-    if active and len(active) != len(CHANNEL_REGISTRIES):
-        return {"action": "refuse", "reason": "stable alias is mixed across registries"}
-    if active:
-        digests = {(states[name][1] or {}).get("digest") for name in active}
-        if len(digests) != 1 or not valid_digest(next(iter(digests))):
-            return {"action": "refuse", "reason": "stable aliases disagree or are unverified"}
-        return {"action": "promote", "reason": "stable alias active in both registries",
-                "digest": next(iter(digests)), "first_publication": False}
-    baseline = {name: pair(latest, name) for name in CHANNEL_REGISTRIES}
-    for name in CHANNEL_REGISTRIES:
-        if not present(baseline[name]):
-            return {"action": "refuse",
-                    "reason": f"latest is {baseline[name][0]} on {name}; no verified first-publish baseline"}
-    digests = {(baseline[name][1] or {}).get("digest") for name in CHANNEL_REGISTRIES}
-    revisions = {(baseline[name][1] or {}).get("revision") for name in CHANNEL_REGISTRIES}
-    if (len(digests) != 1 or len(revisions) != 1
-            or not valid_digest(next(iter(digests))) or not valid_commit(next(iter(revisions)))):
-        return {"action": "refuse",
-                "reason": "latest baseline is not one verified digest/revision in both registries"}
-    return {"action": "first-publish",
-            "reason": "stable alias absent in both; bounded first publication from verified latest",
-            "digest": next(iter(digests)), "revision": next(iter(revisions)),
-            "first_publication": True}
+    first = all((stable.get(name) or [None])[0] == "absent"
+                for name in CHANNEL_REGISTRIES)
+    info = (latest.get("docker_hub") or ("unknown", {}))[1] or {}
+    digest, revision = info.get("digest", ""), info.get("revision", "")
+    if not valid_digest(digest) or not valid_commit(revision):
+        return {"action": "refuse", "reason": "latest has no verified digest/revision"}
+    for label, observations in [("latest", latest), ("stable", stable)]:
+        if label == "stable" and first:
+            continue
+        ok, reason = channel_oci_parity(observations, digest, revision)
+        if not ok:
+            return {"action": "refuse", "reason": label + ": " + reason}
+    return {"action": "first-publish" if first else "promote",
+            "reason": "both registries agree on the active release",
+            "digest": digest, "revision": revision, "first_publication": first}
 
 
 def verify_stable_release_site(site, commit, digest, version, repository):
@@ -3137,6 +3113,17 @@ def verify_stable_release_site(site, commit, digest, version, repository):
         problems.append("stable index commit does not match the release revision")
     if (stable.get("image") or {}).get("digest") != digest:
         problems.append("stable index digest does not match the verified image")
+    normalized = resolve_panel_version(version)[1:]
+    if stable.get("version") != normalized or stable.get("tag") != version:
+        problems.append("stable tag/version must exactly match the release")
+    nightly = (document.get("channels") or {}).get("nightly") or {}
+    expected_schemas = {"docs": normalized, f"docs/versions/{normalized}": normalized,
+                        "docs/nightly": f"0.0.0-nightly.{nightly.get('commit', '')[:12]}"}
+    for directory, schema_version in expected_schemas.items():
+        try:
+            verify_text((root / directory / "schemav1.yaml").read_text(encoding="utf-8"), schema_version)
+        except (ValueError, OSError) as error:
+            problems.append(f"{directory}: OpenAPI verification failed: {error}")
     route = (stable.get("route") or "/docs/").strip("/")
     pin = f"{repository.rstrip('/')}/commit/{commit}"
     for page in ("index.html", "getting-started/proxmox/index.html", "faq/index.html"):
@@ -3154,7 +3141,7 @@ def verify_stable_release_site(site, commit, digest, version, repository):
     versions = root / route / "versions" / "index.html"
     if not versions.is_file():
         problems.append("stable versions page missing")
-    elif version not in versions.read_text(encoding="utf-8", errors="replace"):
+    elif normalized not in versions.read_text(encoding="utf-8", errors="replace"):
         problems.append("stable versions page lacks the release version stamp")
     return (not problems), problems
 
@@ -3456,7 +3443,7 @@ def channel_observe_cli(args):
     observations = channel_observe(args.reference)
     values = {"reference": args.reference,
               "observations": json.dumps(observations, sort_keys=True)}
-    print(json.dumps(values, indent=2))
+    print(json.dumps({"reference": args.reference, "observations": observations}, indent=2))
     write_output(values)
     return observations
 

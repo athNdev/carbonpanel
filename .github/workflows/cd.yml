@@ -12,7 +12,7 @@ on:
   # explicit workflow_dispatch with push=true or nightly=true, gated in
   # scripts/release.py. The shared sha-<commit> tag is preflighted before any
   # build/push and reused when already verified. The workflow is not disabled:
-  # CI-completed events still build with push=false (DESIGN.md §10.1 #6).
+  # CI-completed events still build with push=false (DESIGN.md section 10.1 #6).
   workflow_run:
     workflows: ["Continuous Integration"]
     types:
@@ -651,7 +651,10 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           OBSERVED: ${{ steps.stage.outputs.observed }}
           CI_VERIFIED: ${{ steps.ci.outputs.verified }}
+          IMMUTABLE_OK: ${{ steps.activation.outputs.action == 'activate' && steps.stage.outcome == 'success' }}
+          SITE_OK: ${{ steps.docs.outcome == 'success' }}
         run: |
+          python3 scripts/release.py validate-channel-contract --path .website-build/site/version-index.json
           PREVIOUS=$(python3 scripts/release.py channel-active-receipt \
             --channel nightly --aliases "$ALIASES" \
             --docs-commit "$LIVE_COMMIT" --docs-digest "$LIVE_DIGEST")
@@ -665,9 +668,10 @@ jobs:
             --argjson seq "$((SEQ + 1))" --arg ref "${{ github.ref }}" \
             --arg docs_hash "$DOCS_HASH" --arg run_id "$RUN_ID" \
             --argjson registries "$OBSERVED" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg ci "$CI_VERIFIED" \
+            --arg ci "$CI_VERIFIED" --argjson immutable_ok "$IMMUTABLE_OK" \
+            --argjson site_ok "$SITE_OK" \
             '{channel:"nightly",commit:$commit,digest:$digest,seq:$seq,source_ref:$ref,
-              ci_verified:$ci,immutable_ok:true,contract_valid:true,site_validated:true,
+              ci_verified:$ci,immutable_ok:$immutable_ok,contract_valid:true,site_validated:$site_ok,
               docs_commit:$commit,docs_digest:$digest,docs_artifact_hash:$docs_hash,
               registries:$registries,
               candidate_marker_verified:false,canonical_marker_verified:false,
@@ -675,6 +679,7 @@ jobs:
               run_ids:{ci:$run_id},timestamp:$now}')
           LIVE=$(jq -nc --arg c "$LIVE_COMMIT" --arg d "$LIVE_DIGEST" \
             '{registries:{},docs_commit:$c,docs_digest:$d}')
+          printf 'candidate=%s\n' "$CANDIDATE" >> "$GITHUB_OUTPUT"
           python3 scripts/release.py channel-transaction --phase stage \
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
             --event "$CHANNEL_EVENT"
@@ -767,31 +772,16 @@ jobs:
         if: steps.canonical.outcome == 'success'
         env:
           CHANNEL_EVENT: ${{ github.event_name }}
-          CHANNEL_COMMIT: ${{ steps.pinned.outputs.sha }}
-          CHANNEL_DIGEST: ${{ steps.stage.outputs.digest }}
-          DOCS_HASH: ${{ steps.docs.outputs.hash }}
-          ALIASES: ${{ steps.active.outputs.aliases }}
+          STAGED_CANDIDATE: ${{ steps.stage_decision.outputs.candidate }}
+          PREV_JSON: ${{ steps.stage_decision.outputs.prior_receipt }}
           LIVE_COMMIT: ${{ steps.live_marker.outputs.commit }}
           LIVE_DIGEST: ${{ steps.live_marker.outputs.digest }}
-          RUN_ID: ${{ github.run_id }}
           PROBE_URL: ${{ steps.probe.outputs.url }}
         run: |
-          PREVIOUS=$(python3 scripts/release.py channel-active-receipt \
-            --channel nightly --aliases "$ALIASES" \
-            --docs-commit "$LIVE_COMMIT" --docs-digest "$LIVE_DIGEST")
-          PREV_JSON=$(printf '%s' "$PREVIOUS" | jq -c .receipt)
-          SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
-          CANDIDATE=$(jq -nc \
-            --arg commit "$CHANNEL_COMMIT" --arg digest "$CHANNEL_DIGEST" \
-            --argjson seq "$((SEQ + 1))" --arg ref "${{ github.ref }}" \
-            --arg docs_hash "$DOCS_HASH" --arg run_id "$RUN_ID" --arg probe "$PROBE_URL" \
-            '{channel:"nightly",commit:$commit,digest:$digest,seq:$seq,source_ref:$ref,
-              ci_verified:$ci,immutable_ok:true,contract_valid:true,site_validated:true,
-              docs_commit:$commit,docs_digest:$digest,docs_artifact_hash:$docs_hash,
-              registries:$registries,
-              candidate_marker_verified:true,canonical_marker_verified:true,
-              marker_urls:{nightly:"https://carbonpanel.dev/docs/nightly/",candidate:$probe},
-              run_ids:{ci:$run_id},timestamp:$now}')
+          CANDIDATE=$(jq -ce --arg probe "$PROBE_URL" '
+            .candidate_marker_verified = true |
+            .canonical_marker_verified = true |
+            .marker_urls.candidate = $probe' <<< "$STAGED_CANDIDATE")
           LIVE=$(jq -nc --arg c "$LIVE_COMMIT" --arg d "$LIVE_DIGEST" \
             '{registries:{},docs_commit:$c,docs_digest:$d}')
           python3 scripts/release.py channel-transaction --phase commit \

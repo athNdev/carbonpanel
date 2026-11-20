@@ -2917,8 +2917,13 @@ class ChannelTransactionTests(unittest.TestCase):
         self.assertEqual(result["registries"], ["docker_hub", "ghcr"])
 
     def test_active_receipt_from_live_state_requires_both_registries_to_agree(self):
-        aliases = {"docker_hub": ("present", {"digest": self.PREV_DIGEST}),
-                   "ghcr": ("present", {"digest": self.PREV_DIGEST})}
+        info = {"digest": self.PREV_DIGEST, "revision": self.PREV_COMMIT,
+                "platforms": release.REQUIRED_PLATFORMS}
+        aliases = {name: ("present", info) for name in release.CHANNEL_REGISTRIES}
+        self.assertEqual(release.channel_active_receipt(
+            "nightly", aliases, self.COMMIT, self.PREV_DIGEST), {})
+        self.assertEqual(release.channel_active_receipt(
+            "nightly", aliases, self.PREV_COMMIT, self.DIGEST), {})
         receipt = release.channel_active_receipt(
             "nightly", aliases, self.PREV_COMMIT, self.PREV_DIGEST, 1, "ts")
         self.assertEqual(receipt["revision"], self.PREV_COMMIT)
@@ -3275,10 +3280,11 @@ class StableReleasePublicationTests(unittest.TestCase):
 
     COMMIT = "b" * 40
     DIGEST = "sha256:" + "d" * 64
-    VERSION = "1.0.41"
+    VERSION = "carbonpanel-v2.0.1"
 
     def alias(self, state, digest="", revision=""):
-        return (state, {"digest": digest, "revision": revision})
+        return (state, {"digest": digest, "revision": revision,
+                        "platforms": release.REQUIRED_PLATFORMS})
 
     def test_first_publication_requires_verified_latest_pair(self):
         latest = {"docker_hub": self.alias("present", self.DIGEST, self.COMMIT),
@@ -3294,12 +3300,44 @@ class StableReleasePublicationTests(unittest.TestCase):
         active = {"docker_hub": self.alias("present", self.DIGEST, self.COMMIT),
                   "ghcr": self.alias("present", self.DIGEST, self.COMMIT)}
         self.assertEqual(release.stable_alias_decision(active, latest)["action"], "promote")
+        self.assertEqual(release.stable_alias_decision({}, latest)["action"], "refuse")
+        stale = {name: self.alias("present", self.DIGEST, "a" * 40)
+                 for name in release.CHANNEL_REGISTRIES}
+        self.assertEqual(release.stable_alias_decision(active, stale)["action"], "refuse")
+        half = {**active, "ghcr": ("present", {**active["ghcr"][1], "platforms": set()})}
+        self.assertEqual(release.stable_alias_decision(half, latest)["action"], "refuse")
+
+    def test_channel_cli_stdout_has_typed_observations_and_verified_receipt(self):
+        info = {"digest": self.DIGEST, "revision": self.COMMIT,
+                "platforms": sorted(release.REQUIRED_PLATFORMS)}
+        observed = {name: ["present", info] for name in release.CHANNEL_REGISTRIES}
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "channel-observe", "--reference", "latest"]), \
+             patch.object(release, "channel_observe", return_value=observed), redirect_stdout(out):
+            release.main()
+        observations = json.loads(out.getvalue())["observations"]
+        self.assertIsInstance(observations, dict)
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "channel-active-receipt", "--channel", "stable",
+                                "--aliases", json.dumps(observations), "--docs-commit", self.COMMIT,
+                                "--docs-digest", self.DIGEST]), redirect_stdout(out):
+            release.main()
+        self.assertTrue(json.loads(out.getvalue())["receipt"]["verified"])
+
 
     def site(self):
         root = Path(tempfile.mkdtemp())
         contract = ChannelPromotionTests().contract(commit=self.COMMIT, digest=self.DIGEST)
         contract["channels"]["stable"]["commit"] = self.COMMIT
         contract["channels"]["stable"]["image"]["digest"] = self.DIGEST
+        contract["channels"]["stable"].update(version="2.0.1", tag=self.VERSION)
+        for route, schema_version in (("docs", "2.0.1"), ("docs/versions/2.0.1", "2.0.1"),
+                                      ("docs/nightly", "0.0.0-nightly." + self.COMMIT[:12])):
+            directory = root / route
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "schemav1.yaml").write_text(
+                f"info:\n  version: {schema_version}\npaths:\n  /carbonpanel.v1.Service/List: {{}}\n",
+                encoding="utf-8")
         index = json.dumps(contract)
         (root / "version-index.json").write_text(index, encoding="utf-8")
         (root / "docs").mkdir(exist_ok=True)
@@ -3335,6 +3373,14 @@ class StableReleasePublicationTests(unittest.TestCase):
             root, self.COMMIT, self.DIGEST, self.VERSION,
             "https://github.com/athNdev/carbonpanel")
         self.assertTrue(ok, problems)
+        schema = root / "docs/nightly/schemav1.yaml"
+        original = schema.read_text(encoding="utf-8")
+        schema.write_text(original.replace("0.0.0-nightly.", "1.0.0-nightly."), encoding="utf-8")
+        ok, problems = release.verify_stable_release_site(
+            root, self.COMMIT, self.DIGEST, self.VERSION, "https://github.com/athNdev/carbonpanel")
+        self.assertFalse(ok)
+        self.assertTrue(any("docs/nightly: OpenAPI" in item for item in problems))
+        schema.write_text(original, encoding="utf-8")
         # An old pinned link under a new Stable identity fails closed.
         page = root / "docs/getting-started/proxmox/index.html"
         page.write_text("<html>old guide</html>", encoding="utf-8")
