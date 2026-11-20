@@ -41,8 +41,8 @@ The scheduler invokes the same planner through an injected interface.
   `mods/update[server_id]` and is not exposed as an MCP tool.
 - A disabled policy, missing planner, bad config or already-staged file cannot
   stage a duplicate or an unchecked jar.
-- Apply revalidates the server-owned preview and the live digest; publish
-  refuses a delayed-drift row and keeps staged bytes for recovery.
+- Apply revalidates the preview. Publish verifies the reviewed SHA-512 on the
+  same stream used for undo, preserving staged bytes on drift.
 - Reviewed content checks the complete window before work, at batch
   preparation, and at row insertion. Config targeting an open batch with
   content or an independent cron row must match its complete window. A
@@ -55,6 +55,6 @@ The scheduler invokes the same planner through an injected interface.
   trigger stay intact. Discard shares the operation lock, keeps its typed
   Connect refusals and records its own operation name.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
-  bound candidate and total bytes, including rejected downloads.
-- The scheduler installs the planner first, uses timezones for cron, and
-  skips dispatch if it cannot advance the task's next run.
+  bound candidate and total bytes. Scheduled inventory and provider access
+  failures remain retryable when other items staged.
+- The scheduler installs its planner first and refuses invalid policy windows.

@@ -4,6 +4,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 
@@ -51,7 +52,10 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 		return 0, 0, nil, errors.New("a known game version and loader are required")
 	}
 
-	mods := installedModRows(ctx, serverID, server, modsDir)
+	mods, err := installedModRows(ctx, serverID, server, modsDir)
+	if err != nil {
+		return 0, 0, nil, err
+	}
 	if len(mods) == 0 {
 		return 0, 0, nil, nil
 	}
@@ -90,7 +94,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	selections := make([]*v1.ModUpdateSelection, 0, limit)
 	refused := 0
 	var reasons []string
-	var providerFailure string
+	var providerFailure error
 	for _, mod := range mods {
 		preview := mod.GetUpdatePreview()
 		if preview == nil || preview.GetState() != "available" || preview.GetCandidateSha512() == "" {
@@ -98,7 +102,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 			if preview != nil {
 				reason := preview.GetReason()
 				if strings.HasPrefix(reason, providerLookupPrefix) {
-					providerFailure = reason
+					providerFailure = errors.New(reason)
 				}
 				if reason != "" && len(reasons) < 5 {
 					reasons = append(reasons, mod.GetFileName()+": "+reason)
@@ -126,10 +130,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 		})
 	}
 	if len(selections) == 0 {
-		if providerFailure != "" {
-			return 0, refused, reasons, errors.New(providerFailure)
-		}
-		return 0, refused, reasons, nil
+		return 0, refused, reasons, providerFailure
 	}
 
 	window := v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART
@@ -150,30 +151,45 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 			reasons = append(reasons, result.FileName+": "+result.Outcome+" — "+result.Reason)
 		}
 	}
-	if transient != nil {
-		return staged, refused, reasons, transient
-	}
-	return staged, refused, reasons, nil
+	return staged, refused, reasons, errors.Join(providerFailure, transient)
 }
 
 // installedModRows mirrors the deterministic IDs used by ListMods so a policy
 // can select the same installed files an operator sees in the Mods tab.
-func installedModRows(ctx context.Context, serverID string, server *storage.Server, modsDir string) []*v1.Mod {
+func installedModRows(ctx context.Context, serverID string, server *storage.Server, modsDir string) ([]*v1.Mod, error) {
 	mods := make([]*v1.Mod, 0)
 	for _, dir := range []struct {
 		path    string
 		enabled bool
 	}{{modsDir, true}, {modsDir + "_disabled", false}} {
-		entries, err := os.ReadDir(dir.path)
-		if err != nil {
+		info, err := os.Stat(dir.path)
+		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
+		if err != nil {
+			return nil, fmt.Errorf("read installed mods directory: %w", err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("read installed mods directory: %s is not a directory", dir.path)
+		}
+		entries, err := os.ReadDir(dir.path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read installed mods directory: %w", err)
+		}
 		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if entry.IsDir() || !minecraft.IsValidModFile(entry.Name(), server.ModLoader) {
 				continue
 			}
-			if _, err := entry.Info(); err != nil {
+			if _, err := entry.Info(); errors.Is(err, os.ErrNotExist) {
 				continue
+			} else if err != nil {
+				return nil, fmt.Errorf("read installed mod %q: %w", entry.Name(), err)
 			}
 			mods = append(mods, &v1.Mod{
 				Id:       uuid.NewSHA1(uuid.NameSpaceURL, []byte(serverID+entry.Name())).String(),
@@ -183,7 +199,7 @@ func installedModRows(ctx context.Context, serverID string, server *storage.Serv
 			})
 		}
 	}
-	return mods
+	return mods, nil
 }
 
 // compile-time confirmation that the service satisfies the scheduler seam.

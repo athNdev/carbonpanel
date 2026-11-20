@@ -12,6 +12,7 @@ import (
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -67,6 +68,47 @@ func TestPublishRefusesDelayedLiveDriftAndPreservesStagedBytes(t *testing.T) {
 	staged, err := acc.ReadFile(row.StagePath)
 	require.NoError(t, err)
 	require.Equal(t, "candidate", string(staged), "the candidate bytes must remain for recovery")
+}
+
+type editOnBackupAccessor struct {
+	nodestorage.Accessor
+	edit func() error
+}
+
+func (a editOnBackupAccessor) BeginWrite(ctx context.Context, path string, limit int64) (storageworker.AtomicWriter, error) {
+	if filepath.Ext(path) == ".data" {
+		if err := a.edit(); err != nil {
+			return nil, err
+		}
+	}
+	return a.Accessor.BeginWrite(ctx, path, limit)
+}
+
+func TestReviewedHashCoversTheActualUndoSnapshot(t *testing.T) {
+	ctx := context.Background()
+	data := t.TempDir()
+	acc, err := nodestorage.NewLocal(data)
+	require.NoError(t, err)
+	defer func() { _ = acc.Close() }()
+	const live, staged = "mods/mod.jar", ".carbon-panel/staged/a/update.jar"
+	require.NoError(t, acc.WriteFile(live, []byte("installed")))
+	require.NoError(t, acc.WriteFile(staged, []byte("candidate")))
+	rows := []storage.StagedContentChange{{
+		BatchID: uuid.NewString(), Kind: storage.StagedKindMod, Action: storage.StagedActionReplace,
+		TargetPath: live, StagePath: staged, ExpectedLiveSha512: digest512("installed"),
+	}}
+	wrapped := editOnBackupAccessor{Accessor: acc, edit: func() error {
+		// Modify the already-open inode while the undo write is beginning.
+		return os.WriteFile(filepath.Join(data, filepath.FromSlash(live)), []byte("modified!"), 0o600)
+	}}
+	_, err = commitStreamingFiles(ctx, wrapped, rows)
+	require.ErrorContains(t, err, "changed since review")
+	got, err := acc.ReadFile(live)
+	require.NoError(t, err)
+	require.Equal(t, "modified!", string(got))
+	got, err = acc.ReadFile(staged)
+	require.NoError(t, err)
+	require.Equal(t, "candidate", string(got))
 }
 
 func TestDueModBatchPublishesWithoutApplyingFutureCronItem(t *testing.T) {

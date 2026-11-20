@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/athNdev/carbon-panel/internal/activity"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
@@ -366,6 +367,12 @@ func TestReviewedUpdateRejectsInvalidWindowsBeforeProviderWork(t *testing.T) {
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.Nil(t, batch)
+	var failures []storage.ActivityLog
+	require.NoError(t, store.DB().Where("event = ? AND subject_id = ?", activity.EventModUpdate, server.ID).Find(&failures).Error)
+	require.Len(t, failures, 3)
+	for _, failure := range failures {
+		require.Contains(t, failure.Properties, "invalid mod update window")
+	}
 }
 
 func TestStagingRefusesBatchWithIndependentCronConfig(t *testing.T) {
@@ -788,6 +795,70 @@ func TestScheduledIdleWindowStagesThroughRealPlanner(t *testing.T) {
 	live, err := os.ReadFile(filepath.Join(mods, "mod.jar"))
 	require.NoError(t, err)
 	require.Equal(t, "installed", string(live))
+}
+
+type scheduledLookupFailure struct {
+	*modPreviewFixture
+	failProject bool
+	failPage    int
+	calls       int
+}
+
+func (f *scheduledLookupFailure) CompatibleUpdatesByFileHash(ctx context.Context, hashes []string, loader, game string) (map[string]modrinth.Version, error) {
+	f.calls++
+	if f.calls == f.failPage {
+		return nil, errors.New("provider update lookup unavailable")
+	}
+	return f.modPreviewFixture.CompatibleUpdatesByFileHash(ctx, hashes, loader, game)
+}
+
+func (f *scheduledLookupFailure) GetProjects(ctx context.Context, ids []string) ([]modrinth.ProjectDetails, error) {
+	if f.failProject {
+		return nil, errors.New("provider project lookup unavailable")
+	}
+	return f.modPreviewFixture.GetProjects(ctx, ids)
+}
+
+func TestScheduledProviderFailuresRetryEvenWithSomeStagedUpdates(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		projects   bool
+		page, want int
+	}{
+		{name: "project lookup", projects: true},
+		{name: "partial update lookup", page: 2, want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, server, um := newContentStageFixture(t, "mod-policy-provider", storage.StatusStopped)
+			mods := filepath.Join(server.DataPath, "mods")
+			require.NoError(t, os.MkdirAll(mods, 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(mods, "000.jar"), []byte("installed"), 0o600))
+			if tc.want > 0 {
+				for i := 1; i <= 100; i++ {
+					name := fmt.Sprintf("%03d.jar", i)
+					require.NoError(t, os.WriteFile(filepath.Join(mods, name), []byte(name), 0o600))
+				}
+			}
+			svc := NewModService(store, nil, um, logger.New())
+			svc.SetModUpdateLookup(&scheduledLookupFailure{
+				modPreviewFixture: newPreviewFixture(), failProject: tc.projects, failPage: tc.page,
+			})
+			svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+			staged, _, _, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+			require.ErrorContains(t, err, "lookup unavailable")
+			require.Equal(t, tc.want, staged)
+		})
+	}
+}
+
+func TestScheduledInventoryReadFailureIsRetryable(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-policy-inventory", storage.StatusStopped)
+	require.NoError(t, os.WriteFile(filepath.Join(server.DataPath, "mods"), []byte("unexpected file"), 0o600))
+	svc := NewModService(store, nil, um, logger.New())
+	_, _, _, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	require.ErrorContains(t, err, "read installed mods directory")
 }
 
 func TestTransientProviderFailureReturnsRetryableError(t *testing.T) {

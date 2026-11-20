@@ -74,7 +74,7 @@ type hostMapTransport struct {
 
 func (t hostMapTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
-	if target, ok := t.hosts[clone.URL.Hostname()]; ok {
+	if target, ok := t.hosts[clone.URL.Host]; ok {
 		u, err := url.Parse(target)
 		if err != nil {
 			return nil, err
@@ -86,14 +86,14 @@ func (t hostMapTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestGuardedDownloadClientStripsCredentialsOnCrossOriginRedirect(t *testing.T) {
-	var redirectedAuthorization string
+	redirectedAuthorization := make(chan string, 1)
 	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		redirectedAuthorization = r.Header.Get("Authorization")
+		redirectedAuthorization <- r.Header.Get("Authorization")
 		_, _ = w.Write([]byte("ok"))
 	}))
 	defer destination.Close()
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "https://cdn2.modrinth.test/package.jar", http.StatusFound)
+		http.Redirect(w, r, "https://cdn.modrinth.test:8443/package.jar", http.StatusFound)
 	}))
 	defer origin.Close()
 
@@ -102,8 +102,8 @@ func TestGuardedDownloadClientStripsCredentialsOnCrossOriginRedirect(t *testing.
 	client := indexers.ProtectCredentialsOnRedirect(&http.Client{
 		Timeout: 2 * time.Minute,
 		Transport: hostMapTransport{base: http.DefaultTransport, hosts: map[string]string{
-			"cdn.modrinth.test":  origin.URL,
-			"cdn2.modrinth.test": destination.URL,
+			"cdn.modrinth.test":      origin.URL,
+			"cdn.modrinth.test:8443": destination.URL,
 		}},
 	})
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://cdn.modrinth.test/package.jar", nil)
@@ -113,7 +113,7 @@ func TestGuardedDownloadClientStripsCredentialsOnCrossOriginRedirect(t *testing.
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Empty(t, redirectedAuthorization, "credentials must be stripped on a cross-origin redirect")
+	require.Empty(t, <-redirectedAuthorization, "credentials must be stripped when only the origin port changes")
 }
 
 func TestProviderFetcherVerifiesRealBytesAndEgress(t *testing.T) {

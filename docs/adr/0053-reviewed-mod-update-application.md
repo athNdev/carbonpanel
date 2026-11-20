@@ -42,15 +42,16 @@ request.
 5. Apply recomputes the server-owned preview for the reviewed files and refuses
    a stale project, version, dependency or installed-digest decision. Staged
    rows record the live SHA-512 observed at review time; the journaled publish
-   rechecks it before any backup or mutation and preserves staged bytes on
-   refusal, so a later local edit cannot be silently overwritten.
+   verifies it on the same stream used to create the undo snapshot before
+   mutating live files. It preserves staged bytes if the digest differs.
 6. The apply window is committed before the first staged byte is visible, and
    the window, staged rows and target-uniqueness check run under the existing
    per-server operation journal. A batch with unrelated reviewed changes under
    a different window is refused, not silently retargeted.
 7. Downloads use the connection-guarded HTTP client shared with World Library
-   imports (static URL validation alone is not an SSRF guard). Transient
-   provider failures are returned to the scheduler as retryable errors.
+   imports. The fetcher and staging loop enforce per-file and total byte
+   limits. Scheduled provider and inventory access failures are returned as
+   retryable errors, including when other items staged successfully.
 8. The complete window tuple (mode, timestamp, idle interval) is compared
    before any provider work or persistent write; a differing window on a batch
    with reviewed changes is refused. Selections are deduplicated by live target

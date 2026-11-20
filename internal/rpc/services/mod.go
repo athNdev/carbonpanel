@@ -494,6 +494,10 @@ func (s *ModService) UpdateMod(ctx context.Context, req *connect.Request[v1.Upda
 			msg.GetUpdateSelections(), msg.GetUpdateWindow(),
 			msg.GetUpdateApplyAtUnix(), msg.GetUpdateIdleMinutes())
 		if err != nil {
+			s.auditMod(ctx, peerIP, activity.EventModUpdate, msg.ServerId, map[string]any{
+				"operation": "stage_reviewed_updates",
+				"error":     err.Error(),
+			})
 			code := connect.CodeInternal
 			if errors.Is(err, errInvalidModUpdateWindow) {
 				code = connect.CodeInvalidArgument

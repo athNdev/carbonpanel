@@ -173,14 +173,15 @@ func previewServerModUpdates(ctx context.Context, dataDir, modsDir string, serve
 }
 
 func classifyModUpdate(p *v1.InstalledModUpdate, installed, candidate modrinth.Version, project modrinth.ProjectDetails, loader, game string, lookupErr error) {
+	if lookupErr != nil {
+		p.State, p.Reason = "unavailable", providerLookupPrefix+lookupErr.Error()
+		return
+	}
 	if installed.ID == "" || installed.ProjectID == "" || !slices.ContainsFunc(installed.Files, func(f modrinth.File) bool { return f.Hashes.SHA512 == p.InstalledSha512 }) {
 		p.State, p.Reason = "unknown_source", "Modrinth does not identify these exact file bytes."
 		return
 	}
 	p.Provider, p.ProjectId, p.InstalledVersionId, p.InstalledVersion = "modrinth", installed.ProjectID, installed.ID, installed.VersionNumber
-	if lookupErr != nil {
-		return
-	}
 	if project.ID != installed.ProjectID || (project.ServerSide != "required" && project.ServerSide != "optional") {
 		p.State, p.Reason = "review_required", "The provider did not confirm server-side support for this project."
 		return
