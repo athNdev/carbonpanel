@@ -107,6 +107,17 @@ function startPackagedServer() {
 
 // Public-seam seeds. Only network responses at the external API boundary are
 // stubbed; no source module, store or component internal is imported or driven.
+const LARGE_FLEET = Array.from({ length: 8 }, (_, index) => ({
+	id: `srv-large-${index}`,
+	name: `Very long fixture server name ${index} for responsive dashboard verification`,
+	status: index % 3 === 0 ? 'SERVER_STATUS_ERROR' : index % 3 === 1 ? 'SERVER_STATUS_RUNNING' : 'SERVER_STATUS_STOPPED',
+	modLoader: 'MOD_LOADER_VANILLA',
+	version: '1.21.1',
+	port: 25570 + index,
+	memory: 65536,
+	maxPlayers: 999
+}));
+
 const FLEET = [
 	{
 		id: 'srv-1',
@@ -133,6 +144,7 @@ const FLEET = [
 // The shell focus prefix is stable; the sidebar nav collapses below 768, so
 // only its first three stops are asserted at the narrowest viewport.
 const SHELL_FOCUS = [
+	'Skip to content',
 	'Toggle Navigation',
 	'Carbon Panel',
 	'A1 A11y Reviewer',
@@ -284,6 +296,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 		}
 		if (method === 'ListServers') {
 			if (state.servers === 'error') return fail('Fixture servers unavailable');
+			if (state.servers === 'large') return reply({ servers: LARGE_FLEET });
 			return reply({ servers: state.servers === 'empty' ? [] : FLEET });
 		}
 		if (method === 'GetServer') {
@@ -596,7 +609,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 		const page = await context.newPage();
 		await seedPackagedRoutes(page, state, 'anonymous');
 
-		for (const width of [1440, 768, 360]) {
+		for (const width of [1440, 1024, 768, 360]) {
 			await page.setViewportSize({ width, height: 900 });
 			for (const route of PACKAGED_ROUTES) {
 				await page.goto(root + route.path, { waitUntil: 'domcontentloaded' });
@@ -645,6 +658,158 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 					return route.controls.map(([role, name]) => `${role}:${name}`);
 				});
 			}
+
+      await check(
+        `shell @${width} ${theme}: skip link and off-canvas focus containment`,
+        async () => {
+          const state = await page.evaluate(() => ({
+            main: Boolean(document.getElementById("carbon-main")),
+            skip:
+              document
+                .querySelector('a[href="#carbon-main"]')
+                ?.textContent?.trim() ?? null,
+            navInert: document.getElementById("carbon-sidenav")?.inert ?? false,
+          }));
+          if (
+            !state.main ||
+            state.skip !== "Skip to content" ||
+            state.navInert !== (width === 360)
+          ) {
+            throw new Error(
+              `shell keyboard seam incomplete: ${JSON.stringify(state)}`,
+            );
+          }
+          return state;
+        },
+      );
+
+      await page.goto(root + "/", { waitUntil: "domcontentloaded" });
+      await page
+        .getByRole("heading", { name: "Cluster Overview", level: 1 })
+        .waitFor();
+      await check(
+        `shell @${width} ${theme}: skip link and profile menu keyboard restoration`,
+        async () => {
+          await page.locator("body").click({ position: { x: 2, y: 2 } });
+          await page.keyboard.press("Tab");
+          const skipFocused = await page.evaluate(
+            () =>
+              document.activeElement?.textContent?.trim() === "Skip to content",
+          );
+          await page.keyboard.press("Enter");
+          const landed = await page.evaluate(
+            () => document.activeElement?.id ?? null,
+          );
+          await page.keyboard.press("Tab");
+          const nextInMain = await page.evaluate(() =>
+            Boolean(document.activeElement?.closest("main")),
+          );
+          const trigger = page.locator('[aria-haspopup="menu"]');
+          await trigger.focus();
+
+          await page.keyboard.press("Enter");
+          const menu = page.locator('[role="menu"]');
+          await menu.waitFor();
+          await page.locator('[role="menuitem"]').first().focus();
+          await page.keyboard.press("Escape");
+          await menu.waitFor({ state: "detached" });
+          await page.waitForFunction(
+            () =>
+              document.activeElement ===
+              document.querySelector('[aria-haspopup="menu"]'),
+            null,
+            { timeout: 3000 },
+          );
+          const menuEscapeRestored = true;
+
+          const dialogResults = {};
+          for (const [label, title] of [
+            ["Profile", "Profile"],
+            ["Preferences", "Preferences"],
+          ]) {
+            await trigger.focus();
+            await page.keyboard.press("Enter");
+            await menu.waitFor();
+            await page
+              .getByRole("menuitem", { name: label, exact: true })
+              .click();
+            const dialog = page.getByRole("dialog");
+            await dialog.waitFor();
+            const heading = await dialog.getAttribute("aria-labelledby");
+            dialogResults[label] = Boolean(heading);
+            await page.keyboard.press("Escape");
+            await dialog.waitFor({ state: "detached" });
+            await page.waitForFunction(
+              () =>
+                document.activeElement ===
+                document.querySelector('[aria-haspopup="menu"]'),
+              null,
+              { timeout: 3000 },
+            );
+            dialogResults[`${label}FocusRestored`] = true;
+          }
+
+          if (
+            !skipFocused ||
+            landed !== "carbon-main" ||
+            !nextInMain ||
+            !menuEscapeRestored ||
+            Object.values(dialogResults).some((value) => !value)
+          ) {
+            throw new Error(
+              `shell keyboard restoration incomplete: ${JSON.stringify({ skipFocused, landed, nextInMain, menuEscapeRestored, dialogResults })}`,
+            );
+          }
+          return {
+            skipFocused,
+            landed,
+            nextInMain,
+            menuEscapeRestored,
+            dialogResults,
+          };
+        },
+      );
+			await check(`dashboard @${width} ${theme}: KPI footers wrap without clipping`, async () => {
+				const readTiles = () => page.evaluate(() => {
+					const tiles = [...document.querySelectorAll('[data-testid="showcase-kpi-tiles"] > div')];
+					if (tiles.length !== 4) throw new Error('Expected four populated KPI tiles');
+					return tiles.map((tile) => {
+						const footer = tile.querySelector('.border-t');
+						const spans = footer ? [...footer.querySelectorAll('span')] : [];
+						return {
+							tileOverflow: tile.scrollWidth > tile.clientWidth + 1,
+							footerOverflow: footer ? footer.scrollWidth > footer.clientWidth + 1 : false,
+							clipped: spans
+								.filter((span) => span.scrollWidth > span.clientWidth + 1)
+								.map((span) => span.textContent?.trim() ?? ''),
+							text: (footer?.textContent ?? '').replace(/\s+/g, ' ').trim()
+						};
+					});
+				});
+				await page.goto(root + '/', { waitUntil: 'domcontentloaded' });
+				await page.getByRole('heading', { name: 'Cluster Overview', level: 1 }).waitFor();
+				await page.locator('[data-testid="showcase-kpi-tiles"] > div').first().waitFor();
+				const samples = [await readTiles()];
+				if (width === 1024) {
+					await page.locator('[aria-label="Toggle Navigation"]').click();
+					await page.waitForTimeout(250);
+					samples.push(await readTiles());
+				}
+				state.servers = 'large';
+				await page.goto(root + '/', { waitUntil: 'domcontentloaded' });
+				await page.getByRole('heading', { name: 'Cluster Overview', level: 1 }).waitFor();
+				await page.locator('[data-testid="showcase-kpi-tiles"] > div').first().waitFor();
+				if (process.env.UI_PASS_SHOTS) {
+					await page.screenshot({ path: `${process.env.UI_PASS_SHOTS}/dashboard-kpi-${width}-${theme}.png` });
+				}
+				samples.push(await readTiles());
+				state.servers = 'populated';
+				const bad = samples.flat().filter((tile) => tile.tileOverflow || tile.footerOverflow || tile.clipped.length > 0);
+				if (bad.length > 0) {
+					throw new Error(`dashboard KPI footer clipped: ${JSON.stringify(bad)}`);
+				}
+				return samples.map((sample) => sample.map((tile) => tile.text));
+			});
 
 			await check(`server runtime metrics @${width} ${theme}: keyboard disclosure persists on reload and across servers`, async () => {
 				await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
@@ -836,7 +1001,11 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.keyboard.press('ArrowLeft');
 				return { initial, focusedAfterArrowRight: focused, after };
 			});
-		}
+      await page.goto(root + "/servers/srv-1", {
+        waitUntil: "domcontentloaded",
+      });
+      await page.locator("#server-detail-tabs-tab-world").click();
+      await page.locator("[data-server-tab-panel]").waitFor();		}
 
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await check(`route /servers ${theme}: empty state is exposed`, async () => {
@@ -903,8 +1072,28 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.getByLabel('Username', { exact: true }).fill('review');
 				await page.getByLabel('Password', { exact: true }).fill('wrong-password');
 				await page.getByRole('button', { name: 'Sign In', exact: true }).click();
-				await page.getByText('Invalid username or password', { exact: false }).first().waitFor();
-				return { path: await page.evaluate(() => location.pathname), error: true, metrics };
+				const announced = page
+					.getByRole('alert')
+					.filter({ hasText: 'Invalid username or password' });
+				await announced.first().waitFor();
+				if (!(await announced.first().evaluate((node) => node === document.activeElement))) {
+					throw new Error('Failed sign-in did not focus the error message');
+				}
+				const recovery = page.getByRole('button', { name: 'Forgot access? Recovery' });
+				await recovery.click();
+				if (!(await page.getByLabel('Recovery Key', { exact: true }).evaluate((node) => node === document.activeElement))) {
+					throw new Error('Opening recovery did not focus the recovery key field');
+				}
+				await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+				if (!(await recovery.evaluate((node) => node === document.activeElement))) {
+					throw new Error('Canceling recovery did not return focus');
+				}
+				return {
+					path: await page.evaluate(() => location.pathname),
+					error: true,
+					announced: await announced.count(),
+					metrics
+				};
 			});
 		}
 	} finally {

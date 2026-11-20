@@ -170,7 +170,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						<CardContent class="flex items-center gap-3 p-3">
 							<Package class="h-5 w-5 shrink-0 text-primary" />
 							<div class="min-w-0 flex-1">
-								<p class="truncate font-medium whitespace-nowrap text-white" title={d.displayName}>
+								<p
+									class="truncate font-medium whitespace-nowrap text-foreground"
+									title={d.displayName}
+								>
 									{d.displayName}
 								</p>
 								<p
