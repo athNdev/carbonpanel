@@ -20,6 +20,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { silentCallOptions } from '$lib/api/rpc-client';
 	import { ValidateInviteRequestSchema } from '$lib/proto/carbonpanel/v1/auth_pb';
 	import { CarbonButton, CarbonTextInput, CarbonTabs } from '$lib/components/carbon';
+	import CarbonInactiveTabPanels from '$lib/components/carbon/CarbonInactiveTabPanels.svelte';
 	import { toast } from 'svelte-sonner';
 	import { Loader2, AlertCircle, TicketCheck, KeyRound, Shield } from '@lucide/svelte';
 
@@ -391,6 +392,7 @@ one at https://mozilla.org/MPL/2.0/.
 		{:else}
 			{#if showAuthTabs}
 				<CarbonTabs idPrefix="auth" tabs={authTabs} bind:selectedTab={mode} class="mb-6" />
+				<CarbonInactiveTabPanels tabs={authTabs} selectedTab={mode} idPrefix="auth" />
 			{/if}
 
 			{#if mode === 'login'}
@@ -398,7 +400,8 @@ one at https://mozilla.org/MPL/2.0/.
 					role={showAuthTabs ? 'tabpanel' : undefined}
 					id="auth-panel-login"
 					aria-labelledby={showAuthTabs ? 'auth-tab-login' : undefined}
-					class="motion-fade-in space-y-4"
+					class="focus-ring motion-fade-in space-y-4"
+					tabindex={showAuthTabs ? 0 : undefined}
 				>
 					{#if localAuthEnabled}
 						<form onsubmit={handleSubmit} class="space-y-4">
@@ -461,6 +464,8 @@ one at https://mozilla.org/MPL/2.0/.
 					role={showAuthTabs ? 'tabpanel' : undefined}
 					id="auth-panel-register"
 					aria-labelledby={showAuthTabs ? 'auth-tab-register' : undefined}
+					class="focus-ring"
+					tabindex={showAuthTabs ? 0 : undefined}
 				>
 					<form onsubmit={handleSubmit} class="motion-fade-in space-y-4">
 						{#if inviteValid && inviteDescription}

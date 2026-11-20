@@ -12,6 +12,7 @@
 // mobile engines, screen readers or 400% zoom; only public UI seams are driven.
 //
 // Usage: node a11y-check.mjs
+//        node a11y-check.mjs --dashboard-telemetry-only
 //        node a11y-check.mjs --engine=firefox   (cross-engine smoke)
 //        node a11y-check.mjs --engine=webkit    (cross-engine smoke)
 //   REVIEW_CHROME may point at an explicit owned Chromium executable.
@@ -22,6 +23,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { verifyDashboardTelemetry } from './dashboard-telemetry.mjs';
 import { launchReviewBrowser, reviewBrowserPath, reviewDriver } from '../../review/browser.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -31,6 +33,26 @@ const webDir = resolve(repo, 'web/carbon-panel');
 function requestedEngine() {
 	const arg = process.argv.find((value) => value.startsWith('--engine='));
 	return arg ? arg.slice('--engine='.length) : 'chromium';
+}
+
+async function runDashboardTelemetry(browser, base) {
+	const root = base.replace(/\/$/, '');
+	for (const width of [360, 1024]) {
+		const context = await browser.newContext({
+			viewport: { width, height: 900 },
+			reducedMotion: 'reduce'
+		});
+		try {
+			const page = await context.newPage();
+			const state = { servers: 'populated', detail: 'populated' };
+			await seedPackagedRoutes(page, state, 'anonymous');
+			await check(`dashboard telemetry @${width}: missing, measured zero and partial samples`, () =>
+				verifyDashboardTelemetry(page, root, state)
+			);
+		} finally {
+			await context.close();
+		}
+	}
 }
 
 async function launchEngine(engine) {
@@ -317,6 +339,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 			return reply({ code: 'unauthenticated', message: 'Invalid username or password' }, 401);
 		}
 		if (method === 'ListServers') {
+			if (Array.isArray(state.servers)) return reply({ servers: state.servers });
 			if (state.servers === 'error') return fail('Fixture servers unavailable');
 			if (state.servers === 'large') return reply({ servers: LARGE_FLEET });
 			return reply({ servers: state.servers === 'empty' ? [] : FLEET });
@@ -356,6 +379,10 @@ async function seedPackagedRoutes(page, state, authMode) {
 			if (method === 'GetMinecraftVersions')
 				return reply({ versions: [{ id: '1.21.1', type: 'release' }], latest: '1.21.1' });
 			if (method === 'GetModLoaders') return reply({ modloaders: [] });
+		}
+		if (method === 'ListFiles') {
+			state.fileListings = (state.fileListings ?? 0) + 1;
+			return reply({ files: [] });
 		}
 		if (method === 'ListNodes') return reply({ nodes: [] });
 		if (method === 'ListPlayers') {
@@ -963,44 +990,33 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 			await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
 			const overviewTab = page.locator('#server-detail-tabs-tab-overview');
 			await overviewTab.waitFor();
-			await check(`route /servers/srv-1 @${width} ${theme}: tabs roles, names and arrow-key navigation`, async () => {
-				const semantics = await page.evaluate(() => {
-					const list = document.querySelector('[role="tablist"]');
-					const tabs = [...document.querySelectorAll('[role="tab"]')];
-					return {
-						label: list?.getAttribute('aria-label'),
-						count: tabs.length,
-						first: tabs[0]?.id,
-						selected: tabs.filter((tab) => tab.getAttribute('aria-selected') === 'true').map((tab) => tab.id),
-						panels: document.querySelectorAll('[role="tabpanel"]').length
-					};
-				});
-				if (
-					semantics.label !== 'Sections' ||
-					semantics.count < 10 ||
-					semantics.first !== 'server-detail-tabs-tab-overview' ||
-					semantics.selected.length !== 1 ||
-					semantics.selected[0] !== 'server-detail-tabs-tab-overview' ||
-					semantics.panels !== 1
-				) {
-					throw new Error(`tab semantics incomplete: ${JSON.stringify(semantics)}`);
-				}
+			await check(`route /servers/srv-1 @${width} ${theme}: tab targets, keyboard switching and lazy files`, async () => {
+				const tablist = page.getByRole('tablist').filter({ has: overviewTab });
+				const initial = 'server-detail-tabs-tab-overview';
+				const consoleId = 'server-detail-tabs-tab-console';
+				const count = await assertTabPanels(tablist, initial);
+				if (count < 10) throw new Error(`Expected the server detail tabs, got ${count}`);
+				if ((state.fileListings ?? 0) !== 0) throw new Error('Inactive Files tab fetched a directory');
 				await overviewTab.focus();
 				await page.keyboard.press('ArrowRight');
-				const focused = await page.evaluate(() => document.activeElement?.id);
-				if (focused !== 'server-detail-tabs-tab-console') {
-					throw new Error(`ArrowRight did not move tab focus (got ${focused})`);
+				if (await page.evaluate(() => document.activeElement?.id) !== consoleId) {
+					throw new Error('ArrowRight did not focus Console');
 				}
-				const selected = await page.evaluate(() =>
-					[...document.querySelectorAll('[role="tab"]')]
-						.filter((tab) => tab.getAttribute('aria-selected') === 'true')
-						.map((tab) => tab.id)
-				);
-				if (selected.length !== 1 || selected[0] !== 'server-detail-tabs-tab-console') {
-					throw new Error(`ArrowRight did not move tab selection: ${JSON.stringify(selected)}`);
-				}
+				await assertTabPanels(tablist, consoleId);
+				await tabIntoPanel(page, 'server-detail-tabs-panel-console');
+				await page.keyboard.press('Shift+Tab');
 				await page.keyboard.press('ArrowLeft');
-				return { ...semantics, focused, selectedAfter: selected };
+				await assertTabPanels(tablist, initial);
+				const listing = page.waitForResponse((response) =>
+					new URL(response.url()).pathname === '/carbonpanel.v1.FileService/ListFiles'
+				);
+				await tablist.getByTestId('tab-files').click();
+				await listing;
+				await assertTabPanels(tablist, 'server-detail-tabs-tab-files');
+				await overviewTab.click();
+				await assertTabPanels(tablist, initial);
+				state.fileListings = 0;
+				return `${count} linked panels; Files fetched only on activation`;
 			});
 
 			await page.goto(root + '/settings', { waitUntil: 'domcontentloaded' });
@@ -1066,6 +1082,9 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				) {
 					throw new Error(`settings ArrowRight did not update tab/tabpanel relationship: ${JSON.stringify(after)}`);
 				}
+				await assertTabPanels(page.getByRole('tablist'), secondTabId);
+				await tabIntoPanel(page, after.selectedControls);
+				await page.keyboard.press('Shift+Tab');
 				await page.keyboard.press('ArrowLeft');
 				return { initial, focusedAfterArrowRight: focused, after };
 			});
@@ -1175,9 +1194,58 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 // search control, then a public-seam refusal (SearchModpacks -> 503) followed
 // by reconciliation (Retry -> seeded catalog). No world, credential or indexer
 // state is mutated; the only stub is the external RPC response.
-async function runModpacksJourney(browser, base, theme = 'light') {
+async function assertTabPanels(tablist, selectedId) {
+	await tablist.getByRole('tab').first().waitFor();
+	const tabs = await tablist.getByRole('tab').evaluateAll((buttons) =>
+		buttons.map((button) => {
+			const id = button.getAttribute('aria-controls');
+			const panels = id ? [...document.querySelectorAll('#' + CSS.escape(id))] : [];
+			const panel = panels[0];
+			return {
+				tabId: button.id,
+				tabIdCount: button.id ? document.querySelectorAll('#' + CSS.escape(button.id)).length : 0,
+				tabIndex: button.tabIndex,
+				selected: button.getAttribute('aria-selected') === 'true',
+				id,
+				count: panels.length,
+				role: panel?.getAttribute('role'),
+				labelledBy: panel?.getAttribute('aria-labelledby'),
+				visible: Boolean(panel?.getClientRects().length),
+				hidden: panel?.hidden,
+				panelTabIndex: panel?.tabIndex,
+				children: panel?.childElementCount
+			};
+		})
+	);
+	if (
+		tabs.length < 2 ||
+		new Set(tabs.map((tab) => tab.id)).size !== tabs.length ||
+		tabs.filter((tab) => tab.selected).length !== 1 ||
+		tabs.find((tab) => tab.selected)?.tabId !== selectedId ||
+		tabs.some((tab) =>
+			tab.tabIdCount !== 1 || !tab.id || tab.count !== 1 || tab.role !== 'tabpanel' ||
+			tab.labelledBy !== tab.tabId || tab.visible !== tab.selected ||
+			tab.tabIndex !== (tab.selected ? 0 : -1) ||
+			tab.panelTabIndex !== (tab.selected ? 0 : -1) ||
+			(!tab.selected && (!tab.hidden || tab.children !== 0))
+		)
+	) {
+		throw new Error(`Tab panels for ${selectedId}: ${JSON.stringify(tabs)}`);
+	}
+	return tabs.length;
+}
+
+async function tabIntoPanel(page, panelId) {
+	await page.keyboard.press('Tab');
+	const focusedId = await page.evaluate(() => document.activeElement?.id);
+	if (focusedId !== panelId) {
+		throw new Error(`Tab focused ${focusedId}; expected ${panelId}`);
+	}
+}
+
+async function runModpacksJourney(browser, base, theme = 'light', width = 1440) {
 	const root = base.replace(/\/$/, '');
-	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	const context = await browser.newContext({ viewport: { width, height: 900 } });
 	await context.addInitScript((mode) => {
 		try {
 			localStorage.setItem('carbon-theme', mode);
@@ -1191,7 +1259,7 @@ async function runModpacksJourney(browser, base, theme = 'light') {
 		const state = { servers: 'populated', detail: 'populated', modpacks: 'populated' };
 		await seedPackagedRoutes(page, state, 'anonymous');
 
-		await check(`modpacks ${theme}: library shell and tab controls render`, async () => {
+		await check(`modpacks @${width} ${theme}: library shell and tab controls render`, async () => {
 			await page.goto(root + '/modpacks', { waitUntil: 'domcontentloaded' });
 			await page.getByRole('heading', { name: 'Modpacks', level: 1 }).waitFor();
 			await page.getByText('Browse, import and manage modpack packages').first().waitFor();
@@ -1203,7 +1271,49 @@ async function runModpacksJourney(browser, base, theme = 'light') {
 			return 'description, content area, three tabs and search control visible';
 		});
 
-		await check(`modpacks ${theme}: browse filters have accessible names on desktop and mobile`, async () => {
+		await check(`modpacks @${width} ${theme}: library and import tab targets, keyboard switching and lazy controls`, async () => {
+			const browse = page.getByTestId('tab-browse');
+			const library = page.getByRole('tablist').filter({ has: browse });
+			const search = page.getByPlaceholder('Search modpacks by name or description...');
+			await assertTabPanels(library, 'modpacks-tab-browse');
+			await browse.focus();
+			await page.keyboard.press('ArrowRight');
+			await assertTabPanels(library, 'modpacks-tab-imported');
+			if (await search.count()) throw new Error('Inactive browse controls are still mounted');
+			await tabIntoPanel(page, 'modpacks-panel-imported');
+			await page.keyboard.press('Shift+Tab');
+			await page.keyboard.press('End');
+			await assertTabPanels(library, 'modpacks-tab-favorites');
+			await tabIntoPanel(page, 'modpacks-panel-favorites');
+			await page.keyboard.press('Shift+Tab');
+			await page.keyboard.press('Home');
+			await assertTabPanels(library, 'modpacks-tab-browse');
+			await search.waitFor();
+			await tabIntoPanel(page, 'modpacks-panel-browse');
+
+			await page.getByRole('button', { name: 'Import Modpack', exact: true }).click();
+			const dialog = page.getByRole('dialog', { name: 'Import Modpack' });
+			try {
+				await page.waitForFunction(() =>
+					document.activeElement?.matches('[role="dialog"] button[aria-label="Close modal"]')
+				);
+				const methods = dialog.getByRole('tablist');
+				await assertTabPanels(methods, 'import-method-tab-zip');
+				const urlInput = dialog.getByLabel('Modpack Archive URL *', { exact: true });
+				if (await urlInput.count()) throw new Error('Inactive URL import form is mounted');
+				await methods.getByTestId('tab-zip').focus();
+				await page.keyboard.press('ArrowRight');
+				await assertTabPanels(methods, 'import-method-tab-url');
+				await urlInput.waitFor();
+				await tabIntoPanel(page, 'import-method-panel-url');
+			} finally {
+				await page.keyboard.press('Escape');
+				await dialog.waitFor({ state: 'hidden' });
+			}
+			return 'Two linked tab lists; hidden controls stayed unmounted';
+		});
+
+		await check(`modpacks @${width} ${theme}: browse filters have accessible names on desktop and mobile`, async () => {
 			const previousViewport = page.viewportSize();
 			try {
 				for (const width of [1440, 360]) {
@@ -1218,12 +1328,12 @@ async function runModpacksJourney(browser, base, theme = 'light') {
 			return 'three filters keep their accessible names at both widths';
 		});
 
-		await check(`modpacks ${theme}: seeded catalog renders from the RPC boundary`, async () => {
+		await check(`modpacks @${width} ${theme}: seeded catalog renders from the RPC boundary`, async () => {
 			await page.getByTestId('showcase-modpack-card').first().waitFor({ timeout: 10000 });
 			return page.getByTestId('showcase-modpack-card').count();
 		});
 
-		await check(`modpacks ${theme}: refused search exposes the error state and Retry`, async () => {
+		await check(`modpacks @${width} ${theme}: refused search exposes the error state and Retry`, async () => {
 			state.modpacks = 'refused';
 			await page.getByPlaceholder('Search modpacks by name or description...').fill('refusal-probe');
 			await page.getByRole('button', { name: 'Search', exact: true }).first().click();
@@ -1232,7 +1342,7 @@ async function runModpacksJourney(browser, base, theme = 'light') {
 			return 'error title and Retry control visible';
 		});
 
-		await check(`modpacks ${theme}: Retry reconciles back to the populated catalog`, async () => {
+		await check(`modpacks @${width} ${theme}: Retry reconciles back to the populated catalog`, async () => {
 			state.modpacks = 'populated';
 			await page.getByRole('button', { name: 'Retry', exact: true }).first().click();
 			await page.getByText('Failed to search modpacks').first().waitFor({ state: 'hidden', timeout: 10000 });
@@ -1240,7 +1350,7 @@ async function runModpacksJourney(browser, base, theme = 'light') {
 			return 'error cleared and seeded card restored';
 		});
 
-		await check(`modpacks ${theme}: studio library shell controls render`, async () => {
+		await check(`modpacks @${width} ${theme}: studio library shell controls render`, async () => {
 			state.modpacks = 'populated';
 			await page.goto(root + '/modpacks/studio', { waitUntil: 'domcontentloaded' });
 			await page.getByRole('heading', { name: 'Modpack Studio', level: 1 }).waitFor();
@@ -1472,21 +1582,28 @@ async function runCrossEngineSmoke(browser, base, engine) {
 }
 
 const engine = requestedEngine();
-const fixture = startFixture();
+const dashboardOnly = process.argv.includes('--dashboard-telemetry-only');
+const fixture = dashboardOnly ? null : startFixture();
 const packaged = startPackagedServer();
 let browser;
 try {
-	const [fixtureBase, packagedBase] = await Promise.all([fixture.url, packaged.url]);
+	const [fixtureBase, packagedBase] = await Promise.all([fixture?.url, packaged.url]);
 	const launched = await launchEngine(engine);
 	browser = launched.browser;
 	console.log(JSON.stringify({ check: 'a11y-browser', ...launched.metadata }));
-	if (engine !== 'chromium') {
+	if (dashboardOnly) {
+		await runDashboardTelemetry(browser, packagedBase);
+	} else if (engine !== 'chromium') {
 		await runCrossEngineSmoke(browser, packagedBase, engine);
 	} else {
+		await runDashboardTelemetry(browser, packagedBase);
 		await runComponentJourney(browser, fixtureBase);
 		await runPackagedRouteJourney(browser, packagedBase, 'light');
-		await runModpacksJourney(browser, packagedBase, 'light');
-		await runModpacksJourney(browser, packagedBase, 'dark');
+		for (const theme of ['light', 'dark']) {
+			for (const width of [360, 768, 1440]) {
+				await runModpacksJourney(browser, packagedBase, theme, width);
+			}
+		}
 		await runPackagedRouteJourney(browser, packagedBase, 'dark');
 		await runClippingProbe(browser);
 		await runNarrowSettingsJourney(browser, packagedBase);
@@ -1509,7 +1626,7 @@ try {
 	try {
 		if (browser) await browser.close();
 	} finally {
-		fixture.child.kill('SIGTERM');
+		fixture?.child.kill('SIGTERM');
 		packaged.child.kill('SIGTERM');
 	}
 	console.log(JSON.stringify({ check: 'a11y-browser-summary', total: checks.length, failures, checks }));
