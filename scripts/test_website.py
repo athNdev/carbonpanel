@@ -15,12 +15,14 @@ from scripts.build_website import (
     build_sitemap,
     export_snapshot,
     normalize_mdx,
+    prepare_project,
     publish_design_system,
     publish_shared_index,
     render_astro_config,
     scoped_links,
 )
 from scripts import changelog_page
+from scripts import maintained_guides
 from scripts import version_contract as vc
 from scripts.check_website import (
     Links, bases_from_index, check, check_channels, check_marker, check_version_ui,
@@ -358,6 +360,36 @@ class WebsiteTests(unittest.TestCase):
             with self.assertRaises(ValueError) as raised:
                 check(root)
             self.assertIn("og:title", str(raised.exception))
+
+
+class PrepareProjectStagingTests(unittest.TestCase):
+    """Candidate staging is explicit build state, never a base-path guess."""
+
+    def test_same_custom_base_scopes_only_when_candidate_is_flagged(self):
+        root = Path(__file__).resolve().parent.parent
+        contract, catalog = vc.load(root)
+        index = vc.version_index(
+            vc.release_build_contract(vc.apply_promotion(contract, None)), catalog, root)
+        current = index["versions"][1]
+        guides = maintained_guides.load(root)
+        revision, origin = maintained_guides.derive_revision(root)
+        custom = "/docs/candidate/preview/"  # looks like staging; is a real base
+        for candidate in (False, True):
+            with self.subTest(candidate=candidate), tempfile.TemporaryDirectory() as temporary:
+                snapshot = Path(temporary) / "snapshot"
+                head = subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+                export_snapshot(root, head, snapshot)
+                prepare_project(snapshot, root / "docs/carbon-panel", index, current,
+                                custom, custom, custom, "https://carbonpanel.dev",
+                                guides, revision, origin, root, candidate=candidate)
+                page = (snapshot / "docs/carbon-panel"
+                        / changelog_page.GENERATED_PAGE).read_text(encoding="utf-8")
+                if candidate:
+                    self.assertIn("https://carbonpanel.dev/docs/changelog/", page)
+                    self.assertNotIn(custom + "docs/changelog/", page)
+                else:
+                    self.assertIn("https://carbonpanel.dev" + custom + "docs/changelog/", page)
 
 
 class ChannelChangelogTests(unittest.TestCase):

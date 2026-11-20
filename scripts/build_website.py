@@ -231,7 +231,8 @@ def render_astro_config(shell_text, pages, route):
 
 
 def prepare_project(snapshot, shell, index, current, route, base, root_base, site,
-                    guides, guide_revision, guide_revision_origin, root=ROOT):
+                    guides, guide_revision, guide_revision_origin, root=ROOT,
+                    candidate=False):
     project = snapshot / "docs/carbon-panel"
     for name in SHELL_FILES:
         shutil.copy2(shell / name, project / name)
@@ -259,8 +260,10 @@ def prepare_project(snapshot, shell, index, current, route, base, root_base, sit
     declaration = changelog_page.load_source(root)
     notes = changelog_page.load_notes(root, declaration)
     (project / changelog_page.GENERATED_PAGE).write_text(
+        # Explicit build state, never inferred from the base path: a custom
+        # --base /docs/candidate/preview/ is not a promotion probe.
         changelog_page.render(index, current, declaration, notes, site, root_base,
-                              staging=base.startswith("/docs/candidate/")),
+                              staging=candidate),
         encoding="utf-8")
     (project / "public/presentation.json").write_text(
         json.dumps(changelog_page.presentation_fingerprint(root), indent=2) + "\n",
@@ -458,7 +461,8 @@ def build(root, base, site, promotion=None):
             project_base = staging_route if candidate else base
             dist = prepare_project(snapshot, shell, index, version, route,
                                    version_base, project_base, site, guides,
-                                   guide_revision, guide_revision_origin, root)
+                                   guide_revision, guide_revision_origin, root,
+                                   candidate=candidate)
             target = staged / route.strip("/")
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(dist, target, dirs_exist_ok=True)
