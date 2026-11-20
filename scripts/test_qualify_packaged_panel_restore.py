@@ -80,6 +80,13 @@ class PackagedRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "expected release run"):
             self.unpack(metadata)
 
+    def test_release_workflow_head_can_differ_from_selected_product_revision(self):
+        metadata = self.write_fixture()
+        workflow_head = "b" * 40
+        metadata["workflow_run"]["head_sha"] = workflow_head
+        self.unpack(metadata)
+        self.assertEqual(self.report["release_workflow_commit"], workflow_head)
+
     def test_mismatched_manifest_commit_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "release manifest"):
             self.unpack(self.write_fixture(manifest_commit="b" * 40))

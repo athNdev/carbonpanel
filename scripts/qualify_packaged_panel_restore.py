@@ -35,9 +35,10 @@ def unpack_candidate(artifact, metadata, release_run, product_commit, workspace,
     if metadata["name"] != "verified-release-downloads" or digest != metadata["digest"]:
         raise ValueError("downloaded Actions artifact does not match the verified downloads record")
     source = metadata["workflow_run"]
-    if str(source["id"]) != release_run or source["head_sha"] != product_commit:
-        raise ValueError("Actions artifact does not match the expected release run and product commit")
-    evidence.update(artifact_id=metadata["id"], artifact_digest=digest)
+    if str(source["id"]) != release_run or not re.fullmatch(r"[0-9a-f]{40}", source["head_sha"]):
+        raise ValueError("Actions artifact does not match the expected release run")
+    evidence.update(artifact_id=metadata["id"], artifact_digest=digest,
+                    release_workflow_commit=source["head_sha"])
 
     with ZipFile(artifact) as staged:
         manifest_bytes = staged.read("release-manifest.json")
