@@ -23,4 +23,4 @@ rehearsal reachability seam. The trusted workflow checkout must also provide
 one reviewed qualification record for the version, kind and source commit.
 The publish job compares the generated `SHA256SUMS` digest with that record
 before signing. Green CI and valid payload structure alone cannot enable
-publication. Publication requires an explicit dispatch with `publish=true`.
+publication. The release tag must resolve to the qualified source commit. Publication requires an explicit dispatch with `publish=true`.

@@ -235,9 +235,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ inputs.version }}
+          COMMIT: ${{ inputs.trusted_sha }}
         run: |
           python3 scripts/runtime_artifacts.py assert-no-app-release --version "$VERSION" --artifact "${{ inputs.artifact }}"
-          gh release create "$VERSION" --draft \
+          tag_ref="refs/tags/$VERSION"
+          refs=$(git ls-remote origin "$tag_ref" "$tag_ref^{}")
+          existing_target=$(awk -v ref="$tag_ref" '
+            $2 == ref { tag = $1 }
+            $2 == ref "^{}" { peeled = $1 }
+            END { print (peeled ? peeled : tag) }
+          ' <<< "$refs")
+          if [[ -n "$existing_target" && "$existing_target" != "$COMMIT" ]]; then
+            echo "Runtime tag already points to a different source commit" >&2
+            exit 1
+          fi
+          gh release create "$VERSION" --target "$COMMIT" --draft \
             --title "Carbon Panel runtime artifacts $VERSION" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             dist/runtime/*

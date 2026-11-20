@@ -832,6 +832,9 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("steps.gate.outputs.manifest_sha256",
                       document["jobs"]["gate"]["outputs"]["manifest_sha256"])
         self.assertEqual(steps[publish]["if"], "inputs.publish")
+        self.assertIn("inputs.trusted_sha", steps[publish]["env"]["COMMIT"])
+        self.assertIn('git ls-remote origin "$tag_ref" "$tag_ref^{}"', steps[publish]["run"])
+        self.assertIn('--target "$COMMIT"', steps[publish]["run"])
         triggers = document.get("on") or document.get(True)
         self.assertIn("workflow_dispatch", triggers)
         self.assertNotIn("schedule", triggers)

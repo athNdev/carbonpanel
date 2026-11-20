@@ -20,8 +20,9 @@ describes the guest-side tooling and its verification status.
   qualification record that matches the version, kind and source commit. Other
   dispatches are refused before the build and signing job.
 * Publication target (when actually dispatched): a **draft** GitHub release
-  under the `runtime-v...` tag. No container registry push and no deployment is
-  performed by this workflow.
+  under the runtime tag, with the tag pinned to the qualified source commit.
+  The workflow refuses a pre-existing tag that resolves to a different commit.
+  The workflow writes the draft and its GitHub release files.
 
 ## What gets published
 
