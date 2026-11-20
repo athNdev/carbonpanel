@@ -15,10 +15,12 @@ evidence="$work/evidence/provenance.txt"
 printf 'checkout=%s\nproduct=%s\nstaging_run=%s\n' "$(git rev-parse HEAD)" "$STAGED_SHA" "$STAGED_RUN" | tee "$evidence"
 
 repo="/repos/$GITHUB_REPOSITORY"
-gh api "$repo/actions/runs/$STAGED_RUN" |
-  jq -e --arg sha "$STAGED_SHA" --arg repo "$GITHUB_REPOSITORY" '
-    .path == ".github/workflows/release.yml" and .conclusion == "success" and
-    .head_sha == $sha and .head_repository.full_name == $repo' >/dev/null
+gh api "$repo/actions/runs/$STAGED_RUN" > "$work/run.json"
+workflow_head=$(jq -er --arg repo "$GITHUB_REPOSITORY" '
+    select(.path == ".github/workflows/release.yml" and .conclusion == "success" and
+      .head_repository.full_name == $repo) |
+    .head_sha | select(test("^[0-9a-f]{40}$"))' "$work/run.json")
+printf 'release_workflow_head=%s\n' "$workflow_head" | tee -a "$evidence"
 gh api "$repo/actions/runs/$STAGED_RUN/artifacts?per_page=100" > "$work/artifacts.json"
 
 fetch_artifact() {
