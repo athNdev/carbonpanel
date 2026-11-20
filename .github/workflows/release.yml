@@ -21,6 +21,9 @@ on:
       - '.github/workflows/release.yml'
       - 'scripts/release.py'
       - 'scripts/test_release.py'
+      - 'scripts/stable_recovery.py'
+      - 'scripts/test_stable_recovery.py'
+      - '.github/workflows/stable-recover.yml'
       - 'scripts/openapi_version.py'
       - 'scripts/test_openapi_version.py'
       - 'web/carbon-panel/vite.config.ts'
@@ -95,7 +98,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.revision || github.ref }}
       - name: Check release tooling
-        run: python3 -m unittest scripts.test_release scripts.test_openapi_version
+        run: python3 -m unittest scripts.test_release scripts.test_openapi_version scripts.test_stable_recovery
       - name: Check the checked-in release history catalog
         run: python3 scripts/release.py verify-release-history
       - name: Validate source and version
@@ -506,6 +509,8 @@ jobs:
     needs: [plan, publish-immutable]
     if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
     runs-on: ubuntu-24.04
+    outputs:
+      release_id: ${{ steps.identity.outputs.release_id }}
     # GitHub latest is selected here under product-only verified stable ordering,
     # inside the workflow-level publish lock (never concurrently).
     permissions:
@@ -543,6 +548,22 @@ jobs:
         run: |
           python3 scripts/release.py publish --draft-only --version "$RELEASE_VERSION" \
             --commit "$RELEASE_COMMIT" --output dist/release
+
+      - name: Capture the prepared release identity
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from scripts import release
+          tag = os.environ["RELEASE_VERSION"]
+          record = release.get_release(tag)
+          if record.get("tag_name") != tag or not record.get("id"):
+              raise ValueError("Prepared release record identity is unknown")
+          release.write_output({"release_id": str(record["id"])})
+          PY
 
   stable-channel-transaction:
     name: Qualified stable channel transaction (docs marker bound)
@@ -642,16 +663,16 @@ jobs:
           test "$(printf '%s' "$BASE" | jq -r .verified)" = "true"
           RESULT=$(python3 scripts/docs_publication_gate.py fetch-prior-pages \
             --site .website-build/prior-site --repository "$GITHUB_REPOSITORY" \
-            --artifact-id "$(printf '%s' "$BASE" | jq -r .artifact_id)" \
             --run-id "$(printf '%s' "$BASE" | jq -r .run_id)")
           test "$(printf '%s' "$RESULT" | jq -r .verified)" = "true"
           echo "hash=$(printf '%s' "$RESULT" | jq -r .hash)" >> "$GITHUB_OUTPUT"
           echo "deployment_id=$(printf '%s' "$BASE" | jq -r .deployment_id)" >> "$GITHUB_OUTPUT"
-          echo "prior_artifact=$(printf '%s' "$BASE" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
+          echo "prior_artifact=$(printf '%s' "$RESULT" | jq -r .artifact_id)" >> "$GITHUB_OUTPUT"
       - name: Keep the exact prior docs bytes for alias-write compensation
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           name: github-pages-prior-stable
+          retention-days: 30
           path: .website-build/prior-site
       - name: Render both channels from the release and the verified live Nightly
         id: contract
@@ -694,8 +715,20 @@ jobs:
             --site .website-build/site --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST" --version "$RELEASE_VERSION" \
             --repository "https://github.com/$GITHUB_REPOSITORY"
+      - name: Bind the maintained guide receipt to the rendered publication
+        run: |
+          GATE=scripts/docs_publication_gate.py
+          SITE=.website-build/site
+          INDEX=$SITE/version-index.json
+          python3 "$GATE" guide-fingerprint --declaration docs/maintained-guides.json --root . \
+            --revision "$CARBONPANEL_STABLE_REVISION" > .website-build/guides.json
+          python3 "$GATE" stamp-publication-receipt --site "$SITE" --candidate .website-build/guides.json \
+            --live "$INDEX" --revision "$CARBONPANEL_STABLE_REVISION"
+          python3 "$GATE" verify-publication-receipt --site "$SITE" --candidate .website-build/guides.json \
+            --live "$INDEX" --revision "$CARBONPANEL_STABLE_REVISION"
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
+          retention-days: 30
           path: .website-build/site
       - name: Provision Chromium and pin expectations for stable live browser QA
         id: stable_chromium
@@ -750,6 +783,23 @@ jobs:
           python3 scripts/release.py channel-transaction --phase stage \
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
             --event release
+
+      - name: Journal the qualified release and exact baseline before changing channels
+        env:
+          PRIOR: ${{ steps.prior.outputs.prior_receipt }}
+          CANDIDATE: ${{ steps.stage_decision.outputs.candidate }}
+          PRIOR_DEPLOYMENT: ${{ steps.prior.outputs.deployment_id }}
+          PRIOR_ARTIFACT: ${{ steps.prior.outputs.prior_artifact }}
+          RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
+        run: |
+          python3 -m scripts.stable_recovery journal --prior .website-build/prior-site \
+            --candidate .website-build/site --journal .website-build/transaction.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stable-transaction-plan
+          path: .website-build/transaction.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Sign in to Docker Hub for first-time Stable alias setup
         if: steps.stable_aliases.outputs.first_publication == 'true'
@@ -807,6 +857,9 @@ jobs:
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
           test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$RELEASE_COMMIT"
           test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$IMAGE_DIGEST"
+          python3 scripts/docs_publication_gate.py verify-publication-receipt --base-url https://carbonpanel.dev \
+            --candidate .website-build/guides.json --live .website-build/site/version-index.json \
+            --revision "$RELEASE_COMMIT"
           VERSION=$(jq -er .channels.stable.version .website-build/site/version-index.json)
           for asset in version-index.json docs/version-index.json channel-marker.json \
                       docs/source.json docs/schemav1.yaml "docs/versions/$VERSION/schemav1.yaml" \

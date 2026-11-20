@@ -489,30 +489,23 @@ GHCR-only `3.0.0-alpha.1` preview and the `v3.0.0-beta.4` cross-repository name
 collision are recorded, not republished. No registry alias, ref or release is
 changed by the policy PR.
 
-## Recover a staged release
+## Recover an interrupted publication
 
-If only the final publication job fails, keep the version and its built images.
-Do not move the tag or rebuild a different image under that version.
+Open the original Carbon Panel Release run. Re-run failed jobs in that run
+when GitHub retains its successful build jobs and artifacts. This preserves
+the tested native archives and OCI index. The final job checks both registries,
+the public docs and each download before reporting success.
 
-1. Confirm that all five native archive jobs and the matching-image job succeeded
-   in the original release run. Start with current `main` tooling if the failure
-   required a publisher fix; re-running an old job uses its old tooling.
-2. Download that run's `verified-release-downloads` artifact. Read the version
-   and source commit from its `release-manifest.json`. Fetch the existing release
-   tag into the local checkout without overwriting any other tag.
-3. Run `python3 scripts/release.py publish --version carbonpanel-vMAJOR.MINOR.PATCH --commit COMMIT --output DIRECTORY`,
-   using the canonical product tag and the artifact's metadata and download directory.
+If Stable channel changes started and the original run ended before the draft
+became public, dispatch **Recover interrupted Stable publication** on `main`.
+Set `release_run` to the original numeric run ID. The workflow uses the
+transaction journal and both Pages archives retained for 30 days. It checks
+the current draft, previous public release, exact main CI, both immutable OCI
+indexes and the active Pages deployment. It recovers each owned alias and
+re-deploys the retained prior site as needed, then verifies the public bytes.
+A conflicting release, deployment or alias requires investigation. If the
+release is already public, retry its failed verification from the original run.
 
-The publisher verifies exact-commit CI, tag identity, the complete download set,
-local checksums and GitHub's uploaded asset digests before exposing the release.
-It resolves drafts by their stable release ID; GitHub's by-tag REST endpoint
-does not return unpublished drafts. Existing public releases remain immutable
-under the tool's policy and require a new version for further changes.
-
-A **resume** is stricter than an identical tag digest. The operator must supply
-the verified `sha256:` image digest, and the exact Git tag must resolve to the
-intended source commit. The tool then reads the existing release's
-`release-manifest.json` asset and requires its version, source commit, revision
-and image digest to match the requested release. Equal registry digests and
-platform counts alone are never sufficient; unknown or mismatched provenance
-refuses before any alias moves.
+The immutable product tag, image and exact draft downloads remain available
+after recovery. Use the verified digest and original artifacts for subsequent
+qualification and promotion.

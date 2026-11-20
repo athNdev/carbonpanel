@@ -7,6 +7,8 @@ owners: [oss-runtime]
 code_refs:
   - .github/workflows/cd.yml
   - .github/workflows/release.yml
+  - .github/workflows/stable-recover.yml
+  - scripts/stable_recovery.py
   - scripts/release.py
   - docs/adr/0049-channel-promotion-gates.md
 sources:
@@ -42,7 +44,9 @@ sources:
   setup resumes the missing alias; a conflicting present tag blocks the move.
   The candidate transaction then has an observed previous digest for every alias.
 - Release downloads are staged and checksum-verified on a private draft before
-  channel changes. Exposing the draft rechecks the hosted asset digests.
+  channel changes. A trusted interrupted-run journal binds the private release
+  ID, prior deployment and both retained Pages archives. Recovery requires the
+  original unpublished draft and rechecks both public registries.
 - The stable gate consumes OBSERVED dual-registry digests, not a hardcoded
   literal. An older release target whose checkout lacks the trusted gate script
   is refused with an explicit blocker rather than silently using the wrong code.
@@ -51,8 +55,6 @@ sources:
   dispatch publishes only an already-active source from the receipt. A partial
   move converges, a stale/out-of-order candidate is refused, and an idempotent
   alias at the target is a no-op. No immutable tag is overwritten or deleted.
-- `verify-publication-ref` supplies `GH_TOKEN` so the fail-closed exact-CI check
-  can pass; this enables the check rather than bypassing it.
 
 # Read next
 
