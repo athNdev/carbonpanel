@@ -38,7 +38,7 @@ dark Carbon themes at each width. Theme is selected through the persisted
 `carbon-theme` preference, so the assertions observe the real
 `data-carbon-theme` attribute and painted background rather than toggling a
 class from the test. The shell skip link and profile controls restore keyboard focus to the owning trigger. Dashboard and inventory fleet tables keep the horizontal scroll region on the labelled wrapper at every width. Long KPI values and status footers wrap when the expanded navigation reduces available space. Settings reflow checks measure nested control and text bounds
-with populated defaults and migration choices at narrow and desktop widths.
+with populated defaults and migration choices at both widths. The fixture holds async responses and waits for controls to enable before sending keys.
 
 # Alternatives
 

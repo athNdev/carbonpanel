@@ -22,6 +22,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rbac"
+	"github.com/athNdev/carbon-panel/internal/worldterrain"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
@@ -48,6 +49,7 @@ type ServiceDeps struct {
 	Authorizer Authorizer
 	Resolver   *Resolver
 	Sessions   *SessionRegistry
+	Native     *NativeMap
 	Overlays   *OverlayStore
 	Auditor    AuditLogger
 	Log        Logger
@@ -84,11 +86,16 @@ func (s *Service) ListWorldViewTargets(ctx context.Context, _ *connect.Request[v
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list servers: %w", err))
 	}
 	targets := make([]*v1.WorldViewTarget, 0, len(servers))
+	budget := nativeInventoryBudget{
+		remaining: nativeInventoryProbeLimit,
+		timeLeft:  nativeInventoryProbeWindow,
+	}
 	for _, server := range servers {
 		if server == nil || !s.authorized(ctx, user, server.ID, rbac.ActionRead) {
 			continue
 		}
-		targets = append(targets, s.targetFor(ctx, server, nil))
+		target, _, _ := s.targetFor(ctx, server, nil, &budget)
+		targets = append(targets, target)
 	}
 	return connect.NewResponse(&v1.ListWorldViewTargetsResponse{Targets: targets}), nil
 }
@@ -106,7 +113,11 @@ func (s *Service) GetWorldViewStatus(ctx context.Context, req *connect.Request[v
 	if ref != nil && ref.GetServerId() != "" && ref.GetServerId() != serverID {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
 	}
-	return connect.NewResponse(&v1.GetWorldViewStatusResponse{Target: s.targetFor(ctx, server, ref)}), nil
+	target, _, probeErr := s.targetFor(ctx, server, ref, nil)
+	if probeErr != nil {
+		return nil, probeErr
+	}
+	return connect.NewResponse(&v1.GetWorldViewStatusResponse{Target: target}), nil
 }
 
 func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[v1.GetWorldViewSessionRequest]) (*connect.Response[v1.GetWorldViewSessionResponse], error) {
@@ -122,7 +133,10 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 	if ref != nil && ref.GetServerId() != "" && ref.GetServerId() != serverID {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("world_ref.server_id does not match server_id"))
 	}
-	target := s.targetFor(ctx, server, ref)
+	target, native, probeErr := s.targetFor(ctx, server, ref, nil)
+	if probeErr != nil {
+		return nil, probeErr
+	}
 	state := target.GetRendererState()
 	// A STALE renderer is still reachable (its health probe succeeded): its
 	// last-known tiles can be served, so the workspace must receive a session
@@ -132,7 +146,10 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 	// state but do not offer an iframe that could never load.
 	staticWithoutProxy := state == v1.RendererState_RENDERER_STATE_STALE &&
 		target.GetRendererType() == v1.RendererType_RENDERER_TYPE_STATIC
-	if (state != v1.RendererState_RENDERER_STATE_READY && state != v1.RendererState_RENDERER_STATE_STALE) || staticWithoutProxy {
+	canOpen := state == v1.RendererState_RENDERER_STATE_READY ||
+		state == v1.RendererState_RENDERER_STATE_STALE ||
+		state == v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE
+	if !canOpen || staticWithoutProxy {
 		reason := target.GetError()
 		if reason == "" {
 			reason = "renderer is not ready; no map session was issued"
@@ -143,7 +160,7 @@ func (s *Service) GetWorldViewSession(ctx context.Context, req *connect.Request[
 		return connect.NewResponse(&v1.GetWorldViewSessionResponse{State: state, Reason: reason}), nil
 	}
 
-	key, expires := s.deps.Sessions.Issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL)
+	key, expires := s.deps.Sessions.issue(serverID, worldKey(target.GetWorldRef()), user.ID, DefaultSessionTTL, native)
 	if key == "" {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("could not issue a map session key"))
 	}
@@ -170,8 +187,20 @@ func (s *Service) ListCapabilities(ctx context.Context, req *connect.Request[v1.
 	}
 	renderer, resolveErr := s.resolver().Resolve(ctx, canonicalNodeID(server.NodeID), serverID)
 	if resolveErr != nil || renderer == nil {
+		_, nativeErr := s.nativeScopeFor(ctx, server, nil, resolveErr, nil)
+		if nativeErr == nil {
+			return connect.NewResponse(&v1.ListCapabilitiesResponse{
+				RendererType: v1.RendererType_RENDERER_TYPE_NATIVE,
+				Capabilities: nativeCapabilities(),
+			}), nil
+		}
+		if transientErr := nativeTransientError(nativeErr); transientErr != nil {
+			return nil, transientErr
+		}
 		detail := "renderer is not configured; map capabilities are unavailable"
-		if errors.Is(resolveErr, ErrUnsupportedRenderer) {
+		if errors.Is(nativeErr, worldterrain.ErrTerrainUnsupported) {
+			detail = nativeFormatUnsupported
+		} else if errors.Is(resolveErr, ErrUnsupportedRenderer) {
 			detail = "the configured renderer has no verified adapter"
 		} else if errors.Is(resolveErr, ErrInvalidEndpoint) {
 			detail = "renderer endpoint configuration is invalid for this node"
@@ -325,10 +354,9 @@ func (s *Service) authorized(ctx context.Context, user *auth.AuthenticatedUser, 
 	return allowed
 }
 
-// targetFor builds one honest target. A missing renderer is an onboarding
-// state with an empty level name and unknown confidence, never a guessed folder
-// name or a fabricated freshness timestamp.
-func (s *Service) targetFor(ctx context.Context, server *storage.Server, requested *v1.WorldRef) *v1.WorldViewTarget {
+// targetFor projects a map only after verifying its active source. A fleet
+// inventory can defer format checks while keeping the active world link.
+func (s *Service) targetFor(ctx context.Context, server *storage.Server, requested *v1.WorldRef, budget *nativeInventoryBudget) (*v1.WorldViewTarget, nativeScope, error) {
 	nodeID := canonicalNodeID(server.NodeID)
 	var ref *v1.WorldRef
 	if requested == nil {
@@ -364,6 +392,53 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 
 	renderer, err := s.resolver().Resolve(ctx, nodeID, server.ID)
 	if err != nil || renderer == nil {
+		native, nativeErr := s.nativeScopeFor(ctx, server, ref, err, budget)
+		if nativeErr == nil {
+			ref.LevelName = native.level
+			if ref.GetKind() == v1.WorldRef_KIND_UNSPECIFIED {
+				ref.Kind = v1.WorldRef_KIND_SERVER_LOCAL
+			}
+			target.Dimension = "overworld"
+			target.RendererType = v1.RendererType_RENDERER_TYPE_NATIVE
+			target.RendererState = v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE
+			target.Renderer = &v1.RendererDescriptor{Type: target.RendererType, WebBasePath: ProxyPrefix}
+			for _, cap := range nativeCapabilities() {
+				if cap.GetSupported() {
+					target.Renderer.Capabilities = append(target.Renderer.Capabilities, cap.GetName())
+				}
+			}
+			target.Freshness = &v1.Observation{
+				Source: nativeSource, Applicability: "saved Java terrain", Confidence: "detected",
+				Note: "Terrain updates after Minecraft saves its chunks.",
+			}
+			return target, native, nil
+		}
+
+		if errors.Is(nativeErr, worldterrain.ErrTerrainUnsupported) {
+			target.RendererType = v1.RendererType_RENDERER_TYPE_NATIVE
+			target.Renderer.Type = target.RendererType
+			target.RendererState = v1.RendererState_RENDERER_STATE_UNSUPPORTED
+			target.Freshness.Source = nativeSource
+			target.Freshness.Applicability = "saved Java terrain"
+			target.Freshness.Confidence = "detected"
+			target.Freshness.Note = nativeFormatUnsupported
+			target.Error = nativeFormatUnsupported
+			return target, nativeScope{}, nil
+		}
+		if transientErr := nativeTransientError(nativeErr); transientErr != nil {
+			target.RendererState = v1.RendererState_RENDERER_STATE_UNSPECIFIED
+			target.Error = errNativeProbeDeferred.Error()
+			if errors.Is(nativeErr, errNativeWorldBusy) {
+				target.Error = errNativeWorldBusy.Error()
+			}
+			target.Freshness.Note = target.Error
+			// A transient probe or lifecycle change must leave a direct
+			// caller's last good map available while the request is retried.
+			if budget == nil {
+				return target, nativeScope{}, transientErr
+			}
+			return target, nativeScope{}, nil
+		}
 		if errors.Is(err, ErrUnsupportedRenderer) {
 			target.RendererState = v1.RendererState_RENDERER_STATE_UNSUPPORTED
 		} else if err != nil && !errors.Is(err, ErrRendererUnavailable) {
@@ -383,7 +458,7 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 			target.Error = reason
 			target.Freshness.Note = reason
 		}
-		return target
+		return target, nativeScope{}, nil
 	}
 
 	h, healthErr := renderer.Health(ctx)
@@ -399,7 +474,7 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 		target.Error = "renderer health probe returned no observation"
 		target.Freshness.Confidence = "unknown"
 		target.Freshness.Note = target.Error
-		return target
+		return target, nativeScope{}, nil
 	}
 	target.RendererState = h.State
 	target.LastRender = h.LastRender
@@ -413,7 +488,45 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 	if healthErr != nil && target.Error == "" {
 		target.Error = "renderer health probe failed; see panel logs"
 	}
-	return target
+	return target, nativeScope{}, nil
+}
+
+const nativeFormatUnsupported = "The active world is not in a supported Java Overworld save format."
+
+func nativeTransientError(err error) error {
+	switch {
+	case errors.Is(err, errNativeWorldBusy):
+		return connect.NewError(connect.CodeUnavailable, err)
+	case errors.Is(err, errNativeProbeBusy), errors.Is(err, errNativeProbeDeferred):
+		return connect.NewError(connect.CodeResourceExhausted, err)
+	default:
+		return nil
+	}
+}
+
+func (s *Service) nativeScopeFor(ctx context.Context, server *storage.Server, ref *v1.WorldRef, resolveErr error, budget *nativeInventoryBudget) (nativeScope, error) {
+	if s.deps.Native == nil || !errors.Is(resolveErr, ErrRendererUnavailable) {
+		return nativeScope{}, ErrRendererUnavailable
+	}
+	if _, exists := s.resolver().cfg.endpointFor(canonicalNodeID(server.NodeID), server.ID); exists {
+		return nativeScope{}, ErrRendererUnavailable
+	}
+	return s.deps.Native.inspect(ctx, server, ref, budget)
+}
+
+func nativeCapabilities() []*v1.Capability {
+	caps := make([]*v1.Capability, 0, len(AllCapabilityNames))
+	for _, name := range AllCapabilityNames {
+		switch name {
+		case CapabilityMap2D:
+			caps = append(caps, capability(name, true, "Saved Java Overworld terrain"))
+		case CapabilityMarkers:
+			caps = append(caps, capability(name, true, "Saved panel markers, waypoints and points of interest on the Overworld map"))
+		default:
+			caps = append(caps, capability(name, false, "Native terrain does not provide this feature."))
+		}
+	}
+	return caps
 }
 
 func cloneOverlay(overlay *v1.MapOverlay) *v1.MapOverlay {

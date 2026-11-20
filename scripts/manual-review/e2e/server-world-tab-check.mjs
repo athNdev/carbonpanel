@@ -255,7 +255,7 @@ try {
   assert.ok(await page.getByText("Binding & revision", { exact: true }).count());
   assert.ok(await page.getByText("VERIFIED STOPPED", { exact: true }).count());
   assert.ok(await page.getByText("minecraft:flat", { exact: true }).count());
-  const mapHref = await page.getByRole("link", { name: /Open World View/ }).getAttribute("href");
+  const mapHref = await page.getByRole("link", { name: /Open map/ }).getAttribute("href");
   assert.match(mapHref ?? "", /^\/worlds\/srv-1\/w1\./);
   const libHref = await page.getByRole("link", { name: /Open World Library/ }).getAttribute("href");
   assert.ok(libHref?.includes("/library"), "library deep link");
@@ -270,8 +270,15 @@ try {
   await gotoWorldTab();
   await page.getByText("No world access on this server", { exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: /library world/i }).count(), 0);
+  const scopedMaps = page.getByRole("link", { name: "Open map", exact: true });
+  assert.equal(await scopedMaps.getAttribute("href"), "/worlds?server=srv-1");
   await shot("02-denied-scope-1440");
-  results.push("denied worlds/read shows explicit no-access state and no controls");
+  results.push("without worlds/read the server still links to its scoped maps when world_view/read is allowed");
+  permissions = [{ resource: "servers", action: "read", objectId: "*" }];
+  await gotoWorldTab();
+  await page.getByText("No world access on this server", { exact: true }).waitFor();
+  assert.equal(await scopedMaps.count(), 0, "Open map needs world_view/read on this server");
+  await page.getByText("Opening a map requires World View read access on this server.").waitFor();
   permissions = [{ resource: "*", action: "*", objectId: "*" }];
 
   // 3. Unbound level (configured, no binding or observation).

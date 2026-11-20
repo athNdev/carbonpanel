@@ -5,7 +5,7 @@ SPDX-License-Identifier: MPL-2.0
 <script lang="ts">
 	import { create } from '@bufbuild/protobuf';
 	import { CarbonButton } from '$lib/components/carbon';
-	import { rpcClient } from '$lib/api/rpc-client';
+	import { rpcClient, silentCallOptions } from '$lib/api/rpc-client';
 	import { formatRpcError } from '$lib/api/rpc-error';
 	import {
 		adaptBlueMapRpc,
@@ -19,7 +19,7 @@ SPDX-License-Identifier: MPL-2.0
 
 	// rpcClient groups RPCs by service; adapt to the flat install seam so a
 	// bare type cast cannot leave listModules/createModule undefined at runtime.
-	const installRpc: BlueMapInstallRpc = adaptBlueMapRpc(rpcClient);
+	const installRpc: BlueMapInstallRpc = adaptBlueMapRpc(rpcClient, silentCallOptions);
 
 	interface Props {
 		serverId: string;
@@ -31,24 +31,30 @@ SPDX-License-Identifier: MPL-2.0
 	let { serverId, target, can, oncomplete }: Props = $props();
 
 	let nodes = $state<Awaited<ReturnType<BlueMapInstallRpc['listNodes']>>['nodes']>([]);
-	let nodesLoaded = $state(false);
+	let canInstall = $derived(can('modules', 'create') && can('modules', 'start'));
+	let nodesLoading = $state(false);
+	let nodesError = $state(false);
 	let showingConsent = $state(false);
 	let accepted = $state(false);
 	let busy = $state(false);
 	let message = $state('');
 	let outcome = $state<'idle' | 'installed' | 'adopted' | 'error'>('idle');
 
+	async function loadNodes() {
+		nodesLoading = true;
+		nodesError = false;
+		try {
+			nodes = (await installRpc.listNodes(create(ListNodesRequestSchema))).nodes;
+		} catch {
+			nodes = [];
+			nodesError = true;
+		} finally {
+			nodesLoading = false;
+		}
+	}
+
 	$effect(() => {
-		if (nodesLoaded) return;
-		nodesLoaded = true;
-		void rpcClient.node
-			.listNodes(create(ListNodesRequestSchema))
-			.then((response) => {
-				nodes = response.nodes;
-			})
-			.catch(() => {
-				message = 'Node topology is unavailable; installation is disabled.';
-			});
+		if (canInstall) void loadNodes();
 	});
 
 	let eligibility = $derived<InstallEligibility>(blueMapInstallEligibility(can, nodes, target));
@@ -79,8 +85,15 @@ SPDX-License-Identifier: MPL-2.0
 	}
 </script>
 
-<div class="space-y-3 border border-border bg-card p-4">
-	{#if !eligibility.eligible}
+<div class="space-y-3">
+	{#if canInstall && nodesLoading}
+		<p role="status" class="text-sm text-muted-foreground">Checking renderer setup options…</p>
+	{:else if canInstall && nodesError}
+		<p role="alert" class="text-sm text-destructive-text">
+			Could not check whether BlueMap can be installed on this node.
+		</p>
+		<CarbonButton kind="secondary" size="sm" onclick={loadNodes}>Retry setup check</CarbonButton>
+	{:else if !eligibility.eligible}
 		<p class="text-sm text-muted-foreground">{eligibility.reason}</p>
 	{:else if !showingConsent && outcome === 'idle'}
 		<CarbonButton kind="primary" size="sm" onclick={() => (showingConsent = true)}>
@@ -136,7 +149,7 @@ SPDX-License-Identifier: MPL-2.0
 	{#if message}
 		<p
 			class="text-xs {outcome === 'error' ? 'text-destructive-text' : 'text-muted-foreground'}"
-			role="status"
+			role={outcome === 'error' ? 'alert' : 'status'}
 		>
 			{message}
 		</p>

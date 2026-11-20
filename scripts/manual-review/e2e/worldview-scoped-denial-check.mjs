@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Scoped real-browser check for the World View detail route. Mounts the actual
- * SvelteKit route with local Connect fixtures (the normal entry point) and
- * proves that action-scoped write denials do NOT revoke an otherwise readable
+ * Real-browser checks for the World View inventory and map routes. The actual
+ * SvelteKit app uses local Connect fixtures so the journey can check navigation,
+ * recovery, and setup alongside the scoped permissions. It proves that action-scoped write denials do NOT revoke an otherwise readable
  * world view. The read scope stays valid; only a specific write RPC is refused
  * at the network boundary, which is the real regression case. No live server,
  * world, renderer or daemon is used and the sandbox frame is a harmless
@@ -31,6 +31,18 @@ const results = [];
 const writeCalls = [];
 let denyWrite = ""; // "" | SetPlayerVisibility | SetMapOverlay | SendCommand
 let readDenied = false;
+let statusMode = "ready";
+let nodeIsLocal = true;
+let createModuleCalls = 0;
+let scopedPermission = false;
+let fleetCalls = 0;
+let scopedCalls = 0;
+let sessionKey = "fixture-key";
+let sessionExpiresAt;
+let issueShortSession = false;
+let sessionUnavailable = false;
+let holdSession;
+let holdStatus;
 
 const worldRef = { kind: "KIND_SERVER_LOCAL", serverId: "srv-1", levelName: "survival" };
 const target = {
@@ -49,18 +61,35 @@ const target = {
   nodeId: "local",
 };
 
+const otherTarget = {
+  ...target,
+  serverId: "srv-2",
+  worldRef: { ...worldRef, serverId: "srv-2", levelName: "creative" },
+  name: "Fixture Creative",
+  rendererType: "RENDERER_TYPE_UNSPECIFIED",
+  rendererState: "RENDERER_STATE_ABSENT",
+  renderer: undefined,
+};
+
 let viteServer;
 let browser;
 try {
-  viteServer = await createServer({
-    root: project,
-    server: { host: "127.0.0.1", port: 0, strictPort: false },
-  });
-  await viteServer.listen();
-  const base = `http://127.0.0.1:${viteServer.httpServer.address().port}`;
+  let base = process.env.WORLDVIEW_DENIAL_APP_URL;
+  if (!base) {
+    viteServer = await createServer({
+      root: project,
+      server: { host: "127.0.0.1", port: 0, strictPort: false },
+    });
+    await viteServer.listen();
+    base = "http://127.0.0.1:" + viteServer.httpServer.address().port;
+  }
+  base = base.replace(/\/$/, "");
   ({ browser } = await launchReviewBrowser());
 
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 1000 },
+    reducedMotion: "reduce",
+  });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -86,12 +115,57 @@ try {
       return reply({
         user: { id: "fixture", username: "Fixture" },
         // All action scopes visible; the backend writes are individually denied below.
-        permissions: [{ resource: "*", action: "*", objectId: "*" }],
+        permissions: scopedPermission
+          ? [
+              { resource: "servers", action: "read", objectId: "*" },
+              { resource: "world_view", action: "read", objectId: "srv-1" },
+            ]
+          : [{ resource: "*", action: "*", objectId: "*" }],
       });
-    if (method === "ListWorldViewTargets")
-      return readDenied ? denied() : reply({ targets: [target] });
-    if (method === "GetWorldViewStatus")
-      return readDenied ? denied() : reply({ target });
+    if (method === "ListServers")
+      return reply({
+        servers: [
+          { id: "srv-1", name: "Fixture Survival Server" },
+          { id: "srv-2", name: "Fixture Creative Server" },
+        ],
+      });
+    if (method === "ListWorldViewTargets") {
+      fleetCalls += 1;
+      return readDenied || scopedPermission ? denied() : reply({ targets: [target, otherTarget] });
+    }
+    if (method === "GetWorldViewStatus") {
+      if (!payload.worldRef) scopedCalls += 1;
+      if (holdStatus && payload.serverId === "srv-1") {
+        const pending = holdStatus;
+        holdStatus = undefined;
+        await pending;
+        return denied();
+      }
+      if (readDenied) return denied();
+      if (payload.serverId === "srv-2")
+        return reply({ target: { ...otherTarget, rendererState: target.rendererState, renderer: target.renderer } });
+      if (statusMode === "unknown")
+        return reply({ target: { ...target, rendererState: "RENDERER_STATE_UNSPECIFIED" } });
+      if (statusMode === "missing") return reply({});
+      if (statusMode === "error")
+        return reply({ code: "unavailable", message: "Fixture status temporarily unavailable" }, 503);
+      if (statusMode === "setup")
+        return reply({
+          target: {
+            ...target,
+            rendererType: "RENDERER_TYPE_UNSPECIFIED",
+            rendererState: "RENDERER_STATE_ABSENT",
+            renderer: undefined,
+          },
+        });
+      return reply({ target });
+    }
+    if (method === "ListNodes") return reply({ nodes: [{ id: "local", isLocal: nodeIsLocal }] });
+    if (method === "ListModules") return reply({ modules: [] });
+    if (method === "CreateModule") {
+      createModuleCalls += 1;
+      return reply({ code: "failed_precondition", message: "Fixture install failure" }, 400);
+    }
     if (method === "ListCapabilities")
       return reply({
         rendererType: "RENDERER_TYPE_BLUEMAP",
@@ -109,11 +183,25 @@ try {
       if (method === "SetPlayerVisibility") return reply({ visible: Boolean(payload.visible) });
       return reply({ success: true });
     }
-    if (method === "GetWorldViewSession")
+    if (method === "GetWorldViewSession") {
+      if (holdSession && payload.serverId === "srv-1") {
+        const pending = holdSession;
+        holdSession = undefined;
+        await pending;
+        return reply({ code: "unavailable", message: "Late session failure" }, 503);
+      }
+      if (sessionUnavailable) return reply({ code: "unavailable", message: "Renewal unavailable" }, 503);
+      if (issueShortSession) {
+        issueShortSession = false;
+        sessionExpiresAt = new Date(Date.now() + 4_000).toISOString();
+        sessionUnavailable = true;
+      }
       return reply({
         state: "RENDERER_STATE_READY",
-        proxyPath: "/api/v1/worldview/map/fixture-key/",
+        proxyPath: "/api/v1/worldview/map/" + sessionKey + "/",
+        expiresAt: sessionExpiresAt,
       });
+    }
     return reply({});
   });
   // Same-origin map assets: harmless document so the sandbox iframe has no live dependency.
@@ -251,6 +339,204 @@ try {
     await page.locator("body").innerText(),
   );
   results.push("world_view/read denial still produces the explicit no-access state");
+
+  readDenied = false;
+  await dumpOnFailure("world-inventory", async () => {
+    for (const [width, theme] of [[360, "dark"], [768, "light"], [1440, "dark"]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate((mode) => {
+        localStorage.setItem("carbon-theme", mode);
+        localStorage.setItem("mode-watcher-mode", mode);
+      }, theme);
+      await page.goto(base + "/worlds");
+      const content = page.getByTestId("showcase-worlds-content");
+      const mapLink = content.getByRole("link", { name: "Fixture Overworld" });
+      await mapLink.waitFor();
+      await content.getByText("Fixture Survival Server", { exact: true }).filter({ visible: true }).waitFor();
+      await content.getByText("Not configured", { exact: true }).filter({ visible: true }).waitFor();
+      await content.getByText("Not reported", { exact: true }).filter({ visible: true }).first().waitFor();
+      assert.equal(await page.locator("html").getAttribute("data-carbon-theme"), theme);
+      const overflow = await page.locator("html").evaluate((element) => element.scrollWidth > element.clientWidth);
+      assert.equal(overflow, false, "World View fits at width " + width);
+      await mapLink.focus();
+      assert.equal(await mapLink.evaluate((element) => element === document.activeElement), true);
+      await page.screenshot({
+        path: path.join(evidence, "inventory-" + width + "-" + theme + ".png"),
+        animations: "disabled",
+      });
+      await page.keyboard.press("Enter");
+      await page.getByRole("region", { name: /World map/i }).waitFor();
+    }
+    await page.goto(base + "/worlds?server=srv-1");
+    await page.getByRole("link", { name: "Fixture Overworld" }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "Fixture Creative" }).count(), 0);
+    await page.getByRole("link", { name: "All servers" }).click();
+    await page.getByRole("link", { name: "Fixture Creative" }).waitFor();
+  });
+  results.push("inventory presents names, setup and unknown freshness at 360, 768 and 1440, supports keyboard navigation and preserves server scoping");
+
+  await dumpOnFailure("concrete-server-scope", async () => {
+    scopedPermission = true;
+    const globalBaseline = fleetCalls;
+    const scopedBaseline = scopedCalls;
+    const scopedUrl = base + "/worlds?server=srv-1";
+    await page.goto(scopedUrl);
+    await page.getByRole("link", { name: "Fixture Overworld", exact: true }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "All servers" }).count(), 0);
+    assert.equal(fleetCalls, globalBaseline, "concrete server access must not call the fleet RPC");
+    assert.ok(scopedCalls > scopedBaseline);
+
+    statusMode = "error";
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "World inventory refresh failed" }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "Fixture Overworld", exact: true }).count(), 1);
+    await page.reload();
+    await page.getByRole("heading", { name: "Could not load worlds" }).waitFor();
+
+    statusMode = "ready";
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await page.getByRole("link", { name: "Fixture Overworld", exact: true }).click();
+    await page.getByRole("region", { name: /World map/i }).waitFor();
+    assert.equal(await page.getByRole("link", { name: "Server maps", exact: true }).getAttribute("href"), "/worlds?server=srv-1");
+    scopedPermission = false;
+  });
+  results.push("server-scoped reader uses the concrete read RPC and gets separate fresh, stale, failed and navigation states");
+
+  await dumpOnFailure("last-known-session", async () => {
+    await load();
+    const frame = page.getByRole("region", { name: /World map/i }).locator("iframe");
+    const initial = await frame.getAttribute("src");
+    statusMode = "error";
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByText("Could not refresh the map. Showing the last known state.", { exact: true }).waitFor();
+    assert.equal(await frame.getAttribute("src"), initial);
+    statusMode = "ready";
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByText("Could not refresh the map. Showing the last known state.", { exact: true }).waitFor({ state: "hidden" });
+
+    let release;
+    holdSession = new Promise((resolve) => { release = resolve; });
+    const oldSessionStarted = page.waitForRequest((request) => request.url().endsWith("/GetWorldViewSession"));
+    try {
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await oldSessionStarted;
+      sessionKey = "new-world-session";
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      const newerFrame = page.locator('iframe[src$="/new-world-session/"]');
+      await newerFrame.waitFor();
+      const oldSessionEnded = page.waitForResponse((response) =>
+        response.url().endsWith("/GetWorldViewSession") && response.status() === 503
+      );
+      release();
+      await oldSessionEnded;
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      assert.equal(await newerFrame.count(), 1);
+    } finally {
+      release();
+      sessionKey = "fixture-key";
+    }
+    readDenied = true;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByText("No world-view access", { exact: true }).waitFor();
+    assert.equal(await page.locator("iframe").count(), 0, "read denial removes retained map session");
+    readDenied = false;
+  });
+  results.push("transient status refresh preserves the last-good frame; a late same-world session failure is ignored and a read denial clears it");
+
+  await dumpOnFailure("expired-session-recovery", async () => {
+    issueShortSession = true;
+    try {
+      await load();
+      const oldFrame = page.locator('iframe[src$="/fixture-key/"]');
+      await page.getByText("Could not refresh the map. Showing the last known state.", { exact: true }).waitFor();
+      assert.equal(await oldFrame.count(), 1, "transient renewal retains a usable session");
+      await oldFrame.waitFor({ state: "detached" });
+      sessionExpiresAt = new Date(Date.now() + 300_000).toISOString();
+      sessionKey = "renewed-key";
+      sessionUnavailable = false;
+      await page.locator('iframe[src$="/renewed-key/"]').waitFor();
+    } finally {
+      issueShortSession = false;
+      sessionUnavailable = false;
+      sessionExpiresAt = undefined;
+      sessionKey = "fixture-key";
+    }
+  });
+  results.push("transient renewal retains the map until expiry and recovers without a manual refresh");
+
+  await dumpOnFailure("previous-world-denial", async () => {
+    await load();
+    let release;
+    holdStatus = new Promise((resolve) => { release = resolve; });
+    const oldStatusStarted = page.waitForRequest((request) => request.url().endsWith("/GetWorldViewStatus"));
+    try {
+      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      await oldStatusStarted;
+      const otherKey = "w1." + Buffer.from(JSON.stringify([2, "srv-2", "creative", "", ""])).toString("base64url");
+      await page.evaluate((href) => {
+        const link = document.createElement("a");
+        link.href = href;
+        document.body.append(link);
+        link.click();
+        link.remove();
+      }, "/worlds/srv-2/" + otherKey);
+      await page.getByRole("heading", { name: "Fixture Creative", exact: true }).waitFor();
+      await page.getByRole("region", { name: /World map/i }).waitFor();
+      const oldStatusEnded = page.waitForResponse((response) =>
+        response.url().endsWith("/GetWorldViewStatus") && response.status() === 403
+      );
+      release();
+      await oldStatusEnded;
+      await page.evaluate(() => new Promise(requestAnimationFrame));
+      assert.equal(await page.getByText("No world-view access", { exact: true }).count(), 0);
+      assert.equal(await page.getByRole("region", { name: /World map/i }).count(), 1);
+    } finally {
+      release();
+    }
+  });
+  results.push("a status denial from the previous world does not revoke the current world on client-side navigation");
+
+  await dumpOnFailure("unavailable-status", async () => {
+    await page.setViewportSize({ width: 360, height: 900 });
+    for (const mode of ["missing", "error", "unknown"]) {
+      statusMode = mode;
+      await page.goto(url);
+      await page.getByRole("heading", { name: "Map status unavailable" }).waitFor();
+      if (mode === "unknown")
+        await page.getByText("Carbon Panel received an unrecognized renderer state.", { exact: true }).waitFor();
+      if (mode === "missing")
+        await page.getByText("Carbon Panel received no map status for this world.", { exact: true }).waitFor();
+      assert.equal(await page.getByRole("region", { name: /World map/i }).count(), 0);
+      assert.equal(await page.getByRole("button", { name: "View controls" }).count(), 0);
+      statusMode = "ready";
+      await page.getByRole("button", { name: "Retry", exact: true }).click();
+      await page.getByRole("region", { name: /World map/i }).waitFor();
+    }
+  });
+  results.push("missing, unknown, and failed status expose a working retry and keep the map closed until it is ready");
+
+  await dumpOnFailure("renderer-setup", async () => {
+    statusMode = "setup";
+    nodeIsLocal = false;
+    await page.goto(url);
+    await page.getByRole("heading", { name: "Set up a map" }).waitFor();
+    await page.getByText(/Private renderer discovery is only available on the local node/).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Install BlueMap" }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "View controls" }).count(), 0);
+    nodeIsLocal = true;
+    await page.reload();
+    await page.getByRole("button", { name: "Install BlueMap", exact: true }).click();
+    const accept = page.getByRole("button", { name: "Accept and install" });
+    assert.equal(await accept.isEnabled(), false);
+    await page.getByRole("checkbox", { name: /I explicitly accept/ }).check();
+    await accept.click();
+    await page.getByRole("alert").filter({ hasText: "Fixture install failure" }).waitFor();
+    assert.equal(createModuleCalls, 1);
+    assert.equal(await page.getByText("Fixture install failure", { exact: false }).count(), 1);
+    assert.equal(await page.locator("[data-sonner-toast]").count(), 0);
+    await page.screenshot({ path: path.join(evidence, "setup-error-360.png"), animations: "disabled" });
+  });
+  results.push("remote setup stays guarded and local consented install failure is shown once inline");
 
   assert.deepEqual(errors, [], `page errors: ${errors.join("; ")}`);
   await fs.writeFile(

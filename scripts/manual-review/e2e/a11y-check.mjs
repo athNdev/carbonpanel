@@ -358,13 +358,15 @@ async function seedPackagedRoutes(page, state, authMode) {
 			});
 		}
 		if (state.narrowSettings) {
-			if (method === 'ListNodes')
+			if (method === 'ListNodes') {
+				if (state.nodesReady) await state.nodesReady;
 				return reply({
 					nodes: [
 						{ id: 'local', name: 'Local Controller', isLocal: true, enabled: true, status: 1 },
 						{ id: 'target', name: SETTINGS_NODE, enabled: true, status: 1, availableMemoryMb: '8192' }
 					]
 				});
+			}
 			if (method === 'GetGlobalSettings') return reply({ categories: SETTINGS_CATEGORIES });
 			if (method === 'UpdateGlobalSettings') {
 				const { updates } = route.request().postDataJSON();
@@ -668,11 +670,12 @@ const PACKAGED_ROUTES = [
 	},
 	{
 		path: '/worlds',
-		h1: 'Worlds',
+		h1: 'World View',
 		controls: [
-			['heading', 'Worlds'],
+			['heading', 'World View'],
 			['textbox', 'Search viewable worlds'],
-			['link', 'Renderer modules'],
+			['combobox', 'Server'],
+			['combobox', 'State'],
 			['button', 'Refresh'],
 			['link', 'Alpha Overworld']
 		]
@@ -1651,8 +1654,18 @@ async function runNarrowSettingsJourney(browser, base) {
 						await capture('oidc');
 					});
 					await check(`server settings ${label}: migration keyboard selection and memory advisory fit`, async () => {
-						await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+						let releaseNodes;
+						state.nodesReady = new Promise((resolve) => { releaseNodes = resolve; });
 						const target = page.getByRole('combobox', { name: 'Migrate to Target Node' });
+						try {
+							await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+							await target.and(page.locator(':disabled')).waitFor();
+						} finally {
+							releaseNodes();
+							delete state.nodesReady;
+						}
+						// Locator.press does not wait for an asynchronously enabled control.
+						await target.and(page.locator(':enabled')).waitFor();
 						await target.press('Enter');
 						const option = page.getByRole('option', { name: new RegExp(SETTINGS_NODE) });
 						await assertHorizontallyVisible(option);

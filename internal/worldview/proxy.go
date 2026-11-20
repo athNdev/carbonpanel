@@ -54,6 +54,7 @@ type ProxyDeps struct {
 	Servers    ServerGetter
 	Resolver   *Resolver
 	Sessions   *SessionRegistry
+	Native     *NativeMap
 	Log        Logger
 	Client     HTTPDoer
 }
@@ -163,6 +164,14 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	server, err := h.deps.Servers.GetServer(r.Context(), sess.ServerID)
 	if err != nil || server == nil {
 		http.Error(w, "renderer unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if sess.native.serverID != "" {
+		if h.deps.Native == nil {
+			http.Error(w, "native map is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		h.deps.Native.serveAsset(w, r, server, sess.native, asset)
 		return
 	}
 	renderer, err := h.deps.Resolver.Resolve(r.Context(), server.NodeID, sess.ServerID)

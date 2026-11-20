@@ -6,11 +6,26 @@ modifies or teleports anything. The governing decisions are in
 [ADR 0015](adr/0015-world-viewing-renderer-proxy.md) and the durable rule is in
 `knowledge/architecture/world-viewing.md`.
 
+Open **World View** to browse maps, or use **Open map** in a server’s
+**World** tab. If the active level is still unknown, Carbon Panel checks for
+the active map using that server’s World View read permission. A [built-in
+terrain map](world-terrain.md) opens supported local Java saves without a
+module. For worlds that need an external renderer, the page offers **Install
+BlueMap** when the account and node support it.
+
+Map sessions renew automatically. During a temporary connection failure the
+page keeps an authorized map available until its session expires, then retries.
+
+The native saved-terrain map shows saved markers, waypoints and points of
+interest from the world’s Overworld. Select a pin for its coordinates. Open
+**Map markers** to center the map on a point or toggle pin visibility. Live
+player positions and regions are outside the native map’s coverage.
+
 ## 1. Renderer lifecycle
 
-BlueMap is the built-in default adapter (`builtin-bluemap` module template);
-squaremap and Dynmap are compatibility adapters and `STATIC` is an offline tile
-snapshot.
+BlueMap is the optional managed renderer (`builtin-bluemap` module template).
+Squaremap and Dynmap are compatibility adapters. The static adapter displays
+an offline tile snapshot.
 
 - **Install** a renderer through the existing module workflow
   (`ModuleService.CreateModule` / `StartModule`) using the built-in template or
@@ -153,16 +168,16 @@ need it.
 Capabilities come from the adapter and gate visible controls. Unsupported means
 unsupported — no lookalike control is substituted.
 
-| Capability | BlueMap | squaremap | Dynmap | STATIC |
-| --- | --- | --- | --- | --- |
-| `map.2d` | yes | yes | yes | static tiles only |
-| `map.3d` | yes | no | no | no |
-| `dimensions` | yes | not verified | not verified | no |
-| `markers` | yes | not verified | not verified | no |
-| `players` | only with explicit bridge feed | no | no | no (offline) |
-| `time_weather` | no | no | no | no |
-| `telemetry` | no | no | no | no |
-| `static` | no | no | no | yes |
+| Capability | Built-in terrain | BlueMap | squaremap | Dynmap | Static |
+| --- | --- | --- | --- | --- | --- |
+| `map.2d` | saved Java Overworld | yes | yes | yes | static tiles only |
+| `map.3d` | no | yes | no | no | no |
+| `dimensions` | Overworld only | yes | not verified | not verified | no |
+| `markers` | saved Overworld points | yes | not verified | not verified | no |
+| `players` | no | only with explicit bridge feed | no | no | no (offline) |
+| `time_weather` | no | no | no | no | no |
+| `telemetry` | no | no | no | no | no |
+| `static` | no | no | no | no | yes |
 
 Live player positions additionally require `world_view/observe_players`. The
 console toggle is **UI consent**: it is hidden by default, requires that
@@ -222,12 +237,11 @@ Unmapped procedures and a nil enforcer are denied by the RPC interceptor.
   source and confidence, but no tile proxy is implemented for imported snapshot
   files. It therefore exposes freshness information without an iframe rather
   than a blank or broken map.
-- **Subuser discovery:** `ListWorldViewTargets` is a global listing and requires
-  an unscoped `world_view/read` grant (object `*`). A server-scoped subuser can
-  still open a granted world by deep link and use every scoped RPC and the
-  proxy, but cannot enumerate the picker. This is deliberate anti-enumeration;
-  a scoped picker would need an explicit `server_id` filter with service-side
-  enforcement.
+- **Subuser discovery:** The all-server catalogue uses
+  `ListWorldViewTargets` and requires an unscoped `world_view/read` grant.
+  A server-scoped subuser can follow a map deep link or use **Open map** from
+  the server’s **World** tab. The fallback page reads only that server’s active
+  map through `GetWorldViewStatus`.
 - **Sibling epics:** the shell links to `/players` and `/library`, which are
   owned by the player-management and World Library epics. The world-viewing PR
   is a cumulative draft and is expected to be integrated with those routes;
