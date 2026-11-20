@@ -16,6 +16,7 @@ import unittest
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import showcase_assets as sa  # noqa: E402
@@ -52,6 +53,31 @@ def fake_png(width: int = 320, height: int = 320, pad: int = 6000, seed: bytes =
         + chunk(b"IDAT", idat)
         + chunk(b"IEND", b"")
     )
+
+
+def fake_png_black_map_with_chrome(
+    width: int = 320, height: int = 320, chrome_fraction: float = 0.2
+) -> bytes:
+    """Non-black right-hand chrome over a black left/central map region."""
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    chrome_start = int(width * (1 - chrome_fraction))
+    row = b"\x00" + bytes(3) * chrome_start + bytes((40, 90, 160)) * (width - chrome_start)
+    idat = zlib.compress(row * height, 6)
+    text = b"Comment\x00" + b"fixture" + b"-" * 6000
+    return (
+        sa.PNG_SIGNATURE
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"tEXt", text[:6000 + len(b"Comment")])
+        + chunk(b"IDAT", idat)
+        + chunk(b"IEND", b"")
+    )
+
+
+def workflow_text() -> str:
+    return (
+        Path(__file__).resolve().parent.parent
+        / ".github" / "workflows" / "showcase.yml"
+    ).read_text(encoding="utf-8")
 
 
 def plan_file(root: Path, names: list[str]) -> Path:
@@ -154,6 +180,33 @@ class ShowcaseAssetsTest(unittest.TestCase):
                 expected_source_sha='a' * 40, features='worlds', max_age_hours=12,
             ))
 
+    def test_black_map_region_is_rejected_even_with_nonblack_chrome(self) -> None:
+        # A whole-image 5% gate passes when the panel chrome is coloured even
+        # though the map itself is black. The region gate must still fail
+        # closed (OSS-392).
+        plan = {
+            'steps': [
+                {'screenshot': 'showcase-world-view', 'name': 'rendered map'},
+            ]
+        }
+        self.plan.write_text(json.dumps(plan), encoding='utf-8')
+        (self.images / 'showcase-world-view.png').write_bytes(
+            fake_png_black_map_with_chrome()
+        )
+        sa.build(sa.argparse.Namespace(
+            images_dir=str(self.images), publish_dir=str(self.publish / 'black-region'),
+            plan=str(self.plan), seed_script=str(self.seed), source_sha='a' * 40,
+            source_ref='refs/heads/main', repository='athNdev/carbonpanel',
+            run_id='1', run_url='u', captured_at=datetime.now(timezone.utc).isoformat(),
+            app_version='review', driver_version=REVIEW_DRIVER_VERSION,
+            browser_version='1', features='worlds',
+        ))
+        with self.assertRaisesRegex(sa.AssetError, 'map region is blank'):
+            sa.validate(sa.argparse.Namespace(
+                publish_dir=str(self.publish / 'black-region'), plan=str(self.plan),
+                expected_source_sha='a' * 40, features='worlds', max_age_hours=12,
+            ))
+
     def test_thin_strip_crop_is_rejected(self) -> None:
         # A heading-less strip is not a meaningful README crop; refuse it
         # instead of weakening the plausibility floor.
@@ -248,6 +301,106 @@ class ShowcaseAssetsTest(unittest.TestCase):
         self.build()
         digest_after = json.loads((self.publish / "manifest.json").read_text())["contentDigest"]
         self.assertNotEqual(digest_before, digest_after)
+
+
+    def test_narrow_world_view_image_is_rejected(self) -> None:
+        plan = {
+            "steps": [
+                {"screenshot": "showcase-world-view", "name": "rendered map"},
+            ]
+        }
+        self.plan.write_text(json.dumps(plan), encoding="utf-8")
+        (self.images / "showcase-world-view.png").write_bytes(
+            fake_png(width=1200, height=1800)
+        )
+        sa.build(sa.argparse.Namespace(
+            images_dir=str(self.images), publish_dir=str(self.publish / "narrow"),
+            plan=str(self.plan), seed_script=str(self.seed), source_sha="a" * 40,
+            source_ref="refs/heads/main", repository="athNdev/carbonpanel",
+            run_id="1", run_url="u", captured_at=datetime.now(timezone.utc).isoformat(),
+            app_version="review", driver_version=REVIEW_DRIVER_VERSION,
+            browser_version="1", features="worlds",
+        ))
+        with self.assertRaisesRegex(sa.AssetError, 'too narrow'):
+            sa.validate(sa.argparse.Namespace(
+                publish_dir=str(self.publish / "narrow"), plan=str(self.plan),
+                expected_source_sha="a" * 40, features="worlds", max_age_hours=12,
+            ))
+
+
+class ShowcasePipelineTest(unittest.TestCase):
+    """The routine main-refresh workflow must never drop the proven map image."""
+
+    def test_every_feature_gate_is_on_for_main_push(self) -> None:
+        workflow = workflow_text()
+        # playerdetail is intentionally manual-only: its skin preview depends
+        # on an external provider and is not part of the canonical set.
+        for feature in ("players", "worlds", "worldtab", "library"):
+            pattern = re.compile(
+                r"FEATURES_" + feature.upper() + r": \$?\{\{([^\n]*)\}\}"
+            )
+            matches = pattern.findall(workflow)
+            self.assertGreaterEqual(len(matches), 1, f"no gate for {feature}")
+            for expression in matches:
+                self.assertIn(
+                    "github.event_name == 'push' || inputs." + feature,
+                    expression,
+                    f"{feature} can be dropped on a routine main push",
+                )
+        detail = re.findall(r"FEATURES_PLAYERDETAIL: \$?\{\{([^\n]*)\}\}", workflow)
+        self.assertTrue(detail, "playerdetail gate is missing")
+        for expression in detail:
+            self.assertNotIn(
+                "github.event_name == 'push'",
+                expression,
+                "playerdetail must stay manual-only (external skin provider)",
+            )
+
+    def test_publish_requires_the_real_world_view_asset(self) -> None:
+        workflow = workflow_text()
+        section = workflow.split("Require the full README-canonical image set", 1)[1]
+        section = section.split("Guard provenance monotonicity", 1)[0]
+        for name in (
+            "showcase-world-view",
+            "showcase-world-tab",
+            "showcase-worlds-list",
+            "showcase-dashboard-full",
+            "showcase-player-allowlist",
+        ):
+            self.assertIn(name, section, f"canonical publish set may drop {name}")
+
+    def test_fixture_changes_trigger_a_routine_capture(self) -> None:
+        self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])
+
+    def test_narrow_player_viewport_is_restored_before_world_view(self) -> None:
+        plan = json.loads((
+            Path(__file__).resolve().parent / "review" / "plan-showcase.json"
+        ).read_text(encoding="utf-8"))
+        steps = plan["steps"]
+        viewport = plan["viewport"]
+        narrow = [
+            i for i, step in enumerate(steps)
+            if "setViewport" in step and step["setViewport"] != viewport
+        ]
+        self.assertTrue(narrow, "expected a narrow inline-capture viewport step")
+        world_view = next(
+            i for i, step in enumerate(steps)
+            if step.get("screenshot") == "showcase-world-view"
+        )
+        restores = [
+            step for i, step in enumerate(steps)
+            if max(narrow) < i < world_view
+            and step.get("setViewport") == viewport
+        ]
+        self.assertTrue(
+            restores,
+            "desktop viewport must be restored before the World View capture",
+        )
+        # The restore must always run when the narrowing step runs.
+        self.assertIn(
+            steps[max(narrow)].get("feature"),
+            [step.get("feature") for step in restores],
+        )
 
 
 if __name__ == "__main__":

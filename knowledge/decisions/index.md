@@ -60,3 +60,4 @@
 - [Website and documentation publication — Decision (part 2)](website-docs-decision-2.md) — reserve artwork space with viewport-relative percentage padding on that
 - [Website and documentation publication — Rationale + Verification](website-docs-rationale.md) — Independent Pages deployments overwrite one another. A single artifact preserves
 - [WebSocket connection lifetime](websocket-lifetime.md) — Socket callbacks and timers belong to one connection generation, subscriptions retain their requested tail on reconnect, and AUTH_FAIL ends in a signed-out state rather than a retry loop.
+- [World View capture evidence](world-view-capture-evidence.md) — Fail-closed rules for proving rendered BlueMap terrain in the README World View capture.
