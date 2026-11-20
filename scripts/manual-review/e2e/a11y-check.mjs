@@ -1148,6 +1148,21 @@ async function runModpacksJourney(browser, base, theme = 'light') {
 			return 'description, content area, three tabs and search control visible';
 		});
 
+		await check(`modpacks ${theme}: browse filters have accessible names on desktop and mobile`, async () => {
+			const previousViewport = page.viewportSize();
+			try {
+				for (const width of [1440, 360]) {
+					await page.setViewportSize({ width, height: 900 });
+					for (const name of ['Minecraft version', 'Mod loader', 'Modpack provider']) {
+						await page.getByRole('combobox', { name, exact: true }).waitFor({ timeout: 3000 });
+					}
+				}
+			} finally {
+				await page.setViewportSize(previousViewport);
+			}
+			return 'three filters keep their accessible names at both widths';
+		});
+
 		await check(`modpacks ${theme}: seeded catalog renders from the RPC boundary`, async () => {
 			await page.getByTestId('showcase-modpack-card').first().waitFor({ timeout: 10000 });
 			return page.getByTestId('showcase-modpack-card').count();
