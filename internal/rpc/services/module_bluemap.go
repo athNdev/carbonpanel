@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -295,6 +296,20 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	return false, nil, fin, nil
 }
 
+// The request marker only selects the guarded installer. Persist it from
+// the server's decision, and retain that decision across metadata replacements.
+func blueMapModuleMetadata(requested map[string]string, managed bool) map[string]string {
+	metadata := maps.Clone(requested)
+	delete(metadata, blueMapManagedSignalKey)
+	if managed {
+		if metadata == nil {
+			metadata = make(map[string]string)
+		}
+		metadata[blueMapManagedSignalKey] = "true"
+	}
+	return metadata
+}
+
 func isManagedBlueMapModule(module *storage.Module) bool {
 	return module.TemplateID == blueMapTemplateID && module.ServerID != "" &&
 		strings.EqualFold(strings.TrimSpace(module.Metadata[blueMapManagedSignalKey]), "true")
@@ -331,6 +346,9 @@ func (s *ModuleService) beginManagedBlueMapStart(ctx context.Context, module *st
 	if !bluemapdiscovery.SameRendererNode(current.NodeID, server.NodeID) {
 		return fail(connect.CodeFailedPrecondition, errors.New("the managed renderer belongs to a previous node assignment"))
 	}
+	if _, err := bluemapdiscovery.PrivateRendererNode(ctx, s.store, server.NodeID); err != nil {
+		return fail(connect.CodeFailedPrecondition, err)
+	}
 	return current, transition, nil
 }
 
@@ -343,12 +361,15 @@ func (s *ModuleService) guardManagedBlueMapStart(ctx context.Context, moduleID s
 	return transition, err
 }
 
-func (s *ModuleService) startManagedBlueMap(moduleID string, startImmediately bool) {
-	timeout := s.blueMapStartupTimeout
-	if timeout == 0 {
-		timeout = defaultBlueMapStartupTimeout
+func (s *ModuleService) managedBlueMapTimeout() time.Duration {
+	if s.blueMapStartupTimeout == 0 {
+		return defaultBlueMapStartupTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	return s.blueMapStartupTimeout
+}
+
+func (s *ModuleService) startManagedBlueMap(moduleID string, startImmediately bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.managedBlueMapTimeout())
 	defer cancel()
 	err := s.moduleManager.CreateAndStartModule(ctx, moduleID, startImmediately)
 	if err == nil {

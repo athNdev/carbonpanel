@@ -33,6 +33,8 @@ check. It accepts legacy controller aliases and enabled registered nodes
 marked local in persisted state. Discovery uses the controller Docker client,
 checks the server's current node assignment and opens only its confined storage.
 Managed startup holds the server transition through its bounded Docker call
-and terminal state write. Manual Start, Restart and Recreate share that lease
-and recheck the node assignment. A canceled post-create write records the
-known container ID with its stopped state so a later Start can reuse it.
+and terminal state write. Manual Start, Restart, Recreate and managed updates
+share that lease and recheck node eligibility. Async recreation keeps the lease.
+Only the guarded installer sets the persisted managed marker. Module metadata
+updates preserve that decision. A canceled post-create write records the known
+container ID and stopped state so a later Start can reuse it.

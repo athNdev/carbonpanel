@@ -323,6 +323,22 @@ func TestBuiltinBlueMapManagedActionIsolatedFromGenericCreate(t *testing.T) {
 	if _, ok := modules[0].Metadata[blueMapManagedSignalKey]; ok {
 		t.Fatal("generic module must not be marked managed")
 	}
+
+	if err := store.CreateModuleTemplate(ctx, &storage.ModuleTemplate{
+		ID: "generic", Name: "Generic", Type: storage.ModuleTemplateTypeCustom, DockerImage: "generic:fixture",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	generic, err := svc.CreateModule(ctx, connect.NewRequest(&v1.CreateModuleRequest{
+		Name: "Generic", ServerId: "srv-parity", TemplateId: "generic",
+		Metadata: map[string]string{blueMapManagedSignalKey: "true", "operator-note": "kept"},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta := generic.Msg.Module.GetMetadata(); len(meta) != 1 || meta["operator-note"] != "kept" {
+		t.Fatalf("generic create forged managed identity or lost operator metadata: %v", meta)
+	}
 }
 
 // An injected config-commit failure must delete the just-persisted module row
@@ -564,11 +580,14 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 			}
 			creating, starting := make(chan struct{}, 1), make(chan struct{}, 1)
 			createDone, startDone := make(chan struct{}), make(chan struct{})
+			recreating, recreateDone := make(chan struct{}, 1), make(chan struct{})
 			startCanceled := make(chan struct{})
 			var creates, inspects, starts atomic.Int32
 			var allowCreate, allowStart sync.Once
+			var allowRecreate sync.Once
 			unblockCreate := func() { allowCreate.Do(func() { close(createDone) }) }
 			unblockStart := func() { allowStart.Do(func() { close(startDone) }) }
+			unblockRecreate := func() { allowRecreate.Do(func() { close(recreateDone) }) }
 			dockerAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
@@ -577,14 +596,21 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 				case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
 					_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
 				case strings.HasSuffix(r.URL.Path, "/containers/create"):
-					if creates.Add(1) == 1 {
+					switch creates.Add(1) {
+					case 1:
 						creating <- struct{}{}
 						<-createDone
+					case 2:
+						recreating <- struct{}{}
+						<-recreateDone
 					}
 					_, _ = w.Write([]byte(`{"Id":"` + containerID + `"}`))
 				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/json"):
 					inspects.Add(1)
 					_, _ = w.Write([]byte(`{"State":{"Status":"created"}}`))
+				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/stop"),
+					r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/containers/"+containerID):
+					w.WriteHeader(http.StatusNoContent)
 				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/start"):
 					if starts.Add(1) > 1 {
 						w.WriteHeader(http.StatusNoContent)
@@ -609,6 +635,7 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 				}
 			}))
 			t.Cleanup(dockerAPI.Close)
+			t.Cleanup(unblockRecreate)
 			log := logger.New()
 			dockerClient, err := docker.NewClient(strings.Replace(dockerAPI.URL, "http://", "tcp://", 1), log)
 			if err != nil {
@@ -739,12 +766,97 @@ func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
 			if inspects.Load() != starts.Load() || len(proxyManager.GetModuleRoutes()) != 0 {
 				t.Fatalf("private renderer reached host route setup: %d inspects for %d starts", inspects.Load(), starts.Load())
 			}
+			updateMemory := func(memory int32) error {
+				_, err := client.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{Id: moduleID, Memory: &memory}))
+				return err
+			}
+			if tc.wantModuleStatus == storage.ModuleStatusRunning {
+				if err := updateMemory(768); err != nil {
+					t.Fatal(err)
+				}
+				waitFor(recreating, "update recreation")
+				assertHeld("update recreation")
+				if err := start(); connect.CodeOf(err) != connect.CodeAborted {
+					t.Fatalf("manual Start raced update recreation: %v", err)
+				}
+				unblockRecreate()
+				if err := docker.WaitForServerTransition(ctx, serverID); err != nil {
+					t.Fatalf("update did not release the transition: %v", err)
+				}
+				updated, err := store.GetModule(ctx, moduleID)
+				if err != nil || updated.Status != storage.ModuleStatusRunning || updated.Memory != 768 || creates.Load() != 2 {
+					t.Fatalf("update did not recreate the managed renderer: %v %v; creates=%d", updated, err, creates.Load())
+				}
+			}
+			for _, supplied := range []map[string]string{
+				{"operator-note": "kept"}, {"operator-note": "kept", blueMapManagedSignalKey: "false"},
+			} {
+				updated, err := client.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{
+					Id: moduleID, Metadata: supplied,
+				}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				meta := updated.Msg.Module.GetMetadata()
+				if meta[blueMapManagedSignalKey] != "true" || meta["operator-note"] != "kept" {
+					t.Fatalf("metadata replacement changed the managed identity: %v", meta)
+				}
+			}
+			generic := &storage.Module{
+				ID: "manual-bluemap", ServerID: serverID, NodeID: "default",
+				Name: "Manual BlueMap", TemplateID: blueMapTemplateID, Status: storage.ModuleStatusStopped,
+			}
+			if err := store.CreateModule(ctx, generic); err != nil {
+				t.Fatal(err)
+			}
+			updated, err := client.UpdateModule(ctx, connect.NewRequest(&v1.UpdateModuleRequest{
+				Id: generic.ID, Metadata: map[string]string{blueMapManagedSignalKey: "true", "operator-note": "kept"},
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta := updated.Msg.Module.GetMetadata(); len(meta) != 1 || meta["operator-note"] != "kept" {
+				t.Fatalf("generic update forged managed identity or lost operator metadata: %v", meta)
+			}
 			if err := store.UpdateServerFields(ctx, serverID, map[string]any{"node_id": "different-node"}); err != nil {
 				t.Fatal(err)
 			}
 			before := starts.Load()
 			if err := start(); connect.CodeOf(err) != connect.CodeFailedPrecondition || starts.Load() != before {
 				t.Fatalf("manual Start reached the previous assignment: %v", err)
+			}
+			node := &storage.Node{ID: "51dc7b26-d4a7-4b90-8d5a-d6874f63d406", Name: "Registered local",
+				Host: "unix:///var/run/docker.sock", Enabled: true, IsLocal: true}
+			if err := store.CreateNode(ctx, node); err != nil {
+				t.Fatal(err)
+			}
+			node.Enabled = false
+			if err := store.UpdateNode(ctx, node); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.UpdateServerFields(ctx, serverID, map[string]any{"node_id": node.ID}); err != nil {
+				t.Fatal(err)
+			}
+			row, err = store.GetModule(ctx, moduleID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row.NodeID = node.ID
+			if err := store.UpdateModule(ctx, row); err != nil {
+				t.Fatal(err)
+			}
+			if err := start(); connect.CodeOf(err) != connect.CodeFailedPrecondition ||
+				!strings.Contains(err.Error(), "disabled") || starts.Load() != before {
+				t.Fatalf("manual Start allowed an ineligible current node: %v", err)
+			}
+			createsBefore := creates.Load()
+			if err := updateMemory(1024); connect.CodeOf(err) != connect.CodeFailedPrecondition ||
+				!strings.Contains(err.Error(), "disabled") {
+				t.Fatalf("update allowed an ineligible current node: %v", err)
+			}
+			persisted, err := store.GetModule(ctx, moduleID)
+			if err != nil || persisted.Memory != row.Memory || creates.Load() != createsBefore {
+				t.Fatalf("refused update changed the renderer: %v %v; creates=%d", persisted, err, creates.Load())
 			}
 		})
 	}

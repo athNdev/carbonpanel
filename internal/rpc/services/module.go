@@ -709,7 +709,7 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 		HealthCheckTimeout:    int(msg.HealthCheckTimeout),
 		HealthCheckRetries:    int(msg.HealthCheckRetries),
 		EventHooks:            msg.EventHooks,
-		Metadata:              msg.Metadata,
+		Metadata:              blueMapModuleMetadata(msg.Metadata, finalizeBlueMap != nil),
 		CmdOverride:           msg.CmdOverride,
 		AccessUrls:            msg.AccessUrls,
 		UID:                   msg.Uid,
@@ -797,6 +797,12 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 	if err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("module not found"))
 	}
+
+	module, transition, err := s.beginManagedBlueMapStart(ctx, module)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { transition.Release() }()
 
 	needsRecreate := false
 	before := moduleScalars{
@@ -898,7 +904,7 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 		module.EventHooks = msg.EventHooks
 	}
 	if len(msg.Metadata) > 0 {
-		module.Metadata = msg.Metadata
+		module.Metadata = blueMapModuleMetadata(msg.Metadata, isManagedBlueMapModule(module))
 	}
 	if msg.CmdOverride != nil {
 		if *msg.CmdOverride != module.CmdOverride {
@@ -965,12 +971,23 @@ func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v
 
 	// Recreate container if needed
 	if needsRecreate && module.ContainerID != "" {
-		go func() {
+		// The managed update already owns the assignment. Hand the same
+		// transition to recreation, so the async worker cannot start on a
+		// node that changed after the update's eligibility check.
+		workerTransition := transition
+		transition = nil
+		go func(moduleID string) {
+			defer workerTransition.Release()
 			bgCtx := context.Background()
-			if err := s.moduleManager.RecreateModule(bgCtx, module.ID); err != nil {
+			if workerTransition != nil {
+				var cancel context.CancelFunc
+				bgCtx, cancel = context.WithTimeout(bgCtx, s.managedBlueMapTimeout())
+				defer cancel()
+			}
+			if err := s.moduleManager.RecreateModule(bgCtx, moduleID); err != nil {
 				s.log.Error("Failed to recreate module container: %v", err)
 			}
-		}()
+		}(module.ID)
 	}
 
 	// Get enrichment data
