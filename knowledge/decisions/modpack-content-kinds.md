@@ -6,10 +6,14 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/packwiz/content.go
+  - internal/packwiz/packwiz.go
+  - internal/rpc/handlers/packwiz.go
   - internal/minecraft/content.go
   - internal/rpc/handlers/packwiz_content.go
   - web/carbon-panel/src/lib/components/pack-content-panel.svelte
 sources:
+  - title: Modpack Studio deployment modes
+    resource: ../../docs/carbon-panel/src/content/docs/guides/modpack-studio.mdx
   - title: Packwiz pack format
     resource: https://packwiz.infra.link/tutorials/creating/pack/
 ---
@@ -35,6 +39,9 @@ sources:
   `<data>/<level-name>/datapacks` (default `world`). Resource packs and shader
   packs are client-side: bake never writes them and reports them as
   client-only so the UI points at sync or export instead.
+- Bake preflights server-side CurseForge mod entries for a direct download
+  URL before it changes the target server. A missing URL returns the
+  project and file IDs and the supported deployment alternatives.
 - CurseForge export refuses with the complete item list when anything would be
   dropped, rather than shipping a partial pack.
 
@@ -48,5 +55,5 @@ writing the metafile stops a broken archive from becoming a pack entry.
 
 `internal/packwiz/content_test.go` covers option round-trips, folder moves,
 upload validation, every-kind mrpack export and bake selection;
-`internal/rpc/handlers/packwiz_content_test.go` covers the RPC routes;
-`pack-content-panel.test.ts` covers the console contract.
+`packwiz_content_test.go` covers the RPC routes and `mods_dir_test.go` checks
+bake refusal before server changes. `pack-content-panel.test.ts` covers the UI.

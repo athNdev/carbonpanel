@@ -339,14 +339,6 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 			requestID = strings.TrimSpace(msg.GetRequestId())
 		}
 		operationID := result.OperationID
-		if operationID == "" && requestID != "" {
-			var op storage.ServerOperation
-			if err := s.store.DB().WithContext(ctx).
-				Where("server_id = ? AND request_key = ?", msg.GetServerId(), operation.StorageKey(requestID, "world-bind")).
-				First(&op).Error; err == nil && op.Kind == "world-bind" && op.Phase == storage.ServerOperationComplete {
-				operationID = op.ID
-			}
-		}
 		if operationID != "" && requestID != "" {
 			s.auditWorldOperation(ctx, req, activity.EventWorldBind, msg.GetServerId(), requestID, msg.GetLevelName(), msg.GetRevisionId(), operationID)
 		}
@@ -659,10 +651,15 @@ func notFoundOrInternal(err error, message string) error {
 }
 
 func worldError(err error) error {
+	var rpcErr *connect.Error
+	if errors.As(err, &rpcErr) {
+		return rpcErr
+	}
 	switch {
 	case errors.Is(err, worldlib.ErrRemoteUnavailable), errors.Is(err, nodestorage.ErrUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 	case errors.Is(err, worldlib.ErrTwoWriters), errors.Is(err, worldlib.ErrStaleGeneration),
+		errors.Is(err, worldlib.ErrBindRequestConflict), errors.Is(err, operation.ErrAlreadyFailed),
 		errors.Is(err, worldlib.ErrUncertainOutcome), errors.Is(err, worldlib.ErrDiskBudget),
 		errors.Is(err, storage.ErrWorldRevisionBound), errors.Is(err, storage.ErrWorldBindingStale),
 		errors.Is(err, storage.ErrWorldRevisionImmutable):

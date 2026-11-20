@@ -383,18 +383,35 @@ func TestComposeUpgradeStopsBeforeUpWhenSnapshotFails(t *testing.T) {
 		return
 	}
 
-	if err := os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
+	// Inject a snapshot failure on every account, including root. Even if
+	// Compose is mistakenly reached, the stub cannot contact a daemon.
+	bin := t.TempDir()
+	for name, script := range map[string]string{
+		"sqlite3": "#!/bin/sh\necho 'injected snapshot failure' >&2\nexit 1\n",
+		"docker":  "#!/bin/sh\necho 'unexpected docker invocation' >&2\nexit 99\n",
+	} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
-
 	cmd := exec.Command(bash, filepath.Join(root, "scripts/compose-upgrade.sh"),
 		"--compose", filepath.Join(root, "docker-compose.yml"),
 		"--data-dir", dataDir, "--apply")
+	cmd.Env = append(cmd.Environ(),
+		"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"DOCKER_CONTEXT=",
+		"DOCKER_HOST=unix://"+filepath.Join(bin, "unavailable.sock"),
+	)
 	out, runErr := cmd.CombinedOutput()
 	text := string(out)
 	if runErr == nil {
 		t.Fatalf("expected snapshot failure to stop the upgrade:\n%s", text)
+	}
+	if !strings.Contains(text, "injected snapshot failure") {
+		t.Fatalf("snapshot did not reach the failure fixture:\n%s", text)
+	}
+	if strings.Contains(text, "unexpected docker invocation") {
+		t.Fatalf("Compose ran after the failed snapshot:\n%s", text)
 	}
 	if !strings.Contains(text, "not running compose up") {
 		t.Fatalf("failed snapshot must stop before compose up:\n%s", text)

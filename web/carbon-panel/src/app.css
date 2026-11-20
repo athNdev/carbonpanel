@@ -441,7 +441,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 	.server-tab-header-copy {
 		min-width: 0;
-		flex: 1 1 12rem;
+		flex: 1 1 auto;
 	}
 
 	.server-tab-title-row {
@@ -465,9 +465,11 @@ one at https://mozilla.org/MPL/2.0/.
 		font-size: 0.75rem;
 		line-height: 1rem;
 		color: var(--muted-foreground);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		/* Tab summaries carry operational guidance (for example "World bytes
+		   are never edited here"). They must wrap instead of being ellipsized
+		   when the header action cluster competes for width. */
+		white-space: normal;
+		overflow-wrap: anywhere;
 	}
 
 	.server-tab-actions {
@@ -674,4 +676,14 @@ one at https://mozilla.org/MPL/2.0/.
 		max-width: 100%;
 		height: auto;
 	}
+}
+
+/* Fleet tables keep native table semantics and a single keyboard scroll region. */
+.fleet-table-scroll {
+	overflow-x: auto;
+	scrollbar-width: thin;
+}
+.fleet-table-scroll > table {
+	display: table;
+	overflow: visible;
 }

@@ -684,7 +684,15 @@ SPDX-License-Identifier: MPL-2.0
 				</div>
 			</div>
 		{:else}
-			<p class="text-xs text-muted-foreground">{description.presentation.hint}</p>
+			<!--
+				The state label is shown once in the tab header. Keep the full
+				hint here, inset like the other world cards, so it reads as
+				guidance instead of an edge-aligned orphan line.
+			-->
+			<div class="border border-border bg-card p-3 sm:p-4">
+				<p class="mono-label">World state</p>
+				<p class="mt-1 text-xs text-muted-foreground">{description.presentation.hint}</p>
+			</div>
 
 			<!-- Active world / level -->
 			<div class="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
@@ -706,11 +714,8 @@ SPDX-License-Identifier: MPL-2.0
 					</p>
 				</div>
 				<div class="border border-border bg-card p-4">
-					<p class="mono-label">Management</p>
+					<p class="mono-label">Server environment</p>
 					<div class="mt-2 flex flex-wrap items-center gap-2">
-						<CarbonTag type={description.presentation.tone} size="sm">
-							{description.presentation.label}
-						</CarbonTag>
 						{#if description.target}
 							<CarbonTag type="blue" size="sm">WORLD VIEW OBSERVED</CarbonTag>
 						{/if}
@@ -784,9 +789,8 @@ SPDX-License-Identifier: MPL-2.0
 						<h3 class="mono-label-strong">No active binding</h3>
 					</div>
 					<p class="mt-2 text-xs text-muted-foreground">
-						{description.presentation.hint}
-						Picking a compatible library world journals a stop-based swap; existing level bytes are preserved
-						and never overwritten.
+						Picking a compatible library world journals a stop-based swap; existing level bytes are
+						preserved and never overwritten.
 					</p>
 				</div>
 			{/if}

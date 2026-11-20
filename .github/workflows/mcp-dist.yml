@@ -55,7 +55,7 @@ env:
 
 jobs:
   verify:
-    name: Verify trusted pin, manifest and multi-arch build
+    name: Verify trusted pin, manifest and coverage
     runs-on: ubuntu-24.04
     steps:
       - name: Resolve the trusted pinned commit
@@ -86,9 +86,6 @@ jobs:
             echo "::error::HEAD $actual differs from pinned $EXPECTED_SHA" >&2
             exit 1
           fi
-      - name: Resolve reproducible build date from the pinned commit
-        id: meta
-        run: echo "build_date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
       - name: Verify exact main CI for the pinned commit
         id: ci
         env:
@@ -121,7 +118,7 @@ jobs:
       - name: Validate manifest structure, static ownership and version pinning
         run: |
           python3 scripts/validate_mcp_server_json.py --file docker/mcp.server.json
-          python3 -m unittest scripts.test_validate_mcp_server_json scripts.test_mcp_onboarding_fixture scripts.test_mcp_stdio_smoke scripts.test_mcp_ghcr_preflight
+          python3 -m unittest scripts.test_validate_mcp_server_json scripts.test_mcp_onboarding_fixture scripts.test_mcp_stdio_smoke scripts.test_mcp_ghcr_preflight scripts.test_mcp_build_only_packaged_smoke
       - name: Assert pinned version is not a moving alias
         env:
           MCP_VERSION: ${{ inputs.version }}
@@ -131,22 +128,17 @@ jobs:
             ''|latest|main|edge|dev|master|*' '*|*'/'*|*'@'*) echo "refusing moving version: $MCP_VERSION" >&2; exit 1 ;;
           esac
           printf '%s' "$MCP_VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build both platforms locally (no registry write)
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: docker/Dockerfile.mcp
-          platforms: linux/amd64,linux/arm64
-          push: false
-          build-args: |
-            MCP_ARTIFACT_VERSION=${{ inputs.version }}
-            MCP_ARTIFACT_COMMIT=${{ steps.pinned.outputs.sha }}
-            MCP_ARTIFACT_BUILDDATE=${{ steps.meta.outputs.build_date }}
+
+  verify-packaged:
+    name: Verify the packaged peer on an isolated fixture
+    needs: verify
+    uses: ./.github/workflows/mcp-packaged-smoke.yml
+    with:
+      version: ${{ inputs.version }}
 
   publish-image:
     name: Publish immutable GHCR image after trusted-main gate
-    needs: verify
+    needs: verify-packaged
     if: ${{ inputs.publish }}
     runs-on: ubuntu-24.04
     permissions:
@@ -404,25 +396,33 @@ jobs:
           set -euo pipefail
           mkdir -p .mcp-publish
           jq --arg v "$MCP_VERSION" --arg d "$IMAGE_DIGEST" \
-            '.version = $v | .packages[0].version = $v |
+            '.version = $v |
              .packages[0].identifier = "ghcr.io/athndev/carbonpanel-mcp:" + $v + "@" + $d' \
             docker/mcp.server.json > .mcp-publish/server.json
           python3 scripts/validate_mcp_server_json.py --file .mcp-publish/server.json --require-real-digest
+          cp .mcp-publish/server.json mcp-registry-submitted.json
           cp mcp-publisher .mcp-publish/mcp-publisher
           (cd .mcp-publish && ./mcp-publisher validate)
           (cd .mcp-publish && ./mcp-publisher login github-oidc)
           (cd .mcp-publish && ./mcp-publisher publish)
-      - name: Verify the registry listing itself (not the package push)
+      - name: Verify the exact active registry listing and OCI digest
+        id: registry-read
         env:
           MCP_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          body=$(curl --fail --silent --show-error "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.athNdev%2Fcarbon-panel")
-          printf '%s' "$body" | jq -e --arg n "$MCP_SERVER_NAME" --arg v "$MCP_VERSION" \
-            '[.. | strings | select(. == $n or . == $v)] | length >= 2' > /dev/null
-          printf '%s\n' "$body" > mcp-registry-verification.json
+          name=$(jq -nr --arg value "$MCP_SERVER_NAME" '$value | @uri')
+          version=$(jq -nr --arg value "$MCP_VERSION" '$value | @uri')
+          curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors --max-time 30 \
+            --output mcp-registry-verification.json \
+            "https://registry.modelcontextprotocol.io/v0.1/servers/$name/versions/$version"
+          python3 scripts/validate_mcp_server_json.py --file .mcp-publish/server.json \
+            --listing mcp-registry-verification.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.registry-read.outcome != 'skipped'
         with:
           name: mcp-registry-verification
-          path: mcp-registry-verification.json
+          path: |
+            mcp-registry-submitted.json
+            mcp-registry-verification.json
           if-no-files-found: error

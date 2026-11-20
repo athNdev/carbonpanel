@@ -169,6 +169,9 @@ func ApplyGates(f HostFacts) Selection {
 		add(Check{Code: code, Message: msg, Remedy: remedy})
 		rootlessOK = false
 	}
+	if !f.Systemd || !f.SystemdUserSession || !f.LingerEnabled {
+		markRootless(CodeSystemdRequired, "rootless requires a systemd user manager with linger enabled", "Configure the service user's systemd session and enable linger, or qualify the dedicated rootful service.")
+	}
 	if !f.UserNamespaces {
 		markRootless(CodeUserNamespacesDisabled, "unprivileged user namespaces are disabled", "Enable user namespaces on the host or choose the dedicated rootful path.")
 	}
