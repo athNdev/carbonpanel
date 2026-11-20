@@ -4044,8 +4044,19 @@ class BrowserCollectorFailClosedTests(unittest.TestCase):
             "/docs/nightly/|375": {"html": "", "status": 200,
                                    "url": "http://127.0.0.1:1/docs/nightly/"}}))
         self.assertIn("browser returned empty DOM", message)
-        message = self.run_check(lambda snap: snap.pop("/docs/nightly/|375", None))
+
+        def omit_one(snapshot):
+            # pop() returns the removed value; do NOT return it from the
+            # mutator or the collector would receive only that single entry
+            # instead of the complete snapshot with one key missing.
+            snapshot.pop("/docs/nightly/|375", None)
+            return None
+
+        message = self.run_check(omit_one)
         self.assertIn("no browser result collected", message)
+        self.assertEqual(message.count("browser qualification aborted"), 1)
+        self.assertEqual(message.count("no browser result collected"), 1)
+        self.assertNotIn("browser error:", message)
         message = self.run_check(lambda snap: snap.update({
             "/docs/nightly/|1440": {"html": "<html>ok</html>", "status": 200,
                                     "url": "https://elsewhere.invalid/"}}))
