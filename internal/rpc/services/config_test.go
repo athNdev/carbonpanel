@@ -47,6 +47,16 @@ func setupConfigTestService(t *testing.T) (*ConfigService, *storage.Store) {
 	return NewConfigService(store, &config.Config{}, nil, nil, logger.New()), store
 }
 
+func mountConfigTestClient(t *testing.T, svc *ConfigService) carbonpanelv1connect.ConfigServiceClient {
+	t.Helper()
+	pattern, handler := carbonpanelv1connect.NewConfigServiceHandler(svc)
+	mux := http.NewServeMux()
+	mux.Handle(pattern, handler)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return carbonpanelv1connect.NewConfigServiceClient(server.Client(), server.URL)
+}
+
 type configRecreatorFake struct {
 	result *docker.RecreateContainerResult
 	err    error
@@ -193,12 +203,7 @@ func TestMountedGlobalConfigSyncPreservesWorldBindTarget(t *testing.T) {
 	op, _, err := store.BeginServerOperation(ctx, locked, "", "", "test-world-owner", "world-bind", "test-digest")
 	require.NoError(t, err)
 
-	pattern, handler := carbonpanelv1connect.NewConfigServiceHandler(svc)
-	mux := http.NewServeMux()
-	mux.Handle(pattern, handler)
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	client := carbonpanelv1connect.NewConfigServiceClient(server.Client(), server.URL)
+	client := mountConfigTestClient(t, svc)
 	res, err := client.SyncGlobalSettingsToServers(ctx, connect.NewRequest(&v1.SyncGlobalSettingsToServersRequest{}))
 	require.NoError(t, err)
 	require.EqualValues(t, 2, res.Msg.GetUpdatedServersCount())
@@ -212,6 +217,14 @@ func TestMountedGlobalConfigSyncPreservesWorldBindTarget(t *testing.T) {
 	require.Equal(t, &level, unlocked.Level)
 	require.Equal(t, &props, unlocked.CustomServerProperties)
 
+	// A sync limited to the protected fields performs no write for the owner.
+	require.NoError(t, store.UpdateGlobalSettings(ctx, &storage.ServerConfig{
+		Level: &level, CustomServerProperties: &props,
+	}))
+	res, err = client.SyncGlobalSettingsToServers(ctx, connect.NewRequest(&v1.SyncGlobalSettingsToServersRequest{}))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, res.Msg.GetUpdatedServersCount())
+
 	require.NoError(t, store.AdvanceServerOperation(ctx, op.ID, storage.ServerOperationPrepared, storage.ServerOperationFailed, "fixture released"))
 	_, err = client.SyncGlobalSettingsToServers(ctx, connect.NewRequest(&v1.SyncGlobalSettingsToServersRequest{}))
 	require.NoError(t, err)
@@ -219,6 +232,35 @@ func TestMountedGlobalConfigSyncPreservesWorldBindTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, &level, released.Level)
 	require.Equal(t, &props, released.CustomServerProperties)
+}
+
+func TestMountedGlobalConfigSyncRestoresOnlyMissingDefaults(t *testing.T) {
+	ctx := context.Background()
+	svc, store := setupConfigTestService(t)
+	require.NoError(t, store.UpdateGlobalSettings(ctx, &storage.ServerConfig{}))
+	existing, missing := "global-sync-existing", "global-sync-missing"
+	for i, id := range []string{existing, missing} {
+		require.NoError(t, store.CreateServer(ctx, &storage.Server{
+			ID: id, Name: id, Port: 27100 + i, Status: storage.StatusStopped,
+		}))
+	}
+	before, err := store.GetServerConfig(ctx, existing)
+	require.NoError(t, err)
+	require.NoError(t, store.DB().Where("server_id = ?", missing).Delete(&storage.ServerConfig{}).Error)
+	_, err = store.GetServerConfig(ctx, missing)
+	require.ErrorIs(t, err, storage.ErrServerConfigNotFound)
+
+	client := mountConfigTestClient(t, svc)
+	res, err := client.SyncGlobalSettingsToServers(ctx, connect.NewRequest(&v1.SyncGlobalSettingsToServersRequest{}))
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, res.Msg.GetUpdatedServersCount())
+	restored, err := store.GetServerConfig(ctx, missing)
+	require.NoError(t, err)
+	require.NotNil(t, restored.RCONPassword)
+	require.NotEmpty(t, *restored.RCONPassword)
+	after, err := store.GetServerConfig(ctx, existing)
+	require.NoError(t, err)
+	require.Equal(t, before.UpdatedAt, after.UpdatedAt)
 }
 
 func TestConfigService_GetServerConfig_NotFound(t *testing.T) {

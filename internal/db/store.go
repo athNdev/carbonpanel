@@ -265,8 +265,10 @@ func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) erro
 // A retained world-bind journal protects both sources of the effective level.
 // The ownership check and write share a SQLite transaction so neither can
 // commit based on a snapshot invalidated by a concurrent journal acquisition.
-func (s *Store) SaveSyncedServerConfig(ctx context.Context, config *ServerConfig, fields []string) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+// It reports whether a row was updated or an absent default was restored.
+func (s *Store) SaveSyncedServerConfig(ctx context.Context, config *ServerConfig, fields []string) (bool, error) {
+	wrote := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		active, err := hasActiveWorldBind(tx, config.ServerID)
 		if err != nil {
 			return err
@@ -280,13 +282,16 @@ func (s *Store) SaveSyncedServerConfig(ctx context.Context, config *ServerConfig
 			}
 			fields = allowed
 		}
-		if len(fields) == 0 {
-			return nil
+		if len(fields) != 0 {
+			result := tx.Model(&ServerConfig{}).Where("id = ? AND server_id = ?", config.ID, config.ServerID).
+				Select(fields).Updates(config)
+			if result.Error != nil || result.RowsAffected != 0 {
+				wrote = result.RowsAffected != 0
+				return result.Error
+			}
 		}
-		result := tx.Model(&ServerConfig{}).Where("id = ? AND server_id = ?", config.ID, config.ServerID).
-			Select(fields).Updates(config)
-		if result.Error != nil || result.RowsAffected != 0 || active {
-			return result.Error
+		if active {
+			return nil
 		}
 		// A legacy server may not have a config row. Do not create a second
 		// row if one appeared between the caller's read and this transaction.
@@ -295,8 +300,11 @@ func (s *Store) SaveSyncedServerConfig(ctx context.Context, config *ServerConfig
 		if err != nil || existing != 0 {
 			return err
 		}
-		return tx.Create(config).Error
+		result := tx.Create(config)
+		wrote = result.RowsAffected != 0
+		return result.Error
 	})
+	return err == nil && wrote, err
 }
 
 // UpdateServerConfigMemory updates memory settings in ServerConfig

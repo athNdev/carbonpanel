@@ -9,9 +9,9 @@ layouts before any live-world change.
 ## Supported layout
 
 - A usable family is a top-level folder with a direct `level.dat` marker, for
-  example `world/level.dat`. Markers are classified by the same normalized
-  forward-slash path used during extraction. One or more usable families are
-  supported:
+  example `world/level.dat`. Layout checks, compatibility findings, and
+  extraction use the same normalized forward-slash paths. One or more
+  usable families are supported:
   - a single Java world (`world/level.dat` with `region/`, `datapacks/` and
     dimension data under `world/`);
   - Paper/Spigot/Bukkit split dimensions with their own markers:
@@ -32,7 +32,8 @@ layouts before any live-world change.
   previews (no server) still apply the layout policy without a configured level.
 - While a world bind owns the server's operation journal, global settings sync
   preserves the configured level and the custom properties that can override
-  it. Other global settings can still be synchronized.
+  it. Other global settings can still be synchronized. The sync total counts
+  saved changes and restored defaults.
 
 ## Refused layout (actionable, pre-mutation)
 

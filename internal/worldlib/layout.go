@@ -10,7 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 
@@ -21,6 +20,20 @@ import (
 // be mapped safely to a configured level. It wraps ErrArchiveRejected so the
 // existing RPC error mapping and archive-rejection tests keep working.
 var ErrUnsupportedWorldLayout = fmt.Errorf("%w: unsupported world archive layout", ErrArchiveRejected)
+
+// canonicalWorldZipMember uses the extractor's path and rejects separators
+// whose interpretation would depend on the node's operating system.
+func canonicalWorldZipMember(name string) (string, error) {
+	if strings.Contains(name, `\`) {
+		return "", fmt.Errorf("%w: ZIP entry %q uses backslashes; use forward slashes",
+			ErrUnsupportedWorldLayout, name)
+	}
+	canonical, err := nodestorage.CanonicalZipMember(name)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrArchiveRejected, err)
+	}
+	return canonical, nil
+}
 
 // WorldFamilyFromMarker is the single, bounded definition of a usable world
 // family. A marker is a forward-slash relative path with a DIRECT child
@@ -163,10 +176,7 @@ func InspectRevisionArchive(ctx context.Context, archive string) (*ArchiveReport
 	// The extractor may normalize different member names onto one destination
 	// (for example on Windows). Refuse collisions before any staging or live
 	// mutation, using the extractor's own canonical path rule.
-	// Case-folded canonical destinations, tracking explicit directories AND
-	// regular files. Every ancestor is walked independently of sort order, so
-	// a similarly named sibling (dir- between dir and dir/child) cannot hide a
-	// file-as-ancestor collision.
+	// Track case-folded, canonical file and explicit directory destinations.
 	files := make(map[string]string, len(zr.File))
 	dirs := make(map[string]string)
 	layout := &ArchiveLayout{}
@@ -174,13 +184,9 @@ func InspectRevisionArchive(ctx context.Context, archive string) (*ArchiveReport
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
 		}
-		if strings.Contains(f.Name, `\`) {
-			return nil, nil, fmt.Errorf("%w: ZIP entry %q uses backslashes; use forward slashes",
-				ErrUnsupportedWorldLayout, f.Name)
-		}
-		canonical, err := nodestorage.CanonicalZipMember(f.Name)
+		canonical, err := canonicalWorldZipMember(f.Name)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %v", ErrArchiveRejected, err)
+			return nil, nil, err
 		}
 		key := strings.ToLower(canonical)
 		if f.FileInfo().IsDir() {
@@ -211,20 +217,31 @@ func InspectRevisionArchive(ctx context.Context, archive string) (*ArchiveReport
 			}
 		}
 	}
+	keys := make([]string, 0, len(files)+len(dirs))
 	for _, members := range []map[string]string{files, dirs} {
-		for key, name := range members {
+		for key := range members {
 			if err := ctx.Err(); err != nil {
 				return nil, nil, err
 			}
-			for ancestor := path.Dir(key); ancestor != "." && ancestor != "/"; ancestor = path.Dir(ancestor) {
-				if err := ctx.Err(); err != nil {
-					return nil, nil, err
-				}
-				if previous, ok := files[ancestor]; ok {
-					return nil, nil, fmt.Errorf("%w: archive member %q is a file but also a parent directory of %q",
-						ErrArchiveRejected, previous, name)
-				}
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	// Search for the slash-delimited prefix itself, since a sibling may
+	// sort between a file's name and its first descendant.
+	for key, name := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		prefix := key + "/"
+		i := sort.SearchStrings(keys, prefix)
+		if i < len(keys) && strings.HasPrefix(keys[i], prefix) {
+			descendant, isFile := files[keys[i]]
+			if !isFile {
+				descendant = dirs[keys[i]]
 			}
+			return nil, nil, fmt.Errorf("%w: archive member %q is a file but also a parent directory of %q",
+				ErrArchiveRejected, name, descendant)
 		}
 	}
 	if err := ctx.Err(); err != nil {

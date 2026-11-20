@@ -254,11 +254,14 @@ func (s *ConfigService) SyncGlobalSettingsToServers(ctx context.Context, req *co
 	updatedCount := 0
 
 	for _, srv := range servers {
-		if err := s.syncGlobalServerConfig(ctx, srv.ID, globalConfig, opsAndWhitelistOnly); err != nil {
+		wrote, err := s.syncGlobalServerConfig(ctx, srv.ID, globalConfig, opsAndWhitelistOnly)
+		if err != nil {
 			s.log.Error("Failed to save synced config for server %s: %v", srv.Name, err)
 			continue
 		}
-		updatedCount++
+		if wrote {
+			updatedCount++
+		}
 	}
 
 	msg := fmt.Sprintf("Successfully synced default settings to %d server(s)", updatedCount)
@@ -269,10 +272,10 @@ func (s *ConfigService) SyncGlobalSettingsToServers(ctx context.Context, req *co
 	}), nil
 }
 
-func (s *ConfigService) syncGlobalServerConfig(ctx context.Context, serverID string, defaults *storage.ServerConfig, opsAndWhitelistOnly bool) error {
+func (s *ConfigService) syncGlobalServerConfig(ctx context.Context, serverID string, defaults *storage.ServerConfig, opsAndWhitelistOnly bool) (bool, error) {
 	transition, err := beginServerLifecycleTransition(serverID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer transition.Release()
 
@@ -280,7 +283,7 @@ func (s *ConfigService) syncGlobalServerConfig(ctx context.Context, serverID str
 	if errors.Is(err, storage.ErrServerConfigNotFound) {
 		config = s.store.CreateDefaultServerConfig(serverID)
 	} else if err != nil {
-		return err
+		return false, err
 	}
 
 	var fields []string

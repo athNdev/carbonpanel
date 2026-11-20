@@ -228,6 +228,15 @@ func TestInspectRevisionArchiveCanonicalDirAndAncestorRules(t *testing.T) {
 				{name: "world", data: []byte("file")},
 			},
 		},
+		{
+			name: "explicit descendant directory under a regular file",
+			want: "parent directory",
+			entries: []zipEntry{
+				{name: "dir", data: []byte("file")},
+				{name: "dir-", data: []byte("sibling")},
+				{name: "dir/child/", mode: os.ModeDir},
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			archive := writeTestZip(t, filepath.Join(t.TempDir(), "case.zip"), tc.entries...)

@@ -45,8 +45,8 @@ live only on owning node storage.
   inventing a level, and reuses these binding gates for pick/swap. See
   [Library adoption fencing](../decisions/library-adoption-fencing.md).
 - Imports verify whole-archive SHA-256; ZIP CRC is the only per-file check.
-  Cancellable inspection applies safety limits and classifies markers on the
-  extraction path. Import, preview and bind refuse unusable layouts.
+  Cancellable inspection and compatibility use extraction-normalized paths.
+  Import, preview and bind refuse unusable layouts.
   See [Import layout](../../docs/world-library-import-layout.md).
 - A world-bind journal protects the configured level and custom-property
   override from staged configuration and global sync.
