@@ -671,7 +671,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("if: steps.preflight.outputs.action == 'publish'", source)
         self.assertIn("python3 scripts/release.py verify-immutable", source)
         self.assertIn("  promote-aliases:\n", source)
-        self.assertIn("needs: [plan, publish-immutable, publish]", source)
+        self.assertIn("needs: [plan, publish-immutable, prepare-draft, publish]", source)
         # OSS-413: no independent stable/latest alias write remains; both go
         # through the synced transaction and the deployed exact docs marker.
         self.assertNotIn("promote-stable-alias", source)
@@ -2509,7 +2509,8 @@ class ChannelPromotionTests(unittest.TestCase):
         rel = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertEqual(rel.count("python3 scripts/release.py promote-alias --check-only"), 1)
         self.assertEqual(rel.count("python3 scripts/release.py promote-alias --version"), 1)
-        self.assertIn("needs: [plan, publish-immutable, publish]", rel.split("  publish-minor:")[1])
+        self.assertIn("needs: [plan, publish-immutable, prepare-draft, publish]",
+                      rel.split("  publish-minor:")[1])
         import re as _re
         for job in ("promote-aliases", "publish"):
             match = _re.search(rf"(?ms)^  {job}:\n(.*?)(?=^  [A-Za-z][\w-]*:\n|\Z)", rel)
@@ -3625,6 +3626,110 @@ class LocalOciCandidateTests(unittest.TestCase):
             self.verify(self.layout(malformed=True)[0])
         with self.assertRaisesRegex(ValueError, "!="):
             self.verify(self.layout(ambiguous=True)[0])
+
+
+class PublicationDagPathTests(unittest.TestCase):
+    """Durable evidence that an explicit publish cannot silently no-op.
+
+    Regression for the 2026-11-20 trusted publish runs 44738205399 /
+    44739581869: immutable verification succeeded but the deliberately skipped
+    build ancestors made the write phases skip under implicit success(), so a
+    green run published no GitHub release, docs or aliases.
+    """
+
+    OK_OUTPUTS = {
+        "out_publish-immutable_verified": "true",
+        "out_publish-immutable_digest": "sha256:" + "a" * 64,
+        "out_prepare-draft_release_id": "123456789",
+        "out_stable-channel-transaction_action": "publish",
+        "out_promote-aliases_aliases_verified": "true",
+    }
+
+    def state(self, publish="true", channel="stable", staged=True, **overrides):
+        results = {
+            "result_plan": "success",
+            "result_image": "skipped" if staged else "success",
+            "result_publish-immutable": "success",
+            "result_prepare-draft": "success",
+            "result_stable-channel-transaction": "success" if channel == "stable" else "skipped",
+            "result_promote-aliases": "success",
+            "result_publish": "success",
+            "result_publish-minor": "success" if channel == "stable" else "skipped",
+        }
+        results.update({k: v for k, v in overrides.items() if k.startswith("result_")})
+        values = {"publish": publish, "channel": channel, **results, **self.OK_OUTPUTS}
+        values.update({k: v for k, v in overrides.items() if not k.startswith("result_")})
+        return values
+
+    def test_staged_stable_publish_path_is_allowed(self):
+        ok, reason = release.publication_phases_decision(self.state())
+        self.assertTrue(ok, reason)
+
+    def test_ordinary_non_stable_publish_requires_real_image(self):
+        ok, reason = release.publication_phases_decision(
+            self.state(channel="beta", staged=False))
+        self.assertTrue(ok, reason)
+        ok, reason = release.publication_phases_decision(
+            self.state(channel="beta", staged=False, **{"result_image": "skipped"}))
+        self.assertFalse(ok)
+        self.assertIn("image", reason)
+
+    def test_skipped_failed_or_cancelled_write_phase_fails_closed(self):
+        for phase in ("publish-immutable", "prepare-draft", "promote-aliases", "publish"):
+            for result in ("skipped", "failure", "cancelled"):
+                ok, reason = release.publication_phases_decision(
+                    self.state(**{"result_" + phase: result}))
+                self.assertFalse(ok, (phase, result, reason))
+                self.assertIn(phase, reason)
+        ok, reason = release.publication_phases_decision(
+            self.state(**{"result_stable-channel-transaction": "skipped"}))
+        self.assertFalse(ok)
+        ok, reason = release.publication_phases_decision(
+            self.state(**{"result_publish-minor": "skipped"}))
+        self.assertFalse(ok)
+
+    def test_missing_verification_outputs_fail_closed(self):
+        for key in self.OK_OUTPUTS:
+            ok, reason = release.publication_phases_decision(self.state(**{key: ""}))
+            self.assertFalse(ok, (key, reason))
+
+    def test_rehearsal_cannot_run_any_write_phase(self):
+        state = self.state(publish="false")
+        for phase in ("publish-immutable", "prepare-draft", "promote-aliases",
+                      "publish", "stable-channel-transaction", "publish-minor"):
+            state["result_" + phase] = "skipped"
+        ok, reason = release.publication_phases_decision(state)
+        self.assertTrue(ok, reason)
+        state["result_prepare-draft"] = "success"
+        ok, reason = release.publication_phases_decision(state)
+        self.assertFalse(ok)
+        self.assertIn("prepare-draft", reason)
+
+    def test_workflow_uses_explicit_phase_guards_and_trusted_terminal_gate(self):
+        import yaml
+        path = release.ROOT / ".github/workflows/release.yml"
+        source = path.read_text(encoding="utf-8")
+        doc = yaml.safe_load(source)
+        jobs = doc["jobs"]
+        for name in ("prepare-draft", "stable-channel-transaction",
+                     "promote-aliases", "publish", "publish-minor"):
+            condition = " ".join(str(jobs[name]["if"]).split())
+            self.assertIn("always()", condition, name)
+            self.assertIn("!cancelled()", condition, name)
+            self.assertIn("needs.plan.result == 'success'", condition, name)
+        self.assertIn("needs.prepare-draft.result == 'success'",
+                      " ".join(str(jobs["publish-minor"]["if"]).split()))
+        terminal = jobs["verify-publication-phases"]
+        self.assertIn("always()", " ".join(str(terminal["if"]).split()))
+        for phase in ("publish-immutable", "prepare-draft", "promote-aliases",
+                      "publish", "publish-minor"):
+            self.assertIn(phase, terminal["needs"])
+        steps = terminal["steps"]
+        trusted = [s for s in steps if str(s.get("with", {}).get("path", "")) == ".trusted-release"]
+        self.assertEqual(len(trusted), 1)
+        self.assertEqual(trusted[0]["with"]["ref"], "${{ github.sha }}")
+        self.assertTrue(any("verify-publication-phases" in str(s.get("run", ""))
+                            for s in steps))
 
 
 if __name__ == "__main__":

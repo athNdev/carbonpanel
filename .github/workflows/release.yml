@@ -563,7 +563,14 @@ jobs:
   prepare-draft:
     name: Prepare and verify the private release downloads before channel writes
     needs: [plan, publish-immutable]
-    if: needs.plan.outputs.publish == 'true' && needs.publish-immutable.outputs.verified == 'true'
+    # The staged publish path deliberately SKIPS frontend/binaries/image. An
+    # implicit success() here would also skip this phase and every later write.
+    if: >-
+      always() && !cancelled() &&
+      needs.plan.result == 'success' && needs.publish-immutable.result == 'success' &&
+      needs.plan.outputs.publish == 'true' &&
+      needs.publish-immutable.outputs.verified == 'true' &&
+      needs.publish-immutable.outputs.digest != ''
     runs-on: ubuntu-24.04
     outputs:
       release_id: ${{ steps.identity.outputs.release_id }}
@@ -638,8 +645,13 @@ jobs:
     name: Qualified stable channel transaction (docs marker bound)
     needs: [plan, publish-immutable, prepare-draft]
     if: >-
+      always() && !cancelled() &&
+      needs.plan.result == 'success' && needs.publish-immutable.result == 'success' &&
+      needs.prepare-draft.result == 'success' &&
       needs.plan.outputs.publish == 'true' &&
       needs.publish-immutable.outputs.verified == 'true' &&
+      needs.publish-immutable.outputs.digest != '' &&
+      needs.prepare-draft.outputs.release_id != '' &&
       needs.plan.outputs.channel == 'stable'
     env:
       DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
@@ -1001,6 +1013,9 @@ jobs:
       always() && !cancelled() && needs.plan.result == 'success' &&
       needs.publish-immutable.result == 'success' && needs.prepare-draft.result == 'success' &&
       needs.plan.outputs.publish == 'true' &&
+      needs.publish-immutable.outputs.verified == 'true' &&
+      needs.publish-immutable.outputs.digest != '' &&
+      needs.prepare-draft.outputs.release_id != '' &&
       needs.promote-aliases.result == 'success' &&
       (needs.plan.outputs.channel != 'stable' ||
        (needs.stable-channel-transaction.result == 'success' &&
@@ -1109,6 +1124,8 @@ jobs:
       needs.publish-immutable.result == 'success' && needs.prepare-draft.result == 'success' &&
       needs.plan.outputs.publish == 'true' &&
       needs.publish-immutable.outputs.verified == 'true' &&
+      needs.publish-immutable.outputs.digest != '' &&
+      needs.prepare-draft.outputs.release_id != '' &&
       (needs.plan.outputs.channel != 'stable' ||
        (needs.stable-channel-transaction.result == 'success' &&
         needs.stable-channel-transaction.outputs.action != '' &&
@@ -1247,8 +1264,15 @@ jobs:
 
   publish-minor:
     name: Promote the compatibility tag for the published Stable release
-    needs: [plan, publish-immutable, publish]
-    if: needs.plan.outputs.publish == 'true' && needs.plan.outputs.channel == 'stable'
+    needs: [plan, publish-immutable, prepare-draft, publish]
+    if: >-
+      always() && !cancelled() &&
+      needs.plan.result == 'success' && needs.publish-immutable.result == 'success' &&
+      needs.prepare-draft.result == 'success' && needs.publish.result == 'success' &&
+      needs.plan.outputs.publish == 'true' && needs.plan.outputs.channel == 'stable' &&
+      needs.publish-immutable.outputs.verified == 'true' &&
+      needs.publish-immutable.outputs.digest != '' &&
+      needs.prepare-draft.outputs.release_id != ''
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1279,3 +1303,53 @@ jobs:
         run: |
           python3 scripts/release.py promote-alias --version "$RELEASE_VERSION" \
             --commit "$RELEASE_COMMIT" --alias "${SEMVER%.*}" --digest "$IMAGE_DIGEST"
+
+  # TERMINAL GATE. A green run with every write phase skipped is NOT a
+  # publication. This job runs unconditionally (except full cancellation) and
+  # fails an explicit publish unless every required phase actually succeeded
+  # and produced its verification output. It runs the gate from the trusted
+  # workflow SHA, never from the pinned candidate commit, so a staged candidate
+  # cannot select its own trust logic. No registry/Pages/tag write here.
+  verify-publication-phases:
+    name: Verify every explicit publication phase ran
+    needs: [plan, image, publish-immutable, prepare-draft,
+            stable-channel-transaction, promote-aliases, publish, publish-minor]
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the trusted workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: .trusted-release
+      - name: Fail when a required phase was skipped, failed or unverified
+        working-directory: .trusted-release
+        env:
+          RELEASE_PUBLISH: ${{ needs.plan.outputs.publish }}
+          RELEASE_CHANNEL: ${{ needs.plan.outputs.channel }}
+          RESULT_PLAN: ${{ needs.plan.result }}
+          RESULT_IMAGE: ${{ needs.image.result }}
+          RESULT_IMMUTABLE: ${{ needs.publish-immutable.result }}
+          RESULT_DRAFT: ${{ needs.prepare-draft.result }}
+          RESULT_TRANSACTION: ${{ needs.stable-channel-transaction.result }}
+          RESULT_ALIASES: ${{ needs.promote-aliases.result }}
+          RESULT_PUBLISH: ${{ needs.publish.result }}
+          RESULT_MINOR: ${{ needs.publish-minor.result }}
+          OUT_VERIFIED: ${{ needs.publish-immutable.outputs.verified }}
+          OUT_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+          OUT_RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
+          OUT_ACTION: ${{ needs.stable-channel-transaction.outputs.action }}
+          OUT_ALIASES_VERIFIED: ${{ needs.promote-aliases.outputs.aliases_verified }}
+        run: |
+          python3 scripts/release.py verify-publication-phases \
+            --publish "$RELEASE_PUBLISH" --channel "$RELEASE_CHANNEL" \
+            --result-plan "$RESULT_PLAN" --result-image "$RESULT_IMAGE" \
+            --result-immutable "$RESULT_IMMUTABLE" --result-draft "$RESULT_DRAFT" \
+            --result-transaction "$RESULT_TRANSACTION" --result-aliases "$RESULT_ALIASES" \
+            --result-publish "$RESULT_PUBLISH" --result-minor "$RESULT_MINOR" \
+            --verified "$OUT_VERIFIED" --digest "$OUT_DIGEST" \
+            --release-id "$OUT_RELEASE_ID" --transaction-action "$OUT_ACTION" \
+            --aliases-verified "$OUT_ALIASES_VERIFIED"
