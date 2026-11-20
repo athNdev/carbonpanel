@@ -265,3 +265,70 @@ but does not close that gap. No live mTLS enrollment, registry/release,
 deployment or live host write was performed. Task-owned downloaded image and run
 artifacts in WSL temp remain local evidence unless explicitly retained/cleaned
 per task policy.
+
+## 13. 2026-11-20 follow-up: scanner fix, second boot and offline persistence inspection
+
+No downloads, installs, live guests, enrollment RPC, release or registry writes
+were performed. All inputs were the task-owned artifacts already present in the
+owned WSL instance: Docker image `oss377-qemu:local` (`qemu-system-x86_64`
+7.2.22), the pinned amd64 image (621284352 B, SHA256
+`04e8f2461a16a44e78a370284471f29616cdd9baf1893df25807b71f985b6c94`), the
+deterministic NoCloud seed/CIDATA ISO and the boot-attempt-3 qcow2 overlay.
+
+### Genuine harness defect fixed (grounded in captured output)
+
+The attempt-3 serial log contains this real first-boot success line at line 798:
+
+```
+[  377.903394] cloud-init[964]: {"approved_key_fingerprint": "244f267e2a63caed203d3218001f38cef356622a47b10f78fb8bdce9b90ca167", "bundle_path": "/var/lib/carbon-node/enrollment/enrollment-bundle.json", "contract_ref": "ADR0019 / proto/carbonpanel/v1/node_control.proto", "node_id": "node-94ed0fec32c64d9fb5236be6d57ec629"}
+```
+
+`ENROLL_STDOUT_RE` required compact JSON separators, so a successful boot whose
+stdout used `json.dumps` defaults (spaces after `:` and `,`) was reported
+`enroll_stdout_json: false` and `first_boot_identity_marker: INCONCLUSIVE` in
+section 12. The regex now tolerates that whitespace, and a regression test uses
+the exact captured line. Re-scanning the **unchanged** 88,272-byte attempt-3 log
+now reports `cloud_init_finished: true`, `enroll_stdout_json: true`,
+`node_id: node-94ed0fec32c64d9fb5236be6d57ec629`,
+`fingerprint: 244f267e2a63caed203d3218001f38cef356622a47b10f78fb8bdce9b90ca167`,
+`reboot_or_poweroff_signal: true`, and no high-signal secret markers.
+All 43 `test_node_vm_*` fixtures pass.
+
+### Second boot (boot-attempt-4)
+
+Started 2026-11-19T23:33:07Z from the **same** boot-attempt-3 overlay and seed
+ISO under TCG, in a disposable task-owned container. It booted to a login prompt
+and emitted cloud-init `init-local`, `init`, `modules:config`, `modules:final`
+and `finished` (84.32 s), reaching `network-online.target`; no enrollment JSON
+was re-emitted and no second clean reboot boundary occurred before the container
+was stopped with a bounded 30 s SIGTERM at 2026-11-20T00:02:10Z. The preserved
+serial log is 57,138 B, SHA256
+`4b0beafd53b52a558d1e8f44c0689897a04c0842d684edbb98d30bdd7230ec07`.
+
+### Read-only offline disk inspection
+
+After stopping the container, the booted overlay was converted to raw and its
+ext4 root partition (GPT start LBA 2099200) read with `debugfs` only. Observed:
+`/var/lib/carbon-node/enrollment/` mode `0700`, containing
+`enrollment-bundle.json` (1341 B, mode `0600`) and `enrollment-secret.bin`
+(32 B, mode `0600`). The bundle's `node_id` and fingerprint match the serial
+markers, `bootstrap_scopes` are the two expected enrollment scopes, and the
+exported shape is digest-only (salt, secret digest, CSR-pre, SPKI, fingerprint)
+with no secret/private-key/token field. `cloud-init-output.log` contains the
+first-boot enrollment JSON and both boots' cloud-init stages, confirming the
+first-boot identity step was not repeated after reboot.
+
+### What this does and does not establish
+
+| Gate | Value | Basis |
+| --- | --- | --- |
+| Cloud-init completion | PASS (first and second boot) | serial + `cloud-init-output.log` markers |
+| First-boot identity marker | PASS (after scanner fix) | real serial JSON + on-disk bundle identity |
+| Bundle/secret on disk, root-only modes | PASS | read-only ext4 `debugfs` inspection |
+| State survival across the first reboot | PASS (bounded) | second boot from post-reboot disk retained bundle/secret and did not re-enroll; not a second clean reboot cycle |
+| Effective network connectivity / daemon health | NOT TESTED | no in-guest health probe; `ci-info` at init showed `ens3` without an address; `network-online.target` reached but no connectivity assertion |
+| Live mTLS enrollment | NOT TESTED | no controller endpoint or enrollment traffic in this fixture |
+
+Whole-image byte provenance remains VERIFIED (section 3). This update does not
+claim live enrollment, network health, host provisioning, image publication or
+any release/registry mutation.

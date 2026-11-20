@@ -48,6 +48,32 @@ class SerialScanTests(unittest.TestCase):
         self.assertTrue(r["reboot_or_poweroff_signal"])
         self.assertEqual(r["simple_secret_markers_found"], [])
 
+    def test_detects_enroll_stdout_with_default_json_spacing(self):
+        # Exact first-boot marker line from the 2026-11-19 boot-attempt-3
+        # serial console. enroll.py uses json.dumps defaults (spaces after ':'
+        # and ','), so a compact-only regex falsely reported INCONCLUSIVE for
+        # a real successful boot where the marker was present in the log.
+        line = (
+            '[  377.903394] cloud-init[964]: {"approved_key_fingerprint": '
+            '"244f267e2a63caed203d3218001f38cef356622a47b10f78fb8bdce9b90ca167", '
+            '"bundle_path": "/var/lib/carbon-node/enrollment/enrollment-bundle.json", '
+            '"contract_ref": "ADR0019 / proto/carbonpanel/v1/node_control.proto", '
+            '"node_id": "node-94ed0fec32c64d9fb5236be6d57ec629"}'
+        )
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as f:
+            f.write(line + "\n")
+            path = f.name
+        try:
+            r = boot_qual.scan_serial_log(path)
+        finally:
+            os.unlink(path)
+        self.assertTrue(r["enroll_stdout_json"])
+        self.assertEqual(r["node_id"], "node-94ed0fec32c64d9fb5236be6d57ec629")
+        self.assertEqual(
+            r["fingerprint"],
+            "244f267e2a63caed203d3218001f38cef356622a47b10f78fb8bdce9b90ca167",
+        )
+
     def test_secret_marker_detection_is_high_signal_only(self):
         text = "BEGIN PRIVATE KEY\n-----END PRIVATE KEY-----\n"
         with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as f:

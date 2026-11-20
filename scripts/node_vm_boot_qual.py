@@ -40,9 +40,14 @@ except ImportError:  # pragma: no cover - CLI path
     import node_vm_verify_image as verify_image
 
 # enroll.py prints this JSON object to stdout on success (see enroll.py main()).
+# enroll.py prints with json.dumps defaults (spaces after ':' and ','), and the
+# serial console prefixes each line with a kernel/cloud-init timestamp. Tolerate
+# that whitespace so a real successful first boot is not reported INCONCLUSIVE.
 ENROLL_STDOUT_RE = re.compile(
-    r'\{"approved_key_fingerprint":"[0-9a-f]{64}",'
-    r'"bundle_path":"[^"]+","contract_ref":"[^"]+","node_id":"node-[0-9a-f]{32}"\}'
+    r'\{\s*"approved_key_fingerprint"\s*:\s*"[0-9a-f]{64}"\s*,'
+    r'\s*"bundle_path"\s*:\s*"[^"]+"\s*,'
+    r'\s*"contract_ref"\s*:\s*"[^"]+"\s*,'
+    r'\s*"node_id"\s*:\s*"node-[0-9a-f]{32}"\s*\}'
 )
 SECRET_MARKERS = (
     "BEGIN PRIVATE KEY",
