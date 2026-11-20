@@ -73,3 +73,32 @@ source depended on custom container settings, managed provider setup or
 attached modules that the archive cannot reproduce. A transport-only node
 requires a storage worker that supports exclusive directory allocation and
 free-space queries.
+
+## Operator controls
+
+The server detail page offers export as ZIP or gzip-compressed TAR with
+stopped-server consistency only. It shows a preparation state while the
+controller validates and compresses the data, then returns a download session
+through the same server-scoped authorized download transport used by other
+binary downloads. Before enabling the download, the console shows this notice:
+"Third-party plugin and mod files are included and can contain credentials.
+Review the archive before sharing it." The exporter filters only recognized
+managed settings and paths; it does not inspect the contents of third-party
+plugin or mod files for secrets. Export never stops a live server: an operator
+must stop it first, and the controller refuses a running server.
+
+The create-server wizard offers a Create-from-Archive path. It uploads the
+archive through the standard chunked upload service, previews it once after
+upload and again whenever the destination node changes, and shows the archive
+format, schema and exporter version, runtime defaults, file count, expanded
+and required bytes, destination availability, the chosen port and typed
+blockers or warnings. Runtime defaults can be applied to the editable form but
+the controller revalidates the upload and destination on create. A create
+submission keeps one request ID across retries; a refusal retains the
+completed upload so the operator can correct the destination and retry. A
+successful create discards the submission identity. Neither path stops an
+existing server.
+
+Export preparation, preview and create-from-archive validation use an extended
+one-hour client deadline and respect earlier cancellation. The console reports
+a preparation state rather than presenting these as ordinary metadata calls.

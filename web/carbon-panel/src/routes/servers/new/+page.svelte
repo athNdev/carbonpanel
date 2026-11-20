@@ -30,7 +30,8 @@ one at https://mozilla.org/MPL/2.0/.
 		Plus,
 		Upload,
 		Loader2,
-		X
+		X,
+		Archive
 	} from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
 	import type { CreateServerRequest } from '$lib/proto/carbonpanel/v1/server_pb';
@@ -53,6 +54,16 @@ one at https://mozilla.org/MPL/2.0/.
 	import AdditionalPortsEditor from '$lib/components/additional-ports-editor.svelte';
 	import DockerOverridesEditor from '$lib/components/docker-overrides-editor.svelte';
 	import { getUniqueDockerImages, getDockerImageDisplayName } from '$lib/utils';
+	import {
+		createArchiveImport,
+		type ArchiveImportState
+	} from '$lib/features/servers/archive-import-session';
+	import ArchivePreviewPanel from '$lib/features/servers/ArchivePreviewPanel.svelte';
+	import {
+		ARCHIVE_RPC_OPTIONS,
+		describePreview,
+		isSupportedArchiveFilename
+	} from '$lib/features/servers/archive-presentation';
 	import * as _ from 'lodash-es';
 
 	let loading = $state(false);
@@ -144,6 +155,98 @@ one at https://mozilla.org/MPL/2.0/.
 	let nodePlacementMode = $state<'auto' | 'manual'>('auto');
 	let selectedNodeId = $state<string>('');
 	let placementStrategy = $state<string>('least_memory');
+
+	// Create from archive (OSS-428). The upload stays owned by the wizard; the
+	// session only fences preview responses and holds the stable create id.
+	let archiveMode = $state(false);
+	let archiveUploadInput = $state<HTMLInputElement | null>(null);
+	let archiveUploading = $state(false);
+	let archiveUploadPercent = $state(0);
+	let archiveImportState = $state<ArchiveImportState>({
+		uploadId: '',
+		fileName: '',
+		preview: null,
+		preparing: false,
+		error: null,
+		requestId: ''
+	});
+
+	const archiveImport = createArchiveImport(
+		{
+			previewServerArchive: (request) =>
+				rpcClient.server.previewServerArchive(request, ARCHIVE_RPC_OPTIONS)
+		},
+		(state) => (archiveImportState = state)
+	);
+
+	const archivePreviewView = $derived(
+		archiveImportState.preview ? describePreview(archiveImportState.preview) : null
+	);
+
+	// Preview again whenever the destination changes. A plain variable (not
+	// $state) holds the last key so the effect does not retrigger itself.
+	let lastArchivePreviewKey = '';
+	$effect(() => {
+		const uploadId = archiveImportState.uploadId;
+		const nodeKey = nodePlacementMode === 'manual' ? selectedNodeId : '';
+		if (!archiveMode || !uploadId) {
+			lastArchivePreviewKey = '';
+			return;
+		}
+		const key = `${uploadId}:${nodeKey}`;
+		if (key === lastArchivePreviewKey) return;
+		lastArchivePreviewKey = key;
+		void archiveImport.refresh(nodeKey);
+	});
+
+	function chooseArchiveMode() {
+		archiveMode = true;
+		selectedModpack = null;
+		selectedBlueprintId = '';
+	}
+
+	function leaveArchiveMode() {
+		archiveMode = false;
+	}
+
+	async function handleArchiveUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+		if (!isSupportedArchiveFilename(file.name)) {
+			toast.error('Choose a .zip or .tar.gz server archive.');
+			return;
+		}
+		archiveUploading = true;
+		archiveUploadPercent = 0;
+		try {
+			const { sessionId } = await uploadFile(file, {
+				onProgress: (progress) => (archiveUploadPercent = Math.round(progress.percentComplete))
+			});
+			// A failed or refused preview leaves this upload in place for retry.
+			archiveImport.setUpload(sessionId, file.name);
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : 'Archive upload failed');
+		} finally {
+			archiveUploading = false;
+		}
+	}
+
+	function removeArchive() {
+		archiveImport.discard();
+	}
+
+	function applyArchiveDefaults() {
+		const preview = archiveImportState.preview;
+		if (!preview) return;
+		formData.mcVersion = preview.mcVersion;
+		formData.modLoader = preview.modLoader;
+		formData.loaderVersion = preview.loaderVersion;
+		formData.memory = preview.memory;
+		formData.maxPlayers = preview.maxPlayers;
+		toast.success('Archive runtime defaults applied. Review them before creating.');
+	}
 
 	// Modpack selection
 	let showModpackDialog = $state(false);
@@ -377,6 +480,7 @@ one at https://mozilla.org/MPL/2.0/.
 	async function selectModpack(modpack: IndexedModpack) {
 		selectedModpack = modpack;
 		selectedBlueprintId = '';
+		archiveMode = false;
 		showModpackDialog = false;
 
 		try {
@@ -451,6 +555,10 @@ one at https://mozilla.org/MPL/2.0/.
 				toast.error('Server name is required');
 				return false;
 			}
+			if (archiveMode && !archiveImportState.uploadId) {
+				toast.error('Upload a server archive to continue.');
+				return false;
+			}
 		}
 		if (step === 2) {
 			if (!useProxyMode && !validatePort(formData.port)) {
@@ -514,8 +622,36 @@ one at https://mozilla.org/MPL/2.0/.
 			return;
 		}
 
+		if (archiveMode) {
+			if (!archiveImportState.uploadId) {
+				toast.error('Upload a server archive before creating.');
+				currentStep = 0;
+				return;
+			}
+			if (archiveImportState.preparing) {
+				toast.error('Wait for the archive preview to finish before creating.');
+				currentStep = 0;
+				return;
+			}
+			if (archivePreviewView?.isBlocked) {
+				toast.error('This archive has blocking findings. Resolve them before creating.');
+				currentStep = 0;
+				return;
+			}
+			if (!archiveImportState.requestId) {
+				toast.error('Archive submission is not ready. Re-upload the archive and try again.');
+				currentStep = 0;
+				return;
+			}
+		}
+
 		loading = true;
-		const attempt = beginLifecycleRequest(formData.name.trim() || 'new-server', 'create');
+		// Archive submissions keep one request id across retries; a refusal does
+		// not discard the completed upload. Ordinary creates use the short-lived
+		// in-flight id as before.
+		const attempt = archiveMode
+			? null
+			: beginLifecycleRequest(formData.name.trim() || 'new-server', 'create');
 		try {
 			const selectedVersion = modpackVersions.find((v) => v.id === selectedVersionId);
 			const versionToSend =
@@ -532,10 +668,15 @@ one at https://mozilla.org/MPL/2.0/.
 				port: useProxyMode ? 0 : formData.port,
 				proxyHostname: useProxyMode && proxyEnabled ? formData.proxyHostname : '',
 				proxyListenerId: useProxyMode && proxyEnabled ? formData.proxyListenerId : '',
-				requestId: attempt.requestId
+				requestId: archiveMode ? archiveImportState.requestId : attempt!.requestId,
+				archiveUploadId: archiveMode ? archiveImportState.uploadId : ''
 			};
 
-			const response = await rpcClient.server.createServer(createRequest);
+			const response = await rpcClient.server.createServer(
+				createRequest,
+				archiveMode ? ARCHIVE_RPC_OPTIONS : undefined
+			);
+			if (archiveMode) archiveImport.succeeded();
 			const serverId = response.server?.id ?? '';
 
 			// Install the datapacks selected in the wizard (best-effort: the server
@@ -574,10 +715,12 @@ one at https://mozilla.org/MPL/2.0/.
 			goto(resolve('/servers/[id]', { id: serverId }));
 		} catch (error) {
 			toast.error(
-				`Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`
+				archiveMode
+					? `Create from archive failed: ${error instanceof Error ? error.message : 'Unknown error'}. The uploaded archive was kept; you can retry with the same submission.`
+					: `Failed to create server: ${error instanceof Error ? error.message : 'Unknown error'}`
 			);
 		} finally {
-			attempt.finish();
+			attempt?.finish();
 			loading = false;
 		}
 	}
@@ -692,10 +835,13 @@ one at https://mozilla.org/MPL/2.0/.
 							<button
 								type="button"
 								role="radio"
-								aria-checked={selectedModpack === null}
-								onclick={() => (selectedModpack = null)}
-								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack ===
-								null
+								aria-checked={!archiveMode && selectedModpack === null}
+								onclick={() => {
+									archiveMode = false;
+									selectedModpack = null;
+								}}
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {!archiveMode &&
+								selectedModpack === null
 									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
 									: 'border-border bg-background hover:bg-card'}"
 							>
@@ -712,10 +858,13 @@ one at https://mozilla.org/MPL/2.0/.
 							<button
 								type="button"
 								role="radio"
-								aria-checked={selectedModpack !== null}
-								onclick={() => (showModpackDialog = true)}
-								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {selectedModpack !==
-								null
+								aria-checked={!archiveMode && selectedModpack !== null}
+								onclick={() => {
+									leaveArchiveMode();
+									showModpackDialog = true;
+								}}
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {!archiveMode &&
+								selectedModpack !== null
 									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
 									: 'border-border bg-background hover:bg-card'}"
 							>
@@ -733,7 +882,122 @@ one at https://mozilla.org/MPL/2.0/.
 											: 'Select from favorite saved modpacks'}
 								</p>
 							</button>
+
+							<!-- Archive Tile (OSS-428) -->
+							<button
+								type="button"
+								role="radio"
+								aria-checked={archiveMode}
+								onclick={chooseArchiveMode}
+								class="focus-ring relative cursor-pointer rounded-none border p-4 text-left transition-colors {archiveMode
+									? 'border-primary bg-accent shadow-[inset_3px_0_0_var(--primary)]'
+									: 'border-border bg-background hover:bg-card'}"
+								data-testid="create-from-archive-tile"
+							>
+								<div class="flex items-center gap-2">
+									<Archive class="h-4 w-4 text-accent-text" />
+									<h4 class="text-sm font-semibold text-foreground">From Server Archive</h4>
+								</div>
+								<p class="mt-1 text-xs text-muted-foreground">
+									Create a new server from a portable ZIP or tar.gz export.
+								</p>
+							</button>
 						</div>
+
+						{#if archiveMode}
+							<div class="mt-3 space-y-4 rounded-none border border-primary bg-background p-4">
+								<div class="flex flex-wrap items-start justify-between gap-3">
+									<div>
+										<h4 class="text-sm font-semibold text-foreground">
+											Create from server archive
+										</h4>
+										<p class="mt-1 font-sans text-xs text-muted-foreground">
+											Upload a ZIP or tar.gz export. Preview validates every checksum and reports
+											runtime compatibility and destination capacity. A new name, node and free port
+											are required. No running server is stopped by this flow.
+										</p>
+									</div>
+									{#if archiveImportState.uploadId}
+										<button
+											type="button"
+											onclick={removeArchive}
+											class="shrink-0 cursor-pointer rounded-none bg-secondary px-3 py-1.5 font-mono text-xs text-foreground uppercase transition-colors hover:bg-destructive hover:text-primary-foreground"
+										>
+											Remove archive
+										</button>
+									{/if}
+								</div>
+
+								<div class="flex flex-wrap items-center gap-3">
+									<input
+										bind:this={archiveUploadInput}
+										type="file"
+										accept=".zip,.tar.gz,.tgz,application/zip,application/gzip"
+										class="hidden"
+										onchange={handleArchiveUpload}
+										data-testid="archive-file-input"
+									/>
+									<CarbonButton
+										kind="secondary"
+										size="sm"
+										disabled={archiveUploading}
+										onclick={() => archiveUploadInput?.click()}
+									>
+										{#if archiveUploading}
+											<Loader2 class="h-4 w-4 animate-spin" />
+											Uploading… {archiveUploadPercent}%
+										{:else}
+											<Upload class="h-4 w-4" />
+											{archiveImportState.uploadId ? 'Replace archive' : 'Upload archive'}
+										{/if}
+									</CarbonButton>
+									{#if archiveImportState.fileName}
+										<span class="min-w-0 truncate font-mono text-xs text-muted-foreground">
+											{archiveImportState.fileName}
+										</span>
+									{/if}
+								</div>
+
+								{#if archiveImportState.preparing}
+									<div
+										class="flex items-center gap-2 border border-border bg-card p-3"
+										role="status"
+									>
+										<CarbonInlineLoading
+											description="Preparing archive preview — validating every file can take a few minutes."
+										/>
+									</div>
+								{:else if archiveImportState.error}
+									<p
+										role="alert"
+										class="border-l-4 border-destructive bg-destructive/10 p-3 text-xs text-destructive-text"
+									>
+										{archiveImportState.error}
+									</p>
+								{:else if archivePreviewView}
+									<ArchivePreviewPanel
+										view={archivePreviewView}
+										nodeId={nodePlacementMode === 'manual' ? selectedNodeId : ''}
+										port={useProxyMode ? 0 : formData.port}
+									/>
+									<div class="flex flex-wrap items-center gap-3">
+										<button
+											type="button"
+											onclick={applyArchiveDefaults}
+											class="focus-ring cursor-pointer rounded-none border border-border bg-card px-3 py-1.5 font-mono text-xs text-accent-text uppercase transition-colors hover:bg-accent"
+										>
+											Apply runtime defaults
+										</button>
+										<span class="font-sans text-xs text-muted-foreground">
+											Applied defaults remain editable; the controller revalidates the archive on
+											create.
+										</span>
+									</div>
+								{:else if archiveImportState.uploadId}
+									<p class="font-sans text-xs text-muted-foreground">Preparing preview…</p>
+								{/if}
+							</div>
+						{/if}
 
 						{#if selectedModpack}
 							<div
@@ -1246,6 +1510,53 @@ one at https://mozilla.org/MPL/2.0/.
 							Designate physical cluster host and configure container startup options.
 						</p>
 					</div>
+
+					{#if archiveMode && archivePreviewView}
+						<div
+							class="space-y-2 rounded-none border border-border bg-background p-4"
+							data-testid="archive-destination-confirmation"
+						>
+							<p
+								class="font-mono text-xs font-semibold tracking-wider text-muted-foreground uppercase"
+							>
+								Archive destination
+							</p>
+							<div class="grid grid-cols-2 gap-2 font-mono text-xs sm:grid-cols-4">
+								<div>
+									<span class="block text-muted-foreground">Node</span>
+									<span class="text-foreground">
+										{nodePlacementMode === 'manual'
+											? selectedNodeId || 'not selected'
+											: 'automatic'}
+									</span>
+								</div>
+								<div>
+									<span class="block text-muted-foreground">Port</span>
+									<span class="text-foreground">{useProxyMode ? 'proxy' : formData.port}</span>
+								</div>
+								<div>
+									<span class="block text-muted-foreground">Required</span>
+									<span class="text-foreground">{archivePreviewView.requiredBytes}</span>
+								</div>
+								<div>
+									<span class="block text-muted-foreground">Available</span>
+									<span class="text-foreground">{archivePreviewView.availableBytes ?? '—'}</span>
+								</div>
+							</div>
+							<p
+								class="font-sans text-xs {archivePreviewView.capacity === 'insufficient'
+									? 'text-destructive-text'
+									: 'text-muted-foreground'}"
+							>
+								{archivePreviewView.capacityText}
+							</p>
+							{#if archivePreviewView.isBlocked}
+								<p class="font-sans text-xs text-destructive-text">
+									This archive has blocking findings and cannot be created.
+								</p>
+							{/if}
+						</div>
+					{/if}
 
 					<!-- Cluster Placement Mode (Carbon Tiles) -->
 					<div class="space-y-3">
