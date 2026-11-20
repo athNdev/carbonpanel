@@ -62,6 +62,7 @@
 - [Server work temp is on the data volume](server-work-temp.md) — Modpack downloads, extracts, and native libraries use /data/.tmp, not the 64 MiB noexec /tmp tmpfs.
 - [Shared lazy editor runtime](editor-runtime.md) — Both Monaco views share a cached lazy bootstrap while owning their editor models and pending-load lifetime.
 - [Shared provider request adapters](provider-adapters.md) — Modrinth and CurseForge request construction is shared while browse and Packwiz retain their presentation and version-selection policies.
+- [Split Nightly recovery](nightly-recovery.md) — Recover a Hub-only Nightly alias and separate docs baseline with digest-bound compensation and durable phase replay.
 - [Staged proto generation](proto-generation.md) — Generate and format proto outputs before replacing owned trees, and keep dependency installation frozen.
 - [Website and documentation publication](website-docs.md) — Publish the homepage and commit-pinned application documentation as one Pages artifact with independent presentation.
 - [Website and documentation publication — Decision](website-docs-decision.md) — The homepage and documentation share one artifact. Only the website deployment
