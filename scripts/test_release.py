@@ -3957,8 +3957,18 @@ class BrowserDomGateTests(unittest.TestCase):
                          if s.get("id") == "stable_chromium")
         self.assertEqual(provision["working-directory"],
                          ".trusted-release/scripts/manual-review/e2e")
+        rehearsal = next(s for s in jobs["rehearse-stable-docs"]["steps"]
+                         if s.get("name", "").startswith("Provision pinned Playwright"))
+        self.assertEqual(rehearsal["working-directory"], "scripts/manual-review/e2e")
         cd = (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8")
         self.assertIn("python3 scripts/browser_version_check.py", cd)
+        cd_jobs = yaml.safe_load(cd)["jobs"]
+        cd_steps = cd_jobs["channel-transaction"]["steps"]
+        provision = next(i for i, s in enumerate(cd_steps)
+                         if s.get("name") == "Provision Chromium for browser QA")
+        local = next(i for i, s in enumerate(cd_steps)
+                     if s.get("name", "").startswith("Browser-qualify Stable/Nightly"))
+        self.assertLess(provision, local)
 
 
 if __name__ == "__main__":

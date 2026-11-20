@@ -424,6 +424,11 @@ jobs:
         with:
           version: '1.50.0'
           github_token: ${{ github.token }}
+      - name: Provision pinned Playwright for the rehearsal browser gate
+        working-directory: scripts/manual-review/e2e
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
       - name: Qualify both rendered channels at the commit and staged OCI digest
         env:
           PLANNED_VERSION: ${{ needs.plan.outputs.version }}
