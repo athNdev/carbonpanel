@@ -2,6 +2,7 @@
 """Disposable registry and Pages fixtures for the OSS-413 recovery phases."""
 
 import json
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -60,7 +61,7 @@ class RecoveryRehearsal(unittest.TestCase):
         self.writes = []
 
     def observe(self):
-        state, _ = recovery.observe(self.plan, self.hub, self.ghcr, self.live.__getitem__)
+        state, _, _ = recovery.observe(self.plan, self.hub, self.ghcr, self.live.__getitem__)
         return state
 
     def mutate(self, action):
@@ -128,10 +129,20 @@ class RecoveryRehearsal(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside the plan"):
             self.observe()
 
-    def test_mixed_pages_or_openapi_fail_closed(self):
+    def test_mixed_known_pages_can_restore_but_cannot_advance(self):
         self.rehearse("stage")
+        self.rehearse("hub")
         self.live["/docs/nightly/schemav1.yaml"] = self.sites["final"]["/docs/nightly/schemav1.yaml"]
-        with self.assertRaisesRegex(ValueError, "no unique plan state"):
+        with self.assertRaisesRegex(ValueError, "no action is authorized"):
+            recovery.decide("docs", self.observe())
+        for phase in ("restore-hub", "restore-docs"):
+            self.rehearse(phase)
+        self.assertEqual(self.observe(), ("prior", "absent", "prior"))
+
+    def test_unowned_openapi_bytes_fail_closed(self):
+        self.rehearse("stage")
+        self.live["/docs/nightly/schemav1.yaml"] = b"unowned OpenAPI bytes"
+        with self.assertRaisesRegex(ValueError, "bytes outside the plan"):
             self.observe()
 
     def test_candidate_missing_or_different_and_prior_lost_fail(self):
@@ -212,7 +223,7 @@ class QualificationTests(unittest.TestCase):
             self.assertNotEqual(recovery.tree_digest(site), initial)
 
     def test_build_preserves_newer_verified_stable_identity(self):
-        stable = {"commit": PRIOR, "tag": "carbonpanel-v1.0.41", "version": "1.0.41",
+        stable = {"commit": PRIOR, "tag": "carbonpanel-v2.0.1", "version": "2.0.1",
                   "image": {"revision": PRIOR, "digest": PRIOR_IMAGE}}
         public = {"channels": {"stable": stable}}
         hub = RegistryFixture({"latest": PRIOR_IMAGE, "stable": PRIOR_IMAGE}, {PRIOR_IMAGE: PRIOR})
@@ -223,9 +234,20 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(len(builder.call_args_list), 2)
         for call in builder.call_args_list:
             env = call.kwargs["env"]
-            self.assertEqual(env["CARBONPANEL_STABLE_TAG"], "carbonpanel-v1.0.41")
+            self.assertEqual(env["CARBONPANEL_STABLE_TAG"], "carbonpanel-v2.0.1")
             self.assertEqual(env["CARBONPANEL_STABLE_REVISION"], PRIOR)
             self.assertEqual(env["CARBONPANEL_STABLE_DIGEST"], PRIOR_IMAGE)
+        final = {"channels": {**public["channels"], "nightly": {
+            "commit": TARGET, "image": {"revision": TARGET, "digest": TARGET_IMAGE}}},
+                 "promotion": {"state": "final"}}
+        recovery.verify_final_index(final, identity, CONFIG["candidate"])
+        final["channels"]["stable"] = json.loads(Path("docs/website-source.json").read_bytes())["channels"]["stable"]
+        with self.assertRaisesRegex(ValueError, "changes the publicly verified Stable identity"):
+            recovery.verify_final_index(final, identity, CONFIG["candidate"])
+        for fixture in (hub, ghcr):
+            del fixture.tags["stable"]
+        with self.assertRaisesRegex(ValueError, "Stable/latest aliases disagree"):
+            recovery.verify_stable(public, hub, ghcr)
         ghcr.tags["latest"] = DOCS_IMAGE
         with self.assertRaisesRegex(ValueError, "Stable/latest aliases disagree"):
             recovery.verify_stable(public, hub, ghcr)
@@ -252,6 +274,25 @@ class QualificationTests(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(ValueError, "unconfirmed status"):
                         recovery.require_failed_pages_run_settled("10")
+
+
+@unittest.skipUnless(os.environ.get("NIGHTLY_RECOVERY_RENDER_REHEARSAL") == "true",
+                     "requires Bun, Node and Buf")
+class RenderedPlanRehearsal(unittest.TestCase):
+    def test_candidate_and_final_docs_keep_the_newer_stable(self):
+        revision = recovery.run("git", "rev-parse", "HEAD").strip()
+        candidate = {"commit": revision, "digest": TARGET_IMAGE}
+        stable = {"commit": revision, "digest": PRIOR_IMAGE,
+                  "tag": "carbonpanel-v2.0.1", "version": "2.0.1"}
+        args = SimpleNamespace(run="fixture")
+        schema = f"0.0.0-nightly.{revision[:12]}"
+        staged = recovery.build_site(args, candidate, "candidate", stable)
+        recovery.check_routes(staged, recovery.prefix_for(revision), schema, guide_source=True)
+        final = recovery.build_site(args, candidate, "final", stable)
+        index = json.loads((final / "version-index.json").read_bytes())
+        recovery.verify_final_index(index, stable, candidate)
+        recovery.check_routes(final, "/docs/", stable["version"])
+        recovery.check_routes(final, "/docs/nightly/", schema, guide_source=True)
 
 
 if __name__ == "__main__":

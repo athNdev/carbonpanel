@@ -971,15 +971,30 @@ jobs:
     name: Nightly recovery rehearsal (mock services)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - run: python3 -m unittest scripts.test_nightly_recovery -v
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99
+        with:
+          version: '1.50.0'
+      - name: Exercise both real docs renders with fixture digests
+        env:
+          NIGHTLY_RECOVERY_RENDER_REHEARSAL: 'true'
+        run: python3 -m unittest scripts.test_nightly_recovery.RenderedPlanRehearsal -v
 
-  recover-nightly:
-    name: Recover split Nightly (${{ inputs.recovery }})
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.recovery != 'off'
+  plan-nightly-recovery:
+    name: Read Nightly recovery evidence (${{ inputs.recovery }})
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (inputs.recovery == 'prepare' || inputs.recovery == 'inspect')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -989,30 +1004,12 @@ jobs:
       actions: read
       contents: read
       deployments: read
-      packages: write
-      pages: write
-      id-token: write
-    environment: ${{ contains(fromJSON('["stage","docs","restore-docs"]'), inputs.recovery) && 'github-pages' || 'nightly-recovery' }}
+      pages: read
     env:
       GH_TOKEN: ${{ github.token }}
       RECOVERY_PHASE: ${{ inputs.recovery }}
       RECOVERY_EVIDENCE: ${{ inputs.recovery_evidence }}
     steps:
-      - name: Require explicit controls for recovery writes
-        if: inputs.recovery != 'prepare' && inputs.recovery != 'inspect'
-        env:
-          RECOVERY_ACTIVE: ${{ vars.NIGHTLY_RECOVERY_ACTIVE }}
-          LEGACY_SCHEDULE: ${{ vars.NIGHTLY_SCHEDULE_PUBLISH }}
-          LEGACY_RECONCILE: ${{ vars.CHANNEL_RECONCILE_PUBLISH }}
-          LEGACY_PUSH: ${{ inputs.push }}
-          LEGACY_NIGHTLY: ${{ inputs.nightly }}
-        run: |
-          test "$RECOVERY_ACTIVE" = true
-          test "$LEGACY_SCHEDULE" != true
-          test "$LEGACY_RECONCILE" != true
-          test "$LEGACY_PUSH" != true
-          test "$LEGACY_NIGHTLY" != true
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -1037,6 +1034,7 @@ jobs:
 
       - name: Preserve the split baseline and build the reviewed plan
         if: inputs.recovery == 'prepare'
+        shell: bash
         run: python3 -m scripts.nightly_recovery prepare --config "$RECOVERY_EVIDENCE" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Retain the exact prior, staged and final site trees before any public write
         if: inputs.recovery == 'prepare'
@@ -1049,7 +1047,75 @@ jobs:
           retention-days: 30
 
       - name: Bind the reviewed plan
-        if: inputs.recovery != 'prepare'
+        if: inputs.recovery == 'inspect'
+        run: |
+          run_id=$(jq -re '.run | tostring | select(test("^[1-9][0-9]*$"))' <<< "$RECOVERY_EVIDENCE")
+          digest=$(jq -re '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$RECOVERY_EVIDENCE")
+          {
+            echo "PLAN_RUN=$run_id"
+            echo "PLAN_DIGEST=$digest"
+          } >> "$GITHUB_ENV"
+      - name: Inspect the live recovery state without mutating the channel
+        if: inputs.recovery == 'inspect'
+        shell: bash
+        run: |
+          python3 -m scripts.nightly_recovery decide --phase inspect \
+            --plan-run "$PLAN_RUN" --plan-digest "$PLAN_DIGEST" > /dev/null
+          expected=$(sed -n 's/^expected=//p' "$GITHUB_OUTPUT")
+          python3 -m scripts.nightly_recovery verify --phase inspect \
+            --plan-run "$PLAN_RUN" --plan-digest "$PLAN_DIGEST" --expected "$expected" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Retain the inspection receipt
+        if: inputs.recovery == 'inspect'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-recovery-receipt
+          path: nightly-recovery-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
+  recover-nightly:
+    name: Recover split Nightly (${{ inputs.recovery }})
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      contains(fromJSON('["stage","hub","docs","commit","restore-hub","restore-docs"]'), inputs.recovery)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      deployments: read
+      packages: write
+      pages: write
+      id-token: write
+    environment: ${{ contains(fromJSON('["stage","docs","restore-docs"]'), inputs.recovery) && 'github-pages' || 'nightly-recovery' }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RECOVERY_PHASE: ${{ inputs.recovery }}
+      RECOVERY_EVIDENCE: ${{ inputs.recovery_evidence }}
+    steps:
+      - name: Require explicit controls for recovery writes
+        env:
+          RECOVERY_ACTIVE: ${{ vars.NIGHTLY_RECOVERY_ACTIVE }}
+          LEGACY_SCHEDULE: ${{ vars.NIGHTLY_SCHEDULE_PUBLISH }}
+          LEGACY_RECONCILE: ${{ vars.CHANNEL_RECONCILE_PUBLISH }}
+          LEGACY_PUSH: ${{ inputs.push }}
+          LEGACY_NIGHTLY: ${{ inputs.nightly }}
+        run: |
+          test "$RECOVERY_ACTIVE" = true
+          test "$LEGACY_SCHEDULE" != true
+          test "$LEGACY_RECONCILE" != true
+          test "$LEGACY_PUSH" != true
+          test "$LEGACY_NIGHTLY" != true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind the reviewed plan
         run: |
           run_id=$(jq -re '.run | tostring | select(test("^[1-9][0-9]*$"))' <<< "$RECOVERY_EVIDENCE")
           digest=$(jq -re '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$RECOVERY_EVIDENCE")
@@ -1058,7 +1124,6 @@ jobs:
             echo "PLAN_DIGEST=$digest"
           } >> "$GITHUB_ENV"
       - name: Re-observe the independent baselines and determine the single permitted action
-        if: inputs.recovery != 'prepare'
         id: decision
         run: |
           python3 -m scripts.nightly_recovery decide --phase "$RECOVERY_PHASE" \
@@ -1097,7 +1162,7 @@ jobs:
           python3 -m scripts.nightly_recovery alias --phase "$RECOVERY_PHASE" \
             --plan-run "$PLAN_RUN" --plan-digest "$PLAN_DIGEST"
       - name: Verify the requested post-state and record observed evidence
-        if: inputs.recovery != 'prepare'
+        shell: bash
         env:
           EXPECTED_STATE: ${{ steps.decision.outputs.expected }}
         run: |
@@ -1105,7 +1170,6 @@ jobs:
             --plan-run "$PLAN_RUN" --plan-digest "$PLAN_DIGEST" --expected "$EXPECTED_STATE" \
             | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Retain the recovery receipt
-        if: inputs.recovery != 'prepare'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: nightly-recovery-receipt

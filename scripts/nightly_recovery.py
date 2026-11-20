@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -38,6 +39,10 @@ TRANSITIONS = {
 FINAL_ROLLBACK = {
     "restore-hub": (("candidate", "absent", "final"), ("prior", "absent", "final"), "hub-prior"),
     "restore-docs": (("prior", "absent", "final"), ("prior", "absent", "prior"), "prior"),
+}
+MIXED_ROLLBACK = {
+    "restore-hub": (("candidate", "absent", "mixed"), ("prior", "absent", "mixed"), "hub-prior"),
+    "restore-docs": (("prior", "absent", "mixed"), ("prior", "absent", "prior"), "prior"),
 }
 
 
@@ -336,7 +341,8 @@ def verify_stable(index, hub, ghcr):
                for tag in ("latest", "stable")}
     parity = {"docker_hub": expected, "ghcr": expected}
     require(aliases["latest"] == parity and
-            aliases["stable"] in (parity, {"docker_hub": None, "ghcr": None}),
+            (aliases["stable"] == parity or (legacy and all(value is None
+                                                            for value in aliases["stable"].values()))),
             "Public Stable/latest aliases disagree with the Stable docs")
     return {**stable, "aliases": aliases,
             "platforms": {
@@ -381,8 +387,11 @@ def observe_pages(plan, get=get_live):
         data = get(path)
         observed[path] = None if data is None else digest(data)
     matches = [name for name, expected in plan["probes"].items() if expected == observed]
-    require(len(matches) == 1, "Public Pages bytes match no unique plan state")
-    return matches[0]
+    if len(matches) == 1:
+        return matches[0], observed
+    require(all(any(expected[path] == value for expected in plan["probes"].values())
+                for path, value in observed.items()), "Public Pages returned bytes outside the plan")
+    return "mixed", observed
 
 
 def observe(plan, hub, ghcr, get=get_live):
@@ -392,16 +401,20 @@ def observe(plan, hub, ghcr, get=get_live):
     mapping = ({prior: "prior", target: "candidate"}, {None: "absent", target: "candidate"})
     require(all(alias in states for alias, states in zip(aliases, mapping)),
             "Nightly alias is outside the plan; investigate without changing it")
-    docs = observe_pages(plan, get)
-    return (mapping[0][aliases[0]], mapping[1][aliases[1]], docs), dict(zip(("docker_hub", "ghcr"), aliases))
+    docs, probes = observe_pages(plan, get)
+    state = (mapping[0][aliases[0]], mapping[1][aliases[1]], docs)
+    return state, dict(zip(("docker_hub", "ghcr"), aliases)), probes
 
 
 def decide(phase, state):
     if phase == "inspect":
         return None, state
+    if phase == "restore-hub" and state == ("prior", "absent", "prior"):
+        return None, state
     options = [TRANSITIONS[phase]]
-    if phase in FINAL_ROLLBACK:
-        options.append(FINAL_ROLLBACK[phase])
+    for alternative in (FINAL_ROLLBACK, MIXED_ROLLBACK):
+        if phase in alternative:
+            options.append(alternative[phase])
     # Any verified post-state means the requested write already landed.
     for _, after, _ in options:
         if state == after:
@@ -446,6 +459,16 @@ def build_site(args, candidate, state, stable):
                     "--expect-promotion-state", state, "--expect-promotion-receipt", receipt],
                    check=True, env=env)
     return Path(".website-build/site")
+
+
+def verify_final_index(index, stable, candidate):
+    # build_site validates the rendered channel contract against both exact
+    # pinned identities. Recheck the assembled final artifact before binding.
+    actual_stable = stable_identity(index)
+    require(actual_stable == {key: stable[key] for key in actual_stable},
+            "Final artifact changes the publicly verified Stable identity")
+    require(marker(index, "nightly") == {key: candidate[key] for key in ("commit", "digest")}
+            and index["promotion"]["state"] == "final", "Final marker does not bind the candidate")
 
 
 def preserve_prior(root):
@@ -503,13 +526,7 @@ def prepare(args, hub, ghcr):
     check_routes(sites["stage"], prefix_for(candidate["commit"]), schema, guide_source=True)
     shutil.copytree(build_site(args, candidate, "final", stable), sites["final"])
     shutil.copytree(sites["stage"] / candidate_path, sites["final"] / candidate_path)
-    final_index = json.loads(read(sites["final"], "/version-index.json"))
-    ok, problems = pages.validate_channel_contract(final_index)
-    require(ok, "; ".join(problems))
-    require(stable_identity(final_index) == stable_identity(prior_index),
-            "Final artifact changes the publicly verified Stable identity")
-    require(marker(final_index, "nightly") == {key: candidate[key] for key in ("commit", "digest")}
-            and final_index["promotion"]["state"] == "final", "Final marker does not bind the candidate")
+    verify_final_index(json.loads(read(sites["final"], "/version-index.json")), stable, candidate)
     check_routes(sites["final"], "/docs/", stable_schema)
     check_routes(sites["final"], "/docs/nightly/", schema, guide_source=True)
     probes = {name: site_probes(site, candidate["commit"]) for name, site in sites.items()}
@@ -519,7 +536,7 @@ def prepare(args, hub, ghcr):
     plan = {"version": 1, "run": args.run, "config": config, "ci": ci, "images": images, "stable": stable,
             "pages_baseline": baseline, "probes": probes,
             "trees": {name: tree_digest(site) for name, site in sites.items()}}
-    state, aliases = observe(plan, hub, ghcr)
+    state, aliases, _ = observe(plan, hub, ghcr)
     require(state == ("prior", "absent", "prior"),
             "Live surfaces changed during preparation")
     plan["prior_aliases"] = aliases
@@ -551,15 +568,19 @@ def load_plan(args):
 def phase_check(args, plan, hub, ghcr):
     require(qualify_images(plan["config"], hub, ghcr) == plan["images"],
             "Digest-addressed image evidence changed")
-    state, _ = observe(plan, hub, ghcr)
+    state, _, _ = observe(plan, hub, ghcr)
     action, expected = decide(args.phase, state)
-    if action:
-        require_pages_settled(args.run)
     check_stable(args, plan, hub, ghcr)
     if action and args.phase in ("stage", "hub", "docs", "commit"):
         candidate = plan["config"]["candidate"]["commit"]
         require(api("commits/main")["sha"] == candidate, "Candidate is no longer main HEAD")
         verify_ci(candidate)
+    if action:
+        require_pages_settled(args.run)
+        refreshed, _, _ = observe(plan, hub, ghcr)
+        require(refreshed in (state, expected), "Nightly surfaces changed before the write")
+        state = refreshed
+        action, expected = decide(args.phase, state)
     return state, action, expected
 
 
@@ -580,7 +601,7 @@ def verify_after(args, plan, hub, ghcr):
     last = None
     for attempt in range(8):
         try:
-            observed, aliases = observe(plan, hub, ghcr)
+            observed, aliases, probes = observe(plan, hub, ghcr)
             require(observed == expected, f"Observed {observed}; expected {expected}")
             break
         except (ValueError, OSError) as error:
@@ -594,14 +615,17 @@ def verify_after(args, plan, hub, ghcr):
     final = observed == ("candidate", "candidate", "final")
     deployment = None
     if final:
-        deployment, reason = pages.pages_baseline(REPOSITORY)
-        require(deployment and deployment["artifact_verified"], reason)
+        with tempfile.TemporaryDirectory(prefix="nightly-final-pages-") as temporary:
+            actual = Path(temporary) / "site"
+            deployment = preserve_prior(actual)
+            require(tree_digest(actual) == plan["trees"]["final"],
+                    "Successful Pages deployment artifact differs from the reviewed final tree")
     receipt = {"plan": args.plan_digest, "run": args.run, "phase": args.phase,
                "state": dict(zip(("docker_hub", "ghcr", "pages"), observed)),
                "observed_at": datetime.now(timezone.utc).isoformat(),
                "prior_aliases": plan["prior_aliases"], "observed_aliases": aliases,
                "config": plan["config"], "images": evidence, "ci": plan["ci"], "stable": plan["stable"],
-               "pages_baseline": plan["pages_baseline"], "probes": plan["probes"][observed[2]],
+               "pages_baseline": plan["pages_baseline"], "probes": probes,
                "pages_final": deployment,
                "verified_final": final}
     Path("nightly-recovery-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n",

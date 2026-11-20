@@ -27,9 +27,10 @@ both aliases and the canonical docs agree, use the normal channel workflow.
 3. Quiesce alias and Pages writers for the recovery window. Set
    `NIGHTLY_SCHEDULE_PUBLISH` and `CHANNEL_RECONCILE_PUBLISH` to a value other
    than `true`, set `NIGHTLY_RECOVERY_ACTIVE=true`, and let in-flight writes
-   finish. Coordinate any Stable or docs-only dispatch with the release lead
-   until recovery ends. The recovery phases use the shared `pages-deploy`
-   lock. Select main and leave the developer `push` and `nightly` inputs off.
+   finish. Pause and drain automatic docs-only publication as well as Stable
+   and other Pages writes for the full window. The shared `pages-deploy` lock
+   serializes each phase and is released between dispatches. Select main and
+   leave the developer `push` and `nightly` inputs off.
 4. Dispatch CD with `recovery=prepare` and `recovery_evidence` in this shape:
 
    ~~~json
@@ -85,8 +86,10 @@ the phase's pre-state or post-state is intact, retry that phase. For an
 asynchronous Pages submission, the previous deploy must have reached a
 definitive provider state before another mutation. If an interrupted run
 has no identifiable Pages deployment, have the release lead resolve it
-with the provider before proceeding. Mixed HTML, OpenAPI, marker bytes,
-unknown lookups and unrelated tag moves stop further writes.
+with the provider before proceeding. Mixed Pages bytes cannot advance the
+promotion. A settled failed deployment can be restored when every probed route
+matches a known plan value. Unknown bytes, unknown lookups and unrelated tag
+moves stop further writes.
 
 - After `stage`, run `restore-docs` to deploy the exact prior Pages tree.
 - After `hub` or `docs`, run `restore-hub`, then `restore-docs`. The Hub
