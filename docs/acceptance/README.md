@@ -45,9 +45,11 @@ equal the merge author.
 `LIVE-VERIFIED` is strict: `deploy.job` must name the publishing job, that job
 must be present with `conclusion == success`, the deploy run SHA must equal the
 recorded `revision_sha`, and the revision must be either the PR merge SHA or a
-separately recorded `trusted_deploy_sha`. A skipped, failed or missing named job
-and a build-only run all fail closed. Optional jobs may be skipped; no job may
-fail, be cancelled or time out.
+separately recorded `trusted_deploy_sha`. The GitHub audit verifies the run's
+workflow name against `deploy.workflow` and uses GitHub's commit comparison to
+confirm the trusted SHA descends from the PR merge. A skipped, failed or missing
+named job and a build-only run all fail closed. Optional jobs may be skipped;
+no job may fail, be cancelled or time out.
 
 ## Adding a Done candidate
 

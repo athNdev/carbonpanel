@@ -8,6 +8,7 @@ package native
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -31,6 +32,39 @@ func TestBuildPlanQualifiedAndRefused(t *testing.T) {
 	bad := BuildPlan("node-fixture", f, fixtureTime())
 	if bad.Refusal == "" || bad.Report.GetStatus() != v1.NodePreflightStatus_NODE_PREFLIGHT_STATUS_FAILED {
 		t.Fatalf("failed plan not fail-closed: %+v", bad)
+	}
+	if _, err := bad.Daemon.BuildManifest(); err == nil {
+		t.Fatal("plan refused by the host gates still produced a daemon manifest")
+	}
+}
+
+func TestBuildPlanRefusesInvalidDaemonOptions(t *testing.T) {
+	for _, mode := range []DaemonMode{ModeRootless, ModeRootful} {
+		t.Run(string(mode), func(t *testing.T) {
+			facts := qualifiedFacts()
+			facts.UserNamespaces = mode == ModeRootless
+			facts.ChosenExecRoot = facts.ChosenDataRoot
+			if sel := ApplyGates(facts); sel.Mode != mode {
+				t.Fatalf("fixture must pass host gates, got mode %q", sel.Mode)
+			}
+			const refusal = "OPTIONS_DEDICATED_ROOTS"
+			plan := BuildPlan("node-fixture", facts, fixtureTime())
+			if plan.Refusal != refusal || plan.Selection.Mode != ModeNone || plan.Report.GetStatus() != v1.NodePreflightStatus_NODE_PREFLIGHT_STATUS_FAILED {
+				t.Fatalf("daemon options did not fail preflight: %+v", plan)
+			}
+			if !slices.ContainsFunc(plan.Report.GetChecks(), func(check *v1.NodePreflightCheck) bool {
+				return check.GetCode() == refusal && check.GetStatus() == v1.NodePreflightStatus_NODE_PREFLIGHT_STATUS_FAILED && check.GetRemedy() != ""
+			}) {
+				t.Fatalf("missing actionable daemon refusal in report: %v", plan.Report)
+			}
+			want := []v1.NodeCapability{v1.NodeCapability_NODE_CAPABILITY_STORAGE_WORKER, v1.NodeCapability_NODE_CAPABILITY_DRAIN}
+			if got := plan.Capabilities.GetCapabilities(); !slices.Equal(got, want) {
+				t.Fatalf("refused plan granted %v, want %v", got, want)
+			}
+			if _, err := plan.Daemon.BuildManifest(); err == nil {
+				t.Fatal("plan with invalid daemon options produced a manifest")
+			}
+		})
 	}
 }
 
@@ -88,5 +122,36 @@ func TestRunnerComposesSharedContract(t *testing.T) {
 	}
 	if err := r.AuthorizeNodeOperation(node, "node", "node:heartbeat"); err != nil {
 		t.Fatalf("legitimate node operation refused: %v", err)
+	}
+}
+
+// Authenticated enrollment/captive daemon lifecycle: enrolled-node preflight
+// reports are authorized only within the node's own object and granted scopes.
+func TestRunnerAuthorizePreflightLifecycleRefusals(t *testing.T) {
+	r, err := NewRunner(TopologyDirectTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap := Credential{Kind: CredentialBootstrap}
+	operator := Credential{Kind: CredentialOperator}
+	reporter := Credential{Kind: CredentialNode, ObjectID: "node", Scopes: []string{"node:report", "node:heartbeat"}}
+
+	if err := r.AuthorizePreflight(reporter, "node", []string{"node:report"}); err != nil {
+		t.Fatalf("legitimate preflight report refused: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		cred Credential
+		obj  string
+		sc   []string
+	}{
+		{"bootstrap domain crossing", bootstrap, "node", []string{"node:report"}},
+		{"operator domain crossing", operator, "node", []string{"node:report"}},
+		{"cross node object", reporter, "other-node", []string{"node:report"}},
+		{"over-scope report", reporter, "node", []string{"node:report", "nodes:create"}},
+	} {
+		if err := r.AuthorizePreflight(tc.cred, tc.obj, tc.sc); !errors.Is(err, ErrScope) {
+			t.Fatalf("%s: expected scope refusal, got %v", tc.name, err)
+		}
 	}
 }

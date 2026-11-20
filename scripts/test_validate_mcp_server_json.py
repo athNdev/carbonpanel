@@ -21,6 +21,17 @@ import validate_mcp_server_json as validator  # noqa: E402
 BASELINE = json.loads((ROOT / "docker" / "mcp.server.json").read_text(encoding="utf-8"))
 
 
+def published_listing() -> dict:
+    document = copy.deepcopy(BASELINE)
+    document["packages"][0]["identifier"] = document["packages"][0]["identifier"].replace(
+        "0" * 64, "a" * 64
+    )
+    return {
+        "server": document,
+        "_meta": {validator.OFFICIAL_REGISTRY_METADATA: {"status": "active"}},
+    }
+
+
 def errors_for(document: dict, **kwargs) -> list[str]:
     errors, _warnings = validator.validate(document, **kwargs)
     return errors
@@ -48,17 +59,10 @@ class ManifestContractTests(unittest.TestCase):
             any("placeholder" in error for error in errors_for(BASELINE, require_real_digest=True))
         )
 
-    def test_latest_version_is_refused_everywhere(self):
-        for path in (("version",), ("packages", 0, "version")):
-            document = copy.deepcopy(BASELINE)
-            target = document
-            for key in path[:-1]:
-                target = target[key]
-            target[path[-1]] = "latest"
-            self.assertTrue(
-                any("moving reference" in error for error in errors_for(document)),
-                f"expected moving-reference error for {path}",
-            )
+    def test_latest_server_version_is_refused(self):
+        document = copy.deepcopy(BASELINE)
+        document["version"] = "latest"
+        self.assertTrue(any("moving reference" in error for error in errors_for(document)))
 
     def test_latest_identifier_tag_is_refused(self):
         document = copy.deepcopy(BASELINE)
@@ -101,6 +105,22 @@ class ManifestContractTests(unittest.TestCase):
         document["packages"][0]["registryType"] = "npm"
         self.assertTrue(any("registryType" in error for error in errors_for(document)))
 
+    def test_registry_incompatible_legacy_oci_fields_are_refused(self):
+        for field, value in (("registryBaseUrl", "https://ghcr.io"), ("version", "v0.1.0"),
+                             ("fileSha256", "a" * 64)):
+            with self.subTest(field=field):
+                document = copy.deepcopy(BASELINE)
+                document["packages"][0][field] = value
+                self.assertTrue(any(field in error for error in errors_for(document)))
+
+    def test_oci_image_and_tag_must_match_server_manifest(self):
+        document = copy.deepcopy(BASELINE)
+        package = document["packages"][0]
+        package["identifier"] = package["identifier"].replace("carbonpanel-mcp", "other-package")
+        self.assertTrue(any("identifier must be" in error for error in errors_for(document)))
+        package["identifier"] = BASELINE["packages"][0]["identifier"].replace(":v0.1.0@", ":v0.1.1@")
+        self.assertTrue(any("tag must equal" in error for error in errors_for(document)))
+
     def test_stdio_transport_and_docker_hint_are_required(self):
         document = copy.deepcopy(BASELINE)
         document["packages"][0]["transport"] = {"type": "streamable-http"}
@@ -131,6 +151,34 @@ class ManifestContractTests(unittest.TestCase):
             broken["version"] = "latest"
             path.write_text(json.dumps(broken), encoding="utf-8")
             self.assertEqual(validator.main(["--file", str(path)]), 1)
+
+
+class PublishedListingTests(unittest.TestCase):
+    def test_exact_active_version_and_digest_are_accepted(self):
+        listing = published_listing()
+        self.assertEqual(validator.verify_listing(listing, listing["server"]), [])
+
+    def test_search_response_is_not_exact_version_evidence(self):
+        listing = published_listing()
+        self.assertTrue(validator.verify_listing({"servers": [listing]}, listing["server"]))
+
+    def test_other_version_wrong_digest_and_inactive_entry_are_refused(self):
+        expected = published_listing()["server"]
+        for change in ("version", "digest", "status", "name"):
+            with self.subTest(change=change):
+                listing = published_listing()
+                server = listing["server"]
+                package = server["packages"][0]
+                if change == "version":
+                    server["version"] = "v0.1.1"
+                    package["identifier"] = package["identifier"].replace(":v0.1.0@", ":v0.1.1@")
+                elif change == "digest":
+                    package["identifier"] = package["identifier"].replace("a" * 64, "b" * 64)
+                elif change == "status":
+                    listing["_meta"][validator.OFFICIAL_REGISTRY_METADATA]["status"] = "deprecated"
+                else:
+                    server["name"] = "io.github.other/carbon-panel"
+                self.assertTrue(validator.verify_listing(listing, expected))
 
 
 if __name__ == "__main__":

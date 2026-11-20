@@ -57,8 +57,8 @@ func TestRunJournaledReplaysCompletedRequest(t *testing.T) {
 func TestRunJournaledOutcomeKeepsLockOnUncertainEffect(t *testing.T) {
 	store := openJournalStore(t)
 	server := &db.Server{ID: "srv", NodeID: "node", ContainerID: "cont"}
-	outcome, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-uncertain",
-		func() (bool, error) { return true, errors.New("restart not observed") })
+	outcome, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-uncertain", "",
+		func(context.Context) (bool, error) { return true, errors.New("restart not observed") })
 	if err == nil || !strings.Contains(err.Error(), "restart not observed") {
 		t.Fatalf("want the original uncertainty, got %v", err)
 	}
@@ -80,8 +80,8 @@ func TestRunJournaledOutcomeKeepsLockOnUncertainEffect(t *testing.T) {
 		t.Fatalf("view = %+v, want immediate unknown with resolve action and held lock", view)
 	}
 	// A replayed request id must not start a second attempt.
-	if _, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-uncertain",
-		func() (bool, error) { t.Fatal("must not retry"); return false, nil }); !errors.Is(err, ErrInProgress) {
+	if _, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-uncertain", "",
+		func(context.Context) (bool, error) { t.Fatal("must not retry"); return false, nil }); !errors.Is(err, ErrInProgress) {
 		t.Fatalf("replay error = %v, want ErrInProgress", err)
 	}
 }
@@ -89,8 +89,8 @@ func TestRunJournaledOutcomeKeepsLockOnUncertainEffect(t *testing.T) {
 func TestRunJournaledOutcomeDefiniteFailureReleasesLock(t *testing.T) {
 	store := openJournalStore(t)
 	server := &db.Server{ID: "srv", NodeID: "node", ContainerID: "cont"}
-	_, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-failed",
-		func() (bool, error) { return false, errors.New("archive rejected") })
+	_, err := RunJournaledOutcome(context.Background(), store, logger.New(), server, "world-bind", "req-failed", "",
+		func(context.Context) (bool, error) { return false, errors.New("archive rejected") })
 	if err == nil {
 		t.Fatal("want the failure")
 	}

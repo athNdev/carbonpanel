@@ -57,26 +57,47 @@ func preflightReportAt(nodeID string, sel Selection, ts *timestamppb.Timestamp) 
 	return report
 }
 
-// Capabilities converts qualified facts and the selected mode into the
-// shared capability snapshot. Capabilities that were not observed are omitted,
-// never assumed. A privileged-port capability is only advertised when the
-// host allows unprivileged binds up to port 1024 or an explicit grant exists.
+// Capabilities converts qualified facts and the selected mode into the shared
+// capability snapshot. NodeCapability is a USABLE feature grant: the controller
+// gates operations on it, so a grant is withheld unless a captive daemon mode
+// actually qualified (sel.Mode != ModeNone). This is a single boundary guard for
+// every daemon-dependent feature; no individual mount condition is special.
+// Host diagnostics (cgroup_version, storage_driver, systemd, distro, ...) stay
+// in the snapshot even when no mode qualifies, so a fail-closed host is still
+// inspectable. Agent facilities that work independently of a daemon mode
+// (storage worker, drain) remain granted.
 func Capabilities(f HostFacts, sel Selection) *v1.NodeCapabilities {
-	caps := []v1.NodeCapability{
-		v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET,
-		v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS,
-		v1.NodeCapability_NODE_CAPABILITY_CONTAINERD_NAMESPACE,
+	caps := make([]v1.NodeCapability, 0, 8)
+	qualified := sel.Mode != ModeNone
+	if qualified {
+		// Isolation grants additionally require their own mount/path to be
+		// accepted. A collision refuses that grant without weakening others in
+		// a qualified mode.
+		if !hasFailedCode(sel.Checks, CodePrivateSocketCollision) {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_PRIVATE_SOCKET)
+		}
+		if !hasFailedCode(sel.Checks, CodeDedicatedRootCollision) {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_DEDICATED_ROOTS)
+		}
+		if !hasFailedCode(sel.Checks, CodeNamespaceCollision) {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CONTAINERD_NAMESPACE)
+		}
+	}
+	// Independently usable agent facilities are retained on a fail-closed host.
+	caps = append(caps,
 		v1.NodeCapability_NODE_CAPABILITY_STORAGE_WORKER,
 		v1.NodeCapability_NODE_CAPABILITY_DRAIN,
-	}
-	if sel.Mode == ModeRootless {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_ROOTLESS)
-	}
-	if f.CgroupVersion == "v2" && hasAll(f.DelegatedControllers, "cpu", "io", "memory", "pids") {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CGROUP_V2)
-	}
-	if f.PrivilegedPortStart <= 1024 {
-		caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_PRIVILEGED_PORT)
+	)
+	if qualified {
+		if sel.Mode == ModeRootless {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_ROOTLESS)
+		}
+		if f.CgroupVersion == "v2" && hasAll(f.DelegatedControllers, "cpu", "cpuset", "io", "memory", "pids") {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_CGROUP_V2)
+		}
+		if f.PrivilegedPortStart <= 1024 {
+			caps = append(caps, v1.NodeCapability_NODE_CAPABILITY_PRIVILEGED_PORT)
+		}
 	}
 	return &v1.NodeCapabilities{
 		ProtocolVersion:     ProtocolVersion,
@@ -92,6 +113,15 @@ func Capabilities(f HostFacts, sel Selection) *v1.NodeCapabilities {
 		Systemd:             f.Systemd,
 		Capabilities:        caps,
 	}
+}
+
+func hasFailedCode(checks []Check, code string) bool {
+	for _, c := range checks {
+		if c.Code == code && !c.Passed && !c.Unknown {
+			return true
+		}
+	}
+	return false
 }
 
 // NegotiateVersion implements the shared version-skew outcome for this mode.
