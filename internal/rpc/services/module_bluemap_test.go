@@ -9,11 +9,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -27,6 +30,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
+	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 )
 
 func strPtrFixture(s string) *string { return &s }
@@ -533,4 +537,136 @@ func TestBuiltinBlueMapStartImmediatelyRequiresModulesStartFixture(t *testing.T)
 		t.Fatalf("admin create+start must succeed, got %v", err)
 	}
 	_ = tpl
+}
+
+func TestMountedManagedBlueMapHoldsTransitionThroughRuntime(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		startStatus      int
+		wantModuleStatus storage.ModuleStatus
+	}{
+		{"successful start", http.StatusNoContent, storage.ModuleStatusRunning},
+		{"failed daemon start", http.StatusInternalServerError, storage.ModuleStatusError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			const serverID = "srv-managed-lease"
+			const containerID = "abcdef0123456789"
+			store, _ := blueMapFixtureStore(t, ctx, serverID, "default", "actual_world")
+			t.Cleanup(func() { _ = store.Close() })
+			creating, starting := make(chan struct{}, 1), make(chan struct{}, 1)
+			createDone, startDone := make(chan struct{}), make(chan struct{})
+			var allowCreate, allowStart sync.Once
+			unblockCreate := func() { allowCreate.Do(func() { close(createDone) }) }
+			unblockStart := func() { allowStart.Do(func() { close(startDone) }) }
+			dockerAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/_ping":
+					w.Header().Set("Api-Version", "1.45")
+				case strings.Contains(r.URL.Path, "/images/") && strings.HasSuffix(r.URL.Path, "/json"):
+					_, _ = w.Write([]byte(`{"Id":"sha256:fixture"}`))
+				case strings.HasSuffix(r.URL.Path, "/containers/create"):
+					creating <- struct{}{}
+					<-createDone
+					_, _ = w.Write([]byte(`{"Id":"` + containerID + `"}`))
+				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/json"):
+					_, _ = w.Write([]byte(`{"State":{"Status":"created"}}`))
+				case strings.HasSuffix(r.URL.Path, "/containers/"+containerID+"/start"):
+					starting <- struct{}{}
+					<-startDone
+					w.WriteHeader(tc.startStatus)
+					if tc.startStatus != http.StatusNoContent {
+						_, _ = w.Write([]byte(`{"message":"fixture daemon refused startup"}`))
+					}
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(dockerAPI.Close)
+			log := logger.New()
+			dockerClient, err := docker.NewClient(strings.Replace(dockerAPI.URL, "http://", "tcp://", 1), log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = dockerClient.Close() })
+			t.Cleanup(func() {
+				unblockCreate()
+				unblockStart()
+				waitCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_ = docker.WaitForServerTransition(waitCtx, serverID)
+			})
+			svc := &ModuleService{
+				store: store, enforcer: mustEnforcer(t, store), storageResolver: nodestorage.NewResolver(nil),
+				docker: dockerClient, moduleManager: module.NewManager(store, dockerClient, nil, &config.Config{}, nil, log), log: log,
+			}
+			_, handler := carbonpanelv1connect.NewModuleServiceHandler(svc, connect.WithInterceptors(
+				connect.UnaryInterceptorFunc(func(next connect.UnaryFunc) connect.UnaryFunc {
+					return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+						return next(auth.WithUser(ctx, &auth.AuthenticatedUser{ID: "admin-1", Roles: []string{"admin"}}), req)
+					}
+				}),
+			))
+			panel := httptest.NewServer(handler)
+			defer panel.Close()
+			client := carbonpanelv1connect.NewModuleServiceClient(panel.Client(), panel.URL)
+			install := func() (*connect.Response[v1.CreateModuleResponse], error) {
+				return client.CreateModule(ctx, connect.NewRequest(&v1.CreateModuleRequest{
+					Name: "BlueMap", ServerId: serverID, TemplateId: blueMapTemplateID, StartImmediately: true,
+					Metadata: map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"},
+				}))
+			}
+			waitFor := func(signal <-chan struct{}, phase string) {
+				t.Helper()
+				select {
+				case <-signal:
+				case <-ctx.Done():
+					t.Fatalf("daemon did not reach %s: %v", phase, ctx.Err())
+				}
+			}
+			assertHeld := func(phase string) {
+				t.Helper()
+				lease, err := docker.TryBeginServerTransition(serverID)
+				lease.Release()
+				if !errors.Is(err, docker.ErrTransitionInFlight) {
+					t.Fatalf("migration could claim the transition during %s: %v", phase, err)
+				}
+			}
+			result, err := install()
+			if err != nil {
+				t.Fatal(err)
+			}
+			moduleID := result.Msg.GetModule().GetId()
+			if moduleID == "" {
+				t.Fatal("install returned no renderer")
+			}
+			waitFor(creating, "container create")
+			assertHeld("container create")
+			unblockCreate()
+			waitFor(starting, "container start")
+			assertHeld("container start")
+			retry, err := install()
+			if err != nil || retry.Msg.GetModule().GetId() != moduleID {
+				t.Fatalf("same-assignment install did not adopt the committed renderer: %v %v", retry, err)
+			}
+			unblockStart()
+			if err := docker.WaitForServerTransition(ctx, serverID); err != nil {
+				t.Fatalf("startup did not release the transition: %v", err)
+			}
+			lease, err := docker.TryBeginServerTransition(serverID)
+			if err != nil {
+				t.Fatalf("migration still blocked after daemon completed: %v", err)
+			}
+			defer lease.Release()
+			row, err := store.GetModule(ctx, moduleID)
+			if err != nil || row.Status != tc.wantModuleStatus {
+				t.Fatalf("module after transition release: %v %v", row, err)
+			}
+			if _, err := install(); connect.CodeOf(err) != connect.CodeAborted {
+				t.Fatalf("install bypassed another owner's transition: %v", err)
+			}
+		})
+	}
 }

@@ -39,8 +39,8 @@ const (
 // parallel unguarded install RPC.
 //
 // handled=true means the caller must return resp/err without creating a module.
-// When handled=false the caller MUST call release() after it has persisted the
-// module, so concurrent retries cannot slip between the check and the create.
+// When handled=false the caller must finalize, committing config and handing
+// the transition to the runtime worker after the module row has persisted.
 // A module that already exists is ADOPTED: no create, start, reconfigure,
 // restart or config overwrite; every concurrent caller receives that same row.
 func (s *ModuleService) prepareBuiltinBlueMap(
@@ -87,10 +87,15 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	}
 	// Module creation and config staging must see the same owning world as a
 	// server migration. Re-read under the existing lifecycle transition.
-	transition, err = docker.TryBeginServerTransition(server.ID)
-	if err != nil {
-		return fail(connect.NewError(connect.CodeAborted, err))
+	startingID := s.blueMapStarting[server.ID]
+	if startingID == "" {
+		transition, err = docker.TryBeginServerTransition(server.ID)
+		if err != nil {
+			return fail(connect.NewError(connect.CodeAborted, err))
+		}
 	}
+	// A managed worker already owns the transition when startingID is set.
+	// Under the singleton lock this path may only adopt that committed row.
 	if err := s.store.AssertNoServerOperation(ctx, server.ID); err != nil {
 		return fail(connect.NewError(connect.CodeAborted, err))
 	}
@@ -126,6 +131,9 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		if currentModule == nil || module.ID < currentModule.ID {
 			currentModule = module
 		}
+	}
+	if startingID != "" && (currentModule == nil || currentModule.ID != startingID) {
+		return fail(connect.NewError(connect.CodeAborted, docker.ErrTransitionInFlight))
 	}
 	if currentModule != nil {
 		resp, convErr := s.blueMapResponse(ctx, currentModule)
@@ -235,10 +243,12 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 
 	// finalize is idempotent. ok=true commits staged config after the module
 	// row persists; ok=false (or persistence failure) rolls staging back.
-	// The singleton lock is always released exactly once.
+	// After config commit the worker owns the lifecycle transition, while
+	// concurrent requests can inspect the committed singleton under the mutex.
 	var once sync.Once
+	var commitErr error
+	serverID, startImmediately := server.ID, msg.StartImmediately
 	fin := func(ok bool, moduleID string) error {
-		var commitErr error
 		once.Do(func() {
 			if ok {
 				commitErr = stager.Commit()
@@ -257,7 +267,24 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 				}
 			}
 			_ = stager.Close()
-			release()
+			if !ok || commitErr != nil {
+				release()
+				return
+			}
+			if s.blueMapStarting == nil {
+				s.blueMapStarting = make(map[string]string)
+			}
+			s.blueMapStarting[serverID] = moduleID
+			s.blueMapInstallMu.Unlock()
+			go func() {
+				defer func() {
+					s.blueMapInstallMu.Lock()
+					delete(s.blueMapStarting, serverID)
+					transition.Release()
+					s.blueMapInstallMu.Unlock()
+				}()
+				s.createModuleContainer(moduleID, startImmediately)
+			}()
 		})
 		return commitErr
 	}

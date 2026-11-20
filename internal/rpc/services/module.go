@@ -54,6 +54,7 @@ type ModuleService struct {
 	// converge on one module per server; it is explicitly NOT a cross-process
 	// atomic reservation (ADR 0011/0015).
 	blueMapInstallMu sync.Mutex
+	blueMapStarting  map[string]string // server ID to committed module ID, under blueMapInstallMu
 }
 
 // ModuleAuthorizer is the mapped RBAC seam used for managed-install create and
@@ -769,20 +770,20 @@ func (s *ModuleService) CreateModule(ctx context.Context, req *connect.Request[v
 			// while still holding the singleton lock with a bounded context.
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("managed BlueMap config was rolled back: %w", commitErr))
 		}
+	} else {
+		go s.createModuleContainer(module.ID, msg.StartImmediately)
 	}
-
-	// Create container in background
-	go func() {
-		bgCtx := context.Background()
-		if err := s.moduleManager.CreateAndStartModule(bgCtx, module.ID, msg.StartImmediately); err != nil {
-			s.log.Error("Failed to create module container: %v", err)
-		}
-	}()
 
 	createdByUsername := s.resolveCreatedByUsername(ctx, module.CreatedBy)
 	return connect.NewResponse(&v1.CreateModuleResponse{
 		Module: dbModuleToProto(module, server.Name, template.Name, server.ProxyHostname, createdByUsername),
 	}), nil
+}
+
+func (s *ModuleService) createModuleContainer(moduleID string, startImmediately bool) {
+	if err := s.moduleManager.CreateAndStartModule(context.Background(), moduleID, startImmediately); err != nil {
+		s.log.Error("Failed to create module container: %v", err)
+	}
 }
 
 func (s *ModuleService) UpdateModule(ctx context.Context, req *connect.Request[v1.UpdateModuleRequest]) (*connect.Response[v1.UpdateModuleResponse], error) {
