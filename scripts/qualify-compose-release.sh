@@ -90,6 +90,7 @@ assert_panel_mounts() {
 }
 
 game_script=$(dirname "$0")/qualify-compose-game.mjs
+world_swap_script=$(dirname "$0")/qualify-world-swap.mjs
 echo "=== Clean candidate Compose install and Minecraft join ($mode) ==="
 state="$work/clean-candidate"
 render "$CANDIDATE_IMAGE" "$state"
@@ -206,6 +207,13 @@ test "$(cat "$state/game.json.container")" = "$game_id"
 privileges "$game_id" > "$out/game-privileges-after.json"
 cmp "$out/game-privileges-before.json" "$out/game-privileges-after.json"
 echo "Panel and game effective Docker privileges and mounts unchanged"
+
+if [[ "${QUALIFY_WORLD_SWAP:-false}" == "true" ]]; then
+  echo "=== Running-JVM World Library swap, rejoin and preserved-data proof ==="
+  QUALIFY_STATE="$state/game.json" QUALIFY_DATA_DIR="$state/data" \
+    QUALIFY_WORK="$work" QUALIFY_STAGED_RUN="${QUALIFY_STAGED_RUN:?}" \
+    QUALIFY_STAGED_SHA="$STAGED_SHA" node "$world_swap_script"
+fi
 
 echo "=== Copy-back and rejoin through the prior stable image ==="
 compose stop carbon-panel
