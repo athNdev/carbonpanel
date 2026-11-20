@@ -17,6 +17,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
+	"github.com/athNdev/carbon-panel/internal/staging"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
@@ -228,6 +229,61 @@ func TestLevelChangeAtSharedTransitionBarrierRefusesBeforeStop(t *testing.T) {
 				t.Fatalf("same-level bind = %+v, %v", result, err)
 			}
 		})
+	}
+}
+
+func TestBindRechecksLevelAfterScheduledBatchWinsPreflight(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(dataRoot, "world", "level.dat")
+	if err := os.MkdirAll(filepath.Dir(original), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(original, []byte("existing world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(libraryRoot, "rev.zip")
+	if err := os.WriteFile(archive, multiFamilyTestArchive(t, []string{"world"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := seedWorldServer(t, store, dataRoot)
+	rev := seedRevision(t, store, "wld_scheduled", archive, strings.Repeat("a", 64))
+	when := time.Now().Add(-time.Minute)
+	if _, err := store.StageServerConfigUpdate(ctx, server.ID, map[string]any{"level": "next"}, storage.UpdateWindowAtTime, &when, 0); err != nil {
+		t.Fatal(err)
+	}
+	life := &fakeLifecycle{running: true}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, life, libraryRoot)
+	applied := false
+	binder.FreeBytes = func(ctx context.Context, _, _ string) (int64, error) {
+		// The batch runs after bind captures the level and before it acquires
+		// the durable journal. The owned reread must catch the new level.
+		err := staging.Sweep(ctx, store, nil, time.Now(), nil, func(_ context.Context, _ *storage.Server, _ staging.Plan) error {
+			return nil
+		})
+		applied = err == nil
+		return 1 << 30, err
+	}
+	if _, err := binder.Bind(ctx, BindRequest{ServerID: server.ID, RevisionID: rev.ID, RequestID: "bind-after-batch"}); err == nil ||
+		!strings.Contains(err.Error(), "level changed before world bind owned the operation") {
+		t.Fatalf("bind after batch = %v", err)
+	}
+	if !applied || life.stops != 0 || life.starts != 0 {
+		t.Fatalf("batch ran = %t, lifecycle = %+v", applied, life)
+	}
+	if got, err := os.ReadFile(original); err != nil || string(got) != "existing world" {
+		t.Fatalf("old world = %q, %v", got, err)
+	}
+	ops, err := store.ListServerOperations(ctx)
+	if err != nil || len(ops) != 2 || ops[0].Kind != "apply-batch" || ops[0].Phase != storage.ServerOperationComplete ||
+		ops[1].Kind != "world-bind" || ops[1].Phase != storage.ServerOperationFailed || ops[1].ActiveServer != nil {
+		t.Fatalf("journal = %+v, %v", ops, err)
 	}
 }
 

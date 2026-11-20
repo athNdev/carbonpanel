@@ -4,6 +4,7 @@ package services
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -459,13 +460,17 @@ func TestConfiguredLevelIsAuthoritativeForPreviewAndBind(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("preview configured level: %v", err)
 	}
-	// A stale caller level is not allowed to retarget new work; the canonical
-	// configured level is used for storage and the audit event.
-	differing, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+	_, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
 		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "configured-level",
 	}))
-	if err != nil || differing.Msg.GetOutcome() != "success" {
-		t.Fatalf("bind with differing request level = %+v, %v", differing, err)
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("bind with differing request level = %v", err)
+	}
+	out, err := svc.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: " " + level + " ", RevisionId: rev.ID, RequestId: "configured-level",
+	}))
+	if err != nil || out.Msg.GetOutcome() != "success" {
+		t.Fatalf("bind with configured request level = %+v, %v", out, err)
 	}
 	binding, err := store.GetWorldBinding(ctx, server.ID, level)
 	if err != nil || binding.LevelName != level {
@@ -545,20 +550,22 @@ func TestMountedConnectBindsNamedBackupWithRootCompanions(t *testing.T) {
 	}
 	liveHash := sha256Hex(readFileBytes(t, liveCompanion))
 
-	sum := writeLayoutArchive(t, filepath.Join(libraryRoot, "named.zip"), map[string]string{
+	archivePath := filepath.Join(libraryRoot, "named.zip")
+	sum := writeLayoutArchive(t, archivePath, map[string]string{
 		"world/level.dat":               "published-world",
 		"config/companion.txt":          "archived-root-companion",
+		"revision.zip/companion.txt":    "archive-name-companion",
 		"world/datapacks/in-family.txt": "archived-in-family",
 	})
 	rev := &storage.WorldRevision{
 		ID: worldlib.RevisionID(sum), WorldEntryID: "wld_named", SHA256: sum,
-		EntryCount: 3, MCVersion: "1.21.1", ModLoader: "VANILLA",
-		StoragePath: filepath.Join(libraryRoot, "named.zip"),
+		EntryCount: 4, MCVersion: "1.21.1", ModLoader: "VANILLA",
+		StoragePath: archivePath,
 	}
 	if err := store.PutWorldRevision(ctx, rev); err != nil {
 		t.Fatal(err)
 	}
-	life := &worldTestLifecycle{}
+	life := &worldTestLifecycle{running: true}
 	svc := newWorldRPCService(t, store, libraryRoot, life)
 	pattern, handler := carbonpanelv1connect.NewWorldServiceHandler(svc)
 	mux := http.NewServeMux()
@@ -577,11 +584,29 @@ func TestMountedConnectBindsNamedBackupWithRootCompanions(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("mounted server preview: %v", err)
 	}
-	out, err := client.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
-		ServerId: server.ID, LevelName: " world ", RevisionId: rev.ID, RequestId: "mounted-named-bind",
-	}))
-	if err != nil || out.Msg.GetOutcome() != "success" {
+	bind := func(level, revision, key, window string) (*connect.Response[v1.BindWorldResponse], error) {
+		return client.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+			ServerId: server.ID, LevelName: level, RevisionId: revision, RequestId: key, Window: window,
+		}))
+	}
+	if _, err := bind("another", rev.ID, "mounted-mismatch", ""); connect.CodeOf(err) != connect.CodeInvalidArgument ||
+		!strings.Contains(err.Error(), "does not match configured level") {
+		t.Fatalf("mounted explicit target mismatch = %v", err)
+	}
+	if ops, err := store.ListServerOperations(ctx); err != nil || len(ops) != 0 || life.stops != 0 || life.starts != 0 {
+		t.Fatalf("fresh refusal changed journal or lifecycle: %+v, %v, %+v", ops, err, life)
+	}
+	archiveHash := sha256Hex(readFileBytes(t, archivePath))
+	const key = "mounted-named-bind"
+	out, err := bind("", rev.ID, key, "")
+	if err != nil || out.Msg.GetOutcome() != "success" || out.Msg.GetBinding().GetLevelName() != "world" {
 		t.Fatalf("mounted named bind = %+v, %v", out, err)
+	}
+	for _, level := range []string{"", " world "} {
+		again, err := bind(level, rev.ID, key, "")
+		if err != nil || again.Msg.GetOperationId() != out.Msg.GetOperationId() {
+			t.Fatalf("equivalent retry for level %q = %+v, %v", level, again, err)
+		}
 	}
 	if got := string(readFileBytes(t, filepath.Join(dataRoot, "world", "level.dat"))); got != "published-world" {
 		t.Fatalf("published world = %q", got)
@@ -599,6 +624,72 @@ func TestMountedConnectBindsNamedBackupWithRootCompanions(t *testing.T) {
 	if err != nil || binding.LevelName != "world" {
 		t.Fatalf("binding canonical level = %+v, %v", binding, err)
 	}
+	cfg, err := store.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom := "level-name=new-save"
+	cfg.CustomServerProperties = &custom
+	if err := store.SaveServerConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CheckCompatibility(ctx, connect.NewRequest(&v1.CheckCompatibilityRequest{
+		RevisionId: rev.ID, ServerId: server.ID,
+	})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("preview with changed configured level = %v", err)
+	}
+	if _, err := bind("", rev.ID, "new-bind-wrong-layout", ""); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("fresh bind with changed configured level = %v", err)
+	}
+
+	// Simulate completion before the audit event was recorded.
+	if err := store.DB().Where("event = ? AND request_id = ?", activity.EventWorldBind, key).
+		Delete(&storage.ActivityLog{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []struct{ level, revision, window string }{
+		{"new-save", rev.ID, ""},
+		{"world", "different-revision", ""},
+		{"world", rev.ID, "next_restart"},
+	} {
+		if _, err := bind(input.level, input.revision, key, input.window); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+			t.Fatalf("changed replay payload %+v = %v", input, err)
+		}
+	}
+	for _, level := range []string{"", " world "} {
+		again, err := bind(level, rev.ID, key, "")
+		if err != nil || again.Msg.GetOperationId() != out.Msg.GetOperationId() || again.Msg.GetBinding().GetId() != binding.ID {
+			t.Fatalf("historical retry for level %q = %+v, %v", level, again, err)
+		}
+	}
+	var event storage.ActivityLog
+	if err := store.DB().Where("event = ? AND request_id = ?", activity.EventWorldBind, key).First(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+	var properties map[string]string
+	if err := json.Unmarshal([]byte(event.Properties), &properties); err != nil ||
+		properties["level_name"] != "world" || properties["revision_id"] != rev.ID ||
+		properties["operation_id"] != out.Msg.GetOperationId() {
+		t.Fatalf("recovered audit properties = %v, %v", properties, err)
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, key); got != 1 {
+		t.Fatalf("recovered audit count = %d", got)
+	}
+	if ops, err := store.ListServerOperations(ctx); err != nil || len(ops) != 1 || life.stops != 1 || life.starts != 1 {
+		t.Fatalf("replays or refusals changed journal or lifecycle: %+v, %v, %+v", ops, err, life)
+	}
+	if got := sha256Hex(readFileBytes(t, archivePath)); got != archiveHash {
+		t.Fatalf("stored revision changed: %s -> %s", archiveHash, got)
+	}
+	if got := string(readFileBytes(t, filepath.Join(dataRoot, "world", "level.dat"))); got != "published-world" {
+		t.Fatalf("original world changed during replay: %q", got)
+	}
+	for _, rootCompanion := range []string{"new-save", "revision.zip"} {
+		if _, err := os.Stat(filepath.Join(dataRoot, rootCompanion)); !os.IsNotExist(err) {
+			t.Fatalf("unexpected live directory %q: %v", rootCompanion, err)
+		}
+	}
+
 }
 
 func readFileBytes(t *testing.T, path string) []byte {

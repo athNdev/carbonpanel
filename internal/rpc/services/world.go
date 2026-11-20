@@ -340,35 +340,9 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 	if err != nil {
 		return nil, worldError(err)
 	}
-	// Gate the revision layout BEFORE any journal row or live-world mutation.
-	// Store revisions from before this gate are checked too, so an unsupported
-	// flat archive cannot interrupt a running server at bind time.
-	revision, err := s.store.GetWorldRevision(ctx, msg.GetRevisionId())
-	if err != nil {
-		return nil, notFoundOrInternal(err, "revision not found")
-	}
-	archivePath, err := worldlib.ResolveRevisionArchive(s.libraryRoot, revision.StoragePath)
-	if err != nil {
-		return nil, worldError(err)
-	}
-	levelName, err := authoritativeLevelName(ctx, s.store, msg.GetServerId())
-	if err != nil {
-		return nil, err
-	}
-	// Keep the caller's original level ONLY for proving a completed replay;
-	// new work uses the canonical configured level below.
-	replayLevel := strings.TrimSpace(msg.GetLevelName())
-	layout, err := worldlib.ValidateRevisionArchive(ctx, archivePath)
-	if err != nil {
-		return nil, worldError(err)
-	}
-	if _, err := layout.SelectFamilies(levelName); err != nil {
-		return nil, worldError(err)
-	}
 	result, err := s.binder.Bind(ctx, worldlib.BindRequest{
-		ServerID: msg.GetServerId(), LevelName: levelName, ReplayLevelName: replayLevel,
-		RevisionID: msg.GetRevisionId(),
-		Window:     msg.GetWindow(), RequestID: msg.GetRequestId(), NodeID: server.NodeID,
+		ServerID: msg.GetServerId(), LevelName: msg.GetLevelName(), RevisionID: msg.GetRevisionId(),
+		Window: msg.GetWindow(), RequestID: msg.GetRequestId(), NodeID: server.NodeID,
 		Generation: generation, Operator: operatorName(ctx),
 	})
 	if err != nil {
@@ -385,20 +359,14 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 			}
 			return connect.NewResponse(out), nil
 		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, connect.NewError(connect.CodeNotFound, err)
+		}
 		return nil, worldError(err)
 	}
-	if result != nil && result.Outcome == "success" {
-		requestID := strings.TrimSpace(result.RequestID)
-		if requestID == "" {
-			requestID = strings.TrimSpace(msg.GetRequestId())
-		}
-		operationID := result.OperationID
-		if operationID != "" && requestID != "" {
-			s.auditWorldOperation(ctx, req, activity.EventWorldBind, msg.GetServerId(), requestID, levelName, msg.GetRevisionId(), operationID)
-		}
-		if operationID != "" {
-			result.OperationID = operationID
-		}
+	if result.Outcome == "success" && result.Binding != nil && result.OperationID != "" && result.RequestID != "" {
+		binding := result.Binding
+		s.auditWorldOperation(ctx, req, activity.EventWorldBind, binding.ServerID, result.RequestID, binding.LevelName, binding.RevisionID, result.OperationID)
 	}
 	out := &v1.BindWorldResponse{
 		OperationId: result.OperationID, Outcome: result.Outcome,
@@ -734,7 +702,8 @@ func worldError(err error) error {
 	case errors.Is(err, worldlib.ErrRemoteUnavailable), errors.Is(err, nodestorage.ErrUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)
 	case errors.Is(err, worldlib.ErrTwoWriters), errors.Is(err, worldlib.ErrStaleGeneration),
-		errors.Is(err, worldlib.ErrBindRequestConflict), errors.Is(err, operation.ErrAlreadyFailed),
+		errors.Is(err, worldlib.ErrBindRequestConflict), errors.Is(err, worldlib.ErrBindLevelUnknown),
+		errors.Is(err, operation.ErrAlreadyFailed),
 		errors.Is(err, worldlib.ErrUncertainOutcome), errors.Is(err, worldlib.ErrDiskBudget),
 		errors.Is(err, storage.ErrWorldRevisionBound), errors.Is(err, storage.ErrWorldBindingStale),
 		errors.Is(err, storage.ErrWorldRevisionImmutable):
