@@ -10,6 +10,13 @@ code_refs:
   - internal/rpc/services/server_archive_import.go
   - internal/nodestorage/allocation.go
   - proto/carbonpanel/v1/server.proto
+  - web/carbon-panel/src/lib/features/servers/archive-presentation.ts
+  - web/carbon-panel/src/lib/features/servers/archive-import-session.ts
+  - web/carbon-panel/src/lib/features/servers/ServerArchiveExport.svelte
+  - web/carbon-panel/src/lib/features/servers/ArchiveExportPanel.svelte
+  - web/carbon-panel/src/lib/features/servers/ArchivePreviewPanel.svelte
+  - web/carbon-panel/src/routes/servers/new/+page.svelte
+  - web/carbon-panel/src/routes/servers
 sources:
   - title: Server portability archive format
     resource: ../../docs/server-portability.md
@@ -29,3 +36,12 @@ sources:
 - Keep upload ownership, server-create authorization and retry idempotency scoped
   to the submitting principal. Allocate the destination exclusively on the
   chosen node before committing the new server row.
+- The console offers ZIP and tar.gz export with stopped-server consistency only;
+  it never stops a live server. It must show the third-party credential
+  disclosure before enabling an authorized download and must not claim to detect
+  secrets inside opaque plugin or mod files.
+- Create-from-Archive uploads once, previews after upload and again when the
+  destination changes, and renders typed findings and node capacity. Fence
+  preview responses by upload and destination. Reuse one create request ID
+  across retries and retain a completed upload after a refusal; release that
+  identity only after a committed create.
