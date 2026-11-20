@@ -22,5 +22,9 @@ sources:
   a draft is promoted to a prerelease. Verification requires the enabled
   `multi-user.target.wants` first-boot symlink and a real receipt with signed
   Debian 13 InRelease digest, publishable flag and complete package hashes.
+- Draft promotion uses the release-id API URL from `gh release view --json`,
+  never `GET /releases/tags`; `ct_release_draft_gate.py` proves the view is
+  still a draft for the exact tag and target commit and that attached asset
+  names/digests match before the draft becomes a prerelease.
 - A successful fixture run is not a live `pct` import/boot proof. No such
   runner exists in this lane; record the limitation rather than claiming one.

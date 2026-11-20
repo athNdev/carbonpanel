@@ -227,6 +227,7 @@ jobs:
       - name: Create draft prerelease only (never product release or latest)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
           SHA: ${{ github.sha }}
           EXPECTED: ${{ needs.qualify.outputs.artifact_sha256 }}
@@ -242,13 +243,14 @@ jobs:
             "$RUNNER_TEMP/ct-release/carbonpanel-controller-ct.tar.zst" \
             "$RUNNER_TEMP/ct-release/carbonpanel-controller-ct.tar.zst.sha256" \
             "$receipt"
-          assets=$(gh api "repos/${{ github.repository }}/releases/tags/$VERSION" \
-            --jq '.assets[] | "\(.name) \(.digest)"')
-          for line in \
-            "carbonpanel-controller-ct.tar.zst sha256:$EXPECTED" \
-            "carbonpanel-controller-ct.tar.zst.sha256 sha256:$checksum_sha" \
-            "package-receipt.json sha256:$receipt_sha"; do
-            printf '%s\n' "$assets" | grep -Fxq "$line" \
-              || { echo "draft asset mismatch: $line"; exit 1; }
-          done
+          # gh release view uses GraphQL and can see drafts; REST releases/tags
+          # cannot. Validate the immutable release-id URL before any write.
+          view=$(gh release view "$VERSION" --repo "$REPO" \
+            --json apiUrl,isDraft,tagName,targetCommitish)
+          api_url=$(python3 scripts/ct_release_draft_gate.py draft-url \
+            --view "$view" --version "$VERSION" --sha "$SHA")
+          assets=$(gh api "$api_url" --jq '.assets[] | "\(.name) \(.digest)"')
+          python3 scripts/ct_release_draft_gate.py verify-assets \
+            --assets "$assets" --archive-sha "$EXPECTED" \
+            --checksum-sha "$checksum_sha" --receipt-sha "$receipt_sha"
           gh release edit "$VERSION" --draft=false --prerelease --latest=false
