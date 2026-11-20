@@ -4,7 +4,7 @@ title: Portable node installer
 description: One guest-side Linux installer shared by the host-native, VM and LXC managed modes; it owns only caller-named directories and produces ADR 0019 enrollment material.
 status: stable
 owners: [oss-runtime]
-code_refs: [internal/nodeinstall, internal/noderuntime/enroll, cmd/carbon-node-installer, scripts/install-node.sh, internal/rpc/enrollment_integration_test.go, docs/node-installer.md]
+code_refs: [internal/nodeinstall, internal/noderuntime/enroll, cmd/carbon-node-installer, scripts/install-node.sh, scripts/qualify-node-installer-systemd.sh, internal/rpc/enrollment_integration_test.go, docs/node-installer.md]
 sources:
   - title: Portable Linux node installer
     resource: ../../docs/node-installer.md

@@ -4,7 +4,7 @@ title: "Portable node installer — Rule + Why"
 description: "The portable installer in internal/nodeinstall and cmd/carbon-node-installer"
 status: stable
 owners: [oss-runtime]
-code_refs: [internal/nodeinstall, internal/noderuntime/enroll, cmd/carbon-node-installer, scripts/install-node.sh, internal/rpc/enrollment_integration_test.go, docs/node-installer.md]
+code_refs: [internal/nodeinstall, internal/noderuntime/enroll, cmd/carbon-node-installer, scripts/install-node.sh, scripts/qualify-node-installer-systemd.sh, internal/rpc/enrollment_integration_test.go, docs/node-installer.md]
 sources:
   - title: Parent concept
     resource: node-installer.md
