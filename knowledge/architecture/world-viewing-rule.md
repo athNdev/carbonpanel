@@ -19,9 +19,12 @@ world/region operations stay on the existing server, config and file RPCs with
 their own authorization.
 
 The server World tab links to the active map, or to World View scoped to that
-server when the active level is unknown. World View uses server names only
-from the authorized server inventory. Setup and unavailable states do not
-mount a map.
+server when the active level is unknown. The scoped fallback uses
+GetWorldViewStatus with the concrete server; the all-server catalogue
+requires a global read grant. World View uses names from the authorized
+server inventory. Setup and unavailable states do not mount a map.
+A failed refresh keeps a valid last-known map and reports the error.
+Read denials and scope changes clear the current map session.
 
 Renderer traffic is same-origin only. The browser receives an opaque,
 short-lived session key, never a renderer URL or port; every proxied asset

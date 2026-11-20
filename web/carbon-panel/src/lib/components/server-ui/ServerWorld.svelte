@@ -581,6 +581,11 @@ SPDX-License-Identifier: MPL-2.0
 	{/snippet}
 
 	<div class="flex flex-col gap-4">
+		{#if !canView}
+			<p class="text-xs text-muted-foreground">
+				Opening a map requires World View read access on this server.
+			</p>
+		{/if}
 		{#if pendingOperation}
 			{@const pendingPresentation = operationOutcomePresentation(pendingOperation.outcome)}
 			{@const pendingDisposition = bindingOutcomeDisposition(pendingOperation.outcome)}

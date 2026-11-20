@@ -277,7 +277,8 @@ try {
   permissions = [{ resource: "servers", action: "read", objectId: "*" }];
   await gotoWorldTab();
   await page.getByText("No world access on this server", { exact: true }).waitFor();
-  assert.equal(await scopedMaps.count(), 0, "Open map needs the map's server read scope");
+  assert.equal(await scopedMaps.count(), 0, "Open map needs world_view/read on this server");
+  await page.getByText("Opening a map requires World View read access on this server.").waitFor();
   permissions = [{ resource: "*", action: "*", objectId: "*" }];
 
   // 3. Unbound level (configured, no binding or observation).

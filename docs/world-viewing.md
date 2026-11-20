@@ -7,10 +7,10 @@ modifies or teleports anything. The governing decisions are in
 `knowledge/architecture/world-viewing.md`.
 
 Open **World View** to browse maps, or use **Open map** in a server’s
-**World** tab. If the active level is still unknown, the link lists worlds for
-that server. A map that needs setup offers **Install BlueMap** when the
-account and node support it. The map page also explains when a remote node
-needs an explicit endpoint.
+**World** tab. If the active level is still unknown, Carbon Panel checks for
+the active map using that server’s World View read permission. The map page
+offers **Install BlueMap** when the account and node support it and explains
+when a remote node needs an explicit endpoint.
 
 ## 1. Renderer lifecycle
 
@@ -221,12 +221,11 @@ Unmapped procedures and a nil enforcer are denied by the RPC interceptor.
   source and confidence, but no tile proxy is implemented for imported snapshot
   files. It therefore exposes freshness information without an iframe rather
   than a blank or broken map.
-- **Subuser discovery:** `ListWorldViewTargets` is a global listing and requires
-  an unscoped `world_view/read` grant (object `*`). A server-scoped subuser can
-  still open a granted world by deep link and use every scoped RPC and the
-  proxy, but cannot enumerate the picker. This is deliberate anti-enumeration;
-  a scoped picker would need an explicit `server_id` filter with service-side
-  enforcement.
+- **Subuser discovery:** The all-server catalogue uses
+  `ListWorldViewTargets` and requires an unscoped `world_view/read` grant.
+  A server-scoped subuser can follow a map deep link or use **Open map** from
+  the server’s **World** tab. The fallback page reads only that server’s active
+  map through `GetWorldViewStatus`.
 - **Sibling epics:** the shell links to `/players` and `/library`, which are
   owned by the player-management and World Library epics. The world-viewing PR
   is a cumulative draft and is expected to be integrated with those routes;
