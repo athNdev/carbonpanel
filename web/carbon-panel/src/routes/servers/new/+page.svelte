@@ -16,6 +16,7 @@ one at https://mozilla.org/MPL/2.0/.
 	import { rpcClient } from '$lib/api/rpc-client';
 	import { beginLifecycleRequest } from '$lib/lifecycle-request';
 	import { toast } from 'svelte-sonner';
+	import { uploadFile } from '$lib/utils/chunked-upload';
 	import DatapackSearch from '$lib/components/datapack-search.svelte';
 	import {
 		ArrowLeft,
@@ -27,6 +28,8 @@ one at https://mozilla.org/MPL/2.0/.
 		ChevronLeft,
 		Check,
 		Plus,
+		Upload,
+		Loader2,
 		X
 	} from '@lucide/svelte';
 	import { create } from '@bufbuild/protobuf';
@@ -77,6 +80,12 @@ one at https://mozilla.org/MPL/2.0/.
 
 	// Datapack selection — installed into the world after the server is created
 	let selectedDatapacks = $state<Array<{ id: string; name: string; indexer: string }>>([]);
+	let pendingDatapackUploads = $state<Array<{ sessionId: string; fileName: string; name: string }>>(
+		[]
+	);
+	let datapackUploadInput = $state<HTMLInputElement | null>(null);
+	let uploadingWizardDatapack = $state(false);
+	let wizardDatapackUploadPercent = $state(0);
 	let catalogBlueprints = $state<ServerBlueprint[]>([]);
 	let selectedBlueprintId = $state('');
 
@@ -90,6 +99,43 @@ one at https://mozilla.org/MPL/2.0/.
 
 	function removeDatapack(id: string) {
 		selectedDatapacks = selectedDatapacks.filter((p) => p.id !== id);
+	}
+
+	async function handleWizardDatapackUpload(event: Event) {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
+
+		if (!file.name.toLowerCase().endsWith('.zip')) {
+			toast.error('Datapacks must be .zip archives containing pack.mcmeta');
+			return;
+		}
+
+		uploadingWizardDatapack = true;
+		wizardDatapackUploadPercent = 0;
+		try {
+			const { sessionId } = await uploadFile(file, {
+				onProgress: (p) => (wizardDatapackUploadPercent = Math.round(p.percentComplete))
+			});
+			pendingDatapackUploads = [
+				...pendingDatapackUploads,
+				{
+					sessionId,
+					fileName: file.name,
+					name: file.name.replace(/\.zip$/i, '')
+				}
+			];
+			toast.success(`Uploaded ${file.name} — it will be installed after the server is created`);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : 'Datapack upload failed');
+		} finally {
+			uploadingWizardDatapack = false;
+		}
+	}
+
+	function removePendingDatapackUpload(sessionId: string) {
+		pendingDatapackUploads = pendingDatapackUploads.filter((u) => u.sessionId !== sessionId);
 	}
 
 	// Cluster node placement state
@@ -501,6 +547,20 @@ one at https://mozilla.org/MPL/2.0/.
 						datapackId: dp.id,
 						gameVersion: formData.mcVersion,
 						indexer: dp.indexer
+					});
+					toast.success(`Installed datapack ${dp.name}`);
+				} catch (error) {
+					toast.error(
+						`Datapack ${dp.name} failed to install: ${error instanceof Error ? error.message : 'Unknown error'}`
+					);
+				}
+			}
+			for (const dp of pendingDatapackUploads) {
+				try {
+					await rpcClient.datapack.uploadDatapack({
+						serverId,
+						uploadSessionId: dp.sessionId,
+						fileName: dp.fileName
 					});
 					toast.success(`Installed datapack ${dp.name}`);
 				} catch (error) {
@@ -1507,19 +1567,77 @@ one at https://mozilla.org/MPL/2.0/.
 						</p>
 					</div>
 
-					{#if selectedDatapacks.length > 0}
+					<div class="border border-border bg-card p-4">
+						<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+							<div>
+								<p class="text-xs font-semibold tracking-wider text-foreground uppercase">
+									Upload local datapack
+								</p>
+								<p class="mt-1 text-xs text-muted-foreground">
+									Upload a <code class="font-mono">.zip</code> containing
+									<code class="font-mono">pack.mcmeta</code>. The archive is queued and installed
+									after the server is created.
+								</p>
+							</div>
+							<div class="flex items-center gap-2">
+								<input
+									bind:this={datapackUploadInput}
+									type="file"
+									accept=".zip,application/zip"
+									class="hidden"
+									onchange={handleWizardDatapackUpload}
+								/>
+								<CarbonButton
+									kind="secondary"
+									size="sm"
+									disabled={uploadingWizardDatapack}
+									onclick={() => datapackUploadInput?.click()}
+								>
+									{#if uploadingWizardDatapack}
+										<Loader2 class="h-4 w-4 animate-spin" />
+										Uploading… {wizardDatapackUploadPercent}%
+									{:else}
+										<Upload class="h-4 w-4" />
+										Upload Datapack
+									{/if}
+								</CarbonButton>
+							</div>
+						</div>
+					</div>
+
+					{#if selectedDatapacks.length > 0 || pendingDatapackUploads.length > 0}
 						<div class="border border-border bg-card">
 							<div
 								class="border-b border-border px-4 py-2.5 text-xs font-semibold text-foreground uppercase"
 							>
-								Selected for install ({selectedDatapacks.length})
+								Selected for install ({selectedDatapacks.length + pendingDatapackUploads.length})
 							</div>
 							<ul class="divide-y divide-border">
+								{#each pendingDatapackUploads as dp (dp.sessionId)}
+									<li class="flex items-center justify-between px-4 py-2.5 text-sm text-foreground">
+										<span class="flex min-w-0 items-center gap-2">
+											<Upload class="h-4 w-4 shrink-0 text-muted-foreground" />
+											<span class="truncate" title={dp.fileName}>{dp.name}</span>
+											<span
+												class="shrink-0 font-mono text-[10px] tracking-wider text-muted-foreground uppercase"
+												>Local upload</span
+											>
+										</span>
+										<button
+											type="button"
+											onclick={() => removePendingDatapackUpload(dp.sessionId)}
+											aria-label={`Remove uploaded datapack ${dp.fileName}`}
+											class="flex h-8 w-8 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-destructive-text"
+										>
+											<X class="h-4 w-4" />
+										</button>
+									</li>
+								{/each}
 								{#each selectedDatapacks as dp (dp.id)}
 									<li class="flex items-center justify-between px-4 py-2.5 text-sm text-foreground">
-										<span class="flex items-center gap-2">
-											<Package class="h-4 w-4 text-muted-foreground" />
-											{dp.name}
+										<span class="flex min-w-0 items-center gap-2">
+											<Package class="h-4 w-4 shrink-0 text-muted-foreground" />
+											<span class="truncate">{dp.name}</span>
 										</span>
 										<button
 											type="button"

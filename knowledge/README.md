@@ -60,6 +60,11 @@ Rules:
 
 - One concept per file. The path is the stable ID; do not rename a concept.
   Deprecate it with `status: deprecated` and link to the replacement.
+- A concept is at most **60 lines** including frontmatter; `knowledge/index.md`
+  and every other generated index are at most **150 lines**. Both limits are
+  fail-closed in `cmd/knowledge-lint`. If a topic is larger, keep a bounded hub
+  at the original path and split the detail into linked sub-concepts. Link to
+  `docs/` for long reference material instead of copying it here.
 - `description` is one sentence and at most 240 characters.
 - `code_refs` are repository-relative. Use a directory for a subsystem.
 - `verified` records who confirmed a rule: `human:` for a human review, `agent:`
@@ -164,6 +169,14 @@ Launch the client from the repository root so the relative `knowledge` path
 resolves. On Windows, if the client cannot spawn `npx`, use `cmd /c npx ...`.
 If a client ignores project-level MCP settings, add the same entries to its
 user configuration with an absolute path.
+
+`node scripts/mcp-smoke.mjs` proves read, write, edit, commit, merge and
+conflict resolution against the pinned servers over real stdio in disposable
+temporary directories. [The capability matrix](../docs/knowledge-mcp-capability-matrix.md)
+records the exact tool calls and the remaining external step: Zed's CLI has no
+headless MCP mode, so "works in Zed" still requires interactive verification
+with the project context servers trusted. Do not substitute the stdio proof
+for an editor-level claim.
 
 ## CLI fallback
 

@@ -170,8 +170,9 @@ const (
 	ReadingStopped    ReadingKind = "stopped"
 )
 
-// Reading is one server's last-good vs stale projection. It carries ids and
-// timestamps, never MOTD, player samples or hostnames.
+// Reading is one server's last-good vs stale projection. It carries ids,
+// timestamps and safe recovery guidance, never MOTD, player samples, hostnames,
+// paths or secrets.
 type Reading struct {
 	ID               string      `json:"id"`
 	Kind             ReadingKind `json:"kind"`
@@ -181,6 +182,7 @@ type Reading struct {
 	JoinObservedAt   time.Time   `json:"joinObservedAt,omitempty"`
 	LastGoodAt       time.Time   `json:"lastGoodAt,omitempty"`
 	Detail           string      `json:"detail,omitempty"`
+	Recovery         string      `json:"recovery,omitempty"`
 }
 
 // ClassifyServers projects every server observation at one instant.
@@ -219,6 +221,7 @@ func ClassifyServer(s ServerObservation, in Input) Reading {
 	if !sweepIsFresh && !s.UpdatedAt.IsZero() && checkedAt.Sub(s.UpdatedAt) > staleAfter {
 		r.Kind = ReadingStale
 		r.Detail = "stored status is older than the freshness window"
+		r.Recovery = recoveryForReading(r.Kind)
 		return r
 	}
 
@@ -231,25 +234,30 @@ func ClassifyServer(s ServerObservation, in Input) Reading {
 		if !probeIsFresh(s.Game, checkedAt, staleAfter) {
 			r.Kind = ReadingUnobserved
 			r.Detail = "running with no fresh SLP or RCON observation"
+			r.Recovery = recoveryForReading(r.Kind)
 			return r
 		}
 		if s.Game.OK {
 			r.Kind = ReadingPlayable
 			r.Detail = "fresh successful join observation"
+			r.Recovery = recoveryForReading(r.Kind)
 			return r
 		}
 		r.Kind = ReadingUnjoinable
 		r.Detail = "fresh join probe failed"
+		r.Recovery = recoveryForReading(r.Kind)
 		return r
 	case isStarting(s.Status, in.StartingStatus):
 		started := startClock(s)
 		if !started.IsZero() && checkedAt.Sub(started) > startupAfter {
 			r.Kind = ReadingTimedOut
 			r.Detail = "startup exceeded the deadline"
+			r.Recovery = recoveryForReading(r.Kind)
 			return r
 		}
 		r.Kind = ReadingStarting
 		r.Detail = "still within the startup deadline"
+		r.Recovery = recoveryForReading(r.Kind)
 		return r
 	default:
 		r.Kind = ReadingStopped
@@ -257,7 +265,29 @@ func ClassifyServer(s ServerObservation, in Input) Reading {
 			r.LastGoodAt = s.UpdatedAt
 		}
 		r.Detail = "fresh non-running status"
+		r.Recovery = recoveryForReading(r.Kind)
 		return r
+	}
+}
+
+func recoveryForReading(kind ReadingKind) string {
+	switch kind {
+	case ReadingPlayable:
+		return "No recovery action required; current join evidence is fresh."
+	case ReadingUnjoinable:
+		return "Fresh join probe failed; check server startup and game or network health, then wait for a fresh successful probe. Do not treat the server as stopped."
+	case ReadingUnobserved:
+		return "Running server has no fresh join evidence; wait for or collect a fresh SLP or RCON observation before treating the server as playable."
+	case ReadingStale:
+		return "Stored status is stale; wait for a fresh observation sweep and treat this reading as unknown until refreshed. Do not infer stopped or playable state."
+	case ReadingStarting:
+		return "Server is still within the startup window; wait for startup to complete or for a fresh join observation."
+	case ReadingTimedOut:
+		return "Startup exceeded the deadline; inspect startup and runtime state, then retry with a new request when recovery is needed. Do not assume the server is playable."
+	case ReadingStopped:
+		return "No recovery action required from this reading; the stored status is not running."
+	default:
+		return "Evidence is incomplete; collect fresh observations before taking destructive action."
 	}
 }
 

@@ -4,6 +4,7 @@ package acceptanceevidence
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -58,6 +59,22 @@ func ValidateContract(c Contract, root string, now time.Time) Report {
 	if len(c.ReferenceRuns) == 0 {
 		r.failf("contract has no reference runs; scheduled audit has no live proof fixture")
 	}
+	for _, ref := range c.ReferenceRuns {
+		prefix := fmt.Sprintf("reference run %d", ref.RunID)
+		if ref.RunID <= 0 {
+			prefix = "reference run"
+			r.failf("%s: run_id must be positive", prefix)
+		}
+		if !validSHA(ref.HeadSHA) {
+			r.failf("%s: head_sha %q is not a full commit SHA", prefix, ref.HeadSHA)
+		}
+		if strings.TrimSpace(ref.Name) == "" {
+			r.failf("%s: name is empty", prefix)
+		}
+		if strings.TrimSpace(ref.Conclusion) != "success" {
+			r.failf("%s: conclusion %q must be success for a real audit fixture", prefix, ref.Conclusion)
+		}
+	}
 
 	seen := make(map[string]bool)
 	for _, cand := range c.Candidates {
@@ -75,6 +92,17 @@ func isAcceptedRevision(c Candidate, sha string) bool {
 		}
 	}
 	return false
+}
+
+func validDurableURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u == nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	return u.Host != ""
 }
 
 func validateCandidate(r *Report, c Contract, cand Candidate, root string, now time.Time, seen map[string]bool) {
@@ -205,6 +233,9 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 		if ev.Deploy == nil {
 			fail("tier %s requires deploy evidence", cand.Tier)
 		} else {
+			if ev.Deploy.URL != "" && !validDurableURL(ev.Deploy.URL) {
+				fail("deploy evidence URL %q is not a durable http(s) URL", ev.Deploy.URL)
+			}
 			if cand.Deploy == nil {
 				fail("contract has no deploy reference for tier %s", cand.Tier)
 			} else {
@@ -220,6 +251,9 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 	}
 
 	if cand.Tier == TierLiveVerified {
+		if cand.Live == nil || !validDurableURL(cand.Live.URL) {
+			fail("LIVE-VERIFIED requires a durable http(s) live URL in the contract")
+		}
 		if cand.Deploy == nil || cand.Deploy.Job == "" || cand.Deploy.RevisionSHA == "" {
 			fail("LIVE-VERIFIED requires a named deploy job and an exact revision SHA")
 		} else if ev.Deploy != nil {
@@ -233,6 +267,9 @@ func validateCandidate(r *Report, c Contract, cand Candidate, root string, now t
 		if ev.Live == nil {
 			fail("LIVE-VERIFIED requires live evidence")
 		} else {
+			if !validDurableURL(ev.Live.URL) {
+				fail("live evidence URL %q is not a durable http(s) URL", ev.Live.URL)
+			}
 			if cand.Live == nil || ev.Live.URL != cand.Live.URL {
 				fail("live URL does not match contract URL")
 			}

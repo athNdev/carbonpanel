@@ -31,7 +31,7 @@ decision is recorded in
 
 | Path | Purpose |
 | --- | --- |
-| `node_lxc_artifact.py` | Cross-platform CLI implementing build, verify, signed-archive end-to-end verification, capability gate, first-boot identity, volume import/backup/restore and staged upgrade/rollback |
+| `node_lxc_artifact.py` | Cross-platform CLI implementing build, verify, signed-archive end-to-end verification, fail-closed boot/import qualification, capability gate, first-boot identity, volume import/backup/restore and staged upgrade/rollback |
 | `build-rootfs.sh`, `verify-artifact.sh`, `validate-provenance.sh` | Reproducible build, fail-closed verification and provenance-profile validation entry points |
 | `qualification/RETRIEVAL-EVIDENCE.md` | Exact dated upstream URLs, digests, GPG signature evidence and retrieval method |
 | `qualification/SIGNED-ARCHIVE-EVIDENCE.md` | End-to-end download, byte rehash, GPG verification and canonical layout/metadata results for both architectures |
@@ -43,7 +43,7 @@ decision is recorded in
 | `config/provenance.fixture.json` | SYNTHETIC fixture profile only; never usable for an artifact claim |
 | `fixtures/rootfs-minimal/` | Synthetic, credential-free rootfs tree used by offline builds |
 | `fixtures/capability-*.json` | Supported and unsupported host capability snapshots |
-| `tests/test_node_lxc.py` | Offline fixture qualification suite (22 scenarios, including real-GPG signed-archive checks) |
+| `tests/test_node_lxc.py` | Offline and fail-closed qualification suite (25 scenarios, including real-GPG signed-archive and boot-qualify blocker/reporting checks) |
 | `run-fixtures.sh` | Runs the suite with no host, network, root or live daemon |
 
 ## Verification gates
@@ -109,7 +109,13 @@ decision is recorded in
 sh run-fixtures.sh
 ```
 
-All 22 scenarios pass at the recorded head (14 original offline qualification
-scenarios and eight real-GPG signed-archive scenarios). See
-`qualification/SIGNED-ARCHIVE-EVIDENCE.md`, `qualification/QUALIFICATION.md` and
-the external mode report for exact evidence and limits.
+All 25 scenarios pass at the recorded head, including real-GPG signed-archive
+checks and fail-closed boot-qualify blocker/reporting checks. `boot-qualify`
+always verifies real signed upstream archive bytes in an owned disposable path
+and then probes for an unprivileged LXC import/boot-capable disposable runner;
+it reports qualification as ok only when actual import and boot are performed
+and evidenced, and refuses with explicit blockers otherwise. The manual workflow
+`.github/workflows/lxc-boot-qualification.yml` runs this fail-closed check and
+uploads the JSON report. See `qualification/SIGNED-ARCHIVE-EVIDENCE.md`,
+`qualification/QUALIFICATION.md` and the external mode report for exact evidence
+and limits.

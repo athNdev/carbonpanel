@@ -50,6 +50,13 @@ const (
 	EventPlayerBulk           = "player.bulk"
 	EventPlayerUndo           = "player.undo"
 	EventPlayerSkinRefresh    = "player.skin.refresh"
+
+	// World Library bind and unbind operations (OSS-362). Subject type is
+	// "server" and subject id is the owning server. RequestID is the
+	// journaled operation key so retries and crash recovery emit exactly one
+	// event per operation.
+	EventWorldBind   = "world.bind"
+	EventWorldUnbind = "world.unbind"
 )
 
 // Entry is a single audit record.
@@ -78,6 +85,26 @@ func Log(db *gorm.DB, e Entry) error {
 		Properties: e.Properties,
 		RequestID:  e.RequestID,
 	}).Error
+}
+
+// LogOnce appends an audit record only when no record with the same request
+// id, event and subject already exists. A non-empty request id is required to
+// make the operation-owned event idempotent across retries and crash recovery.
+func LogOnce(db *gorm.DB, e Entry) error {
+	if e.RequestID == "" {
+		return Log(db, e)
+	}
+	var count int64
+	if err := db.Model(&storage.ActivityLog{}).
+		Where("request_id = ? AND event = ? AND subject_id = ?", e.RequestID, e.Event, e.SubjectID).
+		Limit(1).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return Log(db, e)
 }
 
 // Prune deletes records older than olderThan, always keeping at least

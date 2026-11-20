@@ -61,6 +61,12 @@ globalThis.__oss245Ws = {
 	open() {
 		instances[instances.length - 1]?.open();
 	},
+	drop(code = 1006, reason = 'abnormal closure') {
+		const socket = instances[instances.length - 1];
+		if (!socket || socket.readyState === 3) return;
+		socket.readyState = 3;
+		socket.onclose?.({ code, reason, wasClean: false });
+	},
 	emitLogs(serverId, messages) {
 		for (const socket of instances) {
 			socket.frame(

@@ -309,6 +309,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 			if (state.modpacks === 'refused') return fail('Fixture modpack search refused');
 			return reply({ modpacks: MODPACKS, total: MODPACKS.length, page: 1, pageSize: 20 });
 		}
+		if (method === 'GetGlobalSettings') return reply({ categories: [] });
 		return reply({});
 	});
 	// OIDC exchange and REST downloads are not part of these journeys.
@@ -564,6 +565,15 @@ const PACKAGED_ROUTES = [
 			['button', 'More server actions'],
 			['button', 'Copy Address']
 		]
+	},
+	{
+		path: '/settings',
+		h1: 'Settings',
+		controls: [
+			['heading', 'Settings'],
+			['tablist', 'Sections'],
+			['tab', 'Server Defaults']
+		]
 	}
 ];
 
@@ -732,6 +742,73 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				}
 				await page.keyboard.press('ArrowLeft');
 				return { ...semantics, focused, selectedAfter: selected };
+			});
+
+			await page.goto(root + '/settings', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor();
+			await check(`route /settings @${width} ${theme}: tabs, tabpanel relationships, hidden panels and arrow-key navigation`, async () => {
+				await page.locator('[role="tablist"]').waitFor();
+				const readState = () => page.evaluate(() => {
+					const tabs = [...document.querySelectorAll('[role="tab"]')];
+					const selected = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+					const panels = [...document.querySelectorAll('[role="tabpanel"]')].map((panel) => ({
+						id: panel.id,
+						labelledBy: panel.getAttribute('aria-labelledby'),
+						hidden: panel.hasAttribute('hidden') || getComputedStyle(panel).display === 'none',
+						height: panel.getBoundingClientRect().height
+					}));
+					return {
+						label: document.querySelector('[role="tablist"]')?.getAttribute('aria-label'),
+						tabCount: tabs.length,
+						firstTabId: tabs[0]?.id ?? null,
+						selectedId: selected?.id ?? null,
+						selectedControls: selected?.getAttribute('aria-controls') ?? null,
+						panels,
+						visiblePanels: panels.filter((panel) => !panel.hidden).map((panel) => panel.id),
+						hiddenPanels: panels.filter((panel) => panel.hidden).map((panel) => panel.id)
+					};
+				});
+				const panelIdFor = (tabId) => `settings-tabs-panel-${tabId?.replace('settings-tabs-tab-', '') ?? ''}`;
+				const hiddenPanelContract = (state) =>
+					state.panels.length === state.tabCount &&
+					state.visiblePanels.length === 1 &&
+					state.visiblePanels[0] === state.selectedControls &&
+					state.hiddenPanels.length === state.tabCount - 1 &&
+					state.panels.every(
+						(panel) =>
+							panel.labelledBy === panel.id.replace('settings-tabs-panel-', 'settings-tabs-tab-') &&
+							(!panel.hidden || panel.height === 0)
+					);
+				const initial = await readState();
+				if (
+					initial.label !== 'Sections' ||
+					initial.tabCount < 1 ||
+					initial.firstTabId !== 'settings-tabs-tab-server-config' ||
+					initial.selectedId !== 'settings-tabs-tab-server-config' ||
+					initial.selectedControls !== 'settings-tabs-panel-server-config' ||
+					!hiddenPanelContract(initial)
+				) {
+					throw new Error(`settings tab semantics incomplete: ${JSON.stringify(initial)}`);
+				}
+				const secondTabId = await page.evaluate(() => document.querySelectorAll('[role="tab"]')[1]?.id ?? null);
+				await page.locator('#settings-tabs-tab-server-config').focus();
+				await page.keyboard.press('ArrowRight');
+				const focused = await page.evaluate(() => document.activeElement?.id);
+				if (!secondTabId || focused !== secondTabId) {
+					throw new Error(`ArrowRight did not move settings tab focus (got ${focused}, expected ${secondTabId})`);
+				}
+				const after = await readState();
+				if (
+					after.selectedId !== secondTabId ||
+					after.selectedControls !== panelIdFor(secondTabId) ||
+					!hiddenPanelContract(after) ||
+					!after.hiddenPanels.includes('settings-tabs-panel-server-config') ||
+					after.panels.find((panel) => panel.id === 'settings-tabs-panel-server-config')?.height !== 0
+				) {
+					throw new Error(`settings ArrowRight did not update tab/tabpanel relationship: ${JSON.stringify(after)}`);
+				}
+				await page.keyboard.press('ArrowLeft');
+				return { initial, focusedAfterArrowRight: focused, after };
 			});
 		}
 

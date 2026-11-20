@@ -41,7 +41,7 @@ same command passes. The exact nine operations above have production
 `tools/call` evidence through the generated upload/download tool sets; the gate
 was not weakened. `PendingInventory` is empty (0 entries) and the ordinary
 gate now reports `201/201 supported operations verified`. Live counts:
-`supported=201 listed=201 reachable=201 verified=201 excluded=72`.
+`supported=201 listed=201 reachable=201 verified=201 excluded=77`.
 Per-family evidence includes `FileService=17/17`, `UploadService=4/4`,
 `surface=3/3`. The hold mechanism remains live: adding an unmounted operation
 back to `PendingInventory` re-reds both gates.

@@ -41,6 +41,7 @@ on:
       - 'scripts/review/entry-state.mjs'
       - 'scripts/review/entry-state.test.mjs'
       - 'scripts/review/devstack.sh'
+      - 'scripts/review/fixtures/**'
       - 'scripts/showcase_assets.py'
       - 'scripts/showcase_assets.test.py'
       - '.github/workflows/showcase.yml'
@@ -140,7 +141,7 @@ jobs:
           PANEL_REVIEW_PASSWORD: Review-Panel-2026
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
           FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
-          FEATURES_WORLDS: ${{ inputs.worlds }}
+          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
           FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
@@ -174,6 +175,18 @@ jobs:
             fi
           done
 
+      - name: Upload journey diagnostics (read-only, unvalidated)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: showcase-journey-diagnostics
+          path: |
+            /tmp/showcase/*.png
+            /tmp/showcase/report.md
+            /tmp/showcase/browser.json
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Build and validate the asset bundle
         env:
           SOURCE_SHA: ${{ github.sha }}
@@ -183,7 +196,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
           FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
-          FEATURES_WORLDS: ${{ inputs.worlds }}
+          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
           FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
@@ -282,7 +295,7 @@ jobs:
         env:
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
           FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
-          FEATURES_WORLDS: ${{ inputs.worlds }}
+          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
           FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
@@ -330,7 +343,7 @@ jobs:
           SOURCE_SHA: ${{ github.sha }}
           FEATURES_PLAYERS: ${{ github.event_name == 'push' || inputs.players }}
           FEATURES_PLAYERDETAIL: ${{ inputs.playerdetail }}
-          FEATURES_WORLDS: ${{ inputs.worlds }}
+          FEATURES_WORLDS: ${{ github.event_name == 'push' || inputs.worlds }}
           FEATURES_WORLDTAB: ${{ github.event_name == 'push' || inputs.worldtab }}
           FEATURES_LIBRARY: ${{ github.event_name == 'push' || inputs.library }}
         run: |
@@ -351,7 +364,8 @@ jobs:
         run: |
           for name in \
             showcase-dashboard showcase-dashboard-full showcase-server-detail showcase-studio showcase-modpacks \
-            showcase-library showcase-library-revisions showcase-player-allowlist
+            showcase-library showcase-library-revisions showcase-player-allowlist \
+            showcase-worlds-list showcase-world-tab showcase-world-view
           do
             if [ ! -s "/tmp/showcase-artifact/bundle/${name}.png" ]; then
               echo "README-canonical screenshot missing: ${name}" >&2

@@ -1,0 +1,85 @@
+﻿---
+title: Okta (OIDC)
+description: Configure Carbon Panel with Okta as an OpenID Connect identity provider.
+---
+{/*
+SPDX-License-Identifier: MIT AND MPL-2.0
+This file includes DiscoPanel material under the MIT License,
+Copyright (c) 2025 Nicholas W. Heyer. The MIT license text is in LICENSE
+and still applies to that inherited material.
+Maintainer changes are licensed under the Mozilla Public License, v. 2.0.
+If a copy of the MPL was not distributed with this file, You can obtain
+one at https://mozilla.org/MPL/2.0/.
+*/}
+
+import { Code, Aside, Steps } from '@astrojs/starlight/components';
+import composeFile from '../../../../../../../oidc/okta/docker-compose.yaml?raw';
+
+This guide shows a tenant-independent Carbon Panel configuration profile for [Okta](https://developer.okta.com/docs/guides/implement-grant-type/authcode/main/) using standard OpenID Connect Authorization Code with a confidential client.
+
+<Aside>
+This page is a configuration/profile guide. It does not claim successful interoperability with every Okta tenant or policy. Validate sign-in, callback, issuer/audience, claims and role mapping in your own Okta environment before relying on it in production.
+</Aside>
+
+## Prerequisites
+
+- Docker and Docker Compose (or another Carbon Panel deployment method)
+- An Okta application you control (Web Application / OIDC)
+- The exact issuer URI for the authorization server you will use
+
+## Okta application settings
+
+<Steps>
+1. In your Okta admin/developer console, create or select an **OIDC Web Application**.
+2. Add the Carbon Panel callback URL as a **Sign-in redirect URI**:
+   - Local example: `http://localhost:8080/api/v1/auth/oidc/callback`
+   - Production: `https://your-panel.example.com/api/v1/auth/oidc/callback`
+3. Copy the **Client ID** and **Client Secret** into Carbon Panel config.
+4. Use the authorization server issuer URI exactly as published by Okta discovery metadata, for example:
+   - `https://dev-123456.okta.com/oauth2/default` (custom/default authorization server)
+   - `https://dev-123456.okta.com` (org authorization server, if that is the issuer you intend to use)
+5. If you want Carbon Panel roles from Okta groups, configure a groups claim in Okta and map it with `role_claim` / `role_mapping`.
+</Steps>
+
+## Docker Compose example
+
+<Code code={composeFile} lang="yaml" title="oidc/okta/docker-compose.yaml" />
+
+## Key environment variables
+
+| Variable | Purpose |
+|---|---|
+| `CARBONPANEL_AUTH_OIDC_ENABLED` | Enables OIDC authentication |
+| `CARBONPANEL_AUTH_OIDC_ISSUER_URI` | **Exact** Okta issuer URI. Must match the token `iss` claim and discovery issuer. |
+| `CARBONPANEL_AUTH_OIDC_CLIENT_ID` | Okta application client ID |
+| `CARBONPANEL_AUTH_OIDC_CLIENT_SECRET` | Okta application client secret |
+| `CARBONPANEL_AUTH_OIDC_REDIRECT_URL` | Must exactly match a redirect URI registered in Okta and Carbon Panel's callback endpoint |
+| `CARBONPANEL_AUTH_OIDC_SCOPES` | Include `openid`; typically `openid,profile,email` |
+| `CARBONPANEL_AUTH_OIDC_ROLE_CLAIM` | Claim containing groups/roles to map (optional) |
+| `CARBONPANEL_AUTH_OIDC_ROLE_MAPPING` | Maps IdP group/role values to Carbon Panel roles (case-insensitive key match) |
+
+## Callback and security semantics
+
+- Carbon Panel starts sign-in at `/api/v1/auth/oidc/login` and receives the IdP redirect at `/api/v1/auth/oidc/callback`.
+- The callback validates state (single-use, cookie-bound), exchanges the authorization code with PKCE S256, verifies the ID token (`iss`, `aud`, signature, expiry, nonce), then issues a **one-time exchange code**.
+- The browser redeems the session token via `POST /api/v1/auth/oidc/exchange`; the session token is never placed in a URL.
+- Set `CARBONPANEL_AUTH_OIDC_COOKIE_SECURE=true` when Carbon Panel is behind a TLS-terminating proxy. Forwarded headers are not treated as proof of TLS for this cookie.
+
+## Claims and non-escalation
+
+- `role_claim` values may be a string, string array, or JSON-encoded string array. With `role_mapping`, keys are matched case-insensitively.
+- Mapped roles come only from explicit mapping entries. Raw claim values are not treated as Carbon Panel roles unless `allow_raw_claim_roles=true`.
+- Privileged role names (`admin`, `owner`, `root`, `superadmin`, `system`) are never granted from raw claim values; grant privileged access only through explicit reviewed mapping and compatible provenance.
+- If the role claim is absent/unmapped, `absent_claim_policy=deny` revokes OIDC-sourced roles (fail-closed). `defaults_only` applies configured `default_roles` instead.
+- Extra-claims enrichment is fill-only and cannot overwrite protected identity/role claims.
+
+## Production notes
+
+<Aside type="caution">
+Before production use:
+</Aside>
+
+- Use HTTPS for Carbon Panel and register the exact HTTPS callback URI in Okta.
+- Keep `issuer_uri` exactly equal to the issuer emitted by Okta; trailing-slash/path differences can cause verification failure.
+- Restrict Okta app assignment/policies to intended users and groups.
+- Test login, replay refusal, denied/invalid callbacks, role mapping, and role revocation on your tenant.

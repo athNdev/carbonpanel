@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT AND MPL-2.0
+﻿// SPDX-License-Identifier: MIT AND MPL-2.0
 // This file includes DiscoPanel material under the MIT License,
 // Copyright (c) 2025 Nicholas W. Heyer. The MIT license text is in LICENSE
 // and still applies to that inherited material.
@@ -44,7 +44,7 @@ export default defineConfig({
 					label: 'Getting Started',
 					items: [
 						{ label: 'Docker Compose', slug: 'getting-started/docker-compose' },
-						{ label: 'Proxmox LXC', slug: 'getting-started/proxmox' },
+						{ label: 'Proxmox (existing guest)', slug: 'getting-started/proxmox' },
 						{ label: 'Prebuilt Binaries', slug: 'getting-started/prebuilt-binaries' },
 						{ label: 'Building from Source', slug: 'getting-started/build-from-source' },
 					],
@@ -74,6 +74,8 @@ export default defineConfig({
 							items: [
 								{ label: 'Keycloak', slug: 'guides/oidc/keycloak' },
 								{ label: 'Authelia', slug: 'guides/oidc/authelia' },
+								{ label: 'Okta', slug: 'guides/oidc/okta' },
+								{ label: 'authentik', slug: 'guides/oidc/authentik' },
 								{ label: 'Google', slug: 'guides/oidc/google' },
 								{ label: 'Discord', slug: 'guides/oidc/discord' },
 							],

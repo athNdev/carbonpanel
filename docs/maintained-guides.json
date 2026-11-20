@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/athNdev/carbonpanel",
+  "compatibility": {
+    "require_slug_in_every_pinned_channel": true,
+    "preserve_product_pin_and_schema": true
+  },
+  "guides": [
+    {
+      "slug": "getting-started/proxmox",
+      "mode": "page",
+      "source_path": "docs/carbon-panel/src/content/docs/getting-started/proxmox.mdx",
+      "provenance": {
+        "title": "Proxmox (existing guest)",
+        "scope": "The whole page: first-party controller install, guest boundary and --compose update guidance.",
+        "reason": "Operational installer guidance is maintained on the first-party docs source and must not be frozen to a product release snapshot."
+      }
+    },
+    {
+      "slug": "faq",
+      "mode": "fragment",
+      "source_path": "docs/carbon-panel/src/content/docs/faq.mdx",
+      "source_summary": "Proxmox (existing guest, first-party script)",
+      "target_summary": "Proxmox Helper Script",
+      "provenance": {
+        "title": "FAQ Proxmox update entry",
+        "scope": "Only the Proxmox <details> answer inside the versioned FAQ.",
+        "reason": "All other FAQ content stays pinned to the product snapshot; only the retired third-party helper answer is replaced with the shared first-party guidance."
+      }
+    }
+  ]
+}

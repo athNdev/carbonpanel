@@ -29,7 +29,10 @@ operator needs a next action that will not destroy a world.
 Unknown and stale stay distinct from failed and from success. Do not retry a
 non-idempotent request with the same client `request_id`. Do not require the
 Docker socket for ordinary diagnostics: use the journal, `observations.json`
-in a support bundle, and `GetServer.join_observation_kind`.
+in a support bundle, and `GetServer.join_observation_kind`. Diagnostic evidence
+surfaces carry freshness (kind and observation timestamps) and safe recovery
+guidance that names the next action without disclosing filesystem paths,
+hostnames or secrets.
 
 # Paths
 

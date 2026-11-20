@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+﻿// SPDX-License-Identifier: MPL-2.0
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this file,
 // You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -216,6 +216,8 @@ func TestOIDCRawClaimCannotGrantPrivilegedRole(t *testing.T) {
 
 type fullOIDCFixture struct {
 	issuer           string
+	serverURL        string
+	issuerPath       string
 	key              *rsa.PrivateKey
 	keyID            string
 	nonce            string
@@ -234,24 +236,37 @@ type fullOIDCFixture struct {
 }
 
 func newFullOIDCFixture(t *testing.T) (*fullOIDCFixture, *httptest.Server) {
+	return newOIDCProviderFixture(t, "")
+}
+
+// newOIDCProviderFixture starts a tenant-independent OIDC discovery/provider
+// fixture. issuerPath models provider-specific issuer shapes (for example
+// "/oauth2/default" or "/application/o/carbon-panel/") without live tenants.
+func newOIDCProviderFixture(t *testing.T, issuerPath string) (*fullOIDCFixture, *httptest.Server) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("rsa key: %v", err)
 	}
 	f := &fullOIDCFixture{
-		key: key, keyID: "fixture-key",
+		issuerPath: issuerPath,
+		key:        key, keyID: "fixture-key",
 		signingKey: key, signingKID: "fixture-key",
 		jwksKey: key, jwksKID: "fixture-key",
 	}
+	prefix := strings.TrimSuffix(issuerPath, "/")
+	discoveryPath := "/.well-known/openid-configuration"
+	if prefix != "" {
+		discoveryPath = prefix + "/.well-known/openid-configuration"
+	}
 	var srv *httptest.Server
 	mux := http.NewServeMux()
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(discoveryPath, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"jwks_uri":%q,"userinfo_endpoint":%q,"id_token_signing_alg_values_supported":["RS256"]}`,
 			f.issuer, f.issuer+"/authorize", f.issuer+"/token", f.issuer+"/jwks", f.issuer+"/userinfo")
 	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(prefix+"/token", func(w http.ResponseWriter, r *http.Request) {
 		f.tokenCalls++
 		_ = r.ParseForm()
 		f.lastCodeVerifier = r.Form.Get("code_verifier")
@@ -285,7 +300,7 @@ func newFullOIDCFixture(t *testing.T) (*fullOIDCFixture, *httptest.Server) {
 			"expires_in": 3600, "id_token": raw,
 		})
 	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(prefix+"/jwks", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
 			"kty": "RSA", "kid": f.jwksKID, "use": "sig", "alg": "RS256",
@@ -293,16 +308,17 @@ func newFullOIDCFixture(t *testing.T) (*fullOIDCFixture, *httptest.Server) {
 			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(f.jwksKey.PublicKey.E)).Bytes()),
 		}}})
 	})
-	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(prefix+"/userinfo", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"sub":"fixture-subject"}`))
 	})
-	mux.HandleFunc("/extra", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(prefix+"/extra", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(f.extraBody))
 	})
 	srv = httptest.NewServer(mux)
-	f.issuer = srv.URL
+	f.serverURL = srv.URL
+	f.issuer = srv.URL + issuerPath
 	return f, srv
 }
 

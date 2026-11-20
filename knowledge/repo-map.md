@@ -26,7 +26,7 @@ sources:
 | `proto/carbonpanel/v1` | Connect-RPC contracts |
 | `web/carbon-panel` | SvelteKit 2 / Svelte 5 console |
 | `docs` | ADRs, plans, research, runbooks and issue write-ups |
-| `docker`, `scripts`, `oidc` | Deployment assets, developer scripts, OIDC examples |
+| `docker`, `scripts`, `oidc` | Deployment assets, developer scripts, OIDC examples; `scripts/proxmox/install-carbon-panel.sh` installs/updates the controller in an existing guest via shipped Compose/image seams |
 | `packaging` | Reproducible deployment artifacts (node VM QCOW2/cloud-init build definitions) |
 | `packaging/node-lxc` | Unprivileged LXC rootfs artifact lane (see [Node LXC artifact](architecture/node-lxc-artifact.md)) |
 

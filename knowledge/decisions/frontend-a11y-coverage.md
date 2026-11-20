@@ -54,8 +54,7 @@ the packaged SPA with a seeded
 API boundary, not an authenticated live controller, RPC service, Docker daemon
 or Minecraft gameplay. They do not duplicate the screenshot review lane. New
 interactive components should extend the DOM tests for public-seam behavior and
-the journey for whole-page keyboard, role, state and reflow properties. The
-packaged-route journey also drives the Modpacks library and Studio library
-shell controls from the same network-boundary seeds, including a refused
-`SearchModpacks` response and its Retry reconciliation; this exercises the
-named recurring review plans' selectors, not the external mod indexer.
+the journey for whole-page keyboard, role, state and reflow properties. It also
+drives the Modpacks library and Studio shell controls from the same seeds, with
+a refused `SearchModpacks` response and Retry reconciliation, exercising the
+named recurring review plans' selectors rather than the external mod indexer.

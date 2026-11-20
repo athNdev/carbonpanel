@@ -32,5 +32,7 @@ state.
 # Consequences
 
 The client preserves its existing backoff, log batching and subscriber API.
-Fake sockets cover late events and timer races; a Chromium smoke checks an
-actual loopback WebSocket disconnect and reconnection with a non-default tail.
+Fake sockets cover late events and timer races. Chromium journeys cover an
+actual loopback disconnect/reconnect with a non-default tail and the seeded
+console fixture proves transport drops reconnect, re-auth, resubscribe and
+continue live delivery without signing out.
