@@ -199,7 +199,18 @@ python3 scripts/version_bump.py prepare --check
 python3 scripts/build_website.py
 python3 scripts/check_website.py
 python3 scripts/version_bump.py prepare --check --site .website-build/site
+cd scripts/manual-review/e2e && bun install --frozen-lockfile && bunx playwright install chromium && cd ../../..
+python3 scripts/changelog_browser_check.py
 ```
+
+`scripts/changelog_browser_check.py` drives the exact built site with the
+repository-pinned Playwright helper (`scripts/manual-review/e2e/changelog-switcher-dom.mjs`).
+It fails if a changelog route has other than one H1, omits the actual
+release/version banner label or canonical release-note link, shows a retired
+heading, or if the deep-path channel switcher cannot be clicked from the Stable
+archive and Nightly routes at both desktop and mobile widths. This is the same
+gate run in `.github/workflows/docs.yml`; no network, registry or deploy write
+is performed by the checker.
 
 `scripts/version_bump.py prepare` regenerates the shared index; `prepare
 --check` fails on a stale index. `bump <tag> --check` derives a candidate from
