@@ -3356,6 +3356,23 @@ class StableReleasePublicationTests(unittest.TestCase):
                 release._apply_channel_alias("stable", self.DIGEST, args.digest)
             writer.assert_not_called()
 
+    def test_public_asset_reads_match_the_private_prepared_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            files, _ = make_publish_fixture(directory, self.VERSION, "2.0.1", self.COMMIT)
+            record = {"draft": False, "tag_name": self.VERSION, "assets": [
+                {"name": f.name, "digest": "sha256:" + release.sha256(f),
+                 "browser_download_url": "https://example.org/" + f.name} for f in files.iterdir()]}
+            def download(url, timeout):
+                return io.BytesIO((files / url.rsplit("/", 1)[-1]).read_bytes())
+            args = argparse.Namespace(version=self.VERSION, output=directory)
+            with patch.object(release, "get_release", return_value=record), \
+                 patch.object(release.urllib.request, "urlopen", side_effect=download), redirect_stdout(io.StringIO()):
+                release.verify_public_downloads(args)
+            with patch.object(release, "get_release", return_value=record), \
+                 patch.object(release.urllib.request, "urlopen", return_value=io.BytesIO(b"truncated")):
+                with self.assertRaisesRegex(ValueError, "downloaded bytes"):
+                    release.verify_public_downloads(args)
+
     def test_immutable_retry_fills_only_absent_registry_from_the_verified_archive(self):
         prior = self.alias("present", self.DIGEST, self.COMMIT)
         observed = {"docker_hub": prior, "ghcr": self.alias("absent")}

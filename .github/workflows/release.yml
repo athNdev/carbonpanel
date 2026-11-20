@@ -495,14 +495,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
         run: python3 scripts/release.py verify-immutable --version "$RELEASE_VERSION" --digest "$IMAGE_DIGEST"
-      - name: Sync Docker Hub repository description
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ env.DOCKER_HUB_IMAGE }}
-          short-description: Self-hosted Minecraft server and modpack management with Docker.
-          enable-url-completion: true
+
 
   # OSS-413 stable channel transaction. The EXACT target version, both immutable
   # registry digests and the DEPLOYED public docs marker are bound together.
@@ -960,6 +953,33 @@ jobs:
           python3 scripts/release.py verify-release-record \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST"
+
+      - name: Download and hash every public release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: python3 scripts/release.py verify-public-downloads --version "$RELEASE_VERSION" --output dist/release
+
+      - name: Sync Docker Hub repository description
+        if: needs.plan.outputs.channel == 'stable'
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
+          repository: atharvnaphade/carbonpanel
+          short-description: Self-hosted Minecraft server and modpack management with Docker.
+          enable-url-completion: true
+      - name: Verify the published Stable download and README entry points
+        if: needs.plan.outputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$RELEASE_VERSION"
+          curl -fsSL https://hub.docker.com/v2/repositories/atharvnaphade/carbonpanel/ -o "$RUNNER_TEMP/hub-repository.json"
+          jq -e '.full_description | contains("https://carbonpanel.dev/docs/") and contains("github.com/athNdev/carbonpanel/releases")' "$RUNNER_TEMP/hub-repository.json"
+          curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$RELEASE_VERSION/README.md" -o "$RUNNER_TEMP/release-readme"
+          cmp README.md "$RUNNER_TEMP/release-readme"
 
   # ALIAS PROMOTION BEFORE THE PUBLIC RELEASE. Every alias is re-verified against
   # the actual registry state before the GitHub release becomes public, so a

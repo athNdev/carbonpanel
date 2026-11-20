@@ -2071,12 +2071,41 @@ def module_promotion(args):
     write_output(values)
 
 
-def verify_draft_assets(git_tag, output, filenames):
-    uploaded = get_release(git_tag)
-    remote = {asset["name"]: asset.get("digest") for asset in uploaded["assets"]}
-    if not uploaded["draft"] or set(remote) != filenames or any(
-            remote[name] != "sha256:" + sha256(output / name) for name in filenames):
+def missing_draft_assets(git_tag, output, filenames):
+    record = get_release(git_tag)
+    if not record.get("draft"):
+        raise ValueError("The verified release draft is already public")
+    remote = {asset["name"]: asset.get("digest") for asset in record["assets"]}
+    if (not remote.keys() <= filenames
+            or any(digest != "sha256:" + sha256(output / name) for name, digest in remote.items())):
         raise ValueError("Uploaded draft assets do not match the verified local release")
+    return sorted(filenames - remote.keys())
+
+
+def verify_draft_assets(git_tag, output, filenames):
+    if missing_draft_assets(git_tag, output, filenames):
+        raise ValueError("Uploaded draft assets do not match the verified local release")
+
+
+def verify_public_downloads(args):
+    tag = resolve_panel_version(args.version)
+    directory = Path(args.output)
+    record = get_release(args.version)
+    names = {archive_name(tag, *target) for target in TARGETS} | {
+        "openapi.yaml", "checksums.txt", "release-manifest.json"}
+    assets = {asset["name"]: asset for asset in record["assets"]}
+    if record.get("draft") or record.get("tag_name") != args.version or set(assets) != names:
+        raise ValueError("Public release tag or download inventory differs from the prepared release")
+    for name in sorted(names):
+        asset = assets[name]
+        expected = "sha256:" + sha256(directory / name)
+        if asset.get("digest") != expected:
+            raise ValueError("Public release digest differs for " + name)
+        with urllib.request.urlopen(asset["browser_download_url"], timeout=60) as response:
+            received = "sha256:" + hashlib.file_digest(response, "sha256").hexdigest()
+        if received != expected:
+            raise ValueError("Publicly downloaded bytes differ for " + name)
+        print(name, expected)
 
 
 def publish(args):
@@ -2104,8 +2133,13 @@ def publish(args):
     if getattr(args, "expose_prepared", False):
         verify_draft_assets(git_tag, output, complete)
         latest, reason = github_latest_decision(tag, published_stable_versions())
-        github("release", "edit", git_tag, "--draft=false",
-               f"--prerelease={str('-' in tag).lower()}", f"--latest={str(latest).lower()}")
+        try:
+            github("release", "edit", git_tag, "--draft=false",
+                   f"--prerelease={str('-' in tag).lower()}", f"--latest={str(latest).lower()}")
+        except subprocess.CalledProcessError:
+            # GitHub can commit the visibility change before the response is lost.
+            if not release_provenance(tag, args.commit, manifest["image_digest"], git_tag=git_tag)[0]:
+                raise
         print(json.dumps({"git_tag": git_tag, "published": True, "reason": reason}))
         return
     if not run("git", "tag", "--list", git_tag):
@@ -2140,8 +2174,10 @@ def publish(args):
         if not exists:
             github("release", "create", git_tag, "--verify-tag", "--draft",
                    "--title", f"Carbon Panel {display_version(args.version)}", "--notes-file", str(notes))
+        missing = missing_draft_assets(git_tag, output, complete)
         github("release", "edit", git_tag, "--notes-file", str(notes))
-        github("release", "upload", git_tag, *(str(output / name) for name in sorted(expected | {"checksums.txt"})), "--clobber")
+        if missing:
+            github("release", "upload", git_tag, *(str(output / name) for name in missing))
         verify_draft_assets(git_tag, output, complete)
     if getattr(args, "draft_only", False):
         print(json.dumps({"git_tag": git_tag, "draft_verified": True, "digest": manifest["image_digest"]}))
@@ -3741,6 +3777,9 @@ def build_parser():
     reference_verifier = commands.add_parser("verify-reference")
     reference_verifier.add_argument("--reference", required=True)
     reference_verifier.add_argument("--digest", required=True)
+    downloads = commands.add_parser("verify-public-downloads")
+    downloads.add_argument("--version", required=True)
+    downloads.add_argument("--output", required=True)
     publisher = commands.add_parser("publish")
     publish_phase = publisher.add_mutually_exclusive_group()
     publish_phase.add_argument("--expose-prepared", action="store_true",
@@ -3898,6 +3937,7 @@ def main():
                 "stable-alias-decision": stable_alias_decision_cli,
                 "establish-stable-baseline": establish_stable_baseline_cli,
                 "verify-stable-order": verify_stable_order,
+                "verify-public-downloads": verify_public_downloads,
                 "verify-stable-release-site": verify_stable_release_site_cli,
                 "nightly-activation-decision": nightly_activation_decision_cli}
     handler = handlers.get(args.command,
