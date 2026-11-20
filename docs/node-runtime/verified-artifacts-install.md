@@ -1,17 +1,10 @@
 # Installing verified managed-node runtime artifacts
 
-This page describes the artifacts this project publishes for managed Carbon
-Panel nodes, how to verify them, and the honest limits of the evidence behind
-them. It is intentionally separate from the [application release
-process](../releases.md): runtime artifacts use an **independent version
-domain** and are **not** a Carbon Panel application or module release.
-
-> Status of this lane: the isolated publication workflow
-> (`.github/workflows/runtime-artifacts.yml`) and its fail-closed boundary are
-> implemented, but this implementation lane performs **no live registry push,
-> GitHub release, or host provisioning**. No artifact has been built or
-> published by this lane. The announcement near the end is a template that must
-> not be published until the exact assets have been built and verified.
+Managed-node artifacts use an independent version domain. The publication
+workflow is currently in rehearsal. Its builders produce plans or fixtures,
+and there are no qualified runtime downloads. The VM and unprivileged LXC
+paths are previews. The [portable Linux installer](../node-installer.md)
+describes the guest-side tooling and its verification status.
 
 ## Version and ownership
 
@@ -23,7 +16,9 @@ domain** and are **not** a Carbon Panel application or module release.
 * Publication boundary: an explicit `workflow_dispatch` with `publish=true`,
   on the trusted `refs/heads/main` ref, with a full 40-hex source SHA whose
   exact commit has green main CI, and an identity assertion bound to that
-  version, commit, artifact and owner. All other events only stage and verify.
+  version, commit, artifact and owner. Main must also contain a reviewed
+  qualification record that matches the version, kind and source commit. Other
+  dispatches are refused before the build and signing job.
 * Publication target (when actually dispatched): a **draft** GitHub release
   under the `runtime-v...` tag. No container registry push and no deployment is
   performed by this workflow.
@@ -45,21 +40,32 @@ The build entry points are allowlisted per kind (`scripts/build-runtime-qcow2.sh
 owned by their respective artifact lanes. `scripts/runtime_artifacts.py`
 generates the integrity records and checks them before any write.
 
-## Supported paths (and the unsupported ones)
+## Deployment paths
 
-| Goal | Supported artifact | Notes |
+| Mode | Status | Isolation |
 | --- | --- | --- |
-| Proxmox VE / KVM / libvirt VM | QCOW2 | First-class; see the QCOW2 artifact lane. |
-| Proxmox VE unprivileged container | LXC rootfs | First-class; see the LXC artifact lane. |
-| Any supported Linux guest, including Hyper-V, VirtualBox, VMware, bhyve | Portable Linux installer | **The supported path for unqualified formats.** |
-| Direct VHDX / VDI / VMDK / OVA / OVF / bhyve image | None | Not supported: no real clean import/boot evidence. See [the format decision](home-hypervisor-formats.md). |
+| [QCOW2 for Proxmox VE, KVM and libvirt](../../packaging/node-vm/README.md) | Preview | A dedicated VM has its own kernel, disk, network and node identity. |
+| [Unprivileged LXC for Proxmox VE](../node-lxc-mode.md) | Preview | The container shares the host kernel and requires verified nested-runtime capabilities. |
+| [Portable Linux installer](../node-installer.md) | Guest-side tooling for supported Linux guests, including when no qualified disk image is available | Inherits the isolation of the VM or host chosen by the operator. |
 
-Enrollment is scoped and happens at first boot: no approved key, challenge
-claim or other secret is baked into an image or its provisioning metadata. Each
-instance gets a unique identity, following the cloud-init `instance-id`
-first-boot model. Persistent node data (worlds, database, node identity) stays
-on a separate volume that is imported/backed up and recovered by the owning
-artifact lane.
+See the [format evidence table](home-hypervisor-formats.md) for direct disk
+images and per-hypervisor coverage.
+
+## Add qualification evidence before signing
+
+The artifact lane tests the exact payload in its intended deployment. Record
+the platform and version, first and second boot for VM or LXC, scoped
+enrollment, heartbeat, captive daemon isolation and workload provisioning.
+Include persistence and recovery results for the mode under test.
+
+After review, add a row to
+[`scripts/runtime_artifact_qualification.json`](../../scripts/runtime_artifact_qualification.json)
+on main with `version`, `artifact`, `commit`, `manifest_sha256` and an HTTPS
+`evidence` link to the qualification results. `manifest_sha256` is the digest
+of the complete `SHA256SUMS` file for the tested bundle, including its payload
+and provenance. The workflow compares the rebuilt manifest with this digest
+before signing. A new version, source commit or changed manifest needs a
+matching qualification record.
 
 ## Verify before use
 
@@ -130,22 +136,9 @@ If a native verifier is unavailable on the runner (for example no `qemu-img`),
 publication stops and the lane remains REHEARSAL-ONLY. These are preconditions,
 not a substitute for the cryptographic step above.
 
-## Accurate announcement (publish only after verification)
+## Announcement
 
-The following text is a template, not a claim of completed testing. Publish it
-only after the exact assets above have been built, signed, and verified.
-
-> Carbon Panel now publishes independently versioned **managed-node runtime
-> artifacts** under `runtime-vMAJOR.MINOR.PATCH`. The first family is the
-> portable Linux installer, with QCOW2 and unprivileged LXC rootfs artifacts
-> maintained by their own lanes. Downloads are attached to draft releases in
-> `athNdev/carbonpanel`, each with a SHA-256 manifest, a cosign keyless
-> signature and a CycloneDX SBOM. These are not Carbon Panel application
-> releases, and this work performs no registry push or deployment. Home
-> hypervisors without a verified disk image (Hyper-V VHDX, VirtualBox, VMware,
-> bhyve) use the portable guest installer as the supported path. Verification
-> steps and the format evidence table are in `docs/node-runtime/`.
-
-Do not state that a specific home-hypervisor image was imported or booted
-unless that exact import/boot evidence exists; the evidence table records which
-formats are proven and which are deliberately unsupported.
+Publish an announcement after the exact downloads have passed fresh
+installation and signature verification. Name only the modes and hypervisor
+versions covered by their qualification evidence. Report preview paths
+separately so readers can tell which deployment was tested.

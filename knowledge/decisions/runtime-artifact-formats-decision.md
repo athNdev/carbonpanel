@@ -1,7 +1,7 @@
 ---
 type: Decision
 title: "Runtime artifact format support — Decision"
-description: "Only QCOW2, unprivileged LXC rootfs and the portable Linux installer are"
+description: Candidate artifact kinds and the evidence required before publication.
 status: stable
 owners: [oss-runtime]
 sources:
@@ -10,12 +10,12 @@ sources:
 ---
 # Decision
 
-Only QCOW2, unprivileged LXC rootfs and the portable Linux installer are
-publishable runtime artifacts (`VERIFIED_ARTIFACTS`). A distinct home-hypervisor
-disk image (Hyper-V VHDX, VirtualBox VDI/OVA, VMware VMDK/OVF, bhyve) is added
-only after a real clean import and boot of our artifact is performed and its
-evidence recorded in the owning artifact lane. Until then the portable guest
-installer is the supported path on those platforms.
+QCOW2, unprivileged LXC rootfs and the portable Linux installer are the
+candidate artifact kinds. Additional disk formats require a clean import and
+boot of the Carbon Panel artifact on the target hypervisor, with recorded
+evidence. For other hypervisors, operators can use the portable guest tooling
+on a supported Linux guest. LXC shares the host kernel and needs separate
+nested-runtime evidence, even when the dedicated VM is qualified.
 
 A vendor's documented support for a disk format is not import/boot evidence.
 The publication gate refuses unproven formats; the format table and its primary

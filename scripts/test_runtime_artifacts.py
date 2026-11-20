@@ -207,11 +207,11 @@ class BuildStepReachabilityTests(unittest.TestCase):
         self.assertNotEqual(
             set(self.fixture["wrappers"]), set())
         self.assertEqual(
-            set(self.fixture["wrappers"]), set(ra.VERIFIED_ARTIFACTS))
+            set(self.fixture["wrappers"]), set(ra.ARTIFACT_KINDS))
         self.assertEqual(
-            set(self.fixture["delegates"]), set(ra.VERIFIED_ARTIFACTS))
-        self.assertEqual(set(ra.BUILD_SCRIPTS), set(ra.VERIFIED_ARTIFACTS))
-        self.assertEqual(set(ra.BUILD_DELEGATES), set(ra.VERIFIED_ARTIFACTS))
+            set(self.fixture["delegates"]), set(ra.ARTIFACT_KINDS))
+        self.assertEqual(set(ra.BUILD_SCRIPTS), set(ra.ARTIFACT_KINDS))
+        self.assertEqual(set(ra.BUILD_DELEGATES), set(ra.ARTIFACT_KINDS))
 
     def test_allowlisted_wrappers_resolve_to_real_main_entry_points(self):
         for artifact, wrapper in self.fixture["wrappers"].items():
@@ -223,7 +223,7 @@ class BuildStepReachabilityTests(unittest.TestCase):
                 self.assertTrue((ra.ROOT / delegate).is_file(), delegate)
 
     def test_preflight_proves_reachability_without_execution(self):
-        for artifact in ra.VERIFIED_ARTIFACTS:
+        for artifact in ra.ARTIFACT_KINDS:
             with self.subTest(artifact=artifact):
                 ok, reason, decision = ra.preflight_build(artifact)
                 self.assertTrue(ok, reason)
@@ -235,7 +235,7 @@ class BuildStepReachabilityTests(unittest.TestCase):
                                  self.fixture["delegates"][artifact])
 
     def test_cli_preflight_is_reachable_offline(self):
-        for artifact in ra.VERIFIED_ARTIFACTS:
+        for artifact in ra.ARTIFACT_KINDS:
             with self.subTest(artifact=artifact):
                 out = io.StringIO()
                 with contextlib.redirect_stdout(out):
@@ -353,6 +353,14 @@ class TrustedMainTests(unittest.TestCase):
 
 
 class PublicationGateTests(unittest.TestCase):
+    qualification = {
+        "version": VERSION,
+        "artifact": ARTIFACT,
+        "commit": SHA,
+        "manifest_sha256": "a" * 64,
+        "evidence": "https://github.com/example/project/actions/runs/123",
+    }
+
     def gate(self, **overrides):
         args = {
             "event_name": "workflow_dispatch",
@@ -364,6 +372,7 @@ class PublicationGateTests(unittest.TestCase):
             "ci_verified": "true",
             "ref": ra.TRUSTED_REF,
             "owner": "athndev",
+            "qualification_records": [self.qualification],
         }
         args.update(overrides)
         return ra.publication_gate(**args)
@@ -373,6 +382,24 @@ class PublicationGateTests(unittest.TestCase):
         self.assertTrue(allowed, reason)
         self.assertEqual(decision["build_script"], ra.BUILD_SCRIPTS[ARTIFACT])
         self.assertEqual(decision["identity"]["publisher"], "release-bot")
+        self.assertEqual(decision["manifest_sha256"], self.qualification["manifest_sha256"])
+        self.assertEqual(decision["qualification_evidence"], self.qualification["evidence"])
+
+    def test_requires_one_complete_record_for_the_dispatch(self):
+        for records in (
+            [],
+            [self.qualification, self.qualification],
+            [dict(self.qualification, version="runtime-v2.0.0")],
+            [dict(self.qualification, artifact="lxc-rootfs")],
+            [dict(self.qualification, commit="b" * 40)],
+            [dict(self.qualification, manifest_sha256="abc123")],
+            [dict(self.qualification, evidence="https://example.com/no" + chr(10) + "extra")],
+            {},
+        ):
+            with self.subTest(records=records):
+                allowed, _, decision = self.gate(qualification_records=records)
+                self.assertFalse(allowed)
+                self.assertNotIn("manifest_sha256", decision)
 
     def test_every_write_condition_fails_closed(self):
         cases = {
@@ -533,7 +560,7 @@ class PublicationPredicateTests(unittest.TestCase):
                                         process_runner=process_runner)
 
     def test_qualified_bundle_is_accepted_for_every_kind(self):
-        for artifact in ra.VERIFIED_ARTIFACTS:
+        for artifact in ra.ARTIFACT_KINDS:
             with self.subTest(artifact=artifact), tempfile.TemporaryDirectory() as tmp:
                 make_bundle(tmp, artifact, marker={"mode": "apply", "live_build": True})
                 ok, problems = self._predicate(tmp, artifact)
@@ -761,11 +788,11 @@ class PublicationPredicateTests(unittest.TestCase):
             self.assertEqual(code, 1, out.getvalue())
             self.assertEqual(payload["verified"], "false")
             self.assertTrue(any("offline" in p for p in payload["problems"]))
-            self.assertEqual(set(payload["native_verifiers"]), set(ra.VERIFIED_ARTIFACTS))
+            self.assertEqual(set(payload["native_verifiers"]), set(ra.ARTIFACT_KINDS))
 
     def test_real_environment_native_verifier_availability_is_reported(self):
         availability = ra.kind_verifiers.verifier_availability()
-        self.assertEqual(set(availability), set(ra.VERIFIED_ARTIFACTS))
+        self.assertEqual(set(availability), set(ra.ARTIFACT_KINDS))
         for kind, (present, reason) in availability.items():
             with self.subTest(kind=kind):
                 self.assertIsInstance(present, bool)
@@ -788,22 +815,29 @@ class WorkflowContractTests(unittest.TestCase):
         build = index("Build the verified artifact")
         predicate = index("publication predicate")
         checksum = index("deterministic checksum manifest")
+        qualification = index("staged checksum manifest to reviewed qualification")
         sign = index("Keyless-sign")
         bundle_verify = index("Verify the staged bundle")
         publish = index("DRAFT release")
         self.assertLess(build, predicate)
         self.assertLess(predicate, checksum)
-        self.assertLess(predicate, sign)
+        self.assertLess(checksum, qualification)
+        self.assertLess(qualification, sign)
         self.assertLess(predicate, bundle_verify)
         self.assertLess(predicate, publish)
         self.assertIn("publication-predicate", steps[predicate]["run"])
+        self.assertIn("sha256sum --check", steps[qualification]["run"])
+        self.assertIn("needs.gate.outputs.manifest_sha256",
+                      steps[qualification]["env"]["MANIFEST_SHA256"])
+        self.assertIn("steps.gate.outputs.manifest_sha256",
+                      document["jobs"]["gate"]["outputs"]["manifest_sha256"])
         self.assertEqual(steps[publish]["if"], "inputs.publish")
         triggers = document.get("on") or document.get(True)
         self.assertIn("workflow_dispatch", triggers)
         self.assertNotIn("schedule", triggers)
 
     def test_offline_rehearsal_reachability_and_wrappers_are_preserved(self):
-        for artifact in ra.VERIFIED_ARTIFACTS:
+        for artifact in ra.ARTIFACT_KINDS:
             with self.subTest(artifact=artifact):
                 ok, reason, decision = ra.preflight_build(artifact)
                 self.assertTrue(ok, reason)

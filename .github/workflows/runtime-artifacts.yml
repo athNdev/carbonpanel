@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       artifact:
-        description: Verified runtime artifact (portable installer is the fallback for unqualified formats)
+        description: Runtime artifact kind with reviewed qualification evidence
         required: true
         type: choice
         options:
@@ -32,7 +32,7 @@ on:
         required: true
         type: string
       publish:
-        description: Publish verified records to a DRAFT release (false = stage and verify only)
+        description: Allow qualified records to be signed and attached to a draft release
         required: false
         default: false
         type: boolean
@@ -55,6 +55,8 @@ jobs:
     outputs:
       allowed: ${{ steps.gate.outputs.allowed }}
       reason: ${{ steps.gate.outputs.reason }}
+      manifest_sha256: ${{ steps.gate.outputs.manifest_sha256 }}
+      qualification_evidence: ${{ steps.gate.outputs.qualification_evidence }}
     steps:
       - name: Checkout with history for ancestry check
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,6 +70,7 @@ jobs:
         id: ci
         env:
           SHA: ${{ inputs.trusted_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/runtime_artifacts.py verify-main-ci --commit "$SHA"
       - name: Verify the identity assertion is bound to this dispatch
         id: identity
@@ -152,6 +155,11 @@ jobs:
         run: |
           python3 scripts/runtime_artifacts.py assert-no-app-release --version "$VERSION" --artifact "${{ inputs.artifact }}"
           python3 scripts/runtime_artifacts.py checksums --dir dist/runtime --output dist/runtime/SHA256SUMS
+      - name: Match the staged checksum manifest to reviewed qualification
+        env:
+          MANIFEST_SHA256: ${{ needs.gate.outputs.manifest_sha256 }}
+        run: |
+          printf '%s  dist/runtime/SHA256SUMS\n' "$MANIFEST_SHA256" | sha256sum --check
       - name: Generate deterministic CycloneDX SBOM
         env:
           VERSION: ${{ inputs.version }}
@@ -208,12 +216,14 @@ jobs:
           VERSION: ${{ inputs.version }}
           ARTIFACT: ${{ inputs.artifact }}
           COMMIT: ${{ inputs.trusted_sha }}
+          QUALIFICATION_EVIDENCE: ${{ needs.gate.outputs.qualification_evidence }}
         run: |
           {
             echo "Carbon Panel managed node runtime artifacts $VERSION"
             echo
             echo "Artifact: $ARTIFACT"
             echo "Source commit: $COMMIT (exact-commit main CI verified at dispatch)"
+            echo "Qualification evidence: $QUALIFICATION_EVIDENCE"
             echo
             echo "This is an independently versioned runtime artifact publication"
             echo "(ADR 0033). It is NOT a Carbon Panel application or module release."

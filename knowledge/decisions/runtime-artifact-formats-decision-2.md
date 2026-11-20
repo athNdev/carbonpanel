@@ -19,5 +19,8 @@ and symlinks or non-regular files are refused. If a native validator is
 unavailable (for example no `qemu-img` on the runner), publication STOPS and the
 lane stays REHEARSAL-ONLY; these are preconditions, not a substitute for the
 consumer's cryptographic verification. The predicate does not gate the offline
-rehearsal reachability seam. Publication remains a manual `workflow_dispatch`
-with `publish=true`, and no real artifact has been published.
+rehearsal reachability seam. The trusted workflow checkout must also provide
+one reviewed qualification record for the version, kind and source commit.
+The publish job compares the generated `SHA256SUMS` digest with that record
+before signing. Green CI and valid payload structure alone cannot enable
+publication. Publication requires an explicit dispatch with `publish=true`.
