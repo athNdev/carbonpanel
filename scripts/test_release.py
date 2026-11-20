@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
+import os
 import re
 import shlex
 import subprocess
@@ -2213,6 +2214,98 @@ class ChannelPromotionTests(unittest.TestCase):
         self.assertFalse(release.channel_oci_parity(
             wrong_revision, self.DIGEST, self.CANDIDATE)[0])
 
+    def test_oci_parity_accepts_json_round_tripped_platform_lists(self):
+        # channel-observe -> JSON -> stable-alias-decision turns platform tuples
+        # into lists of lists. The gate must normalise them instead of raising
+        # TypeError on an unhashable list (observed in publish run 44760231606).
+        observations = self.immutable()
+        for registry in observations:
+            state, info = observations[registry]
+            observations[registry] = (state, {
+                **info,
+                "platforms": [list(pair) for pair in info["platforms"]],
+            })
+        ok, reason = release.channel_oci_parity(
+            observations, self.DIGEST, self.CANDIDATE)
+        self.assertTrue(ok, reason)
+
+    def test_oci_parity_refuses_malformed_platform_entries(self):
+        for bad in ({"linux": "amd64"}, ["linux/amd64"], [("linux", "amd64", "x")],
+                    [("linux", 1)], "linux/amd64"):
+            observations = self.immutable()
+            for registry in observations:
+                state, info = observations[registry]
+                observations[registry] = (state, {**info, "platforms": bad})
+            ok, reason = release.channel_oci_parity(
+                observations, self.DIGEST, self.CANDIDATE)
+            self.assertFalse(ok, (bad, reason))
+            self.assertIn("platform evidence", reason)
+
+    def test_stable_alias_decision_cli_accepts_json_platform_lists(self):
+        def obs(digest):
+            return ("present", {"digest": digest,
+                                "platforms": [["linux", "amd64"], ["linux", "arm64"]],
+                                "revision": self.CANDIDATE})
+        latest = {"docker_hub": obs(self.DIGEST), "ghcr": obs(self.DIGEST)}
+        stable = {"docker_hub": ("absent", {}), "ghcr": ("absent", {})}
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "stable-alias-decision",
+                                "--stable", json.dumps(stable),
+                                "--latest", json.dumps(latest)]), redirect_stdout(out):
+            release.main()
+        decision = json.loads(out.getvalue())
+        self.assertIn(decision["action"], ("promote", "first-publish"))
+        self.assertEqual(decision["digest"], self.DIGEST)
+        bad = {"docker_hub": ("present", {"digest": self.DIGEST,
+                                          "platforms": {"linux": "amd64"},
+                                          "revision": self.CANDIDATE}),
+               "ghcr": obs(self.DIGEST)}
+        with patch("sys.argv", ["release.py", "stable-alias-decision",
+                                "--stable", json.dumps(stable),
+                                "--latest", json.dumps(bad)]), redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, "platform evidence"):
+                release.main()
+
+    def test_verify_channel_parity_cli_refuses_malformed_platform_evidence(self):
+        bad = {"docker_hub": ("present", {"digest": self.DIGEST,
+                                          "platforms": {"linux": "amd64"},
+                                          "revision": self.CANDIDATE}),
+               "ghcr": ("present", {"digest": self.DIGEST,
+                                    "platforms": [["linux", "amd64"], ["linux", "arm64"]],
+                                    "revision": self.CANDIDATE})}
+        with patch("sys.argv", ["release.py", "verify-channel-parity",
+                                "--observations", json.dumps(bad),
+                                "--digest", self.DIGEST,
+                                "--commit", self.CANDIDATE]), redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, "platform evidence"):
+                release.main()
+
+    def test_trusted_module_provenance_requires_safe_path(self):
+        # Two checkouts with the same module name: plain PYTHONPATH still lets
+        # the candidate CWD win, so the release workflow must use python -P.
+        with tempfile.TemporaryDirectory() as base:
+            root = Path(base)
+            for name, marker in (("trusted", "trusted"), ("candidate", "candidate")):
+                scripts = root / name / "scripts"
+                scripts.mkdir(parents=True)
+                (scripts / "__init__.py").write_text("", encoding="utf-8")
+                (scripts / "probe.py").write_text(
+                    "MARKER = " + repr(marker) + "\n", encoding="utf-8")
+            env = {**os.environ, "PYTHONPATH": str(root / "trusted")}
+            code = "import scripts.probe; print(scripts.probe.MARKER)"
+            plain = subprocess.run(["python", "-c", code], cwd=root / "candidate",
+                                   env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(plain.stdout.strip(), "candidate")
+            safe = subprocess.run(["python", "-P", "-c", code], cwd=root / "candidate",
+                                  env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(safe.stdout.strip(), "trusted")
+
+    def test_release_uses_trusted_policy_declaration_and_safe_path(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("PYTHONPATH=.trusted-release python3 -P -m scripts.stable_recovery",
+                      source)
+        self.assertIn("--declaration .trusted-release/docs/maintained-guides.json", source)
+
     # --- Move state machine (first publish / retry / stale / rollback) -------
 
     def make_move(self, **overrides):
@@ -2569,7 +2662,7 @@ class ReviewerHighHardeningTests(unittest.TestCase):
         stable_runs = "\n".join(str(step.get("run", ""))
                                 for step in jobs["stable-channel-transaction"]["steps"])
         self.assertIn("playwright install --with-deps chromium", stable_runs)
-        self.assertIn("browser_version_check.py --base-url https://carbonpanel.dev", stable_runs)
+        self.assertIn(".trusted-release/scripts/browser_version_check.py .website-build/site --base-url https://carbonpanel.dev", stable_runs)
         cd = yaml.safe_load(
             (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8"))
         cd_runs = "\n".join(str(step.get("run", ""))

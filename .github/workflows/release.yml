@@ -148,7 +148,7 @@ jobs:
           [[ "$STAGED_RUN" =~ ^[0-9]+$ && "$EXPECTED_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$STAGED_RUN" > "$RUNNER_TEMP/run.json"
           gh run download "$STAGED_RUN" --name qualified-stable-stage --dir "$RUNNER_TEMP/stage"
-          python3 -m scripts.stable_recovery verify-stage --source-run "$RUNNER_TEMP/run.json" \
+          PYTHONPATH=.trusted-release python3 -P -m scripts.stable_recovery verify-stage --source-run "$RUNNER_TEMP/run.json" \
             --journal "$RUNNER_TEMP/stage/stage.json"
           echo "run=$STAGED_RUN" >> "$GITHUB_OUTPUT"
 
@@ -682,8 +682,20 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.commit }}
           fetch-depth: 0
+      # Check out the trusted dispatch SHA BEFORE running any candidate Python.
+      - name: Check out the trusted workflow gate revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: .trusted-release
+      # Static probe only: the trusted gate reads the candidate gate script as
+      # DATA. No candidate Python module is imported before the trust switch.
       - name: Refuse an older target that lacks the trusted gate script
-        run: python3 scripts/release.py verify-gate-script --path scripts/release.py
+        run: python3 .trusted-release/scripts/release.py verify-gate-script --path scripts/release.py
+      # All privileged gates run from the trusted checkout, including their
+      # openapi_version and docs_publication_gate imports. Candidate artifact
+      # and doc paths stay explicit in the arguments below.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.22.1'
@@ -699,8 +711,8 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
         run: |
-          TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
-          OBS=$(python3 scripts/release.py channel-observe --reference "$TAG" | jq -c .observations)
+          TAG=$(python3 .trusted-release/scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
+          OBS=$(python3 .trusted-release/scripts/release.py channel-observe --reference "$TAG" | jq -c .observations)
           printf 'observations=%s\n' "$OBS" >> "$GITHUB_OUTPUT"
       - name: Verify the OBSERVED digests, not a hardcoded literal
         id: parity
@@ -709,7 +721,7 @@ jobs:
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           OBS: ${{ steps.immutable.outputs.observations }}
         run: |
-          python3 scripts/release.py verify-channel-parity \
+          python3 .trusted-release/scripts/release.py verify-channel-parity \
             --observations "$OBS" --digest "$IMAGE_DIGEST" --commit "$RELEASE_COMMIT"
           HUB=$(printf '%s' "$OBS" | jq -r '.docker_hub[1].digest')
           GHCR=$(printf '%s' "$OBS" | jq -r '.ghcr[1].digest')
@@ -720,32 +732,32 @@ jobs:
       - name: Decide first publication or promotion from ACTUAL alias observations
         id: stable_aliases
         run: |
-          STABLE=$(python3 scripts/release.py channel-observe --reference stable | jq -c .observations)
-          LATEST=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
-          python3 scripts/release.py stable-alias-decision \
+          STABLE=$(python3 .trusted-release/scripts/release.py channel-observe --reference stable | jq -c .observations)
+          LATEST=$(python3 .trusted-release/scripts/release.py channel-observe --reference latest | jq -c .observations)
+          python3 .trusted-release/scripts/release.py stable-alias-decision \
             --stable "$STABLE" --latest "$LATEST"
       - name: Capture the verified prior receipt and exact prior docs bytes
         id: prior
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ALIASES=$(python3 scripts/release.py channel-observe --reference latest | jq -c .observations)
+          ALIASES=$(python3 .trusted-release/scripts/release.py channel-observe --reference latest | jq -c .observations)
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
           PRIOR_COMMIT=$(printf '%s' "$LIVE" | jq -r '.commit // empty')
           PRIOR_DIGEST=$(printf '%s' "$LIVE" | jq -r '.image.digest // empty')
           printf 'live_commit=%s\n' "$PRIOR_COMMIT" >> "$GITHUB_OUTPUT"
           printf 'live_digest=%s\n' "$PRIOR_DIGEST" >> "$GITHUB_OUTPUT"
-          RECEIPT=$(python3 scripts/release.py channel-active-receipt \
+          RECEIPT=$(python3 .trusted-release/scripts/release.py channel-active-receipt \
             --channel stable --aliases "$ALIASES" \
             --docs-commit "$PRIOR_COMMIT" --docs-digest "$PRIOR_DIGEST")
           test "$(jq -r '.receipt.verified' <<< "$RECEIPT")" = true
           printf 'prior_receipt=%s\n' "$(printf '%s' "$RECEIPT" | jq -c .receipt)" >> "$GITHUB_OUTPUT"
           # Rollback bytes come from the ACTUAL live deployment, resolved by
           # the shared docs gate - never from this freshly rebuilt site.
-          BASE=$(python3 scripts/docs_publication_gate.py pages-baseline \
+          BASE=$(python3 .trusted-release/scripts/docs_publication_gate.py pages-baseline \
             --repository "$GITHUB_REPOSITORY")
           test "$(printf '%s' "$BASE" | jq -r .verified)" = "true"
-          RESULT=$(python3 scripts/docs_publication_gate.py fetch-prior-pages \
+          RESULT=$(python3 .trusted-release/scripts/docs_publication_gate.py fetch-prior-pages \
             --site .website-build/prior-site --repository "$GITHUB_REPOSITORY" \
             --run-id "$(printf '%s' "$BASE" | jq -r .run_id)")
           test "$(printf '%s' "$RESULT" | jq -r .verified)" = "true"
@@ -767,8 +779,8 @@ jobs:
           PRIOR=.website-build/prior-site/version-index.json
           NIGHTLY_COMMIT=$(jq -er '.channels.nightly.commit' "$PRIOR")
           NIGHTLY_DIGEST=$(jq -er '.channels.nightly.image.digest' "$PRIOR")
-          NIGHTLY=$(python3 scripts/release.py channel-observe --reference nightly | jq -ce .observations)
-          python3 scripts/release.py verify-channel-parity --observations "$NIGHTLY" \
+          NIGHTLY=$(python3 .trusted-release/scripts/release.py channel-observe --reference nightly | jq -ce .observations)
+          python3 .trusted-release/scripts/release.py verify-channel-parity --observations "$NIGHTLY" \
             --commit "$NIGHTLY_COMMIT" --digest "$NIGHTLY_DIGEST"
           case "$(jq -er '.channels.nightly.promotion.state' "$PRIOR")" in
             final)
@@ -785,7 +797,7 @@ jobs:
           esac
           diff <(jq -S .channels.nightly "$PRIOR") \
             <(jq -S .channels.nightly .website-build/site/version-index.json)
-          python3 scripts/release.py validate-channel-contract \
+          python3 .trusted-release/scripts/release.py validate-channel-contract \
             --path .website-build/site/version-index.json \
             --stable-commit "$RELEASE_COMMIT" --stable-digest "$IMAGE_DIGEST"
       - name: Qualify rendered Stable HTML, version stamp, pins and both index routes
@@ -795,16 +807,16 @@ jobs:
           RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
           IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
         run: |
-          python3 scripts/release.py verify-stable-release-site \
+          python3 .trusted-release/scripts/release.py verify-stable-release-site \
             --site .website-build/site --commit "$RELEASE_COMMIT" \
             --digest "$IMAGE_DIGEST" --version "$RELEASE_VERSION" \
             --repository "https://github.com/$GITHUB_REPOSITORY"
       - name: Bind the maintained guide receipt to the rendered publication
         run: |
-          GATE=scripts/docs_publication_gate.py
+          GATE=.trusted-release/scripts/docs_publication_gate.py
           SITE=.website-build/site
           INDEX=$SITE/version-index.json
-          python3 "$GATE" guide-fingerprint --declaration docs/maintained-guides.json --root . \
+          python3 "$GATE" guide-fingerprint --declaration .trusted-release/docs/maintained-guides.json --root . \
             --revision "$CARBONPANEL_STABLE_REVISION" > .website-build/guides.json
           python3 "$GATE" stamp-publication-receipt --site "$SITE" --candidate .website-build/guides.json \
             --live "$INDEX" --revision "$CARBONPANEL_STABLE_REVISION"
@@ -829,7 +841,7 @@ jobs:
           echo "CARBONPANEL_EXPECT_PROMOTION_STATE=$(jq -r '.promotion.state' "$INDEX")" >> "$GITHUB_ENV"
       - name: Check the packaged candidate in Chromium before publication
         id: local_browser
-        run: python3 scripts/browser_version_check.py
+        run: python3 .trusted-release/scripts/browser_version_check.py .website-build/site
       - name: Qualify the candidate before the first external channel change
         id: stage_decision
         env:
@@ -847,7 +859,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           PREV_JSON=$(jq -ce 'select(.verified == true)' <<< "$PRIOR")
-          python3 scripts/release.py verify-stable-order --prior-tag "$(jq -er .channels.stable.tag .website-build/prior-site/version-index.json)" \
+          python3 .trusted-release/scripts/release.py verify-stable-order --prior-tag "$(jq -er .channels.stable.tag .website-build/prior-site/version-index.json)" \
             --candidate-tag "$RELEASE_VERSION" --prior-receipt "$PREV_JSON" --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST"
           SEQ=$(printf '%s' "$PREV_JSON" | jq -r '.seq // 0')
           CANDIDATE=$(jq -nc \
@@ -864,7 +876,7 @@ jobs:
               run_ids:{release:$run_id}}')
           LIVE=$(jq -c '{registries:.registries, docs_commit, docs_digest}' <<< "$PREV_JSON")
           echo "candidate=$CANDIDATE" >> "$GITHUB_OUTPUT"
-          python3 scripts/release.py channel-transaction --phase stage \
+          python3 .trusted-release/scripts/release.py channel-transaction --phase stage \
             --candidate "$CANDIDATE" --previous "$PREV_JSON" --live "$LIVE" \
             --event release
 
@@ -876,7 +888,7 @@ jobs:
           PRIOR_ARTIFACT: ${{ steps.prior.outputs.prior_artifact }}
           RELEASE_ID: ${{ needs.prepare-draft.outputs.release_id }}
         run: |
-          python3 -m scripts.stable_recovery journal --prior .website-build/prior-site \
+          PYTHONPATH=.trusted-release python3 -P -m scripts.stable_recovery journal --prior .website-build/prior-site \
             --candidate .website-build/site --journal .website-build/transaction.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -905,13 +917,13 @@ jobs:
           PRIOR: ${{ steps.prior.outputs.prior_receipt }}
         run: |
           PRIOR_TAG=$(jq -er '.channels.stable.tag' .website-build/prior-site/version-index.json)
-          python3 scripts/release.py verify-release-record --version "$PRIOR_TAG" \
+          python3 .trusted-release/scripts/release.py verify-release-record --version "$PRIOR_TAG" \
             --commit "$(jq -er .revision <<< "$PRIOR")" --digest "$(jq -er .digest <<< "$PRIOR")"
-          python3 scripts/release.py establish-stable-baseline --receipt "$PRIOR"
+          python3 .trusted-release/scripts/release.py establish-stable-baseline --receipt "$PRIOR"
       - name: Stage the candidate probe alongside the exact prior canonical site
         run: |
           cp -a .website-build/prior-site .website-build/probe-site
-          python3 scripts/release.py stage-channel-marker --site .website-build/probe-site \
+          python3 .trusted-release/scripts/release.py stage-channel-marker --site .website-build/probe-site \
             --channel stable --commit "$CARBONPANEL_STABLE_REVISION" --digest "$CARBONPANEL_STABLE_DIGEST"
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
@@ -941,7 +953,7 @@ jobs:
           LIVE=$(curl -fsSL https://carbonpanel.dev/version-index.json | jq -c '.channels.stable')
           test "$(printf '%s' "$LIVE" | jq -r '.commit')" = "$RELEASE_COMMIT"
           test "$(printf '%s' "$LIVE" | jq -r '.image.digest')" = "$IMAGE_DIGEST"
-          python3 scripts/docs_publication_gate.py verify-publication-receipt --base-url https://carbonpanel.dev \
+          python3 .trusted-release/scripts/docs_publication_gate.py verify-publication-receipt --base-url https://carbonpanel.dev \
             --candidate .website-build/guides.json --live .website-build/site/version-index.json \
             --revision "$RELEASE_COMMIT"
           VERSION=$(jq -er .channels.stable.version .website-build/site/version-index.json)
@@ -954,7 +966,7 @@ jobs:
       - name: Live browser QA of public Stable/Nightly channels after docs deploy
         id: stable_live_browser
         if: steps.deploy.outcome == 'success'
-        run: python3 scripts/browser_version_check.py --base-url https://carbonpanel.dev
+        run: python3 .trusted-release/scripts/browser_version_check.py .website-build/site --base-url https://carbonpanel.dev
       - name: Decide the qualified stable transaction before any alias move
         id: transaction
         env:
@@ -966,7 +978,7 @@ jobs:
           CANDIDATE=$(jq -ce --argjson probe "$PROBE_OK" --argjson canonical "$CANONICAL_OK" \
             '.candidate_marker_verified=$probe | .canonical_marker_verified=$canonical' <<< "$STAGED")
           LIVE=$(jq -c '{registries:.registries,docs_commit,docs_digest}' <<< "$PRIOR")
-          python3 scripts/release.py channel-transaction --phase commit \
+          python3 .trusted-release/scripts/release.py channel-transaction --phase commit \
             --candidate "$CANDIDATE" --previous "$PRIOR" --live "$LIVE" --event release
       # One positive action contract at the side-effect boundary. The engine can
       # also return 'reconcile', 'rollback', 'refuse' or empty; only an exact
