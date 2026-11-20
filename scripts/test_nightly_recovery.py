@@ -275,6 +275,35 @@ class QualificationTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "unconfirmed status"):
                         recovery.require_failed_pages_run_settled("10")
 
+    def test_final_receipt_uses_actual_deployed_artifact_after_noop_retry(self):
+        job_name = "Recover split Nightly (docs)"
+        def jobs(outcome):
+            return {"jobs": [{"name": job_name, "steps": [
+                {"name": "Deploy the selected Pages artifact", "conclusion": outcome}
+            ]}]}
+        responses = [
+            [{"id": 91, "sha": TARGET}, {"id": 90, "sha": TARGET}],
+            [{"target_url": "https://github.com/example/repo/actions/runs/11"}],
+            jobs("skipped"),
+            [{"target_url": "https://github.com/example/repo/actions/runs/10"}],
+            jobs("failure"),
+            {"status": "succeed"},
+            {"artifacts": [{"name": "github-pages", "id": 7, "expired": False}]},
+        ]
+        for actual in ("verified-final-tree", "different-tree"):
+            with self.subTest(actual=actual), patch.object(recovery, "api", side_effect=responses), \
+                    patch.object(recovery, "pages_provider_id", return_value="provider-10"), \
+                    patch.object(recovery, "preserve_pages", return_value={"run_id": "10"}) as preserve, \
+                    patch.object(recovery, "tree_digest", return_value=actual):
+                plan = {"trees": {"final": "verified-final-tree"}}
+                if actual != plan["trees"]["final"]:
+                    with self.assertRaisesRegex(ValueError, "differs from the reviewed final tree"):
+                        recovery.verify_final_deployment(plan)
+                else:
+                    receipt = recovery.verify_final_deployment(plan)
+                    self.assertEqual(receipt, {"run_id": "10", "provider_deployment_id": "provider-10"})
+                    self.assertEqual(preserve.call_args.args[1]["artifact_candidates"], ["7"])
+
 
 @unittest.skipUnless(os.environ.get("NIGHTLY_RECOVERY_RENDER_REHEARSAL") == "true",
                      "requires Bun, Node and Buf")

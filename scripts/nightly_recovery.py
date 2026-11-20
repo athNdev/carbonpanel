@@ -115,15 +115,19 @@ def require_failed_pages_run_settled(run_id):
              if step["name"] == "Deploy the selected Pages artifact"]
     if len(steps) == 1 and steps[0]["conclusion"] in ("success", "skipped"):
         return
-    logs = run("gh", "run", "view", run_id, "--repo", REPOSITORY, "--log")
-    identifiers = set(re.findall(r"Created deployment for [0-9a-f]{40}, ID: ([0-9a-zA-Z_-]+)", logs))
-    require(len(identifiers) == 1,
-            f"Pages outcome for run {run_id} is unknown; resolve the provider deployment before writing")
-    deployment_id = identifiers.pop()
+    deployment_id = pages_provider_id(run_id)
     provider_status = api(f"pages/deployments/{deployment_id}")["status"]
     require(provider_status in ("succeed", "deployment_failed", "deployment_perms_error",
                                 "deployment_content_failed", "deployment_cancelled"),
             f"Pages deployment {deployment_id} has unconfirmed status {provider_status}")
+
+
+def pages_provider_id(run_id):
+    logs = run("gh", "run", "view", run_id, "--repo", REPOSITORY, "--log")
+    identifiers = set(re.findall(r"Created deployment for [0-9a-f]{40}, ID: ([0-9a-zA-Z_-]+)", logs))
+    require(len(identifiers) == 1,
+            f"Pages outcome for run {run_id} is unknown; resolve the provider deployment before writing")
+    return identifiers.pop()
 
 
 def fetch(url, headers=None, *, exact_route=False):
@@ -474,6 +478,10 @@ def verify_final_index(index, stable, candidate):
 def preserve_prior(root):
     baseline, reason = pages.pages_baseline(REPOSITORY)
     require(baseline and baseline["artifact_verified"], reason)
+    return preserve_pages(root, baseline)
+
+
+def preserve_pages(root, baseline):
     reader, endpoint = pages.github_api(REPOSITORY)
     run_id = baseline["run_id"]
     available = json.loads(reader(f"{endpoint}/actions/runs/{run_id}/artifacts?per_page=100"))
@@ -483,6 +491,42 @@ def preserve_prior(root):
         root, selected, lambda item: reader(f"{endpoint}/actions/artifacts/{item['id']}/zip"),
         get_live("/version-index.json"), run_id=run_id)
     return {**result, "deployment_id": baseline["deployment_id"], "deployment_sha": baseline["sha"]}
+
+
+def verify_final_deployment(plan):
+    # An idempotent retry may finish the environment job without itself
+    # deploying. Identify the native Pages write, even if its runner failed
+    # after the provider accepted it.
+    for deployment in api("deployments?environment=github-pages&per_page=10"):
+        statuses = api(f"deployments/{deployment['id']}/statuses?per_page=1")
+        if not statuses:
+            continue
+        match = re.search(r"/actions/runs/(\d+)(?:/|$)", statuses[0].get("target_url") or "")
+        if not match:
+            continue
+        run_id = match[1]
+        jobs = api(f"actions/runs/{run_id}/jobs?filter=latest&per_page=100")["jobs"]
+        if not any(job["name"] == "Recover split Nightly (docs)" and
+                   any(step["name"] == "Deploy the selected Pages artifact" and
+                       step["conclusion"] not in (None, "skipped") for step in job.get("steps", []))
+                   for job in jobs):
+            continue
+        provider_id = pages_provider_id(run_id)
+        require(api(f"pages/deployments/{provider_id}")["status"] == "succeed",
+                "The observed final Pages deployment has not succeeded at the provider")
+        listing = api(f"actions/runs/{run_id}/artifacts?per_page=100")
+        artifacts = [str(item["id"]) for item in listing["artifacts"]
+                     if item["name"] == "github-pages" and not item["expired"]]
+        require(len(artifacts) == 1, "Final Pages deployment artifact is not uniquely available")
+        baseline = {"deployment_id": str(deployment["id"]), "run_id": run_id,
+                    "artifact_candidates": artifacts, "sha": deployment["sha"]}
+        with tempfile.TemporaryDirectory(prefix="nightly-final-pages-") as temporary:
+            site = Path(temporary) / "site"
+            evidence = preserve_pages(site, baseline)
+            require(tree_digest(site) == plan["trees"]["final"],
+                    "Successful Pages deployment artifact differs from the reviewed final tree")
+        return {**evidence, "provider_deployment_id": provider_id}
+    raise ValueError("No native Pages write was observed for the reviewed final site")
 
 
 def prepare(args, hub, ghcr):
@@ -577,6 +621,8 @@ def phase_check(args, plan, hub, ghcr):
         verify_ci(candidate)
     if action:
         require_pages_settled(args.run)
+        if action == "ghcr":
+            verify_final_deployment(plan)
         refreshed, _, _ = observe(plan, hub, ghcr)
         require(refreshed in (state, expected), "Nightly surfaces changed before the write")
         state = refreshed
@@ -615,11 +661,7 @@ def verify_after(args, plan, hub, ghcr):
     final = observed == ("candidate", "candidate", "final")
     deployment = None
     if final:
-        with tempfile.TemporaryDirectory(prefix="nightly-final-pages-") as temporary:
-            actual = Path(temporary) / "site"
-            deployment = preserve_prior(actual)
-            require(tree_digest(actual) == plan["trees"]["final"],
-                    "Successful Pages deployment artifact differs from the reviewed final tree")
+        deployment = verify_final_deployment(plan)
     receipt = {"plan": args.plan_digest, "run": args.run, "phase": args.phase,
                "state": dict(zip(("docker_hub", "ghcr", "pages"), observed)),
                "observed_at": datetime.now(timezone.utc).isoformat(),
