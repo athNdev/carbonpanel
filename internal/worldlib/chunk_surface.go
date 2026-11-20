@@ -5,6 +5,7 @@ package worldlib
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -25,8 +26,9 @@ var (
 // block coordinates are indexed with X increasing first, then Z. A column
 // with no surface has JavaOverworldMinY - 1.
 type JavaChunkSurface struct {
-	X, Z    int32
-	Heights [javaChunkWidth * javaChunkWidth]int16
+	X, Z        int32
+	Heights     [javaChunkWidth * javaChunkWidth]int16
+	Provisional bool
 }
 
 // SupportsJavaOverworldDataVersion reports the supported modern chunk interval.
@@ -58,7 +60,11 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 	if !ok {
 		return surface, errors.New("missing generation status in Java chunk")
 	}
-	if status != "full" && status != "minecraft:full" {
+	switch strings.TrimPrefix(status, "minecraft:") {
+	case "full":
+	case "surface", "carvers", "liquid_carvers", "features", "initialize_light", "light", "spawn", "heightmaps":
+		surface.Provisional = true
+	default:
 		return surface, ErrJavaChunkUnfinished
 	}
 	minSection, ok := root["yPos"].(int32)
@@ -72,6 +78,12 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 	}
 	surface.X, surface.Z = x, z
 	heights, ok := FactNested(root, "Heightmaps", "WORLD_SURFACE")
+	if !ok && surface.Provisional {
+		heights, ok = FactNested(root, "Heightmaps", "WORLD_SURFACE_WG")
+		if !ok {
+			return surface, ErrJavaChunkUnfinished
+		}
+	}
 	if !ok {
 		return surface, errors.New("missing saved surface heightmap in Java chunk")
 	}

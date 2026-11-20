@@ -287,28 +287,28 @@
       "name": "server players panel renders"
     },
     {
-      "waitFor": "#server-detail-tabs-panel-players section[aria-label=\"Add allowlist entry\"] input",
-      "feature": "players",
-      "name": "allowlist identity field renders"
-    },
-    {
-      "waitFor": "#server-detail-tabs-panel-players section[aria-label=\"Add allowlist entry\"] button:has-text(\"Add to allowlist\")",
-      "feature": "players",
-      "name": "allowlist submit control renders"
-    },
-    {
       "waitFor": "#server-detail-tabs-panel-players [data-player-row]:has-text(\"ReviewGuest\")",
       "feature": "players",
       "name": "actual game client appears in the server-scoped roster"
     },
     {
+      "click": "#server-detail-tabs-panel-players button:has-text(\"Add player to allowlist\")",
+      "feature": "players",
+      "name": "open the allowlist dialog"
+    },
+    {
+      "waitFor": "[role=\"dialog\"] section[aria-label=\"Add allowlist entry\"] input",
+      "feature": "players",
+      "name": "allowlist identity field renders"
+    },
+    {
       "screenshot": "showcase-player-allowlist",
-      "element": "#server-detail-tabs-panel-players",
+      "element": "[role=\"dialog\"]:has(section[aria-label=\"Add allowlist entry\"])",
       "scroll": false,
       "feature": "players",
-      "name": "server-scoped observed player and allowlist form",
-      "alt": "Server Players tab with the observed gameplay fixture and allowlist controls",
-      "focus": "The server-scoped ReviewGuest session and the add-player form"
+      "name": "server-scoped allowlist form",
+      "alt": "Add player to allowlist dialog with a username or UUID field",
+      "focus": "The add-player form and the server it applies to"
     },
     {
       "setViewport": { "width": 1256, "height": 1040 },

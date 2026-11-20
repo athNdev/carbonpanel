@@ -63,7 +63,8 @@ test('compact density tightens the same shared header without changing its token
 test('the shell bounds height so tab panes can fill the remaining column', () => {
 	assert.match(shell, /h-dvh/);
 	assert.match(shell, /flex min-h-0 flex-1 flex-col overflow-y-auto p-4/);
-	assert.match(shell, /min-h-full w-full max-w-7xl flex-1 flex-col/);
+	assert.match(shell, /min-h-full w-full max-w-7xl flex-col/);
+	assert.match(shell, /page\.url\.pathname === '\/'\s*\? 'shrink-0 grow'\s*: 'flex-1'/);
 });
 
 test('the server detail page passes min-h-0 through the tab panel', () => {

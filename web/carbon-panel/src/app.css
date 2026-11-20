@@ -214,11 +214,19 @@ one at https://mozilla.org/MPL/2.0/.
 		border-bottom-color: var(--primary);
 		background-color: var(--card);
 	}
+	.telemetry-track {
+		height: 0.625rem;
+		width: 100%;
+		overflow: hidden;
+		background: var(--secondary);
+		outline: 1px solid var(--border);
+		outline-offset: -1px;
+	}
 	.mono-label {
 		font-family: var(--carbon-font-mono);
 		font-size: 12px;
 		line-height: 1.6;
-		letter-spacing: 0.04em;
+		letter-spacing: 0.015em;
 		text-transform: uppercase;
 		color: var(--muted-foreground);
 	}
@@ -227,7 +235,7 @@ one at https://mozilla.org/MPL/2.0/.
 		font-size: 12px;
 		line-height: 1.6;
 		font-weight: 600;
-		letter-spacing: 0.04em;
+		letter-spacing: 0.015em;
 		text-transform: uppercase;
 		color: var(--foreground);
 	}
@@ -235,7 +243,7 @@ one at https://mozilla.org/MPL/2.0/.
 		font-family: var(--carbon-font-mono);
 		font-size: 12px;
 		line-height: 1.6;
-		letter-spacing: 0.04em;
+		letter-spacing: 0.015em;
 		text-transform: uppercase;
 		color: var(--accent-text);
 	}

@@ -1,0 +1,39 @@
+---
+title: Configure a new server
+description: Choose a modpack, add compatible content, and attach optional services when creating a server.
+---
+{/* SPDX-License-Identifier: MPL-2.0 */}
+
+Choose **From Modpack Preset** to search the Modpacks Library or open your
+favorites. The preset is applied using the library default or a release you
+explicitly select. For a pack that has its own install process, manage individual
+mods from its server page after the first boot.
+
+On **Add-ons**, you can do any of the following.
+
+- Use **Datapacks** to browse for the selected Minecraft version or upload a ZIP
+  containing `pack.mcmeta`. See [Server datapacks](../server-datapacks/).
+- Use **Mods** on a standalone Fabric, Forge, NeoForge, or Quilt server to choose
+  a release. The wizard checks declared required dependencies against the game
+  version and loader. For terrain pregeneration, look for [Chunky](https://github.com/pop4959/Chunky/wiki/Installing)
+  in versions where it supports your loader.
+- Use **Modules** to attach services from the built-in templates offered for
+  setup. Start them explicitly from the server's **Modules** tab. Once you have
+  a world, open **World View** to set up BlueMap.
+
+The wizard creates the server and then applies the add-ons. When you choose
+**Start Immediately**, a requested first start waits for those add-ons. If an
+installation fails, the setup results show the failed item. **Retry failed
+add-ons** reuses the same server and skips completed items. The setup screen
+keeps retry details while it is open.
+
+## Resource Pack Host
+
+Add the **Resource Pack Host** module, then upload public resource pack ZIPs to
+`modules/resource-pack-host/packs` through **Files**. Start the module, append
+the ZIP filename to its access URL, and set that URL as the Minecraft server's
+resource pack. Make sure players can reach the URL from their own network.
+
+The module serves this directory over unauthenticated HTTP. Keep only files you
+intend to share in it. The module mounts the directory read-only and disables
+listings, hidden files, and symbolic links. See the [upstream Static Web Server documentation](https://static-web-server.net/v2/features/docker).

@@ -304,7 +304,11 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{#snippet worldLink(target: WorldViewTarget)}
 				<a
 					href={targetHref(target)}
-					class="focus-ring font-medium break-words text-foreground underline-offset-2 hover:text-accent-text hover:underline"
+					class="focus-ring font-medium break-words text-foreground underline-offset-2 group-hover:text-accent-text group-hover:underline after:absolute after:inset-0"
+					aria-label={'Open map for ' +
+						(target.name || target.worldRef?.levelName || 'Untitled world') +
+						' on ' +
+						serverLabel(target.serverId)}
 				>
 					{target.name || target.worldRef?.levelName || 'Untitled world'}
 				</a>
@@ -328,7 +332,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				</h2>
 				<ul class="divide-y divide-border">
 					{#each filtered as target (targetHref(target))}
-						<li class="flex min-w-0 flex-col gap-2 p-3 text-sm">
+						<li
+							class="group relative flex min-w-0 flex-col gap-2 p-3 text-sm focus-within:bg-accent hover:bg-accent"
+						>
 							<div class="grid items-start gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
 								{@render worldLink(target)}
 								<div>{@render stateTag(target)}</div>
@@ -363,7 +369,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					</tr>
 				{/snippet}
 				{#each filtered as target (targetHref(target))}
-					<tr class="transition-colors hover:bg-accent">
+					<tr class="group relative transition-colors focus-within:bg-accent hover:bg-accent">
 						<td class="min-w-[180px] px-3 py-3">
 							{@render worldLink(target)}
 							<p class="font-mono text-xs break-all text-muted-foreground">

@@ -57,6 +57,7 @@ type TileCoord struct{ X, Z int }
 type Tile struct {
 	PNG                                                                []byte
 	RenderedChunks, MissingChunks, UnsupportedChunks, UnreadableChunks int
+	ProvisionalChunks                                                  int
 	TimestampedChunks                                                  int
 	OldestSavedAt, NewestSavedAt                                       time.Time
 }
@@ -109,6 +110,7 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 	startX := (coord.X - rx*tilesPerRegion) * chunksPerTile
 	startZ := (coord.Z - rz*tilesPerRegion) * chunksPerTile
 	var budget readBudget
+	var provisional [chunksPerTile * chunksPerTile]bool
 	for z := 0; z < chunksPerTile; z++ {
 		for x := 0; x < chunksPerTile; x++ {
 			if err := ctx.Err(); err != nil {
@@ -135,6 +137,10 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 				tile.UnreadableChunks++
 			default:
 				tile.RenderedChunks++
+				if chunk.Provisional {
+					tile.ProvisionalChunks++
+					provisional[z*chunksPerTile+x] = true
+				}
 				tile.recordSave(binary.BigEndian.Uint32(original[sectorBytes+index : sectorBytes+index+4]))
 				for row := 0; row < chunkBlocks; row++ {
 					start := (z*chunkBlocks+row)*TileBlocks + x*chunkBlocks
@@ -165,7 +171,7 @@ func RenderOverworldTile(ctx context.Context, store ReadStorage, level string, c
 
 	var out bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := encoder.Encode(&out, shadeGrid(grid)); err != nil {
+	if err := encoder.Encode(&out, shadeGrid(grid, provisional)); err != nil {
 		return Tile{}, fmt.Errorf("encode terrain tile: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -224,7 +230,7 @@ var elevation = [...]struct {
 	{worldlib.JavaOverworldMaxY, 239, 235, 221},
 }
 
-func shadeGrid(grid []int16) *image.NRGBA {
+func shadeGrid(grid []int16, provisional [chunksPerTile * chunksPerTile]bool) *image.NRGBA {
 	img := image.NewNRGBA(image.Rect(0, 0, TileBlocks, TileBlocks))
 	for z := 0; z < TileBlocks; z++ {
 		for x := 0; x < TileBlocks; x++ {
@@ -237,7 +243,11 @@ func shadeGrid(grid []int16) *image.NRGBA {
 			n := neighborHeight(grid, x, z-1, height)
 			s := neighborHeight(grid, x, z+1, height)
 			shade := max(-38, min(38, (l-r)*4+(n-s)*3))
-			img.SetNRGBA(x, z, terrainColor(height, shade))
+			pixel := terrainColor(height, shade)
+			if provisional[(z/chunkBlocks)*chunksPerTile+x/chunkBlocks] {
+				pixel.A = 176
+			}
+			img.SetNRGBA(x, z, pixel)
 		}
 	}
 	return img

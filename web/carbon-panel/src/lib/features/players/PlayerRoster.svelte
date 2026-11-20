@@ -114,7 +114,10 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 	const visible = $derived(filterAndSortPlayers(rosterState.players, filter));
 	const hasFilters = $derived(
-		!!filter.query || filter.stateFilter !== 'all' || filter.accessFilter !== 'all'
+		filter.serverId !== serverId ||
+			!!filter.query ||
+			filter.stateFilter !== 'all' ||
+			filter.accessFilter !== 'all'
 	);
 
 	function keyOf(player: PlayerSummary): string {
@@ -225,6 +228,14 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	function handleGlobalKeydown(event: KeyboardEvent) {
 		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
 		const target = event.target as HTMLElement | null;
+		if (
+			target instanceof Element &&
+			target.closest('dialog[open], [role="dialog"], [role="alertdialog"]')
+		)
+			return;
+		// Native controls own Enter even when a roster row was highlighted earlier.
+		if (event.key === 'Enter' && target instanceof Element && target.closest('button, a[href]'))
+			return;
 		const typing =
 			!!target &&
 			(target.tagName === 'INPUT' ||
@@ -291,20 +302,18 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				onretry={refresh}
 			/>
 		{/if}
-	{:else if visible.length === 0}
+	{:else if visible.length === 0 && !hasFilters}
 		<CarbonEmptyState
-			title={hasFilters ? 'No matching players' : 'No players found'}
-			description={hasFilters
-				? 'Try a different name, server, presence or access filter.'
-				: 'No player identities have been observed yet.'}
-			actionLabel={hasFilters ? 'Clear filters' : 'Refresh'}
-			onaction={hasFilters ? clearFilters : refresh}
+			title="No players yet"
+			description="Players will appear here as their identities are observed."
+			actionLabel="Refresh"
+			onaction={refresh}
 		/>
 	{:else}
 		<div bind:this={listEl} class="space-y-2">
 			<CarbonDataTable title="Player roster" description={rosterState.sourceDetail || undefined}>
 				{#snippet toolbar()}
-					<div bind:this={toolbarEl} class="flex flex-col gap-2 sm:flex-row sm:items-center">
+					<div bind:this={toolbarEl} class="flex min-w-0 flex-wrap items-end gap-2">
 						<CarbonSearch
 							bind:value={filter.query}
 							placeholder="Search name, UUID, alias or server…"
@@ -573,6 +582,17 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 									action={player.whitelisted ? 'whitelist_remove' : 'whitelist_add'}
 									onDone={refresh}
 								/>
+							</div>
+						</td>
+					</tr>
+				{:else}
+					<tr>
+						<td colspan="7" class="px-4 py-6">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<p class="text-sm text-muted-foreground">No players match these filters.</p>
+								<CarbonButton kind="tertiary" size="sm" onclick={clearFilters}>
+									Clear filters
+								</CarbonButton>
 							</div>
 						</td>
 					</tr>

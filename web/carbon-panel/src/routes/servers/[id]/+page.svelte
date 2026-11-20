@@ -572,9 +572,9 @@ one at https://mozilla.org/MPL/2.0/.
 								{/if}
 							</span>
 						</div>
-						<div class="mt-1 h-1.5 w-full rounded-none border border-border bg-background">
+						<div class="telemetry-track mt-1.5" aria-hidden="true">
 							<div
-								class="h-full rounded-none bg-primary transition-all"
+								class="h-full bg-accent-text transition-[width]"
 								style="width: {server.status === ServerStatus.CREATING
 									? '100'
 									: memoryUsagePercent(server.memoryUsage, server.memory)}%"
@@ -590,9 +590,9 @@ one at https://mozilla.org/MPL/2.0/.
 								{server.cpuPercent !== undefined ? `${server.cpuPercent.toFixed(1)}%` : '—'}
 							</span>
 						</div>
-						<div class="mt-1 h-1.5 w-full rounded-none border border-border bg-background">
+						<div class="telemetry-track mt-1.5" aria-hidden="true">
 							<div
-								class="h-full rounded-none bg-accent-text transition-all"
+								class="h-full bg-[var(--chart-4)] transition-[width]"
 								style="width: {Math.min(server.cpuPercent || 0, 100)}%"
 							></div>
 						</div>

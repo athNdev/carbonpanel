@@ -48,16 +48,15 @@ and warning also have text roles. Status tags have dedicated foreground and
 background pairs. Do not convey meaning by color alone. Charts must use labels
 or patterns as well as color and provide a text alternative.
 
-The source provides light and dark palettes. Panel supports both but defaults
-to dark: `:root` carries the dark palette, so a fresh browser with no stored
-preference renders dark controls. Light applies only under
-`[data-carbon-theme='light']`. Cloud currently starts with the dark class and
-does not expose a theme picker; its light palette is a foundation for future
-work, not a claim that Cloud's pages have been qualified in light mode.
-A preview may use data-carbon-theme on a container; application themes use the
-root dark class. The default is written as `:where(:root)` so it carries no
-specificity and can never outrank an explicit theme. Test contrast in the
-actual adjacent surfaces, including hover, selection and focus states.
+The system preference follows the operating system on first use and when its
+appearance changes. Explicit Light and Dark choices persist in this browser
+and take precedence over the OS. The panel's display preference owner applies
+the effective palette to both the root dark class and `data-carbon-theme`.
+Without JavaScript or a system color preference the underlying tokens use
+dark. Cloud starts with its dark class. Themes can also be previewed on a
+container with `data-carbon-theme`. The CSS fallback is written as
+`:where(:root)` to yield to those previews. Test contrast in the actual
+adjacent surfaces, including hover, selection and focus states.
 
 ### Type, spacing and geometry
 

@@ -35,3 +35,6 @@ decoded bytes and values, coordinates, and output dimensions. A changed selected
 entry invalidates the result. Unsupported and unreadable data remain visible
 in coverage counts. Region timestamp values describe saved chunks, while the
 PNG represents elevation and slope without claiming block or biome fidelity.
+Supported late generation stages can contribute provisional saved surface
+heights. The PNG fades these chunks and returns their count. Early generation
+records without qualified surfaces remain transparent. Viewing never generates terrain.

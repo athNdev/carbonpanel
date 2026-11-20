@@ -2,7 +2,7 @@
 import { loadNativeTile, tileKey, type MapPoint, type TileResult } from './native-map';
 
 const MAX_ACTIVE_REQUESTS = 2;
-const MAX_CACHED_TILES = 64;
+const MAX_CACHED_TILES = 96;
 
 /** The visible tiles are ordered from the center out by the viewport. */
 export function createNativeTileLoader(

@@ -107,6 +107,9 @@ async function runPackagedWorldView(browser) {
       renderer: { type: "RENDERER_TYPE_BLUEMAP", capabilities: ["map.2d"] },
     };
     let selectedRenderer = native;
+    let libraryReader = false;
+    let serverListFailure;
+    const runningServer = {id: native.serverId, name: native.name, status: "SERVER_STATUS_RUNNING", modLoader: "MOD_LOADER_VANILLA"};
     let tileRequests = 0;
     let savingTile;
     let savingTileRetried = false;
@@ -130,6 +133,10 @@ async function runPackagedWorldView(browser) {
     });
     await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
       const method = new URL(route.request().url()).pathname.split("/").at(-1);
+      if (method === "ListServers" && serverListFailure) {
+        await route.fulfill({status: serverListFailure === "permission_denied" ? 403 : 503, json:{code: serverListFailure, message: "fixture inventory error"}});
+        return;
+      }
       if (method === "ListMapOverlays") {
         const request = route.request().postDataJSON();
         markerReads.push(request);
@@ -140,6 +147,10 @@ async function runPackagedWorldView(browser) {
         GetAuthStatus: {localAuthEnabled: false, oidcEnabled: false, anonymousAccessEnabled: false},
         GetCurrentUser: { user: {id: "fixture", username: "Fixture"}, permissions: [
           { resource: "world_view", action: "read", objectId: native.serverId },
+          ...(libraryReader ? [
+            {resource: "servers", action: "read", objectId: "*"},
+            {resource: "worlds", action: "read", objectId: "*"},
+          ] : []),
         ]},
         GetWorldViewStatus: { target: selectedRenderer },
         GetWorldViewSession: {
@@ -148,7 +159,8 @@ async function runPackagedWorldView(browser) {
         },
         ListWorldViewTargets: { targets: [native] },
         ListCapabilities: {rendererType: native.rendererType, capabilities: [{name: "map.2d", supported: true}]},
-        ListServers: {servers: [{id: native.serverId, name: native.name}]},
+        ListServers: {servers: [runningServer, {...runningServer, id:"stopped", name:"Stopped fixture", status:"SERVER_STATUS_STOPPED"}]},
+        ListBindings: {configuredLevelName:"overworld", bindings:[]},
       };
       await route.fulfill({ json: responses[method] ?? {} });
     });
@@ -220,6 +232,49 @@ async function runPackagedWorldView(browser) {
     assert.equal(await surface.locator("iframe").count(), 0);
     results.push("status polling reissues sessions when the rendering mode changes in either direction");
     results.push("the packaged World View renders native tiles and scoped Overworld markers without an iframe or module");
+    for (const width of [360, 1440]) {
+      await page.setViewportSize({width, height: 900});
+      await page.goto(origin + "worlds?server=" + native.serverId);
+      const link = page.getByRole("link", {name:/Open map for Fixture native world/});
+      const row = link.locator("xpath=ancestor::*[self::tr or self::li][1]");
+      const bounds = await row.boundingBox();
+      assert.ok(bounds);
+      await page.mouse.click(bounds.x + bounds.width - 8, bounds.y + bounds.height / 2);
+      await page.waitForURL(url => url.pathname.startsWith("/worlds/" + native.serverId + "/"));
+      await page.goBack();
+      await link.focus();
+      await link.press("Enter");
+      await page.waitForURL(url => url.pathname.startsWith("/worlds/" + native.serverId + "/"));
+    }
+    results.push("both desktop rows and mobile cards open through their far edge and keyboard link");
+    libraryReader = true;
+    await page.goto(origin + "library");
+    const running = page.getByRole("region", {name:"Running server worlds"});
+    await running.getByText("overworld", {exact:true}).waitFor();
+    await running.getByText("Server-local", {exact:true}).waitFor();
+    await running.getByRole("link", {name:native.name, exact:true}).waitFor();
+    assert.doesNotMatch(await running.innerText(), /Stopped fixture/);
+    await page.getByRole("heading", {name:"No saved library revisions yet"}).waitFor();
+    assert.equal(await page.getByRole("link", {name:"Import world"}).count(), 0);
+    await page.getByRole("combobox", {name:"Edition"}).selectOption("bedrock");
+    await running.getByText("No running worlds match these filters.").waitFor();
+    await page.getByRole("button", {name:"Reset filters"}).click();
+    await running.getByText("overworld", {exact:true}).waitFor();
+    await page.screenshot({path: path.join(evidence, "packaged-library-running-world.png")});
+    results.push("running worlds appear alongside an empty revision library, honor filters and hide creation from readers");
+    const refreshServers = running.getByRole("button", {name:"Refresh"});
+    serverListFailure = "unavailable";
+    await refreshServers.click();
+    await running.getByText("Could not refresh the running server list.").waitFor();
+    await running.getByText("overworld", {exact:true}).waitFor();
+    serverListFailure = "permission_denied";
+    await refreshServers.click();
+    await running.getByText("Running server inventory access was denied.").waitFor();
+    assert.equal(await running.getByRole("link", {name:native.name}).count(), 0);
+    serverListFailure = undefined;
+    await refreshServers.click();
+    await running.getByText("overworld", {exact:true}).waitFor();
+    results.push("the library keeps cached worlds on transient failure, hides denied inventory, and recovers after reauthorization");
   } finally {
     await context?.close();
     child.kill();
@@ -329,6 +384,7 @@ try {
           headers: {
             "X-CarbonPanel-Rendered-Chunks":
               scenario === "partial" ? "31" : "64",
+            "X-CarbonPanel-Provisional-Chunks": scenario === "partial" ? "12" : "0",
             "X-CarbonPanel-Tile-Saved-At": "2026-11-12T12:32:00Z",
           },
           body: savedTile(x, z),
@@ -343,7 +399,7 @@ try {
   }
 
   const saved = "Saved terrain available.";
-  const partial = "Only part of this area has saved terrain.";
+  const partial = "Blank areas have no readable saved surface. Explore in Minecraft, then refresh after a save.";
   const fromMap = (page) =>
     page.getByRole("application", { name: "Survival map" });
   const coordinates = (page) => page.getByTestId("native-map-coordinates");
@@ -377,6 +433,13 @@ try {
           "at most two tile fetches",
         );
         const map = fromMap(page);
+        await text(page, "Faded terrain shows saved heights from chunks still generating.").waitFor();
+        const span = page.getByRole("combobox", { name: "Map span" });
+        await span.selectOption("1024");
+        await text(page, partial).waitFor();
+        assert.ok(await map.locator(".tile").count() > 8);
+        assert.ok(await map.locator(".tile").count() <= 81);
+        await span.selectOption("auto");
         assert.equal(
           await map.evaluate((element) => getComputedStyle(element).position),
           "relative",
@@ -414,6 +477,8 @@ try {
         assert.notEqual(await coordinates(page).innerText(), beforeDrag);
 
         await map.press("Equal");
+        assert.equal(await span.inputValue(), "128");
+        await span.selectOption("64");
         await page
           .getByRole("button", { name: "Zoom in", exact: true })
           .click();
@@ -501,7 +566,7 @@ try {
     const bounds = await map.boundingBox();
     const pin = await camp.boundingBox();
     assert.ok(bounds && pin);
-    const scale = 2 * Math.max(1, bounds.width / 640, bounds.height / 640);
+    const scale = Math.max(bounds.width, bounds.height) / 256;
     assert.ok(
       Math.abs(
         pin.x + pin.width / 2 - (bounds.x + bounds.width / 2 + 24.5 * scale),
@@ -574,7 +639,7 @@ try {
     const page = await context.newPage();
     await configure(page, "dark");
     const statuses = [
-      ["empty", "No saved terrain here. Move or try the world spawn."],
+      ["empty", "No saved surface here. Move or try the world spawn."],
       ["busy", "Map rendering is busy. Retry in a moment."],
       [
         "changed",

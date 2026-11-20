@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { derived, writable } from 'svelte/store';
+import { Code, ConnectError } from '@connectrpc/connect';
 import type { Server } from '../../proto/carbonpanel/v1/common_pb';
 
 export interface InventoryState {
@@ -7,6 +8,7 @@ export interface InventoryState {
 	hydrated: boolean;
 	loading: boolean;
 	error: unknown;
+	listAccessDenied: boolean;
 }
 export interface InventoryRequests {
 	list(fullStats: boolean, silent: boolean): Promise<Server[]>;
@@ -27,12 +29,19 @@ export function createServerInventory(
 		clearInterval: globalThis.clearInterval.bind(globalThis)
 	}
 ) {
-	let snapshot: InventoryState = { servers: [], hydrated: false, loading: false, error: null };
+	let snapshot: InventoryState = {
+		servers: [],
+		hydrated: false,
+		loading: false,
+		error: null,
+		listAccessDenied: false
+	};
 	const state = writable(snapshot);
 	let epoch = 0;
 	let clock = 0;
 	let listVersion = 0;
 	let outcomeVersion = 0;
+	let accessVersion = 0;
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Private bookkeeping; only writable snapshots are reactive.
 	const versions = new Map<string, number>();
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Private bookkeeping; only writable snapshots are reactive.
@@ -81,7 +90,7 @@ export function createServerInventory(
 		versions.clear();
 		removed.clear();
 		activeRequests = 0;
-		publish({ servers: [], hydrated: false, loading: false, error: null });
+		publish({ servers: [], hydrated: false, loading: false, error: null, listAccessDenied: false });
 	}
 	function run<T>(
 		key: string,
@@ -94,8 +103,14 @@ export function createServerInventory(
 		activeRequests++;
 		publish({ loading: true });
 		const valid = () => startedEpoch === epoch;
+		function observeListAccess(denied: boolean) {
+			if (key.startsWith('detail:') || !valid() || sequence < accessVersion) return;
+			accessVersion = sequence;
+			if (snapshot.listAccessDenied !== denied) publish({ listAccessDenied: denied });
+		}
 		const request = operation(sequence, valid)
 			.then((result) => {
+				observeListAccess(false);
 				if (!key.startsWith('detail:') && valid() && sequence >= outcomeVersion) {
 					outcomeVersion = sequence;
 					publish({ error: null });
@@ -103,6 +118,12 @@ export function createServerInventory(
 				return result;
 			})
 			.catch((error) => {
+				if (
+					error instanceof ConnectError &&
+					(error.code === Code.PermissionDenied || error.code === Code.Unauthenticated)
+				) {
+					observeListAccess(true);
+				}
 				if (!key.startsWith('detail:') && valid() && sequence >= outcomeVersion) {
 					outcomeVersion = sequence;
 					publish({ error, ...(key.startsWith('detail:') ? {} : { hydrated: true }) });

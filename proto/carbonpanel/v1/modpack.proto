@@ -252,6 +252,7 @@ message Version {
   int32 sort_index = 5;
   string version_number = 6;
   string sha256 = 7;
+  repeated string game_versions = 8;
 }
 
 // Version filter parameters

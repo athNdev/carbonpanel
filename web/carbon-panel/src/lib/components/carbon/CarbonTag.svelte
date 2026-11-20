@@ -65,7 +65,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 <span
 	{...restProps}
-	class="inline-flex shrink-0 items-center gap-1 rounded-none font-mono font-semibold tracking-wider whitespace-nowrap uppercase transition-[color,background-color,border-color] duration-[var(--motion-fast)] ease-[var(--ease-out-quart)] select-none {pulse
+	class="inline-flex shrink-0 items-center gap-1 rounded-none font-mono font-semibold tracking-normal whitespace-nowrap uppercase transition-[color,background-color,border-color] duration-[var(--motion-fast)] ease-[var(--ease-out-quart)] select-none {pulse
 		? 'motion-pulse'
 		: ''} {sizeClasses[size]} {typeClasses[type]} {className}"
 >

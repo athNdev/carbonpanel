@@ -154,7 +154,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 				previousActiveElement = document.activeElement as HTMLElement | null;
 				// Focus the modal or its first actionable element on open
 				const focusTimer = setTimeout(() => {
-					if (!modalElement) return;
+					if (!modalElement || modalElement.contains(document.activeElement)) return;
 					const focusableSelectors = [
 						'input:not([disabled])',
 						'button:not([disabled])',
