@@ -568,6 +568,7 @@ one at https://mozilla.org/MPL/2.0/.
 							<Label for="memory-limit" class="text-sm">Memory request (MB)</Label>
 							<Input
 								id="memory-limit"
+								aria-describedby="memory-limit-advisory"
 								type="number"
 								min="512"
 								placeholder="e.g., 8192"
@@ -582,9 +583,10 @@ one at https://mozilla.org/MPL/2.0/.
 								{disabled}
 								class="h-8 text-xs"
 							/>
-							<p class="text-xs [overflow-wrap:anywhere] text-muted-foreground">
-								Advisory until the engine reports the cap as enforced; ignored when
-								memory_limit_unsupported.
+							<p id="memory-limit-advisory" class="min-w-0 text-xs text-muted-foreground">
+								The requested cap is advisory until the engine confirms enforcement. The engine
+								ignores it when reporting
+								<code class="[overflow-wrap:anywhere]">memory_limit_unsupported</code>.
 							</p>
 						</div>
 					</div>

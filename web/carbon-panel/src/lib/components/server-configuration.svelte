@@ -32,7 +32,7 @@ one at https://mozilla.org/MPL/2.0/.
 		Wand2
 	} from '@lucide/svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
-	import { CarbonButton, CarbonInlineLoading } from '$lib/components/carbon';
+	import { CarbonButton, CarbonInlineLoading, CarbonSelect } from '$lib/components/carbon';
 	import ServerTabPanel from '$lib/components/server-ui/ServerTabPanel.svelte';
 	import type { Server } from '$lib/proto/carbonpanel/v1/common_pb';
 	import {
@@ -50,6 +50,7 @@ one at https://mozilla.org/MPL/2.0/.
 	}
 
 	let { server, config, onSave, saving: externalSaving = false }: Props = $props();
+	const fieldControlPrefix = $props.id();
 
 	// State
 	let loading = $state(false);
@@ -652,10 +653,22 @@ one at https://mozilla.org/MPL/2.0/.
 				<p class="text-xs text-muted-foreground">Unable to load server configuration</p>
 			</div>
 		{:else}
-			<div class="flex h-full">
-				<!-- Category Sidebar -->
-				<div class="w-48 shrink-0 overflow-y-auto border-r border-border bg-background">
-					<nav class="space-y-0 p-0">
+			<div class="flex h-full flex-col md:flex-row">
+				<div class="min-w-0 border-b border-border bg-background p-3 md:hidden">
+					<CarbonSelect
+						label="Configuration category"
+						value={activeCategory}
+						onchange={(event) => selectCategory(event.currentTarget.value)}
+					>
+						{#each filteredCategories as category (category.name)}
+							<option value={getCategoryId(category.name)}>{category.name}</option>
+						{/each}
+					</CarbonSelect>
+				</div>
+				<div
+					class="hidden w-48 shrink-0 overflow-y-auto border-r border-border bg-background md:block"
+				>
+					<nav aria-label="Configuration categories" class="space-y-0 p-0">
 						{#each filteredCategories as category (category.name)}
 							{@const categoryId = getCategoryId(category.name)}
 							{@const isActive = activeCategory === categoryId}
@@ -694,6 +707,7 @@ one at https://mozilla.org/MPL/2.0/.
 						{@const isModified = modifiedFields.has(prop.key)}
 						{@const isHighlighted = highlightedField === prop.key}
 						{@const canToggle = canToggleField(prop)}
+						{@const controlId = `${fieldControlPrefix}-${prop.key}`}
 
 						<div
 							id={prop.key}
@@ -711,7 +725,8 @@ one at https://mozilla.org/MPL/2.0/.
 								<div class="min-w-0 flex-1">
 									<div class="mb-1 flex flex-wrap items-center gap-2">
 										<Label
-											for={prop.key}
+											id={`${controlId}-label`}
+											for={controlId}
 											class="text-xs font-medium text-foreground {!isEnabled
 												? 'text-muted-foreground'
 												: ''}"
@@ -817,7 +832,7 @@ one at https://mozilla.org/MPL/2.0/.
 							{#if prop.type === 'checkbox'}
 								<div class="flex items-center gap-3 py-1">
 									<Switch
-										id={prop.key}
+										id={controlId}
 										checked={getBooleanValue(prop)}
 										onCheckedChange={(checked) => updateValue(prop.key, checked)}
 										disabled={prop.system || !isEnabled}
@@ -834,6 +849,8 @@ one at https://mozilla.org/MPL/2.0/.
 									disabled={prop.system || !isEnabled}
 								>
 									<SelectTrigger
+										id={controlId}
+										aria-labelledby={`${controlId}-label`}
 										class="h-9 rounded-none border border-border bg-background text-foreground {!isEnabled
 											? 'opacity-60'
 											: ''}"
@@ -852,7 +869,7 @@ one at https://mozilla.org/MPL/2.0/.
 								</Select>
 							{:else if prop.type === 'number'}
 								<Input
-									id={prop.key}
+									id={controlId}
 									type="number"
 									value={getDisplayValue(prop)}
 									placeholder={prop.defaultValue ?? ''}
@@ -864,7 +881,7 @@ one at https://mozilla.org/MPL/2.0/.
 								/>
 							{:else if prop.type === 'password'}
 								<Input
-									id={prop.key}
+									id={controlId}
 									type="password"
 									value={getDisplayValue(prop)}
 									placeholder={prop.defaultValue ?? ''}
@@ -876,7 +893,7 @@ one at https://mozilla.org/MPL/2.0/.
 								/>
 							{:else}
 								<Input
-									id={prop.key}
+									id={controlId}
 									type="text"
 									value={getDisplayValue(prop)}
 									placeholder={prop.defaultValue ?? ''}
