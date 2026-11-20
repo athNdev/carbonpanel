@@ -67,7 +67,7 @@
       "focus": "Shell navigation, cluster overview and the seeded server fleet"
     },
     {
-      "setViewport": { "width": 1216, "height": 1000 },
+      "setViewport": { "width": 1256, "height": 1260 },
       "name": "frame the dashboard content for README width"
     },
     {
@@ -297,18 +297,19 @@
       "name": "allowlist submit control renders"
     },
     {
-      "waitFor": "#server-detail-tabs-panel-players [data-player-row]:has-text(\"ReviewFixture\"):has-text(\"Allowlisted\")",
+      "fill": "#server-detail-tabs-panel-players section[aria-label=\"Add allowlist entry\"] input",
+      "value": "ReviewFixture",
       "feature": "players",
-      "name": "seeded identity shows its server-scoped allowlist state"
+      "name": "show the actual allowlist form with a fixture name entered"
     },
     {
       "screenshot": "showcase-player-allowlist",
-      "element": "#server-detail-tabs-panel-players",
+      "element": "#server-detail-tabs-panel-players section[aria-label=\"Add allowlist entry\"]",
       "scroll": false,
       "feature": "players",
-      "name": "server allowlist form and scoped roster",
-      "alt": "Server Players tab with the real allowlist form and the seeded identity's scoped access state",
-      "focus": "Allowlist form, scoped roster and moderation controls"
+      "name": "allowlist form before applying a change",
+      "alt": "Server Players tab allowlist form with the review fixture name entered",
+      "focus": "Exact player identity input and the Add to allowlist control"
     },
     {
       "setViewport": { "width": 960, "height": 900 },

@@ -17,11 +17,11 @@ These are unretouched browser crops of the packaged application running in an
 isolated disposable installation with seeded fixtures, not mockups or homepage
 sample islands. The stack seeds a first admin, a local node, a running Vanilla
 1.21.1 server, real Packwiz mods, one World Library revision, and an offline
-player identity through the real allowlist RPC. A compatibility verdict is
+player identity through the real allowlist RPC. The allowlist form capture
+shows a fixture name entered in the form before submission. A compatibility verdict is
 computed on demand by the read-only `CheckCompatibility` RPC; a panel that has
 not run that check correctly shows "No compatibility report yet". The expanded
-roster capture shows an offline identity's honest unavailable avatar state,
-not a skin profile. Resource figures and logs are observed values, not
+roster capture shows the seeded offline identity and its observed provenance. Resource figures and logs are observed values, not
 performance claims. No production account, world, log or private player profile
 is used.
 
