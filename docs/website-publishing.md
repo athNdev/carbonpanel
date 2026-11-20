@@ -392,4 +392,4 @@ passes the qualified-transaction gate with that exact receipt source. All
 channel and docs moves share ONE non-cancelling `pages-deploy` lock with no
 nested group or self-dispatch. The Nightly revision lives in the published
 artifact, marker and receipt — never in a tracked main file updated per build.
-See ADR 0051 and [release operations](releases.md).
+See ADR 0052 and [release operations](releases.md).

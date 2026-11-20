@@ -1901,7 +1901,8 @@ class ReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output, _ = make_publish_fixture(directory)
             notes, generated = [], []
-            with patch.object(release, "guard_publishing"), \
+            with patch.object(release, "verify_live_stable"), \
+                 patch.object(release, "guard_publishing"), \
                  patch.object(release, "run", return_value=""), \
                  patch_gh_release_view(), \
                  patch.object(release, "github", side_effect=publish_github_reply(
@@ -3289,6 +3290,22 @@ class StableReleasePublicationTests(unittest.TestCase):
         return (state, {"digest": digest, "revision": revision,
                         "platforms": release.REQUIRED_PLATFORMS})
 
+    def test_exposure_requires_matching_public_aliases_and_both_docs_indexes(self):
+        entry = {"tag": self.VERSION, "commit": self.COMMIT, "image": {"digest": self.DIGEST}}
+        encoded = json.dumps({"channels": {"stable": entry}}).encode()
+        matched = {name: self.alias("present", self.DIGEST, self.COMMIT) for name in release.CHANNEL_REGISTRIES}
+        with patch.object(release, "channel_observe", return_value=matched), \
+             patch.object(release.urllib.request, "urlopen", side_effect=[io.BytesIO(encoded), io.BytesIO(encoded)]):
+            release.verify_live_stable(self.VERSION, self.COMMIT, self.DIGEST)
+        with patch.object(release, "channel_observe", return_value=matched), \
+             patch.object(release.urllib.request, "urlopen", side_effect=[io.BytesIO(encoded), io.BytesIO(b"{}")]), \
+             self.assertRaisesRegex(ValueError, "docs"):
+            release.verify_live_stable(self.VERSION, self.COMMIT, self.DIGEST)
+        with patch.object(release, "channel_observe", side_effect=[matched, {}]), \
+             patch.object(release.urllib.request, "urlopen") as fetch, self.assertRaisesRegex(ValueError, "latest"):
+            release.verify_live_stable(self.VERSION, self.COMMIT, self.DIGEST)
+        fetch.assert_not_called()
+
     def test_exposing_a_prepared_release_never_uploads_assets(self):
         with tempfile.TemporaryDirectory() as directory:
             make_publish_fixture(directory, self.VERSION, "2.0.1", self.COMMIT)
@@ -3298,7 +3315,8 @@ class StableReleasePublicationTests(unittest.TestCase):
             remote = {"draft": True, "assets": [
                 {"name": file.name, "digest": "sha256:" + release.sha256(file)}
                 for file in output.iterdir()]}
-            with patch.object(release, "guard_publishing"), \
+            with patch.object(release, "verify_live_stable"), \
+                 patch.object(release, "guard_publishing"), \
                  patch.object(release, "get_release", return_value=remote), \
                  patch.object(release, "published_stable_versions", return_value=["v1.0.40"]), \
                  patch.object(release, "github") as github:

@@ -2108,6 +2108,21 @@ def verify_public_downloads(args):
         print(name, expected)
 
 
+def verify_live_stable(tag, commit, digest):
+    for alias in ("stable", "latest"):
+        ok, reason = channel_oci_parity(_coerce_observation_map(channel_observe(alias)), digest, commit)
+        if not ok:
+            raise ValueError(f"Public {alias} alias disagrees with the prepared release: {reason}")
+    indexes = []
+    for route in ("/version-index.json", "/docs/version-index.json"):
+        with urllib.request.urlopen("https://carbonpanel.dev" + route, timeout=60) as response:
+            indexes.append(response.read())
+    entry = json.loads(indexes[0])["channels"]["stable"]
+    if (indexes[0] != indexes[1] or entry["tag"] != tag or entry["commit"] != commit
+            or entry["image"]["digest"] != digest):
+        raise ValueError("Public Stable docs disagree with the prepared release")
+
+
 def publish(args):
     tag = resolve_panel_version(args.version)
     git_tag = args.version
@@ -2133,6 +2148,10 @@ def publish(args):
     if getattr(args, "expose_prepared", False):
         verify_draft_assets(git_tag, output, complete)
         latest, reason = github_latest_decision(tag, published_stable_versions())
+        if not product["prerelease"]:
+            if not latest:
+                raise ValueError("Cannot expose a new Stable release: " + reason)
+            verify_live_stable(git_tag, args.commit, manifest["image_digest"])
         try:
             github("release", "edit", git_tag, "--draft=false",
                    f"--prerelease={str('-' in tag).lower()}", f"--latest={str(latest).lower()}")
@@ -2182,6 +2201,8 @@ def publish(args):
     if getattr(args, "draft_only", False):
         print(json.dumps({"git_tag": git_tag, "draft_verified": True, "digest": manifest["image_digest"]}))
         return
+    if latest:
+        verify_live_stable(git_tag, args.commit, manifest["image_digest"])
     github("release", "edit", git_tag, "--draft=false",
            f"--prerelease={str('-' in tag).lower()}", f"--latest={str(latest).lower()}")
     print(json.dumps({"git_tag": git_tag, "semver": product["semver"] if product else tag[1:],
@@ -2196,7 +2217,7 @@ def publish(args):
 # schema_version 3 contract plus exact site build (docs). Every move is
 # digest-anchored and bound to the previously verified digest so a retry or a
 # partial failure can converge or roll back without ever overwriting an
-# immutable version tag. See ADR 0051 and docs/releases.md.
+# immutable version tag. See ADR 0052 and docs/releases.md.
 
 CHANNEL_CONTRACT_SCHEMA = 3
 CHANNEL_NAMES = ("stable", "nightly")

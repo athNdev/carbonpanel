@@ -34,6 +34,20 @@ class InterruptedPublicationTests(unittest.TestCase):
             with self.subTest(attrs=attrs), self.assertRaises(ValueError):
                 self.authorize(run=self.run | attrs)
 
+    def test_stage_sources_bind_workflow_run_target_and_qualified_digest(self):
+        run = self.run | {"conclusion": "success"}
+        stage = {"run": "42", "repo": self.repo, "workflow_sha": run["head_sha"],
+                 **{k: self.target[k] for k in ("commit", "tag", "digest")}}
+        args = (self.repo, "42", stage["tag"], stage["commit"], stage["digest"])
+        recovery.verify_stage(run, stage, *args)
+        for field in stage:
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                recovery.verify_stage(run, stage | {field: "changed"}, *args)
+        for attrs in ({"event": "pull_request"}, {"head_branch": "feature"},
+                      {"conclusion": "failure"}, {"path": ".github/workflows/ci.yml"}):
+            with self.subTest(attrs=attrs), self.assertRaises(ValueError):
+                recovery.verify_stage(run | attrs, stage, *args)
+
     def test_publication_or_changed_ids_never_rollback(self):
         for overrides in ({"record": self.record | {"draft": False}}, {"record": self.record | {"id": 8}},
                           {"latest": self.latest | {"tag_name": self.target["tag"]}},

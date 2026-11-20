@@ -8,10 +8,10 @@ code_refs:
   - .github/workflows/cd.yml
   - .github/workflows/landing.yml
   - scripts/release.py
-  - docs/adr/0051-channel-promotion-gates.md
+  - docs/adr/0052-channel-promotion-gates.md
 sources:
   - title: Channel promotion decision
-    resource: ../../docs/adr/0051-channel-promotion-gates.md
+    resource: ../../docs/adr/0052-channel-promotion-gates.md
   - title: Release operations and versioning
     resource: ../../docs/releases.md
 ---

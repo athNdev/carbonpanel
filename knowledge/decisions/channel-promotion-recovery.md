@@ -10,10 +10,10 @@ code_refs:
   - .github/workflows/stable-recover.yml
   - scripts/stable_recovery.py
   - scripts/release.py
-  - docs/adr/0051-channel-promotion-gates.md
+  - docs/adr/0052-channel-promotion-gates.md
 sources:
   - title: Channel promotion decision
-    resource: ../../docs/adr/0051-channel-promotion-gates.md
+    resource: ../../docs/adr/0052-channel-promotion-gates.md
   - title: Release operations and versioning
     resource: ../../docs/releases.md
 ---
@@ -26,8 +26,8 @@ sources:
   so a failed deploy or probe can still trigger it.
 - Rollback restores BOTH registry aliases and the EXACT prior docs BYTES from a
   distinct Pages artifact; a re-stamp cannot restore byte identity. The public
-  docs byte hash is re-checked. Retry resumes the exact recorded digest and
-  never rebuilds a different image.
+  docs byte hash is re-checked. Stable consumes native archives and the OCI
+  index from the successful trusted staging run pinned by ID, SHA and digest.
 - No legacy alias-write step remains: Nightly and Stable aliases move ONLY in
   the qualified transaction. Stable binds the exact target version to both
   registry digests and the deployed public docs marker, and GitHub release

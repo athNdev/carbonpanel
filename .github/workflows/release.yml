@@ -52,8 +52,12 @@ on:
         description: 'EXPLICIT PUBLICATION OPT-IN: off (default) builds and verifies only'
         default: false
         type: boolean
+      staged_run:
+        description: 'Successful main build-only release run supplying the qualified Stable downloads and OCI archive'
+        required: false
+        type: string
       expected_digest:
-        description: 'Optional verified sha256 digest to resume an identical immutable version; blank publishes new'
+        description: 'Required for Stable: exact qualified OCI digest reported by the staged run'
         required: false
         type: string
 
@@ -92,11 +96,28 @@ jobs:
       publish: ${{ steps.plan.outputs.publish }}
       ci_verified: ${{ steps.trusted.outputs.ci_verified }}
       publication_reason: ${{ steps.plan.outputs.publication_reason }}
+      artifact_run: ${{ steps.stage_source.outputs.run || github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ inputs.revision || github.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.publish
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: .trusted-release
+      - name: Verify trusted ref and exact main CI for an explicit publication
+        id: trusted
+        if: inputs.publish
+        working-directory: .trusted-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          RELEASE_COMMIT=$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)
+          python3 scripts/release.py verify-publication-ref --commit "$RELEASE_COMMIT" --ref "$RELEASE_REF"
       - name: Check release tooling
         run: python3 -m unittest scripts.test_release scripts.test_openapi_version scripts.test_stable_recovery
       - name: Check the checked-in release history catalog
@@ -114,27 +135,27 @@ jobs:
         run: |
           python3 scripts/release.py plan --version "$RELEASE_VERSION" \
             --event "$RELEASE_EVENT" --publish-input "$RELEASE_PUBLISH" --resume-digest "$EXPECTED_DIGEST"
-      - name: Verify trusted ref and exact main CI for an explicit publication
-        id: trusted
-        if: inputs.publish
+      - name: Bind Stable publication to its successful read-only stage run
+        id: stage_source
+        if: steps.plan.outputs.publish == 'true' && steps.plan.outputs.channel == 'stable'
         env:
           GH_TOKEN: ${{ github.token }}
+          STAGED_RUN: ${{ inputs.staged_run }}
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+          RELEASE_VERSION: ${{ steps.plan.outputs.version }}
           RELEASE_COMMIT: ${{ steps.plan.outputs.commit }}
-          RELEASE_REF: ${{ github.ref }}
-        # GH_TOKEN is required here: `gh run list` in exact_main_ci_verified()
-        # otherwise runs unauthenticated, so the fail-closed CI check could
-        # never pass and the stable publication lane stayed permanently held.
-        # This restores the check; it does not bypass or weaken it.
-        # A checkbox is never CI evidence. verify-publication-ref requires the
-        # trusted refs/heads/main dispatch ref and a successful completed push
-        # CI run for the exact checked-out SHA, including ancestry of main.
         run: |
-          python3 scripts/release.py verify-publication-ref \
-            --commit "$RELEASE_COMMIT" --ref "$RELEASE_REF"
+          [[ "$STAGED_RUN" =~ ^[0-9]+$ && "$EXPECTED_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$STAGED_RUN" > "$RUNNER_TEMP/run.json"
+          gh run download "$STAGED_RUN" --name qualified-stable-stage --dir "$RUNNER_TEMP/stage"
+          python3 -m scripts.stable_recovery verify-stage --source-run "$RUNNER_TEMP/run.json" \
+            --journal "$RUNNER_TEMP/stage/stage.json"
+          echo "run=$STAGED_RUN" >> "$GITHUB_OUTPUT"
 
   frontend:
     name: Build versioned UI and API schema
     needs: plan
+    if: needs.plan.outputs.publish != 'true' || needs.plan.outputs.channel != 'stable'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -409,10 +430,29 @@ jobs:
             --version "$CARBONPANEL_STABLE_TAG" --repository "https://github.com/$GITHUB_REPOSITORY"
           python3 scripts/browser_version_check.py
 
+      - name: Record the tested artifact identity for Stable publication
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.plan.outputs.channel == 'stable'
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          jq -n --arg run "$GITHUB_RUN_ID" --arg repo "$GITHUB_REPOSITORY" --arg head "$GITHUB_SHA" \
+            --arg tag "$RELEASE_VERSION" --arg sha "$CARBONPANEL_STABLE_REVISION" --arg digest "$CARBONPANEL_STABLE_DIGEST" \
+            '{run:$run,repo:$repo,workflow_sha:$head,tag:$tag,commit:$sha,digest:$digest}' > stage.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.plan.outputs.channel == 'stable'
+        with:
+          name: qualified-stable-stage
+          path: stage.json
+          if-no-files-found: error
+          retention-days: 14
+
   publish-immutable:
     name: Publish immutable version tag after fail-closed preflight
     needs: [plan, image]
-    if: needs.plan.outputs.publish == 'true'
+    if: >-
+      always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.publish == 'true' &&
+      ((needs.plan.outputs.channel == 'stable' && needs.plan.outputs.artifact_run == inputs.staged_run) ||
+       (needs.plan.outputs.channel != 'stable' && needs.image.result == 'success'))
     runs-on: ubuntu-24.04
     # The workflow-level publish lock covers this phase; no per-job group.
     permissions:
@@ -435,6 +475,8 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-release-oci
+          run-id: ${{ needs.plan.outputs.artifact_run }}
+          github-token: ${{ github.token }}
           path: dist/verified-oci
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Fail closed without registry credentials
@@ -524,6 +566,8 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-release-downloads
+          run-id: ${{ needs.plan.outputs.artifact_run }}
+          github-token: ${{ github.token }}
           path: dist/release
       - name: Record the verified image digest and final checksums
         env:
@@ -953,6 +997,8 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-release-downloads
+          run-id: ${{ needs.plan.outputs.artifact_run }}
+          github-token: ${{ github.token }}
           path: dist/release
       - name: Record the verified image digest and final checksums
         env:

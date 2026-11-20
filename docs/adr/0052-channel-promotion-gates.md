@@ -1,4 +1,4 @@
-# ADR 0051: Verified channel promotion gates for docs and OCI
+# ADR 0052: Verified channel promotion gates for docs and OCI
 
 - Status: Accepted
 - Date: 2026-11-20

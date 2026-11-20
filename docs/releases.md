@@ -369,7 +369,7 @@ digest and commit: an
 ancestor check refuses stale/out-of-order moves, an alias already at the target
 is an idempotent no-op, a partial move converges, and a candidate that loses
 qualification rolls back to the previous verified digest. No immutable tag is
-overwritten and no tag is deleted. See ADR 0051.
+overwritten and no tag is deleted. See ADR 0052.
 
 The trigger/tag-name patterns behind these channels follow the dated primary-
 source research note `container-image-stable-rolling-channels-2026-11-20.md`:
@@ -401,9 +401,12 @@ Releases link; they remain correctly marked as prereleases.
    rehearsal. The rehearsal creates no tag or release and pushes no image; its
    downloads are retained as workflow artifacts.
 3. Inspect all five native archive jobs, the image assembly job and the
-   `verified-release-downloads` artifact. Run the workflow again with the same
-   product tag and commit, enabling **publish** to publish it. Publication also
-   requires a trusted `refs/heads/main` dispatch ref and exact-commit main CI,
+   `verified-release-downloads` and `verified-release-oci` artifacts. For a
+   Stable release, finish operator qualification with these retained bytes.
+   Open `stage.json` in the `qualified-stable-stage` artifact. Set **staged_run**
+   to its run ID and **expected_digest** to its digest. Dispatch the workflow
+   on main with the same product tag and exact commit and enable **publish**.
+   Stable uses those original archives and OCI index. Publication also requires a trusted `refs/heads/main` dispatch ref and exact-commit main CI,
    verified read-only by `verify-publication-ref`.
 
 Pushing a `carbonpanel-v*` tag — like a branch push, a pull request, a CI run, a

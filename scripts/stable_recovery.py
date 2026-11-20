@@ -131,11 +131,36 @@ def recover(args):
     release.write_output({"restore_pages": str(owned).lower()})
 
 
+def verify_stage(source, receipt, repo, run_id, tag, commit, digest):
+    if (source.get("event") != "workflow_dispatch" or source.get("head_branch") != "main"
+            or source.get("path") != ".github/workflows/release.yml"
+            or source.get("repository", {}).get("full_name") != repo
+            or source.get("head_repository", {}).get("full_name") != repo
+            or source.get("status") != "completed" or source.get("conclusion") != "success"
+            or str(source.get("id")) != run_id or not release.valid_commit(source.get("head_sha", ""))
+            or not release.valid_commit(commit) or not release.valid_digest(digest)):
+        raise ValueError("Stable requires a successful trusted build-only release dispatch")
+    expected = {"run": run_id, "repo": repo, "workflow_sha": source["head_sha"],
+                "tag": tag, "commit": commit, "digest": digest}
+    if receipt != expected:
+        raise ValueError("Qualified stage does not match the exact release version, revision and digest")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("journal", "recover"))
-    parser.add_argument("--journal", required=True)
-    parser.add_argument("--prior", required=True)
-    parser.add_argument("--candidate", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+    for command in ("journal", "recover"):
+        sub = commands.add_parser(command)
+        for key in ("journal", "prior", "candidate"):
+            sub.add_argument("--" + key, required=True)
+    source = commands.add_parser("verify-stage")
+    source.add_argument("--source-run", required=True)
+    source.add_argument("--journal", required=True)
     args = parser.parse_args()
-    (capture if args.command == "journal" else recover)(args)
+    if args.command == "verify-stage":
+        verify_stage(json.loads(Path(args.source_run).read_text(encoding="utf-8")),
+                     json.loads(Path(args.journal).read_text(encoding="utf-8")),
+                     *(os.environ[k] for k in ("GITHUB_REPOSITORY", "STAGED_RUN", "RELEASE_VERSION",
+                                               "RELEASE_COMMIT", "EXPECTED_DIGEST")))
+    else:
+        (capture if args.command == "journal" else recover)(args)
