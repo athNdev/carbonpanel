@@ -62,15 +62,23 @@ def git_value(args: list[str], default: str) -> str:
     return (proc.stdout or "").strip() or default
 
 
-def cleanup(*, fixture: str | None, network: str | None) -> list[str]:
-    steps: list[str] = []
+def cleanup(*, fixture: str | None, network: str | None, images: list[str]) -> tuple[list[str], bool]:
+    commands: list[list[str]] = []
     if fixture:
-        cp = run(["docker", "rm", "-f", fixture], check=False, capture=True)
-        steps.append(f"docker rm -f {fixture}: rc={cp.returncode}")
+        commands.append(["docker", "rm", "-f", fixture])
     if network:
-        cp = run(["docker", "network", "rm", network], check=False, capture=True)
-        steps.append(f"docker network rm {network}: rc={cp.returncode}")
-    return steps
+        commands.append(["docker", "network", "rm", network])
+    commands.extend(["docker", "image", "rm", image] for image in images)
+
+    steps: list[str] = []
+    cleanup_ok = True
+    for command in commands:
+        cp = run(command, check=False, capture=True)
+        steps.append(f"{shlex.join(command)}: rc={cp.returncode}")
+        if cp.returncode:
+            cleanup_ok = False
+            print(cp.stderr, end="", file=sys.stderr)
+    return steps, cleanup_ok
 
 
 def wait_ready(fixture: str, timeout_s: int) -> bool:
@@ -129,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     }
 
-    build_mcp_cmd = ["docker", "build", "-f", "docker/Dockerfile.mcp", "-t", image_tag]
+    build_mcp_cmd = ["docker", "build", "-f", "docker/Dockerfile.mcp", "--load", "-t", image_tag]
     if args.platform:
         build_mcp_cmd += ["--platform", args.platform]
     build_mcp_cmd += [
@@ -138,9 +146,10 @@ def main(argv: list[str] | None = None) -> int:
         "--build-arg", f"MCP_ARTIFACT_BUILDDATE={build_date}",
         ".",
     ]
-    build_mock_cmd = ["docker", "build", "-f", "docker/Dockerfile.mcp-mock", "-t", mock_tag, "."]
+    build_mock_cmd = ["docker", "build", "-f", "docker/Dockerfile.mcp-mock", "--load", "-t", mock_tag, "."]
+    create_network_cmd = ["docker", "network", "create", "--internal", network]
     run_fixture_cmd = [
-        "docker", "run", "-d", "--name", fixture_name,
+        "docker", "run", "--pull", "never", "-d", "--name", fixture_name,
         "--network", network, "--network-alias", "panel-fixture", mock_tag,
     ]
     smoke_cmd = [
@@ -148,9 +157,8 @@ def main(argv: list[str] | None = None) -> int:
         "--expect-tool", "list_servers",
         "--call-tool", "list_servers",
         "--url", "http://panel-fixture:8080",
-        "--evidence", str(args.evidence),
         "--",
-        "docker", "run", "-i", "--rm", "--network", network,
+        "docker", "run", "--pull", "never", "-i", "--rm", "--network", network,
         "-e", "CARBONPANEL_URL", "-e", "CARBONPANEL_TOKEN",
         "-e", "CARBONPANEL_API_TOKEN", "-e", "CARBONPANEL_MCP_TRANSPORT",
         image_tag,
@@ -158,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     report["planned_commands"] = {
         "build_mock": build_mock_cmd,
         "build_mcp": build_mcp_cmd,
-        "create_network": ["docker", "network", "create", network],
+        "create_network": create_network_cmd,
         "run_fixture": run_fixture_cmd,
         "stdio_smoke": smoke_cmd,
     }
@@ -178,23 +186,39 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
         return 2
 
-    cleanup_steps: list[str] = []
+    owned_images: list[str] = []
     fixture_started = False
     network_created = False
     try:
         if not args.skip_build:
             run(build_mock_cmd)
+            if not args.mock_tag:
+                owned_images.append(mock_tag)
             run(build_mcp_cmd)
-        run(["docker", "network", "create", network])
+            if not args.image_tag:
+                owned_images.append(image_tag)
+        image_id = run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", image_tag], capture=True,
+        ).stdout.strip()
+        if not image_id.startswith("sha256:"):
+            raise RuntimeError("cannot resolve the local MCP image ID")
+        report["image_id"] = image_id
+        run(create_network_cmd)
         network_created = True
         run(run_fixture_cmd)
         fixture_started = True
         if not wait_ready(fixture_name, args.ready_timeout):
             raise RuntimeError("fixture never became ready")
-        cp = subprocess.run(smoke_cmd, cwd=str(ROOT), text=True)
+        cp = subprocess.run(
+            [*smoke_cmd[:-1], image_id], cwd=str(ROOT), stdout=subprocess.PIPE, text=True,
+        )
         report["stdio_smoke_exit_code"] = cp.returncode
+        if cp.stdout:
+            report["stdio_smoke"] = json.loads(cp.stdout)
         if cp.returncode != 0:
             raise RuntimeError(f"stdio smoke failed with exit code {cp.returncode}")
+        if report.get("stdio_smoke", {}).get("status") != "ok":
+            raise RuntimeError("stdio smoke did not provide successful evidence")
         logs = subprocess.run(["docker", "logs", fixture_name], cwd=str(ROOT), text=True, capture_output=True)
         fixture_log_text = (logs.stdout or "") + (logs.stderr or "")
         args.fixture_log.parent.mkdir(parents=True, exist_ok=True)
@@ -209,11 +233,14 @@ def main(argv: list[str] | None = None) -> int:
         report["status"] = "failed"
         report["error"] = str(error)
     finally:
-        cleanup_steps = cleanup(
+        report["cleanup"], report["cleanup_ok"] = cleanup(
             fixture=fixture_name if fixture_started else None,
             network=network if network_created else None,
+            images=owned_images,
         )
-        report["cleanup"] = cleanup_steps
+        if not report["cleanup_ok"] and report["status"] == "ok":
+            report["status"] = "failed"
+            report["error"] = "Docker smoke cleanup failed"
 
     args.evidence.parent.mkdir(parents=True, exist_ok=True)
     args.evidence.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

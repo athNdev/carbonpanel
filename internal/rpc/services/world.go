@@ -659,6 +659,10 @@ func notFoundOrInternal(err error, message string) error {
 }
 
 func worldError(err error) error {
+	var rpcErr *connect.Error
+	if errors.As(err, &rpcErr) {
+		return rpcErr
+	}
 	switch {
 	case errors.Is(err, worldlib.ErrRemoteUnavailable), errors.Is(err, nodestorage.ErrUnavailable):
 		return connect.NewError(connect.CodeUnavailable, err)

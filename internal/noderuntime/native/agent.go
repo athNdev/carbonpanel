@@ -29,21 +29,29 @@ type Plan struct {
 // No host configuration is changed and no daemon is started.
 func BuildPlan(nodeID string, facts HostFacts, observedAt time.Time) Plan {
 	sel := ApplyGates(facts)
-	p := Plan{
+	var daemon DaemonSpec
+	var refusal string
+	if sel.Mode == ModeNone {
+		refusal = Describe(sel)
+	} else {
+		candidate := SpecFromFacts(nodeID, facts, sel)
+		if failures := failedChecks(candidate.Validate()); len(failures) != 0 {
+			sel.Mode = ModeNone
+			sel.Checks = append(sel.Checks, failures...)
+			sel.Reasons = failures
+			refusal = failures[0].Code
+		} else {
+			daemon = candidate
+		}
+	}
+	return Plan{
 		NodeID:       nodeID,
 		Selection:    sel,
 		Report:       PreflightReport(nodeID, sel, observedAt),
 		Capabilities: Capabilities(facts, sel),
-		Daemon:       SpecFromFacts(nodeID, facts, sel),
+		Daemon:       daemon,
+		Refusal:      refusal,
 	}
-	if sel.Mode == ModeNone {
-		p.Refusal = Describe(sel)
-		return p
-	}
-	if code := p.Daemon.ValidateOrRefuse(); code != "" {
-		p.Refusal = code
-	}
-	return p
 }
 
 // Runner is the host-native runtime seam used by cmd/carbon-node. It composes

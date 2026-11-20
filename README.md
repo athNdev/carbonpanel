@@ -220,10 +220,10 @@ has an exact version with a publicly pullable GHCR digest. The guide includes
 client configuration and build compatibility. [MCP server guide](docs/carbon-panel/src/content/docs/guides/mcp-server.mdx)
 
 The implemented catalogue mounts the generated **211-tool combined catalogue**.
-It is derived from 250 declared RPCs across 26 proto services, of which 240 are
+It is derived from 250 declared RPCs across 28 proto services, of which 240 are
 mounted/reachable across 27 mounted services. Tool coverage is not the same as
-RPC coverage; the audit matrix records 201 supported operations (all listed,
-reachable and verified) and 77 excluded operations with exact reasons and
+RPC coverage; the audit matrix records 200 supported operations (all listed,
+reachable and verified) and 78 excluded operations with exact reasons and
 equivalent flows. Do not infer that every panel RPC has a tool.
 
 Tool availability depends on the build behind `CARBONPANEL_URL` and the grants

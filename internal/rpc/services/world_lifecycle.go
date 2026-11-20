@@ -8,15 +8,20 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"time"
 
-	"connectrpc.com/connect"
-
+	"github.com/athNdev/carbon-panel/internal/activity"
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/docker"
+	"github.com/athNdev/carbon-panel/internal/events"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/rbac"
+	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -71,10 +76,8 @@ func RecoverWorldBindings(ctx context.Context, store *storage.Store, binder *wor
 	}
 }
 
-// worldLifecycleAdapter gives the World Binder the narrow stop/start seam it
-// needs without reaching through the HTTP mux. A world binding grant is NOT a
-// servers:stop/start grant, so each call re-checks the server-scoped permission
-// explicitly before delegating to ServerService.
+// worldLifecycleAdapter changes the existing container under the bind journal.
+// The public power RPCs keep their normal journal and grant checks.
 type worldLifecycleAdapter struct {
 	servers  *ServerService
 	store    *storage.Store
@@ -103,26 +106,127 @@ func (a *worldLifecycleAdapter) requireServerPermission(ctx context.Context, ser
 	return nil
 }
 
-func (a *worldLifecycleAdapter) StopServer(ctx context.Context, serverID string) error {
-	if err := a.requireServerPermission(ctx, serverID, rbac.ActionStop); err != nil {
-		return err
+func (a *worldLifecycleAdapter) ownedContainer(ctx context.Context, serverID, action string) (*storage.Server, *docker.Client, error) {
+	if err := a.requireServerPermission(ctx, serverID, action); err != nil {
+		return nil, nil, err
 	}
 	if a.servers == nil {
-		return errors.New("server service is unavailable")
+		return nil, nil, errors.New("server service is unavailable")
 	}
-	_, err := a.servers.StopServer(ctx, connect.NewRequest(&v1.StopServerRequest{Id: serverID}))
-	return err
+	server, err := a.store.GetServer(ctx, serverID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if server.ContainerID == "" {
+		return nil, nil, errors.New("world lifecycle requires an existing container")
+	}
+	if err := operation.AssertWorldBindOwner(ctx, a.store, server); err != nil {
+		return nil, nil, err
+	}
+	client, err := a.servers.getDockerClientStrict(server.NodeID)
+	return server, client, err
+}
+
+func (a *worldLifecycleAdapter) BeginTransition(serverID string) (func(), error) {
+	transition, err := beginServerLifecycleTransition(serverID)
+	if err != nil {
+		return nil, err
+	}
+	return transition.Release, nil
+}
+
+func (a *worldLifecycleAdapter) StopServer(ctx context.Context, serverID string) error {
+	server, client, err := a.ownedContainer(ctx, serverID, rbac.ActionStop)
+	if err != nil {
+		return err
+	}
+	window := docker.DefaultStopWindow
+	if cfg, err := a.store.GetServerConfig(ctx, serverID); err == nil {
+		window = docker.StopWindow(cfg)
+	}
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), window+15*time.Second)
+	defer cancel()
+	server.Status = storage.StatusStopping
+	if err := a.store.UpdateServer(stopCtx, server); err != nil {
+		return err
+	}
+	if a.servers.proxy != nil {
+		if server.ProxyHostname != "" {
+			if err := a.servers.proxy.RemoveServerRoute(server.ID); err != nil {
+				a.servers.log.Warn("world bind: cannot remove proxy route for %s: %v", server.ID, err)
+			}
+		} else {
+			a.servers.proxy.StopDirectKnock(server.ID)
+		}
+	}
+	found, err := client.StopContainerWithin(stopCtx, server.ContainerID, window)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errors.New("container disappeared during the world stop")
+	}
+	observed, err := client.ObserveContainer(stopCtx, server.ContainerID)
+	if err != nil {
+		return err
+	}
+	if observed.Running || observed.Status != storage.StatusStopped {
+		return fmt.Errorf("container is %s after the world stop", observed.Status)
+	}
+
+	server.Status = storage.StatusStopped
+	if err := a.store.UpdateServer(stopCtx, server); err != nil {
+		return err
+	}
+	if a.servers.bus != nil {
+		a.servers.bus.Emit(stopCtx, events.Event{
+			Type: v1.TriggeredEventType_TRIGGERED_EVENT_TYPE_SERVER_STOP, ServerID: server.ID,
+		})
+	}
+	a.servers.auditPower(stopCtx, "", activity.EventServerStop, server.ID, "")
+	return nil
 }
 
 func (a *worldLifecycleAdapter) StartServer(ctx context.Context, serverID string) error {
-	if err := a.requireServerPermission(ctx, serverID, rbac.ActionStart); err != nil {
+	server, client, err := a.ownedContainer(ctx, serverID, rbac.ActionStart)
+	if err != nil {
 		return err
 	}
-	if a.servers == nil {
-		return errors.New("server service is unavailable")
+	release, err := a.servers.acquireNodeAdmission(ctx, server)
+	if err != nil {
+		return err
 	}
-	_, err := a.servers.StartServer(ctx, connect.NewRequest(&v1.StartServerRequest{Id: serverID}))
-	return err
+	defer release()
+	if err := a.servers.checkServerStartCapacity(ctx, server); err != nil {
+		return err
+	}
+	if err := operation.AssertWorldBindOwner(ctx, a.store, server); err != nil {
+		return err
+	}
+	if err := serverruntime.Start(ctx, a.store, client, server); err != nil {
+		return err
+	}
+	observed, err := client.ObserveContainer(ctx, server.ContainerID)
+	if err != nil {
+		return err
+	}
+	if !observed.Running || observed.OOMKilled ||
+		(observed.Status != storage.StatusRunning && observed.Status != storage.StatusStarting) {
+		return fmt.Errorf("container is %s after world restart", observed.Status)
+	}
+	now := time.Now()
+	server.Status = storage.StatusStarting
+	server.LastStarted = &now
+	if err := a.store.UpdateServer(ctx, server); err != nil {
+		return err
+	}
+	if a.servers.proxy != nil && server.ProxyHostname != "" {
+		if err := a.servers.proxy.UpdateServerRoute(server); err != nil {
+			a.servers.log.Warn("world bind: cannot restore proxy route for %s: %v", server.ID, err)
+		}
+	}
+	a.servers.auditPower(ctx, "", activity.EventServerStart, server.ID, "")
+	return nil
 }
 
 func (a *worldLifecycleAdapter) IsRunning(ctx context.Context, serverID string) (bool, error) {
@@ -130,5 +234,46 @@ func (a *worldLifecycleAdapter) IsRunning(ctx context.Context, serverID string) 
 	if err != nil {
 		return false, err
 	}
-	return server.Status == storage.StatusRunning, nil
+	if a.servers == nil {
+		return false, errors.New("server service is unavailable")
+	}
+	client, err := a.servers.getDockerClientStrict(server.NodeID)
+	if err != nil {
+		return false, err
+	}
+	if server.ContainerID == "" {
+		resolved, err := client.ResolveContainer(ctx, server.ID)
+		if errors.Is(err, docker.ErrContainerNotResolved) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if resolved != nil {
+			return false, errors.New("untracked container must be reconciled before binding")
+		}
+		return false, nil
+	}
+	observed, err := client.ObserveContainer(ctx, server.ContainerID)
+	if err != nil {
+		return false, err
+	}
+	switch observed.Status {
+	case storage.StatusStopped:
+		if !observed.Running {
+			return false, nil
+		}
+	case storage.StatusRunning, storage.StatusUnhealthy:
+		if !observed.Running {
+			break
+		}
+		if err := a.requireServerPermission(ctx, serverID, rbac.ActionStop); err != nil {
+			return false, err
+		}
+		if err := a.requireServerPermission(ctx, serverID, rbac.ActionStart); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, fmt.Errorf("world bind requires a stable container state; found %s", observed.Status)
 }
