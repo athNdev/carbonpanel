@@ -1,6 +1,6 @@
 ---
 type: Runbook
-title: "Backup and restore — Use this when + Rules + Known gap + Read next"
+title: "Backup and restore â€” Use this when + Rules + Known gap + Read next"
 description: "A backup, snapshot, restore or retention change is being made."
 status: stable
 owners: [oss-runtime]
@@ -25,6 +25,8 @@ A backup, snapshot, restore or retention change is being made.
   tracked source.
 - Retention must not delete the only surviving copy of a world.
 - A restore must not overwrite a live world without an explicit confirmation.
+- RestoreBackup checks World Library bindings under the server journal lock.
+  Unbind all levels on the server, then retry the same archive.
 - Streaming local/shared/worker backups enforce the same 4 GiB/file and 64 GiB
   total limits, plus 500,000 entries and a 1 MiB manifest. Backup refuses a
   manifest restore would reject. Existing restore stage/old trees and failed

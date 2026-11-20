@@ -6,7 +6,7 @@
 
 - [Actionable recovery paths](actionable-recovery.md) — Safe next actions for permission, port, pull, stale node, partial restore or migration, and disk exhaustion without treating unknown as failed.
 - [Backup and restore](backup-restore.md) — Where panel database snapshot, backup storage, restore and retention are specified.
-- [Backup and restore — Use this when + Rules + Known gap + Read next](backup-restore-use-this-when.md) — A backup, snapshot, restore or retention change is being made.
+- [Backup and restore â€” Use this when + Rules + Known gap + Read next](backup-restore-use-this-when.md) — A backup, snapshot, restore or retention change is being made.
 - [Deep sleep and wake](deep-sleep.md) — A player knock must not start an intentionally stopped server. Hibernation and deep sleep share one idle-power module.
 - [Deep sleep and wake — Use this when + Procedure + Player knock versus intentional stop + Known gap + Read next](deep-sleep-use-this-when.md) — A server should hibernate or wake, or a sleep-related change is being reviewed.
 - [Deployment modes](deployment-modes.md) — Which install paths are shipped (Compose and native binary), which are not (Helm, Terraform), and how Compose upgrade and copy-back rollback keep host data.
