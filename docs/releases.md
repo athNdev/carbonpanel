@@ -28,7 +28,7 @@ in [release-history.md](release-history.md#upgrade-notes--read-before-upgrading-
 A recurring, read-only rehearsal runs in CI (`upgrade-rehearsal.yml`): weekly,
 on PRs that change migration/config/release surfaces and on manual dispatch. It
 runs two fail-closed cases on seeded disposable DB/world copies: the explicit
-`v1.0.40` legacy baseline (35 → 44 → 35 tables) and the current published
+`v1.0.40` legacy baseline (35 → 45 → 35 tables) and the current published
 stable derived from the authoritative release record by the product version
 contract, so the weekly check follows new stables without a hardcoded version.
 Both use real `carbon-panel` binaries and assert integrity, additive table

@@ -8,6 +8,7 @@
 - [Host-native private daemon mode — Rule](host-native-runtime-rule.md) — internal/noderuntime/native is the HOST-NATIVE LINUX PRIVATE DAEMON mode for
 - [Host-native private daemon mode — Rule (part 2)](host-native-runtime-rule-2.md) — issue-certificate-first atomic consume, controller-derived TLS topology
 - [Host-native private daemon mode — Why + How to check + Read next](host-native-runtime-why.md) — Parallel deployment modes share one enrollment/control contract. Keeping host
+- [Managed node outbound agent](managed-node-agent.md) — The managed agent binds enrollment and recurring health reports to an explicitly selected controller and private Docker daemon.
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
 - [Map viewing — Invariants](world-viewing-invariants.md) — world_view/read never grants observe_players, overlay edits or admin;
 - [Map viewing — Invariants (part 2)](world-viewing-invariants-2.md) — (no host allocation/publication), read-only /app/world bind of the canonical
@@ -25,7 +26,7 @@
 - [Module system — Shape + Rules](module-system-shape.md) — Modules are server-side content units. Hooks run inside the server's runtime;
 - [Node control protocol](node-control-protocol.md) — A versioned typed contract for managed nodes; responses carry no secrets and routing never falls back to a legacy endpoint.
 - [Node control protocol — Rule](node-control-protocol-rule.md) — Managed-node control uses the separate versioned contract in
-- [Node control protocol — Rule (part 2)](node-control-protocol-rule-2.md) — The contract ships without an implementation. New RPCs are denied by default
+- [Node control protocol — Rule (part 2)](node-control-protocol-rule-2.md) — Node control stays separate from the panel RPC surface and uses explicit enrollment domains.
 - [Node control protocol — Why + How to check + Read next](node-control-protocol-why.md) — A direct Docker endpoint is not an authenticated node principal and has no
 - [Node resolution](node-resolution.md) — Every operation must resolve the Docker client for the target node and fail closed when it cannot.
 - [Node resolution — Current state](node-resolution-current-state.md) — Module, snapshot and deep-sleep helpers were made fail-closed and record the
