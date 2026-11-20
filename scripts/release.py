@@ -2462,6 +2462,26 @@ def validate_channel_contract(document, stable_commit=None, stable_digest=None):
     return (not problems), problems
 
 
+def normalise_platform_evidence(raw):
+    """Validate observed platform pairs from any registry-observation source.
+
+    Both in-process observations (sets of tuples) and CLI JSON (lists of lists)
+    must pass the SAME shape check. Returns (frozenset, '') or (None, reason);
+    malformed entries are refused deterministically, never coerced from
+    arbitrary iterables or mapping keys.
+    """
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return None, "platform evidence has an invalid shape"
+    result = set()
+    for platform in raw:
+        if (not isinstance(platform, (list, tuple))
+                or len(platform) != 2
+                or not all(isinstance(part, str) for part in platform)):
+            return None, "platform evidence has a malformed entry"
+        result.add((platform[0], platform[1]))
+    return frozenset(result), ""
+
+
 def channel_oci_parity(observations, digest, commit, registries=CHANNEL_REGISTRIES):
     """Both maintained registries must serve the SAME verified multiarch digest
     and OCI revision. A missing, unknown, single-arch or mismatched registry
@@ -2478,20 +2498,10 @@ def channel_oci_parity(observations, digest, commit, registries=CHANNEL_REGISTRI
             return False, f"{registry} immutable image is absent"
         if info.get("digest") != digest:
             return False, f"{registry} digest differs from the verified digest"
-        # channel-observe serialises through JSON, so platform pairs arrive
-        # as lists of lists. Accept only well-formed two-string pairs; a
-        # malformed entry is refused deterministically instead of being
-        # silently ignored or coerced from arbitrary iterable/dict keys.
-        raw_platforms = info.get("platforms", ())
-        if not isinstance(raw_platforms, (list, tuple, set, frozenset)):
-            return False, f"{registry} platform evidence has an invalid shape"
-        observed_platforms = set()
-        for platform in raw_platforms:
-            if (not isinstance(platform, (list, tuple))
-                    or len(platform) != 2
-                    or not all(isinstance(part, str) for part in platform)):
-                return False, f"{registry} platform evidence has a malformed entry"
-            observed_platforms.add((platform[0], platform[1]))
+        observed_platforms, error = normalise_platform_evidence(
+            info.get("platforms", ()))
+        if error:
+            return False, f"{registry} {error}"
         if not REQUIRED_PLATFORMS <= observed_platforms:
             return False, f"{registry} lacks both required Linux architectures"
         if info.get("revision") != commit:
@@ -3728,7 +3738,11 @@ def _coerce_observation_map(document):
         state, info = value
         if state == "present" and info:
             info = dict(info)
-            info["platforms"] = {tuple(item) for item in info.get("platforms", ())}
+            platforms, error = normalise_platform_evidence(
+                info.get("platforms", ()))
+            if error:
+                raise ValueError(f"{registry} {error}")
+            info["platforms"] = platforms
         result[registry] = (state, info)
     return result
 

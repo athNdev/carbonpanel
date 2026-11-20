@@ -2265,6 +2265,20 @@ class ChannelPromotionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "platform evidence"):
                 release.main()
 
+    def test_verify_channel_parity_cli_refuses_malformed_platform_evidence(self):
+        bad = {"docker_hub": ("present", {"digest": self.DIGEST,
+                                          "platforms": {"linux": "amd64"},
+                                          "revision": self.CANDIDATE}),
+               "ghcr": ("present", {"digest": self.DIGEST,
+                                    "platforms": [["linux", "amd64"], ["linux", "arm64"]],
+                                    "revision": self.CANDIDATE})}
+        with patch("sys.argv", ["release.py", "verify-channel-parity",
+                                "--observations", json.dumps(bad),
+                                "--digest", self.DIGEST,
+                                "--commit", self.CANDIDATE]), redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, "platform evidence"):
+                release.main()
+
     # --- Move state machine (first publish / retry / stale / rollback) -------
 
     def make_move(self, **overrides):
@@ -2621,7 +2635,7 @@ class ReviewerHighHardeningTests(unittest.TestCase):
         stable_runs = "\n".join(str(step.get("run", ""))
                                 for step in jobs["stable-channel-transaction"]["steps"])
         self.assertIn("playwright install --with-deps chromium", stable_runs)
-        self.assertIn("browser_version_check.py --base-url https://carbonpanel.dev", stable_runs)
+        self.assertIn(".trusted-release/scripts/browser_version_check.py .website-build/site --base-url https://carbonpanel.dev", stable_runs)
         cd = yaml.safe_load(
             (release.ROOT / ".github/workflows/cd.yml").read_text(encoding="utf-8"))
         cd_runs = "\n".join(str(step.get("run", ""))
