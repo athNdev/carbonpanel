@@ -831,10 +831,23 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.goto(root + '/servers/srv-2', { waitUntil: 'domcontentloaded' });
 				await trigger.waitFor();
 				if (await cards.isVisible()) throw new Error('Opening another server lost the preference');
+				const searchInstalledMods = async (query) => {
+					await page.getByRole('tab', { name: 'Mods', exact: true }).click();
+					const panel = page.getByRole('tabpanel');
+					const search = panel.getByPlaceholder('Search installed mods...');
+					await search.click();
+					await page.keyboard.press('ControlOrMeta+A');
+					await page.keyboard.type(query);
+					if (await search.inputValue() !== query) throw new Error('Mods control did not receive input');
+					const bounds = await panel.boundingBox();
+					if (!bounds || bounds.height < 160) throw new Error('Selected tab has no usable body');
+				};
+				await searchInstalledMods('collapsed');
 				await trigger.focus();
 				await page.keyboard.press('Enter');
 				await cards.waitFor({ state: 'visible' });
 				if (await trigger.getAttribute('aria-expanded') !== 'true') throw new Error('Expanded state not announced');
+				await searchInstalledMods('expanded');
 			});
 
 			for (const path of ['/servers', '/servers/srv-1']) {

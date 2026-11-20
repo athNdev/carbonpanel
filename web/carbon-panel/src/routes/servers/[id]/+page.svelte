@@ -668,7 +668,8 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		<!-- Carbon Tabs for Sub-Views with bottom blue line indicator (Requirement 4) -->
-		<div class="flex min-h-0 flex-1 flex-col gap-4">
+		<!-- Keep a usable tab viewport when stacked runtime cards fill the screen. -->
+		<div class="flex min-h-[28rem] flex-1 flex-col gap-4">
 			<!-- Tab Bar -->
 			<CarbonTabs
 				tabs={subViewTabs}
