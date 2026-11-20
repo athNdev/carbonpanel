@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/pkg/logger"
@@ -46,6 +47,49 @@ func TestCalculateNextRunHonorsTaskTimezone(t *testing.T) {
 		})
 		return err
 	}())
+}
+
+func TestDueModUpdateTaskExecutesOnceAndRecordsOutcome(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	planner := &fakeModPlanner{staged: 1, refused: 1, reasons: []string{"mod.jar: provider lookup failed"}}
+	s.SetModUpdatePlanner(planner)
+	ctx := context.Background()
+
+	server := &storage.Server{ID: "srv-mod-due", Name: "mod-due", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	overdue := time.Now().Add(-3 * time.Hour)
+	task := &storage.ScheduledTask{
+		ID:       "task-mod-due",
+		ServerID: server.ID,
+		Name:     "automatic mod updates",
+		TaskType: storage.TaskTypeModUpdate,
+		Status:   storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeCron,
+		CronExpr: "0 3 * * *",
+		NextRun:  &overdue,
+		Config:   `{"enabled":true,"window":"next_restart"}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+
+	require.Equal(t, 1, planner.calls)
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, executions, 1, "a missed due slot must run once")
+	require.Equal(t, storage.ExecutionStatusCompleted, executions[0].Status)
+	require.Contains(t, executions[0].Output, "staged 1")
+	require.Contains(t, executions[0].Output, "mod.jar: provider lookup failed")
+
+	updated, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.NextRun)
+	require.True(t, updated.NextRun.After(time.Now()), "the next run must be recomputed in the future")
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.Equal(t, 1, planner.calls, "a second tick must not re-run the same task")
 }
 
 func TestValidateModUpdateConfigJSON(t *testing.T) {
