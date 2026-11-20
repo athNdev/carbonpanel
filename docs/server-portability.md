@@ -43,3 +43,31 @@ plugin connections and credentials separately.
 
 The consistency policy requires a stopped server. If third-party software can
 write to the data directory independently, stop those writers before exporting.
+
+## Export and create from an archive
+
+Use the stopped-server consistency option. Export verifies the game container
+and attached module containers on their owning nodes before reading the data.
+The download session has the same server-scoped file authorization as other
+binary downloads.
+
+Upload the archive through the standard chunked upload service. Preview checks
+every file checksum, reports runtime compatibility and gives the expanded
+size and the destination's available space after node selection. Its space
+requirement includes an allowance for filesystem allocation and first-boot
+writes. A preview does not create a server.
+
+Provide a new name, a destination node and a free port when creating the
+server. Keep the same request ID for retries of the same submission. The
+controller validates the caller's upload and the destination again. It stages
+the data into a fresh directory on that node, then commits the new server and
+initial config together. If the copy is interrupted, it removes the directory
+allocated by that attempt. Once the row is committed, the verified data is
+retained for recovery if container creation or boot fails.
+
+The initial import path supports the managed runtime and the Minecraft and
+loader versions recorded in the archive. Preview reports a blocker when the
+source depended on custom container settings, managed provider setup or
+attached modules that the archive cannot reproduce. A transport-only node
+requires a storage worker that supports exclusive directory allocation and
+free-space queries.

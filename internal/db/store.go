@@ -122,6 +122,42 @@ func (s *Store) CreateServer(ctx context.Context, server *Server) error {
 	return s.SyncServerConfigWithServer(ctx, server)
 }
 
+// ErrServerNameInUse is returned when creation from an archive would obscure an
+// existing server that has the same display name.
+var ErrServerNameInUse = errors.New("a server already uses that name")
+
+// CheckArchiveServerName is read-only. CreateArchiveServer repeats the check
+// inside its database transaction before publishing the new server.
+func (s *Store) CheckArchiveServerName(ctx context.Context, name string) error {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&Server{}).
+		Where("lower(trim(name)) = lower(trim(?))", name).Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 0 {
+		return ErrServerNameInUse
+	}
+	return nil
+}
+
+// CreateArchiveServer commits the server and its initial config together after
+// its data has been verified and placed. An error leaves no server row.
+func (s *Store) CreateArchiveServer(ctx context.Context, server *Server, levelName string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		scoped := &Store{db: tx, cfg: s.cfg}
+		if err := scoped.CheckArchiveServerName(ctx, server.Name); err != nil {
+			return err
+		}
+		if err := scoped.CreateServer(ctx, server); err != nil {
+			return err
+		}
+		if levelName == "" {
+			return nil
+		}
+		return tx.Model(&ServerConfig{}).Where("server_id = ?", server.ID).Update("level", levelName).Error
+	})
+}
+
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	var server Server
 	err := s.db.WithContext(ctx).First(&server, "id = ?", id).Error

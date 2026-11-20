@@ -391,6 +391,8 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 		serverService.SetAdmissionCoordinator(s.admission)
 	}
 	serverService.SetStorageResolver(s.storageResolver)
+	serverService.SetServerArchiveDownloads(s.downloadManager)
+	serverService.SetServerArchiveUploads(s.uploadManager)
 	if finished, err := serverService.ResumeUnsettledDispositions(context.Background()); err != nil {
 		s.log.Error("Failed to list unfinished deletions: %v", err)
 	} else if finished > 0 {

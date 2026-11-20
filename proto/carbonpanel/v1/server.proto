@@ -30,6 +30,10 @@ service ServerService {
   rpc GetNextAvailablePort(GetNextAvailablePortRequest) returns (GetNextAvailablePortResponse);
   // Create new server instance
   rpc CreateServer(CreateServerRequest) returns (CreateServerResponse);
+  // Export a stopped server using its owning node storage.
+  rpc ExportServerArchive(ExportServerArchiveRequest) returns (ExportServerArchiveResponse);
+  // Validate a completed caller-owned upload without creating a server.
+  rpc PreviewServerArchive(PreviewServerArchiveRequest) returns (PreviewServerArchiveResponse);
   // Modify server settings
   rpc UpdateServer(UpdateServerRequest) returns (UpdateServerResponse);
   // Remove server and data
@@ -145,6 +149,8 @@ message CreateServerRequest {
   string request_id = 23;
   // Exact mod loader version. Empty means the loader's latest.
   string loader_version = 24;
+  // Completed upload owned by the caller. Required request_id when importing.
+  string archive_upload_id = 25;
 }
 
 // Created server instance
@@ -297,3 +303,68 @@ message ListServerPlayersResponse {
   int32 online_count = 2;
 }
 
+
+enum ServerArchiveFormat {
+  SERVER_ARCHIVE_FORMAT_UNSPECIFIED = 0;
+  SERVER_ARCHIVE_FORMAT_ZIP = 1;
+  SERVER_ARCHIVE_FORMAT_TAR_GZ = 2;
+}
+
+enum ServerArchiveConsistency {
+  SERVER_ARCHIVE_CONSISTENCY_UNSPECIFIED = 0;
+  SERVER_ARCHIVE_CONSISTENCY_STOPPED = 1;
+}
+
+message ExportServerArchiveRequest {
+  string server_id = 1;
+  ServerArchiveFormat format = 2;
+  ServerArchiveConsistency consistency = 3;
+}
+
+message ExportServerArchiveResponse {
+  string session_id = 1;
+  string filename = 2;
+  int64 total_size = 3;
+}
+
+message PreviewServerArchiveRequest {
+  string upload_id = 1;
+  string node_id = 2;
+}
+
+enum ServerArchiveFindingSeverity {
+  SERVER_ARCHIVE_FINDING_SEVERITY_UNSPECIFIED = 0;
+  SERVER_ARCHIVE_FINDING_SEVERITY_WARNING = 1;
+  SERVER_ARCHIVE_FINDING_SEVERITY_BLOCKER = 2;
+}
+
+enum ServerArchiveFindingCode {
+  SERVER_ARCHIVE_FINDING_CODE_UNSPECIFIED = 0;
+  SERVER_ARCHIVE_FINDING_CODE_CUSTOM_RUNTIME = 1;
+  SERVER_ARCHIVE_FINDING_CODE_PROVIDER_SETUP = 2;
+  SERVER_ARCHIVE_FINDING_CODE_INSUFFICIENT_SPACE = 3;
+  SERVER_ARCHIVE_FINDING_CODE_STORAGE_UNAVAILABLE = 4;
+  SERVER_ARCHIVE_FINDING_CODE_UNSUPPORTED_LOADER = 5;
+}
+
+message ServerArchiveFinding {
+  ServerArchiveFindingSeverity severity = 1;
+  ServerArchiveFindingCode code = 2;
+  string message = 3;
+}
+
+message PreviewServerArchiveResponse {
+  ServerArchiveFormat format = 1;
+  int32 schema_version = 2;
+  string exporter_version = 3;
+  string mc_version = 4;
+  ModLoader mod_loader = 5;
+  string loader_version = 6;
+  int32 memory = 7;
+  int32 max_players = 8;
+  int32 file_count = 9;
+  int64 expanded_bytes = 10;
+  int64 required_bytes = 11;
+  optional int64 available_bytes = 12;
+  repeated ServerArchiveFinding findings = 13;
+}

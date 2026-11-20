@@ -43,13 +43,16 @@ import (
 	"github.com/athNdev/carbon-panel/internal/scheduler"
 	"github.com/athNdev/carbon-panel/internal/serverruntime"
 	"github.com/athNdev/carbon-panel/internal/staging"
+	"github.com/athNdev/carbon-panel/pkg/download"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
+	"github.com/athNdev/carbon-panel/pkg/upload"
 	"github.com/athNdev/carbon-panel/pkg/utils"
 	"github.com/containerd/errdefs"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -73,6 +76,8 @@ type ServerService struct {
 	store            *storage.Store
 	docker           *docker.Client
 	storageResolver  *nodestorage.Resolver
+	archiveDownloads *download.Manager
+	archiveUploads   *upload.Manager
 	hostMemoryMB     func(context.Context, string) (int64, error)
 	hostPortBound    func(int) bool
 	removeData       func(string) error
@@ -571,7 +576,7 @@ func NewServerService(
 		enforcer:         enforcer,
 		// Every service owns a gate by default; the composition root replaces
 		// it with the one shared by RPC and scheduler starts.
-		admission: serverruntime.NewAdmissionCoordinator(),
+		admission:  serverruntime.NewAdmissionCoordinator(),
 		daemonInfo: make(map[string]daemonEnforcementCache),
 	}
 }
@@ -1023,6 +1028,46 @@ func (s *ServerService) GetServer(ctx context.Context, req *connect.Request[v1.G
 func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v1.CreateServerRequest]) (*connect.Response[v1.CreateServerResponse], error) {
 	msg := req.Msg
 
+	serverUUID := uuid.New().String()
+	var imported *archiveImport
+	var keepArchiveClaim bool
+	if msg.GetArchiveUploadId() != "" {
+		// Defaults derived from an archive belong to this invocation.
+		msg = proto.CloneOf(msg)
+		var prior *storage.Server
+		var err error
+		imported, prior, err = s.prepareArchiveImport(ctx, msg)
+		if err != nil {
+			return nil, err
+		}
+		if prior != nil {
+			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, prior)}), nil
+		}
+		defer imported.file.Close()
+
+		owner, claimed, err := s.store.ClaimIdempotencyKey(ctx, imported.replayKey, serverUUID, imported.replayKind)
+		if err != nil {
+			return nil, archiveReplayError(err)
+		}
+		if !claimed {
+			prior, err := s.archiveReplay(ctx, owner)
+			if err != nil {
+				return nil, err
+			}
+			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, prior)}), nil
+		}
+		defer func() {
+			if !keepArchiveClaim {
+				if err := s.store.ReleaseIdempotencyKey(context.WithoutCancel(ctx), imported.replayKey); err != nil {
+					s.log.Error("Release archive create idempotency key: %v", err)
+				}
+			}
+		}()
+		if err := s.store.CheckArchiveServerName(ctx, msg.Name); err != nil {
+			return nil, archiveNameError(err)
+		}
+	}
+
 	if err := s.checkDockerPrivilegedOverrides(ctx, msg.DockerOverrides); err != nil {
 		return nil, err
 	}
@@ -1243,7 +1288,6 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	serverUUID := uuid.New().String()
 	serverDataDir := fmt.Sprintf("%s_%s", files.SanitizePathName(msg.Name), serverUUID)
 	serverDataPath := filepath.Join(s.config.Storage.DataDir, "servers", serverDataDir)
 
@@ -1335,7 +1379,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	releaseClaim := false
-	if requestID != "" {
+	if requestID != "" && imported == nil {
 		owner, claimed, claimErr := s.store.ClaimIdempotencyKey(ctx, requestID, server.ID, "create")
 		if claimErr != nil {
 			code := connect.CodeInternal
@@ -1423,6 +1467,18 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		}
 	}()
 
+	if imported != nil {
+		removeImported, err := s.placeArchive(ctx, imported, server)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if !keepArchiveClaim {
+				removeImported()
+			}
+		}()
+	}
+
 	// Serialize capacity check and DB reservation so concurrent create
 	// requests cannot both observe the same free memory and overcommit a node.
 	s.capacityMu.Lock()
@@ -1434,13 +1490,15 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	// Create the world on the node's storage. A remote node with no reachable
 	// mount is refused before a controller-local directory can be mistaken for
 	// the world the remote daemon will use.
-	if _, err := dataRootFor(ctx, s.store, server, true, s.storageResolver); err != nil {
-		s.capacityMu.Unlock()
-		if nodestorage.IsUnavailable(err) {
-			return nil, connect.NewError(connect.CodeUnavailable, err)
+	if imported == nil {
+		if _, err := dataRootFor(ctx, s.store, server, true, s.storageResolver); err != nil {
+			s.capacityMu.Unlock()
+			if nodestorage.IsUnavailable(err) {
+				return nil, connect.NewError(connect.CodeUnavailable, err)
+			}
+			s.log.Error("Failed to create data directory: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server directory"))
 		}
-		s.log.Error("Failed to create data directory: %v", err)
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server directory"))
 	}
 
 	// A manual server pack is written through ForNode before the row is kept,
@@ -1460,11 +1518,21 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	}
 
 	// Save to database
-	if err := s.store.CreateServer(ctx, server); err != nil {
+	createRecord := s.store.CreateServer
+	if imported != nil {
+		createRecord = func(ctx context.Context, server *storage.Server) error {
+			return s.store.CreateArchiveServer(ctx, server, imported.verified.LevelName)
+		}
+	}
+	if err := createRecord(ctx, server); err != nil {
 		s.capacityMu.Unlock()
+		if imported != nil {
+			return nil, archiveNameError(err)
+		}
 		s.log.Error("Failed to create server: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to create server"))
 	}
+	keepArchiveClaim = imported != nil
 	keepLease = true
 	releaseClaim = false
 	s.capacityMu.Unlock()

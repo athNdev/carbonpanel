@@ -38,7 +38,8 @@ type PanelBuild string
 
 const (
 	// PanelBuildStableV140 is the latest stable panel release (v1.0.40).
-	PanelBuildStableV140 PanelBuild = "v1.0.40"
+	PanelBuildStableV140        PanelBuild = "v1.0.40"
+	PanelBuildServerPortability PanelBuild = "development (OSS-422)"
 	// PanelBuildPostStable is the pinned post-v1.0.40 build that first
 	// contains PlayerService, WorldService, WorldViewService and
 	// ModBrowseService.
