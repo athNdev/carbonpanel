@@ -552,6 +552,7 @@ jobs:
       needs.publish-immutable.outputs.verified == 'true' &&
       needs.plan.outputs.channel == 'stable'
     env:
+      DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
       CARBONPANEL_STABLE_TAG: ${{ needs.plan.outputs.version }}
       CARBONPANEL_STABLE_REVISION: ${{ needs.plan.outputs.commit }}
       CARBONPANEL_STABLE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
@@ -566,8 +567,6 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
-    env:
-      DOCKER_HUB_IMAGE: atharvnaphade/carbonpanel
     outputs:
       action: ${{ steps.transaction.outputs.action }}
       receipt: ${{ steps.transaction.outputs.receipt }}
