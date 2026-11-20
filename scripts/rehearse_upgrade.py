@@ -6,7 +6,7 @@ This is a MODEL rehearsal on owned, disposable, synthetic fixtures. It does not
 run a real v1.0.40 binary, use a real user database, touch a registry, or start
 a service. It models the documented copy-back backup/restore procedure and the
 additive schema growth described in migration-compatibility-audit.md section 3
-(35 -> 44 tables and 10 node-control metadata columns). It exists so the
+(35 -> 45 tables and 10 node-control metadata columns). It exists so the
 migration policy PR carries executable evidence of the *procedure* and its
 limits, not a claim of live-upgrade qualification.
 """
@@ -26,6 +26,7 @@ NEW_MODELS = [
     "player_identities", "player_aliases", "player_sessions",
     "player_access_states", "player_moderation_actions", "world_entries",
     "world_revisions", "world_bindings", "world_import_jobs",
+    "node_enrollment_authority_state",
 ]
 NODE_COLUMNS = [
     "transport", "enrollment_state", "enrollment_id", "enrollment_expires_at",
@@ -148,7 +149,7 @@ def run(workspace):
     checks = {
         "v1_shape_is_35_tables": len(before_tables) == 35,
         "before_integrity_ok": before_integrity == "ok",
-        "upgrade_adds_9_models": after_tables - before_tables == set(NEW_MODELS),
+        "upgrade_adds_expected_models": after_tables - before_tables == set(NEW_MODELS),
         "upgrade_adds_node_columns": all(c in {"transport", *NODE_COLUMNS} for c in NODE_COLUMNS),
         "upgrade_backfills_legacy": transport == "legacy",
         "upgrade_preserves_rows": before_counts == after_counts,

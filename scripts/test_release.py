@@ -2018,7 +2018,7 @@ class ReleaseTests(unittest.TestCase):
                 report = rehearsal.run(directory)
                 self.assertTrue(report["pass"], report["checks"])
                 self.assertEqual(report["before"]["tables"], 35)
-                self.assertEqual(report["after_upgrade"]["tables"], 44)
+                self.assertEqual(report["after_upgrade"]["tables"], 45)
                 self.assertEqual(report["after_copy_back_rollback"]["tables"], 35)
                 self.assertEqual(report["after_upgrade"]["nodes_backfill"], "legacy")
                 self.assertTrue(all(report["checks"].values()))

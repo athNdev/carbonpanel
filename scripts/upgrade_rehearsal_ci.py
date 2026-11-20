@@ -5,7 +5,7 @@
 One job runs TWO fail-closed cases on caller-owned disposable paths:
 
 * LEGACY baseline: the explicit v1.0.40 stable -> candidate migration
-  (35 -> 44 -> 35 tables), using the verified release archive.
+  (35 -> 45 -> 35 tables), using the verified release archive.
 * CURRENT stable: the highest published product stable derived from the
   authoritative GitHub release record via the product version contract
   (`scripts/release.py`), -> candidate. No hardcoded table count: the candidate
@@ -53,13 +53,15 @@ RELEASE_BASE = "https://github.com/athNdev/carbonpanel/releases/download/{tag}"
 
 # Legacy table counts use the project's historical convention (every table,
 # including sqlite_sequence and casbin_rule): v1.0.40 seeds 35 and the candidate
-# adds 9 model tables for 44. The CURRENT case derives counts from the binaries.
+# adds 10 model tables for 45 (including managed-node enrollment state). The
+# CURRENT case derives counts from the binaries.
 LEGACY_TABLE_COUNT = 35
-CANDIDATE_TABLE_COUNT = 44
+CANDIDATE_TABLE_COUNT = 45
 NEW_MODEL_TABLES = {
     "player_identities", "player_aliases", "player_sessions",
     "player_access_states", "player_moderation_actions", "world_entries",
     "world_revisions", "world_bindings", "world_import_jobs",
+    "node_enrollment_authority_state",
 }
 CORE_TABLES = (
     "servers", "server_configs", "users", "nodes", "roles", "user_roles",
@@ -645,7 +647,7 @@ def execute(workspace, args):
         "Disposable fixtures only; no live world, database, host, registry, tag or release is touched.",
         "Both stable DBs are seeded by real stable binaries and candidate DBs by the real candidate binary.",
         "No Docker daemon, gameplay, browser, IdP or load balancer is exercised by this job.",
-        "The legacy case pins the 35 -> 44 baseline; the current case derives its baseline from the authoritative release record and asserts additive growth without a hardcoded count.",
+        "The legacy case pins the 35 -> 45 baseline; the current case derives its baseline from the authoritative release record and asserts additive growth without a hardcoded count.",
         "Operator-breaking OIDC/PROXY config changes remain documented go/no-go gates.",
     ]
     (workspace / "rehearsal-ci-report.json").write_text(
