@@ -2,6 +2,8 @@
 name: Qualify packaged Panel under systemd
 
 on:
+  push:
+    branches: [codex/oss-246-panel-systemd-proof]
   workflow_dispatch:
     inputs:
       release_run:
@@ -46,10 +48,10 @@ jobs:
         id: packages
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_RUN: ${{ inputs.release_run }}
-          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
-          BASELINE_TAG: ${{ inputs.baseline_tag }}
-          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          RELEASE_RUN: '44681201824'
+          CANDIDATE_COMMIT: e8245faa8cc148b45751294983e9894b949daf2f
+          BASELINE_TAG: v1.0.40
+          BASELINE_COMMIT: f88748be6a216b187e675bbb1f110df07e544148
           PACKAGE_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
@@ -83,10 +85,10 @@ jobs:
 
       - name: Install, restart and replace the packaged programs in an isolated service
         env:
-          RELEASE_RUN: ${{ inputs.release_run }}
-          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
-          BASELINE_TAG: ${{ inputs.baseline_tag }}
-          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          RELEASE_RUN: '44681201824'
+          CANDIDATE_COMMIT: e8245faa8cc148b45751294983e9894b949daf2f
+          BASELINE_TAG: v1.0.40
+          BASELINE_COMMIT: f88748be6a216b187e675bbb1f110df07e544148
           ARTIFACT_ID: ${{ steps.packages.outputs.artifact_id }}
           ARTIFACT_DIGEST: ${{ steps.packages.outputs.artifact_digest }}
         run: |
