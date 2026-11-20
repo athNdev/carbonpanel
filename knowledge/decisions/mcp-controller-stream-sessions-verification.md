@@ -20,6 +20,12 @@ read unblock, handle close and session eviction. The tools/call fixture proves
 307 KiB framed transfer with SHA equality and read-only/revoked/cross-owner/
 cross-server refusals with zero writes.
 
+The packaged smoke job repeats the stream round trip and refusals through the
+OCI entrypoint by immutable local image ID. The fixture mounts generated auth,
+file and upload handlers behind the production authorization interceptor. It
+owns its database and file tree, and the MCP container reaches the fixture
+over the Linux runner's loopback without data or Docker socket mounts.
+
 Staged downloads reuse this machinery: `OpenStreamRequest.download_session_id`
 opens the controller temp file through the same registry, owner/server binding
 and frame/SHA contract instead of a node path. See

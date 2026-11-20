@@ -811,6 +811,45 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				return samples.map((sample) => sample.map((tile) => tile.text));
 			});
 
+			await check(`server runtime metrics @${width} ${theme}: keyboard disclosure persists on reload and across servers`, async () => {
+				await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+				const trigger = page.getByRole('button', { name: 'Runtime metrics', exact: true });
+				const cards = page.locator('#server-runtime-metrics');
+				await trigger.waitFor();
+				if (await trigger.getAttribute('aria-controls') !== 'server-runtime-metrics' || !await cards.isVisible()) {
+					throw new Error('Default server metrics or disclosure relationship missing');
+				}
+				await trigger.focus();
+				await page.keyboard.press('Space');
+				await cards.waitFor({ state: 'hidden' });
+				if (await trigger.getAttribute('aria-expanded') !== 'false') throw new Error('Collapsed state not announced');
+				await page.getByRole('tab', { name: 'World', exact: true }).click();
+				if (await cards.isVisible()) throw new Error('Changing tab reopened the metrics');
+				await page.reload({ waitUntil: 'domcontentloaded' });
+				await trigger.waitFor();
+				if (await cards.isVisible()) throw new Error('Reload lost the collapsed preference');
+				await page.goto(root + '/servers/srv-2', { waitUntil: 'domcontentloaded' });
+				await trigger.waitFor();
+				if (await cards.isVisible()) throw new Error('Opening another server lost the preference');
+				const searchInstalledMods = async (query) => {
+					await page.getByRole('tab', { name: 'Mods', exact: true }).click();
+					const panel = page.getByRole('tabpanel');
+					const search = panel.getByPlaceholder('Search installed mods...');
+					await search.click();
+					await page.keyboard.press('ControlOrMeta+A');
+					await page.keyboard.type(query);
+					if (await search.inputValue() !== query) throw new Error('Mods control did not receive input');
+					const bounds = await panel.boundingBox();
+					if (!bounds || bounds.height < 160) throw new Error('Selected tab has no usable body');
+				};
+				await searchInstalledMods('collapsed');
+				await trigger.focus();
+				await page.keyboard.press('Enter');
+				await cards.waitFor({ state: 'visible' });
+				if (await trigger.getAttribute('aria-expanded') !== 'true') throw new Error('Expanded state not announced');
+				await searchInstalledMods('expanded');
+			});
+
 			for (const path of ['/servers', '/servers/srv-1']) {
 				await page.goto(root + path, { waitUntil: 'domcontentloaded' });
 				await page.locator('h1').first().waitFor();

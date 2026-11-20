@@ -355,6 +355,24 @@ class DockerHubDescriptionTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("drifted", buffer.getvalue())
 
+    def test_short_description_only_drift_triggers_a_repair_write(self):
+        with tempfile.TemporaryDirectory() as folder:
+            body = Path(folder) / "body.md"
+            generate_to(body)
+            live = Path(folder) / "hub.json"
+            live.write_text(json.dumps({
+                "full_description": body.read_text(encoding="utf-8"),
+                "description": "an older tagline",
+            }), encoding="utf-8")
+            outputs = Path(folder) / "outputs"
+            with patch.dict(os.environ, {"GITHUB_OUTPUT": str(outputs)}):
+                description.command_check(description.build_parser().parse_args(
+                    ["check", "--expected", str(body), "--live-file", str(live)]))
+            written = outputs.read_text(encoding="utf-8")
+            self.assertIn("matches=true", written)
+            self.assertIn("short_description_ok=false", written)
+            self.assertIn("changed=true", written)
+
     def test_verification_uses_the_real_docker_hub_description_field(self):
         with tempfile.TemporaryDirectory() as folder:
             body = Path(folder) / "body.md"

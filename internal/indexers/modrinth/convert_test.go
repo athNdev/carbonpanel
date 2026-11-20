@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package modrinth
 
 import (
@@ -14,6 +13,7 @@ func TestConvertSearchProject(t *testing.T) {
 	m := &ModrinthIndexer{}
 	got := m.convertSearchProject(Project{
 		ProjectID:     "abc123",
+		ServerSide:    "unsupported",
 		Slug:          "all-the-mods-9",
 		Title:         "All The Mods 9",
 		Description:   "big pack",
@@ -27,6 +27,9 @@ func TestConvertSearchProject(t *testing.T) {
 
 	if got.ID != "modrinth-abc123" || got.Indexer != "modrinth" || got.LatestFileID != "v9" {
 		t.Errorf("ids = %+v", got)
+	}
+	if got.ServerSide != "unsupported" {
+		t.Fatalf("server side = %q", got.ServerSide)
 	}
 	if got.WebsiteURL != "https://modrinth.com/modpack/all-the-mods-9" {
 		t.Errorf("url = %q", got.WebsiteURL)
@@ -46,6 +49,7 @@ func TestConvertProject_LoaderSplit(t *testing.T) {
 	m := &ModrinthIndexer{}
 	got := m.convertProject(ProjectDetails{
 		ID:          "abc123",
+		ServerSide:  "required",
 		Slug:        "all-the-mods-9",
 		Title:       "All The Mods 9",
 		Description: "d",
@@ -56,6 +60,9 @@ func TestConvertProject_LoaderSplit(t *testing.T) {
 		Published:   "2024-01-02T00:00:00Z",
 	})
 
+	if got.ServerSide != "required" {
+		t.Fatalf("server side = %q", got.ServerSide)
+	}
 	if got.Description != "full body" {
 		t.Errorf("description = %q", got.Description)
 	}

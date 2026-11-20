@@ -400,6 +400,38 @@
     "description": "Import a modpack from an operator-supplied https URL. Requires confirm=true. The proto credential fields auth_token (modpack.proto:176) and allow_private_network (modpack.proto:177) are deliberately not exposed to MCP arguments."
   },
   {
+    "tool": "packwiz_list_packs",
+    "procedure": "/carbonpanel.v1.PackwizService/ListPacks",
+    "service": "carbonpanel.v1.PackwizService",
+    "method": "ListPacks",
+    "client": "NewPackwizServiceClient",
+    "scope": "modpacks/read",
+    "class": "safe",
+    "access": "read",
+    "confirm": false,
+    "build": "post-v1.0.40+eb7c2dbef6033fb988e3d1eefc3d3a2c155b99f3",
+    "transport": "rpc",
+    "registered_by": "content",
+    "bounded_args": "non-negative offset; 1..50 entries; 4 MiB controller response limit",
+    "description": "List Packwiz Studio packs. Requires global modpacks/read. Use next_offset to page through pack summaries."
+  },
+  {
+    "tool": "packwiz_get_pack",
+    "procedure": "/carbonpanel.v1.PackwizService/GetPack",
+    "service": "carbonpanel.v1.PackwizService",
+    "method": "GetPack",
+    "client": "NewPackwizServiceClient",
+    "scope": "modpacks/read",
+    "class": "safe",
+    "access": "read",
+    "confirm": false,
+    "build": "post-v1.0.40+eb7c2dbef6033fb988e3d1eefc3d3a2c155b99f3",
+    "transport": "rpc",
+    "registered_by": "content",
+    "bounded_args": "one exact pack_id; non-negative offset; 1..50 entries; 4 MiB controller response limit",
+    "description": "Read Packwiz pack metadata and a page of content across mods, datapacks, resource packs and shaders. Requires global modpacks/read. Omits download URLs, paths and raw options."
+  },
+  {
     "tool": "search_datapacks",
     "procedure": "/carbonpanel.v1.DatapackService/SearchDatapacks",
     "service": "carbonpanel.v1.DatapackService",
@@ -1226,7 +1258,7 @@
     "registered_by": "integration",
     "bounded_args": "operator Studio arguments; fail-closed policy at packwiz.go:106",
     "source_ref": "internal/rpc/server.go:315-320; internal/rpc/handlers/packwiz.go:106",
-    "equivalent_flow": "ModpackService and DatapackService tools above",
-    "description": "Packwiz Studio authoring and deployment REST surface; its data operations are covered by the typed modpack/datapack tools."
+    "equivalent_flow": "packwiz_list_packs / packwiz_get_pack for inventory reads only",
+    "description": "Packwiz Studio authoring and deployment REST surface. Mutations, raw content and update checks remain outside the MCP read tools."
   }
 ]

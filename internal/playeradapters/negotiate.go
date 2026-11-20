@@ -7,16 +7,10 @@ package playeradapters
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 )
-
-// minManagementJavaVersion is the first Java release with the native Server
-// Management Protocol (25w35a / 1.21.9). D-MGMT gates real-server validation.
-const minManagementJavaVersion = "1.21.9"
 
 const decisionPending = "capability not verified / decision pending"
 
@@ -49,7 +43,7 @@ func Negotiate(ctx context.Context, info ServerInfo, exec ExecFunc) (Adapter, Ca
 			source:     SourceManagementProtocol,
 			available:  managementOK,
 			reason:     managementReason,
-			detail:     "Structured management protocol is configured; reachability and authentication are verified on first use. Real 1.21.9+ interoperability is gated by D-MGMT.",
+			detail:     "Structured management protocol is configured; reachability and authentication are verified on first use. Uses the v1 wire format exercised on vanilla 1.21.9.",
 			newAdapter: func() Adapter { return newManagementAdapter(info) },
 		},
 		{
@@ -142,9 +136,11 @@ func managementAvailable(info ServerInfo) (bool, string) {
 	if info.ManagementSecret == "" {
 		return false, "no management bearer secret is configured; set one or use the Java RCON/exec fallback"
 	}
-	ok, err := versionAtLeast(info.MCVersion, minManagementJavaVersion)
-	if err != nil || !ok {
-		return false, fmt.Sprintf("Java %q is below the minimum %s required by the management protocol", info.MCVersion, minManagementJavaVersion)
+	// Negotiate only the version family whose wire signature was qualified.
+	// A newer major is reported unsupported rather than silently sent an
+	// older-shaped request.
+	if _, err := selectManagementProfile(info.MCVersion); err != nil {
+		return false, err.Error()
 	}
 	return true, ""
 }
@@ -173,57 +169,4 @@ func execAvailable(info ServerInfo, exec ExecFunc) (bool, string) {
 		return false, "node exec uses the Java rcon-cli path; Bedrock parity is " + decisionPending
 	}
 	return true, ""
-}
-
-// versionAtLeast compares dotted numeric prefixes such as "1.21.9",
-// "1.21.9-rc1" or "1.22". A missing component is zero; an unparseable version
-// is rejected so an unknown version never unlocks a newer protocol.
-func versionAtLeast(got, minimum string) (bool, error) {
-	g, err := versionParts(got)
-	if err != nil {
-		return false, err
-	}
-	m, err := versionParts(minimum)
-	if err != nil {
-		return false, err
-	}
-	for len(g) < len(m) {
-		g = append(g, 0)
-	}
-	for len(m) < len(g) {
-		m = append(m, 0)
-	}
-	for i := range g {
-		if g[i] > m[i] {
-			return true, nil
-		}
-		if g[i] < m[i] {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-func versionParts(v string) ([]int, error) {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil, errors.New("empty version")
-	}
-	raw := strings.Split(v, ".")
-	parts := make([]int, 0, len(raw))
-	for _, segment := range raw {
-		i := 0
-		for i < len(segment) && segment[i] >= '0' && segment[i] <= '9' {
-			i++
-		}
-		if i == 0 {
-			return nil, fmt.Errorf("non-numeric version component %q", segment)
-		}
-		n, err := strconv.Atoi(segment[:i])
-		if err != nil {
-			return nil, fmt.Errorf("invalid version component %q: %w", segment, err)
-		}
-		parts = append(parts, n)
-	}
-	return parts, nil
 }

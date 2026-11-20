@@ -555,8 +555,8 @@ def command_check(arguments):
     data = live_description(config["repository"], arguments.live_file)
     live = data.get("full_description")
     matches, explanation = compare(expected, live)
-    changed = (not matches) or arguments.force
     short_ok = published_short_description(data) == config["short_description"]
+    changed = (not matches) or (not short_ok) or arguments.force
     # Keep stdout clean: this step's output file is written by emit_outputs.
     print(explanation, file=sys.stderr)
     print("expected {} UTF-8 bytes, live {} UTF-8 bytes, short_description_ok={}".format(

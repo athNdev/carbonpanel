@@ -1,0 +1,8 @@
+{
+  "name": "carbonpanel-review-minecraft-player",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "mineflayer": "4.39.0"
+  }
+}
