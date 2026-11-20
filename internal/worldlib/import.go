@@ -168,8 +168,14 @@ func (i *LocalImporter) Import(ctx context.Context, req ImportRequest) (*ImportR
 		return fail(fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, expected, checksum))
 	}
 
-	report, err := InspectArchive(archivePath)
+	// One bounded, context-aware pass covers the archive hardening limits and
+	// the world layout gate. Refuse layouts the binder cannot map instead of
+	// storing an immutable revision that can never be bound.
+	report, layout, err := InspectRevisionArchive(ctx, archivePath)
 	if err != nil {
+		return fail(err)
+	}
+	if err := layout.Validate(); err != nil {
 		return fail(err)
 	}
 	archiveSize, err := ArchiveFileSize(archivePath)

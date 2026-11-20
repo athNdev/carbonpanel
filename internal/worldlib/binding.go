@@ -23,6 +23,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/snapshot"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 	"github.com/athNdev/carbon-panel/pkg/files"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/google/uuid"
@@ -120,15 +121,19 @@ var ErrBindRequestConflict = errors.New("world bind request ID conflicts with th
 
 // BindRequest is the pure input to a bind or swap.
 type BindRequest struct {
-	ServerID      string
-	LevelName     string
-	RevisionID    string
-	Window        string
-	RequestID     string
-	NodeID        string
-	Generation    int64
-	Operator      string
-	AcceptUnknown bool
+	ServerID  string
+	LevelName string
+	// ReplayLevelName is the caller's original level, used only to prove a
+	// completed operation replay after the configured level changed. Empty
+	// means LevelName. New work always uses the canonical configured level.
+	ReplayLevelName string
+	RevisionID      string
+	Window          string
+	RequestID       string
+	NodeID          string
+	Generation      int64
+	Operator        string
+	AcceptUnknown   bool
 	// Previous is the binding captured under the admission lock before a swap.
 	// It is set by Binder, never by RPC callers.
 	Previous *storage.WorldBinding
@@ -239,16 +244,35 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Read both records under admission. Check any reuse before considering an
-	// already-matching binding: it may come from a different operation.
-	existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName)
+	// A proven completed replay may use the caller's ORIGINAL level even when
+	// configuration has since changed: main's replay contract verifies it
+	// against the retained binding and operation. Try that first, before any
+	// canonical level enforcement, so historical operations stay idempotent.
+	replayReq := req
+	if strings.TrimSpace(req.ReplayLevelName) != "" {
+		replayReq.LevelName = req.ReplayLevelName
+	}
+	existing, err := b.store.GetWorldBinding(ctx, replayReq.ServerID, replayReq.LevelName)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	payloadHash := worldBindPayloadHash(server, req)
-	if replay, err := b.replayBind(ctx, server, req, payloadHash, existing); replay != nil || err != nil {
+	replayHash := worldBindPayloadHash(server, replayReq)
+	if replay, err := b.replayBind(ctx, server, replayReq, replayHash, existing); replay != nil || err != nil {
 		return replay, err
 	}
+
+	// New work uses the authoritative configured level, not the caller's claim.
+	if err := b.canonicalLevel(ctx, &req); err != nil {
+		return nil, err
+	}
+	levelAtAdmission := req.LevelName
+	if replayReq.LevelName != req.LevelName {
+		existing, err = b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	payloadHash := worldBindPayloadHash(server, req)
 	if existing != nil {
 		if !existing.MatchesOwner(req.NodeID, req.Generation) {
 			return nil, fmt.Errorf("%w: existing binding belongs to another node generation", ErrStaleGeneration)
@@ -274,6 +298,22 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 			return nil, err
 		}
 		defer releaseTransition()
+	}
+	// Completed replays returned above never reach the transition. For a fresh
+	// operation the shared server transition is now held, so config can no
+	// longer change underneath this bind. Re-read and require the SAME level
+	// chosen under admission; a change is refused before stop, journal or any
+	// live-world mutation.
+	currentLevel, err := b.configuredLevel(ctx, req.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	if currentLevel != levelAtAdmission {
+		return nil, fmt.Errorf("%w: server level changed before world bind acquired the shared transition",
+			ErrUnsupportedWorldLayout)
+	}
+	if err := b.canonicalLevel(ctx, &req); err != nil {
+		return nil, err
 	}
 	current, err := b.store.GetServer(ctx, server.ID)
 	if err != nil {
@@ -328,6 +368,21 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	var cleanup []string
 	journal, err := operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-bind", req.RequestID, payloadHash,
 		func(ownedCtx context.Context) (bool, error) {
+			// The journal now owns the server. A scheduler ApplyBatch can finish
+			// under its own journal between preflight and this callback, so
+			// recheck the target before Stop or any file effect. Replays never
+			// reach this point.
+			ownedLevel, err := b.configuredLevel(ownedCtx, req.ServerID)
+			if err != nil {
+				return false, err
+			}
+			if ownedLevel != levelAtAdmission {
+				return false, fmt.Errorf("%w: server level changed before world bind owned the operation",
+					ErrUnsupportedWorldLayout)
+			}
+			if err := b.canonicalLevel(ownedCtx, &req); err != nil {
+				return false, err
+			}
 			out, roots, err := b.publish(ownedCtx, acc, server, req, archivePath)
 			cleanup = roots
 			if out != nil {
@@ -405,6 +460,37 @@ func worldBindPayloadHash(server *storage.Server, req BindRequest) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%q|%q|%q|%q|%d",
 		operation.Digest("world-bind", server), req.LevelName, req.RevisionID, window, req.NodeID, req.Generation)))
 	return hex.EncodeToString(sum[:])
+}
+
+// canonicalLevel resolves the authoritative target level from server config and
+// normalises the request to it. Callers must hold the relevant ownership (Binder
+// admission and, for a fresh operation, the shared server transition).
+func (b *Binder) configuredLevel(ctx context.Context, serverID string) (string, error) {
+	cfg, err := b.store.GetServerConfig(ctx, serverID)
+	if err != nil {
+		return "", fmt.Errorf("server world configuration not found: %w", err)
+	}
+	if cfg == nil {
+		return "", errors.New("server world configuration is missing")
+	}
+	level := worldview.ActualLevelName(cfg)
+	if level == "" {
+		return "", errors.New("server actual level name is unknown")
+	}
+	return level, nil
+}
+
+func (b *Binder) canonicalLevel(ctx context.Context, req *BindRequest) error {
+	level, err := b.configuredLevel(ctx, req.ServerID)
+	if err != nil {
+		return err
+	}
+	if requested := strings.TrimSpace(req.LevelName); requested != "" && requested != level {
+		return fmt.Errorf("%w: bind level %q does not match configured level %q",
+			ErrUnsupportedWorldLayout, requested, level)
+	}
+	req.LevelName = level
+	return nil
 }
 
 // replayBind only returns success when the installed binding is attributable
@@ -586,7 +672,7 @@ func (b *Binder) publish(ctx context.Context, acc nodestorage.Accessor, server *
 	}
 	if len(families) == 0 {
 		_ = acc.RemoveAll(stageRoot)
-		return nil, nil, fmt.Errorf("%w: archive has no level.dat family", ErrArchiveRejected)
+		return nil, nil, fmt.Errorf("%w: archive has no usable level.dat family", ErrArchiveRejected)
 	}
 
 	next := &storage.WorldBinding{
@@ -940,6 +1026,9 @@ func copyLocalArchiveToAccessor(ctx context.Context, acc nodestorage.Accessor, l
 	return err
 }
 
+// stageFamilies uses WorldFamilyFromMarker, the single bounded definition of a
+// publishable level family shared with import and preview. It also resolves the
+// configured target BEFORE the caller swaps the binding or moves live data.
 func stageFamilies(acc nodestorage.Accessor, stageRoot, levelName string) ([]string, error) {
 	entries, err := acc.ReadDir(stageRoot)
 	if err != nil {
@@ -947,20 +1036,31 @@ func stageFamilies(acc nodestorage.Accessor, stageRoot, levelName string) ([]str
 	}
 	families := []string{}
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+		if !entry.IsDir() || WorldFamilyFromMarker(path.Join(entry.Name(), "level.dat")) == "" {
 			continue
 		}
-		if _, err := acc.Stat(path.Join(stageRoot, entry.Name(), "level.dat")); err == nil {
-			families = append(families, entry.Name())
+		// A directory is a world family only when its actual direct marker is a
+		// regular, non-empty file. Ordinary backup companions (config/, mods/)
+		// must never be published as worlds.
+		marker, err := acc.Stat(path.Join(stageRoot, entry.Name(), "level.dat"))
+		if err != nil || !marker.Mode().IsRegular() || marker.Size() == 0 {
+			continue
 		}
+		families = append(families, entry.Name())
 	}
 	if len(families) == 0 {
-		if _, err := acc.Stat(path.Join(stageRoot, levelName, "level.dat")); err == nil {
-			families = append(families, levelName)
+		// Preserve the legacy exact-name fallback: a configured level folder
+		// with an actual direct level.dat is usable even if the directory
+		// listing was unavailable at extraction time.
+		if WorldFamilyFromMarker(path.Join(levelName, "level.dat")) != "" {
+			if marker, err := acc.Stat(path.Join(stageRoot, levelName, "level.dat")); err == nil &&
+				marker.Mode().IsRegular() && marker.Size() > 0 {
+				families = append(families, levelName)
+			}
 		}
 	}
 	sort.Strings(families)
-	return families, nil
+	return SelectWorldFamilies(families, levelName)
 }
 
 // levelFamilyDigest fingerprints the optional level.dat for rollback verification.

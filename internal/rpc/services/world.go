@@ -27,6 +27,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/operation"
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/internal/worldlib/providers"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -273,6 +274,29 @@ func (s *WorldService) CheckCompatibility(ctx context.Context, req *connect.Requ
 	if err != nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
 	}
+	// Preview must refuse the same layouts and target mismatch bind refuses,
+	// including revisions stored before this gate existed. A version-only
+	// request has no server scope, so it applies the archive layout policy but
+	// does not require a configured level (proto allows either target form).
+	var levelName string
+	if msg.GetServerId() != "" {
+		levelName, err = authoritativeLevelName(ctx, s.store, msg.GetServerId())
+		if err != nil {
+			return nil, err
+		}
+	} else if strings.TrimSpace(targetMC) == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			errors.New("target_mc_version is required when server_id is omitted"))
+	}
+	layout, err := worldlib.ValidateRevisionArchive(ctx, archivePath)
+	if err != nil {
+		return nil, worldError(err)
+	}
+	if levelName != "" {
+		if _, err := layout.SelectFamilies(levelName); err != nil {
+			return nil, worldError(err)
+		}
+	}
 	report, err := s.compat.Check(ctx, archivePath, worldlib.Target{
 		ServerID: msg.GetServerId(), MCVersion: targetMC, Edition: edition,
 		ModLoader: loader, DataVersion: revision.DataVersion,
@@ -316,9 +340,35 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 	if err != nil {
 		return nil, worldError(err)
 	}
+	// Gate the revision layout BEFORE any journal row or live-world mutation.
+	// Store revisions from before this gate are checked too, so an unsupported
+	// flat archive cannot interrupt a running server at bind time.
+	revision, err := s.store.GetWorldRevision(ctx, msg.GetRevisionId())
+	if err != nil {
+		return nil, notFoundOrInternal(err, "revision not found")
+	}
+	archivePath, err := worldlib.ResolveRevisionArchive(s.libraryRoot, revision.StoragePath)
+	if err != nil {
+		return nil, worldError(err)
+	}
+	levelName, err := authoritativeLevelName(ctx, s.store, msg.GetServerId())
+	if err != nil {
+		return nil, err
+	}
+	// Keep the caller's original level ONLY for proving a completed replay;
+	// new work uses the canonical configured level below.
+	replayLevel := strings.TrimSpace(msg.GetLevelName())
+	layout, err := worldlib.ValidateRevisionArchive(ctx, archivePath)
+	if err != nil {
+		return nil, worldError(err)
+	}
+	if _, err := layout.SelectFamilies(levelName); err != nil {
+		return nil, worldError(err)
+	}
 	result, err := s.binder.Bind(ctx, worldlib.BindRequest{
-		ServerID: msg.GetServerId(), LevelName: msg.GetLevelName(), RevisionID: msg.GetRevisionId(),
-		Window: msg.GetWindow(), RequestID: msg.GetRequestId(), NodeID: server.NodeID,
+		ServerID: msg.GetServerId(), LevelName: levelName, ReplayLevelName: replayLevel,
+		RevisionID: msg.GetRevisionId(),
+		Window:     msg.GetWindow(), RequestID: msg.GetRequestId(), NodeID: server.NodeID,
 		Generation: generation, Operator: operatorName(ctx),
 	})
 	if err != nil {
@@ -344,7 +394,7 @@ func (s *WorldService) BindWorld(ctx context.Context, req *connect.Request[v1.Bi
 		}
 		operationID := result.OperationID
 		if operationID != "" && requestID != "" {
-			s.auditWorldOperation(ctx, req, activity.EventWorldBind, msg.GetServerId(), requestID, msg.GetLevelName(), msg.GetRevisionId(), operationID)
+			s.auditWorldOperation(ctx, req, activity.EventWorldBind, msg.GetServerId(), requestID, levelName, msg.GetRevisionId(), operationID)
 		}
 		if operationID != "" {
 			result.OperationID = operationID
@@ -652,6 +702,27 @@ func notFoundOrInternal(err error, message string) error {
 		return connect.NewError(connect.CodeNotFound, errors.New(message))
 	}
 	return connect.NewError(connect.CodeInternal, errors.New(message))
+}
+
+// authoritativeLevelName is the single target-level policy for preview and
+// bind. A missing config or unknown level fails closed instead of silently
+// disabling target-family checks.
+func authoritativeLevelName(ctx context.Context, store *storage.Store, serverID string) (string, error) {
+	if strings.TrimSpace(serverID) == "" {
+		return "", connect.NewError(connect.CodeInvalidArgument, errors.New("server_id is required"))
+	}
+	cfg, err := store.GetServerConfig(ctx, serverID)
+	if err != nil {
+		return "", notFoundOrInternal(err, "server world configuration not found")
+	}
+	if cfg == nil {
+		return "", connect.NewError(connect.CodeFailedPrecondition, errors.New("server world configuration is missing"))
+	}
+	level := worldview.ActualLevelName(cfg)
+	if level == "" {
+		return "", connect.NewError(connect.CodeFailedPrecondition, errors.New("server actual level name is unknown"))
+	}
+	return level, nil
 }
 
 func worldError(err error) error {

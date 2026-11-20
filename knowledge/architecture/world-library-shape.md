@@ -44,13 +44,13 @@ live only on owning node storage.
 - The server-detail World tab reports unmanaged and unbound states without
   inventing a level, and reuses these binding gates for pick/swap. See
   [Library adoption fencing](../decisions/library-adoption-fencing.md).
-- Imports verify the operator-supplied SHA-256 against a whole-archive SHA-256
-  in node-local staging; `archive/zip` CRC checks entries, but no per-file
-  SHA-256 manifest is verified. Inspection rejects traversal/unsafe paths,
-  symlink, special and encrypted entries, nesting deeper than two levels, and
-  size/entry/manifest caps. Executable/plugin payloads (`.jar`, `.dll`, `.so`,
-  `.mcfunction`) are only detected and reported, never installed or run.
-  Container privileges are unchanged.
+- Imports verify operator SHA-256 against the whole archive in node-local
+  staging; `archive/zip` CRC checks entries, no per-file manifest. Inspection
+  rejects unsafe paths, symlinks/special/encrypted entries, deep nesting and
+  size/entry/manifest caps; executables are detected, never installed, and
+  privileges unchanged. A supported archive keeps the world in a named folder
+  (`world/level.dat`); root-level or unusable layouts are refused at import,
+  preview and bind. See [Import layout](../../docs/world-library-import-layout.md).
 - Platform support has two axes: API-backed artifact support (Modrinth,
   CurseForge content artifacts) and experimental/manual prebuilt-world import.
   A modpack or datapack is not a prebuilt world. CurseForge `x-api-key` goes

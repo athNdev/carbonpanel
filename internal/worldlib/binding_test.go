@@ -84,6 +84,198 @@ func seedRevision(t *testing.T, store *storage.Store, entryID, archivePath, sha 
 	return rev
 }
 
+// levelBarrierLifecycle changes the configured level exactly once, inside the
+// shared server transition, to simulate a config update racing the bind after
+// Binder-private admission has already chosen a level.
+type levelBarrierLifecycle struct {
+	fakeLifecycle
+	store    *storage.Store
+	serverID string
+	newLevel string
+	fired    bool
+}
+
+func (l *levelBarrierLifecycle) BeginTransition(serverID string) (func(), error) {
+	if !l.fired {
+		l.fired = true
+		ctx := context.Background()
+		cfg, err := l.store.GetServerConfig(ctx, l.serverID)
+		if err != nil {
+			return nil, err
+		}
+		level := l.newLevel
+		cfg.Level = &level
+		if err := l.store.SaveServerConfig(ctx, cfg); err != nil {
+			return nil, err
+		}
+	}
+	return func() {}, nil
+}
+
+func TestCompletedReplaySurvivesLevelChangeButNewWorkUsesConfiguredLevel(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(libraryRoot, "rev.zip")
+	if err := os.WriteFile(archivePath, multiFamilyTestArchive(t, []string{"world"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := seedWorldServer(t, store, dataRoot)
+	level := "world"
+	if err := store.SaveServerConfig(ctx, &storage.ServerConfig{
+		ID: server.ID, ServerID: server.ID, Level: &level,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rev := seedRevision(t, store, "wld_replay", archivePath, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+	first, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "replay-original", Window: "now",
+	})
+	if err != nil || first.Binding == nil {
+		t.Fatalf("original bind = %+v, %v", first, err)
+	}
+
+	changed := "other"
+	cfg, err := store.GetServerConfig(ctx, server.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Level = &changed
+	if err := store.SaveServerConfig(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	replay, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "replay-original", Window: "now",
+	})
+	if err != nil || replay.Binding == nil || replay.Binding.ID != first.Binding.ID {
+		t.Fatalf("completed replay after level change = %+v, %v", replay, err)
+	}
+
+	_, err = binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "fresh-after-change", Window: "now",
+	})
+	if err == nil || !strings.Contains(err.Error(), `configured level "other"`) {
+		t.Fatalf("fresh bind after level change = %v, want configured level enforced", err)
+	}
+}
+
+func TestLevelChangeAtSharedTransitionBarrierRefusesBeforeStop(t *testing.T) {
+	for _, tc := range []struct {
+		name, newLevel, wantErr string
+	}{
+		{"level changes", "other", "level changed before world bind acquired the shared transition"},
+		{"same level", "world", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newWorldTestStore(t)
+			root := t.TempDir()
+			dataRoot := filepath.Join(root, "data")
+			libraryRoot := filepath.Join(root, "library")
+			if err := os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			archivePath := filepath.Join(libraryRoot, "rev.zip")
+			if err := os.WriteFile(archivePath, multiFamilyTestArchive(t, []string{"world"}), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			server := seedWorldServer(t, store, dataRoot)
+			level := "world"
+			if err := store.SaveServerConfig(ctx, &storage.ServerConfig{
+				ID: server.ID, ServerID: server.ID, Level: &level,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			rev := seedRevision(t, store, "wld_barrier", archivePath, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+			barrier := &levelBarrierLifecycle{
+				fakeLifecycle: fakeLifecycle{running: true},
+				store:         store, serverID: server.ID, newLevel: tc.newLevel,
+			}
+			binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, barrier, libraryRoot)
+			result, err := binder.Bind(ctx, BindRequest{
+				ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+				NodeID: "local", Generation: 1, RequestID: "barrier-bind", Window: "now",
+			})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("barrier bind = %+v, %v; want %q", result, err, tc.wantErr)
+				}
+				if barrier.stops != 0 || barrier.starts != 0 {
+					t.Fatalf("refused bind mutated lifecycle: %+v", barrier)
+				}
+				if _, err := store.GetWorldBinding(ctx, server.ID, "world"); err == nil {
+					t.Fatal("refused bind created a binding")
+				}
+				return
+			}
+			if err != nil || result == nil || result.Outcome != "success" {
+				t.Fatalf("same-level bind = %+v, %v", result, err)
+			}
+		})
+	}
+}
+
+// TestBinderRevalidatesConfiguredLevelUnderAdmission proves a stale or padded
+// request level cannot address a different binding key or publish into another
+// folder (OSS-432).
+func TestBinderRevalidatesConfiguredLevelUnderAdmission(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	if err := os.MkdirAll(filepath.Join(dataRoot, "world"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(libraryRoot, "rev.zip")
+	if err := os.WriteFile(archivePath, multiFamilyTestArchive(t, []string{"world"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := seedWorldServer(t, store, dataRoot)
+	level := "world"
+	if err := store.SaveServerConfig(ctx, &storage.ServerConfig{
+		ID: server.ID, ServerID: server.ID, Level: &level,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rev := seedRevision(t, store, "wld_level", archivePath, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+	lifecycle := &fakeLifecycle{running: true}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, lifecycle, libraryRoot)
+
+	_, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "other", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "stale-level", Window: "now",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match configured level") {
+		t.Fatalf("stale level bind = %v", err)
+	}
+	if lifecycle.stops != 0 || lifecycle.starts != 0 {
+		t.Fatalf("refused bind mutated lifecycle: %+v", lifecycle)
+	}
+	if _, err := store.GetWorldBinding(ctx, server.ID, "world"); err == nil {
+		t.Fatal("refused bind created a binding")
+	}
+}
+
 func TestBindStagesPublishesAndRestarts(t *testing.T) {
 	ctx := context.Background()
 	store := newWorldTestStore(t)
