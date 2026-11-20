@@ -182,20 +182,11 @@ func (a *httpRenderer) Health(ctx context.Context) (*Health, error) {
 		if err != nil || len(ids) == 0 {
 			return blueMapNoMapHealth(err), nil
 		}
-		// A reachable map list is still not a viewable map. BlueMap's webapp
-		// loads /maps/{id}/textures.json for EVERY configured map on startup;
-		// a 404 or a non-textures body produces a black canvas even though the
-		// iframe and its canvas are visible. Require a real textures document
-		// for each map before READY so a missing resource fails closed at the
-		// RPC seam (no session key is issued). The map count is bounded by the
-		// 1 MiB settings body and capped here so health stays bounded too.
-		if len(ids) > maxBlueMapProbedMaps {
-			return blueMapNoAssetsHealth(), nil
-		}
-		for _, id := range ids {
-			if err := blueMapTexturesReady(ctx, a.ep.baseURL(), id, a.hc); err != nil {
-				return blueMapNoAssetsHealth(), nil
-			}
+		if !blueMapAssetsReady(ctx, a.ep.baseURL(), ids, a.hc) {
+			h.State = v1.RendererState_RENDERER_STATE_ABSENT
+			h.Confidence = "unknown"
+			h.Detail = blueMapNoAssetsDetail
+			return h, nil
 		}
 	}
 
@@ -286,12 +277,28 @@ func blueMapNoMapHealth(err error) *Health {
 }
 
 const (
+	blueMapNoAssetsDetail = "BlueMap has a configured map but its map textures could not be read; wait for rendering or fix the renderer web root before opening the map"
+
 	// maxBlueMapProbedMaps bounds the number of network probes performed by a
 	// single health check even if settings.json carries a very large map list.
 	maxBlueMapProbedMaps = 32
 	// BlueMap 5.29 textures.json can exceed 2 MiB decompressed for real worlds.
 	maxBlueMapTexturesBytes = 8 << 20
 )
+
+// BlueMap's webapp loads textures for every map at startup. A healthy first
+// map cannot compensate for a broken secondary map.
+func blueMapAssetsReady(ctx context.Context, baseURL string, ids []string, hc HTTPDoer) bool {
+	if len(ids) > maxBlueMapProbedMaps {
+		return false
+	}
+	for _, id := range ids {
+		if err := blueMapTexturesReady(ctx, baseURL, id, hc); err != nil {
+			return false
+		}
+	}
+	return true
+}
 
 // blueMapTexturesReady verifies that the map data the webapp actually loads on
 // startup is reachable over the private renderer endpoint. BlueMap v5.29 stores
@@ -317,6 +324,9 @@ func blueMapTexturesReady(ctx context.Context, baseURL, mapID string, hc HTTPDoe
 	}
 	_ = resp.Body.Close()
 
+	if resp.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("textures.json returned HTTP %d", resp.StatusCode)
+	}
 	variant, err := doBlueMapTexturesGet(ctx, plain+".gz", hc)
 	if err != nil {
 		return err
@@ -384,16 +394,6 @@ func verifyBlueMapTextures(resp *http.Response, literalGzip bool) error {
 		return errors.New("textures.json returned an empty textures array")
 	}
 	return nil
-}
-
-// blueMapNoAssetsHealth reports the honest setup/rendering state when the
-// renderer's map list exists but its network-served map data does not. The
-// renderer address and the underlying error are never echoed to the client.
-func blueMapNoAssetsHealth() *Health {
-	return &Health{
-		State: v1.RendererState_RENDERER_STATE_ABSENT, Source: "renderer.http.bluemap",
-		Confidence: "unknown", Detail: "BlueMap has a configured map but its map textures could not be read; wait for rendering or fix the renderer web root before opening the map",
-	}
 }
 
 // parseHealthBody reads optional real fields from the renderer response. A
