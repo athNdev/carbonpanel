@@ -3,24 +3,24 @@
   "issue": "OSS-375",
   "head": "7e6b12162ea891c6b5654981c932dd8e298517da",
   "sourceOfTruth": {
-    "proto": "proto/carbonpanel/v1/*.proto (26 services / 250 RPC methods)",
-    "mounts": "internal/rpc/server.go registerServices (27 services / 240 reachable RPCs); reflection list (19) and rbac parity list (24) are stale",
+    "proto": "proto/carbonpanel/v1/*.proto (26 services / 252 RPC methods)",
+    "mounts": "internal/rpc/server.go registerServices (27 services / 242 reachable RPCs); reflection list (19) and rbac parity list (24) are stale",
     "scopes": "internal/rbac/mapping.go PublicProcedures/AuthenticatedOnlyProcedures/ProcedurePermissions",
     "catalog": "internal/mcp/catalog_data.go (generated); internal/mcp/catalog.go (MountedServices, exposedTools)",
     "fixtures": "internal/mcp/mcp_test.go registerToolHandlers/registerAuthHandlers"
   },
   "policy": "IN SCOPE = ordinary supported authenticated administration and data management, mapped to a typed ACL-scoped tool or a bounded composed workflow (upload/download/metrics). EXCLUDED = genuine private protocol mechanics, unmounted contracts, unauthenticated bootstrap, credential/secret dumps, free-form command, sensitive-location disclosure, third-party egress, and intentionally operator-only maintenance; each exclusion names a supported equivalent flow where one exists.",
   "counts": {
-    "declared_rpcs": 250,
-    "mounted_reachable": 240,
-    "listed_in_tool_catalog": 237,
+    "declared_rpcs": 252,
+    "mounted_reachable": 242,
+    "listed_in_tool_catalog": 239,
     "reachable_by_tool_or_composed": 35,
     "verified_by_fixture": 35,
     "excluded_by_reason": 77,
-    "supported_operations": 201,
+    "supported_operations": 203,
     "unmounted_rpcs": 10,
     "non_rpc_surfaces": 28,
-    "listed_rpcs": 223,
+    "listed_rpcs": 225,
     "listed_surfaces": 14,
     "reachable_rpcs": 30,
     "reachable_surfaces": 5,
@@ -28,7 +28,7 @@
     "verified_surfaces": 4,
     "excluded_rpcs": 52,
     "excluded_surfaces": 25,
-    "supported_rpcs": 198,
+    "supported_rpcs": 200,
     "supported_surfaces": 3
   },
   "operations": [
@@ -3598,6 +3598,29 @@
       }
     },
     {
+      "id": "rpc:/carbonpanel.v1.ServerService/ExportServerArchive",
+      "kind": "rpc",
+      "procedure": "/carbonpanel.v1.ServerService/ExportServerArchive",
+      "service": "carbonpanel.v1.ServerService",
+      "method": "ExportServerArchive",
+      "client": "NewServerServiceClient",
+      "scope": "files/read[server_id]",
+      "declared": true,
+      "mounted": true,
+      "support": "supported",
+      "class": "review",
+      "reason": "SUPPORTED OPERATION: ordinary authenticated administration or data management; exposed through a typed, ACL-scoped tool.",
+      "reasonRef": "proto/carbonpanel/v1/server.proto:34 (rpc declaration); internal/rbac/mapping.go (scope files/read[server_id])",
+      "equivalentFlow": "",
+      "composedBy": "",
+      "suggestedTool": "export_server_archive",
+      "coverage": {
+        "listed": true,
+        "reachable": false,
+        "verified": false
+      }
+    },
+    {
       "id": "rpc:/carbonpanel.v1.ServerService/GetNextAvailablePort",
       "kind": "rpc",
       "procedure": "/carbonpanel.v1.ServerService/GetNextAvailablePort",
@@ -3729,6 +3752,29 @@
       "equivalentFlow": "",
       "composedBy": "",
       "suggestedTool": "server_service_migrate_server",
+      "coverage": {
+        "listed": true,
+        "reachable": false,
+        "verified": false
+      }
+    },
+    {
+      "id": "rpc:/carbonpanel.v1.ServerService/PreviewServerArchive",
+      "kind": "rpc",
+      "procedure": "/carbonpanel.v1.ServerService/PreviewServerArchive",
+      "service": "carbonpanel.v1.ServerService",
+      "method": "PreviewServerArchive",
+      "client": "NewServerServiceClient",
+      "scope": "servers/create",
+      "declared": true,
+      "mounted": true,
+      "support": "supported",
+      "class": "safe",
+      "reason": "SUPPORTED OPERATION: ordinary authenticated administration or data management; exposed through a typed, ACL-scoped tool.",
+      "reasonRef": "proto/carbonpanel/v1/server.proto:36 (rpc declaration); internal/rbac/mapping.go (scope servers/create)",
+      "equivalentFlow": "",
+      "composedBy": "",
+      "suggestedTool": "preview_server_archive",
       "coverage": {
         "listed": true,
         "reachable": false,

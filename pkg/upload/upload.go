@@ -386,15 +386,20 @@ func (m *Manager) getMissingChunks(sessionID, ownerUserID string) ([]int32, erro
 
 // GetTempPath returns the temp path for a completed unowned session.
 func (m *Manager) GetTempPath(sessionID string) (string, string, error) {
-	return m.getTempPath(sessionID, "")
+	return m.getTempPath(sessionID, "", false)
 }
 
 // GetTempPathFor returns the temp path after enforcing the owner binding.
 func (m *Manager) GetTempPathFor(sessionID, ownerUserID string) (string, string, error) {
-	return m.getTempPath(sessionID, ownerUserID)
+	return m.getTempPath(sessionID, ownerUserID, false)
 }
 
-func (m *Manager) getTempPath(sessionID, ownerUserID string) (string, string, error) {
+// GetOwnedTempPathFor refuses legacy unowned sessions for authenticated callers.
+func (m *Manager) GetOwnedTempPathFor(sessionID, ownerUserID string) (string, string, error) {
+	return m.getTempPath(sessionID, ownerUserID, true)
+}
+
+func (m *Manager) getTempPath(sessionID, ownerUserID string, exactOwner bool) (string, string, error) {
 	session, err := m.getSession(sessionID, ownerUserID)
 	if err != nil {
 		return "", "", err
@@ -403,6 +408,9 @@ func (m *Manager) getTempPath(sessionID, ownerUserID string) (string, string, er
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
+	if exactOwner && session.OwnerUserID != ownerUserID {
+		return "", "", ErrOwnerMismatch
+	}
 	if !session.Completed {
 		return "", "", errors.New("upload not completed")
 	}

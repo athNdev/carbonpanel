@@ -43,6 +43,7 @@ type FileInfo struct {
 
 // Response is one JSON line from the worker.
 type Response struct {
+	FreeBytes int64      `json:"free_bytes,omitempty"`
 	Offset    int64      `json:"offset,omitempty"`
 	Digest    string     `json:"digest,omitempty"`
 	Version   int        `json:"version,omitempty"`

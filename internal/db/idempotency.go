@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const maxRequestIDLen = 128
@@ -60,6 +62,22 @@ func (s *Store) ClaimIdempotencyKey(ctx context.Context, requestID, serverID, ki
 		return "", false, fmt.Errorf("%w: %s", ErrRequestIDReused, existing.Kind)
 	}
 	return existing.ServerID, false, nil
+}
+
+// LookupIdempotencyKey finds a prior result without claiming a new request.
+func (s *Store) LookupIdempotencyKey(ctx context.Context, requestID, kind string) (string, error) {
+	var existing IdempotencyKey
+	err := s.db.WithContext(ctx).Where("request_id = ?", requestID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if existing.Kind != kind {
+		return "", ErrRequestIDReused
+	}
+	return existing.ServerID, nil
 }
 
 // ReleaseIdempotencyKey forgets a claim that never became a server row.

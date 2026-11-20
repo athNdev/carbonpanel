@@ -6,6 +6,10 @@ status: stable
 owners: [oss-runtime]
 code_refs:
   - internal/serverarchive
+  - internal/rpc/services/server_archive.go
+  - internal/rpc/services/server_archive_import.go
+  - internal/nodestorage/allocation.go
+  - proto/carbonpanel/v1/server.proto
 sources:
   - title: Server portability archive format
     resource: ../../docs/server-portability.md
@@ -22,3 +26,6 @@ sources:
 - Validate the complete archive before allocating a destination. Copy only into
   a newly allocated destination and verify its input against the inspected
   manifest before keeping the destination.
+- Keep upload ownership, server-create authorization and retry idempotency scoped
+  to the submitting principal. Allocate the destination exclusively on the
+  chosen node before committing the new server row.

@@ -71,6 +71,7 @@ type Archive struct {
 	Format        Format
 	Manifest      Manifest
 	ExpandedBytes int64
+	LevelName     string
 }
 
 // Write streams from the owning node. The caller must hold server lifecycle
@@ -242,7 +243,7 @@ func CopyTo(ctx context.Context, f *os.File, verified Archive, destination nodes
 	if err != nil {
 		return err
 	}
-	if observed.Format != verified.Format || observed.Manifest.Runtime != verified.Manifest.Runtime ||
+	if observed.Format != verified.Format || observed.LevelName != verified.LevelName || observed.Manifest.Runtime != verified.Manifest.Runtime ||
 		observed.Manifest.ExporterVersion != verified.Manifest.ExporterVersion ||
 		len(observed.Manifest.Files) != len(expected) {
 		return fmt.Errorf("server archive changed after inspection")
@@ -312,6 +313,9 @@ func scan(ctx context.Context, f *os.File, consume func(File, io.Reader) error) 
 			}
 			if !bytes.Equal(body.Bytes(), safe) {
 				return fmt.Errorf("archive contains nonportable or credential-bearing settings")
+			}
+			if strings.EqualFold(rel, "server.properties") {
+				result.LevelName = archiveLevelName(body.Bytes())
 			}
 			r = bytes.NewReader(body.Bytes())
 		}
@@ -706,4 +710,15 @@ func withoutPaperForwarding(data []byte, section, key string) ([]byte, error) {
 	}
 	delete(config, key)
 	return yaml.Marshal(root)
+}
+
+func archiveLevelName(data []byte) string {
+	name := ""
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		line = bytes.Trim(line, " \t\f\r")
+		if value, ok := bytes.CutPrefix(line, []byte("level-name=")); ok {
+			name = string(value)
+		}
+	}
+	return name
 }

@@ -32,8 +32,8 @@ func everyDeclaredProcedure(t *testing.T) map[string]bool {
 		}
 		return true
 	})
-	if len(out) != 250 {
-		t.Fatalf("declared proto RPCs: got %d, want 250", len(out))
+	if len(out) != 252 {
+		t.Fatalf("declared proto RPCs: got %d, want 252", len(out))
 	}
 	return out
 }
@@ -226,14 +226,14 @@ func TestFamilyAudit(t *testing.T) {
 				t.Errorf("declared RPC %s is missing from the matrix", procedure)
 			}
 		}
-		if declaredOps != 250 || mountedOps != 240 || unmountedOps != 10 || nonRPC != 28 {
-			t.Fatalf("matrix row counts: declared=%d mounted=%d unmounted=%d nonRPC=%d; want 250/240/10/28",
+		if declaredOps != 252 || mountedOps != 242 || unmountedOps != 10 || nonRPC != 28 {
+			t.Fatalf("matrix row counts: declared=%d mounted=%d unmounted=%d nonRPC=%d; want 252/242/10/28",
 				declaredOps, mountedOps, unmountedOps, nonRPC)
 		}
 
 		want := FamilyAuditCounts{
-			DeclaredRPCs:              250,
-			MountedReachable:          240,
+			DeclaredRPCs:              252,
+			MountedReachable:          242,
 			ListedInToolCatalog:       recordedListed,
 			ReachableByToolOrComposed: recordedReachable,
 			VerifiedByFixture:         recordedVerified,
@@ -427,7 +427,7 @@ func TestFamilyAudit(t *testing.T) {
 			t.Fatalf("partial slice: %d/%d non-pending operations verified", verified, inScope)
 		}
 		t.Logf("ORDINARY GATE PASS: %d/%d supported operations verified; PENDING inventory is empty (%d entries)",
-		verified, inScope, len(PendingInventory))
+			verified, inScope, len(PendingInventory))
 	})
 
 	t.Run("GateDetectsUnlistedSupportedOperation", func(t *testing.T) {
@@ -442,7 +442,7 @@ func TestFamilyAudit(t *testing.T) {
 		// construction, while keeping the distinct LISTED/REACHABLE signals.
 		const syntheticProcedure = "/carbonpanel.v1.WorldService/ImportWorldSyntheticGap"
 		synthetic := FamilyAuditOperation{
-			ID: "rpc:" + syntheticProcedure,
+			ID:   "rpc:" + syntheticProcedure,
 			Kind: "rpc", Procedure: syntheticProcedure,
 			Support: FamilyAuditSupported,
 		}

@@ -224,10 +224,10 @@ prepared here. At the time of this change no image has been pushed to GHCR and
 no MCP Registry entry has been submitted. Do not substitute a locally built or
 preview artifact for the official stable one when it is published.
 
-The implemented catalogue mounts the generated **211-tool combined catalogue**.
-It is derived from 250 declared RPCs across 26 proto services, of which 240 are
+The implemented catalogue mounts the generated **213-tool combined catalogue**.
+It is derived from 252 declared RPCs across 26 proto services, of which 242 are
 mounted/reachable across 27 mounted services. Tool coverage is not the same as
-RPC coverage; the audit matrix records 201 supported operations (all listed,
+RPC coverage; the audit matrix records 203 supported operations (all listed,
 reachable and verified) and 77 excluded operations with exact reasons and
 equivalent flows. Do not infer that every panel RPC has a tool.
 
@@ -277,7 +277,7 @@ local/preview image.
    socket. Confirm worlds and the panel database are intact before and after.
 5. Use the read-only tool set qualified for my panel build. On stable, the
    verified minimal set is list_servers, get_server, list_files, get_file and
-   list_backups. The combined catalogue mounts 211 tools (250 declared / 240
+   list_backups. The combined catalogue mounts 213 tools (252 declared / 242
    mounted RPCs). The PlayerService,
    WorldService and WorldViewService tools are mounted, but their backing RPCs
    are absent from stable v1.0.40: on that build return the structured
@@ -357,8 +357,8 @@ Linux is fully supported and tested — Windows installations may have issues.
 
 ### Compatibility: package availability is not server capability
 
-The gateway mounts the generated **211-tool combined catalogue** (250 declared
-RPCs, 240 mounted/reachable). All ten tools below are mounted; the columns
+The gateway mounts the generated **213-tool combined catalogue** (252 declared
+RPCs, 242 mounted/reachable). All ten tools below are mounted; the columns
 report whether the panel build behind `CARBONPANEL_URL` implements the RPC that
 backs each tool. Exclusions and policy boundaries are recorded in the OSS-375
 audit matrix. Tool names below match the implemented catalogue exactly.

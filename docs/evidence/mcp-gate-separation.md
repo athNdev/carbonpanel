@@ -76,3 +76,10 @@ Canonical generation: `go run ./internal/mcp/cataloggen` plus
 `family_content_descriptors.json` and `family_audit_matrix.json`. The corrected
 LF-normalized `family_content_descriptors.json` is included explicitly in this
 branch.
+
+## Development server portability coverage
+
+The expected hosted contract after OSS-422 adds export and preview is
+`supported=203 listed=203 reachable=203 verified=203 excluded=77`. This
+count describes the development branch coverage fixture. The earlier run above
+records the exact checks and counts from the pinned publication candidate.
