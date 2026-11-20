@@ -2946,6 +2946,14 @@ def verify_staged_page_site(site, candidate_commit, candidate_digest,
         document = json.loads(index_path.read_text(encoding="utf-8"))
     except ValueError as error:
         return False, [f"staged version-index.json is invalid: {error}"]
+    # Current main publishes the one shared index at BOTH URLs; a missing or
+    # drifted /docs/ copy is a staged publication defect, not just a metadata
+    # nicety. The same bytes must be served from either route.
+    docs_index = root / "docs" / "version-index.json"
+    if not docs_index.is_file():
+        problems.append("staged site has no /docs/version-index.json copy")
+    elif docs_index.read_bytes() != index_path.read_bytes():
+        problems.append("staged /docs/version-index.json differs from the site root copy")
     channels = document.get("channels") or {}
     if set(channels) != set(CHANNEL_NAMES):
         problems.append("staged site must publish exactly stable and nightly channels")

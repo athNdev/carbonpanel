@@ -2923,6 +2923,9 @@ class ChannelPageStagingTests(unittest.TestCase):
             digest=nightly_digest or self.ACTIVE_DIGEST)
         (root / "version-index.json").write_text(
             json.dumps(contract), encoding="utf-8")
+        (root / "docs").mkdir(parents=True, exist_ok=True)
+        (root / "docs" / "version-index.json").write_text(
+            json.dumps(contract), encoding="utf-8")
         for page in ("docs/index.html", "docs/nightly/index.html",
                      "docs/getting-started/proxmox/index.html"):
             target = root / page
@@ -2946,6 +2949,16 @@ class ChannelPageStagingTests(unittest.TestCase):
             ok, problems = self.verify(root)
             self.assertTrue(ok, problems)
             self.assertEqual(problems, [])
+
+    def test_docs_index_copy_must_match_the_root_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.site(directory)
+            self.probe(root)
+            (root / "docs" / "version-index.json").write_text("{}", encoding="utf-8")
+            ok, problems = self.verify(root)
+            self.assertFalse(ok)
+            self.assertTrue(any("differs from the site root" in item
+                                for item in problems))
 
     def test_incomplete_stage_refuses_stamped_canonical_missing_stable_or_probe(self):
         with tempfile.TemporaryDirectory() as directory:
