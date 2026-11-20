@@ -370,7 +370,13 @@ one at https://mozilla.org/MPL/2.0/.
 		</CarbonPageHeader>
 
 		<div>
-			<button type="button" class="focus-ring inline-flex min-h-8 items-center gap-2 text-sm font-semibold text-foreground hover:text-accent-text" aria-expanded={$metricsExpanded} aria-controls="server-runtime-metrics" onclick={() => displayPreferences.setMetricsExpanded(!$metricsExpanded)}>
+			<button
+				type="button"
+				class="focus-ring inline-flex min-h-8 items-center gap-2 text-sm font-semibold text-foreground hover:text-accent-text"
+				aria-expanded={$metricsExpanded}
+				aria-controls="server-runtime-metrics"
+				onclick={() => displayPreferences.setMetricsExpanded(!$metricsExpanded)}
+			>
 				<ChevronDown aria-hidden="true" class={`h-4 w-4 ${$metricsExpanded ? '' : '-rotate-90'}`} />
 				Runtime metrics
 			</button>
