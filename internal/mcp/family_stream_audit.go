@@ -185,7 +185,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "ANY /api/v1/packwiz/packs/*", Mount: "internal/rpc/server.go:320",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonStudioAuthoring,
-		Reason: "Modpack Studio authoring and deployment uses global modpacks grants. The generated PackwizService shares the migrated JSON operations, while multipart import, export archives, raw assets and other adapter-only operations stay on HTTP.",
+		Reason: "Packwiz inventory reads have typed packwiz_list_packs and packwiz_get_pack tools. This mixed Studio route also serves update checks, mutations, multipart imports, exports and raw assets outside that bounded read contract.",
 		ACL:    "modpacks/read or modpacks/create on global object *",
 		Sources: []string{
 			"internal/rpc/server.go:320:mux.Handle(\"/api/v1/packwiz/\"",

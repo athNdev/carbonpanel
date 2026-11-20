@@ -110,6 +110,10 @@ var contentDecisions = []contentDecision{
 	{procedure: "/carbonpanel.v1.ModpackService/GetModpackByURL", tool: "get_modpack_by_url", class: ClassSafe, access: "read", boundedArgs: "single absolute https URL without userinfo; <= 512 chars", description: "Look up one modpack by website URL. The URL is validated as https without embedded credentials; the controller applies its own redirect and host policy."},
 	{procedure: "/carbonpanel.v1.ModpackService/ImportRemoteModpack", tool: "import_remote_modpack", class: ClassReview, access: "mutation", confirm: true, boundedArgs: "url (https, no userinfo) + name/description/mc_version/mod_loader <= 128 chars; auth_token and allow_private_network are intentionally not accepted", description: "Import a modpack from an operator-supplied https URL. Requires confirm=true. The proto credential fields auth_token (modpack.proto:176) and allow_private_network (modpack.proto:177) are deliberately not exposed to MCP arguments."},
 
+	// PackwizService reads the Studio authoring library, separate from the provider index.
+	{procedure: cpconnect.PackwizServiceListPacksProcedure, tool: packwizListTool, class: ClassSafe, access: "read", boundedArgs: "non-negative offset; 1..50 entries; 4 MiB controller response limit", description: "List Packwiz Studio packs. Requires global modpacks/read. Use next_offset to page through pack summaries."},
+	{procedure: cpconnect.PackwizServiceGetPackProcedure, tool: packwizGetTool, class: ClassSafe, access: "read", boundedArgs: "one exact pack_id; non-negative offset; 1..50 entries; 4 MiB controller response limit", description: "Read Packwiz pack metadata and a page of content across mods, datapacks, resource packs and shaders. Requires global modpacks/read. Omits download URLs, paths and raw options."},
+
 	// --- DatapackService (mods/*[server_id]) ------------------------------
 	{procedure: "/carbonpanel.v1.DatapackService/SearchDatapacks", tool: "search_datapacks", class: ClassSafe, access: "read", boundedArgs: "query/game_version/indexer <= 64 chars; offset <= 10000; limit 1..100", description: "Search a datapack index using the existing mods/read grant. Read-only."},
 	{procedure: "/carbonpanel.v1.DatapackService/ListDatapacks", tool: "list_datapacks", class: ClassSafe, access: "read", boundedArgs: "server_id only", description: "List datapacks installed in one server's world. Read-only."},
@@ -179,7 +183,7 @@ var contentDecisions = []contentDecision{
 	{procedure: "REST PUT /api/v1/upload/{sessionId}", tool: "", class: ClassSafe, access: "mutation", scopeOverride: "uploads/create", transport: "rest", registeredBy: "integration", boundedArgs: "single session id; bounded raw byte body; optional X-Upload-Offset", sourceRef: "internal/rpc/server.go:296; internal/rpc/handlers/upload.go:42,59,105-111", equivalentFlow: "init_upload -> upload_chunk -> get_upload_status -> save_uploaded_file / import_uploaded_mod / upload_datapack / import_uploaded_modpack", description: "Scoped streaming upload byte channel, fail-closed at uploads/create with the server-local temp path deliberately withheld."},
 	{procedure: "REST GET /api/v1/download/{sessionId}", tool: "", class: ClassSafe, access: "read", scopeOverride: "files/read[session.server_id]", transport: "rest", registeredBy: "integration", boundedArgs: "single session id; optional Range header", sourceRef: "internal/rpc/server.go:299; internal/rpc/handlers/download.go:29,65,109-119", equivalentFlow: "init_file_download / download_archive / export_world -> scoped GET by browser or CLI", description: "Scoped streaming download byte channel, fail-closed on the session's own server id."},
 	{procedure: "REST /api/v1/servers/{id}/mods/*", tool: "", class: ClassSafe, access: "mutation", scopeOverride: "mods/read|create[server_id]", transport: "rest", registeredBy: "integration", boundedArgs: "server id + bounded mod query/install arguments", sourceRef: "internal/rpc/server.go:310-313; internal/rpc/handlers/mod_search.go:209", equivalentFlow: "search_mods / get_mod_versions / install_mods", description: "Legacy JSON adapter sharing one operation with ModBrowseService; retained for the ADR 0012 deprecation window."},
-	{procedure: "REST /api/v1/packwiz/*", tool: "", class: ClassSafe, access: "mutation", scopeOverride: "modpacks/*", transport: "rest", registeredBy: "integration", boundedArgs: "operator Studio arguments; fail-closed policy at packwiz.go:106", sourceRef: "internal/rpc/server.go:315-320; internal/rpc/handlers/packwiz.go:106", equivalentFlow: "ModpackService and DatapackService tools above", description: "Packwiz Studio authoring and deployment REST surface; its data operations are covered by the typed modpack/datapack tools."},
+	{procedure: "REST /api/v1/packwiz/*", tool: "", class: ClassSafe, access: "mutation", scopeOverride: "modpacks/*", transport: "rest", registeredBy: "integration", boundedArgs: "operator Studio arguments; fail-closed policy at packwiz.go:106", sourceRef: "internal/rpc/server.go:315-320; internal/rpc/handlers/packwiz.go:106", equivalentFlow: "packwiz_list_packs / packwiz_get_pack for inventory reads only", description: "Packwiz Studio authoring and deployment REST surface. Mutations, raw content and update checks remain outside the MCP read tools."},
 }
 
 // ContentToolDescriptors is the exported hand-off list. All factual tuple
@@ -310,6 +314,7 @@ type ContentClients struct {
 	Mod       cpconnect.ModServiceClient
 	ModBrowse cpconnect.ModBrowseServiceClient
 	Modpack   cpconnect.ModpackServiceClient
+	Packwiz   cpconnect.PackwizServiceClient
 	Datapack  cpconnect.DatapackServiceClient
 	Module    cpconnect.ModuleServiceClient
 	File      cpconnect.FileServiceClient
@@ -330,6 +335,7 @@ func NewContentClients(httpClient connect.HTTPClient, baseURL, token string) (*C
 		Mod:       cpconnect.NewModServiceClient(httpClient, baseURL, opts...),
 		ModBrowse: cpconnect.NewModBrowseServiceClient(httpClient, baseURL, opts...),
 		Modpack:   cpconnect.NewModpackServiceClient(httpClient, baseURL, opts...),
+		Packwiz:   cpconnect.NewPackwizServiceClient(httpClient, baseURL, append(opts, connect.WithReadMaxBytes(packwizReadMaxBytes))...),
 		Datapack:  cpconnect.NewDatapackServiceClient(httpClient, baseURL, opts...),
 		Module:    cpconnect.NewModuleServiceClient(httpClient, baseURL, opts...),
 		File:      cpconnect.NewFileServiceClient(httpClient, baseURL, opts...),
@@ -871,6 +877,8 @@ func registerContentTools(s *sdkmcp.Server, cl *ContentClients) {
 	if s == nil || cl == nil {
 		panic("mcp.registerContentTools: nil server or clients")
 	}
+
+	registerPackwizReadTools(s, cl)
 
 	// --- ModService -------------------------------------------------------
 	addContentTool(s, "list_mods", cl, func(ctx context.Context, cl *ContentClients, in contentServerArgs) (any, error) {
