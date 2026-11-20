@@ -1285,9 +1285,9 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		DockerOverrides: msg.DockerOverrides,
 	}
 
-	// Confinement check for the volume/device/network gap. This runs here â€”
+	// Confinement check for the volume/device/network gap. This runs here —
 	// not next to the privileged-overrides check at the top of this function
-	// â€” because the safe roots are derived from the server's own data path,
+	// — because the safe roots are derived from the server's own data path,
 	// which is only assigned above.
 	if err := s.checkDockerOverridesConfinement(msg.DockerOverrides, serverDataPath); err != nil {
 		return nil, err
