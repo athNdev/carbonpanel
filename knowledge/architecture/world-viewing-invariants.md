@@ -25,7 +25,7 @@ sources:
   accessor. The renderer is dialed at the inspected IP, not a Docker DNS alias
   (host/native modes cannot resolve container names); no port probing,
   host-port binding, public listener or cross-server fallback. No HTTP is sent
-  when a runtime gate fails.
+  when a runtime gate fails, even using a previously issued map session.
 - A listening web server is not a configured or rendered world. READY requires
   the exact target world in the module config, a rendered scoped tile and the
   renderer's own map list (`/settings.json`); missing facts report setup,
@@ -45,16 +45,15 @@ sources:
   from the pinned BlueMap v5.29 JIT webapp rebuild, not from `unsafe-eval`, a
   per-route CSP, or a capture-only bypass. See
   [ADR 0048](../../docs/adr/0048-bluemap-asset-routing-and-csp.md).
-- In-context BlueMap install uses existing ModuleService authorization. It is a
-  server-side singleton per server guarded by a controller-PROCESS mutex held
-  through persistence: it covers concurrent RPCs/tabs/operators/retries on ONE
-  controller process and makes no cross-controller or distributed guarantee.
-  Consent is explicit but its actor/time come from the authenticated principal
-  and server clock. An existing module is adopted read-only. `startImmediately`
-  needs `modules/start` as well as `modules/create`; both are checked before any
-  world read or config write, and refusals leave zero config side effects. The
-  managed signal isolates this workflow so generic Modules-page creation still
-  works without it.
+- In-context BlueMap install uses ModuleService authorization. A per-controller
+  mutex serializes persistence and read-only adoption. The per-server lifecycle
+  transition shared with migration holds from config staging through async
+  create/start, including failure. During startup, retries can only adopt the
+  committed module on its current node assignment. These locks are process-local.
+  Consent is explicit; actor and time come from the principal and server clock.
+  `startImmediately` needs `modules/start` plus `modules/create`. Checks precede
+  world reads and config writes; refusals have no config side effects. The
+  managed signal keeps generic Modules-page creation on its existing path.
 - Managed BlueMap keeps a read-only rootfs/world bind but mounts a writable panel-owned Mojang resource cache at `/app/bluemap`; without it the renderer exits `Resource-File missing`.
 - The managed renderer variant is constructed on the backend from actual world
   facts read via the confined node accessor: private container-only web port

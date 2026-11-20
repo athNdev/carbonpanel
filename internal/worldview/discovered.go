@@ -31,9 +31,16 @@ func newDiscoveredRenderer(facts *InstalledRenderer, hc HTTPDoer) Renderer {
 
 func (d *discoveredRenderer) Type() v1.RendererType { return rendererType(RendererBlueMap) }
 
-// ProxyBaseURL is internal only. The proxy uses it to dial the owned network;
-// the browser only ever sees ProxyPrefix plus an opaque session key.
-func (d *discoveredRenderer) ProxyBaseURL() string { return d.facts.BaseURL }
+// ProxyBaseURL rechecks runtime provenance for every asset, including assets
+// requested with a session issued before the renderer or its mount changed.
+func (d *discoveredRenderer) ProxyBaseURL() string {
+	f := d.facts
+	if f.Lifecycle != ModuleRunning || !f.IdentityVerified || !f.NetworkVerified ||
+		!f.MountVerified || !f.ReadOnlyWorldMount || (f.LegacyTag && !f.ProvenanceVerified) {
+		return ""
+	}
+	return f.BaseURL
+}
 
 func (d *discoveredRenderer) Capabilities() []*v1.Capability {
 	// A discovered module has no explicitly configured player bridge feed, so

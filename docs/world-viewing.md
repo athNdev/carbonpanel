@@ -32,8 +32,11 @@ node** through the private owned network (ADR 0040): the exact server/node/modul
 identity and node-scoped container metadata (labels, pinned image, owned-network
 membership and the effective read-only bind of the server's actual level folder)
 must verify before any HTTP request. Module config and tile assets are read only
-through the confined node data accessor. A remote node has no private path and
-stays unavailable until an explicit, allowlisted node-local endpoint is set.
+through the confined node data accessor. This includes an enabled Docker node
+registered as local to the controller. It can use managed BlueMap installation
+and private discovery with its registered ID and the configured controller
+Docker client. Unknown or disabled registered nodes cannot use the private path.
+A remote node needs an explicit, allowlisted node-local endpoint.
 No renderer is discovered by port probing or host-port bindings.
 
 A discovered module reaches READY after the renderer's `/settings.json` lists
@@ -47,6 +50,10 @@ ModuleService create/start RPCs; it is a server-side singleton per server,
 records explicit operator consent (actor and time from the authenticated
 principal and clock), adopts an existing module without mutation, and requires
 `modules/start` in addition to `modules/create` when starting immediately.
+Docker image preparation, container creation and start share a two-minute
+startup limit. If the limit expires, the panel releases the server lifecycle
+transition and marks the module as errored. Open Modules and retry Start;
+the panel keeps the container ID when Docker already returned it.
 
 ## 2. Endpoint topology and the same-origin proxy
 

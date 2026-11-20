@@ -4,10 +4,12 @@ title: "Map viewing — Rule"
 description: "WorldViewService observes worlds; it does not own them. A WorldRef"
 status: stable
 owners: [oss-runtime]
-code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, web/carbon-panel/src/routes/worlds]
+code_refs: [proto/carbonpanel/v1/worldview.proto, internal/worldview, internal/bluemapdiscovery, internal/rpc/services/module_bluemap.go, web/carbon-panel/src/routes/worlds]
 sources:
   - title: Parent concept
     resource: world-viewing.md
+  - title: Installed BlueMap discovery
+    resource: ../../docs/adr/0040-bluemap-installed-module-discovery.md
 ---
 # Rule
 
@@ -25,3 +27,14 @@ request re-authenticates with the cookie or bearer token and enforces
 nodes without a node-local renderer, unsupported capabilities and stale tiles
 are reported honestly; there is no public map endpoint, no controller-local
 fallback and no cross-origin iframe.
+
+Managed BlueMap install and private discovery share one node eligibility
+check. It accepts legacy controller aliases and enabled registered nodes
+marked local in persisted state. Discovery uses the controller Docker client,
+checks the server's current node assignment and opens only its confined storage.
+Managed startup holds the server transition through its bounded Docker call
+and terminal state write. Manual Start, Restart, Recreate and managed updates
+share that lease and recheck node eligibility. Async recreation keeps the lease.
+Only the guarded installer sets the persisted managed marker. Module metadata
+updates preserve that decision. A canceled post-create write records the known
+container ID and stopped state so a later Start can reuse it.
