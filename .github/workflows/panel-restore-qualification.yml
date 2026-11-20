@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Packaged Panel database restore
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Successful Carbon Panel Release run containing verified-release-downloads
+        required: true
+        type: string
+      product_commit:
+        description: Exact product commit SHA expected in the release run and binary
+        required: true
+        type: string
+  pull_request:
+    paths:
+      - '.github/workflows/panel-restore-qualification.yml'
+      - 'scripts/qualify_packaged_panel_restore.py'
+      - 'scripts/test_qualify_packaged_panel_restore.py'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test qualification helpers
+        run: python3 -m unittest scripts.test_qualify_packaged_panel_restore
+      - name: Download and identify staged release
+        id: release
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.release_run_id }}
+          PRODUCT_COMMIT: ${{ inputs.product_commit }}
+        run: |
+          # Internal qualification PRs rehearse the latest available staged build.
+          # Manual dispatch always requires an explicitly selected run and product SHA.
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            latest=$(gh run list --repo "$GITHUB_REPOSITORY" \
+              --workflow release.yml --status success --event workflow_dispatch --limit 1 \
+              --json databaseId,headSha --jq '.[] | [.databaseId, .headSha] | @tsv')
+            read -r SOURCE_RUN PRODUCT_COMMIT <<< "$latest"
+            if [[ -z "$SOURCE_RUN" ]]; then
+              echo '::notice::No successful release run is available. Dispatch this workflow with the next staged run.'
+              exit 0
+            fi
+          fi
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ && "$PRODUCT_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          source="repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN"
+          gh api "$source" | jq -e --arg sha "$PRODUCT_COMMIT" \
+            '.head_sha == $sha and .conclusion == "success" and .path == ".github/workflows/release.yml"'
+          mkdir -p "$RUNNER_TEMP/panel-restore-inputs"
+          metadata="$RUNNER_TEMP/panel-restore-inputs/artifact.json"
+          gh api "$source/artifacts?per_page=100" | jq \
+            '[.artifacts[] | select(.name == "verified-release-downloads" and (.expired | not))] | if length == 1 then .[0] else null end' > "$metadata"
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]] && jq -e '. == null' "$metadata"; then
+            echo '::notice::Staged downloads have expired. Dispatch this workflow with the next staged run.'
+            exit 0
+          fi
+          artifact_id=$(jq -er '.id' "$metadata")
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$RUNNER_TEMP/panel-restore-inputs/artifact.zip"
+          {
+            echo "product_commit=$PRODUCT_COMMIT"
+            echo "run_id=$SOURCE_RUN"
+          } >> "$GITHUB_OUTPUT"
+      - name: Restore through the packaged Panel CLI and check the live inventory
+        if: steps.release.outputs.run_id != ''
+        env:
+          PRODUCT_COMMIT: ${{ steps.release.outputs.product_commit }}
+          RELEASE_RUN: ${{ steps.release.outputs.run_id }}
+        run: |
+          python3 -m scripts.qualify_packaged_panel_restore \
+            --artifact "$RUNNER_TEMP/panel-restore-inputs/artifact.zip" \
+            --metadata "$RUNNER_TEMP/panel-restore-inputs/artifact.json" \
+            --product-commit "$PRODUCT_COMMIT" --release-run "$RELEASE_RUN" \
+            --harness-commit "$(git rev-parse HEAD)" \
+            --evidence "$RUNNER_TEMP/panel-restore-evidence.json"
+      - name: Upload restore evidence
+        if: always() && steps.release.outputs.run_id != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: panel-restore-evidence
+          path: ${{ runner.temp }}/panel-restore-evidence.json
+          if-no-files-found: error
+          retention-days: 30
