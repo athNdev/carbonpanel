@@ -149,10 +149,18 @@ Quiet surfaces, clear states and a shared set of foundations.
 | Access                 | Local accounts, roles and server-scoped permissions, OIDC, API tokens and an audit log.                              |
 | Integrations           | Protocol Buffers, Connect RPC/gRPC, an API reference and Prometheus metrics.                                         |
 
-Carbon Panel is under active development. The website documentation displays its
-exact application commit, labelled as a development snapshot. Check
-[the documentation version](https://carbonpanel.dev/docs/versions/) against
-your installation when following a guide.
+## Release channels
+
+Carbon Panel publishes two image channels from the same source.
+
+- **Stable** — `:latest` follows tested releases. Pin an immutable version tag
+  for an exact release; see the [Stable documentation](https://carbonpanel.dev/docs/)
+  and [releases](https://github.com/athNdev/carbonpanel/releases).
+- **Nightly** — `:nightly` follows qualified main builds as a preview and may
+  contain changes ahead of Stable; see the [Nightly documentation](https://carbonpanel.dev/docs/nightly/).
+
+The Current Stable shown on the Docker Hub page comes from the verified release
+contract.
 
 ## Quick start
 
@@ -164,9 +172,10 @@ provides versioned archives for Linux, macOS and Windows.
 See [release downloads and checksum verification](docs/releases.md) and the
 [release history and tag migration](docs/release-history.md): product releases
 use `carbonpanel-vMAJOR.MINOR.PATCH` tags, while plain `v*` tags remain the
-separate Go/module domain. The verified stable is `1.0.40` (`v1.0.40`), the
-current 1.0 rollback line; see the upgrade notes before moving to the next
-MAJOR release. Prereleases never move `latest` or a minor alias.
+separate Go/module domain. [Releases](https://github.com/athNdev/carbonpanel/releases)
+publishes the current Stable version and upgrade notes; check the
+[documentation version](https://carbonpanel.dev/docs/versions/) before following
+a guide. Prereleases never move `latest` or a minor alias.
 
 ### 1. Download the repository and build or pull the image
 

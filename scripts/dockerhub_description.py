@@ -50,7 +50,6 @@ look after your servers, and keep every block on your own terms.
 
 **Current Stable:** `{version}` (`{tag}`, commit `{commit_short}`, digest `{digest_short}`).
 Install the pinned image: `docker pull {repository}:{version}`.
-`:latest` is a moving alias; there is no `:stable` tag. See [releases](https://github.com/{github_repository}/releases).
 
 [Full README](https://github.com/{github_repository}/blob/{ref}/README.md) · [Showcase captures](https://github.com/{github_repository}/tree/{showcase_ref}/assets/showcase) · [Documentation](https://carbonpanel.dev/docs/) · [MCP guide]({mcp_guide_url}) · [Docker image](https://hub.docker.com/r/{repository})
 

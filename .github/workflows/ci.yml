@@ -28,7 +28,7 @@ jobs:
       - run: python3 -m unittest scripts.test_release scripts.test_docs_publication_gate scripts.test_go_mod_download scripts.test_runtime_artifacts
       - run: python3 -m unittest scripts.test_validate_mcp_server_json
       # Offline only: this PR test never authenticates or writes Docker Hub.
-      - run: python3 -m unittest scripts.test_dockerhub_description
+      - run: python3 -m unittest scripts.test_dockerhub_description scripts.test_version_bump_channels
 
   proxmox-installer:
     name: Proxmox installer fixtures
