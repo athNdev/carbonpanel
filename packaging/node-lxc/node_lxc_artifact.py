@@ -161,6 +161,14 @@ def digest_of_files(files: dict[str, dict[str, str]]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def fixture_source_digest(files: dict[str, dict[str, str]]) -> str:
+    """Pin synthetic inputs independently of how a checkout supplies mode bits."""
+    return digest_of_files({
+        path: {"sha256": info["sha256"], "size": info["size"]}
+        for path, info in files.items()
+    })
+
+
 def write_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -901,9 +909,8 @@ def cmd_build(args: argparse.Namespace) -> int:
         files = canonical_files(source)
     except ValueError as exc:
         return refuse("UNSAFE_SOURCE", str(exc))
-    computed = digest_of_files(files)
-
     if args.fixture:
+        computed = fixture_source_digest(files)
         expected = prov.get("fixture", {}).get("manifest_sha256")
         if computed != expected:
             return refuse("PROVENANCE_DIGEST_MISMATCH", "fixture rootfs digest does not match pinned provenance",

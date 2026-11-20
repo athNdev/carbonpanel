@@ -145,7 +145,7 @@ class NodeLxCFixtureTests(unittest.TestCase):
         shutil.copytree(FIXTURES / "rootfs-minimal", seeded)
         (seeded / "leak.json").write_text('{"password": "hunter2"}\n')
         import node_lxc_artifact as tool
-        digest = tool.digest_of_files(tool.canonical_files(seeded))
+        digest = tool.fixture_source_digest(tool.canonical_files(seeded))
         prov = json.loads(PROVENANCE.read_text())
         prov["fixture"]["manifest_sha256"] = digest
         prov_path = self.work / "seeded-provenance.json"
@@ -172,7 +172,7 @@ class NodeLxCFixtureTests(unittest.TestCase):
 
     def test_06b_line_ending_independent_digest(self) -> None:
         """A CRLF checkout must produce the same pinned digest as an LF source."""
-        from node_lxc_artifact import canonical_file_digest, canonical_files, digest_of_files
+        from node_lxc_artifact import canonical_file_digest, canonical_files, fixture_source_digest
         lf = self.work / "digest-lf"
         crlf = self.work / "digest-crlf"
         for root in (lf, crlf):
@@ -189,12 +189,25 @@ class NodeLxCFixtureTests(unittest.TestCase):
         sample = crlf / "etc" / "os-release"
         sample.write_bytes(sample.read_bytes().replace(b"\n", b"\r\n"))
         self.assertEqual(canonical_file_digest(sample), canonical_file_digest(lf / "etc" / "os-release"))
-        self.assertEqual(digest_of_files(canonical_files(crlf)), digest_of_files(canonical_files(lf)))
+        self.assertEqual(fixture_source_digest(canonical_files(crlf)), fixture_source_digest(canonical_files(lf)))
         # The CRLF tree still builds against the same pin.
         ok("build", "--source-dir", str(crlf),
            "--out-dir", str(self.work / "artifact-crlf"), "--provenance", str(PROVENANCE),
            "--version", "runtime-v5.0.0", "--platform", "amd64", "--sign-key", str(self.priv), "--fixture")
         ok("verify", "--artifact-dir", str(self.work / "artifact-crlf"), "--public-key", str(self.pub))
+
+    def test_06h_fixture_source_pin_ignores_checkout_mode_only(self) -> None:
+        import node_lxc_artifact as tool
+
+        files = tool.canonical_files(FIXTURES / "rootfs-minimal")
+        checkout_modes = {
+            path: dict(info, mode="0666" if info["mode"] == "0644" else "0644")
+            for path, info in files.items()
+        }
+        pin = json.loads(PROVENANCE.read_text())["fixture"]["manifest_sha256"]
+        self.assertEqual(tool.fixture_source_digest(files), pin)
+        self.assertEqual(tool.fixture_source_digest(checkout_modes), pin)
+        self.assertNotEqual(tool.digest_of_files(files), tool.digest_of_files(checkout_modes))
 
     def _prov_copy(self, mutate) -> Path:
         prov = json.loads(ARTIFACT_PROVENANCE.read_text())
