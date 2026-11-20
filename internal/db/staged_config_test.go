@@ -307,6 +307,31 @@ func TestStageServerConfigUpdateSharesOneWindow(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestLegacyOnRestartBatchAdmitsCompatibleConfigAndReviewedContent(t *testing.T) {
+	ctx := context.Background()
+	const serverID = "srv-legacy-on-restart"
+	store := newStagedTestStore(t, serverID)
+	first, err := store.StageConfigChange(ctx, serverID, map[string]any{"motd": "soon"}, StagedApplyOnRestart, "")
+	require.NoError(t, err)
+	require.NoError(t, store.DB().Model(&ServerUpdateBatch{}).Where("id = ?", first.BatchID).
+		UpdateColumn("window", string(StagedApplyOnRestart)).Error)
+	before, err := store.OpenUpdateBatch(ctx, serverID)
+	require.NoError(t, err)
+	require.Equal(t, "on_restart", before.Window)
+	second, err := store.StageConfigChange(ctx, serverID, map[string]any{"difficulty": "hard"}, StagedApplyOnRestart, "")
+	require.NoError(t, err)
+	require.Equal(t, first.BatchID, second.BatchID)
+	require.NoError(t, store.CheckReviewedContentWindow(ctx, serverID, UpdateWindowNextRestart, nil, 0))
+	prepared, err := store.PrepareReviewedContentBatch(ctx, serverID, UpdateWindowNextRestart, nil, 0)
+	require.NoError(t, err)
+	require.Equal(t, first.BatchID, prepared.ID)
+	require.Equal(t, string(UpdateWindowNextRestart), prepared.Window)
+	require.NoError(t, store.AddStagedContentToBatch(ctx, &StagedContentChange{
+		ID: uuid.NewString(), ServerID: serverID, Kind: StagedKindMod, Action: StagedActionDelete,
+		TargetPath: "mods/a.jar",
+	}, prepared.ID, UpdateWindowNextRestart, nil, 0))
+}
+
 func TestStageConfigRetargetRollsBackOnInsertFailure(t *testing.T) {
 	ctx := context.Background()
 	const serverID = "srv-config-retarget"

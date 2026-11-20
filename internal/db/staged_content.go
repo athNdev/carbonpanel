@@ -42,6 +42,9 @@ func (s *Store) AddStagedContent(ctx context.Context, row *StagedContentChange) 
 		if err != nil {
 			return err
 		}
+		if err := requireBatchAdmission(tx, row.ServerID); err != nil {
+			return err
+		}
 		if err := requireNoBatchCronConfig(tx, batch.ID); err != nil {
 			return err
 		}
@@ -142,6 +145,21 @@ func ensureOpenBatch(tx *gorm.DB, serverID string, window UpdateWindow) (*Server
 	return open, nil
 }
 
+// requireBatchAdmission runs after the transaction's first write, so checking
+// ownership and inserting cannot straddle a publish or discard snapshot.
+func requireBatchAdmission(tx *gorm.DB, serverID string) error {
+	var active int64
+	if err := tx.Model(&ServerOperation{}).
+		Where("active_server = ? AND kind IN ?", serverID, []string{"apply-batch", "discard-update-batch"}).
+		Count(&active).Error; err != nil {
+		return err
+	}
+	if active != 0 {
+		return fmt.Errorf("%w: the batch is being published or discarded; retry after it finishes", ErrUpdateBatchConflict)
+	}
+	return nil
+}
+
 func hasBatchContent(tx *gorm.DB, batchID string) (bool, error) {
 	var count int64
 	err := tx.Model(&StagedContentChange{}).
@@ -162,7 +180,7 @@ func requireNoBatchCronConfig(tx *gorm.DB, batchID string) error {
 		return err
 	}
 	if cron {
-		return fmt.Errorf("%w: open batch %s has an independently scheduled config row; stage content in a separate batch", ErrUpdateBatchConflict, batchID)
+		return fmt.Errorf("%w: open batch %s has an independently scheduled config row; apply or discard that config before staging content", ErrUpdateBatchConflict, batchID)
 	}
 	return nil
 }
@@ -236,6 +254,9 @@ func (s *Store) AddStagedContentToBatch(ctx context.Context, row *StagedContentC
 		if err := tx.Create(row).Error; err != nil {
 			return err
 		}
+		if err := requireBatchAdmission(tx, row.ServerID); err != nil {
+			return err
+		}
 		batch, err := openUpdateBatch(tx, row.ServerID)
 		if err != nil {
 			return err
@@ -278,6 +299,9 @@ func (s *Store) setOpenBatchWindow(ctx context.Context, serverID string, window 
 			return err
 		}
 		if reviewed {
+			if err := requireBatchAdmission(tx, serverID); err != nil {
+				return err
+			}
 			if err := checkReviewedContentWindow(tx, batch, window, applyAt, idleMinutes); err != nil {
 				return err
 			}

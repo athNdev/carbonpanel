@@ -67,7 +67,10 @@ request.
    still admit next-restart config alongside an independent cron row.
    On a config-only batch with no cron, an explicit
    retarget changes the window and inserts the config in one transaction.
-   An open legacy batch can keep its pending cron rows while publishing due
+   Config and content admission also check the publish and discard journal
+   in their write transaction. A timed publisher rechecks its batch after
+   obtaining the journal, so a retarget between selection and ownership
+   waits for the new window. An open legacy batch can keep its pending cron rows while publishing due
    mod content: the publisher excludes cron config from base checks, rollback
    reconciliation and publication, then parks the remaining batch on next
    restart. Cron rows keep their own trigger and batch; this adds no cron

@@ -97,6 +97,15 @@ func Sweep(ctx context.Context, store *storage.Store, log *logger.Logger, now ti
 func ApplyBatch(ctx context.Context, store *storage.Store, log *logger.Logger, server *storage.Server, batch storage.ServerUpdateBatch, publish Publisher, resolvers ...*nodestorage.Resolver) error {
 	resolver := firstResolver(resolvers)
 	return operation.RunJournaled(ctx, store, log, server, "apply-batch", "", func() error {
+		// Admission can retarget the batch after Sweep decides it is due but
+		// before this journal owns it. Let the next sweep evaluate any change.
+		current, err := store.OpenUpdateBatch(ctx, server.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.ID != batch.ID || !current.UpdatedAt.Equal(batch.UpdatedAt) {
+			return nil
+		}
 		if err := reconcileOpenBatchState(ctx, store, batch.ID); err != nil {
 			return err
 		}

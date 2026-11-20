@@ -48,12 +48,13 @@ The scheduler invokes the same planner through an injected interface.
   content or an independent cron row must match its complete window. A
   config-only retarget and its new row commit together. The SQLite write
   transactions reject pending cron config and content symmetrically.
+- Config and content cannot join while publication or discard owns the
+  journal. The publisher rechecks batch changes after acquiring the journal.
 - Due publication of legacy mixed data excludes cron config from base checks,
   rollback reconciliation and publication. The remaining cron row and its
   trigger stay intact. Discard shares the operation lock, keeps its typed
   Connect refusals and records its own operation name.
-- Duplicate targets and cumulative download bytes are bounded, including
-  rejected transfers. The guarded World Library client is reused and
-  transient provider failures stay retryable.
-- The scheduler installs the planner before starting, applies timezone only to
-  cron, and refuses to dispatch a task whose next run cannot be advanced.
+- The guarded World Library client bounds transfers, including rejected bytes.
+  Duplicate targets are refused and transient provider failures stay retryable.
+- The scheduler installs the planner first, uses timezones for cron, and
+  skips dispatch if it cannot advance the task's next run.

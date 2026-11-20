@@ -269,13 +269,16 @@ func (s *Store) stageConfigChange(ctx context.Context, serverID string, changes 
 		if err != nil {
 			return err
 		}
+		if err := requireBatchAdmission(tx, serverID); err != nil {
+			return err
+		}
 		content, err := hasBatchContent(tx, batch.ID)
 		if err != nil {
 			return err
 		}
 		if mode == StagedApplyScheduled {
 			if content {
-				return fmt.Errorf("%w: open batch %s has staged content; schedule config changes in a separate batch", ErrUpdateBatchConflict, batch.ID)
+				return fmt.Errorf("%w: open batch %s has staged content; apply or discard that content before staging cron config", ErrUpdateBatchConflict, batch.ID)
 			}
 		} else {
 			cron, err := hasBatchCronConfig(tx, batch.ID)
