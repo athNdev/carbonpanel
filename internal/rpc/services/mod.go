@@ -49,6 +49,13 @@ type ModService struct {
 	storageResolver  *nodestorage.Resolver
 	candidateFetcher modCandidateFetcher
 	updateLookup     modUpdateLookup
+	updateBudget     int64
+}
+
+// SetModUpdateBatchBudget overrides the cumulative candidate-byte budget. It
+// exists for bounded-space fixtures; production uses the package default.
+func (s *ModService) SetModUpdateBatchBudget(budget int64) {
+	s.updateBudget = budget
 }
 
 // SetModUpdateLookup replaces the provider lookup used by scheduled policies.

@@ -338,4 +338,25 @@ func TestSetOpenBatchWindowKeepsMixedConfigAndModBatchTogether(t *testing.T) {
 	contentRows, err := store.ListBatchContent(ctx, batch.ID)
 	require.NoError(t, err)
 	require.Len(t, contentRows, 1)
+
+	// An idempotent submission must not rewrite a matching window.
+	again, err := store.SetOpenBatchWindow(ctx, "srv-mod-window", UpdateWindowAtTime, &when, 0)
+	require.NoError(t, err)
+	require.Equal(t, batch.ID, again.ID)
+	require.Equal(t, string(UpdateWindowAtTime), again.Window)
+	rows, err = store.ListStagedConfigChanges(ctx, "srv-mod-window", StagedStatusStaged)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, StagedApplyAtTime, rows[0].ApplyMode)
+
+	// An intended transition updates the batch and its config rows together.
+	soon := when.Add(time.Hour)
+	changed, err := store.SetOpenBatchWindow(ctx, "srv-mod-window", UpdateWindowAtTime, &soon, 0)
+	require.NoError(t, err)
+	require.True(t, changed.ApplyAt.Equal(soon))
+	rows, err = store.ListStagedConfigChanges(ctx, "srv-mod-window", StagedStatusStaged)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].ApplyAt)
+	assert.True(t, rows[0].ApplyAt.Equal(soon))
 }

@@ -127,21 +127,54 @@ func (s *Store) SetOpenBatchWindow(ctx context.Context, serverID string, window 
 	if err != nil {
 		return nil, err
 	}
-	batch.Window = string(window)
-	batch.ApplyAt = applyAt
-	batch.IdleMinutes = idleMinutes
-	if err := s.db.WithContext(ctx).Save(batch).Error; err != nil {
-		return nil, err
+	sameInstant := func(a, b *time.Time) bool {
+		if a == nil || b == nil {
+			return a == b
+		}
+		return a.Equal(*b)
 	}
-	if err := s.db.WithContext(ctx).Model(&StagedConfigChange{}).
-		Where("batch_id = ? AND status = ?", batch.ID, string(StagedStatusStaged)).
-		Updates(map[string]any{
-			"apply_mode":   string(mode),
+	if batch.Window == string(window) && sameInstant(batch.ApplyAt, applyAt) && batch.IdleMinutes == idleMinutes {
+		// Do not rewrite an unchanged window: an idempotent submission must
+		// leave the batch and its staged config rows untouched.
+		configs, err := s.ListBatchConfig(ctx, batch.ID)
+		if err != nil {
+			return nil, err
+		}
+		stale := false
+		for _, config := range configs {
+			if config.ApplyMode != mode || config.IdleMinutes != idleMinutes || !sameInstant(config.ApplyAt, applyAt) {
+				stale = true
+				break
+			}
+		}
+		if !stale {
+			return batch, nil
+		}
+	}
+	// One transaction: a failed config-row update must not leave the batch on
+	// a different window (or vice versa).
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&ServerUpdateBatch{}).Where("id = ?", batch.ID).Updates(map[string]any{
+			"window":       string(window),
 			"apply_at":     applyAt,
 			"idle_minutes": idleMinutes,
 		}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&StagedConfigChange{}).
+			Where("batch_id = ? AND status = ?", batch.ID, string(StagedStatusStaged)).
+			Updates(map[string]any{
+				"apply_mode":   string(mode),
+				"apply_at":     applyAt,
+				"idle_minutes": idleMinutes,
+			}).Error
+	})
+	if err != nil {
 		return nil, err
 	}
+	batch.Window = string(window)
+	batch.ApplyAt = applyAt
+	batch.IdleMinutes = idleMinutes
 	return batch, nil
 }
 

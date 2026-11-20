@@ -24,7 +24,7 @@ type modUpdateFetchFixture struct {
 	calls   int
 }
 
-func (f *modUpdateFetchFixture) Fetch(context.Context, *storage.ServerConfig, string, string, string, string, string, string) ([]byte, string, error) {
+func (f *modUpdateFetchFixture) Fetch(context.Context, *storage.ServerConfig, string, string, string, string, string, string, int64) ([]byte, string, error) {
 	f.calls++
 	return f.data, f.outcome, f.err
 }
@@ -255,7 +255,7 @@ func TestStagingRefusesToRetargetAnAlreadyReviewedBatch(t *testing.T) {
 
 	_, err = svc.UpdateMod(ctx, connect.NewRequest(request))
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "already-reviewed changes")
+	require.Contains(t, err.Error(), "refusing conflicting window")
 
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
@@ -267,6 +267,73 @@ func TestStagingRefusesToRetargetAnAlreadyReviewedBatch(t *testing.T) {
 	live, err := os.ReadFile(filepath.Join(mods, "mod.jar"))
 	require.NoError(t, err)
 	require.Equal(t, "installed", string(live))
+}
+
+func TestDuplicateSelectionDownloadsOnceAndRefusesConflictingWindow(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-duplicate", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	fetcher := &modUpdateFetchFixture{data: []byte("next")}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(fetcher)
+	request := modUpdateRequest(server.ID, installedModDigest("installed"))
+	request.UpdateSelections = append(request.UpdateSelections, request.UpdateSelections[0])
+
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(request))
+	require.NoError(t, err)
+	require.Len(t, res.Msg.GetStagedUpdates(), 2)
+	outcomes := map[string]int{}
+	for _, row := range res.Msg.GetStagedUpdates() {
+		outcomes[row.GetOutcome()]++
+	}
+	require.Equal(t, 1, outcomes["staged"])
+	require.Equal(t, 1, outcomes["already_selected"])
+	require.Equal(t, 1, fetcher.calls, "a duplicate target must not repeat the download")
+	rows, err := store.ListBatchContent(ctx, res.Msg.GetUpdateBatchId())
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	// The same enum with a different idle interval must be refused before a
+	// second download, leaving the reviewed batch untouched.
+	second := modUpdateRequest(server.ID, installedModDigest("installed"))
+	second.UpdateWindow = v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_IDLE
+	second.UpdateIdleMinutes = 45
+	_, err = svc.UpdateMod(ctx, connect.NewRequest(second))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "refusing conflicting window")
+	require.Equal(t, 1, fetcher.calls)
+	batch, err := store.OpenUpdateBatch(ctx, server.ID)
+	require.NoError(t, err)
+	require.Equal(t, string(storage.UpdateWindowNextRestart), batch.Window)
+	require.Equal(t, 0, batch.IdleMinutes)
+}
+
+func TestCumulativeCandidateBudgetIsEnforced(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-budget", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("candidate")})
+	svc.SetModUpdateBatchBudget(4)
+
+	res, err := svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.NoError(t, err)
+	require.Equal(t, "refused_limit", res.Msg.GetStagedUpdates()[0].GetOutcome())
+	require.Empty(t, res.Msg.GetUpdateBatchId())
+	require.Empty(t, stagedFiles(t, server.DataPath), "no bytes staged when the budget is exceeded")
+
+	svc.SetModUpdateBatchBudget(1024)
+	res, err = svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.NoError(t, err)
+	require.Equal(t, "staged", res.Msg.GetStagedUpdates()[0].GetOutcome())
 }
 
 func TestStageReviewedModUpdateRequiresKnownServerAndValidWindow(t *testing.T) {

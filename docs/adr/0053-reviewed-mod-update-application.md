@@ -51,7 +51,13 @@ request.
 7. Downloads use the connection-guarded HTTP client shared with World Library
    imports (static URL validation alone is not an SSRF guard). Transient
    provider failures are returned to the scheduler as retryable errors.
-8. Cron timezone is resolved only for cron schedules; if an existing task's
+8. The complete window tuple (mode, timestamp, idle interval) is compared
+   before any provider work or persistent write; a differing window on a batch
+   with reviewed changes is refused. Selections are deduplicated by live target
+   and total candidate bytes are bounded so repeated or large requests cannot
+   exhaust controller memory. The batch-plus-config window transition is one
+   transaction and an unchanged window is not rewritten.
+9. Cron timezone is resolved only for cron schedules; if an existing task's
    schedule cannot be advanced, dispatch is refused and the task is disabled so
    it cannot run on every tick. The planner is installed before the scheduler
    starts so cold boot sees the real implementation.

@@ -43,7 +43,9 @@ The scheduler invokes the same planner through an injected interface.
 - Apply revalidates the server-owned preview and the live digest; publish
   refuses a delayed-drift row and keeps staged bytes for recovery.
 - Window, staged rows and target uniqueness are journaled together; unrelated
-  reviewed batches are not retargeted. The guarded World Library download
-  client is reused and transient provider failures stay retryable.
+  reviewed batches are not retargeted. The whole window tuple is compared
+  before work, duplicate targets and cumulative bytes are bounded, and the
+  batch/config window transition is transactional. The guarded World Library
+  download client is reused and transient provider failures stay retryable.
 - The scheduler installs the planner before starting, applies timezone only to
   cron, and refuses to dispatch a task whose next run cannot be advanced.

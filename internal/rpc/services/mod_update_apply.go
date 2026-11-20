@@ -26,13 +26,16 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/utils"
 )
 
-const maxModUpdateBytes = 256 << 20
+const (
+	maxModUpdateBytes      = 256 << 20
+	maxModUpdateBatchBytes = 512 << 20
+)
 
 // modCandidateFetcher re-verifies a reviewed provider release and returns its
 // exact bytes. It is injected so the RPC and the scheduled-policy executor can
 // share one operation without either owning a global provider client.
 type modCandidateFetcher interface {
-	Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string) ([]byte, string, error)
+	Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string, limit int64) ([]byte, string, error)
 }
 
 // modUpdateVersionLookup is the narrow provider capability the fetcher needs.
@@ -50,7 +53,7 @@ type providerModCandidateFetcher struct {
 	client   *http.Client
 }
 
-func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string) ([]byte, string, error) {
+func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, projectID, filename, sha512Hex, loader, game string, limit int64) ([]byte, string, error) {
 	lookup := f.versions
 	if lookup == nil {
 		lookup = modUpdateProvider(settings)
@@ -106,12 +109,16 @@ func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storag
 		}
 		return nil, "refused_download", fmt.Errorf("provider returned HTTP %d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxModUpdateBytes+1))
+	readLimit := int64(maxModUpdateBytes)
+	if limit > 0 && limit < readLimit {
+		readLimit = limit
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, readLimit+1))
 	if err != nil {
 		return nil, "transient_download", err
 	}
-	if len(data) > maxModUpdateBytes || len(data) == 0 {
-		return nil, "refused_download", errors.New("candidate file exceeds the update limit or is empty")
+	if int64(len(data)) > readLimit || len(data) == 0 {
+		return nil, "refused_download", fmt.Errorf("candidate file exceeds the %d-byte update limit or is empty", readLimit)
 	}
 	sum := sha512.Sum512(data)
 	if !bytes.Equal(sum[:], want) {
@@ -161,6 +168,24 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	if len(selections) == 0 {
 		return nil, nil, nil, errors.New("no mod updates selected")
 	}
+	// One live target appears once. A duplicated filename is skipped before
+	// any provider work so a repeated submission cannot repeat a download or
+	// create two staged rows for the same file.
+	results := make([]stagedModUpdate, 0, len(selections))
+	seenTargets := make(map[string]bool, len(selections))
+	unique := make([]*v1.ModUpdateSelection, 0, len(selections))
+	for _, sel := range selections {
+		if seenTargets[sel.GetFileName()] {
+			results = append(results, stagedModUpdate{
+				ModID: sel.GetModId(), FileName: sel.GetFileName(),
+				Outcome: "already_selected", Reason: "this file was already selected in this request",
+			})
+			continue
+		}
+		seenTargets[sel.GetFileName()] = true
+		unique = append(unique, sel)
+	}
+	selections = unique
 	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("server not found: %w", err)
@@ -206,6 +231,30 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		return nil, nil, nil, err
 	}
 
+	// Compare the complete window before any persistent write or provider
+	// work. A different at_time or idle interval must not retarget an existing
+	// reviewed batch, even when every selection turns out to be a duplicate.
+	existing, err := s.store.OpenUpdateBatch(ctx, server.ID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if existing != nil && !batchWindowEquals(existing, windowName, applyAt, idle) {
+		configs, err := s.store.ListBatchConfig(ctx, existing.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		rows, err := s.store.ListBatchContent(ctx, existing.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if len(configs) > 0 || len(rows) > 0 {
+			return nil, nil, nil, fmt.Errorf(
+				"open batch %s has window %q (at %v, idle %d) with reviewed changes; refusing conflicting window %q (at %v, idle %d)",
+				existing.ID, existing.Window, existing.ApplyAt, existing.IdleMinutes,
+				windowName, applyAt, idle)
+		}
+	}
+
 	// Rebuild the server-owned preview for exactly the reviewed files. The
 	// preview owns project, dependency and version-selection policy, so apply
 	// cannot reuse a decision that became stale while the operator reviewed.
@@ -231,9 +280,9 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		previewByFile[mod.FileName] = mod.UpdatePreview
 	}
 
-	results := make([]stagedModUpdate, 0, len(selections))
 	ready := make([]readyModUpdate, 0, len(selections))
 	var transient error
+	var totalBytes int64
 	for _, sel := range selections {
 		result := stagedModUpdate{ModID: sel.GetModId(), FileName: sel.GetFileName()}
 		installed := locations[sel.GetFileName()]
@@ -270,8 +319,18 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			results = append(results, result)
 			continue
 		}
+		budget := s.updateBudget
+		if budget <= 0 {
+			budget = maxModUpdateBatchBytes
+		}
+		remaining := budget - totalBytes
+		if remaining <= 0 {
+			result.Outcome, result.Reason = "refused_limit", "the cumulative staged update budget is exhausted"
+			results = append(results, result)
+			continue
+		}
 		data, outcome, fetchErr := fetcher.Fetch(ctx, settings, sel.GetCandidateVersionId(),
-			preview.GetProjectId(), sel.GetCandidateFilename(), sel.GetCandidateSha512(), loader, server.MCVersion)
+			preview.GetProjectId(), sel.GetCandidateFilename(), sel.GetCandidateSha512(), loader, server.MCVersion, remaining)
 		if fetchErr != nil {
 			result.Outcome, result.Reason = outcome, fetchErr.Error()
 			if outcome == "transient_download" {
@@ -280,6 +339,12 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			results = append(results, result)
 			continue
 		}
+		if int64(len(data)) > remaining {
+			result.Outcome, result.Reason = "refused_limit", "candidate exceeds the cumulative staged update budget"
+			results = append(results, result)
+			continue
+		}
+		totalBytes += int64(len(data))
 		ready = append(ready, readyModUpdate{
 			selection: sel, targetPath: filepath.ToSlash(installed),
 			liveHash: preview.GetInstalledSha512(), bytes: data,
@@ -369,6 +434,18 @@ func installedModLocation(root *os.Root, base, fileName string) (string, bool, e
 		return "", false, err
 	}
 	return disabled, false, nil
+}
+
+// batchWindowEquals compares the complete window tuple, not just the enum, so
+// a second update cannot silently move a reviewed batch's at_time or interval.
+func batchWindowEquals(batch *storage.ServerUpdateBatch, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int) bool {
+	if batch.Window != string(window) || batch.IdleMinutes != idleMinutes {
+		return false
+	}
+	if batch.ApplyAt == nil || applyAt == nil {
+		return batch.ApplyAt == nil && applyAt == nil
+	}
+	return batch.ApplyAt.Equal(*applyAt)
 }
 
 func windowFromProto(window v1.ConfigApplyWindow, applyAtUnix int64, idleMinutes int32) (storage.UpdateWindow, *time.Time, int) {
