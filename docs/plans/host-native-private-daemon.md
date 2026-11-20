@@ -98,6 +98,7 @@ fixtures without journald.
 | `CONTAINERD_NAMESPACE_COLLISION` | namespace empty or `moby`/`default` | fail closed | Use a node-specific namespace. |
 | `PRIVATE_NETWORK_COLLISION` | bridge overlaps host, empty CIDR, or port range overlaps raw API | fail closed | Choose a non-overlapping private range. |
 | `NO_SHARED_DAEMON_FALLBACK` (invariant) + collision codes | a preinstalled engine is present or its socket/root is selected | presence is reported; selection fails closed via `PRIVATE_SOCKET_COLLISION` / `DEDICATED_ROOT_COLLISION` | Keep the managed daemon on its private socket. |
+| `SYSTEMD_REQUIRED` | systemd, its user manager, or linger is unavailable for the service user | rootless disqualified | Configure the user session with linger or qualify the dedicated rootful service. |
 | `ROOTLESS_USERNAMES_DISABLED` | user namespaces off | rootless disqualified | Enable userns or use hardened rootful. |
 | `ROOTLESS_SUBUID_SUBGID_MISSING` | subuid/subgid unavailable | rootless disqualified | Configure ranges or use hardened rootful. |
 | `ROOTLESS_CGROUP_V2_NOT_DELEGATED` | cgroup v1 or controllers not delegated | rootless disqualified | Delegate `cpu cpuset io memory pids`. |
@@ -118,6 +119,10 @@ every daemon-dependent grant (private socket, dedicated roots, containerd
 namespace, rootless, cgroup v2, privileged port) when no captive daemon mode
 qualifies (`sel.Mode == ModeNone`), regardless of which universal gate refused.
 A qualified rootful or rootless mode advertises the grants its facts support.
+Host compatibility and the derived daemon specification must both pass.
+When the renderer's validation refuses the specification, preflight reports
+failure with the validation code and remedy. The CLI refuses to emit a
+unit or configuration for any refused plan.
 Host diagnostics (`cgroup_version`, `storage_driver`, `systemd`, distro,
 architecture, kernel) remain in the snapshot on a fail-closed host so it stays
 inspectable; the redacted preflight checks still carry exact refusal codes and

@@ -8,6 +8,7 @@ package native
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -31,6 +32,39 @@ func TestBuildPlanQualifiedAndRefused(t *testing.T) {
 	bad := BuildPlan("node-fixture", f, fixtureTime())
 	if bad.Refusal == "" || bad.Report.GetStatus() != v1.NodePreflightStatus_NODE_PREFLIGHT_STATUS_FAILED {
 		t.Fatalf("failed plan not fail-closed: %+v", bad)
+	}
+	if _, err := bad.Daemon.BuildManifest(); err == nil {
+		t.Fatal("plan refused by the host gates still produced a daemon manifest")
+	}
+}
+
+func TestBuildPlanRefusesInvalidDaemonOptions(t *testing.T) {
+	for _, mode := range []DaemonMode{ModeRootless, ModeRootful} {
+		t.Run(string(mode), func(t *testing.T) {
+			facts := qualifiedFacts()
+			facts.UserNamespaces = mode == ModeRootless
+			facts.ChosenExecRoot = facts.ChosenDataRoot
+			if sel := ApplyGates(facts); sel.Mode != mode {
+				t.Fatalf("fixture must pass host gates, got mode %q", sel.Mode)
+			}
+			const refusal = "OPTIONS_DEDICATED_ROOTS"
+			plan := BuildPlan("node-fixture", facts, fixtureTime())
+			if plan.Refusal != refusal || plan.Selection.Mode != ModeNone || plan.Report.GetStatus() != v1.NodePreflightStatus_NODE_PREFLIGHT_STATUS_FAILED {
+				t.Fatalf("daemon options did not fail preflight: %+v", plan)
+			}
+			if !slices.ContainsFunc(plan.Report.GetChecks(), func(check *v1.NodePreflightCheck) bool {
+				return check.GetCode() == refusal && check.GetStatus() == v1.NodePreflightStatus_NODE_PREFLIGHT_STATUS_FAILED && check.GetRemedy() != ""
+			}) {
+				t.Fatalf("missing actionable daemon refusal in report: %v", plan.Report)
+			}
+			want := []v1.NodeCapability{v1.NodeCapability_NODE_CAPABILITY_STORAGE_WORKER, v1.NodeCapability_NODE_CAPABILITY_DRAIN}
+			if got := plan.Capabilities.GetCapabilities(); !slices.Equal(got, want) {
+				t.Fatalf("refused plan granted %v, want %v", got, want)
+			}
+			if _, err := plan.Daemon.BuildManifest(); err == nil {
+				t.Fatal("plan with invalid daemon options produced a manifest")
+			}
+		})
 	}
 }
 

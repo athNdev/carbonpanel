@@ -35,3 +35,9 @@ sources:
   grant is withheld at one boundary; host diagnostics and daemon-independent
   facilities (`STORAGE_WORKER`, `DRAIN`) remain. See the plan's capability
   snapshot contract.
+- Qualification requires both the host gates and the derived daemon spec to
+  pass. A spec refusal fails preflight with its code and remedy and prevents
+  the doctor from emitting a unit or config.
+- Rootless qualification requires systemd and a user manager with linger.
+  A missing user manager or linger can select the dedicated rootful service
+  when the operator explicitly qualifies it.
