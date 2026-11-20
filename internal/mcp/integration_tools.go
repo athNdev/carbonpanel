@@ -5,11 +5,10 @@
 
 // Package mcp integration lane (OSS-370).
 //
-// This file adds only the 22 SUPPORTED operations that no family head ships a
-// tool for, as asserted by internal/mcp/family_audit_matrix.json. It never
-// edits a family file. Every entry is a ClassReview mutation with an explicit
-// confirm gate, a typed generated Connect client from the shared Clients
-// struct, and Go-side argument bounds. The exact source reason for each audit
+// This file adds supported operations that no family head ships a
+// tool for, as asserted by internal/mcp/family_audit_matrix.json. The tools
+// use typed generated Connect clients and Go-side argument bounds. Mutations
+// require confirmation. The exact source reason for each audit
 // decision remains in the audit matrix; this file only supplies the missing
 // callable path and its scoped fixture.
 package mcp
@@ -100,7 +99,7 @@ var integrationToolDecisions = []integrationToolDecision{
 // catalog generator consumes these together with the first-slice and family
 // descriptors; order is stable for reproducible generation.
 func IntegrationToolSpecs() []ToolSpec {
-	out := make([]ToolSpec, 0, len(integrationToolDecisions))
+	out := make([]ToolSpec, 0, len(integrationToolDecisions)+1)
 	for _, d := range integrationToolDecisions {
 		class, confirm := ClassReview, true
 		// OSS-383 LookupPlayer is explicitly read-only and ephemeral.
@@ -115,7 +114,7 @@ func IntegrationToolSpecs() []ToolSpec {
 			Description: d.Description,
 		})
 	}
-	return out
+	return append(out, stagedConfigListSpec)
 }
 
 // integrationArgs is the single bounded argument envelope for the 22 additions.
@@ -178,8 +177,8 @@ func integrationInvoke[Req, Res any](ctx context.Context,
 }
 
 func intText(tool, field, value string, max int) error { return requireText(tool, field, value, max) }
-func intID(tool, field, value string) error           { return requireID(tool, field, value) }
-func intOptID(tool, field, value string) error        { return optionalID(tool, field, value) }
+func intID(tool, field, value string) error            { return requireID(tool, field, value) }
+func intOptID(tool, field, value string) error         { return optionalID(tool, field, value) }
 
 func intLimit(tool string, limit int32) (int32, error) { return limitOr(tool, limit) }
 
@@ -194,6 +193,7 @@ func RegisterIntegrationTools(s *sdkmcp.Server, c *Clients) {
 			return runIntegrationTool(ctx, cl, d.Procedure, in)
 		})
 	}
+	addTool(s, stagedConfigListSpec.Name, c, listStagedConfigChanges)
 }
 
 func runIntegrationTool(ctx context.Context, cl *Clients, procedure string, in integrationArgs) (any, error) {

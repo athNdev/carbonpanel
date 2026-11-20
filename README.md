@@ -224,12 +224,12 @@ prepared here. At the time of this change no image has been pushed to GHCR and
 no MCP Registry entry has been submitted. Do not substitute a locally built or
 preview artifact for the official stable one when it is published.
 
-The implemented catalogue mounts the generated **211-tool combined catalogue**.
+The implemented catalogue mounts the generated **212-tool combined catalogue**.
 It is derived from 250 declared RPCs across 28 proto services, of which 240 are
 mounted/reachable across 27 mounted services. Tool coverage is not the same as
-RPC coverage; the audit matrix records 200 supported operations (all listed,
-reachable and verified) and 78 excluded operations with exact reasons and
-equivalent flows. Do not infer that every panel RPC has a tool.
+RPC coverage. The audit classifies 201 supported operations and 77 exclusions.
+The strict gate verifies that each supported operation is listed, reachable and
+exercised in a fixture. Do not infer that every panel RPC has a tool.
 
 A successful client install proves only that the **package is available**. It
 does **not** prove that a tool works against your panel: **server capabilities**
@@ -357,7 +357,7 @@ Linux is fully supported and tested — Windows installations may have issues.
 
 ### Compatibility: package availability is not server capability
 
-The gateway mounts the generated **211-tool combined catalogue** (250 declared
+The gateway mounts the generated **212-tool combined catalogue** (250 declared
 RPCs, 240 mounted/reachable). All ten tools below are mounted; the columns
 report whether the panel build behind `CARBONPANEL_URL` implements the RPC that
 backs each tool. Exclusions and policy boundaries are recorded in the OSS-375

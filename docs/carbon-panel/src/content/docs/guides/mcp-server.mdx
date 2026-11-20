@@ -21,11 +21,18 @@ Carbon Panel can expose a read-first [Model Context Protocol](https://modelconte
 versioned and owned: it does not move a panel release tag, a Docker Hub panel
 image or a GitHub Release. See [ADR 0034](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md).
 
-The gateway mounts the generated **211-tool combined catalogue**. It is derived
+The gateway mounts the generated **212-tool combined catalogue**. It is derived
 from 250 declared RPCs across 28 proto services, of which 240 are mounted/reachable
 across 27 mounted services. Tool coverage is not the same as RPC coverage;
-the audit matrix records 200 supported operations (all listed, reachable and
-verified) and 78 excluded operations with exact reasons and equivalent flows.
+the audit classifies 201 supported operations and 77 exclusions. The strict gate
+requires executable fixture evidence for every supported operation.
+
+Use `get_server` for per-server status and cached CPU, memory, disk, TPS and
+player telemetry when the controller has a sample. It requires `servers/read`
+on that server. `list_staged_config_changes` requires `server_config/read` on the
+selected server. It returns rollout status and scheduling metadata, with an
+optional status filter and a result limit of 1 to 100. It omits saved config
+payloads. This tool requires a controller with `StagedConfigService`.
 
 ## Two different claims: available versus compatible
 
@@ -164,7 +171,7 @@ session is the liveness signal.
 
 ## Compatibility matrix
 
-Tool names match the implemented **combined 211-tool catalogue** exactly
+Tool names match the implemented **combined 212-tool catalogue** exactly
 (250 declared RPCs, 240 mounted/reachable). All ten tools below are mounted; the
 columns report whether the panel build behind `CARBONPANEL_URL` implements the
 RPC that backs each tool. Exclusions and policy boundaries are recorded in the
