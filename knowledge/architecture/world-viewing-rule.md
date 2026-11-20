@@ -30,5 +30,5 @@ fallback and no cross-origin iframe.
 
 Managed BlueMap install and private discovery share one node eligibility
 check. It accepts legacy controller aliases and enabled registered nodes
-marked local in persisted state. Discovery also checks the server's current
-node assignment and opens only that server's confined data storage.
+marked local in persisted state. Discovery uses the controller Docker client,
+checks the server's current node assignment and opens only its confined storage.

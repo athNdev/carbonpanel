@@ -84,6 +84,10 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	if nodeErr != nil {
 		return fail(connect.NewError(connect.CodeFailedPrecondition, nodeErr))
 	}
+	if node.ID != "" && s.docker == nil {
+		return fail(connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("the registered node has no configured controller Docker client for private BlueMap")))
+	}
 	// Singleton per server: idempotent retry/concurrent tabs converge on the
 	// exact same module identity. No host port or renderer probe is involved.
 	existing, listErr := s.store.ListModulesByTemplate(ctx, blueMapTemplateID)

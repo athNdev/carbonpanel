@@ -100,8 +100,9 @@ map config per target world plus explicit `accept-download` acknowledgement.
 
 - Managed install and private discovery share the same local-node check.
   Legacy controller aliases and enabled registered nodes marked local by the
-  persisted node record qualify. Discovery also verifies the server's current
-  assignment against the module and Docker labels before reading its data.
+  persisted node record qualify. Private discovery inspects the configured
+  controller daemon and verifies the server's current assignment against the
+  module and Docker labels before reading its data.
   Missing and disabled nodes have no private discovery. Remote nodes need an
   explicit, allowlisted node-local endpoint.
 - A configured-but-unrendered world reports a setup/rendering state, not a map.

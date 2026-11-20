@@ -67,12 +67,21 @@ func TestManagedBlueMapRegisteredNodeConnect(t *testing.T) {
 	}
 	cfg := &config.Config{}
 	manager := module.NewManager(srv.store, nil, nil, cfg, nil, srv.log)
-	service := services.NewModuleService(srv.store, nil, manager, srv.proxyManager, srv.authManager, cfg, nil, srv.log)
-	service.SetEnforcer(srv.enforcer)
-	service.SetStorageResolver(nodestorage.NewResolver(nil))
-	path, handler := carbonpanelv1connect.NewModuleServiceHandler(service, connect.WithInterceptors(srv.authInterceptor()))
-	ts.Config.Handler.(*http.ServeMux).Handle(path, handler)
-	api := carbonpanelv1connect.NewModuleServiceClient(ts.Client(), ts.URL)
+	controller, err := docker.NewClient("tcp://127.0.0.1:1", srv.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = controller.Close() })
+	mountService := func(prefix string, controller *docker.Client) carbonpanelv1connect.ModuleServiceClient {
+		service := services.NewModuleService(srv.store, controller, manager, srv.proxyManager, srv.authManager, cfg, nil, srv.log)
+		service.SetEnforcer(srv.enforcer)
+		service.SetStorageResolver(nodestorage.NewResolver(nil))
+		path, handler := carbonpanelv1connect.NewModuleServiceHandler(service, connect.WithInterceptors(srv.authInterceptor()))
+		ts.Config.Handler.(*http.ServeMux).Handle(prefix+path, http.StripPrefix(prefix, handler))
+		return carbonpanelv1connect.NewModuleServiceClient(ts.Client(), ts.URL+prefix)
+	}
+	api := mountService("", controller)
+	apiWithoutController := mountService("/controller-only", nil)
 
 	for _, tc := range []struct {
 		name, nodeID, existingNode string
@@ -83,6 +92,7 @@ func TestManagedBlueMapRegisteredNodeConnect(t *testing.T) {
 	}{
 		{"legacy", "default", "", true, true, 0, ""},
 		{"registered-local", localID, "", true, true, 0, ""},
+		{"registered-without-controller", localID, "", true, true, connect.CodeFailedPrecondition, "no configured controller Docker client"},
 		{"registered-local-without-consent", localID, "", true, false, connect.CodeInvalidArgument, "explicit acceptance"},
 		{"registered-local-without-world", localID, "", false, true, connect.CodeFailedPrecondition, "readable Minecraft Java Edition world"},
 		{"registered-remote", remoteID, "", true, true, connect.CodeFailedPrecondition, "remote node"},
@@ -131,7 +141,11 @@ func TestManagedBlueMapRegisteredNodeConnect(t *testing.T) {
 				Metadata: metadata, StartImmediately: true,
 			})
 			req.Header().Set("Authorization", "Bearer "+token)
-			resp, err := api.CreateModule(ctx, req)
+			client := api
+			if tc.name == "registered-without-controller" {
+				client = apiWithoutController
+			}
+			resp, err := client.CreateModule(ctx, req)
 			if tc.wantCode != 0 {
 				if connect.CodeOf(err) != tc.wantCode || !strings.Contains(err.Error(), tc.wantReason) {
 					t.Fatalf("CreateModule = %v, want %v containing %q", err, tc.wantCode, tc.wantReason)
@@ -171,6 +185,12 @@ func TestManagedBlueMapRegisteredNodeConnect(t *testing.T) {
 				})
 				req.Header().Set("Authorization", "Bearer "+token)
 				return api.CreateModule(ctx, req)
+			}
+			if tc.name == "legacy" {
+				server.NodeID = "local"
+				if err := srv.store.UpdateServer(ctx, server); err != nil {
+					t.Fatal(err)
+				}
 			}
 			repeated, err := retry(token)
 			if err != nil || repeated.Msg.GetModule().GetId() != persisted.ID {
@@ -253,9 +273,10 @@ func TestPrivateBlueMapRegisteredNodeConnect(t *testing.T) {
 	if err := srv.store.CreateModule(ctx, mod); err != nil {
 		t.Fatal(err)
 	}
-	var inspectCalls atomic.Int32
+	var dockerCalls, inspectCalls atomic.Int32
 	var running atomic.Bool
 	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dockerCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/_ping":
@@ -332,6 +353,26 @@ func TestPrivateBlueMapRegisteredNodeConnect(t *testing.T) {
 		!facts.ReadOnlyWorldMount || !facts.AcceptDownload || !facts.WorldMatchesServer ||
 		!facts.Rendered || facts.MapID != level || facts.WorldName != level || facts.BaseURL != "" {
 		t.Fatalf("registered-node discovery failed to read exact config and tiles: %+v, %v", facts, err)
+	}
+
+	// An edited endpoint may still carry the persisted local marker. Without
+	// a default controller client, that endpoint must never receive a probe.
+	stored, err := srv.store.GetNode(ctx, localID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Host = "tcp://" + strings.TrimPrefix(daemon.URL, "http://")
+	if err := srv.store.UpdateNode(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+	poolWithoutController := docker.NewClientPool(srv.store, nil, srv.log, dockerConfig)
+	defer func() { _ = poolWithoutController.Close() }()
+	withoutController := bluemapdiscovery.New(srv.store, poolWithoutController, nodestorage.NewResolver(nil), network, srv.log)
+	before := dockerCalls.Load()
+	facts, err = withoutController.FindRenderer(ctx, localID, serverID)
+	if err != nil || facts == nil || facts.Lifecycle != worldview.ModuleFailed ||
+		facts.BaseURL != "" || dockerCalls.Load() != before {
+		t.Fatalf("discovery used an edited node endpoint without the controller client: %+v, %v", facts, err)
 	}
 
 	tests := []struct{ name, serverNode, moduleNode string }{

@@ -136,11 +136,10 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 
 	// Runtime truth first: labels, image, state, owned-network membership and
 	// the EFFECTIVE world bind. No HTTP is issued unless every gate passes.
-	runtime, inspectErr := d.pool.GetClientStrictContext(ctx, nodeID)
-	if inspectErr != nil {
-		if d.log != nil {
-			d.log.Warn("bluemap discovery: node %s client unavailable: %v", nodeID, inspectErr)
-		}
+	// This is a controller-local feature. Never dial a registered endpoint on
+	// the strength of its stored locality marker alone.
+	runtime := d.pool.GetDefaultClient()
+	if runtime == nil {
 		facts.Lifecycle = worldview.ModuleFailed
 		return facts, nil
 	}
@@ -219,10 +218,11 @@ func rendererBaseURL(identity *docker.ModuleRuntimeIdentity) string {
 	return "http://" + net.JoinHostPort(ip.String(), strconv.Itoa(bluemapWebPort))
 }
 
-// SameRendererNode compares recorded renderer owners. Missing legacy node IDs
-// designate the default controller daemon.
+// SameRendererNode compares recorded renderer owners. The legacy aliases
+// designate the same default controller daemon.
 func SameRendererNode(a, b string) bool {
-	return canonicalNode(a) == canonicalNode(b)
+	a, b = canonicalNode(a), canonicalNode(b)
+	return a == b || (nodestorage.IsLegacyLocalNodeID(a) && nodestorage.IsLegacyLocalNodeID(b))
 }
 
 func canonicalNode(nodeID string) string {
