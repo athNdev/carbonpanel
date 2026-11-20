@@ -3,7 +3,7 @@
 // Fixture coverage for the Connect JSON int64 wire values consumed by the
 // real World Library swap qualification harness.
 import assert from "node:assert/strict";
-import { normalizeWireInt, isInterruptedTransport } from "./qualify-world-swap.mjs";
+import { normalizeWireInt, isInterruptedTransport, connectError } from "./qualify-world-swap.mjs";
 import { safeToRetry, transportCause } from "./qualify-compose-game.mjs";
 
 // Exact shape observed from a successful Go Connect JSON GetUploadStatus
@@ -51,4 +51,14 @@ assert.equal(safeToRetry("WorldService", "BindWorld", { request_id: "bind-1" }),
 assert.equal(safeToRetry("ServerService", "GetServer", {}), true);
 assert.equal(safeToRetry("BackupService", "CreateBackup", {}), false);
 
-console.log("PASS: wire normalization and retry-boundary fixtures for the world swap harness");
+// Only the structured Connect conflict with the real ErrBindRequestConflict
+// message qualifies as the intended wrong-revision replay refusal.
+const conflict = connectError(new Error(
+  'WorldService/BindWorld: 400 {"code":"failed_precondition","message":"world bind request ID conflicts with the requested binding"}'));
+assert.equal(conflict.code, "failed_precondition");
+assert.equal(conflict.status, 400);
+assert.match(conflict.text, /world bind request ID conflicts with the requested binding/);
+const unrelated = connectError(new Error('WorldService/BindWorld: 429 {"code":"resource_exhausted","message":"already busy"}'));
+assert.notEqual(unrelated.code, "failed_precondition");
+
+console.log("PASS: wire normalization, retry boundaries and structured replay refusal fixtures");

@@ -27,9 +27,8 @@ Shipped Compose has no auto-registered local node row. The fixture registers a
 node for `unix:///var/run/docker.sock` if absent and places both servers on its
 real UUID via `node_id`, so the supported node-id and endpoint-generation path
 is exercised. The fixture asserts the node is classified `is_local` and that
-each created server reports that exact `nodeId`. Do not bypass normal node IDs
-or endpoint-generation checks, and
-do not edit world binding source from this harness. If BindWorld reports
+each created server reports that exact `nodeId`. Do not bypass node IDs or
+endpoint-generation checks or edit binding source here. If BindWorld reports
 `remote node storage unavailable` for that real node UUID, the defect is in the
 product's storage resolution (binder must resolve the node row, not only legacy
 string IDs) and belongs to a separate product branch, not this qualification PR.
@@ -41,8 +40,7 @@ file's ownership to the runner; never chmod managed world data.
 A backup record's size and digest are metadata, not proof that archived bytes
 exist. Locate the real archive by its published digest inside this fixture's
 backup directory only, with the same narrow fixture privilege. The stable
-original-world marker comes
-from the `level.dat` inside that archive captured before the swap, not from a
+original-world marker is the `level.dat` inside that archive captured before the swap, not from a
 mutable live file that `save-all flush` may rewrite. Compare the archive digest
 and that archived marker before and after the swap; a missing, damaged or
 changed archive fails the check.
@@ -51,7 +49,9 @@ Classify transport failures from Undici's `error.cause.code`, not the top-level
 message. Retry only reads and idempotency-keyed mutations (`request_id` or
 `requestId`) or deterministic fixture console commands. Replay only interrupted
 transport with the same key; preserve HTTP/precondition errors. Require a bind
-operation id and `outcome: success` before later assertions.
+operation id and `outcome: success` before later assertions. A wrong-revision
+replay needs structured `failed_precondition` plus `ErrBindRequestConflict` text
+and unchanged restart identity, binding, marker and event count.
 
 Duplicate unexpired primary artifacts are a hard error, never a fallback trigger.
 

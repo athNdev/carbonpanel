@@ -35,6 +35,13 @@ export function isInterruptedTransport(error) {
   return /UND_ERR_SOCKET|ECONNRESET|EPIPE|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/.test(transportCause(error));
 }
 
+export function connectError(error) {
+  const text = String((error && error.message) || "");
+  const code = text.match(/"code"\s*:\s*"([^"]+)"/);
+  const status = text.match(/:\s*(\d{3})\s/);
+  return { code: code ? code[1] : "", status: status ? Number(status[1]) : 0, text };
+}
+
 const base = "http://127.0.0.1:18080";
 const player = "CarbonQual";
 const version = "1.21.1";
@@ -388,7 +395,8 @@ async function main() {
   // create a new container. Prove the restart with Docker's start time.
   assert.equal(afterServer.containerId, baselineServer.containerId,
     "bind unexpectedly replaced the owned container");
-  assert.notEqual(containerStart(afterServer.containerId), startedBefore,
+  const startedAfterBind = containerStart(afterServer.containerId);
+  assert.notEqual(startedAfterBind, startedBefore,
     "owned container was not restarted by the bind transaction");
   await assertJoin(state.id, state.port);
   assert.match(await command(state.id, "gamerule doFireTick"), /doFireTick.*false/i,
@@ -431,24 +439,33 @@ async function main() {
 
   // Replay the original idempotency key with a different revision: must be
   // refused without another swap, a new binding or a second event.
-  let refused = false;
-  let refusal = "";
+  let replayError;
   try {
     await rpc("WorldService", "BindWorld", {
       server_id: state.id, level_name: "world", revision_id: revisionB,
       window: "now", request_id: bindKey,
     });
   } catch (error) {
-    refusal = error.message;
-    refused = /failed_precondition|409|already|original revision/i.test(refusal);
+    replayError = error;
   }
-  assert.ok(refused, "superseded replay was not refused: " + refusal);
+  assert.ok(replayError, "superseded replay was not refused");
+  const conflict = connectError(replayError);
+  assert.equal(conflict.code, "failed_precondition",
+    "replay refusal must be a structured failed_precondition: " + conflict.text);
+  assert.match(conflict.text, /world bind request ID conflicts with the requested binding/,
+    "replay refusal must be ErrBindRequestConflict: " + conflict.text);
+
   const bindingAfter = (await rpc("WorldService", "GetBinding", { server_id: state.id, level_name: "world" })).binding;
   assert.equal(bindingAfter.revisionId, revisionA, "replay changed the binding");
+  assert.equal(containerStart(afterServer.containerId), startedAfterBind,
+    "replay restarted the owned container");
+  assert.match(await command(state.id, "gamerule doFireTick"), /doFireTick.*false/i,
+    "replay replaced the imported-world marker");
   const eventsAfter = (await activityEntries()).filter(entry => entry.event === "world.bind" && entry.requestId === bindKey);
   assert.equal(eventsAfter.length, 1, "replay emitted a second event");
-  report.replayRefusal = refusal;
-  check("superseded replay refused without another swap", refusal.slice(0, 220));
+  report.replayRefusal = conflict;
+  check("structured ErrBindRequestConflict replay refusal with no second swap",
+    conflict.code + ": " + conflict.text.slice(0, 160));
 
   writeFileSync(evidence, JSON.stringify(report, null, 2), { mode: 0o600 });
   console.log("PASS: final-candidate JVM World Library swap, rejoin and preserved-data proof");
