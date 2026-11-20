@@ -45,6 +45,8 @@ let holdSession;
 let holdStatus;
 
 const worldRef = { kind: "KIND_SERVER_LOCAL", serverId: "srv-1", levelName: "survival" };
+const survivalMapLink = { name: "Open map for Fixture Overworld on Fixture Survival Server", exact: true };
+const creativeMapLink = { name: "Open map for Fixture Creative on Fixture Creative Server", exact: true };
 const target = {
   serverId: "srv-1",
   worldRef,
@@ -349,7 +351,7 @@ try {
       }, theme);
       await page.goto(base + "/worlds");
       const content = page.getByTestId("showcase-worlds-content");
-      const mapLink = content.getByRole("link", { name: "Fixture Overworld" });
+      const mapLink = content.getByRole("link", survivalMapLink);
       await mapLink.waitFor();
       await content.getByText("Fixture Survival Server", { exact: true }).filter({ visible: true }).waitFor();
       await content.getByText("Not configured", { exact: true }).filter({ visible: true }).waitFor();
@@ -367,10 +369,10 @@ try {
       await page.getByRole("region", { name: /World map/i }).waitFor();
     }
     await page.goto(base + "/worlds?server=srv-1");
-    await page.getByRole("link", { name: "Fixture Overworld" }).waitFor();
-    assert.equal(await page.getByRole("link", { name: "Fixture Creative" }).count(), 0);
+    await page.getByRole("link", survivalMapLink).waitFor();
+    assert.equal(await page.getByRole("link", creativeMapLink).count(), 0);
     await page.getByRole("link", { name: "All servers" }).click();
-    await page.getByRole("link", { name: "Fixture Creative" }).waitFor();
+    await page.getByRole("link", creativeMapLink).waitFor();
   });
   results.push("inventory presents names, setup and unknown freshness at 360, 768 and 1440, supports keyboard navigation and preserves server scoping");
 
@@ -380,7 +382,7 @@ try {
     const scopedBaseline = scopedCalls;
     const scopedUrl = base + "/worlds?server=srv-1";
     await page.goto(scopedUrl);
-    await page.getByRole("link", { name: "Fixture Overworld", exact: true }).waitFor();
+    await page.getByRole("link", survivalMapLink).waitFor();
     assert.equal(await page.getByRole("link", { name: "All servers" }).count(), 0);
     assert.equal(fleetCalls, globalBaseline, "concrete server access must not call the fleet RPC");
     assert.ok(scopedCalls > scopedBaseline);
@@ -388,13 +390,13 @@ try {
     statusMode = "error";
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "World inventory refresh failed" }).waitFor();
-    assert.equal(await page.getByRole("link", { name: "Fixture Overworld", exact: true }).count(), 1);
+    assert.equal(await page.getByRole("link", survivalMapLink).count(), 1);
     await page.reload();
     await page.getByRole("heading", { name: "Could not load worlds" }).waitFor();
 
     statusMode = "ready";
     await page.getByRole("button", { name: "Retry", exact: true }).click();
-    await page.getByRole("link", { name: "Fixture Overworld", exact: true }).click();
+    await page.getByRole("link", survivalMapLink).click();
     await page.getByRole("region", { name: /World map/i }).waitFor();
     assert.equal(await page.getByRole("link", { name: "Server maps", exact: true }).getAttribute("href"), "/worlds?server=srv-1");
     scopedPermission = false;

@@ -22,6 +22,9 @@ or a missing `WorldViewService`. `family_content_descriptors.json` is compared
 byte-for-byte by `TestContentDescriptorArtifact`, so it is pinned to LF in
 `.gitattributes`: without the pin a Windows checkout with `core.autocrlf=true`
 converts it to CRLF and fails the equivalence check with no descriptor drift.
+Refresh the generated catalogue when a mounted RPC response changes. Its tool
+descriptions identify the configured save folder on world-binding reads and
+the provider's Minecraft versions on modpack release reads.
 `family_audit_test.go` recomputes LISTED and
 REACHABLE from live source, but VERIFIED comes only from executable invocation
 evidence: a real `tools/call` over the SDK stdio wire must reach the typed

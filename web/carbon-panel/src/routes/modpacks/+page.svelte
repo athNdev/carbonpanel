@@ -15,7 +15,6 @@ one at https://mozilla.org/MPL/2.0/.
 	import {
 		CarbonButton,
 		CarbonDataTable,
-		CarbonTag,
 		CarbonSearch,
 		CarbonSelect,
 		CarbonModal,

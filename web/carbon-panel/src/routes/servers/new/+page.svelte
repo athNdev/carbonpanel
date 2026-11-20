@@ -995,7 +995,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<h2 class="text-base font-semibold">Server created</h2>
 				{#if setupTasks.length > 0}
 					<ul class="divide-y divide-border border-y border-border" aria-live="polite">
-						{#each setupTasks as task}
+						{#each setupTasks as task (task)}
 							<li
 								class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 text-sm"
 							>

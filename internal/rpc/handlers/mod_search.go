@@ -834,7 +834,11 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 	if err != nil {
 		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusInternalServerError, Message: fmt.Sprintf("failed to open mods directory: %v", err)}
 	}
-	defer storageRoot.Close()
+	defer func() {
+		if closeErr := storageRoot.Close(); closeErr != nil {
+			m.log.Warn("closing mod install directory: %v", closeErr)
+		}
+	}()
 
 	resp := InstallModsResponse{
 		Success:   true,
