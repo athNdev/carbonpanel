@@ -32,7 +32,9 @@ permissions:
 jobs:
   compose:
     name: Compose packaged ${{ matrix.mode }} network
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.body, 'Compose staging: ')
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.body, 'Compose staging: ')
     strategy:
       fail-fast: false
       matrix:
