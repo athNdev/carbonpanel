@@ -3,7 +3,8 @@
 // Fixture coverage for the Connect JSON int64 wire values consumed by the
 // real World Library swap qualification harness.
 import assert from "node:assert/strict";
-import { normalizeWireInt } from "./qualify-world-swap.mjs";
+import { normalizeWireInt, isInterruptedTransport } from "./qualify-world-swap.mjs";
+import { safeToRetry, transportCause } from "./qualify-compose-game.mjs";
 
 // Exact shape observed from a successful Go Connect JSON GetUploadStatus
 // response: int64 fields are decimal strings, not JSON numbers.
@@ -32,4 +33,22 @@ assert.throws(() => normalizeWireInt("12.5", "bytesReceived"), /unexpected int64
 assert.throws(() => normalizeWireInt("not-a-number", "bytesReceived"), /unexpected int64 wire value/);
 assert.throws(() => normalizeWireInt(null, "bytesReceived"), /unexpected int64 wire value/);
 
-console.log("PASS: Connect JSON int64 wire normalization for the world swap harness");
+// The observed Undici socket closure is classified from error.cause.code,
+// not from the top-level "fetch failed" message.
+const undiciSocket = new TypeError("fetch failed");
+undiciSocket.cause = { code: "UND_ERR_SOCKET", message: "other side closed" };
+assert.match(transportCause(undiciSocket).text, /UND_ERR_SOCKET/);
+assert.equal(isInterruptedTransport(undiciSocket), true);
+
+// A deterministic product/precondition failure must never be replayed.
+const precondition = new Error("WorldService/BindWorld: 400 failed_precondition");
+assert.equal(isInterruptedTransport(precondition), false);
+
+// Both idempotency-key spellings used by the harness make a mutation replayable.
+assert.equal(safeToRetry("ServerService", "CreateServer", { requestId: "create-1" }), true);
+assert.equal(safeToRetry("ServerService", "CreateServer", { request_id: "create-2" }), true);
+assert.equal(safeToRetry("WorldService", "BindWorld", { request_id: "bind-1" }), true);
+assert.equal(safeToRetry("ServerService", "GetServer", {}), true);
+assert.equal(safeToRetry("BackupService", "CreateBackup", {}), false);
+
+console.log("PASS: wire normalization and retry-boundary fixtures for the world swap harness");

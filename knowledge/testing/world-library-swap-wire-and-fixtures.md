@@ -47,13 +47,13 @@ mutable live file that `save-all flush` may rewrite. Compare the archive digest
 and that archived marker before and after the swap; a missing, damaged or
 changed archive fails the check.
 
-Classify transport failures from Undici's `error.cause.code` (`UND_ERR_SOCKET`,
-`ECONNRESET`, `EPIPE`, timeouts), not from the top-level message. Retry only
-reads and mutations carrying an idempotency key (or deterministic fixture
-console commands), so an interrupted write cannot duplicate a mutation.
+Classify transport failures from Undici's `error.cause.code`, not the top-level
+message. Retry only reads and idempotency-keyed mutations (`request_id` or
+`requestId`) or deterministic fixture console commands. Replay only interrupted
+transport with the same key; preserve HTTP/precondition errors. Require a bind
+operation id and `outcome: success` before later assertions.
 
-Duplicate unexpired primary staging artifacts are a hard error, not a trigger
-for the bounded reconstruction fallback.
+Duplicate unexpired primary artifacts are a hard error, never a fallback trigger.
 
 # Read next
 

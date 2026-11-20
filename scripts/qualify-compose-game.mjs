@@ -7,9 +7,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pathToFileURL } from "node:url";
 
-const require = createRequire(resolve(process.env.QUALIFY_NPM_PREFIX, "package.json"));
-const { createClient } = require("minecraft-protocol");
+function minecraftClient() {
+  const require = createRequire(resolve(process.env.QUALIFY_NPM_PREFIX, "package.json"));
+  return require("minecraft-protocol").createClient;
+}
+
 const base = "http://127.0.0.1:18080";
 const username = "compose-qualifier";
 const player = "CarbonQual";
@@ -20,7 +24,7 @@ const [phase, stateFile] = process.argv.slice(2);
 let token;
 
 // Undici reports the socket error on error.cause.code, not in error.message.
-function transportCause(error) {
+export function transportCause(error) {
   const codes = [];
   let cause = error && error.cause;
   for (let depth = 0; cause && depth < 5; depth++) {
@@ -30,14 +34,17 @@ function transportCause(error) {
   return { codes, text: codes.join(" ") + " " + String((error && error.message) || "") };
 }
 
-function safeToRetry(service, method, body) {
+export function safeToRetry(service, method, body) {
   // Reads are always safe. Mutations are retried only with an idempotency key,
   // or when the only effect is re-issuing a deterministic fixture console
   // command (gamerule/save-all/list) whose repeated execution is harmless.
   const reads = new Set(["GetServer", "ListNodes", "GetNextAvailablePort", "GetImportJob",
     "GetUploadStatus", "GetBinding", "ListBackups", "ListActivityLogs", "CheckCompatibility", "Login"]);
   if (reads.has(method)) return true;
-  if (body && typeof body.request_id === "string" && body.request_id) return true;
+  // Connect clients in this harness use both proto (request_id) and JS
+  // (requestId) spellings; either is a stable idempotency key.
+  if (body && ((typeof body.request_id === "string" && body.request_id) ||
+    (typeof body.requestId === "string" && body.requestId))) return true;
   if (service === "ServerService" && method === "SendCommand") return true;
   return false;
 }
@@ -98,7 +105,7 @@ async function command(id, text) {
 
 function connectPlayer(port) {
   return new Promise((resolve, reject) => {
-    const client = createClient({
+    const client = minecraftClient()({
       host: "127.0.0.1", port, version, username: player, auth: "offline",
     });
     const timeout = setTimeout(() => fail(new Error("client never reached Play state")), 12000);
@@ -223,4 +230,6 @@ async function main() {
   writeFileSync(stateFile + ".container", server.containerId + "\n");
 }
 
-await main();
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  await main();
+}

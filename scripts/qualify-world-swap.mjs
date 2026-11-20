@@ -20,6 +20,21 @@ export function normalizeWireInt(value, label) {
   throw new Error(label + ": unexpected int64 wire value " + typeof value + " " + String(value));
 }
 
+// Undici reports the socket error on error.cause.code, not the top-level message.
+function transportCause(error) {
+  const codes = [];
+  let cause = error && error.cause;
+  for (let depth = 0; cause && depth < 5; depth++) {
+    if (cause.code) codes.push(String(cause.code));
+    cause = cause.cause;
+  }
+  return codes.join(" ") + " " + String((error && error.message) || "");
+}
+
+export function isInterruptedTransport(error) {
+  return /UND_ERR_SOCKET|ECONNRESET|EPIPE|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/.test(transportCause(error));
+}
+
 const base = "http://127.0.0.1:18080";
 const player = "CarbonQual";
 const version = "1.21.1";
@@ -344,14 +359,20 @@ async function main() {
     // A graceful stop may take 60s; the ordinary 30s read deadline is too short.
     bind = await rpc("WorldService", "BindWorld", bindBody, 180000);
   } catch (error) {
-    // Reconcile an interrupted call by replaying the same idempotency key; the
-    // journal returns the original operation instead of starting a second swap.
-    console.log("BindWorld interrupted; reconciling by request id " + bindKey + ": " + error.message);
+    // Only an interrupted transport may be replayed, and only with the SAME
+    // idempotency key. HTTP/precondition/product errors must stay visible so a
+    // deterministic staging failure is not masked as an interruption.
+    if (!isInterruptedTransport(error)) throw error;
+    console.log("BindWorld transport interrupted; reconciling by request id " +
+      bindKey + ": " + transportCause(error));
     await sleep(5000);
     bind = await rpc("WorldService", "BindWorld", bindBody, 180000);
   }
-  report.operationId = bind.operationId || "";
-  check("BindWorld issued", "operation=" + report.operationId);
+  assert.ok(bind.operationId, "BindWorld response has no operation id");
+  assert.equal(bind.outcome, "success", "BindWorld outcome is not successful: " + bind.outcome);
+  report.operationId = bind.operationId;
+  report.bindOutcome = bind.outcome;
+  check("BindWorld completed with a journaled operation", "operation=" + bind.operationId);
 
   const binding = await waitFor("world binding", 300, async () => {
     const current = (await rpc("WorldService", "GetBinding", { server_id: state.id, level_name: "world" })).binding;
