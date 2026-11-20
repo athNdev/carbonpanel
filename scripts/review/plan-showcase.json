@@ -302,6 +302,11 @@
       "focus": "Identity, presence and the loaded skin image"
     },
     {
+      "setViewport": { "width": 1440, "height": 1000 },
+      "feature": "players",
+      "name": "restore desktop viewport after narrow player captures"
+    },
+    {
       "goto": "/library",
       "waitFor": "[data-testid=\"showcase-library-content\"]",
       "feature": "library",

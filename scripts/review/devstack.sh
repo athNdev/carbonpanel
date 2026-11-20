@@ -428,7 +428,7 @@ EOF
 # Never remove a name: inspect, verify the immutable ID and ownership label,
 # then remove exactly that ID. A colliding unowned container is a hard refusal.
 owned_sidecar_id() {
-	local name="$1" record id owner
+	local name="${1:-${NAME}-bluemap}" record id owner
 	record="$(docker inspect --format '{{.Id}} {{ index .Config.Labels "carbonpanel.review.owner" }}' "$name" 2>/dev/null)" || return 1
 	id="${record%% *}"; owner="${record#* }"
 	if [[ ! "$id" =~ ^[0-9a-f]{64}$ ]]; then
@@ -443,12 +443,12 @@ owned_sidecar_id() {
 }
 
 sidecar_exists() {
-	local name="$1"
+	local name="${1:-${NAME}-bluemap}"
 	docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fxq "$name"
 }
 
 remove_owned_sidecar() {
-	local name="$1"
+	local name="${1:-${NAME}-bluemap}"
 	if ! sidecar_exists "$name"; then
 		return 0
 	fi

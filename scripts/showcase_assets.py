@@ -55,6 +55,9 @@ MAX_DIMENSION = 8192
 # not mask a black map (OSS-392). Fractions are relative to image dimensions.
 WORLD_VIEW_MAP_REGION = (0.02, 0.25, 0.65, 0.90)
 MIN_MAP_NONBLACK = 0.05
+# A World View crop narrower than this means a narrow feature viewport leaked
+# into the desktop capture and the renderer controls column was lost.
+MIN_WORLD_VIEW_WIDTH = 2000
 
 
 class AssetError(Exception):
@@ -409,6 +412,10 @@ def validate(args: argparse.Namespace) -> None:
             if map_nonblack < MIN_MAP_NONBLACK:
                 raise AssetError(
                     f"rendered map region is blank ({map_nonblack:.1%} non-black pixels); refusing to publish"
+                )
+            if width < MIN_WORLD_VIEW_WIDTH:
+                raise AssetError(
+                    f"rendered map crop is too narrow ({width}px); desktop viewport was lost; refusing to publish"
                 )
         if sha256_bytes(data) != image.get("sha256"):
             raise AssetError(f"{path.name}: SHA256 does not match manifest")

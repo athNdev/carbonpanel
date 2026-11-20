@@ -303,6 +303,31 @@ class ShowcaseAssetsTest(unittest.TestCase):
         self.assertNotEqual(digest_before, digest_after)
 
 
+    def test_narrow_world_view_image_is_rejected(self) -> None:
+        plan = {
+            "steps": [
+                {"screenshot": "showcase-world-view", "name": "rendered map"},
+            ]
+        }
+        self.plan.write_text(json.dumps(plan), encoding="utf-8")
+        (self.images / "showcase-world-view.png").write_bytes(
+            fake_png(width=1200, height=1800)
+        )
+        sa.build(sa.argparse.Namespace(
+            images_dir=str(self.images), publish_dir=str(self.publish / "narrow"),
+            plan=str(self.plan), seed_script=str(self.seed), source_sha="a" * 40,
+            source_ref="refs/heads/main", repository="athNdev/carbonpanel",
+            run_id="1", run_url="u", captured_at=datetime.now(timezone.utc).isoformat(),
+            app_version="review", driver_version=REVIEW_DRIVER_VERSION,
+            browser_version="1", features="worlds",
+        ))
+        with self.assertRaisesRegex(sa.AssetError, 'too narrow'):
+            sa.validate(sa.argparse.Namespace(
+                publish_dir=str(self.publish / "narrow"), plan=str(self.plan),
+                expected_source_sha="a" * 40, features="worlds", max_age_hours=12,
+            ))
+
+
 class ShowcasePipelineTest(unittest.TestCase):
     """The routine main-refresh workflow must never drop the proven map image."""
 
@@ -346,6 +371,36 @@ class ShowcasePipelineTest(unittest.TestCase):
 
     def test_fixture_changes_trigger_a_routine_capture(self) -> None:
         self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])
+
+    def test_narrow_player_viewport_is_restored_before_world_view(self) -> None:
+        plan = json.loads((
+            Path(__file__).resolve().parent / "review" / "plan-showcase.json"
+        ).read_text(encoding="utf-8"))
+        steps = plan["steps"]
+        viewport = plan["viewport"]
+        narrow = [
+            i for i, step in enumerate(steps)
+            if "setViewport" in step and step["setViewport"] != viewport
+        ]
+        self.assertTrue(narrow, "expected a narrow inline-capture viewport step")
+        world_view = next(
+            i for i, step in enumerate(steps)
+            if step.get("screenshot") == "showcase-world-view"
+        )
+        restores = [
+            step for i, step in enumerate(steps)
+            if max(narrow) < i < world_view
+            and step.get("setViewport") == viewport
+        ]
+        self.assertTrue(
+            restores,
+            "desktop viewport must be restored before the World View capture",
+        )
+        # The restore must always run when the narrowing step runs.
+        self.assertIn(
+            steps[max(narrow)].get("feature"),
+            [step.get("feature") for step in restores],
+        )
 
 
 if __name__ == "__main__":
