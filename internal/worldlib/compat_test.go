@@ -405,6 +405,31 @@ func TestCompatCheckUnknownTargetVersionGates(t *testing.T) {
 	}
 }
 
+func TestCompatCheckJava1211PatchDataVersion(t *testing.T) {
+	// Mojang's shipped Java 1.21.1 version.json declares world_version 3955.
+	world := compatWorld(t, 3955, "1.21.1")
+	for _, target := range []struct {
+		mcVersion   string
+		dataVersion string
+		wantBlocked bool
+	}{
+		{mcVersion: "1.21.1", dataVersion: "3955"},
+		{mcVersion: "1.21", dataVersion: "3953", wantBlocked: true},
+	} {
+		t.Run(target.mcVersion, func(t *testing.T) {
+			report, err := NewEngine().Check(context.Background(), world, compatJavaTarget(target.mcVersion))
+			if err != nil {
+				t.Fatal(err)
+			}
+			compatRequireConfidence(t, compatFinding(t, report, "target_data_version"), Detected, target.dataVersion)
+			transform, found := report.Transform("in_place_downgrade")
+			if blocked := found && transform.Status == StatusBlocked; blocked != target.wantBlocked {
+				t.Fatalf("downgrade blocked=%t, want %t: %+v", blocked, target.wantBlocked, transform)
+			}
+		})
+	}
+}
+
 func TestCompatCheckTargetDataVersionOverride(t *testing.T) {
 	compatStubProtocol(t, func(string) int { return -1 }) // must not be consulted
 	world := compatWorld(t, 3953, "1.21")
