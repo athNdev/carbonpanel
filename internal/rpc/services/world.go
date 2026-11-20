@@ -723,7 +723,8 @@ func worldError(err error) error {
 		return connect.NewError(connect.CodeResourceExhausted, err)
 	case errors.Is(err, providers.ErrCategoryUnavailable):
 		return connect.NewError(connect.CodeFailedPrecondition, err)
-	case errors.Is(err, worldlib.ErrArchiveRejected), errors.Is(err, worldlib.ErrChecksumMismatch),
+	case errors.Is(err, worldlib.ErrInvalidImportRequest),
+		errors.Is(err, worldlib.ErrArchiveRejected), errors.Is(err, worldlib.ErrChecksumMismatch),
 		errors.Is(err, worldlib.ErrCredentialBoundary), errors.Is(err, providers.ErrCredentialBoundary):
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	default:

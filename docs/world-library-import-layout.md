@@ -9,7 +9,9 @@ layouts before any live-world change.
 ## Supported layout
 
 - A usable family is a top-level folder with a direct `level.dat` marker, for
-  example `world/level.dat`. One or more usable families are supported:
+  example `world/level.dat`. Markers are classified by the same normalized
+  forward-slash path used during extraction. One or more usable families are
+  supported:
   - a single Java world (`world/level.dat` with `region/`, `datapacks/` and
     dimension data under `world/`);
   - Paper/Spigot/Bukkit split dimensions with their own markers:
@@ -28,6 +30,9 @@ layouts before any live-world change.
   re-reads that level under admission before journaling or moving data, and
   passes the canonical value to storage and the audit event. Version-only
   previews (no server) still apply the layout policy without a configured level.
+- While a world bind owns the server's operation journal, global settings sync
+  preserves the configured level and the custom properties that can override
+  it. Other global settings can still be synchronized.
 
 ## Refused layout (actionable, pre-mutation)
 
@@ -37,7 +42,8 @@ layouts before any live-world change.
   variants such as `WORLD/LEVEL.DAT`, backslash separators such as
   `world\level.dat`, and zero-byte markers): repack into a named top-level
   folder with an exact lowercase, non-empty `level.dat` using forward slashes.
-  Backslashes are refused because extraction on Linux leaves them literal.
+  Backslashes in archive paths are refused because node filesystems interpret
+  them differently.
 - A family name that does not match the selected target level (for example
   `MySave/level.dat` selected for `world`): rename the folder or choose the
   matching target. The available families are named in the error.

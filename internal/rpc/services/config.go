@@ -254,68 +254,7 @@ func (s *ConfigService) SyncGlobalSettingsToServers(ctx context.Context, req *co
 	updatedCount := 0
 
 	for _, srv := range servers {
-		serverConfig, err := s.store.GetServerConfig(ctx, srv.ID)
-		if err != nil {
-			s.log.Warn("Could not find server config for %s, creating default: %v", srv.Name, err)
-			serverConfig = s.store.CreateDefaultServerConfig(srv.ID)
-		}
-
-		if opsAndWhitelistOnly {
-			// Selectively copy Ops and Whitelist settings
-			if globalConfig.Ops != nil {
-				serverConfig.Ops = globalConfig.Ops
-			}
-			if globalConfig.OpsFile != nil {
-				serverConfig.OpsFile = globalConfig.OpsFile
-			}
-			if globalConfig.ExistingOpsFile != nil {
-				serverConfig.ExistingOpsFile = globalConfig.ExistingOpsFile
-			}
-			if globalConfig.UserAPIProvider != nil {
-				serverConfig.UserAPIProvider = globalConfig.UserAPIProvider
-			}
-			if globalConfig.EnableWhitelist != nil {
-				serverConfig.EnableWhitelist = globalConfig.EnableWhitelist
-			}
-			if globalConfig.Whitelist != nil {
-				serverConfig.Whitelist = globalConfig.Whitelist
-			}
-			if globalConfig.WhitelistFile != nil {
-				serverConfig.WhitelistFile = globalConfig.WhitelistFile
-			}
-			if globalConfig.OverrideWhitelist != nil {
-				serverConfig.OverrideWhitelist = globalConfig.OverrideWhitelist
-			}
-			if globalConfig.ExistingWhitelistFile != nil {
-				serverConfig.ExistingWhitelistFile = globalConfig.ExistingWhitelistFile
-			}
-			if globalConfig.EnforceWhitelist != nil {
-				serverConfig.EnforceWhitelist = globalConfig.EnforceWhitelist
-			}
-		} else {
-			// Copy all non-server-specific fields using reflection
-			globalValue := reflect.ValueOf(globalConfig).Elem()
-			configValue := reflect.ValueOf(serverConfig).Elem()
-			configType := configValue.Type()
-
-			for i := 0; i < configType.NumField(); i++ {
-				field := configType.Field(i)
-				if field.Name == "ID" || field.Name == "ServerID" || field.Name == "UpdatedAt" ||
-					field.Name == "Server" || field.Name == "RCONPassword" ||
-					field.Name == "Type" || field.Name == "Version" || field.Name == "Memory" ||
-					field.Name == "InitMemory" || field.Name == "MaxMemory" || field.Name == "ServerPort" ||
-					field.Name == "MaxPlayers" {
-					continue
-				}
-
-				globalField := globalValue.FieldByName(field.Name)
-				if globalField.IsValid() && globalField.Kind() == reflect.Pointer && !globalField.IsNil() {
-					configValue.Field(i).Set(globalField)
-				}
-			}
-		}
-
-		if err := s.store.UpdateServerConfig(ctx, serverConfig); err != nil {
+		if err := s.syncGlobalServerConfig(ctx, srv.ID, globalConfig, opsAndWhitelistOnly); err != nil {
 			s.log.Error("Failed to save synced config for server %s: %v", srv.Name, err)
 			continue
 		}
@@ -328,6 +267,46 @@ func (s *ConfigService) SyncGlobalSettingsToServers(ctx context.Context, req *co
 		UpdatedServersCount: int32(updatedCount),
 		Message:             msg,
 	}), nil
+}
+
+func (s *ConfigService) syncGlobalServerConfig(ctx context.Context, serverID string, defaults *storage.ServerConfig, opsAndWhitelistOnly bool) error {
+	transition, err := beginServerLifecycleTransition(serverID)
+	if err != nil {
+		return err
+	}
+	defer transition.Release()
+
+	config, err := s.store.GetServerConfig(ctx, serverID)
+	if errors.Is(err, storage.ErrServerConfigNotFound) {
+		config = s.store.CreateDefaultServerConfig(serverID)
+	} else if err != nil {
+		return err
+	}
+
+	var fields []string
+	global := reflect.ValueOf(defaults).Elem()
+	target := reflect.ValueOf(config).Elem()
+	for i := 0; i < target.NumField(); i++ {
+		name := target.Type().Field(i).Name
+		switch name {
+		case "ID", "ServerID", "UpdatedAt", "Server", "RCONPassword",
+			"Type", "Version", "Memory", "InitMemory", "MaxMemory", "ServerPort", "MaxPlayers":
+			continue
+		case "Ops", "OpsFile", "ExistingOpsFile", "UserAPIProvider", "EnableWhitelist",
+			"Whitelist", "WhitelistFile", "OverrideWhitelist", "ExistingWhitelistFile", "EnforceWhitelist":
+			// These fields also participate in an ops/whitelist-only sync.
+		default:
+			if opsAndWhitelistOnly {
+				continue
+			}
+		}
+		value := global.Field(i)
+		if value.Kind() == reflect.Pointer && !value.IsNil() {
+			target.Field(i).Set(value)
+			fields = append(fields, name)
+		}
+	}
+	return s.store.SaveSyncedServerConfig(ctx, config, fields)
 }
 
 // ValidateProviderKey checks a content-provider credential against its upstream

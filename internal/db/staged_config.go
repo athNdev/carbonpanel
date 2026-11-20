@@ -393,18 +393,29 @@ func (s *Store) ListBatchConfig(ctx context.Context, batchID string) ([]*StagedC
 // serializes this config write with the world's durable operation admission.
 func guardStagedWorldLevel(tx *gorm.DB, serverID string, diff map[string]any) error {
 	for field := range diff {
-		if strings.EqualFold(field, "level") || strings.EqualFold(field, "customServerProperties") {
-			var active int64
-			if err := tx.Model(&ServerOperation{}).Where("active_server = ? AND kind = ?", serverID, "world-bind").Count(&active).Error; err != nil {
-				return err
-			}
-			if active != 0 {
-				return ErrActiveOperation
-			}
-			break
+		if !worldLevelConfigField(field) {
+			continue
 		}
+		active, err := hasActiveWorldBind(tx, serverID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return ErrActiveOperation
+		}
+		break
 	}
 	return nil
+}
+
+func worldLevelConfigField(field string) bool {
+	return strings.EqualFold(field, "level") || strings.EqualFold(field, "customServerProperties")
+}
+
+func hasActiveWorldBind(tx *gorm.DB, serverID string) (bool, error) {
+	var active int64
+	err := tx.Model(&ServerOperation{}).Where("active_server = ? AND kind = ?", serverID, "world-bind").Count(&active).Error
+	return active != 0, err
 }
 
 // ApplyStagedConfigChange merges a staged diff into the live ServerConfig and

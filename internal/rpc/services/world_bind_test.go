@@ -178,6 +178,56 @@ func TestImportedWorldCanBePreviewedAndBound(t *testing.T) {
 	}
 }
 
+func TestMountedWorldImportRejectsInvalidUploadChecksums(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	svc := newWorldRPCService(t, store, t.TempDir(), &worldTestLifecycle{})
+	svc.uploads = upload.NewManager(t.TempDir(), time.Minute, 10<<20, logger.New())
+	t.Cleanup(svc.uploads.Stop)
+	archive, err := worldlib.WriteFreshWorldArchive(map[string]string{"level-name": "world"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := svc.uploads.InitSession("import.zip", int64(len(archive)), int32(len(archive)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if complete, err := svc.uploads.WriteChunk(session.ID, 0, archive); err != nil || !complete {
+		t.Fatalf("upload completed=%t, error=%v", complete, err)
+	}
+	pattern, handler := carbonpanelv1connect.NewWorldServiceHandler(svc)
+	mux := http.NewServeMux()
+	mux.Handle(pattern, handler)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := carbonpanelv1connect.NewWorldServiceClient(server.Client(), server.URL)
+	for label, checksum := range map[string]string{"missing": "", "malformed": "bad-digest"} {
+		t.Run(label, func(t *testing.T) {
+			_, err := client.ImportWorld(ctx, connect.NewRequest(&v1.ImportWorldRequest{
+				Source: "upload", UploadId: session.ID, LicenseAttestation: "Owned fixture",
+				Sha256Checksum: checksum, RequestId: "invalid-checksum-" + label,
+			}))
+			if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), "SHA-256") {
+				t.Fatalf("validation = %v, want InvalidArgument for %s checksum", err, label)
+			}
+		})
+	}
+	jobs, err := store.ListWorldImportJobs(ctx, "", 10)
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("invalid input created import jobs: %+v, %v", jobs, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.ImportWorld(ctx, connect.NewRequest(&v1.ImportWorldRequest{
+		Source: "upload", UploadId: session.ID, LicenseAttestation: "Owned fixture",
+		Sha256Checksum: sha256Hex(archive), RequestId: "valid-checksum-storage-failure",
+	}))
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("storage failure = %v, want Internal", err)
+	}
+}
+
 func writeLayoutArchive(t *testing.T, path string, entries map[string]string) string {
 	t.Helper()
 	f, err := os.Create(path)
@@ -359,7 +409,7 @@ func TestWorldLayoutRefusalsAreSideEffectFreeWithExistingLiveWorld(t *testing.T)
 // TestMountedConnectRefusesFlatWithExistingCompanions exercises the generated
 // Connect handler (not direct method calls) against an existing live world and
 // companion directory, proving a flat revision is refused without mutation.
-func TestMountedConnectRefusesFlatWithExistingCompanions(t *testing.T) {
+func TestMountedConnectRefusesUnsupportedLayoutWithExistingCompanions(t *testing.T) {
 	ctx := context.Background()
 	store := newWorldRPCStore(t)
 	root := t.TempDir()
@@ -381,16 +431,6 @@ func TestMountedConnectRefusesFlatWithExistingCompanions(t *testing.T) {
 	liveHash := sha256Hex(readFileBytes(t, live))
 	companionHash := sha256Hex(readFileBytes(t, companion))
 
-	sum := writeLayoutArchive(t, filepath.Join(libraryRoot, "flat.zip"), map[string]string{"level.dat": "nbt"})
-	rev := &storage.WorldRevision{
-		ID: worldlib.RevisionID(sum), WorldEntryID: "wld_mounted_flat", SHA256: sum,
-		SizeBytes: int64(len(sum)), EntryCount: 1, MCVersion: "1.21.1", ModLoader: "VANILLA",
-		StoragePath: filepath.Join(libraryRoot, "flat.zip"),
-	}
-	if err := store.PutWorldRevision(ctx, rev); err != nil {
-		t.Fatal(err)
-	}
-
 	life := &worldTestLifecycle{running: true}
 	svc := newWorldRPCService(t, store, libraryRoot, life)
 	pattern, handler := carbonpanelv1connect.NewWorldServiceHandler(svc)
@@ -400,17 +440,39 @@ func TestMountedConnectRefusesFlatWithExistingCompanions(t *testing.T) {
 	defer ts.Close()
 	client := carbonpanelv1connect.NewWorldServiceClient(ts.Client(), ts.URL)
 
-	_, pErr := client.CheckCompatibility(ctx, connect.NewRequest(&v1.CheckCompatibilityRequest{
-		RevisionId: rev.ID, ServerId: server.ID,
-	}))
-	if pErr == nil || !strings.Contains(pErr.Error(), "named world folder") {
-		t.Fatalf("mounted preview = %v", pErr)
-	}
-	_, bErr := client.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
-		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "mounted-flat",
-	}))
-	if bErr == nil || !strings.Contains(bErr.Error(), "named world folder") {
-		t.Fatalf("mounted bind = %v", bErr)
+	for _, tc := range []struct {
+		label, wantMessage string
+		entries            map[string]string
+	}{
+		{"flat", "named world folder", map[string]string{"level.dat": "nbt"}},
+		{"unrelated-family", "unrelated world families", map[string]string{
+			"world/level.dat": "nbt", "other//level.dat": "other nbt",
+		}},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			archive := filepath.Join(libraryRoot, tc.label+".zip")
+			sum := writeLayoutArchive(t, archive, tc.entries)
+			rev := &storage.WorldRevision{
+				ID: worldlib.RevisionID(sum), WorldEntryID: "wld_mounted_" + tc.label, SHA256: sum,
+				SizeBytes: int64(len(readFileBytes(t, archive))), EntryCount: int32(len(tc.entries)),
+				MCVersion: "1.21.1", ModLoader: "VANILLA", StoragePath: archive,
+			}
+			if err := store.PutWorldRevision(ctx, rev); err != nil {
+				t.Fatal(err)
+			}
+			_, previewErr := client.CheckCompatibility(ctx, connect.NewRequest(&v1.CheckCompatibilityRequest{
+				RevisionId: rev.ID, ServerId: server.ID,
+			}))
+			if connect.CodeOf(previewErr) != connect.CodeInvalidArgument || !strings.Contains(previewErr.Error(), tc.wantMessage) {
+				t.Fatalf("mounted preview = %v, want %q", previewErr, tc.wantMessage)
+			}
+			_, bindErr := client.BindWorld(ctx, connect.NewRequest(&v1.BindWorldRequest{
+				ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "mounted-" + tc.label,
+			}))
+			if connect.CodeOf(bindErr) != connect.CodeInvalidArgument || !strings.Contains(bindErr.Error(), tc.wantMessage) {
+				t.Fatalf("mounted bind = %v, want %q", bindErr, tc.wantMessage)
+			}
+		})
 	}
 	if life.stops != 0 || life.starts != 0 || !life.running {
 		t.Fatalf("mounted refusal mutated lifecycle: %+v", life)
@@ -552,7 +614,7 @@ func TestMountedConnectBindsNamedBackupWithRootCompanions(t *testing.T) {
 
 	archivePath := filepath.Join(libraryRoot, "named.zip")
 	sum := writeLayoutArchive(t, archivePath, map[string]string{
-		"world/level.dat":               "published-world",
+		"world//level.dat":              "published-world",
 		"config/companion.txt":          "archived-root-companion",
 		"revision.zip/companion.txt":    "archive-name-companion",
 		"world/datapacks/in-family.txt": "archived-in-family",

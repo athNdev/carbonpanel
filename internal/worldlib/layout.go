@@ -55,35 +55,6 @@ type ArchiveLayout struct {
 	EmptyLevelMarkers []string
 }
 
-func layoutFromFiles(files []*zip.File) *ArchiveLayout {
-	layout := &ArchiveLayout{}
-	families := make(map[string]struct{})
-	for _, f := range files {
-		name := normalizeMemberName(f.Name)
-		if unsafeMemberName(name) || f.FileInfo().IsDir() {
-			continue // the security inspection rejects these separately
-		}
-		dir := path.Dir(name)
-		if (dir == "." || dir == "") && strings.EqualFold(path.Base(name), "level.dat") {
-			layout.RootLevelDat = true
-			continue
-		}
-		if family := WorldFamilyFromMarker(f.Name); family != "" {
-			if f.UncompressedSize64 == 0 {
-				layout.EmptyLevelMarkers = append(layout.EmptyLevelMarkers, family)
-				continue
-			}
-			families[family] = struct{}{}
-		}
-	}
-	for family := range families {
-		layout.NamedFamilies = append(layout.NamedFamilies, family)
-	}
-	sort.Strings(layout.NamedFamilies)
-	sort.Strings(layout.EmptyLevelMarkers)
-	return layout
-}
-
 // Validate refuses layouts the binder cannot map. A single named world family
 // (or several families for dimension siblings) stays supported, as do the
 // documented named backup archives. Archives with no usable family are refused
@@ -189,9 +160,6 @@ func InspectRevisionArchive(ctx context.Context, archive string) (*ArchiveReport
 	if err := inspectZipCtx(ctx, &zr.Reader, 1, report); err != nil {
 		return nil, nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, nil, err
-	}
 	// The extractor may normalize different member names onto one destination
 	// (for example on Windows). Refuse collisions before any staging or live
 	// mutation, using the extractor's own canonical path rule.
@@ -201,7 +169,15 @@ func InspectRevisionArchive(ctx context.Context, archive string) (*ArchiveReport
 	// file-as-ancestor collision.
 	files := make(map[string]string, len(zr.File))
 	dirs := make(map[string]string)
+	layout := &ArchiveLayout{}
 	for _, f := range zr.File {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		if strings.Contains(f.Name, `\`) {
+			return nil, nil, fmt.Errorf("%w: ZIP entry %q uses backslashes; use forward slashes",
+				ErrUnsupportedWorldLayout, f.Name)
+		}
 		canonical, err := nodestorage.CanonicalZipMember(f.Name)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: %v", ErrArchiveRejected, err)
@@ -224,28 +200,42 @@ func InspectRevisionArchive(ctx context.Context, archive string) (*ArchiveReport
 				ErrArchiveRejected, previous, f.Name, canonical)
 		}
 		files[key] = f.Name
-	}
-	for key, name := range files {
-		for ancestor := path.Dir(key); ancestor != "." && ancestor != "/" && ancestor != ""; ancestor = path.Dir(ancestor) {
-			if previous, ok := files[ancestor]; ok {
-				return nil, nil, fmt.Errorf("%w: archive member %q is a file but also a parent directory of %q",
-					ErrArchiveRejected, previous, name)
+
+		if strings.EqualFold(canonical, "level.dat") {
+			layout.RootLevelDat = true
+		} else if family := WorldFamilyFromMarker(canonical); family != "" {
+			if f.UncompressedSize64 == 0 {
+				layout.EmptyLevelMarkers = append(layout.EmptyLevelMarkers, family)
+			} else {
+				layout.NamedFamilies = append(layout.NamedFamilies, family)
 			}
 		}
 	}
-	dirKeys := make([]string, 0, len(dirs))
-	for key := range dirs {
-		dirKeys = append(dirKeys, key)
-	}
-	sort.Strings(dirKeys)
-	for key, name := range files {
-		i := sort.SearchStrings(dirKeys, key+"/")
-		if i < len(dirKeys) && strings.HasPrefix(dirKeys[i], key+"/") {
-			return nil, nil, fmt.Errorf("%w: archive member %q is a file but also a parent directory of %q",
-				ErrArchiveRejected, name, dirs[dirKeys[i]])
+	for _, members := range []map[string]string{files, dirs} {
+		for key, name := range members {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
+			for ancestor := path.Dir(key); ancestor != "." && ancestor != "/"; ancestor = path.Dir(ancestor) {
+				if err := ctx.Err(); err != nil {
+					return nil, nil, err
+				}
+				if previous, ok := files[ancestor]; ok {
+					return nil, nil, fmt.Errorf("%w: archive member %q is a file but also a parent directory of %q",
+						ErrArchiveRejected, previous, name)
+				}
+			}
 		}
 	}
-	return report, layoutFromFiles(zr.File), nil
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	sort.Strings(layout.NamedFamilies)
+	sort.Strings(layout.EmptyLevelMarkers)
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	return report, layout, nil
 }
 
 // InspectWorldLayout is the read-only layout-only view used by callers that

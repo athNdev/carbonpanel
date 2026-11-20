@@ -261,6 +261,44 @@ func (s *Store) SaveServerConfig(ctx context.Context, config *ServerConfig) erro
 	return s.db.WithContext(ctx).Save(config).Error
 }
 
+// SaveSyncedServerConfig updates only the fields propagated by global sync.
+// A retained world-bind journal protects both sources of the effective level.
+// The ownership check and write share a SQLite transaction so neither can
+// commit based on a snapshot invalidated by a concurrent journal acquisition.
+func (s *Store) SaveSyncedServerConfig(ctx context.Context, config *ServerConfig, fields []string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		active, err := hasActiveWorldBind(tx, config.ServerID)
+		if err != nil {
+			return err
+		}
+		if active {
+			allowed := make([]string, 0, len(fields))
+			for _, field := range fields {
+				if !worldLevelConfigField(field) {
+					allowed = append(allowed, field)
+				}
+			}
+			fields = allowed
+		}
+		if len(fields) == 0 {
+			return nil
+		}
+		result := tx.Model(&ServerConfig{}).Where("id = ? AND server_id = ?", config.ID, config.ServerID).
+			Select(fields).Updates(config)
+		if result.Error != nil || result.RowsAffected != 0 || active {
+			return result.Error
+		}
+		// A legacy server may not have a config row. Do not create a second
+		// row if one appeared between the caller's read and this transaction.
+		var existing int64
+		err = tx.Model(&ServerConfig{}).Where("server_id = ?", config.ServerID).Count(&existing).Error
+		if err != nil || existing != 0 {
+			return err
+		}
+		return tx.Create(config).Error
+	})
+}
+
 // UpdateServerConfigMemory updates memory settings in ServerConfig
 func (s *Store) UpdateServerConfigMemory(ctx context.Context, serverID string, memory int) error {
 	config, err := s.GetServerConfig(ctx, serverID)

@@ -51,6 +51,13 @@ func TestInspectWorldLayoutClassifiesAndValidates(t *testing.T) {
 			wantFams: []string{"world"},
 		},
 		{
+			name: "redundant forward slashes use the extracted family",
+			entries: []zipEntry{
+				{name: "world//level.dat", data: []byte("nbt")},
+			},
+			wantFams: []string{"world"},
+		},
+		{
 			name:    "root level.dat is refused with actionable message",
 			entries: []zipEntry{{name: "level.dat", data: []byte("nbt")}},
 			wantErr: true,
@@ -87,12 +94,6 @@ func TestInspectWorldLayoutClassifiesAndValidates(t *testing.T) {
 		{
 			name:    "case variant marker is not usable on case-sensitive hosts",
 			entries: []zipEntry{{name: "WORLD/LEVEL.DAT", data: []byte("nbt")}},
-			wantErr: true,
-			wantMsg: "no usable level family",
-		},
-		{
-			name:    "backslash marker does not match the Linux extractor",
-			entries: []zipEntry{{name: `world\level.dat`, data: []byte("nbt")}},
 			wantErr: true,
 			wantMsg: "no usable level family",
 		},
@@ -170,6 +171,16 @@ func TestInspectRevisionArchiveRejectsNormalizedDestinationCollisions(t *testing
 	_, _, err := InspectRevisionArchive(context.Background(), archive)
 	if err == nil || !strings.Contains(err.Error(), "share destination") {
 		t.Fatalf("collision = %v, want shared-destination refusal", err)
+	}
+}
+
+func TestInspectRevisionArchiveRefusesBackslashSeparators(t *testing.T) {
+	archive := writeTestZip(t, filepath.Join(t.TempDir(), "nonportable.zip"),
+		zipEntry{name: "world/level.dat", data: []byte("nbt")},
+		zipEntry{name: `world\notes.txt`, data: []byte("companion")})
+	_, _, err := InspectRevisionArchive(context.Background(), archive)
+	if !errors.Is(err, ErrUnsupportedWorldLayout) || !strings.Contains(err.Error(), "use forward slashes") {
+		t.Fatalf("backslash path = %v, want portable separator refusal", err)
 	}
 }
 
@@ -251,5 +262,34 @@ func TestInspectRevisionArchiveIsBoundedAndCancelable(t *testing.T) {
 	cancel()
 	if _, _, err := InspectRevisionArchive(ctx, archive); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled preflight = %v, want context.Canceled", err)
+	}
+}
+
+type cancelOnCheckContext struct {
+	context.Context
+	cancel    context.CancelFunc
+	remaining int
+}
+
+func (c *cancelOnCheckContext) Err() error {
+	c.remaining--
+	if c.remaining == 0 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestInspectRevisionArchiveCancelsDuringMetadata(t *testing.T) {
+	archive := writeTestZip(t, filepath.Join(t.TempDir(), "world.zip"),
+		zipEntry{name: "world/", mode: os.ModeDir},
+		zipEntry{name: "world/region/", mode: os.ModeDir})
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Directory-only entries need no CRC reads. The sixth check occurs in
+	// metadata processing, after security inspection has already finished.
+	ctx := &cancelOnCheckContext{Context: base, cancel: cancel, remaining: 6}
+	report, layout, err := InspectRevisionArchive(ctx, archive)
+	if err != context.Canceled || report != nil || layout != nil {
+		t.Fatalf("canceled metadata returned report=%v layout=%v error=%v", report, layout, err)
 	}
 }
