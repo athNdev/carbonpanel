@@ -11,6 +11,7 @@ one at https://mozilla.org/MPL/2.0/.
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { replaceState } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { create } from '@bufbuild/protobuf';
 	import { Code, ConnectError } from '@connectrpc/connect';
@@ -198,7 +199,8 @@ one at https://mozilla.org/MPL/2.0/.
 				oidcLinkError = oidcLinkErrorMessage(result);
 			}
 			url.searchParams.delete('oidc_link');
-			replaceState(url, page.state);
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- preserve the resolved settings route, query and fragment
+			replaceState(`${resolve('/settings')}${url.search}${url.hash}`, page.state);
 		}
 		loadConfig();
 	});
