@@ -27,13 +27,13 @@ type nativeScopeStore interface {
 	GetServerConfig(context.Context, string) (*storage.ServerConfig, error)
 	GetNode(context.Context, string) (*storage.Node, error)
 	GetWorldBinding(context.Context, string, string) (*storage.WorldBinding, error)
-	AssertNoServerOperation(context.Context, string) error
+	WorldViewOperationState(context.Context, string) (restoreID string, busy bool, err error)
 }
 
 // nativeScope identifies read-only terrain before any renderer work. Its
 // storage fields come from the persisted server and node, never the map URL.
-// The effective owner, level, generation and binding together invalidate work
-// when an operator changes the server location or active library revision.
+// The effective owner, level, generation, binding and restore ID together
+// invalidate work when an operator moves or replaces the saved world.
 type nativeScope struct {
 	serverID       string
 	dataRoot       string
@@ -43,6 +43,7 @@ type nativeScope struct {
 	bindingID      string
 	revisionID     string
 	bindingStamp   int64
+	restoreID      string
 }
 
 func resolveNativeScope(ctx context.Context, store nativeScopeStore, server *storage.Server, requested *v1.WorldRef) (nativeScope, error) {
@@ -52,7 +53,11 @@ func resolveNativeScope(ctx context.Context, store nativeScopeStore, server *sto
 	if requested != nil && requested.GetServerId() != "" && requested.GetServerId() != server.ID {
 		return nativeScope{}, errNativeWorldMismatch
 	}
-	if err := store.AssertNoServerOperation(ctx, server.ID); err != nil {
+	restoreID, busy, err := store.WorldViewOperationState(ctx, server.ID)
+	if err != nil {
+		return nativeScope{}, errNativeSourceAbsent
+	}
+	if busy {
 		return nativeScope{}, errNativeWorldBusy
 	}
 	cfg, err := store.GetServerConfig(ctx, server.ID)
@@ -69,7 +74,7 @@ func resolveNativeScope(ctx context.Context, store nativeScopeStore, server *sto
 
 	scope := nativeScope{
 		serverID: server.ID, dataRoot: server.DataPath, level: level,
-		node: nodestorage.LocalNode(), nodeGeneration: 1,
+		node: nodestorage.LocalNode(), nodeGeneration: 1, restoreID: restoreID,
 	}
 	if !nodestorage.IsLegacyLocalNodeID(server.NodeID) {
 		node, err := store.GetNode(ctx, server.NodeID)

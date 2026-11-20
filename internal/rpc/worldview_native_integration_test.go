@@ -15,15 +15,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"connectrpc.com/connect"
 
+	"github.com/athNdev/carbon-panel/internal/config"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/rbac"
+	"github.com/athNdev/carbon-panel/internal/rpc/services"
 	"github.com/athNdev/carbon-panel/internal/worldlib"
 	"github.com/athNdev/carbon-panel/internal/worldview"
+	"github.com/athNdev/carbon-panel/pkg/files"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
 )
@@ -89,6 +93,18 @@ func TestNativeWorldViewSessionReadsTerrainThroughScopedProxy(t *testing.T) {
 		observation.Msg.GetTarget().GetLastRender() != nil {
 		t.Fatalf("native target did not report the active scoped world: %v, %v", observation, err)
 	}
+	if !slices.Contains(observation.Msg.GetTarget().GetRenderer().GetCapabilities(), worldview.CapabilityMarkers) {
+		t.Fatal("native renderer descriptor omitted saved markers")
+	}
+	capRequest := connect.NewRequest(&v1.ListCapabilitiesRequest{ServerId: server.ID})
+	capRequest.Header().Set("Authorization", "Bearer "+granted)
+	caps, err := api.ListCapabilities(ctx, capRequest)
+	if err != nil || caps.Msg.GetRendererType() != v1.RendererType_RENDERER_TYPE_NATIVE ||
+		!slices.ContainsFunc(caps.Msg.GetCapabilities(), func(cap *v1.Capability) bool {
+			return cap.GetName() == worldview.CapabilityMarkers && cap.GetSupported()
+		}) {
+		t.Fatalf("native capabilities omitted saved markers: %v, %v", caps, err)
+	}
 	issue := func(token string, ref *v1.WorldRef) (*v1.GetWorldViewSessionResponse, error) {
 		t.Helper()
 		req := connect.NewRequest(&v1.GetWorldViewSessionRequest{ServerId: server.ID, WorldRef: ref})
@@ -149,15 +165,87 @@ func TestNativeWorldViewSessionReadsTerrainThroughScopedProxy(t *testing.T) {
 	asset(granted, "native/overworld/1/0.png", http.StatusNotFound)
 	asset(granted, "native/nether/0/0.png", http.StatusNotFound)
 
+	observed, err := os.ReadFile(regionPath)
+	if err != nil || !bytes.Equal(observed, region) {
+		t.Fatalf("native viewing changed the world fixture: %v", err)
+	}
+
+	// An upgraded level may still contain chunks written by the old game.
+	// The assets must agree when level.dat declares an unsupported version.
+	levelPath := filepath.Join(root, level, "level.dat")
+	newerMetadata, err := worldlib.WriteFreshLevelData(map[string]string{"level-name": level}, "9999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(levelPath, newerMetadata, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asset(granted, "native/manifest.json", http.StatusUnprocessableEntity)
+	asset(granted, tileAsset, http.StatusUnprocessableEntity)
+	if err := os.WriteFile(levelPath, levelNBT, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A real BackupService restore publishes new bytes under the identical
+	// server, node and level name without a World Library binding.
+	backup := services.NewBackupService(srv.store, nil, nil, config.S3Config{}, srv.log)
+	backup.SetEnforcer(srv.enforcer)
+	backupPath, backupHandler := carbonpanelv1connect.NewBackupServiceHandler(backup, connect.WithInterceptors(srv.authInterceptor()))
+	mux.Handle(backupPath, backupHandler)
+	restoreToken := seedWorldViewToken(t, srv, "native-map-restorer", "native-map-restore-role", []rbac.Permission{
+		{Resource: rbac.ResourceBackups, Action: rbac.ActionUpdate, ObjectID: "*"},
+	})
+	archiveRoot := t.TempDir()
+	archivedRegion := filepath.Join(archiveRoot, level, "region", "r.0.0.mca")
+	if err := os.MkdirAll(filepath.Dir(archivedRegion), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(archiveRoot, level, "level.dat"), levelNBT, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restoredRegion := bytes.Clone(region)
+	binary.BigEndian.PutUint32(restoredRegion[4096:], 1795200100)
+	if err := os.WriteFile(archivedRegion, restoredRegion, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "world.zip")
+	if _, err := files.CreateZipArchive([]string{level}, archiveRoot, archive, true); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := files.SHA256File(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := &storage.BackupRecord{ID: "native-map-backup", ServerID: server.ID, Name: "world.zip", Path: archive, SHA256: sum}
+	if err := srv.store.CreateBackupRecord(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	restore := connect.NewRequest(&v1.RestoreBackupRequest{Id: record.ID})
+	restore.Header().Set("Authorization", "Bearer "+restoreToken)
+	restored, err := carbonpanelv1connect.NewBackupServiceClient(ts.Client(), ts.URL).RestoreBackup(ctx, restore)
+	if err != nil || !restored.Msg.GetSuccess() {
+		t.Fatalf("mounted backup restore failed: %v, %v", restored, err)
+	}
+	asset(granted, "native/manifest.json", http.StatusConflict)
+	asset(granted, tileAsset, http.StatusConflict)
+	session, err = issue(granted, nil)
+	if err != nil || session.GetProxyPath() == "" {
+		t.Fatalf("no new session after restoring the same level: %v, %v", session, err)
+	}
+	_, restoredHeader := asset(granted, tileAsset, http.StatusOK)
+	if restoredHeader.Get("X-CarbonPanel-Tile-Saved-At") == header.Get("X-CarbonPanel-Tile-Saved-At") {
+		t.Fatal("new map session did not report the restored region timestamp")
+	}
+
 	replacement := "new_active_level"
 	cfg.Level = &replacement
 	if err := srv.store.SaveServerConfig(ctx, cfg); err != nil {
 		t.Fatal(err)
 	}
 	asset(granted, tileAsset, http.StatusConflict)
-	observed, err := os.ReadFile(regionPath)
-	if err != nil || !bytes.Equal(observed, region) {
-		t.Fatalf("native viewing changed the world fixture: %v", err)
+	observed, err = os.ReadFile(regionPath)
+	if err != nil || !bytes.Equal(observed, restoredRegion) {
+		t.Fatalf("native viewing changed the restored world fixture: %v", err)
 	}
 }
 

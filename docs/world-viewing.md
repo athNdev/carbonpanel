@@ -23,9 +23,9 @@ player positions and regions are outside the native map’s coverage.
 
 ## 1. Renderer lifecycle
 
-BlueMap is the built-in default adapter (`builtin-bluemap` module template);
-squaremap and Dynmap are compatibility adapters and `STATIC` is an offline tile
-snapshot.
+BlueMap is the optional managed renderer (`builtin-bluemap` module template).
+Squaremap and Dynmap are compatibility adapters. The static adapter displays
+an offline tile snapshot.
 
 - **Install** a renderer through the existing module workflow
   (`ModuleService.CreateModule` / `StartModule`) using the built-in template or
@@ -161,16 +161,16 @@ need it.
 Capabilities come from the adapter and gate visible controls. Unsupported means
 unsupported — no lookalike control is substituted.
 
-| Capability | BlueMap | squaremap | Dynmap | STATIC |
-| --- | --- | --- | --- | --- |
-| `map.2d` | yes | yes | yes | static tiles only |
-| `map.3d` | yes | no | no | no |
-| `dimensions` | yes | not verified | not verified | no |
-| `markers` | yes | not verified | not verified | no |
-| `players` | only with explicit bridge feed | no | no | no (offline) |
-| `time_weather` | no | no | no | no |
-| `telemetry` | no | no | no | no |
-| `static` | no | no | no | yes |
+| Capability | Built-in terrain | BlueMap | squaremap | Dynmap | Static |
+| --- | --- | --- | --- | --- | --- |
+| `map.2d` | saved Java Overworld | yes | yes | yes | static tiles only |
+| `map.3d` | no | yes | no | no | no |
+| `dimensions` | Overworld only | yes | not verified | not verified | no |
+| `markers` | saved Overworld points | yes | not verified | not verified | no |
+| `players` | no | only with explicit bridge feed | no | no | no (offline) |
+| `time_weather` | no | no | no | no | no |
+| `telemetry` | no | no | no | no | no |
+| `static` | no | no | no | no | yes |
 
 Live player positions additionally require `world_view/observe_players`. The
 console toggle is **UI consent**: it is hidden by default, requires that

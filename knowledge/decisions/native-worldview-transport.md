@@ -16,8 +16,9 @@ sources:
 
 Use the existing same-origin World View session for the native manifest and PNG
 tile paths. Derive the active level from persisted server configuration. Keep
-node endpoint generation and active revision in the key's private scope. Recheck
-server authorization on each request and ownership before serving a new tile.
+node endpoint generation, active revision and the last restore journal ID in the
+key's private scope. Recheck server authorization and the bounded level format
+before serving assets. Refuse assets while lifecycle operations hold the world.
 
 # Alternatives
 

@@ -100,6 +100,8 @@ async function runPackagedWorldView(browser) {
     };
     const session = "/api/v1/worldview/map/native-route-fixture/";
     let tileRequests = 0;
+    let savingTile;
+    let savingTileRetried = false;
     const markerReads = [];
     const overworldMarker = { serverId: native.serverId, worldRef, dimension: "overworld", x: 18.5, z: -29.25 };
     const overlays = [
@@ -113,6 +115,11 @@ async function runPackagedWorldView(browser) {
       viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce",
     });
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: async (value) => { window.__copiedMapLink = value; } },
+      });
+    });
     await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
       const method = new URL(route.request().url()).pathname.split("/").at(-1);
       if (method === "ListMapOverlays") {
@@ -142,6 +149,12 @@ async function runPackagedWorldView(browser) {
       const match = route.request().url().match(/\/native\/overworld\/(-?\d+)\/(-?\d+)\.png$/);
       assert.ok(match, "packaged map requests exactly one scoped tile");
       tileRequests += 1;
+      if (!savingTile) {
+        savingTile = match[0];
+        await route.fulfill({ status: 503, headers: { "Retry-After": "1" } });
+        return;
+      }
+      if (match[0] === savingTile) savingTileRetried = true;
       await route.fulfill({
         body: fixtureTile(Number(match[1]), Number(match[2])),
         contentType: "image/png",
@@ -149,7 +162,12 @@ async function runPackagedWorldView(browser) {
       });
     });
     const key = "w1." + Buffer.from(JSON.stringify([2, native.serverId, worldRef.levelName, "", ""])).toString("base64url");
+    const completedSave = page.waitForResponse((response) =>
+      savingTile && response.url().endsWith(savingTile) && response.status() === 200
+    );
     await page.goto(origin + "worlds/" + native.serverId + "/" + key + "?dimension=nether");
+    await completedSave;
+    assert.ok(savingTileRetried, "a tile interrupted by a save retries under the same map session");
     await page.getByRole("heading", { name: "World terrain" }).waitFor();
     const surface = page.getByRole("region", { name: "Map surface" });
     const tile = surface.locator("img").first();
@@ -169,6 +187,15 @@ async function runPackagedWorldView(browser) {
     assert.equal(await page.getByRole("button", { name: "Show player markers", exact: true }).count(), 0);
     assert.doesNotMatch(await page.locator("body").innerText(), /Private position|Player position|Region boundary|Nether location/);
     await page.screenshot({path: path.join(evidence, "packaged-world-view-native.png")});
+    await surface.getByRole("button", { name: "Copy map link", exact: true }).click();
+    const copy = new URL(await page.evaluate(() => window.__copiedMapLink));
+    assert.equal(copy.origin, new URL(origin).origin);
+    assert.equal(copy.pathname, "/worlds/" + native.serverId + "/" + key);
+    assert.deepEqual(Object.fromEntries(copy.searchParams), { x: "12", z: "-34" });
+    copy.searchParams.set("x", "-128");
+    copy.searchParams.set("z", "92");
+    await page.goto(copy.href);
+    await page.getByTestId("native-map-coordinates").getByText("X: -128 · Z: 92").waitFor();
     results.push("the packaged World View renders native tiles and scoped Overworld markers without an iframe or module");
   } finally {
     await context?.close();
@@ -528,7 +555,7 @@ try {
       ["busy", "Map rendering is busy. Retry in a moment."],
       [
         "changed",
-        "The world changed while terrain was being read. Retry after the save finishes.",
+        "The active world changed. Reopen the map to view the current world.",
       ],
       ["unsupported", "Carbon Panel cannot read saved terrain for this world."],
       [

@@ -31,7 +31,8 @@ denials and scope changes clear the current map session.
 The native viewport reads saved Overworld terrain through its map session.
 It bounds visible tile requests and aborts work outside the current session
 or viewport. Empty and partial saves are explicit; controls move the map view
-and do not modify the world.
+and do not modify the world. Shared map links carry coordinates only and
+still require the recipient’s scoped read permission.
 The native Overworld map projects existing non-sensitive markers, waypoints,
 and points of interest from the scoped ListMapOverlays result. The marker
 list can center offscreen points. Native markers include neither live player

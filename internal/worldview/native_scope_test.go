@@ -19,9 +19,10 @@ import (
 
 type nativeScopeFixture struct {
 	*fakeStore
-	node    *storage.Node
-	binding *storage.WorldBinding
-	busy    bool
+	node      *storage.Node
+	binding   *storage.WorldBinding
+	busy      bool
+	restoreID string
 }
 
 func (f *nativeScopeFixture) GetNode(context.Context, string) (*storage.Node, error) {
@@ -38,11 +39,8 @@ func (f *nativeScopeFixture) GetWorldBinding(context.Context, string, string) (*
 	return f.binding, nil
 }
 
-func (f *nativeScopeFixture) AssertNoServerOperation(context.Context, string) error {
-	if f.busy {
-		return errors.New("fixture operation in progress")
-	}
-	return nil
+func (f *nativeScopeFixture) WorldViewOperationState(context.Context, string) (string, bool, error) {
+	return f.restoreID, f.busy, nil
 }
 
 func TestNativeScopeUsesActualLevelAndCurrentNode(t *testing.T) {
@@ -115,6 +113,11 @@ func TestNativeScopeRefusesUnsafeOrUnavailableStorage(t *testing.T) {
 		t.Fatalf("active operation should refuse rendering, got %v", err)
 	}
 	f.busy = false
+	f.restoreID = "same-level-restore"
+	restored, err := resolveNativeScope(ctx, f, server, nil)
+	if err != nil || restored == got || restored.restoreID != f.restoreID {
+		t.Fatalf("a restore kept the old native scope: %+v (%v)", restored, err)
+	}
 
 	f.setLevelName(server.ID, "../../outside")
 	if _, err := resolveNativeScope(ctx, f, server, nil); !errors.Is(err, errNativeSourceAbsent) {

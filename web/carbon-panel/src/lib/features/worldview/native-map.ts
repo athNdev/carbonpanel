@@ -34,7 +34,7 @@ export type TileResult =
 
 export const NATIVE_FAILURE_MESSAGE: Record<NativeMapFailure, string> = {
 	busy: 'Map rendering is busy. Retry in a moment.',
-	changed: 'The world changed while terrain was being read. Retry after the save finishes.',
+	changed: 'The active world changed. Reopen the map to view the current world.',
 	unsupported: 'Carbon Panel cannot read saved terrain for this world.',
 	unavailable: 'Carbon Panel could not read the map. Retry in a moment.',
 	access: 'The map session is no longer authorized. Refresh the World View page.'
@@ -93,8 +93,8 @@ export function visibleNativeTiles(center: MapPoint, size: MapSize, scale: numbe
 	return tiles.sort((a, b) => distance(a) - distance(b));
 }
 
-function failure(status: number): NativeMapFailure {
-	switch (status) {
+function failure(response: Response): NativeMapFailure {
+	switch (response.status) {
 		case 401:
 		case 403:
 			return 'access';
@@ -104,6 +104,8 @@ function failure(status: number): NativeMapFailure {
 			return 'unsupported';
 		case 429:
 			return 'busy';
+		case 503:
+			return response.headers.get('Retry-After') === '1' ? 'busy' : 'unavailable';
 		default:
 			return 'unavailable';
 	}
@@ -142,7 +144,7 @@ export async function loadNativeManifest(
 	const root = nativeSessionRoot(path);
 	if (!root) return { status: 'unavailable' };
 	const response = await request(root + 'native/manifest.json', signal);
-	if (!response.ok) return { status: failure(response.status) };
+	if (!response.ok) return { status: failure(response) };
 	if (mediaType(response) !== 'application/json') return { status: 'unavailable' };
 	const manifest: Partial<NativeManifest> | null = await response.json();
 	if (
@@ -181,12 +183,27 @@ export async function loadNativeTile(
 	) {
 		return { status: 'unavailable' };
 	}
-	const response = await request(
-		root + 'native/overworld/' + tile.x + '/' + tile.z + '.png',
-		signal
-	);
+	const url = root + 'native/overworld/' + tile.x + '/' + tile.z + '.png';
+	let response = await request(url, signal);
+	if (response.status === 503 && failure(response) === 'busy') {
+		// Minecraft may rewrite the region header during a read. Give that save
+		// one second to finish without changing the session or losing the camera.
+		signal.throwIfAborted();
+		await new Promise<void>((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				signal.removeEventListener('abort', abort);
+				resolve();
+			}, 1_000);
+			function abort() {
+				clearTimeout(timeout);
+				reject(signal.reason);
+			}
+			signal.addEventListener('abort', abort, { once: true });
+		});
+		response = await request(url, signal);
+	}
 	if (response.status === 404) return { status: 'empty' };
-	if (!response.ok) return { status: failure(response.status) };
+	if (!response.ok) return { status: failure(response) };
 	if (mediaType(response) !== 'image/png') return { status: 'unavailable' };
 
 	const count = response.headers.get('X-CarbonPanel-Rendered-Chunks');

@@ -5,7 +5,13 @@
 
 package worldview
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/athNdev/carbon-panel/internal/worldterrain"
+)
 
 func TestNativeTileAssetUsesCanonicalCoordinates(t *testing.T) {
 	if got, ok := parseNativeTileAsset("native/overworld/-5/0.png"); !ok || got != (nativeTileAsset{x: -5}) {
@@ -21,5 +27,13 @@ func TestNativeTileAssetUsesCanonicalCoordinates(t *testing.T) {
 		if got, ok := parseNativeTileAsset(path); ok {
 			t.Errorf("unsafe or noncanonical map asset %q selected %+v", path, got)
 		}
+	}
+}
+
+func TestNativeRegionSaveAsksForTileRetry(t *testing.T) {
+	response := httptest.NewRecorder()
+	writeNativeAssetError(response, worldterrain.ErrRegionChanged)
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get("Retry-After") != "1" {
+		t.Fatalf("region save response code = %d, headers = %v", response.Code, response.Header())
 	}
 }

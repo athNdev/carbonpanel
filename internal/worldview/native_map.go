@@ -86,29 +86,30 @@ func (m *NativeMap) inspect(ctx context.Context, server *storage.Server, ref *v1
 	return scope, nil
 }
 
-func (m *NativeMap) manifest(ctx context.Context, scope nativeScope) (nativeManifest, error) {
-	acc, err := m.storage.ForNode(ctx, scope.node, scope.dataRoot)
+// readNativeLevel validates the active level for every asset. Region chunks
+// may retain older formats after a server upgrade changes level.dat.
+func readNativeLevel(ctx context.Context, acc nodestorage.Accessor, level string) (map[string]any, error) {
+	f, err := acc.OpenRead(ctx, path.Join(level, "level.dat"))
 	if err != nil {
-		return nativeManifest{}, errNativeSourceAbsent
-	}
-	defer func() { _ = acc.Close() }()
-	f, err := acc.OpenRead(ctx, path.Join(scope.level, "level.dat"))
-	if err != nil {
-		return nativeManifest{}, errNativeSourceAbsent
+		return nil, errNativeSourceAbsent
 	}
 	defer func() { _ = f.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(f, nativeLevelLimit+1))
 	if err != nil || len(raw) > nativeLevelLimit {
-		return nativeManifest{}, errNativeSourceAbsent
+		return nil, errNativeSourceAbsent
 	}
 	facts, err := worldlib.LevelDataFacts(raw)
 	if err != nil {
-		return nativeManifest{}, worldterrain.ErrTerrainUnsupported
+		return nil, worldterrain.ErrTerrainUnsupported
 	}
 	version, ok := worldlib.FactInt(facts, "DataVersion")
 	if !ok || !worldterrain.SupportsDataVersion(version) {
-		return nativeManifest{}, worldterrain.ErrTerrainUnsupported
+		return nil, worldterrain.ErrTerrainUnsupported
 	}
+	return facts, ctx.Err()
+}
+
+func makeNativeManifest(facts map[string]any) nativeManifest {
 	manifest := nativeManifest{TileBlocks: worldterrain.TileBlocks, Dimension: "overworld"}
 	x, hasX := worldlib.FactInt(facts, "SpawnX")
 	z, hasZ := worldlib.FactInt(facts, "SpawnZ")
@@ -123,11 +124,11 @@ func (m *NativeMap) manifest(ctx context.Context, scope nativeScope) (nativeMani
 	if hasX && hasZ && x >= -30_000_000 && x < 30_000_000 && z >= -30_000_000 && z < 30_000_000 {
 		manifest.Spawn = &nativeSpawn{X: x, Z: z}
 	}
-	return manifest, nil
+	return manifest
 }
 
 // serveAsset runs only after the existing map session and server ACL checks.
-// The server's current binding and node generation must still match the lease.
+// The server's current binding, node generation and restore ID must match the lease.
 func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *storage.Server, issued nativeScope, asset string) {
 	tileAsset, isTile := parseNativeTileAsset(asset)
 	if !isTile && asset != nativeManifestPath {
@@ -151,16 +152,20 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 		return
 	}
 
+	acc, err := m.storage.ForNode(ctx, scope.node, scope.dataRoot)
+	if err != nil {
+		http.Error(w, "saved terrain is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer func() { _ = acc.Close() }()
+	facts, err := readNativeLevel(ctx, acc, scope.level)
+	if err != nil {
+		writeNativeAssetError(w, err)
+		return
+	}
+
 	if asset == nativeManifestPath {
-		manifest, err := m.manifest(ctx, scope)
-		if errors.Is(err, worldterrain.ErrTerrainUnsupported) {
-			http.Error(w, "this saved terrain format is unsupported", http.StatusUnprocessableEntity)
-			return
-		}
-		if err != nil {
-			http.Error(w, "saved terrain is unavailable", http.StatusServiceUnavailable)
-			return
-		}
+		manifest := makeNativeManifest(facts)
 		if !m.currentScopeMatches(ctx, scope) {
 			http.Error(w, "world changed; reopen the map", http.StatusConflict)
 			return
@@ -173,20 +178,13 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 		return
 	}
 
-	tile, err := m.renderTile(ctx, scope, worldterrain.TileCoord{X: tileAsset.x, Z: tileAsset.z})
+	tile, err := worldterrain.RenderOverworldTile(ctx, acc, scope.level, worldterrain.TileCoord{X: tileAsset.x, Z: tileAsset.z})
 	if err != nil {
-		status, message := http.StatusServiceUnavailable, "saved terrain is temporarily unavailable"
-		switch {
-		case errors.Is(err, worldterrain.ErrTerrainMissing), errors.Is(err, worldterrain.ErrTileCoordinate):
-			status, message = http.StatusNotFound, "no saved terrain at these coordinates"
-		case errors.Is(err, worldterrain.ErrTerrainUnsupported):
-			status, message = http.StatusUnprocessableEntity, "this saved terrain format is unsupported"
-		case errors.Is(err, worldterrain.ErrRegionChanged):
-			status, message = http.StatusConflict, "this region is being saved; retry the tile"
-		case errors.Is(err, errNativeWorldMismatch):
-			status, message = http.StatusConflict, "world changed or is temporarily unavailable; reopen the map"
-		}
-		http.Error(w, message, status)
+		writeNativeAssetError(w, err)
+		return
+	}
+	if !m.currentScopeMatches(ctx, scope) {
+		http.Error(w, "world changed; reopen the map", http.StatusConflict)
 		return
 	}
 	w.Header().Set("Content-Type", "image/png")
@@ -201,20 +199,18 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 	}
 }
 
-func (m *NativeMap) renderTile(ctx context.Context, scope nativeScope, coord worldterrain.TileCoord) (worldterrain.Tile, error) {
-	acc, err := m.storage.ForNode(ctx, scope.node, scope.dataRoot)
-	if err != nil {
-		return worldterrain.Tile{}, err
+func writeNativeAssetError(w http.ResponseWriter, err error) {
+	status, message := http.StatusServiceUnavailable, "saved terrain is temporarily unavailable"
+	switch {
+	case errors.Is(err, worldterrain.ErrTerrainMissing), errors.Is(err, worldterrain.ErrTileCoordinate):
+		status, message = http.StatusNotFound, "no saved terrain at these coordinates"
+	case errors.Is(err, worldterrain.ErrTerrainUnsupported):
+		status, message = http.StatusUnprocessableEntity, "this saved terrain format is unsupported"
+	case errors.Is(err, worldterrain.ErrRegionChanged):
+		w.Header().Set("Retry-After", "1")
+		message = "this region is being saved; retry the tile"
 	}
-	defer func() { _ = acc.Close() }()
-	tile, err := worldterrain.RenderOverworldTile(ctx, acc, scope.level, coord)
-	if err != nil {
-		return worldterrain.Tile{}, err
-	}
-	if !m.currentScopeMatches(ctx, scope) {
-		return worldterrain.Tile{}, errNativeWorldMismatch
-	}
-	return tile, nil
+	http.Error(w, message, status)
 }
 
 func (m *NativeMap) currentScopeMatches(ctx context.Context, scope nativeScope) bool {

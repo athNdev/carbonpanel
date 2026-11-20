@@ -30,12 +30,15 @@ The World View workspace can open a built-in map for a supported Java save on
 the controller's local Docker node. Explicitly configured renderers and an
 existing discoverable BlueMap renderer keep their current selection. A native
 map reads only saved Overworld data. Check the tile's saved time and coverage
-when terrain is still being generated or saved.
+when terrain is still being generated or saved. Use **Copy map link** to
+share the current coordinates with someone who can read the same world.
+Ordinary save churn retries the affected tile in place.
 
 The panel authorizes its native manifest and PNG requests through the existing
 short-lived World View key and the operator's server-specific read permission.
-The server's canonical level, current node generation and World Library
-revision scope each key. The native renderer accepts only Overworld coordinate
+The server's canonical level, current node generation, World Library revision
+and last restore operation scope each key. Restoring a backup invalidates open
+map keys even when the level folder name stays the same. The native renderer accepts only Overworld coordinate
 tile requests, and permits two concurrent renders in the controller. A busy
 request can be retried. The server supplies only a rendered tile, not a raw
 region file. Viewing uses no runtime module, game assets or external services.

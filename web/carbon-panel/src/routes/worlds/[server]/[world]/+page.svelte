@@ -82,6 +82,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { adminActions, buildAdminRequest, type AdminAction } from '$lib/features/worldview/admin';
 	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
 	import NativeMapViewport from '$lib/components/worldview/NativeMapViewport.svelte';
+	import { parseNativeCoordinate, type MapPoint } from '$lib/features/worldview/native-map';
 	import { nativeMapMarkers } from '$lib/features/worldview/native-map-markers';
 	import { prefersReducedMotion } from '$lib/motion';
 
@@ -173,6 +174,19 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let x = $derived(parseNumber(page.url.searchParams.get('x')) ?? 0);
 	let z = $derived(parseNumber(page.url.searchParams.get('z')) ?? 0);
 	let layer = $derived(page.url.searchParams.get('layer') || 'all');
+	let nativeLocation = $derived.by(() => {
+		const x = parseNativeCoordinate(page.url.searchParams.get('x') ?? '');
+		const z = parseNativeCoordinate(page.url.searchParams.get('z') ?? '');
+		return x === null || z === null ? null : { x, z };
+	});
+
+	function mapLink(point: MapPoint): string {
+		const path = resolve('/worlds/[server]/[world]', { server: serverId, world: worldKey });
+		const url = new URL(path, window.location.origin);
+		url.searchParams.set('x', String(point.x));
+		url.searchParams.set('z', String(point.z));
+		return url.href;
+	}
 
 	function parseNumber(value: string | null): number | null {
 		if (value === null || value.trim() === '') return null;
@@ -703,6 +717,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								proxyPath={embed.src}
 								title="World terrain"
 								preservePositionOnRenewal
+								location={nativeLocation}
+								{mapLink}
 								markers={nativeMarkers}
 								markersUnavailable={Boolean(overlaysError)}
 								onReopen={() => void loadSession()}

@@ -384,8 +384,11 @@ func (s *Service) targetFor(ctx context.Context, server *storage.Server, request
 			target.Dimension = "overworld"
 			target.RendererType = v1.RendererType_RENDERER_TYPE_NATIVE
 			target.RendererState = v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE
-			target.Renderer = &v1.RendererDescriptor{
-				Type: target.RendererType, Capabilities: []string{CapabilityMap2D}, WebBasePath: ProxyPrefix,
+			target.Renderer = &v1.RendererDescriptor{Type: target.RendererType, WebBasePath: ProxyPrefix}
+			for _, cap := range nativeCapabilities() {
+				if cap.GetSupported() {
+					target.Renderer.Capabilities = append(target.Renderer.Capabilities, cap.GetName())
+				}
 			}
 			target.Freshness = &v1.Observation{
 				Source: nativeSource, Applicability: "saved Java terrain", Confidence: "detected",
@@ -459,11 +462,14 @@ func (s *Service) nativeScopeFor(ctx context.Context, server *storage.Server, re
 func nativeCapabilities() []*v1.Capability {
 	caps := make([]*v1.Capability, 0, len(AllCapabilityNames))
 	for _, name := range AllCapabilityNames {
-		detail := "Native terrain does not provide this feature."
-		if name == CapabilityMap2D {
-			detail = "Saved Java Overworld terrain"
+		switch name {
+		case CapabilityMap2D:
+			caps = append(caps, capability(name, true, "Saved Java Overworld terrain"))
+		case CapabilityMarkers:
+			caps = append(caps, capability(name, true, "Saved panel markers, waypoints and points of interest on the Overworld map"))
+		default:
+			caps = append(caps, capability(name, false, "Native terrain does not provide this feature."))
 		}
-		caps = append(caps, capability(name, name == CapabilityMap2D, detail))
 	}
 	return caps
 }
