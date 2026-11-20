@@ -2479,10 +2479,19 @@ def channel_oci_parity(observations, digest, commit, registries=CHANNEL_REGISTRI
         if info.get("digest") != digest:
             return False, f"{registry} digest differs from the verified digest"
         # channel-observe serialises through JSON, so platform pairs arrive
-        # as lists of lists. Normalise them to the tuple form used by the
-        # frozenset; otherwise set() raises on an unhashable inner list.
-        observed_platforms = {tuple(platform)
-                              for platform in info.get("platforms", ())}
+        # as lists of lists. Accept only well-formed two-string pairs; a
+        # malformed entry is refused deterministically instead of being
+        # silently ignored or coerced from arbitrary iterable/dict keys.
+        raw_platforms = info.get("platforms", ())
+        if not isinstance(raw_platforms, (list, tuple, set, frozenset)):
+            return False, f"{registry} platform evidence has an invalid shape"
+        observed_platforms = set()
+        for platform in raw_platforms:
+            if (not isinstance(platform, (list, tuple))
+                    or len(platform) != 2
+                    or not all(isinstance(part, str) for part in platform)):
+                return False, f"{registry} platform evidence has a malformed entry"
+            observed_platforms.add((platform[0], platform[1]))
         if not REQUIRED_PLATFORMS <= observed_platforms:
             return False, f"{registry} lacks both required Linux architectures"
         if info.get("revision") != commit:

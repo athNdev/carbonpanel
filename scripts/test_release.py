@@ -2228,6 +2228,43 @@ class ChannelPromotionTests(unittest.TestCase):
             observations, self.DIGEST, self.CANDIDATE)
         self.assertTrue(ok, reason)
 
+    def test_oci_parity_refuses_malformed_platform_entries(self):
+        for bad in ({"linux": "amd64"}, ["linux/amd64"], [("linux", "amd64", "x")],
+                    [("linux", 1)], "linux/amd64"):
+            observations = self.immutable()
+            for registry in observations:
+                state, info = observations[registry]
+                observations[registry] = (state, {**info, "platforms": bad})
+            ok, reason = release.channel_oci_parity(
+                observations, self.DIGEST, self.CANDIDATE)
+            self.assertFalse(ok, (bad, reason))
+            self.assertIn("platform evidence", reason)
+
+    def test_stable_alias_decision_cli_accepts_json_platform_lists(self):
+        def obs(digest):
+            return ("present", {"digest": digest,
+                                "platforms": [["linux", "amd64"], ["linux", "arm64"]],
+                                "revision": self.CANDIDATE})
+        latest = {"docker_hub": obs(self.DIGEST), "ghcr": obs(self.DIGEST)}
+        stable = {"docker_hub": ("absent", {}), "ghcr": ("absent", {})}
+        out = io.StringIO()
+        with patch("sys.argv", ["release.py", "stable-alias-decision",
+                                "--stable", json.dumps(stable),
+                                "--latest", json.dumps(latest)]), redirect_stdout(out):
+            release.main()
+        decision = json.loads(out.getvalue())
+        self.assertIn(decision["action"], ("promote", "first-publish"))
+        self.assertEqual(decision["digest"], self.DIGEST)
+        bad = {"docker_hub": ("present", {"digest": self.DIGEST,
+                                          "platforms": {"linux": "amd64"},
+                                          "revision": self.CANDIDATE}),
+               "ghcr": obs(self.DIGEST)}
+        with patch("sys.argv", ["release.py", "stable-alias-decision",
+                                "--stable", json.dumps(stable),
+                                "--latest", json.dumps(bad)]), redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, "platform evidence"):
+                release.main()
+
     # --- Move state machine (first publish / retry / stale / rollback) -------
 
     def make_move(self, **overrides):
