@@ -32,6 +32,10 @@ The native viewport reads saved Overworld terrain through its map session.
 It bounds visible tile requests and aborts work outside the current session
 or viewport. Empty and partial saves are explicit; controls move the map view
 and do not modify the world.
+The native Overworld map projects existing non-sensitive markers, waypoints,
+and points of interest from the scoped ListMapOverlays result. The marker
+list can center offscreen points. Native markers include neither live player
+locations nor region overlays.
 
 Renderer traffic is same-origin only. The browser receives an opaque,
 short-lived session key, never a renderer URL or port; every proxied asset

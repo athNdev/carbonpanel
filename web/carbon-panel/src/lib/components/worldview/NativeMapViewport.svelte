@@ -1,6 +1,18 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <script lang="ts">
-	import { Crosshair, Copy, Minus, Plus, RefreshCw } from '@lucide/svelte';
+	import {
+		Crosshair,
+		Copy,
+		Flag,
+		Landmark,
+		MapPin,
+		Minus,
+		Plus,
+		RefreshCw,
+		X
+	} from '@lucide/svelte';
+	import CarbonAccordion from '$lib/components/carbon/CarbonAccordion.svelte';
+	import CarbonAccordionItem from '$lib/components/carbon/CarbonAccordionItem.svelte';
 	import CarbonButton from '$lib/components/carbon/CarbonButton.svelte';
 	import CarbonErrorState from '$lib/components/carbon/CarbonErrorState.svelte';
 	import CarbonInlineLoading from '$lib/components/carbon/CarbonInlineLoading.svelte';
@@ -22,19 +34,31 @@
 		type TileResult
 	} from '$lib/features/worldview/native-map';
 	import { createNativeTileLoader } from '$lib/features/worldview/native-map-loader';
+	import {
+		projectNativeMapPoint,
+		type NativeMapMarker,
+		type NativeMarkerKind
+	} from '$lib/features/worldview/native-map-markers';
+	import { overlayKindLabel } from '$lib/features/worldview/overlays';
 
 	let {
 		proxyPath,
 		title,
 		preservePositionOnRenewal = false,
-		onReopen
+		onReopen,
+		markers = [],
+		markersUnavailable = false
 	}: {
 		proxyPath: string;
 		title: string;
 		preservePositionOnRenewal?: boolean;
 		onReopen?: () => void;
+		markers?: readonly NativeMapMarker[];
+		markersUnavailable?: boolean;
 	} = $props();
 	const id = $props.id();
+	const markerIcons = { marker: MapPin, waypoint: Flag, poi: Landmark };
+	const markerInset = 22;
 	const mostImportantFailure: NativeMapFailure[] = [
 		'access',
 		'unsupported',
@@ -61,6 +85,11 @@
 	let tiles = $state.raw<ReadonlyMap<string, TileResult>>(new Map());
 	let loader = $state.raw<ReturnType<typeof createNativeTileLoader> | undefined>();
 	let dragging = $state(false);
+	let showMarkers = $state(true);
+	let selectedMarkerId = $state('');
+	let viewport = $state<HTMLDivElement>();
+	let markerTrigger: HTMLButtonElement | undefined;
+	let selectedMarker = $derived(markers.find((marker) => marker.id === selectedMarkerId));
 	let positionedPath: string | undefined;
 	let drag: { pointer: number; x: number; y: number; center: MapPoint } | undefined;
 
@@ -71,6 +100,19 @@
 	let scale = $derived(blockScale(size, zoom));
 	let visible = $derived(visibleNativeTiles(center, size, scale));
 	let block = $derived({ x: Math.floor(center.x), z: Math.floor(center.z) });
+	let visiblePins = $derived(
+		showMarkers
+			? markers
+					.map((marker) => ({ marker, ...projectNativeMapPoint(marker, center, size, scale) }))
+					.filter(
+						({ left, top }) =>
+							left >= markerInset &&
+							left <= size.width - markerInset &&
+							top >= markerInset &&
+							top <= size.height - markerInset
+					)
+			: []
+	);
 
 	$effect(() => {
 		const path = proxyPath;
@@ -163,6 +205,7 @@
 	}
 
 	function keyPan(event: KeyboardEvent) {
+		if (event.target !== event.currentTarget) return;
 		if (event.ctrlKey || event.altKey || event.metaKey || (event.shiftKey && event.key !== '+'))
 			return;
 		const step = Math.max(4, Math.round(48 / scale));
@@ -194,6 +237,7 @@
 
 	function startPan(event: PointerEvent) {
 		if (drag || event.button !== 0) return;
+		if (event.target instanceof Element && event.target.closest('button')) return;
 		const element = event.currentTarget as HTMLElement;
 		element.setPointerCapture(event.pointerId);
 		drag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, center: { ...center } };
@@ -225,10 +269,36 @@
 		}
 	}
 
+	function selectMarker(markerId: string, event: MouseEvent) {
+		markerTrigger = event.currentTarget as HTMLButtonElement;
+		selectedMarkerId = markerId;
+	}
+
+	function focusMarker(marker: NativeMapMarker, event: MouseEvent) {
+		showMarkers = true;
+		selectMarker(marker.id, event);
+		moveTo(marker.x, marker.z);
+		viewport?.focus();
+	}
+
+	function closeMarkerDetails() {
+		selectedMarkerId = '';
+		(markerTrigger?.isConnected ? markerTrigger : viewport)?.focus();
+	}
+
+	function markerName(marker: NativeMapMarker): string {
+		return overlayKindLabel(marker.kind) + ': ' + marker.label;
+	}
+
 	function tilePixel(block: number, centerBlock: number, viewport: number): number {
 		return Math.round(viewport / 2 + (block * TILE_BLOCKS - centerBlock) * scale);
 	}
 </script>
+
+{#snippet kindIcon(kind: NativeMarkerKind)}
+	{@const Icon = markerIcons[kind]}
+	<Icon class="h-4 w-4 shrink-0" aria-hidden="true" />
+{/snippet}
 
 <section class="min-w-0 border border-border bg-card" aria-labelledby={id + '-title'}>
 	<header class="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
@@ -292,6 +362,7 @@
 			aria-describedby={id + '-controls'}
 			class="map-viewport focus-ring relative isolate w-full touch-none overflow-hidden bg-background select-none"
 			class:dragging
+			bind:this={viewport}
 			bind:clientWidth={size.width}
 			bind:clientHeight={size.height}
 			onkeydown={keyPan}
@@ -321,7 +392,48 @@
 			<div class="pointer-events-none absolute inset-0 grid place-items-center" aria-hidden="true">
 				<Crosshair class="map-cursor h-5 w-5" strokeWidth={2} />
 			</div>
+			{#each visiblePins as { marker, left, top } (marker.id)}
+				<button
+					type="button"
+					class="focus-ring absolute z-10 grid size-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer place-items-center border border-border bg-card text-foreground shadow-sm hover:bg-accent aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground"
+					style:left={left + 'px'}
+					style:top={top + 'px'}
+					aria-label={markerName(marker)}
+					aria-pressed={selectedMarkerId === marker.id}
+					title={markerName(marker)}
+					onclick={(event) => selectMarker(selectedMarkerId === marker.id ? '' : marker.id, event)}
+				>
+					{@render kindIcon(marker.kind)}
+				</button>
+			{/each}
 		</div>
+		{#if selectedMarker && showMarkers}
+			<div
+				class="flex flex-wrap items-start justify-between gap-2 border-t border-border bg-background px-4 py-3"
+			>
+				<div role="status" class="flex min-w-0 items-start gap-2">
+					{@render kindIcon(selectedMarker.kind)}
+					<div class="min-w-0">
+						<h3 class="text-sm font-semibold break-words text-foreground">
+							{selectedMarker.label}
+						</h3>
+						<p class="mt-1 text-xs break-words text-muted-foreground">
+							{overlayKindLabel(selectedMarker.kind)} ·
+							<code>X: {selectedMarker.x} · Z: {selectedMarker.z}</code>
+						</p>
+					</div>
+				</div>
+				<CarbonButton
+					kind="ghost"
+					size="sm"
+					iconOnly
+					aria-label="Close marker details"
+					onclick={closeMarkerDetails}
+				>
+					<X class="h-4 w-4" aria-hidden="true" />
+				</CarbonButton>
+			</div>
+		{/if}
 		<div class="space-y-3 border-t border-border px-4 py-3">
 			<div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
 				<div class="min-w-0 text-xs text-muted-foreground">
@@ -381,6 +493,50 @@
 				<p role="status" class="text-xs text-muted-foreground">{copyNote}</p>
 			{/if}
 		</div>
+		{#if markersUnavailable}
+			<p role="status" class="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+				{markers.length
+					? 'Could not refresh map markers. Showing the last known markers.'
+					: 'Map markers are unavailable.'}
+			</p>
+		{/if}
+		{#if markers.length}
+			<CarbonAccordion>
+				<CarbonAccordionItem title={'Map markers (' + markers.length + ')'}>
+					<label class="mb-3 flex items-center gap-2 text-xs text-foreground">
+						<input
+							type="checkbox"
+							bind:checked={showMarkers}
+							class="focus-ring size-4 cursor-pointer"
+						/>
+						Show markers on map
+					</label>
+					<ul
+						class="max-h-56 divide-y divide-border overflow-auto"
+						aria-label="Map marker locations"
+					>
+						{#each markers as marker (marker.id)}
+							<li>
+								<button
+									type="button"
+									class="focus-ring flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left text-sm hover:bg-accent"
+									aria-label={'Center map on ' + markerName(marker)}
+									onclick={(event) => focusMarker(marker, event)}
+								>
+									{@render kindIcon(marker.kind)}
+									<span class="min-w-0 break-words">
+										<span class="block text-foreground">{marker.label}</span>
+										<span class="block text-xs text-muted-foreground">
+											{overlayKindLabel(marker.kind)} · <code>X: {marker.x} · Z: {marker.z}</code>
+										</span>
+									</span>
+								</button>
+							</li>
+						{/each}
+					</ul>
+				</CarbonAccordionItem>
+			</CarbonAccordion>
+		{/if}
 	{/if}
 </section>
 

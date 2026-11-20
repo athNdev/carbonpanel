@@ -82,6 +82,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	import { adminActions, buildAdminRequest, type AdminAction } from '$lib/features/worldview/admin';
 	import BlueMapInstall from '$lib/components/worldview/BlueMapInstall.svelte';
 	import NativeMapViewport from '$lib/components/worldview/NativeMapViewport.svelte';
+	import { nativeMapMarkers } from '$lib/features/worldview/native-map-markers';
 	import { prefersReducedMotion } from '$lib/motion';
 
 	const store = createWorldViewStore({
@@ -167,6 +168,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let dimension = $derived(
 		page.url.searchParams.get('dimension') || statusTarget?.dimension || 'overworld'
 	);
+	let overlayDimension = $derived(view === 'saved' ? 'overworld' : dimension);
+	let nativeMarkers = $derived(nativeMapMarkers(overlays));
 	let x = $derived(parseNumber(page.url.searchParams.get('x')) ?? 0);
 	let z = $derived(parseNumber(page.url.searchParams.get('z')) ?? 0);
 	let layer = $derived(page.url.searchParams.get('layer') || 'all');
@@ -270,7 +273,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		const attempt = ++overlaysAttempt;
 		try {
 			const response = await rpcClient.worldView.listMapOverlays(
-				create(ListMapOverlaysRequestSchema, { serverId, worldRef, dimension }),
+				create(ListMapOverlaysRequestSchema, { serverId, worldRef, dimension: overlayDimension }),
 				silentCallOptions
 			);
 			if (!current() || attempt !== overlaysAttempt) return;
@@ -700,6 +703,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 								proxyPath={embed.src}
 								title="World terrain"
 								preservePositionOnRenewal
+								markers={nativeMarkers}
+								markersUnavailable={Boolean(overlaysError)}
 								onReopen={() => void loadSession()}
 							/>
 						{/key}
@@ -815,88 +820,90 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						</CarbonAccordionItem>
 					{/if}
 
-					<CarbonAccordionItem title="Overlays" bind:open={overlayControlsOpen}>
-						<div class="space-y-3">
-							{#if !playerVisible && canObserve && matrix.players(true).supported}
-								<CarbonButton kind="tertiary" size="sm" onclick={togglePlayers}>
-									<Users class="h-3.5 w-3.5" />
-									<span>Show player markers</span>
-								</CarbonButton>
-							{:else if playerVisible}
-								<CarbonButton kind="tertiary" size="sm" onclick={togglePlayers}>
-									<span>Hide player markers</span>
-								</CarbonButton>
-							{:else}
-								<p class="text-xs text-muted-foreground">{matrix.players(canObserve).reason}</p>
-							{/if}
-							{#if visibilityNote}
-								<p class="text-xs text-success-text">{visibilityNote}</p>
-							{/if}
+					{#if view !== 'saved'}
+						<CarbonAccordionItem title="Overlays" bind:open={overlayControlsOpen}>
+							<div class="space-y-3">
+								{#if !playerVisible && canObserve && matrix.players(true).supported}
+									<CarbonButton kind="tertiary" size="sm" onclick={togglePlayers}>
+										<Users class="h-3.5 w-3.5" />
+										<span>Show player markers</span>
+									</CarbonButton>
+								{:else if playerVisible}
+									<CarbonButton kind="tertiary" size="sm" onclick={togglePlayers}>
+										<span>Hide player markers</span>
+									</CarbonButton>
+								{:else}
+									<p class="text-xs text-muted-foreground">{matrix.players(canObserve).reason}</p>
+								{/if}
+								{#if visibilityNote}
+									<p class="text-xs text-success-text">{visibilityNote}</p>
+								{/if}
 
-							<CarbonSelect
-								label="Overlay layer"
-								value={layer}
-								onchange={(event) =>
-									writeQuery({ layer: (event.currentTarget as HTMLSelectElement).value })}
-							>
-								<option value="all">All overlays</option>
-								<option value="marker">Markers</option>
-								<option value="poi">Points of interest</option>
-								<option value="waypoint">Waypoints</option>
-								<option value="region">Regions</option>
-							</CarbonSelect>
+								<CarbonSelect
+									label="Overlay layer"
+									value={layer}
+									onchange={(event) =>
+										writeQuery({ layer: (event.currentTarget as HTMLSelectElement).value })}
+								>
+									<option value="all">All overlays</option>
+									<option value="marker">Markers</option>
+									<option value="poi">Points of interest</option>
+									<option value="waypoint">Waypoints</option>
+									<option value="region">Regions</option>
+								</CarbonSelect>
 
-							{#if matrix.overlayEditing(canUpdate).supported}
-								<CarbonButton kind="secondary" size="sm" onclick={() => openOverlayForm(null)}>
-									<MapPin class="h-3.5 w-3.5" />
-									<span>Add overlay</span>
-								</CarbonButton>
-							{:else}
-								<p class="text-xs text-muted-foreground">
-									{matrix.overlayEditing(canUpdate).reason}
-								</p>
-							{/if}
+								{#if matrix.overlayEditing(canUpdate).supported}
+									<CarbonButton kind="secondary" size="sm" onclick={() => openOverlayForm(null)}>
+										<MapPin class="h-3.5 w-3.5" />
+										<span>Add overlay</span>
+									</CarbonButton>
+								{:else}
+									<p class="text-xs text-muted-foreground">
+										{matrix.overlayEditing(canUpdate).reason}
+									</p>
+								{/if}
 
-							{#if overlaysError}
-								<p class="text-xs text-destructive-text">
-									{formatRpcError(overlaysError, 'Overlays could not be loaded.')}
-								</p>
-							{:else if filteredOverlays.length === 0}
-								<p class="text-xs text-muted-foreground">
-									No overlays in this layer for the current state.
-								</p>
-							{:else}
-								<CarbonStructuredList>
-									{#each filteredOverlays as overlay (overlay.id)}
-										<div
-											class="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs"
-										>
-											<div class="min-w-0">
-												<p class="truncate font-medium">{overlayDisplay(overlay).label}</p>
-												<p class="text-muted-foreground">
-													{overlayKindLabel(overlay.kind)}{overlayDisplay(overlay).coordinates
-														? ` · ${overlayDisplay(overlay).coordinates}`
-														: ''}
-												</p>
+								{#if overlaysError}
+									<p class="text-xs text-destructive-text">
+										{formatRpcError(overlaysError, 'Overlays could not be loaded.')}
+									</p>
+								{:else if filteredOverlays.length === 0}
+									<p class="text-xs text-muted-foreground">
+										No overlays in this layer for the current state.
+									</p>
+								{:else}
+									<CarbonStructuredList>
+										{#each filteredOverlays as overlay (overlay.id)}
+											<div
+												class="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-xs"
+											>
+												<div class="min-w-0">
+													<p class="truncate font-medium">{overlayDisplay(overlay).label}</p>
+													<p class="text-muted-foreground">
+														{overlayKindLabel(overlay.kind)}{overlayDisplay(overlay).coordinates
+															? ` · ${overlayDisplay(overlay).coordinates}`
+															: ''}
+													</p>
+												</div>
+												{#if matrix.overlayEditing(canUpdate).supported}
+													<CarbonButton
+														kind="tertiary"
+														size="sm"
+														onclick={() => openOverlayForm(overlay)}
+													>
+														Edit
+													</CarbonButton>
+												{/if}
 											</div>
-											{#if matrix.overlayEditing(canUpdate).supported}
-												<CarbonButton
-													kind="tertiary"
-													size="sm"
-													onclick={() => openOverlayForm(overlay)}
-												>
-													Edit
-												</CarbonButton>
-											{/if}
-										</div>
-									{/each}
-								</CarbonStructuredList>
-							{/if}
-							<p class="text-xs text-muted-foreground">
-								Player profile links are not available in this build; marker labels stay opaque.
-							</p>
-						</div>
-					</CarbonAccordionItem>
+										{/each}
+									</CarbonStructuredList>
+								{/if}
+								<p class="text-xs text-muted-foreground">
+									Player profile links are not available in this build; marker labels stay opaque.
+								</p>
+							</div>
+						</CarbonAccordionItem>
+					{/if}
 
 					<CarbonAccordionItem
 						title="Administration"
