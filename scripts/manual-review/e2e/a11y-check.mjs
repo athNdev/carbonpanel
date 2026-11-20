@@ -135,16 +135,24 @@ async function runShellJourney(browser, base) {
 				contentType: 'application/json', body: JSON.stringify({ server: measured })
 			}));
 			await page.goto(root + '/servers/srv-1');
-			const tracks = page.locator('.telemetry-track');
-			await tracks.first().waitFor();
-			const geometry = await tracks.evaluateAll((elements) => elements.map((track) => {
-				const fill = track.firstElementChild;
-				return {
-					height: track.getBoundingClientRect().height,
-					percent: Math.round(100 * fill.getBoundingClientRect().width / track.getBoundingClientRect().width),
-					visibleFill: getComputedStyle(fill).backgroundColor !== getComputedStyle(track).backgroundColor
-				};
-			}));
+			// The route can replace its initial DOM during hydration. Read the complete
+			// painted sample in one browser turn instead of sampling after a locator wait.
+			const sample = await page.waitForFunction(() => {
+				const tracks = [...document.querySelectorAll('.telemetry-track')];
+				if (tracks.length !== 2) return;
+				const bars = tracks.map((track) => {
+					const fill = track.firstElementChild;
+					const box = track.getBoundingClientRect();
+					return {
+						height: box.height,
+						percent: Math.round(100 * fill.getBoundingClientRect().width / box.width),
+						visibleFill: getComputedStyle(fill).backgroundColor !== getComputedStyle(track).backgroundColor
+					};
+				});
+				if (bars[0].percent === 50 && bars[1].percent === 35) return bars;
+			}, null, { timeout: 10000 });
+			const geometry = await sample.jsonValue();
+			await sample.dispose();
 			assert.deepEqual(geometry.map((bar) => bar.percent), [50, 35]);
 			assert.ok(geometry.every((bar) => bar.height >= 10 && bar.visibleFill));
 			if (process.env.UI_PASS_SHOTS)
