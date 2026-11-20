@@ -20,37 +20,24 @@
   placeholder digests and moving (undated) URLs; fixture mode is explicitly
   synthetic and cannot be used for artifact claims.
 
-## Real blocker — guest boot NOT qualified (external)
+## Disposable Proxmox readiness
 
-The originating host has **no `/dev/kvm`** and **no LXC tooling**
-(`lxc`, `lxc-create`, `lxc-copy`, `pct`, `systemd-nspawn`), and no privileged
-access to provision one. The task-owned WSL 2 Ubuntu distribution likewise has
-no `/dev/kvm` and no LXC tools; installing them would require elevation and
-host/WSL configuration changes, which are out of scope. A real Ubuntu 24.04 LXC
-rootfs therefore cannot be imported and booted in this lane. This is an
-**external qualification blocker**, not a code defect and not a pass:
+Run the read-only readiness check from the repository root with a new,
+caller-owned work directory:
 
-- No live Proxmox/LXC import or boot was performed.
-- No nested Docker daemon was started inside a real guest.
-- No effective kernel enforcement (user namespaces, cgroup delegation, seccomp,
-  AppArmor, `/dev` nesting) was observed on a real guest.
-- No gameplay compatibility or performance evidence exists.
+```sh
+python3 packaging/node-lxc/node_lxc_artifact.py boot-qualify \
+  --arch amd64 --work-dir "$work_dir" --fetch
+```
 
-`node_lxc_artifact.py boot-qualify` provides the fail-closed import/boot
-verification path: it verifies real signed upstream archive bytes in an owned
-disposable path (or consumes a staged verified archive) and then probes for an
-unprivileged LXC-capable disposable runner. It records explicit prerequisite
-blockers and writes a JSON report; it returns `status: ok` only when an actual
-unprivileged import and boot are performed and evidenced. The manual workflow
-`.github/workflows/lxc-boot-qualification.yml` runs this command on a disposable
-runner and uploads the report as evidence (fail-closed on blocked/unqualified
-runs). Real byte-level archive evidence remains in
-[SIGNED-ARCHIVE-EVIDENCE.md](SIGNED-ARCHIVE-EVIDENCE.md). Live clean
-import/boot evidence (epic milestone M5) remains outstanding until a capable
-runner produces it.
+The command verifies and inspects the signed upstream root and LXD metadata
+archives. It checks for Linux, Proxmox tools and cgroup v2 without invoking
+guest management tools. The report records `BOOT_QUALIFICATION_BLOCKED` and
+`attempted: false` even if those prerequisites are present. A runner probe
+cannot establish fixture ownership or authorize guest operations. The manual
+`.github/workflows/lxc-boot-qualification.yml` uploads the same JSON report.
 
-## Not claimed
-
-No live host provisioning, global host configuration change, image publication,
-registry push, release, or Carbon Panel application release is part of this
-lane. No merge is authorized by this qualification record.
+The available WSL and hosted environments lack a designated disposable
+Proxmox fixture. Milestone M5 requires a real unprivileged import, two boots,
+effective confinement, shared enrollment and nested runtime evidence from
+such a fixture. See [the mode documentation](../../../docs/node-lxc-mode.md#disposable-proxmox-qualification).

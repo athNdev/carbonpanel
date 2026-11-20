@@ -6,7 +6,10 @@ directory. This suite qualifies refusals and state transitions only.
 """
 from __future__ import annotations
 
+import argparse
 import base64
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -15,6 +18,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -141,7 +145,7 @@ class NodeLxCFixtureTests(unittest.TestCase):
         shutil.copytree(FIXTURES / "rootfs-minimal", seeded)
         (seeded / "leak.json").write_text('{"password": "hunter2"}\n')
         import node_lxc_artifact as tool
-        digest = tool.digest_of_files(tool.canonical_files(seeded))
+        digest = tool.fixture_source_digest(tool.canonical_files(seeded))
         prov = json.loads(PROVENANCE.read_text())
         prov["fixture"]["manifest_sha256"] = digest
         prov_path = self.work / "seeded-provenance.json"
@@ -168,7 +172,7 @@ class NodeLxCFixtureTests(unittest.TestCase):
 
     def test_06b_line_ending_independent_digest(self) -> None:
         """A CRLF checkout must produce the same pinned digest as an LF source."""
-        from node_lxc_artifact import canonical_file_digest, canonical_files, digest_of_files
+        from node_lxc_artifact import canonical_file_digest, canonical_files, fixture_source_digest
         lf = self.work / "digest-lf"
         crlf = self.work / "digest-crlf"
         for root in (lf, crlf):
@@ -185,12 +189,25 @@ class NodeLxCFixtureTests(unittest.TestCase):
         sample = crlf / "etc" / "os-release"
         sample.write_bytes(sample.read_bytes().replace(b"\n", b"\r\n"))
         self.assertEqual(canonical_file_digest(sample), canonical_file_digest(lf / "etc" / "os-release"))
-        self.assertEqual(digest_of_files(canonical_files(crlf)), digest_of_files(canonical_files(lf)))
+        self.assertEqual(fixture_source_digest(canonical_files(crlf)), fixture_source_digest(canonical_files(lf)))
         # The CRLF tree still builds against the same pin.
         ok("build", "--source-dir", str(crlf),
            "--out-dir", str(self.work / "artifact-crlf"), "--provenance", str(PROVENANCE),
            "--version", "runtime-v5.0.0", "--platform", "amd64", "--sign-key", str(self.priv), "--fixture")
         ok("verify", "--artifact-dir", str(self.work / "artifact-crlf"), "--public-key", str(self.pub))
+
+    def test_06h_fixture_source_pin_ignores_checkout_mode_only(self) -> None:
+        import node_lxc_artifact as tool
+
+        files = tool.canonical_files(FIXTURES / "rootfs-minimal")
+        checkout_modes = {
+            path: dict(info, mode="0666" if info["mode"] == "0644" else "0644")
+            for path, info in files.items()
+        }
+        pin = json.loads(PROVENANCE.read_text())["fixture"]["manifest_sha256"]
+        self.assertEqual(tool.fixture_source_digest(files), pin)
+        self.assertEqual(tool.fixture_source_digest(checkout_modes), pin)
+        self.assertNotEqual(tool.digest_of_files(files), tool.digest_of_files(checkout_modes))
 
     def _prov_copy(self, mutate) -> Path:
         prov = json.loads(ARTIFACT_PROVENANCE.read_text())
@@ -679,6 +696,45 @@ class SignedArchiveFixtureTests(unittest.TestCase):
         self.assertEqual(result["signed_archive_verification"]["reason_code"], "UPSTREAM_DIGEST_MISMATCH")
         self.assertEqual(result["boot_qualification"]["status"], "blocked")
         self.assertEqual(result["boot_qualification"]["reason"], "signed archive verification did not pass")
+
+
+    def test_22_boot_readiness_does_not_treat_tools_as_authorization(self) -> None:
+        import node_lxc_artifact as tool
+
+        work = self.work / "proxmox-readiness"
+        args = argparse.Namespace(
+            provenance=ARTIFACT_PROVENANCE,
+            arch="amd64",
+            work_dir=work,
+            signed_archive_dir=None,
+            report=None,
+            fetch=False,
+        )
+        # Model a host with all tools present. Archive verification is covered
+        # by the adjacent real-GPG fixtures; only the readiness boundary is
+        # exercised here, with subprocess execution explicitly forbidden.
+        with (
+            mock.patch.object(tool, "_verify_signed_archive_result", return_value=(0, {"status": "ok"})),
+            mock.patch.object(tool.shutil, "which", return_value="/usr/bin/tool"),
+            mock.patch.object(tool.sys, "platform", "linux"),
+            mock.patch.object(tool.Path, "is_file", return_value=True),
+            mock.patch.object(tool.subprocess, "run", side_effect=AssertionError("executed a guest command")),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(tool.cmd_boot_qualify(args), 1)
+
+        report = json.loads((work / "boot-qualification-report.json").read_text())
+        self.assertEqual(report["reason_code"], "BOOT_QUALIFICATION_BLOCKED")
+        boot = report["boot_qualification"]
+        self.assertTrue(all(check["ok"] for check in boot["prerequisite_checks"]))
+        self.assertEqual(boot["status"], "blocked")
+        self.assertFalse(boot["capable_runner"])
+        self.assertFalse(boot["attempted"])
+        self.assertIsNone(boot["import_evidence"])
+        self.assertIsNone(boot["boot_evidence"])
+        self.assertIsNone(boot["first_boot_identity_evidence"])
+        self.assertEqual(len(boot["blockers"]), 1)
+        self.assertIn("authorized disposable Proxmox fixture", boot["blockers"][0])
 
 
 if __name__ == "__main__":
