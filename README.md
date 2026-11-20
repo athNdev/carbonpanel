@@ -219,12 +219,11 @@ The gateway has its own versioned GHCR image and MCP Registry identity.
 has an exact version with a publicly pullable GHCR digest. The guide includes
 client configuration and build compatibility. [MCP server guide](docs/carbon-panel/src/content/docs/guides/mcp-server.mdx)
 
-The implemented catalogue mounts the generated **211-tool combined catalogue**.
-It is derived from 250 declared RPCs across 28 proto services, of which 240 are
-mounted/reachable across 27 mounted services. Tool coverage is not the same as
-RPC coverage; the audit matrix records 200 supported operations (all listed,
-reachable and verified) and 78 excluded operations with exact reasons and
-equivalent flows. Do not infer that every panel RPC has a tool.
+The gateway mounts the generated **211-tool combined catalogue**. The
+controller has 250 declared RPCs across 28 proto services and
+240 mounted/reachable RPCs across 27 services. The strict gate verifies the
+200 supported operations. The audit matrix documents 78 excluded operations
+and their equivalents where available.
 
 Tool availability depends on the build behind `CARBONPANEL_URL` and the grants
 of the account that owns the API token. The compatibility matrix identifies

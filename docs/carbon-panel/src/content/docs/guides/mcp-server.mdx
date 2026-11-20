@@ -19,11 +19,11 @@ Carbon Panel includes a read-first Model Context Protocol (MCP) stdio gateway.
 The gateway's OCI package has its own version and release workflow.
 [Distribution decision](https://github.com/athNdev/carbonpanel/blob/main/docs/adr/0034-mcp-server-distribution.md)
 
-The gateway mounts the generated **211-tool combined catalogue**. It is derived
-from 250 declared RPCs across 28 proto services, of which 240 are mounted/reachable
-across 27 mounted services. Tool coverage is not the same as RPC coverage;
-the audit matrix records 200 supported operations (all listed, reachable and
-verified) and 78 excluded operations with exact reasons and equivalent flows.
+The gateway mounts the generated **211-tool combined catalogue**. The
+controller has 250 declared RPCs across 28 proto services and
+240 mounted/reachable RPCs across 27 services. The strict gate verifies the
+200 supported operations. The audit matrix documents 78 excluded operations
+and their equivalents where available.
 
 ## Choose the panel build first
 
