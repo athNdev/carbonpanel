@@ -80,6 +80,10 @@ func main() {
 	fmt.Println(string(encoded))
 
 	if *unitOut != "" || *configOut != "" {
+		if plan.Refusal != "" {
+			fmt.Fprintln(os.Stderr, "render manifest refused:", plan.Refusal)
+			os.Exit(2)
+		}
 		manifest, err := plan.Daemon.BuildManifest()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "render manifest:", err)

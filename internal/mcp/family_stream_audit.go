@@ -83,12 +83,12 @@ type FamilyStreamEvidence struct {
 }
 
 // Counts are pinned by TestFamilyStreamAuditIntegrity so the handoff cannot
-// silently lose a surface. LISTED=22, workflow=6, transport=5, private=11.
+// silently lose a surface. LISTED=22, workflow=3, transport=5, private=14.
 const (
 	FamilyStreamListedCount    = 22
-	FamilyStreamWorkflowCount  = 6
+	FamilyStreamWorkflowCount  = 3
 	FamilyStreamTransportCount = 5
-	FamilyStreamPrivateCount   = 11
+	FamilyStreamPrivateCount   = 14
 	FamilyStreamEvidenceCount  = 22
 )
 
@@ -127,8 +127,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	},
 	{
 		Route: "POST /api/v1/settings/validate-key", Mount: "internal/rpc/server.go:305",
-		Decision: FamilyStreamDecisionWorkflow, ReasonCode: StreamReasonSharedOperation,
-		Reason:          "Deprecated REST adapter delegates to the same shared indexers.ValidateProviderKey operation as the generated RPC (key_validator.go:32-37,60). The credential stays in a POST body; the generated tool path is the supported agent workflow and redacts the key.",
+		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonSharedOperation,
+		Reason:          "The REST and generated ConfigService operations share provider validation. The settings/read operation handles credentials and contacts the provider. Use the panel settings workflow.",
 		ACL:             "settings/read on global object *",
 		TypedEquivalent: []string{"/carbonpanel.v1.ConfigService/ValidateProviderKey"},
 		Sources: []string{
@@ -185,7 +185,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "ANY /api/v1/packwiz/packs/*", Mount: "internal/rpc/server.go:320",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonStudioAuthoring,
-		Reason: "Modpack Studio authoring and deployment engine (server.go:315-320). No typed product RPC exists for the Studio workflow; the REST global modpacks/<action> check only mirrors the generated mapping (packwiz.go:99-109, ADR 0012). Operator authoring stays outside the agent catalog.",
+		Reason: "Modpack Studio authoring and deployment uses global modpacks grants. The generated PackwizService shares the migrated JSON operations, while multipart import, export archives, raw assets and other adapter-only operations stay on HTTP.",
 		ACL:    "modpacks/read or modpacks/create on global object *",
 		Sources: []string{
 			"internal/rpc/server.go:320:mux.Handle(\"/api/v1/packwiz/\"",
@@ -219,10 +219,9 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	},
 	{
 		Route: "GET /api/v1/staged-config/{serverID}/staged", Mount: "internal/rpc/server.go:323",
-		Decision: FamilyStreamDecisionWorkflow, ReasonCode: StreamReasonSharedOperation,
-		Reason:          "Legacy staged-diff reader (staged_config.go:109-111) authorized on the path server before any staged-id lookup (staged_config.go:84-90). ConfigService.GetUpdateBatch is the supported typed read.",
-		ACL:             "server_config/read on serverID",
-		TypedEquivalent: []string{"/carbonpanel.v1.ConfigService/GetUpdateBatch"},
+		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonOperatorMaintenance,
+		Reason: "Legacy staged-diff reader shares the operation with StagedConfigService.ListStagedChanges. Use the panel staged changes workflow.",
+		ACL:    "server_config/read on serverID",
 		Sources: []string{
 			"internal/rpc/server.go:323:mux.Handle(\"/api/v1/staged-config/\"",
 			"internal/rpc/handlers/staged_config.go:87:rbac.ResourceServerConfig, action, serverID",
@@ -230,10 +229,9 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	},
 	{
 		Route: "POST /api/v1/staged-config/{serverID}/staged", Mount: "internal/rpc/server.go:323",
-		Decision: FamilyStreamDecisionWorkflow, ReasonCode: StreamReasonSharedOperation,
-		Reason:          "Stage a bounded diff (staged_config.go:112-113). The REST action is server_config/create while the typed ConfigService.UpdateServerConfig maps server_config/update[server_id]; use stage=true on the typed tool so the operation and ACL stay aligned.",
-		ACL:             "server_config/create on serverID (typed stage uses server_config/update[server_id])",
-		TypedEquivalent: []string{"/carbonpanel.v1.ConfigService/UpdateServerConfig"},
+		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonOperatorMaintenance,
+		Reason: "The adapter and StagedConfigService.StageConfigChange stage a diff under the same server_config/create grant. ConfigService.UpdateServerConfig uses a different operation and grant.",
+		ACL:    "server_config/create on serverID",
 		Sources: []string{
 			"internal/rpc/server.go:323:mux.Handle(\"/api/v1/staged-config/\"",
 			"internal/rpc/handlers/staged_config.go:87:rbac.ResourceServerConfig, action, serverID",
@@ -242,7 +240,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "POST|DELETE /api/v1/staged-config/{serverID}/staged/{id}[/apply|/rollback]", Mount: "internal/rpc/server.go:323",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonOperatorMaintenance,
-		Reason: "Apply/rollback/discard drive live container recreation and config rollout (staged_config.go:114-119). They also authorize against the record's real owner (staged_config.go:92-107). No typed RPC owns this operator maintenance path; excluded from the agent catalog.",
+		Reason: "Apply, rollback and discard are shared with StagedConfigService. Both adapters check the record's owner before attempting the change. Use the panel staged changes workflow.",
 		ACL:    "server_config/create on serverID and on the staged record's owner",
 		Sources: []string{
 			"internal/rpc/server.go:323:mux.Handle(\"/api/v1/staged-config/\"",
@@ -253,12 +251,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "GET /api/v2/metrics/host", Mount: "internal/rpc/server.go:331",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonTelemetry,
-		Reason: "REST-only Prometheus exposition with no typed client (metrics.go:34-48,65-68,100-160). It is a monitoring scrape surface, not an agent workflow. Host data overlaps the bounded servers/read tools (GetServer/ListServerPlayers/GetServerLogs).",
+		Reason: "Prometheus exposition for monitoring. Use an authenticated host metrics scrape for telemetry.",
 		ACL:    "servers/read on global object * (fail-closed via requireRequestObject)",
-		TypedEquivalent: []string{
-			"/carbonpanel.v1.ServerService/GetServer", "/carbonpanel.v1.ServerService/ListServerPlayers",
-			"/carbonpanel.v1.ServerService/GetServerLogs",
-		},
 		Sources: []string{
 			"internal/rpc/server.go:331:mux.Handle(\"/api/v2/metrics/\"",
 			"internal/rpc/handlers/metrics.go:65:\"/api/v2/metrics/host\"",
@@ -268,11 +262,8 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "GET /api/v2/metrics/servers/{id}", Mount: "internal/rpc/server.go:331",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonTelemetry,
-		Reason: "Per-server Prometheus exposition, again REST-only (metrics.go:61-63,180-202). Authorized on the concrete server id; no typed client exists. Use the bounded servers/read tools for agent-facing status.",
+		Reason: "Per-server Prometheus exposition for monitoring. GetServer provides server status and metadata.",
 		ACL:    "servers/read on id",
-		TypedEquivalent: []string{
-			"/carbonpanel.v1.ServerService/GetServer", "/carbonpanel.v1.ServerService/ListServerPlayers",
-		},
 		Sources: []string{
 			"internal/rpc/server.go:331:mux.Handle(\"/api/v2/metrics/\"",
 			"internal/rpc/handlers/metrics.go:61:/api/v2/metrics/servers/",
@@ -324,7 +315,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 		Route: "/ws", Mount: "internal/rpc/server.go:278",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonBrowserHandshake,
 		Reason: "Browser console/log/event hub WebSocket upgrade. Private handshake; agents use typed RPC reads and events instead of a raw upgrade socket.",
-		ACL:    "none at mount (browser session hub)",
+		ACL:    "authenticated WebSocket upgrade and refresh; servers/read and servers/command on the subscribed or commanded server",
 		Sources: []string{
 			"internal/rpc/server.go:278:mux.Handle(\"/ws\"",
 		},
@@ -343,7 +334,7 @@ var FamilyStreamAudit = []FamilyStreamSurface{
 	{
 		Route: "gRPC reflection v1 / v1alpha", Mount: "internal/rpc/server.go:274-275",
 		Decision: FamilyStreamDecisionPrivate, ReasonCode: StreamReasonReflection,
-		Reason: "Static 19-service reflection list is stale by six mounted services and is never a catalog source. Enumeration uses the shared 25-service mount list and proto descriptors.",
+		Reason: "Reflection describes the same registered Connect service list the server checks against its mounted handlers.",
 		ACL:    "none (discovery endpoint)",
 		Sources: []string{
 			"internal/rpc/server.go:274:grpcreflect.NewHandlerV1",
@@ -375,8 +366,8 @@ var FamilyStreamEvidenceMatrix = []FamilyStreamEvidence{
 	{"ANY /api/v1/packwiz/packs/*", StreamCheckStream, "", false, true, "Studio authoring adapter denies 403 for servers/read-only and 401 without credentials; no tool exposes raw pack routes"},
 	{"GET /api/v1/packwiz/loaders/{loader}/versions", StreamCheckTypedRPC, "/carbonpanel.v1.MinecraftService/GetLoaderVersions", true, true, "typed loader versions succeeds for authenticated caller; structured denial for invalid token; raw bootstrap route stays out of catalog"},
 	{"GET /api/v1/packwiz/{id}/pack.toml", StreamCheckTypedRPC, "/carbonpanel.v1.ModpackService/GetModpackConfig", true, true, "typed modpack config succeeds for modpacks/read; structured denial for invalid token; raw pack bytes stay out of catalog"},
-	{"GET /api/v1/staged-config/{serverID}/staged", StreamCheckTypedRPC, "/carbonpanel.v1.ConfigService/GetUpdateBatch", true, true, "typed batch read succeeds for server_config/read; legacy list 200/403/401"},
-	{"POST /api/v1/staged-config/{serverID}/staged", StreamCheckTypedRPC, "/carbonpanel.v1.ConfigService/UpdateServerConfig", true, true, "typed staged update succeeds for server_config/update; legacy mutation path denies 403/401"},
+	{"GET /api/v1/staged-config/{serverID}/staged", StreamCheckStream, "", true, true, "legacy list returns 200 with server_config/read, 403 without that grant and 401 without credentials"},
+	{"POST /api/v1/staged-config/{serverID}/staged", StreamCheckSource, "", false, false, "adapter requires server_config/create before staging; generated StagedConfigService shares the operation"},
 	{"POST|DELETE /api/v1/staged-config/{serverID}/staged/{id}[/apply|/rollback]", StreamCheckStream, "", false, true, "apply/rollback/discard deny 403 for a token without server_config/create; no exposed tool"},
 	{"GET /api/v2/metrics/host", StreamCheckStream, "", true, true, "Prometheus exposition 200 for servers/read on *; 403 for scoped token and for missing credentials (adapter collapses auth failure into 403)"},
 	{"GET /api/v2/metrics/servers/{id}", StreamCheckStream, "", true, true, "per-server exposition 200 for servers/read[id]; 403 for another server id and for missing credentials (fail-closed 403)"},

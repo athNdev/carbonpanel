@@ -43,7 +43,9 @@ func (b *Boundary) BeginTLSEnrollment(ctx context.Context, cred Credential, enro
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.beginEnrollmentChallengeLocked(&v1.BeginEnrollmentChallengeRequest{EnrollmentId: enrollmentID}, binding, true)
+	return commitMutationLocked(ctx, a, func() (*v1.BeginEnrollmentChallengeResponse, error) {
+		return a.beginEnrollmentChallengeLocked(&v1.BeginEnrollmentChallengeRequest{EnrollmentId: enrollmentID}, binding, true)
+	})
 }
 
 // ClaimTLSEnrollment verifies the signed request against the controller's
@@ -62,7 +64,9 @@ func (b *Boundary) ClaimTLSEnrollment(ctx context.Context, cred Credential, req 
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.claimEnrollmentLocked(req, binding, true)
+	return commitMutationLocked(ctx, a, func() (*v1.ClaimEnrollmentResponse, error) {
+		return a.claimEnrollmentLocked(req, binding, true)
+	})
 }
 
 func (a *EnrollmentAuthority) bootstrapTLSBinding(state *tls.ConnectionState) ([]byte, error) {

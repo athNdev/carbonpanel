@@ -64,6 +64,7 @@ type FamilyAuditOperation struct {
 	Reason         string              `json:"reason"`
 	ReasonRef      string              `json:"reasonRef"`
 	EquivalentFlow string              `json:"equivalentFlow"`
+	HTTPMounts     []string            `json:"httpMounts,omitempty"`
 	ComposedBy     string              `json:"composedBy"`
 	SuggestedTool  string              `json:"suggestedTool"`
 	Coverage       FamilyAuditCoverage `json:"coverage"`

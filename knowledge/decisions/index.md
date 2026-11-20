@@ -6,6 +6,7 @@
 
 - [Architecture decisions](adrs.md) — Index of the accepted ADRs and the concept each one governs.
 - [Architecture decisions — Decision records](adrs-decision-records.md) — / ADR / Decision / Governs /
+- [Architecture decisions — Decision records (part 2)](adrs-decision-records-2.md) — ADR index continuation from 0048 onward.
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.
@@ -38,6 +39,7 @@
 - [Named egress classes](egress-class-policy.md) — Provider, webhook and archive outbound requests use class-specific policy objects; loopback is a test-only opt-in and remote saves are staged.
 - [Named egress classes — Choice + Alternatives](egress-class-policy-choice.md) — pkg/utils exposes three immutable EgressPolicy values, one per outbound
 - [Named egress classes — Consequence](egress-class-policy-consequence.md) — New outbound families must construct a named policy rather than pass a bare
+- [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.
