@@ -17,6 +17,7 @@
 //   REVIEW_CHROME may point at an explicit owned Chromium executable.
 //   The packaged-route half requires `bun run build` in web/carbon-panel first.
 
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -1249,19 +1250,50 @@ async function assertHorizontallyVisible(locator) {
 	const clipped = await locator.evaluate((element) => {
 		let left = 0;
 		let right = document.documentElement.clientWidth;
+		const clips = (container) =>
+			['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(container).overflowX);
+		const intersect = (container) => {
+			const clientLeft = container.getBoundingClientRect().left + container.clientLeft;
+			left = Math.max(left, clientLeft);
+			right = Math.min(right, clientLeft + container.clientWidth);
+		};
+		const outside = (bounds) => bounds.width && (bounds.left < left - 1 || bounds.right > right + 1);
+
 		for (let parent = element.parentElement; parent; parent = parent.parentElement) {
-			if (!['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(parent).overflowX))
-				continue;
-			const bounds = parent.getBoundingClientRect();
-			left = Math.max(left, bounds.left + parent.clientLeft);
-			right = Math.min(right, bounds.left + parent.clientLeft + parent.clientWidth);
+			if (clips(parent)) intersect(parent);
 		}
+		const box = element.getBoundingClientRect();
+		if (outside(box)) return box.toJSON();
+
+		// Own overflow can clip content even when the entire element box is visible.
+		if (clips(element)) intersect(element);
 		const text = document.createRange();
 		text.selectNodeContents(element);
-		const rects = [element.getBoundingClientRect(), ...text.getClientRects()];
-		return rects.find((bounds) => bounds.width && (bounds.left < left - 1 || bounds.right > right + 1))?.toJSON();
+		return [...text.getClientRects()].find(outside)?.toJSON();
 	});
-	if (clipped) throw new Error(`${locator} is clipped: ${JSON.stringify(clipped)}`);
+	if (clipped) throw new Error(String(locator) + ' is clipped: ' + JSON.stringify(clipped));
+}
+
+async function runClippingProbe(browser) {
+	await check('visibility probe detects self-clipped text inside a wider parent', async () => {
+		const context = await browser.newContext();
+		try {
+			const page = await context.newPage();
+			await page.setContent(
+				'<div style="width:480px;overflow:hidden">' +
+					'<button style="width:180px;overflow:hidden;border:4px solid">Save settings</button>' +
+					'<p style="width:80px;overflow:hidden;white-space:nowrap">A much longer settings label</p>' +
+				'</div>'
+			);
+			await assertHorizontallyVisible(page.getByRole('button', { name: 'Save settings' }));
+			await assert.rejects(
+				() => assertHorizontallyVisible(page.getByText('A much longer settings label')),
+				/is clipped:/
+			);
+		} finally {
+			await context.close();
+		}
+	});
 }
 
 async function runNarrowSettingsJourney(browser, base) {
@@ -1439,6 +1471,7 @@ try {
 		await runPackagedRouteJourney(browser, packagedBase, 'light');
 		await runModpacksJourney(browser, packagedBase, 'light');
 		await runPackagedRouteJourney(browser, packagedBase, 'dark');
+		await runClippingProbe(browser);
 		await runNarrowSettingsJourney(browser, packagedBase);
 		await check('route themes: light and dark paint different backgrounds', async () => {
 			if (!themeBackgrounds.light || !themeBackgrounds.dark) {
