@@ -272,8 +272,8 @@ func famCases() []famCase {
 		{"server", "get_server_logs", map[string]any{"id": "srv-1", "tail": 10}, "serverOps", true},
 		{"server", "clear_server_logs", map[string]any{"id": "srv-1", "confirm": true}, "serverOps", true},
 		{"server", "get_next_available_port", map[string]any{}, "serverOps", true},
-		{"server", "export_server_archive", map[string]any{"server_id": "srv-1", "format": "zip"}, "serverOps", false},
-		{"server", "preview_server_archive", map[string]any{"upload_id": "upload-1"}, "serverOps", false},
+		{"server", "export_server_archive", map[string]any{"server_id": "srv-1", "format": "zip"}, "serverOps", true},
+		{"server", "preview_server_archive", map[string]any{"upload_id": "upload-1"}, "serverOps", true},
 		{"server", "create_server", map[string]any{"name": "srv-2", "mc_version": "1.21.4", "mod_loader": "fabric", "request_id": "req-1", "confirm": true}, "serverOps", true},
 		{"server", "update_server", map[string]any{"id": "srv-1", "name": "renamed", "confirm": true}, "serverOps", true},
 		{"server", "delete_server", map[string]any{"id": "srv-1", "keep_data": true, "confirm": true}, "serverOps", true},
@@ -334,8 +334,8 @@ func famCases() []famCase {
 }
 
 func TestFamilyServerDescriptorInventory(t *testing.T) {
-	if len(FamilyServerDescriptors) != 52 {
-		t.Fatalf("listed RPC descriptors = %d, want 52", len(FamilyServerDescriptors))
+	if len(FamilyServerDescriptors) != 54 {
+		t.Fatalf("listed RPC descriptors = %d, want 54", len(FamilyServerDescriptors))
 	}
 	included := FamilyServerIncludedDescriptors()
 	if len(included) != FamilyServerToolCount || FamilyServerReachableCount() != 53 {
