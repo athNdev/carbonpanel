@@ -540,6 +540,9 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
           IMAGE_DIGEST: ${{ steps.resolved.outputs.digest }}
         run: python3 scripts/release.py verify-immutable --version "$RELEASE_VERSION" --digest "$IMAGE_DIGEST"
+      # The Docker Hub full_description is owned solely by
+      # .github/workflows/dockerhub-description.yml. A release must not write a
+      # raw or older README over the derived, byte-bounded public body.
 
 
   # OSS-413 stable channel transaction. The EXACT target version, both immutable
@@ -1069,15 +1072,9 @@ jobs:
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
         run: python3 scripts/release.py verify-public-downloads --version "$RELEASE_VERSION" --output dist/release
 
-      - name: Sync Docker Hub repository description
-        if: needs.plan.outputs.channel == 'stable'
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-          repository: atharvnaphade/carbonpanel
-          short-description: Self-hosted Minecraft server and modpack management with Docker.
-          enable-url-completion: true
+      # The Docker Hub full_description is owned solely by
+      # .github/workflows/dockerhub-description.yml. A release must not write a
+      # raw or older README over the derived, byte-bounded public body.
       - name: Verify the published Stable download and README entry points
         if: needs.plan.outputs.channel == 'stable'
         env:

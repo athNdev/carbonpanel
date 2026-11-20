@@ -15,6 +15,7 @@
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
 - [Console log buffer ownership](console-buffer-ownership.md) — A delayed log listing or WebSocket snapshot can only write the viewed buffer while it still owns the displayed server and the latest request.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
+- [Docker Hub description ownership](dockerhub-description-ownership.md) — A dedicated main and scheduled workflow derives a byte-bounded Docker-focused body from README and the published version contract; image publication never writes it.
 - [Frontend accessibility coverage](frontend-a11y-coverage.md) — Component and real application-route accessibility are tested in a real DOM and a real Chromium journey, not by matching source text.
 - [Frontend server inventory ownership](server-inventory.md) — Server reads, lifecycle requests and status presentation share generation guards and account-scoped state.
 - [Geyser safe bind default](geyser-safe-bind.md) — A standalone Geyser entrypoint defaults to a loopback Bedrock bind; an explicit BEDROCK_ADDRESS is the opt-in to wider exposure.
@@ -44,6 +45,7 @@
 - [Named egress classes — Choice + Alternatives](egress-class-policy-choice.md) — pkg/utils exposes three immutable EgressPolicy values, one per outbound
 - [Named egress classes — Consequence](egress-class-policy-consequence.md) — New outbound families must construct a named policy rather than pass a bare
 - [Node enrollment state](node-enrollment-state.md) — Preserve enrollment and revocation across controller restart with a signer-bound SQLite compare-and-swap.
+- [Packwiz batch mutations report per-entry outcomes](packwiz-batch-entry-results.md) — BatchMods returns one result per requested slug; count is the number of successes, and per-entry failures stay visible on both transports.
 - [Product integration gate re-baseline (OSS-365)](product-integration-gate.md) — The three product epics are accepted against current main, with merged-vs-qualified evidence kept distinct and unmeasurable renderer claims recorded as blockers rather than promotions.
 - [Provider HTTP credentials](provider-http-policy.md) — Provider credentials stay with the configured origin and never accompany keyless fallback or cross-origin redirects.
 - [Public runtime profile contract](public-runtime-profile.md) — Effective Docker runtime and storage checks are a public package so Panel and Cloud share one implementation.

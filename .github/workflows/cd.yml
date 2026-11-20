@@ -402,15 +402,6 @@ jobs:
       # `channel-transaction` job below. The former edge/nightly manual and
       # schedule alias-write steps were REMOVED; this job only builds and
       # verifies the immutable sha image and never moves a moving alias.
-      - name: Sync Docker Hub repository description
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
-        if: steps.channel.outputs.publish == 'true' && steps.check-creds.outputs.has_creds == 'true' && github.event_name != 'pull_request'
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD || secrets.DOCKERHUB_TOKEN }}
-          repository: atharvnaphade/carbonpanel
-          short-description: Self-hosted Minecraft server and modpack management with Docker.
-          enable-url-completion: true
 
   # OSS-413 qualified channel transaction. Phase 1 (stage) is zero-write and
   # diagnoses the candidate without touching aliases or canonical docs. The
@@ -953,3 +944,6 @@ jobs:
           path: channel-receipt.json
           if-no-files-found: error
           retention-days: 30
+      # The Docker Hub full_description is owned solely by
+      # .github/workflows/dockerhub-description.yml. Image/channel publication
+      # must never overwrite it with a raw, older README.

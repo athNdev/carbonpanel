@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "repository": "atharvnaphade/carbonpanel",
+  "github_repository": "athNdev/carbonpanel",
+  "ref": "main",
+  "showcase_ref": "showcase-assets",
+  "version_index": "docs/version-index.json",
+  "short_description": "Self-hosted Minecraft server and modpack management with Docker.",
+  "mcp_guide_url": "https://github.com/athNdev/carbonpanel/blob/main/docs/carbon-panel/src/content/docs/guides/mcp-server.mdx",
+  "sections": [
+    "Modpack Studio. Modpacks, made simple.",
+    "Look after what you build.",
+    "Features",
+    "Quick start",
+    "Documentation and help",
+    "License"
+  ],
+  "max_bytes": 25000
+}
