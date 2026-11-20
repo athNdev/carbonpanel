@@ -1,6 +1,6 @@
 ---
 type: Architecture
-title: "World Library â€” Rollback rules (part 2)"
+title: "World Library — Rollback rules (part 2)"
 description: "Failed multi-family swap compensation: quarantine, byte proof and binding proof."
 status: stable
 owners: [oss-runtime]
