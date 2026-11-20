@@ -18,6 +18,7 @@ import (
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/rpc/handlers"
+	"github.com/athNdev/carbon-panel/internal/scheduler"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/stretchr/testify/require"
@@ -758,13 +759,62 @@ func TestScheduledModUpdatePolicyStagesOnceAndHonorsExclusions(t *testing.T) {
 	staged, refused, reasons, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
 	require.NoError(t, err)
 	require.Zero(t, staged, "a second run must deduplicate the already staged file")
-	require.Equal(t, 1, refused)
-	require.NotEmpty(t, reasons)
+	require.Zero(t, refused, "an already staged file is not a refusal")
+	require.Empty(t, reasons)
 	require.Equal(t, 1, fetcher.calls, "deduplication must happen before any provider download")
 
 	live, err := os.ReadFile(filepath.Join(mods, "mod.jar"))
 	require.NoError(t, err)
 	require.Equal(t, "installed", string(live), "an automatic policy must not write the live tree")
+}
+
+type failSecondCandidateOnce struct {
+	calls  []string
+	failed bool
+}
+
+func (f *failSecondCandidateOnce) Fetch(_ context.Context, _ *storage.ServerConfig, _, _, name, _, _, _ string, _ int64) ([]byte, int64, string, error) {
+	f.calls = append(f.calls, name)
+	if name == "b.jar" && !f.failed {
+		f.failed = true
+		return nil, 0, "transient_download", errors.New("candidate download unavailable")
+	}
+	data := []byte("next-" + name[:1])
+	return data, int64(len(data)), "", nil
+}
+
+func TestScheduledRetryDoesNotCountAlreadyStagedModAsRefused(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-policy-retry-report", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
+
+	fetcher := &failSecondCandidateOnce{}
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(twoModPreviewFixture{})
+	svc.SetModCandidateFetcher(fetcher)
+	sched := scheduler.NewScheduler(store, nil, nil, nil, nil, logger.New())
+	sched.SetModUpdatePlanner(svc)
+	task := &storage.ScheduledTask{
+		ID: "retry-report", ServerID: server.ID, Name: "test staged count",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", RetryCount: 1, RetryDelay: 1,
+		Config: `{"enabled":true,"max_updates_per_run":2}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+	execution, err := sched.TriggerTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.ExecutionStatusCompleted, execution.Status)
+	require.Equal(t, 1, execution.RetryNum)
+	require.Equal(t, "staged 2 compatible update(s); 0 refused and left untouched", execution.Output)
+	require.Equal(t, []string{"a.jar", "b.jar", "b.jar"}, fetcher.calls)
+	require.Len(t, stagedFiles(t, server.DataPath), 2)
+	stored, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.NextRun, "manual execution can advance an observed NULL deadline")
+	require.NotNil(t, stored.LastRun)
 }
 
 func TestScheduledIdleWindowStagesThroughRealPlanner(t *testing.T) {

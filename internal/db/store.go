@@ -1439,11 +1439,11 @@ func (s *Store) UpdateModUpdatePolicy(ctx context.Context, previous, task *Sched
 	return result.RowsAffected != 0, result.Error
 }
 
-// AdvanceModUpdateSchedule refuses to install a deadline calculated from a
-// schedule or task status that changed after the scheduler read it.
+// AdvanceModUpdateSchedule refuses to advance a stale schedule, status,
+// or deadline. SQL IS also matches a task whose observed deadline was NULL.
 func (s *Store) AdvanceModUpdateSchedule(ctx context.Context, task *ScheduledTask, nextRun *time.Time, lastRun time.Time) error {
 	result := matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), task).
-		Where("id = ?", task.ID).
+		Where("id = ? AND next_run IS ?", task.ID, task.NextRun).
 		Updates(map[string]any{"next_run": nextRun, "last_run": lastRun})
 	if result.Error == nil && result.RowsAffected == 0 {
 		return ErrModUpdateScheduleChanged
@@ -1463,7 +1463,7 @@ func (s *Store) ToggleModUpdateSchedule(ctx context.Context, previous, task *Sch
 // when calculation from the scheduler's earlier snapshot fails.
 func (s *Store) DisableInvalidModUpdateSchedule(ctx context.Context, task *ScheduledTask) error {
 	return matchingTaskSchedule(s.db.WithContext(ctx).Model(&ScheduledTask{}), task).
-		Where("id = ?", task.ID).Update("status", TaskStatusDisabled).Error
+		Where("id = ? AND next_run IS ?", task.ID, task.NextRun).Update("status", TaskStatusDisabled).Error
 }
 
 func (s *Store) DeleteScheduledTask(ctx context.Context, id string) error {

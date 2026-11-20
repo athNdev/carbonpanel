@@ -52,7 +52,8 @@ request.
    imports. The fetcher and staging loop enforce per-file and total byte
    limits. Scheduled provider failures remain retryable after partial staging.
    Directory scan and entry metadata errors other than missing paths also fail
-   the run. All retry attempts share the execution's update budget.
+   the run. All retry attempts share the execution's update budget. Files
+   that already have a staged row do not count as refusals.
 8. The complete window tuple (mode, timestamp, idle interval) is compared
    before any provider work or persistent write; a differing window on a batch
    with reviewed changes is refused. Selections are deduplicated by live target
@@ -81,9 +82,10 @@ request.
    rejected downloads. Discard shares operation ownership, preserves typed
    Connect refusals and records the discard operation under its own name.
 10. Cron timezone is resolved only for cron schedules; if an existing task's
-   schedule cannot be advanced, dispatch is refused and the task is disabled so
-   it cannot run on every tick. The planner is installed before the scheduler
-   starts so cold boot sees the real implementation.
+   schedule cannot be advanced, dispatch is refused. Mod-update advancement
+   checks the observed deadline and schedule to fence stale due reads after a
+   reschedule. Invalid current schedules are disabled. The planner is installed
+   before the scheduler starts so cold boot sees the real implementation.
 
 ## Consequences
 

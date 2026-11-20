@@ -55,6 +55,6 @@ task list. Policy edits preserve schedule state and opt-outs start disabled.
   trigger stay intact. Discard shares the operation lock, keeps its typed
   Connect refusals and records its own operation name.
 - The guarded HTTP client protects egress and redirects. Fetch and staging
-  bound candidate and total bytes. Retries share the run's update budget and
-  keep the failure if that budget is exhausted.
-- The scheduler installs its planner first and refuses invalid policy windows.
+  bound bytes. Retries skip staged files and preserve failure at budget exhaustion.
+- Mod-update dispatch requires the observed deadline and schedule. The
+  scheduler installs the planner first and refuses invalid policy windows.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
@@ -57,6 +58,26 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	if len(mods) == 0 {
 		return 0, 0, nil, nil
 	}
+	batch, err := s.store.OpenUpdateBatch(ctx, serverID)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	if batch != nil {
+		rows, err := s.store.ListBatchContent(ctx, batch.ID)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+		alreadyStaged := make(map[string]bool, len(rows))
+		for _, row := range rows {
+			if row.Kind == storage.StagedKindMod {
+				alreadyStaged[row.FileName] = true
+			}
+		}
+		mods = slices.DeleteFunc(mods, func(mod *v1.Mod) bool { return alreadyStaged[mod.GetFileName()] })
+		if len(mods) == 0 {
+			return 0, 0, nil, nil
+		}
+	}
 	settings, err := s.store.GetServerConfig(ctx, storage.GlobalSettingsID)
 	if err != nil && !errors.Is(err, storage.ErrServerConfigNotFound) {
 		return 0, 0, nil, errors.New("failed to load provider settings")
@@ -69,16 +90,6 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 		return 0, 0, nil, err
 	}
 
-	alreadyStaged := make(map[string]bool)
-	if batch, err := s.store.OpenUpdateBatch(ctx, serverID); err == nil && batch != nil {
-		if rows, err := s.store.ListBatchContent(ctx, batch.ID); err == nil {
-			for _, row := range rows {
-				if row.Kind == storage.StagedKindMod {
-					alreadyStaged[row.FileName] = true
-				}
-			}
-		}
-	}
 	excluded := make(map[string]bool, len(cfg.ExcludedProjects))
 	for _, id := range cfg.ExcludedProjects {
 		excluded[id] = true
@@ -107,9 +118,9 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 			}
 			continue
 		}
-		if excluded[preview.GetProjectId()] || alreadyStaged[mod.GetFileName()] {
+		if excluded[preview.GetProjectId()] {
 			refused++
-			reasons = append(reasons, mod.GetFileName()+": excluded or already staged")
+			reasons = append(reasons, mod.GetFileName()+": excluded")
 			continue
 		}
 		if len(selections) >= limit {
@@ -138,9 +149,12 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	results, _, transient, err := s.stageReviewedModUpdates(ctx, serverID, selections, window, 0, int32(cfg.IdleMinutes))
 	staged := 0
 	for _, result := range results {
-		if result.Outcome == "staged" {
+		switch result.Outcome {
+		case "staged":
 			staged++
-		} else {
+		case "already_staged", "already_selected":
+			// The same file is already represented by another staged row or selection.
+		default:
 			refused++
 			reasons = append(reasons, result.FileName+": "+result.Outcome+" — "+result.Reason)
 		}

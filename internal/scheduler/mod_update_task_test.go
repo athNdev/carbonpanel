@@ -12,6 +12,7 @@ import (
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	"github.com/robfig/cron/v3"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 type fakeModPlanner struct {
@@ -90,6 +91,62 @@ func TestDueModUpdateTaskExecutesOnceAndRecordsOutcome(t *testing.T) {
 	s.checkAndRunDueTasks()
 	s.wg.Wait()
 	require.Equal(t, 1, planner.calls, "a second tick must not re-run the same task")
+}
+
+func TestDueModUpdateTaskDoesNotDispatchAfterDisableEnable(t *testing.T) {
+	s, store := newTriggerTestScheduler(t)
+	planner := &fakeModPlanner{}
+	s.SetModUpdatePlanner(planner)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	server := &storage.Server{ID: "srv-mod-retoggled", Name: "retoggled", Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, server))
+	past := time.Now().UTC().Add(-time.Hour)
+	task := &storage.ScheduledTask{
+		ID: "task-mod-retoggled", ServerID: server.ID, Name: "retoggled mod policy",
+		TaskType: storage.TaskTypeModUpdate, Status: storage.TaskStatusEnabled,
+		Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", NextRun: &past,
+		Config: `{"enabled":true}`,
+	}
+	require.NoError(t, store.CreateScheduledTask(ctx, task))
+	var retoggled bool
+	var future *time.Time
+	require.NoError(t, store.DB().Callback().Update().Before("gorm:update").Register("fixture:retoggle-before-deadline-advance", func(tx *gorm.DB) {
+		updates, ok := tx.Statement.Dest.(map[string]any)
+		if retoggled || !ok || updates["last_run"] == nil {
+			return
+		}
+		// Advance already calculated from the due snapshot, but has yet to
+		// write. Exercise the same transition writes as the operator's RPC.
+		retoggled = true
+		observed, err := store.GetScheduledTask(ctx, task.ID)
+		require.NoError(t, err)
+		disabled := *observed
+		disabled.Status, disabled.NextRun = storage.TaskStatusDisabled, nil
+		saved, err := store.ToggleModUpdateSchedule(ctx, observed, &disabled)
+		require.NoError(t, err)
+		require.True(t, saved)
+		enabled := *observed
+		future, err = s.CalculateNextRun(&enabled)
+		require.NoError(t, err)
+		enabled.NextRun = future
+		saved, err = store.ToggleModUpdateSchedule(ctx, &disabled, &enabled)
+		require.NoError(t, err)
+		require.True(t, saved)
+	}))
+
+	s.checkAndRunDueTasks()
+	s.wg.Wait()
+	require.True(t, retoggled)
+	require.Zero(t, planner.calls)
+	executions, err := store.ListTaskExecutions(ctx, task.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, executions)
+	stored, err := store.GetScheduledTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.TaskStatusEnabled, stored.Status)
+	require.True(t, future.Equal(*stored.NextRun))
+	require.Nil(t, stored.LastRun)
 }
 
 type signalingModPlanner struct {
