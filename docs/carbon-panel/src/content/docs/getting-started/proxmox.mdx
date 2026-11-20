@@ -33,10 +33,16 @@ The generated `compose.yml` mounts `/var/run/docker.sock` because Carbon Panel m
 
 ## Prepared Debian 13 system CT (controller-ct)
 
-A prebuilt **system container template** is an ordinary Debian 13 amd64 LXC root filesystem archive, not an OCI application image. The current controller CT ships with a **pinned Stable controller image**, not a moving tag. The exact Stable version and image digest are recorded in the release receipt/manifest that accompanies the `controller-ct-v*` artifact; read that receipt for the build you downloaded instead of relying on a digest copied into a guide. A VM remains the stronger-isolation choice when you need live migration, a different kernel or storage layout, or maximum separation. Docker and Proxmox configurations vary — verify the feature requirements below against your own host rather than assuming every combination is supported.
+A prebuilt **system container template** is an ordinary Debian 13 amd64 LXC root filesystem archive, not an OCI application image. The current controller CT ships with a **pinned Stable controller image**, not a moving tag. The embedded `metadata.json` records the exact controller image digest and the CT artifact version; it does not declare a Stable release number field. Read that receipt for the build you downloaded instead of relying on a digest copied into a guide. A VM remains the stronger-isolation choice when you need live migration, a different kernel or storage layout, or maximum separation. Docker and Proxmox configurations vary — verify the feature requirements below against your own host rather than assuming every combination is supported.
 
 :::note[Template availability]
-No public template URL is claimed here. The project's [Releases](https://github.com/athNdev/carbonpanel/releases) page is an interim discoverability link, not proof that a specific CT asset is published or bootable. Until the exact `controller-ct-v*` asset is live, use a locally built template. The expected filenames are `carbonpanel-controller-ct.tar.zst` and `carbonpanel-controller-ct.tar.zst.sha256`. Source and general downloads are on the [repository](https://github.com/athNdev/carbonpanel).
+This is a **preview** artifact under the [`controller-ct-v0.1.0` release](https://github.com/athNdev/carbonpanel/releases/tag/controller-ct-v0.1.0); native Proxmox boot qualification is pending. Download these assets from that release before importing:
+
+- [Template archive](https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/carbonpanel-controller-ct.tar.zst)
+- [SHA-256 sidecar](https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/carbonpanel-controller-ct.tar.zst.sha256)
+- [Package receipt](https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/package-receipt.json) — Debian/Docker package provenance for the guest
+
+Use only these tagged assets; do not substitute an unversioned or locally built file for a published release. This guide does not claim that a native `pct` import or boot was tested — verify the checksum, the package receipt and the CT yourself on your Proxmox host. Source and general downloads remain on the [repository](https://github.com/athNdev/carbonpanel).
 :::
 
 ### Verify and import the template
@@ -47,7 +53,21 @@ Check the archive against its sidecar on the Proxmox host before importing anyth
 sha256sum -c carbonpanel-controller-ct.tar.zst.sha256
 ```
 
-Import the archive into a Proxmox storage (GUI: *Datacenter → storage → CT Templates → Upload*). In the GUI create a CT from that template with **Unprivileged** enabled and **Nesting** and **keyctl** enabled in *Options → Features* before first start, set an SSH public key for root, attach the network, then start the CT. These two features are required for Docker inside an unprivileged LXC; do not enable privileged mode, do not disable AppArmor or seccomp, and do not add broad mount or FUSE permissions.
+Read the embedded receipt to confirm the exact controller pin this build ships. This reads one file from the archive without extracting it:
+
+```bash
+tar --zstd -xOf carbonpanel-controller-ct.tar.zst ./usr/share/carbon-panel/metadata.json
+```
+
+Import the archive into a Proxmox storage. The easiest GUI path is *Datacenter → storage → CT Templates → Download from URL*: paste the verified release asset URL
+
+```text
+https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/carbonpanel-controller-ct.tar.zst
+```
+
+Expand the advanced options, select **SHA-256**, and paste the digest from the sidecar (for example, `cut -d' ' -f1 carbonpanel-controller-ct.tar.zst.sha256`) rather than a digest copied from prose. Proxmox implements URL download for CT template content and the SHA-256 checksum field in its storage UI/API ([ContentView.js](https://github.com/proxmox/pve-manager/blob/master/www/manager6/storage/ContentView.js), [Storage/Status.pm](https://github.com/proxmox/pve-storage/blob/master/src/PVE/API2/Storage/Status.pm)). If manual transfer is required, use *CT Templates → Upload* with the same archive and sidecar instead. There is no `pvesm download-url` CLI subcommand.
+
+In the GUI create a CT from that template with **Unprivileged** enabled and **Nesting** and **keyctl** enabled in *Options → Features* before first start, set an SSH public key for root, attach the network, then start the CT. These two features are required for Docker inside an unprivileged LXC; do not enable privileged mode, do not disable AppArmor or seccomp, and do not add broad mount or FUSE permissions.
 
 Equivalent CLI. Assign the four variables for your site, then the commands are pasteable:
 
