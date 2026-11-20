@@ -630,6 +630,9 @@ func (s *AuthService) ListAPITokens(ctx context.Context, req *connect.Request[v1
 	if user == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
+	if err := s.checkAPITokenAccess(ctx, user.ID); err != nil {
+		return nil, err
+	}
 
 	tokens, err := s.store.ListAPITokensByUser(ctx, user.ID)
 	if err != nil {
@@ -652,6 +655,9 @@ func (s *AuthService) DeleteAPIToken(ctx context.Context, req *connect.Request[v
 	if user == nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
+	if err := s.checkAPITokenAccess(ctx, user.ID); err != nil {
+		return nil, err
+	}
 
 	if req.Msg.Id == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("token ID is required"))
@@ -663,6 +669,18 @@ func (s *AuthService) DeleteAPIToken(ctx context.Context, req *connect.Request[v
 	}
 
 	return connect.NewResponse(&v1.DeleteAPITokenResponse{}), nil
+}
+
+func (s *AuthService) checkAPITokenAccess(ctx context.Context, userID string) error {
+	err := s.authManager.CheckAPITokenAccess(ctx, userID)
+	if errors.Is(err, auth.ErrLocalAPITokenSession) {
+		return connect.NewError(connect.CodePermissionDenied, err)
+	}
+	if err != nil {
+		s.log.Error("Failed to check API token management access: %v", err)
+		return connect.NewError(connect.CodeInternal, errors.New("failed to check API token access"))
+	}
+	return nil
 }
 
 func (s *AuthService) UseRecoveryKey(ctx context.Context, req *connect.Request[v1.UseRecoveryKeyRequest]) (*connect.Response[v1.UseRecoveryKeyResponse], error) {

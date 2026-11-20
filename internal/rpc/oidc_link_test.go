@@ -47,7 +47,7 @@ func TestBeginOIDCLinkFromAuthenticatedConnectSession(t *testing.T) {
 	admin, err := manager.CreateLocalUser(ctx, "link-admin", "", password)
 	require.NoError(t, err)
 	require.NoError(t, store.AssignRole(ctx, admin.ID, "admin", "local"))
-	_, err = manager.CreateLocalUser(ctx, "link-plain", "", password)
+	plainUser, err := manager.CreateLocalUser(ctx, "link-plain", "", password)
 	require.NoError(t, err)
 
 	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,9 +71,11 @@ func TestBeginOIDCLinkFromAuthenticatedConnectSession(t *testing.T) {
 	authService := services.NewAuthService(store, manager, enforcer, handler, log)
 	userService := services.NewUserService(store, manager, log)
 	userService.SetOIDCHandler(handler)
+	userService.SetEnforcer(enforcer)
 	opts := connect.WithInterceptors(NewAuthInterceptor(manager, enforcer, store, log))
 	mux.Handle(carbonpanelv1connect.NewAuthServiceHandler(authService, opts))
 	mux.Handle(carbonpanelv1connect.NewUserServiceHandler(userService, opts))
+	mux.Handle(carbonpanelv1connect.NewRoleServiceHandler(services.NewRoleService(store, enforcer, log), opts))
 	mux.HandleFunc("/api/v1/auth/oidc/login", handler.HandleLogin)
 
 	client := panel.Client()
@@ -82,6 +84,7 @@ func TestBeginOIDCLinkFromAuthenticatedConnectSession(t *testing.T) {
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	authClient := carbonpanelv1connect.NewAuthServiceClient(client, panel.URL)
 	userClient := carbonpanelv1connect.NewUserServiceClient(client, panel.URL)
+	roleClient := carbonpanelv1connect.NewRoleServiceClient(client, panel.URL)
 	login := func(name string) string {
 		res, err := authClient.Login(ctx, connect.NewRequest(&v1.LoginRequest{Username: name, Password: password}))
 		require.NoError(t, err)
@@ -108,7 +111,7 @@ func TestBeginOIDCLinkFromAuthenticatedConnectSession(t *testing.T) {
 	require.False(t, eligible(plain))
 	_, err = begin(plain)
 	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
-	apiToken, _, err := manager.GenerateAPIToken(ctx, admin.ID, "fixture", nil)
+	apiToken, apiTokenRow, err := manager.GenerateAPIToken(ctx, admin.ID, "fixture", nil)
 	require.NoError(t, err)
 	require.False(t, eligible(apiToken))
 	_, err = begin(apiToken)
@@ -126,4 +129,73 @@ func TestBeginOIDCLinkFromAuthenticatedConnectSession(t *testing.T) {
 	defer func() { _ = start.Body.Close() }()
 	require.Equal(t, http.StatusFound, start.StatusCode)
 	require.Contains(t, start.Header.Get("Location"), idp.URL+"/authorize?")
+
+	require.NoError(t, store.AssignRole(ctx, plainUser.ID, "viewer", "oidc"))
+	require.NoError(t, store.AssignRole(ctx, plainUser.ID, "operator", "local"))
+	updated, err := userClient.UpdateUser(ctx, authenticatedRequest(adminToken, &v1.UpdateUserRequest{
+		Id: plainUser.ID, Roles: []string{"viewer", "operator"},
+	}))
+	require.NoError(t, err)
+	require.Equal(t, []string{"operator"}, updated.Msg.User.LocalRoles)
+	require.Equal(t, []string{"viewer"}, updated.Msg.User.OidcRoles)
+	updated, err = userClient.UpdateUser(ctx, authenticatedRequest(adminToken, &v1.UpdateUserRequest{
+		Id: plainUser.ID, LocalRolesUpdate: &v1.LocalRoleSelection{Roles: []string{"viewer"}},
+	}))
+	require.NoError(t, err)
+	require.Equal(t, []string{"viewer"}, updated.Msg.User.LocalRoles)
+	require.Equal(t, []string{"viewer"}, updated.Msg.User.OidcRoles)
+	_, err = roleClient.UnassignRole(ctx, authenticatedRequest(adminToken, &v1.UnassignRoleRequest{
+		UserId: plainUser.ID, RoleName: "viewer",
+	}))
+	require.NoError(t, err)
+	current, err := userClient.GetUser(ctx, authenticatedRequest(adminToken, &v1.GetUserRequest{Id: plainUser.ID}))
+	require.NoError(t, err)
+	require.Empty(t, current.Msg.User.LocalRoles)
+	require.Equal(t, []string{"viewer"}, current.Msg.User.OidcRoles)
+	require.Equal(t, []string{"viewer"}, current.Msg.User.Roles)
+
+	require.NoError(t, store.AssignRole(ctx, plainUser.ID, "viewer", "local"))
+	updated, err = userClient.UpdateUser(ctx, authenticatedRequest(adminToken, &v1.UpdateUserRequest{
+		Id: plainUser.ID, LocalRolesUpdate: &v1.LocalRoleSelection{},
+	}))
+	require.NoError(t, err)
+	require.Empty(t, updated.Msg.User.LocalRoles)
+	require.Equal(t, []string{"viewer"}, updated.Msg.User.OidcRoles)
+
+	require.NoError(t, enforcer.SetPermissionsForRole("editor", []rbac.Permission{{
+		Resource: rbac.ResourceUsers, Action: rbac.ActionUpdate, ObjectID: "*",
+	}}))
+	require.NoError(t, store.AssignRole(ctx, plainUser.ID, "editor", "local"))
+	newEmail := "should-not-persist@example.test"
+	_, err = userClient.UpdateUser(ctx, authenticatedRequest(plain, &v1.UpdateUserRequest{
+		Id: plainUser.ID, Email: &newEmail, LocalRolesUpdate: &v1.LocalRoleSelection{Roles: []string{"admin"}},
+	}))
+	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
+	current, err = userClient.GetUser(ctx, authenticatedRequest(adminToken, &v1.GetUserRequest{Id: plainUser.ID}))
+	require.NoError(t, err)
+	require.Empty(t, current.Msg.User.GetEmail())
+	require.Equal(t, []string{"editor"}, current.Msg.User.LocalRoles)
+
+	adminSession, err := store.GetSession(ctx, adminToken)
+	require.NoError(t, err)
+	_, _, _, err = store.LinkOIDCIdentity(ctx, admin.ID, idp.URL, "linked-subject", adminSession.ID, nil, nil)
+	require.NoError(t, err)
+	// Use an OIDC-origin fixture session on the same user to exercise the
+	// generated API handlers through their production interceptor.
+	oidc := login(admin.Username)
+	oidcSession, err := store.GetSession(ctx, oidc)
+	require.NoError(t, err)
+	require.NoError(t, store.DB().Model(&db.Session{}).Where("id = ?", oidcSession.ID).Update("auth_provider", "oidc").Error)
+	_, err = authClient.DeleteAPIToken(ctx, authenticatedRequest(oidc, &v1.DeleteAPITokenRequest{Id: apiTokenRow.ID}))
+	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
+	_, err = authClient.ListAPITokens(ctx, authenticatedRequest(oidc, &v1.ListAPITokensRequest{}))
+	require.Equal(t, connect.CodePermissionDenied, connect.CodeOf(err))
+	_, err = manager.ValidateAPIToken(ctx, apiToken)
+	require.NoError(t, err)
+}
+
+func authenticatedRequest[T any](token string, msg *T) *connect.Request[T] {
+	req := connect.NewRequest(msg)
+	req.Header().Set("Authorization", "Bearer "+token)
+	return req
 }

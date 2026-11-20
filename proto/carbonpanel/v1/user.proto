@@ -78,7 +78,14 @@ message UpdateUserRequest {
   string id = 1;
   optional string email = 2;
   optional bool is_active = 3;
+  // Legacy effective role list. Provider grants remain provider managed.
   repeated string roles = 4;
+  LocalRoleSelection local_roles_update = 5;
+}
+
+// Editable local roles. An empty selection clears all locally managed grants.
+message LocalRoleSelection {
+  repeated string roles = 1;
 }
 
 // Updated user

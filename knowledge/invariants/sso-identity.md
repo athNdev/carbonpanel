@@ -43,7 +43,8 @@ A role can have separate grants for a linked local account. Each request
 reloads the grants allowed by the session origin. Local sessions use locally
 owned grants and linked OIDC sessions use OIDC-sourced grants. Privileged
 overlap with a local grant is allowed for the explicitly linked account.
-Other privileged provenance conflicts refuse sign-in.
+Other privileged provenance conflicts refuse sign-in. Manual role edits
+and removals affect locally managed grants.
 
 # How to check
 

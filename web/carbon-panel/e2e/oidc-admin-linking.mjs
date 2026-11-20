@@ -31,9 +31,19 @@ try {
 	// Seed only the network boundary. The app logs in, calls its generated Connect
 	// client, navigates with the browser cookie and renders the returned status.
 	const user = { id: 'fixture', username: 'fixture-admin', authProvider: 'local', isActive: true };
+	const managedUser = {
+		id: 'managed',
+		username: 'fixture-member',
+		authProvider: 'oidc',
+		isActive: true,
+		roles: ['operator', 'viewer'],
+		localRoles: ['operator'],
+		oidcRoles: ['operator', 'viewer']
+	};
 	const token = 'fixture-local-session';
 	let linkAttempts = 0;
 	let callbackAttempts = 0;
+	let roleEdits = 0;
 	let linked = false;
 	await context.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
 		const request = route.request();
@@ -54,6 +64,20 @@ try {
 				});
 			case 'GetAuthConfig':
 				return reply({ localAuthEnabled: true, oidcEnabled: true, sessionTimeout: 86400 });
+			case 'ListUsers':
+				return reply({ users: [managedUser] });
+			case 'ListRoles':
+				return reply({ roles: managedUser.roles.map((name) => ({ id: name, name })) });
+			case 'UpdateUser': {
+				const payload = request.postDataJSON();
+				assert.equal(payload.id, managedUser.id);
+				assert.equal(Object.hasOwn(payload, 'roles'), false);
+				assert.ok(payload.localRolesUpdate, 'The empty local role selection is explicit');
+				assert.deepEqual(payload.localRolesUpdate.roles ?? [], []);
+				roleEdits++;
+				managedUser.localRoles = [];
+				return reply({ user: managedUser });
+			}
 			case 'BeginOIDCLink':
 				assert.equal(await request.headerValue('authorization'), `Bearer ${token}`);
 				assert.deepEqual(request.postDataJSON(), {});
@@ -104,9 +128,23 @@ try {
 	assert.equal(await page.evaluate(() => localStorage.getItem('auth_token')), token);
 	assert.equal(linkAttempts, 2);
 	assert.equal(callbackAttempts, 2);
+
+	// The effective set includes both grants, but only the local copy is editable.
+	await page.getByRole('tab', { name: 'Users', exact: true }).click();
+	await page.getByRole('button', { name: `Edit ${managedUser.username}` }).click();
+	const editor = page.getByRole('dialog');
+	const localRoles = editor.getByRole('group', { name: 'Local roles' });
+	const providerRoles = editor.getByRole('group', { name: 'Identity provider roles' });
+	await localRoles.getByRole('button', { name: 'viewer', pressed: false }).waitFor();
+	await providerRoles.getByText('viewer', { exact: true }).waitFor();
+	await providerRoles.getByText('operator', { exact: true }).waitFor();
+	await localRoles.getByRole('button', { name: 'operator', pressed: true }).click();
+	await editor.getByRole('button', { name: 'Save Changes' }).click();
+	await editor.waitFor({ state: 'hidden' });
+	assert.equal(roleEdits, 1);
 	assert.deepEqual(errors, []);
 	console.log(
-		'PASS: Local admin linking sends the browser binding, handles denial, and keeps the local session on success.'
+		'PASS: Local admin linking binds the browser, handles denial, preserves the local session, and edits local roles independently.'
 	);
 } finally {
 	await browser?.close();

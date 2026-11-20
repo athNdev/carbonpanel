@@ -22,7 +22,7 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_carbonpanel_v1_user: GenFile =
 	/*@__PURE__*/
 	fileDesc(
-		'ChljYXJib25wYW5lbC92MS91c2VyLnByb3RvEg5jYXJib25wYW5lbC52MSIWChRCZWdpbk9JRENMaW5rUmVxdWVzdCIrChVCZWdpbk9JRENMaW5rUmVzcG9uc2USEgoKbGlua190b2tlbhgBIAEoCSISChBMaXN0VXNlcnNSZXF1ZXN0IjgKEUxpc3RVc2Vyc1Jlc3BvbnNlEiMKBXVzZXJzGAEgAygLMhQuY2FyYm9ucGFuZWwudjEuVXNlciIcCg5HZXRVc2VyUmVxdWVzdBIKCgJpZBgBIAEoCSI1Cg9HZXRVc2VyUmVzcG9uc2USIgoEdXNlchgBIAEoCzIULmNhcmJvbnBhbmVsLnYxLlVzZXIiVQoRQ3JlYXRlVXNlclJlcXVlc3QSEAoIdXNlcm5hbWUYASABKAkSDQoFZW1haWwYAiABKAkSEAoIcGFzc3dvcmQYAyABKAkSDQoFcm9sZXMYBCADKAkiOAoSQ3JlYXRlVXNlclJlc3BvbnNlEiIKBHVzZXIYASABKAsyFC5jYXJib25wYW5lbC52MS5Vc2VyInIKEVVwZGF0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJEhIKBWVtYWlsGAIgASgJSACIAQESFgoJaXNfYWN0aXZlGAMgASgISAGIAQESDQoFcm9sZXMYBCADKAlCCAoGX2VtYWlsQgwKCl9pc19hY3RpdmUiOAoSVXBkYXRlVXNlclJlc3BvbnNlEiIKBHVzZXIYASABKAsyFC5jYXJib25wYW5lbC52MS5Vc2VyIh8KEURlbGV0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJIiUKEkRlbGV0ZVVzZXJSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJMogECgtVc2VyU2VydmljZRJQCglMaXN0VXNlcnMSIC5jYXJib25wYW5lbC52MS5MaXN0VXNlcnNSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuTGlzdFVzZXJzUmVzcG9uc2USSgoHR2V0VXNlchIeLmNhcmJvbnBhbmVsLnYxLkdldFVzZXJSZXF1ZXN0Gh8uY2FyYm9ucGFuZWwudjEuR2V0VXNlclJlc3BvbnNlElMKCkNyZWF0ZVVzZXISIS5jYXJib25wYW5lbC52MS5DcmVhdGVVc2VyUmVxdWVzdBoiLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZVVzZXJSZXNwb25zZRJTCgpVcGRhdGVVc2VyEiEuY2FyYm9ucGFuZWwudjEuVXBkYXRlVXNlclJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5VcGRhdGVVc2VyUmVzcG9uc2USUwoKRGVsZXRlVXNlchIhLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZVVzZXJSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuRGVsZXRlVXNlclJlc3BvbnNlElwKDUJlZ2luT0lEQ0xpbmsSJC5jYXJib25wYW5lbC52MS5CZWdpbk9JRENMaW5rUmVxdWVzdBolLmNhcmJvbnBhbmVsLnYxLkJlZ2luT0lEQ0xpbmtSZXNwb25zZUJIWkZnaXRodWIuY29tL2F0aE5kZXYvY2FyYm9uLXBhbmVsL3BrZy9wcm90by9jYXJib25wYW5lbC92MTtjYXJib25wYW5lbHYxYgZwcm90bzM',
+		'ChljYXJib25wYW5lbC92MS91c2VyLnByb3RvEg5jYXJib25wYW5lbC52MSIWChRCZWdpbk9JRENMaW5rUmVxdWVzdCIrChVCZWdpbk9JRENMaW5rUmVzcG9uc2USEgoKbGlua190b2tlbhgBIAEoCSISChBMaXN0VXNlcnNSZXF1ZXN0IjgKEUxpc3RVc2Vyc1Jlc3BvbnNlEiMKBXVzZXJzGAEgAygLMhQuY2FyYm9ucGFuZWwudjEuVXNlciIcCg5HZXRVc2VyUmVxdWVzdBIKCgJpZBgBIAEoCSI1Cg9HZXRVc2VyUmVzcG9uc2USIgoEdXNlchgBIAEoCzIULmNhcmJvbnBhbmVsLnYxLlVzZXIiVQoRQ3JlYXRlVXNlclJlcXVlc3QSEAoIdXNlcm5hbWUYASABKAkSDQoFZW1haWwYAiABKAkSEAoIcGFzc3dvcmQYAyABKAkSDQoFcm9sZXMYBCADKAkiOAoSQ3JlYXRlVXNlclJlc3BvbnNlEiIKBHVzZXIYASABKAsyFC5jYXJib25wYW5lbC52MS5Vc2VyIrIBChFVcGRhdGVVc2VyUmVxdWVzdBIKCgJpZBgBIAEoCRISCgVlbWFpbBgCIAEoCUgAiAEBEhYKCWlzX2FjdGl2ZRgDIAEoCEgBiAEBEg0KBXJvbGVzGAQgAygJEj4KEmxvY2FsX3JvbGVzX3VwZGF0ZRgFIAEoCzIiLmNhcmJvbnBhbmVsLnYxLkxvY2FsUm9sZVNlbGVjdGlvbkIICgZfZW1haWxCDAoKX2lzX2FjdGl2ZSIjChJMb2NhbFJvbGVTZWxlY3Rpb24SDQoFcm9sZXMYASADKAkiOAoSVXBkYXRlVXNlclJlc3BvbnNlEiIKBHVzZXIYASABKAsyFC5jYXJib25wYW5lbC52MS5Vc2VyIh8KEURlbGV0ZVVzZXJSZXF1ZXN0EgoKAmlkGAEgASgJIiUKEkRlbGV0ZVVzZXJSZXNwb25zZRIPCgdtZXNzYWdlGAEgASgJMogECgtVc2VyU2VydmljZRJQCglMaXN0VXNlcnMSIC5jYXJib25wYW5lbC52MS5MaXN0VXNlcnNSZXF1ZXN0GiEuY2FyYm9ucGFuZWwudjEuTGlzdFVzZXJzUmVzcG9uc2USSgoHR2V0VXNlchIeLmNhcmJvbnBhbmVsLnYxLkdldFVzZXJSZXF1ZXN0Gh8uY2FyYm9ucGFuZWwudjEuR2V0VXNlclJlc3BvbnNlElMKCkNyZWF0ZVVzZXISIS5jYXJib25wYW5lbC52MS5DcmVhdGVVc2VyUmVxdWVzdBoiLmNhcmJvbnBhbmVsLnYxLkNyZWF0ZVVzZXJSZXNwb25zZRJTCgpVcGRhdGVVc2VyEiEuY2FyYm9ucGFuZWwudjEuVXBkYXRlVXNlclJlcXVlc3QaIi5jYXJib25wYW5lbC52MS5VcGRhdGVVc2VyUmVzcG9uc2USUwoKRGVsZXRlVXNlchIhLmNhcmJvbnBhbmVsLnYxLkRlbGV0ZVVzZXJSZXF1ZXN0GiIuY2FyYm9ucGFuZWwudjEuRGVsZXRlVXNlclJlc3BvbnNlElwKDUJlZ2luT0lEQ0xpbmsSJC5jYXJib25wYW5lbC52MS5CZWdpbk9JRENMaW5rUmVxdWVzdBolLmNhcmJvbnBhbmVsLnYxLkJlZ2luT0lEQ0xpbmtSZXNwb25zZUJIWkZnaXRodWIuY29tL2F0aE5kZXYvY2FyYm9uLXBhbmVsL3BrZy9wcm90by9jYXJib25wYW5lbC92MTtjYXJib25wYW5lbHYxYgZwcm90bzM',
 		[file_carbonpanel_v1_common]
 	);
 
@@ -215,9 +215,16 @@ export type UpdateUserRequest = Message<'carbonpanel.v1.UpdateUserRequest'> & {
 	isActive?: boolean | undefined;
 
 	/**
+	 * Legacy effective role list. Provider grants remain provider managed.
+	 *
 	 * @generated from field: repeated string roles = 4;
 	 */
 	roles: string[];
+
+	/**
+	 * @generated from field: carbonpanel.v1.LocalRoleSelection local_roles_update = 5;
+	 */
+	localRolesUpdate?: LocalRoleSelection | undefined;
 };
 
 /**
@@ -227,6 +234,26 @@ export type UpdateUserRequest = Message<'carbonpanel.v1.UpdateUserRequest'> & {
 export const UpdateUserRequestSchema: GenMessage<UpdateUserRequest> =
 	/*@__PURE__*/
 	messageDesc(file_carbonpanel_v1_user, 8);
+
+/**
+ * Editable local roles. An empty selection clears all locally managed grants.
+ *
+ * @generated from message carbonpanel.v1.LocalRoleSelection
+ */
+export type LocalRoleSelection = Message<'carbonpanel.v1.LocalRoleSelection'> & {
+	/**
+	 * @generated from field: repeated string roles = 1;
+	 */
+	roles: string[];
+};
+
+/**
+ * Describes the message carbonpanel.v1.LocalRoleSelection.
+ * Use `create(LocalRoleSelectionSchema)` to create a new message.
+ */
+export const LocalRoleSelectionSchema: GenMessage<LocalRoleSelection> =
+	/*@__PURE__*/
+	messageDesc(file_carbonpanel_v1_user, 9);
 
 /**
  * Updated user
@@ -246,7 +273,7 @@ export type UpdateUserResponse = Message<'carbonpanel.v1.UpdateUserResponse'> & 
  */
 export const UpdateUserResponseSchema: GenMessage<UpdateUserResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 9);
+	messageDesc(file_carbonpanel_v1_user, 10);
 
 /**
  * User to delete
@@ -266,7 +293,7 @@ export type DeleteUserRequest = Message<'carbonpanel.v1.DeleteUserRequest'> & {
  */
 export const DeleteUserRequestSchema: GenMessage<DeleteUserRequest> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 10);
+	messageDesc(file_carbonpanel_v1_user, 11);
 
 /**
  * Deletion confirmation
@@ -286,7 +313,7 @@ export type DeleteUserResponse = Message<'carbonpanel.v1.DeleteUserResponse'> & 
  */
 export const DeleteUserResponseSchema: GenMessage<DeleteUserResponse> =
 	/*@__PURE__*/
-	messageDesc(file_carbonpanel_v1_user, 11);
+	messageDesc(file_carbonpanel_v1_user, 12);
 
 /**
  * User management service (admin only)

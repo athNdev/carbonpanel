@@ -42,7 +42,7 @@ var (
 	ErrSessionTimeoutMin    = errors.New("session timeout must be at least 300 seconds (5 minutes)")
 	ErrAPITokenExpired      = errors.New("api token has expired")
 	ErrAPITokenNotFound     = errors.New("api token not found")
-	ErrLocalAPITokenSession = errors.New("sign in locally to create API tokens for this account")
+	ErrLocalAPITokenSession = errors.New("sign in locally to manage API tokens for this account")
 	ErrInvalidRecoveryKey   = errors.New("invalid recovery key")
 	// ErrNoAuthProvider is returned when the configuration would leave the
 	// panel with no authentication provider and no explicit opt-in to run
@@ -457,17 +457,24 @@ func (m *Manager) UpdateSettings(ctx context.Context, localEnabled, allowReg, an
 }
 
 // Creates a new API token for a user. Plaintext is returned, SHA-256 hash is stored
-func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, expiresInDays *int32) (string, *db.APIToken, error) {
+func (m *Manager) CheckAPITokenAccess(ctx context.Context, userID string) error {
 	// Tokens tied to a local account authenticate with locally owned grants.
 	// A linked OIDC session cannot turn its IdP grant into a local credential.
 	if caller := GetUserFromContext(ctx); caller != nil && caller.ID == userID && caller.SessionProvider == oidcSource {
 		user, err := m.store.GetUser(ctx, userID)
 		if err != nil {
-			return "", nil, err
+			return err
 		}
 		if isLinkedLocalAccount(user) {
-			return "", nil, ErrLocalAPITokenSession
+			return ErrLocalAPITokenSession
 		}
+	}
+	return nil
+}
+
+func (m *Manager) GenerateAPIToken(ctx context.Context, userID, name string, expiresInDays *int32) (string, *db.APIToken, error) {
+	if err := m.CheckAPITokenAccess(ctx, userID); err != nil {
+		return "", nil, err
 	}
 	// Generate 32 random bytes
 	raw := make([]byte, 32)

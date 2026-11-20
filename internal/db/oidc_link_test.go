@@ -283,6 +283,26 @@ func TestOIDCLinkMigrationPreservesLegacyGrantsAndSession(t *testing.T) {
 	require.Equal(t, []string{"admin"}, roles)
 }
 
+func TestCleanExpiredSessionsUsesAbsoluteExpiry(t *testing.T) {
+	ctx := t.Context()
+	store := newTestStore(t)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	user, _ := createLocalOIDCLinkFixture(t, store, "offset-admin")
+	now := time.Now()
+	for _, session := range []Session{
+		{ID: "live", UserID: user.ID, Token: "live", ExpiresAt: now.Add(time.Hour).In(time.FixedZone("west", -11*3600))},
+		{ID: "expired", UserID: user.ID, Token: "expired", ExpiresAt: now.Add(-time.Hour).In(time.FixedZone("east", 11*3600))},
+	} {
+		require.NoError(t, store.CreateSession(ctx, &session))
+	}
+	require.NoError(t, store.CleanExpiredSessions(ctx))
+	for id, expected := range map[string]int64{"live": 1, "expired": 0} {
+		var count int64
+		require.NoError(t, store.db.Model(&Session{}).Where("id = ?", id).Count(&count).Error)
+		require.Equal(t, expected, count, id)
+	}
+}
+
 func TestUserRoleGrantAssignmentSerializesExactSources(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)

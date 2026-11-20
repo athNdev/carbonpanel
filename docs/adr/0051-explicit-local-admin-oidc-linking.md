@@ -27,11 +27,14 @@ independently of the provider and its group policy.
    A subsequent ordinary OIDC sign-in resolves the same account by issuer
    and subject. The account keeps its local credentials and profile.
 5. Local and OIDC role grants have independent provenance, including
-   overlaps on a linked account. Each request reloads current grants.
+   overlaps on a linked account. Session validation reloads current grants.
    A linked OIDC session receives OIDC-sourced roles. Local sign-in and
-   existing local API credentials receive locally owned roles. Creating an
-   API token for the linked local account requires local access. Legacy
-   untyped sessions on a linked account require a fresh sign-in.
+   existing local API credentials receive locally owned roles. Managing the
+   linked account's API tokens requires local access. Older untyped sessions
+   on a linked account require a fresh sign-in.
+6. The user editor manages local grants and shows provider grants separately.
+   Direct per-server grants still belong to the shared account. An open
+   WebSocket uses the grants captured at its last socket authentication.
 
 ## Consequences
 

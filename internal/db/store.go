@@ -1015,7 +1015,80 @@ func assignUserRole(tx *gorm.DB, userID, roleName, source string) (bool, error) 
 }
 
 func (s *Store) UnassignRole(ctx context.Context, userID, roleName string) error {
-	return s.db.WithContext(ctx).Where("user_id = ? AND role_name = ?", userID, roleName).Delete(&UserRole{}).Error
+	return s.db.WithContext(ctx).
+		Where("user_id = ? AND role_name = ? AND source <> ?", userID, roleName, oidcRoleSource).
+		Delete(&UserRole{}).Error
+}
+
+var ErrLocalAdminGrantForbidden = errors.New("assigning the admin role requires roles/manage_wildcard")
+
+// LocalRoleUpdate describes an explicit replacement of locally owned roles.
+// A legacy effective-role list preserves provider-only grants without adopting
+// them as new local grants.
+type LocalRoleUpdate struct {
+	Roles                []string
+	LegacyEffectiveNames bool
+	AllowAdminGrant      bool
+}
+
+func (s *Store) UpdateUserProfileAndRoles(ctx context.Context, userID string, email *string, active *bool, roles *LocalRoleUpdate) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// The profile UPDATE acquires the SQLite writer lock before checking
+		// which grants exist and whether a new local admin grant is allowed.
+		fields := map[string]any{"updated_at": tx.NowFunc()}
+		if email != nil {
+			fields["email"] = *email
+		}
+		if active != nil {
+			fields["is_active"] = *active
+		}
+		if err := updateUserFields(tx, userID, fields); err != nil || roles == nil {
+			return err
+		}
+		return replaceLocalRoleGrants(tx, userID, *roles)
+	})
+}
+
+func replaceLocalRoleGrants(tx *gorm.DB, userID string, update LocalRoleUpdate) error {
+	current, err := getUserRoleNames(tx.Where("user_roles.source <> ?", oidcRoleSource), userID)
+	if err != nil {
+		return err
+	}
+	local := make(map[string]bool, len(current))
+	for _, role := range current {
+		local[role] = true
+	}
+	providerOnly := map[string]bool{}
+	if update.LegacyEffectiveNames {
+		provider, err := getUserRoleNames(tx.Where("user_roles.source = ?", oidcRoleSource), userID)
+		if err != nil {
+			return err
+		}
+		for _, role := range provider {
+			providerOnly[role] = !local[role]
+		}
+	}
+	desired := make([]string, 0, len(update.Roles))
+	for _, role := range update.Roles {
+		if role == "" || providerOnly[role] {
+			continue
+		}
+		if !local[role] {
+			if strings.EqualFold(role, "admin") && !update.AllowAdminGrant {
+				return ErrLocalAdminGrantForbidden
+			}
+			if _, err := assignUserRole(tx, userID, role, "local"); err != nil {
+				return err
+			}
+			local[role] = true
+		}
+		desired = append(desired, role)
+	}
+	stale := tx.Where("user_id = ? AND source <> ?", userID, oidcRoleSource)
+	if len(desired) > 0 {
+		stale = stale.Where("role_name NOT IN ?", desired)
+	}
+	return stale.Delete(&UserRole{}).Error
 }
 
 // SetUserRolesBySource reconciles a user's role grants for exactly one source
@@ -1023,8 +1096,8 @@ func (s *Store) UnassignRole(ctx context.Context, userID, roleName string) error
 // are never read as "current", deleted, or reattributed. It returns the
 // deterministic added/removed role names so callers can emit audit deltas.
 //
-// This is the source-aware helper required for OIDC entitlement reconciliation:
-// the older UnassignRole has no source filter and must not be used for it.
+// OIDC entitlement reconciliation uses this helper rather than the manual
+// UnassignRole operation.
 func (s *Store) SetUserRolesBySource(ctx context.Context, userID, source string, desired []string) (added, removed []string, err error) {
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		added, removed, err = setUserRolesBySource(tx, userID, source, desired)
@@ -1146,7 +1219,9 @@ func (s *Store) DeleteUserSessionsExcept(ctx context.Context, userID, exceptToke
 }
 
 func (s *Store) CleanExpiredSessions(ctx context.Context) error {
-	return s.db.WithContext(ctx).Where("expires_at < ?", time.Now()).Delete(&Session{}).Error
+	return s.db.WithContext(ctx).
+		Where("julianday(expires_at) <= julianday(?)", time.Now().UTC().Format(time.RFC3339Nano)).
+		Delete(&Session{}).Error
 }
 
 // CleanAllSessions deletes all sessions (used when JWT secret changes).

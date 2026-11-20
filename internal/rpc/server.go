@@ -421,6 +421,7 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 	backupService.SetScheduler(s.scheduler)
 	userService := services.NewUserService(s.store, s.authManager, s.log)
 	userService.SetOIDCHandler(s.oidcHandler)
+	userService.SetEnforcer(s.enforcer)
 	roleService := services.NewRoleService(s.store, s.enforcer, s.log)
 	moduleService := services.NewModuleService(s.store, s.docker, s.moduleManager, s.proxyManager, s.authManager, s.config, s.logStreamer, s.log)
 	moduleService.SetEnforcer(s.enforcer)
