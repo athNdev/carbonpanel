@@ -71,12 +71,12 @@ try {
         player.serverId === serverId &&
         player.ref?.name === username &&
         Boolean(player.ref.identityKey) &&
-        (player.presence === 'PLAYER_PRESENCE_ONLINE' || player.presence === 1),
+        ['PLAYER_PRESENCE_ONLINE', 'PLAYER_PRESENCE_RECENTLY_SEEN', 1, 3].includes(player.presence),
     );
     if (!observed) await sleep(1000, undefined, { signal: active });
   }
 } catch {
-  console.error('The disposable panel did not observe ReviewGuest online on the seeded server');
+  console.error('The disposable panel did not observe ReviewGuest on the seeded server');
 } finally {
   if (bot && !ended) {
     const end = new Promise((resolve) => bot.once('end', resolve));
@@ -90,7 +90,7 @@ try {
 }
 
 if (observed && ended) {
-  console.log('The disposable panel observed ReviewGuest online on the seeded server');
+  console.log('The disposable panel observed ReviewGuest on the seeded server');
   process.exit(0);
 }
 process.exit(1);

@@ -493,7 +493,7 @@ class ShowcasePipelineTest(unittest.TestCase):
         # The seed must be pinned only for a fresh fixture config; an existing
         # review config (and any running container) is never modified.
         self.assertIn('if [ ! -f "${DATA}/config/config.yaml" ]; then', devstack)
-        self.assertIn("JSON.stringify({minecraft:{global_config:{seed:", devstack)
+        self.assertIn("minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}", devstack)
         self.assertNotIn("ConfigService/UpdateServerConfig", devstack)
         # Region readiness must use the shared GetServer.dataPath resolver and
         # real .mca header coverage, never a guessed slug+ID path.
