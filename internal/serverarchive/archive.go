@@ -180,7 +180,7 @@ func writeFile(
 	if err != nil {
 		return File{}, err
 	}
-	defer handle.Close()
+	defer func() { _ = handle.Close() }()
 	size := info.Size()
 	var r io.Reader = handle
 	if isManagedSettings(rel) {
@@ -408,7 +408,7 @@ func readContainer(ctx context.Context, f *os.File, entry func(string, int64, io
 		if err != nil {
 			return "", err
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		gz.Multistream(false)
 		archive := tar.NewReader(gz)
 		for {

@@ -55,18 +55,18 @@ func TestNativeRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer original.Close()
+			defer func() { _ = original.Close() }()
 			target, err := nodestorage.NewLocal(destination)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer target.Close()
+			defer func() { _ = target.Close() }()
 
 			f, err := os.CreateTemp(t.TempDir(), "export")
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			if err := Write(ctx, original, f, format, fixtureRuntime, "fixture"); err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +105,7 @@ func TestInspectRequiresMatchingManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w := zip.NewWriter(f)
 	for _, pair := range [][2]string{{"data/world/level.dat", "testdata"}, {"manifest.json", manifest}} {
 		entry, err := w.Create(pair[0])
