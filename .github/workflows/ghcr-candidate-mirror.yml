@@ -34,17 +34,24 @@ jobs:
 
       - name: Refuse a destination that is not definitively absent
         env:
+          ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          TOKEN=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:athndev/carbonpanel:pull,push" \
-            | jq -er .token)
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $TOKEN" \
-            -H 'Accept: application/vnd.oci.image.index.v1+json' \
-            "https://ghcr.io/v2/athndev/carbonpanel/manifests/sha-$CANDIDATE_COMMIT")
-          echo "destination_status=$CODE"
-          test "$CODE" = "404" || { echo "::error::destination sha tag not definitively absent"; exit 1; }
+          set +e
+          docker run --rm quay.io/skopeo/stable:latest inspect \
+            --creds "$ACTOR:$GH_TOKEN" \
+            "docker://ghcr.io/athndev/carbonpanel:sha-$CANDIDATE_COMMIT" \
+            > "$RUNNER_TEMP/pre.json" 2> "$RUNNER_TEMP/pre.err"
+          RC=$?
+          set -e
+          echo "preflight_rc=$RC"
+          cat "$RUNNER_TEMP/pre.err"
+          if [ "$RC" -eq 0 ]; then
+            echo "::error::destination sha tag already present"; exit 1
+          fi
+          grep -Eqi 'manifest unknown|not found' "$RUNNER_TEMP/pre.err" || {
+            echo "::error::cannot prove destination absence (auth or transport blocker)"; exit 1
+          }
 
       - name: Mirror the exact Hub index with all manifests and attestations
         env:
