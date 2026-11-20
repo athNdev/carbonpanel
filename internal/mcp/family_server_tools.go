@@ -9,7 +9,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
@@ -24,6 +26,7 @@ import (
 // integration owner decides how to merge the two and regenerate the catalog.
 type FamilyServerClients struct {
 	Server    carbonpanelv1connect.ServerServiceClient
+	Archive   carbonpanelv1connect.ServerServiceClient
 	Config    carbonpanelv1connect.ConfigServiceClient
 	Task      carbonpanelv1connect.TaskServiceClient
 	Activity  carbonpanelv1connect.ActivityServiceClient
@@ -45,7 +48,14 @@ func NewFamilyServerClients(httpClient connect.HTTPClient, baseURL, token string
 		return nil, fmt.Errorf("API token is required")
 	}
 	opts := []connect.ClientOption{connect.WithInterceptors(bearerInterceptor(token))}
+	archiveClient := httpClient
+	if client, ok := httpClient.(*http.Client); ok && client.Timeout == DefaultRequestTimeout {
+		longCallClient := *client
+		longCallClient.Timeout = time.Hour
+		archiveClient = &longCallClient
+	}
 	return &FamilyServerClients{
+		Archive:   carbonpanelv1connect.NewServerServiceClient(archiveClient, baseURL, opts...),
 		Server:    carbonpanelv1connect.NewServerServiceClient(httpClient, baseURL, opts...),
 		Config:    carbonpanelv1connect.NewConfigServiceClient(httpClient, baseURL, opts...),
 		Task:      carbonpanelv1connect.NewTaskServiceClient(httpClient, baseURL, opts...),
@@ -625,7 +635,7 @@ func RegisterFamilyServerTools(s *sdkmcp.Server, c *FamilyServerClients) {
 		default:
 			return nil, famErr("export_server_archive", "format", "must be zip or tar.gz")
 		}
-		return invoke(ctx, cl.Server.ExportServerArchive, v1.ExportServerArchiveRequest{
+		return invoke(ctx, cl.Archive.ExportServerArchive, v1.ExportServerArchiveRequest{
 			ServerId:    in.ServerID,
 			Format:      format,
 			Consistency: v1.ServerArchiveConsistency_SERVER_ARCHIVE_CONSISTENCY_STOPPED,
@@ -638,7 +648,7 @@ func RegisterFamilyServerTools(s *sdkmcp.Server, c *FamilyServerClients) {
 		if err := famOptID("preview_server_archive", "node_id", in.NodeID); err != nil {
 			return nil, err
 		}
-		return invoke(ctx, cl.Server.PreviewServerArchive, v1.PreviewServerArchiveRequest{UploadId: in.UploadID, NodeId: in.NodeID})
+		return invoke(ctx, cl.Archive.PreviewServerArchive, v1.PreviewServerArchiveRequest{UploadId: in.UploadID, NodeId: in.NodeID})
 	})
 	addFamilyTool(s, "create_server", c, func(ctx context.Context, cl *FamilyServerClients, in famCreateServerArgs) (any, error) {
 		if err := famText("create_server", "name", in.Name, maxIDLen, true); err != nil {
@@ -678,8 +688,10 @@ func RegisterFamilyServerTools(s *sdkmcp.Server, c *FamilyServerClients) {
 		if err := famOptID("create_server", "request_id", in.RequestID); err != nil {
 			return nil, err
 		}
+		client := cl.Server
 		if in.ArchiveUploadID != "" {
-			preview, err := cl.Server.PreviewServerArchive(ctx, connect.NewRequest(&v1.PreviewServerArchiveRequest{UploadId: in.ArchiveUploadID, NodeId: in.NodeID}))
+			client = cl.Archive
+			preview, err := cl.Archive.PreviewServerArchive(ctx, connect.NewRequest(&v1.PreviewServerArchiveRequest{UploadId: in.ArchiveUploadID, NodeId: in.NodeID}))
 			if err != nil {
 				return nil, err
 			}
@@ -689,7 +701,7 @@ func RegisterFamilyServerTools(s *sdkmcp.Server, c *FamilyServerClients) {
 				}
 			}
 		}
-		return invoke(ctx, cl.Server.CreateServer, v1.CreateServerRequest{
+		return invoke(ctx, client.CreateServer, v1.CreateServerRequest{
 			Name: in.Name, McVersion: in.McVersion, ModLoader: v1.ModLoader(loader),
 			Port: famIntValue(in.Port), MaxPlayers: famIntValue(in.MaxPlayers),
 			Memory: famIntValue(in.Memory), NodeId: in.NodeID, RequestId: in.RequestID,
