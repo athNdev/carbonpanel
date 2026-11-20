@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -77,15 +78,28 @@ func TestIntegrationControllerStreamEarlyCommitIsRefused(t *testing.T) {
 
 // digestFakeClient returns a fixed final frame so gateway digest validation
 // can be tested without a real controller. Only the three stream methods are
-// used; the embedded interface supplies the rest.
+// used; the embedded interface supplies the rest. onOpen can force a post-Open
+// admission race; closes records the controller close and the context seen by
+// the fake so terminal cleanup can be asserted.
 type digestFakeClient struct {
 	carbonpanelv1connect.FileServiceClient
-	frame []byte
-	sha   string
+	frame  []byte
+	sha    string
+	onOpen func()
+	closes []streamCloseRecord
+}
+
+type streamCloseRecord struct {
+	sessionID string
+	cancel    bool
+	ctxErr    error
 }
 
 func (c *digestFakeClient) OpenStream(_ context.Context,
 	req *connect.Request[v1.OpenStreamRequest]) (*connect.Response[v1.OpenStreamResponse], error) {
+	if c.onOpen != nil {
+		c.onOpen()
+	}
 	return connect.NewResponse(&v1.OpenStreamResponse{SessionId: "ctl-fake", Size: req.Msg.GetTotalSize()}), nil
 }
 
@@ -96,9 +110,119 @@ func (c *digestFakeClient) ReadStreamFrame(_ context.Context,
 	}), nil
 }
 
-func (c *digestFakeClient) CloseStream(_ context.Context,
-	_ *connect.Request[v1.CloseStreamRequest]) (*connect.Response[v1.CloseStreamResponse], error) {
+func (c *digestFakeClient) CloseStream(ctx context.Context,
+	req *connect.Request[v1.CloseStreamRequest]) (*connect.Response[v1.CloseStreamResponse], error) {
+	c.closes = append(c.closes, streamCloseRecord{
+		sessionID: req.Msg.GetSessionId(),
+		cancel:    req.Msg.GetCancel(),
+		ctxErr:    ctx.Err(),
+	})
 	return connect.NewResponse(&v1.CloseStreamResponse{}), nil
+}
+
+// TestGatewayTerminalFailureClosesControllerHandleAndRecovers proves the two
+// terminal gateway-side failure paths close the controller-owned handle with a
+// context independent of an already-canceled tools/call, release local staging,
+// and leave the registry able to accept a fresh successful transfer.
+func TestGatewayTerminalFailureClosesControllerHandleAndRecovers(t *testing.T) {
+	frame := bytes.Repeat([]byte("z"), storageworker.ChunkBytes)
+	sum := sha256.Sum256(frame)
+	goodSHA := hex.EncodeToString(sum[:])
+	wrong := sha256.Sum256([]byte("not-the-frame"))
+	wrongSHA := hex.EncodeToString(wrong[:])
+
+	t.Run("open_admission_rejection", func(t *testing.T) {
+		var transfer *StreamTransfer
+		client := &digestFakeClient{frame: frame, sha: goodSHA}
+		client.onOpen = func() {
+			// The pre-RPC admission check saw an empty registry; fill it during
+			// OpenStream so the post-RPC re-check refuses the owned handle.
+			transfer.mu.Lock()
+			defer transfer.mu.Unlock()
+			for i := 0; i < maxGatewaySessions; i++ {
+				transfer.sessions[fmt.Sprintf("dummy-%d", i)] = &streamSession{}
+			}
+		}
+		var err error
+		transfer, err = NewStreamTransfer(client, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := transfer.OpenWithSize(ctx, "u-open", "srv-1", "worlds/x", int64(len(frame)));
+			!errors.Is(err, ErrStreamAdmission) {
+			t.Fatalf("post-Open admission was not refused: %v", err)
+		}
+		if len(client.closes) != 1 {
+			t.Fatalf("controller close records: got %d want 1", len(client.closes))
+		}
+		gotClose := client.closes[0]
+		if gotClose.sessionID != "ctl-fake" || !gotClose.cancel || gotClose.ctxErr != nil {
+			t.Fatalf("terminal open cleanup: %+v", gotClose)
+		}
+		transfer.mu.Lock()
+		count, staged := len(transfer.sessions), transfer.aggregate
+		transfer.mu.Unlock()
+		if count != maxGatewaySessions || staged != 0 {
+			t.Fatalf("admission cleanup changed registry: sessions=%d staged=%d", count, staged)
+		}
+		for i := 0; i < maxGatewaySessions; i++ {
+			transfer.Release("u-open", fmt.Sprintf("dummy-%d", i))
+		}
+	})
+
+	t.Run("terminal_read_failure_then_recovery", func(t *testing.T) {
+		client := &digestFakeClient{frame: frame, sha: wrongSHA}
+		transfer, err := NewStreamTransfer(client, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		handle, err := transfer.OpenWithSize(ctx, "u-read", "srv-1", "worlds/x", int64(len(frame)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, err := transfer.ReadChunk(ctx, "u-read", handle); !errors.Is(err, ErrStreamDigestMismatch) {
+			t.Fatalf("terminal read failure was not refused: %v", err)
+		}
+		if len(client.closes) != 1 {
+			t.Fatalf("controller close records: got %d want 1", len(client.closes))
+		}
+		gotClose := client.closes[0]
+		if gotClose.sessionID != "ctl-fake" || !gotClose.cancel || gotClose.ctxErr != nil {
+			t.Fatalf("terminal read cleanup: %+v", gotClose)
+		}
+		if _, _, err := transfer.ClaimCommit("u-read", handle); !errors.Is(err, ErrStreamNotFound) {
+			t.Fatalf("failed session still holds staged bytes: %v", err)
+		}
+		transfer.mu.Lock()
+		count, staged := len(transfer.sessions), transfer.aggregate
+		transfer.mu.Unlock()
+		if count != 0 || staged != 0 {
+			t.Fatalf("terminal cleanup left state: sessions=%d staged=%d", count, staged)
+		}
+
+		// A fresh session with a valid digest still completes normally.
+		goodClient := &digestFakeClient{frame: frame, sha: goodSHA}
+		goodTransfer, err := NewStreamTransfer(goodClient, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		goodHandle, err := goodTransfer.OpenWithSize(context.Background(), "u-read", "srv-1", "worlds/x", int64(len(frame)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, err := goodTransfer.ReadChunk(context.Background(), "u-read", goodHandle); !errors.Is(err, io.EOF) {
+			t.Fatalf("fresh read did not complete: %v", err)
+		}
+		data, digest, err := goodTransfer.ClaimCommit("u-read", goodHandle)
+		if err != nil || digest != goodSHA || !bytes.Equal(data, frame) {
+			t.Fatalf("fresh commit failed: digest=%q bytes=%d err=%v", digest, len(data), err)
+		}
+		goodTransfer.FinishCommit("u-read", goodHandle, CommitSucceeded)
+	})
 }
 
 // TestGatewayRejectsMismatchedControllerDigest proves the gateway refuses a
