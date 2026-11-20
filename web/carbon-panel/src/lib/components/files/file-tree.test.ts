@@ -52,7 +52,9 @@ test('hover keeps the selected row visually selected', () => {
 });
 
 test('clicking a row focuses the tree so arrow keys work immediately', () => {
-	assert.ok(row.includes('closest<HTMLElement>') && row.includes('[role="tree"]'));
+	const clickHandler = row.match(/onclick=\{\(e\) => \{([\s\S]*?)\}\}/)?.[1] ?? '';
+	assert.match(clickHandler, /\.closest\('\[role="tree"\]'\)/);
+	assert.match(clickHandler, /\?\.focus\(\)/);
 });
 
 test('Escape closes the context menu', () => {

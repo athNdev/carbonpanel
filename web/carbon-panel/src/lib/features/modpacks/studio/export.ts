@@ -94,8 +94,7 @@ export function findCurseForgeDroppedMods(
 
 /** Result of the export request before any browser download is triggered. */
 export type ExportRequestResult =
-	| { ok: true; blob: Blob }
-	| { ok: false; dropped?: string[]; message: string };
+	{ ok: true; blob: Blob } | { ok: false; dropped?: string[]; message: string };
 
 /**
  * GET the export endpoint with the selected options encoded in the query.
