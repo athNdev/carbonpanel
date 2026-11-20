@@ -1827,6 +1827,125 @@ def verify_publication_ref(args):
     return allowed
 
 
+PHASE_RESULTS = ("success", "failure", "cancelled", "skipped", "")
+KNOWN_CHANNELS = ("stable", "prerelease")
+POSITIVE_TRANSACTION_ACTIONS = ("publish", "noop")
+
+
+def publication_phases_decision(state):
+    """Decide whether every side-effect phase of a Release run really ran.
+
+    GitHub job ``if`` expressions can silently skip a phase when an ancestor was
+    deliberately skipped (for example the staged publish path skips the whole
+    build DAG). A green run with every write phase skipped is NOT a publication.
+
+    Operator intent and the Python plan decision are deliberately separate:
+    ``event``/``request_publish`` come from the trusted dispatch, while
+    ``publish``/``channel`` are the plan's computed outputs. A false or missing
+    plan output can never turn an explicit publish request into a green
+    rehearsal. Unknown job results fail closed. No credential is read here.
+    """
+    event = str(state.get("event", ""))
+    requested = (event == "workflow_dispatch"
+                 and str(state.get("request_publish", "")).lower() == "true")
+    decision = str(state.get("publish", "")).lower() == "true"
+    channel = str(state.get("channel", ""))
+    results = {k[len("result_"):]: str(v)
+               for k, v in state.items() if k.startswith("result_")}
+    outputs = {k[len("out_"):]: str(v)
+               for k, v in state.items() if k.startswith("out_")}
+
+    # Unknown results are never silently treated as rehearsal or success.
+    for job, result in results.items():
+        if result not in PHASE_RESULTS:
+            return False, "unknown result for " + job + ": " + result
+    plan_result = results.get("plan", "")
+    if requested:
+        if plan_result != "success":
+            return False, "explicit publish requires plan result success, got " + (plan_result or "missing")
+        if not decision:
+            return False, "explicit publish requires an affirmative plan decision"
+        if channel not in KNOWN_CHANNELS:
+            return False, "unrecognized publication channel: " + (channel or "missing")
+    else:
+        # Automatic events and dry dispatches can only stage. A plan that says
+        # publish=true without a trusted dispatch request is a contradiction.
+        if decision:
+            return False, "plan decided publish without a trusted explicit request"
+        if plan_result not in ("success", "skipped", ""):
+            return False, "plan result not usable: " + plan_result
+
+    staged = requested and channel == "stable"
+    side_effect = ("publish-immutable", "prepare-draft", "promote-aliases",
+                   "publish")
+    required = list(side_effect)
+    if staged:
+        required += ["stable-channel-transaction", "publish-minor"]
+    else:
+        # Ordinary (non-Stable) publication must really build and verify the
+        # image in this run; only Stable may consume a pinned staged run.
+        required.append("image")
+
+    if not requested:
+        for job in side_effect + ("stable-channel-transaction", "publish-minor"):
+            if results.get(job, "skipped") not in ("skipped", ""):
+                return False, "rehearsal ran side-effect phase " + job
+        return True, "rehearsal: no side-effect phase ran"
+
+    for job in required:
+        result = results.get(job, "")
+        if result in ("cancelled",):
+            return False, "publication cancelled at " + job
+        if result != "success":
+            return False, "required phase " + job + " result=" + (result or "missing")
+
+    if outputs.get("publish-immutable_verified") != "true":
+        return False, "immutable verification output missing"
+    if not outputs.get("publish-immutable_digest"):
+        return False, "immutable digest output missing"
+    if not outputs.get("prepare-draft_release_id"):
+        return False, "private draft release id missing"
+    if staged:
+        action = outputs.get("stable-channel-transaction_action", "")
+        if action not in POSITIVE_TRANSACTION_ACTIONS:
+            return False, "stable transaction action not allowlisted: " + (action or "missing")
+        if outputs.get("promote-aliases_aliases_verified") != "true":
+            return False, "alias verification output missing"
+    return True, "all required publication phases ran and verified"
+
+
+def verify_publication_phases_cli(args):
+    """Terminal workflow gate for one explicit Release run."""
+    state = {
+        "event": args.event,
+        "request_publish": args.request_publish,
+        "publish": args.publish,
+        "channel": args.channel,
+        "result_plan": args.result_plan,
+        "result_image": args.result_image,
+        "result_publish-immutable": args.result_immutable,
+        "result_prepare-draft": args.result_draft,
+        "result_stable-channel-transaction": args.result_transaction,
+        "result_promote-aliases": args.result_aliases,
+        "result_publish": args.result_publish,
+        "result_publish-minor": args.result_minor,
+        "out_publish-immutable_verified": args.verified,
+        "out_publish-immutable_digest": args.digest,
+        "out_prepare-draft_release_id": args.release_id,
+        "out_stable-channel-transaction_action": args.transaction_action,
+        "out_promote-aliases_aliases_verified": args.aliases_verified,
+    }
+    ok, reason = publication_phases_decision(state)
+    values = {"allow": str(ok).lower(), "reason": reason,
+              "event": args.event, "request_publish": args.request_publish,
+              "publish": args.publish, "channel": args.channel}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    if not ok:
+        raise ValueError("Publication phase verification failed: " + reason)
+    return ok
+
+
 def verify_release_history_cli(args):
     """Validate the checked-in 84-tag retrospective catalog."""
     ok, problems = verify_release_history(None)
@@ -3795,6 +3914,15 @@ def build_parser():
     ref_checker.add_argument("--commit", required=True)
     ref_checker.add_argument("--ref", required=True)
     ref_checker.add_argument("--event", default="workflow_dispatch")
+    phase_checker = commands.add_parser("verify-publication-phases")
+    phase_checker.add_argument("--event", default="")
+    phase_checker.add_argument("--request-publish", default="")
+    for name in ("publish", "channel", "result-plan", "result-image",
+                 "result-immutable", "result-draft", "result-transaction",
+                 "result-aliases", "result-publish", "result-minor",
+                 "verified", "digest", "release-id", "transaction-action",
+                 "aliases-verified"):
+        phase_checker.add_argument("--" + name, default="")
     commands.add_parser("verify-release-history")
     indexable = commands.add_parser("indexable-urls")
     indexable.add_argument("--event", required=True)
@@ -3946,6 +4074,7 @@ def main():
                 "product-version": product_version_info,
                 "verify-release-history": verify_release_history_cli,
                 "verify-publication-ref": verify_publication_ref,
+                "verify-publication-phases": verify_publication_phases_cli,
                 "indexable-urls": indexable_urls_cli,
                 "validate-channel-contract": validate_channel_contract_cli,
                 "channel-source-gate": channel_source_gate_cli,
