@@ -48,19 +48,12 @@ locked Playwright package and owned cache the review harness already provides.
 
 # Consequence
 
-Accessibility claims must name the engine actually exercised. The primary gate
-is Chromium only. An optional smoke mode drives the same packaged routes in
-Firefox or WebKit when CI installs those browsers into the owned cache; it is a
-smoke check, not full cross-engine coverage. Mobile-device emulation, screen
-readers and 400% zoom are not covered by this gate. The route checks exercise
-the packaged SPA with a seeded
-API boundary, not an authenticated live controller, RPC service, Docker daemon
-or Minecraft gameplay. They do not duplicate the screenshot review lane. New
-interactive components should extend the DOM tests for public-seam behavior and
-the journey for whole-page keyboard, role, state and reflow properties. It also
-drives the Modpacks library and Studio shell controls from the same seeds, with
-a refused `SearchModpacks` response and Retry reconciliation. On relevant PRs
-and main changes the Modpacks browser review also drives both checked-in plans
-against an owned authenticated controller. The library plan waits for the
-Modrinth-backed catalog, checks the unmatched-query empty state, and clears
-the query. Studio coverage is limited to the project library entry controls.
+Chromium is the primary gate. Firefox and WebKit run smoke checks. Screen
+readers, 400% zoom and mobile-device emulation are outside the coverage. Seeded
+SPA checks exercise the frontend boundary, including refused `SearchModpacks`
+and Retry. Extend DOM and page journey tests for new interactive controls.
+
+On relevant PRs and main changes, the Modpacks browser review runs both plans
+against an owned authenticated controller. It checks the Modrinth-backed
+catalog, unmatched search and recovery, and the Studio library entry controls.
+Product journeys and screenshot publication have separate evidence.
