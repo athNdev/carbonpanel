@@ -313,6 +313,13 @@ func ManagedVolumes(server *storage.Server, level string) (string, error) {
 		{Source: data + "/" + level, Target: "/app/world", ReadOnly: true},
 		{Source: base + "/data", Target: "/app/data", CreateDir: true},
 		{Source: base + "/web", Target: "/app/web", CreateDir: true},
+		// BlueMap downloads Mojang client resources into ./bluemap relative to
+		// its working directory. The module root filesystem is deliberately
+		// read-only, so without a panel-owned writable mount the renderer exits
+		// with "Resource-File missing" (and never serves a map). Keep this
+		// cache inside the server's module tree; the world stays read-only and
+		// container privileges are unchanged.
+		{Source: base + "/resources", Target: "/app/bluemap", CreateDir: true},
 	}
 	raw, err := json.Marshal(vols)
 	if err != nil {
