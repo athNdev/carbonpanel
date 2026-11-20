@@ -987,6 +987,7 @@ jobs:
       - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99
         with:
           version: '1.50.0'
+          github_token: ${{ github.token }}
       - name: Exercise both real docs renders with fixture digests
         env:
           NIGHTLY_RECOVERY_RENDER_REHEARSAL: 'true'
