@@ -9,6 +9,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,7 +59,67 @@ func settingsResponseFixture(status int, body string) http.HandlerFunc {
 			_, _ = w.Write([]byte(body))
 			return
 		}
-		_, _ = w.Write([]byte(`{"version":"5.29"}`))
+		serveBlueMapFixture(w, r)
+	}
+}
+
+func TestDiscoveredBlueMapChecksEveryServedMapTextureFixture(t *testing.T) {
+	textures := []byte(`[{"name":"block/atlas.png"}]`)
+	gzipped := gzipBytes(t, textures)
+	for _, tc := range []struct {
+		name      string
+		status    int
+		plain     []byte
+		gzip      []byte
+		wantReady bool
+	}{
+		{name: "both maps ready", status: http.StatusOK, plain: textures, wantReady: true},
+		{name: "gzip sibling ready", status: http.StatusNotFound, gzip: gzipped, wantReady: true},
+		{name: "plain asset denied despite available gzip sibling", status: http.StatusForbidden, gzip: gzipped},
+		{name: "secondary map missing", status: http.StatusNotFound},
+		{name: "secondary map serves its HTML fallback", status: http.StatusOK, plain: []byte("<html>BlueMap</html>")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, m := rendererConnectionService(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/settings.json":
+					_, _ = w.Write([]byte(`{"maps":["world","world_nether"]}`))
+				case "/maps/world/textures.json":
+					_, _ = w.Write(textures)
+				case "/maps/world_nether/textures.json":
+					w.WriteHeader(tc.status)
+					_, _ = w.Write(tc.plain)
+				case "/maps/world_nether/textures.json.gz":
+					if len(tc.gzip) != 0 {
+						_, _ = w.Write(tc.gzip)
+						return
+					}
+					http.NotFound(w, r)
+				default:
+					serveBlueMapFixture(w, r)
+				}
+			})
+			target := listTarget(t, service, m.serverID)
+			session, err := service.GetWorldViewSession(svcCtx("admin", "admin"), connect.NewRequest(&v1.GetWorldViewSessionRequest{
+				ServerId: m.serverID,
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantReady {
+				if target.GetRendererState() != v1.RendererState_RENDERER_STATE_READY || session.Msg.GetProxyPath() == "" {
+					t.Fatalf("expected READY with a session, got state=%s session=%v", target.GetRendererState(), session.Msg)
+				}
+				return
+			}
+			if target.GetRendererState() != v1.RendererState_RENDERER_STATE_ERROR ||
+				session.Msg.GetState() != v1.RendererState_RENDERER_STATE_ERROR || session.Msg.GetProxyPath() != "" {
+				t.Fatalf("expected renderer ERROR without a session, got state=%s session=%v", target.GetRendererState(), session.Msg)
+			}
+			if detail := target.GetError(); !strings.Contains(detail, "map textures could not be read") || session.Msg.GetReason() != detail {
+				t.Fatalf("expected the same actionable textures diagnostic for the target and session, got %q and %q", detail, session.Msg.GetReason())
+			}
+		})
 	}
 }
 

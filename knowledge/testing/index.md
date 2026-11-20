@@ -5,6 +5,7 @@
 ## Concepts
 
 - [Modpack compatibility sweep](modpack-sweep.md) — How to qualify pre-existing modpacks sequentially on the newest supported Minecraft version.
+- [Packaged Linux systemd qualification](panel-systemd-qualification.md) — Qualify a controller archive with a fresh install and in-place upgrade on hosted Linux.
 - [Testing seams](harness.md) — How failure and recovery behavior is tested without a live Minecraft server or a reachable Docker daemon.
 - [Testing seams — Rules + Read next](harness-rules.md) — Proto generation tests exercise the real entrypoint with a failing generator
 - [Testing seams — Shape + Use it when](harness-shape.md) — The ignore-policy check uses a disposable Git repository and synthetic canaries.

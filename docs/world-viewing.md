@@ -36,11 +36,13 @@ through the confined node data accessor. A remote node has no private path and
 stays unavailable until an explicit, allowlisted node-local endpoint is set.
 No renderer is discovered by port probing or host-port bindings.
 
-A web server listening on container port 8100 is not a ready map. READY also
-requires a configured target world matching the server's actual level name, a
-rendered scoped tile and the renderer's own `/settings.json` map list. Missing
-facts are reported honestly as setup/rendering/stopped/unreachable/error with an
-actionable next step. The in-context **Install BlueMap** action uses the existing
+A discovered module reaches READY after the renderer's `/settings.json` lists
+the configured map for the server's actual level and the node data accessor
+finds a scoped tile. Both discovered modules and explicit BlueMap endpoints
+also need to serve textures for every map they list, including secondary
+dimensions. A discovered renderer with unavailable textures shows an error
+and a retry action in World View.
+The in-context **Install BlueMap** action uses the existing
 ModuleService create/start RPCs; it is a server-side singleton per server,
 records explicit operator consent (actor and time from the authenticated
 principal and clock), adopts an existing module without mutation, and requires
@@ -111,8 +113,10 @@ BlueMap `v5.29` source commit `a61e143fe1e069c536159e0bc79410d5b6da3885` with
 `define`. The verified JIT bundle `index-BA9KJ4pi.js` has SHA-256
 `ba940f930de0642acfd2ca8b0eda6aa0914ce02fcf673cee18262b3dd5217da3` and no
 `new Function` / `compileToFunction` occurrences; the pristine bundle contains
-both. See [ADR 0048](adr/0048-bluemap-asset-routing-and-csp.md) for provenance,
-the rejected alternatives and the evidence limits.
+both. See [ADR 0048](adr/0048-bluemap-asset-routing-and-csp.md) for provenance
+and evidence limits. The review stack applies this rebuild before opening the
+map. Managed install currently starts the upstream image with its stock webapp,
+which can fail to render under the panel CSP.
 
 For disposable review stacks, prefer BlueMap's own webserver and verify with
 `curl -H 'Accept-Encoding: gzip' .../maps/world/textures.json` from the panel's
