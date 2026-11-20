@@ -8,8 +8,11 @@ qualify. A successful tile reports how many chunks were rendered, missing,
 unsupported, or unreadable.
 
 The first renderer supports standard-height Overworld chunks from Java 1.18
-through 1.21.9 (DataVersion 2860–4554). It uses the saved
-`Heightmaps.WORLD_SURFACE` array in fully generated chunks. The file is selected
+through 1.21.9 (DataVersion 2860–4554). Fully generated chunks use the saved
+`Heightmaps.WORLD_SURFACE` array. Late generation stages can also contain
+saved surface heights, either in that array or in `WORLD_SURFACE_WG`. The map
+fades those provisional heights until the chunk is complete. Earlier stages
+and chunks without a readable surface stay blank. The file is selected
 from the owning world's `region/` directory. It does not follow external
 `.mcc` chunk payloads. Gzip, zlib, and uncompressed records are supported.
 LZ4, older and newer formats, nonstandard world heights, Nether, End, and
@@ -29,7 +32,12 @@ may lag in-game changes until Minecraft saves.
 The World View workspace can open a built-in map for a supported Java save on
 the controller's local Docker node. Explicitly configured renderers and an
 existing discoverable BlueMap renderer keep their current selection. A native
-map reads only saved Overworld data. Check the tile's saved time and coverage
+map reads only saved Overworld data. **Map span** sets the longer edge of the
+viewport from 32 to 1,024 blocks. **Auto** opens at 256 blocks and expands to
+512 when every tile in the initial view has complete coverage. Panning loads
+the visible area with two concurrent requests. To extend a new world's saved
+terrain, explore it in Minecraft and use **Refresh terrain** after the game saves.
+Check the tile's saved time and coverage
 when terrain is still being generated or saved. Use **Copy map link** to
 share the current coordinates with someone who can read the same world.
 Ordinary save churn retries the affected tile in place. In a large server

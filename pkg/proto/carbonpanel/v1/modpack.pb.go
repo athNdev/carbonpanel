@@ -1749,6 +1749,7 @@ type Version struct {
 	SortIndex     int32                  `protobuf:"varint,5,opt,name=sort_index,json=sortIndex,proto3" json:"sort_index,omitempty"`
 	VersionNumber string                 `protobuf:"bytes,6,opt,name=version_number,json=versionNumber,proto3" json:"version_number,omitempty"`
 	Sha256        string                 `protobuf:"bytes,7,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	GameVersions  []string               `protobuf:"bytes,8,rep,name=game_versions,json=gameVersions,proto3" json:"game_versions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1830,6 +1831,13 @@ func (x *Version) GetSha256() string {
 		return x.Sha256
 	}
 	return ""
+}
+
+func (x *Version) GetGameVersions() []string {
+	if x != nil {
+		return x.GameVersions
+	}
+	return nil
 }
 
 // Version filter parameters
@@ -2178,7 +2186,7 @@ const file_carbonpanel_v1_modpack_proto_rawDesc = "" +
 	"\x16GetModpackFilesRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"L\n" +
 	"\x17GetModpackFilesResponse\x121\n" +
-	"\x05files\x18\x01 \x03(\v2\x1b.carbonpanel.v1.ModpackFileR\x05files\"\xf6\x01\n" +
+	"\x05files\x18\x01 \x03(\v2\x1b.carbonpanel.v1.ModpackFileR\x05files\"\x9b\x02\n" +
 	"\aVersion\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12!\n" +
@@ -2187,7 +2195,8 @@ const file_carbonpanel_v1_modpack_proto_rawDesc = "" +
 	"\n" +
 	"sort_index\x18\x05 \x01(\x05R\tsortIndex\x12%\n" +
 	"\x0eversion_number\x18\x06 \x01(\tR\rversionNumber\x12\x16\n" +
-	"\x06sha256\x18\a \x01(\tR\x06sha256\"m\n" +
+	"\x06sha256\x18\a \x01(\tR\x06sha256\x12#\n" +
+	"\rgame_versions\x18\b \x03(\tR\fgameVersions\"m\n" +
 	"\x19GetModpackVersionsRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fgame_version\x18\x02 \x01(\tR\vgameVersion\x12\x1d\n" +

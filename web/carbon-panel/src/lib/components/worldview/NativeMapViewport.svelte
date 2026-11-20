@@ -17,12 +17,14 @@
 	import CarbonButton from '$lib/components/carbon/CarbonButton.svelte';
 	import CarbonErrorState from '$lib/components/carbon/CarbonErrorState.svelte';
 	import CarbonInlineLoading from '$lib/components/carbon/CarbonInlineLoading.svelte';
+	import CarbonSelect from '$lib/components/carbon/CarbonSelect.svelte';
 	import CarbonTextInput from '$lib/components/carbon/CarbonTextInput.svelte';
 	import {
 		blockScale,
 		CHUNKS_PER_TILE,
 		clampBlock,
 		loadNativeManifest,
+		MAP_SPANS,
 		NATIVE_FAILURE_MESSAGE,
 		parseNativeCoordinate,
 		TILE_BLOCKS,
@@ -71,8 +73,8 @@
 		'busy',
 		'unavailable'
 	];
-	const initialZoom = 1;
-	const maximumZoom = 3;
+	const initialZoom = 2;
+	const maximumZoom = MAP_SPANS.length - 1;
 	const formatTime = new Intl.DateTimeFormat(undefined, {
 		dateStyle: 'medium',
 		timeStyle: 'short'
@@ -81,6 +83,7 @@
 	let center = $state<MapPoint>({ x: 0, z: 0 });
 	let size = $state<MapSize>({ width: 0, height: 0 });
 	let zoom = $state(initialZoom);
+	let spanChoice = $state('auto');
 	let xInput = $state('');
 	let zInput = $state('');
 	let coordinateError = $state({ x: '', z: '' });
@@ -140,6 +143,7 @@
 					positionedPath = path;
 					center = location ?? manifest.manifest.spawn ?? { x: 0, z: 0 };
 					zoom = initialZoom;
+					spanChoice = 'auto';
 				}
 				tileLoader = createNativeTileLoader(path, (results) => (tiles = results));
 				loader = tileLoader;
@@ -154,6 +158,19 @@
 		loader?.setVisible(visible);
 	});
 
+	// A small spawn save stays legible. Open up one step when the first
+	// viewport has continuous saved coverage. Manual zoom always takes priority.
+	$effect(() => {
+		if (spanChoice !== 'auto' || zoom !== initialZoom || !visible.length) return;
+		if (
+			visible.every((tile) => {
+				const result = tiles.get(tileKey(tile));
+				return result?.status === 'saved' && result.chunks === CHUNKS_PER_TILE;
+			})
+		)
+			zoom = initialZoom - 1;
+	});
+
 	$effect(() => {
 		if (location) moveTo(location.x, location.z);
 	});
@@ -166,6 +183,7 @@
 			states.some((tile) => tile?.status === status)
 		);
 		const partial = saved.some((tile) => tile.chunks === null || tile.chunks < CHUNKS_PER_TILE);
+		const provisional = saved.some((tile) => tile.provisionalChunks > 0);
 		const savedAt = saved
 			.map((tile) => tile.savedAt)
 			.filter((time) => time !== null)
@@ -177,12 +195,13 @@
 			message = NATIVE_FAILURE_MESSAGE[failure];
 		} else if (saved.length === 0) {
 			message = spawn
-				? 'No saved terrain here. Move or try the world spawn.'
-				: 'No saved terrain here. Move to a different area.';
+				? 'No saved surface here. Move or try the world spawn.'
+				: 'No saved surface here. Move to a different area.';
 		} else if (partial || saved.length < states.length) {
-			message = 'Only part of this area has saved terrain.';
+			message =
+				'Blank areas have no readable saved surface. Explore in Minecraft, then refresh after a save.';
 		}
-		return { loading, failure, savedAt, message };
+		return { loading, failure, savedAt, message, provisional };
 	});
 
 	function moveTo(x: number, z: number) {
@@ -192,6 +211,12 @@
 
 	function changeZoom(direction: number) {
 		zoom = Math.min(maximumZoom, Math.max(0, zoom + direction));
+		spanChoice = String(MAP_SPANS[zoom]);
+	}
+
+	function setMapSpan(value: string) {
+		spanChoice = value;
+		zoom = value === 'auto' ? initialZoom : MAP_SPANS.findIndex((span) => String(span) === value);
 	}
 
 	function jumpToCoordinates(event: SubmitEvent) {
@@ -326,7 +351,19 @@
 			<p class="mt-1 text-xs text-muted-foreground">Overworld · Saved terrain</p>
 		</div>
 		{#if result?.status === 'ready'}
-			<div role="group" aria-label="Map zoom and position" class="flex flex-wrap gap-1">
+			<div role="group" aria-label="Map zoom and position" class="flex flex-wrap items-end gap-1">
+				<CarbonSelect
+					label="Map span"
+					value={spanChoice}
+					onchange={(event) => setMapSpan(event.currentTarget.value)}
+				>
+					<option value="auto"
+						>{spanChoice === 'auto' ? `Auto (${MAP_SPANS[zoom]} blocks)` : 'Auto'}</option
+					>
+					{#each MAP_SPANS as span (span)}
+						<option value={String(span)}>{span.toLocaleString()} blocks</option>
+					{/each}
+				</CarbonSelect>
 				<CarbonButton
 					kind="secondary"
 					size="md"
@@ -457,6 +494,9 @@
 			<div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
 				<div class="min-w-0 text-xs text-muted-foreground">
 					<p role="status">{summary.message}</p>
+					{#if summary.provisional}
+						<p class="mt-1">Faded terrain shows saved heights from chunks still generating.</p>
+					{/if}
 					{#if summary.savedAt}
 						<p class="mt-1">
 							Newest tile save <time datetime={summary.savedAt}

@@ -346,7 +346,6 @@ try {
       await page.setViewportSize({ width, height: 900 });
       await page.evaluate((mode) => {
         localStorage.setItem("carbon-theme", mode);
-        localStorage.setItem("mode-watcher-mode", mode);
       }, theme);
       await page.goto(base + "/worlds");
       const content = page.getByTestId("showcase-worlds-content");

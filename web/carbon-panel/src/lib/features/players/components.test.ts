@@ -177,7 +177,11 @@ test('AddAllowlistEntry uses the server-scoped typed path with journal and undo'
 		/hasPermission\('players', 'access:write', serverId\)/,
 		'gated by server-scoped access:write'
 	);
-	assert.match(s, /Bedrock XUID allowlists are not supported yet/, 'edition boundary is disclosed');
+	assert.match(
+		s.replace(/\s+/g, ' '),
+		/Bedrock XUID allowlists are not supported yet/,
+		'edition boundary is disclosed'
+	);
 	assert.match(s, /aria-live="polite"/, 'outcomes are announced');
 	assert.doesNotMatch(s, /sendCommand|SendCommandRequestSchema/, 'no legacy command fallback');
 });

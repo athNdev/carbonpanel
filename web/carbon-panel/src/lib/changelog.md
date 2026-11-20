@@ -9,12 +9,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - World View opens saved Overworld terrain for supported local Java servers. Pan and zoom with a pointer or keyboard, jump to spawn or coordinates, share a coordinate link, and view saved markers, waypoints and points of interest.
 - Player lookup shows the account's name, UUID and full Minecraft skin when available. Server history follows the account's existing presence permissions.
+- Create Server can queue compatible mods and module templates alongside existing modpack presets and datapacks. Review add-on results before first start and retry failed items on the server that was already created.
+- World Library lists the current worlds of running servers you can access, and distinguishes managed revisions from server-local worlds.
+
+### Changed
+
+- World View offers adjustable coverage and renders saved terrain from qualifying partially generated chunks. World View rows link to the map from the full row.
+- Modpacks uses a compact catalogue table with a details dialog for compatibility, runtime requirements, and indexed files. The server Players tab keeps the roster visible and opens allowlist entry in a dialog.
 
 ### Fixed
 
 - World View opens from the server's World tab and recovers when a map session expires. Restoring a world invalidates old terrain sessions. Managed BlueMap works with registered local Docker nodes, and interrupted startup can reuse its container on retry.
 - Responsive settings keep their Save controls visible, tabs have named panels and predictable keyboard focus, and modpack filters have accessible names.
 - Dashboard totals distinguish measured zeroes, configured limits and unavailable or stale observations. The sidebar no longer displays a hard-coded product version.
+- Theme selections apply immediately, persist across reloads and can follow the system setting. The dashboard scrolls past the System Health card, shows multiple Docker nodes from the sidebar, and gives server names and resource meters more room.
 - Stable and Nightly documentation show their own changelogs and preserve the current page when switching channels.
 
 ## [2.0.1] - 2026-11-20

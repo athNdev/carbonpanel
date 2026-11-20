@@ -6,12 +6,40 @@
 package docker
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	models "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/moby/moby/api/types/container"
 )
+
+func TestPrepareReadOnlyModuleBindStaysWithinServerRoot(t *testing.T) {
+	client := &Client{}
+	root := t.TempDir()
+	source := filepath.Join(root, "modules", "resource-pack-host", "packs")
+	if err := client.prepareModuleMountSource(root, source, []string{root}); err != nil {
+		t.Fatal(err)
+	}
+	if stat, err := os.Stat(source); err != nil || !stat.IsDir() {
+		t.Fatalf("bind source directory was not prepared: %v", err)
+	}
+	out := t.TempDir()
+	if err := client.prepareModuleMountSource(root, filepath.Join(out, "created"), []string{root}); err == nil {
+		t.Fatal("outside-root source was accepted")
+	}
+	link := filepath.Join(root, "link")
+	if err := os.Symlink(out, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	if err := client.prepareModuleMountSource(root, filepath.Join(link, "created"), []string{root}); err == nil {
+		t.Fatal("source with escaping symlink was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(out, "created")); !os.IsNotExist(err) {
+		t.Fatalf("bind setup wrote outside of the safe root: %v", err)
+	}
+}
 
 func moduleHostConfig() *container.HostConfig {
 	memory := int64(512 << 20)

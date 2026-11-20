@@ -172,42 +172,18 @@ func (c *Client) CreateModuleContainer(ctx context.Context, module *models.Modul
 		return "", err
 	}
 
-	// Pre-create bind mounts, confined to the validated safe roots. Creating
-	// host directories outside the server data path / backup dir as a side
-	// effect of a module create is itself a host-write primitive, so mounts
-	// that fail the gate are skipped (they cannot reach ContainerCreate
-	// either, per the check above).
+	// Prepare explicitly requested bind sources on the controller's view of
+	// storage. A read-only mount stays read-only after its source exists.
 	for _, vol := range vols {
-		if vol.CreateDir && !vol.ReadOnly && (vol.Type == "" || vol.Type == "bind") {
+		if vol.CreateDir && (vol.Type == "" || vol.Type == "bind") {
 			if vol.Source == "" || vol.Target == "" {
 				continue
 			}
-			allowed := false
-			for _, root := range mkdirRoots {
-				if files.Within(root, vol.Source) {
-					allowed = true
-					break
+			if err := c.prepareModuleMountSource(server.DataPath, vol.Source, mkdirRoots); err != nil {
+				if vol.ReadOnly {
+					return "", fmt.Errorf("prepare read-only module bind source %q: %w", vol.Source, err)
 				}
-			}
-			if !allowed {
-				c.log.Warn("Skipping pre-create of mount directory outside safe roots: %q", vol.Source)
-				continue
-			}
-			// Pre-create on the filesystem that backs the bind: the
-			// controller's view of the node's storage (ADR 0005). A node that
-			// declares its own layout gets the mapped path; others keep the
-			// identical-path contract.
-			target := vol.Source
-			if !c.nodeStorage.IsLocal && c.nodeStorage.StorageRoot != "" {
-				target = nodestorage.MapPath(c.nodeStorage, server.DataPath, vol.Source)
-				if target == vol.Source {
-					continue
-				}
-			}
-			if _, err := os.Stat(target); os.IsNotExist(err) {
-				if err := os.MkdirAll(target, 0755); err != nil {
-					c.log.Warn("Failed to pre-create mount directory %s: %v", target, err)
-				}
+				c.log.Warn("Failed to pre-create mount directory %s: %v", vol.Source, err)
 			}
 		}
 	}
@@ -403,6 +379,26 @@ func (c *Client) parseModuleVolumes(volumeJSON string, aliasCtx *alias.Context) 
 	}
 
 	return volumes, nil
+}
+
+func (c *Client) prepareModuleMountSource(serverDataPath, source string, safeRoots []string) error {
+	for _, root := range safeRoots {
+		if !files.Within(root, source) {
+			continue
+		}
+		target, targetRoot := source, root
+		if !c.nodeStorage.IsLocal && c.nodeStorage.StorageRoot != "" {
+			target = nodestorage.MapPath(c.nodeStorage, serverDataPath, source)
+			targetRoot = nodestorage.MapPath(c.nodeStorage, serverDataPath, root)
+			if target == source {
+				return fmt.Errorf("node storage mapping is unavailable")
+			}
+		}
+		if files.WithinReal(targetRoot, target) {
+			return os.MkdirAll(target, 0755)
+		}
+	}
+	return fmt.Errorf("source resolves outside the server data and backup directories")
 }
 
 // Module volumes to Docker mount specs. safeRoots is the already-validated

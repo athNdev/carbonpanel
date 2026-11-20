@@ -33,3 +33,6 @@ Configured and discoverable adapters retain their current precedence. Native
 terrain covers supported controller-local saves. It uses bounded workers and
 private no-store responses. Tiles show saved observations rather than live
 game state. World changes invalidate the key and require a new session.
+The viewport queues only visible tiles, nearest first, with two concurrent reads.
+Map span covers 32–1,024 blocks along the longer viewport edge. Automatic span
+widens from 256 to 512 blocks when the initial tiles have full coverage.

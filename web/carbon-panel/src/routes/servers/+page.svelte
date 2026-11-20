@@ -595,15 +595,17 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon Tile / Grid Layout -->
 	{:else}
-		<div class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">
+		<div
+			class="motion-stagger grid grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] gap-4 [&>*]:min-w-0"
+		>
 			{#each filteredServers as server (server.id)}
 				<div
 					class="flex flex-col justify-between rounded-none border border-border bg-card p-4 transition-colors hover:border-foreground/30"
 				>
 					<div>
 						<!-- Header & Actions -->
-						<div class="flex items-start justify-between gap-3 border-b border-border pb-3">
-							<div class="flex min-w-0 items-center gap-3">
+						<div class="border-b border-border pb-3">
+							<div class="flex min-w-0 items-start gap-3">
 								<div
 									class="flex h-10 w-10 shrink-0 items-center justify-center border border-border bg-background text-accent-text"
 								>
@@ -612,78 +614,21 @@ one at https://mozilla.org/MPL/2.0/.
 								<div class="min-w-0">
 									<a
 										href={resolve('/servers/[id]', { id: server.id })}
-										class="block truncate text-base font-semibold text-foreground hover:text-accent-text"
+										class="focus-ring block text-lg leading-snug font-semibold wrap-anywhere text-foreground hover:text-accent-text"
 									>
 										{server.name}
 									</a>
-									<p class="truncate text-xs text-muted-foreground">
-										{server.description || 'No description provided'}
-									</p>
+									{#if server.description}
+										<p class="mt-1 text-sm wrap-anywhere text-muted-foreground">
+											{server.description}
+										</p>
+									{/if}
 								</div>
-							</div>
-
-							<!-- Action Buttons Bar -->
-							<div class="flex shrink-0 border border-border bg-background">
-								{#if server.status === ServerStatus.STOPPED || server.status === ServerStatus.ERROR || server.status === ServerStatus.DEEPSLEEP || server.status === ServerStatus.PAUSED}
-									<button
-										title={server.status === ServerStatus.DEEPSLEEP
-											? 'Wake'
-											: server.status === ServerStatus.PAUSED
-												? 'Resume'
-												: 'Start'}
-										aria-label={`${server.status === ServerStatus.DEEPSLEEP ? 'Wake' : server.status === ServerStatus.PAUSED ? 'Resume' : 'Start'} server ${server.name}`}
-										disabled={loading}
-										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-border text-success-text transition-colors hover:bg-success/20 disabled:opacity-50"
-										onclick={(e) => handleServerAction('start', server, e)}
-									>
-										<Play class="h-3 w-3 fill-current" />
-									</button>
-								{/if}
-								{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.STARTING || server.status === ServerStatus.DEEPSLEEP || server.status === ServerStatus.PAUSED}
-									<button
-										title="Stop"
-										aria-label={`Stop server ${server.name}`}
-										disabled={loading}
-										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-border text-destructive-text transition-colors hover:bg-destructive/20 disabled:opacity-50"
-										onclick={(e) => handleServerAction('stop', server, e)}
-									>
-										<Square class="h-2.5 w-2.5 fill-current" />
-									</button>
-								{/if}
-								{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY}
-									<button
-										title="Restart"
-										aria-label={`Restart server ${server.name}`}
-										disabled={loading}
-										class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-border text-warning-text transition-colors hover:bg-warning/20 disabled:opacity-50"
-										onclick={(e) => handleServerAction('restart', server, e)}
-									>
-										<RotateCw class="h-3 w-3" />
-									</button>
-								{/if}
-								<button
-									title="Recreate"
-									aria-label={`Recreate server ${server.name}`}
-									disabled={loading}
-									class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
-									onclick={(e) => handleServerAction('recreate', server, e)}
-								>
-									<RefreshCcw class="h-3 w-3" />
-								</button>
-								<button
-									title="Delete"
-									aria-label={`Delete server ${server.name}`}
-									disabled={loading}
-									class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-none text-destructive-text transition-colors hover:bg-destructive/20 disabled:opacity-50"
-									onclick={(e) => deleteServer(server, e)}
-								>
-									<Trash2 class="h-3 w-3" />
-								</button>
 							</div>
 						</div>
 
 						<!-- Status & Version row -->
-						<div class="my-3 flex items-center gap-2">
+						<div class="my-3 flex flex-wrap items-center gap-2">
 							<CarbonTag type={getStatusTagType(server.status)} size="sm">
 								{getStatusDisplayName(server.status)}
 							</CarbonTag>
@@ -696,36 +641,37 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 
 						<!-- Stats Sharp Grid -->
-						<div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-							<div
-								class="flex items-center gap-2 rounded-none border border-border bg-background p-2"
-							>
+						<div class="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
+							<div class="flex min-w-0 items-center gap-2 bg-background px-2.5 py-2">
 								<Wifi class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 								<div class="min-w-0">
-									<p class="mono-label">Port</p>
+									<p class="text-xs text-muted-foreground">Port</p>
 									<p class="truncate font-mono text-xs font-semibold text-foreground">
 										{server.port}
 									</p>
 								</div>
 							</div>
-							<div
-								class="flex items-center gap-2 rounded-none border border-border bg-background p-2"
-							>
+							<div class="flex min-w-0 items-center gap-2 bg-background px-2.5 py-2">
 								<MemoryStick class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 								<div class="min-w-0">
-									<p class="mono-label">Memory</p>
+									<p class="text-xs text-muted-foreground">Memory</p>
 									<p class="truncate font-mono text-xs font-semibold text-foreground">
-										{(server.memory / 1024).toFixed(1)} GB
+										{(server.memory / 1024).toFixed(1)} GiB
 									</p>
 								</div>
 							</div>
 							{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY}
-								<div
-									class="flex items-center gap-2 rounded-none border border-border bg-background p-2"
-								>
+								{@const tpsColor = !server.tps
+									? 'text-muted-foreground'
+									: server.tps >= 18
+										? 'text-success-text'
+										: server.tps >= 15
+											? 'text-warning-text'
+											: 'text-destructive-text'}
+								<div class="flex min-w-0 items-center gap-2 bg-background px-2.5 py-2">
 									<Users class="h-3.5 w-3.5 shrink-0 text-success-text" />
 									<div class="min-w-0">
-										<p class="mono-label">Players</p>
+										<p class="text-xs text-muted-foreground">Players</p>
 										<p
 											class="font-mono text-xs font-semibold {joinIsPlayable(server)
 												? 'text-success-text'
@@ -739,25 +685,11 @@ one at https://mozilla.org/MPL/2.0/.
 										</p>
 									</div>
 								</div>
-								<div
-									class="flex items-center gap-2 rounded-none border border-border bg-background p-2"
-								>
-									<Zap
-										class="h-3.5 w-3.5 shrink-0 {server.tps && server.tps >= 18
-											? 'text-success-text'
-											: server.tps && server.tps >= 15
-												? 'text-warning-text'
-												: 'text-destructive-text'}"
-									/>
+								<div class="flex min-w-0 items-center gap-2 bg-background px-2.5 py-2">
+									<Zap class="h-3.5 w-3.5 shrink-0 {tpsColor}" />
 									<div class="min-w-0">
-										<p class="mono-label">TPS</p>
-										<p
-											class="font-mono text-xs font-semibold {server.tps && server.tps >= 18
-												? 'text-success-text'
-												: server.tps && server.tps >= 15
-													? 'text-warning-text'
-													: 'text-destructive-text'}"
-										>
+										<p class="text-xs text-muted-foreground">TPS</p>
+										<p class="font-mono text-xs font-semibold {tpsColor}">
 											{server.tps ? server.tps.toFixed(1) : '—'}
 										</p>
 									</div>
@@ -766,15 +698,74 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 					</div>
 
-					<!-- Bottom Link -->
-					<div class="mt-4 border-t border-border pt-3">
+					<div
+						class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3"
+					>
 						<a
 							href={resolve('/servers/[id]', { id: server.id })}
-							class="flex h-8 w-full items-center justify-between rounded-none border border-border bg-background px-3 font-sans text-xs text-foreground transition-colors hover:bg-accent"
+							class="focus-ring inline-flex min-h-9 items-center gap-2 text-sm font-medium text-accent-text hover:underline"
 						>
-							<span>View Server Details</span>
-							<ArrowRight class="h-3.5 w-3.5 text-accent-text" />
+							View details
+							<ArrowRight class="h-4 w-4" aria-hidden="true" />
 						</a>
+						<!-- Action Buttons Bar -->
+						<div class="flex shrink-0 border border-border bg-background">
+							{#if server.status === ServerStatus.STOPPED || server.status === ServerStatus.ERROR || server.status === ServerStatus.DEEPSLEEP || server.status === ServerStatus.PAUSED}
+								<button
+									title={server.status === ServerStatus.DEEPSLEEP
+										? 'Wake'
+										: server.status === ServerStatus.PAUSED
+											? 'Resume'
+											: 'Start'}
+									aria-label={`${server.status === ServerStatus.DEEPSLEEP ? 'Wake' : server.status === ServerStatus.PAUSED ? 'Resume' : 'Start'} server ${server.name}`}
+									disabled={loading}
+									class="focus-ring flex h-9 w-9 cursor-pointer items-center justify-center rounded-none border-r border-border text-success-text transition-colors hover:bg-success/20 disabled:opacity-50"
+									onclick={(e) => handleServerAction('start', server, e)}
+								>
+									<Play class="h-3.5 w-3.5 fill-current" />
+								</button>
+							{/if}
+							{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY || server.status === ServerStatus.STARTING || server.status === ServerStatus.DEEPSLEEP || server.status === ServerStatus.PAUSED}
+								<button
+									title="Stop"
+									aria-label={`Stop server ${server.name}`}
+									disabled={loading}
+									class="focus-ring flex h-9 w-9 cursor-pointer items-center justify-center rounded-none border-r border-border text-destructive-text transition-colors hover:bg-destructive/20 disabled:opacity-50"
+									onclick={(e) => handleServerAction('stop', server, e)}
+								>
+									<Square class="h-2.5 w-2.5 fill-current" />
+								</button>
+							{/if}
+							{#if server.status === ServerStatus.RUNNING || server.status === ServerStatus.UNHEALTHY}
+								<button
+									title="Restart"
+									aria-label={`Restart server ${server.name}`}
+									disabled={loading}
+									class="focus-ring flex h-9 w-9 cursor-pointer items-center justify-center rounded-none border-r border-border text-warning-text transition-colors hover:bg-warning/20 disabled:opacity-50"
+									onclick={(e) => handleServerAction('restart', server, e)}
+								>
+									<RotateCw class="h-3.5 w-3.5" />
+								</button>
+							{/if}
+							<button
+								title="Recreate"
+								aria-label={`Recreate server ${server.name}`}
+								disabled={loading}
+								class="focus-ring flex h-9 w-9 cursor-pointer items-center justify-center rounded-none border-r border-border text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
+								onclick={(e) => handleServerAction('recreate', server, e)}
+							>
+								<RefreshCcw class="h-3.5 w-3.5" />
+							</button>
+							<button
+								title="Delete"
+								aria-label={`Delete server ${server.name}`}
+								disabled={loading}
+								class="focus-ring flex h-9 w-9 cursor-pointer items-center justify-center rounded-none text-destructive-text transition-colors hover:bg-destructive/20 disabled:opacity-50"
+								onclick={(e) => deleteServer(server, e)}
+							>
+								<Trash2 class="h-3.5 w-3.5" />
+							</button>
+						</div>
 					</div>
 				</div>
 			{/each}

@@ -42,11 +42,22 @@ test('visible tiles use floor for negative coordinates, exclude seam neighbors, 
 	assert.deepEqual(oneTile, [{ x: -1, z: -1 }]);
 	const size = { width: 3840, height: 2160 };
 	const wide = visibleNativeTiles({ x: 112, z: -33 }, size, blockScale(size, 0));
-	assert.ok(wide.length <= 36);
+	assert.ok(wide.length > 36 && wide.length <= 81);
 	assert.deepEqual(wide[0], { x: 0, z: -1 });
 	const corner = visibleNativeTiles({ x: -30_000_000, z: 29_999_999 }, size, blockScale(size, 0));
-	assert.ok(corner.length > 0 && corner.length <= 36);
+	assert.ok(corner.length > 0 && corner.length <= 81);
 	assert.ok(corner.every((tile) => tile.x >= -234375 && tile.z <= 234374));
+});
+
+test('the widest span covers every visible tile on both sides of an offset square viewport', () => {
+	const size = { width: 500, height: 500 };
+	const center = { x: 17, z: -21 };
+	const scale = blockScale(size, 0);
+	assert.equal(size.width / scale, 1024);
+	const tiles = visibleNativeTiles(center, size, scale);
+	assert.equal(tiles.length, 81);
+	assert.ok(tiles.some((t) => t.x === -4 && t.z === -5));
+	assert.ok(tiles.some((t) => t.x === 4 && t.z === 3));
 });
 
 test('invalid request paths and out-of-range tiles are rejected before fetch', async () => {

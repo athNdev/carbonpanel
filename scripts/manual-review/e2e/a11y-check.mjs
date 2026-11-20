@@ -35,6 +35,127 @@ function requestedEngine() {
 	return arg ? arg.slice('--engine='.length) : 'chromium';
 }
 
+async function runShellJourney(browser, base) {
+	const root = base.replace(/\/$/, '');
+	const context = await browser.newContext({
+		viewport: { width: 1440, height: 900 }, colorScheme: 'dark', reducedMotion: 'reduce'
+	});
+	try {
+		const page = await context.newPage();
+		await seedPackagedRoutes(page, { servers: 'large', detail: 'populated', narrowSettings: true }, 'anonymous');
+		const openPreferences = async () => {
+			await page.locator('header button[aria-haspopup="menu"]').click();
+			await page.getByRole('menuitem', { name: 'Preferences' }).click();
+		};
+		const palette = (mode) => page.waitForFunction((mode) => {
+			const html = document.documentElement;
+			return html.dataset.carbonTheme === mode && html.classList.contains('dark') === (mode === 'dark') &&
+				getComputedStyle(document.body).backgroundColor === (mode === 'dark' ? 'rgb(22, 22, 22)' : 'rgb(255, 255, 255)');
+		}, mode);
+		await page.goto(root + '/');
+		await page.getByRole('heading', { name: 'Cluster Overview' }).waitFor();
+		await check('shell: explicit theme, persistence and live system changes', async () => {
+			const select = page.getByLabel('Theme', { exact: true });
+			await openPreferences();
+			assert.equal(await select.inputValue(), 'system');
+			await palette('dark');
+			await select.selectOption('light');
+			await palette('light');
+			await page.reload();
+			await palette('light');
+			await openPreferences();
+			assert.equal(await select.inputValue(), 'light');
+			await select.selectOption('dark');
+			await page.emulateMedia({ colorScheme: 'light' });
+			await palette('dark');
+			await select.selectOption('system');
+			await palette('light');
+			await page.emulateMedia({ colorScheme: 'dark' });
+			await palette('dark');
+			assert.equal(await page.evaluate(() => localStorage.getItem('carbon-theme')), 'system');
+			await page.getByRole('button', { name: 'Done' }).click();
+		});
+		await check('shell: expanded navigation summarizes all registered hosts', async () => {
+			await page.locator('#carbon-sidenav').getByText('2 of 2 online').waitFor();
+		});
+		await check('shell: a refused node inventory is shown as unavailable', async () => {
+			const nodes = '**/carbonpanel.v1.NodeService/ListNodes';
+			await page.route(nodes, (route) => route.fulfill({
+				status: 403, contentType: 'application/json',
+				body: JSON.stringify({ code: 'permission_denied', message: 'Node inventory unavailable' })
+			}));
+			try {
+				await page.reload();
+				await page.locator('#carbon-sidenav').getByText('Node status unavailable').waitFor();
+			} finally {
+				await page.unroute(nodes);
+			}
+		});
+		for (const [width, height] of [[1440, 900], [1024, 640], [768, 450], [360, 640]]) {
+			await page.setViewportSize({ width, height });
+			await page.goto(root + '/');
+			await page.getByTestId('health-nodes').waitFor();
+			await check(`dashboard @${width}x${height}: health card and bottom gutter are reachable`, async () => {
+				const bounds = await page.evaluate(() => {
+					const main = document.querySelector('main');
+					main.scrollTop = main.scrollHeight;
+					const grid = document.querySelector('[data-testid="health-nodes"]').parentElement;
+					const card = grid.parentElement.getBoundingClientRect();
+					const contentFits = [...grid.children].every((cell) => {
+						const [label, value] = [...cell.children].map((child) => child.getBoundingClientRect());
+						return label.right <= value.left && value.right <= cell.getBoundingClientRect().right;
+					});
+					return { top: card.top, bottom: card.bottom, padding: parseFloat(getComputedStyle(main).paddingBottom), contentFits };
+				});
+				assert.ok(bounds.top >= 48 && bounds.bottom <= height - bounds.padding + 1, JSON.stringify(bounds));
+				assert.ok(bounds.contentFits, 'System health labels and values must fit each cell');
+				if (process.env.UI_PASS_SHOTS)
+					await page.screenshot({ path: `${process.env.UI_PASS_SHOTS}/system-health-${width}.png`, animations: 'disabled' });
+				return bounds;
+			});
+			await page.goto(root + '/servers');
+			await page.getByRole('button', { name: 'Tile View' }).click();
+			await check(`server tiles @${width}: long names wrap within the card`, async () => {
+				const title = page.getByRole('link', { name: LARGE_FLEET[0].name, exact: true });
+				await title.waitFor();
+				const metrics = await title.evaluate((element) => ({
+					width: element.clientWidth, scrollWidth: element.scrollWidth,
+					height: element.clientHeight, lineHeight: parseFloat(getComputedStyle(element).lineHeight)
+				}));
+				assert.ok(metrics.width >= 185 && metrics.scrollWidth <= metrics.width + 1 && metrics.height >= 2 * metrics.lineHeight - 1, JSON.stringify(metrics));
+				if (process.env.UI_PASS_SHOTS)
+					await page.screenshot({ path: `${process.env.UI_PASS_SHOTS}/server-tiles-${width}.png`, animations: 'disabled' });
+				return metrics;
+			});
+		}
+		await check('server detail: resource meters paint a measured RAM and CPU sample', async () => {
+			await page.setViewportSize({ width: 1440, height: 900 });
+			const measured = { ...FLEET[0], containerId: 'fixture-container', memoryUsage: '1024', cpuPercent: 35 };
+			await page.route('**/carbonpanel.v1.ServerService/GetServer', (route) => route.fulfill({
+				contentType: 'application/json', body: JSON.stringify({ server: measured })
+			}));
+			await page.goto(root + '/servers/srv-1');
+			const tracks = page.locator('.telemetry-track');
+			await tracks.first().waitFor();
+			const geometry = await tracks.evaluateAll((elements) => elements.map((track) => {
+				const fill = track.firstElementChild;
+				return {
+					height: track.getBoundingClientRect().height,
+					percent: Math.round(100 * fill.getBoundingClientRect().width / track.getBoundingClientRect().width),
+					visibleFill: getComputedStyle(fill).backgroundColor !== getComputedStyle(track).backgroundColor
+				};
+			}));
+			assert.deepEqual(geometry.map((bar) => bar.percent), [50, 35]);
+			assert.ok(geometry.every((bar) => bar.height >= 10 && bar.visibleFill));
+			if (process.env.UI_PASS_SHOTS)
+				await page.screenshot({ path: `${process.env.UI_PASS_SHOTS}/server-resource-meters.png`, animations: 'disabled' });
+			return geometry;
+		});
+	} finally {
+		await context.close();
+	}
+}
+
 async function runDashboardTelemetry(browser, base) {
 	const root = base.replace(/\/$/, '');
 	for (const width of [360, 1024]) {
@@ -394,6 +515,18 @@ async function seedPackagedRoutes(page, state, authMode) {
 		if (method === 'ListPlayers') {
 			return reply({ players: state.lookupQueries ? [] : PLAYERS, sourceDetail: 'Synthetic a11y route fixture' });
 		}
+		if (method === 'SetWhitelistEntry') {
+			assert.equal(route.request().postDataJSON().serverId, 'srv-1');
+			return reply({ outcome: { results: [{
+				success: true, message: 'Review guest added.', undoSupported: true, undoToken: 'fixture-undo'
+			}] } });
+		}
+		if (method === 'UndoPlayerAction') {
+			const request = route.request().postDataJSON();
+			assert.equal(request.serverId, 'srv-1');
+			assert.equal(request.undoToken, 'fixture-undo');
+			return reply({ outcome: { results: [{ success: true }] } });
+		}
 		if (method === 'LookupPlayer') {
 			const request = route.request().postDataJSON();
 			state.lookupQueries?.push(request);
@@ -449,6 +582,18 @@ async function seedPackagedRoutes(page, state, authMode) {
 		if (method === 'SearchModpacks') {
 			if (state.modpacks === 'refused') return fail('Fixture modpack search refused');
 			return reply({ modpacks: MODPACKS, total: MODPACKS.length, page: 1, pageSize: 20 });
+		}
+		if (method === 'GetModpackFiles') {
+			return reply({
+				files: [{
+					id: 'seed-file-1',
+					displayName: 'Fabric pack 1.0',
+					fileName: 'fabric-pack.mrpack',
+					fileLength: '524288',
+					gameVersions: ['1.21.1'],
+					releaseType: 'release'
+				}]
+			});
 		}
 		if (method === 'GetGlobalSettings') return reply({ categories: [] });
 		return reply({});
@@ -835,11 +980,9 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	// `carbon-theme` is the app's persisted preference key (see
 	// display-preferences.svelte.ts) and drives `data-carbon-theme` on <html>.
-	// mode-watcher-mode is also set so the two theme systems stay consistent.
 	await context.addInitScript((mode) => {
 		try {
 			localStorage.setItem('carbon-theme', mode);
-			localStorage.setItem('mode-watcher-mode', mode);
 		} catch {
 			// The per-route theme check reports the effective theme from the DOM.
 		}
@@ -1178,6 +1321,35 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				return `${count} linked panels; Files fetched only on activation`;
 			});
 
+			await check(`server players @${width} ${theme}: roster filters persist and allowlist opens in a dialog`, async () => {
+				await page.getByRole('tab', { name: 'Players', exact: true }).click();
+				const roster = page.locator('[data-player-row]').filter({ hasText: 'SolarFox' });
+				await roster.waitFor();
+				const search = page.getByRole('textbox', { name: 'Search players' });
+				await search.fill('unmatched-fixture');
+				await page.getByText('No players match these filters.').waitFor();
+				assert(await search.isVisible(), 'search must remain usable after a zero-match query');
+				await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
+				await roster.waitFor();
+
+				const trigger = page.getByRole('button', { name: 'Add player to allowlist' });
+				await trigger.focus();
+				await trigger.press('Enter');
+				const dialog = page.getByRole('dialog', { name: 'Add player to allowlist' });
+				await dialog.getByRole('textbox', { name: 'Exact UUID or username' }).fill('ReviewGuest');
+				await dialog.getByRole('button', { name: 'Add to allowlist', exact: true }).click();
+				await dialog.getByText('Review guest added.', { exact: true }).waitFor();
+				await page.keyboard.press('Escape');
+				await dialog.waitFor({ state: 'hidden' });
+				assert(await trigger.evaluate((el) => el === document.activeElement), 'allowlist close returns focus');
+				await trigger.press('Enter');
+				await dialog.getByRole('button', { name: 'Undo', exact: true }).click();
+				await dialog.getByText('Allowlist entry removed.', { exact: true }).waitFor();
+				await page.keyboard.press('Escape');
+				await dialog.waitFor({ state: 'hidden' });
+				return 'roster remains visible, and closing the scoped dialog preserves its undo action';
+			});
+
 			await page.goto(root + '/settings', { waitUntil: 'domcontentloaded' });
 			await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor();
 			await check(`route /settings @${width} ${theme}: tabs, tabpanel relationships, hidden panels and arrow-key navigation`, async () => {
@@ -1408,7 +1580,6 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 	await context.addInitScript((mode) => {
 		try {
 			localStorage.setItem('carbon-theme', mode);
-			localStorage.setItem('mode-watcher-mode', mode);
 		} catch {
 			// The per-route theme check reports the effective theme from the DOM.
 		}
@@ -1490,6 +1661,22 @@ async function runModpacksJourney(browser, base, theme = 'light', width = 1440) 
 		await check(`modpacks @${width} ${theme}: seeded catalog renders from the RPC boundary`, async () => {
 			await page.getByTestId('showcase-modpack-card').first().waitFor({ timeout: 10000 });
 			return page.getByTestId('showcase-modpack-card').count();
+		});
+
+		await check(`modpacks @${width} ${theme}: compact table opens complete pack details with keyboard`, async () => {
+			const table = page.getByRole('table').filter({ hasText: 'Seeded Fabric Pack' });
+			const details = table.getByRole('button', { name: 'View details for Seeded Fabric Pack' });
+			await details.focus();
+			await details.press('Enter');
+			const dialog = page.getByRole('dialog', { name: 'Seeded Fabric Pack' });
+			await dialog.getByRole('heading', { name: 'Compatibility' }).waitFor();
+			await dialog.getByText('2 GB', { exact: true }).waitFor();
+			await dialog.getByText('Fabric pack 1.0', { exact: true }).waitFor();
+			await dialog.getByRole('button', { name: 'Use in Server' }).waitFor();
+			await page.keyboard.press('Escape');
+			await dialog.waitFor({ state: 'hidden' });
+			assert(await details.evaluate((el) => el === document.activeElement), 'closing returns focus to the pack');
+			return 'description, compatibility, indexed files and create action present';
 		});
 
 		await check(`modpacks @${width} ${theme}: refused search exposes the error state and Retry`, async () => {
@@ -1588,7 +1775,6 @@ async function runNarrowSettingsJourney(browser, base) {
 			const context = await browser.newContext({ reducedMotion: 'reduce' });
 			await context.addInitScript(({ theme, density }) => {
 				localStorage.setItem('carbon-theme', theme);
-				localStorage.setItem('mode-watcher-mode', theme);
 				localStorage.setItem('carbon-density', density);
 			}, { theme, density });
 			try {
@@ -1707,7 +1893,6 @@ async function runCrossEngineSmoke(browser, base, engine) {
 			await context.addInitScript((mode) => {
 				try {
 					localStorage.setItem('carbon-theme', mode);
-					localStorage.setItem('mode-watcher-mode', mode);
 				} catch {
 					// The theme check reports the effective theme from the DOM.
 				}
@@ -1752,7 +1937,8 @@ async function runCrossEngineSmoke(browser, base, engine) {
 
 const engine = requestedEngine();
 const dashboardOnly = process.argv.includes('--dashboard-telemetry-only');
-const fixture = dashboardOnly ? null : startFixture();
+const shellOnly = process.argv.includes('--shell-only');
+const fixture = dashboardOnly || shellOnly ? null : startFixture();
 const packaged = startPackagedServer();
 let browser;
 try {
@@ -1760,13 +1946,16 @@ try {
 	const launched = await launchEngine(engine);
 	browser = launched.browser;
 	console.log(JSON.stringify({ check: 'a11y-browser', ...launched.metadata }));
-	if (dashboardOnly) {
+	if (shellOnly) {
+		await runShellJourney(browser, packagedBase);
+	} else if (dashboardOnly) {
 		await runDashboardTelemetry(browser, packagedBase);
 	} else if (engine !== 'chromium') {
 		await runCrossEngineSmoke(browser, packagedBase, engine);
 	} else {
 		await runDashboardTelemetry(browser, packagedBase);
 		await runComponentJourney(browser, fixtureBase);
+		await runShellJourney(browser, packagedBase);
 		await runPackagedRouteJourney(browser, packagedBase, 'light');
 		for (const theme of ['light', 'dark']) {
 			for (const width of [360, 768, 1440]) {

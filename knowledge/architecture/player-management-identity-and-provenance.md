@@ -41,13 +41,13 @@ UUID (session-server profile) or current username (Minecraft Services name
 lookup). `LookupPlayer` is read-only: its ephemeral result never persists an
 identity, session, access row, roster entry, presence claim or audit row.
 See the [lookup profile](player-management-lookup-profile.md) for portraits and recorded joins.
-Authoritative negatives are `NOT_FOUND`; outages and timeouts are `UNAVAILABLE`; unpinnable
-queries are `AMBIGUOUS`. No name-history service is queried. A manual
-per-server allowlist add is a separate authorized mutation that reuses typed
-moderation (`players:access:write` on `server_id`), journal, audit and undo;
-it persists only the identity the mutation needs. Java name/UUID entries use
-the negotiated Java adapter; Bedrock Gamertag/XUID entries need an adapter
-proving Bedrock support and are otherwise refused with a capability error.
+Authoritative negatives are `NOT_FOUND`, outages are `UNAVAILABLE` and
+unpinnable queries are `AMBIGUOUS`. The server Players tab keeps roster filters
+visible after a zero-match search and opens a scoped allowlist dialog.
+Allowlist adds reuse typed moderation (`players:access:write` on `server_id`),
+journal, audit and undo, and persist only the identity the mutation needs.
+Java name/UUID entries use the negotiated Java adapter. Bedrock Gamertag/XUID
+entries require an adapter proving Bedrock support.
 `internal/playerdata` reads `stats`, `advancements` and `playerdata` snapshots
 through the injected node resolver with caller contexts and bounded reads;
 live NBT is never edited.

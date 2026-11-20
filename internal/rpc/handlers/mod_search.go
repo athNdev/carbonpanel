@@ -26,6 +26,7 @@ import (
 	"github.com/athNdev/carbon-panel/internal/indexers/modrinth"
 	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/rbac"
+	"github.com/athNdev/carbon-panel/internal/storageworker"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 )
 
@@ -829,6 +830,11 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 	if len(items) == 0 {
 		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusBadRequest, Message: "no mods specified to install"}
 	}
+	storageRoot, err := nodestorage.NewLocal(modsDir)
+	if err != nil {
+		return InstallModsResponse{}, &ModBrowseError{Status: http.StatusInternalServerError, Message: fmt.Sprintf("failed to open mods directory: %v", err)}
+	}
+	defer storageRoot.Close()
 
 	resp := InstallModsResponse{
 		Success:   true,
@@ -850,10 +856,12 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 			continue
 		}
 
-		targetPath := filepath.Join(modsDir, fileName)
-
-		// Download directly to target file
-		res, err := m.httpClient.Get(item.DownloadURL)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, item.DownloadURL, nil)
+		if err != nil {
+			resp.Errors = append(resp.Errors, fmt.Sprintf("invalid download for %s: %v", item.Name, err))
+			continue
+		}
+		res, err := m.httpClient.Do(req)
 		if err != nil {
 			resp.Errors = append(resp.Errors, fmt.Sprintf("failed to download %s: %v", item.Name, err))
 			continue
@@ -865,7 +873,11 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 			continue
 		}
 
-		out, err := os.Create(targetPath)
+		limit := res.ContentLength
+		if limit <= 0 || limit > storageworker.MaxStreamBytes {
+			limit = storageworker.MaxStreamBytes
+		}
+		out, err := storageRoot.BeginWrite(ctx, fileName, limit)
 		if err != nil {
 			res.Body.Close()
 			resp.Errors = append(resp.Errors, fmt.Sprintf("failed to save %s: %v", item.Name, err))
@@ -874,11 +886,14 @@ func (m *ModOnlineManager) Install(ctx context.Context, server *storage.Server, 
 
 		_, copyErr := io.Copy(out, res.Body)
 		res.Body.Close()
-		out.Close()
-
 		if copyErr != nil {
-			_ = os.Remove(targetPath)
+			_ = out.Close()
 			resp.Errors = append(resp.Errors, fmt.Sprintf("incomplete download for %s: %v", item.Name, copyErr))
+			continue
+		}
+		if err := out.Commit(); err != nil {
+			_ = out.Close()
+			resp.Errors = append(resp.Errors, fmt.Sprintf("failed to publish %s: %v", item.Name, err))
 			continue
 		}
 

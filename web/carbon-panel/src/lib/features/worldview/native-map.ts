@@ -7,7 +7,9 @@ export const MIN_BLOCK = -30_000_000;
 export const MAX_BLOCK = 29_999_999;
 const MIN_TILE = MIN_BLOCK / TILE_BLOCKS;
 const MAX_TILE = Math.floor(MAX_BLOCK / TILE_BLOCKS);
-const MAX_VISIBLE_AXIS = 6;
+// The largest span plus one partially visible tile on either side of a seam.
+export const MAP_SPANS = [1024, 512, 256, 128, 64, 32] as const;
+const MAX_VISIBLE_AXIS = MAP_SPANS[0] / TILE_BLOCKS + 1;
 
 export interface MapPoint {
 	x: number;
@@ -29,7 +31,13 @@ export type NativeMapFailure = 'busy' | 'changed' | 'unsupported' | 'unavailable
 export type ManifestResult =
 	{ status: 'ready'; manifest: NativeManifest } | { status: NativeMapFailure };
 export type TileResult =
-	| { status: 'saved'; src: string; chunks: number | null; savedAt: string | null }
+	| {
+			status: 'saved';
+			src: string;
+			chunks: number | null;
+			provisionalChunks: number;
+			savedAt: string | null;
+	  }
 	| { status: 'empty' | NativeMapFailure };
 
 export const NATIVE_FAILURE_MESSAGE: Record<NativeMapFailure, string> = {
@@ -61,10 +69,9 @@ export function tileKey(tile: MapPoint): string {
 	return tile.x + ':' + tile.z;
 }
 
-/** At minimum zoom, the viewport spans at most five tiles on either axis. */
+/** Span is measured along the longer viewport edge, including on mobile. */
 export function blockScale(size: MapSize, zoomStep: number): number {
-	const span = TILE_BLOCKS * (MAX_VISIBLE_AXIS - 1);
-	return Math.max(1, size.width / span, size.height / span) * 2 ** zoomStep;
+	return Math.max(1, size.width, size.height) / MAP_SPANS[zoomStep];
 }
 
 export function visibleNativeTiles(center: MapPoint, size: MapSize, scale: number): MapPoint[] {
@@ -185,7 +192,7 @@ export async function loadNativeTile(
 	}
 	const url = root + 'native/overworld/' + tile.x + '/' + tile.z + '.png';
 	let response = await request(url, signal);
-	if (response.status === 503 && failure(response) === 'busy') {
+	if ((response.status === 503 || response.status === 429) && failure(response) === 'busy') {
 		// Minecraft may rewrite the region header during a read. Give that save
 		// one second to finish without changing the session or losing the camera.
 		signal.throwIfAborted();
@@ -209,6 +216,11 @@ export async function loadNativeTile(
 	const count = response.headers.get('X-CarbonPanel-Rendered-Chunks');
 	const number = count !== null && /^\d+$/.test(count) ? Number(count) : null;
 	const chunks = number !== null && number <= CHUNKS_PER_TILE ? number : null;
+	const provisional = Number(response.headers.get('X-CarbonPanel-Provisional-Chunks'));
+	const provisionalChunks =
+		Number.isInteger(provisional) && provisional > 0 && provisional <= (chunks ?? 0)
+			? provisional
+			: 0;
 	if (chunks === 0) return { status: 'empty' };
 	const timestamp = response.headers.get('X-CarbonPanel-Tile-Saved-At');
 	const savedAt =
@@ -217,5 +229,5 @@ export async function loadNativeTile(
 			: null;
 	const image = await response.blob();
 	if (!image.size || image.size > 256 * 1024) return { status: 'unavailable' };
-	return { status: 'saved', src: await toImageSource(image), chunks, savedAt };
+	return { status: 'saved', src: await toImageSource(image), chunks, provisionalChunks, savedAt };
 }

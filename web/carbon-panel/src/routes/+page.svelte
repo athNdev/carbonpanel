@@ -45,6 +45,7 @@ one at https://mozilla.org/MPL/2.0/.
 		serverActions,
 		sortServersByActivity
 	} from '$lib/stores/servers';
+	import { summarizeNodes } from '$lib/utils/node-status';
 	import { summarizeDashboardTelemetry } from '$lib/features/servers/dashboard-telemetry';
 	import { joinIsPlayable, joinKindLabel } from '$lib/server-join';
 	import {
@@ -166,13 +167,7 @@ one at https://mozilla.org/MPL/2.0/.
 		)
 	});
 
-	let nodeStats = $derived({
-		total: dashboardNodes.length,
-		online: dashboardNodes.filter((n) => n.status === NodeStatusEnum.ONLINE).length,
-		offline: dashboardNodes.filter((n) => n.status !== NodeStatusEnum.ONLINE).length,
-		totalServers: dashboardNodes.reduce((acc, n) => acc + (n.serverCount || 0), 0),
-		totalAllocatedMb: dashboardNodes.reduce((acc, n) => acc + Number(n.allocatedMemoryMb || 0n), 0)
-	});
+	let nodeStats = $derived(summarizeNodes(dashboardNodes));
 
 	function getNodeTagType(status: NodeStatusEnum): 'green' | 'red' | 'gray' {
 		switch (status) {
@@ -488,12 +483,9 @@ one at https://mozilla.org/MPL/2.0/.
 						{/if}
 					</div>
 					{#if telemetry.memory.reportedUtilization !== null}
-						<div
-							class="mt-3 h-1.5 w-full overflow-hidden rounded-none bg-secondary"
-							aria-hidden="true"
-						>
+						<div class="telemetry-track mt-3" aria-hidden="true">
 							<div
-								class="h-full bg-primary transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
+								class="h-full bg-accent-text transition-[width] duration-[var(--motion-slow)] ease-[var(--ease-out-quart)]"
 								style="width: {Math.min(telemetry.memory.reportedUtilization, 100)}%"
 							></div>
 						</div>
@@ -602,29 +594,26 @@ one at https://mozilla.org/MPL/2.0/.
 							? 'text-destructive-text'
 							: 'text-warning-text'} shrink-0"
 					/>
-					<div class="font-sans text-xs text-foreground">
+					<div class="space-y-1 text-sm leading-snug">
 						{#if serversByStatus.critical.length > 0}
-							<span class="font-mono font-bold text-destructive-text"
-								>{serversByStatus.critical.length} SERVER{serversByStatus.critical.length > 1
-									? 'S'
-									: ''} CRITICAL</span
-							>: require operator intervention.
+							<p class="font-semibold text-destructive-text">
+								{serversByStatus.critical.length}
+								{serversByStatus.critical.length === 1 ? 'server needs' : 'servers need'} attention
+							</p>
+							<p class="text-muted-foreground">Check the affected servers for errors or low TPS.</p>
 						{/if}
 						{#if serversByStatus.warning.length > 0}
-							<span
-								class="font-mono font-bold text-warning-text {serversByStatus.critical.length > 0
-									? 'ml-2'
-									: ''}"
-								>{serversByStatus.warning.length} SERVER{serversByStatus.warning.length > 1
-									? 'S'
-									: ''} RUNNING SLOW</span
-							>: sub-optimal TPS detected.
+							<p class="font-medium text-warning-text">
+								{serversByStatus.warning.length}
+								{serversByStatus.warning.length === 1 ? 'server is' : 'servers are'} reporting degraded
+								performance
+							</p>
 						{/if}
 					</div>
 				</div>
 				<a
 					href={resolve('/servers')}
-					class="mono-label-accent flex shrink-0 items-center gap-1 hover:text-foreground"
+					class="focus-ring flex shrink-0 items-center gap-1 text-sm font-medium text-accent-text hover:underline"
 				>
 					<span>Inspect Servers</span>
 					<ChevronRight class="h-3.5 w-3.5" />
@@ -642,9 +631,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<!-- Table Toolbar / Header -->
 					<div class="flex items-center justify-between border-b border-border bg-card p-4">
 						<div>
-							<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
-								Server Overview
-							</h2>
+							<h2 class="font-sans text-base font-semibold text-foreground">Server Overview</h2>
 							<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 								Instance telemetry & state across cluster
 							</p>
@@ -854,9 +841,7 @@ one at https://mozilla.org/MPL/2.0/.
 				<!-- Header -->
 				<div class="flex items-center justify-between border-b border-border bg-card p-4">
 					<div>
-						<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
-							Recent Activity
-						</h2>
+						<h2 class="font-sans text-base font-semibold text-foreground">Recent Activity</h2>
 						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 							Latest lifecycle and cluster events
 						</p>
@@ -920,14 +905,16 @@ one at https://mozilla.org/MPL/2.0/.
 					class="flex flex-col justify-between gap-3 border-b border-border p-4 sm:flex-row sm:items-center"
 				>
 					<div>
-						<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
-							Nodes
-						</h2>
+						<h2 class="font-sans text-base font-semibold text-foreground">Nodes</h2>
 						<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 							Docker hosts backing this cluster
 						</p>
 					</div>
-					<CarbonTag type={nodeStats.offline > 0 ? 'yellow' : 'green'} size="sm">
+					<CarbonTag
+						type={nodeStats.offline > 0 ? 'yellow' : 'green'}
+						size="sm"
+						class="self-start sm:self-auto"
+					>
 						{nodeStats.online}/{nodeStats.total} ONLINE
 					</CarbonTag>
 				</div>
@@ -964,9 +951,7 @@ one at https://mozilla.org/MPL/2.0/.
 				class="flex flex-col justify-between gap-3 border-b border-border p-4 sm:flex-row sm:items-center"
 			>
 				<div>
-					<h2 class="font-sans text-sm font-semibold tracking-wider text-foreground uppercase">
-						System Health
-					</h2>
+					<h2 class="font-sans text-base font-semibold text-foreground">System Health</h2>
 					<p class="mt-0.5 font-sans text-xs text-muted-foreground">
 						Underlying daemon and network state
 					</p>
@@ -978,6 +963,7 @@ one at https://mozilla.org/MPL/2.0/.
 							? 'yellow'
 							: 'green'}
 					size="sm"
+					class="self-start sm:self-auto"
 				>
 					{serversByStatus.critical.length > 0
 						? 'ATTENTION REQUIRED'
@@ -986,29 +972,30 @@ one at https://mozilla.org/MPL/2.0/.
 							: 'OPERATIONAL'}
 				</CarbonTag>
 			</div>
-			<div
-				class="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4"
-			>
-				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="mono-label">RPC telemetry</span>
+			<div class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-px bg-border">
+				<div class="flex min-w-0 items-center justify-between gap-3 bg-card px-4 py-3">
+					<span class="text-sm text-muted-foreground">RPC telemetry</span>
 					<CarbonTag type="gray" size="sm">NOT MEASURED</CarbonTag>
 				</div>
-				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="mono-label"> Network Proxy </span>
+				<div class="flex min-w-0 items-center justify-between gap-3 bg-card px-4 py-3">
+					<span class="text-sm text-muted-foreground">Network proxy</span>
 					<CarbonTag type={stats.running > 0 ? 'green' : 'gray'} size="sm">
 						{stats.running > 0 ? 'CONNECTED' : 'IDLE'}
 					</CarbonTag>
 				</div>
-				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="mono-label"> Storage Allocation </span>
-					<span class="font-mono text-xs text-foreground">
+				<div class="flex min-w-0 items-center justify-between gap-3 bg-card px-4 py-3">
+					<span class="text-sm text-muted-foreground">Storage allocation</span>
+					<span class="text-right text-sm font-medium text-foreground">
 						{stats.totalDiskUsage > 0
 							? `${formatBytes(stats.totalDiskUsage)}${stats.totalDiskSize}`
-							: 'LOCAL VOLUMES'}
+							: 'Local volumes'}
 					</span>
 				</div>
-				<div class="flex items-center justify-between gap-3 px-4 py-3" data-testid="health-nodes">
-					<span class="mono-label">Nodes</span>
+				<div
+					class="flex min-w-0 items-center justify-between gap-3 bg-card px-4 py-3"
+					data-testid="health-nodes"
+				>
+					<span class="text-sm text-muted-foreground">Nodes</span>
 					{#if nodeStats.total > 0}
 						<CarbonTag type={nodeStats.offline > 0 ? 'yellow' : 'green'} size="sm">
 							{nodeStats.online}/{nodeStats.total} ONLINE

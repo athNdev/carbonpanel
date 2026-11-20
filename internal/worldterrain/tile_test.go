@@ -207,6 +207,34 @@ func TestRenderOverworldTileRefusals(t *testing.T) {
 	}
 }
 
+func TestSavedSurfaceOnUnfinishedChunks(t *testing.T) {
+	early := chunkData(0, 0, 3955, "minecraft:biomes")
+	carvers := chunkData(1, 0, 3955, "minecraft:carvers")
+	light := chunkData(2, 0, 3955, "minecraft:initialize_light")
+	wg := bytes.Replace(chunkData(3, 0, 3955, "surface"), []byte("\x00\x0dWORLD_SURFACE"), []byte("\x00\x10WORLD_SURFACE_WG"), 1)
+	noHeight := bytes.Replace(chunkData(4, 0, 3955, "features"), []byte("WORLD_SURFACE"), []byte("OTHER_SURFACE"), 1)
+	full := chunkData(5, 0, 3955, "full")
+	fixture := [][]byte{early, carvers, light, wg, noHeight, full}
+	var chunks []savedChunk
+	for x, raw := range fixture {
+		chunks = append(chunks, savedChunk{x, 0, raw, 2, testSave})
+	}
+	_, store := regionStore(t, "r.0.0.mca", regionData(t, chunks...))
+	tile, err := RenderOverworldTile(t.Context(), store, "fixture_world", TileCoord{})
+	if err != nil || tile.RenderedChunks != 4 || tile.ProvisionalChunks != 3 || tile.MissingChunks != 60 {
+		t.Fatalf("saved surface counts: rendered %d, provisional %d, missing %d, err %v", tile.RenderedChunks, tile.ProvisionalChunks, tile.MissingChunks, err)
+	}
+	img, err := png.Decode(bytes.NewReader(tile.PNG))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, alpha := range []uint8{0, 176, 176, 176, 0, 255} {
+		if got := color.NRGBAModel.Convert(img.At(i*chunkBlocks, 0)).(color.NRGBA).A; got != alpha {
+			t.Fatalf("chunk %d alpha = %d, want %d", i, got, alpha)
+		}
+	}
+}
+
 type inMemoryRegion struct {
 	*bytes.Reader
 	headerReads int
@@ -286,7 +314,7 @@ func TestRenderOverworldTileGameSave(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	canvas := image.NewNRGBA(image.Rect(0, 0, 3*TileBlocks, 3*TileBlocks))
-	chunks, timestamps := 0, 0
+	chunks, provisional, timestamps := 0, 0, 0
 	for z := -1; z <= 1; z++ {
 		for x := -1; x <= 1; x++ {
 			tile, err := RenderOverworldTile(t.Context(), store, level, TileCoord{X: x, Z: z})
@@ -300,6 +328,7 @@ func TestRenderOverworldTileGameSave(t *testing.T) {
 				t.Fatalf("tile (%d, %d) unreadable=%d unsupported=%d", x, z, tile.UnreadableChunks, tile.UnsupportedChunks)
 			}
 			chunks += tile.RenderedChunks
+			provisional += tile.ProvisionalChunks
 			timestamps += tile.TimestampedChunks
 			img, err := png.Decode(bytes.NewReader(tile.PNG))
 			if err != nil {
@@ -321,7 +350,7 @@ func TestRenderOverworldTileGameSave(t *testing.T) {
 	if chunks == 0 || timestamps != chunks || len(colors) < 8 {
 		t.Fatalf("real save yielded %d chunks, %d timestamps and %d colors", chunks, timestamps, len(colors))
 	}
-	t.Logf("qualified %d saved chunks with %d timestamps and %d terrain colors", chunks, timestamps, len(colors))
+	t.Logf("qualified %d saved chunks (%d provisional) with %d timestamps and %d terrain colors", chunks, provisional, timestamps, len(colors))
 
 	if output := os.Getenv("CARBON_TERRAIN_FIXTURE_PNG"); output != "" {
 		// The qualification operator supplies a separate artifact path.
