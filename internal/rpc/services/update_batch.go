@@ -56,7 +56,7 @@ func (s *ConfigService) DiscardUpdateBatch(ctx context.Context, req *connect.Req
 	// Mod-update staging holds the same per-server operation while it commits
 	// a window and staged rows. Sharing the ownership prevents a discard from
 	// closing the chosen batch halfway through a staging write.
-	err = operation.RunJournaled(ctx, s.store, s.log, server, "stage-mod-updates", "", func() error {
+	err = operation.RunJournaled(ctx, s.store, s.log, server, "discard-update-batch", "", func() error {
 		if req.Msg.GetItemId() == "" {
 			return s.discardWholeBatch(ctx, server)
 		}
@@ -69,6 +69,11 @@ func (s *ConfigService) DiscardUpdateBatch(ctx context.Context, req *connect.Req
 		return nil
 	})
 	if err != nil {
+		// Keep the typed refusal from the inner operation (for example a
+		// missing item or wrong server) instead of flattening it to Internal.
+		if _, ok := err.(*connect.Error); ok {
+			return nil, err
+		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&v1.DiscardUpdateBatchResponse{}), nil

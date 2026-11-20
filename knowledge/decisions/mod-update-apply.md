@@ -48,7 +48,10 @@ The scheduler invokes the same planner through an injected interface.
   batch/config window transition is transactional. The full tuple is rechecked
   under the operation, inserts name the still-open chosen batch, discard shares
   the lock, cron config rows keep their schedule, and rejected transfers still
-  consume the byte budget. The guarded World Library download client is reused
-  and transient provider failures stay retryable.
+  consume the byte budget. A batch with a cron config row is refused by both
+  mod-staging entry points, preserving that row's batch and trigger. Discard
+  keeps typed Connect refusals and its own operation name. The guarded World
+  Library download client is reused and transient provider failures stay
+  retryable.
 - The scheduler installs the planner before starting, applies timezone only to
   cron, and refuses to dispatch a task whose next run cannot be advanced.

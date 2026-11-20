@@ -240,6 +240,7 @@ func TestSameModeWindowRaceCannotRescheduleReviewedBatch(t *testing.T) {
 			require.Condition(t, func() bool {
 				return strings.Contains(err.Error(), "conflicting window") ||
 					strings.Contains(err.Error(), "in progress") ||
+					strings.Contains(err.Error(), "active operation") ||
 					strings.Contains(err.Error(), "database is locked")
 			}, "race must be refused by the operation or window check: %v", err)
 		}
@@ -344,6 +345,70 @@ func TestRacedDiscardCannotOrphanStagedModPayload(t *testing.T) {
 	phase, err := store.GetStagedContent(ctx, rows[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, storage.StagedStatusStaged, phase.Status)
+}
+
+func TestStagingRefusesBatchWithIndependentCronConfig(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "mod-cron-cohab", storage.StatusStopped)
+	mods := filepath.Join(server.DataPath, "mods")
+	require.NoError(t, os.MkdirAll(mods, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(mods, "mod.jar"), []byte("installed"), 0o600))
+	cron, err := store.StageConfigChange(ctx, server.ID,
+		map[string]any{"motd": "nightly"}, storage.StagedApplyScheduled, "0 3 * * *")
+	require.NoError(t, err)
+
+	svc := NewModService(store, nil, um, logger.New())
+	svc.SetModUpdateLookup(newPreviewFixture())
+	svc.SetModCandidateFetcher(&modUpdateFetchFixture{data: []byte("next")})
+
+	_, err = svc.UpdateMod(ctx, connect.NewRequest(modUpdateRequest(server.ID, installedModDigest("installed"))))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "independently scheduled config row")
+
+	_, _, _, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	require.Error(t, err, "the scheduled entry point must refuse the same cohabitation")
+	require.Contains(t, err.Error(), "independently scheduled config row")
+
+	rows, err := store.ListBatchContent(ctx, cron.BatchID)
+	require.NoError(t, err)
+	require.Empty(t, rows, "no mod payload may be staged into the cron batch")
+	staged, err := store.GetStagedConfigChange(ctx, cron.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, staged.Status)
+	require.Equal(t, storage.StagedApplyScheduled, staged.ApplyMode)
+	live, err := os.ReadFile(filepath.Join(mods, "mod.jar"))
+	require.NoError(t, err)
+	require.Equal(t, "installed", string(live))
+}
+
+func TestDiscardUpdateBatchPreservesTypedRefusals(t *testing.T) {
+	ctx := context.Background()
+	store, server, um := newContentStageFixture(t, "discard-typed", storage.StatusStopped)
+	configSvc := NewConfigService(store, nil, nil, nil, logger.New())
+	_ = um
+
+	_, err := configSvc.DiscardUpdateBatch(ctx, connect.NewRequest(&v1.DiscardUpdateBatchRequest{
+		ServerId: server.ID, ItemId: "missing-item",
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+
+	other := &storage.Server{ID: "discard-other", Name: "discard-other", DataPath: t.TempDir(), Status: storage.StatusStopped}
+	require.NoError(t, store.CreateServer(ctx, other))
+	row, err := store.AddStagedContent(ctx, &storage.StagedContentChange{
+		ID: "srv-item", ServerID: server.ID, Kind: storage.StagedKindMod,
+		Action: storage.StagedActionReplace, TargetPath: "mods/a.jar",
+		StagePath: ".carbon-panel/staged/a/a.jar", FileName: "a.jar",
+	})
+	require.NoError(t, err)
+	_, err = configSvc.DiscardUpdateBatch(ctx, connect.NewRequest(&v1.DiscardUpdateBatchRequest{
+		ServerId: other.ID, ItemId: row.ID,
+	}))
+	require.Error(t, err)
+	require.Equal(t, connect.CodeNotFound, connect.CodeOf(err))
+	still, err := store.GetStagedContent(ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusStaged, still.Status, "a cross-server discard must not touch the row")
 }
 
 func TestStageReviewedModUpdateKeepsLiveBytesAndStagesExactCandidate(t *testing.T) {

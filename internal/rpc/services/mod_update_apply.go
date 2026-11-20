@@ -239,6 +239,17 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if existing != nil {
+		scheduled, err := batchHasScheduledConfig(ctx, s.store, existing.ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if scheduled {
+			return nil, nil, nil, fmt.Errorf(
+				"open batch %s has an independently scheduled config row; stage mod updates in a separate batch",
+				existing.ID)
+		}
+	}
 	if existing != nil && !batchWindowEquals(existing, windowName, applyAt, idle) {
 		reviewed, err := batchHasWindowBoundRows(ctx, s.store, existing.ID)
 		if err != nil {
@@ -362,6 +373,17 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		if err != nil {
 			return err
 		}
+		if existing != nil {
+			scheduled, err := batchHasScheduledConfig(ctx, s.store, existing.ID)
+			if err != nil {
+				return err
+			}
+			if scheduled {
+				return fmt.Errorf(
+					"open batch %s has an independently scheduled config row; stage mod updates in a separate batch",
+					existing.ID)
+			}
+		}
 		if existing != nil && !batchWindowEquals(existing, windowName, applyAt, idle) {
 			reviewed, err := batchHasWindowBoundRows(ctx, s.store, existing.ID)
 			if err != nil {
@@ -458,6 +480,19 @@ func batchHasWindowBoundRows(ctx context.Context, store *storage.Store, batchID 
 
 // batchWindowEquals compares the complete window tuple, not just the enum, so
 // a second update cannot silently move a reviewed batch's at_time or interval.
+func batchHasScheduledConfig(ctx context.Context, store *storage.Store, batchID string) (bool, error) {
+	configs, err := store.ListBatchConfig(ctx, batchID)
+	if err != nil {
+		return false, err
+	}
+	for _, config := range configs {
+		if config.ApplyMode == storage.StagedApplyScheduled {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func batchWindowEquals(batch *storage.ServerUpdateBatch, window storage.UpdateWindow, applyAt *time.Time, idleMinutes int) bool {
 	if batch.Window != string(window) || batch.IdleMinutes != idleMinutes {
 		return false
