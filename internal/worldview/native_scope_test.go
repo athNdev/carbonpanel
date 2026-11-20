@@ -8,12 +8,22 @@ package worldview
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"gorm.io/gorm"
 
+	"github.com/athNdev/carbon-panel/internal/auth"
 	storage "github.com/athNdev/carbon-panel/internal/db"
+	"github.com/athNdev/carbon-panel/internal/nodestorage"
+	"github.com/athNdev/carbon-panel/internal/worldlib"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
@@ -136,5 +146,169 @@ func TestNativeScopeRefusesUnsafeOrUnavailableStorage(t *testing.T) {
 		if _, err := resolveNativeScope(ctx, f, server, nil); !errors.Is(err, errNativeSourceAbsent) {
 			t.Fatalf("unqualified owner %+v should refuse rendering, got %v", tc, err)
 		}
+	}
+}
+
+func nativeProbeServiceFixture(t *testing.T, servers int) *Service {
+	t.Helper()
+	f := &nativeScopeFixture{fakeStore: newFakeStore()}
+	const level = "actual-world"
+	nbt, err := worldlib.WriteFreshLevelData(map[string]string{"level-name": level}, "3953")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range servers {
+		root := t.TempDir()
+		if err := os.Mkdir(filepath.Join(root, level), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, level, "level.dat"), nbt, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		id := fmt.Sprintf("native-server-%d", i)
+		f.addServer(id, "default")
+		f.servers[id].DataPath = root
+		f.setLevelName(id, level)
+	}
+	return NewService(ServiceDeps{
+		Store:      f,
+		Authorizer: &fakeEnforcer{allow: func([]string, string, string, string) (bool, error) { return true, nil }},
+		Native:     NewNativeMap(f, nodestorage.NewResolver(nil)),
+	})
+}
+
+func TestNativeInventoryDefersUnexaminedWorldsFixture(t *testing.T) {
+	const serverCount = nativeInventoryProbeLimit + 3
+	service := nativeProbeServiceFixture(t, serverCount)
+	ctx := svcCtx("native-viewer", "user")
+	list, err := service.ListWorldViewTargets(ctx, connect.NewRequest(&v1.ListWorldViewTargetsRequest{}))
+	if err != nil || len(list.Msg.GetTargets()) != serverCount {
+		t.Fatalf("all authorized worlds must stay discoverable: %v (%v)", list, err)
+	}
+	qualified := 0
+	var deferred *v1.WorldViewTarget
+	for _, target := range list.Msg.GetTargets() {
+		switch target.GetRendererState() {
+		case v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE:
+			qualified++
+		case v1.RendererState_RENDERER_STATE_UNSPECIFIED:
+			if target.GetWorldRef().GetServerId() != target.GetServerId() ||
+				target.GetWorldRef().GetLevelName() == "" || !strings.Contains(target.GetError(), "open this world") {
+				t.Fatalf("deferred inventory row lost its active world link or action: %+v", target)
+			}
+			deferred = target
+		default:
+			t.Fatalf("inventory returned an unexpected state: %+v", target)
+		}
+	}
+	if qualified == 0 || qualified > nativeInventoryProbeLimit || deferred == nil {
+		t.Fatalf("inventory probe budget violated: qualified %d of %d", qualified, serverCount)
+	}
+
+	status, err := service.GetWorldViewStatus(ctx, connect.NewRequest(&v1.GetWorldViewStatusRequest{
+		ServerId: deferred.GetServerId(), WorldRef: deferred.GetWorldRef(),
+	}))
+	if err != nil || status.Msg.GetTarget().GetRendererState() != v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE {
+		t.Fatalf("direct status could not check the deferred world: %v (%v)", status, err)
+	}
+}
+
+func TestNativeInspectionCongestionPreservesIssuedSessionFixture(t *testing.T) {
+	service := nativeProbeServiceFixture(t, 1)
+	ctx := svcCtx("native-viewer", "user")
+	const serverID = "native-server-0"
+	request := func() *connect.Request[v1.GetWorldViewSessionRequest] {
+		return connect.NewRequest(&v1.GetWorldViewSessionRequest{ServerId: serverID})
+	}
+	session, err := service.GetWorldViewSession(ctx, request())
+	if err != nil || session.Msg.GetProxyPath() == "" {
+		t.Fatalf("initial native session unavailable: %v (%v)", session, err)
+	}
+	native := service.deps.Native
+	for range nativeWorkSlots {
+		native.slots <- struct{}{}
+	}
+	status := connect.NewRequest(&v1.GetWorldViewStatusRequest{ServerId: serverID})
+	if _, err := service.GetWorldViewStatus(ctx, status); connect.CodeOf(err) != connect.CodeResourceExhausted {
+		t.Fatalf("busy qualification must be a retryable status error: %v", err)
+	}
+	if _, err := service.GetWorldViewSession(ctx, request()); connect.CodeOf(err) != connect.CodeResourceExhausted {
+		t.Fatalf("busy qualification must be a retryable renewal error: %v", err)
+	}
+
+	proxy := NewProxyHandler(ProxyDeps{
+		Auth:       &fakeAuth{users: map[string]*auth.AuthenticatedUser{"fixture-token": auth.GetUserFromContext(ctx)}},
+		Authorizer: service.deps.Authorizer, Servers: service.deps.Store,
+		Sessions: service.SessionRegistry(), Native: native,
+	})
+	manifest := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, session.Msg.GetProxyPath()+nativeManifestPath, nil)
+		req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: "fixture-token"})
+		response := httptest.NewRecorder()
+		proxy.ServeHTTP(response, req)
+		return response
+	}
+	if response := manifest(); response.Code != http.StatusTooManyRequests {
+		t.Fatalf("asset did not share the same work budget: %d", response.Code)
+	}
+	for range nativeWorkSlots {
+		<-native.slots
+	}
+	if response := manifest(); response.Code != http.StatusOK {
+		t.Fatalf("congestion invalidated the original session: %d %s", response.Code, response.Body)
+	}
+}
+
+func TestNativeQualificationDefersWhileWorldChangesFixture(t *testing.T) {
+	service := nativeProbeServiceFixture(t, 1)
+	ctx := svcCtx("native-viewer", "user")
+	service.deps.Store.(*nativeScopeFixture).busy = true
+	const serverID = "native-server-0"
+	_, statusErr := service.GetWorldViewStatus(ctx, connect.NewRequest(&v1.GetWorldViewStatusRequest{ServerId: serverID}))
+	_, sessionErr := service.GetWorldViewSession(ctx, connect.NewRequest(&v1.GetWorldViewSessionRequest{ServerId: serverID}))
+	_, capsErr := service.ListCapabilities(ctx, connect.NewRequest(&v1.ListCapabilitiesRequest{ServerId: serverID}))
+	for _, err := range []error{statusErr, sessionErr, capsErr} {
+		if connect.CodeOf(err) != connect.CodeUnavailable || !errors.Is(err, errNativeWorldBusy) {
+			t.Fatalf("a live server operation did not return its temporary reason: %v", err)
+		}
+	}
+	list, err := service.ListWorldViewTargets(ctx, connect.NewRequest(&v1.ListWorldViewTargetsRequest{}))
+	if err != nil || len(list.Msg.GetTargets()) != 1 {
+		t.Fatalf("temporarily changing world disappeared from inventory: %v (%v)", list, err)
+	}
+	target := list.Msg.GetTargets()[0]
+	if target.GetRendererState() != v1.RendererState_RENDERER_STATE_UNSPECIFIED ||
+		target.GetError() != errNativeWorldBusy.Error() || target.GetWorldRef().GetLevelName() == "" {
+		t.Fatalf("inventory lost the changing world or its reason: %+v", target)
+	}
+}
+
+func TestNativeQualificationPreservesExplicitEndpointSelectionFixture(t *testing.T) {
+	service := nativeProbeServiceFixture(t, 1)
+	ctx := svcCtx("native-viewer", "user")
+	const serverID = "native-server-0"
+	config := Config{Endpoints: []Endpoint{{ServerID: serverID, Kind: RendererBlueMap, Host: "127.0.0.1", Port: 8100}}}
+	// A node classification error wraps ErrRendererUnavailable even for a
+	// matching explicit renderer. It must never trigger native fallback.
+	service.deps.Resolver = NewResolver(config, &fakeLocator{err: errors.New("node classification unavailable")})
+	get := func() (*v1.WorldViewTarget, error) {
+		status, err := service.GetWorldViewStatus(ctx, connect.NewRequest(&v1.GetWorldViewStatusRequest{ServerId: serverID}))
+		if err != nil {
+			return nil, err
+		}
+		return status.Msg.GetTarget(), nil
+	}
+	target, err := get()
+	if err != nil || target.GetRendererType() == v1.RendererType_RENDERER_TYPE_NATIVE ||
+		target.GetRendererState() == v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE {
+		t.Fatalf("explicit endpoint unexpectedly fell back to native: %v (%v)", target, err)
+	}
+
+	// An unavailable discovery adapter with no explicit endpoint can still
+	// offer native terrain for the already-authorized controller-local world.
+	service.deps.Resolver = NewResolver(Config{}, &fakeLocator{err: errors.New("discovery unavailable")})
+	target, err = get()
+	if err != nil || target.GetRendererState() != v1.RendererState_RENDERER_STATE_NATIVE_AVAILABLE {
+		t.Fatalf("unidentified optional renderer blocked valid local terrain: %v (%v)", target, err)
 	}
 }

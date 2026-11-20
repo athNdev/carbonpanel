@@ -32,7 +32,9 @@ existing discoverable BlueMap renderer keep their current selection. A native
 map reads only saved Overworld data. Check the tile's saved time and coverage
 when terrain is still being generated or saved. Use **Copy map link** to
 share the current coordinates with someone who can read the same world.
-Ordinary save churn retries the affected tile in place.
+Ordinary save churn retries the affected tile in place. In a large server
+list, Carbon Panel may check the save format when you open the world. An
+unsupported save reports the format limit before opening the map.
 
 The panel authorizes its native manifest and PNG requests through the existing
 short-lived World View key and the operator's server-specific read permission.

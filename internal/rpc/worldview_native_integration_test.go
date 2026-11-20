@@ -180,6 +180,39 @@ func TestNativeWorldViewSessionReadsTerrainThroughScopedProxy(t *testing.T) {
 	if err := os.WriteFile(levelPath, newerMetadata, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	unsupportedReq := connect.NewRequest(&v1.GetWorldViewStatusRequest{ServerId: server.ID})
+	unsupportedReq.Header().Set("Authorization", "Bearer "+granted)
+	unsupported, err := api.GetWorldViewStatus(ctx, unsupportedReq)
+	if err != nil || unsupported.Msg.GetTarget().GetRendererState() != v1.RendererState_RENDERER_STATE_UNSUPPORTED ||
+		unsupported.Msg.GetTarget().GetError() == "" {
+		t.Fatalf("unsupported save was advertised as ready: %v, %v", unsupported, err)
+	}
+
+	unavailable, err := issue(granted, nil)
+	if err != nil || unavailable.GetProxyPath() != "" || unavailable.GetState() != v1.RendererState_RENDERER_STATE_UNSUPPORTED ||
+		unavailable.GetReason() == "" {
+		t.Fatalf("unsupported save received a session or no reason: %v, %v", unavailable, err)
+	}
+
+	unavailableCapsReq := connect.NewRequest(&v1.ListCapabilitiesRequest{ServerId: server.ID})
+	unavailableCapsReq.Header().Set("Authorization", "Bearer "+granted)
+	unavailableCaps, err := api.ListCapabilities(ctx, unavailableCapsReq)
+	if err != nil || slices.ContainsFunc(unavailableCaps.Msg.GetCapabilities(), func(cap *v1.Capability) bool {
+		return cap.GetSupported()
+	}) {
+		t.Fatalf("unsupported save advertised native capabilities: %v, %v", unavailableCaps, err)
+	}
+
+	fleet := seedWorldViewToken(t, srv, "native-map-fleet", "native-map-fleet-role", []rbac.Permission{
+		{Resource: rbac.ResourceWorldView, Action: rbac.ActionRead, ObjectID: "*"},
+	})
+	listReq := connect.NewRequest(&v1.ListWorldViewTargetsRequest{})
+	listReq.Header().Set("Authorization", "Bearer "+fleet)
+	list, err := api.ListWorldViewTargets(ctx, listReq)
+	if err != nil || len(list.Msg.GetTargets()) != 1 ||
+		list.Msg.GetTargets()[0].GetRendererState() != v1.RendererState_RENDERER_STATE_UNSUPPORTED {
+		t.Fatalf("inventory advertised an unsupported native save: %v, %v", list, err)
+	}
 	asset(granted, "native/manifest.json", http.StatusUnprocessableEntity)
 	asset(granted, tileAsset, http.StatusUnprocessableEntity)
 	if err := os.WriteFile(levelPath, levelNBT, 0o644); err != nil {

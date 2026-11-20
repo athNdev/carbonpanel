@@ -312,6 +312,9 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			{#snippet stateTag(target: WorldViewTarget)}
 				{@const view = deriveViewState(target)}
 				<CarbonTag type={VIEW_STATE_TONE[view]} size="sm">{VIEW_STATE_LABEL[view]}</CarbonTag>
+				{#if (view === 'unknown' || view === 'unsupported') && target.error}
+					<p class="mt-1 max-w-xs text-xs break-words text-muted-foreground">{target.error}</p>
+				{/if}
 			{/snippet}
 			{#snippet observation(target: WorldViewTarget)}
 				{deriveViewState(target) === 'saved'

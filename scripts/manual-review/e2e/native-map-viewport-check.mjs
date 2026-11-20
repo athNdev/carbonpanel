@@ -99,6 +99,14 @@ async function runPackagedWorldView(browser) {
       renderer: { type: "RENDERER_TYPE_NATIVE", capabilities: ["map.2d"] },
     };
     const session = "/api/v1/worldview/map/native-route-fixture/";
+    const embedSession = "/api/v1/worldview/map/bluemap-route-fixture/";
+    const blueMap = {
+      ...native,
+      rendererType: "RENDERER_TYPE_BLUEMAP",
+      rendererState: "RENDERER_STATE_READY",
+      renderer: { type: "RENDERER_TYPE_BLUEMAP", capabilities: ["map.2d"] },
+    };
+    let selectedRenderer = native;
     let tileRequests = 0;
     let savingTile;
     let savingTileRetried = false;
@@ -133,14 +141,20 @@ async function runPackagedWorldView(browser) {
         GetCurrentUser: { user: {id: "fixture", username: "Fixture"}, permissions: [
           { resource: "world_view", action: "read", objectId: native.serverId },
         ]},
-        GetWorldViewStatus: { target: native },
-        GetWorldViewSession: { state: native.rendererState, proxyPath: session },
+        GetWorldViewStatus: { target: selectedRenderer },
+        GetWorldViewSession: {
+          state: selectedRenderer.rendererState,
+          proxyPath: selectedRenderer === native ? session : embedSession,
+        },
         ListWorldViewTargets: { targets: [native] },
         ListCapabilities: {rendererType: native.rendererType, capabilities: [{name: "map.2d", supported: true}]},
         ListServers: {servers: [{id: native.serverId, name: native.name}]},
       };
       await route.fulfill({ json: responses[method] ?? {} });
     });
+    await page.route("**" + embedSession + "**", (route) =>
+      route.fulfill({ contentType: "text/html", body: "<title>BlueMap fixture</title>" })
+    );
     await page.route("**" + session + "**", async (route) => {
       if (route.request().url().endsWith("/native/manifest.json")) {
         await route.fulfill({json: {tileBlocks: 128, dimension: "overworld", spawn: {x: 12, z: -34}}});
@@ -196,6 +210,15 @@ async function runPackagedWorldView(browser) {
     copy.searchParams.set("z", "92");
     await page.goto(copy.href);
     await page.getByTestId("native-map-coordinates").getByText("X: -128 · Z: 92").waitFor();
+    await page.locator('[role=application] img').first().waitFor();
+    selectedRenderer = blueMap;
+    await surface.locator('iframe[src="' + embedSession + '"]').waitFor();
+    assert.equal(await surface.locator('iframe[src="' + session + '"]').count(), 0);
+    selectedRenderer = native;
+    await page.getByTestId("native-map-coordinates").getByText("X: -128 · Z: 92").waitFor();
+    await page.locator('[role=application] img').first().waitFor();
+    assert.equal(await surface.locator("iframe").count(), 0);
+    results.push("status polling reissues sessions when the rendering mode changes in either direction");
     results.push("the packaged World View renders native tiles and scoped Overworld markers without an iframe or module");
   } finally {
     await context?.close();

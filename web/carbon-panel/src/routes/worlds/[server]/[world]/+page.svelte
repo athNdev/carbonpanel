@@ -50,6 +50,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		ListMapOverlaysRequestSchema,
 		SetMapOverlayRequestSchema,
 		SetPlayerVisibilityRequestSchema,
+		RendererState,
 		WorldRef_Kind,
 		type Capability,
 		type MapOverlay,
@@ -150,6 +151,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	);
 	let capabilities = $state<Capability[]>([]);
 	let capabilitiesRenderer = $derived(statusTarget?.renderer?.type ?? statusTarget?.rendererType);
+	let sessionMode = $derived(
+		view === 'saved' ? 'native' : rendererControlsAvailable ? 'embedded' : null
+	);
+	let sessionScope = $derived(
+		sessionMode ? statusKey + ':' + sessionMode + ':' + capabilitiesRenderer : ''
+	);
 	let matrix = $derived<CapabilityMatrix>(
 		createCapabilityMatrix(capabilities, capabilitiesRenderer)
 	);
@@ -245,22 +252,28 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	}
 
 	async function loadSession() {
-		if (!worldRef) return;
+		if (!worldRef || !sessionScope) return;
 		const current = scopeGuard();
-		const key = statusKey;
+		const key = sessionScope;
+		const native = sessionMode === 'native';
 		const attempt = ++sessionAttempt;
 		try {
 			const response = await rpcClient.worldView.getWorldViewSession(
 				create(GetWorldViewSessionRequestSchema, { serverId, worldRef }),
 				{ ...silentCallOptions, timeoutMs: 10_000 }
 			);
-			if (!current() || attempt !== sessionAttempt || denied) return;
+			if (!current() || key !== sessionScope || attempt !== sessionAttempt || denied) return;
+			if (response.proxyPath && native !== (response.state === RendererState.NATIVE_AVAILABLE)) {
+				clearSession();
+				sessionError = new Error('The map changed. Refresh to reopen it.');
+				return;
+			}
 			sessionOwner = key;
 			session = response;
 			sessionExpired = false;
 			sessionError = null;
 		} catch (error) {
-			if (!current() || attempt !== sessionAttempt) return;
+			if (!current() || key !== sessionScope || attempt !== sessionAttempt) return;
 			handleError(error);
 			sessionError = error;
 		}
@@ -354,7 +367,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
-		if (!canRead || !worldRef || denied || !rendererControlsAvailable) {
+		if (!canRead || !worldRef || denied || !sessionScope) {
 			clearSession();
 			return;
 		}
@@ -362,7 +375,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	});
 
 	$effect(() => {
-		if (!canRead || denied || sessionOwner !== statusKey || !session?.proxyPath) return;
+		if (!canRead || denied || sessionOwner !== sessionScope || !session?.proxyPath) return;
 		const expiresAt = timestampToMs(session.expiresAt);
 		if (expiresAt === null) return;
 
@@ -391,7 +404,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 			? { src: null, reason: 'The map session expired. Reconnecting…' }
 			: evaluateSession(
 					!denied &&
-						sessionOwner === statusKey &&
+						sessionOwner === sessionScope &&
 						(view === 'saved' || canMountEmbed(view, session?.proxyPath)),
 					session
 				)
@@ -695,8 +708,8 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							<h2 class="text-base font-semibold">Unsupported renderer</h2>
 						</div>
 						<p class="text-sm text-muted-foreground">
-							{rendererName(capabilitiesRenderer)} has no verified adapter capability here. No substitute
-							map is shown.
+							{statusTarget?.error ||
+								rendererName(capabilitiesRenderer) + ' has no verified map adapter.'}
 						</p>
 					</div>
 				{:else if view === 'stopped'}

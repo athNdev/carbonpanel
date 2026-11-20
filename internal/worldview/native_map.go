@@ -23,11 +23,25 @@ import (
 )
 
 const (
-	nativeSource     = "worldview.native.terrain"
-	nativeTileSlots  = 2
-	nativeTimeout    = 5 * time.Second
-	nativeLevelLimit = 1 << 20
+	nativeSource               = "worldview.native.terrain"
+	nativeWorkSlots            = 2
+	nativeTimeout              = 5 * time.Second
+	nativeLevelLimit           = 1 << 20
+	nativeInventoryProbeLimit  = 12
+	nativeInventoryProbeWindow = 250 * time.Millisecond
 )
+
+var (
+	errNativeProbeBusy     = errors.New("built-in map checks are busy; retry shortly")
+	errNativeProbeDeferred = errors.New("open this world to check the built-in map format")
+)
+
+// nativeInventoryBudget bounds extra format checks across one inventory
+// response. An unchecked row still links to its individual world status.
+type nativeInventoryBudget struct {
+	remaining int
+	timeLeft  time.Duration
+}
 
 type nativeMapStore interface {
 	nativeScopeStore
@@ -46,7 +60,7 @@ func NewNativeMap(store nativeMapStore, resolver *nodestorage.Resolver) *NativeM
 	if store == nil || resolver == nil {
 		return nil
 	}
-	return &NativeMap{store: store, storage: resolver, slots: make(chan struct{}, nativeTileSlots)}
+	return &NativeMap{store: store, storage: resolver, slots: make(chan struct{}, nativeWorkSlots)}
 }
 
 type nativeSpawn struct {
@@ -60,34 +74,60 @@ type nativeManifest struct {
 	Spawn      *nativeSpawn `json:"spawn"`
 }
 
-func (m *NativeMap) inspect(ctx context.Context, server *storage.Server, ref *v1.WorldRef) (nativeScope, error) {
+func (m *NativeMap) tryWork() bool {
+	select {
+	case m.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *NativeMap) inspect(ctx context.Context, server *storage.Server, ref *v1.WorldRef, budget *nativeInventoryBudget) (nativeScope, error) {
 	scope, err := resolveNativeScope(ctx, m.store, server, ref)
 	if err != nil {
 		return nativeScope{}, err
 	}
-	// Inventory/status opens only the level header. Manifest and tile requests
-	// validate saved content later, under the shared work budget.
-	ctx, stop := context.WithTimeout(ctx, nativeTimeout)
+	started := time.Now()
+	limit := nativeTimeout
+	if budget != nil {
+		if budget.remaining == 0 || budget.timeLeft <= 0 {
+			return nativeScope{}, errNativeProbeDeferred
+		}
+		limit = min(limit, budget.timeLeft)
+	}
+	if !m.tryWork() {
+		return nativeScope{}, errNativeProbeBusy
+	}
+	defer func() { <-m.slots }()
+	if budget != nil {
+		budget.remaining--
+		defer func() { budget.timeLeft -= time.Since(started) }()
+	}
+
+	ctx, stop := context.WithDeadline(ctx, started.Add(limit))
 	defer stop()
 	acc, err := m.storage.ForNode(ctx, scope.node, scope.dataRoot)
 	if err != nil {
-		return nativeScope{}, errNativeSourceAbsent
+		err = errNativeSourceAbsent
+	} else {
+		defer func() { _ = acc.Close() }()
+		_, err = readNativeLevel(ctx, acc, scope.level)
 	}
-	defer func() { _ = acc.Close() }()
-	f, err := acc.OpenRead(ctx, path.Join(scope.level, "level.dat"))
+	if ctx.Err() != nil {
+		if budget != nil && time.Since(started) >= limit {
+			return nativeScope{}, errNativeProbeDeferred
+		}
+		return nativeScope{}, errNativeProbeBusy
+	}
 	if err != nil {
-		return nativeScope{}, errNativeSourceAbsent
-	}
-	defer func() { _ = f.Close() }()
-	var header [2]byte
-	if _, err := io.ReadFull(f, header[:]); err != nil || (header[0] != 10 && header != [2]byte{0x1f, 0x8b}) {
-		return nativeScope{}, errNativeSourceAbsent
+		return nativeScope{}, err
 	}
 	return scope, nil
 }
 
-// readNativeLevel validates the active level for every asset. Region chunks
-// may retain older formats after a server upgrade changes level.dat.
+// readNativeLevel validates the active level for qualification and every
+// asset. Region chunks may retain their old format after level.dat upgrades.
 func readNativeLevel(ctx context.Context, acc nodestorage.Accessor, level string) (map[string]any, error) {
 	f, err := acc.OpenRead(ctx, path.Join(level, "level.dat"))
 	if err != nil {
@@ -143,14 +183,12 @@ func (m *NativeMap) serveAsset(w http.ResponseWriter, r *http.Request, server *s
 		http.Error(w, "world changed or is temporarily unavailable; reopen the map", http.StatusConflict)
 		return
 	}
-	select {
-	case m.slots <- struct{}{}:
-		defer func() { <-m.slots }()
-	default:
+	if !m.tryWork() {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "map rendering is busy; retry the tile", http.StatusTooManyRequests)
 		return
 	}
+	defer func() { <-m.slots }()
 
 	acc, err := m.storage.ForNode(ctx, scope.node, scope.dataRoot)
 	if err != nil {
