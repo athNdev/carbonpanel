@@ -305,6 +305,10 @@ const SETTINGS_CATEGORIES = [
 	}
 ];
 
+const LOOKUP_UUID = 'c3b9d17a-561d-4086-99d3-400bac225283';
+// Synthetic 16x32 portrait. The provider and atlas projection have separate Go coverage.
+const LOOKUP_PNG = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAgCAYAAAAbifjMAAAAOUlEQVR4nGNgQAPXFpb8x4fR1WOAUQOGpAGqya//U4JHDRg1YLgYgA7kNK3/48MEc+OoAaMGDE0DAMemII6Cz5U4AAAAAElFTkSuQmCC';
+
 async function seedPackagedRoutes(page, state, authMode) {
 	await page.route(/\/carbonpanel\.v1\.[^/]+\/[^/?]+/, async (route) => {
 		const method = new URL(route.request().url()).pathname.split('/').at(-1);
@@ -331,7 +335,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 					? {}
 					: {
 							user: { id: 'a11y', username: 'A11y Reviewer' },
-							permissions: [{ resource: '*', action: '*', objectId: '*' }]
+							permissions: state.permissions ?? [{ resource: '*', action: '*', objectId: '*' }]
 						}
 			);
 		}
@@ -386,7 +390,48 @@ async function seedPackagedRoutes(page, state, authMode) {
 		}
 		if (method === 'ListNodes') return reply({ nodes: [] });
 		if (method === 'ListPlayers') {
-			return reply({ players: PLAYERS, sourceDetail: 'Synthetic a11y route fixture' });
+			return reply({ players: state.lookupQueries ? [] : PLAYERS, sourceDetail: 'Synthetic a11y route fixture' });
+		}
+		if (method === 'LookupPlayer') {
+			const request = route.request().postDataJSON();
+			state.lookupQueries?.push(request);
+			if (request?.query === 'FixtureMissing') {
+				return reply({ status: 'PLAYER_LOOKUP_STATUS_NOT_FOUND' });
+			}
+			if (request?.query === 'FixtureObserved') {
+				return reply({
+					status: 'PLAYER_LOOKUP_STATUS_FOUND',
+					name: request.query,
+					uuid: LOOKUP_UUID,
+					observedIdentityKey: 'fixture-identity',
+					observation: {
+						source: 'PLAYER_DATA_SOURCE_PANEL_DB',
+						observedAt: '2039-01-01T00:00:00Z'
+					}
+				});
+			}
+			return reply({
+				status: 'PLAYER_LOOKUP_STATUS_FOUND',
+				name: request?.query,
+				uuid: LOOKUP_UUID,
+				observation: { source: 'PLAYER_DATA_SOURCE_IDENTITY_SERVICE', observedAt: '2026-11-20T03:30:00Z' },
+				...(request?.query === 'FixtureSkin'
+					? { skin: { data: LOOKUP_PNG, contentType: 'image/png' } }
+					: {})
+			});
+		}
+		if (method === 'ListPlayerSessions' && state.lookupSessionRequests) {
+			const request = route.request().postDataJSON();
+			state.lookupSessionRequests.push(request);
+			if (request?.serverId !== 'fixture-presence-server' || state.lookupSessionDenied) {
+				return reply({ code: 'permission_denied', message: 'No presence grant' }, 403);
+			}
+			return reply({
+				sessions: [
+					{ identityKey: 'fixture-identity', serverId: 'fixture-presence-server', joinedAt: '2003-06-01T10:30:00Z' },
+					{ identityKey: 'fixture-identity', serverId: 'fixture-hidden-server', joinedAt: '2039-01-01T00:00:00Z' }
+				]
+			});
 		}
 		if (method === 'ListWorldEntries') return reply({ entries: WORLD_ENTRIES });
 		if (method === 'ListWorldViewTargets') return reply({ targets: WORLD_TARGETS });
@@ -604,7 +649,7 @@ const PACKAGED_ROUTES = [
 		h1: 'Players',
 		controls: [
 			['heading', 'Players'],
-			['textbox', 'Exact UUID or username'],
+			['textbox', 'Minecraft username or UUID'],
 			['textbox', 'Search players'],
 			['button', 'Look up'],
 			['button', 'SolarFox']
@@ -670,6 +715,116 @@ const PACKAGED_ROUTES = [
 		]
 	}
 ];
+
+async function checkPlayerLookup(page, state, root, width, theme) {
+	await check(`player lookup @${width} ${theme}: same-origin portrait, identity and absence`, async () => {
+		const requests = [];
+		const listen = (request) => requests.push(request);
+		page.on('request', listen);
+		state.lookupQueries = [];
+		try {
+			await page.goto(root + '/players', { waitUntil: 'domcontentloaded' });
+			const lookup = page.getByRole('region', { name: 'Look up a player' });
+			const input = lookup.getByRole('textbox', { name: 'Minecraft username or UUID' });
+			const submit = async (query) => {
+				await input.fill(query);
+				await input.press('Enter');
+			};
+
+			await submit('FixtureSkin');
+			const portrait = lookup.getByRole('img', { name: 'Full-body skin for FixtureSkin' });
+			await portrait.waitFor();
+			await page.waitForFunction(() => {
+				const image = document.querySelector('img[alt="Full-body skin for FixtureSkin"]');
+				return image?.complete && image.naturalWidth === 16 && image.naturalHeight === 32;
+			});
+			if (!(await portrait.getAttribute('src'))?.startsWith('data:image/png;base64,')) {
+				throw new Error('Portrait was not rendered from panel response bytes');
+			}
+			await lookup.getByRole('heading', { name: 'FixtureSkin', exact: true }).waitFor();
+			await lookup.getByText(LOOKUP_UUID, { exact: true }).waitFor();
+			await lookup.getByText('Mojang', { exact: true }).waitFor();
+			await lookup.getByText('Looking up an account does not add it to your roster.', { exact: true }).waitFor();
+			if (await lookup.getByRole('link', { name: 'View player record' }).count()) {
+				throw new Error('An unknown account linked to a roster identity');
+			}
+
+			await submit('FixtureNoSkin');
+			await lookup.getByRole('heading', { name: 'FixtureNoSkin', exact: true }).waitFor();
+			await lookup.getByText('Skin unavailable', { exact: true }).waitFor();
+			await lookup.getByText(LOOKUP_UUID, { exact: true }).waitFor();
+
+			await submit('FixtureMissing');
+			await lookup.getByText('Account not found', { exact: true }).waitFor();
+			if (await lookup.getByRole('article').count()) throw new Error('A missing account rendered a profile');
+
+			if (state.lookupQueries.length !== 3 || state.lookupQueries.some((request) => !request.includeSkin)) {
+				throw new Error('Profile requests did not opt into portrait data');
+			}
+			if (requests.some((request) => {
+				const url = new URL(request.url());
+				if (['http:', 'https:'].includes(url.protocol) && url.origin !== root) return true;
+				return url.pathname.includes('/carbonpanel.v1.PlayerService/') &&
+					!['LookupPlayer', 'ListPlayers'].includes(url.pathname.split('/').at(-1));
+			})) {
+				throw new Error('Lookup made an external request or accessed another player API');
+			}
+			return 'An account survived a missing portrait; no outside texture request or player mutation';
+		} finally {
+			page.off('request', listen);
+			delete state.lookupQueries;
+		}
+	});
+	await check(`player lookup @${width} ${theme}: historical joins respect explicit server scope`, async () => {
+		const allServers = state.servers;
+		const identityGrant = { resource: 'players', action: 'read', objectId: '*' };
+		const presenceGrant = { resource: 'players', action: 'presence', objectId: 'fixture-presence-server' };
+		state.servers = 'empty';
+		state.lookupSessionRequests = [];
+		const profile = async () => {
+			await page.goto(root + '/players', { waitUntil: 'domcontentloaded' });
+			const lookup = page.getByRole('region', { name: 'Look up a player' });
+			const input = lookup.getByRole('textbox', { name: 'Minecraft username or UUID' });
+			await input.fill('FixtureObserved');
+			await input.press('Enter');
+			await lookup.getByRole('heading', { name: 'FixtureObserved', exact: true }).waitFor();
+			await lookup.getByText('Looking up an account does not add it to your roster.', { exact: true }).waitFor();
+			return lookup;
+		};
+		try {
+			state.permissions = [identityGrant];
+			const readOnly = await profile();
+			if (state.lookupSessionRequests.length || /recorded server join|last seen|2039/i.test(await readOnly.innerText())) {
+				throw new Error('Identity-only lookup displayed or requested historical presence');
+			}
+
+			state.permissions = [identityGrant, presenceGrant];
+			const scoped = await profile();
+			await scoped.getByText('Recorded server join', { exact: true }).waitFor();
+			const text = await scoped.innerText();
+			if (!text.includes('2003') || /2039|fixture-presence-server|fixture-hidden-server|last seen/i.test(text)) {
+				throw new Error('Wrong session timestamp or a hidden server identifier appeared');
+			}
+			if (state.lookupSessionRequests.length !== 1 || state.lookupSessionRequests[0]?.serverId !== presenceGrant.objectId) {
+				throw new Error('An explicit presence grant did not use exactly its own server scope');
+			}
+
+			state.lookupSessionDenied = true;
+			const refused = page.waitForResponse((response) => response.url().endsWith('/ListPlayerSessions') && response.status() === 403);
+			const denied = await profile();
+			await refused;
+			if (/recorded server join|last seen|2039|2003/i.test(await denied.innerText())) {
+				throw new Error('A refused session request altered or leaked the profile history');
+			}
+			return 'Known identity remained visible. History used the authorized scope with no server inventory.';
+		} finally {
+			state.servers = allServers;
+			delete state.permissions;
+			delete state.lookupSessionRequests;
+			delete state.lookupSessionDenied;
+		}
+	});
+}
 
 async function runPackagedRouteJourney(browser, base, theme = 'light') {
 	const root = base.replace(/\/$/, '');
@@ -739,6 +894,8 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 					return route.controls.map(([role, name]) => `${role}:${name}`);
 				});
 			}
+
+			if (width === 1440 || width === 360) await checkPlayerLookup(page, state, root, width, theme);
 
       await check(
         `shell @${width} ${theme}: skip link and off-canvas focus containment`,

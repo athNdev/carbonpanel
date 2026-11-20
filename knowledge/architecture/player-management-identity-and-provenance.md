@@ -1,6 +1,6 @@
 ---
 type: Architecture
-title: "Player management — Identity and provenance + Sources and capabilities + Skins, identity lookup and deep data + Roster f"
+title: "Player management - Identity, provenance and capabilities"
 description: "PlayerIdentity is a panel cache/index with an opaque pl_* key. Online UUID,"
 status: stable
 owners: [oss-runtime]
@@ -33,14 +33,15 @@ capabilities.
 
 # Skins, identity lookup and deep data
 
-`internal/playerskin` fetches signed textures server-side, caches them
+`internal/playerskin` fetches Mojang-hosted textures server-side, caches them
 same-origin with bounded TTL/size and renders a 2D face. It accepts only
 canonical UUIDs and pinned texture hashes; arbitrary URLs and cross-host
 redirects are refused. The same bounded provider transport resolves an exact
 UUID (session-server profile) or current username (Minecraft Services name
 lookup). `LookupPlayer` is read-only: its ephemeral result never persists an
-identity, session, access row, roster entry or presence claim. Authoritative
-negatives are `NOT_FOUND`; outages and timeouts are `UNAVAILABLE`; unpinnable
+identity, session, access row, roster entry, presence claim or audit row.
+See the [lookup profile](player-management-lookup-profile.md) for portraits and recorded joins.
+Authoritative negatives are `NOT_FOUND`; outages and timeouts are `UNAVAILABLE`; unpinnable
 queries are `AMBIGUOUS`. No name-history service is queried. A manual
 per-server allowlist add is a separate authorized mutation that reuses typed
 moderation (`players:access:write` on `server_id`), journal, audit and undo;
