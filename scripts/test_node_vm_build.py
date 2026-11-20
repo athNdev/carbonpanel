@@ -70,6 +70,9 @@ class BuildFixtureTests(unittest.TestCase):
             self.assertNotIn("@@", name + text)
         self.assertIn("fixture-instance-0001", rendered["meta-data"])
         self.assertIn("#cloud-config", rendered["user-data"])
+        self.assertIn('match:\n      name: "en*"', rendered["network-config"])
+        self.assertNotIn("ens160:", rendered["network-config"])
+        self.assertIn("dhcp4: true", rendered["network-config"])
         # the first-boot script is embedded as base64, not as an executable secret
         self.assertIn("encoding: b64", rendered["user-data"])
         self.assertTrue(build.check_no_baked_secrets(self.config, self.policy, rendered))

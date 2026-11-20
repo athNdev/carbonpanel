@@ -125,17 +125,26 @@ def prepare_overlay(image_path, work_dir):
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     overlay = work_dir / "boot-disk.qcow2"
-    qemu_img = which_any("qemu-img")
-    if qemu_img:
-        proc = run([qemu_img, "create", "-f", "qcow2", "-F", "qcow2",
-                    "-b", str(image_path.resolve()), str(overlay)])
-        if proc.returncode == 0 and overlay.is_file():
-            return {"path": str(overlay), "mode": "backing", "tool": "qemu-img"}
-        # fallback to full copy if backing fails (e.g. format quirks)
+    try:
+        # qemu-img create can truncate its output. Reserve a new file before
+        # invoking it so a rerun cannot replace an existing boot disk.
+        overlay.touch(mode=0o600, exist_ok=False)
+    except FileExistsError as exc:
+        raise BootQualError("boot disk already exists; use a new work directory") from exc
+    try:
+        qemu_img = which_any("qemu-img")
+        if qemu_img:
+            proc = run([qemu_img, "create", "-f", "qcow2", "-F", "qcow2",
+                        "-b", str(image_path.resolve()), str(overlay)])
+            if proc.returncode == 0 and overlay.stat().st_size > 0:
+                return {"path": str(overlay), "mode": "backing", "tool": "qemu-img"}
+            # fallback to full copy if backing fails (e.g. format quirks)
         shutil.copy2(image_path, overlay)
-        return {"path": str(overlay), "mode": "copy", "tool": "copy-fallback"}
-    shutil.copy2(image_path, overlay)
-    return {"path": str(overlay), "mode": "copy", "tool": "copy"}
+        os.chmod(overlay, 0o600)
+        return {"path": str(overlay), "mode": "copy", "tool": "copy-fallback" if qemu_img else "copy"}
+    except Exception:
+        overlay.unlink(missing_ok=True)
+        raise
 
 
 def qemu_command(disk_path, seed_iso, serial_log, arch="x86_64", memory_mib=2048,

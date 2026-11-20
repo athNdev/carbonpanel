@@ -3,8 +3,9 @@
 Fixture/design lane for OSS-377 under the parent RSS epic OSS-368. This lane
 produces a **build definition** for a dedicated, disposable VM per managed node
 for Proxmox VE and generic KVM/libvirt. It is **not published, not a release and
-not a live-provisioning tool**. No QCOW2 is built here and no host VM is created,
-changed or deleted.
+not a live-provisioning tool**. The build entry point emits a plan and NoCloud
+seed. See [QEMU boot qualification](qualification/VM-BOOT-QUALIFICATION.md)
+for runs on disposable overlays of the pinned upstream QCOW2.
 
 Layout:
 
@@ -58,6 +59,19 @@ for out-of-band operator registration under the SHARED ADR0019
 `node_control.proto` contract. This lane does not define, fork or mount any
 node-control RPC. The bootstrap scopes are limited to
 `BeginEnrollmentChallenge` and `ClaimEnrollment`.
+
+The Ed25519 key (`node.key`), opaque secret (`enrollment-secret.bin`) and bundle
+(`enrollment-bundle.json`) are published together under
+`/var/lib/carbon-node/enrollment/`. Repeating first boot with the same instance
+identity reuses the existing files. Incomplete or mismatched state requires
+operator review and is preserved on failure. The secret encodes 256 random
+bits as unpadded base64url so it can cross the shared protobuf string field.
+`CSR_PRE` is a signed PKCS#10 DER request for the same key.
+
+The default NoCloud network seed requests IPv4 DHCP on predictable Ubuntu
+Ethernet interface names (`en*`). Attach the VM only to the intended private
+network. Override the network seed per VM when static addresses or different
+interface matching are required.
 
 `SIG_CLAIM` uses the **shared** ADR0019/OSS-385 `ClaimContextRaw` byte encoding:
 NUL-delimited `carbon-panel-enroll-v1`, node/enrollment/challenge IDs, the

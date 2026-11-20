@@ -56,4 +56,4 @@ config change, no registry push and no release.
   and planner semantics only. The base-image pin is real and signature-backed;
   `scripts/node_vm_verify_image.py` now verifies that an already-downloaded
   image's real bytes match the pin and the signed `SHA256SUMS` (amd64/arm64
-  bytes verified 2026-11-19, see `VM-BOOT-QUALIFICATION.md`). No QCOW2 was built
+  bytes verified 2026-11-19, see `VM-BOOT-QUALIFICATION.md`).

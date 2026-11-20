@@ -109,6 +109,18 @@ class CommandTests(unittest.TestCase):
         self.assertIn("-accel", cmd)
         self.assertIn("tcg", cmd)
 
+    def test_overlay_preserves_existing_run_disk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work_dir = Path(directory)
+            source = work_dir / "base.qcow2"
+            source.write_bytes(b"fixture base image")
+            existing = work_dir / "boot-disk.qcow2"
+            existing.write_bytes(b"prior first-boot state")
+            with self.assertRaisesRegex(boot_qual.BootQualError, "boot disk already exists"):
+                boot_qual.prepare_overlay(source, work_dir)
+            self.assertEqual(source.read_bytes(), b"fixture base image")
+            self.assertEqual(existing.read_bytes(), b"prior first-boot state")
+
 
 if __name__ == "__main__":
     unittest.main()
