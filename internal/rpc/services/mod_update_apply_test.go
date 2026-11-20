@@ -297,57 +297,57 @@ func TestCumulativeBudgetCountsRejectedDownloads(t *testing.T) {
 }
 
 func TestRacedDiscardCannotOrphanStagedModPayload(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	store, server, um := newContentStageFixture(t, "mod-discard-race", storage.StatusStopped)
 	mods := filepath.Join(server.DataPath, "mods")
 	require.NoError(t, os.MkdirAll(mods, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(mods, "a.jar"), []byte("installed-a"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(mods, "b.jar"), []byte("installed-b"), 0o600))
 
 	svc := NewModService(store, nil, um, logger.New())
 	svc.SetModUpdateLookup(twoModPreviewFixture{})
 	svc.SetModCandidateFetcher(&modUpdateFetchByFileFixture{
-		data:  map[string][]byte{"a.jar": []byte("next-a"), "b.jar": []byte("next-b")},
-		delay: 100 * time.Millisecond,
+		data: map[string][]byte{"a.jar": []byte("next-a")},
 	})
 	configSvc := NewConfigService(store, nil, nil, nil, logger.New())
-	request := twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)
-
-	type stageResult struct {
-		batchID string
-		err     error
+	discard := func() error {
+		_, err := configSvc.DiscardUpdateBatch(ctx, connect.NewRequest(&v1.DiscardUpdateBatchRequest{ServerId: server.ID}))
+		return err
 	}
-	result := make(chan stageResult, 1)
-	go func() {
-		res, err := svc.UpdateMod(ctx, connect.NewRequest(request))
-		if err != nil {
-			result <- stageResult{err: err}
+	var raced bool
+	require.NoError(t, store.DB().Callback().Create().Before("gorm:create").Register("fixture:discard_during_mod_insert", func(tx *gorm.DB) {
+		row, ok := tx.Statement.Dest.(*storage.StagedContentChange)
+		if !ok {
 			return
 		}
-		result <- stageResult{batchID: res.Msg.GetUpdateBatchId()}
-	}()
-	_, discardErr := configSvc.DiscardUpdateBatch(ctx, connect.NewRequest(&v1.DiscardUpdateBatchRequest{ServerId: server.ID}))
-	staged := <-result
+		// The real producer wrote payload bytes and still owns the journal.
+		// Discard must not close its batch before the staged row commits.
+		require.FileExists(t, filepath.Join(server.DataPath, filepath.FromSlash(row.StagePath)))
+		require.ErrorContains(t, discard(), "already has an active operation")
+		raced = true
+	}))
 
-	if staged.err != nil {
-		// A discard that won the ownership race must leave no orphan payload.
-		require.Empty(t, stagedFiles(t, server.DataPath))
-		return
-	}
-	require.NoError(t, discardErr)
+	request := twoModRequest(server.ID, "a.jar", "installed-a", v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART, 0)
+	response, err := svc.UpdateMod(ctx, connect.NewRequest(request))
+	require.NoError(t, err)
+	require.True(t, raced)
 	batch, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
 	require.NotNil(t, batch)
-	require.Equal(t, staged.batchID, batch.ID, "the reply must name the batch that actually holds the bytes")
+	require.Equal(t, response.Msg.GetUpdateBatchId(), batch.ID)
 	rows, err := store.ListBatchContent(ctx, batch.ID)
 	require.NoError(t, err)
-	require.NotEmpty(t, rows)
-	for _, row := range rows {
-		require.Equal(t, staged.batchID, row.BatchID)
-	}
-	phase, err := store.GetStagedContent(ctx, rows[0].ID)
+	require.Len(t, rows, 1)
+	require.Len(t, stagedFiles(t, server.DataPath), 1)
+
+	require.NoError(t, discard(), "discard can retry after staging releases the journal")
+	closed, err := store.OpenUpdateBatch(ctx, server.ID)
 	require.NoError(t, err)
-	require.Equal(t, storage.StagedStatusStaged, phase.Status)
+	require.Nil(t, closed)
+	require.Empty(t, stagedFiles(t, server.DataPath))
+	row, err := store.GetStagedContent(ctx, rows[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, storage.StagedStatusDiscarded, row.Status)
 }
 
 func TestReviewedUpdateRejectsInvalidWindowsBeforeProviderWork(t *testing.T) {

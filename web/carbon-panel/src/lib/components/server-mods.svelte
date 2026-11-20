@@ -9,6 +9,7 @@ one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import {
 		Loader2,
 		Upload,
@@ -99,6 +100,14 @@ one at https://mozilla.org/MPL/2.0/.
 	let policyIdleMinutes = $state(15);
 	let policyLastOutcome = $state('No runs yet');
 	let policySaving = $state(false);
+	let policyLoading = $state(false);
+	let policyLoadedServer = $state<string | null>(null);
+	let policyReady = $derived(policyLoadedServer === server.id);
+	let loadedPolicyOptIn = false;
+	let policyGeneration = 0;
+	onDestroy(() => {
+		policyGeneration++;
+	});
 
 	let availableUpdates = $derived(mods.filter((mod) => mod.updatePreview?.state === 'available'));
 
@@ -119,19 +128,35 @@ one at https://mozilla.org/MPL/2.0/.
 		return new Date(Number(value.seconds) * 1000).toLocaleString();
 	}
 
-	let policyNextRun = $derived(timestampLabel(policyTask?.nextRun));
+	let policyNextRun = $derived(
+		timestampLabel(policyTask?.status === TaskStatus.ENABLED ? policyTask.nextRun : undefined)
+	);
+	let policyScheduleStatus = $derived(
+		policyTask?.status === TaskStatus.ENABLED
+			? 'Enabled'
+			: policyTask?.status === TaskStatus.PAUSED
+				? 'Paused'
+				: policyTask?.status === TaskStatus.DISABLED
+					? 'Disabled'
+					: 'Not scheduled'
+	);
 	let policyLastRun = $derived(timestampLabel(policyTask?.lastRun));
 
 	async function loadPolicy() {
-		if (!canHaveMods()) return;
+		if (!canHaveMods() || policyLoading) return;
 		const serverId = server.id;
+		const generation = policyGeneration;
+		const current = () => generation === policyGeneration && isCurrentServer(serverId, server.id);
 		try {
+			policyLoading = true;
 			const response = await rpcClient.task.listTasks({ serverId });
-			if (!isCurrentServer(serverId, server.id)) return;
+			if (!current()) return;
 			const task = response.tasks.find((candidate) => candidate.taskType === TaskType.MOD_UPDATE);
 			policyTask = task ?? null;
 			const state = policyFromPersistedTask(task ?? null, TaskStatus.ENABLED);
 			policyEnabled = state.enabled;
+			loadedPolicyOptIn = state.enabled;
+			policyLoadedServer = serverId;
 			policyCron = state.cron;
 			policyTimezone = state.timezone;
 			policyExcluded = state.excludedProjects;
@@ -141,7 +166,7 @@ one at https://mozilla.org/MPL/2.0/.
 			policyIdleMinutes = state.idleMinutes;
 			if (task) {
 				const history = await rpcClient.task.listTaskExecutions({ taskId: task.id });
-				if (!isCurrentServer(serverId, server.id)) return;
+				if (!current()) return;
 				const latest: TaskExecution | undefined = history.executions[0];
 				if (latest) {
 					const outcome =
@@ -157,25 +182,26 @@ one at https://mozilla.org/MPL/2.0/.
 					policyLastOutcome = 'No runs yet';
 				}
 			} else {
-				policyEnabled = DEFAULT_POLICY_STATE.enabled;
-				policyCron = DEFAULT_POLICY_STATE.cron;
-				policyTimezone = DEFAULT_POLICY_STATE.timezone;
-				policyExcluded = DEFAULT_POLICY_STATE.excludedProjects;
-				policyMax = DEFAULT_POLICY_STATE.maxPerRun;
-				policySkipRunning = DEFAULT_POLICY_STATE.skipWhenRunning;
-				policyWindow = DEFAULT_POLICY_STATE.window;
-				policyIdleMinutes = DEFAULT_POLICY_STATE.idleMinutes;
 				policyLastOutcome = 'No runs yet';
 			}
 		} catch (error) {
-			if (!wasRpcErrorToasted(error)) toast.error('Failed to load the mod update policy');
+			if (current() && !wasRpcErrorToasted(error))
+				toast.error('Failed to load the mod update policy');
+		} finally {
+			if (current()) policyLoading = false;
 		}
 	}
 
 	async function savePolicy() {
+		if (!policyReady || policyLoading || policySaving) return;
 		const serverId = server.id;
+		const generation = policyGeneration;
+		const current = () => generation === policyGeneration && isCurrentServer(serverId, server.id);
+		const task = policyTask;
+		const enabled = policyEnabled;
+		const explicitOptInChange = enabled !== loadedPolicyOptIn;
 		const config = buildPolicyConfig({
-			enabled: policyEnabled,
+			enabled,
 			excludedProjects: policyExcluded,
 			maxPerRun: policyMax,
 			skipWhenRunning: policySkipRunning,
@@ -184,20 +210,23 @@ one at https://mozilla.org/MPL/2.0/.
 		});
 		try {
 			policySaving = true;
-			if (policyTask) {
+			if (task) {
 				const updated = await rpcClient.task.updateTask({
-					id: policyTask.id,
+					id: task.id,
 					cronExpr: policyCron,
 					timezone: policyTimezone,
 					config
 				});
-				if (!isCurrentServer(serverId, server.id)) return;
-				const toggled = await rpcClient.task.toggleTask({
-					id: policyTask.id,
-					status: policyEnabled ? TaskStatus.ENABLED : TaskStatus.DISABLED
-				});
-				if (!isCurrentServer(serverId, server.id)) return;
-				policyTask = toggled.task ?? updated.task ?? policyTask;
+				if (!current()) return;
+				policyTask = updated.task ?? task;
+				if (explicitOptInChange) {
+					const status = enabled ? TaskStatus.ENABLED : TaskStatus.DISABLED;
+					if (policyTask.status !== status) {
+						const toggled = await rpcClient.task.toggleTask({ id: task.id, status });
+						if (!current()) return;
+						policyTask = toggled.task ?? policyTask;
+					}
+				}
 			} else {
 				const created = await rpcClient.task.createTask({
 					serverId,
@@ -211,15 +240,17 @@ one at https://mozilla.org/MPL/2.0/.
 					retryCount: 1,
 					retryDelay: 60
 				});
-				if (!isCurrentServer(serverId, server.id)) return;
+				if (!current()) return;
 				policyTask = created.task ?? null;
 			}
+			loadedPolicyOptIn = enabled;
 			toast.success('Mod update policy saved');
 			await loadPolicy();
 		} catch (error) {
-			if (!wasRpcErrorToasted(error)) toast.error('Failed to save the mod update policy');
+			if (current() && !wasRpcErrorToasted(error))
+				toast.error('Failed to save the mod update policy');
 		} finally {
-			policySaving = false;
+			if (current()) policySaving = false;
 		}
 	}
 
@@ -232,8 +263,13 @@ one at https://mozilla.org/MPL/2.0/.
 			loading = true;
 			uploading = false;
 			hasLoaded = false;
-			// Policy state belongs to one server; never carry it across tabs.
+			// Invalidate outstanding policy work even if navigation returns to
+			// the same server before an earlier response arrives.
+			policyGeneration++;
 			policyTask = null;
+			policyLoadedServer = null;
+			policyLoading = false;
+			loadedPolicyOptIn = false;
 			policyEnabled = DEFAULT_POLICY_STATE.enabled;
 			policyCron = DEFAULT_POLICY_STATE.cron;
 			policyTimezone = DEFAULT_POLICY_STATE.timezone;
@@ -710,12 +746,28 @@ one at https://mozilla.org/MPL/2.0/.
 					/>
 					Skip while running
 				</label>
-				<CarbonButton kind="secondary" size="sm" disabled={policySaving} onclick={savePolicy}>
+				<CarbonButton
+					kind="secondary"
+					size="sm"
+					disabled={!policyReady || policyLoading || policySaving}
+					onclick={savePolicy}
+				>
 					Save policy
 				</CarbonButton>
+				{#if policyLoading && !policyReady}
+					<CarbonInlineLoading description="Loading policy" />
+				{:else if !policyReady}
+					<CarbonButton kind="ghost" size="sm" onclick={loadPolicy}
+						>Retry loading policy</CarbonButton
+					>
+				{/if}
 				<dl
-					class="grid w-full grid-cols-1 gap-1 font-mono text-xs text-muted-foreground sm:grid-cols-3"
+					class="grid w-full grid-cols-1 gap-1 font-mono text-xs text-muted-foreground sm:grid-cols-4"
 				>
+					<div>
+						<dt class="inline">Schedule:</dt>
+						<dd class="inline">{policyScheduleStatus}</dd>
+					</div>
 					<div>
 						<dt class="inline">Next run:</dt>
 						<dd class="inline">{policyNextRun}</dd>

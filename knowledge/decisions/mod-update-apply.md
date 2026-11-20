@@ -28,8 +28,8 @@ the installed fingerprint and provider release, downloads the exact candidate
 bytes with a SHA-512 check, and stages them into the server's open batch. The
 planner never writes the live mods directory or restarts the server.
 
-Automatic and scheduled policies are `mod_update` tasks holding a JSON config.
-The scheduler invokes the same planner through an injected interface.
+JSON-backed `mod_update` policies use the same planner. Save waits for the
+current task list, preserves status on config edits, and creates opt-outs disabled.
 
 # Consequences
 

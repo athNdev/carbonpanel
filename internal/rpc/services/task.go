@@ -343,9 +343,14 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
+	status := storage.TaskStatusEnabled
 	if taskType == storage.TaskTypeModUpdate {
-		if err := scheduler.ValidateModUpdateConfigJSON(msg.Config); err != nil {
+		policy, err := scheduler.ParseModUpdateConfigJSON(msg.Config)
+		if err != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		}
+		if !policy.Enabled {
+			status = storage.TaskStatusDisabled
 		}
 	}
 
@@ -356,7 +361,7 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 		Name:              msg.Name,
 		Description:       msg.Description,
 		TaskType:          taskType,
-		Status:            storage.TaskStatusEnabled,
+		Status:            status,
 		Schedule:          scheduleType,
 		CronExpr:          msg.CronExpr,
 		IntervalSecs:      int(msg.IntervalSecs),
@@ -397,7 +402,9 @@ func (s *TaskService) CreateTask(ctx context.Context, req *connect.Request[v1.Cr
 	if err != nil && task.Schedule != storage.ScheduleTypeEvent {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid schedule configuration: %w", err))
 	}
-	task.NextRun = nextRun
+	if task.Status == storage.TaskStatusEnabled {
+		task.NextRun = nextRun
+	}
 
 	// Save to database
 	if err := s.store.CreateScheduledTask(ctx, task); err != nil {
@@ -534,8 +541,21 @@ func (s *TaskService) UpdateTask(ctx context.Context, req *connect.Request[v1.Up
 	}
 	task.NextRun = nextRun
 
-	// Save changes
-	if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
+	// Config-only policy edits must not restore a status that changed after
+	// this request read it.
+	if task.TaskType == storage.TaskTypeModUpdate {
+		if task.Status != storage.TaskStatusEnabled {
+			task.NextRun = nil
+		}
+		saved, err := s.store.UpdateModUpdatePolicy(ctx, task)
+		if err != nil {
+			s.log.Error("Failed to update mod policy: %v", err)
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update task"))
+		}
+		if !saved {
+			return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("the task changed while saving its policy; reload and try again"))
+		}
+	} else if err := s.store.UpdateScheduledTask(ctx, task); err != nil {
 		s.log.Error("Failed to update task: %v", err)
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("failed to update task"))
 	}

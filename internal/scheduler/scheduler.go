@@ -1458,11 +1458,17 @@ func webhookEventName(t v1.TriggeredEventType) string {
 // so a misconfigured schedule fails at create/update time rather than hours
 // later when the schedule first fires.
 func ValidateModUpdateConfigJSON(raw string) error {
+	_, err := ParseModUpdateConfigJSON(raw)
+	return err
+}
+
+// ParseModUpdateConfigJSON returns the validated policy used to create a task.
+func ParseModUpdateConfigJSON(raw string) (storage.ModUpdateTaskConfig, error) {
 	var cfg storage.ModUpdateTaskConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return fmt.Errorf("invalid mod update policy: %w", err)
+		return cfg, fmt.Errorf("invalid mod update policy: %w", err)
 	}
-	return ValidateModUpdateConfig(cfg)
+	return cfg, ValidateModUpdateConfig(cfg)
 }
 
 // ValidateModUpdateConfig checks a decoded policy at the execution boundary.

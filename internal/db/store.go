@@ -1417,6 +1417,16 @@ func (s *Store) UpdateScheduledTask(ctx context.Context, task *ScheduledTask) er
 	return s.db.WithContext(ctx).Save(task).Error
 }
 
+// UpdateModUpdatePolicy saves task definition changes while preserving a
+// concurrent schedule toggle and the scheduler's last execution record.
+func (s *Store) UpdateModUpdatePolicy(ctx context.Context, task *ScheduledTask) (bool, error) {
+	result := s.db.WithContext(ctx).Model(task).
+		Where("status = ?", task.Status).
+		Select("*").Omit("ID", "Status", "CreatedAt", "LastRun").
+		Updates(task)
+	return result.RowsAffected != 0, result.Error
+}
+
 func (s *Store) DeleteScheduledTask(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Delete executions first

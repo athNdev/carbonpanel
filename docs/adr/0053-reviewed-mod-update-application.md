@@ -88,6 +88,9 @@ request.
 
 - Manual staging requires an operator to select a preview and apply window.
   An enabled scheduled policy selects compatible updates using its saved window.
+  New opted-out policies are disabled at creation. The Mods tab waits for the
+  current server's task list and preserves paused or disabled schedules during
+  config-only saves. An explicit opt-in change can also change schedule status.
   Staging alone never restarts a server.
 - Backup, rollback, per-server serialization and apply-window semantics are
   exactly the staged-batch semantics already used for config and content.

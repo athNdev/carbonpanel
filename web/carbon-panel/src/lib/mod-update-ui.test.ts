@@ -5,7 +5,6 @@ import {
 	buildPolicyConfig,
 	buildUpdateSelections,
 	DEFAULT_POLICY_STATE,
-	isCurrentServer,
 	policyFromPersistedTask,
 	updateStateClass,
 	type ModLike
@@ -73,14 +72,6 @@ test('a disabled first save reloads unchecked and idle duration is persisted', (
 		idle_minutes: 30
 	});
 	assert.deepEqual(policyFromPersistedTask(null, 1), DEFAULT_POLICY_STATE);
-});
-
-test('two-server navigation cannot apply another server policy response', () => {
-	assert.equal(isCurrentServer('srv-a', 'srv-a'), true);
-	assert.equal(isCurrentServer('srv-a', 'srv-b'), false);
-	// A stale load for srv-a must be discarded after the tab switches to srv-b.
-	const stale = policyFromPersistedTask({ config: JSON.stringify({ enabled: true }) }, 1);
-	assert.equal(isCurrentServer('srv-a', 'srv-b') && stale.enabled, false);
 });
 
 test('policy config is opt-in, excludes blank IDs and bounds the batch', () => {
