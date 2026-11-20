@@ -646,6 +646,32 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				});
 			}
 
+			await check(`server runtime metrics @${width} ${theme}: keyboard disclosure persists on reload and across servers`, async () => {
+				await page.goto(root + '/servers/srv-1', { waitUntil: 'domcontentloaded' });
+				const trigger = page.getByRole('button', { name: 'Runtime metrics', exact: true });
+				const cards = page.locator('#server-runtime-metrics');
+				await trigger.waitFor();
+				if (await trigger.getAttribute('aria-controls') !== 'server-runtime-metrics' || !await cards.isVisible()) {
+					throw new Error('Default server metrics or disclosure relationship missing');
+				}
+				await trigger.focus();
+				await page.keyboard.press('Space');
+				await cards.waitFor({ state: 'hidden' });
+				if (await trigger.getAttribute('aria-expanded') !== 'false') throw new Error('Collapsed state not announced');
+				await page.getByRole('tab', { name: 'World', exact: true }).click();
+				if (await cards.isVisible()) throw new Error('Changing tab reopened the metrics');
+				await page.reload({ waitUntil: 'domcontentloaded' });
+				await trigger.waitFor();
+				if (await cards.isVisible()) throw new Error('Reload lost the collapsed preference');
+				await page.goto(root + '/servers/srv-2', { waitUntil: 'domcontentloaded' });
+				await trigger.waitFor();
+				if (await cards.isVisible()) throw new Error('Opening another server lost the preference');
+				await trigger.focus();
+				await page.keyboard.press('Enter');
+				await cards.waitFor({ state: 'visible' });
+				if (await trigger.getAttribute('aria-expanded') !== 'true') throw new Error('Expanded state not announced');
+			});
+
 			for (const path of ['/servers', '/servers/srv-1']) {
 				await page.goto(root + path, { waitUntil: 'domcontentloaded' });
 				await page.locator('h1').first().waitFor();
