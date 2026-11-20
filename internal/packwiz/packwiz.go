@@ -1397,6 +1397,16 @@ type BakeResult struct {
 	ClientOnly int `json:"client_only"`
 }
 
+// ValidateServerBake checks whether the server bake can use the pack's CurseForge entries.
+func (p *Pack) ValidateServerBake() error {
+	for _, mod := range p.Mods {
+		if mod.Side != "client" && mod.Platform == "curseforge" && strings.TrimSpace(mod.DownloadURL) == "" {
+			return fmt.Errorf("no direct download URL is available for CurseForge project %s, file %s. Deploy the original pack through the CurseForge modpack library, or replace this entry with a direct URL you are authorized to use", mod.ProjectID, mod.VersionID)
+		}
+	}
+	return nil
+}
+
 // BakeToServer extracts server-side mods directly into /data/mods.
 func (m *Manager) BakeToServer(packID, modsDir string) (int, error) {
 	res, err := m.BakeToServerContent(packID, modsDir, "")
@@ -1412,6 +1422,12 @@ func (m *Manager) BakeToServerContent(packID, modsDir, datapacksDir string) (Bak
 	pack, err := m.GetPack(packID)
 	if err != nil {
 		return res, err
+	}
+
+	if modsDir != "" {
+		if err := pack.ValidateServerBake(); err != nil {
+			return res, err
+		}
 	}
 
 	mods, clientMods, err := m.installArchives(pack.Mods, modsDir)

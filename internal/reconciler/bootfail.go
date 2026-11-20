@@ -17,13 +17,17 @@ import (
 const bootFailureLogTail = 300
 
 // shouldScanBootFailure reports whether the game log is worth consulting for
-// a crash. Docker-level status cannot see a dead JVM inside a live
-// entrypoint, so a container that never gets healthy needs its logs read.
+// a crash. A container may exit before reconciliation observes a failed JVM.
 // Shutdown states are excluded: flagging a server someone is stopping would
 // fight the operator with a red herring.
 func shouldScanBootFailure(desired db.ServerStatus, obs observedState) bool {
-	if !obs.Exists || obs.ContainerID == "" || obs.StartedAt.IsZero() {
+	if !obs.Exists || obs.ContainerID == "" || obs.StartedAt.IsZero() || obs.OOMKilled {
 		return false
+	}
+	if obs.Status == db.StatusStopped || obs.Status == db.StatusError {
+		// Keep the loader's explanation after a fast exit during boot. A
+		// previous error can also be refined after the logs become available.
+		return obs.ExitCode != exitCodeSIGTERM && (isBootStatus(desired) || desired == db.StatusError)
 	}
 	switch desired {
 	case db.StatusStarting,

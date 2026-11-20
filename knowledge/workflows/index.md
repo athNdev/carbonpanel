@@ -13,6 +13,7 @@
 - [Frontend change — Rules](frontend-change-rules.md) — SvelteKit 3 rejects any /server/ directory under src as server-only, even
 - [Frontend change — Rules (part 2)](frontend-change-rules-2.md) — removed. Login, signup, route-change layout and sidebar collapse inherit that
 - [Frontend change — Steps](frontend-change-steps.md) — Work in web/carbon-panel (SvelteKit 3, Svelte 5, IBM Carbon tokens).
+- [MCP artifact distribution](mcp-distribution.md) — Build and verify the MCP image independently of Carbon Panel releases.
 - [Release](release.md) — The checks and artifacts required before a tagged Carbon Panel release.
 - [Release — Read next](release-read-next.md) — Detailed guidance on read next.
 - [Release — Rules](release-rules.md) — Publication is an explicit opt-in enforced by publication_allowed() in

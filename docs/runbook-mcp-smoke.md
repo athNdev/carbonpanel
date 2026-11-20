@@ -28,10 +28,11 @@ python3 scripts/validate_mcp_server_json.py --file docker/mcp.server.json
 python3 -m unittest scripts.test_validate_mcp_server_json scripts.test_mcp_onboarding_fixture scripts.test_mcp_stdio_smoke scripts.test_mcp_ghcr_preflight
 ```
 
-The validator refuses `latest`, version ranges, a non-OCI package, a missing
-secret marker on `CARBONPANEL_TOKEN`, a mismatched ownership label and an
-all-zero digest when `--require-real-digest` is passed. The checked-in manifest
-intentionally still has a placeholder digest.
+The validator checks the exact GHCR image and requires the OCI identifier's tag
+to match the listing version. OCI package entries carry the registry, tag and
+digest in `identifier`. The official Registry rejects the legacy package fields
+`registryBaseUrl`, `version` and `fileSha256`. The checked-in manifest uses a
+placeholder digest that is refused by `--require-real-digest`.
 
 ## 1. Resolve and pin the immutable artifact
 
@@ -62,6 +63,11 @@ done
 ```
 
 Both lines must print `io.github.athNdev/carbon-panel`.
+
+The build-only workflow exports both final root filesystems and checks each
+entrypoint's ELF header. It runs the native amd64 image against the isolated
+fixture in section 3 and retains the build and smoke evidence as Actions
+artifacts. The publication dispatch requires that check before any package push.
 
 ### First-tag observation: authoritative read is required
 
@@ -190,12 +196,11 @@ that matches where the MCP process runs:
 
 ### Capability-error check
 
-Ask for `list_players` against the stable fixture. `PlayerService` is absent
-from `v1.0.40`; the expected result is an MCP tool error (`isError: true`) with
-`code: CAPABILITY_UNAVAILABLE`, the tool and RPC names, the required qualified
-build and the observed build. A success, an empty omission or a client-version
-guess is a failure. The exact field names are owned by the core implementation
-lane; the semantics are fixed by ADR 0034.
+Ask for `list_players` against a disposable panel fixture pinned to `v1.0.40`.
+The expected result has `isError: true`, with
+`structuredContent.kind: capability_unavailable`, the backing `procedure` and
+the `minimum_panel_build` required by the tool. Record the fixture's pinned
+controller revision alongside the response.
 
 New tools (`PlayerService`, `WorldService`, `WorldViewService`) are qualified
 only against the pinned post-stable build that contains them, with retained
@@ -215,12 +220,15 @@ authorized registry dispatch, verify the listing with a read-only GET:
 
 ```bash
 curl --fail --silent --show-error \
-  "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.athNdev%2Fcarbon-panel"
+  --output mcp-registry-verification.json \
+  "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.athNdev%2Fcarbon-panel/versions/<PINNED_MCP_VERSION>"
+python3 scripts/validate_mcp_server_json.py --file <SUBMITTED_SERVER_JSON> \
+  --listing mcp-registry-verification.json
 ```
 
-Confirm the exact `name` and pinned `version` appear, and that the `packages`
-entry identifier carries the same digest as the image. Retain the raw response.
-Do not announce until this succeeds.
+Retain the raw response and the submitted manifest. The verifier requires an
+active record for the exact name and version, and compares the canonical OCI
+identifier with the one submitted using the anonymously pulled image digest.
 
 ## Evidence to retain
 

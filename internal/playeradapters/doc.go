@@ -13,24 +13,19 @@
 // every detail and error produced here.
 //
 // Adapters are chosen by Negotiate in a fixed order: the native Minecraft
-// Server Management Protocol (Java >= 1.21.9), then Java RCON, then a caller
+// Server Management Protocol (Java 1.21.9 and 1.21.10), then Java RCON, then a caller
 // supplied node-scoped ExecFunc. An unavailable source is downgraded, never
 // invented. Optional plugin-bridge capabilities (vitals, inventory, groups,
 // mute) and Bedrock parity are reported as "capability not verified / decision
 // pending" (decision gates D3/D6 and the OSS-353 gate); no fake capability is
 // claimed.
 //
-// FIXTURE VERIFICATION NOTICE — decision gate D-MGMT:
-// The tests in this package exercise an in-process fixture WebSocket server
-// implementing the method names and payload shapes declared as constants in
-// management.go. They prove framing, auth headers, correlation, timeouts,
-// reconnect generation guards and notification handling against that fixture.
-// They do NOT prove that a real Minecraft 1.21.9+ server interoperates with
-// this client: no live game server, RCON endpoint or management endpoint was
-// contacted. The protocol method names, payload shapes, subprotocol/auth form
-// and push-notification schema must be validated against a real 1.21.9+
-// server (and its version-specific protocol revision) before this adapter is
-// advertised as supported; D-MGMT owns that validation.
+// The v1 management client uses the Java 1.21.9 wire format. No-argument
+// calls omit params. Mutations use named arrays and notifications carry
+// arrays of player records. Vanilla 1.21.9 was exercised with two players,
+// including join, kick, leave, allowlist, ban and operator changes.
+// The same profile is selected for the 1.21.10 hotfix. Later protocol
+// revisions require a separate profile. See ADR 0017.
 //
 // Ownership and lifetime: ManagementAdapter runs a bounded background reader
 // for its WebSocket. The owner must call Close when the server or controller

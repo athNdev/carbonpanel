@@ -103,7 +103,7 @@ func matchFatalLine(text string) (string, bool) {
 		}
 		return "Minecraft server process failed", true
 	}
-	if strings.Contains(text, "which is missing!") {
+	if strings.Contains(text, " requires ") && strings.Contains(text, "which is missing!") {
 		return truncateReason(cleanReason(text)), true
 	}
 	if strings.Contains(text, "Failed to start the minecraft server") {

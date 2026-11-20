@@ -24,6 +24,25 @@ func writeConfigYAML(t *testing.T, body string) string {
 	return dir
 }
 
+func TestLoadServerScopedPlayerEndpoint(t *testing.T) {
+	dir := writeConfigYAML(t, `minecraft:
+  player_endpoints:
+    srv-1:
+      node_id: node-1
+      management_url: wss://node.example.invalid:25585
+      management_secret_env: EXAMPLE_MGMT_SECRET
+      rcon_host: node.example.invalid
+`)
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := PlayerEndpoint{NodeID: "node-1", ManagementURL: "wss://node.example.invalid:25585", ManagementSecretEnv: "EXAMPLE_MGMT_SECRET", RCONHost: "node.example.invalid"}
+	if got := cfg.Minecraft.PlayerEndpoints["srv-1"]; got != want {
+		t.Fatalf("player endpoint = %+v, want %+v", got, want)
+	}
+}
+
 func TestLoad_DefaultsWithoutFile(t *testing.T) {
 	cfg, err := Load(t.TempDir())
 	if err != nil {

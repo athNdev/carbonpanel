@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
+# Prepare verified, read-only release inputs for a disposable hosted job.
+set -euo pipefail
+
+work=$1
+product=$2
+: "${GITHUB_REPOSITORY:?}" "${GITHUB_OUTPUT:?}" "${STAGED_RUN:?}" "${STAGED_SHA:?}" "${BASELINE_TAG:?}"
+[[ "$STAGED_RUN" =~ ^[0-9]+$ && "$STAGED_SHA" =~ ^[0-9a-f]{40}$ ]]
+[[ "$BASELINE_TAG" =~ ^(mod-)?v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+[[ "$GITHUB_ACTIONS" == true && "$RUNNER_ENVIRONMENT" == github-hosted ]]
+[[ "$(git -C "$product" rev-parse HEAD)" == "$STAGED_SHA" ]]
+mkdir -p "$work/evidence"
+evidence="$work/evidence/provenance.txt"
+printf 'checkout=%s\nproduct=%s\nstaging_run=%s\n' "$(git rev-parse HEAD)" "$STAGED_SHA" "$STAGED_RUN" | tee "$evidence"
+
+repo="/repos/$GITHUB_REPOSITORY"
+gh api "$repo/actions/runs/$STAGED_RUN" > "$work/run.json"
+workflow_head=$(jq -er --arg repo "$GITHUB_REPOSITORY" '
+    select(.path == ".github/workflows/release.yml" and .conclusion == "success" and
+      .head_repository.full_name == $repo) |
+    .head_sha | select(test("^[0-9a-f]{40}$"))' "$work/run.json")
+printf 'release_workflow_head=%s\n' "$workflow_head" | tee -a "$evidence"
+gh api "$repo/actions/runs/$STAGED_RUN/artifacts?per_page=100" > "$work/artifacts.json"
+
+fetch_artifact() {
+  local name=$1 record id digest zip
+  record=$(jq -ec --arg name "$name" '[.artifacts[] | select(.name == $name and .expired == false)] |
+    if length == 1 then .[0] else error("artifact missing or ambiguous") end' "$work/artifacts.json")
+  id=$(jq -er '.id' <<< "$record")
+  digest=$(jq -er '.digest | select(test("^sha256:[0-9a-f]{64}$"))' <<< "$record")
+  zip="$work/$name.zip"
+  gh api "$repo/actions/artifacts/$id/zip" > "$zip"
+  printf '%s  %s\n' "${digest#sha256:}" "$zip" | sha256sum -c
+  printf 'actions_artifact=%s id=%s digest=%s\n' "$name" "$id" "$digest" | tee -a "$evidence"
+  unzip -q "$zip" -d "$work/$name"
+}
+
+fetch_artifact release-image-context
+fetch_artifact release-bundle-linux-amd64
+mapfile -t bundles < <(find "$work/release-bundle-linux-amd64" -name 'carbon-panel*_linux_amd64.tar.gz' -type f)
+[[ "${#bundles[@]}" == 1 ]]
+bundle="${bundles[0]}"
+mkdir "$work/bundle"
+tar -xzf "$bundle" -C "$work/bundle"
+context="$work/release-image-context"
+for program in carbon-panel carbon-storage; do
+  cmp "$work/bundle/$program" "$context/linux_amd64/$program"
+done
+candidate_version=$(jq -er --arg sha "$STAGED_SHA" '
+  select(.commit == $sha and .os == "linux" and .arch == "amd64") |
+  .version | sub("^v";"") | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"))' "$work/bundle/BUILD-INFO.json")
+printf 'candidate_version=%s\n' "$candidate_version" | tee -a "$evidence"
+sha256sum "$bundle" "$work/bundle/carbon-panel" "$work/bundle/carbon-storage" \
+  "$product/docker/Dockerfile.release" "$product/docker-compose.yml" \
+  "$product/scripts/compose-upgrade.sh" "$product/scripts/compose-upgrade-rollback.sh" | tee -a "$evidence"
+
+gh release download "$BASELINE_TAG" -R "$GITHUB_REPOSITORY" -p release-manifest.json -D "$work"
+baseline_digest=$(jq -er '.image_digest | select(test("^sha256:[0-9a-f]{64}$"))' "$work/release-manifest.json")
+baseline_commit=$(jq -er '.commit | select(test("^[0-9a-f]{40}$"))' "$work/release-manifest.json")
+baseline_repo=$(jq -er '.github_image | select(test("^ghcr\\.io/[a-z0-9._/-]+:[0-9A-Za-z.-]+$")) | split(":")[0]' "$work/release-manifest.json")
+baseline="$baseline_repo@$baseline_digest"
+printf 'baseline_tag=%s\nbaseline_commit=%s\nbaseline_image=%s\n' \
+  "$BASELINE_TAG" "$baseline_commit" "$baseline" | tee -a "$evidence"
+sha256sum "$work/release-manifest.json" | tee -a "$evidence"
+
+# A loopback-only registry makes the shipped --pull always path usable without
+# a registry publication. The staged job retains its inputs, not the OCI tar.
+docker run -d --name compose-qualification-registry -p 127.0.0.1:5000:5000 registry:2
+for ((i=0; i<30; i++)); do
+  if curl --silent --fail http://127.0.0.1:5000/v2/ >/dev/null; then break; fi
+  sleep 1
+done
+curl --silent --show-error --fail http://127.0.0.1:5000/v2/ >/dev/null
+tag="127.0.0.1:5000/carbonpanel:candidate"
+docker buildx build --platform linux/amd64 --load --progress plain \
+  -f "$product/docker/Dockerfile.release" -t "$tag" \
+  --label "org.opencontainers.image.version=$candidate_version" \
+  --label "org.opencontainers.image.revision=$STAGED_SHA" \
+  --build-arg "APP_VERSION=$candidate_version" "$context" 2>&1 | tee "$work/evidence/image-build.txt"
+docker push "$tag"
+candidate=$(docker image inspect "$tag" --format '{{json .RepoDigests}}' |
+  jq -er '.[] | select(test("^127\\.0\\.0\\.1:5000/carbonpanel@sha256:[0-9a-f]{64}$"))')
+printf 'candidate_image=%s\n' "$candidate" | tee -a "$evidence"
+printf 'baseline_image=%s\nbaseline_commit=%s\ncandidate_image=%s\ncandidate_version=%s\n' \
+  "$baseline" "$baseline_commit" "$candidate" "$candidate_version" >> "$GITHUB_OUTPUT"

@@ -71,7 +71,9 @@ cautions recorded in this ADR.
   `io.modelcontextprotocol.server.name=io.github.athNdev/carbon-panel` on every
   platform image; that value is exactly the registry `server.json` `name`.
   `github.com/athNdev/carbonpanel` is the canonical repository and its stable
-  repository id (`1369132627`) is recorded in `server.json`.
+  repository id (`1369132627`) is recorded in `server.json`. The OCI package
+  identifier contains the registry, version tag and digest in one canonical
+  reference, as required by the official Registry.
 - The image is multi-arch `linux/amd64` + `linux/arm64`, built from the pinned
   toolchain in `toolchain-versions.json` with `GOTOOLCHAIN=local` and
   `CGO_ENABLED=0`. The canonical command is `cmd/carbonpanel-mcp`; build
@@ -115,8 +117,13 @@ cautions recorded in this ADR.
   a separate claim from a successful authenticated push) and by a **real stdio
   handshake** (`scripts/mcp_stdio_smoke.py`: initialize, `tools/list`, stdout
   hygiene, clean EOF) before any registry advertisement. The MCP Registry entry
-  is verified by its own read-only GET after publication; a package push is
-  never described as a registry listing.
+  is verified by a read-only GET for the exact version after publication.
+  Verification requires an active record with the same OCI identifier and
+  digest as the submitted manifest.
+- The dispatch builds both platform filesystems and checks the ELF machine
+  headers before publication. It also runs the built amd64 container over stdio
+  against the owned isolated fixture. Packaging changes exercise the same
+  read-only job in pull requests.
 - The stdio MCP process must use a panel URL reachable from itself: a
   host-installed binary may use host loopback, while a container on the panel's
   Compose network must use the panel service DNS name and port. `localhost`
@@ -125,7 +132,9 @@ cautions recorded in this ADR.
 ### Authorization and capability surface
 
 - The MCP server reuses Carbon Panel's fail-closed authorization with a
-  dedicated, expiring, least-privilege `dp_` API token supplied per client. It
+  dedicated, expiring `dp_` API token supplied per client. The token inherits
+  the grants of its issuing account, which should hold only the required
+  permissions. The MCP server
   requires an authentication-enabled panel and verifies auth state through
   `AuthService/GetAuthStatus` and token identity; legacy no-auth installations,
   anonymous access and browser session tokens are refused with a credential
@@ -168,14 +177,11 @@ is recorded for that build. The documentation marks qualification pending until
 that evidence exists. Full API coverage is explicitly out of scope for this
 slice; OSS-370 remains open.
 
-When a tool's RPC is absent or `Unimplemented`, the server returns an honest
-structured capability error (an MCP tool error with a `CAPABILITY_UNAVAILABLE`
-code, the tool/RPC names, the pinned build required and the observed panel
-build). It never reports success, never silently omits the tool from a result
-that implied it worked, and never guesses from the client version. The exact
-error payload is owned by the core implementation lane and must match the shape
-documented in the guide; this ADR fixes the semantic requirement, not a final
-wire field list.
+When a tool's RPC is absent or `Unimplemented`, the server returns a structured
+MCP tool error. The result sets `isError: true` and carries
+`structuredContent.kind: capability_unavailable`, the backing `procedure`
+and the `minimum_panel_build`. Qualification evidence records the tested
+controller revision alongside that result.
 
 ## Consequences
 
