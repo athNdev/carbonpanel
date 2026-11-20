@@ -54,8 +54,21 @@ func (t nbtTag) valid() bool { return t <= nbtLongArray }
 // offsets into the already-bounded buffer, so no allocation is driven by an
 // untrusted length without first checking the remaining input.
 type nbtCursor struct {
-	data []byte
-	pos  int
+	data      []byte
+	pos       int
+	maxValues int
+	values    int
+}
+
+func (c *nbtCursor) checkValueBudget(count int) error {
+	limit := c.maxValues
+	if limit == 0 {
+		limit = maxNBTEntries + 1
+	}
+	if count > limit-c.values {
+		return fmt.Errorf("nbt: value budget of %d exceeded", limit)
+	}
+	return nil
 }
 
 func (c *nbtCursor) take(n int) ([]byte, error) {
@@ -199,6 +212,11 @@ func (c *nbtCursor) payload(typ nbtTag, depth int) (any, error) {
 		return nil, fmt.Errorf("nbt: nesting depth exceeds %d", maxNBTDepth)
 	}
 
+	if err := c.checkValueBudget(1); err != nil {
+		return nil, err
+	}
+	c.values++
+
 	switch typ {
 	case nbtByte:
 		v, err := c.u8()
@@ -243,6 +261,11 @@ func (c *nbtCursor) payload(typ nbtTag, depth int) (any, error) {
 				return nil, fmt.Errorf("nbt: list of End tags declares %d elements", n)
 			}
 			return []any{}, nil
+		}
+		// Every list element consumes at least one value. Check the shared
+		// budget before reserving space from an untrusted length.
+		if err := c.checkValueBudget(n); err != nil {
+			return nil, err
 		}
 		values := make([]any, 0, n)
 		for i := 0; i < n; i++ {

@@ -66,7 +66,7 @@ func readSurface(ctx context.Context, r io.ReaderAt, entry []byte, budget *readB
 		return result, errors.New("empty Anvil chunk payload")
 	}
 	if size > maxCompressedChunk {
-		return result, errors.New("Anvil chunk exceeds the compressed size limit")
+		return result, errors.New("compressed Anvil chunk exceeds the size limit")
 	}
 	if int(size) > maxCompressedTile-budget.compressed || budget.decompressed >= maxDecompressedTile {
 		return result, ErrTileBudget
@@ -112,7 +112,7 @@ func unpackChunk(ctx context.Context, compression byte, packed []byte, budget *r
 		return nil, ErrTileBudget
 	}
 	if len(raw) > maxDecompressedChunk {
-		return nil, errors.New("Anvil chunk exceeds the decompressed size limit")
+		return nil, errors.New("decompressed Anvil chunk exceeds the size limit")
 	}
 	return raw, nil
 }

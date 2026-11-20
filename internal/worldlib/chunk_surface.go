@@ -11,13 +11,14 @@ const (
 	JavaOverworldMinY = -64
 	JavaOverworldMaxY = 319
 	javaChunkWidth    = 16
+	maxChunkNBTValues = 32_768
 	firstModernJava   = 2860 // Java 1.18
 	lastSupportedJava = 4554 // Java 1.21.9
 )
 
 var (
 	ErrJavaChunkUnsupported = errors.New("unsupported Java Overworld chunk format")
-	ErrJavaChunkUnfinished  = errors.New("Java Overworld chunk is not fully generated")
+	ErrJavaChunkUnfinished  = errors.New("incomplete Java Overworld chunk")
 )
 
 // JavaChunkSurface is the vanilla-height Overworld's saved surface. Highest
@@ -39,9 +40,9 @@ func SupportsJavaOverworldDataVersion(version int64) bool {
 func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 	var surface JavaChunkSurface
 	if len(raw) > maxNBTDecompressed {
-		return surface, errors.New("Java chunk NBT exceeds the decoder limit")
+		return surface, errors.New("chunk NBT exceeds the Java decoder limit")
 	}
-	cursor := &nbtCursor{data: raw}
+	cursor := &nbtCursor{data: raw, maxValues: maxChunkNBTValues}
 	root, _, err := parseNBTDocument(cursor)
 	if err != nil {
 		return surface, err
@@ -55,7 +56,7 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 	}
 	status, ok := root["Status"].(string)
 	if !ok {
-		return surface, errors.New("Java chunk has no generation status")
+		return surface, errors.New("missing generation status in Java chunk")
 	}
 	if status != "full" && status != "minecraft:full" {
 		return surface, ErrJavaChunkUnfinished
@@ -67,12 +68,12 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 	x, hasX := root["xPos"].(int32)
 	z, hasZ := root["zPos"].(int32)
 	if !hasX || !hasZ {
-		return surface, errors.New("Java chunk has no position")
+		return surface, errors.New("missing position in Java chunk")
 	}
 	surface.X, surface.Z = x, z
 	heights, ok := FactNested(root, "Heightmaps", "WORLD_SURFACE")
 	if !ok {
-		return surface, errors.New("Java chunk has no saved surface heightmap")
+		return surface, errors.New("missing saved surface heightmap in Java chunk")
 	}
 	packed, ok := heights.([]int64)
 	// 384 blocks plus the empty value fit in 9 bits. Modern Java never
@@ -89,7 +90,7 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 	for i := range surface.Heights {
 		relative := int((uint64(packed[i/perLong]) >> ((i % perLong) * bits)) & valueMask)
 		if relative > heightSpan {
-			return surface, fmt.Errorf("Java surface height out of range at column %d", i)
+			return surface, fmt.Errorf("out-of-range Java surface height at column %d", i)
 		}
 		surface.Heights[i] = int16(JavaOverworldMinY + relative - 1)
 	}

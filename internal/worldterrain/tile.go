@@ -38,8 +38,8 @@ var (
 	ErrTerrainMissing     = errors.New("no saved terrain is available in this tile")
 	ErrTerrainUnsupported = errors.New("this tile has no supported Java Overworld chunks")
 	ErrTerrainUnreadable  = errors.New("this tile has no readable Java Overworld chunks")
-	ErrRegionChanged      = errors.New("Anvil region changed while reading the tile")
-	ErrTileBudget         = errors.New("Anvil tile exceeds the read or decode budget")
+	ErrRegionChanged      = errors.New("region changed while reading the Anvil tile")
+	ErrTileBudget         = errors.New("tile exceeds the Anvil read or decode budget")
 )
 
 // ReadStorage supplies confined, read-only file access scoped to the owning
