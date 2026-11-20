@@ -23,10 +23,12 @@ stop may need 60 seconds. Use its own bounded deadline and reconcile an
 interrupted call by replaying the same `request_id`; the journal returns the
 original operation rather than starting a second swap.
 
-World bind needs the owning node's storage adapter. Create fixture servers on
-the controller's registered local node (`NodeService/ListNodes`, `is_local`),
-not on a node created by the harness: a harness-created node is treated as
-remote and BindWorld is refused with `remote node storage unavailable`.
+World bind needs the owning node's storage adapter. Leave `node_id` unset so
+the server uses the controller's own daemon, which
+`nodestorage.IsLegacyLocalNodeID` recognizes for `""`/`local`/`default`. Do not
+create a harness-owned node: it is treated as remote with no storage transport
+and BindWorld is refused with `remote node storage unavailable`. This shipped
+Compose fixture has no separately registered `is_local` DB node.
 
 Node-owned server fixture directories are deliberately not world-writable.
 Archive them with narrowly scoped fixture `sudo` reads and restore the archive
