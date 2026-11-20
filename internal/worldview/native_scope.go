@@ -38,6 +38,7 @@ type nativeScope struct {
 	serverID       string
 	dataRoot       string
 	level          string
+	loader         storage.ModLoader
 	node           nodestorage.NodeInfo
 	nodeGeneration int64
 	bindingID      string
@@ -73,7 +74,7 @@ func resolveNativeScope(ctx context.Context, store nativeScopeStore, server *sto
 	}
 
 	scope := nativeScope{
-		serverID: server.ID, dataRoot: server.DataPath, level: level,
+		serverID: server.ID, dataRoot: server.DataPath, level: level, loader: server.ModLoader,
 		node: nodestorage.LocalNode(), nodeGeneration: 1, restoreID: restoreID,
 	}
 	if !nodestorage.IsLegacyLocalNodeID(server.NodeID) {

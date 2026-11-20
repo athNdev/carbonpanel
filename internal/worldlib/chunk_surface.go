@@ -51,6 +51,11 @@ func ParseJavaChunkSurface(raw []byte) (JavaChunkSurface, error) {
 	})
 }
 
+// SupportsJavaEndDataVersion reports the End save-version qualification.
+func SupportsJavaEndDataVersion(version int64) bool {
+	return version == java1219DataVersion
+}
+
 // ParseJavaEndChunkSurface reads the standard-height Java 1.21.9 End profile.
 // The caller owns the dimension's storage identity.
 func ParseJavaEndChunkSurface(raw []byte) (JavaChunkSurface, error) {

@@ -4,7 +4,7 @@ title: Native map assets use scoped World View sessions
 description: Native terrain uses the existing authenticated World View session with a server-validated world binding.
 status: stable
 owners: [oss-runtime]
-code_refs: [internal/worldview/native_map.go, internal/worldview/native_scope.go, internal/worldview/proxy.go, internal/worldview/registry.go]
+code_refs: [internal/worldview/native_map.go, internal/worldview/native_end.go, internal/worldview/native_scope.go, internal/worldview/proxy.go, internal/worldview/registry.go]
 sources:
   - title: Native terrain format and access
     resource: ../../docs/world-terrain.md
@@ -19,6 +19,11 @@ tile paths. Derive the active level from persisted server configuration. Keep
 node endpoint generation, active revision and the last restore journal ID in the
 key's private scope. Recheck server authorization and the bounded level format
 before serving assets. Refuse assets while lifecycle operations hold the world.
+
+The End assets use a closed Java 1.21.9 Vanilla save profile. Pin ordinary
+local directories to the active level and its DIM1/region tree, then recheck
+the source identity, active world and renderer precedence before publication.
+The optional manifest dimensions describe only qualified saved sources.
 
 # Alternatives
 
