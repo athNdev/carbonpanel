@@ -334,8 +334,33 @@ def candidate_guide_fingerprint(declaration_path, revision, root):
     return guide_fingerprint(declaration, revision, blobs)
 
 
+PUBLISHED_INDEX_ROUTES = ("/version-index.json", "/docs/version-index.json")
+
+
+def published_route_liveness(get_bytes):
+    """Narrow reusable check for the documented public metadata route.
+
+    A missing or drifted `/docs/version-index.json` is a publication defect
+    even when maintained guide bytes are unchanged. Network failures are not
+    converted into 404s and therefore fail closed.
+    """
+    observed = live_bytes(get_bytes, PUBLISHED_INDEX_ROUTES)
+    problems = []
+    routes = {}
+    for path, value in observed.items():
+        if value is None:
+            problems.append(f"published route {path} is missing")
+            routes[path] = ""
+        else:
+            routes[path] = sha256_bytes(value)
+    if all(observed.values()) and observed[PUBLISHED_INDEX_ROUTES[0]] != \
+            observed[PUBLISHED_INDEX_ROUTES[1]]:
+        problems.append("docs version index disagrees with the site root copy")
+    return {"routes": routes, "problems": problems}
+
+
 def fetch_live_guide_evidence(get_bytes):
-    """Read only the per-channel guide receipts used for liveness."""
+    """Read the per-channel guide receipts and published-route liveness."""
     evidence = {}
     for channel in CHANNELS:
         path = "/" + CHANNEL_ROUTES[channel].strip("/") + "/maintained-guides.json"
@@ -345,6 +370,9 @@ def fetch_live_guide_evidence(get_bytes):
             if isinstance(error, urllib.error.HTTPError) and error.code != 404:
                 raise
             evidence[channel] = None
+    route_state = published_route_liveness(get_bytes)
+    evidence["published_routes"] = route_state["routes"]
+    evidence["published_route_problems"] = route_state["problems"]
     return evidence
 
 
@@ -395,6 +423,7 @@ def guide_change_decision(candidate, live_evidence):
         # invisible; source HEAD movement with identical inputs stays a no-op.
         if manifest.get("declaration_sha256") != declaration_hash:
             problems.append(f"{channel} live maintained declaration hash is stale")
+    problems.extend((live_evidence or {}).get("published_route_problems") or [])
     return {"publish": bool(problems),
             "reason": ("live maintained guide receipt is missing or stale"
                        if problems else "live maintained guide receipt is current"),
@@ -640,7 +669,7 @@ def stamp_publication_receipt(site, candidate, live_index, source_revision):
                           "state": (entry.get("promotion") or {}).get("state")}
     page_hashes = {}
     root = Path(site)
-    paths = ["/version-index.json"]
+    paths = list(PUBLISHED_INDEX_ROUTES)
     for name in CHANNELS:
         entry = (live_index.get("channels") or {}).get(name) or {}
         route = str(entry.get("route") or "").strip("/")
@@ -818,7 +847,7 @@ def verify_prior_bytes(site, base_url):
     """
     get_bytes = _http_get(base_url)
     index = json.loads(get_bytes("/version-index.json").decode("utf-8"))
-    paths = ["/version-index.json", "/publication-receipt.json"]
+    paths = list(PUBLISHED_INDEX_ROUTES) + ["/publication-receipt.json"]
     for name in CHANNELS:
         route = index["channels"][name]["route"].strip("/")
         paths.append(f"/{route}/maintained-guides.json")

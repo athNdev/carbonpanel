@@ -297,6 +297,13 @@ def check_versions(root, index, errors, staging_route=None):
         errors.append("version index stable identity disagrees with the default route")
     if not (root / "version-index.json").is_file():
         errors.append("version-index.json: missing shared published index")
+    else:
+        shared = (root / "version-index.json").read_text(encoding="utf-8")
+        docs_index = root / "docs" / "version-index.json"
+        if not docs_index.is_file():
+            errors.append("docs/version-index.json: missing published docs index")
+        elif docs_index.read_text(encoding="utf-8") != shared:
+            errors.append("docs/version-index.json: disagrees with shared published index")
 
 
 def check_channels(index, errors, expect=None):

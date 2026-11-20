@@ -724,5 +724,56 @@ class LiveByteVerificationTests(unittest.TestCase):
                         "a" * 40, str(Path(directory)))
 
 
+class PublishedRouteLivenessTests(unittest.TestCase):
+    """The documented /docs/ index mirror is part of publication liveness."""
+
+    def candidate_and_evidence(self):
+        candidate = GuideLivenessTests().candidate()
+        digest = candidate["guides"][0]["source_sha256"]
+        return candidate, GuideLivenessTests().evidence(sha256=digest)
+
+    def test_missing_docs_mirror_triggers_publication(self):
+        candidate, evidence = self.candidate_and_evidence()
+        evidence["published_route_problems"] = [
+            "published route /docs/version-index.json is missing"]
+        decision = gate.guide_change_decision(candidate, evidence)
+        self.assertTrue(decision["publish"])
+        self.assertIn("/docs/version-index.json", " ".join(decision["problems"]))
+
+    def test_drifted_docs_mirror_triggers_publication(self):
+        candidate, evidence = self.candidate_and_evidence()
+        evidence["published_route_problems"] = [
+            "docs version index disagrees with the site root copy"]
+        self.assertTrue(gate.guide_change_decision(candidate, evidence)["publish"])
+
+    def test_matching_routes_keep_the_noop(self):
+        candidate, evidence = self.candidate_and_evidence()
+        evidence["published_route_problems"] = []
+        evidence["published_routes"] = {"/version-index.json": "a" * 64,
+                                        "/docs/version-index.json": "a" * 64}
+        self.assertFalse(gate.guide_change_decision(candidate, evidence)["publish"])
+
+    def test_missing_and_drifted_routes_are_classified(self):
+        index_bytes = b'{"schema_version":3}'
+        def get_bytes(path):
+            if path == "/docs/version-index.json":
+                raise urllib.error.HTTPError(path, 404, "not found", {}, None)
+            return index_bytes
+        state = gate.published_route_liveness(get_bytes)
+        self.assertEqual(state["problems"],
+                         ["published route /docs/version-index.json is missing"])
+
+        def drifted(path):
+            return index_bytes if path == "/version-index.json" else b"{}"
+        state = gate.published_route_liveness(drifted)
+        self.assertEqual(state["problems"],
+                         ["docs version index disagrees with the site root copy"])
+
+        def broken(_path):
+            raise urllib.error.URLError("network down")
+        with self.assertRaises(urllib.error.URLError):
+            gate.published_route_liveness(broken)
+
+
 if __name__ == "__main__":
     unittest.main()
