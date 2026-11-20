@@ -242,6 +242,7 @@ def main():
     parser.add_argument("--candidate-commit", required=True)
     parser.add_argument("--baseline-commit", required=True)
     parser.add_argument("--release-run", required=True)
+    parser.add_argument("--release-workflow-head", required=True)
     parser.add_argument("--actions-artifact-id", required=True)
     parser.add_argument("--actions-artifact-digest", required=True)
     parser.add_argument("--baseline-tag", required=True)
@@ -260,6 +261,7 @@ def main():
         "qualifier_commit": os.environ["GITHUB_SHA"],
         "qualifier_run": os.environ["GITHUB_RUN_ID"],
         "candidate_release_run": args.release_run,
+        "candidate_release_workflow_head": args.release_workflow_head,
         "candidate_actions_artifact_id": args.actions_artifact_id,
         "candidate_actions_artifact_digest": args.actions_artifact_digest,
         "baseline_release_tag": args.baseline_tag,
