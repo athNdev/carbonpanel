@@ -824,12 +824,19 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
+	if req.Mode != "sync" {
+		if err := pack.ValidateServerBake(); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
 	// Align Minecraft version and mod loader
 	server.MCVersion = pack.MCVersion
 	server.ModLoader = storage.ModLoader(strings.ToLower(pack.ModLoader))
-	_ = h.store.UpdateServer(r.Context(), server)
 
 	if req.Mode == "sync" {
+		_ = h.store.UpdateServer(r.Context(), server)
 		// Mode A: Live Sync URL
 		host := r.Host
 		if host == "" {
@@ -884,6 +891,7 @@ func (h *PackwizHandler) handleDeploy(w http.ResponseWriter, r *http.Request, pa
 		return
 	}
 
+	_ = h.store.UpdateServer(r.Context(), server)
 	installed := []string{fmt.Sprintf("%d mod(s)", result.Mods)}
 	if result.Datapacks > 0 {
 		installed = append(installed, fmt.Sprintf("%d datapack(s)", result.Datapacks))

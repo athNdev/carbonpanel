@@ -309,13 +309,6 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 </script>
 
 <svelte:head>
-	{#if loadError}
-		<CarbonErrorState
-			title="Failed to load modpack projects"
-			message={loadError}
-			onretry={loadPacks}
-		/>
-	{/if}
 	<title>Modpack Studio - Carbon Panel</title>
 </svelte:head>
 
@@ -376,6 +369,12 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		<div class="flex items-center justify-center py-24">
 			<CarbonInlineLoading description="Loading modpack projects..." />
 		</div>
+	{:else if loadError}
+		<CarbonErrorState
+			title="Failed to load modpack projects"
+			message={loadError}
+			onretry={loadPacks}
+		/>
 	{:else if filteredPacks.length === 0}
 		<div class="space-y-4 rounded-none border border-dashed border-border bg-card p-16 text-center">
 			<div
@@ -390,7 +389,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 					(.zip), or Packwiz archive.
 				</p>
 			</div>
-			<div class="flex items-center justify-center gap-3 pt-2">
+			<div class="flex flex-wrap items-center justify-center gap-3 pt-2">
 				<CarbonButton
 					kind="secondary"
 					size="md"

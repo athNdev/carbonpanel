@@ -3,11 +3,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -25,25 +28,44 @@ func TestRestartServer_SetsStatusErrorOnFailure(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	log := logger.New()
 
+	// Host port 2375 may belong to a running Docker daemon. Wire every
+	// lookup path to one private loopback endpoint that refuses mutations.
+	var attempts atomic.Int32
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/_ping" {
+			w.Header().Set("Api-Version", "1.45")
+			w.Header().Set("Ostype", "linux")
+			return
+		}
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"message":"injected Docker failure"}`, http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(daemon.Close)
+	host := "tcp://" + strings.TrimPrefix(daemon.URL, "http://")
+	t.Setenv("DOCKER_HOST", host)
+	t.Setenv("DOCKER_TLS_VERIFY", "")
+	t.Setenv("DOCKER_CERT_PATH", "")
 	cfg := &config.Config{
 		Storage: config.StorageConfig{DataDir: t.TempDir()},
+		Docker:  config.DockerConfig{Host: host},
 	}
-
 	ctx := context.Background()
-
 	require.NoError(t, store.CreateNode(ctx, &db.Node{
 		ID:      "test-node",
 		Name:    "Test Node",
-		Host:    "tcp://127.0.0.1:2375",
+		Host:    host,
 		Enabled: true,
 		Status:  db.NodeStatusOnline,
 	}))
 
-	// Unreachable docker endpoint ensures restart/recreate calls fail
-	dockerCli, err := docker.NewClient("tcp://127.0.0.1:1", log)
+	dockerCli, err := docker.NewClient(host, log)
 	require.NoError(t, err)
-
+	pool := docker.NewClientPool(store, dockerCli, log)
+	pool.RegisterClient("test-node", dockerCli)
+	t.Cleanup(func() { _ = pool.Close() })
 	svc := NewServerService(store, dockerCli, nil, cfg, nil, nil, nil, nil, nil, log, nil, nil, nil)
+	svc.pool = pool
 	svc.hostMemoryMB = func(context.Context, string) (int64, error) { return 16 * 1024, nil }
 
 	server := &db.Server{
@@ -61,6 +83,7 @@ func TestRestartServer_SetsStatusErrorOnFailure(t *testing.T) {
 	// Attempt RestartServer
 	_, err = svc.RestartServer(ctx, connect.NewRequest(&v1.RestartServerRequest{Id: server.ID}))
 	require.Error(t, err)
+	require.Positive(t, attempts.Load(), "restart must reach the isolated Docker endpoint")
 
 	// Verify server status was updated to Error in the database
 	updated, err := store.GetServer(ctx, server.ID)
