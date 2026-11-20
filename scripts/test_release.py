@@ -3082,5 +3082,54 @@ class PriorPagesDeploymentTests(unittest.TestCase):
                 b"<h1>deployed guide</h1>")
 
 
+class LocalOciCandidateTests(unittest.TestCase):
+    """A no-write exact candidate: local OCI bytes bound to the tested commit."""
+
+    COMMIT = "b" * 40
+
+    def archive(self, revision=None, with_index=True):
+        index = {"manifests": [{"digest": "sha256:" + "a" * 64}]}
+        manifest = {"config": {"digest": "sha256:" + "c" * 64}}
+        config = {"config": {"Labels": {
+            "org.opencontainers.image.revision": revision or self.COMMIT}}}
+        out = io.BytesIO()
+        with tarfile.open(fileobj=out, mode="w") as bundle:
+            for name, data in (
+                ("index.json", json.dumps(index).encode()),
+                ("blobs/sha256/" + "a" * 64, json.dumps(manifest).encode()),
+                ("blobs/sha256/" + "c" * 64, json.dumps(config).encode()),
+            ):
+                if name == "index.json" and not with_index:
+                    continue
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                bundle.addfile(info, io.BytesIO(data))
+        return out.getvalue(), json.dumps(index).encode()
+
+    def test_exact_local_oci_candidate_is_verified_without_registry_writes(self):
+        data, index_bytes = self.archive()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "candidate-oci.tar"
+            path.write_bytes(data)
+            result = release.local_oci_candidate(path, self.COMMIT)
+            self.assertTrue(result["verified"])
+            self.assertEqual(result["digest"], "sha256:" + release.sha256_bytes(index_bytes))
+            self.assertEqual(result["revision"], self.COMMIT)
+
+    def test_wrong_revision_and_missing_index_refuse(self):
+        data, _ = self.archive(revision="a" * 40)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wrong.tar"
+            path.write_bytes(data)
+            with self.assertRaisesRegex(ValueError, "revision"):
+                release.local_oci_candidate(path, self.COMMIT)
+        data, _ = self.archive(with_index=False)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "no-index.tar"
+            path.write_bytes(data)
+            with self.assertRaisesRegex(ValueError, "no index.json"):
+                release.local_oci_candidate(path, self.COMMIT)
+
+
 if __name__ == "__main__":
     unittest.main()

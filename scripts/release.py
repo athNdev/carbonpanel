@@ -1461,6 +1461,61 @@ def finalize(args):
     (output / "checksums.txt").write_text(checksums, encoding="utf-8")
 
 
+def local_oci_candidate(archive, expected_commit):
+    """Derive an exact candidate from a locally exported OCI layout, no writes.
+
+    `archive` is a tar made by `docker buildx build --output type=oci,dest=...`
+    with NO registry push. The image digest is sha256 of the OCI index bytes
+    and the config blob must carry org.opencontainers.image.revision equal to
+    the exact trusted main commit. This is a temporary verification artifact
+    for the docs/digest gates, not a published image or a release qualification.
+    """
+    with tarfile.open(archive) as bundle:
+        def member_bytes(name):
+            try:
+                handle = bundle.extractfile(name)
+            except KeyError:
+                return None
+            return handle.read() if handle is not None else None
+
+        index_bytes = member_bytes("index.json") or member_bytes("./index.json")
+        if index_bytes is None:
+            raise ValueError("OCI candidate has no index.json")
+        index = json.loads(index_bytes.decode("utf-8"))
+        digests = [item.get("digest", "") for item in (index.get("manifests") or [])]
+        if not digests or not all(valid_digest(item) for item in digests):
+            raise ValueError("OCI candidate index has no complete manifest digests")
+        config_digest = ""
+        for digest in digests:
+            manifest_bytes = member_bytes(f"blobs/sha256/{digest.split(':', 1)[1]}")
+            if manifest_bytes is None:
+                continue
+            config_digest = (json.loads(manifest_bytes.decode("utf-8")).get("config") or {}).get(
+                "digest", "")
+            break
+        if not valid_digest(config_digest):
+            raise ValueError("OCI candidate manifest has no valid config digest")
+        config_bytes = member_bytes(f"blobs/sha256/{config_digest.split(':', 1)[1]}")
+        if config_bytes is None:
+            raise ValueError("OCI candidate config blob is missing")
+        revision = ((json.loads(config_bytes.decode("utf-8")).get("config") or {})
+                    .get("Labels") or {}).get("org.opencontainers.image.revision", "")
+    if revision != expected_commit:
+        raise ValueError(f"OCI candidate revision {revision!r} != expected {expected_commit}")
+    return {"digest": "sha256:" + hashlib.sha256(index_bytes).hexdigest(),
+            "revision": revision, "commit": expected_commit, "verified": True}
+
+
+def local_oci_candidate_cli(args):
+    """CLI: emit the exact local OCI candidate digest and revision."""
+    result = local_oci_candidate(args.archive, args.commit)
+    values = {key: str(value).lower() if isinstance(value, bool) else value
+              for key, value in result.items()}
+    print(json.dumps(values, indent=2))
+    write_output(values)
+    return result
+
+
 def verify_image(args):
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     platforms = {(item.get("platform", {}).get("os"), item.get("platform", {}).get("architecture"))
@@ -3449,6 +3504,9 @@ def build_parser():
     simulate.add_argument("--fail-final-probe", action="store_true")
     gate_script = commands.add_parser("verify-gate-script")
     gate_script.add_argument("--path", required=True)
+    oci_candidate = commands.add_parser("local-oci-candidate")
+    oci_candidate.add_argument("--archive", required=True)
+    oci_candidate.add_argument("--commit", required=True)
     parity = commands.add_parser("verify-channel-parity")
     parity.add_argument("--observations", default="{}")
     parity.add_argument("--digest", required=True)
@@ -3480,7 +3538,8 @@ def main():
                 "channel-bootstrap-plan": channel_bootstrap_plan_cli,
                 "fetch-prior-pages": fetch_prior_pages_cli,
                 "verify-channel-docs": verify_channel_docs_cli,
-                "verify-staged-page-site": verify_staged_page_site_cli}
+                "verify-staged-page-site": verify_staged_page_site_cli,
+                "local-oci-candidate": local_oci_candidate_cli}
     handler = handlers.get(args.command,
                            globals().get(args.command.replace("-", "_")))
     if handler is None:
