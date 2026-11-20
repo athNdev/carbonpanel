@@ -58,3 +58,7 @@ On relevant PRs and main changes, the Modpacks browser review runs both plans
 against an owned authenticated controller. It checks the Modrinth-backed
 catalog, unmatched search and recovery, and the Studio library entry controls.
 Product journeys and screenshot publication have separate evidence.
+
+When async data enables a keyboard target, the packaged journey holds that
+response long enough to observe the disabled state and waits for the enabled
+control before sending keys.
