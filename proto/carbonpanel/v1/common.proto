@@ -63,6 +63,10 @@ message User {
   google.protobuf.Timestamp created_at = 7;
   google.protobuf.Timestamp updated_at = 8;
   optional google.protobuf.Timestamp last_login = 9;
+  // Locally managed roles, populated by UserService.
+  repeated string local_roles = 10;
+  // Roles managed by the OIDC provider, populated by UserService.
+  repeated string oidc_roles = 11;
 }
 
 // Minecraft server instance

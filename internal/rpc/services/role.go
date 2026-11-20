@@ -6,7 +6,6 @@
 // If a copy of the MPL was not distributed with this file, You can obtain
 // one at https://mozilla.org/MPL/2.0/.
 
-
 package services
 
 import (
@@ -16,12 +15,12 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/auth"
-	"github.com/google/uuid"
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/pkg/logger"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1/carbonpanelv1connect"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -87,12 +86,12 @@ func (s *RoleService) CreateRole(ctx context.Context, req *connect.Request[v1.Cr
 	// Reject before any store write. Otherwise a roles:create holder could
 	// create a *:* role and assign it to themselves, bypassing the checks on
 	// UpdatePermissions and AssignRole.
-	if permissionsContainWildcard(protoPermsToRbac(msg.Permissions)) && !s.canManageWildcards(ctx) {
+	if permissionsContainWildcard(protoPermsToRbac(msg.Permissions)) && !canManageWildcards(ctx, s.enforcer) {
 		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("creating a role with wildcard permissions requires roles/manage_wildcard"))
 	}
 	// Default roles are granted to every new user, so creating one is also a
 	// privilege decision and must not be available to roles:create alone.
-	if msg.IsDefault && !s.canManageWildcards(ctx) {
+	if msg.IsDefault && !canManageWildcards(ctx, s.enforcer) {
 		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("creating a default role requires roles/manage_wildcard"))
 	}
 
@@ -227,7 +226,7 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 	// Populate available objects for scoped permissions when requested.
 	// Driven entirely by ProcedurePermissions: any resource with a non-empty
 	// ObjectIDField is scopeable, and the field name determines which entity
-	// type provides the objects (e.g. "server_id" â†’ servers).
+	// type provides the objects (e.g. "server_id" Ã¢â€ â€™ servers).
 	if req.Msg.IncludeObjects {
 		type idName struct{ id, name string }
 
@@ -340,12 +339,12 @@ func (s *RoleService) GetPermissionMatrix(ctx context.Context, req *connect.Requ
 // canManageWildcards is an additional payload-conditional check on top of the
 // procedure's roles/create or roles/update permission. A custom role holding
 // roles:update must not be able to grant itself unrestricted access.
-func (s *RoleService) canManageWildcards(ctx context.Context) bool {
+func canManageWildcards(ctx context.Context, enforcer *rbac.Enforcer) bool {
 	user := auth.GetUserFromContext(ctx)
-	if user == nil || s.enforcer == nil {
+	if user == nil || enforcer == nil {
 		return false
 	}
-	allowed, err := s.enforcer.Enforce(user.Roles, rbac.ResourceRoles, rbac.ActionManageWildcard, "*")
+	allowed, err := enforcer.Enforce(user.Roles, rbac.ResourceRoles, rbac.ActionManageWildcard, "*")
 	return err == nil && allowed
 }
 
@@ -372,7 +371,7 @@ func (s *RoleService) UpdatePermissions(ctx context.Context, req *connect.Reques
 
 	// A wildcard resource or action in a custom role is equivalent to granting
 	// every permission. Require the explicit, non-default capability.
-	if permissionsContainWildcard(perms) && !s.canManageWildcards(ctx) {
+	if permissionsContainWildcard(perms) && !canManageWildcards(ctx, s.enforcer) {
 		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("granting wildcard permissions requires roles/manage_wildcard"))
 	}
 
@@ -396,7 +395,7 @@ func (s *RoleService) AssignRole(ctx context.Context, req *connect.Request[v1.As
 	// Assigning the built-in admin role from a roles:create grant would make
 	// that grant an admin escalation. The first-admin bootstrap uses a
 	// different, public path; here only the explicit capability permits it.
-	if strings.EqualFold(msg.RoleName, "admin") && !s.canManageWildcards(ctx) {
+	if strings.EqualFold(msg.RoleName, "admin") && !canManageWildcards(ctx, s.enforcer) {
 		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("assigning the admin role requires roles/manage_wildcard"))
 	}
 

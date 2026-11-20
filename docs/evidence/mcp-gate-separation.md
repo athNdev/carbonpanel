@@ -41,7 +41,7 @@ same command passes. The exact nine operations above have production
 `tools/call` evidence through the generated upload/download tool sets; the gate
 was not weakened. `PendingInventory` is empty (0 entries) and the ordinary
 gate reports `203/203 supported operations verified`. Live counts are
-`supported=203 listed=203 reachable=203 verified=203 excluded=75`.
+`supported=203 listed=203 reachable=203 verified=203 excluded=76`.
 Per-family evidence includes `FileService=17/17`, `UploadService=4/4`,
 `PackwizService=2/2` and `surface=2/2`. The Packwiz fixture drives real Packwiz
 storage through both typed tools and the production auth interceptor.

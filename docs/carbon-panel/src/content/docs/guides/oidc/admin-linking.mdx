@@ -1,0 +1,58 @@
+---
+title: Link a local admin to OIDC
+description: Explicitly bind a verified OIDC identity to an existing local admin account.
+---
+{/*
+SPDX-License-Identifier: MPL-2.0
+This file includes DiscoPanel material under the MIT License,
+Copyright (c) 2025 Nicholas W. Heyer. The MIT license text is in LICENSE
+and still applies to that inherited material.
+Maintainer changes are licensed under the Mozilla Public License, v. 2.0.
+If a copy of the MPL was not distributed with this file, You can obtain
+one at https://mozilla.org/MPL/2.0/.
+*/}
+
+import { Steps } from '@astrojs/starlight/components';
+
+Use this flow to sign in with SSO on an existing local admin account while
+keeping its local break-glass access.
+
+## Prerequisites
+
+- Configure OIDC and verify that discovery and ID-token validation work.
+- Sign in locally as an active admin with a locally assigned `admin` grant.
+  API tokens and SSO sessions cannot start a link.
+- Use `role_mapping` to map the provider group to each role that should be
+  available through SSO. For example, map `carbon-admins` to `admin` after
+  reviewing who belongs to that group.
+
+## Link your account
+
+<Steps>
+1. Open **Settings → Auth → OIDC / Single Sign-On** and select **Link SSO account**.
+2. Sign in at the identity provider using the account you intend to link.
+   Complete the flow within five minutes in the same browser. Keep the
+   initiating local session active until you return to Settings.
+3. Confirm the success message. Sign out and use **Sign in with SSO** to
+   verify the linked account and its mapped roles.
+</Steps>
+
+The link binds the issuer and subject from the verified ID token to your
+existing account. Your password and local grants stay available. Local
+sign-ins use locally owned roles, and SSO sign-ins use provider-mapped roles.
+Removing a mapped group revokes its SSO grant at the next verified sign-in.
+In **Settings → Users**, edit locally managed roles and review SSO-managed
+roles separately. Manage provider grants through the identity provider.
+
+## If linking fails
+
+| Result | What to check |
+| --- | --- |
+| Link expired or no longer valid | Sign in locally and start again from Settings. Another sign-in, a restart, or an expired session can cancel a pending link. |
+| Identity requires review | The identity is already linked, or the subject matches a record under another or unknown issuer. Review the stored identity and use the documented recovery path. |
+| Role conflict | Check the explicit role mapping and existing role grants before retrying. |
+| Provider declined the request | Check account selection and the provider's app assignment or sign-in policy. |
+
+Audit records contain an issuer and, after identity verification, a subject
+hash. Keep browser link URLs, authorization codes and tokens out of logs
+and support tickets.

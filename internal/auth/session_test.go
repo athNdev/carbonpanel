@@ -3,7 +3,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-
 package auth
 
 import (
@@ -240,7 +239,7 @@ func TestInactiveUserRejected(t *testing.T) {
 	token := mustLogin(t, m, "heidi", testPassword)
 
 	u.IsActive = false
-	if err := store.UpdateUser(ctx, u); err != nil {
+	if err := store.UpdateUserProfile(ctx, u); err != nil {
 		t.Fatalf("UpdateUser: %v", err)
 	}
 	if _, _, _, _, err := m.Login(ctx, "heidi", testPassword); err != ErrUserNotActive {

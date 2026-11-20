@@ -238,6 +238,22 @@ func TestBuiltinBlueMapRefusesUnsafeOverridesAndConstructsManagedVariant(t *test
 	if !foundWorld {
 		t.Fatal("managed world mount is missing")
 	}
+	// BlueMap must be able to write its Mojang resource cache even though the
+	// module rootfs is read-only; otherwise the installed renderer exits with
+	// "Resource-File missing" and no map is ever served (OSS-388 E2E).
+	foundResources := false
+	for _, m := range mounts {
+		if m.Target == "/app/bluemap" {
+			foundResources = true
+			if m.ReadOnly || !strings.HasPrefix(filepath.ToSlash(filepath.Clean(m.Source)),
+				filepath.ToSlash(filepath.Clean(filepath.Join(dataRoot, "modules", "bluemap")))) {
+				t.Fatalf("resource cache mount is not panel-owned and writable: %+v", m)
+			}
+		}
+	}
+	if !foundResources {
+		t.Fatal("managed BlueMap resource-cache mount (/app/bluemap) is missing")
+	}
 
 	// Backend-generated config: consent + one map per ACTUAL dimension, with
 	// the canonical world path; no client-supplied sed command is used.
