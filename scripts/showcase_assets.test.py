@@ -372,6 +372,28 @@ class ShowcasePipelineTest(unittest.TestCase):
     def test_fixture_changes_trigger_a_routine_capture(self) -> None:
         self.assertIn("scripts/review/fixtures/**", workflow_text().split("workflow_dispatch:", 1)[0])
 
+    def test_fixture_terrain_batches_are_bounded_and_seed_uses_rpc(self) -> None:
+        devstack = (
+            Path(__file__).resolve().parent / "review" / "devstack.sh"
+        ).read_text(encoding="utf-8")
+        block = devstack.split("local -a ranges=(", 1)[1].split(")", 1)[0]
+        ranges = re.findall(r'"(-?\d+) (-?\d+) (-?\d+) (-?\d+)"', block)
+        self.assertTrue(ranges, "no forceload ranges found")
+        for x0, z0, x1, z1 in ranges:
+            chunks = (int(x1) // 16 - int(x0) // 16 + 1) * (
+                int(z1) // 16 - int(z0) // 16 + 1
+            )
+            self.assertLessEqual(chunks, 256, f"forceload range exceeds 256 chunks: {chunks}")
+        # The seed must be pinned only for a fresh fixture config; an existing
+        # review config (and any running container) is never modified.
+        self.assertIn('if [ ! -f "${DATA}/config/config.yaml" ]; then', devstack)
+        self.assertIn("JSON.stringify({minecraft:{global_config:{seed:", devstack)
+        self.assertNotIn("ConfigService/UpdateServerConfig", devstack)
+        # The World View camera must be zoomed out for a landscape capture.
+        distance = re.search(r"world:0:0:0:(\d+):0:0:0:0:perspective", devstack)
+        self.assertTrue(distance, "no BlueMap startLocation found")
+        self.assertGreater(int(distance.group(1)), 100, "camera is not a wide landscape view")
+
     def test_narrow_player_viewport_is_restored_before_world_view(self) -> None:
         plan = json.loads((
             Path(__file__).resolve().parent / "review" / "plan-showcase.json"

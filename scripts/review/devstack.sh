@@ -345,16 +345,47 @@ seed_showcase_pack() {
 # saves before the renderer reads the world. This only generates disposable
 # fixture terrain; no external world or live server is touched.
 seed_showcase_terrain() {
-	local token="$1" server_id="$2" response success
-	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"forceload add -4 -4 4 4",silent:true}))')"
-	response="$(rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" 2>/dev/null)" || {
-		echo "review terrain pre-generation was refused; map capture may be empty" >&2
-		return 0
-	}
-	success="$(printf '%s' "${response}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success?"true":"false")}catch(e){console.log("false")}})')"
-	echo "review deterministic spawn chunk grid: success=${success}" >&2
-	[ "${success}" = "true" ] || return 0
-	sleep 45
+	local token="$1" server_id="$2" response success range
+	local -a ranges=(
+		"-256 -256 -1 -1"
+		"0 -256 255 -1"
+		"-256 0 -1 255"
+		"0 0 255 255"
+	)
+	# Minecraft /forceload takes BLOCK coordinates and refuses more than 256
+	# chunks per command. Each range covers 16x16 = 256 chunks (256 blocks per
+	# side); four ranges cover a 512x512 block landscape around spawn.
+	for range in "${ranges[@]}"; do
+		response="$(REVIEW_SERVER_ID="${server_id}" REVIEW_RANGE="${range}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"forceload add " + process.env.REVIEW_RANGE,silent:true}))')"
+		response="$(rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" 2>/dev/null)" || {
+			echo "review terrain batch ${range} was refused; map capture may be clipped" >&2
+			return 0
+		}
+		success="$(printf '%s' "${response}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).success?"true":"false")}catch(e){console.log("false")}})')"
+		echo "review terrain batch ${range}: success=${success}" >&2
+		[ "${success}" = "true" ] || return 0
+	done
+	# Chunks generate asynchronously. Wait for the persisted region files to
+	# grow beyond a small floor and then stop changing (bounded, not a blind
+	# sleep) before asking the renderer to read the world.
+	local region_dir="${DATA}/data/servers/${server_id}/world/region"
+	local stable=0 prev_size=-1 size poll
+	for ((poll = 0; poll < 40; poll++)); do
+		size=0
+		if [ -d "${region_dir}" ]; then
+			size="$(find "${region_dir}" -maxdepth 1 -name '*.mca' -type f -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {print s+0}')"
+		fi
+		size="${size:-0}"
+		if [ "${size}" -gt 102400 ] && [ "${size}" = "${prev_size}" ]; then
+			stable=$((stable + 1))
+		else
+			stable=0
+		fi
+		prev_size="${size}"
+		[ "${stable}" -ge 3 ] && break
+		sleep 3
+	done
+	echo "review persisted region bytes: ${prev_size} (stable checks: ${stable})" >&2
 	response="$(REVIEW_SERVER_ID="${server_id}" node -e 'console.log(JSON.stringify({id:process.env.REVIEW_SERVER_ID,command:"save-all flush",silent:true}))')"
 	rpc /carbonpanel.v1.ServerService/SendCommand "${response}" "${token}" >/dev/null 2>&1 || true
 }
@@ -410,13 +441,13 @@ EOF
 		if [ -f "${mapdir}/web/settings.json" ] && [ -d "${mapdir}/web/maps/${level}/tiles" ]; then
 			count="$(find "${mapdir}/web/maps/${level}/tiles" -type f 2>/dev/null | wc -l | tr -d ' ')"
 		fi
-		if [ "${count}" -ge 20 ] && [ "${count}" = "${prev_count}" ]; then
+		if [ "${count}" -ge 250 ] && [ "${count}" = "${prev_count}" ]; then
 			stable=$((stable + 1))
 		else
 			stable=0
 		fi
 		prev_count="${count}"
-		if [ "${stable}" -ge 4 ] && [ "${count}" -ge 20 ]; then
+		if [ "${stable}" -ge 4 ] && [ "${count}" -ge 250 ]; then
 			break
 		fi
 		sleep 3
@@ -528,7 +559,7 @@ overlay_csp_safe_webapp() {
 # the tile-coverage wait and immediately before the journey.
 set_bluemap_start_location() {
 	local mapdir="$1" web="${1}/web"
-	local start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:15:0:0:0:0:perspective}"
+	local start_location="${REVIEW_BLUEMAP_START_LOCATION:-world:0:0:0:120:0:0:0:0:perspective}"
 	local settings_tmp="${DATA}/config/bluemap-settings.json"
 	[ -f "${web}/settings.json" ] || return 1
 	START_LOCATION="${start_location}" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);j.startLocation=process.env.START_LOCATION;process.stdout.write(JSON.stringify(j))}catch(e){process.exit(1)}})' \
@@ -604,7 +635,11 @@ up)
 	PORT="$(free_port "${PORT}")"
 	mkdir -p "${DATA}/data" "${DATA}/backups" "${DATA}/tmp" "${DATA}/config"
 	echo "${PORT}" >"${DATA}/port"
-	[ -f "${DATA}/config/config.yaml" ] || printf '{}\n' >"${DATA}/config/config.yaml"
+	# Fresh fixtures only: pin a deterministic world seed in the initial
+	# config (JSON is valid YAML). Existing review configs are never touched.
+	if [ ! -f "${DATA}/config/config.yaml" ]; then
+		REVIEW_WORLD_SEED="${REVIEW_WORLD_SEED:-carbonpanel-showcase-416}" node -e 'console.log(JSON.stringify({minecraft:{global_config:{seed:process.env.REVIEW_WORLD_SEED}}}))' >"${DATA}/config/config.yaml"
+	fi
 	docker build -q -f "${REPO}/docker/Dockerfile.carbon-panel" \
 		-t "${IMAGE}" --build-arg APP_VERSION=review "${REPO}" >/dev/null
 	start_panel
@@ -674,13 +709,13 @@ up)
 						# READY means textures/settings are valid, but the viewport may
 						# still request lowres tiles the renderer has not produced yet.
 						# Let the real renderer continue filling the shared web root.
-						tile_deadline=$((SECONDS + 120))
+						tile_deadline=$((SECONDS + 300))
 						tile_stable=0
 						tile_prev=-1
 						while ((SECONDS < tile_deadline)); do
 							tile_count="$(find "${server_path}/modules/bluemap/web/maps" -path '*/tiles/*' -type f 2>/dev/null | wc -l | tr -d ' ')"
 							tile_count="${tile_count:-0}"
-							if [ "${tile_count}" -ge 60 ] && [ "${tile_count}" = "${tile_prev}" ]; then
+							if [ "${tile_count}" -ge 250 ] && [ "${tile_count}" = "${tile_prev}" ]; then
 								tile_stable=$((tile_stable + 1))
 							else
 								tile_stable=0
