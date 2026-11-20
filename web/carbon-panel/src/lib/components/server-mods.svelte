@@ -57,19 +57,19 @@ one at https://mozilla.org/MPL/2.0/.
 	let modFilter = $state<'all' | 'enabled' | 'disabled'>('all');
 
 	let hasLoaded = false;
-	let previousServerId = $state(server.id);
+	let requestNumber = 0;
+	let updateStatus = $state('');
+	let previousServerId = '';
 
 	$effect(() => {
 		if (server.id !== previousServerId) {
 			previousServerId = server.id;
+			updateStatus = '';
 			mods = [];
 			loading = true;
 			uploading = false;
 			hasLoaded = false;
 		}
-	});
-
-	$effect(() => {
 		if (active && !hasLoaded) {
 			hasLoaded = true;
 			loadMods();
@@ -96,7 +96,11 @@ one at https://mozilla.org/MPL/2.0/.
 		return result;
 	});
 
-	async function loadMods() {
+	async function loadMods(checkUpdates = false) {
+		const serverId = server.id;
+		const request = ++requestNumber;
+		const isCurrent = () => request === requestNumber && server.id === serverId;
+		updateStatus = checkUpdates ? 'Checking installed files for compatible releases…' : '';
 		// A vanilla server has no mods directory, and asking for one returns an
 		// error the RPC interceptor turns into a toast - on a tab that already
 		// explains the server cannot take mods. Do not make the call.
@@ -107,14 +111,20 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 		try {
 			loading = true;
-			const response = await rpcClient.mod.listMods({ serverId: server.id });
+			const response = await rpcClient.mod.listMods({ serverId, checkUpdates });
+			if (!isCurrent()) return;
 			mods = response.mods;
+			if (checkUpdates) {
+				const available = mods.filter((mod) => mod.updatePreview?.state === 'available').length;
+				updateStatus = `Checked ${mods.length} installed files. Compatible updates available for ${available}.`;
+			}
 		} catch (_e) {
-			if (server.modLoader !== ModLoader.VANILLA) {
-				toast.error('Failed to load mods');
+			if (isCurrent()) {
+				updateStatus = checkUpdates ? 'Update check failed. Try again.' : '';
+				toast.error(checkUpdates ? 'Failed to check for updates' : 'Failed to load mods');
 			}
 		} finally {
-			loading = false;
+			if (isCurrent()) loading = false;
 		}
 	}
 
@@ -272,6 +282,14 @@ one at https://mozilla.org/MPL/2.0/.
 	{/snippet}
 	{#snippet actions()}
 		{#if canHaveMods()}
+			<CarbonButton
+				kind="secondary"
+				size="sm"
+				disabled={loading || uploading || !mods.length}
+				onclick={() => loadMods(true)}
+			>
+				Check for updates
+			</CarbonButton>
 			<CarbonButton kind="primary" size="sm" onclick={() => (browserDialogOpen = true)}>
 				<Boxes class="h-4 w-4" />
 				<span>Browse Mods</span>
@@ -299,6 +317,7 @@ one at https://mozilla.org/MPL/2.0/.
 			/>
 		{/if}
 	{/snippet}
+	<p role="status" class="text-sm text-muted-foreground">{updateStatus}</p>
 	{#snippet toolbar()}
 		{#if canHaveMods()}
 			<div
@@ -468,6 +487,17 @@ one at https://mozilla.org/MPL/2.0/.
 										>
 									{/if}
 								</div>
+								{#if mod.updatePreview}
+									{#if mod.updatePreview.installedVersion}
+										<p class="mt-1 text-xs break-words text-muted-foreground">
+											Modrinth · Installed {mod.updatePreview.installedVersion}
+											{#if mod.updatePreview.candidateVersion && mod.updatePreview.candidateVersionId !== mod.updatePreview.installedVersionId}
+												· Candidate {mod.updatePreview.candidateVersion}
+											{/if}
+										</p>
+									{/if}
+									<p class="mt-1 text-sm text-muted-foreground">{mod.updatePreview.reason}</p>
+								{/if}
 								{#if mod.description}
 									<p class="mt-1 line-clamp-1 font-sans text-xs text-muted-foreground">
 										{mod.description}

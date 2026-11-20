@@ -194,6 +194,15 @@ func (s *ModService) ListMods(ctx context.Context, req *connect.Request[v1.ListM
 		}
 	}
 
+	if msg.CheckUpdates && len(mods) != 0 {
+		settings, err := s.store.GetServerConfig(ctx, storage.GlobalSettingsID)
+		if err != nil && !errors.Is(err, storage.ErrServerConfigNotFound) {
+			return nil, connect.NewError(connect.CodeInternal, errors.New("failed to load provider settings"))
+		}
+		if err := previewServerModUpdates(ctx, root, modsDir, server, mods, modUpdateProvider(settings)); err != nil {
+			return nil, err
+		}
+	}
 	return connect.NewResponse(&v1.ListModsResponse{
 		Mods: mods,
 	}), nil
