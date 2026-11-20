@@ -1046,7 +1046,7 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 		if prior != nil {
 			return connect.NewResponse(&v1.CreateServerResponse{Server: s.toProtoServer(ctx, prior)}), nil
 		}
-		defer imported.file.Close()
+		defer func() { _ = imported.file.Close() }()
 
 		owner, claimed, err := s.store.ClaimIdempotencyKey(ctx, imported.replayKey, serverUUID, imported.replayKind)
 		if err != nil {
