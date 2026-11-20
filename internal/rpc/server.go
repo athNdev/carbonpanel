@@ -515,7 +515,16 @@ func (s *Server) registerServices(mux connectHandlerMux, opts []connect.HandlerO
 	mux.Handle(proxyPath, proxyHandler)
 
 	serverPath, serverHandler := carbonpanelv1connect.NewServerServiceHandler(serverService, opts...)
-	mux.Handle(serverPath, serverHandler)
+	mux.Handle(serverPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case carbonpanelv1connect.ServerServiceCreateServerProcedure,
+			carbonpanelv1connect.ServerServiceExportServerArchiveProcedure,
+			carbonpanelv1connect.ServerServicePreviewServerArchiveProcedure:
+			extend := http.NewResponseController(w).SetWriteDeadline
+			r = r.WithContext(services.WithArchiveResponseDeadline(r.Context(), extend))
+		}
+		serverHandler.ServeHTTP(w, r)
+	}))
 
 	nodePath, nodeHandler := carbonpanelv1connect.NewNodeServiceHandler(nodeService, opts...)
 	mux.Handle(nodePath, nodeHandler)

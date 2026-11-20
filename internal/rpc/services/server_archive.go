@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/athNdev/carbon-panel/internal/buildinfo"
@@ -44,6 +45,9 @@ func (s *ServerService) ExportServerArchive(ctx context.Context, req *connect.Re
 	if s.archiveDownloads == nil {
 		return nil, connect.NewError(connect.CodeUnavailable, errors.New("server archive downloads are unavailable"))
 	}
+
+	ctx, cancel := s.beginArchiveRequest(ctx)
+	defer cancel()
 
 	transition, err := beginServerLifecycleTransition(msg.GetServerId())
 	if err != nil {
@@ -185,4 +189,22 @@ func (s *ServerService) verifyArchiveContainerStopped(ctx context.Context, nodeI
 		return connect.NewError(connect.CodeFailedPrecondition, errors.New("the owning node reports that a container is still active"))
 	}
 	return nil
+}
+
+type archiveDeadlineContextKey struct{}
+
+// WithArchiveResponseDeadline lets the mounted Connect handler extend the
+// HTTP write deadline only after it identifies an archive operation.
+func WithArchiveResponseDeadline(ctx context.Context, extend func(time.Time) error) context.Context {
+	return context.WithValue(ctx, archiveDeadlineContextKey{}, extend)
+}
+
+func (s *ServerService) beginArchiveRequest(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(time.Hour)
+	if extend, ok := ctx.Value(archiveDeadlineContextKey{}).(func(time.Time) error); ok {
+		if err := extend(deadline); err != nil {
+			s.log.Warn("Set server archive response deadline: %v", err)
+		}
+	}
+	return context.WithDeadline(ctx, deadline)
 }

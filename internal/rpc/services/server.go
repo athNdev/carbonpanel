@@ -1032,6 +1032,9 @@ func (s *ServerService) CreateServer(ctx context.Context, req *connect.Request[v
 	var imported *archiveImport
 	var keepArchiveClaim bool
 	if msg.GetArchiveUploadId() != "" {
+		archiveCtx, cancel := s.beginArchiveRequest(ctx)
+		defer cancel()
+		ctx = archiveCtx
 		// Defaults derived from an archive belong to this invocation.
 		msg = proto.CloneOf(msg)
 		var prior *storage.Server

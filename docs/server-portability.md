@@ -55,7 +55,9 @@ Upload the archive through the standard chunked upload service. Preview checks
 every file checksum, reports runtime compatibility and gives the expanded
 size and the destination's available space after node selection. Its space
 requirement includes an allowance for filesystem allocation and first-boot
-writes. A preview does not create a server.
+writes. A preview does not create a server. Export preparation, preview, and
+archive creation can take longer than ordinary metadata calls. These calls
+have a one-hour controller deadline and respect earlier client cancellation.
 
 Provide a new name, a destination node and a free port when creating the
 server. Keep the same request ID for retries of the same submission. The

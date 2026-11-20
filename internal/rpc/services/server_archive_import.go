@@ -34,6 +34,8 @@ type archiveImport struct {
 }
 
 func (s *ServerService) PreviewServerArchive(ctx context.Context, req *connect.Request[v1.PreviewServerArchiveRequest]) (*connect.Response[v1.PreviewServerArchiveResponse], error) {
+	ctx, cancel := s.beginArchiveRequest(ctx)
+	defer cancel()
 	imported, err := s.openServerArchive(ctx, req.Msg.GetUploadId())
 	if err != nil {
 		return nil, err
