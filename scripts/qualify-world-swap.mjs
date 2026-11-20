@@ -253,6 +253,8 @@ async function main() {
   });
   const sourceId = source.server.id;
   assert.ok(sourceId, "source server id missing");
+  assert.equal(source.server.nodeId, state.nodeId,
+    "source world server must use the same registered local node UUID");
   await waitRunning(sourceId, 250);
   // keepInventory must survive the later rollback leg; doFireTick is the
   // distinct new-world marker observed after the rejoin.

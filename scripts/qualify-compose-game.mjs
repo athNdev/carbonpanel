@@ -125,6 +125,7 @@ async function main() {
         enabled: true, maxMemoryMb: 4096, maxServers: 4,
       })).node;
     }
+    assert.equal(node.isLocal, true, "Unix-socket fixture node must be classified local");
     state.nodeId = node.id;
     assert.ok(state.nodeId, "fixture node has no id");
     state.port = (await rpc("ServerService", "GetNextAvailablePort")).port;
@@ -145,6 +146,8 @@ async function main() {
     });
     state.id = result.server.id;
     assert.ok(state.id, "create did not return a server ID");
+    assert.equal(result.server.nodeId, state.nodeId,
+      "server must be placed on the registered local node UUID");
     writeFileSync(stateFile, JSON.stringify(state), { mode: 0o600 });
   }
 
