@@ -122,3 +122,52 @@ func TestKeyValidator_UnsupportedProvider(t *testing.T) {
 	assert.False(t, resp.Valid)
 	assert.Contains(t, resp.Message, "Unsupported provider")
 }
+
+func TestKeyValidator_CookieSessionUsesGlobalSettingsPolicy(t *testing.T) {
+	store, err := db.NewSQLiteStore(&config.Config{Database: config.DatabaseConfig{Path: filepath.Join(t.TempDir(), "panel.db"), MaxConnections: 5}})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	require.NoError(t, store.Migrate())
+
+	enforcer, err := rbac.NewEnforcer(store.DB())
+	require.NoError(t, err)
+	require.NoError(t, enforcer.SeedDefaultPolicies(false))
+	require.NoError(t, enforcer.SetPermissionsForRole("user", []rbac.Permission{{Resource: rbac.ResourceSettings, Action: rbac.ActionRead, ObjectID: "*"}}))
+
+	manager, err := auth.NewManager(store, enforcer, &config.AuthConfig{Local: config.LocalConfig{Enabled: true}, SessionTimeout: 3600})
+	require.NoError(t, err)
+
+	user, err := manager.CreateLocalUser(t.Context(), "alice", "alice@example.com", "ValidPass123!")
+	require.NoError(t, err)
+	require.NoError(t, store.AssignRole(t.Context(), user.ID, "user", "local"))
+
+	_, _, token, _, err := manager.Login(t.Context(), "alice", "ValidPass123!")
+	require.NoError(t, err)
+
+	handler := NewKeyValidatorHandler(manager, enforcer, logger.New())
+
+	t.Run("authorized cookie session", func(t *testing.T) {
+		rec := postKeyValidationWithCookie(handler, ValidateKeyRequest{Provider: "unsupported-provider", APIKey: "x"}, token)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var resp ValidateKeyResponse
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+		assert.False(t, resp.Valid)
+		assert.Contains(t, resp.Message, "Unsupported provider")
+	})
+
+	require.NoError(t, enforcer.SetPermissionsForRole("user", nil))
+	t.Run("cookie session denied without global permission", func(t *testing.T) {
+		rec := postKeyValidationWithCookie(handler, ValidateKeyRequest{Provider: "unsupported-provider", APIKey: "x"}, token)
+		require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+	})
+}
+
+func postKeyValidationWithCookie(handler http.Handler, body ValidateKeyRequest, token string) *httptest.ResponseRecorder {
+	encoded, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/validate-key", bytes.NewReader(encoded))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
+}
