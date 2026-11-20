@@ -221,3 +221,143 @@ func TestRestoreBackupRefusedWhileOperationOwnsWorld(t *testing.T) {
 		t.Fatalf("refusal must name the operation, got %v", err)
 	}
 }
+
+// bindingRestoreFixture adds a bound world to the shared restore fixture. The
+// live level carries "original-world" bytes and the archive carries
+// "restored-world" bytes, so a mutation is directly observable.
+func bindingRestoreFixture(t *testing.T, withBinding bool) (*BackupService, *storage.Store, string, string) {
+	t.Helper()
+	svc, store, serverID, serverDataDir := restoreFixture(t)
+	ctx := restoreContext(t)
+
+	worldDir := filepath.Join(serverDataDir, "world")
+	if err := os.MkdirAll(worldDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worldDir, "level.dat"), []byte("original-world"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if withBinding {
+		if err := store.CreateWorldBinding(ctx, &storage.WorldBinding{
+			ID: "wlb-restore-probe", ServerID: serverID, LevelName: "world",
+			RevisionID: "rev_old", NodeID: "local", Generation: 1, Consistency: "verified",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	srcDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(srcDir, "world"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "world", "level.dat"), []byte("restored-world"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "restore.zip")
+	if _, err := files.CreateZipArchive([]string{"world"}, srcDir, archive, true); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := files.SHA256File(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := newBackupRecord("b-binding-restore", serverID, archive)
+	rec.SHA256 = sum
+	if err := store.CreateBackupRecord(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	return svc, store, serverID, serverDataDir
+}
+
+// TestRestoreBackupRefusedWhileWorldBindingActive pins the fail-closed guard:
+// a bound world cannot have its bytes replaced by an ordinary restore.
+func TestRestoreBackupRefusedWhileWorldBindingActive(t *testing.T) {
+	svc, _, _, serverDataDir := bindingRestoreFixture(t, true)
+	ctx := restoreContext(t)
+
+	_, err := svc.RestoreBackup(ctx, connect.NewRequest(&v1.RestoreBackupRequest{Id: "b-binding-restore"}))
+	if err == nil || connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("restore error = %v, want CodeFailedPrecondition", err)
+	}
+	if !strings.Contains(err.Error(), "UnbindWorld") {
+		t.Fatalf("refusal must name the operator unbind step, got %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(serverDataDir, "world", "level.dat"))
+	if err != nil || string(got) != "original-world" {
+		t.Fatalf("world bytes changed on refusal: %q, %v", got, err)
+	}
+}
+
+// TestRestoreBackupRefusalPreservesWorldBindingAndRevision checks that the
+// guard leaves the authoritative binding and immutable revision untouched.
+func TestRestoreBackupRefusalPreservesWorldBindingAndRevision(t *testing.T) {
+	svc, store, serverID, serverDataDir := bindingRestoreFixture(t, true)
+	ctx := restoreContext(t)
+	if err := store.CreateWorldEntry(ctx, &storage.WorldEntry{
+		ID: "wld-restore-probe", Name: "probe", Edition: "java",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutWorldRevision(ctx, &storage.WorldRevision{
+		ID: "rev_old", WorldEntryID: "wld-restore-probe", SHA256: strings.Repeat("a", 64),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.RestoreBackup(ctx, connect.NewRequest(&v1.RestoreBackupRequest{Id: "b-binding-restore"}))
+	if err == nil || connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("restore error = %v, want CodeFailedPrecondition", err)
+	}
+
+	binding, err := store.GetWorldBinding(ctx, serverID, "world")
+	if err != nil {
+		t.Fatalf("binding vanished after refusal: %v", err)
+	}
+	if binding.ID != "wlb-restore-probe" || binding.RevisionID != "rev_old" || binding.NodeID != "local" || binding.Generation != 1 {
+		t.Fatalf("binding changed after refusal: %+v", binding)
+	}
+	bindings, err := store.ListWorldBindings(ctx, serverID, "")
+	if err != nil || len(bindings) != 1 {
+		t.Fatalf("bindings after refusal = %+v, %v", bindings, err)
+	}
+	revision, err := store.GetWorldRevision(ctx, "rev_old")
+	if err != nil || revision.SHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("revision changed after refusal: %+v, %v", revision, err)
+	}
+	got, err := os.ReadFile(filepath.Join(serverDataDir, "world", "level.dat"))
+	if err != nil || string(got) != "original-world" {
+		t.Fatalf("world bytes changed on refusal: %q, %v", got, err)
+	}
+	rec, err := store.GetBackupRecord(ctx, "b-binding-restore")
+	if err != nil || rec.Status != "failed" {
+		t.Fatalf("backup record after refusal = %+v, %v", rec, err)
+	}
+}
+
+// TestRestoreBackupSucceedsAfterWorldBindingRemoved verifies the ordinary
+// unbound restore path still works after the binding row is removed. Removing
+// only the row mirrors UnbindWorld: it never deletes world bytes.
+func TestRestoreBackupSucceedsAfterWorldBindingRemoved(t *testing.T) {
+	svc, store, serverID, serverDataDir := bindingRestoreFixture(t, true)
+	ctx := restoreContext(t)
+	binding, err := store.GetWorldBinding(ctx, serverID, "world")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteWorldBinding(ctx, binding.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := svc.RestoreBackup(ctx, connect.NewRequest(&v1.RestoreBackupRequest{Id: "b-binding-restore"}))
+	if err != nil || !resp.Msg.Success {
+		t.Fatalf("unbound restore failed: %v %+v", err, resp)
+	}
+	got, err := os.ReadFile(filepath.Join(serverDataDir, "world", "level.dat"))
+	if err != nil || string(got) != "restored-world" {
+		t.Fatalf("restored world bytes = %q, %v", got, err)
+	}
+	bindings, err := store.ListWorldBindings(ctx, serverID, "")
+	if err != nil || len(bindings) != 0 {
+		t.Fatalf("bindings after unbound restore = %+v, %v", bindings, err)
+	}
+}

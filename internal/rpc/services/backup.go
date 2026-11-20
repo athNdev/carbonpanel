@@ -457,6 +457,26 @@ func (s *BackupService) RestoreBackup(ctx context.Context, req *connect.Request[
 	// other lifecycle mutation of the world (OSS-229/OSS-235).
 	var restoreResp *v1.RestoreBackupResponse
 	jerr := operation.RunJournaled(ctx, s.store, s.log, server, "restore", "", func() error {
+		// A backup restore replaces whole level families outside the World
+		// Library binder. WorldBinding is authoritative for which world is
+		// live (ADR 0016): restoring while a binding is active would leave a
+		// row claiming the old revision over newly written bytes. Check under
+		// the journaled lock, before the container stop or the first byte
+		// mutation, and fail closed if the binding state cannot be read.
+		bindings, bindErr := s.store.ListWorldBindings(ctx, server.ID, "")
+		if bindErr != nil {
+			return connect.NewError(connect.CodeInternal,
+				fmt.Errorf("cannot verify world bindings before restore: %w", bindErr))
+		}
+		if len(bindings) > 0 {
+			levels := make([]string, 0, len(bindings))
+			for _, binding := range bindings {
+				levels = append(levels, binding.LevelName)
+			}
+			return connect.NewError(connect.CodeFailedPrecondition,
+				fmt.Errorf("restore refused: server %s has active World Library binding(s) for level(s) %s; call UnbindWorld for each level before restoring",
+					server.ID, strings.Join(levels, ", ")))
+		}
 		var rerr error
 		restoreResp, rerr = s.restoreBackupNow(ctx, server, rec, archivePath, worldDataPath, acc, done)
 		return rerr
