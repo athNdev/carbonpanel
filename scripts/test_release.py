@@ -3082,6 +3082,28 @@ class PriorPagesDeploymentTests(unittest.TestCase):
                 b"<h1>deployed guide</h1>")
 
 
+class LocalOciWorkflowSeamTests(unittest.TestCase):
+    """The verifier attaches to the existing no-credential export seam only."""
+
+    def test_verifier_is_build_evidence_and_not_a_promotion_input(self):
+        source = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        image = source.split("  image:\n", 1)[1].split("\n  publish-immutable:\n", 1)[0]
+        self.assertIn("push: false", image)
+        self.assertIn("outputs: type=oci,dest=dist/image.oci.tar", image)
+        self.assertIn("local-oci-candidate", image)
+        self.assertIn("--archive dist/image.oci.tar", image)
+        self.assertIn('--commit "$PINNED_COMMIT"', image)
+        self.assertNotIn("--push", image)
+        self.assertNotIn("docker/login", image)
+        self.assertLess(source.index("  image:\n"),
+                        source.index("  publish-immutable:\n"))
+        # The local digest never feeds alias/immutable promotion: that path
+        # still verifies an independently observed PUBLIC digest.
+        self.assertNotIn("needs.image.outputs.local_oci", source)
+        self.assertIn("preflight-immutable", source)
+        self.assertIn("verify-immutable", source)
+
+
 class LocalOciCandidateTests(unittest.TestCase):
     """A no-write exact candidate: local OCI bytes bound to the tested commit."""
 

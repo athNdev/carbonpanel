@@ -313,6 +313,19 @@ jobs:
           build-args: APP_VERSION=${{ needs.plan.outputs.semver }}
           cache-from: type=gha,scope=release-image
           cache-to: type=gha,mode=max,scope=release-image
+      - name: Verify the exact local OCI candidate (build evidence only)
+        id: local_oci
+        env:
+          PINNED_COMMIT: ${{ needs.plan.outputs.commit }}
+        run: |
+          # No registry write: digest the already exported LOCAL OCI layout and
+          # bind it to the exact tested commit. Build evidence only. Promotion
+          # still needs an independently verified public pair in BOTH registries.
+          python3 scripts/release.py local-oci-candidate \
+            --archive dist/image.oci.tar --commit "$PINNED_COMMIT" > dist/local-oci.json
+          cat dist/local-oci.json >> "$GITHUB_STEP_SUMMARY"
+          echo "digest=$(jq -r .digest dist/local-oci.json)" >> "$GITHUB_OUTPUT"
+          echo "revision=$(jq -r .revision dist/local-oci.json)" >> "$GITHUB_OUTPUT"
       - name: Check final download checksums (digest added after immutable publication)
         run: python3 scripts/release.py finalize --output dist/release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
