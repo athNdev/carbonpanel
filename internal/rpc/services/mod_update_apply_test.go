@@ -143,30 +143,34 @@ func TestScheduledModUpdatePolicyStagesOnceAndHonorsExclusions(t *testing.T) {
 	svc.SetModUpdateLookup(lookup)
 	svc.SetModCandidateFetcher(fetcher)
 
-	staged, refused, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{})
+	staged, refused, reasons, err := svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{})
 	require.NoError(t, err)
 	require.Zero(t, staged, "a disabled policy must not stage")
 	require.Zero(t, refused)
+	require.Empty(t, reasons)
 
-	staged, refused, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{
+	staged, refused, reasons, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{
 		Enabled:          true,
 		ExcludedProjects: []string{"project"},
 	})
 	require.NoError(t, err)
 	require.Zero(t, staged, "an excluded project must not be staged")
 	require.Equal(t, 1, refused)
+	require.NotEmpty(t, reasons, "the refusal cause must be reported to the operator")
 	require.Zero(t, fetcher.calls)
 
-	staged, refused, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	staged, refused, reasons, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
 	require.NoError(t, err)
 	require.Equal(t, 1, staged)
 	require.Zero(t, refused)
+	require.Empty(t, reasons)
 	require.Equal(t, 1, fetcher.calls)
 
-	staged, refused, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
+	staged, refused, reasons, err = svc.StageAvailableUpdates(ctx, server.ID, storage.ModUpdateTaskConfig{Enabled: true})
 	require.NoError(t, err)
 	require.Zero(t, staged, "a second run must deduplicate the already staged file")
 	require.Equal(t, 1, refused)
+	require.NotEmpty(t, reasons)
 	require.Equal(t, 1, fetcher.calls, "deduplication must happen before any provider download")
 
 	live, err := os.ReadFile(filepath.Join(mods, "mod.jar"))

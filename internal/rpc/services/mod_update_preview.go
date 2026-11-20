@@ -19,6 +19,10 @@ import (
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 )
 
+// providerLookupPrefix marks a failed provider lookup so a scheduled policy can
+// distinguish a provider outage from a genuinely unidentified local upload.
+const providerLookupPrefix = "Provider lookup failed: "
+
 type modUpdateLookup interface {
 	GetProjects(context.Context, []string) ([]modrinth.ProjectDetails, error)
 	VersionsByFileHash(context.Context, []string) (map[string]modrinth.Version, error)
@@ -128,6 +132,12 @@ func previewServerModUpdates(ctx context.Context, dataDir, modsDir string, serve
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			for _, hash := range batch {
+				for _, mod := range byHash[hash] {
+					mod.UpdatePreview.State = "unavailable"
+					mod.UpdatePreview.Reason = providerLookupPrefix + err.Error()
+				}
 			}
 			continue
 		}

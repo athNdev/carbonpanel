@@ -18,49 +18,49 @@ const defaultAutomaticModUpdatesPerRun = 10
 // StageAvailableUpdates implements the scheduler-facing half of OSS-425. It
 // reuses the exact preview and staging operations as the manual review flow;
 // nothing here publishes bytes or restarts a server.
-func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string, cfg storage.ModUpdateTaskConfig) (int, int, error) {
+func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string, cfg storage.ModUpdateTaskConfig) (int, int, []string, error) {
 	if !cfg.Enabled {
-		return 0, 0, nil
+		return 0, 0, nil, nil
 	}
 	server, err := s.store.GetServer(ctx, serverID)
 	if err != nil {
-		return 0, 0, errors.New("server not found")
+		return 0, 0, nil, errors.New("server not found")
 	}
 	dataRoot, err := dataRootFor(ctx, s.store, server, false, s.storageResolver)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 	root, err := os.OpenRoot(dataRoot)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 	defer func() { _ = root.Close() }()
 	modsDir := minecraft.GetModsPath(dataRoot, server.ModLoader)
 	if modsDir == "" {
-		return 0, 0, errors.New("this server type does not support mods")
+		return 0, 0, nil, errors.New("this server type does not support mods")
 	}
 	loader := string(server.ModLoader)
 	if isModpackPlatformLoader(server.ModLoader) {
 		loader = string(server.ModpackLoader)
 	}
 	if loader == "" || server.MCVersion == "" || strings.EqualFold(server.MCVersion, "latest") {
-		return 0, 0, errors.New("a known game version and loader are required")
+		return 0, 0, nil, errors.New("a known game version and loader are required")
 	}
 
 	mods := installedModRows(ctx, serverID, server, modsDir)
 	if len(mods) == 0 {
-		return 0, 0, nil
+		return 0, 0, nil, nil
 	}
 	settings, err := s.store.GetServerConfig(ctx, storage.GlobalSettingsID)
 	if err != nil && !errors.Is(err, storage.ErrServerConfigNotFound) {
-		return 0, 0, errors.New("failed to load provider settings")
+		return 0, 0, nil, errors.New("failed to load provider settings")
 	}
 	lookup := s.updateLookup
 	if lookup == nil {
 		lookup = modUpdateProvider(settings)
 	}
 	if err := previewServerModUpdates(ctx, dataRoot, modsDir, server, mods, lookup); err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 
 	alreadyStaged := make(map[string]bool)
@@ -80,22 +80,39 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	limit := cfg.MaxUpdatesPerRun
 	if limit <= 0 {
 		limit = defaultAutomaticModUpdatesPerRun
+	} else if limit > 50 {
+		// A persisted config is untrusted even when creation validated it;
+		// never let a large value become a large allocation.
+		limit = 50
 	}
 
 	selections := make([]*v1.ModUpdateSelection, 0, limit)
 	refused := 0
+	var reasons []string
+	var providerFailure string
 	for _, mod := range mods {
 		preview := mod.GetUpdatePreview()
 		if preview == nil || preview.GetState() != "available" || preview.GetCandidateSha512() == "" {
 			refused++
+			if preview != nil {
+				reason := preview.GetReason()
+				if strings.HasPrefix(reason, providerLookupPrefix) {
+					providerFailure = reason
+				}
+				if reason != "" && len(reasons) < 5 {
+					reasons = append(reasons, mod.GetFileName()+": "+reason)
+				}
+			}
 			continue
 		}
 		if excluded[preview.GetProjectId()] || alreadyStaged[mod.GetFileName()] {
 			refused++
+			reasons = append(reasons, mod.GetFileName()+": excluded or already staged")
 			continue
 		}
 		if len(selections) >= limit {
 			refused++
+			reasons = append(reasons, mod.GetFileName()+": per-run limit reached")
 			continue
 		}
 		selections = append(selections, &v1.ModUpdateSelection{
@@ -108,7 +125,10 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 		})
 	}
 	if len(selections) == 0 {
-		return 0, refused, nil
+		if providerFailure != "" {
+			return 0, refused, reasons, errors.New(providerFailure)
+		}
+		return 0, refused, reasons, nil
 	}
 
 	window := v1.ConfigApplyWindow_CONFIG_APPLY_WINDOW_NEXT_RESTART
@@ -118,7 +138,7 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 	}
 	results, _, err := s.stageReviewedModUpdates(ctx, serverID, selections, window, 0, 0)
 	if err != nil {
-		return 0, refused, err
+		return 0, refused, reasons, err
 	}
 	staged := 0
 	for _, result := range results {
@@ -126,9 +146,10 @@ func (s *ModService) StageAvailableUpdates(ctx context.Context, serverID string,
 			staged++
 		} else {
 			refused++
+			reasons = append(reasons, result.FileName+": "+result.Outcome+" — "+result.Reason)
 		}
 	}
-	return staged, refused, nil
+	return staged, refused, reasons, nil
 }
 
 // installedModRows mirrors the deterministic IDs used by ListMods so a policy
@@ -163,5 +184,5 @@ func installedModRows(ctx context.Context, serverID string, server *storage.Serv
 
 // compile-time confirmation that the service satisfies the scheduler seam.
 var _ interface {
-	StageAvailableUpdates(context.Context, string, storage.ModUpdateTaskConfig) (int, int, error)
+	StageAvailableUpdates(context.Context, string, storage.ModUpdateTaskConfig) (int, int, []string, error)
 } = (*ModService)(nil)

@@ -9,6 +9,7 @@ import (
 
 	storage "github.com/athNdev/carbon-panel/internal/db"
 	"github.com/athNdev/carbon-panel/pkg/logger"
+	"github.com/robfig/cron/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,13 +18,34 @@ type fakeModPlanner struct {
 	cfg     storage.ModUpdateTaskConfig
 	staged  int
 	refused int
+	reasons []string
 	err     error
 }
 
-func (f *fakeModPlanner) StageAvailableUpdates(_ context.Context, _ string, cfg storage.ModUpdateTaskConfig) (int, int, error) {
+func (f *fakeModPlanner) StageAvailableUpdates(_ context.Context, _ string, cfg storage.ModUpdateTaskConfig) (int, int, []string, error) {
 	f.calls++
 	f.cfg = cfg
-	return f.staged, f.refused, f.err
+	return f.staged, f.refused, f.reasons, f.err
+}
+
+func TestCalculateNextRunHonorsTaskTimezone(t *testing.T) {
+	s := &Scheduler{
+		cronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		log:        logger.New(),
+	}
+	utc := &storage.ScheduledTask{Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", Timezone: "UTC"}
+	sydney := &storage.ScheduledTask{Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", Timezone: "Australia/Sydney"}
+	utcNext, err := s.CalculateNextRun(utc)
+	require.NoError(t, err)
+	sydneyNext, err := s.CalculateNextRun(sydney)
+	require.NoError(t, err)
+	require.False(t, utcNext.Equal(*sydneyNext), "the same cron in a different zone must fire at a different instant")
+	require.Error(t, func() error {
+		_, err := s.CalculateNextRun(&storage.ScheduledTask{
+			Schedule: storage.ScheduleTypeCron, CronExpr: "0 3 * * *", Timezone: "Not/AZone",
+		})
+		return err
+	}())
 }
 
 func TestValidateModUpdateConfigJSON(t *testing.T) {
@@ -37,7 +59,7 @@ func TestValidateModUpdateConfigJSON(t *testing.T) {
 func TestExecuteModUpdateTaskUsesSharedPlannerAndOptInPolicy(t *testing.T) {
 	ctx := context.Background()
 	server := &storage.Server{ID: "srv-mod-task", Status: storage.StatusStopped}
-	planner := &fakeModPlanner{staged: 2, refused: 1}
+	planner := &fakeModPlanner{staged: 2, refused: 1, reasons: []string{"mod.jar: provider lookup failed"}}
 	s := &Scheduler{log: logger.New(), modUpdatePlanner: planner}
 	task := &storage.ScheduledTask{
 		ServerID: server.ID,
@@ -47,6 +69,7 @@ func TestExecuteModUpdateTaskUsesSharedPlannerAndOptInPolicy(t *testing.T) {
 	out, err := s.executeModUpdateTask(ctx, server, task)
 	require.NoError(t, err)
 	require.Contains(t, out, "staged 2")
+	require.Contains(t, out, "mod.jar: provider lookup failed", "the operator must see the refusal cause")
 	require.Equal(t, 1, planner.calls)
 	require.True(t, planner.cfg.Enabled)
 	require.Equal(t, []string{"excluded"}, planner.cfg.ExcludedProjects)

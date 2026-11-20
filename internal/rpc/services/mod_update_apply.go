@@ -33,12 +33,26 @@ type modCandidateFetcher interface {
 	Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, filename, sha512Hex, loader, game string) ([]byte, string, error)
 }
 
+// modUpdateVersionLookup is the narrow provider capability the fetcher needs.
+// The real Modrinth client satisfies it; tests inject a fixture.
+type modUpdateVersionLookup interface {
+	GetVersion(context.Context, string) (*modrinth.Version, error)
+}
+
 // providerModCandidateFetcher uses the configured Modrinth adapter. A candidate
 // must still be listed, released, compatible and carry the reviewed SHA-512.
-type providerModCandidateFetcher struct{}
+// Optional fields let the same code be exercised against an HTTP fixture.
+type providerModCandidateFetcher struct {
+	versions modUpdateVersionLookup
+	client   *http.Client
+}
 
-func (providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, filename, sha512Hex, loader, game string) ([]byte, string, error) {
-	version, err := modUpdateProvider(settings).GetVersion(ctx, versionID)
+func (f providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.ServerConfig, versionID, filename, sha512Hex, loader, game string) ([]byte, string, error) {
+	lookup := f.versions
+	if lookup == nil {
+		lookup = modUpdateProvider(settings)
+	}
+	version, err := lookup.GetVersion(ctx, versionID)
 	if err != nil || version == nil || version.ID == "" {
 		return nil, "refused_provider", fmt.Errorf("provider did not confirm release %s", versionID)
 	}
@@ -63,7 +77,10 @@ func (providerModCandidateFetcher) Fetch(ctx context.Context, settings *storage.
 	if target == nil || !providers.DownloadURLIsAllowed(target.URL) {
 		return nil, "refused_download", errors.New("no allowed download URL for the reviewed file")
 	}
-	client := indexers.ProtectCredentialsOnRedirect(&http.Client{Timeout: 2 * time.Minute})
+	client := f.client
+	if client == nil {
+		client = indexers.ProtectCredentialsOnRedirect(&http.Client{Timeout: 2 * time.Minute})
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
 	if err != nil {
 		return nil, "refused_download", err
@@ -160,10 +177,35 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		fetcher = providerModCandidateFetcher{}
 	}
 
+	// Validate the window before any provider work or byte writes. An invalid
+	// at_time/idle request must not leave staged bytes or an open batch behind.
+	windowName, applyAt, idle := windowFromProto(window, applyAtUnix, idleMinutes)
+	if err := storage.ValidateUpdateWindow(windowName, applyAt, idle); err != nil {
+		return nil, nil, err
+	}
+
+	// One live target can appear only once in the open batch, regardless of
+	// whether it was selected manually or by a policy run.
+	alreadyStaged := make(map[string]bool)
+	if batch, err := s.store.OpenUpdateBatch(ctx, server.ID); err == nil && batch != nil {
+		if rows, err := s.store.ListBatchContent(ctx, batch.ID); err == nil {
+			for _, row := range rows {
+				if row.Kind == storage.StagedKindMod {
+					alreadyStaged[row.FileName] = true
+				}
+			}
+		}
+	}
+
 	results := make([]stagedModUpdate, 0, len(selections))
 	staged := 0
 	for _, sel := range selections {
 		result := stagedModUpdate{ModID: sel.GetModId(), FileName: sel.GetFileName()}
+		if alreadyStaged[sel.GetFileName()] {
+			result.Outcome, result.Reason = "already_staged", "this file already has an update in the open batch"
+			results = append(results, result)
+			continue
+		}
 		installed, err := modInstallPath(base, sel.GetFileName())
 		if err != nil || sel.GetInstalledSha512() == "" {
 			result.Outcome, result.Reason = "refused_drift", "the reviewed file is not a valid installed mod"
@@ -199,6 +241,7 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 			continue
 		}
 		result.Outcome, result.StagedID = "staged", row.ID
+		alreadyStaged[sel.GetFileName()] = true
 		staged++
 		results = append(results, result)
 	}
@@ -206,7 +249,6 @@ func (s *ModService) stageReviewedModUpdates(ctx context.Context, serverID strin
 		return results, nil, nil
 	}
 
-	windowName, applyAt, idle := windowFromProto(window, applyAtUnix, idleMinutes)
 	batch, err := s.store.SetOpenBatchWindow(ctx, server.ID, windowName, applyAt, idle)
 	if err != nil {
 		return results, nil, fmt.Errorf("failed to set the apply window: %w", err)

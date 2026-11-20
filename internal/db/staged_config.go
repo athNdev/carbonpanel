@@ -155,6 +155,13 @@ type stageConfigOptions struct {
 	SetBatchWindow bool
 }
 
+// ValidateUpdateWindow checks an apply window before any bytes are staged, so
+// an invalid at_time/idle request cannot leave an open batch behind.
+func ValidateUpdateWindow(window UpdateWindow, applyAt *time.Time, idleMinutes int) error {
+	_, err := modeForWindow(window, applyAt, idleMinutes)
+	return err
+}
+
 func modeForWindow(window UpdateWindow, applyAt *time.Time, idleMinutes int) (StagedApplyMode, error) {
 	switch window {
 	case UpdateWindowNextRestart:

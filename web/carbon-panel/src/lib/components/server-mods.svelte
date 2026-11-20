@@ -521,7 +521,7 @@ one at https://mozilla.org/MPL/2.0/.
 					class="h-8 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
 				>
 					<option value="next">Next restart</option>
-					<option value="time">At a chosen time (UTC)</option>
+					<option value="time">At a chosen time (browser local)</option>
 					<option value="idle">When the server is empty</option>
 				</select>
 			</div>
@@ -631,6 +631,7 @@ one at https://mozilla.org/MPL/2.0/.
 						id="mod-policy-max"
 						type="number"
 						min="1"
+						max="50"
 						bind:value={policyMax}
 						class="h-8 w-20 rounded-none border border-border bg-background px-2 text-xs text-foreground focus:border-primary focus:outline-none"
 					/>
