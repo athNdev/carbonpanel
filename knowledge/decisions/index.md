@@ -31,6 +31,7 @@
 - [MCP upload/commit family seam — Choice + Alternatives rejected + Consequence + Verification + Read next](mcp-upload-commit-family-choice.md) — The upload/commit operations (SaveUploadedFile, InitUpload, UploadChunk
 - [Modpack content kinds](modpack-content-kinds.md) — Datapacks, resource packs and shader packs share one packwiz contract in Modpack Studio; a server bake installs only server-side content.
 - [Modpack display loader](modpack-display-loader.md) — A modpack server keeps its provisioning platform in ModLoader and names the real game loader in ModpackLoader for display.
+- [Modrinth dedicated server support](modpack-server-support.md) — Indexed Modrinth projects that explicitly declare dedicated servers unsupported cannot be deployed or attached to a server.
 - [Module form conversions](module-form-codecs.md) — Module instance and template forms share pure row conversions while preserving separate request fields, staging policy, and explicit malformed-JSON reporting.
 - [Module form conversions — Choice](module-form-codecs-choice.md) — Environment keys, metadata keys and volume paths trim whitespace; blank keys
 - [Module form conversions — Choice (part 2)](module-form-codecs-choice-2.md) — Malformed persisted JSON is now reported explicitly rather than silently

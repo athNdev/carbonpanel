@@ -456,6 +456,7 @@ func (s *ModpackService) SyncModpacks(ctx context.Context, req *connect.Request[
 		dockerImage := docker.GetOptimalDockerTag(mcVersion, modLoader, false)
 
 		dbModpack := &storage.IndexedModpack{
+			ServerSide:    modpack.ServerSide,
 			ID:            modpack.ID,
 			IndexerID:     modpack.IndexerID,
 			Indexer:       modpack.Indexer,
