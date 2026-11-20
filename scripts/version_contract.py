@@ -150,7 +150,7 @@ def release_build_contract(contract, environ=None):
         return contract
     from scripts import release
     allowed, reason = release.publication_candidate_decision(tag)
-    if not allowed or tag == release.NEXT_STABLE_GIT_TAG:
+    if not allowed or tag == release.OCCUPIED_PRODUCT_TAG:
         raise ValueError("Unpublishable stable identity: " + reason)
     product = release.product_release(tag)
     if product["prerelease"] or not SHA.fullmatch(revision) or not DIGEST.fullmatch(digest):

@@ -113,11 +113,9 @@ RESERVED_LEGACY_SEMVERS = frozenset({
     "1.0.40", "3.0.0-alpha.1", "3.0.0-beta.4",
     "3.0.0-beta.5", "3.0.0-beta.6", "3.0.0-beta.7", "3.0.0-beta.8"})
 
-# The MAJOR boundary for the next stable. Kept as data so docs, tests and the
-# release history catalog cannot drift from the policy.
-NEXT_STABLE_GIT_TAG = "carbonpanel-v2.0.0"
-NEXT_STABLE_SEMVER = "2.0.0"
-NEXT_STABLE_MINOR = "2.0"
+# This tag already exists at the recorded commit and stays immutable.
+OCCUPIED_PRODUCT_TAG = "carbonpanel-v2.0.0"
+OCCUPIED_PRODUCT_COMMIT = "69ddb46d596aea8ed117a3dba6a1f63521572664"
 
 
 def product_release(value):
@@ -279,10 +277,20 @@ def verify_release_history(document=None):
         problems.append("no historical registry alias may be invented")
     # The MAJOR boundary is data, not prose drift.
     nxt = doc.get("next_stable", {})
-    if (nxt.get("git_tag"), nxt.get("semver"), nxt.get("minor_alias"),
-            nxt.get("boundary")) != (
-            NEXT_STABLE_GIT_TAG, NEXT_STABLE_SEMVER, NEXT_STABLE_MINOR, "major"):
-        problems.append("planned next stable must be carbonpanel-v2.0.0 (MAJOR)")
+    product = product_release_or_none(nxt.get("git_tag"))
+    occupied = doc.get("occupied_product_tags")
+    if not isinstance(occupied, dict):
+        occupied = {}
+    if (occupied.get(OCCUPIED_PRODUCT_TAG) != OCCUPIED_PRODUCT_COMMIT
+            or any(not product_release_or_none(tag) or not valid_commit(commit)
+                   for tag, commit in occupied.items())):
+        problems.append("occupied product tags must retain their original commits")
+    if (not product or product["prerelease"] or nxt["git_tag"] in occupied
+            or product["semver"] != nxt.get("semver") or product["minor"] != nxt.get("minor_alias")
+            or nxt.get("boundary") != "major" or int(product["semver"].split(".")[0]) <= 1
+            or any(semver_key(product["version"]) <= semver_key(product_release(tag)["version"])
+                   for tag in occupied if product_release_or_none(tag))):
+        problems.append("next stable must be an available major product version above the occupied tags")
     alias = doc.get("historical_alias", {})
     if (alias.get("git_tag") != HISTORICAL_PRODUCT_ALIAS
             or alias.get("commit") != LEGACY_STABLE_COMMIT
@@ -962,10 +970,8 @@ def resume_provenance(tag, commit, expected_digest, releases_json=None, git_tag=
             return False, "version tag points at a different commit"
     except subprocess.CalledProcessError:
         return False, "version tag identity cannot be determined"
-    if not local:
-        return False, "resuming immutable publication requires the recorded exact Git tag"
     return release_provenance(tag, commit, expected_digest, releases_json, release_tag,
-                              allow_prepared_draft=True)[:2]
+                              allow_prepared_draft=bool(local))[:2]
 
 
 TRUSTED_DEVELOPER_REF = "refs/heads/main"
@@ -1261,7 +1267,7 @@ def get_release(tag):
     return json.loads(github("api", api_url))
 
 
-def guard_publishing(tag, commit, git_tag=None):
+def guard_publishing(tag, commit, git_tag=None, resume_digest=""):
     """Refuse any non-product tag and require verified exact-main CI.
 
     `tag` is the internal v-form; `git_tag` is the canonical product ref that is
@@ -1287,7 +1293,9 @@ def guard_publishing(tag, commit, git_tag=None):
     releases = json.loads(github("api", "--paginate", "--slurp", "/repos/{owner}/{repo}/releases?per_page=100"))
     if any(release["tag_name"] == release_tag and not release["draft"]
            for page in releases for release in page):
-        raise ValueError("A published release is immutable; choose a new version")
+        if (not resume_digest or not tags or not valid_digest(resume_digest)
+                or not release_provenance(tag, commit, resume_digest, releases, release_tag)[0]):
+            raise ValueError("A published release is immutable; choose a new version")
 
 
 def plan(args):
@@ -1298,7 +1306,7 @@ def plan(args):
     epoch = int(run("git", "show", "-s", "--format=%ct", "HEAD"))
     allowed, reason = publication_allowed(args.event, args.publish_input, raw)
     if allowed:
-        guard_publishing(tag, commit, raw)
+        guard_publishing(tag, commit, raw, getattr(args, "resume_digest", ""))
     values = {"version": raw, "internal_version": tag,
               "semver": product["semver"] if product else tag[1:],
               "git_tag": raw, "product": str(bool(product)).lower(),
@@ -1632,11 +1640,47 @@ def immutable_references(tag):
     return {"docker_hub": f"{DOCKER_HUB_IMAGE}:{tag[1:]}", "ghcr": github_image(tag)}
 
 
+def staged_immutable_targets(observations, digest, revision):
+    """An exact staged OCI archive may fill absent tags, never replace an existing one."""
+    missing = []
+    for registry in CHANNEL_REGISTRIES:
+        observation = observations.get(registry)
+        if observation and observation[0] == "absent":
+            missing.append(registry)
+            continue
+        ok, reason = channel_oci_parity(observations, digest, revision, registries=(registry,))
+        if not ok:
+            raise ValueError("Conflicting immutable release image: " + reason)
+    return missing
+
+
 def preflight_immutable(args):
     """Read-only preflight of the immutable version tag in every registry."""
     tag = resolve_panel_version(args.version)
     if args.expected_digest and not valid_digest(args.expected_digest):
         raise ValueError("Invalid expected digest")
+    archive = getattr(args, "staged_archive", None)
+    if archive:
+        candidate = local_oci_candidate(archive, args.commit)
+        if set(candidate["platforms"]) != {"linux/amd64", "linux/arm64"}:
+            raise ValueError("Publication requires both release platforms in the staged archive")
+        distribution = subprocess.check_output(["skopeo", "inspect", "--raw", "oci-archive:" + archive])
+        digest = "sha256:" + hashlib.sha256(distribution).hexdigest()
+        if args.expected_digest and args.expected_digest != digest:
+            raise ValueError("Requested digest differs from the staged and verified OCI distribution")
+        staged = json.loads(distribution)
+        platforms = {(p.get("os"), p.get("architecture"))
+                     for item in staged.get("manifests", []) if (p := item.get("platform"))}
+        if not REQUIRED_PLATFORMS <= platforms:
+            raise ValueError("OCI distribution manifest lacks both required architectures")
+        refs = immutable_references(tag)
+        missing = staged_immutable_targets(
+            _coerce_observation_map(channel_observe(tag[1:])), digest, args.commit)
+        values = {"action": IMMUTABLE_PUBLISH if missing else IMMUTABLE_RESUME,
+                  "digest": digest, "targets": json.dumps([refs[name] for name in missing])}
+        print(json.dumps(values, indent=2))
+        write_output(values)
+        return values["action"]
     observations = {name: observe_reference(ref)
                     for name, ref in immutable_references(tag).items()}
     provenance = (resume_provenance(tag, args.commit, args.expected_digest,
@@ -2310,7 +2354,7 @@ def channel_move_decision(channel, candidate_commit, candidate_digest,
 
     # The planned 2.0.0 stable is deliberately NOT publishable by a channel move.
     tag = str(qualification.get("tag", ""))
-    if tag in (NEXT_STABLE_GIT_TAG, "v" + NEXT_STABLE_SEMVER, NEXT_STABLE_SEMVER):
+    if tag in (OCCUPIED_PRODUCT_TAG, "v2.0.0", "2.0.0"):
         return "refuse", "the planned 2.0.0 stable is not a channel publication", ""
 
     # Stable is frozen to the verified baseline; no arbitrary/legacy tag moves it.
@@ -2320,7 +2364,7 @@ def channel_move_decision(channel, candidate_commit, candidate_digest,
             ok, reason = publication_candidate_decision(release_tag)
             product = product_release_or_none(release_tag)
             if (not ok or product is None or product["channel"] != "stable"
-                    or release_tag == NEXT_STABLE_GIT_TAG):
+                    or release_tag == OCCUPIED_PRODUCT_TAG):
                 return "refuse", "stable aliases require an exact stable product tag: " + reason, ""
         elif (candidate_commit != STABLE_CHANNEL_BASELINE["commit"]
               or candidate_digest != STABLE_CHANNEL_BASELINE["digest"]):
@@ -2531,7 +2575,7 @@ def channel_transaction_decision(candidate, previous=None, live=None,
             ok, reason = publication_candidate_decision(release_tag)
             product = product_release_or_none(release_tag)
             if (not ok or product is None or product["channel"] != "stable"
-                    or release_tag == NEXT_STABLE_GIT_TAG):
+                    or release_tag == OCCUPIED_PRODUCT_TAG):
                 return ("refuse", "stable channel requires an exact canonical stable release tag: "
                         + reason, previous or {}, [])
         elif (commit != STABLE_CHANNEL_BASELINE["commit"]
@@ -3574,6 +3618,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     planner = commands.add_parser("plan")
+    planner.add_argument("--resume-digest", default="")
     planner.add_argument("--version", required=True)
     planner.add_argument("--event", required=True)
     planner.add_argument("--publish-input", default="false")
@@ -3598,6 +3643,7 @@ def build_parser():
     image_tagger.add_argument("--module", action="store_true")
     image_tagger.add_argument("--immutable-only", action="store_true")
     immutable_preflight = commands.add_parser("preflight-immutable")
+    immutable_preflight.add_argument("--staged-archive", help="verified OCI archive from the originating release build")
     immutable_preflight.add_argument("--version", required=True)
     immutable_preflight.add_argument("--commit", required=True)
     immutable_preflight.add_argument("--expected-digest")

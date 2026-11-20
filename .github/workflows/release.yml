@@ -107,9 +107,10 @@ jobs:
           RELEASE_PUBLISH: ${{ inputs.publish }}
         # The Python gate is authoritative: automatic events and rehearsals can
         # only ever produce publish=false here, regardless of workflow inputs.
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
         run: |
           python3 scripts/release.py plan --version "$RELEASE_VERSION" \
-            --event "$RELEASE_EVENT" --publish-input "$RELEASE_PUBLISH"
+            --event "$RELEASE_EVENT" --publish-input "$RELEASE_PUBLISH" --resume-digest "$EXPECTED_DIGEST"
       - name: Verify trusted ref and exact main CI for an explicit publication
         id: trusted
         if: inputs.publish
@@ -277,6 +278,8 @@ jobs:
     permissions:
       contents: read
       actions: read
+    outputs:
+      distribution_digest: ${{ steps.distribution.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -304,6 +307,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           outputs: type=oci,dest=dist/image.oci.tar
+          tags: carbonpanel-release:candidate
           labels: |
             org.opencontainers.image.title=Carbon Panel
             org.opencontainers.image.version=${{ needs.plan.outputs.semver }}
@@ -328,6 +332,19 @@ jobs:
           cat dist/local-oci.json >> "$GITHUB_STEP_SUMMARY"
           echo "digest=$(jq -r .digest dist/local-oci.json)" >> "$GITHUB_OUTPUT"
           echo "revision=$(jq -r .revision dist/local-oci.json)" >> "$GITHUB_OUTPUT"
+      - name: Rehearse copying the exact OCI archive without public registry access
+        id: distribution
+        run: |
+          command -v skopeo >/dev/null || { sudo apt-get update && sudo apt-get install -y skopeo; }
+          SOURCE="oci-archive:dist/image.oci.tar"
+          skopeo inspect --raw "$SOURCE" > dist/distribution-index.json
+          jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64","arm64"]' dist/distribution-index.json
+          EXPECTED="sha256:$(sha256sum dist/distribution-index.json | cut -d' ' -f1)"
+          skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/copied-digest" \
+            "$SOURCE" "oci:$RUNNER_TEMP/verified-layout:candidate"
+          test "$(cat "$RUNNER_TEMP/copied-digest")" = "$EXPECTED"
+          echo "$EXPECTED" > dist/distribution-digest.txt
+          echo "digest=$EXPECTED" >> "$GITHUB_OUTPUT"
       - name: Check final download checksums (digest added after immutable publication)
         run: python3 scripts/release.py finalize --output dist/release
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -338,13 +355,57 @@ jobs:
           retention-days: 14
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-image-context
-          path: dist/image
-          include-hidden-files: true
+          name: verified-release-oci
+          path: |
+            dist/image.oci.tar
+            dist/distribution-digest.txt
+          compression-level: 0
           if-no-files-found: error
           retention-days: 7
 
   # IMMUTABLE VERSION PUBLICATION ONLY. No moving alias is written here.
+  rehearse-stable-docs:
+    name: Render the staged Stable release and qualify both channels
+    needs: [plan, image]
+    if: needs.plan.outputs.publish != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      CARBONPANEL_STABLE_REVISION: ${{ needs.plan.outputs.commit }}
+      CARBONPANEL_STABLE_DIGEST: ${{ needs.image.outputs.distribution_digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
+        with:
+          version: '1.50.0'
+          github_token: ${{ github.token }}
+      - name: Qualify both rendered channels at the commit and staged OCI digest
+        env:
+          PLANNED_VERSION: ${{ needs.plan.outputs.version }}
+          PLANNED_CHANNEL: ${{ needs.plan.outputs.channel }}
+        run: |
+          if [ "$PLANNED_CHANNEL" = stable ]; then
+            export CARBONPANEL_STABLE_TAG="$PLANNED_VERSION"
+          else
+            export CARBONPANEL_STABLE_TAG="$(jq -er '.next_stable.git_tag' docs/release-history.json)"
+          fi
+          python3 scripts/build_website.py
+          python3 scripts/check_website.py
+          python3 scripts/release.py verify-stable-release-site --site .website-build/site \
+            --commit "$CARBONPANEL_STABLE_REVISION" --digest "$CARBONPANEL_STABLE_DIGEST" \
+            --version "$CARBONPANEL_STABLE_TAG" --repository "https://github.com/$GITHUB_REPOSITORY"
+          python3 scripts/browser_version_check.py
+
   publish-immutable:
     name: Publish immutable version tag after fail-closed preflight
     needs: [plan, image]
@@ -370,8 +431,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-image-context
-          path: .
+          name: verified-release-oci
+          path: dist/verified-oci
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Fail closed without registry credentials
         env:
@@ -390,6 +451,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+      - name: Provision the OCI copy tool
+        run: command -v skopeo >/dev/null || { sudo apt-get update && sudo apt-get install -y skopeo; }
       - name: Preflight exact immutable version in every registry
         id: preflight
         env:
@@ -403,52 +466,29 @@ jobs:
         run: |
           python3 scripts/release.py preflight-immutable \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
-            --expected-digest "$EXPECTED_DIGEST"
-      - name: Resolve the sole immutable tag reference
-        id: immutable_tag
-        env:
-          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
-        run: |
-          TAG=$(python3 scripts/release.py image-tags --version "$RELEASE_VERSION" --immutable-only)
-          {
-            echo 'tags<<EOF'
-            echo "$DOCKER_HUB_IMAGE:$TAG"
-            echo "${GHCR_IMAGE,,}:$TAG"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-      - name: Push the immutable version tag only
+            --expected-digest "$EXPECTED_DIGEST" --staged-archive dist/verified-oci/image.oci.tar
+      - name: Copy the tested OCI bytes to both immutable version tags
         id: push
         if: steps.preflight.outputs.action == 'publish'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: dist/image
-          file: docker/Dockerfile.release
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.immutable_tag.outputs.tags }}
-          labels: |
-            org.opencontainers.image.title=Carbon Panel
-            org.opencontainers.image.version=${{ needs.plan.outputs.semver }}
-            org.opencontainers.image.revision=${{ needs.plan.outputs.commit }}
-            org.opencontainers.image.url=https://carbonpanel.dev/
-            org.opencontainers.image.documentation=https://carbonpanel.dev/docs/
-            org.opencontainers.image.licenses=MPL-2.0
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-          build-args: APP_VERSION=${{ needs.plan.outputs.semver }}
-          cache-from: type=gha,scope=release-image
-          cache-to: type=gha,mode=max,scope=release-image
-      - name: Resolve the verified digest (resume uses the operator-supplied digest)
+        env:
+          TARGETS: ${{ steps.preflight.outputs.targets }}
+        run: |
+          SOURCE="oci-archive:dist/verified-oci/image.oci.tar"
+          EXPECTED=$(cat dist/verified-oci/distribution-digest.txt)
+          test "sha256:$(skopeo inspect --raw "$SOURCE" | sha256sum | cut -d' ' -f1)" = "$EXPECTED"
+          while IFS= read -r ref; do
+            skopeo copy --all --preserve-digests --digestfile "$RUNNER_TEMP/copied-digest" \
+              "$SOURCE" "docker://$ref"
+            test "$(cat "$RUNNER_TEMP/copied-digest")" = "$EXPECTED"
+          done < <(jq -er '.[]' <<< "$TARGETS")
+          echo "digest=$EXPECTED" >> "$GITHUB_OUTPUT"
+      - name: Resolve the digest of the qualified staged distribution
         id: resolved
         env:
-          PREFLIGHT_ACTION: ${{ steps.preflight.outputs.action }}
-          PUSH_DIGEST: ${{ steps.push.outputs.digest }}
-          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+          DIGEST: ${{ steps.preflight.outputs.digest }}
         run: |
-          if [ "$PREFLIGHT_ACTION" = "resume" ]; then
-            echo "digest=$EXPECTED_DIGEST" >> "$GITHUB_OUTPUT"
-          else
-            echo "digest=$PUSH_DIGEST" >> "$GITHUB_OUTPUT"
-          fi
+          test "$(cat dist/verified-oci/distribution-digest.txt)" = "$DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
       - name: Verify tag to digest and both architectures in both registries
         id: verify
         env:
@@ -491,7 +531,18 @@ jobs:
         env:
           IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
         run: python3 scripts/release.py finalize --output dist/release --digest "$IMAGE_DIGEST"
+      - name: Decide whether this digest already has a published record
+        id: record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.plan.outputs.commit }}
+          IMAGE_DIGEST: ${{ needs.publish-immutable.outputs.digest }}
+        run: |
+          python3 scripts/release.py release-record --version "$RELEASE_VERSION" \
+            --commit "$RELEASE_COMMIT" --digest "$IMAGE_DIGEST"
       - name: Verify the private GitHub draft matches the tested release files
+        if: steps.record.outputs.action == 'publish'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.plan.outputs.version }}
@@ -808,11 +859,15 @@ jobs:
   # never before a write that may still be compensated and rolled back.
   publish:
     name: Publish complete GitHub release
-    needs: [plan, publish-immutable, stable-channel-transaction, promote-aliases]
+    needs: [plan, publish-immutable, prepare-draft, stable-channel-transaction, promote-aliases]
     if: >-
+      always() && !cancelled() && needs.plan.result == 'success' &&
+      needs.publish-immutable.result == 'success' && needs.prepare-draft.result == 'success' &&
       needs.plan.outputs.publish == 'true' &&
+      needs.promote-aliases.result == 'success' &&
       (needs.plan.outputs.channel != 'stable' ||
-       (needs.stable-channel-transaction.outputs.action != '' &&
+       (needs.stable-channel-transaction.result == 'success' &&
+        needs.stable-channel-transaction.outputs.action != '' &&
         needs.stable-channel-transaction.outputs.action != 'refuse' &&
         needs.stable-channel-transaction.outputs.action != 'rollback' &&
         needs.promote-aliases.outputs.aliases_verified == 'true'))
@@ -875,10 +930,13 @@ jobs:
     name: Promote moving aliases from the verified digest
     needs: [plan, publish-immutable, prepare-draft, stable-channel-transaction]
     if: >-
+      always() && !cancelled() && needs.plan.result == 'success' &&
+      needs.publish-immutable.result == 'success' && needs.prepare-draft.result == 'success' &&
       needs.plan.outputs.publish == 'true' &&
       needs.publish-immutable.outputs.verified == 'true' &&
       (needs.plan.outputs.channel != 'stable' ||
-       (needs.stable-channel-transaction.outputs.action != '' &&
+       (needs.stable-channel-transaction.result == 'success' &&
+        needs.stable-channel-transaction.outputs.action != '' &&
         needs.stable-channel-transaction.outputs.action != 'refuse' &&
         needs.stable-channel-transaction.outputs.action != 'rollback'))
     runs-on: ubuntu-24.04

@@ -672,7 +672,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("--alias latest", source)
         self.assertIn("  stable-channel-transaction:\n", source)
         self.assertIn("channel-promote \\\n", source)
-        self.assertIn("needs: [plan, publish-immutable, stable-channel-transaction]", source)
+        self.assertIn("needs: [plan, publish-immutable, prepare-draft, stable-channel-transaction]", source)
         self.assertIn("python3 scripts/release.py release-record", source)
         self.assertIn("--immutable-only", source)
         # Durable release record completes before alias promotion.
@@ -1617,23 +1617,23 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 release.product_release(bad)
 
-    def test_next_stable_outputs_are_2_0_0_and_minor_2_0_latest(self):
-        plan = release.promotion_plan("carbonpanel-v2.0.0")
-        self.assertEqual([step["tag"] for step in plan], ["2.0.0", "2.0", "latest"])
+    def test_next_stable_outputs_are_2_0_1_and_minor_2_0_latest(self):
+        plan = release.promotion_plan("carbonpanel-v2.0.1")
+        self.assertEqual([step["tag"] for step in plan], ["2.0.1", "2.0", "latest"])
         self.assertEqual([step["mutable"] for step in plan], [False, True, True])
-        self.assertEqual(release.product_release(release.NEXT_STABLE_GIT_TAG)["semver"],
-                         release.NEXT_STABLE_SEMVER)
+        self.assertEqual(release.product_release(release.load_release_history()["next_stable"]["git_tag"])["semver"],
+                         "2.0.1")
         # The immutable image tag is the displayed SemVer, never the Git tag.
         with patch("sys.argv", ["release.py", "image-tags",
-                                "--version", "carbonpanel-v2.0.0", "--immutable-only"]), \
+                                "--version", "carbonpanel-v2.0.1", "--immutable-only"]), \
              redirect_stdout(io.StringIO()) as out:
             release.main()
-        self.assertEqual(out.getvalue().strip(), "2.0.0")
+        self.assertEqual(out.getvalue().strip(), "2.0.1")
         with patch("sys.argv", ["release.py", "image-tags",
-                                "--version", "carbonpanel-v2.0.0"]), \
+                                "--version", "carbonpanel-v2.0.1"]), \
              redirect_stdout(io.StringIO()) as out:
             release.main()
-        self.assertEqual(out.getvalue().split(), ["2.0.0", "2.0", "latest"])
+        self.assertEqual(out.getvalue().split(), ["2.0.1", "2.0", "latest"])
         rollback = release.rollback_line()
         self.assertEqual((rollback["minor"], rollback["version"], rollback["commit"]),
                          ("1.0", "v1.0.40", "f88748be6a216b187e675bbb1f110df07e544148"))
@@ -2294,7 +2294,7 @@ class ChannelPromotionTests(unittest.TestCase):
             candidate_digest=release.LEGACY_STABLE_DIGEST,
             immutable_observations=self.immutable(
                 commit=release.LEGACY_STABLE_COMMIT, digest=release.LEGACY_STABLE_DIGEST),
-            qualification=self.qualify(tag=release.NEXT_STABLE_GIT_TAG))
+            qualification=self.qualify(tag=release.OCCUPIED_PRODUCT_TAG))
         self.assertEqual(action, "refuse")
 
     def test_stable_alias_only_moves_from_verified_baseline(self):
@@ -3329,6 +3329,18 @@ class StableReleasePublicationTests(unittest.TestCase):
         self.assertEqual(release.stable_alias_decision(active, stale)["action"], "refuse")
         half = {**active, "ghcr": ("present", {**active["ghcr"][1], "platforms": set()})}
         self.assertEqual(release.stable_alias_decision(half, latest)["action"], "refuse")
+
+    def test_immutable_retry_fills_only_absent_registry_from_the_verified_archive(self):
+        prior = self.alias("present", self.DIGEST, self.COMMIT)
+        observed = {"docker_hub": prior, "ghcr": self.alias("absent")}
+        self.assertEqual(release.staged_immutable_targets(observed, self.DIGEST, self.COMMIT), ["ghcr"])
+        observed["ghcr"] = prior
+        self.assertEqual(release.staged_immutable_targets(observed, self.DIGEST, self.COMMIT), [])
+        for bad in (self.alias("present", self.DIGEST, "a" * 40),
+                    self.alias("present", "sha256:" + "0" * 64, self.COMMIT),
+                    self.alias("unknown")):
+            with self.assertRaises(ValueError):
+                release.staged_immutable_targets({**observed, "ghcr": bad}, self.DIGEST, self.COMMIT)
 
     def test_first_alias_interruption_resumes_only_the_missing_verified_baseline(self):
         ok = self.alias("present", self.DIGEST, self.COMMIT)

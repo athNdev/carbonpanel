@@ -18,7 +18,7 @@ early testing and never move a stable alias.
 
 ## UPGRADE NOTES (from v1.0.40)
 
-**2.0.0 is a MAJOR release.** An unchanged v1.0.40 configuration does not
+**2.0.1 is a MAJOR release.** An unchanged v1.0.40 configuration does not
 upgrade cleanly. The Connect/HTTP wire contract and database schema are additive
 and compatible; the breaks are in configuration and operating behavior. Back up
 the database (db + wal + shm), configuration, worlds and backups, and rehearse on
@@ -55,7 +55,7 @@ OIDC/PROXY migration go/no-go steps above. See
 
 The 1.0 line stays at `1.0.40` as the current rollback path (not a permanent ban
 on future 1.0.x maintenance). The next planned stable is
-**`carbonpanel-v2.0.0` (MAJOR)**: the wire/Connect API and schema are additive,
+**`carbonpanel-v2.0.1` (MAJOR)**: the wire/Connect API and schema are additive,
 but three intentional operator/upgrade changes break an unchanged v1.0.40
 config, so a compatible MINOR would be dishonest. See
 [UPGRADE NOTES](#upgrade-notes-from-v1040) before upgrading. Before changing a
@@ -66,7 +66,8 @@ published versions and Go module endpoints are never renumbered, retargeted or
 unpublished. A tag identifies one source commit. Published releases and their
 assets are not overwritten. Correct a bad release with a new version.
 `web/carbon-panel/package.json` is a private workspace package, not a second
-release-version counter.
+release-version counter. The earlier `carbonpanel-v2.0.0` tag is occupied at
+`69ddb46d596aea8ed117a3dba6a1f63521572664` and stays at that commit.
 
 ## Version domains and promotion
 
@@ -122,16 +123,16 @@ Download an archive from [GitHub Releases](https://github.com/athNdev/carbonpane
 The five targets are Linux amd64/arm64, macOS Intel/Apple Silicon, and Windows
 amd64. The current verified stable is `1.0.40` (Git tag `v1.0.40`); its fixed
 archive set and digests are recorded in [release history](release-history.md).
-A future, not-yet-published product release tagged `carbonpanel-v2.0.0` keeps
-the same archive naming convention, derived from its SemVer field (`v2.0.0`
+A future, not-yet-published product release tagged `carbonpanel-v2.0.1` keeps
+the same archive naming convention, derived from its SemVer field (`v2.0.1`
 internally for archive names). For example:
 
 ```text
-carbon-panel_v2.0.0_linux_amd64.tar.gz
-carbon-panel_v2.0.0_linux_arm64.tar.gz
-carbon-panel_v2.0.0_darwin_amd64.tar.gz
-carbon-panel_v2.0.0_darwin_arm64.tar.gz
-carbon-panel_v2.0.0_windows_amd64.zip
+carbon-panel_v2.0.1_linux_amd64.tar.gz
+carbon-panel_v2.0.1_linux_arm64.tar.gz
+carbon-panel_v2.0.1_darwin_amd64.tar.gz
+carbon-panel_v2.0.1_darwin_arm64.tar.gz
+carbon-panel_v2.0.1_windows_amd64.zip
 ```
 
 Every archive contains `carbon-panel`, `carbon-storage` (with `.exe` on
@@ -191,8 +192,8 @@ short-lived `GITHUB_TOKEN` with package-write permission.
 | Tag | Meaning |
 | --- | --- |
 | `1.0.40` | The verified historical stable release, immutable; `1.0` is its current rollback alias |
-| `2.0.0-alpha.1` | An exact future prerelease; never moves a stable alias |
-| `2.0.0` | An exact stable release, immutable |
+| `2.0.1-alpha.1` | An exact future prerelease; never moves a stable alias |
+| `2.0.1` | An exact stable release, immutable |
 | `2.0` | Moving minor channel, promoted only with a stable `2.0.x` release |
 | `latest` | Moving stable channel, promoted only with a stable release |
 | `edge`, `sha-…` | Docker Hub development builds from CI-verified main commits; not versions |
@@ -331,26 +332,18 @@ Nightly revision belongs in the published artifact/marker and the receipt only;
 no mutable Nightly state is committed to main, which would self-trigger CI.
 Canonical `carbonpanel-v*` builds stay immutable. A reconciliation run re-verifies
 and repairs drift. `latest` and the `stable` alias move only from the verified
-stable digest (`sha256:ead260ef…`, commit `f88748be…`); the planned
-`carbonpanel-v2.0.0` stable is not a channel publication.
+stable digest observed in both registries and bound to the public docs revision.
 
-**Planned-boundary data vs a later patch release.** The release scripts currently
-carry `NEXT_STABLE_GIT_TAG = carbonpanel-v2.0.0`, `NEXT_STABLE_SEMVER = 2.0.0`
-and `NEXT_STABLE_MINOR = 2.0` as reviewed policy data, and the classified catalog
-`docs/release-history.json` records the same `next_stable` boundary plus the
-MAJOR breaking changes. Validation and release reporting therefore assume the
-provisional 2.0.0 boundary today; a channel move to that tag is refused. A later
-`carbonpanel-v2.0.1` stable is **catalog-driven, not derived from the old 2.0.0
-literal**: it requires a new reviewed catalog entry classified as a Carbon Panel
-published stable (exact peeled commit and verified digest), the matching
-`next_stable`/compatibility update in `docs/website-source.json` and the shared
-index via `version_bump.py bump --apply`, and the corresponding reviewed update
-of those release-script constants on the same commit. The existing catalog rows
-`v2.0.0` and `v2.0.1` are `upstream-identical` historical records; their tag
-names, peel commits and provenance are immutable and are never rewritten or
-repurposed as panel releases. Release-note wording for the SSO/OIDC breaking
-changes belongs to the SSO owner; OSS-413 references it but does not edit those
-notes.
+**Selecting the next Stable.** The classified catalog records the selected
+`next_stable` identity, its minor alias and its MAJOR migration boundary.
+The occupied product tag `carbonpanel-v2.0.0` stays at its recorded Git
+commit. The inherited plain tags `v2.0.0` and `v2.0.1` retain their
+historical provenance. For `carbonpanel-v2.0.1`, the workflow renders the
+canonical and versioned guides and checks both OpenAPI documents against
+2.0.1. It also checks the Nightly schema against the verified Nightly commit.
+The private download draft is complete before moving channel aliases.
+Rerunning failed jobs uses the original staged OCI archive and checks every
+existing immutable reference before copying to an absent registry.
 
 No legacy alias-write step remains in any workflow: Nightly and Stable aliases
 move only inside the qualified transaction. A stable release binds its exact
@@ -403,7 +396,7 @@ Releases link; they remain correctly marked as prereleases.
 1. Update the changelog and upgrade documentation for shipped changes. Merge the
    intended commit and wait for **Continuous Integration** on main to succeed.
 2. Open **Actions → Carbon Panel Release → Run workflow**. Enter the canonical
-   product tag (for example `carbonpanel-v2.0.0`) and the exact commit (or
+   product tag (for example `carbonpanel-v2.0.1`) and the exact commit (or
    `main`). Leave **publish** off for a complete build and verification
    rehearsal. The rehearsal creates no tag or release and pushes no image; its
    downloads are retained as workflow artifacts.
