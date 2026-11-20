@@ -241,7 +241,7 @@ one at https://mozilla.org/MPL/2.0/.
 					aria-pressed={statusFilter === 'running'}
 					class="cursor-pointer rounded-none border px-2.5 py-1 font-mono text-xs uppercase transition-colors {statusFilter ===
 					'running'
-						? 'border-success bg-success text-primary-foreground'
+						? 'border-success bg-success/15 text-success-text'
 						: 'border-success/50 bg-background text-success-text hover:bg-accent'}"
 				>
 					Running ({servers.filter((s) => s.status === ServerStatus.RUNNING).length})
@@ -392,7 +392,12 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon DataTable Layout (Requirement 2) -->
 	{:else if viewMode === 'table'}
-		<div class="w-full overflow-x-auto rounded-none border border-border bg-background">
+		<div
+			class="fleet-table-scroll focus-ring w-full rounded-none border border-border bg-background"
+			role="region"
+			aria-label="Server inventory table"
+			tabindex="0"
+		>
 			<table class="w-full border-collapse text-left font-sans text-sm">
 				<!-- Sharp Header Row #393939 -->
 				<thead

@@ -107,6 +107,17 @@ function startPackagedServer() {
 
 // Public-seam seeds. Only network responses at the external API boundary are
 // stubbed; no source module, store or component internal is imported or driven.
+const LARGE_FLEET = Array.from({ length: 8 }, (_, index) => ({
+	id: `srv-large-${index}`,
+	name: `Very long fixture server name ${index} for responsive dashboard verification`,
+	status: index % 3 === 0 ? 'SERVER_STATUS_ERROR' : index % 3 === 1 ? 'SERVER_STATUS_RUNNING' : 'SERVER_STATUS_STOPPED',
+	modLoader: 'MOD_LOADER_VANILLA',
+	version: '1.21.1',
+	port: 25570 + index,
+	memory: 65536,
+	maxPlayers: 999
+}));
+
 const FLEET = [
 	{
 		id: 'srv-1',
@@ -285,6 +296,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 		}
 		if (method === 'ListServers') {
 			if (state.servers === 'error') return fail('Fixture servers unavailable');
+			if (state.servers === 'large') return reply({ servers: LARGE_FLEET });
 			return reply({ servers: state.servers === 'empty' ? [] : FLEET });
 		}
 		if (method === 'GetServer') {
@@ -597,7 +609,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 		const page = await context.newPage();
 		await seedPackagedRoutes(page, state, 'anonymous');
 
-		for (const width of [1440, 768, 360]) {
+		for (const width of [1440, 1024, 768, 360]) {
 			await page.setViewportSize({ width, height: 900 });
 			for (const route of PACKAGED_ROUTES) {
 				await page.goto(root + route.path, { waitUntil: 'domcontentloaded' });
@@ -757,6 +769,48 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
           };
         },
       );
+			await check(`dashboard @${width} ${theme}: KPI footers wrap without clipping`, async () => {
+				const readTiles = () => page.evaluate(() => {
+					const tiles = [...document.querySelectorAll('[data-testid="showcase-kpi-tiles"] > div')];
+					if (tiles.length !== 4) throw new Error('Expected four populated KPI tiles');
+					return tiles.map((tile) => {
+						const footer = tile.querySelector('.border-t');
+						const spans = footer ? [...footer.querySelectorAll('span')] : [];
+						return {
+							tileOverflow: tile.scrollWidth > tile.clientWidth + 1,
+							footerOverflow: footer ? footer.scrollWidth > footer.clientWidth + 1 : false,
+							clipped: spans
+								.filter((span) => span.scrollWidth > span.clientWidth + 1)
+								.map((span) => span.textContent?.trim() ?? ''),
+							text: (footer?.textContent ?? '').replace(/\s+/g, ' ').trim()
+						};
+					});
+				});
+				await page.goto(root + '/', { waitUntil: 'domcontentloaded' });
+				await page.getByRole('heading', { name: 'Cluster Overview', level: 1 }).waitFor();
+				await page.locator('[data-testid="showcase-kpi-tiles"] > div').first().waitFor();
+				const samples = [await readTiles()];
+				if (width === 1024) {
+					await page.locator('[aria-label="Toggle Navigation"]').click();
+					await page.waitForTimeout(250);
+					samples.push(await readTiles());
+				}
+				state.servers = 'large';
+				await page.goto(root + '/', { waitUntil: 'domcontentloaded' });
+				await page.getByRole('heading', { name: 'Cluster Overview', level: 1 }).waitFor();
+				await page.locator('[data-testid="showcase-kpi-tiles"] > div').first().waitFor();
+				if (process.env.UI_PASS_SHOTS) {
+					await page.screenshot({ path: `${process.env.UI_PASS_SHOTS}/dashboard-kpi-${width}-${theme}.png` });
+				}
+				samples.push(await readTiles());
+				state.servers = 'populated';
+				const bad = samples.flat().filter((tile) => tile.tileOverflow || tile.footerOverflow || tile.clipped.length > 0);
+				if (bad.length > 0) {
+					throw new Error(`dashboard KPI footer clipped: ${JSON.stringify(bad)}`);
+				}
+				return samples.map((sample) => sample.map((tile) => tile.text));
+			});
+
 			for (const path of ['/servers', '/servers/srv-1']) {
 				await page.goto(root + path, { waitUntil: 'domcontentloaded' });
 				await page.locator('h1').first().waitFor();
@@ -996,6 +1050,18 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 					.getByRole('alert')
 					.filter({ hasText: 'Invalid username or password' });
 				await announced.first().waitFor();
+				if (!(await announced.first().evaluate((node) => node === document.activeElement))) {
+					throw new Error('Failed sign-in did not focus the error message');
+				}
+				const recovery = page.getByRole('button', { name: 'Forgot access? Recovery' });
+				await recovery.click();
+				if (!(await page.getByLabel('Recovery Key', { exact: true }).evaluate((node) => node === document.activeElement))) {
+					throw new Error('Opening recovery did not focus the recovery key field');
+				}
+				await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+				if (!(await recovery.evaluate((node) => node === document.activeElement))) {
+					throw new Error('Canceling recovery did not return focus');
+				}
 				return {
 					path: await page.evaluate(() => location.pathname),
 					error: true,

@@ -9,7 +9,8 @@ one at https://mozilla.org/MPL/2.0/.
 -->
 
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import { formatRpcError } from '$lib/api/rpc-error';
 	import { goto } from '$app/navigation';
 	import { asset, resolve } from '$app/paths';
 	import { create } from '@bufbuild/protobuf';
@@ -29,6 +30,25 @@ one at https://mozilla.org/MPL/2.0/.
 	let confirmPassword = $state('');
 	let loading = $state(false);
 	let error = $state('');
+	let statusPending = $state(true);
+	let errorBanner = $state<HTMLDivElement>();
+	let recoveryTrigger = $state<HTMLButtonElement>();
+	let recoveryPanel = $state<HTMLDivElement>();
+
+	async function showError(message: string) {
+		error = message;
+		await tick();
+		errorBanner?.focus();
+	}
+
+	async function toggleRecovery(open: boolean) {
+		showRecovery = open;
+		recoveryKey = '';
+		error = '';
+		await tick();
+		if (open) recoveryPanel?.querySelector('input')?.focus();
+		else recoveryTrigger?.focus();
+	}
 	let authStatus = $state({
 		enabled: false,
 		firstUserSetup: false,
@@ -49,6 +69,10 @@ one at https://mozilla.org/MPL/2.0/.
 	let invitePin = $state('');
 
 	onMount(() => {
+		void initializeSignIn();
+	});
+
+	async function initializeSignIn() {
 		// The login route renders outside CarbonShell, so hydrate the shared
 		// preference owner here before choosing a theme-aware brand mark.
 		displayPreferences.hydrate();
@@ -57,9 +81,8 @@ one at https://mozilla.org/MPL/2.0/.
 		// Canonical OIDC error states from the callback. Never render raw IdP text.
 		const oidcError = urlParams.get('error');
 		if (oidcError) {
-			error = oidcErrorMessage(oidcError);
+			void showError(oidcErrorMessage(oidcError));
 			window.history.replaceState({}, '', '/login');
-			return;
 		}
 
 		// The callback returns a one-time exchange code. The session token is
@@ -68,7 +91,7 @@ one at https://mozilla.org/MPL/2.0/.
 		if (exchangeCode) {
 			loading = true;
 			window.history.replaceState({}, '', '/login');
-			fetch('/api/v1/auth/oidc/exchange', {
+			await fetch('/api/v1/auth/oidc/exchange', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				credentials: 'same-origin',
@@ -83,14 +106,13 @@ one at https://mozilla.org/MPL/2.0/.
 				})
 				.then((valid) => {
 					loading = false;
-					if (valid) goto(resolve('/'));
-					else error = 'Session validation failed. Please try again.';
+					if (valid) return goto(resolve('/'));
+					return showError('Session validation failed. Please try again.');
 				})
 				.catch(() => {
 					loading = false;
-					error = 'SSO sign-in could not be completed. Please try again.';
+					return showError('SSO sign-in could not be completed. Please try again.');
 				});
-			return;
 		}
 
 		// Check for invite code in URL
@@ -105,6 +127,7 @@ one at https://mozilla.org/MPL/2.0/.
 		// Check auth status
 		authStore.checkAuthStatus().then(async (status) => {
 			authStatus = status;
+			statusPending = false;
 			oidcEnabled = $authStore.oidcEnabled;
 			localAuthEnabled = $authStore.localAuthEnabled;
 
@@ -140,7 +163,7 @@ one at https://mozilla.org/MPL/2.0/.
 				window.history.replaceState({}, '', '/login');
 			}
 		});
-	});
+	}
 
 	async function handleLogin() {
 		error = '';
@@ -153,7 +176,7 @@ one at https://mozilla.org/MPL/2.0/.
 				goto(resolve('/'));
 			}, 100);
 		} catch (err: unknown) {
-			error = err instanceof Error ? err.message : 'Login failed';
+			await showError(formatRpcError(err, 'Invalid username or password'));
 			loading = false;
 		}
 	}
@@ -162,12 +185,12 @@ one at https://mozilla.org/MPL/2.0/.
 		error = '';
 
 		if (password !== confirmPassword) {
-			error = 'Passwords do not match';
+			await showError('Passwords do not match');
 			return;
 		}
 
 		if (password.length < 12) {
-			error = 'Password must be at least 12 characters';
+			await showError('Password must be at least 12 characters');
 			return;
 		}
 
@@ -190,7 +213,7 @@ one at https://mozilla.org/MPL/2.0/.
 				goto(resolve('/'));
 			}, 100);
 		} catch (err: unknown) {
-			error = err instanceof Error ? err.message : 'Registration failed';
+			await showError(formatRpcError(err, 'Registration failed'));
 			loading = false;
 		}
 	}
@@ -204,7 +227,7 @@ one at https://mozilla.org/MPL/2.0/.
 				window.location.href = response.loginUrl;
 			}
 		} catch (err: unknown) {
-			error = err instanceof Error ? err.message : 'Failed to initiate SSO login';
+			await showError(formatRpcError(err, 'Failed to initiate SSO login'));
 		}
 	}
 
@@ -216,7 +239,7 @@ one at https://mozilla.org/MPL/2.0/.
 			toast.success('Panel reset to first-user setup');
 			window.location.reload();
 		} catch (err: unknown) {
-			error = err instanceof Error ? err.message : 'Invalid recovery key';
+			await showError(formatRpcError(err, 'Invalid recovery key'));
 			loading = false;
 		}
 	}
@@ -231,6 +254,7 @@ one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
+	let showAuthTabs = $derived((authStatus.allowRegistration || inviteValid) && localAuthEnabled);
 	const authTabs = [
 		{ id: 'login', label: 'Login' },
 		{ id: 'register', label: 'Register' }
@@ -261,7 +285,7 @@ one at https://mozilla.org/MPL/2.0/.
 	<title>Carbon Panel - Login</title>
 </svelte:head>
 
-<div
+<main
 	class="flex min-h-screen items-center justify-center rounded-none bg-background p-4 font-sans text-foreground"
 >
 	<div
@@ -289,6 +313,8 @@ one at https://mozilla.org/MPL/2.0/.
 		{#if error}
 			{#key error}
 				<div
+					bind:this={errorBanner}
+					tabindex="-1"
 					role="alert"
 					class="motion-rise-in mb-6 flex items-start gap-2.5 rounded-none border-l-4 border-destructive bg-destructive/10 p-4 text-xs text-destructive-text"
 				>
@@ -298,7 +324,9 @@ one at https://mozilla.org/MPL/2.0/.
 			{/key}
 		{/if}
 
-		{#if authStatus.firstUserSetup}
+		{#if statusPending}
+			<p role="status" class="text-sm text-muted-foreground">Checking sign-in options�</p>
+		{:else if authStatus.firstUserSetup}
 			<!-- First User Setup Form -->
 			<form onsubmit={handleSubmit} class="space-y-4">
 				<CarbonTextInput
@@ -360,12 +388,17 @@ one at https://mozilla.org/MPL/2.0/.
 				</CarbonButton>
 			</form>
 		{:else}
-			{#if (authStatus.allowRegistration || inviteValid) && localAuthEnabled}
-				<CarbonTabs tabs={authTabs} bind:selectedTab={mode} class="mb-6" />
+			{#if showAuthTabs}
+				<CarbonTabs idPrefix="auth" tabs={authTabs} bind:selectedTab={mode} class="mb-6" />
 			{/if}
 
 			{#if mode === 'login'}
-				<div class="motion-fade-in space-y-4">
+				<div
+					role={showAuthTabs ? 'tabpanel' : undefined}
+					id="auth-panel-login"
+					aria-labelledby={showAuthTabs ? 'auth-tab-login' : undefined}
+					class="motion-fade-in space-y-4"
+				>
 					{#if localAuthEnabled}
 						<form onsubmit={handleSubmit} class="space-y-4">
 							<CarbonTextInput
@@ -423,77 +456,87 @@ one at https://mozilla.org/MPL/2.0/.
 				</div>
 			{:else}
 				<!-- Registration Form -->
-				<form onsubmit={handleSubmit} class="motion-fade-in space-y-4">
-					{#if inviteValid && inviteDescription}
-						<div
-							class="flex items-center gap-2 rounded-none border-l-4 border-success bg-success/15 p-3 text-xs text-success-text"
-						>
-							<TicketCheck class="h-4 w-4 shrink-0" />
-							<span>{inviteDescription}</span>
-						</div>
-					{/if}
-					<CarbonTextInput
-						label="Username"
-						autocomplete="username"
-						placeholder="Choose a username"
-						bind:value={username}
-						required
-						disabled={loading}
-					/>
-					<CarbonTextInput
-						type="email"
-						autocomplete="email"
-						label="Email (optional)"
-						placeholder="your@email.com"
-						bind:value={email}
-						disabled={loading}
-					/>
-					<CarbonTextInput
-						revealable
-						type="password"
-						label="Password"
-						autocomplete="new-password"
-						placeholder="Choose a password (min 12 chars)"
-						bind:value={password}
-						required
-						disabled={loading}
-					/>
-					<CarbonTextInput
-						revealable
-						type="password"
-						label="Confirm Password"
-						placeholder="Confirm your password"
-						bind:value={confirmPassword}
-						required
-						disabled={loading}
-					/>
-					{#if inviteValid && inviteRequiresPin}
+				<div
+					role={showAuthTabs ? 'tabpanel' : undefined}
+					id="auth-panel-register"
+					aria-labelledby={showAuthTabs ? 'auth-tab-register' : undefined}
+				>
+					<form onsubmit={handleSubmit} class="motion-fade-in space-y-4">
+						{#if inviteValid && inviteDescription}
+							<div
+								class="flex items-center gap-2 rounded-none border-l-4 border-success bg-success/15 p-3 text-xs text-success-text"
+							>
+								<TicketCheck class="h-4 w-4 shrink-0" />
+								<span>{inviteDescription}</span>
+							</div>
+						{/if}
 						<CarbonTextInput
-							revealable
-							type="password"
-							label="Invite PIN"
-							autocomplete="off"
-							placeholder="Enter invite PIN"
-							bind:value={invitePin}
+							label="Username"
+							autocomplete="username"
+							placeholder="Choose a username"
+							bind:value={username}
 							required
 							disabled={loading}
 						/>
-					{/if}
-					<CarbonButton type="submit" class="w-full justify-center rounded-none" disabled={loading}>
-						{#if loading}
-							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-							Creating account...
-						{:else}
-							Create Account
+						<CarbonTextInput
+							type="email"
+							autocomplete="email"
+							label="Email (optional)"
+							placeholder="your@email.com"
+							bind:value={email}
+							disabled={loading}
+						/>
+						<CarbonTextInput
+							revealable
+							type="password"
+							label="Password"
+							autocomplete="new-password"
+							placeholder="Choose a password (min 12 chars)"
+							bind:value={password}
+							required
+							disabled={loading}
+						/>
+						<CarbonTextInput
+							revealable
+							type="password"
+							label="Confirm Password"
+							placeholder="Confirm your password"
+							bind:value={confirmPassword}
+							required
+							disabled={loading}
+						/>
+						{#if inviteValid && inviteRequiresPin}
+							<CarbonTextInput
+								revealable
+								type="password"
+								label="Invite PIN"
+								autocomplete="off"
+								placeholder="Enter invite PIN"
+								bind:value={invitePin}
+								required
+								disabled={loading}
+							/>
 						{/if}
-					</CarbonButton>
-				</form>
+						<CarbonButton
+							type="submit"
+							class="w-full justify-center rounded-none"
+							disabled={loading}
+						>
+							{#if loading}
+								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+								Creating account...
+							{:else}
+								Create Account
+							{/if}
+						</CarbonButton>
+					</form>
+				</div>
 			{/if}
 		{/if}
 
 		<!-- Recovery Drawer / Options -->
 		{#if showRecovery}
-			<div class="mt-6 space-y-4 border-t border-border pt-6">
+			<div bind:this={recoveryPanel} class="mt-6 space-y-4 border-t border-border pt-6">
 				<div
 					class="rounded-none border-l-4 border-destructive bg-destructive/10 p-3.5 text-xs text-destructive-text"
 				>
@@ -514,10 +557,7 @@ one at https://mozilla.org/MPL/2.0/.
 					<CarbonButton
 						kind="secondary"
 						class="w-1/2 justify-center rounded-none"
-						onclick={() => {
-							showRecovery = false;
-							error = '';
-						}}
+						onclick={() => toggleRecovery(false)}
 						disabled={loading}
 					>
 						Cancel
@@ -537,12 +577,13 @@ one at https://mozilla.org/MPL/2.0/.
 					</CarbonButton>
 				</div>
 			</div>
-		{:else if !authStatus.firstUserSetup}
+		{:else if !statusPending && !authStatus.firstUserSetup}
 			<div class="mt-6 border-t border-border pt-4 text-center">
 				<button
 					type="button"
 					class="inline-flex min-h-6 cursor-pointer items-center gap-1.5 rounded-none px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-					onclick={() => (showRecovery = true)}
+					bind:this={recoveryTrigger}
+					onclick={() => toggleRecovery(true)}
 				>
 					<KeyRound class="h-3.5 w-3.5" />
 					Forgot access? Recovery
@@ -568,4 +609,4 @@ one at https://mozilla.org/MPL/2.0/.
 			</CarbonButton>
 		{/if}
 	</div>
-</div>
+</main>

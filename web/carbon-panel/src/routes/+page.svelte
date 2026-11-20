@@ -319,20 +319,20 @@ one at https://mozilla.org/MPL/2.0/.
 </script>
 
 {#if isLoading}
-	<div class="space-y-6 bg-background text-foreground">
+	<div class="space-y-6 bg-background text-foreground" role="status" aria-label="Loading dashboard">
 		<div
 			class="flex flex-col justify-between gap-4 border-b border-border pb-4 sm:flex-row sm:items-center"
 		>
 			<div class="w-full">
 				<div class="motion-skeleton h-8 w-56 bg-card"></div>
-				<div class="motion-skeleton mt-2 h-3 w-80 bg-card"></div>
+				<div class="motion-skeleton mt-2 h-3 w-80 max-w-full bg-card"></div>
 			</div>
 			<div class="flex items-center gap-2">
 				<div class="motion-skeleton h-8 w-28 bg-card"></div>
 				<div class="motion-skeleton h-8 w-32 bg-card"></div>
 			</div>
 		</div>
-		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+		<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 			{#each [0, 1, 2, 3] as _ (_)}
 				<div
 					class="flex h-[140px] flex-col justify-between rounded-none border border-border bg-card p-6 select-none"
@@ -394,7 +394,7 @@ one at https://mozilla.org/MPL/2.0/.
 
 		<!-- Carbon KPI Tiles -->
 		<div
-			class="motion-stagger grid gap-4 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0"
+			class="motion-stagger grid gap-4 md:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0"
 			data-testid="showcase-kpi-tiles"
 		>
 			<!-- Tile 1: Total Servers -->
@@ -415,9 +415,9 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
+					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
-					<div class="flex items-center gap-3">
+					<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
 						<div class="flex items-center gap-1.5 text-success-text">
 							<span class="h-1.5 w-1.5 bg-success"></span>
 							<span>{stats.running} ACTIVE</span>
@@ -458,7 +458,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
+					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
 					{#if stats.totalPlayers > 0}
 						<div class="flex items-center gap-1.5 text-success-text">
@@ -508,10 +508,11 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
+					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
 					<div
-						class="flex items-center gap-1.5 {stats.memUsagePercent > 85
+						class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 {stats.memUsagePercent >
+						85
 							? 'text-destructive-text'
 							: stats.memUsagePercent > 70
 								? 'text-warning-text'
@@ -560,7 +561,7 @@ one at https://mozilla.org/MPL/2.0/.
 					</div>
 				</div>
 				<div
-					class="mt-3 flex items-center justify-between border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
+					class="mt-3 flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t border-border pt-3 font-sans text-[11px] text-muted-foreground"
 				>
 					{#if stats.running === 0}
 						<div class="flex items-center gap-1.5 text-muted-foreground">
@@ -574,7 +575,7 @@ one at https://mozilla.org/MPL/2.0/.
 						</div>
 					{:else}
 						<div
-							class="flex items-center gap-1.5 {stats.avgTps >= 18
+							class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 {stats.avgTps >= 18
 								? 'text-success-text'
 								: 'text-destructive-text'}"
 						>
@@ -634,10 +635,10 @@ one at https://mozilla.org/MPL/2.0/.
 		{/if}
 
 		<!-- Server list & Recent activity Grid -->
-		<div class="grid gap-6 lg:grid-cols-7 [&>*]:min-w-0">
+		<div class="grid gap-6 2xl:grid-cols-7 [&>*]:min-w-0">
 			<!-- Carbon DataTable: Server Overview (4 cols on lg) -->
 			<div
-				class="flex flex-col justify-between rounded-none border border-border bg-card lg:col-span-4"
+				class="flex flex-col justify-between rounded-none border border-border bg-card 2xl:col-span-4"
 			>
 				<div>
 					<!-- Table Toolbar / Header -->
@@ -682,7 +683,12 @@ one at https://mozilla.org/MPL/2.0/.
 							</CarbonButton>
 						</div>
 					{:else}
-						<div class="overflow-x-auto">
+						<div
+							class="fleet-table-scroll focus-ring"
+							role="region"
+							aria-label="Server overview table"
+							tabindex="0"
+						>
 							<table class="w-full border-collapse text-left font-sans text-sm">
 								<thead class="border-b border-border bg-secondary text-foreground">
 									<tr>
@@ -780,9 +786,9 @@ one at https://mozilla.org/MPL/2.0/.
 															title={server.status === ServerStatus.DEEPSLEEP
 																? 'Wake Server'
 																: 'Start Server'}
-															aria-label={server.status === ServerStatus.DEEPSLEEP
-																? 'Wake Server'
-																: 'Start Server'}
+															aria-label={(server.status === ServerStatus.DEEPSLEEP
+																? 'Wake '
+																: 'Start ') + server.name}
 														>
 															<PlayCircle class="h-4 w-4" />
 														</button>
@@ -792,7 +798,7 @@ one at https://mozilla.org/MPL/2.0/.
 																onclick={() => handleServerAction('stop', server)}
 																class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 																title="Stop Server"
-																aria-label="Stop Server"
+																aria-label={'Stop ' + server.name}
 															>
 																<StopCircle class="h-4 w-4" />
 															</button>
@@ -803,7 +809,7 @@ one at https://mozilla.org/MPL/2.0/.
 															onclick={() => handleServerAction('start', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-accent-text transition-colors hover:bg-secondary hover:text-accent-text"
 															title="Resume Server"
-															aria-label="Resume Server"
+															aria-label={'Resume ' + server.name}
 														>
 															<PlayCircle class="h-4 w-4" />
 														</button>
@@ -812,7 +818,7 @@ one at https://mozilla.org/MPL/2.0/.
 															onclick={() => handleServerAction('stop', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 															title="Stop Server"
-															aria-label="Stop Server"
+															aria-label={'Stop ' + server.name}
 														>
 															<StopCircle class="h-4 w-4" />
 														</button>
@@ -822,13 +828,14 @@ one at https://mozilla.org/MPL/2.0/.
 															onclick={() => handleServerAction('stop', server)}
 															class="flex h-7 w-7 cursor-pointer items-center justify-center text-destructive-text transition-colors hover:bg-secondary hover:text-destructive-text"
 															title="Stop Server"
-															aria-label="Stop Server"
+															aria-label={'Stop ' + server.name}
 														>
 															<StopCircle class="h-4 w-4" />
 														</button>
 													{/if}
 													<a
 														href={resolve('/servers/[id]', { id: server.id })}
+														aria-label={'Manage ' + server.name}
 														class="mono-label-accent inline-flex h-7 items-center px-2.5 transition-colors hover:bg-secondary hover:text-foreground"
 													>
 														Manage
@@ -845,7 +852,7 @@ one at https://mozilla.org/MPL/2.0/.
 			</div>
 
 			<!-- Carbon Structured List: Recent Activity (3 cols on lg) -->
-			<div class="flex flex-col rounded-none border border-border bg-card lg:col-span-3">
+			<div class="flex flex-col rounded-none border border-border bg-card 2xl:col-span-3">
 				<!-- Header -->
 				<div class="flex items-center justify-between border-b border-border bg-card p-4">
 					<div>
@@ -985,8 +992,8 @@ one at https://mozilla.org/MPL/2.0/.
 				class="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4"
 			>
 				<div class="flex items-center justify-between gap-3 px-4 py-3">
-					<span class="mono-label"> RPC Telemetry </span>
-					<CarbonTag type="green" size="sm">OPERATIONAL</CarbonTag>
+					<span class="mono-label">RPC telemetry</span>
+					<CarbonTag type="gray" size="sm">NOT MEASURED</CarbonTag>
 				</div>
 				<div class="flex items-center justify-between gap-3 px-4 py-3">
 					<span class="mono-label"> Network Proxy </span>

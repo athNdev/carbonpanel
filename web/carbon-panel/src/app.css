@@ -677,3 +677,13 @@ one at https://mozilla.org/MPL/2.0/.
 		height: auto;
 	}
 }
+
+/* Fleet tables keep native table semantics and a single keyboard scroll region. */
+.fleet-table-scroll {
+	overflow-x: auto;
+	scrollbar-width: thin;
+}
+.fleet-table-scroll > table {
+	display: table;
+	overflow: visible;
+}

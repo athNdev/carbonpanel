@@ -60,8 +60,13 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 	let passwordSaving = $state(false);
 	let passwordDone = $state(false);
 
-	function toggleProfile() {
+	let profileMenu = $state<HTMLDivElement>();
+	async function toggleProfile() {
 		profileOpen = !profileOpen;
+		if (profileOpen) {
+			await tick();
+			profileMenu?.querySelector('button')?.focus();
+		}
 	}
 
 	function closeProfile() {
@@ -119,13 +124,26 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 		}
 	}
 
-	function handleProfileKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') {
+	async function handleProfileKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape' && profileOpen) {
+			event.preventDefault();
 			profileOpen = false;
-			// The focused menuitem is removed with the menu; return focus to
-			// the trigger instead of dropping the user at the document root.
-			void tick().then(() => profileTriggerButton?.focus());
+			await tick();
+			profileTriggerButton?.focus();
+			return;
 		}
+		if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+		event.preventDefault();
+		const fromTrigger = event.currentTarget === profileTriggerButton;
+		profileOpen = true;
+		await tick();
+		if (!profileMenu) return;
+		const items = Array.from(profileMenu.querySelectorAll('button'));
+		const index = items.findIndex((item) => item === document.activeElement);
+		if (event.key === 'Home' || (fromTrigger && event.key === 'ArrowDown')) items[0]?.focus();
+		else if (event.key === 'End' || fromTrigger) items.at(-1)?.focus();
+		else
+			items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
 	}
 	let servers = $derived($activitySortedServers);
 	let runningCount = $derived($runningServers.length);
@@ -329,6 +347,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 							onkeydown={handleProfileKeydown}
 						></div>
 						<div
+							bind:this={profileMenu}
 							role="menu"
 							aria-label="Profile"
 							onkeydown={handleProfileKeydown}
@@ -383,6 +402,7 @@ file, You can obtain one at https://mozilla.org/MPL/2.0/.
 						     destinations are explicit NavItem hrefs but their route files land
 						     in separate PRs. The cast is scoped to this single call. -->
 						<a
+							aria-current={isCurrentPath(item.href) ? 'page' : undefined}
 							href={resolve(item.href as '/')}
 							onclick={closeMobileNav}
 							class="focus-ring relative flex items-center gap-3 py-2.5 font-sans text-sm transition-colors {sideNavExpanded

@@ -761,10 +761,10 @@ one at https://mozilla.org/MPL/2.0/.
 			<div class="space-y-3">
 				<Label for="target_node" class="text-sm font-medium">Migrate to Target Node</Label>
 				<div class="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-					<div class="flex-1">
+					<div class="min-w-0 flex-1">
 						<Select type="single" bind:value={targetNodeId} disabled={migrating || loadingNodes}>
-							<SelectTrigger id="target_node" class="h-10 w-full">
-								<span>
+							<SelectTrigger id="target_node" class="min-h-10 w-full py-1.5 whitespace-normal">
+								<span class="min-w-0 text-left [overflow-wrap:anywhere]">
 									{nodes.find((n) => n.id === targetNodeId)?.name || 'Select destination node...'}
 								</span>
 							</SelectTrigger>

@@ -714,7 +714,7 @@ SPDX-License-Identifier: MPL-2.0
 					</p>
 				</div>
 				<div class="border border-border bg-card p-4">
-					<p class="mono-label">Management</p>
+					<p class="mono-label">Server environment</p>
 					<div class="mt-2 flex flex-wrap items-center gap-2">
 						{#if description.target}
 							<CarbonTag type="blue" size="sm">WORLD VIEW OBSERVED</CarbonTag>
@@ -789,9 +789,8 @@ SPDX-License-Identifier: MPL-2.0
 						<h3 class="mono-label-strong">No active binding</h3>
 					</div>
 					<p class="mt-2 text-xs text-muted-foreground">
-						{description.presentation.hint}
-						Picking a compatible library world journals a stop-based swap; existing level bytes are preserved
-						and never overwritten.
+						Picking a compatible library world journals a stop-based swap; existing level bytes are
+						preserved and never overwritten.
 					</p>
 				</div>
 			{/if}
