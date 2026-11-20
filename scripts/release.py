@@ -1464,46 +1464,101 @@ def finalize(args):
 def local_oci_candidate(archive, expected_commit):
     """Derive an exact candidate from a locally exported OCI layout, no writes.
 
-    `archive` is a tar made by `docker buildx build --output type=oci,dest=...`
-    with NO registry push. The image digest is sha256 of the OCI index bytes
-    and the config blob must carry org.opencontainers.image.revision equal to
-    the exact trusted main commit. This is a temporary verification artifact
-    for the docs/digest gates, not a published image or a release qualification.
+    A Buildx `type=oci,dest=...` tar can wrap members with `./`, carry a nested
+    index and carry `attestation-manifest` / unknown-platform descriptors that
+    have no image config. The canonical digest is always sha256 of the OUTER
+    index bytes; only qualified platform manifests (real os/arch) may attest
+    org.opencontainers.image.revision. Attestations are skipped, malformed or
+    ambiguous descriptors fail closed, and nothing here writes to a registry,
+    Pages, a tag, an alias or a tracked file. Build evidence only.
     """
     with tarfile.open(archive) as bundle:
         def member_bytes(name):
-            try:
-                handle = bundle.extractfile(name)
-            except KeyError:
-                return None
-            return handle.read() if handle is not None else None
+            for candidate in (name, "./" + name):
+                try:
+                    handle = bundle.extractfile(candidate)
+                except KeyError:
+                    continue
+                return handle.read() if handle is not None else None
+            return None
 
-        index_bytes = member_bytes("index.json") or member_bytes("./index.json")
+        def hex_digest(value):
+            text = str(value or "")
+            if not text.startswith("sha256:") or not valid_digest(text):
+                return ""
+            return text.split(":", 1)[1]
+
+        index_bytes = member_bytes("index.json")
         if index_bytes is None:
             raise ValueError("OCI candidate has no index.json")
-        index = json.loads(index_bytes.decode("utf-8"))
-        digests = [item.get("digest", "") for item in (index.get("manifests") or [])]
-        if not digests or not all(valid_digest(item) for item in digests):
-            raise ValueError("OCI candidate index has no complete manifest digests")
-        config_digest = ""
-        for digest in digests:
-            manifest_bytes = member_bytes(f"blobs/sha256/{digest.split(':', 1)[1]}")
-            if manifest_bytes is None:
+        try:
+            root = json.loads(index_bytes.decode("utf-8"))
+        except ValueError as error:
+            raise ValueError(f"OCI candidate index is malformed: {error}") from error
+        if not isinstance(root.get("manifests"), list) or not root["manifests"]:
+            raise ValueError("OCI candidate index has no manifest descriptors")
+
+        queue = list(root["manifests"])
+        seen = set()
+        qualified = []
+        while queue:
+            descriptor = queue.pop(0)
+            if not isinstance(descriptor, dict):
+                raise ValueError("OCI candidate has a malformed descriptor")
+            annotations = descriptor.get("annotations") or {}
+            if "attestation-manifest" in str(annotations.get("vnd.docker.reference.type", "")):
                 continue
-            config_digest = (json.loads(manifest_bytes.decode("utf-8")).get("config") or {}).get(
-                "digest", "")
-            break
-        if not valid_digest(config_digest):
-            raise ValueError("OCI candidate manifest has no valid config digest")
-        config_bytes = member_bytes(f"blobs/sha256/{config_digest.split(':', 1)[1]}")
-        if config_bytes is None:
-            raise ValueError("OCI candidate config blob is missing")
-        revision = ((json.loads(config_bytes.decode("utf-8")).get("config") or {})
-                    .get("Labels") or {}).get("org.opencontainers.image.revision", "")
-    if revision != expected_commit:
-        raise ValueError(f"OCI candidate revision {revision!r} != expected {expected_commit}")
+            platform = descriptor.get("platform") or {}
+            if "unknown" in (str(platform.get("os")), str(platform.get("architecture"))):
+                continue
+            digest = hex_digest(descriptor.get("digest"))
+            if not digest:
+                raise ValueError("OCI candidate has a descriptor without a valid sha256 digest")
+            if digest in seen:
+                continue
+            seen.add(digest)
+            blob = member_bytes(f"blobs/sha256/{digest}")
+            if blob is None:
+                raise ValueError(f"OCI candidate manifest blob {digest[:12]} is missing")
+            try:
+                manifest = json.loads(blob.decode("utf-8"))
+            except ValueError as error:
+                raise ValueError(f"OCI candidate manifest {digest[:12]} is malformed: {error}") from error
+            media = str(descriptor.get("mediaType") or manifest.get("mediaType") or "")
+            if media.endswith("image.index.v1+json") or isinstance(manifest.get("manifests"), list):
+                queue.extend(manifest["manifests"])
+                continue
+            config_digest = hex_digest((manifest.get("config") or {}).get("digest"))
+            if not config_digest:
+                raise ValueError("OCI candidate manifest has no valid config digest")
+            config_bytes = member_bytes(f"blobs/sha256/{config_digest}")
+            if config_bytes is None:
+                raise ValueError("OCI candidate config blob is missing")
+            try:
+                config = json.loads(config_bytes.decode("utf-8"))
+            except ValueError as error:
+                raise ValueError(f"OCI candidate config blob is malformed: {error}") from error
+            labels = (config.get("config") or {}).get("Labels") or {}
+            qualified.append({
+                "platform": f"{platform.get('os')}/{platform.get('architecture')}",
+                "revision": labels.get("org.opencontainers.image.revision", ""),
+                "config_digest": config_digest,
+            })
+
+    if not qualified:
+        raise ValueError("OCI candidate has no qualified platform manifest with a config")
+    platforms = set()
+    for entry in qualified:
+        if not valid_commit(entry["revision"]):
+            raise ValueError(f"OCI candidate {entry['platform']} has no full-SHA revision label")
+        if entry["revision"] != expected_commit:
+            raise ValueError(
+                f"OCI candidate {entry['platform']} revision {entry['revision']!r} "
+                f"!= expected {expected_commit}")
+        platforms.add(entry["platform"])
     return {"digest": "sha256:" + hashlib.sha256(index_bytes).hexdigest(),
-            "revision": revision, "commit": expected_commit, "verified": True}
+            "revision": expected_commit, "commit": expected_commit,
+            "platforms": sorted(platforms), "verified": True}
 
 
 def local_oci_candidate_cli(args):

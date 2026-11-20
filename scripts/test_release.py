@@ -3105,52 +3105,100 @@ class LocalOciWorkflowSeamTests(unittest.TestCase):
 
 
 class LocalOciCandidateTests(unittest.TestCase):
-    """A no-write exact candidate: local OCI bytes bound to the tested commit."""
+    """No-write exact candidate: local OCI bytes bound to the tested commit."""
 
     COMMIT = "b" * 40
+    AMD, CFG, ARM, ARM_CFG, ATTEST, INNER = ("a" * 64, "c" * 64, "f" * 64,
+                                             "0" * 64, "e" * 64, "d" * 64)
 
-    def archive(self, revision=None, with_index=True):
-        index = {"manifests": [{"digest": "sha256:" + "a" * 64}]}
-        manifest = {"config": {"digest": "sha256:" + "c" * 64}}
-        config = {"config": {"Labels": {
-            "org.opencontainers.image.revision": revision or self.COMMIT}}}
+    def layout(self, prefix="", revision=None, nested=False, attest=False,
+               second_platform=False, ambiguous=False, missing_blob=False,
+               malformed=False, with_index=True):
+        rev = revision or self.COMMIT
+        index = {"manifests": [{
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:" + self.AMD,
+            "platform": {"os": "linux", "architecture": "amd64"}}]}
+        entries = {
+            "index.json": json.dumps(index).encode(),
+            "blobs/sha256/" + self.AMD: json.dumps({
+                "config": {"digest": "sha256:" + self.CFG}}).encode(),
+            "blobs/sha256/" + self.CFG: json.dumps({
+                "config": {"Labels": {"org.opencontainers.image.revision": rev}}}).encode(),
+        }
+        if nested:
+            inner = index
+            index = {"manifests": [{
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "digest": "sha256:" + self.INNER}]}
+            entries["blobs/sha256/" + self.INNER] = json.dumps(inner).encode()
+        if attest:
+            index["manifests"].append({
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "digest": "sha256:" + self.ATTEST,
+                "platform": {"os": "unknown", "architecture": "unknown"},
+                "annotations": {"vnd.docker.reference.type": "attestation-manifest"}})
+        if second_platform or ambiguous:
+            index["manifests"].append({
+                "digest": "sha256:" + self.ARM,
+                "platform": {"os": "linux", "architecture": "arm64"}})
+            entries["blobs/sha256/" + self.ARM] = json.dumps({
+                "config": {"digest": "sha256:" + self.ARM_CFG}}).encode()
+            entries["blobs/sha256/" + self.ARM_CFG] = json.dumps({
+                "config": {"Labels": {"org.opencontainers.image.revision":
+                                      "a" * 40 if ambiguous else rev}}}).encode()
+        if malformed:
+            index["manifests"].append("not-a-descriptor")
+        entries["index.json"] = json.dumps(index).encode()
+        if missing_blob:
+            entries.pop("blobs/sha256/" + self.AMD, None)
+        if not with_index:
+            entries.pop("index.json", None)
         out = io.BytesIO()
         with tarfile.open(fileobj=out, mode="w") as bundle:
-            for name, data in (
-                ("index.json", json.dumps(index).encode()),
-                ("blobs/sha256/" + "a" * 64, json.dumps(manifest).encode()),
-                ("blobs/sha256/" + "c" * 64, json.dumps(config).encode()),
-            ):
-                if name == "index.json" and not with_index:
-                    continue
-                info = tarfile.TarInfo(name)
+            for name, data in entries.items():
+                info = tarfile.TarInfo(prefix + name)
                 info.size = len(data)
                 bundle.addfile(info, io.BytesIO(data))
-        return out.getvalue(), json.dumps(index).encode()
+        return out.getvalue(), entries.get("index.json", b"")
 
-    def test_exact_local_oci_candidate_is_verified_without_registry_writes(self):
-        data, index_bytes = self.archive()
+    def verify(self, data):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "candidate-oci.tar"
             path.write_bytes(data)
-            result = release.local_oci_candidate(path, self.COMMIT)
-            self.assertTrue(result["verified"])
-            self.assertEqual(result["digest"], "sha256:" + release.sha256_bytes(index_bytes))
-            self.assertEqual(result["revision"], self.COMMIT)
+            return release.local_oci_candidate(path, self.COMMIT)
 
-    def test_wrong_revision_and_missing_index_refuse(self):
-        data, _ = self.archive(revision="a" * 40)
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "wrong.tar"
-            path.write_bytes(data)
-            with self.assertRaisesRegex(ValueError, "revision"):
-                release.local_oci_candidate(path, self.COMMIT)
-        data, _ = self.archive(with_index=False)
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "no-index.tar"
-            path.write_bytes(data)
-            with self.assertRaisesRegex(ValueError, "no index.json"):
-                release.local_oci_candidate(path, self.COMMIT)
+    def test_exact_local_oci_candidate_is_verified_without_registry_writes(self):
+        data, index_bytes = self.layout()
+        result = self.verify(data)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["digest"], "sha256:" + release.sha256_bytes(index_bytes))
+        self.assertEqual(result["revision"], self.COMMIT)
+        self.assertEqual(result["platforms"], ["linux/amd64"])
+
+    def test_buildx_prefixed_nested_index_with_attestation_and_two_platforms(self):
+        # The real failure shape: ./ members, wrapped multi-platform index and
+        # a BuildKit attestation descriptor with an unknown platform.
+        data, index_bytes = self.layout(prefix="./", nested=True, attest=True,
+                                        second_platform=True)
+        result = self.verify(data)
+        self.assertEqual(result["digest"], "sha256:" + release.sha256_bytes(index_bytes))
+        self.assertEqual(result["platforms"], ["linux/amd64", "linux/arm64"])
+        self.assertEqual(result["revision"], self.COMMIT)
+
+    def test_wrong_revision_and_wrong_digest_refuse(self):
+        with self.assertRaisesRegex(ValueError, "revision"):
+            self.verify(self.layout(revision="a" * 40)[0])
+        with self.assertRaisesRegex(ValueError, "manifest blob"):
+            self.verify(self.layout(missing_blob=True)[0])
+        with self.assertRaisesRegex(ValueError, "no index.json"):
+            self.verify(self.layout(with_index=False)[0])
+
+    def test_malformed_and_ambiguous_descriptors_refuse(self):
+        with self.assertRaisesRegex(ValueError, "malformed descriptor"):
+            self.verify(self.layout(malformed=True)[0])
+        with self.assertRaisesRegex(ValueError, "!="):
+            self.verify(self.layout(ambiguous=True)[0])
 
 
 if __name__ == "__main__":
