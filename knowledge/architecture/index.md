@@ -8,6 +8,7 @@
 - [Host-native private daemon mode — Rule](host-native-runtime-rule.md) — internal/noderuntime/native is the HOST-NATIVE LINUX PRIVATE DAEMON mode for
 - [Host-native private daemon mode — Rule (part 2)](host-native-runtime-rule-2.md) — issue-certificate-first atomic consume, controller-derived TLS topology
 - [Host-native private daemon mode — Why + How to check + Read next](host-native-runtime-why.md) — Parallel deployment modes share one enrollment/control contract. Keeping host
+- [Managed node outbound agent](managed-node-agent.md) — The managed agent binds enrollment and recurring health reports to an explicitly selected controller and private Docker daemon.
 - [Map viewing](world-viewing.md) — First-class maps are an observation-only surface behind an authenticated same-origin renderer proxy.
 - [Map viewing — Invariants](world-viewing-invariants.md) — world_view/read never grants observe_players, overlay edits or admin;
 - [Map viewing — Invariants (part 2)](world-viewing-invariants-2.md) — (no host allocation/publication), read-only /app/world bind of the canonical

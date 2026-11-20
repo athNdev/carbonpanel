@@ -16,9 +16,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -355,6 +357,47 @@ func BuildClaim(stateDir string, ch ClaimChallenge, now time.Time) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
+	req, err := buildClaim(dir, ch, nil, now)
+	if err != nil {
+		return nil, err
+	}
+	out, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := reserveClaim(dir, now); err != nil {
+		return nil, err
+	}
+	if err := writeFile(filepath.Join(dir, claimRequestFile), append(out, '\n'), 0o600); err != nil {
+		return nil, errors.Join(err, os.Remove(filepath.Join(dir, claimConsumed)))
+	}
+	return out, nil
+}
+
+// BuildLiveClaim reserves the one-time submission and returns the request in
+// memory for delivery over the verified connection that issued the challenge.
+func BuildLiveClaim(stateDir string, ch *v1.BeginEnrollmentChallengeResponse, capabilities *v1.NodeCapabilities, now time.Time) (*v1.ClaimEnrollmentRequest, error) {
+	if ch.GetNodeId() == "" || ch.GetExpiresAt().CheckValid() != nil || capabilities == nil {
+		return nil, fmt.Errorf("%w: enrollment challenge or capabilities are incomplete", ErrInvalidInput)
+	}
+	dir, err := safeStateDir(stateDir)
+	if err != nil {
+		return nil, err
+	}
+	req, err := buildClaim(dir, ClaimChallenge{
+		ChallengeID: ch.GetChallengeId(), ServerNonce: ch.GetServerNonce(), ExpiresAt: ch.GetExpiresAt().AsTime(),
+		NodeID: ch.GetNodeId(), EnrollmentID: ch.GetEnrollmentId(), ChannelContext: ch.GetChannelContext(),
+	}, capabilities, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := reserveClaim(dir, now); err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+func buildClaim(dir string, ch ClaimChallenge, capabilities *v1.NodeCapabilities, now time.Time) (*v1.ClaimEnrollmentRequest, error) {
 	if ch.ChallengeID == "" || ch.EnrollmentID == "" || len(ch.ServerNonce) < 16 || len(ch.ChannelContext) == 0 {
 		return nil, fmt.Errorf("%w: challenge is incomplete", ErrInvalidInput)
 	}
@@ -370,10 +413,28 @@ func BuildClaim(stateDir string, ch ClaimChallenge, now time.Time) ([]byte, erro
 	}
 	if _, err := os.Stat(filepath.Join(dir, claimConsumed)); err == nil {
 		return nil, fmt.Errorf("%w: claim already produced for this enrollment", ErrConsumed)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
 	var bundle EnrollmentBundle
 	if err := readJSON(filepath.Join(dir, bundleFile), &bundle); err != nil {
 		return nil, err
+	}
+	requiredCaps, err := parseCapabilities(bundle.RequiredCapabilities)
+	if err != nil {
+		return nil, err
+	}
+	if capabilities == nil {
+		capabilities = &v1.NodeCapabilities{ProtocolVersion: bundle.ProtocolVersion, Capabilities: requiredCaps}
+	} else {
+		if capabilities.GetProtocolVersion() != bundle.ProtocolVersion {
+			return nil, fmt.Errorf("%w: live protocol version does not match the approved enrollment", ErrInvalidInput)
+		}
+		for _, want := range requiredCaps {
+			if !slices.Contains(capabilities.GetCapabilities(), want) {
+				return nil, fmt.Errorf("%w: approved capability %s is unavailable", ErrInvalidInput, want)
+			}
+		}
 	}
 	rawSecret, err := os.ReadFile(filepath.Join(dir, enrollmentSecret))
 	if err != nil {
@@ -384,30 +445,37 @@ func BuildClaim(stateDir string, ch ClaimChallenge, now time.Time) ([]byte, erro
 		return nil, err
 	}
 
-	ctx := ClaimContext(id.NodeID, ch.EnrollmentID, ch.ChallengeID, ch.ServerNonce, ch.ExpiresAt, bundle.RequiredCapabilities, ch.ChannelContext)
-	sig := ed25519.Sign(priv, ctx)
-	protoCaps, err := parseCapabilities(bundle.RequiredCapabilities)
-	if err != nil {
-		return nil, err
+	if bundle.NodeID != id.NodeID || !bytes.Equal(bundle.ApprovedPublicKeySPKI, id.SPKI) {
+		return nil, fmt.Errorf("%w: enrollment bundle identity does not match the node key", ErrIntegrity)
 	}
-	req := &v1.ClaimEnrollmentRequest{
+	digest := sha256.Sum256(append(append([]byte{}, bundle.EnrollmentSalt...), s...))
+	if !bytes.Equal(digest[:], bundle.EnrollmentSecretDigest) {
+		return nil, fmt.Errorf("%w: enrollment secret does not match the approved bundle", ErrIntegrity)
+	}
+	signature := ed25519.Sign(priv, enroll.ClaimContext(id.NodeID, ch.EnrollmentID, ch.ChallengeID, ch.ServerNonce, ch.ExpiresAt, capabilities.GetCapabilities(), ch.ChannelContext))
+	return &v1.ClaimEnrollmentRequest{
 		EnrollmentId:           ch.EnrollmentID,
 		EnrollmentToken:        string(s),
 		KeyFingerprint:         encodeSecret(id.Fingerprint),
-		Capabilities:           &v1.NodeCapabilities{ProtocolVersion: bundle.ProtocolVersion, Capabilities: protoCaps},
+		Capabilities:           capabilities,
 		ChallengeId:            ch.ChallengeID,
-		FreshClaimSignature:    sig,
+		FreshClaimSignature:    signature,
 		ChannelBindingEvidence: ch.ChannelContext,
+	}, nil
+}
+
+func reserveClaim(dir string, now time.Time) error {
+	path := filepath.Join(dir, claimConsumed)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%w: claim already produced for this enrollment", ErrConsumed)
 	}
-	out, err := protojson.MarshalOptions{Multiline: true, Indent: "  "}.Marshal(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := writeFile(filepath.Join(dir, claimRequestFile), append(out, '\n'), 0o600); err != nil {
-		return nil, err
+	_, writeErr := fmt.Fprintln(file, now.UTC().Format(time.RFC3339Nano))
+	if err := errors.Join(writeErr, file.Sync(), file.Close()); err != nil {
+		return errors.Join(err, os.Remove(path))
 	}
-	if err := writeFile(filepath.Join(dir, claimConsumed), []byte(time.Now().UTC().Format(time.RFC3339Nano)+"\n"), 0o600); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return nil
 }
