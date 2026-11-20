@@ -458,7 +458,7 @@ func TestBuiltinBlueMapBackendEligibilityFixture(t *testing.T) {
 		wantReason string
 	}{
 		{"no consent", "default", "actual_world", true, tpl, map[string]string{blueMapManagedSignalKey: "true"}, connect.CodeInvalidArgument, "explicit acceptance"},
-		{"remote node", "node-2", "actual_world", true, tpl, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "remote node"},
+		{"unknown node", "node-2", "actual_world", true, tpl, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "ownership could not be verified"},
 		{"invalid level", "default", "../etc", true, tpl, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "level name is invalid"},
 		{"unpinned image", "default", "actual_world", true, &storage.ModuleTemplate{ID: blueMapTemplateID, DockerImage: "ghcr.io/bluemap-minecraft/bluemap:latest"}, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "not the pinned"},
 		{"missing world", "default", "actual_world", false, tpl, map[string]string{blueMapManagedSignalKey: "true", blueMapConsentSignalKey: "true"}, connect.CodeFailedPrecondition, "readable Minecraft Java Edition world"},

@@ -98,8 +98,12 @@ map config per target world plus explicit `accept-download` acknowledgement.
 
 ## Consequences
 
-- Private discovery is local-node only; remote nodes are labelled
-  unsupported/manual with the exact next action (explicit node-local endpoint).
+- Managed install and private discovery share the same local-node check.
+  Legacy controller aliases and enabled registered nodes marked local by the
+  persisted node record qualify. Discovery also verifies the server's current
+  assignment against the module and Docker labels before reading its data.
+  Missing and disabled nodes have no private discovery. Remote nodes need an
+  explicit, allowlisted node-local endpoint.
 - A configured-but-unrendered world reports a setup/rendering state, not a map.
 - The singleton guarantee is per controller process; operators must not run two
   controllers against one database for BlueMap installs.

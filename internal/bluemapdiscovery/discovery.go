@@ -48,6 +48,7 @@ const (
 // Store is the narrow persisted-data seam used by discovery. *storage.Store
 // satisfies it; no new global state is introduced.
 type Store interface {
+	nodeStore
 	ListModulesByTemplate(ctx context.Context, templateID string) ([]*storage.Module, error)
 	GetServer(ctx context.Context, id string) (*storage.Server, error)
 	GetServerConfig(ctx context.Context, id string) (*storage.ServerConfig, error)
@@ -97,7 +98,7 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 	}
 	var chosen *storage.Module
 	for _, m := range modules {
-		if m == nil || m.ServerID != serverID || canonicalNode(m.NodeID) != nodeID {
+		if m == nil || m.ServerID != serverID || !SameRendererNode(m.NodeID, nodeID) {
 			continue
 		}
 		// Idempotent installs mean one module per server; if an operator has
@@ -113,6 +114,13 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 	server, err := d.store.GetServer(ctx, serverID)
 	if err != nil || server == nil || server.DataPath == "" {
 		return nil, fmt.Errorf("renderer server has no data path: %w", err)
+	}
+	if !SameRendererNode(server.NodeID, nodeID) {
+		return nil, nil
+	}
+	node, err := PrivateRendererNode(ctx, d.store, server.NodeID)
+	if err != nil {
+		return nil, err
 	}
 	levelName := ""
 	if cfg, cfgErr := d.store.GetServerConfig(ctx, serverID); cfgErr == nil {
@@ -166,7 +174,7 @@ func (d *Discovery) FindRenderer(ctx context.Context, nodeID, serverID string) (
 		return facts, nil
 	}
 
-	accessor, err := d.resolver.ForNode(ctx, nodestorage.LocalNode(), server.DataPath)
+	accessor, err := d.resolver.ForNode(ctx, node, server.DataPath)
 	if err != nil {
 		if d.log != nil {
 			d.log.Warn("bluemap discovery: confined accessor for %s failed: %v", serverID, err)
@@ -211,6 +219,12 @@ func rendererBaseURL(identity *docker.ModuleRuntimeIdentity) string {
 	return "http://" + net.JoinHostPort(ip.String(), strconv.Itoa(bluemapWebPort))
 }
 
+// SameRendererNode compares recorded renderer owners. Missing legacy node IDs
+// designate the default controller daemon.
+func SameRendererNode(a, b string) bool {
+	return canonicalNode(a) == canonicalNode(b)
+}
+
 func canonicalNode(nodeID string) string {
 	if strings.TrimSpace(nodeID) == "" {
 		return "default"
@@ -238,7 +252,7 @@ func identityMatchesRuntime(module *storage.Module, serverID, nodeID string, run
 	return imageOK &&
 		runtime.ModuleID == module.ID &&
 		runtime.ServerID == serverID &&
-		canonicalNode(runtime.NodeID) == nodeID &&
+		SameRendererNode(runtime.NodeID, nodeID) &&
 		runtime.TemplateID == worldview.BuiltinBlueMapTemplateID &&
 		!runtime.Privileged
 }

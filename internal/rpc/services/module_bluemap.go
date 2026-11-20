@@ -18,7 +18,6 @@ import (
 	"github.com/athNdev/carbon-panel/internal/auth"
 	"github.com/athNdev/carbon-panel/internal/bluemapdiscovery"
 	storage "github.com/athNdev/carbon-panel/internal/db"
-	"github.com/athNdev/carbon-panel/internal/nodestorage"
 	"github.com/athNdev/carbon-panel/internal/rbac"
 	"github.com/athNdev/carbon-panel/internal/worldview"
 	v1 "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
@@ -61,20 +60,6 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		return true, nil, nil, err
 	}
 
-	// Singleton per server: idempotent retry/concurrent tabs converge on the
-	// exact same module identity. No host port or renderer probe is involved.
-	existing, listErr := s.store.ListModulesByTemplate(ctx, blueMapTemplateID)
-	if listErr != nil {
-		return fail(connect.NewError(connect.CodeInternal, fmt.Errorf("check existing renderer: %w", listErr)))
-	}
-	for _, module := range existing {
-		if module != nil && module.ServerID == msg.ServerId {
-			resp, convErr := s.blueMapResponse(ctx, module)
-			s.blueMapInstallMu.Unlock()
-			return true, resp, noop, convErr
-		}
-	}
-
 	user := auth.GetUserFromContext(ctx)
 	if user == nil || user.ID == "" {
 		return fail(connect.NewError(connect.CodeUnauthenticated, errors.New("blue map install requires an authenticated operator")))
@@ -95,6 +80,28 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		}
 		return fail(connect.NewError(connect.CodePermissionDenied, errors.New(reason)))
 	}
+	node, nodeErr := bluemapdiscovery.PrivateRendererNode(ctx, s.store, server.NodeID)
+	if nodeErr != nil {
+		return fail(connect.NewError(connect.CodeFailedPrecondition, nodeErr))
+	}
+	// Singleton per server: idempotent retry/concurrent tabs converge on the
+	// exact same module identity. No host port or renderer probe is involved.
+	existing, listErr := s.store.ListModulesByTemplate(ctx, blueMapTemplateID)
+	if listErr != nil {
+		return fail(connect.NewError(connect.CodeInternal, fmt.Errorf("check existing renderer: %w", listErr)))
+	}
+	for _, module := range existing {
+		if module != nil && module.ServerID == msg.ServerId {
+			if !bluemapdiscovery.SameRendererNode(module.NodeID, server.NodeID) {
+				return fail(connect.NewError(connect.CodeFailedPrecondition,
+					errors.New("the existing BlueMap module belongs to a previous node assignment; resolve it from the Modules page before retrying")))
+			}
+			resp, convErr := s.blueMapResponse(ctx, module)
+			s.blueMapInstallMu.Unlock()
+			return true, resp, noop, convErr
+		}
+	}
+
 	// startImmediately is a SECOND privileged action. Check it here, before
 	// world inspection and before any config staging or DB write.
 	if msg.StartImmediately {
@@ -116,12 +123,6 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 			errors.New("explicit acceptance of the Mojang download and Minecraft EULA is required to install BlueMap")))
 	}
 
-	// Backend eligibility (not a client claim): local node only, because the
-	// private owned-network renderer path does not exist on a remote node.
-	if !nodestorage.IsLegacyLocalNodeID(server.NodeID) {
-		return fail(connect.NewError(connect.CodeFailedPrecondition,
-			errors.New("private BlueMap discovery is unavailable on a remote node; configure an explicit node-local world_view endpoint instead")))
-	}
 	cfg, cfgErr := s.store.GetServerConfig(ctx, server.ID)
 	if cfgErr != nil {
 		return fail(connect.NewError(connect.CodeFailedPrecondition,
@@ -146,7 +147,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 		return fail(connect.NewError(connect.CodeFailedPrecondition,
 			errors.New("node-owned storage is unavailable; the world folder cannot be verified for BlueMap")))
 	}
-	world, inspectErr := bluemapdiscovery.InspectManagedWorld(ctx, s.storageResolver, server, level)
+	world, inspectErr := bluemapdiscovery.InspectManagedWorld(ctx, s.storageResolver, node, server, level)
 	if inspectErr != nil {
 		return fail(connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
 			"BlueMap needs a readable Minecraft Java Edition world at %q: %w", level, inspectErr)))
@@ -172,7 +173,7 @@ func (s *ModuleService) prepareBuiltinBlueMap(
 	// world (including custom level folder, _nether/_end and custom dimensions).
 	// It is STAGED now and committed only after the module row persists; an
 	// existing operator config is preserved, never overwritten.
-	stager, stageErr := bluemapdiscovery.StageManagedConfig(ctx, s.storageResolver, server, world)
+	stager, stageErr := bluemapdiscovery.StageManagedConfig(ctx, s.storageResolver, node, server, world)
 	if stageErr != nil {
 		if errors.Is(stageErr, bluemapdiscovery.ErrManagedConfigExists) {
 			return fail(connect.NewError(connect.CodeFailedPrecondition,

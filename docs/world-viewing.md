@@ -32,8 +32,11 @@ node** through the private owned network (ADR 0040): the exact server/node/modul
 identity and node-scoped container metadata (labels, pinned image, owned-network
 membership and the effective read-only bind of the server's actual level folder)
 must verify before any HTTP request. Module config and tile assets are read only
-through the confined node data accessor. A remote node has no private path and
-stays unavailable until an explicit, allowlisted node-local endpoint is set.
+through the confined node data accessor. This includes an enabled Docker node
+registered as local to the controller. It can use managed BlueMap installation
+and private discovery with its registered ID. A missing or disabled node
+cannot use the private path. A remote node needs an explicit, allowlisted
+node-local endpoint.
 No renderer is discovered by port probing or host-port bindings.
 
 A discovered module reaches READY after the renderer's `/settings.json` lists
