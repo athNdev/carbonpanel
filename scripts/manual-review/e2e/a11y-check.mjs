@@ -12,6 +12,7 @@
 // mobile engines, screen readers or 400% zoom; only public UI seams are driven.
 //
 // Usage: node a11y-check.mjs
+//        node a11y-check.mjs --dashboard-telemetry-only
 //        node a11y-check.mjs --engine=firefox   (cross-engine smoke)
 //        node a11y-check.mjs --engine=webkit    (cross-engine smoke)
 //   REVIEW_CHROME may point at an explicit owned Chromium executable.
@@ -22,6 +23,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { verifyDashboardTelemetry } from './dashboard-telemetry.mjs';
 import { launchReviewBrowser, reviewBrowserPath, reviewDriver } from '../../review/browser.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -31,6 +33,26 @@ const webDir = resolve(repo, 'web/carbon-panel');
 function requestedEngine() {
 	const arg = process.argv.find((value) => value.startsWith('--engine='));
 	return arg ? arg.slice('--engine='.length) : 'chromium';
+}
+
+async function runDashboardTelemetry(browser, base) {
+	const root = base.replace(/\/$/, '');
+	for (const width of [360, 1024]) {
+		const context = await browser.newContext({
+			viewport: { width, height: 900 },
+			reducedMotion: 'reduce'
+		});
+		try {
+			const page = await context.newPage();
+			const state = { servers: 'populated', detail: 'populated' };
+			await seedPackagedRoutes(page, state, 'anonymous');
+			await check(`dashboard telemetry @${width}: missing, measured zero and partial samples`, () =>
+				verifyDashboardTelemetry(page, root, state)
+			);
+		} finally {
+			await context.close();
+		}
+	}
 }
 
 async function launchEngine(engine) {
@@ -317,6 +339,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 			return reply({ code: 'unauthenticated', message: 'Invalid username or password' }, 401);
 		}
 		if (method === 'ListServers') {
+			if (Array.isArray(state.servers)) return reply({ servers: state.servers });
 			if (state.servers === 'error') return fail('Fixture servers unavailable');
 			if (state.servers === 'large') return reply({ servers: LARGE_FLEET });
 			return reply({ servers: state.servers === 'empty' ? [] : FLEET });
@@ -1471,17 +1494,21 @@ async function runCrossEngineSmoke(browser, base, engine) {
 }
 
 const engine = requestedEngine();
-const fixture = startFixture();
+const dashboardOnly = process.argv.includes('--dashboard-telemetry-only');
+const fixture = dashboardOnly ? null : startFixture();
 const packaged = startPackagedServer();
 let browser;
 try {
-	const [fixtureBase, packagedBase] = await Promise.all([fixture.url, packaged.url]);
+	const [fixtureBase, packagedBase] = await Promise.all([fixture?.url, packaged.url]);
 	const launched = await launchEngine(engine);
 	browser = launched.browser;
 	console.log(JSON.stringify({ check: 'a11y-browser', ...launched.metadata }));
-	if (engine !== 'chromium') {
+	if (dashboardOnly) {
+		await runDashboardTelemetry(browser, packagedBase);
+	} else if (engine !== 'chromium') {
 		await runCrossEngineSmoke(browser, packagedBase, engine);
 	} else {
+		await runDashboardTelemetry(browser, packagedBase);
 		await runComponentJourney(browser, fixtureBase);
 		await runPackagedRouteJourney(browser, packagedBase, 'light');
 		await runModpacksJourney(browser, packagedBase, 'light');
@@ -1508,7 +1535,7 @@ try {
 	try {
 		if (browser) await browser.close();
 	} finally {
-		fixture.child.kill('SIGTERM');
+		fixture?.child.kill('SIGTERM');
 		packaged.child.kill('SIGTERM');
 	}
 	console.log(JSON.stringify({ check: 'a11y-browser-summary', total: checks.length, failures, checks }));

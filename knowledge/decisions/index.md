@@ -14,6 +14,7 @@
 - [Channel promotion recovery and serialization](channel-promotion-recovery.md) — Prior-receipt rollback, exact docs restore, shared lock and target guard for channel promotion.
 - [Clean Windows profile evidence](windows-clean-profile-evidence.md) — Clean-profile firewall qualification requires a new standard-user SID and an independently observed positive control; missing proof is incomplete.
 - [Console log buffer ownership](console-buffer-ownership.md) — A delayed log listing or WebSocket snapshot can only write the viewed buffer while it still owns the displayed server and the latest request.
+- [Dashboard telemetry coverage](dashboard-telemetry-coverage.md) — Dashboard player and RAM totals describe running servers that reported telemetry.
 - [Development process ownership](development-process-ownership.md) — Windows development commands enter native jobs before execution, while POSIX commands use owned process groups.
 - [Docker Hub description ownership](dockerhub-description-ownership.md) — A dedicated main and scheduled workflow derives a byte-bounded Docker-focused body from README and the published version contract; image publication never writes it.
 - [Explicit phase-result gate for every publication write](publication-phase-gate.md) — Every release side-effect phase checks direct results and verification outputs, and a terminal job fails an explicit publish when a required phase was skipped.
