@@ -6,16 +6,9 @@
 name: Mirror qualified Nightly candidate to GHCR
 
 on:
+  push:
+    branches: [codex/ghcr-candidate-mirror]
   workflow_dispatch:
-    inputs:
-      commit:
-        description: 'Exact current-main candidate commit (40 hex)'
-        required: true
-        type: string
-      digest:
-        description: 'Verified Hub candidate index digest (sha256:...)'
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -25,23 +18,23 @@ concurrency:
   group: ghcr-candidate-mirror
   cancel-in-progress: false
 
+env:
+  CANDIDATE_COMMIT: d76a357cf5be2bcf11a1d99f457f4e2bfa4bc171
+  CANDIDATE_DIGEST: sha256:330be8e3dc80f4afe7befa0a4c73ca1d1c7989ee6a70539a4c5f49cac6a13a56
+
 jobs:
   mirror:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Validate exact inputs
-        env:
-          COMMIT: ${{ inputs.commit }}
-          DIGEST: ${{ inputs.digest }}
         run: |
-          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
 
       - name: Refuse a destination that is not definitively absent
         env:
           GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ inputs.commit }}
         run: |
           TOKEN=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
             "https://ghcr.io/token?service=ghcr.io&scope=repository:athndev/carbonpanel:pull,push" \
@@ -49,7 +42,7 @@ jobs:
           CODE=$(curl -s -o /dev/null -w '%{http_code}' \
             -H "Authorization: Bearer $TOKEN" \
             -H 'Accept: application/vnd.oci.image.index.v1+json' \
-            "https://ghcr.io/v2/athndev/carbonpanel/manifests/sha-$COMMIT")
+            "https://ghcr.io/v2/athndev/carbonpanel/manifests/sha-$CANDIDATE_COMMIT")
           echo "destination_status=$CODE"
           test "$CODE" = "404" || { echo "::error::destination sha tag not definitively absent"; exit 1; }
 
@@ -57,27 +50,23 @@ jobs:
         env:
           ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ inputs.commit }}
-          DIGEST: ${{ inputs.digest }}
         run: |
           docker run --rm quay.io/skopeo/stable:latest copy --all --preserve-digests \
             --src-tls-verify=true --dest-tls-verify=true \
-            "docker://atharvnaphade/carbonpanel@$DIGEST" \
-            "docker://ghcr.io/athndev/carbonpanel:sha-$COMMIT" \
+            "docker://atharvnaphade/carbonpanel@$CANDIDATE_DIGEST" \
+            "docker://ghcr.io/athndev/carbonpanel:sha-$CANDIDATE_COMMIT" \
             --dest-creds "$ACTOR:$GH_TOKEN"
 
       - name: Verify the mirrored index digest and both Linux platforms
         env:
           ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ github.token }}
-          COMMIT: ${{ inputs.commit }}
-          DIGEST: ${{ inputs.digest }}
         run: |
           docker run --rm quay.io/skopeo/stable:latest inspect --raw \
             --creds "$ACTOR:$GH_TOKEN" \
-            "docker://ghcr.io/athndev/carbonpanel:sha-$COMMIT" > "$RUNNER_TEMP/ghcr-index.json"
+            "docker://ghcr.io/athndev/carbonpanel:sha-$CANDIDATE_COMMIT" > "$RUNNER_TEMP/ghcr-index.json"
           ACTUAL="sha256:$(sha256sum "$RUNNER_TEMP/ghcr-index.json" | cut -d' ' -f1)"
           echo "mirrored_digest=$ACTUAL"
-          test "$ACTUAL" = "$DIGEST"
+          test "$ACTUAL" = "$CANDIDATE_DIGEST"
           jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64","arm64"]' "$RUNNER_TEMP/ghcr-index.json"
           echo "manifest_count=$(jq '.manifests | length' "$RUNNER_TEMP/ghcr-index.json")"
