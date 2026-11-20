@@ -23,7 +23,11 @@ sources:
   a non-canonical candidate path before moving Hub, then deploy and probe
   canonical HTML and OpenAPI before creating GHCR Nightly.
 - Both docs builds consume the verified public Stable release identity. Recovery
-  stops if that identity or its registry evidence changes.
+  stops if that identity or its registry evidence changes. Each rendered build
+  must pass `scripts/check_website.py` with the exact pinned identities before a
+  staged write; authored cross-page links must resolve under the pinned route
+  (site-root paths are rebased by the renderer, while a lone `../` on a nested
+  page resolves inside its own directory and fails the check).
 - Replay one explicitly selected mutation under the shared Pages lock. Observe
   its exact pre-state or post-state. Keep all immutable references. Before GHCR
   creation the prior Hub and exact Pages can be restored independently. Creation
