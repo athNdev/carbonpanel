@@ -404,7 +404,7 @@ registry entry exists, and no live fresh-install smoke has been run.
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Understand the panel         | [Introduction](https://carbonpanel.dev/docs/introduction/)                                                       |
 | Install it                   | [Docker Compose](https://carbonpanel.dev/docs/getting-started/docker-compose/)                                   |
-| Install on Proxmox           | [Prepared Debian 13 system CT](docs/carbon-panel/src/content/docs/getting-started/proxmox.mdx) or [existing Debian/Ubuntu guest](docs/carbon-panel/src/content/docs/getting-started/proxmox.mdx), plus the [first-party installer script](https://github.com/athNdev/carbonpanel/blob/main/scripts/proxmox/install-carbon-panel.sh) |
+| Install on Proxmox           | [Proxmox guide (prepared CT preview / existing guest)](docs/carbon-panel/src/content/docs/getting-started/proxmox.mdx) and [CT archive preview](https://github.com/athNdev/carbonpanel/releases/download/controller-ct-v0.1.0/carbonpanel-controller-ct.tar.zst) |
 | Connect an AI assistant      | [MCP server guide](docs/carbon-panel/src/content/docs/guides/mcp-server.mdx) (build-bound tool compatibility)     |
 | Configure it                 | [Configuration](https://carbonpanel.dev/docs/configuration/) and [config.example.yaml](config.example.yaml)      |
 | Back up a server             | [Server backups](https://carbonpanel.dev/docs/guides/backups/)                                                   |
