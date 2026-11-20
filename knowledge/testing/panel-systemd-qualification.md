@@ -16,7 +16,8 @@ Dispatch **Qualify packaged Panel under systemd** with the Carbon Panel Release
 run ID, full candidate commit, published Stable tag and full Stable commit.
 Choose the same product commit and artifact intended for release. The workflow
 checks the Actions artifact digest, release manifest, checksum file, native
-package identity and running binary hash. It builds no product code.
+package identity and running binary hash. The release workflow commit and
+selected product commit are recorded separately. It builds no product code.
 
 The hosted amd64 and arm64 jobs start each controller from the unpacked archive
 in a transient systemd unit with real Docker and unique persistent paths.
