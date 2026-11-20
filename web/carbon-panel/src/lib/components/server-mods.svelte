@@ -488,6 +488,14 @@ one at https://mozilla.org/MPL/2.0/.
 									{/if}
 								</div>
 								{#if mod.updatePreview}
+									{#if mod.updatePreview.installedVersion}
+										<p class="mt-1 text-xs break-words text-muted-foreground">
+											Modrinth · Installed {mod.updatePreview.installedVersion}
+											{#if mod.updatePreview.candidateVersion && mod.updatePreview.candidateVersionId !== mod.updatePreview.installedVersionId}
+												· Candidate {mod.updatePreview.candidateVersion}
+											{/if}
+										</p>
+									{/if}
 									<p class="mt-1 text-sm text-muted-foreground">{mod.updatePreview.reason}</p>
 								{/if}
 								{#if mod.description}
