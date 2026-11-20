@@ -30,3 +30,9 @@ sources:
   active journal's matching server, container and node endpoint.
 - A safe rollback restores running intent on the original container.
   Uncertain stop or restart retains the journal lock and recovery data.
+
+# Request replay
+
+- A bind request ID identifies one server, level, revision, activation window
+  and node generation. A completed replay must still name the binding installed
+  by that operation. Legacy journal rows rely on the binding and timestamps.

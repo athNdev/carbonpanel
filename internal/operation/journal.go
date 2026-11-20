@@ -113,12 +113,14 @@ type JournalOutcome struct {
 // active server lock and records an explicit operator-resolution note. It does
 // not advance to failed, so the UI cannot offer a blind retry. A completion or
 // a definite failure follows the same path as RunJournaled.
-func RunJournaledOutcome(ctx context.Context, store Journal, log *logger.Logger, server *db.Server, kind, requestID string, mutate func(context.Context) (uncertain bool, err error)) (JournalOutcome, error) {
+func RunJournaledOutcome(ctx context.Context, store Journal, log *logger.Logger, server *db.Server, kind, requestID, payloadHash string, mutate func(context.Context) (uncertain bool, err error)) (JournalOutcome, error) {
 	if err := ValidateRequestID(requestID); err != nil {
 		return JournalOutcome{}, err
 	}
-	digest := Digest(kind, server)
-	op, reused, err := store.BeginServerOperation(ctx, server.ID, server.NodeID, server.ContainerID, StorageKey(requestID, kind), kind, digest)
+	if payloadHash == "" {
+		payloadHash = Digest(kind, server)
+	}
+	op, reused, err := store.BeginServerOperation(ctx, server.ID, server.NodeID, server.ContainerID, StorageKey(requestID, kind), kind, payloadHash)
 	if err != nil {
 		return JournalOutcome{}, fmt.Errorf("record %s intent: %w", kind, err)
 	}

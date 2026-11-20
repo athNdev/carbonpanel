@@ -115,6 +115,9 @@ func (a *KeyedAdmission) Acquire(ctx context.Context, keys ...string) (func(), e
 	}, nil
 }
 
+// ErrBindRequestConflict identifies a request ID that cannot prove the requested binding.
+var ErrBindRequestConflict = errors.New("world bind request ID conflicts with the requested binding")
+
 // BindRequest is the pure input to a bind or swap.
 type BindRequest struct {
 	ServerID      string
@@ -197,6 +200,10 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		req.RequestID = "world-bind-" + uuid.NewString()
 	}
 
+	if err := operation.ValidateRequestID(req.RequestID); err != nil {
+		return nil, err
+	}
+
 	server, err := b.store.GetServer(ctx, req.ServerID)
 	if err != nil {
 		return nil, err
@@ -231,9 +238,20 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Read the binding under admission. A row from an unfinished swap is
-	// not proof that the requested world was published.
-	if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
+	// Read both records under admission. Check any reuse before considering an
+	// already-matching binding: it may come from a different operation.
+	existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	payloadHash := worldBindPayloadHash(server, req)
+	if replay, err := b.replayBind(ctx, server, req, payloadHash, existing); replay != nil || err != nil {
+		return replay, err
+	}
+	if existing != nil {
+		if !existing.MatchesOwner(req.NodeID, req.Generation) {
+			return nil, fmt.Errorf("%w: existing binding belongs to another node generation", ErrStaleGeneration)
+		}
 		if existing.RevisionID == req.RevisionID {
 			var active storage.ServerOperation
 			err := b.store.DB().WithContext(ctx).Where("active_server = ?", req.ServerID).First(&active).Error
@@ -246,12 +264,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 			}
 			return &BindResult{Binding: existing, RequestID: req.RequestID, Outcome: string(operation.OutcomeSuccess), Consistency: existing.Consistency}, nil
 		}
-		if !existing.MatchesOwner(req.NodeID, req.Generation) {
-			return nil, fmt.Errorf("%w: existing binding belongs to another node generation", ErrStaleGeneration)
-		}
 		req.Previous = existing
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
 	}
 
 	if b.lifecycle != nil {
@@ -305,7 +318,7 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 
 	var result *BindResult
 	var cleanup []string
-	journal, err := operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-bind", req.RequestID,
+	journal, err := operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-bind", req.RequestID, payloadHash,
 		func(ownedCtx context.Context) (bool, error) {
 			out, roots, err := b.publish(ownedCtx, acc, server, req, revision)
 			cleanup = roots
@@ -357,23 +370,69 @@ func (b *Binder) Bind(ctx context.Context, req BindRequest) (*BindResult, error)
 		return nil, err
 	}
 	if result == nil {
-		// A replayed request_id that already completed does not re-run mutate.
-		// Report the binding that the first attempt made rather than an
-		// uncertainty the operator would have to resolve.
-		if journal.Outcome == string(operation.OutcomeSuccess) {
-			if existing, err := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName); err == nil {
-				return &BindResult{Binding: existing, Outcome: string(operation.OutcomeSuccess),
-					OperationID: journal.OperationID, RequestID: req.RequestID, Consistency: existing.Consistency}, nil
-			}
+		// Another controller may have recorded this operation after our initial read.
+		current, readErr := b.store.GetWorldBinding(ctx, req.ServerID, req.LevelName)
+		if readErr != nil && !errors.Is(readErr, gorm.ErrRecordNotFound) {
+			return nil, readErr
 		}
-		return &BindResult{Outcome: string(operation.OutcomeUnknown), OperationID: journal.OperationID, RequestID: req.RequestID},
-			fmt.Errorf("%w: journal replay did not return a binding", ErrUncertainOutcome)
+		replay, replayErr := b.replayBind(ctx, server, req, payloadHash, current)
+		if replay != nil || replayErr != nil {
+			return replay, replayErr
+		}
+		return nil, ErrBindRequestConflict
 	}
+
 	result.OperationID = journal.OperationID
 	if result.RequestID == "" {
 		result.RequestID = req.RequestID
 	}
 	return result, nil
+}
+
+func worldBindPayloadHash(server *storage.Server, req BindRequest) string {
+	window := req.Window
+	if window == "" {
+		window = "now"
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%q|%q|%q|%q|%d",
+		operation.Digest("world-bind", server), req.LevelName, req.RevisionID, window, req.NodeID, req.Generation)))
+	return hex.EncodeToString(sum[:])
+}
+
+// replayBind only returns success when the installed binding is attributable
+// to this operation. Before payload hashes were recorded, the binding and its
+// publication time are the available evidence.
+func (b *Binder) replayBind(ctx context.Context, server *storage.Server, req BindRequest, payloadHash string, binding *storage.WorldBinding) (*BindResult, error) {
+	var op storage.ServerOperation
+	err := b.store.DB().WithContext(ctx).
+		Where("server_id = ? AND request_key = ?", server.ID, operation.StorageKey(req.RequestID, "world-bind")).
+		First(&op).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if op.Kind != "world-bind" || (op.PayloadHash != payloadHash && op.PayloadHash != operation.Digest(op.Kind, server)) {
+		return nil, ErrBindRequestConflict
+	}
+	switch op.Phase {
+	case storage.ServerOperationComplete:
+		if binding == nil || binding.RevisionID != req.RevisionID ||
+			!binding.MatchesOwner(req.NodeID, req.Generation) ||
+			binding.BoundAt.Before(op.CreatedAt) || binding.BoundAt.After(op.UpdatedAt) {
+			return nil, ErrBindRequestConflict
+		}
+		return &BindResult{Binding: binding, Outcome: string(operation.OutcomeSuccess),
+			OperationID: op.ID, RequestID: req.RequestID, Consistency: binding.Consistency}, nil
+	case storage.ServerOperationPrepared, storage.ServerOperationExecuting:
+		return &BindResult{Outcome: string(operation.OutcomeUnknown), OperationID: op.ID, RequestID: req.RequestID},
+			fmt.Errorf("%w: operation %s owns the server", ErrUncertainOutcome, op.ID)
+	case storage.ServerOperationFailed:
+		return nil, fmt.Errorf("%w: %s", operation.ErrAlreadyFailed, op.LastError)
+	default:
+		return nil, ErrBindRequestConflict
+	}
 }
 
 // resolveGeneration reads the owning node's endpoint generation from the
@@ -727,7 +786,7 @@ func (b *Binder) Unbind(ctx context.Context, serverID, level, requestID string) 
 	defer releaseRevision()
 
 	removed := false
-	_, err = operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-unbind", requestID,
+	_, err = operation.RunJournaledOutcome(ctx, b.store, b.log, server, "world-unbind", requestID, "",
 		func(context.Context) (bool, error) {
 			current, err := b.store.GetWorldBinding(ctx, serverID, level)
 			if err != nil {
