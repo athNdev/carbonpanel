@@ -4,10 +4,12 @@ title: "MCP tool gateway — Rule (part 3)"
 description: "The nine formerly PENDING operations are now mounted by production"
 status: stable
 owners: [oss-runtime]
-code_refs: [cmd/carbonpanel-mcp, internal/mcp, internal/rpc/auth_interceptor.go, internal/rbac/mapping.go]
+code_refs: [cmd/carbonpanel-mcp, internal/mcp, internal/rpc/auth_interceptor.go, internal/rbac/mapping.go, scripts/mcp_build_only_packaged_smoke.py]
 sources:
   - title: Parent concept
     resource: mcp-server.md
+  - title: MCP artifact smoke runbook
+    resource: ../../docs/runbook-mcp-smoke.md
 ---
 The nine formerly PENDING operations are now mounted by production
 `NewServer` / `registerCombinedTools` and carry executable `tools/call`
@@ -32,3 +34,7 @@ Disposable fixtures connect a real MCP SDK client over the stdio wire format
 to the in-process gateway; its tools call typed clients against `httptest`
 Connect handlers wrapped in `rpc.NewAuthInterceptor`, with scoped API tokens.
 The binary also has a subprocess test using the SDK `CommandTransport`.
+For build-only container smoke, the report ties the stdio handshake, tool list
+and scoped read call to the local image ID. The runner removes its temporary
+container, network and automatically tagged images. Cleanup failure fails the
+smoke and preserves the report.
