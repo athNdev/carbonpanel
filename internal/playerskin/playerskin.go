@@ -42,13 +42,15 @@ const (
 	KindFace = "face"
 	KindSkin = "skin"
 	KindCape = "cape"
+	// KindPortrait is a derived front view for global account lookup.
+	KindPortrait = "portrait"
 )
 
 var (
 	uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 	errInvalidUUID = errors.New("playerskin: invalid uuid: expected a canonical 36-character UUID")
-	errInvalidKind = errors.New("playerskin: invalid kind: expected face, skin or cape")
+	errInvalidKind = errors.New("playerskin: invalid kind: expected face, skin, cape or portrait")
 )
 
 // Asset is one same-origin skin/cape asset. Data is always a complete PNG: a
@@ -148,7 +150,7 @@ func (c *Cache) Close() {
 
 // Get returns the asset for uuid/kind, using a fresh positive or negative
 // cache entry when one exists. uuid must be canonical (case-insensitive); kind
-// must be face, skin or cape. Invalid identifiers return an error; all upstream
+// must be face, skin, cape or portrait. Invalid identifiers return an error; all upstream
 // problems return an unavailable Asset with a nil error.
 func (c *Cache) Get(ctx context.Context, uuid, kind string) (Asset, error) {
 	u, k, err := validateInputs(uuid, kind)
@@ -197,7 +199,7 @@ func validateInputs(uuid, kind string) (string, string, error) {
 	}
 	u := strings.ToLower(uuid)
 	switch kind {
-	case KindFace, KindSkin, KindCape:
+	case KindFace, KindSkin, KindCape, KindPortrait:
 		return u, kind, nil
 	default:
 		return "", "", errInvalidKind
