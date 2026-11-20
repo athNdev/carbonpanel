@@ -55,8 +55,6 @@ func TestPreserveStoredStatus_DoesNotMaskOrdinaryStatuses(t *testing.T) {
 		"an operator-started container must show as running")
 	assert.False(t, preserveStoredStatus(storage.StatusRunning, storage.StatusStopped),
 		"a genuinely stopped container must not keep showing as running")
-	assert.False(t, preserveStoredStatus(storage.StatusError, storage.StatusStopped),
-		"error must yield to a live reading like any other status")
 	assert.False(t, preserveStoredStatus(storage.StatusStopped, storage.StatusDeepSleep),
 		"a live deep-sleep reading still refreshes the display")
 }
@@ -99,20 +97,19 @@ func TestPreserveStoredStatus_BootGraceSurvivesUnhealthyProbes(t *testing.T) {
 		"a boot that finished must converge to running")
 }
 
-// TestPreserveStoredStatus_ErrorSurvivesRetryLoop keeps a recorded game crash
-// visible: while the entrypoint retries inside a live container, Docker
-// reports starting/unhealthy and those readings must not wash the error out
-// on every list refresh. A real recovery (running) or stop still wins.
-func TestPreserveStoredStatus_ErrorSurvivesRetryLoop(t *testing.T) {
+// A recorded game crash stays visible while the entrypoint retries or after
+// it exits. A running container and a persisted stop can clear the failure.
+func TestPreserveStoredStatus_ErrorSurvivesRetryAndExit(t *testing.T) {
 	for _, live := range []storage.ServerStatus{
 		storage.StatusStarting,
 		storage.StatusUnhealthy,
+		storage.StatusStopped,
 	} {
 		assert.True(t, preserveStoredStatus(storage.StatusError, live),
 			"a recorded crash must survive live status %q", live)
 	}
 	assert.False(t, preserveStoredStatus(storage.StatusError, storage.StatusRunning),
 		"a recovered server must converge to running")
-	assert.False(t, preserveStoredStatus(storage.StatusError, storage.StatusStopped),
-		"a stopped server must converge to stopped")
+	assert.False(t, preserveStoredStatus(storage.StatusStopped, storage.StatusStopped),
+		"a recorded stop must display as stopped")
 }

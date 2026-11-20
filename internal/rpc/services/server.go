@@ -571,7 +571,7 @@ func NewServerService(
 		enforcer:         enforcer,
 		// Every service owns a gate by default; the composition root replaces
 		// it with the one shared by RPC and scheduler starts.
-		admission: serverruntime.NewAdmissionCoordinator(),
+		admission:  serverruntime.NewAdmissionCoordinator(),
 		daemonInfo: make(map[string]daemonEnforcementCache),
 	}
 }
@@ -865,10 +865,10 @@ func preserveStoredStatus(stored, live storage.ServerStatus) bool {
 		return true
 	}
 	if stored == storage.StatusError &&
-		(live == storage.StatusStarting || live == storage.StatusUnhealthy) {
+		(live == storage.StatusStarting || live == storage.StatusUnhealthy || live == storage.StatusStopped) {
 		// A recorded game failure owns the display until the server actually
-		// recovers (running) or stops. Boot and health readings from a
-		// crash-retry loop must not wash the error out on every refresh.
+		// recovers or a stop is recorded. Docker's stopped state alone does
+		// not distinguish a clean shutdown from a failed process.
 		return true
 	}
 	return false

@@ -723,8 +723,8 @@ func (r *Reconciler) ReconcileServer(ctx context.Context, serverID string) error
 	// Game-process failure detection. The container can outlive a crashed JVM
 	// (the image retries inside a live entrypoint), so Docker-level status
 	// alone never turns red for a hard boot failure like a missing hard
-	// dependency. When the game is not verifiably healthy, consult the
-	// current boot's log tail for machine-precise fatal markers.
+	// dependency. Consult the current boot's log tail for fatal markers even
+	// when the entrypoint has already exited.
 	if dec.action != actStop && dec.action != actRecreate && shouldScanBootFailure(server.Status, obs) {
 		if reason, ok := r.detectBootFailure(ctx, cli, obs); ok {
 			dec.status = db.StatusError
