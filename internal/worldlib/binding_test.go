@@ -2,6 +2,8 @@
 package worldlib
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -425,5 +427,339 @@ func TestKeyedAdmissionReleasesOnCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("admission lock was not released")
+	}
+}
+
+// faultyAccessor injects I/O faults at the real node-accessor boundary. The
+// predicate receives the same relative paths production uses, so tests can
+// target a promotion or a restore without changing production behaviour.
+type faultyAccessor struct {
+	nodestorage.Accessor
+	failRename      func(oldRel, newRel string) bool
+	loseRenameReply func(oldRel, newRel string) bool
+}
+
+func (f *faultyAccessor) Rename(oldRel, newRel string) error {
+	if f.failRename != nil && f.failRename(oldRel, newRel) {
+		return errors.New("injected rename fault")
+	}
+	if err := f.Accessor.Rename(oldRel, newRel); err != nil {
+		return err
+	}
+	if f.loseRenameReply != nil && f.loseRenameReply(oldRel, newRel) {
+		return errors.New("injected lost rename reply")
+	}
+	return nil
+}
+
+func multiFamilyTestArchive(t *testing.T, families []string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, family := range families {
+		w, err := zw.Create(family + "/level.dat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte("new-" + family)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func seedMultiFamilyFixture(t *testing.T, store *storage.Store, families []string) (*storage.Server, *storage.WorldRevision, string, string) {
+	t.Helper()
+	root := t.TempDir()
+	dataRoot := filepath.Join(root, "data")
+	libraryRoot := filepath.Join(root, "library")
+	for _, family := range families {
+		if err := os.MkdirAll(filepath.Join(dataRoot, family), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dataRoot, family, "level.dat"), []byte("old-"+family), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(libraryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(libraryRoot, "rev.zip")
+	if err := os.WriteFile(archivePath, multiFamilyTestArchive(t, families), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := seedWorldServer(t, store, dataRoot)
+	rev := seedRevision(t, store, "wld_multi", archivePath, strings.Repeat("9", 64))
+	return server, rev, dataRoot, libraryRoot
+}
+
+func libraryEntryWithPrefix(t *testing.T, dataRoot, prefix string) string {
+	t.Helper()
+	lib := filepath.Join(dataRoot, ".world-library")
+	entries, err := os.ReadDir(lib)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), prefix) {
+			return filepath.Join(lib, entry.Name())
+		}
+	}
+	return ""
+}
+
+func TestBindMultiFamilyPartialPromotionRollbackPreservesEveryWorld(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	// Sorted order is world, world_end, world_nether. Fail the last promotion
+	// so two families are already on the new revision when compensation starts.
+	families := []string{"world", "world_end", "world_nether"}
+	server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, families)
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+	binder.SetAccessorDecorator(func(acc nodestorage.Accessor) nodestorage.Accessor {
+		return &faultyAccessor{Accessor: acc, failRename: func(oldRel, newRel string) bool {
+			return newRel == "world_nether" && strings.Contains(oldRel, "stage-")
+		}}
+	})
+
+	_, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "rollback-multi",
+	})
+	if err == nil {
+		t.Fatal("expected the injected promotion failure")
+	}
+	if errors.Is(err, ErrUncertainOutcome) {
+		t.Fatalf("expected a proven rollback, got uncertain outcome: %v", err)
+	}
+
+	// Every family is back on its retained old bytes; none was dropped.
+	for _, family := range families {
+		got, readErr := os.ReadFile(filepath.Join(dataRoot, family, "level.dat"))
+		if readErr != nil || string(got) != "old-"+family {
+			t.Errorf("family %s after rollback = %q, %v; want old-%s", family, string(got), readErr, family)
+		}
+	}
+	bindings, err := store.ListWorldBindings(ctx, server.ID, "")
+	if err != nil || len(bindings) != 0 {
+		t.Fatalf("bindings after proven rollback = %+v, %v; want none", bindings, err)
+	}
+	// Temporary trees are released only after bytes and binding were proven.
+	entries, err := os.ReadDir(filepath.Join(dataRoot, ".world-library"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary trees survived a proven rollback: %v", entries)
+	}
+	active, err := store.ListActiveServerOperations(ctx)
+	if err != nil || len(active) != 0 {
+		t.Fatalf("active operations after failed publish = %+v, %v", active, err)
+	}
+}
+
+func TestBindRollbackRestoreFailureKeepsOldDataAndUncertainBinding(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	families := []string{"world", "world_end", "world_nether"}
+	server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, families)
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+	binder.SetAccessorDecorator(func(acc nodestorage.Accessor) nodestorage.Accessor {
+		return &faultyAccessor{Accessor: acc, failRename: func(oldRel, newRel string) bool {
+			// Trigger compensation, then fail one retained-family restore.
+			if newRel == "world_nether" && strings.Contains(oldRel, "stage-") {
+				return true
+			}
+			return strings.Contains(oldRel, "old-") && strings.HasSuffix(oldRel, "/world_end")
+		}}
+	})
+
+	_, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "rollback-restore-io",
+	})
+	if !errors.Is(err, ErrUncertainOutcome) {
+		t.Fatalf("ambiguous restore must report uncertain outcome, got %v", err)
+	}
+	oldRoot := libraryEntryWithPrefix(t, dataRoot, "old-")
+	if oldRoot == "" {
+		t.Fatal("retained old tree was deleted on ambiguous I/O")
+	}
+	for _, family := range families {
+		// A family restored before the injected failure is back in live; the
+		// rest stay in the retained tree. Old bytes must exist in one place.
+		got, readErr := os.ReadFile(filepath.Join(dataRoot, family, "level.dat"))
+		if readErr != nil || string(got) != "old-"+family {
+			got, readErr = os.ReadFile(filepath.Join(oldRoot, family, "level.dat"))
+			if readErr != nil || string(got) != "old-"+family {
+				t.Errorf("old family %s lost on ambiguous restore: live=%q old=%q err=%v", family, string(got), string(got), readErr)
+			}
+		}
+	}
+	if q := libraryEntryWithPrefix(t, dataRoot, "quarantine-"); q == "" {
+		t.Fatal("quarantined new bytes were deleted on ambiguous I/O")
+	}
+	binding, err := store.GetWorldBinding(ctx, server.ID, "world")
+	if err != nil || binding.RevisionID != rev.ID {
+		t.Fatalf("binding must remain on the new revision until bytes are proven, got %+v, %v", binding, err)
+	}
+	active, err := store.ListActiveServerOperations(ctx)
+	if err != nil || len(active) != 1 {
+		t.Fatalf("journal must keep its lock on ambiguity, active = %+v, %v", active, err)
+	}
+}
+
+func TestBindRollbackBindingRefusalKeepsOldDataAndUncertainBinding(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	families := []string{"world", "world_end", "world_nether"}
+	server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, families)
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+	binder.SetAccessorDecorator(func(acc nodestorage.Accessor) nodestorage.Accessor {
+		return &faultyAccessor{Accessor: acc, failRename: func(oldRel, newRel string) bool {
+			return newRel == "world_nether" && strings.Contains(oldRel, "stage-")
+		}}
+	})
+	called := false
+	binder.rollbackBindingHook = func() error {
+		called = true
+		return errors.New("binding store unavailable")
+	}
+
+	_, err := binder.Bind(ctx, BindRequest{
+		ServerID: server.ID, LevelName: "world", RevisionID: rev.ID,
+		NodeID: "local", Generation: 1, RequestID: "rollback-binding-refusal",
+	})
+	if !called {
+		t.Fatal("rollback binding decision was not attempted")
+	}
+	if !errors.Is(err, ErrUncertainOutcome) {
+		t.Fatalf("refused binding restore must be uncertain, got %v", err)
+	}
+	// Bytes were proven, but the row was not: the new binding still stands and
+	// the quarantined new bytes remain for operator inspection.
+	binding, err := store.GetWorldBinding(ctx, server.ID, "world")
+	if err != nil || binding.RevisionID != rev.ID {
+		t.Fatalf("binding must not be reported rolled back, got %+v, %v", binding, err)
+	}
+	if q := libraryEntryWithPrefix(t, dataRoot, "quarantine-"); q == "" {
+		t.Fatal("quarantine removed before the binding decision was durable")
+	}
+	for _, family := range families {
+		got, readErr := os.ReadFile(filepath.Join(dataRoot, family, "level.dat"))
+		if readErr != nil || string(got) != "old-"+family {
+			t.Errorf("old family %s lost after refused binding restore: %q, %v", family, string(got), readErr)
+		}
+	}
+}
+
+func TestRecoverPreservesQuarantineAndRestoresOnlyMissingOldFamily(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	dataRoot := filepath.Join(t.TempDir(), "data")
+	oldFamily := filepath.Join(dataRoot, ".world-library", "old-drill", "world")
+	quarantineFamily := filepath.Join(dataRoot, ".world-library", "quarantine-drill", "world")
+	if err := os.MkdirAll(oldFamily, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldFamily, "level.dat"), []byte("old-world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(quarantineFamily, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(quarantineFamily, "level.dat"), []byte("new-world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, t.TempDir())
+	summary, err := binder.Recover(ctx, "srv-1", dataRoot, "local", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "restored 1") || !strings.Contains(summary, "preserved 1") {
+		t.Fatalf("unexpected recovery summary %q", summary)
+	}
+	got, err := os.ReadFile(filepath.Join(dataRoot, "world", "level.dat"))
+	if err != nil || string(got) != "old-world" {
+		t.Fatalf("old family not restored: %q, %v", got, err)
+	}
+	got, err = os.ReadFile(filepath.Join(quarantineFamily, "level.dat"))
+	if err != nil || string(got) != "new-world" {
+		t.Fatalf("quarantine was not preserved for operator inspection: %q, %v", got, err)
+	}
+}
+
+func TestBindMultiFamilyLostRenameReplyPreservesRecoveryAndRefusesRetry(t *testing.T) {
+	for _, transition := range []string{"retain", "promote"} {
+		t.Run(transition, func(t *testing.T) {
+			ctx := context.Background()
+			store := newWorldTestStore(t)
+			families := []string{"world", "world_nether"}
+			server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, families)
+			binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+			binder.SetAccessorDecorator(func(acc nodestorage.Accessor) nodestorage.Accessor {
+				return &faultyAccessor{Accessor: acc, loseRenameReply: func(src, dst string) bool {
+					if transition == "retain" {
+						return src == "world_nether" && strings.Contains(dst, "old-")
+					}
+					return dst == "world_nether" && strings.Contains(src, "stage-")
+				}}
+			})
+			req := BindRequest{ServerID: server.ID, LevelName: "world", RevisionID: rev.ID, RequestID: "lost-reply"}
+			first, err := binder.Bind(ctx, req)
+			if !errors.Is(err, ErrUncertainOutcome) || first == nil || first.OperationID == "" {
+				t.Fatalf("outcome = %+v, %v; want journaled uncertainty", first, err)
+			}
+			// A fresh binder is used on startup, with the same durable database.
+			restarted := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+			_, err = restarted.Recover(ctx, server.ID, dataRoot, "local", 1)
+			if !errors.Is(err, ErrUncertainOutcome) {
+				t.Fatalf("startup recovery = %v; want an unresolved operation", err)
+			}
+			req.RequestID = "retry-lost-reply"
+			retry, err := restarted.Bind(ctx, req)
+			if !errors.Is(err, ErrUncertainOutcome) || retry == nil || retry.OperationID != first.OperationID {
+				t.Fatalf("retry = %+v, %v; want original unresolved operation", retry, err)
+			}
+			oldRoot := libraryEntryWithPrefix(t, dataRoot, "old-")
+			for _, family := range families {
+				got, err := os.ReadFile(filepath.Join(oldRoot, family, "level.dat"))
+				if err != nil || string(got) != "old-"+family {
+					t.Fatalf("retained %s = %q, %v", family, got, err)
+				}
+			}
+		})
+	}
+}
+
+func TestBindPreservesOldFamiliesUntilJournalCompletion(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldTestStore(t)
+	families := []string{"world", "world_nether"}
+	server, rev, dataRoot, libraryRoot := seedMultiFamilyFixture(t, store, families)
+	// Force the journal update to fail after the storage mutation has finished.
+	if err := store.DB().Exec(`CREATE TRIGGER refuse_world_completion BEFORE UPDATE ON server_operations
+		WHEN NEW.phase = 'complete' BEGIN SELECT RAISE(ABORT, 'injected journal write failure'); END`).Error; err != nil {
+		t.Fatal(err)
+	}
+	binder := NewBinder(store, logger.New(), nodestorage.NewResolver(nil), nil, &fakeLifecycle{}, libraryRoot)
+	req := BindRequest{ServerID: server.ID, LevelName: "world", RevisionID: rev.ID, RequestID: "journal-write-failure"}
+	result, err := binder.Bind(ctx, req)
+	if !errors.Is(err, ErrUncertainOutcome) || result == nil || result.Outcome != "unknown" {
+		t.Fatalf("bind = %+v, %v; want unknown", result, err)
+	}
+	op, err := store.GetServerOperation(ctx, result.OperationID)
+	if err != nil || op.ActiveServer == nil || op.Phase != storage.ServerOperationExecuting {
+		t.Fatalf("operation = %+v, %v; want active executing", op, err)
+	}
+	oldRoot := libraryEntryWithPrefix(t, dataRoot, "old-")
+	for _, family := range families {
+		got, err := os.ReadFile(filepath.Join(oldRoot, family, "level.dat"))
+		if err != nil || string(got) != "old-"+family {
+			t.Fatalf("retained %s = %q, %v", family, got, err)
+		}
 	}
 }
