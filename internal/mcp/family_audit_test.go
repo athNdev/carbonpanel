@@ -6,17 +6,23 @@
 package mcp
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
 	"strings"
 	"testing"
 
+	"connectrpc.com/grpcreflect"
+	"github.com/athNdev/carbon-panel/internal/worldview"
 	_ "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
-// everyDeclaredProcedure enumerates all 26 proto services, including the
-// unmounted NodeControlService. Reflection (19 names) and the RBAC parity test
-// (24 names) are deliberately not used as sources of truth.
+// everyDeclaredProcedure enumerates the declared proto services, including the
+// unmounted NodeControlService. Declaration comes from descriptors.
+// Mounting and permissions are checked against their separate production inventories.
 func everyDeclaredProcedure(t *testing.T) map[string]bool {
 	t.Helper()
 	out := make(map[string]bool)
@@ -32,8 +38,8 @@ func everyDeclaredProcedure(t *testing.T) map[string]bool {
 		}
 		return true
 	})
-	if len(out) != 251 {
-		t.Fatalf("declared proto RPCs: got %d, want 251", len(out))
+	if len(out) != 250 {
+		t.Fatalf("declared proto RPCs: got %d, want 250", len(out))
 	}
 	return out
 }
@@ -107,6 +113,7 @@ func TestFamilyAudit(t *testing.T) {
 		}
 
 		declared := everyDeclaredProcedure(t)
+		mounted := mountedProcedures(t)
 		listed := liveListedProcedures()
 		reachable := liveReachableTools()
 		fixtures := liveFixtureProcedures(t)
@@ -131,6 +138,10 @@ func TestFamilyAudit(t *testing.T) {
 				}
 				seenRPC[op.Procedure] = true
 				declaredOps++
+				_, liveMounted := mounted[op.Procedure]
+				if op.Mounted != liveMounted {
+					t.Errorf("%s: audit mounted=%t, production mounted=%t", op.ID, op.Mounted, liveMounted)
+				}
 				if op.Mounted {
 					mountedOps++
 				} else {
@@ -226,14 +237,14 @@ func TestFamilyAudit(t *testing.T) {
 				t.Errorf("declared RPC %s is missing from the matrix", procedure)
 			}
 		}
-		if declaredOps != 251 || mountedOps != 241 || unmountedOps != 10 || nonRPC != 28 {
-			t.Fatalf("matrix row counts: declared=%d mounted=%d unmounted=%d nonRPC=%d; want 251/241/10/28",
+		if declaredOps != 250 || mountedOps != 240 || unmountedOps != 10 || nonRPC != 28 {
+			t.Fatalf("matrix row counts: declared=%d mounted=%d unmounted=%d nonRPC=%d; want 250/240/10/28",
 				declaredOps, mountedOps, unmountedOps, nonRPC)
 		}
 
 		want := FamilyAuditCounts{
-			DeclaredRPCs:              251,
-			MountedReachable:          241,
+			DeclaredRPCs:              250,
+			MountedReachable:          240,
 			ListedInToolCatalog:       recordedListed,
 			ReachableByToolOrComposed: recordedReachable,
 			VerifiedByFixture:         recordedVerified,
@@ -264,6 +275,10 @@ func TestFamilyAudit(t *testing.T) {
 				}
 			}
 		}
+	})
+
+	t.Run("HTTPMounts", func(t *testing.T) {
+		assertAuditHTTPMounts(t, matrix)
 	})
 
 	t.Run("ScopeSurfaces", func(t *testing.T) {
@@ -427,7 +442,7 @@ func TestFamilyAudit(t *testing.T) {
 			t.Fatalf("partial slice: %d/%d non-pending operations verified", verified, inScope)
 		}
 		t.Logf("ORDINARY GATE PASS: %d/%d supported operations verified; PENDING inventory is empty (%d entries)",
-		verified, inScope, len(PendingInventory))
+			verified, inScope, len(PendingInventory))
 	})
 
 	t.Run("GateDetectsUnlistedSupportedOperation", func(t *testing.T) {
@@ -442,7 +457,7 @@ func TestFamilyAudit(t *testing.T) {
 		// construction, while keeping the distinct LISTED/REACHABLE signals.
 		const syntheticProcedure = "/carbonpanel.v1.WorldService/ImportWorldSyntheticGap"
 		synthetic := FamilyAuditOperation{
-			ID: "rpc:" + syntheticProcedure,
+			ID:   "rpc:" + syntheticProcedure,
 			Kind: "rpc", Procedure: syntheticProcedure,
 			Support: FamilyAuditSupported,
 		}
@@ -464,4 +479,88 @@ func TestFamilyAudit(t *testing.T) {
 			t.Fatalf("ImportWorld must be complete under full coverage, got %+v", importCoverage)
 		}
 	})
+}
+
+// HTTP mounts are the handler patterns registered by the controller; a pattern
+// can serve several methods and subroutes. Handler policies are tested in the
+// scoped endpoint fixtures.
+func assertAuditHTTPMounts(t *testing.T, matrix FamilyAuditMatrix) {
+	t.Helper()
+	const file = "../rpc/server.go"
+	fset := token.NewFileSet()
+	source, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reflector := grpcreflect.NewStaticReflector()
+	reflectionV1, _ := grpcreflect.NewHandlerV1(reflector)
+	reflectionV1Alpha, _ := grpcreflect.NewHandlerV1Alpha(reflector)
+	mounts := map[string]bool{}
+	for _, decl := range source.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || fn.Name.Name != "setupHandler" && fn.Name.Name != "setupFrontend" {
+			continue
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			method, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || method.Sel.Name != "Handle" && method.Sel.Name != "HandleFunc" {
+				return true
+			}
+			recv, ok := method.X.(*ast.Ident)
+			if !ok || recv.Name != "mux" || len(call.Args) == 0 {
+				return true
+			}
+			var pattern string
+			switch first := call.Args[0].(type) {
+			case *ast.BasicLit:
+				pattern, _ = strconv.Unquote(first.Value)
+			case *ast.SelectorExpr:
+				if pkg, ok := first.X.(*ast.Ident); ok && pkg.Name == "worldview" && first.Sel.Name == "ProxyPrefix" {
+					pattern = worldview.ProxyPrefix
+				}
+			case *ast.CallExpr:
+				if ref, ok := first.Fun.(*ast.SelectorExpr); ok {
+					if pkg, ok := ref.X.(*ast.Ident); ok && pkg.Name == "grpcreflect" {
+						switch ref.Sel.Name {
+						case "NewHandlerV1":
+							pattern = reflectionV1
+						case "NewHandlerV1Alpha":
+							pattern = reflectionV1Alpha
+						}
+					}
+				}
+			}
+			if pattern == "" {
+				t.Errorf("%s: classify new HTTP mount pattern", fset.Position(call.Pos()))
+			} else {
+				mounts[pattern] = true
+			}
+			return true
+		})
+	}
+
+	audited := map[string]string{}
+	for _, op := range matrix.Operations {
+		for _, pattern := range op.HTTPMounts {
+			if op.Kind == "rpc" || op.Scope == "" {
+				t.Errorf("%s: HTTP mount %s must have a non-RPC audit row and scope", op.ID, pattern)
+			}
+			if previous, exists := audited[pattern]; exists {
+				t.Errorf("%s: HTTP mount %s already audited by %s", op.ID, pattern, previous)
+			}
+			if !mounts[pattern] {
+				t.Errorf("%s: HTTP mount %s is absent from production", op.ID, pattern)
+			}
+			audited[pattern] = op.ID
+		}
+	}
+	for pattern := range mounts {
+		if _, ok := audited[pattern]; !ok {
+			t.Errorf("production HTTP mount %s is unclassified", pattern)
+		}
+	}
 }

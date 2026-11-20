@@ -1171,7 +1171,7 @@
     "transport": "rest",
     "registered_by": "integration",
     "bounded_args": "single session id; bounded raw byte body; optional X-Upload-Offset",
-    "source_ref": "internal/rpc/server.go:291; internal/rpc/handlers/upload.go:42,59,105-111",
+    "source_ref": "internal/rpc/server.go:296; internal/rpc/handlers/upload.go:42,59,105-111",
     "equivalent_flow": "init_upload -\u003e upload_chunk -\u003e get_upload_status -\u003e save_uploaded_file / import_uploaded_mod / upload_datapack / import_uploaded_modpack",
     "description": "Scoped streaming upload byte channel, fail-closed at uploads/create with the server-local temp path deliberately withheld."
   },
@@ -1189,7 +1189,7 @@
     "transport": "rest",
     "registered_by": "integration",
     "bounded_args": "single session id; optional Range header",
-    "source_ref": "internal/rpc/server.go:294; internal/rpc/handlers/download.go:29,65,109-119",
+    "source_ref": "internal/rpc/server.go:299; internal/rpc/handlers/download.go:29,65,109-119",
     "equivalent_flow": "init_file_download / download_archive / export_world -\u003e scoped GET by browser or CLI",
     "description": "Scoped streaming download byte channel, fail-closed on the session's own server id."
   },

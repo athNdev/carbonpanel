@@ -1,0 +1,97 @@
+{
+  "name": "modpacks-library",
+  "title": "Modpacks library: recurring browse and management controls",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "bootstrap": {
+    "path": "/login",
+    "detectSelector": "input[placeholder=\"Enter your username\"]",
+    "usernameSelector": "input[placeholder=\"Choose admin username\"]",
+    "passwordSelector": "input[placeholder=\"Choose a strong password (min 12 chars)\"]",
+    "confirmSelector": "input[placeholder=\"Confirm your password\"]",
+    "submitSelector": "button[type=\"submit\"]",
+    "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks\"]"
+  },
+  "login": {
+    "path": "/login",
+    "usernameSelector": "input[placeholder=\"Enter your username\"]",
+    "passwordSelector": "input[placeholder=\"Enter your password\"]",
+    "submitSelector": "button[type=\"submit\"]",
+    "successSelector": "nav[aria-label=\"Main Navigation\"] a[href=\"/modpacks\"]"
+  },
+  "steps": [
+    {
+      "goto": "/modpacks",
+      "name": "navigate to modpacks library"
+    },
+    {
+      "waitFor": "text=Browse, import and manage modpack packages",
+      "name": "modpacks library loads"
+    },
+    {
+      "assertVisible": "[data-testid=\"showcase-modpacks-content\"]",
+      "name": "modpacks content area is present"
+    },
+    {
+      "assertVisible": "[data-testid=\"tab-browse\"]",
+      "name": "browse library tab is present"
+    },
+    {
+      "assertVisible": "[data-testid=\"tab-imported\"]",
+      "name": "imported library tab is present"
+    },
+    {
+      "assertVisible": "[data-testid=\"tab-favorites\"]",
+      "name": "favorites library tab is present"
+    },
+    {
+      "assertVisible": "input[placeholder=\"Search modpacks by name or description...\"]",
+      "name": "modpack search control is present"
+    },
+    {
+      "assertNoScrollbar": "[data-carbon-tabs]",
+      "name": "modpacks library tabs do not scroll vertically"
+    },
+    {
+      "assertVisible": "[data-testid=\"showcase-modpack-card\"]",
+      "name": "initial modpack catalog is populated",
+      "timeout": 45000
+    },
+    {
+      "screenshot": "modpacks-library-controls",
+      "name": "capture modpacks library controls"
+    },
+    {
+      "fill": "input[placeholder=\"Search modpacks by name or description...\"]",
+      "value": "carbonpanel-no-such-modpack-refusal-fixture",
+      "name": "request a modpack that does not exist"
+    },
+    {
+      "press": "Enter",
+      "name": "submit the unmatched search"
+    },
+    {
+      "assertVisible": "main :text-is('No modpacks matching \"carbonpanel-no-such-modpack-refusal-fixture\"')",
+      "name": "empty state refuses the unmatched query"
+    },
+    {
+      "assertVisible": "button:has-text(\"Clear search & filters\")",
+      "name": "reconciliation control is offered"
+    },
+    {
+      "click": "button:has-text(\"Clear search & filters\")",
+      "name": "reconcile by clearing search and filters"
+    },
+    {
+      "assertVisible": "[data-testid=\"showcase-modpack-card\"]",
+      "name": "populated catalog returns after reconciliation"
+    },
+    {
+      "screenshot": "modpacks-library-reconciled",
+      "name": "capture reconciled catalog"
+    }
+  ],
+  "docs": "Run with scripts/review/journey.mjs against an owned panel review stack. Wait for the initial catalog before submitting an unmatched search. Wait for the query-specific empty state, then clear the search and verify the catalog returns. Coverage includes the browse controls and this non-mutating search flow."
+}

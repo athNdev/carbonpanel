@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: MPL-2.0
+name: Modpacks browser review
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/modpacks-review.yml'
+      - 'docker/Dockerfile.carbon-panel'
+      - 'go.mod'
+      - 'go.sum'
+      - 'internal/indexers/**'
+      - 'internal/rpc/services/modpack*.go'
+      - 'proto/carbonpanel/v1/modpack.proto'
+      - 'scripts/manual-review/e2e/bun.lock'
+      - 'scripts/manual-review/e2e/package.json'
+      - 'scripts/review/**'
+      - 'web/carbon-panel/bun.lock'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/src/lib/**'
+      - 'web/carbon-panel/src/routes/+layout.*'
+      - 'web/carbon-panel/src/routes/login/**'
+      - 'web/carbon-panel/src/routes/modpacks/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/modpacks-review.yml'
+      - 'docker/Dockerfile.carbon-panel'
+      - 'go.mod'
+      - 'go.sum'
+      - 'internal/indexers/**'
+      - 'internal/rpc/services/modpack*.go'
+      - 'proto/carbonpanel/v1/modpack.proto'
+      - 'scripts/manual-review/e2e/bun.lock'
+      - 'scripts/manual-review/e2e/package.json'
+      - 'scripts/review/**'
+      - 'web/carbon-panel/bun.lock'
+      - 'web/carbon-panel/package.json'
+      - 'web/carbon-panel/src/lib/**'
+      - 'web/carbon-panel/src/routes/+layout.*'
+      - 'web/carbon-panel/src/routes/login/**'
+      - 'web/carbon-panel/src/routes/modpacks/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: modpacks-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  journeys:
+    name: Modpacks journeys (disposable controller)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PANEL_REVIEW_USER: reviewer
+      REVIEW_STACK_NAME: carbon-panel-review-modpacks
+      REVIEW_IMAGE: carbon-panel:review-modpacks
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.1'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.2'
+      - run: node scripts/review/setup-browser.mjs --with-deps
+      - name: Generate isolated fixture password
+        run: |
+          password="$(node -p '"review-" + require("node:crypto").randomBytes(16).toString("hex")')"
+          printf '::add-mask::%s\n' "${password}"
+          printf 'PANEL_REVIEW_PASSWORD=%s\n' "${password}" >> "${GITHUB_ENV}"
+      - name: Boot owned review stack
+        id: boot
+        run: bash scripts/review/devstack.sh up-controller
+      - name: Run both checked-in Chromium plans
+        id: review
+        run: |
+          port="$(cat "${HOME}/.cache/carbon-panel-review/sessions/${REVIEW_STACK_NAME}/port")"
+          output_dir="${RUNNER_TEMP}/modpacks-review"
+          mkdir -p "${output_dir}"
+          git rev-parse HEAD > "${output_dir}/source-commit.txt"
+          result=0
+          for plan in modpacks-library modpacks-studio-library; do
+            node scripts/review/journey.mjs \
+              --plan "scripts/review/plan-${plan}.json" \
+              --base "http://127.0.0.1:${port}" \
+              --out "${output_dir}/${plan}" || result=1
+          done
+          exit "${result}"
+      - name: Upload browser review receipts
+        if: ${{ always() && steps.review.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: modpacks-review
+          path: ${{ runner.temp }}/modpacks-review/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop owned review stack
+        if: ${{ always() && steps.boot.outcome != 'skipped' }}
+        run: bash scripts/review/devstack.sh down

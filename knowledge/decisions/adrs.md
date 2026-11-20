@@ -13,5 +13,4 @@ sources:
 # Parts
 
 - [Architecture decisions — Decision records](adrs-decision-records.md) — / ADR / Decision / Governs /
-- [Architecture decisions — Recent decision records](adrs-decision-records-recent.md) — Recent ADR records split from the main index
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find

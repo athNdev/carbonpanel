@@ -6,7 +6,7 @@
 
 - [Architecture decisions](adrs.md) — Index of the accepted ADRs and the concept each one governs.
 - [Architecture decisions — Decision records](adrs-decision-records.md) — / ADR / Decision / Governs /
-- [Architecture decisions — Recent decision records](adrs-decision-records-recent.md) — Recent ADR records split from the main index to keep each concept bounded.
+- [Architecture decisions — Decision records (part 2)](adrs-decision-records-2.md) — ADR index continuation from 0048 onward.
 - [Architecture decisions — Rule](adrs-rule.md) — The ADR is authoritative for rationale. This index exists so an agent can find
 - [Blueprint create qualification](blueprint-create-qualification.md) — Create-path blueprints are Java/tag seeds whose resolved image, env and protocol are tested; a Bedrock full-image seed is labeled unsupported, not a native edition.
 - [Bounded modpack import extraction](bounded-import-extraction.md) — All modpack imports use the shared bounded extractor in a staging directory; unsafe entries are rejected, never silently skipped.

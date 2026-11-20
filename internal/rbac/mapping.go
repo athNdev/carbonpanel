@@ -276,8 +276,8 @@ var ProcedurePermissions = map[string]ProcedurePermission{
 	"/carbonpanel.v1.UserService/GetUser":       {Resource: ResourceUsers, Action: ActionRead},
 	"/carbonpanel.v1.UserService/CreateUser":    {Resource: ResourceUsers, Action: ActionCreate},
 	"/carbonpanel.v1.UserService/UpdateUser":    {Resource: ResourceUsers, Action: ActionUpdate},
-	"/carbonpanel.v1.UserService/DeleteUser":    {Resource: ResourceUsers, Action: ActionDelete},
 	"/carbonpanel.v1.UserService/BeginOIDCLink": {Resource: ResourceUsers, Action: ActionUpdate},
+	"/carbonpanel.v1.UserService/DeleteUser":    {Resource: ResourceUsers, Action: ActionDelete},
 
 	// â”€â”€ RoleService â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	"/carbonpanel.v1.RoleService/ListRoles":           {Resource: ResourceRoles, Action: ActionRead},

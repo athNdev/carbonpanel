@@ -37,17 +37,17 @@ func isCapabilityTool(name string) bool {
 // artifact; LISTED/REACHABLE/VERIFIED are recomputed from live source.
 func TestIntegrationCombinedCatalog(t *testing.T) {
 	matrix := FamilyAudit()
-	if matrix.Counts.DeclaredRPCs != IntegrationDeclaredRPCs || IntegrationDeclaredRPCs != 251 {
-		t.Fatalf("declared RPCs: matrix=%d generated=%d want 251", matrix.Counts.DeclaredRPCs, IntegrationDeclaredRPCs)
+	if matrix.Counts.DeclaredRPCs != IntegrationDeclaredRPCs || IntegrationDeclaredRPCs != 250 {
+		t.Fatalf("declared RPCs: matrix=%d generated=%d want 250", matrix.Counts.DeclaredRPCs, IntegrationDeclaredRPCs)
 	}
-	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 241 {
-		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 241", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
+	if matrix.Counts.MountedReachable != IntegrationMountedRPCs || IntegrationMountedRPCs != 240 {
+		t.Fatalf("mounted RPCs: matrix=%d generated=%d want 240", matrix.Counts.MountedReachable, IntegrationMountedRPCs)
 	}
 	if matrix.Counts.ExcludedByReason != IntegrationExcludedOps || IntegrationExcludedOps != 78 {
 		t.Fatalf("excluded ops: matrix=%d generated=%d want 78", matrix.Counts.ExcludedByReason, IntegrationExcludedOps)
 	}
-	if IntegrationSupportedOps != 201 {
-		t.Fatalf("supported ops: got %d want 201", IntegrationSupportedOps)
+	if IntegrationSupportedOps != 200 {
+		t.Fatalf("supported ops: got %d want 200", IntegrationSupportedOps)
 	}
 	if len(exposedTools) != IntegrationCombinedTools {
 		t.Fatalf("generated tool count: got %d want %d", len(exposedTools), IntegrationCombinedTools)
@@ -104,8 +104,8 @@ func TestIntegrationCombinedCatalog(t *testing.T) {
 			t.Errorf("%s: live coverage incomplete: %+v", op.ID, cov)
 		}
 	}
-	if listedN != 201 || reachableN != 201 || verifiedN != 201 {
-		t.Fatalf("live coverage: LISTED=%d REACHABLE=%d VERIFIED=%d; want 201/201/201 (PENDING inventory empty)",
+	if listedN != 200 || reachableN != 200 || verifiedN != 200 {
+		t.Fatalf("live coverage: LISTED=%d REACHABLE=%d VERIFIED=%d; want 200/200/200 (PENDING inventory empty)",
 			listedN, reachableN, verifiedN)
 	}
 

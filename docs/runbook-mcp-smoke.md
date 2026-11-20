@@ -153,6 +153,12 @@ substitute for verification of a public immutable digest. Use `--dry-run` to
 inspect the planned commands without Docker; when Docker is unavailable it
 reports `blocked` with evidence instead of claiming success.
 
+The build-only report records the local image ID used for the container and
+includes the stdio driver's handshake, tool names and scoped call result under
+`stdio_smoke`. The runner removes its fixture, network and automatically tagged
+images. Cleanup failure fails the smoke and retains the report. Images selected
+with `--image-tag`, `--mock-tag` or `--skip-build` remain available to the caller.
+
 ## 4. Read-only smoke on a disposable fixture
 
 Use an owned mock panel or a freshly created, disposable panel install. Never a
@@ -169,7 +175,7 @@ that matches where the MCP process runs:
    process location**. Report `healthy`, `degraded`/`unavailable` and `unknown`
    separately; a stored `Running` status is not playable evidence.
 2. Call `tools/list`; retain the tool list. It enumerates the generated
-   combined catalogue of 211 tools (251 declared RPCs, 241 mounted/reachable).
+   combined catalogue of 211 tools (250 declared RPCs, 240 mounted/reachable).
 3. On stable `v1.0.40` (`f88748be…`) call only the verified-by-contract
    read-only set matching the core lane's stable smoke path: `list_servers`,
    `get_server`, `list_files`, `get_file`, `list_backups`. Record request/response

@@ -40,10 +40,11 @@ After the upload/download byte-transport lanes were mounted in production, the
 same command passes. The exact nine operations above have production
 `tools/call` evidence through the generated upload/download tool sets; the gate
 was not weakened. `PendingInventory` is empty (0 entries) and the ordinary
-gate now reports `201/201 supported operations verified`. Live counts:
-`supported=201 listed=201 reachable=201 verified=201 excluded=78`.
-Per-family evidence includes `FileService=17/17`, `UploadService=4/4`,
-`surface=3/3`. The hold mechanism remains live: adding an unmounted operation
+gate reports `200/200 supported operations verified`. Live counts are
+`supported=200 listed=200 reachable=200 verified=200 excluded=78`.
+Per-family evidence includes `FileService=17/17`, `UploadService=4/4` and `surface=2/2`.
+The two supported byte transfers are exercised through their mounted MCP tools.
+Prometheus scrapes are classified among the excluded HTTP surfaces. The hold mechanism remains live: adding an unmounted operation
 back to `PendingInventory` re-reds both gates.
 
 ## 3. Publication blocking and ordinary CI

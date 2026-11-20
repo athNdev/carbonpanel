@@ -107,6 +107,17 @@ function startPackagedServer() {
 
 // Public-seam seeds. Only network responses at the external API boundary are
 // stubbed; no source module, store or component internal is imported or driven.
+const LARGE_FLEET = Array.from({ length: 8 }, (_, index) => ({
+	id: `srv-large-${index}`,
+	name: `Very long fixture server name ${index} for responsive dashboard verification`,
+	status: index % 3 === 0 ? 'SERVER_STATUS_ERROR' : index % 3 === 1 ? 'SERVER_STATUS_RUNNING' : 'SERVER_STATUS_STOPPED',
+	modLoader: 'MOD_LOADER_VANILLA',
+	version: '1.21.1',
+	port: 25570 + index,
+	memory: 65536,
+	maxPlayers: 999
+}));
+
 const FLEET = [
 	{
 		id: 'srv-1',
@@ -133,6 +144,7 @@ const FLEET = [
 // The shell focus prefix is stable; the sidebar nav collapses below 768, so
 // only its first three stops are asserted at the narrowest viewport.
 const SHELL_FOCUS = [
+	'Skip to content',
 	'Toggle Navigation',
 	'Carbon Panel',
 	'A1 A11y Reviewer',
@@ -173,6 +185,56 @@ const WORLD_ENTRIES = [
 		updatedAt: ISO(1_700_000_000)
 	}
 ];
+// Representative existing modpack rows, seeded only at the SearchModpacks
+// network boundary. Field names are the generated client's camelCase keys and
+// the JSON-array columns are valid JSON, so the real page renders them.
+const MODPACKS = [
+	{
+		id: 'seed-pack-1',
+		indexerId: 'seed-modrinth',
+		indexer: 'modrinth',
+		name: 'Seeded Fabric Pack',
+		slug: 'seeded-fabric-pack',
+		summary: 'Representative catalog entry for the recurring modpack journey',
+		description: 'Seeded at the RPC boundary; no network indexer is contacted.',
+		logoUrl: '',
+		websiteUrl: '',
+		downloadCount: 1234,
+		categories: '["fabric"]',
+		gameVersions: '["1.21.1"]',
+		modLoaders: '["fabric"]',
+		latestFileId: 'seed-file-1',
+		mcVersion: '1.21.1',
+		javaVersion: 21,
+		dockerImage: '',
+		recommendedRam: 2048,
+		isFavorited: false,
+		indexError: ''
+	},
+	{
+		id: 'seed-pack-2',
+		indexerId: 'seed-modrinth',
+		indexer: 'modrinth',
+		name: 'Seeded Forge Pack',
+		slug: 'seeded-forge-pack',
+		summary: 'Second representative catalog entry',
+		description: 'Seeded at the RPC boundary; no network indexer is contacted.',
+		logoUrl: '',
+		websiteUrl: '',
+		downloadCount: 987,
+		categories: '["forge"]',
+		gameVersions: '["1.20.4"]',
+		modLoaders: '["forge"]',
+		latestFileId: 'seed-file-2',
+		mcVersion: '1.20.4',
+		javaVersion: 17,
+		dockerImage: '',
+		recommendedRam: 2048,
+		isFavorited: false,
+		indexError: ''
+	}
+];
+
 const WORLD_TARGETS = [
 	{
 		serverId: 'srv-1',
@@ -234,6 +296,7 @@ async function seedPackagedRoutes(page, state, authMode) {
 		}
 		if (method === 'ListServers') {
 			if (state.servers === 'error') return fail('Fixture servers unavailable');
+			if (state.servers === 'large') return reply({ servers: LARGE_FLEET });
 			return reply({ servers: state.servers === 'empty' ? [] : FLEET });
 		}
 		if (method === 'GetServer') {
@@ -251,6 +314,14 @@ async function seedPackagedRoutes(page, state, authMode) {
 		if (method === 'GetModLoaders') return reply({ modloaders: ['vanilla', 'fabric'] });
 		if (method === 'GetDockerImages') return reply({ images: [] });
 		if (method === 'GetNextAvailablePort') return reply({ port: 25567 });
+		if (method === 'GetIndexerStatus') {
+			return reply({ indexersAvailable: { modrinth: true }, modpacksByIndexer: { modrinth: 2 } });
+		}
+		if (method === 'ListFavorites') return reply({ modpacks: [] });
+		if (method === 'SearchModpacks') {
+			if (state.modpacks === 'refused') return fail('Fixture modpack search refused');
+			return reply({ modpacks: MODPACKS, total: MODPACKS.length, page: 1, pageSize: 20 });
+		}
 		if (method === 'GetGlobalSettings') return reply({ categories: [] });
 		return reply({});
 	});
@@ -538,7 +609,7 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 		const page = await context.newPage();
 		await seedPackagedRoutes(page, state, 'anonymous');
 
-		for (const width of [1440, 768, 360]) {
+		for (const width of [1440, 1024, 768, 360]) {
 			await page.setViewportSize({ width, height: 900 });
 			for (const route of PACKAGED_ROUTES) {
 				await page.goto(root + route.path, { waitUntil: 'domcontentloaded' });
@@ -587,6 +658,158 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 					return route.controls.map(([role, name]) => `${role}:${name}`);
 				});
 			}
+
+      await check(
+        `shell @${width} ${theme}: skip link and off-canvas focus containment`,
+        async () => {
+          const state = await page.evaluate(() => ({
+            main: Boolean(document.getElementById("carbon-main")),
+            skip:
+              document
+                .querySelector('a[href="#carbon-main"]')
+                ?.textContent?.trim() ?? null,
+            navInert: document.getElementById("carbon-sidenav")?.inert ?? false,
+          }));
+          if (
+            !state.main ||
+            state.skip !== "Skip to content" ||
+            state.navInert !== (width === 360)
+          ) {
+            throw new Error(
+              `shell keyboard seam incomplete: ${JSON.stringify(state)}`,
+            );
+          }
+          return state;
+        },
+      );
+
+      await page.goto(root + "/", { waitUntil: "domcontentloaded" });
+      await page
+        .getByRole("heading", { name: "Cluster Overview", level: 1 })
+        .waitFor();
+      await check(
+        `shell @${width} ${theme}: skip link and profile menu keyboard restoration`,
+        async () => {
+          await page.locator("body").click({ position: { x: 2, y: 2 } });
+          await page.keyboard.press("Tab");
+          const skipFocused = await page.evaluate(
+            () =>
+              document.activeElement?.textContent?.trim() === "Skip to content",
+          );
+          await page.keyboard.press("Enter");
+          const landed = await page.evaluate(
+            () => document.activeElement?.id ?? null,
+          );
+          await page.keyboard.press("Tab");
+          const nextInMain = await page.evaluate(() =>
+            Boolean(document.activeElement?.closest("main")),
+          );
+          const trigger = page.locator('[aria-haspopup="menu"]');
+          await trigger.focus();
+
+          await page.keyboard.press("Enter");
+          const menu = page.locator('[role="menu"]');
+          await menu.waitFor();
+          await page.locator('[role="menuitem"]').first().focus();
+          await page.keyboard.press("Escape");
+          await menu.waitFor({ state: "detached" });
+          await page.waitForFunction(
+            () =>
+              document.activeElement ===
+              document.querySelector('[aria-haspopup="menu"]'),
+            null,
+            { timeout: 3000 },
+          );
+          const menuEscapeRestored = true;
+
+          const dialogResults = {};
+          for (const [label, title] of [
+            ["Profile", "Profile"],
+            ["Preferences", "Preferences"],
+          ]) {
+            await trigger.focus();
+            await page.keyboard.press("Enter");
+            await menu.waitFor();
+            await page
+              .getByRole("menuitem", { name: label, exact: true })
+              .click();
+            const dialog = page.getByRole("dialog");
+            await dialog.waitFor();
+            const heading = await dialog.getAttribute("aria-labelledby");
+            dialogResults[label] = Boolean(heading);
+            await page.keyboard.press("Escape");
+            await dialog.waitFor({ state: "detached" });
+            await page.waitForFunction(
+              () =>
+                document.activeElement ===
+                document.querySelector('[aria-haspopup="menu"]'),
+              null,
+              { timeout: 3000 },
+            );
+            dialogResults[`${label}FocusRestored`] = true;
+          }
+
+          if (
+            !skipFocused ||
+            landed !== "carbon-main" ||
+            !nextInMain ||
+            !menuEscapeRestored ||
+            Object.values(dialogResults).some((value) => !value)
+          ) {
+            throw new Error(
+              `shell keyboard restoration incomplete: ${JSON.stringify({ skipFocused, landed, nextInMain, menuEscapeRestored, dialogResults })}`,
+            );
+          }
+          return {
+            skipFocused,
+            landed,
+            nextInMain,
+            menuEscapeRestored,
+            dialogResults,
+          };
+        },
+      );
+			await check(`dashboard @${width} ${theme}: KPI footers wrap without clipping`, async () => {
+				const readTiles = () => page.evaluate(() => {
+					const tiles = [...document.querySelectorAll('[data-testid="showcase-kpi-tiles"] > div')];
+					if (tiles.length !== 4) throw new Error('Expected four populated KPI tiles');
+					return tiles.map((tile) => {
+						const footer = tile.querySelector('.border-t');
+						const spans = footer ? [...footer.querySelectorAll('span')] : [];
+						return {
+							tileOverflow: tile.scrollWidth > tile.clientWidth + 1,
+							footerOverflow: footer ? footer.scrollWidth > footer.clientWidth + 1 : false,
+							clipped: spans
+								.filter((span) => span.scrollWidth > span.clientWidth + 1)
+								.map((span) => span.textContent?.trim() ?? ''),
+							text: (footer?.textContent ?? '').replace(/\s+/g, ' ').trim()
+						};
+					});
+				});
+				await page.goto(root + '/', { waitUntil: 'domcontentloaded' });
+				await page.getByRole('heading', { name: 'Cluster Overview', level: 1 }).waitFor();
+				await page.locator('[data-testid="showcase-kpi-tiles"] > div').first().waitFor();
+				const samples = [await readTiles()];
+				if (width === 1024) {
+					await page.locator('[aria-label="Toggle Navigation"]').click();
+					await page.waitForTimeout(250);
+					samples.push(await readTiles());
+				}
+				state.servers = 'large';
+				await page.goto(root + '/', { waitUntil: 'domcontentloaded' });
+				await page.getByRole('heading', { name: 'Cluster Overview', level: 1 }).waitFor();
+				await page.locator('[data-testid="showcase-kpi-tiles"] > div').first().waitFor();
+				if (process.env.UI_PASS_SHOTS) {
+					await page.screenshot({ path: `${process.env.UI_PASS_SHOTS}/dashboard-kpi-${width}-${theme}.png` });
+				}
+				samples.push(await readTiles());
+				state.servers = 'populated';
+				const bad = samples.flat().filter((tile) => tile.tileOverflow || tile.footerOverflow || tile.clipped.length > 0);
+				if (bad.length > 0) {
+					throw new Error(`dashboard KPI footer clipped: ${JSON.stringify(bad)}`);
+				}
+				return samples.map((sample) => sample.map((tile) => tile.text));
+			});
 
 			for (const path of ['/servers', '/servers/srv-1']) {
 				await page.goto(root + path, { waitUntil: 'domcontentloaded' });
@@ -752,7 +975,11 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.keyboard.press('ArrowLeft');
 				return { initial, focusedAfterArrowRight: focused, after };
 			});
-		}
+      await page.goto(root + "/servers/srv-1", {
+        waitUntil: "domcontentloaded",
+      });
+      await page.locator("#server-detail-tabs-tab-world").click();
+      await page.locator("[data-server-tab-panel]").waitFor();		}
 
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await check(`route /servers ${theme}: empty state is exposed`, async () => {
@@ -819,12 +1046,104 @@ async function runPackagedRouteJourney(browser, base, theme = 'light') {
 				await page.getByLabel('Username', { exact: true }).fill('review');
 				await page.getByLabel('Password', { exact: true }).fill('wrong-password');
 				await page.getByRole('button', { name: 'Sign In', exact: true }).click();
-				await page.getByText('Invalid username or password', { exact: false }).first().waitFor();
-				return { path: await page.evaluate(() => location.pathname), error: true, metrics };
+				const announced = page
+					.getByRole('alert')
+					.filter({ hasText: 'Invalid username or password' });
+				await announced.first().waitFor();
+				if (!(await announced.first().evaluate((node) => node === document.activeElement))) {
+					throw new Error('Failed sign-in did not focus the error message');
+				}
+				const recovery = page.getByRole('button', { name: 'Forgot access? Recovery' });
+				await recovery.click();
+				if (!(await page.getByLabel('Recovery Key', { exact: true }).evaluate((node) => node === document.activeElement))) {
+					throw new Error('Opening recovery did not focus the recovery key field');
+				}
+				await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+				if (!(await recovery.evaluate((node) => node === document.activeElement))) {
+					throw new Error('Canceling recovery did not return focus');
+				}
+				return {
+					path: await page.evaluate(() => location.pathname),
+					error: true,
+					announced: await announced.count(),
+					metrics
+				};
 			});
 		}
 	} finally {
 		await loginContext.close();
+	}
+}
+
+// OSS-406 named recurring modpack journey, driven on the real packaged build.
+// It executes the same selectors as scripts/review/plan-modpacks-library.json
+// and plan-modpacks-studio-library.json: the library shell, its tab strip and
+// search control, then a public-seam refusal (SearchModpacks -> 503) followed
+// by reconciliation (Retry -> seeded catalog). No world, credential or indexer
+// state is mutated; the only stub is the external RPC response.
+async function runModpacksJourney(browser, base, theme = 'light') {
+	const root = base.replace(/\/$/, '');
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	await context.addInitScript((mode) => {
+		try {
+			localStorage.setItem('carbon-theme', mode);
+			localStorage.setItem('mode-watcher-mode', mode);
+		} catch {
+			// The per-route theme check reports the effective theme from the DOM.
+		}
+	}, theme);
+	try {
+		const page = await context.newPage();
+		const state = { servers: 'populated', detail: 'populated', modpacks: 'populated' };
+		await seedPackagedRoutes(page, state, 'anonymous');
+
+		await check(`modpacks ${theme}: library shell and tab controls render`, async () => {
+			await page.goto(root + '/modpacks', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('heading', { name: 'Modpacks', level: 1 }).waitFor();
+			await page.getByText('Browse, import and manage modpack packages').first().waitFor();
+			await page.getByTestId('showcase-modpacks-content').first().waitFor();
+			for (const tab of ['Browse', 'Imported', 'Favorites']) {
+				await page.getByRole('tab', { name: new RegExp(tab) }).first().waitFor({ timeout: 10000 });
+			}
+			await page.getByPlaceholder('Search modpacks by name or description...').waitFor();
+			return 'description, content area, three tabs and search control visible';
+		});
+
+		await check(`modpacks ${theme}: seeded catalog renders from the RPC boundary`, async () => {
+			await page.getByTestId('showcase-modpack-card').first().waitFor({ timeout: 10000 });
+			return page.getByTestId('showcase-modpack-card').count();
+		});
+
+		await check(`modpacks ${theme}: refused search exposes the error state and Retry`, async () => {
+			state.modpacks = 'refused';
+			await page.getByPlaceholder('Search modpacks by name or description...').fill('refusal-probe');
+			await page.getByRole('button', { name: 'Search', exact: true }).first().click();
+			await page.getByText('Failed to search modpacks').first().waitFor({ timeout: 10000 });
+			await page.getByRole('button', { name: 'Retry', exact: true }).first().waitFor();
+			return 'error title and Retry control visible';
+		});
+
+		await check(`modpacks ${theme}: Retry reconciles back to the populated catalog`, async () => {
+			state.modpacks = 'populated';
+			await page.getByRole('button', { name: 'Retry', exact: true }).first().click();
+			await page.getByText('Failed to search modpacks').first().waitFor({ state: 'hidden', timeout: 10000 });
+			await page.getByTestId('showcase-modpack-card').first().waitFor({ timeout: 10000 });
+			return 'error cleared and seeded card restored';
+		});
+
+		await check(`modpacks ${theme}: studio library shell controls render`, async () => {
+			state.modpacks = 'populated';
+			await page.goto(root + '/modpacks/studio', { waitUntil: 'domcontentloaded' });
+			await page.getByRole('heading', { name: 'Modpack Studio', level: 1 }).waitFor();
+			await page.getByText('Visual workspace for custom modpacks:', { exact: false }).first().waitFor();
+			await page.getByRole('button', { name: 'Create Modpack' }).first().waitFor();
+			await page.getByRole('button', { name: 'Import Modpack' }).first().waitFor();
+			await page.getByRole('link', { name: 'Browse Modpacks' }).first().waitFor();
+			await page.getByPlaceholder('Search modpack projects...').waitFor();
+			return 'studio heading, description, three controls and project search visible';
+		});
+	} finally {
+		await context.close();
 	}
 }
 
@@ -899,6 +1218,7 @@ try {
 	} else {
 		await runComponentJourney(browser, fixtureBase);
 		await runPackagedRouteJourney(browser, packagedBase, 'light');
+		await runModpacksJourney(browser, packagedBase, 'light');
 		await runPackagedRouteJourney(browser, packagedBase, 'dark');
 		await check('route themes: light and dark paint different backgrounds', async () => {
 			if (!themeBackgrounds.light || !themeBackgrounds.dark) {
