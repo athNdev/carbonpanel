@@ -160,7 +160,7 @@ func registerOK[Req, Res any](mux *http.ServeMux, procedure string, ic connect.U
 	var handler func(context.Context, *connect.Request[Req]) (*connect.Response[Res], error)
 	postStable := false
 	if e, ok := DeclaredProcedure(procedure); ok {
-		postStable = e.Build == PanelBuildPostStable
+		postStable = e.Build != PanelBuildStableV140
 	}
 	if olderMode == "domain-notfound" && procedure == "/carbonpanel.v1.ServerService/GetServer" {
 		handler = func(context.Context, *connect.Request[Req]) (*connect.Response[Res], error) {
