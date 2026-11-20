@@ -227,7 +227,7 @@ preview artifact for the official stable one when it is published.
 The implemented catalogue mounts the generated **212-tool combined catalogue**.
 It is derived from 250 declared RPCs across 28 proto services, of which 240 are
 mounted/reachable across 27 mounted services. Tool coverage is not the same as
-RPC coverage. The audit classifies 201 supported operations and 77 exclusions.
+RPC coverage. The audit classifies 201 supported operations and 77 excluded operations.
 The strict gate verifies that each supported operation is listed, reachable and
 exercised in a fixture. Do not infer that every panel RPC has a tool.
 
