@@ -9,12 +9,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/athNdev/carbon-panel/internal/rbac"
+	"github.com/athNdev/carbon-panel/internal/rpc"
 	_ "github.com/athNdev/carbon-panel/pkg/proto/carbonpanel/v1"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
@@ -79,30 +80,16 @@ func fieldsKey(m protoreflect.MessageDescriptor) string {
 }
 
 func TestSharedMountListMatchesServerRegistrations(t *testing.T) {
-	src, err := os.ReadFile("../rpc/server.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(src)
-	start := strings.Index(text, "func (s *Server) registerServices(")
-	if start < 0 {
-		t.Fatal("registerServices not found in internal/rpc/server.go")
-	}
-	end := strings.Index(text[start:], "\n}")
-	if end < 0 {
-		t.Fatal("end of registerServices not found")
-	}
-	body := text[start : start+end]
-	if got := strings.Count(body, "mux.Handle("); got != len(MountedServices) {
-		t.Fatalf("server.go registerServices mounts %d services, shared list has %d", got, len(MountedServices))
-	}
-	if strings.Contains(body, "NodeControl") {
-		t.Fatal("NodeControlService must never be mounted")
-	}
+	// internal/rpc exercises actual handler registration against this list.
+	want := slices.Clone(rpc.RegisteredConnectServices)
+	got := make([]string, 0, len(MountedServices))
 	for _, service := range MountedServices {
-		if !strings.Contains(body, "New"+service+"Handler(") {
-			t.Errorf("server.go does not mount %s", service)
-		}
+		got = append(got, "carbonpanel.v1."+service)
+	}
+	sort.Strings(want)
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("MCP service list differs from production: got %v, want %v", got, want)
 	}
 }
 

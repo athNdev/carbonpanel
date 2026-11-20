@@ -12,7 +12,7 @@ sources:
 The nine formerly PENDING operations are now mounted by production
 `NewServer` / `registerCombinedTools` and carry executable `tools/call`
 evidence, so `PendingInventory` is empty and the STRICT publication gate is
-green (201/201 SUPPORTED operations LISTED, REACHABLE and VERIFIED). The same
+green (200/200 supported operations listed, reachable and verified). The same
 gate now also runs in ordinary CI (`mcp-coverage` job) with a fail-closed
 negative fixture and a real-binary stdio conformance smoke. The exact
 retired inventory and its per-tool evidence map live in
