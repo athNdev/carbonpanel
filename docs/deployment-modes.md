@@ -102,7 +102,8 @@ Compose staging: <run ID> <full staged product SHA> <prior Stable tag>
 Each host/bridge runner assembles the candidate OCI image from verified staged
 Linux amd64 bytes and uses an immutable digest on a loopback-only registry.
 It runs a clean candidate install and a prior Stable install with a disposable
-Minecraft world. It checks a real Minecraft login and online roster, the
+Minecraft world and auto-start enabled. Panel shutdown stops managed servers,
+and the new controller starts the fixture from its persisted auto-start setting. It checks a real Minecraft login and online roster, the
 snapshot-before-recreate path, real ENOSPC on an isolated snapshot filesystem,
 interruption during image pull, privilege and mount parity, copy-back to the
 prior image, and game restart with a persistent world gamerule. The run records

@@ -209,7 +209,8 @@ echo "Panel and game effective Docker privileges and mounts unchanged"
 
 echo "=== Copy-back and rejoin through the prior stable image ==="
 compose stop carbon-panel
-bash "$product/scripts/compose-upgrade-rollback.sh" --compose "$compose_file" \
+# The Linux image owns the controller database through a root-owned bind mount.
+sudo bash "$product/scripts/compose-upgrade-rollback.sh" --compose "$compose_file" \
   --data-dir "$state/data" --snapshot "$snapshot" --apply
 cmp "$snapshot" "$state/data/carbon-panel.db"
 render "$BASELINE_IMAGE" "$state"

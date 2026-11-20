@@ -120,6 +120,7 @@ async function main() {
       maxPlayers: 5,
       port: state.port,
       startImmediately: true,
+      autoStart: true,
       dockerOverrides: { environment: { ONLINE_MODE: "FALSE" } },
       requestId: "compose-qualification-create",
     });
