@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-ADR 0016 defines a stop â†’ stage â†’ journal â†’ publish â†’ restart world swap.
+ADR 0016 defines a stop Ã¢â€ â€™ stage Ã¢â€ â€™ journal Ã¢â€ â€™ publish Ã¢â€ â€™ restart world swap.
 The binding row is swapped before filesystem promotion. The original rollback
 closure renamed retained old families back with errors ignored, then deleted
 the whole retention tree. For a normal Java world with overworld, nether and
@@ -39,6 +39,22 @@ Compensation for a failed multi-family publish is data-preserving and staged:
 5. Startup recovery preserves every tree for an active operation. For legacy
    retention trees without an active operation, recovery restores a family only
    when the live path is confirmed missing. It never deletes retained data.
+
+## Running servers
+
+A bind holds the server lifecycle transition from the first Docker observation
+until the decision. Its active journal guards stop, promotion and restart. The
+adapter requires both server power
+grants for a running target and checks the active bind journal's server, node
+endpoint and container identity before internal power calls. Public power
+requests keep their ordinary admission checks.
+
+Publish proceeds after the node confirms the container stopped. Success and
+proven rollback restart the same container. The controller confirms the Docker
+process is running before releasing recovery data. If stopping or restarting
+cannot be verified, the operation stays active and the controller preserves
+the recovery trees. Staged configuration and container recreation stay on the
+regular start path.
 
 Knowledge is updated in `knowledge/architecture/world-library-shape.md`.
 

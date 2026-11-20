@@ -27,6 +27,10 @@ type fakeLifecycle struct {
 	failStart bool
 }
 
+func (f *fakeLifecycle) BeginTransition(string) (func(), error) {
+	return func() {}, nil
+}
+
 func (f *fakeLifecycle) IsRunning(context.Context, string) (bool, error) { return f.running, nil }
 func (f *fakeLifecycle) StopServer(context.Context, string) error {
 	f.stops++
