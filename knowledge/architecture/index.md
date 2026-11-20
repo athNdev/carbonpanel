@@ -81,6 +81,6 @@
 - [Unprivileged LXC node artifact lane — Qualification and boot evidence](node-lxc-artifact-qual.md) — Fail-closed boot qualification and runtime evidence boundaries for the LXC artifact lane.
 - [Unprivileged LXC node artifact lane — Rule](node-lxc-artifact-rule.md) — The unprivileged LXC / Proxmox rootfs template is a separate artifact lane at
 - [World Library](world-library.md) — Library worlds are immutable content-addressed revisions; servers get private writable clones through journaled, stop-based bindings, never a live folder rename.
-- [World Library â€” Rollback rules (part 2)](world-library-shape-2.md) — Failed multi-family swap compensation: quarantine, byte proof and binding proof.
 - [World Library — Read next](world-library-read-next.md) — Fail-closed authorization
+- [World Library — Rollback rules (part 2)](world-library-shape-2.md) — Failed multi-family swap compensation: quarantine, byte proof and binding proof.
 - [World Library — Shape + Rules](world-library-shape.md) — A WorldEntry is a logical library identity (wld_*). A WorldRevision is an

@@ -143,7 +143,7 @@ type BindResult struct {
 	Consistency string
 }
 
-// Binder owns the journalled stop â†’ stage â†’ publish â†’ restart transaction.
+// Binder owns the journalled stop → stage → publish → restart transaction.
 type Binder struct {
 	store       *storage.Store
 	log         *logger.Logger

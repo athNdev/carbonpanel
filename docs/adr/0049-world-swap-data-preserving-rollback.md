@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-ADR 0016 defines a stop Ã¢â€ â€™ stage Ã¢â€ â€™ journal Ã¢â€ â€™ publish Ã¢â€ â€™ restart world swap.
+ADR 0016 defines a stop → stage → journal → publish → restart world swap.
 The binding row is swapped before filesystem promotion. The original rollback
 closure renamed retained old families back with errors ignored, then deleted
 the whole retention tree. For a normal Java world with overworld, nether and
