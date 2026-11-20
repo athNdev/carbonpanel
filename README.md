@@ -68,6 +68,14 @@ provenance before binding it to a server.
 
 [![Immutable world revision with version, size and provenance](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-library-revisions.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-library-revisions.png)
 
+### Look inside a world.
+
+Open a rendered map of a world in the panel, with real terrain tiles and the renderer's own pan and zoom controls.
+
+[![In-app World View with real rendered BlueMap terrain and renderer controls](https://raw.githubusercontent.com/athNdev/carbonpanel/showcase-assets/assets/showcase/showcase-world-view.png)](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-world-view.png)
+
+[View the full-resolution World View capture ↗](https://github.com/athNdev/carbonpanel/blob/showcase-assets/assets/showcase/showcase-world-view.png)
+
 ### Decide who connects.
 
 Add a player to a server's allowlist before they have joined, with a typed,
