@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -156,7 +157,6 @@ func TestBindWorldReportsUnknownOutcomeInsteadOfRetryableError(t *testing.T) {
 	}
 }
 
-
 func countWorldEvents(t *testing.T, store *storage.Store, event, serverID, requestID string) int64 {
 	t.Helper()
 	var count int64
@@ -274,7 +274,6 @@ func TestBindWorldUncertainOutcomeEmitsNoSuccessEvent(t *testing.T) {
 	_ = time.Now() // keep time import used only if needed by future edits
 }
 
-
 func TestUnbindWorldEmitsExactlyOneEventOnSuccess(t *testing.T) {
 	ctx := context.Background()
 	store := newWorldRPCStore(t)
@@ -327,5 +326,46 @@ func TestUnbindWorldReplayEmitsExactlyOneEventWhenBindingAbsent(t *testing.T) {
 	}
 	if got := countWorldEvents(t, store, activity.EventWorldUnbind, server.ID, "rpc-unbind-replay-1"); got != 1 {
 		t.Fatalf("events after replay with absent binding = %d, want 1", got)
+	}
+}
+
+// faultyRPCAccessor fails the single-family promotion at the real node
+// accessor boundary so a failed World Library bind can be exercised through
+// the real RPC service without touching host data.
+type faultyRPCAccessor struct {
+	nodestorage.Accessor
+}
+
+func (f *faultyRPCAccessor) Rename(oldRel, newRel string) error {
+	if newRel == "world" && strings.Contains(oldRel, "stage-") {
+		return errors.New("injected promotion fault")
+	}
+	return f.Accessor.Rename(oldRel, newRel)
+}
+
+func TestBindWorldFailedRollbackEmitsNoEvent(t *testing.T) {
+	ctx := context.Background()
+	store := newWorldRPCStore(t)
+	root := t.TempDir()
+	libraryRoot := filepath.Join(root, "library")
+	server, rev := seedWorldRPC(t, store, filepath.Join(root, "data"), libraryRoot, 7)
+	svc := newWorldRPCService(t, store, libraryRoot, &worldTestLifecycle{})
+	svc.binder.SetAccessorDecorator(func(acc nodestorage.Accessor) nodestorage.Accessor {
+		return &faultyRPCAccessor{Accessor: acc}
+	})
+	req := connect.NewRequest(&v1.BindWorldRequest{
+		ServerId: server.ID, LevelName: "world", RevisionId: rev.ID, RequestId: "rpc-bind-failed-rollback",
+	})
+	if _, err := svc.BindWorld(ctx, req); err == nil {
+		t.Fatal("expected the injected promotion failure")
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-failed-rollback"); got != 0 {
+		t.Fatalf("events after failed bind = %d, want 0", got)
+	}
+	if _, err := svc.BindWorld(ctx, req); err == nil {
+		t.Fatal("replay of a failed request must not succeed")
+	}
+	if got := countWorldEvents(t, store, activity.EventWorldBind, server.ID, "rpc-bind-failed-rollback"); got != 0 {
+		t.Fatalf("events after failed replay = %d, want 0", got)
 	}
 }
